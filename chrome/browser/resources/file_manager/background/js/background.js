@@ -257,14 +257,14 @@ AppWindowWrapper.prototype = {
  *     dropped, the window is focused on the current window.
  */
 AppWindowWrapper.focusOnDesktop = function(appWindow, opt_profileId) {
-  new Promise(function(onFullfilled, onRejected) {
+  new Promise(function(onFulfilled, onRejected) {
     if (opt_profileId) {
-      onFullfilled(opt_profileId);
+      onFulfilled(opt_profileId);
     } else {
       chrome.fileBrowserPrivate.getProfiles(function(profiles,
                                                      currentId,
                                                      displayedId) {
-        onFullfilled(currentId);
+        onFulfilled(currentId);
       });
     }
   }).then(function(profileId) {
@@ -690,10 +690,6 @@ Background.prototype.onExecute_ = function(action, details) {
       launchAudioPlayer({items: urls, position: 0});
       break;
 
-    case 'watch':
-      launchVideoPlayer(urls[0]);
-      break;
-
     default:
       var launchEnable = null;
       var queue = new AsyncUtil.Queue();
@@ -803,21 +799,6 @@ function launchAudioPlayer(playlist, opt_displayedId) {
   });
 }
 
-var videoPlayer = new SingletonAppWindowWrapper('video_player.html',
-                                                {hidden: true});
-
-/**
- * Launches the video player.
- * @param {string} url Video url.
- * @param {string=} opt_displayedId ProfileID of the desktop where the video
- *     player should show.
- */
-function launchVideoPlayer(url, opt_displayedId) {
-  videoPlayer.launch({url: url}, false, function(appWindow) {
-    AppWindowWrapper.focusOnDesktop(videoPlayer.rawAppWindow, opt_displayedId);
-  });
-}
-
 /**
  * Launches the app.
  * @private
@@ -871,9 +852,6 @@ Background.prototype.onRestarted_ = function() {
     });
     callback();
   });
-
-  // Reopen video player.
-  videoPlayer.reopen();
 };
 
 /**
@@ -913,7 +891,11 @@ Background.prototype.onContextMenuClicked_ = function(info) {
  */
 Background.prototype.initContextMenu_ = function() {
   try {
-    chrome.contextMenus.remove('new-window');
+    // According to the spec [1], the callback is optional. But no callbacki
+    // causes an error for some reason, so we call it with null-callback to
+    // prevent the error. http://crbug.com/353877
+    // - [1] https://developer.chrome.com/extensions/contextMenus#method-remove
+    chrome.contextMenus.remove('new-window', function() {});
   } catch (ignore) {
     // There is no way to detect if the context menu is already added, therefore
     // try to recreate it every time.

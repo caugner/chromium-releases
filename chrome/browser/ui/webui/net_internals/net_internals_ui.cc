@@ -57,6 +57,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension_set.h"
 #include "grit/generated_resources.h"
@@ -865,7 +866,8 @@ void NetInternalsMessageHandler::OnGetExtensionInfo(
     ExtensionService* extension_service = extension_system->extension_service();
     if (extension_service) {
       scoped_ptr<const extensions::ExtensionSet> extensions(
-          extension_service->GenerateInstalledExtensionsSet());
+          extensions::ExtensionRegistry::Get(profile)
+              ->GenerateInstalledExtensionsSet());
       for (extensions::ExtensionSet::const_iterator it = extensions->begin();
            it != extensions->end(); ++it) {
         base::DictionaryValue* extension_info = new base::DictionaryValue();
@@ -1684,7 +1686,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnSetLogLevel(
   }
 
   DCHECK_GE(log_level, net::NetLog::LOG_ALL);
-  DCHECK_LE(log_level, net::NetLog::LOG_BASIC);
+  DCHECK_LT(log_level, net::NetLog::LOG_NONE);
   net_log()->SetObserverLogLevel(
       this, static_cast<net::NetLog::LogLevel>(log_level));
 }
@@ -1810,12 +1812,12 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
 
     // Create and add the entry directly, to avoid sending it to any other
     // NetLog observers.
-    net::NetLog::Entry entry(net::NetLog::TYPE_REQUEST_ALIVE,
-                             request->net_log().source(),
-                             net::NetLog::PHASE_BEGIN,
-                             request->creation_time(),
-                             &callback,
-                             request->net_log().GetLogLevel());
+    net::NetLog::EntryData entry_data(net::NetLog::TYPE_REQUEST_ALIVE,
+                                      request->net_log().source(),
+                                      net::NetLog::PHASE_BEGIN,
+                                      request->creation_time(),
+                                      &callback);
+    net::NetLog::Entry entry(&entry_data, request->net_log().GetLogLevel());
 
     // Have to add |entry| to the queue synchronously, as there may already
     // be posted tasks queued up to add other events for |request|, which we

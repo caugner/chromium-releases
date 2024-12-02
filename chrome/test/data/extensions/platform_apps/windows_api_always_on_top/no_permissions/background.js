@@ -14,7 +14,7 @@ function testAlwaysOnTop(testId, value) {
                            options,
                            callbackPass(function(win) {
     // Check that isAlwaysOnTop() returns false because the manifest did not
-    // specify the "alwaysOnTopWindows" permission.
+    // specify the "app.window.alwaysOnTop" permission.
     chrome.test.assertEq(false, win.isAlwaysOnTop());
 
     // Attempt to use setAlwaysOnTop() to change the property. But this should
@@ -23,7 +23,7 @@ function testAlwaysOnTop(testId, value) {
 
     // setAlwaysOnTop is synchronous in the browser, so send an async request to
     // ensure we get the updated value of isAlwaysOnTop.
-    chrome.runtime.getPlatformInfo(callbackPass(function(platformInfo) {
+    chrome.test.waitForRoundTrip("msg", callbackPass(function(platformInfo) {
       // Check that isAlwaysOnTop() returns false.
       chrome.test.assertEq(false, win.isAlwaysOnTop());
 

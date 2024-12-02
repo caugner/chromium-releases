@@ -15,7 +15,6 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
 #include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/process_manager.h"
@@ -276,7 +276,7 @@ class OAuth2Test : public OobeBaseTest {
 
     FakeGaia::AccessTokenInfo auth_login_token_info;
     auth_login_token_info.token = kTestAuthLoginToken;
-    auth_login_token_info.scopes.insert(gaia_urls->oauth1_login_scope());
+    auth_login_token_info.scopes.insert(GaiaConstants::kOAuth1LoginScope);
     auth_login_token_info.audience = gaia_urls->oauth2_chrome_client_id();
     fake_gaia_->IssueOAuthToken(kTestRefreshToken, auth_login_token_info);
   }

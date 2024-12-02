@@ -11,8 +11,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
@@ -27,7 +27,7 @@ class AppWindow;
 
 // The AppWindowRegistry tracks the AppWindows for all platform apps for a
 // particular browser context.
-class AppWindowRegistry : public BrowserContextKeyedService {
+class AppWindowRegistry : public KeyedService {
  public:
   class Observer {
    public:
@@ -37,9 +37,17 @@ class AppWindowRegistry : public BrowserContextKeyedService {
     virtual void OnAppWindowIconChanged(apps::AppWindow* app_window) = 0;
     // Called just after a app window was removed.
     virtual void OnAppWindowRemoved(apps::AppWindow* app_window) = 0;
+#if defined(OS_CHROMEOS)
+    // Called just after a app window was hidden. This is different from
+    // window visibility as a minimize does not hide a window, but does make
+    // it not visible.
+    virtual void OnAppWindowHidden(apps::AppWindow* app_window);
+    // Called just after a app window was shown.
+    virtual void OnAppWindowShown(apps::AppWindow* app_window);
+#endif
 
    protected:
-    virtual ~Observer() {}
+    virtual ~Observer();
   };
 
   typedef std::list<apps::AppWindow*> AppWindowList;
@@ -58,6 +66,10 @@ class AppWindowRegistry : public BrowserContextKeyedService {
   void AppWindowIconChanged(apps::AppWindow* app_window);
   // Called by |app_window| when it is activated.
   void AppWindowActivated(apps::AppWindow* app_window);
+#if defined(OS_CHROMEOS)
+  void AppWindowHidden(apps::AppWindow* app_window);
+  void AppWindowShown(apps::AppWindow* app_window);
+#endif
   void RemoveAppWindow(apps::AppWindow* app_window);
 
   void AddObserver(Observer* observer);
@@ -115,7 +127,7 @@ class AppWindowRegistry : public BrowserContextKeyedService {
     virtual ~Factory();
 
     // BrowserContextKeyedServiceFactory
-    virtual BrowserContextKeyedService* BuildServiceInstanceFor(
+    virtual KeyedService* BuildServiceInstanceFor(
         content::BrowserContext* context) const OVERRIDE;
     virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
     virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;

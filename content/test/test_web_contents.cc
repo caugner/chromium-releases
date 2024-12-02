@@ -129,7 +129,7 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
 }
 
 void TestWebContents::TestSetIsLoading(bool value) {
-  SetIsLoading(GetRenderViewHost(), value, NULL);
+  SetIsLoading(GetRenderViewHost(), value, true, NULL);
 }
 
 void TestWebContents::CommitPendingNavigation() {
@@ -163,7 +163,7 @@ void TestWebContents::ProceedWithCrossSiteNavigation() {
     return;
   TestRenderViewHost* rvh = static_cast<TestRenderViewHost*>(
       GetRenderViewHost());
-  rvh->SendShouldCloseACK(true);
+  rvh->SendBeforeUnloadACK(true);
 }
 
 RenderViewHostDelegateView* TestWebContents::GetDelegateView() {
@@ -207,21 +207,17 @@ void TestWebContents::SetHistoryLengthAndPrune(
   EXPECT_EQ(expect_set_history_length_and_prune_min_page_id_, min_page_id);
 }
 
-void TestWebContents::TestDidFinishLoad(int64 frame_id,
-                                        const GURL& url,
-                                        bool is_main_frame) {
-  ViewHostMsg_DidFinishLoad msg(0, frame_id, url, is_main_frame);
-  OnMessageReceived(GetRenderViewHost(), msg);
+void TestWebContents::TestDidFinishLoad(const GURL& url) {
+  FrameHostMsg_DidFinishLoad msg(0, url);
+  frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
 }
 
 void TestWebContents::TestDidFailLoadWithError(
-    int64 frame_id,
     const GURL& url,
-    bool is_main_frame,
     int error_code,
     const base::string16& error_description) {
   FrameHostMsg_DidFailLoadWithError msg(
-      0, frame_id, url, is_main_frame, error_code, error_description);
+      0, url, error_code, error_description);
   frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
 }
 

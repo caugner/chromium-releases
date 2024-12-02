@@ -11,24 +11,26 @@
 #include "chrome/browser/notifications/fake_balloon_view.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/chrome_unit_test_suite.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "content/public/common/show_desktop_notification_params.h"
 #include "ui/base/ime/input_method_initializer.h"
+#include "ui/gl/gl_surface.h"
 #include "ui/message_center/message_center.h"
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ui/aura/env.h"
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/test/context_factories_for_test.h"
 #endif
 
 #if defined(USE_AURA)
-#include "ui/views/corewm/wm_state.h"
+#include "ui/wm/core/wm_state.h"
 #endif
 
 
@@ -106,9 +108,11 @@ DesktopNotificationsTest::~DesktopNotificationsTest() {
 }
 
 void DesktopNotificationsTest::SetUp() {
+  ChromeUnitTestSuite::InitializeProviders();
+  ChromeUnitTestSuite::InitializeResourceBundle();
   ui::InitializeInputMethodForTesting();
 #if defined(USE_AURA)
-  wm_state_.reset(new views::corewm::WMState);
+  wm_state_.reset(new wm::WMState);
 #endif
 #if defined(USE_ASH)
   ui::ScopedAnimationDurationScaleMode normal_duration_mode(
@@ -117,8 +121,8 @@ void DesktopNotificationsTest::SetUp() {
   // is not created for these tests.
   message_center::MessageCenter::Initialize();
   // The ContextFactory must exist before any Compositors are created.
-  bool allow_test_contexts = true;
-  ui::InitializeContextFactoryForTests(allow_test_contexts);
+  bool enable_pixel_output = false;
+  ui::InitializeContextFactoryForTests(enable_pixel_output);
   // MockBalloonCollection retrieves information about the screen on creation.
   // So it is necessary to make sure the desktop gets created first.
   ash::Shell::CreateInstance(new ash::test::TestShellDelegate);

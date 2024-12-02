@@ -126,10 +126,10 @@ class ComponentLoader {
   void AddDefaultComponentExtensionsWithBackgroundPages(
       bool skip_session_components);
   void AddFileManagerExtension();
+  void AddVideoPlayerExtension();
   void AddHangoutServicesExtension();
   void AddHotwordHelperExtension();
   void AddImageLoaderExtension();
-  void AddBookmarksExtensions();
   void AddNetworkSpeechSynthesisExtension();
 
   void AddWithName(int manifest_resource_id,

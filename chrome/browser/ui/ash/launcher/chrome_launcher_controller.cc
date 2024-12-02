@@ -38,6 +38,8 @@
 #include "chrome/browser/ui/ash/app_sync_ui_state.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #include "chrome/browser/ui/ash/launcher/app_shortcut_launcher_item_controller.h"
+#include "chrome/browser/ui/ash/launcher/app_window_launcher_controller.h"
+#include "chrome/browser/ui/ash/launcher/app_window_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/browser_shortcut_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/launcher/browser_status_monitor.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_app_menu_item.h"
@@ -46,8 +48,6 @@
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_types.h"
 #include "chrome/browser/ui/ash/launcher/launcher_app_tab_helper.h"
 #include "chrome/browser/ui/ash/launcher/launcher_item_controller.h"
-#include "chrome/browser/ui/ash/launcher/shell_window_launcher_controller.h"
-#include "chrome/browser/ui/ash/launcher/shell_window_launcher_item_controller.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -70,6 +70,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_resource.h"
@@ -80,17 +81,17 @@
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "net/base/url_util.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/views/corewm/window_animations.h"
+#include "ui/wm/core/window_animations.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
+#include "chrome/browser/ui/ash/launcher/multi_profile_app_window_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/multi_profile_browser_status_monitor.h"
-#include "chrome/browser/ui/ash/launcher/multi_profile_shell_window_launcher_controller.h"
 #endif
 
 using extensions::Extension;
@@ -355,19 +356,19 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
     // If running in separated destkop mode, we create the multi profile version
     // of status monitor.
     browser_status_monitor_.reset(new MultiProfileBrowserStatusMonitor(this));
-    shell_window_controller_.reset(
-        new MultiProfileShellWindowLauncherController(this));
+    app_window_controller_.reset(
+        new MultiProfileAppWindowLauncherController(this));
   } else {
     // Create our v1/v2 application / browser monitors which will inform the
     // launcher of status changes.
     browser_status_monitor_.reset(new BrowserStatusMonitor(this));
-    shell_window_controller_.reset(new ShellWindowLauncherController(this));
+    app_window_controller_.reset(new AppWindowLauncherController(this));
   }
 #else
   // Create our v1/v2 application / browser monitors which will inform the
   // launcher of status changes.
   browser_status_monitor_.reset(new BrowserStatusMonitor(this));
-  shell_window_controller_.reset(new ShellWindowLauncherController(this));
+  app_window_controller_.reset(new AppWindowLauncherController(this));
 #endif
 
   // Right now ash::Shell isn't created for tests.
@@ -378,20 +379,22 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
         ash::Shell::GetInstance()->shelf_item_delegate_manager();
   }
 
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_EXTENSION_LOADED,
-                              content::Source<Profile>(profile_));
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                              content::Source<Profile>(profile_));
+  notification_registrar_.Add(
+      this,
+      chrome::NOTIFICATION_EXTENSION_LOADED,
+      content::Source<Profile>(profile_));
+  notification_registrar_.Add(
+      this,
+      chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
+      content::Source<Profile>(profile_));
 }
 
 ChromeLauncherController::~ChromeLauncherController() {
   // Reset the BrowserStatusMonitor as it has a weak pointer to this.
   browser_status_monitor_.reset();
 
-  // Reset the shell window controller here since it has a weak pointer to this.
-  shell_window_controller_.reset();
+  // Reset the app window controller here since it has a weak pointer to this.
+  app_window_controller_.reset();
 
   for (std::set<ash::Shelf*>::iterator iter = shelves_.begin();
        iter != shelves_.end();
@@ -701,9 +704,8 @@ extensions::LaunchType ChromeLauncherController::GetLaunchType(
   if (!extension)
     return extensions::LAUNCH_TYPE_DEFAULT;
 
-  return extensions::GetLaunchType(
-      profile_->GetExtensionService()->extension_prefs(),
-      extension);
+  return extensions::GetLaunchType(extensions::ExtensionPrefs::Get(profile_),
+                                   extension);
 }
 
 ash::ShelfID ChromeLauncherController::GetShelfIDForAppID(
@@ -903,8 +905,9 @@ ash::ShelfAutoHideBehavior ChromeLauncherController::GetShelfAutoHideBehavior(
 
 bool ChromeLauncherController::CanUserModifyShelfAutoHideBehavior(
     aura::Window* root_window) const {
-  return profile_->GetPrefs()->
-      FindPreference(prefs::kShelfAutoHideBehaviorLocal)->IsUserModifiable();
+  return !ash::Shell::GetInstance()->IsMaximizeModeWindowManagerEnabled() &&
+      profile_->GetPrefs()->FindPreference(
+          prefs::kShelfAutoHideBehaviorLocal)->IsUserModifiable();
 }
 
 void ChromeLauncherController::ToggleShelfAutoHideBehavior(
@@ -1066,7 +1069,7 @@ void ChromeLauncherController::ActivateWindowOrMinimizeIfActive(
     if (CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDisableMinimizeOnSecondLauncherItemClick)) {
       AnimateWindow(window->GetNativeWindow(),
-                    views::corewm::WINDOW_ANIMATION_TYPE_BOUNCE);
+                    wm::WINDOW_ANIMATION_TYPE_BOUNCE);
     } else {
       window->Minimize();
     }
@@ -1131,7 +1134,7 @@ void ChromeLauncherController::ActiveUserChanged(
   // Update the V1 applications.
   browser_status_monitor_->ActiveUserChanged(user_email);
   // Switch the running applications to the new user.
-  shell_window_controller_->ActiveUserChanged(user_email);
+  app_window_controller_->ActiveUserChanged(user_email);
   // Update the user specific shell properties from the new user profile.
   UpdateAppLaunchersFromPref();
   SetShelfAlignmentFromPrefs();
@@ -1146,7 +1149,7 @@ void ChromeLauncherController::ActiveUserChanged(
 
 void ChromeLauncherController::AdditionalUserAddedToSession(Profile* profile) {
   // Switch the running applications to the new user.
-  shell_window_controller_->AdditionalUserAddedToSession(profile);
+  app_window_controller_->AdditionalUserAddedToSession(profile);
 }
 
 void ChromeLauncherController::Observe(
@@ -1166,7 +1169,7 @@ void ChromeLauncherController::Observe(
       UpdateAppLaunchersFromPref();
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
       const content::Details<UnloadedExtensionInfo>& unload_info(details);
       const Extension* extension = unload_info->extension;
       const std::string& id = extension->id();
@@ -1217,9 +1220,6 @@ void ChromeLauncherController::OnShelfAlignmentChanged(
     profile_->GetPrefs()->SetString(prefs::kShelfAlignmentLocal, pref_value);
     profile_->GetPrefs()->SetString(prefs::kShelfAlignment, pref_value);
   }
-}
-
-void ChromeLauncherController::OnDisplayConfigurationChanging() {
 }
 
 void ChromeLauncherController::OnDisplayConfigurationChanged() {
@@ -1286,9 +1286,9 @@ void ChromeLauncherController::ActivateShellApp(const std::string& app_id,
   if (id) {
     LauncherItemController* controller = id_to_item_controller_map_[id];
     if (controller->type() == LauncherItemController::TYPE_APP) {
-      ShellWindowLauncherItemController* shell_window_controller =
-          static_cast<ShellWindowLauncherItemController*>(controller);
-      shell_window_controller->ActivateIndexedApp(index);
+      AppWindowLauncherItemController* app_window_controller =
+          static_cast<AppWindowLauncherItemController*>(controller);
+      app_window_controller->ActivateIndexedApp(index);
     }
   }
 }
@@ -1881,9 +1881,9 @@ int ChromeLauncherController::FindInsertionPoint(bool is_app_list) {
     ash::ShelfItemType type = model_->items()[i].type;
     if (type == ash::TYPE_APP_SHORTCUT ||
         ((is_app_list || alternate) && type == ash::TYPE_APP_LIST) ||
-        type == ash::TYPE_BROWSER_SHORTCUT ||
-        type == ash::TYPE_WINDOWED_APP)
+        type == ash::TYPE_BROWSER_SHORTCUT) {
       return i;
+    }
   }
   return 0;
 }

@@ -34,11 +34,11 @@
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_disabled_ui.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
+#include "chrome/browser/extensions/install_verifier.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_util.h"
@@ -71,6 +71,7 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "extensions/browser/blacklist_state.h"
 #include "extensions/browser/extension_error.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/lazy_background_task_queue.h"
@@ -157,6 +158,7 @@ ExtensionSettingsHandler::ExtensionSettingsHandler()
       registered_for_notifications_(false),
       warning_service_observer_(this),
       error_console_observer_(this),
+      extension_prefs_observer_(this),
       should_do_verification_check_(false) {
 }
 
@@ -178,6 +180,7 @@ ExtensionSettingsHandler::ExtensionSettingsHandler(ExtensionService* service,
       registered_for_notifications_(false),
       warning_service_observer_(this),
       error_console_observer_(this),
+      extension_prefs_observer_(this),
       should_do_verification_check_(false) {
 }
 
@@ -198,7 +201,7 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   bool enabled = extension_service_->IsExtensionEnabled(extension->id());
   GetExtensionBasicInfo(extension, enabled, extension_data);
 
-  ExtensionPrefs* prefs = extension_service_->extension_prefs();
+  ExtensionPrefs* prefs = ExtensionPrefs::Get(extension_service_->profile());
   int disable_reasons = prefs->GetDisableReasons(extension->id());
 
   bool suspicious_install =
@@ -231,9 +234,8 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
       registry->terminated_extensions().Contains(extension->id()));
   extension_data->SetBoolean("enabledIncognito",
       util::IsIncognitoEnabled(extension->id(), extension_service_->profile()));
-  extension_data->SetBoolean("incognitoCanBeToggled",
-                             extension->can_be_incognito_enabled() &&
-                             !extension->force_incognito_enabled());
+  extension_data->SetBoolean("incognitoCanBeEnabled",
+                             extension->can_be_incognito_enabled());
   extension_data->SetBoolean("wantsFileAccess", extension->wants_file_access());
   extension_data->SetBoolean("allowFileAccess",
       util::AllowFileAccess(extension->id(), extension_service_->profile()));
@@ -259,8 +261,7 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   extension_data->SetString("locationText", location_text);
 
   base::string16 blacklist_text;
-  switch (extension_service_->extension_prefs()->GetExtensionBlacklistState(
-              extension->id())) {
+  switch (prefs->GetExtensionBlacklistState(extension->id())) {
     case BLACKLISTED_SECURITY_VULNERABILITY:
       blacklist_text = l10n_util::GetStringUTF16(
           IDS_OPTIONS_BLACKLISTED_SECURITY_VULNERABILITY);
@@ -287,8 +288,7 @@ base::DictionaryValue* ExtensionSettingsHandler::CreateExtensionDetailValue(
   else
     extension_data->SetInteger("order", 2);
 
-  if (!ExtensionActionAPI::GetBrowserActionVisibility(
-          extension_service_->extension_prefs(), extension->id())) {
+  if (!ExtensionActionAPI::GetBrowserActionVisibility(prefs, extension->id())) {
     extension_data->SetBoolean("enable_show_button", true);
   }
 
@@ -555,11 +555,51 @@ void ExtensionSettingsHandler::RegisterMessages() {
                  AsWeakPtr()));
 }
 
+void ExtensionSettingsHandler::LoadUnpackedExtension(
+    const base::FilePath& path) {
+  UnpackedInstaller::Create(extension_service_)->Load(path);
+}
+
+int ExtensionSettingsHandler::IndexOfLoadingPath(const base::FilePath& path) {
+  for (size_t i = 0; i < loading_extension_directories_.size(); ++i) {
+    if (path == loading_extension_directories_[i])
+      return i;
+  }
+  return -1;
+}
+
+void ExtensionSettingsHandler::AddLoadingPath(const base::FilePath& path) {
+  DCHECK(IndexOfLoadingPath(path) == -1);
+
+  if (loading_extension_directories_.empty()) {
+    Profile* profile = Profile::FromWebUI(web_ui());
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_EXTENSION_LOAD_RETRY,
+                   content::Source<Profile>(profile));
+  }
+  loading_extension_directories_.push_back(path);
+}
+
+void ExtensionSettingsHandler::RemoveLoadingPath(const base::FilePath& path) {
+  int index = IndexOfLoadingPath(path);
+  DCHECK(index != -1);
+
+  loading_extension_directories_.erase(loading_extension_directories_.begin() +
+                                       index);
+  if (loading_extension_directories_.empty()) {
+    Profile* profile = Profile::FromWebUI(web_ui());
+    registrar_.Remove(this,
+                      chrome::NOTIFICATION_EXTENSION_LOAD_RETRY,
+                      content::Source<Profile>(profile));
+  }
+}
+
 void ExtensionSettingsHandler::FileSelected(const base::FilePath& path,
                                             int index,
                                             void* params) {
   last_unpacked_directory_ = base::FilePath(path);
-  UnpackedInstaller::Create(extension_service_)->Load(path);
+  AddLoadingPath(last_unpacked_directory_);
+  LoadUnpackedExtension(path);
 }
 
 void ExtensionSettingsHandler::MultiFilesSelected(
@@ -598,7 +638,7 @@ void ExtensionSettingsHandler::Observe(
     case chrome::NOTIFICATION_EXTENSION_HOST_CREATED:
       source_profile = content::Source<Profile>(source).ptr();
       if (!profile->IsSameProfile(source_profile))
-          return;
+        return;
       MaybeUpdateAfterNotification();
       break;
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED: {
@@ -609,8 +649,21 @@ void ExtensionSettingsHandler::Observe(
       MaybeUpdateAfterNotification();
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED:
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED:
+    case chrome::NOTIFICATION_EXTENSION_LOAD_RETRY: {
+      std::pair<bool, const base::FilePath&>* retry_and_path =
+          content::Details<std::pair<bool, const base::FilePath&> >(details)
+              .ptr();
+      HandleLoadRetryMessage(retry_and_path->first, retry_and_path->second);
+      break;
+    }
+    case chrome::NOTIFICATION_EXTENSION_LOADED: {
+      const base::FilePath& path =
+          content::Details<const Extension>(details).ptr()->path();
+      if (IndexOfLoadingPath(path) != -1)
+        RemoveLoadingPath(path);
+      // Fall through.
+    }
+    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED:
     case chrome::NOTIFICATION_EXTENSION_UPDATE_DISABLED:
     case chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED:
@@ -630,6 +683,12 @@ void ExtensionSettingsHandler::Observe(
   }
 }
 
+void ExtensionSettingsHandler::OnExtensionDisableReasonsChanged(
+    const std::string& extension_id,
+    int disable_reasons) {
+  MaybeUpdateAfterNotification();
+}
+
 void ExtensionSettingsHandler::ExtensionUninstallAccepted() {
   DCHECK(!extension_id_prompting_.empty());
 
@@ -640,8 +699,9 @@ void ExtensionSettingsHandler::ExtensionUninstallAccepted() {
   const Extension* extension =
       extension_service_->GetExtensionById(extension_id_prompting_, true);
   if (!extension) {
-    extension = extension_service_->GetTerminatedExtension(
-        extension_id_prompting_);
+    extension =
+        ExtensionRegistry::Get(Profile::FromWebUI(web_ui()))->GetExtensionById(
+            extension_id_prompting_, ExtensionRegistry::TERMINATED);
     was_terminated = true;
   }
   if (!extension)
@@ -694,6 +754,7 @@ void ExtensionSettingsHandler::ReloadUnpackedExtensions() {
 
   for (std::vector<const Extension*>::iterator iter =
        unpacked_extensions.begin(); iter != unpacked_extensions.end(); ++iter) {
+    AddLoadingPath((*iter)->path());
     extension_service_->ReloadExtension((*iter)->id());
   }
 }
@@ -752,7 +813,7 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
   results.SetBoolean("developerMode", developer_mode);
 
   bool load_unpacked_disabled =
-      extension_service_->extension_prefs()->ExtensionsBlacklistedByDefault();
+      ExtensionPrefs::Get(profile)->ExtensionsBlacklistedByDefault();
   results.SetBoolean("loadUnpackedDisabled", load_unpacked_disabled);
 
   web_ui()->CallJavascriptFunction(
@@ -763,7 +824,9 @@ void ExtensionSettingsHandler::HandleRequestExtensionsData(
                         should_do_verification_check_);
   if (should_do_verification_check_) {
     should_do_verification_check_ = false;
-    extension_service_->VerifyAllExtensions(false);  // bootstrap=false.
+    ExtensionSystem::Get(Profile::FromWebUI(web_ui()))
+        ->install_verifier()
+        ->VerifyAllExtensions();
   }
 }
 
@@ -833,6 +896,10 @@ void ExtensionSettingsHandler::HandleReloadMessage(
     const base::ListValue* args) {
   std::string extension_id = base::UTF16ToUTF8(ExtractStringValue(args));
   CHECK(!extension_id.empty());
+  const Extension* extension =
+      extension_service_->GetInstalledExtension(extension_id);
+  if (extension)
+    AddLoadingPath(extension->path());
   extension_service_->ReloadExtension(extension_id);
 }
 
@@ -845,15 +912,17 @@ void ExtensionSettingsHandler::HandleEnableMessage(
 
   const Extension* extension =
       extension_service_->GetInstalledExtension(extension_id);
-  if (!extension ||
-      !management_policy_->UserMayModifySettings(extension, NULL)) {
-    LOG(ERROR) << "Attempt to enable an extension that is non-usermanagable was"
-               << "made. Extension id: " << extension->id();
+  if (!extension)
+    return;
+
+  if (!management_policy_->UserMayModifySettings(extension, NULL)) {
+    LOG(ERROR) << "An attempt was made to enable an extension that is "
+               << "non-usermanagable. Extension id: " << extension->id();
     return;
   }
 
   if (enable_str == "true") {
-    ExtensionPrefs* prefs = extension_service_->extension_prefs();
+    ExtensionPrefs* prefs = ExtensionPrefs::Get(extension_service_->profile());
     if (prefs->DidExtensionEscalatePermissions(extension_id)) {
       ShowExtensionDisabledDialog(
           extension_service_, web_ui()->GetWebContents(), extension);
@@ -919,8 +988,8 @@ void ExtensionSettingsHandler::HandleAllowFileAccessMessage(
     return;
 
   if (!management_policy_->UserMayModifySettings(extension, NULL)) {
-    LOG(ERROR) << "Attempt to change allow file access of an extension that is "
-               << "non-usermanagable was made. Extension id : "
+    LOG(ERROR) << "An attempt was made to change allow file access of an"
+               << " extension that is non-usermanagable. Extension id : "
                << extension->id();
     return;
   }
@@ -940,8 +1009,8 @@ void ExtensionSettingsHandler::HandleUninstallMessage(
     return;
 
   if (!management_policy_->UserMayModifySettings(extension, NULL)) {
-    LOG(ERROR) << "Attempt to uninstall an extension that is non-usermanagable "
-               << "was made. Extension id : " << extension->id();
+    LOG(ERROR) << "An attempt was made to uninstall an extension that is "
+               << "non-usermanagable. Extension id : " << extension->id();
     return;
   }
 
@@ -967,9 +1036,8 @@ void ExtensionSettingsHandler::HandlePermissionsMessage(
   std::string extension_id(base::UTF16ToUTF8(ExtractStringValue(args)));
   CHECK(!extension_id.empty());
   const Extension* extension =
-      extension_service_->GetExtensionById(extension_id, true);
-  if (!extension)
-    extension = extension_service_->GetTerminatedExtension(extension_id);
+      ExtensionRegistry::Get(Profile::FromWebUI(web_ui()))
+          ->GetExtensionById(extension_id, ExtensionRegistry::EVERYTHING);
   if (!extension)
     return;
 
@@ -998,7 +1066,9 @@ void ExtensionSettingsHandler::HandleShowButtonMessage(
   if (!extension)
     return;
   ExtensionActionAPI::SetBrowserActionVisibility(
-      extension_service_->extension_prefs(), extension->id(), true);
+      ExtensionPrefs::Get(extension_service_->profile()),
+      extension->id(),
+      true);
 }
 
 void ExtensionSettingsHandler::HandleAutoUpdateMessage(
@@ -1066,7 +1136,7 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
   // Register for notifications that we need to reload the page.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
                  content::Source<Profile>(profile));
@@ -1083,8 +1153,7 @@ void ExtensionSettingsHandler::MaybeRegisterForNotifications() {
   registrar_.Add(
       this,
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
-      content::Source<ExtensionPrefs>(
-          profile->GetExtensionService()->extension_prefs()));
+      content::Source<ExtensionPrefs>(ExtensionPrefs::Get(profile)));
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
                  content::NotificationService::AllBrowserContextsAndSources());
@@ -1249,9 +1318,21 @@ void ExtensionSettingsHandler::OnRequirementsChecked(
   } else {
     ExtensionErrorReporter::GetInstance()->ReportError(
         base::UTF8ToUTF16(JoinString(requirement_errors, ' ')),
-        true /* be noisy */);
+        true,   // Be noisy.
+        NULL);  // Caller expects no response.
   }
   requirements_checker_.reset();
+}
+
+void ExtensionSettingsHandler::HandleLoadRetryMessage(
+    bool retry,
+    const base::FilePath& path) {
+  if (IndexOfLoadingPath(path) == -1)
+    return;  // Not an extension we're tracking.
+  if (retry)
+    LoadUnpackedExtension(path);
+  else
+    RemoveLoadingPath(path);
 }
 
 }  // namespace extensions

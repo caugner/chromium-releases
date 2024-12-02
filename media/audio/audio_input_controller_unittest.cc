@@ -145,7 +145,9 @@ TEST_F(AudioInputControllerTest, RecordAndClose) {
 // Test that the AudioInputController reports an error when the input stream
 // stops. This can happen when the underlying audio layer stops feeding data as
 // a result of a removed microphone device.
-TEST_F(AudioInputControllerTest, RecordAndError) {
+// Disabled due to crbug.com/357569 and crbug.com/357501.
+// TODO(henrika): Remove the test when the timer workaround has been removed.
+TEST_F(AudioInputControllerTest, DISABLED_RecordAndError) {
   MockAudioInputControllerEventHandler event_handler;
   int count = 0;
 

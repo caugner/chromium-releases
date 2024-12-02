@@ -11,6 +11,7 @@
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "media/base/audio_buffer.h"
+#include "media/base/audio_hardware_config.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/fake_audio_renderer_sink.h"
 #include "media/base/gmock_callback_support.h"
@@ -33,6 +34,7 @@ namespace media {
 static AudioCodec kCodec = kCodecVorbis;
 static SampleFormat kSampleFormat = kSampleFormatPlanarF32;
 static ChannelLayout kChannelLayout = CHANNEL_LAYOUT_STEREO;
+static int kChannelCount = 2;
 static int kChannels = ChannelLayoutToChannelCount(kChannelLayout);
 static int kSamplesPerSecond = 44100;
 
@@ -51,7 +53,8 @@ class AudioRendererImplTest : public ::testing::Test {
  public:
   // Give the decoder some non-garbage media properties.
   AudioRendererImplTest()
-      : needs_stop_(true),
+      : hardware_config_(AudioParameters(), AudioParameters()),
+        needs_stop_(true),
         demuxer_stream_(DemuxerStream::AUDIO),
         decoder_(new MockAudioDecoder()) {
     AudioDecoderConfig audio_config(kCodec,
@@ -64,8 +67,8 @@ class AudioRendererImplTest : public ::testing::Test {
     demuxer_stream_.set_audio_decoder_config(audio_config);
 
     // Used to save callbacks and run them at a later time.
-    EXPECT_CALL(*decoder_, Read(_))
-        .WillRepeatedly(Invoke(this, &AudioRendererImplTest::ReadDecoder));
+    EXPECT_CALL(*decoder_, Decode(_, _))
+        .WillRepeatedly(Invoke(this, &AudioRendererImplTest::DecodeDecoder));
 
     EXPECT_CALL(*decoder_, Reset(_))
         .WillRepeatedly(Invoke(this, &AudioRendererImplTest::ResetDecoder));
@@ -73,22 +76,24 @@ class AudioRendererImplTest : public ::testing::Test {
     EXPECT_CALL(*decoder_, Stop(_))
         .WillRepeatedly(Invoke(this, &AudioRendererImplTest::StopDecoder));
 
-    // Set up audio properties.
-    EXPECT_CALL(*decoder_, bits_per_channel())
-        .WillRepeatedly(Return(audio_config.bits_per_channel()));
-    EXPECT_CALL(*decoder_, channel_layout())
-        .WillRepeatedly(Return(audio_config.channel_layout()));
-    EXPECT_CALL(*decoder_, samples_per_second())
-        .WillRepeatedly(Return(audio_config.samples_per_second()));
-
+    // Mock out demuxer reads
+    EXPECT_CALL(demuxer_stream_, Read(_)).WillRepeatedly(
+        RunCallback<0>(DemuxerStream::kOk, DecoderBuffer::CreateEOSBuffer()));
+    AudioParameters out_params =
+        AudioParameters(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                        kChannelLayout,
+                        kSamplesPerSecond,
+                        SampleFormatToBytesPerChannel(kSampleFormat) * 8,
+                        512);
+    hardware_config_.UpdateOutputConfig(out_params);
     ScopedVector<AudioDecoder> decoders;
     decoders.push_back(decoder_);
     sink_ = new FakeAudioRendererSink();
-    renderer_.reset(new AudioRendererImpl(
-        message_loop_.message_loop_proxy(),
-        sink_,
-        decoders.Pass(),
-        SetDecryptorReadyCB()));
+    renderer_.reset(new AudioRendererImpl(message_loop_.message_loop_proxy(),
+                                          sink_,
+                                          decoders.Pass(),
+                                          SetDecryptorReadyCB(),
+                                          &hardware_config_));
 
     // Stub out time.
     renderer_->set_now_cb_for_testing(base::Bind(
@@ -105,19 +110,8 @@ class AudioRendererImplTest : public ::testing::Test {
   }
 
   void ExpectUnsupportedAudioDecoder() {
-    EXPECT_CALL(*decoder_, Initialize(_, _, _))
+    EXPECT_CALL(*decoder_, Initialize(_, _))
         .WillOnce(RunCallback<1>(DECODER_ERROR_NOT_SUPPORTED));
-  }
-
-  void ExpectUnsupportedAudioDecoderConfig() {
-    EXPECT_CALL(*decoder_, bits_per_channel())
-        .WillRepeatedly(Return(3));
-    EXPECT_CALL(*decoder_, channel_layout())
-        .WillRepeatedly(Return(CHANNEL_LAYOUT_UNSUPPORTED));
-    EXPECT_CALL(*decoder_, samples_per_second())
-        .WillRepeatedly(Return(0));
-    EXPECT_CALL(*decoder_, Initialize(_, _, _))
-        .WillOnce(RunCallback<1>(PIPELINE_OK));
   }
 
   MOCK_METHOD1(OnStatistics, void(const PipelineStatistics&));
@@ -130,12 +124,12 @@ class AudioRendererImplTest : public ::testing::Test {
   }
 
   void Initialize() {
-    EXPECT_CALL(*decoder_, Initialize(_, _, _))
+    EXPECT_CALL(*decoder_, Initialize(_, _))
         .WillOnce(RunCallback<1>(PIPELINE_OK));
     InitializeWithStatus(PIPELINE_OK);
 
-    next_timestamp_.reset(
-        new AudioTimestampHelper(decoder_->samples_per_second()));
+    next_timestamp_.reset(new AudioTimestampHelper(
+        hardware_config_.GetOutputConfig().sample_rate()));
   }
 
   void InitializeWithStatus(PipelineStatus expected) {
@@ -159,11 +153,11 @@ class AudioRendererImplTest : public ::testing::Test {
     event.RunAndWaitForStatus(expected);
 
     // We should have no reads.
-    EXPECT_TRUE(read_cb_.is_null());
+    EXPECT_TRUE(decode_cb_.is_null());
   }
 
   void InitializeAndStop() {
-    EXPECT_CALL(*decoder_, Initialize(_, _, _))
+    EXPECT_CALL(*decoder_, Initialize(_, _))
         .WillOnce(RunCallback<1>(PIPELINE_OK));
     WaitableMessageLoopEvent event;
     renderer_->Initialize(
@@ -189,7 +183,7 @@ class AudioRendererImplTest : public ::testing::Test {
   }
 
   void InitializeAndStopDuringDecoderInit() {
-    EXPECT_CALL(*decoder_, Initialize(_, _, _))
+    EXPECT_CALL(*decoder_, Initialize(_, _))
         .WillOnce(EnterPendingDecoderInitStateAction(this));
     WaitableMessageLoopEvent event;
     renderer_->Initialize(
@@ -247,7 +241,7 @@ class AudioRendererImplTest : public ::testing::Test {
     event.RunAndWaitForStatus(PIPELINE_OK);
 
     // We should have no reads.
-    EXPECT_TRUE(read_cb_.is_null());
+    EXPECT_TRUE(decode_cb_.is_null());
   }
 
   void Play() {
@@ -278,37 +272,39 @@ class AudioRendererImplTest : public ::testing::Test {
   }
 
   bool IsReadPending() const {
-    return !read_cb_.is_null();
+    return !decode_cb_.is_null();
   }
 
   void WaitForPendingRead() {
     SCOPED_TRACE("WaitForPendingRead()");
-    if (!read_cb_.is_null())
+    if (!decode_cb_.is_null())
       return;
 
-    DCHECK(wait_for_pending_read_cb_.is_null());
+    DCHECK(wait_for_pending_decode_cb_.is_null());
 
     WaitableMessageLoopEvent event;
-    wait_for_pending_read_cb_ = event.GetClosure();
+    wait_for_pending_decode_cb_ = event.GetClosure();
     event.RunAndWait();
 
-    DCHECK(!read_cb_.is_null());
-    DCHECK(wait_for_pending_read_cb_.is_null());
+    DCHECK(!decode_cb_.is_null());
+    DCHECK(wait_for_pending_decode_cb_.is_null());
   }
 
   // Delivers |size| frames with value kPlayingAudio to |renderer_|.
   void SatisfyPendingRead(int size) {
     CHECK_GT(size, 0);
-    CHECK(!read_cb_.is_null());
+    CHECK(!decode_cb_.is_null());
 
     scoped_refptr<AudioBuffer> buffer =
-        MakePlanarAudioBuffer<float>(kSampleFormat,
-                                     kChannels,
-                                     kPlayingAudio,
-                                     0.0f,
-                                     size,
-                                     next_timestamp_->GetTimestamp(),
-                                     next_timestamp_->GetFrameDuration(size));
+        MakeAudioBuffer<float>(kSampleFormat,
+                               kChannelLayout,
+                               kChannelCount,
+                               kSamplesPerSecond,
+                               kPlayingAudio,
+                               0.0f,
+                               size,
+                               next_timestamp_->GetTimestamp(),
+                               next_timestamp_->GetFrameDuration(size));
     next_timestamp_->AddFrames(size);
 
     DeliverBuffer(AudioDecoder::kOk, buffer);
@@ -363,7 +359,7 @@ class AudioRendererImplTest : public ::testing::Test {
     do {
       TimeDelta audio_delay = TimeDelta::FromMicroseconds(
           total_frames_read * Time::kMicrosecondsPerSecond /
-          static_cast<float>(decoder_->samples_per_second()));
+          static_cast<float>(hardware_config_.GetOutputConfig().sample_rate()));
 
       frames_read = renderer_->Render(
           bus.get(), audio_delay.InMilliseconds());
@@ -455,6 +451,7 @@ class AudioRendererImplTest : public ::testing::Test {
   base::MessageLoop message_loop_;
   scoped_ptr<AudioRendererImpl> renderer_;
   scoped_refptr<FakeAudioRendererSink> sink_;
+  AudioHardwareConfig hardware_config_;
 
   // Whether or not the test needs the destructor to call Stop() on
   // |renderer_| at destruction.
@@ -466,28 +463,29 @@ class AudioRendererImplTest : public ::testing::Test {
     return time_;
   }
 
-  void ReadDecoder(const AudioDecoder::ReadCB& read_cb) {
+  void DecodeDecoder(const scoped_refptr<DecoderBuffer>& buffer,
+                     const AudioDecoder::DecodeCB& decode_cb) {
     // We shouldn't ever call Read() after Stop():
     EXPECT_TRUE(stop_decoder_cb_.is_null());
 
     // TODO(scherkus): Make this a DCHECK after threading semantics are fixed.
     if (base::MessageLoop::current() != &message_loop_) {
       message_loop_.PostTask(FROM_HERE, base::Bind(
-          &AudioRendererImplTest::ReadDecoder,
-          base::Unretained(this), read_cb));
+          &AudioRendererImplTest::DecodeDecoder,
+          base::Unretained(this), buffer, decode_cb));
       return;
     }
 
-    CHECK(read_cb_.is_null()) << "Overlapping reads are not permitted";
-    read_cb_ = read_cb;
+    CHECK(decode_cb_.is_null()) << "Overlapping decodes are not permitted";
+    decode_cb_ = decode_cb;
 
     // Wake up WaitForPendingRead() if needed.
-    if (!wait_for_pending_read_cb_.is_null())
-      base::ResetAndReturn(&wait_for_pending_read_cb_).Run();
+    if (!wait_for_pending_decode_cb_.is_null())
+      base::ResetAndReturn(&wait_for_pending_decode_cb_).Run();
   }
 
   void ResetDecoder(const base::Closure& reset_cb) {
-    CHECK(read_cb_.is_null())
+    CHECK(decode_cb_.is_null())
         << "Reset overlapping with reads is not permitted";
 
     message_loop_.PostTask(FROM_HERE, reset_cb);
@@ -503,8 +501,8 @@ class AudioRendererImplTest : public ::testing::Test {
 
   void DeliverBuffer(AudioDecoder::Status status,
                      const scoped_refptr<AudioBuffer>& buffer) {
-    CHECK(!read_cb_.is_null());
-    base::ResetAndReturn(&read_cb_).Run(status, buffer);
+    CHECK(!decode_cb_.is_null());
+    base::ResetAndReturn(&decode_cb_).Run(status, buffer);
   }
 
   MockDemuxerStream demuxer_stream_;
@@ -515,24 +513,19 @@ class AudioRendererImplTest : public ::testing::Test {
   TimeTicks time_;
 
   // Used for satisfying reads.
-  AudioDecoder::ReadCB read_cb_;
+  AudioDecoder::DecodeCB decode_cb_;
   scoped_ptr<AudioTimestampHelper> next_timestamp_;
 
   WaitableMessageLoopEvent ended_event_;
 
-  // Run during ReadDecoder() to unblock WaitForPendingRead().
-  base::Closure wait_for_pending_read_cb_;
+  // Run during DecodeDecoder() to unblock WaitForPendingRead().
+  base::Closure wait_for_pending_decode_cb_;
   base::Closure stop_decoder_cb_;
 
   PipelineStatusCB init_decoder_cb_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererImplTest);
 };
-
-TEST_F(AudioRendererImplTest, Initialize_Failed) {
-  ExpectUnsupportedAudioDecoderConfig();
-  InitializeWithStatus(PIPELINE_ERROR_INITIALIZATION_FAILED);
-}
 
 TEST_F(AudioRendererImplTest, Initialize_Successful) {
   Initialize();

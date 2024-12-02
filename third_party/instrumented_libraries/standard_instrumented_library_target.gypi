@@ -32,6 +32,8 @@
         '<(_verbose_libraries_build_flag)',
         '--c-compiler=<(_cc)',
         '--cxx-compiler=<(_cxx)',
+        '--jobs=<(_jobs)',
+        '--build-method=<(_build_method)',
       ],
     },
   ],

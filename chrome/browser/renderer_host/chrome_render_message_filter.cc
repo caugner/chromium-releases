@@ -19,19 +19,20 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/activity_log_private/activity_log_private_api.h"
 #include "chrome/browser/extensions/api/messaging/message_service.h"
+#include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/message_bundle.h"
 #include "chrome/common/render_messages.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/extension_messages.h"
 
 #if defined(USE_TCMALLOC)
 #include "chrome/browser/browser_about_handler.h"
@@ -42,6 +43,11 @@ using extensions::APIPermission;
 using blink::WebCache;
 
 namespace {
+
+const uint32 kFilteredMessageClasses[] = {
+  ChromeMsgStart,
+  ExtensionMsgStart,
+};
 
 // Logs an action to the extension activity log for the specified profile.  Can
 // be called from any thread.
@@ -76,7 +82,9 @@ ChromeRenderMessageFilter::ChromeRenderMessageFilter(
     int render_process_id,
     Profile* profile,
     net::URLRequestContextGetter* request_context)
-    : render_process_id_(render_process_id),
+    : BrowserMessageFilter(
+          kFilteredMessageClasses, arraysize(kFilteredMessageClasses)),
+      render_process_id_(render_process_id),
       profile_(profile),
       off_the_record_(profile_->IsOffTheRecord()),
       predictor_(profile_->GetNetworkPredictor()),
@@ -126,6 +134,8 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnCanTriggerClipboardRead)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_CanTriggerClipboardWrite,
                         OnCanTriggerClipboardWrite)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_IsCrashReportingEnabled,
+                        OnIsCrashReportingEnabled)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -485,4 +495,8 @@ void ChromeRenderMessageFilter::OnCanTriggerClipboardWrite(
   *allowed = (origin.SchemeIs(extensions::kExtensionScheme) ||
       extension_info_map_->SecurityOriginHasAPIPermission(
           origin, render_process_id_, APIPermission::kClipboardWrite));
+}
+
+void ChromeRenderMessageFilter::OnIsCrashReportingEnabled(bool* enabled) {
+  *enabled = MetricsServiceHelper::IsCrashReportingEnabled();
 }

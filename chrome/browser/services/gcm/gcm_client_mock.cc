@@ -28,6 +28,7 @@ GCMClientMock::~GCMClientMock() {
 void GCMClientMock::Initialize(
     const checkin_proto::ChromeBuildProto& chrome_build_proto,
     const base::FilePath& store_path,
+    const std::vector<std::string>& account_ids,
     const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
     const scoped_refptr<net::URLRequestContextGetter>&
         url_request_context_getter,
@@ -63,7 +64,6 @@ void GCMClientMock::CheckOut() {
 }
 
 void GCMClientMock::Register(const std::string& app_id,
-                             const std::string& cert,
                              const std::vector<std::string>& sender_ids) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
@@ -80,6 +80,13 @@ void GCMClientMock::Register(const std::string& app_id,
 }
 
 void GCMClientMock::Unregister(const std::string& app_id) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&GCMClientMock::UnregisterFinished,
+                 weak_ptr_factory_.GetWeakPtr(),
+                 app_id));
 }
 
 void GCMClientMock::Send(const std::string& app_id,
@@ -92,7 +99,11 @@ void GCMClientMock::Send(const std::string& app_id,
       base::Bind(&GCMClientMock::SendFinished,
                  weak_ptr_factory_.GetWeakPtr(),
                  app_id,
-                 message.id));
+                 message));
+}
+
+GCMClient::GCMStatistics GCMClientMock::GetStatistics() const {
+  return GCMClient::GCMStatistics();
 }
 
 void GCMClientMock::PerformDelayedLoading() {
@@ -160,18 +171,26 @@ void GCMClientMock::RegisterFinished(const std::string& app_id,
       app_id, registrion_id, registrion_id.empty() ? SERVER_ERROR : SUCCESS);
 }
 
+void GCMClientMock::UnregisterFinished(const std::string& app_id) {
+  delegate_->OnUnregisterFinished(app_id, GCMClient::SUCCESS);
+}
+
 void GCMClientMock::SendFinished(const std::string& app_id,
-                                 const std::string& message_id) {
-  delegate_->OnSendFinished(app_id, message_id, SUCCESS);
+                                 const OutgoingMessage& message) {
+  delegate_->OnSendFinished(app_id, message.id, SUCCESS);
 
   // Simulate send error if message id contains a hint.
-  if (message_id.find("error") != std::string::npos) {
+  if (message.id.find("error") != std::string::npos) {
+    SendErrorDetails send_error_details;
+    send_error_details.message_id = message.id;
+    send_error_details.result = NETWORK_ERROR;
+    send_error_details.additional_data = message.data;
     base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&GCMClientMock::MessageSendError,
                    weak_ptr_factory_.GetWeakPtr(),
                    app_id,
-                   message_id),
+                   send_error_details),
         base::TimeDelta::FromMilliseconds(200));
   }
 }
@@ -187,10 +206,11 @@ void GCMClientMock::MessagesDeleted(const std::string& app_id) {
     delegate_->OnMessagesDeleted(app_id);
 }
 
-void GCMClientMock::MessageSendError(const std::string& app_id,
-                                     const std::string& message_id) {
+void GCMClientMock::MessageSendError(
+    const std::string& app_id,
+    const GCMClient::SendErrorDetails& send_error_details) {
   if (delegate_)
-    delegate_->OnMessageSendError(app_id, message_id, NETWORK_ERROR);
+    delegate_->OnMessageSendError(app_id, send_error_details);
 }
 
 }  // namespace gcm

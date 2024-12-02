@@ -116,6 +116,7 @@
 #include "components/language_usage_metrics/language_usage_metrics.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/browser/nacl_process_host.h"
+#include "components/rappor/rappor_service.h"
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -172,7 +173,6 @@
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "net/base/net_util.h"
-#include "printing/printed_document.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/gfx/win/dpi.h"
 #endif  // defined(OS_WIN)
@@ -184,8 +184,16 @@
 #include "chrome/browser/mac/keystone_glue.h"
 #endif
 
+#if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
+#include "printing/printed_document.h"
+#endif
+
 #if defined(ENABLE_RLZ)
 #include "chrome/browser/rlz/rlz.h"
+#endif
+
+#if defined(ENABLE_WEBRTC)
+#include "chrome/browser/media/webrtc_log_util.h"
 #endif
 
 #if defined(USE_AURA)
@@ -243,10 +251,10 @@ PrefService* InitializeLocalState(
     // language the user selected when downloading the installer. This
     // becomes our default language in the prefs.
     // Other platforms obey the system locale.
-    std::wstring install_lang;
+    base::string16 install_lang;
     if (GoogleUpdateSettings::GetLanguage(&install_lang)) {
       local_state->SetString(prefs::kApplicationLocale,
-                             WideToASCII(install_lang));
+                             base::UTF16ToASCII(install_lang));
     }
   }
 #endif  // defined(OS_WIN)
@@ -467,16 +475,10 @@ void LaunchDevToolsHandlerIfNeeded(const CommandLine& command_line) {
         command_line.GetSwitchValueASCII(::switches::kRemoteDebuggingPort);
     int port;
     if (base::StringToInt(port_str, &port) && port > 0 && port < 65535) {
-      std::string frontend_str;
-      if (command_line.HasSwitch(::switches::kRemoteDebuggingFrontend)) {
-        frontend_str = command_line.GetSwitchValueASCII(
-            ::switches::kRemoteDebuggingFrontend);
-      }
       g_browser_process->CreateDevToolsHttpProtocolHandler(
           chrome::HOST_DESKTOP_TYPE_NATIVE,
           "127.0.0.1",
-          port,
-          frontend_str);
+          port);
     } else {
       DLOG(WARNING) << "Invalid http debugger port number " << port;
     }
@@ -650,6 +652,8 @@ void ChromeBrowserMainParts::StartMetricsRecording() {
     return;
   }
 
+  metrics->CheckForClonedInstall();
+
   if (IsMetricsReportingEnabled())
     metrics->Start();
 }
@@ -768,13 +772,13 @@ void ChromeBrowserMainParts::PostMainMessageLoopStart() {
 int ChromeBrowserMainParts::PreCreateThreads() {
   TRACE_EVENT0("startup", "ChromeBrowserMainParts::PreCreateThreads");
   result_code_ = PreCreateThreadsImpl();
-  // These members must be initialized before returning from this function.
-#if !defined(OS_ANDROID)
-  DCHECK(master_prefs_.get());
-  DCHECK(browser_creator_.get());
-#endif
 
-  if (result_code_ == 0) {
+  if (result_code_ == content::RESULT_CODE_NORMAL_EXIT) {
+#if !defined(OS_ANDROID)
+    // These members must be initialized before exiting this function normally.
+    DCHECK(master_prefs_.get());
+    DCHECK(browser_creator_.get());
+#endif
     for (size_t i = 0; i < chrome_extra_parts_.size(); ++i)
       chrome_extra_parts_[i]->PreCreateThreads();
   }
@@ -873,49 +877,44 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
   // just changed it to include experiments.
   crash_keys::SetSwitchesFromCommandLine(CommandLine::ForCurrentProcess());
 
-  // If we're running tests (ui_task is non-null), then the ResourceBundle
-  // has already been initialized.
-  if (parameters().ui_task &&
-      !local_state_->IsManagedPreference(prefs::kApplicationLocale)) {
-    browser_process_->SetApplicationLocale("en-US");
-  } else {
-    // Mac starts it earlier in |PreMainMessageLoopStart()| (because it is
-    // needed when loading the MainMenu.nib and the language doesn't depend on
-    // anything since it comes from Cocoa.
+  // Mac starts it earlier in |PreMainMessageLoopStart()| (because it is
+  // needed when loading the MainMenu.nib and the language doesn't depend on
+  // anything since it comes from Cocoa.
 #if defined(OS_MACOSX)
-    browser_process_->SetApplicationLocale(l10n_util::GetLocaleOverride());
+  std::string locale =
+      parameters().ui_task ? "en-US" : l10n_util::GetLocaleOverride();
+  browser_process_->SetApplicationLocale(locale);
 #else
-    const std::string locale =
-        local_state_->GetString(prefs::kApplicationLocale);
+  const std::string locale =
+      local_state_->GetString(prefs::kApplicationLocale);
 
-    // On a POSIX OS other than ChromeOS, the parameter that is passed to the
-    // method InitSharedInstance is ignored.
+  // On a POSIX OS other than ChromeOS, the parameter that is passed to the
+  // method InitSharedInstance is ignored.
 
-    TRACE_EVENT_BEGIN0("startup",
-        "ChromeBrowserMainParts::PreCreateThreadsImpl:InitResourceBundle");
-    const std::string loaded_locale =
-        ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
-    TRACE_EVENT_END0("startup",
-        "ChromeBrowserMainParts::PreCreateThreadsImpl:InitResourceBundle");
+  TRACE_EVENT_BEGIN0("startup",
+      "ChromeBrowserMainParts::PreCreateThreadsImpl:InitResourceBundle");
+  const std::string loaded_locale =
+      ResourceBundle::InitSharedInstanceWithLocale(locale, NULL);
+  TRACE_EVENT_END0("startup",
+      "ChromeBrowserMainParts::PreCreateThreadsImpl:InitResourceBundle");
 
-    if (loaded_locale.empty() &&
-        !parsed_command_line().HasSwitch(switches::kNoErrorDialogs)) {
-      ShowMissingLocaleMessageBox();
-      return chrome::RESULT_CODE_MISSING_DATA;
-    }
-    CHECK(!loaded_locale.empty()) << "Locale could not be found for " << locale;
-    browser_process_->SetApplicationLocale(loaded_locale);
-
-    base::FilePath resources_pack_path;
-    PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-    {
-      TRACE_EVENT0("startup",
-          "ChromeBrowserMainParts::PreCreateThreadsImpl:AddDataPack");
-      ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-          resources_pack_path, ui::SCALE_FACTOR_NONE);
-    }
-#endif  // defined(OS_MACOSX)
+  if (loaded_locale.empty() &&
+      !parsed_command_line().HasSwitch(switches::kNoErrorDialogs)) {
+    ShowMissingLocaleMessageBox();
+    return chrome::RESULT_CODE_MISSING_DATA;
   }
+  CHECK(!loaded_locale.empty()) << "Locale could not be found for " << locale;
+  browser_process_->SetApplicationLocale(loaded_locale);
+
+  base::FilePath resources_pack_path;
+  PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+  {
+    TRACE_EVENT0("startup",
+        "ChromeBrowserMainParts::PreCreateThreadsImpl:AddDataPack");
+    ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+        resources_pack_path, ui::SCALE_FACTOR_NONE);
+  }
+#endif  // defined(OS_MACOSX)
 
 #if defined(TOOLKIT_GTK)
   g_set_application_name(l10n_util::GetStringUTF8(IDS_PRODUCT_NAME).c_str());
@@ -1095,6 +1094,15 @@ void ChromeBrowserMainParts::PostBrowserStart() {
   // Allow ProcessSingleton to process messages.
   process_singleton_->Unlock();
 #endif
+#if defined(ENABLE_WEBRTC)
+  // Set up a task to delete old WebRTC log files for all profiles. Use a delay
+  // to reduce the impact on startup time.
+  BrowserThread::PostDelayedTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&WebRtcLogUtil::DeleteOldWebRtcLogFilesForAllProfiles),
+      base::TimeDelta::FromMinutes(1));
+#endif
 }
 
 int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
@@ -1105,6 +1113,12 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // Now that the file thread has been started, start recording.
   StartMetricsRecording();
 #endif
+
+  if (IsMetricsReportingEnabled()) {
+    browser_process_->rappor_service()->Start(
+        browser_process_->local_state(),
+        browser_process_->system_request_context());
+  }
 
   // Create watchdog thread after creating all other threads because it will
   // watch the other threads and they must be running.
@@ -1170,9 +1184,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     // 20 seconds to respond. Note that this needs to be done before we attempt
     // to read the profile.
     notify_result_ = process_singleton_->NotifyOtherProcessOrCreate();
-    UMA_HISTOGRAM_ENUMERATION("NotifyOtherProcessOrCreate.Result",
-                               notify_result_,
-                               ProcessSingleton::NUM_NOTIFY_RESULTS);
     switch (notify_result_) {
       case ProcessSingleton::PROCESS_NONE:
         // No process already running, fall through to starting a new one.
@@ -1206,17 +1217,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
         NOTREACHED();
     }
   }
-
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  if (sxs_linux::ShouldMigrateUserDataDir())
-    return sxs_linux::MigrateUserDataDir();
-#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
-
-  first_run::CreateSentinelIfNeeded();
 #endif  // !defined(OS_ANDROID)
 
-  // Desktop construction occurs here, (required before profile creation).
-  PreProfileInit();
+  // Handle special early return paths (which couldn't be processed even earlier
+  // as they require the process singleton to be held) first.
 
   std::string try_chrome =
       parsed_command_line().GetSwitchValueASCII(switches::kTryChromeAgain);
@@ -1249,22 +1253,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 #endif  // defined(OS_WIN)
   }
 
-  // Profile creation ----------------------------------------------------------
-
-  MetricsService::SetExecutionPhase(MetricsService::CREATE_PROFILE);
-  profile_ = CreatePrimaryProfile(parameters(),
-                                  user_data_dir_,
-                                  parsed_command_line());
-  if (!profile_)
-    return content::RESULT_CODE_NORMAL_EXIT;
-
-#if defined(ENABLE_BACKGROUND)
-  // Autoload any profiles which are running background apps.
-  // TODO(rlp): Do this on a separate thread. See http://crbug.com/99075.
-  browser_process_->profile_manager()->AutoloadProfiles();
-#endif
-  // Post-profile init ---------------------------------------------------------
-
 #if defined(OS_WIN)
   // Do the tasks if chrome has been upgraded while it was last running.
   if (!already_running && upgrade_util::DoUpgradeTasks(parsed_command_line()))
@@ -1274,12 +1262,41 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   // machine. If yes and the current Chrome process is user level, we do not
   // allow the user level Chrome to run. So we notify the user and uninstall
   // user level Chrome.
-  // Note this check should only happen here, after all the checks above
-  // (uninstall, resource bundle initialization, other chrome browser
-  // processes etc).
+  // Note this check needs to happen here (after the process singleton was
+  // obtained but before potentially creating the first run sentinel).
   if (ChromeBrowserMainPartsWin::CheckMachineLevelInstall())
     return chrome::RESULT_CODE_MACHINE_LEVEL_INSTALL_EXISTS;
+#endif  // defined(OS_WIN)
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  if (sxs_linux::ShouldMigrateUserDataDir())
+    return sxs_linux::MigrateUserDataDir();
+#endif  // defined(OS_LINUX) && !defined(OS_CHROMEOS)
+
+  // Desktop construction occurs here, (required before profile creation).
+  PreProfileInit();
+
+  // Profile creation ----------------------------------------------------------
+
+  MetricsService::SetExecutionPhase(MetricsService::CREATE_PROFILE);
+  profile_ = CreatePrimaryProfile(parameters(),
+                                  user_data_dir_,
+                                  parsed_command_line());
+  if (!profile_)
+    return content::RESULT_CODE_NORMAL_EXIT;
+
+#if !defined(OS_ANDROID)
+  // The first run sentinel must be created after the process singleton was
+  // grabbed and no early return paths were otherwise hit above.
+  first_run::CreateSentinelIfNeeded();
+#endif  // !defined(OS_ANDROID)
+
+#if defined(ENABLE_BACKGROUND)
+  // Autoload any profiles which are running background apps.
+  // TODO(rlp): Do this on a separate thread. See http://crbug.com/99075.
+  browser_process_->profile_manager()->AutoloadProfiles();
 #endif
+  // Post-profile init ---------------------------------------------------------
 
   TranslateService::Initialize();
 
@@ -1391,26 +1408,14 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   browser_process_->intranet_redirect_detector();
   GoogleSearchCounter::RegisterForNotifications();
 
-  if (parsed_command_line().HasSwitch(switches::kEnableSdch)) {
-    // SDCH options via switches::kEnableSdch include:
-    const int kSdchDisabled = 0;
-    const int kSdchOverHttpEnabled = 1;
-    const int kSdchOverBothHttpAndHttpsEnabled = 2;
-    int sdch_enabled = kSdchOverHttpEnabled;
-    if (base::StringToInt(parsed_command_line().GetSwitchValueASCII(
-            switches::kEnableSdch), &sdch_enabled)) {
-      if (sdch_enabled == kSdchDisabled) {
-        net::SdchManager::EnableSdchSupport(false);
-      } else if (sdch_enabled == kSdchOverBothHttpAndHttpsEnabled) {
-        net::SdchManager::EnableSecureSchemeSupport(true);
-      }
-    }
+  if (parsed_command_line().HasSwitch(switches::kEnableSdchOverHttps)) {
+    net::SdchManager::EnableSecureSchemeSupport(true);
   }
 
   if (parsed_command_line().HasSwitch(switches::kEnableWatchdog))
     InstallJankometer(parsed_command_line());
 
-#if defined(OS_WIN) && !defined(GOOGLE_CHROME_BUILD)
+#if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
   if (parsed_command_line().HasSwitch(switches::kDebugPrint)) {
     base::FilePath path =
         parsed_command_line().GetSwitchValuePath(switches::kDebugPrint);
@@ -1467,12 +1472,6 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   ThreadWatcherList::StartWatchingAll(parsed_command_line());
 
 #if !defined(DISABLE_NACL)
-  if (parsed_command_line().HasSwitch(switches::kPnaclDir)) {
-    PathService::Override(chrome::DIR_PNACL_BASE,
-                          parsed_command_line().GetSwitchValuePath(
-                              switches::kPnaclDir));
-  }
-
   content::BrowserThread::PostTask(
       content::BrowserThread::IO,
       FROM_HERE,

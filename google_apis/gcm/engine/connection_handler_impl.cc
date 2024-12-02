@@ -357,18 +357,18 @@ void ConnectionHandlerImpl::OnGotMessageBytes() {
       input_stream_->GetState() != SocketInputStream::READY) {
     LOG(ERROR) << "Failed to extract protobuf bytes of type "
                << static_cast<unsigned int>(message_tag_);
-    protobuf.reset();  // Return a null pointer to denote an error.
-    read_callback_.Run(protobuf.Pass());
+    // Reset the connection.
+    connection_callback_.Run(net::ERR_FAILED);
     return;
   }
 
   {
     CodedInputStream coded_input_stream(input_stream_.get());
     if (!protobuf->ParsePartialFromCodedStream(&coded_input_stream)) {
-      NOTREACHED() << "Unable to parse GCM message of type "
-                   << static_cast<unsigned int>(message_tag_);
-      protobuf.reset();  // Return a null pointer to denote an error.
-      read_callback_.Run(protobuf.Pass());
+      LOG(ERROR) << "Unable to parse GCM message of type "
+                 << static_cast<unsigned int>(message_tag_);
+      // Reset the connection.
+      connection_callback_.Run(net::ERR_FAILED);
       return;
     }
   }
@@ -402,6 +402,9 @@ void ConnectionHandlerImpl::CloseConnection() {
   if (socket_)
     socket_->Disconnect();
   socket_ = NULL;
+  handshake_complete_ = false;
+  message_tag_ = 0;
+  message_size_ = 0;
   input_stream_.reset();
   output_stream_.reset();
   weak_ptr_factory_.InvalidateWeakPtrs();

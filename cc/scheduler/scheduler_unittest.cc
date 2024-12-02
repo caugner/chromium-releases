@@ -34,7 +34,8 @@ namespace {
 void InitializeOutputSurfaceAndFirstCommit(Scheduler* scheduler) {
   scheduler->DidCreateAndInitializeOutputSurface();
   scheduler->SetNeedsCommit();
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   // Go through the motions to draw the commit.
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
   scheduler->OnBeginImplFrameDeadline();
@@ -61,7 +62,8 @@ class FakeSchedulerClient : public SchedulerClient {
   }
 
   Scheduler* CreateScheduler(const SchedulerSettings& settings) {
-    scheduler_ = Scheduler::Create(this, settings, 0);
+    scheduler_ =
+        Scheduler::Create(this, settings, 0, base::MessageLoopProxy::current());
     return scheduler_.get();
   }
 
@@ -75,6 +77,9 @@ class FakeSchedulerClient : public SchedulerClient {
   int num_actions_() const { return static_cast<int>(actions_.size()); }
   const char* Action(int i) const { return actions_[i]; }
   base::Value& StateForAction(int i) const { return *states_[i]; }
+  base::TimeTicks posted_begin_impl_frame_deadline() const {
+    return posted_begin_impl_frame_deadline_;
+  }
 
   int ActionIndex(const char* action) const {
     for (size_t i = 0; i < actions_.size(); i++)
@@ -173,12 +178,6 @@ class FakeSchedulerClient : public SchedulerClient {
     return base::TimeDelta();
   }
 
-  virtual void PostBeginImplFrameDeadline(const base::Closure& closure,
-                                          base::TimeTicks deadline) OVERRIDE {
-    actions_.push_back("PostBeginImplFrameDeadlineTask");
-    states_.push_back(scheduler_->StateAsValue().release());
-  }
-
   virtual void DidBeginImplFrameDeadline() OVERRIDE {}
 
  protected:
@@ -187,6 +186,7 @@ class FakeSchedulerClient : public SchedulerClient {
   bool swap_will_happen_if_draw_happens_;
   int num_draws_;
   bool log_anticipated_draw_time_change_;
+  base::TimeTicks posted_begin_impl_frame_deadline_;
   std::vector<const char*> actions_;
   ScopedVector<base::Value> states_;
   scoped_ptr<Scheduler> scheduler_;
@@ -206,10 +206,9 @@ TEST(SchedulerTest, InitializeOutputSurfaceDoesNotBeginImplFrame) {
   EXPECT_EQ(0, client.num_actions_());
 }
 
-void RequestCommit(bool deadline_scheduling_enabled) {
+TEST(SchedulerTest, RequestCommit) {
   FakeSchedulerClient client;
   SchedulerSettings scheduler_settings;
-  scheduler_settings.deadline_scheduling_enabled = deadline_scheduling_enabled;
   Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
   scheduler->SetCanStart();
   scheduler->SetVisible(true);
@@ -222,22 +221,12 @@ void RequestCommit(bool deadline_scheduling_enabled) {
   client.Reset();
   scheduler->SetNeedsCommit();
   EXPECT_TRUE(client.needs_begin_impl_frame());
-  if (deadline_scheduling_enabled) {
-    EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
-  } else {
-    EXPECT_EQ(client.num_actions_(), 2);
-    EXPECT_TRUE(client.HasAction("ScheduledActionSendBeginMainFrame"));
-    EXPECT_TRUE(client.HasAction("SetNeedsBeginImplFrame"));
-  }
+  EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
   client.Reset();
 
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  if (deadline_scheduling_enabled) {
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-    EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
-  } else {
-    EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
-  }
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
@@ -245,18 +234,21 @@ void RequestCommit(bool deadline_scheduling_enabled) {
   // BeginImplFrame.
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
-  // FinishCommit should commit
-  scheduler->FinishCommit();
+  // NotifyReadyToCommit should trigger the commit.
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   EXPECT_SINGLE_ACTION("ScheduledActionCommit", client);
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
   // BeginImplFrame should prepare the draw.
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
@@ -264,13 +256,15 @@ void RequestCommit(bool deadline_scheduling_enabled) {
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
   EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
   // The following BeginImplFrame deadline should SetNeedsBeginImplFrame(false)
   // to avoid excessive toggles.
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
 
   scheduler->OnBeginImplFrameDeadline();
@@ -279,21 +273,9 @@ void RequestCommit(bool deadline_scheduling_enabled) {
   client.Reset();
 }
 
-TEST(SchedulerTest, RequestCommit) {
-  bool deadline_scheduling_enabled = false;
-  RequestCommit(deadline_scheduling_enabled);
-}
-
-TEST(SchedulerTest, RequestCommit_Deadline) {
-  bool deadline_scheduling_enabled = true;
-  RequestCommit(deadline_scheduling_enabled);
-}
-
-void RequestCommitAfterBeginMainFrameSent(
-    bool deadline_scheduling_enabled) {
+TEST(SchedulerTest, RequestCommitAfterBeginMainFrameSent) {
   FakeSchedulerClient client;
   SchedulerSettings scheduler_settings;
-  scheduler_settings.deadline_scheduling_enabled = deadline_scheduling_enabled;
   Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
   scheduler->SetCanStart();
   scheduler->SetVisible(true);
@@ -305,23 +287,12 @@ void RequestCommitAfterBeginMainFrameSent(
 
   // SetNeedsCommit should begin the frame.
   scheduler->SetNeedsCommit();
-  if (deadline_scheduling_enabled) {
-    EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
-  } else {
-    EXPECT_EQ(client.num_actions_(), 2);
-    EXPECT_TRUE(client.HasAction("SetNeedsBeginImplFrame"));
-    EXPECT_TRUE(client.HasAction("ScheduledActionSendBeginMainFrame"));
-  }
+  EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
 
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  if (deadline_scheduling_enabled) {
-    EXPECT_EQ(client.num_actions_(), 2);
-    EXPECT_TRUE(client.HasAction("ScheduledActionSendBeginMainFrame"));
-    EXPECT_TRUE(client.HasAction("PostBeginImplFrameDeadlineTask"));
-  } else {
-    EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
-  }
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
@@ -332,19 +303,15 @@ void RequestCommitAfterBeginMainFrameSent(
   client.Reset();
 
   // Finish the first commit.
-  scheduler->FinishCommit();
-  EXPECT_ACTION("ScheduledActionCommit", client, 0, 2);
-  EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
+  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
-  if (deadline_scheduling_enabled) {
-    EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
-    EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
-  } else {
-    EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 3);
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 1, 3);
-    EXPECT_ACTION("SetNeedsBeginImplFrame", client, 2, 3);
-  }
+  EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
+  EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // Because we just swapped, the Scheduler should also request the next
   // BeginImplFrame from the OutputSurface.
@@ -354,24 +321,21 @@ void RequestCommitAfterBeginMainFrameSent(
   // Since another commit is needed, the next BeginImplFrame should initiate
   // the second commit.
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  if (deadline_scheduling_enabled) {
-    EXPECT_EQ(client.num_actions_(), 2);
-    EXPECT_TRUE(client.HasAction("ScheduledActionSendBeginMainFrame"));
-    EXPECT_TRUE(client.HasAction("PostBeginImplFrameDeadlineTask"));
-  } else {
-    EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
-  }
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
 
   // Finishing the commit before the deadline should post a new deadline task
   // to trigger the deadline early.
-  scheduler->FinishCommit();
-  EXPECT_ACTION("ScheduledActionCommit", client, 0, 2);
-  EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
+  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
   EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
@@ -383,21 +347,9 @@ void RequestCommitAfterBeginMainFrameSent(
   client.Reset();
 }
 
-TEST(SchedulerTest, RequestCommitAfterBeginMainFrameSent) {
-  bool deadline_scheduling_enabled = false;
-  RequestCommitAfterBeginMainFrameSent(deadline_scheduling_enabled);
-}
-
-TEST(SchedulerTest, RequestCommitAfterBeginMainFrameSent_Deadline) {
-  bool deadline_scheduling_enabled = true;
-  RequestCommitAfterBeginMainFrameSent(deadline_scheduling_enabled);
-}
-
-void TextureAcquisitionCausesCommitInsteadOfDraw(
-    bool deadline_scheduling_enabled) {
+TEST(SchedulerTest, TextureAcquisitionCausesCommitInsteadOfDraw) {
   FakeSchedulerClient client;
   SchedulerSettings scheduler_settings;
-  scheduler_settings.deadline_scheduling_enabled = deadline_scheduling_enabled;
   Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
   scheduler->SetCanStart();
   scheduler->SetVisible(true);
@@ -413,20 +365,24 @@ void TextureAcquisitionCausesCommitInsteadOfDraw(
 
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
   EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_FALSE(client.needs_begin_impl_frame());
 
@@ -445,35 +401,30 @@ void TextureAcquisitionCausesCommitInsteadOfDraw(
   // No draw happens since the textures are acquired by the main thread.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(scheduler->RedrawPending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
   client.Reset();
   scheduler->SetNeedsCommit();
-  if (deadline_scheduling_enabled) {
-    EXPECT_EQ(0, client.num_actions_());
-  } else {
-    EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
-  }
+  EXPECT_EQ(0, client.num_actions_());
 
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  if (deadline_scheduling_enabled) {
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-    EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
-  } else {
-    EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
-  }
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   // Commit will release the texture.
   client.Reset();
-  scheduler->FinishCommit();
-  EXPECT_ACTION("ScheduledActionCommit", client, 0, 2);
-  EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
+  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(scheduler->RedrawPending());
 
   // Now we can draw again after the commit happens.
@@ -481,33 +432,24 @@ void TextureAcquisitionCausesCommitInsteadOfDraw(
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
   EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
   // Make sure we stop requesting BeginImplFrames if we don't swap.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
   EXPECT_FALSE(client.needs_begin_impl_frame());
 }
 
-TEST(SchedulerTest, TextureAcquisitionCausesCommitInsteadOfDraw) {
-  bool deadline_scheduling_enabled = false;
-  TextureAcquisitionCausesCommitInsteadOfDraw(deadline_scheduling_enabled);
-}
-
-TEST(SchedulerTest, TextureAcquisitionCausesCommitInsteadOfDraw_Deadline) {
-  bool deadline_scheduling_enabled = true;
-  TextureAcquisitionCausesCommitInsteadOfDraw(deadline_scheduling_enabled);
-}
-
-void TextureAcquisitionCollision(bool deadline_scheduling_enabled) {
+TEST(SchedulerTest, TextureAcquisitionCollision) {
   FakeSchedulerClient client;
   SchedulerSettings scheduler_settings;
-  scheduler_settings.deadline_scheduling_enabled = deadline_scheduling_enabled;
   Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
   scheduler->SetCanStart();
   scheduler->SetVisible(true);
@@ -518,12 +460,7 @@ void TextureAcquisitionCollision(bool deadline_scheduling_enabled) {
 
   client.Reset();
   scheduler->SetNeedsCommit();
-if (deadline_scheduling_enabled) {
-    EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
-  } else {
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-    EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
-  }
+  EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
 
   client.Reset();
   scheduler->SetMainThreadNeedsLayerTextures();
@@ -532,12 +469,8 @@ if (deadline_scheduling_enabled) {
 
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  if (deadline_scheduling_enabled) {
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-    EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
-  } else {
-    EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
-  }
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
@@ -548,8 +481,9 @@ if (deadline_scheduling_enabled) {
   // the unlock.
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
-  // Trigger the commit
-  scheduler->FinishCommit();
+  // Trigger the commit.
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
   // Between commit and draw, texture acquisition for main thread delayed,
@@ -561,7 +495,8 @@ if (deadline_scheduling_enabled) {
   // No implicit commit is expected.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
@@ -569,44 +504,39 @@ if (deadline_scheduling_enabled) {
   EXPECT_ACTION(
       "ScheduledActionAcquireLayerTexturesForMainThread", client, 1, 3);
   EXPECT_ACTION("SetNeedsBeginImplFrame", client, 2, 3);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
   // The compositor should not draw because textures are locked by main
   // thread.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
   EXPECT_FALSE(client.needs_begin_impl_frame());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // The impl thread need an explicit commit from the main thread to lock
   // the textures.
   client.Reset();
   scheduler->SetNeedsCommit();
-  if (deadline_scheduling_enabled) {
-    EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
-  } else {
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-    EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
-  }
+  EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
   EXPECT_TRUE(client.needs_begin_impl_frame());
 
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  if (deadline_scheduling_enabled) {
-    EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-    EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
-  } else {
-    EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
-  }
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
 
   // Trigger the commit, which will trigger the deadline task early.
-  scheduler->FinishCommit();
-  EXPECT_ACTION("ScheduledActionCommit", client, 0, 2);
-  EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
+  EXPECT_SINGLE_ACTION("ScheduledActionCommit", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
   client.Reset();
 
@@ -615,23 +545,13 @@ if (deadline_scheduling_enabled) {
   EXPECT_ACTION("ScheduledActionDrawAndSwapIfPossible", client, 0, 2);
   EXPECT_ACTION("SetNeedsBeginImplFrame", client, 1, 2);
   EXPECT_TRUE(client.needs_begin_impl_frame());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
 }
 
-TEST(SchedulerTest, TextureAcquisitionCollision) {
-  bool deadline_scheduling_enabled = false;
-  TextureAcquisitionCollision(deadline_scheduling_enabled);
-}
-
-TEST(SchedulerTest, TextureAcquisitionCollision_Deadline) {
-  bool deadline_scheduling_enabled = true;
-  TextureAcquisitionCollision(deadline_scheduling_enabled);
-}
-
-void VisibilitySwitchWithTextureAcquisition(bool deadline_scheduling_enabled) {
+TEST(SchedulerTest, VisibilitySwitchWithTextureAcquisition) {
   FakeSchedulerClient client;
   SchedulerSettings scheduler_settings;
-  scheduler_settings.deadline_scheduling_enabled = deadline_scheduling_enabled;
   Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
   scheduler->SetCanStart();
   scheduler->SetVisible(true);
@@ -642,11 +562,10 @@ void VisibilitySwitchWithTextureAcquisition(bool deadline_scheduling_enabled) {
   scheduler->DidCreateAndInitializeOutputSurface();
 
   scheduler->SetNeedsCommit();
-  if (deadline_scheduling_enabled) {
-    scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-    scheduler->OnBeginImplFrameDeadline();
-  }
-  scheduler->FinishCommit();
+  scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
+  scheduler->OnBeginImplFrameDeadline();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   scheduler->SetMainThreadNeedsLayerTextures();
   scheduler->SetNeedsCommit();
   client.Reset();
@@ -666,18 +585,8 @@ void VisibilitySwitchWithTextureAcquisition(bool deadline_scheduling_enabled) {
   // for a new frame in order to escape a deadlock.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_ACTION("ScheduledActionSendBeginMainFrame", client, 0, 2);
-  EXPECT_ACTION("PostBeginImplFrameDeadlineTask", client, 1, 2);
-}
-
-TEST(SchedulerTest, VisibilitySwitchWithTextureAcquisition) {
-  bool deadline_scheduling_enabled = false;
-  VisibilitySwitchWithTextureAcquisition(deadline_scheduling_enabled);
-}
-
-TEST(SchedulerTest, VisibilitySwitchWithTextureAcquisition_Deadline) {
-  bool deadline_scheduling_enabled = true;
-  VisibilitySwitchWithTextureAcquisition(deadline_scheduling_enabled);
+  EXPECT_SINGLE_ACTION("ScheduledActionSendBeginMainFrame", client);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 }
 
 class SchedulerClientThatsetNeedsDrawInsideDraw : public FakeSchedulerClient {
@@ -850,7 +759,8 @@ TEST(SchedulerTest, RequestCommitInsideDraw) {
   EXPECT_EQ(1, client.num_draws());
   EXPECT_TRUE(scheduler->CommitPending());
   EXPECT_TRUE(client.needs_begin_impl_frame());
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
 
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
   scheduler->OnBeginImplFrameDeadline();
@@ -963,7 +873,8 @@ TEST(SchedulerTest, NoSwapWhenSwapFailsDuringForcedCommit) {
   scheduler->SetCanDraw(true);
   scheduler->SetNeedsRedraw();
   scheduler->SetNeedsForcedCommitForReadback();
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndReadback"));
 }
 
@@ -979,17 +890,20 @@ TEST(SchedulerTest, BackToBackReadbackAllowed) {
   scheduler->SetCanDraw(true);
   scheduler->SetNeedsRedraw();
   scheduler->SetNeedsForcedCommitForReadback();
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndReadback"));
 
   client.Reset();
   scheduler->SetNeedsForcedCommitForReadback();
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndReadback"));
 
   // The replacement commit comes in after 2 readbacks.
   client.Reset();
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
 }
 
 
@@ -1028,7 +942,8 @@ TEST(SchedulerTest, ManageTiles) {
   // the deadline task.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   // On the deadline, he actions should have occured in the right order.
   client.Reset();
@@ -1040,6 +955,7 @@ TEST(SchedulerTest, ManageTiles) {
             client.ActionIndex("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_FALSE(scheduler->ManageTilesPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // Request a draw. We don't need a ManageTiles yet.
   client.Reset();
@@ -1053,7 +969,8 @@ TEST(SchedulerTest, ManageTiles) {
   // the deadline task.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   // Draw. The draw will trigger SetNeedsManageTiles, and
   // then the ManageTiles action will be triggered after the Draw.
@@ -1067,14 +984,17 @@ TEST(SchedulerTest, ManageTiles) {
             client.ActionIndex("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_FALSE(scheduler->ManageTilesPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // We need a BeginImplFrame where we don't swap to go idle.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
-  EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);;
+  EXPECT_SINGLE_ACTION("SetNeedsBeginImplFrame", client);
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   EXPECT_EQ(0, client.num_draws());
 
   // Now trigger a ManageTiles outside of a draw. We will then need
@@ -1089,12 +1009,14 @@ TEST(SchedulerTest, ManageTiles) {
   // BeginImplFrame. There will be no draw, only ManageTiles.
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_EQ(0, client.num_draws());
   EXPECT_FALSE(client.HasAction("ScheduledActionDrawAndSwapIfPossible"));
   EXPECT_TRUE(client.HasAction("ScheduledActionManageTiles"));
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 }
 
 // Test that ManageTiles only happens once per frame.  If an external caller
@@ -1113,7 +1035,8 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
   scheduler->SetNeedsRedraw();
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   EXPECT_TRUE(scheduler->ManageTilesPending());
   scheduler->DidManageTiles();  // An explicit ManageTiles.
@@ -1126,13 +1049,15 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
   EXPECT_FALSE(client.HasAction("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_FALSE(scheduler->ManageTilesPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // Next frame without DidManageTiles should ManageTiles with draw.
   scheduler->SetNeedsManageTiles();
   scheduler->SetNeedsRedraw();
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
@@ -1143,6 +1068,7 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
             client.ActionIndex("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_FALSE(scheduler->ManageTilesPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   scheduler->DidManageTiles();  // Corresponds to ScheduledActionManageTiles
 
   // If we get another DidManageTiles within the same frame, we should
@@ -1152,7 +1078,8 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
   scheduler->SetNeedsRedraw();
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   EXPECT_TRUE(scheduler->ManageTilesPending());
 
@@ -1162,6 +1089,7 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
   EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndSwapIfPossible"));
   EXPECT_FALSE(client.HasAction("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // If we get another DidManageTiles, we should not ManageTiles on the next
   // frame. This verifies we don't alternate calling ManageTiles once and twice.
@@ -1172,7 +1100,8 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
   scheduler->SetNeedsRedraw();
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   EXPECT_TRUE(scheduler->ManageTilesPending());
 
@@ -1182,13 +1111,15 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
   EXPECT_TRUE(client.HasAction("ScheduledActionDrawAndSwapIfPossible"));
   EXPECT_FALSE(client.HasAction("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
 
   // Next frame without DidManageTiles should ManageTiles with draw.
   scheduler->SetNeedsManageTiles();
   scheduler->SetNeedsRedraw();
   client.Reset();
   scheduler->BeginImplFrame(BeginFrameArgs::CreateForTesting());
-  EXPECT_SINGLE_ACTION("PostBeginImplFrameDeadlineTask", client);
+  EXPECT_EQ(client.num_actions_(), 0);
+  EXPECT_TRUE(scheduler->BeginImplFrameDeadlinePending());
 
   client.Reset();
   scheduler->OnBeginImplFrameDeadline();
@@ -1199,7 +1130,27 @@ TEST(SchedulerTest, ManageTilesOncePerFrame) {
             client.ActionIndex("ScheduledActionManageTiles"));
   EXPECT_FALSE(scheduler->RedrawPending());
   EXPECT_FALSE(scheduler->ManageTilesPending());
+  EXPECT_FALSE(scheduler->BeginImplFrameDeadlinePending());
   scheduler->DidManageTiles();  // Corresponds to ScheduledActionManageTiles
+}
+
+TEST(SchedulerTest, TriggerBeginFrameDeadlineEarly) {
+  SchedulerClientNeedsManageTilesInDraw client;
+  SchedulerSettings default_scheduler_settings;
+  Scheduler* scheduler = client.CreateScheduler(default_scheduler_settings);
+  scheduler->SetCanStart();
+  scheduler->SetVisible(true);
+  scheduler->SetCanDraw(true);
+  InitializeOutputSurfaceAndFirstCommit(scheduler);
+
+  client.Reset();
+  BeginFrameArgs impl_frame_args = BeginFrameArgs::CreateForTesting();
+  scheduler->SetNeedsRedraw();
+  scheduler->BeginImplFrame(impl_frame_args);
+
+  // The deadline should be zero since there is no work other than drawing
+  // pending.
+  EXPECT_EQ(base::TimeTicks(), client.posted_begin_impl_frame_deadline());
 }
 
 class SchedulerClientWithFixedEstimates : public FakeSchedulerClient {
@@ -1231,6 +1182,7 @@ class SchedulerClientWithFixedEstimates : public FakeSchedulerClient {
 
 void MainFrameInHighLatencyMode(int64 begin_main_frame_to_commit_estimate_in_ms,
                                 int64 commit_to_activate_estimate_in_ms,
+                                bool smoothness_takes_priority,
                                 bool should_send_begin_main_frame) {
   // Set up client with specified estimates (draw duration is set to 1).
   SchedulerClientWithFixedEstimates client(
@@ -1238,13 +1190,12 @@ void MainFrameInHighLatencyMode(int64 begin_main_frame_to_commit_estimate_in_ms,
       base::TimeDelta::FromMilliseconds(
           begin_main_frame_to_commit_estimate_in_ms),
       base::TimeDelta::FromMilliseconds(commit_to_activate_estimate_in_ms));
-  SchedulerSettings scheduler_settings;
-  scheduler_settings.deadline_scheduling_enabled = true;
-  scheduler_settings.switch_to_low_latency_if_possible = true;
-  Scheduler* scheduler = client.CreateScheduler(scheduler_settings);
+  SchedulerSettings default_scheduler_settings;
+  Scheduler* scheduler = client.CreateScheduler(default_scheduler_settings);
   scheduler->SetCanStart();
   scheduler->SetVisible(true);
   scheduler->SetCanDraw(true);
+  scheduler->SetSmoothnessTakesPriority(smoothness_takes_priority);
   InitializeOutputSurfaceAndFirstCommit(scheduler);
 
   // Impl thread hits deadline before commit finishes.
@@ -1255,7 +1206,8 @@ void MainFrameInHighLatencyMode(int64 begin_main_frame_to_commit_estimate_in_ms,
   EXPECT_FALSE(scheduler->MainThreadIsInHighLatencyMode());
   scheduler->OnBeginImplFrameDeadline();
   EXPECT_TRUE(scheduler->MainThreadIsInHighLatencyMode());
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   EXPECT_TRUE(scheduler->MainThreadIsInHighLatencyMode());
   EXPECT_TRUE(client.HasAction("ScheduledActionSendBeginMainFrame"));
 
@@ -1275,19 +1227,26 @@ TEST(SchedulerTest,
     SkipMainFrameIfHighLatencyAndCanCommitAndActivateBeforeDeadline) {
   // Set up client so that estimates indicate that we can commit and activate
   // before the deadline (~8ms by default).
-  MainFrameInHighLatencyMode(1, 1, false);
+  MainFrameInHighLatencyMode(1, 1, false, false);
 }
 
 TEST(SchedulerTest, NotSkipMainFrameIfHighLatencyAndCanCommitTooLong) {
   // Set up client so that estimates indicate that the commit cannot finish
   // before the deadline (~8ms by default).
-  MainFrameInHighLatencyMode(10, 1, true);
+  MainFrameInHighLatencyMode(10, 1, false, true);
 }
 
 TEST(SchedulerTest, NotSkipMainFrameIfHighLatencyAndCanActivateTooLong) {
   // Set up client so that estimates indicate that the activate cannot finish
   // before the deadline (~8ms by default).
-  MainFrameInHighLatencyMode(1, 10, true);
+  MainFrameInHighLatencyMode(1, 10, false, true);
+}
+
+TEST(SchedulerTest, NotSkipMainFrameInPreferSmoothnessMode) {
+  // Set up client so that estimates indicate that we can commit and activate
+  // before the deadline (~8ms by default), but also enable smoothness takes
+  // priority mode.
+  MainFrameInHighLatencyMode(1, 1, true, true);
 }
 
 void SpinForMillis(int millis) {
@@ -1300,7 +1259,12 @@ void SpinForMillis(int millis) {
 }
 
 TEST(SchedulerTest, PollForCommitCompletion) {
-  FakeSchedulerClient client;
+  // Since we are simulating a long commit, set up a client with draw duration
+  // estimates that prevent skipping main frames to get to low latency mode.
+  SchedulerClientWithFixedEstimates client(
+      base::TimeDelta::FromMilliseconds(1),
+      base::TimeDelta::FromMilliseconds(32),
+      base::TimeDelta::FromMilliseconds(32));
   client.set_log_anticipated_draw_time_change(true);
   SchedulerSettings settings = SchedulerSettings();
   settings.throttle_frame_production = false;
@@ -1313,7 +1277,8 @@ TEST(SchedulerTest, PollForCommitCompletion) {
 
   scheduler->SetNeedsCommit();
   EXPECT_TRUE(scheduler->CommitPending());
-  scheduler->FinishCommit();
+  scheduler->NotifyBeginMainFrameStarted();
+  scheduler->NotifyReadyToCommit();
   scheduler->SetNeedsRedraw();
   BeginFrameArgs impl_frame_args = BeginFrameArgs::CreateForTesting();
   const int interval = 1;
@@ -1322,7 +1287,7 @@ TEST(SchedulerTest, PollForCommitCompletion) {
   scheduler->OnBeginImplFrameDeadline();
 
   // At this point, we've drawn a frame.  Start another commit, but hold off on
-  // the FinishCommit for now.
+  // the NotifyReadyToCommit for now.
   EXPECT_FALSE(scheduler->CommitPending());
   scheduler->SetNeedsCommit();
   EXPECT_TRUE(scheduler->CommitPending());

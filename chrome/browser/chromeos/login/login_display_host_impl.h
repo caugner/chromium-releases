@@ -13,7 +13,6 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/auth_prewarmer.h"
-#include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
@@ -28,12 +27,14 @@
 
 class PrefService;
 
-namespace policy {
-class AutoEnrollmentClient;
-}  // namespace policy
+namespace content {
+class RenderFrameHost;
+class WebContents;
+}
 
 namespace chromeos {
 
+class DemoAppLauncher;
 class FocusRingController;
 class KeyboardDrivenOobeKeyHandler;
 class OobeUI;
@@ -51,10 +52,14 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   explicit LoginDisplayHostImpl(const gfx::Rect& background_bounds);
   virtual ~LoginDisplayHostImpl();
 
-  // Returns the default LoginDispalyHost instance if it has been created.
+  // Returns the default LoginDisplayHost instance if it has been created.
   static LoginDisplayHost* default_host() {
     return default_host_;
   }
+
+  // Gets the Gaia auth iframe within a WebContents.
+  static content::RenderFrameHost* GetGaiaAuthIframe(
+      content::WebContents* web_contents);
 
   // LoginDisplayHost implementation:
   virtual LoginDisplay* CreateLoginDisplay(
@@ -66,9 +71,7 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   virtual void OnCompleteLogin() OVERRIDE;
   virtual void OpenProxySettings() OVERRIDE;
   virtual void SetStatusAreaVisible(bool visible) OVERRIDE;
-  virtual void CheckForAutoEnrollment() OVERRIDE;
-  virtual void GetAutoEnrollmentCheckResult(
-      const GetAutoEnrollmentCheckResultCallback& callback) OVERRIDE;
+  virtual AutoEnrollmentController* GetAutoEnrollmentController() OVERRIDE;
   virtual void StartWizard(
       const std::string& first_screen_name,
       scoped_ptr<base::DictionaryValue> screen_parameters) OVERRIDE;
@@ -143,15 +146,8 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Schedules fade out animation.
   void ScheduleFadeOutAnimation();
 
-  // Callback for the ownership status check.
-  void OnOwnershipStatusCheckDone(
-      DeviceSettingsService::OwnershipStatus status);
-
-  // Callback for completion of the |auto_enrollment_client_|.
-  void OnAutoEnrollmentClientDone();
-
-  // Forces auto-enrollment on the appropriate controller.
-  void ForceAutoEnrollment();
+  // Progress callback registered with |auto_enrollment_controller_|.
+  void OnAutoEnrollmentProgress(policy::AutoEnrollmentState state);
 
   // Loads given URL. Creates WebUILoginView if needed.
   void LoadURL(const GURL& url);
@@ -174,9 +170,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
 
   // Toggles OOBE progress bar visibility, the bar is hidden by default.
   void SetOobeProgressBarVisible(bool visible);
-
-  // Notifies the interested parties of the auto enrollment check result.
-  void NotifyAutoEnrollmentCheckResult(bool should_auto_enroll);
 
   // Tries to play startup sound. If sound can't be played right now,
   // for instance, because cras server is not initialized, playback
@@ -208,8 +201,12 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Demo app launcher.
   scoped_ptr<DemoAppLauncher> demo_app_launcher_;
 
-  // Client for enterprise auto-enrollment check.
-  scoped_ptr<policy::AutoEnrollmentClient> auto_enrollment_client_;
+  // The controller driving the auto-enrollment check.
+  scoped_ptr<AutoEnrollmentController> auto_enrollment_controller_;
+
+  // Subscription for progress callbacks from |auto_enrollement_controller_|.
+  scoped_ptr<AutoEnrollmentController::ProgressCallbackList::Subscription>
+      auto_enrollment_progress_subscription_;
 
   // Has ShutdownDisplayHost() already been called?  Used to avoid posting our
   // own deletion to the message loop twice if the user logs out while we're
@@ -278,13 +275,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
 
   // Handles special keys for keyboard driven oobe.
   scoped_ptr<KeyboardDrivenOobeKeyHandler> keyboard_driven_oobe_key_handler_;
-
-  // Whether auto enrollment client has done the check.
-  bool auto_enrollment_check_done_;
-
-  // Callbacks to notify when auto enrollment client has done the check.
-  std::vector<GetAutoEnrollmentCheckResultCallback>
-      get_auto_enrollment_result_callbacks_;
 
   FinalizeAnimationType finalize_animation_type_;
 

@@ -61,8 +61,7 @@ _TEST_ONLY_WARNING = (
     'You might be calling functions intended only for testing from\n'
     'production code.  It is OK to ignore this warning if you know what\n'
     'you are doing, as the heuristics used to detect the situation are\n'
-    'not perfect.  The commit queue will not block on this warning.\n'
-    'Email joi@chromium.org if you have questions.')
+    'not perfect.  The commit queue will not block on this warning.')
 
 
 _INCLUDE_ORDER_WARNING = (
@@ -170,6 +169,7 @@ _BANNED_CPP_FUNCTIONS = (
         r"^components[\\\/]breakpad[\\\/]app[\\\/]breakpad_mac\.mm$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_browser_main\.cc$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_message_filter\.cc$",
+        r"^mojo[\\\/]system[\\\/]raw_shared_buffer_posix\.cc$",
         r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
       ),
     ),
@@ -240,6 +240,7 @@ _BANNED_CPP_FUNCTIONS = (
 _VALID_OS_MACROS = (
     # Please keep sorted.
     'OS_ANDROID',
+    'OS_ANDROID_HOST',
     'OS_BSD',
     'OS_CAT',       # For testing.
     'OS_CHROMEOS',
@@ -758,7 +759,7 @@ def _CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api):
   if problems:
     return [output_api.PresubmitPromptOrNotify(
         'Most layers below src/chrome/ should not hardcode service URLs.\n'
-        'Are you sure this is correct? (Contact: joi@chromium.org)',
+        'Are you sure this is correct?',
         ['  %s:%d:  %s' % (
             problem[0], problem[1], problem[2]) for problem in problems])]
   else:
@@ -904,6 +905,7 @@ def _CheckSpamLogging(input_api, output_api):
                      r"logging_native_handler\.cc$",
                  r"^content[\\\/]common[\\\/]gpu[\\\/]client[\\\/]"
                      r"gl_helper_benchmark\.cc$",
+                 r"^native_client_sdk[\\\/]",
                  r"^remoting[\\\/]base[\\\/]logging\.h$",
                  r"^remoting[\\\/]host[\\\/].*",
                  r"^sandbox[\\\/]linux[\\\/].*",
@@ -1012,6 +1014,38 @@ def _CheckCygwinShell(input_api, output_api):
   return []
 
 
+def _CheckUserActionUpdate(input_api, output_api):
+  """Checks if any new user action has been added."""
+  if any('actions.xml' == input_api.os_path.basename(f) for f in
+         input_api.LocalPaths()):
+    # If actions.xml is already included in the changelist, the PRESUBMIT
+    # for actions.xml will do a more complete presubmit check.
+    return []
+
+  file_filter = lambda f: f.LocalPath().endswith(('.cc', '.mm'))
+  action_re = r'[^a-zA-Z]UserMetricsAction\("([^"]*)'
+  current_actions = None
+  for f in input_api.AffectedFiles(file_filter=file_filter):
+    for line_num, line in f.ChangedContents():
+      match = input_api.re.search(action_re, line)
+      if match:
+        # Loads contents in tools/metrics/actions/actions.xml to memory. It's
+        # loaded only once.
+        if not current_actions:
+          with open('tools/metrics/actions/actions.xml') as actions_f:
+            current_actions = actions_f.read()
+        # Search for the matched user action name in |current_actions|.
+        for action_name in match.groups():
+          action = 'name="{0}"'.format(action_name)
+          if action not in current_actions:
+            return [output_api.PresubmitPromptWarning(
+              'File %s line %d: %s is missing in '
+              'tools/metrics/actions/actions.xml. Please run '
+              'tools/metrics/actions/extract_actions.py to update.'
+              % (f.LocalPath(), line_num, action_name))]
+  return []
+
+
 def _CheckJavaStyle(input_api, output_api):
   """Runs checkstyle on changed java files and returns errors if any exist."""
   original_sys_path = sys.path
@@ -1061,7 +1095,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckSpamLogging(input_api, output_api))
   results.extend(_CheckForAnonymousVariables(input_api, output_api))
   results.extend(_CheckCygwinShell(input_api, output_api))
-  results.extend(_CheckJavaStyle(input_api, output_api))
+  results.extend(_CheckUserActionUpdate(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1207,6 +1241,7 @@ def _CheckForInvalidOSMacros(input_api, output_api):
 def CheckChangeOnUpload(input_api, output_api):
   results = []
   results.extend(_CommonChecks(input_api, output_api))
+  results.extend(_CheckJavaStyle(input_api, output_api))
   return results
 
 
@@ -1229,7 +1264,6 @@ def GetDefaultTryConfigs(bots=None):
       'content_browsertests',
       'content_unittests',
       'crypto_unittests',
-      #'gfx_unittests',
       'gpu_unittests',
       'interactive_ui_tests',
       'ipc_tests',
@@ -1269,62 +1303,30 @@ def GetDefaultTryConfigs(bots=None):
           'ui_unittests',
       ],
       'ios_rel_device': ['compile'],
-      'linux_asan': ['defaulttests'],
+      'linux_asan': ['compile'],
+      'mac_asan': ['compile'],
       #TODO(stip): Change the name of this builder to reflect that it's release.
       'linux_gtk': standard_tests,
-      'linux_chromeos_asan': ['defaulttests'],
-      'linux_chromeos_clang': ['compile'],
-      # Note: It is a Release builder even if its name convey otherwise.
-      'linux_chromeos': standard_tests + [
-          'app_list_unittests',
-          'aura_unittests',
-          'ash_unittests',
-          'chromeos_unittests',
-          'components_unittests',
-          'dbus_unittests',
-          'device_unittests',
-          'events_unittests',
-          'google_apis_unittests',
-          'sandbox_linux_unittests',
-      ],
-      'linux_chromium_dbg': ['defaulttests'],
+      'linux_chromeos_asan': ['compile'],
+      'linux_chromium_chromeos_clang_dbg': ['defaulttests'],
+      'linux_chromium_chromeos_rel': ['defaulttests'],
+      'linux_chromium_compile_dbg': ['defaulttests'],
       'linux_chromium_rel': ['defaulttests'],
-      'linux_clang': ['compile'],
+      'linux_chromium_clang_dbg': ['defaulttests'],
       'linux_nacl_sdk_build': ['compile'],
-      'linux_rel': standard_tests + [
-          'app_list_unittests',
-          'aura_unittests',
-          'cc_unittests',
-          'chromedriver_unittests',
-          'components_unittests',
-          'compositor_unittests',
-          'events_unittests',
-          'google_apis_unittests',
-          'nacl_integration',
-          'remoting_unittests',
-          'sandbox_linux_unittests',
-          'sync_integration_tests',
+      'linux_rel': [
           'telemetry_perf_unittests',
           'telemetry_unittests',
       ],
-      'mac': ['compile'],
-      'mac_chromium_dbg': ['defaulttests'],
+      'mac_chromium_compile_dbg': ['defaulttests'],
       'mac_chromium_rel': ['defaulttests'],
       'mac_nacl_sdk_build': ['compile'],
-      'mac_rel': standard_tests + [
-          'app_list_unittests',
-          'cc_unittests',
-          'chromedriver_unittests',
-          'components_unittests',
-          'google_apis_unittests',
-          'message_center_unittests',
-          'nacl_integration',
-          'remoting_unittests',
-          'sync_integration_tests',
+      'mac_rel': [
           'telemetry_perf_unittests',
           'telemetry_unittests',
       ],
       'win': ['compile'],
+      'win_chromium_compile_dbg': ['defaulttests'],
       'win_nacl_sdk_build': ['compile'],
       'win_rel': standard_tests + [
           'app_list_unittests',
@@ -1336,6 +1338,7 @@ def GetDefaultTryConfigs(bots=None):
           'components_unittests',
           'compositor_unittests',
           'events_unittests',
+          'gfx_unittests',
           'google_apis_unittests',
           'installer_util_unittests',
           'mini_installer_test',
@@ -1352,9 +1355,10 @@ def GetDefaultTryConfigs(bots=None):
   }
 
   swarm_enabled_builders = (
-      'linux_rel',
-      'mac_rel',
-      'win_rel',
+  # http://crbug.com/354263
+  #    'linux_rel',
+  #    'mac_rel',
+  #    'win_rel',
   )
 
   swarm_enabled_tests = (
@@ -1371,9 +1375,16 @@ def GetDefaultTryConfigs(bots=None):
                                  for x in builders_and_tests[bot]]
 
   if bots:
-    return [(bot, set(builders_and_tests[bot])) for bot in bots]
+    return {
+        'tryserver.chromium': dict((bot, set(builders_and_tests[bot]))
+                                   for bot in bots)
+    }
   else:
-    return [(bot, set(tests)) for bot, tests in builders_and_tests.iteritems()]
+    return {
+        'tryserver.chromium': dict(
+            (bot, set(tests))
+            for bot, tests in builders_and_tests.iteritems())
+    }
 
 
 def CheckChangeOnCommit(input_api, output_api):
@@ -1387,10 +1398,6 @@ def CheckChangeOnCommit(input_api, output_api):
       input_api,
       output_api,
       json_url='http://chromium-status.appspot.com/current?format=json'))
-  results.extend(input_api.canned_checks.CheckRietveldTryJobExecution(input_api,
-      output_api, 'http://codereview.chromium.org',
-      ('win_rel', 'linux_rel', 'mac_rel, win:compile'),
-      'tryserver@chromium.org'))
 
   results.extend(input_api.canned_checks.CheckChangeHasBugField(
       input_api, output_api))
@@ -1400,14 +1407,17 @@ def CheckChangeOnCommit(input_api, output_api):
   return results
 
 
-def GetPreferredTrySlaves(project, change):
+def GetPreferredTryMasters(project, change):
   files = change.LocalPaths()
 
   if not files or all(re.search(r'[\\/]OWNERS$', f) for f in files):
-    return []
+    return {}
 
   if all(re.search('\.(m|mm)$|(^|[/_])mac[/_.]', f) for f in files):
-    return GetDefaultTryConfigs(['mac', 'mac_rel'])
+    return GetDefaultTryConfigs([
+        'mac_chromium_compile_dbg',
+        'mac_chromium_rel',
+    ])
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
     return GetDefaultTryConfigs(['win', 'win_rel'])
   if all(re.search('(^|[/_])android[/_.]', f) for f in files):
@@ -1419,31 +1429,28 @@ def GetPreferredTrySlaves(project, change):
   if all(re.search('[/_]ios[/_.]', f) for f in files):
     return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
 
-  trybots = GetDefaultTryConfigs([
+  builders = [
       'android_clang_dbg',
       'android_dbg',
       'ios_dbg_simulator',
       'ios_rel_device',
-      'linux_gtk',
-      'linux_asan',
-      'linux_chromeos',
-      'linux_clang',
-      'linux_nacl_sdk_build',
-      'linux_rel',
-      'mac',
-      'mac_nacl_sdk_build',
-      'mac_rel',
-      'win',
-      'win_nacl_sdk_build',
+      'linux_chromium_chromeos_rel',
+      'linux_chromium_clang_dbg',
+      'linux_chromium_rel',
+      'mac_chromium_compile_dbg',
+      'mac_chromium_rel',
+      'win_chromium_compile_dbg',
       'win_rel',
       'win_x64_rel',
-  ])
+  ]
 
   # Match things like path/aura/file.cc and path/file_aura.cc.
   # Same for chromeos.
   if any(re.search('[/_](aura|chromeos)', f) for f in files):
-    trybots.extend(GetDefaultTryConfigs([
-        'linux_chromeos_asan', 'linux_chromeos_clang']))
+    builders.extend([
+        'linux_chromeos_asan',
+        'linux_chromium_chromeos_clang_dbg'
+    ])
 
   # If there are gyp changes to base, build, or chromeos, run a full cros build
   # in addition to the shorter linux_chromeos build. Changes to high level gyp
@@ -1451,13 +1458,13 @@ def GetPreferredTrySlaves(project, change):
   # differnt from the linux_chromeos build that most chrome developers test
   # with.
   if any(re.search('^(base|build|chromeos).*\.gypi?$', f) for f in files):
-    trybots.extend(GetDefaultTryConfigs(['cros_x86']))
+    builders.extend(['cros_x86'])
 
   # The AOSP bot doesn't build the chrome/ layer, so ignore any changes to it
   # unless they're .gyp(i) files as changes to those files can break the gyp
   # step on that bot.
   if (not all(re.search('^chrome', f) for f in files) or
       any(re.search('\.gypi?$', f) for f in files)):
-    trybots.extend(GetDefaultTryConfigs(['android_aosp']))
+    builders.extend(['android_aosp'])
 
-  return trybots
+  return GetDefaultTryConfigs(builders)

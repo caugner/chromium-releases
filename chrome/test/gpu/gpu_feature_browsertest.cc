@@ -215,7 +215,8 @@ class AcceleratedCompositingBlockedTest : public GpuFeatureTest {
 // Compositing is always on for Aura and Mac.
 #define MAYBE_AcceleratedCompositingBlocked DISABLED_AcceleratedCompositingBlocked
 #else
-#define MAYBE_AcceleratedCompositingBlocked AcceleratedCompositingBlocked
+// TODO(jam): http://crbug.com/350550
+#define MAYBE_AcceleratedCompositingBlocked DISABLED_AcceleratedCompositingBlocked
 #endif
 
 IN_PROC_BROWSER_TEST_F(AcceleratedCompositingBlockedTest,
@@ -296,19 +297,14 @@ IN_PROC_BROWSER_TEST_F(WebGLTest, WebGLDisabled) {
   RunEventTest(url, kWebGLCreationEvent, false);
 }
 
-#if defined(GOOGLE_CHROME_BUILD) && defined(OS_MACOSX)
 // This test is oblivious to the fact that multisample could be blacklisted on
-// some configurations.
-// http://crbug.com/314745
-#define MAYBE_MultisamplingAllowed DISABLED_MultisamplingAllowed
-#else
-#define MAYBE_MultisamplingAllowed MultisamplingAllowed
-#endif
-IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MAYBE_MultisamplingAllowed) {
+// some configurations. Previously disabled on GOOGLE_CHROME_BUILD and
+// on OS_MACOSX: http://crbug.com/314745
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, DISABLED_MultisamplingAllowed) {
   if (gpu::GPUTestBotConfig::GpuBlacklistedOnBot())
     return;
   // Multisampling is not supported if running on top of osmesa.
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationOSMesaGL)
+  if (gfx::GetGLImplementation() == gfx::kGLImplementationOSMesaGL)
     return;
   // Linux Intel uses mesa driver, where multisampling is not supported.
   // Multisampling is also not supported on virtualized mac os.

@@ -5,6 +5,7 @@
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/api/gcm/gcm_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/extensions/extension_gcm_app_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/services/gcm/fake_gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_client_factory.h"
@@ -16,6 +17,37 @@
 namespace {
 
 const char kEventsExtension[] = "gcm/events";
+
+gcm::GCMClient::SendErrorDetails CreateErrorDetails(
+    const std::string& message_id,
+    const gcm::GCMClient::Result result,
+    const std::string& total_messages) {
+  gcm::GCMClient::SendErrorDetails error;
+  error.message_id = message_id;
+  error.result = result;
+  error.additional_data["expectedMessageId"] = message_id;
+  switch (result) {
+    case gcm::GCMClient::ASYNC_OPERATION_PENDING:
+      error.additional_data["expectedErrorMessage"] =
+          "Asynchronous operation is pending.";
+      break;
+    case gcm::GCMClient::SERVER_ERROR:
+      error.additional_data["expectedErrorMessage"] = "Server error occurred.";
+      break;
+    case gcm::GCMClient::NETWORK_ERROR:
+      error.additional_data["expectedErrorMessage"] = "Network error occurred.";
+      break;
+    case gcm::GCMClient::TTL_EXCEEDED:
+      error.additional_data["expectedErrorMessage"] = "Time-to-live exceeded.";
+      break;
+    case gcm::GCMClient::UNKNOWN_ERROR:
+    default:  // Default case is the same as UNKNOWN_ERROR
+      error.additional_data["expectedErrorMessage"] = "Unknown error occurred.";
+      break;
+  }
+  error.additional_data["totalMessages"] = total_messages;
+  return error;
+}
 
 }  // namespace
 
@@ -103,9 +135,6 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, Register) {
   StartCollecting();
   ASSERT_TRUE(RunExtensionTest("gcm/functions/register"));
 
-  // SHA1 of the public key provided in manifest.json.
-  EXPECT_EQ("26469186F238EE08FA71C38311C6990F61D40DCA",
-            service()->last_registered_cert());
   const std::vector<std::string>& sender_ids =
       service()->last_registered_sender_ids();
   EXPECT_TRUE(std::find(sender_ids.begin(), sender_ids.end(), "Sender1") !=
@@ -114,11 +143,14 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, Register) {
                   sender_ids.end());
 }
 
-IN_PROC_BROWSER_TEST_F(GcmApiTest, RegisterWithoutKey) {
+IN_PROC_BROWSER_TEST_F(GcmApiTest, Unregister) {
   if (ShouldSkipTest())
     return;
 
-  ASSERT_TRUE(RunExtensionTest("gcm/functions/register_without_key"));
+  service()->AddExpectedUnregisterResponse(gcm::GCMClient::SUCCESS);
+  service()->AddExpectedUnregisterResponse(gcm::GCMClient::SERVER_ERROR);
+
+  ASSERT_TRUE(RunExtensionTest("gcm/functions/unregister"));
 }
 
 IN_PROC_BROWSER_TEST_F(GcmApiTest, SendValidation) {
@@ -155,8 +187,8 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessagesDeleted) {
       LoadTestExtension(kEventsExtension, "on_messages_deleted.html");
   ASSERT_TRUE(extension);
 
-  GcmJsEventRouter router(profile());
-  router.OnMessagesDeleted(extension->id());
+  extensions::ExtensionGCMAppHandler app_handler(profile());
+  app_handler.OnMessagesDeleted(extension->id());
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
@@ -168,12 +200,17 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnMessage) {
       LoadTestExtension(kEventsExtension, "on_message.html");
   ASSERT_TRUE(extension);
 
-  GcmJsEventRouter router(profile());
+  extensions::ExtensionGCMAppHandler app_handler(profile());
 
   gcm::GCMClient::IncomingMessage message;
   message.data["property1"] = "value1";
   message.data["property2"] = "value2";
-  router.OnMessage(extension->id(), message);
+  // First message is sent without a collapse key.
+  app_handler.OnMessage(extension->id(), message);
+
+  // Second message carries the same data and a collapse key.
+  message.collapse_key = "collapseKeyValue";
+  app_handler.OnMessage(extension->id(), message);
 
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
@@ -186,17 +223,33 @@ IN_PROC_BROWSER_TEST_F(GcmApiTest, OnSendError) {
       LoadTestExtension(kEventsExtension, "on_send_error.html");
   ASSERT_TRUE(extension);
 
-  GcmJsEventRouter router(profile());
-  router.OnSendError(extension->id(), "error_message_1",
-      gcm::GCMClient::ASYNC_OPERATION_PENDING);
-  router.OnSendError(extension->id(), "error_message_2",
-      gcm::GCMClient::SERVER_ERROR);
-  router.OnSendError(extension->id(), "error_message_3",
-      gcm::GCMClient::NETWORK_ERROR);
-  router.OnSendError(extension->id(), "error_message_4",
-      gcm::GCMClient::UNKNOWN_ERROR);
-  router.OnSendError(extension->id(), "error_message_5",
-      gcm::GCMClient::TTL_EXCEEDED);
+  std::string total_expected_messages = "5";
+  extensions::ExtensionGCMAppHandler app_handler(profile());
+  app_handler.OnSendError(
+      extension->id(),
+      CreateErrorDetails("error_message_1",
+                         gcm::GCMClient::ASYNC_OPERATION_PENDING,
+                         total_expected_messages));
+  app_handler.OnSendError(
+      extension->id(),
+      CreateErrorDetails("error_message_2",
+                         gcm::GCMClient::SERVER_ERROR,
+                         total_expected_messages));
+  app_handler.OnSendError(
+      extension->id(),
+      CreateErrorDetails("error_message_3",
+                         gcm::GCMClient::NETWORK_ERROR,
+                         total_expected_messages));
+  app_handler.OnSendError(
+      extension->id(),
+      CreateErrorDetails("error_message_4",
+                         gcm::GCMClient::UNKNOWN_ERROR,
+                         total_expected_messages));
+  app_handler.OnSendError(
+      extension->id(),
+      CreateErrorDetails("error_message_5",
+                         gcm::GCMClient::TTL_EXCEEDED,
+                         total_expected_messages));
 
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }

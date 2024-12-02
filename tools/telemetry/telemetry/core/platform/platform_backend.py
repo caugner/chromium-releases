@@ -94,6 +94,9 @@ class PlatformBackend(object):
   def FlushSystemCacheForDirectory(self, directory, ignoring=None):
     raise NotImplementedError()
 
+  def FlushDnsCache(self):
+    pass
+
   def LaunchApplication(
       self, application, parameters=None, elevate_privilege=False):
     raise NotImplementedError()
@@ -112,6 +115,10 @@ class PlatformBackend(object):
 
   def StartVideoCapture(self, min_bitrate_mbps):
     raise NotImplementedError()
+
+  @property
+  def is_video_capture_running(self):
+    return False
 
   def StopVideoCapture(self):
     raise NotImplementedError()

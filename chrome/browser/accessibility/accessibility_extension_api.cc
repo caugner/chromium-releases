@@ -9,7 +9,6 @@
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api_constants.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/infobars/confirm_infobar_delegate.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/extensions/api/experimental_accessibility.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "extensions/browser/event_router.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/common/error_utils.h"
@@ -73,28 +73,28 @@ void ExtensionAccessibilityEventRouter::ClearControlEventCallback() {
 }
 
 void ExtensionAccessibilityEventRouter::HandleWindowEvent(
-    ui::AccessibilityTypes::Event event,
+    ui::AXEvent event,
     const AccessibilityWindowInfo* info) {
   if (!control_event_callback_.is_null())
     control_event_callback_.Run(event, info);
 
-  if (event == ui::AccessibilityTypes::EVENT_ALERT)
+  if (event == ui::AX_EVENT_ALERT)
     OnWindowOpened(info);
 }
 
 void ExtensionAccessibilityEventRouter::HandleMenuEvent(
-    ui::AccessibilityTypes::Event event,
+    ui::AXEvent event,
     const AccessibilityMenuInfo* info) {
   switch (event) {
-    case ui::AccessibilityTypes::EVENT_MENUSTART:
-    case ui::AccessibilityTypes::EVENT_MENUPOPUPSTART:
+    case ui::AX_EVENT_MENU_START:
+    case ui::AX_EVENT_MENU_POPUP_START:
       OnMenuOpened(info);
       break;
-    case ui::AccessibilityTypes::EVENT_MENUEND:
-    case ui::AccessibilityTypes::EVENT_MENUPOPUPEND:
+    case ui::AX_EVENT_MENU_END:
+    case ui::AX_EVENT_MENU_POPUP_END:
       OnMenuClosed(info);
       break;
-    case ui::AccessibilityTypes::EVENT_FOCUS:
+    case ui::AX_EVENT_FOCUS:
       OnControlFocused(info);
       break;
     default:
@@ -103,21 +103,21 @@ void ExtensionAccessibilityEventRouter::HandleMenuEvent(
 }
 
 void ExtensionAccessibilityEventRouter::HandleControlEvent(
-    ui::AccessibilityTypes::Event event,
+    ui::AXEvent event,
     const AccessibilityControlInfo* info) {
   if (!control_event_callback_.is_null())
     control_event_callback_.Run(event, info);
 
   switch (event) {
-    case ui::AccessibilityTypes::EVENT_TEXT_CHANGED:
-    case ui::AccessibilityTypes::EVENT_SELECTION_CHANGED:
+    case ui::AX_EVENT_TEXT_CHANGED:
+    case ui::AX_EVENT_SELECTION_CHANGED:
       OnTextChanged(info);
       break;
-    case ui::AccessibilityTypes::EVENT_VALUE_CHANGED:
-    case ui::AccessibilityTypes::EVENT_ALERT:
+    case ui::AX_EVENT_VALUE_CHANGED:
+    case ui::AX_EVENT_ALERT:
       OnControlAction(info);
       break;
-    case ui::AccessibilityTypes::EVENT_FOCUS:
+    case ui::AX_EVENT_FOCUS:
       OnControlFocused(info);
       break;
     default:

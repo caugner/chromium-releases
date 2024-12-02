@@ -81,6 +81,9 @@ class PermissionMessage {
     kMediaGalleriesAllGalleriesDelete,
     kScreenlockPrivate,
     kOverrideBookmarksUI,
+    kAutomation,
+    kAccessibilityFeaturesModify,
+    kAccessibilityFeaturesRead,
     kEnumBoundary,
   };
   COMPILE_ASSERT(PermissionMessage::kNone > PermissionMessage::kUnknown,

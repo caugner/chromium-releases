@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
 import telemetry.core.timeline.bounds as timeline_bounds
+from telemetry.page.actions import wait_until
 
 class PageActionNotSupported(Exception):
   pass
@@ -23,43 +25,27 @@ class PageAction(object):
         setattr(self, k, v)
     self._timeline_marker_base_name = None
     self._timeline_marker_id = None
-
-  def CustomizeBrowserOptionsForPageSet(self, options):
-    """Override to add action-specific options to the BrowserOptions
-    object. These options will be set for the whole page set.
-
-    If the browser is not being restarted for every page in the page set then
-    all browser options required for the action must be set here. This, however,
-    requires that they do not conflict with options require by other actions
-    used up by the page set.
-    """
-    pass
-
-  def CustomizeBrowserOptionsForSinglePage(self, options):
-    """Override to add action-specific options to the BrowserOptions
-    object. These options will be set for just the page calling the action
-
-    This will only take effect if the browser is restarted for the page calling
-    the action, so should only be used in tests that restart the browser for
-    each page.
-    """
-    pass
+    if hasattr(self, 'wait_until'):
+      self.wait_until = wait_until.WaitUntil(self, self.wait_until)
+    else:
+      self.wait_until = None
 
   def WillRunAction(self, page, tab):
     """Override to do action-specific setup before
     Test.WillRunAction is called."""
     pass
 
-  def RunAction(self, page, tab, previous_action):
-    raise NotImplementedError()
+  def WillWaitAfterRun(self):
+    return self.wait_until is not None
 
-  def RunsPreviousAction(self):
-    """Some actions require some initialization to be performed before the
-    previous action. For example, wait for href change needs to record the old
-    href before the previous action changes it. Therefore, we allow actions to
-    run the previous action. An action that does this should override this to
-    return True in order to prevent the previous action from being run twice."""
-    return False
+  def RunActionAndMaybeWait(self, page, tab):
+    if self.wait_until:
+      self.wait_until.RunActionAndWait(page, tab)
+    else:
+      self.RunAction(page, tab)
+
+  def RunAction(self, page, tab):
+    raise NotImplementedError()
 
   def CleanUp(self, page, tab):
     pass
@@ -108,5 +94,8 @@ class PageAction(object):
       active_range.AddEvent(
           timeline.GetEventOfName(self._GetUniqueTimelineMarkerName(),
                                   True, True))
+    if self.wait_until:
+      active_range.AddBounds(
+          self.wait_until.GetActiveRangeOnTimeline(timeline))
 
     return active_range

@@ -14,7 +14,6 @@
 
 #include <vector>
 
-#include "ash/shell.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
@@ -31,19 +30,15 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/ime/input_method_manager.h"
 #include "chromeos/ime/xkeyboard.h"
-#include "ui/aura/root_window.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/views/corewm/window_util.h"
+#include "ui/wm/core/window_util.h"
 
 namespace {
 
 const int kBadDeviceId = -1;
-
-const char kNeo2LayoutId[] = "xkb:de:neo:ger";
-const char kCaMultixLayoutId[] = "xkb:ca:multix:fra";
 
 // A key code and a flag we should use when a key is remapped to |remap_to|.
 const struct ModifierRemapping {
@@ -121,15 +116,14 @@ bool HasDiamondKey() {
       chromeos::switches::kHasChromeOSDiamondKey);
 }
 
-bool IsMod3UsedByCurrentInputMethod() {
+bool IsISOLevel5ShiftUsedByCurrentInputMethod() {
   // Since both German Neo2 XKB layout and Caps Lock depend on Mod3Mask,
   // it's not possible to make both features work. For now, we don't remap
   // Mod3Mask when Neo2 is in use.
   // TODO(yusukes): Remove the restriction.
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
-  return manager->GetCurrentInputMethod().id() == kNeo2LayoutId ||
-      manager->GetCurrentInputMethod().id() == kCaMultixLayoutId;
+  return manager->IsISOLevel5ShiftUsedByCurrentInputMethod();
 }
 
 }  // namespace
@@ -141,11 +135,6 @@ EventRewriter::EventRewriter()
       xkeyboard_for_testing_(NULL),
       keyboard_driven_event_rewriter_(new KeyboardDrivenEventRewriter),
       pref_service_for_testing_(NULL) {
-  // The ash shell isn't instantiated for our unit tests.
-  if (ash::Shell::HasInstance()) {
-    ash::Shell::GetPrimaryRootWindow()->GetDispatcher()->
-        AddRootWindowObserver(this);
-  }
   base::MessageLoopForUI::current()->AddObserver(this);
   if (base::SysInfo::IsRunningOnChromeOS()) {
     XInputHierarchyChangedEventListener::GetInstance()->AddObserver(this);
@@ -155,10 +144,6 @@ EventRewriter::EventRewriter()
 
 EventRewriter::~EventRewriter() {
   base::MessageLoopForUI::current()->RemoveObserver(this);
-  if (ash::Shell::HasInstance()) {
-    ash::Shell::GetPrimaryRootWindow()->GetDispatcher()->
-        RemoveRootWindowObserver(this);
-  }
   if (base::SysInfo::IsRunningOnChromeOS()) {
     XInputHierarchyChangedEventListener::GetInstance()->RemoveObserver(this);
   }
@@ -196,22 +181,44 @@ void EventRewriter::RewriteForTesting(XEvent* event) {
   Rewrite(event);
 }
 
-void EventRewriter::OnKeyboardMappingChanged(const aura::RootWindow* root) {
-  RefreshKeycodes();
+void EventRewriter::DeviceKeyPressedOrReleased(int device_id) {
+  std::map<int, DeviceType>::const_iterator iter =
+      device_id_to_type_.find(device_id);
+  if (iter == device_id_to_type_.end()) {
+    // |device_id| is unknown. This means the device was connected before
+    // booting the OS. Query the name of the device and add it to the map.
+    DeviceAdded(device_id);
+  }
+
+  last_device_id_ = device_id;
 }
 
 base::EventStatus EventRewriter::WillProcessEvent(
     const base::NativeEvent& event) {
   XEvent* xevent = event;
-  if (xevent->type == KeyPress || xevent->type == KeyRelease)
+  if (xevent->type == KeyPress || xevent->type == KeyRelease) {
     Rewrite(xevent);
-  else if (xevent->type == GenericEvent)
-    RewriteLocatedEvent(xevent);
+  } else if (xevent->type == GenericEvent) {
+    XIDeviceEvent* xievent = static_cast<XIDeviceEvent*>(xevent->xcookie.data);
+    if (xievent->evtype == XI_KeyPress || xievent->evtype == XI_KeyRelease) {
+      if (xievent->deviceid == xievent->sourceid)
+        DeviceKeyPressedOrReleased(xievent->deviceid);
+    } else {
+      RewriteLocatedEvent(xevent);
+    }
+  } else if (xevent->type == MappingNotify) {
+    if (xevent->xmapping.request == MappingModifier ||
+        xevent->xmapping.request == MappingKeyboard) {
+      RefreshKeycodes();
+    }
+  }
   return base::EVENT_CONTINUE;
 }
 
 void EventRewriter::DidProcessEvent(const base::NativeEvent& event) {
 }
+
+void EventRewriter::DeviceHierarchyChanged() {}
 
 void EventRewriter::DeviceAdded(int device_id) {
   DCHECK_NE(XIAllDevices, device_id);
@@ -245,18 +252,6 @@ void EventRewriter::DeviceAdded(int device_id) {
 
 void EventRewriter::DeviceRemoved(int device_id) {
   device_id_to_type_.erase(device_id);
-}
-
-void EventRewriter::DeviceKeyPressedOrReleased(int device_id) {
-  std::map<int, DeviceType>::const_iterator iter =
-      device_id_to_type_.find(device_id);
-  if (iter == device_id_to_type_.end()) {
-    // |device_id| is unknown. This means the device was connected before
-    // booting the OS. Query the name of the device and add it to the map.
-    DeviceAdded(device_id);
-  }
-
-  last_device_id_ = device_id;
 }
 
 void EventRewriter::RefreshKeycodes() {
@@ -397,7 +392,7 @@ void EventRewriter::GetRemappedModifierMasks(
   const bool skip_mod2 = !HasDiamondKey();
   // If Mod3 is used by the current input method, don't allow the CapsLock
   // pref to remap it, or the keyboard behavior will be broken.
-  const bool skip_mod3 = IsMod3UsedByCurrentInputMethod();
+  const bool skip_mod3 = IsISOLevel5ShiftUsedByCurrentInputMethod();
 
   for (size_t i = 0; i < arraysize(kModifierFlagToPrefName); ++i) {
     if ((skip_mod2 && kModifierFlagToPrefName[i].native_modifier == Mod2Mask) ||
@@ -474,9 +469,9 @@ bool EventRewriter::RewriteModifiers(XEvent* event) {
         remapped_key = kModifierRemappingCtrl;
       break;
     // On Chrome OS, XF86XK_Launch7 (F16) with Mod3Mask is sent when Caps Lock
-    // is pressed (with one exception: when IsMod3UsedByCurrentInputMethod() is
-    // true, the key generates XK_ISO_Level3_Shift with Mod3Mask, not
-    // XF86XK_Launch7).
+    // is pressed (with one exception: when
+    // IsISOLevel5ShiftUsedByCurrentInputMethod() is true, the key generates
+    // XK_ISO_Level3_Shift with Mod3Mask, not XF86XK_Launch7).
     case XF86XK_Launch7:
       remapped_key =
           GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);

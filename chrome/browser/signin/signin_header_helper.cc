@@ -4,7 +4,7 @@
 
 #include "chrome/browser/signin/signin_header_helper.h"
 
-#include "chrome/browser/extensions/extension_renderer_state.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -24,7 +24,6 @@ namespace {
 
 const char kChromeConnectedHeader[] = "X-Chrome-Connected";
 const char kChromeManageAccountsHeader[] = "X-Chrome-Manage-Accounts";
-const char kGaiaAuthExtensionID[] = "mfffpogegjflfpflabcdkioaeobkgjik";
 
 // Show profile avatar bubble on UI thread. Must be called on the UI thread.
 void ShowAvatarBubbleUIThread(int child_id, int route_id) {
@@ -37,9 +36,10 @@ void ShowAvatarBubbleUIThread(int child_id, int route_id) {
 
 #if !defined(OS_ANDROID)
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-  if (browser)
-    browser->window()->ShowAvatarBubbleFromAvatarButton();
-  // TODO(guohui): need to handle the case when avatar button is not available.
+  if (browser) {
+    browser->window()->ShowAvatarBubbleFromAvatarButton(
+        BrowserWindow::AVATAR_BUBBLE_MODE_ACCOUNT_MANAGEMENT);
+  }
 #else  // defined(OS_ANDROID)
   AccountManagementScreenHelper::OpenAccountManagementScreen(
       Profile::FromBrowserContext(web_contents->GetBrowserContext()));
@@ -67,32 +67,29 @@ void AppendMirrorRequestHeaderIfPossible(
     int route_id) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
-   if (io_data->is_incognito() ||
-       io_data->google_services_username()->GetValue().empty()) {
-     return;
-   }
+  if (io_data->IsOffTheRecord() ||
+      io_data->google_services_username()->GetValue().empty()) {
+    return;
+  }
 
-  // Only set the header for Gaia (in the mirror world) and Drive. Gaia needs
-  // the header to redirect certain user actions to Chrome native UI. Drive
-  // needs the header to tell if the current user is connected. The drive path
-  // is a temporary workaround until the more generic chrome.principals API is
+  // Only set the header for Drive always, and other Google properties if
+  // new-profile-management is enabled.
+  // Vasquette, which is integrated with most Google properties, needs the
+  // header to redirect certain user actions to Chrome native UI. Drive needs
+  // the header to tell if the current user is connected. The drive path is a
+  // temporary workaround until the more generic chrome.principals API is
   // available.
   const GURL& url = redirect_url.is_empty() ? request->url() : redirect_url;
   GURL origin(url.GetOrigin());
-  bool is_gaia_origin = !switches::IsEnableWebBasedSignin() &&
+  bool is_google_url =
+      !switches::IsEnableWebBasedSignin() &&
       switches::IsNewProfileManagement() &&
-      gaia::IsGaiaSignonRealm(origin);
-  if (!is_gaia_origin && !IsDriveOrigin(origin))
+      google_util::IsGoogleDomainUrl(
+          url,
+          google_util::ALLOW_SUBDOMAIN,
+          google_util::DISALLOW_NON_STANDARD_PORTS);
+  if (!is_google_url && !IsDriveOrigin(origin))
     return;
-
-  ExtensionRendererState* renderer_state =
-      ExtensionRendererState::GetInstance();
-  ExtensionRendererState::WebViewInfo webview_info;
-  bool is_guest = renderer_state->GetWebViewInfo(
-      child_id, route_id, &webview_info);
-  if (is_guest && webview_info.extension_id == kGaiaAuthExtensionID){
-    return;
-  }
 
   std::string account_id(io_data->google_services_account_id()->GetValue());
   if (account_id.empty())
@@ -112,7 +109,7 @@ void ProcessMirrorResponseHeaderIfExists(
   if (gaia::IsGaiaSignonRealm(request->url().GetOrigin()) &&
       request->response_headers()->HasHeader(kChromeManageAccountsHeader)) {
     DCHECK(switches::IsNewProfileManagement() &&
-           !io_data->is_incognito());
+           !io_data->IsOffTheRecord());
     content::BrowserThread::PostTask(
         content::BrowserThread::UI, FROM_HERE,
         base::Bind(ShowAvatarBubbleUIThread, child_id, route_id));

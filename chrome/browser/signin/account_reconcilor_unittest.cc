@@ -8,13 +8,13 @@
 #include "chrome/browser/signin/account_reconcilor.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service_wrapper.h"
+#include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -27,7 +27,7 @@ const char kTestEmail[] = "user@gmail.com";
 
 class MockAccountReconcilor : public testing::StrictMock<AccountReconcilor> {
  public:
-  static BrowserContextKeyedService* Build(content::BrowserContext* profile);
+  static KeyedService* Build(content::BrowserContext* profile);
 
   explicit MockAccountReconcilor(Profile* profile);
   virtual ~MockAccountReconcilor() {}
@@ -45,14 +45,15 @@ class MockAccountReconcilor : public testing::StrictMock<AccountReconcilor> {
 };
 
 // static
-BrowserContextKeyedService* MockAccountReconcilor::Build(
-    content::BrowserContext* profile) {
-  return new MockAccountReconcilor(static_cast<Profile*>(profile));
+KeyedService* MockAccountReconcilor::Build(content::BrowserContext* profile) {
+  AccountReconcilor* reconcilor =
+      new MockAccountReconcilor(static_cast<Profile*>(profile));
+  reconcilor->Initialize(false /* start_reconcile_if_tokens_available */);
+  return reconcilor;
 }
 
 MockAccountReconcilor::MockAccountReconcilor(Profile* profile)
-    : testing::StrictMock<AccountReconcilor>(profile) {
-}
+    : testing::StrictMock<AccountReconcilor>(profile) {}
 
 }  // namespace
 
@@ -85,7 +86,7 @@ class AccountReconcilorTest : public testing::Test {
       const std::string& account_id,
       const std::string& refresh_token);
 
-private:
+ private:
   content::TestBrowserThreadBundle bundle_;
   scoped_ptr<TestingProfile> profile_;
   FakeSigninManagerForTesting* signin_manager_;
@@ -103,7 +104,7 @@ AccountReconcilorTest::AccountReconcilorTest()
 void AccountReconcilorTest::SetUp() {
   TestingProfile::Builder builder;
   builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
-                            FakeProfileOAuth2TokenServiceWrapper::Build);
+                            BuildFakeProfileOAuth2TokenService);
   builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
                             FakeSigninManagerBase::Build);
   builder.AddTestingFactory(AccountReconcilorFactory::GetInstance(),
@@ -327,6 +328,47 @@ TEST_F(AccountReconcilorTest, StartReconcileNoop) {
   ASSERT_FALSE(reconcilor->AreAllRefreshTokensChecked());
 
   token_service()->IssueAllTokensForAccount("user@gmail.com", "access_token",
+      base::Time::Now() + base::TimeDelta::FromHours(1));
+
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(reconcilor->AreAllRefreshTokensChecked());
+  ASSERT_FALSE(reconcilor->is_reconcile_started_);
+}
+
+// This is test is needed until chrome changes to use gaia obfuscated id.
+// The signin manager and token service use the gaia "email" property, which
+// preserves dots in usernames and preserves case. gaia::ParseListAccountsData()
+// however uses gaia "displayEmail" which does not preserve case, and then
+// passes the string through gaia::CanonicalizeEmail() which removes dots.  This
+// tests makes sure that an email like "Dot.S@hmail.com", as seen by the
+// token service, will be considered the same as "dots@gmail.com" as returned
+// by gaia::ParseListAccountsData().
+TEST_F(AccountReconcilorTest, StartReconcileNoopWithDots) {
+  signin_manager()->SetAuthenticatedUsername("Dot.S@gmail.com");
+  token_service()->UpdateCredentials("Dot.S@gmail.com", "refresh_token");
+
+  AccountReconcilor* reconcilor =
+      AccountReconcilorFactory::GetForProfile(profile());
+  ASSERT_TRUE(reconcilor);
+
+  SetFakeResponse(GaiaUrls::GetInstance()->list_accounts_url().spec(),
+      "[\"f\", [[\"b\", 0, \"n\", \"dot.s@gmail.com\", \"p\", 0, 0, 0, 0, 1]]]",
+      net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+  SetFakeResponse("https://www.googleapis.com/oauth2/v1/userinfo",
+      "{\"id\":\"foo\"}", net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+
+  reconcilor->StartReconcile();
+  ASSERT_FALSE(reconcilor->AreGaiaAccountsSet());
+  ASSERT_FALSE(reconcilor->AreAllRefreshTokensChecked());
+
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(reconcilor->AreGaiaAccountsSet());
+  ASSERT_EQ(1u, reconcilor->GetGaiaAccountsForTesting().size());
+  ASSERT_STREQ("dots@gmail.com",
+               reconcilor->GetGaiaAccountsForTesting()[0].first.c_str());
+  ASSERT_FALSE(reconcilor->AreAllRefreshTokensChecked());
+
+  token_service()->IssueAllTokensForAccount("Dot.S@gmail.com", "access_token",
       base::Time::Now() + base::TimeDelta::FromHours(1));
 
   base::RunLoop().RunUntilIdle();

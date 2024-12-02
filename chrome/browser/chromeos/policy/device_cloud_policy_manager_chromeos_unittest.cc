@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 
+#include <algorithm>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -24,6 +26,8 @@
 #include "chromeos/cryptohome/system_salt_getter.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_cryptohome_client.h"
+#include "chromeos/dbus/fake_dbus_thread_manager.h"
 #include "chromeos/system/mock_statistics_provider.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
@@ -57,11 +61,6 @@ void CopyLockResult(base::RunLoop* loop,
                     EnterpriseInstallAttributes::LockResult result) {
   *out = result;
   loop->Quit();
-}
-
-void CopyTokenService(chromeos::DeviceOAuth2TokenService** out_token_service,
-                      chromeos::DeviceOAuth2TokenService* in_token_service) {
-  *out_token_service = in_token_service;
 }
 
 class DeviceCloudPolicyManagerChromeOSTest
@@ -109,7 +108,7 @@ class DeviceCloudPolicyManagerChromeOSTest
     TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(
         request_context_getter_.get());
     TestingBrowserProcess::GetGlobal()->SetLocalState(&local_state_);
-    // SystemSaltGetter is used in DeviceOAuth2TokenServiceFactory.
+    // SystemSaltGetter is used in DeviceOAuth2TokenService.
     chromeos::SystemSaltGetter::Initialize();
     chromeos::DeviceOAuth2TokenServiceFactory::Initialize();
     url_fetcher_response_code_ = 200;
@@ -145,7 +144,7 @@ class DeviceCloudPolicyManagerChromeOSTest
         .Set(key::kDeviceMetricsReportingEnabled,
              POLICY_LEVEL_MANDATORY,
              POLICY_SCOPE_MACHINE,
-             base::Value::CreateBooleanValue(false),
+             new base::FundamentalValue(false),
              NULL);
     EXPECT_TRUE(manager_->policies().Equals(bundle));
   }
@@ -198,7 +197,7 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, EnrolledDevice) {
   manager_->Shutdown();
   VerifyPolicyPopulated();
 
-  EXPECT_EQ(manager_->GetRobotAccountId(),
+  EXPECT_EQ(store_->policy()->service_account_identity(),
             PolicyBuilder::kFakeServiceAccountIdentity);
 }
 
@@ -262,6 +261,70 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConsumerDevice) {
 
   manager_->Shutdown();
   EXPECT_TRUE(manager_->policies().Equals(bundle));
+}
+
+class DeviceCloudPolicyManagerChromeOSStateKeyTest : public testing::Test {
+ protected:
+  DeviceCloudPolicyManagerChromeOSStateKeyTest() {}
+
+  virtual void SetUp() OVERRIDE {
+    chromeos::system::StatisticsProvider::SetTestProvider(
+        &statistics_provider_);
+    EXPECT_CALL(statistics_provider_, GetMachineStatistic(_, _))
+        .WillRepeatedly(Invoke(this,
+                               &DeviceCloudPolicyManagerChromeOSStateKeyTest::
+                                   GetMachineStatistic));
+  }
+
+  virtual void TearDown() OVERRIDE {
+    chromeos::system::StatisticsProvider::SetTestProvider(NULL);
+  }
+
+  bool GetMachineStatistic(const std::string& name, std::string* result) {
+    *result = "fake-" + name;
+    return true;
+  }
+
+ private:
+  chromeos::system::MockStatisticsProvider statistics_provider_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeviceCloudPolicyManagerChromeOSStateKeyTest);
+};
+
+TEST_F(DeviceCloudPolicyManagerChromeOSStateKeyTest, GetDeviceStateKeys) {
+  base::Time current = base::Time::UnixEpoch() + base::TimeDelta::FromDays(100);
+
+  // The correct number of state keys gets returned.
+  std::vector<std::string> state_keys;
+  EXPECT_TRUE(DeviceCloudPolicyManagerChromeOS::GetDeviceStateKeys(
+      current, &state_keys));
+  EXPECT_EQ(DeviceCloudPolicyManagerChromeOS::kDeviceStateKeyFutureQuanta,
+            static_cast<int>(state_keys.size()));
+
+  // All state keys are different.
+  std::set<std::string> state_key_set(state_keys.begin(), state_keys.end());
+  EXPECT_EQ(DeviceCloudPolicyManagerChromeOS::kDeviceStateKeyFutureQuanta,
+            static_cast<int>(state_key_set.size()));
+
+  // Moving forward just a little yields the same keys.
+  std::vector<std::string> new_state_keys;
+  current += base::TimeDelta::FromDays(1);
+  EXPECT_TRUE(DeviceCloudPolicyManagerChromeOS::GetDeviceStateKeys(
+      current, &new_state_keys));
+  EXPECT_EQ(state_keys, new_state_keys);
+
+  // Jumping to a future quantum results in the state keys rolling forward.
+  int64 step =
+      GG_INT64_C(1)
+      << DeviceCloudPolicyManagerChromeOS::kDeviceStateKeyTimeQuantumPower;
+  current += 2 * base::TimeDelta::FromSeconds(step);
+
+  EXPECT_TRUE(DeviceCloudPolicyManagerChromeOS::GetDeviceStateKeys(
+      current, &new_state_keys));
+  ASSERT_EQ(DeviceCloudPolicyManagerChromeOS::kDeviceStateKeyFutureQuanta,
+            static_cast<int>(new_state_keys.size()));
+  EXPECT_TRUE(std::equal(state_keys.begin() + 2, state_keys.end(),
+                         new_state_keys.begin()));
 }
 
 class DeviceCloudPolicyManagerChromeOSEnrollmentTest
@@ -421,12 +484,10 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
       return;
 
     // Process robot refresh token store.
-    chromeos::DeviceOAuth2TokenService* token_service = NULL;
-    chromeos::DeviceOAuth2TokenServiceFactory::Get(
-        base::Bind(&CopyTokenService, &token_service));
-    base::RunLoop().RunUntilIdle();
-    ASSERT_TRUE(token_service);
-    EXPECT_EQ("refreshToken4Test", token_service->GetRefreshToken(""));
+    chromeos::DeviceOAuth2TokenService* token_service =
+        chromeos::DeviceOAuth2TokenServiceFactory::Get();
+    EXPECT_TRUE(token_service->RefreshTokenIsAvailable(
+        token_service->GetRobotAccountId()));
 
     // Process policy store.
     device_settings_test_helper_.set_store_result(store_result_);
@@ -518,13 +579,6 @@ TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest,
   ExpectFailedEnrollment(EnrollmentStatus::STATUS_ROBOT_REFRESH_FETCH_FAILED);
 }
 
-TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest, RobotRefreshSaveFailed) {
-  // Without a DeviceOAuth2TokenService, the refresh token can't be saved.
-  chromeos::DeviceOAuth2TokenServiceFactory::Shutdown();
-  RunTest();
-  ExpectFailedEnrollment(EnrollmentStatus::STATUS_ROBOT_REFRESH_STORE_FAILED);
-}
-
 TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest,
        RobotRefreshEncryptionFailed) {
   // The encryption lib is a noop for tests, but empty results from encryption
@@ -569,6 +623,27 @@ TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest, LoadError) {
   ExpectFailedEnrollment(EnrollmentStatus::STATUS_STORE_ERROR);
   EXPECT_EQ(CloudPolicyStore::STATUS_LOAD_ERROR,
             status_.store_status());
+}
+
+// A subclass that runs with a blank system salt.
+class DeviceCloudPolicyManagerChromeOSEnrollmentBlankSystemSaltTest
+    : public DeviceCloudPolicyManagerChromeOSEnrollmentTest {
+ protected:
+  DeviceCloudPolicyManagerChromeOSEnrollmentBlankSystemSaltTest() {
+    // Set up a FakeCryptohomeClient with a blank system salt.
+    scoped_ptr<chromeos::FakeCryptohomeClient> fake_cryptohome_client(
+        new chromeos::FakeCryptohomeClient());
+    fake_cryptohome_client->set_system_salt(std::vector<uint8>());
+    fake_dbus_thread_manager_->SetCryptohomeClient(
+        fake_cryptohome_client.PassAs<chromeos::CryptohomeClient>());
+  }
+};
+
+TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentBlankSystemSaltTest,
+       RobotRefreshSaveFailed) {
+  // Without the system salt, the robot token can't be stored.
+  RunTest();
+  ExpectFailedEnrollment(EnrollmentStatus::STATUS_ROBOT_REFRESH_STORE_FAILED);
 }
 
 }  // namespace

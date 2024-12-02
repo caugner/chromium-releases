@@ -8,8 +8,10 @@
 
 #include "base/logging.h"
 #include "ui/app_list/app_list_constants.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/app_list_view_delegate.h"
 #include "ui/app_list/pagination_model.h"
+#include "ui/app_list/views/app_list_folder_view.h"
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/apps_container_view.h"
 #include "ui/app_list/views/apps_grid_view.h"
@@ -57,10 +59,8 @@ ContentsView::ContentsView(AppListMainView* app_list_main_view,
       kPageTransitionDurationInMs,
       kOverscrollPageTransitionDurationMs);
 
-  content::WebContents* start_page_contents =
-      view_delegate ? view_delegate->GetStartPageContents() : NULL;
-  apps_container_view_ = new AppsContainerView(
-      app_list_main_view, pagination_model, model, start_page_contents);
+  apps_container_view_ =
+      new AppsContainerView(app_list_main_view, pagination_model, model);
   AddChildView(apps_container_view_);
   view_model_->Add(apps_container_view_, kIndexAppsContainer);
 
@@ -78,6 +78,12 @@ ContentsView::~ContentsView() {
 void ContentsView::CancelDrag() {
   if (apps_container_view_->apps_grid_view()->has_dragged_view())
     apps_container_view_->apps_grid_view()->EndDrag(true);
+  if (apps_container_view_->app_list_folder_view()
+          ->items_grid_view()
+          ->has_dragged_view()) {
+    apps_container_view_->app_list_folder_view()->items_grid_view()->EndDrag(
+        true);
+  }
 }
 
 void ContentsView::SetDragAndDropHostOfCurrentAppList(
@@ -108,6 +114,31 @@ void ContentsView::CalculateIdealBounds() {
   gfx::Rect rect(GetContentsBounds());
   if (rect.IsEmpty())
     return;
+
+  if (app_list::switches::IsExperimentalAppListEnabled()) {
+    int incoming_view_index = 0;
+    switch (show_state_) {
+      case SHOW_APPS:
+        incoming_view_index = kIndexAppsContainer;
+        break;
+      case SHOW_SEARCH_RESULTS:
+        incoming_view_index = kIndexSearchResults;
+        break;
+      default:
+        NOTREACHED();
+    }
+
+    gfx::Rect incoming_target(rect);
+    gfx::Rect outgoing_target(rect);
+    outgoing_target.set_y(-outgoing_target.height());
+
+    for (int i = 0; i < view_model_->view_size(); ++i) {
+      view_model_->set_ideal_bounds(i,
+                                    i == incoming_view_index ? incoming_target
+                                                             : outgoing_target);
+    }
+    return;
+  }
 
   gfx::Rect container_frame(rect);
   gfx::Rect results_frame(rect);

@@ -12,11 +12,11 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_internals_util.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/common/chrome_version_info.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "components/signin/core/browser/signin_internals_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 
 using base::Time;
@@ -312,7 +312,7 @@ base::DictionaryValue* AboutSigninInternals::TokenInfo::ToValue() const {
     } else {
       token_info->SetString(
           "status",
-          base::StringPrintf("Failure: %s", error.error_message().c_str()));
+          base::StringPrintf("Failure: %s", error.ToString().c_str()));
     }
   } else {
     token_info->SetString("status", "Waiting for response");

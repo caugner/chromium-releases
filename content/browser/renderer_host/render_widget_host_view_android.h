@@ -120,6 +120,7 @@ class RenderWidgetHostViewAndroid
                                 const gfx::Range& range) OVERRIDE;
   virtual void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) OVERRIDE;
+  virtual void SelectionRootBoundsChanged(const gfx::Rect& bounds) OVERRIDE;
   virtual void ScrollOffsetChanged() OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
@@ -196,12 +197,15 @@ class RenderWidgetHostViewAndroid
   virtual void OnCompositingDidCommit() OVERRIDE;
   virtual void OnAttachCompositor() OVERRIDE {}
   virtual void OnDetachCompositor() OVERRIDE;
+  virtual void OnWillDestroyWindow() OVERRIDE;
 
   // ImageTransportFactoryAndroidObserver implementation.
   virtual void OnLostResources() OVERRIDE;
 
   // DelegatedFrameEvictor implementation
   virtual void EvictDelegatedFrame() OVERRIDE;
+
+  virtual SkBitmap::Config PreferredReadbackFormat() OVERRIDE;
 
   // Non-virtual methods
   void SetContentViewCore(ContentViewCoreImpl* content_view_core);
@@ -219,25 +223,19 @@ class RenderWidgetHostViewAndroid
   void OnSetNeedsBeginFrame(bool enabled);
   void OnSmartClipDataExtracted(const base::string16& result);
 
-  int GetNativeImeAdapter();
+  long GetNativeImeAdapter();
 
   void WasResized();
 
   void GetScaledContentBitmap(
       float scale,
-      gfx::Size* out_size,
+      SkBitmap::Config bitmap_config,
       gfx::Rect src_subrect,
       const base::Callback<void(bool, const SkBitmap&)>& result_callback);
 
   bool HasValidFrame() const;
 
-  // Select all text between the given coordinates.
-  void SelectRange(const gfx::Point& start, const gfx::Point& end);
-
   void MoveCaret(const gfx::Point& point);
-
-  void RequestContentClipping(const gfx::Rect& clipping,
-                              const gfx::Size& content_size);
 
   // Returns true when animation ticks are still needed. This avoids a separate
   // round-trip for requesting follow-up animation.
@@ -294,6 +292,8 @@ class RenderWidgetHostViewAndroid
       const gfx::Size& dst_size_in_pixel,
       const base::Callback<void(bool, const SkBitmap&)>& callback,
       const SkBitmap::Config config);
+
+  bool IsReadbackConfigSupported(SkBitmap::Config bitmap_config);
 
   // If we have locks on a frame during a ContentViewCore swap or a context
   // lost, the frame is no longer valid and we can safely release all the locks.
@@ -372,9 +372,9 @@ class RenderWidgetHostViewAndroid
   scoped_ptr<DelegatedFrameEvictor> frame_evictor_;
 
   bool using_delegated_renderer_;
-  bool root_window_destroyed_;
 
   size_t locks_on_frame_count_;
+  bool observing_root_window_;
 
   struct LastFrameInfo {
     LastFrameInfo(uint32 output_id,

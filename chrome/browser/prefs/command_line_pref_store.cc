@@ -57,16 +57,12 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
       { switches::kDisableTLSChannelID, prefs::kEnableOriginBoundCerts, false },
       { switches::kDisableSSLFalseStart, prefs::kDisableSSLRecordSplitting,
           true },
-      { switches::kEnableUnrestrictedSSL3Fallback,
-          prefs::kEnableUnrestrictedSSL3Fallback, true },
-      { switches::kEnableMemoryInfo, prefs::kEnableMemoryInfo, true },
 #if defined(GOOGLE_CHROME_BUILD)
       { switches::kDisablePrintPreview, prefs::kPrintPreviewDisabled, true },
 #else
       { switches::kEnablePrintPreview, prefs::kPrintPreviewDisabled, false },
 #endif
 #if defined(OS_CHROMEOS)
-      { chromeos::switches::kDisableDrive, prefs::kDisableDrive, true },
       { chromeos::switches::kEnableTouchpadThreeFingerClick,
           prefs::kEnableTouchpadThreeFingerClick, true },
 #endif
@@ -78,9 +74,6 @@ const CommandLinePrefStore::IntegerSwitchToPreferenceMapEntry
     CommandLinePrefStore::integer_switch_map_[] = {
       { switches::kDiskCacheSize, prefs::kDiskCacheSize },
       { switches::kMediaCacheSize, prefs::kMediaCacheSize },
-#if defined(OS_CHROMEOS)
-      { chromeos::switches::kDeviceRegistered, prefs::kDeviceRegistered },
-#endif
     };
 
 CommandLinePrefStore::CommandLinePrefStore(const CommandLine* command_line)

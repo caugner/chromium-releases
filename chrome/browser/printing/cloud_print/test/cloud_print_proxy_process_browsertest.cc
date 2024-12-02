@@ -27,6 +27,7 @@
 #include "chrome/common/service_process_util.h"
 #include "chrome/service/service_ipc_server.h"
 #include "chrome/service/service_process.h"
+#include "chrome/test/base/chrome_unit_test_suite.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_io_thread_state.h"
@@ -34,8 +35,9 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/common/content_paths.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_multiprocess_test.h"
@@ -211,6 +213,7 @@ int CloudPrintMockService_Main(SetExpectationsCallback set_expectations) {
   base::MessageLoopForUI main_message_loop;
   main_message_loop.set_thread_name("Main Thread");
   CommandLine* command_line = CommandLine::ForCurrentProcess();
+  content::RegisterPathProvider();
 
 #if defined(OS_MACOSX)
   if (!command_line->HasSwitch(kTestExecutablePath))
@@ -317,8 +320,7 @@ class CloudPrintProxyPolicyStartupTest : public base::MultiProcessTest,
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
   // MultiProcessTest implementation.
-  virtual CommandLine MakeCmdLine(const std::string& procname,
-                                  bool debug_on_start) OVERRIDE;
+  virtual CommandLine MakeCmdLine(const std::string& procname) OVERRIDE;
 
   bool LaunchBrowser(const CommandLine& command_line, Profile* profile) {
     int return_code = 0;
@@ -372,6 +374,10 @@ class CloudPrintProxyPolicyStartupTest : public base::MultiProcessTest,
 
 CloudPrintProxyPolicyStartupTest::CloudPrintProxyPolicyStartupTest()
     : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD) {
+  // Although is really a unit test which runs in the browser_tests binary, it
+  // doesn't get the unit setup which normally happens in the unit test binary.
+  ChromeUnitTestSuite::InitializeProviders();
+  ChromeUnitTestSuite::InitializeResourceBundle();
 }
 
 CloudPrintProxyPolicyStartupTest::~CloudPrintProxyPolicyStartupTest() {
@@ -432,9 +438,11 @@ base::ProcessHandle CloudPrintProxyPolicyStartupTest::Launch(
   ipc_file_list.push_back(std::make_pair(
       startup_channel_->TakeClientFileDescriptor(),
       kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
-  base::ProcessHandle handle = SpawnChild(name, ipc_file_list, false);
+  base::LaunchOptions options;
+  options.fds_to_remap = &ipc_file_list;
+  base::ProcessHandle handle = SpawnChildWithOptions(name, options);
 #else
-  base::ProcessHandle handle = SpawnChild(name, false);
+  base::ProcessHandle handle = SpawnChild(name);
 #endif
   EXPECT_TRUE(handle);
   return handle;
@@ -473,9 +481,8 @@ void CloudPrintProxyPolicyStartupTest::OnChannelConnected(int32 peer_pid) {
 }
 
 CommandLine CloudPrintProxyPolicyStartupTest::MakeCmdLine(
-    const std::string& procname,
-    bool debug_on_start) {
-  CommandLine cl = MultiProcessTest::MakeCmdLine(procname, debug_on_start);
+    const std::string& procname) {
+  CommandLine cl = MultiProcessTest::MakeCmdLine(procname);
   cl.AppendSwitchASCII(switches::kProcessChannelID, startup_channel_id_);
 #if defined(OS_MACOSX)
   cl.AppendSwitchASCII(kTestExecutablePath, executable_path_.value());
@@ -501,7 +508,7 @@ TEST_F(CloudPrintProxyPolicyStartupTest, StartAndShutdown) {
   content::RunAllPendingInMessageLoop();
 }
 
-BrowserContextKeyedService* CloudPrintProxyServiceFactoryForPolicyTest(
+KeyedService* CloudPrintProxyServiceFactoryForPolicyTest(
     content::BrowserContext* profile) {
   CloudPrintProxyService* service =
       new CloudPrintProxyService(static_cast<Profile*>(profile));

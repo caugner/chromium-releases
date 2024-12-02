@@ -17,6 +17,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
+#include "cc/base/switches.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
 #include "cc/output/compositor_frame.h"
@@ -34,7 +35,6 @@
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/browser/android/compositor_client.h"
-#include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -267,6 +267,10 @@ void CompositorImpl::SetVisible(bool visible) {
     settings.use_memory_management = false;
     settings.highp_threshold_min = 2048;
 
+    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    settings.initial_debug_state.SetRecordRenderingStats(
+        command_line->HasSwitch(cc::switches::kEnableGpuBenchmarking));
+
     host_ = cc::LayerTreeHost::CreateSingleThreaded(this, this, NULL, settings);
     host_->SetRootLayer(root_layer_);
 
@@ -393,13 +397,21 @@ CreateGpuProcessViewContext(
   limits.max_transfer_buffer_size = std::min(
       3 * full_screen_texture_size_in_bytes, kDefaultMaxTransferBufferSize);
   limits.mapped_memory_reclaim_limit = 2 * 1024 * 1024;
+#if !defined(OS_CHROMEOS)
+  bool bind_generates_resource = false;
+#endif
+  bool lose_context_when_out_of_memory = true;
   return make_scoped_ptr(
       new WebGraphicsContext3DCommandBufferImpl(surface_id,
                                                 url,
                                                 gpu_channel_host.get(),
                                                 attributes,
-                                                false,
-                                                limits));
+#if !defined(OS_CHROMEOS)
+                                                bind_generates_resource,
+#endif
+                                                lose_context_when_out_of_memory,
+                                                limits,
+                                                NULL));
 }
 
 scoped_ptr<cc::OutputSurface> CompositorImpl::CreateOutputSurface(

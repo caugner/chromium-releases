@@ -27,6 +27,9 @@ import org.chromium.content.browser.test.util.TestTouchUtils;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.content_shell_apk.ContentShellTestBase;
 
+/**
+ * Tests the insertion handle that allows users to paste text.
+ */
 public class InsertionHandleTest extends ContentShellTestBase {
     private static final String META_DISABLE_ZOOM =
         "<meta name=\"viewport\" content=\"" +
@@ -71,7 +74,7 @@ public class InsertionHandleTest extends ContentShellTestBase {
 
         // The TestInputMethodManagerWrapper intercepts showSoftInput so that a keyboard is never
         // brought up.
-        getImeAdapter().setInputMethodManagerWrapper(
+        getContentViewCore().getImeAdapterForTest().setInputMethodManagerWrapper(
                 new TestInputMethodManagerWrapper(getContentViewCore()));
     }
 
@@ -82,7 +85,7 @@ public class InsertionHandleTest extends ContentShellTestBase {
         clickNodeToShowInsertionHandle(TEXTAREA_ID);
 
         // Unselecting should cause the handle to disappear.
-        getImeAdapter().unselect();
+        unselectOnMainSync();
         assertTrue(waitForHandleShowingEquals(false));
     }
 
@@ -204,6 +207,35 @@ public class InsertionHandleTest extends ContentShellTestBase {
         dragToX = getContentView().getWidth();
         dragHandleTo(dragToX, dragToY);
         assertTrue(handle.getPositionX() < dragToX - 100);
+    }
+
+    /**
+     * Tests insertion handle visibility relative to the clipping rectangle.
+     * This is currently not implemented using dragHandleTo, because of issues with
+     * http://crbug.com/169648.
+     */
+    @MediumTest
+    @Feature({"TextSelection", "TextInput", "Main"})
+    public void testInsertionHandleVisiblity() throws Throwable {
+        launchWithUrl(TEXTAREA_DATA_URL);
+        clickNodeToShowInsertionHandle(TEXTAREA_ID);
+
+        InsertionHandleController ihc = getContentViewCore().getInsertionHandleControllerForTest();
+        HandleView handle = ihc.getHandleViewForTest();
+
+        assertTrue(handle.isPositionVisible());
+
+        ihc.setVisibleClippingRectangle(
+                handle.getAdjustedPositionX() + 1, handle.getAdjustedPositionY() + 1,
+                handle.getAdjustedPositionX() + 100, handle.getAdjustedPositionY() + 100);
+
+        assertFalse(handle.isPositionVisible());
+
+        ihc.setVisibleClippingRectangle(
+                handle.getAdjustedPositionX() - 1, handle.getAdjustedPositionY() - 1,
+                handle.getAdjustedPositionX() + 1, handle.getAdjustedPositionY() + 1);
+
+        assertTrue(handle.isPositionVisible());
     }
 
     @Override
@@ -362,6 +394,15 @@ public class InsertionHandleTest extends ContentShellTestBase {
         });
     }
 
+    private void unselectOnMainSync() {
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                getContentViewCore().getImeAdapterForTest().unselect();
+            }
+        });
+    }
+
     private int getSelectionStart() {
         return Selection.getSelectionStart(getEditable());
     }
@@ -382,9 +423,5 @@ public class InsertionHandleTest extends ContentShellTestBase {
         ClipboardManager clipMgr =
                 (ClipboardManager) getActivity().getSystemService(Context.CLIPBOARD_SERVICE);
         clipMgr.setPrimaryClip(ClipData.newPlainText(null, text));
-    }
-
-    private ImeAdapter getImeAdapter() {
-        return getContentViewCore().getImeAdapterForTest();
     }
 }

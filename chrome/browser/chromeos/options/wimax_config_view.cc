@@ -104,7 +104,7 @@ void WimaxConfigView::UpdateErrorLabel() {
         GetNetworkState(service_path_);
     if (wimax && wimax->connection_state() == shill::kStateFailure)
       error_msg = ash::network_connect::ErrorString(
-          wimax->error(), wimax->path());
+          wimax->last_error(), wimax->path());
   }
   if (!error_msg.empty()) {
     error_label_->SetText(error_msg);
@@ -204,11 +204,11 @@ void WimaxConfigView::Init() {
       GetNetworkState(service_path_);
   DCHECK(wimax && wimax->type() == shill::kTypeWimax);
 
-  WifiConfigView::ParseWiFiEAPUIProperty(
+  WifiConfigView::ParseEAPUIProperty(
       &save_credentials_ui_data_, wimax, ::onc::eap::kSaveCredentials);
-  WifiConfigView::ParseWiFiEAPUIProperty(
+  WifiConfigView::ParseEAPUIProperty(
       &identity_ui_data_, wimax, ::onc::eap::kIdentity);
-  WifiConfigView::ParseWiFiUIProperty(
+  WifiConfigView::ParseUIProperty(
       &passphrase_ui_data_, wimax, ::onc::wifi::kPassphrase);
 
   views::GridLayout* layout = views::GridLayout::CreatePanel(this);

@@ -46,30 +46,25 @@ class PageMeasurementResults(page_test_results.PageTestResults):
     assert self._current_page
     return self._page_specific_values_for_current_page
 
-  def GetAllPageSpecificValuesForSuccessfulPages(self):
-    pages_that_had_errors_or_failures = self.pages_that_had_errors_or_failures
-    return [
-      value for value in self._all_page_specific_values
-      if value.page not in pages_that_had_errors_or_failures]
-
   def WillMeasurePage(self, page):
     assert not self._current_page
     self._current_page = page
     self._page_specific_values_for_current_page = []
 
   def Add(self, trace_name, units, value, chart_name=None, data_type='default'):
+    # TODO(isherman): Remove this as well.
     value = value_backcompat.ConvertOldCallingConventionToValue(
       self._current_page,
       trace_name, units, value, chart_name, data_type)
+    self.AddValue(value)
+
+  def AddValue(self, value):
     self._ValidateValue(value)
     self._page_specific_values_for_current_page.append(value)
     self._all_page_specific_values.append(value)
 
-  def AddSummary(self, trace_name, units, value, chart_name=None,
-                 data_type='default'):
-    value = value_backcompat.ConvertOldCallingConventionToValue(
-      None,
-      trace_name, units, value, chart_name, data_type)
+  def AddSummaryValue(self, value):
+    assert value.page is None
     self._ValidateValue(value)
     self._all_summary_values.append(value)
 

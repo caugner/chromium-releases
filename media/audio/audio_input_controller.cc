@@ -18,6 +18,8 @@ const int kMaxInputChannels = 2;
 // to resolve http://crbug.com/79936 for Windows platforms.  This then caused
 // breakage (very hard to repro bugs!) on other platforms: See
 // http://crbug.com/226327 and http://crbug.com/230972.
+// See also that the timer has been disabled on Mac now due to
+// crbug.com/357501.
 const int kTimerResetIntervalSeconds = 1;
 // We have received reports that the timer can be too trigger happy on some
 // Mac devices and the initial timer interval has therefore been increased
@@ -37,7 +39,7 @@ AudioInputController::AudioInputController(EventHandler* handler,
       handler_(handler),
       stream_(NULL),
       data_is_active_(false),
-      state_(kEmpty),
+      state_(CLOSED),
       sync_writer_(sync_writer),
       max_volume_(0.0),
       user_input_monitor_(user_input_monitor),
@@ -46,7 +48,7 @@ AudioInputController::AudioInputController(EventHandler* handler,
 }
 
 AudioInputController::~AudioInputController() {
-  DCHECK(kClosed == state_ || kCreated == state_ || kEmpty == state_);
+  DCHECK_EQ(state_, CLOSED);
 }
 
 // static
@@ -199,6 +201,17 @@ void AudioInputController::DoCreateForStream(
   }
 
   DCHECK(!no_data_timer_.get());
+
+  // This is a fix for crbug.com/357501.  The timer can trigger when closing
+  // the lid on Macs, which causes more problems than the timer fixes.
+  // Also, in crbug.com/357569, the goal is to remove usage of this timer
+  // since it was added to solve a crash on Windows that no longer can be
+  // reproduced.
+  // TODO(henrika): remove usage of timer when it has been verified on Canary
+  // that we are safe doing so. Goal is to get rid of |no_data_timer_| and
+  // everything that is tied to it.
+  enable_nodata_timer = false;
+
   if (enable_nodata_timer) {
     // Create the data timer which will call DoCheckForNoData(). The timer
     // is started in DoRecord() and restarted in each DoCheckForNoData()
@@ -211,7 +224,7 @@ void AudioInputController::DoCreateForStream(
     DVLOG(1) << "Disabled: timer check for no data.";
   }
 
-  state_ = kCreated;
+  state_ = CREATED;
   handler_->OnCreated(this);
 
   if (user_input_monitor_) {
@@ -224,12 +237,12 @@ void AudioInputController::DoRecord() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   SCOPED_UMA_HISTOGRAM_TIMER("Media.AudioInputController.RecordTime");
 
-  if (state_ != kCreated)
+  if (state_ != CREATED)
     return;
 
   {
     base::AutoLock auto_lock(lock_);
-    state_ = kRecording;
+    state_ = RECORDING;
   }
 
   if (no_data_timer_) {
@@ -246,22 +259,22 @@ void AudioInputController::DoClose() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   SCOPED_UMA_HISTOGRAM_TIMER("Media.AudioInputController.CloseTime");
 
+  if (state_ == CLOSED)
+    return;
+
   // Delete the timer on the same thread that created it.
   no_data_timer_.reset();
 
-  if (state_ != kClosed) {
-    DoStopCloseAndClearStream(NULL);
-    SetDataIsActive(false);
+  DoStopCloseAndClearStream(NULL);
+  SetDataIsActive(false);
 
-    if (LowLatencyMode()) {
-      sync_writer_->Close();
-    }
+  if (LowLatencyMode())
+    sync_writer_->Close();
 
-    state_ = kClosed;
+  if (user_input_monitor_)
+    user_input_monitor_->DisableKeyPressMonitoring();
 
-    if (user_input_monitor_)
-      user_input_monitor_->DisableKeyPressMonitoring();
-  }
+  state_ = CLOSED;
 }
 
 void AudioInputController::DoReportError() {
@@ -274,7 +287,7 @@ void AudioInputController::DoSetVolume(double volume) {
   DCHECK_GE(volume, 0);
   DCHECK_LE(volume, 1.0);
 
-  if (state_ != kCreated && state_ != kRecording)
+  if (state_ != CREATED && state_ != RECORDING)
     return;
 
   // Only ask for the maximum volume at first call and use cached value
@@ -294,10 +307,10 @@ void AudioInputController::DoSetVolume(double volume) {
 
 void AudioInputController::DoSetAutomaticGainControl(bool enabled) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK_NE(state_, kRecording);
+  DCHECK_NE(state_, RECORDING);
 
   // Ensure that the AGC state only can be modified before streaming starts.
-  if (state_ != kCreated || state_ == kRecording)
+  if (state_ != CREATED)
     return;
 
   stream_->SetAutomaticGainControl(enabled);
@@ -334,7 +347,7 @@ void AudioInputController::OnData(AudioInputStream* stream,
                                   double volume) {
   {
     base::AutoLock auto_lock(lock_);
-    if (state_ != kRecording)
+    if (state_ != RECORDING)
       return;
   }
 

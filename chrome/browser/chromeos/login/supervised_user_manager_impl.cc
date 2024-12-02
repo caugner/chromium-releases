@@ -91,8 +91,13 @@ namespace chromeos {
 const char kSchemaVersion[] = "SchemaVersion";
 const char kPasswordRevision[] = "PasswordRevision";
 const char kSalt[] = "PasswordSalt";
+const char kPasswordSignature[] = "PasswordSignature";
 const char kEncryptedPassword[] = "EncryptedPassword";
 const char kRequirePasswordUpdate[] = "RequirePasswordUpdate";
+const char kHasIncompleteKey[] = "HasIncompleteKey";
+const char kPasswordEncryptionKey[] = "password.hmac.encryption";
+const char kPasswordSignatureKey[] = "password.hmac.signature";
+
 const char kPasswordUpdateFile[] = "password.update";
 const int kMinPasswordRevision = 1;
 
@@ -334,7 +339,7 @@ void SupervisedUserManagerImpl::StartCreationTransaction(
       const base::string16& display_name) {
   g_browser_process->local_state()->
       SetString(kLocallyManagedUserCreationTransactionDisplayName,
-           UTF16ToASCII(display_name));
+                base::UTF16ToASCII(display_name));
   g_browser_process->local_state()->CommitPendingWrite();
 }
 

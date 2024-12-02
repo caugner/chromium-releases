@@ -6,9 +6,8 @@
 
 namespace switches {
 
-// Disable using a public suffix based domain matching for autofill of
-// passwords.
-const char kDisablePasswordAutofillPublicSuffixDomainMatching[] =
-    "disable-password-autofill-public-suffix-domain-matching";
+// Enables the chrome://memory-internals/ page.
+const char kEnablePasswordManagerInternalsUI[] =
+    "enable-password-manager-internals-ui";
 
 }  // namespace switches

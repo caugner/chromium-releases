@@ -29,6 +29,7 @@
       'layers/delegated_renderer_layer_impl_unittest.cc',
       'layers/heads_up_display_unittest.cc',
       'layers/heads_up_display_layer_impl_unittest.cc',
+      'layers/io_surface_layer_impl_unittest.cc',
       'layers/layer_impl_unittest.cc',
       'layers/layer_iterator_unittest.cc',
       'layers/layer_position_constraint_unittest.cc',
@@ -40,17 +41,23 @@
       'layers/picture_layer_impl_unittest.cc',
       'layers/picture_layer_unittest.cc',
       'layers/render_surface_unittest.cc',
+      'layers/render_surface_impl_unittest.cc',
       'layers/scrollbar_layer_unittest.cc',
       'layers/solid_color_layer_impl_unittest.cc',
+      'layers/solid_color_scrollbar_layer_impl_unittest.cc',
+      'layers/surface_layer_impl_unittest.cc',
       'layers/texture_layer_unittest.cc',
+      'layers/texture_layer_impl_unittest.cc',
       'layers/tiled_layer_impl_unittest.cc',
       'layers/tiled_layer_unittest.cc',
       'layers/ui_resource_layer_impl_unittest.cc',
       'layers/ui_resource_layer_unittest.cc',
+      'layers/video_layer_impl_unittest.cc',
       'output/delegating_renderer_unittest.cc',
       'output/filter_operations_unittest.cc',
       'output/gl_renderer_unittest.cc',
       'output/output_surface_unittest.cc',
+      'output/overlay_unittest.cc',
       'output/renderer_pixeltest.cc',
       'output/shader_unittest.cc',
       'output/software_renderer_unittest.cc',
@@ -96,7 +103,6 @@
       'trees/layer_tree_host_unittest_delegated.cc',
       'trees/layer_tree_host_unittest_occlusion.cc',
       'trees/layer_tree_host_unittest_picture.cc',
-      'trees/layer_tree_host_unittest_pinch_zoom.cc',
       'trees/layer_tree_host_unittest_scroll.cc',
       'trees/layer_tree_host_unittest_video.cc',
       'trees/occlusion_tracker_unittest.cc',
@@ -163,6 +169,8 @@
       'test/fake_video_frame_provider.h',
       'test/geometry_test_utils.cc',
       'test/geometry_test_utils.h',
+      'test/gpu_rasterization_settings.h',
+      'test/hybrid_rasterization_settings.h',
       'test/test_in_process_context_provider.cc',
       'test/test_in_process_context_provider.h',
       'test/impl_side_painting_settings.h',
@@ -176,7 +184,6 @@
       'test/layer_tree_test.h',
       'test/mock_quad_culler.cc',
       'test/mock_quad_culler.h',
-      'test/occlusion_tracker_test_common.h',
       'test/ordered_texture_map.cc',
       'test/ordered_texture_map.h',
       'test/paths.cc',
@@ -207,6 +214,9 @@
       'test/test_context_support.h',
       'test/test_gles2_interface.cc',
       'test/test_gles2_interface.h',
+      'test/test_occlusion_tracker.h',
+      'test/test_shared_bitmap_manager.cc',
+      'test/test_shared_bitmap_manager.h',
       'test/test_texture.cc',
       'test/test_texture.h',
       'test/test_tile_priorities.cc',
@@ -257,7 +267,8 @@
         [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"',
           {
             'conditions': [
-              [ 'linux_use_tcmalloc==1',
+              # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+              [ '(use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1)',
                 {
                   'dependencies': [
                     '../base/allocator/allocator.gyp:allocator',
@@ -290,6 +301,7 @@
       ],
       'sources': [
         'layers/layer_perftest.cc',
+        'layers/picture_layer_impl_perftest.cc',
         'resources/picture_layer_tiling_perftest.cc',
         'resources/raster_worker_pool_perftest.cc',
         'resources/task_graph_runner_perftest.cc',
@@ -314,7 +326,8 @@
           }
         ],
         # See http://crbug.com/162998#c4 for why this is needed.
-        ['OS=="linux" and linux_use_tcmalloc==1',
+        # TODO(dmikurube): Kill linux_use_tcmalloc. http://crbug.com/345554
+        ['OS=="linux" and ((use_allocator!="none" and use_allocator!="see_use_tcmalloc") or (use_allocator=="see_use_tcmalloc" and linux_use_tcmalloc==1))',
           {
             'dependencies': [
               '../base/allocator/allocator.gyp:allocator',

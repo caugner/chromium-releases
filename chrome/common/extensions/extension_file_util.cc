@@ -22,12 +22,12 @@
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
-#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_handlers/theme_handler.h"
 #include "chrome/common/extensions/message_bundle.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/install_warning.h"
 #include "extensions/common/manifest.h"
@@ -325,8 +325,7 @@ std::set<base::FilePath> GetBrowserImagePaths(const Extension* extension) {
 
 void GarbageCollectExtensions(
     const base::FilePath& install_directory,
-    const std::multimap<std::string, base::FilePath>& extension_paths,
-    bool clean_temp_dir) {
+    const std::multimap<std::string, base::FilePath>& extension_paths) {
   // Nothing to clean up if it doesn't exist.
   if (!base::DirectoryExists(install_directory))
     return;
@@ -344,14 +343,13 @@ void GarbageCollectExtensions(
     // Clean up temporary files left if Chrome crashed or quit in the middle
     // of an extension install.
     if (basename.value() == kTempDirectoryName) {
-      if (clean_temp_dir)
-        base::DeleteFile(extension_path, true);  // Recursive
+      base::DeleteFile(extension_path, true);  // Recursive
       continue;
     }
 
     // Parse directory name as a potential extension ID.
     if (IsStringASCII(basename.value())) {
-      extension_id = UTF16ToASCII(basename.LossyDisplayName());
+      extension_id = base::UTF16ToASCII(basename.LossyDisplayName());
       if (!Extension::IdIsValid(extension_id))
         extension_id.clear();
     }

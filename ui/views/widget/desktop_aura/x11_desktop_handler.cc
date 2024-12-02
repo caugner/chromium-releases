@@ -9,8 +9,10 @@
 
 #include "base/message_loop/message_loop.h"
 #include "ui/aura/env.h"
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/x/x11_menu_list.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/gfx/x/x11_error_tracker.h"
 
 #if !defined(OS_CHROMEOS)
 #include "ui/views/ime/input_method.h"
@@ -21,7 +23,6 @@ namespace {
 
 const char* kAtomsToCache[] = {
   "_NET_ACTIVE_WINDOW",
-  "_NET_WM_STATE_HIDDEN",
   NULL
 };
 
@@ -97,52 +98,19 @@ void X11DesktopHandler::ActivateWindow(::Window window) {
   }
 }
 
-void X11DesktopHandler::DeactivateWindow(::Window window) {
-  DCHECK(IsActiveWindow(window));
-
-  std::vector< ::Window > windows;
-  if (!ui::GetXWindowStack(x_root_window_, &windows)) {
-    // TODO(mlamouri): use XQueryTree in case of _NET_CLIENT_LIST_STACKING is
-    // not supported by the WM.
-    NOTIMPLEMENTED();
-    return;
-  }
-
-  // To deactivate the window, we want to activate the window below in z-order.
-  ::Window to_activate = GetNextToActivateInStack(windows);
-  // TODO(mlamouri): some WM might not have a "Desktop" to activate when there
-  // are no other windows. In which case, we should handle the case where
-  // |to_activate| == 0.
-  if (!to_activate) {
-    DLOG(WARNING) << "Not deactivating because there are no other window to "
-                  << "activate. If you see this please file a bug and mention "
-                  << "the window manager you are using.";
-    return;
-  }
-
-  ActivateWindow(to_activate);
-}
-
 bool X11DesktopHandler::IsActiveWindow(::Window window) const {
   return window == current_window_;
 }
 
 void X11DesktopHandler::ProcessXEvent(const base::NativeEvent& event) {
   switch (event->type) {
-    case EnterNotify:
-      if (event->xcrossing.focus == True &&
-          current_window_ != event->xcrossing.window)
-        OnActiveWindowChanged(event->xcrossing.window);
-      break;
-    case LeaveNotify:
-      if (event->xcrossing.focus == False &&
-          current_window_ == event->xcrossing.window)
-        OnActiveWindowChanged(None);
-      break;
     case FocusIn:
-      if (event->xfocus.mode == NotifyNormal &&
-          current_window_ != event->xfocus.window)
+      if (current_window_ != event->xfocus.window)
         OnActiveWindowChanged(event->xfocus.window);
+      break;
+    case FocusOut:
+      if (current_window_ == event->xfocus.window)
+        OnActiveWindowChanged(None);
       break;
     default:
       NOTREACHED();
@@ -163,6 +131,26 @@ uint32_t X11DesktopHandler::Dispatch(const base::NativeEvent& event) {
           OnActiveWindowChanged(window);
         }
       }
+      break;
+    }
+    // Menus created by Chrome can be drag and drop targets. Since they are
+    // direct children of the screen root window and have override_redirect
+    // we cannot use regular _NET_CLIENT_LIST_STACKING property to find them
+    // and use a separate cache to keep track of them.
+    // TODO(varkha): Implement caching of all top level X windows and their
+    // coordinates and stacking order to eliminate repeated calls to X server
+    // during mouse movement, drag and shaping events.
+    case CreateNotify: {
+      // The window might be destroyed if the message pump haven't gotten a
+      // chance to run but we can safely ignore the X error.
+      gfx::X11ErrorTracker error_tracker;
+      XCreateWindowEvent *xcwe = &event->xcreatewindow;
+      ui::XMenuList::GetInstance()->MaybeRegisterMenu(xcwe->window);
+      break;
+    }
+    case DestroyNotify: {
+      XDestroyWindowEvent *xdwe = &event->xdestroywindow;
+      ui::XMenuList::GetInstance()->MaybeUnregisterMenu(xdwe->window);
       break;
     }
   }
@@ -192,48 +180,6 @@ void X11DesktopHandler::OnActiveWindowChanged(::Window xid) {
     new_host->HandleNativeWidgetActivationChanged(true);
 
   current_window_ = xid;
-}
-
-::Window X11DesktopHandler::GetNextToActivateInStack(
-    const std::vector< ::Window >& windows) {
-  DCHECK(current_window_);
-
-  // We start by doing a fast forward in the stack to find the active window.
-  std::vector< ::Window >::const_iterator it =
-      std::find(windows.begin(), windows.end(), current_window_);
-
-  // We expect to find the currently active window in the |windows| list. Not
-  // finding it is an unexpected behavior.
-  CHECK(it != windows.end());
-
-  // After that, we want to activate the next window that is not minimized.
-  for (++it; it != windows.end(); ++it) {
-    std::vector<Atom> wm_states;
-    if (!ui::GetAtomArrayProperty(*it, "_NET_WM_STATE", &wm_states))
-      continue;
-
-    std::vector<Atom>::const_iterator hidden_atom =
-        std::find(wm_states.begin(),
-                  wm_states.end(),
-                  atom_cache_.GetAtom("_NET_WM_STATE_HIDDEN"));
-
-    if (hidden_atom != wm_states.end())
-      continue;
-
-    // We could do more checks like verifying that _NET_WM_WINDOW_TYPE is a
-    // value we are happy with or that _NET_WM_STATE does not contain
-    // _NET_WM_STATE_SKIP_PAGER or _NET_WM_STATE_SKIP_TASKBAR but those calls
-    // would cost and so far, the tested WM put the special window before the
-    // active one in the stack and the desktop at the end of the stack. That
-    // matches pretty well the behavior we are looking for.
-
-    return *it;
-  }
-
-  // If we reached that point, that means we have not found an appropriate
-  // window to activate. There is nothing we can do about it and the caller
-  // should take care of doing the right thing.
-  return 0;
 }
 
 }  // namespace views

@@ -13,12 +13,14 @@
 
 namespace media {
 
-FakeVideoDecoder::FakeVideoDecoder(int decoding_delay)
+FakeVideoDecoder::FakeVideoDecoder(int decoding_delay,
+                                   bool supports_get_decode_output)
     : task_runner_(base::MessageLoopProxy::current()),
-      weak_factory_(this),
       decoding_delay_(decoding_delay),
+      supports_get_decode_output_(supports_get_decode_output),
       state_(UNINITIALIZED),
-      total_bytes_decoded_(0) {
+      total_bytes_decoded_(0),
+      weak_factory_(this) {
   DCHECK_GE(decoding_delay, 0);
 }
 
@@ -32,8 +34,6 @@ void FakeVideoDecoder::Initialize(const VideoDecoderConfig& config,
   DCHECK(config.IsValidConfig());
   DCHECK(decode_cb_.IsNull()) << "No reinitialization during pending decode.";
   DCHECK(reset_cb_.IsNull()) << "No reinitialization during pending reset.";
-
-  weak_this_ = weak_factory_.GetWeakPtr();
 
   current_config_ = config;
   init_cb_.SetCallback(BindToCurrentLoop(status_cb));
@@ -55,8 +55,11 @@ void FakeVideoDecoder::Decode(const scoped_refptr<DecoderBuffer>& buffer,
   DCHECK_LE(decoded_frames_.size(), static_cast<size_t>(decoding_delay_));
 
   int buffer_size = buffer->end_of_stream() ? 0 : buffer->data_size();
-  decode_cb_.SetCallback(BindToCurrentLoop(base::Bind(
-      &FakeVideoDecoder::OnFrameDecoded, weak_this_, buffer_size, decode_cb)));
+  decode_cb_.SetCallback(
+      BindToCurrentLoop(base::Bind(&FakeVideoDecoder::OnFrameDecoded,
+                                   weak_factory_.GetWeakPtr(),
+                                   buffer_size,
+                                   decode_cb)));
 
   if (buffer->end_of_stream() && decoded_frames_.empty()) {
     decode_cb_.RunOrHold(kOk, VideoFrame::CreateEOSFrame());
@@ -101,6 +104,15 @@ void FakeVideoDecoder::Stop(const base::Closure& closure) {
     return;
 
   DoStop();
+}
+
+scoped_refptr<VideoFrame> FakeVideoDecoder::GetDecodeOutput() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  if (!supports_get_decode_output_ || decoded_frames_.empty())
+    return NULL;
+  scoped_refptr<VideoFrame> out = decoded_frames_.front();
+  decoded_frames_.pop_front();
+  return out;
 }
 
 void FakeVideoDecoder::HoldNextInit() {

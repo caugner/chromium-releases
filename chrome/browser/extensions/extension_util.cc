@@ -5,10 +5,15 @@
 #include "chrome/browser/extensions/extension_util.h"
 
 #include "base/command_line.h"
+#include "base/logging.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension_icon_set.h"
+#include "chrome/common/extensions/manifest_handlers/app_isolation_info.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "content/public/browser/site_instance.h"
 #include "extensions/browser/extension_prefs.h"
@@ -31,8 +36,6 @@ bool IsIncognitoEnabled(const std::string& extension_id,
     // If this is an existing component extension we always allow it to
     // work in incognito mode.
     if (extension->location() == Manifest::COMPONENT)
-      return true;
-    if (extension->force_incognito_enabled())
       return true;
   }
 
@@ -63,7 +66,7 @@ void SetIsIncognitoEnabled(const std::string& extension_id,
     }
   }
 
-  ExtensionPrefs* extension_prefs = service->extension_prefs();
+  ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(service->profile());
   // Broadcast unloaded and loaded events to update browser state. Only bother
   // if the value changed and the extension is actually enabled, since there is
   // no UI otherwise.
@@ -129,7 +132,7 @@ void SetAllowFileAccess(const std::string& extension_id,
   if (allow == AllowFileAccess(extension_id, context))
     return;
 
-  service->extension_prefs()->SetAllowFileAccess(extension_id, allow);
+  ExtensionPrefs::Get(context)->SetAllowFileAccess(extension_id, allow);
 
   bool extension_is_enabled = service->extensions()->Contains(extension_id);
   if (extension_is_enabled)
@@ -171,6 +174,70 @@ bool IsExtensionInstalledPermanently(const std::string& extension_id,
   const Extension* extension = ExtensionRegistry::Get(context)->
       GetExtensionById(extension_id, ExtensionRegistry::EVERYTHING);
   return extension && !extension->is_ephemeral();
+}
+
+GURL GetSiteForExtensionId(const std::string& extension_id,
+                           content::BrowserContext* context) {
+  return content::SiteInstance::GetSiteForURL(
+      context, Extension::GetBaseURLFromExtensionId(extension_id));
+}
+
+scoped_ptr<base::DictionaryValue> GetExtensionInfo(const Extension* extension) {
+  DCHECK(extension);
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+
+  dict->SetString("id", extension->id());
+  dict->SetString("name", extension->name());
+
+  GURL icon = extensions::ExtensionIconSource::GetIconURL(
+      extension,
+      extension_misc::EXTENSION_ICON_SMALLISH,
+      ExtensionIconSet::MATCH_BIGGER,
+      false,  // Not grayscale.
+      NULL);  // Don't set bool if exists.
+  dict->SetString("icon", icon.spec());
+
+  return dict.Pass();
+}
+
+bool HasIsolatedStorage(const ExtensionInfo& info) {
+  if (!info.extension_manifest.get())
+    return false;
+
+  std::string error;
+  scoped_refptr<const Extension> extension(Extension::Create(
+      info.extension_path,
+      info.extension_location,
+      *info.extension_manifest,
+      Extension::NO_FLAGS,
+      info.extension_id,
+      &error));
+  if (!extension.get())
+    return false;
+
+  return AppIsolationInfo::HasIsolatedStorage(extension.get());
+}
+
+bool SiteHasIsolatedStorage(const GURL& extension_site_url,
+                            content::BrowserContext* context) {
+  const Extension* extension = ExtensionRegistry::Get(context)->
+      enabled_extensions().GetExtensionOrAppByURL(extension_site_url);
+  if (extension)
+    return AppIsolationInfo::HasIsolatedStorage(extension);
+
+  if (extension_site_url.SchemeIs(kExtensionScheme)) {
+    // The site URL may also be from an evicted ephemeral app. We do not
+    // immediately delete their data when they are removed from extension
+    // system.
+    ExtensionPrefs* prefs = ExtensionPrefs::Get(context);
+    DCHECK(prefs);
+    scoped_ptr<ExtensionInfo> info = prefs->GetEvictedEphemeralAppInfo(
+        extension_site_url.host());
+    if (info.get())
+      return HasIsolatedStorage(*info);
+  }
+
+  return false;
 }
 
 }  // namespace util

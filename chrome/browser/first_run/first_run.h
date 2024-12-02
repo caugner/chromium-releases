@@ -10,11 +10,11 @@
 
 #include "base/basictypes.h"
 
-class CommandLine;
 class GURL;
 class Profile;
 
 namespace base {
+class CommandLine;
 class FilePath;
 }
 
@@ -88,7 +88,7 @@ bool IsChromeFirstRun();
 
 // Returns true if |command_line|'s switches explicitly specify that first run
 // should be suppressed in the current run.
-bool IsFirstRunSuppressed(const CommandLine& command_line);
+bool IsFirstRunSuppressed(const base::CommandLine& command_line);
 
 // Creates the first run sentinel if needed. This should only be called after
 // the process singleton has been grabbed by the current process
@@ -101,8 +101,7 @@ std::string GetPingDelayPrefName();
 // Register user preferences used by the MasterPrefs structure.
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
-// Removes the sentinel file created in ConfigDone(). Returns false if the
-// sentinel file could not be removed.
+// Remove the first run sentinel file; returns false on failure.
 bool RemoveSentinel();
 
 // Sets the kShowFirstRunBubbleOption local state pref so that the browser

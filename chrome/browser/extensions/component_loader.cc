@@ -15,7 +15,6 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -288,6 +287,11 @@ void ComponentLoader::AddFileManagerExtension() {
 #endif  // defined(OS_CHROMEOS)
 }
 
+void ComponentLoader::AddVideoPlayerExtension() {
+  Add(IDR_VIDEOPLAYER_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("video_player")));
+}
+
 void ComponentLoader::AddHangoutServicesExtension() {
 #if defined(GOOGLE_CHROME_BUILD) || defined(ENABLE_HANGOUT_SERVICES_EXTENSION)
   Add(IDR_HANGOUT_SERVICES_MANIFEST,
@@ -296,8 +300,7 @@ void ComponentLoader::AddHangoutServicesExtension() {
 }
 
 void ComponentLoader::AddHotwordHelperExtension() {
-  Profile* profile = static_cast<Profile*>(browser_context_);
-  if (HotwordServiceFactory::IsHotwordAllowed(profile)) {
+  if (HotwordServiceFactory::IsHotwordAllowed(browser_context_)) {
     Add(IDR_HOTWORD_HELPER_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("hotword_helper")));
   }
@@ -317,15 +320,6 @@ void ComponentLoader::AddImageLoaderExtension() {
   Add(IDR_IMAGE_LOADER_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("image_loader")));
 #endif  // defined(IMAGE_LOADER_EXTENSION)
-}
-
-void ComponentLoader::AddBookmarksExtensions() {
-  Add(IDR_BOOKMARKS_MANIFEST,
-      base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-#if defined(ENABLE_ENHANCED_BOOKMARKS)
-  Add(IDR_ENHANCED_BOOKMARKS_MANIFEST,
-      base::FilePath(FILE_PATH_LITERAL("enhanced_bookmark_manager")));
-#endif
 }
 
 void ComponentLoader::AddNetworkSpeechSynthesisExtension() {
@@ -414,14 +408,16 @@ void ComponentLoader::AddDefaultComponentExtensions(
   if (!skip_session_components) {
     const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (!command_line->HasSwitch(chromeos::switches::kGuestSession))
-      AddBookmarksExtensions();
+      Add(IDR_BOOKMARKS_MANIFEST,
+          base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
 
     Add(IDR_CROSH_BUILTIN_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/crosh_builtin")));
   }
 #else  // !defined(OS_CHROMEOS)
   DCHECK(!skip_session_components);
-  AddBookmarksExtensions();
+  Add(IDR_BOOKMARKS_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
   // Cloud Print component app. Not required on Chrome OS.
   Add(IDR_CLOUDPRINT_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("cloud_print")));
@@ -444,6 +440,7 @@ void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
     return;
 
   // Component extensions needed for kiosk apps.
+  AddVideoPlayerExtension();
   AddFileManagerExtension();
 
   // Add virtual keyboard.
@@ -474,7 +471,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #endif
 
   if (!skip_session_components) {
+    AddVideoPlayerExtension();
     AddFileManagerExtension();
+
     AddHangoutServicesExtension();
     AddHotwordHelperExtension();
     AddImageLoaderExtension();
@@ -500,7 +499,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     if (!command_line->HasSwitch(
             chromeos::switches::kDisableQuickofficeComponentApp)) {
       std::string id = Add(IDR_QUICKOFFICE_MANIFEST, base::FilePath(
-          FILE_PATH_LITERAL("/usr/share/chromeos-assets/quick_office")));
+          FILE_PATH_LITERAL("/usr/share/chromeos-assets/quickoffice")));
       EnableFileSystemInGuestMode(id);
     }
 #endif  // defined(GOOGLE_CHROME_BUILD)

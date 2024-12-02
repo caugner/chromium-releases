@@ -54,8 +54,10 @@ class LayerTreeHostPerfTest : public LayerTreeTest {
   }
 
   virtual void Animate(base::TimeTicks monotonic_time) OVERRIDE {
-    if (animation_driven_drawing_ && !TestEnded())
+    if (animation_driven_drawing_ && !TestEnded()) {
       layer_tree_host()->SetNeedsAnimate();
+      layer_tree_host()->SetNextCommitForcesRedraw();
+    }
   }
 
   virtual void BeginCommitOnThread(LayerTreeHostImpl* host_impl) OVERRIDE {
@@ -253,7 +255,9 @@ class BrowserCompositorInvalidateLayerTreePerfTest
     : public LayerTreeHostPerfTestJsonReader {
  public:
   BrowserCompositorInvalidateLayerTreePerfTest()
-      : next_sync_point_(1), clean_up_started_(false) {}
+      : LayerTreeHostPerfTestJsonReader(),
+        next_sync_point_(1),
+        clean_up_started_(false) {}
 
   virtual void BuildTree() OVERRIDE {
     LayerTreeHostPerfTestJsonReader::BuildTree();
@@ -267,6 +271,8 @@ class BrowserCompositorInvalidateLayerTreePerfTest
   }
 
   virtual void WillCommit() OVERRIDE {
+    if (CleanUpStarted())
+      return;
     gpu::Mailbox gpu_mailbox;
     std::ostringstream name_stream;
     name_stream << "name" << next_sync_point_;
@@ -286,11 +292,6 @@ class BrowserCompositorInvalidateLayerTreePerfTest
     layer_tree_host()->SetNeedsCommit();
   }
 
-  virtual void DidCommitAndDrawFrame() OVERRIDE {
-    if (CleanUpStarted())
-      EndTest();
-  }
-
   virtual void CleanUpAndEndTest(LayerTreeHostImpl* host_impl) OVERRIDE {
     clean_up_started_ = true;
     MainThreadTaskRunner()->PostTask(
@@ -303,6 +304,7 @@ class BrowserCompositorInvalidateLayerTreePerfTest
   void CleanUpAndEndTestOnMainThread() {
     tab_contents_->SetTextureMailbox(TextureMailbox(),
                                      scoped_ptr<SingleReleaseCallback>());
+    EndTest();
   }
 
   virtual bool CleanUpStarted() OVERRIDE { return clean_up_started_; }
@@ -314,6 +316,7 @@ class BrowserCompositorInvalidateLayerTreePerfTest
 };
 
 TEST_F(BrowserCompositorInvalidateLayerTreePerfTest, DenseBrowserUI) {
+  measure_commit_cost_ = true;
   SetTestName("dense_layer_tree");
   ReadTestFile("dense_layer_tree");
   RunTestWithImplSidePainting();

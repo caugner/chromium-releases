@@ -45,6 +45,8 @@ struct ReliablePacketInfo;
 // network requests are performed on.
 class GCM_EXPORT MCSClient {
  public:
+  // Any change made to this enum should have corresponding change in the
+  // GetStateString(...) function.
   enum State {
     UNINITIALIZED,  // Uninitialized.
     LOADED,         // GCM Load finished, waiting to connect.
@@ -125,11 +127,8 @@ class GCM_EXPORT MCSClient {
   // Returns the current state of the client.
   State state() const { return state_; }
 
- protected:
-  // Sets a |gcm_store| for testing. Does not take ownership.
-  // TODO(fgorski): Remove this method. Create GCMEngineFactory that will create
-  // components of the engine.
-  void SetGCMStoreForTesting(GCMStore* gcm_store);
+  // Returns text representation of the state enum.
+  std::string GetStateString() const;
 
  private:
   typedef uint32 StreamId;

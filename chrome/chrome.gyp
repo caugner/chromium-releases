@@ -22,7 +22,6 @@
     'allocator_target': '../base/allocator/allocator.gyp:allocator',
     'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome',
     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
-    'repack_locales_cmd': ['python', 'tools/build/repack_locales.py'],
     'conditions': [
       ['OS!="ios"', {
         'chromium_browser_dependencies': [
@@ -90,12 +89,12 @@
     # by Native Client only.
     # NOTE: Most new includes should go in the OS!="ios" condition below.
     '../build/chrome_settings.gypi',
+    '../build/util/version.gypi',
     '../build/win_precompile.gypi',
     'chrome_browser.gypi',
     'chrome_browser_ui.gypi',
     'chrome_common.gypi',
     'chrome_installer_util.gypi',
-    'version.gypi',
     '../components/nacl/nacl_defines.gypi',
   ],
   'conditions': [
@@ -137,7 +136,7 @@
             'chrome_resources.gyp:chrome_resources',
             'chrome_resources.gyp:chrome_strings',
             'chrome_resources.gyp:theme_resources',
-            'common/extensions/api/api.gyp:api',
+            'common/extensions/api/api.gyp:chrome_api',
             '../base/base.gyp:base',
             '../content/content.gyp:content_browser',
             '../net/net.gyp:http_server',
@@ -244,8 +243,10 @@
           'type': 'static_library',
           'variables': { 'enable_wexit_time_destructors': 1, },
           'dependencies': [
-            'common/extensions/api/api.gyp:api',
+            'common/extensions/api/api.gyp:chrome_api',
             '../base/base.gyp:base',
+            '../components/components.gyp:wifi_component',
+            '../content/content.gyp:content_common',
             '../content/content.gyp:content_utility',
             '../media/media.gyp:media',
             '../skia/skia.gyp:skia',
@@ -310,6 +311,9 @@
           'include_dirs': [
             '..',
             '<(grit_out_dir)',
+          ],
+          'export_dependent_settings': [
+            'common/extensions/api/api.gyp:chrome_api',
           ],
           'conditions': [
             ['toolkit_uses_gtk == 1', {
@@ -697,9 +701,9 @@
           'dependencies': [
             'chrome_resources.gyp:chrome_strings',
             '../base/base.gyp:base',
+            '../ui/base/ui_base.gyp:ui_base',
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gfx/gfx.gyp:gfx_geometry',
-            '../ui/ui.gyp:ui',
           ],
           'include_dirs': [
             '<(grit_out_dir)',
@@ -863,6 +867,7 @@
           'type': 'static_library',
           'dependencies': [
             'chrome_resources.gyp:theme_resources',
+            '../ui/accessibility/accessibility.gyp:ax_gen',
             '../skia/skia.gyp:skia',
           ],
           'include_dirs': [
@@ -910,8 +915,10 @@
             'safe_browsing_proto',
           ],
           'sources': [
-            'browser/safe_browsing/signature_util.h',
-            'browser/safe_browsing/signature_util_win.cc',
+            'browser/safe_browsing/binary_feature_extractor.h',
+            'browser/safe_browsing/binary_feature_extractor_win.cc',
+            'browser/safe_browsing/pe_image_reader_win.cc',
+            'browser/safe_browsing/pe_image_reader_win.h',
             'tools/safe_browsing/sb_sigutil.cc',
           ],
         },
@@ -988,12 +995,15 @@
           'type': 'none',
           'dependencies': [
             'activity_type_ids_java',
+            'app_banner_metrics_ids_java',
             'chrome_resources.gyp:chrome_strings',
             'profile_sync_service_model_type_selection_java',
             'resource_id_java',
             'toolbar_model_security_levels_java',
+            'tab_load_status_java',
             '../base/base.gyp:base',
             '../components/components.gyp:autofill_java',
+            '../components/components.gyp:dom_distiller_core_java',
             '../components/components.gyp:navigation_interception_java',
             '../components/components.gyp:sessions',
             '../components/components.gyp:web_contents_delegate_android_java',
@@ -1045,8 +1055,6 @@
             '../third_party/libjingle/libjingle.gyp:libjingle',
           ],
           'sources': [
-            'service/chrome_service_application_mac.h',
-            'service/chrome_service_application_mac.mm',
             'service/cloud_print/cdd_conversion_win.cc',
             'service/cloud_print/cdd_conversion_win.h',
             'service/cloud_print/cloud_print_auth.cc',

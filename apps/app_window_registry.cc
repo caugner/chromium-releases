@@ -6,7 +6,7 @@
 #include "apps/app_window_registry.h"
 #include "apps/apps_client.h"
 #include "apps/ui/native_app_window.h"
-#include "components/browser_context_keyed_service/browser_context_dependency_manager.h"
+#include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_manager.h"
@@ -45,6 +45,17 @@ std::string GetWindowKeyForRenderViewHost(
 
 namespace apps {
 
+#if defined(OS_CHROMEOS)
+void AppWindowRegistry::Observer::OnAppWindowHidden(AppWindow* app_window) {
+}
+
+void AppWindowRegistry::Observer::OnAppWindowShown(AppWindow* app_window) {
+}
+#endif
+
+AppWindowRegistry::Observer::~Observer() {
+}
+
 AppWindowRegistry::AppWindowRegistry(content::BrowserContext* context)
     : context_(context),
       devtools_callback_(base::Bind(&AppWindowRegistry::OnDevToolsStateChanged,
@@ -76,6 +87,16 @@ void AppWindowRegistry::AppWindowIconChanged(AppWindow* app_window) {
 void AppWindowRegistry::AppWindowActivated(AppWindow* app_window) {
   BringToFront(app_window);
 }
+
+#if defined(OS_CHROMEOS)
+void AppWindowRegistry::AppWindowHidden(AppWindow* app_window) {
+  FOR_EACH_OBSERVER(Observer, observers_, OnAppWindowHidden(app_window));
+}
+
+void AppWindowRegistry::AppWindowShown(AppWindow* app_window) {
+  FOR_EACH_OBSERVER(Observer, observers_, OnAppWindowShown(app_window));
+}
+#endif
 
 void AppWindowRegistry::RemoveAppWindow(AppWindow* app_window) {
   const AppWindowList::iterator it =
@@ -285,7 +306,7 @@ AppWindowRegistry::Factory::Factory()
 
 AppWindowRegistry::Factory::~Factory() {}
 
-BrowserContextKeyedService* AppWindowRegistry::Factory::BuildServiceInstanceFor(
+KeyedService* AppWindowRegistry::Factory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   return new AppWindowRegistry(context);
 }

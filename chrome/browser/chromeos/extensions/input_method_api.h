@@ -7,7 +7,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/api/profile_keyed_api_factory.h"
+#include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function.h"
 
@@ -47,9 +47,11 @@ class StartImeFunction : public SyncExtensionFunction {
                              INPUTMETHODPRIVATE_STARTIME)
 };
 
-class InputMethodAPI : public ProfileKeyedAPI,
+class InputMethodAPI : public BrowserContextKeyedAPI,
                        public extensions::EventRouter::Observer {
  public:
+  static const char kOnInputMethodChanged[];
+
   explicit InputMethodAPI(content::BrowserContext* context);
   virtual ~InputMethodAPI();
 
@@ -57,10 +59,10 @@ class InputMethodAPI : public ProfileKeyedAPI,
   // Window System) id.
   static std::string GetInputMethodForXkb(const std::string& xkb_id);
 
-  // ProfileKeyedAPI implementation.
-  static ProfileKeyedAPIFactory<InputMethodAPI>* GetFactoryInstance();
+  // BrowserContextKeyedAPI implementation.
+  static BrowserContextKeyedAPIFactory<InputMethodAPI>* GetFactoryInstance();
 
-  // ProfileKeyedAPI implementation.
+  // BrowserContextKeyedAPI implementation.
   virtual void Shutdown() OVERRIDE;
 
   // EventRouter::Observer implementation.
@@ -68,9 +70,9 @@ class InputMethodAPI : public ProfileKeyedAPI,
       OVERRIDE;
 
  private:
-  friend class ProfileKeyedAPIFactory<InputMethodAPI>;
+  friend class BrowserContextKeyedAPIFactory<InputMethodAPI>;
 
-  // ProfileKeyedAPI implementation.
+  // BrowserContextKeyedAPI implementation.
   static const char* service_name() {
     return "InputMethodAPI";
   }

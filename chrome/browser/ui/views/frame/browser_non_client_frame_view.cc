@@ -68,6 +68,8 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
           browser_view_->browser(), !browser_view_->IsRegularOrGuestSession());
       avatar_button_->set_id(VIEW_ID_AVATAR_BUTTON);
       AddChildView(avatar_button_);
+      // Invalidate here because adding a child does not invalidate the layout.
+      InvalidateLayout();
       frame_->GetRootView()->Layout();
     }
   } else if (avatar_button_) {
@@ -147,8 +149,8 @@ void BrowserNonClientFrameView::UpdateNewStyleAvatarInfo(
 
   if (browser_view_->ShouldShowAvatar()) {
     if (!new_avatar_button_) {
-      base::string16 profile_name =
-          profiles::GetActiveProfileDisplayName(browser_view_->browser());
+      base::string16 profile_name = profiles::GetAvatarNameForProfile(
+          browser_view_->browser()->profile());
       new_avatar_button_ = new NewAvatarButton(
           listener, profile_name, style, browser_view_->browser());
       new_avatar_button_->set_id(VIEW_ID_NEW_AVATAR_BUTTON);

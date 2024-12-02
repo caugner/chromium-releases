@@ -154,7 +154,6 @@ V4L2VideoDecodeAccelerator::PictureRecord::~PictureRecord() {}
 
 V4L2VideoDecodeAccelerator::V4L2VideoDecodeAccelerator(
     EGLDisplay egl_display,
-    Client* client,
     const base::WeakPtr<Client>& io_client,
     const base::Callback<bool(void)>& make_context_current,
     scoped_ptr<V4L2Device> device,
@@ -162,8 +161,6 @@ V4L2VideoDecodeAccelerator::V4L2VideoDecodeAccelerator(
     : child_message_loop_proxy_(base::MessageLoopProxy::current()),
       io_message_loop_proxy_(io_message_loop_proxy),
       weak_this_(base::AsWeakPtr(this)),
-      client_ptr_factory_(client),
-      client_(client_ptr_factory_.GetWeakPtr()),
       io_client_(io_client),
       decoder_thread_("V4L2DecoderThread"),
       decoder_state_(kUninitialized),
@@ -202,11 +199,14 @@ V4L2VideoDecodeAccelerator::~V4L2VideoDecodeAccelerator() {
   DCHECK(output_buffer_map_.empty());
 }
 
-bool V4L2VideoDecodeAccelerator::Initialize(
-    media::VideoCodecProfile profile) {
+bool V4L2VideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
+                                            Client* client) {
   DVLOG(3) << "Initialize()";
   DCHECK(child_message_loop_proxy_->BelongsToCurrentThread());
   DCHECK_EQ(decoder_state_, kUninitialized);
+
+  client_ptr_factory_.reset(new base::WeakPtrFactory<Client>(client));
+  client_ = client_ptr_factory_->GetWeakPtr();
 
   switch (profile) {
     case media::H264PROFILE_BASELINE:
@@ -287,6 +287,9 @@ bool V4L2VideoDecodeAccelerator::Initialize(
     NOTIFY_ERROR(PLATFORM_FAILURE);
     return false;
   }
+
+  if (!StartDevicePoll())
+    return false;
 
   SetDecoderState(kInitialized);
 
@@ -427,7 +430,7 @@ void V4L2VideoDecodeAccelerator::Destroy() {
   DCHECK(child_message_loop_proxy_->BelongsToCurrentThread());
 
   // We're destroying; cancel all callbacks.
-  client_ptr_factory_.InvalidateWeakPtrs();
+  client_ptr_factory_.reset();
 
   // If the decoder thread is running, destroy using posted task.
   if (decoder_thread_.IsRunning()) {
@@ -709,7 +712,6 @@ bool V4L2VideoDecodeAccelerator::DecodeBufferInitial(
   DCHECK_EQ(decoder_thread_.message_loop(), base::MessageLoop::current());
   DCHECK_NE(decoder_state_, kUninitialized);
   DCHECK_NE(decoder_state_, kDecoding);
-  DCHECK(!device_poll_thread_.IsRunning());
   // Initial decode.  We haven't been able to get output stream format info yet.
   // Get it, and start decoding.
 
@@ -754,10 +756,6 @@ bool V4L2VideoDecodeAccelerator::DecodeBufferInitial(
   } else {
     *endpos = size;
   }
-
-  // StartDevicePoll will raise the error if there is one.
-  if (!StartDevicePoll())
-    return false;
 
   decoder_state_ = kDecoding;
   ScheduleDecodeBufferTaskIfNeeded();
@@ -885,8 +883,6 @@ void V4L2VideoDecodeAccelerator::ServiceDeviceTask(bool event_pending) {
   DVLOG(3) << "ServiceDeviceTask()";
   DCHECK_EQ(decoder_thread_.message_loop(), base::MessageLoop::current());
   DCHECK_NE(decoder_state_, kUninitialized);
-  DCHECK_NE(decoder_state_, kInitialized);
-  DCHECK_NE(decoder_state_, kAfterReset);
   TRACE_EVENT0("Video Decoder", "V4L2VDA::ServiceDeviceTask");
 
   if (decoder_state_ == kResetting) {
@@ -1353,6 +1349,9 @@ void V4L2VideoDecodeAccelerator::ResetDoneTask() {
     return;
   }
 
+  if (!StartDevicePoll())
+    return;
+
   // We might have received a resolution change event while we were waiting
   // for the reset to finish. The codec will not post another event if the
   // resolution after reset remains the same as the one to which were just
@@ -1407,8 +1406,9 @@ void V4L2VideoDecodeAccelerator::DestroyTask() {
 
 bool V4L2VideoDecodeAccelerator::StartDevicePoll() {
   DVLOG(3) << "StartDevicePoll()";
-  DCHECK_EQ(decoder_thread_.message_loop(), base::MessageLoop::current());
   DCHECK(!device_poll_thread_.IsRunning());
+  if (decoder_thread_.IsRunning())
+    DCHECK_EQ(decoder_thread_.message_loop(), base::MessageLoop::current());
 
   // Start up the device poll thread and schedule its first DevicePollTask().
   if (!device_poll_thread_.Start()) {
@@ -1495,7 +1495,8 @@ bool V4L2VideoDecodeAccelerator::StopDevicePoll(bool keep_input_state) {
 
 void V4L2VideoDecodeAccelerator::StartResolutionChangeIfNeeded() {
   DCHECK_EQ(decoder_thread_.message_loop(), base::MessageLoop::current());
-  DCHECK_EQ(decoder_state_, kDecoding);
+  DCHECK_NE(decoder_state_, kUninitialized);
+  DCHECK_NE(decoder_state_, kResetting);
 
   if (!resolution_change_pending_)
     return;
@@ -1587,7 +1588,7 @@ void V4L2VideoDecodeAccelerator::NotifyError(Error error) {
 
   if (client_) {
     client_->NotifyError(error);
-    client_ptr_factory_.InvalidateWeakPtrs();
+    client_ptr_factory_.reset();
   }
 }
 

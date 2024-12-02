@@ -15,8 +15,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/extensions/api/sessions/session_id.h"
 #include "chrome/browser/extensions/api/tabs/windows_util.h"
-#include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/extensions/extension_function_registry.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/extensions/window_controller_list.h"
@@ -35,6 +33,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_function_dispatcher.h"
+#include "extensions/browser/extension_function_registry.h"
 #include "extensions/common/error_utils.h"
 #include "net/base/net_util.h"
 #include "ui/base/layout.h"
@@ -53,6 +53,8 @@ const char kInvalidSessionIdError[] = "Invalid session id: \"*\".";
 const char kNoBrowserToRestoreSession[] =
     "There are no browser windows to restore the session.";
 const char kSessionSyncError[] = "Synced sessions are not available.";
+const char kRestoreInIncognitoError[] =
+    "Can not restore sessions in incognito mode.";
 
 // Comparator function for use with std::sort that will sort sessions by
 // descending modified_time (i.e., most recent first).
@@ -205,7 +207,16 @@ bool SessionsGetRecentlyClosedFunction::RunImpl() {
   std::vector<linked_ptr<api::sessions::Session> > result;
   TabRestoreService* tab_restore_service =
       TabRestoreServiceFactory::GetForProfile(GetProfile());
-  DCHECK(tab_restore_service);
+
+  // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
+  // incognito mode)
+  if (!tab_restore_service) {
+    DCHECK_NE(GetProfile(), GetProfile()->GetOriginalProfile())
+        << "TabRestoreService expected for normal profiles";
+    results_ = GetRecentlyClosed::Results::Create(
+        std::vector<linked_ptr<api::sessions::Session> >());
+    return true;
+  }
 
   // List of entries. They are ordered from most to least recent.
   // We prune the list to contain max 25 entries at any time and removes
@@ -229,7 +240,8 @@ scoped_ptr<tabs::Tab> SessionsGetDevicesFunction::CreateTabModel(
     int selected_index) {
   std::string session_id = SessionId(session_tag, tab.tab_id.id()).ToString();
   return CreateTabModelHelper(GetProfile(),
-                              tab.navigations[tab.current_navigation_index],
+                              tab.navigations[
+                                tab.normalized_navigation_index()],
                               session_id,
                               tab_index,
                               tab.pinned,
@@ -562,6 +574,11 @@ bool SessionsRestoreFunction::RunImpl() {
     return false;
   }
 
+  if (GetProfile() != GetProfile()->GetOriginalProfile()) {
+    SetError(kRestoreInIncognitoError);
+    return false;
+  }
+
   if (!params->session_id)
     return RestoreMostRecentlyClosed(browser);
 
@@ -574,21 +591,6 @@ bool SessionsRestoreFunction::RunImpl() {
   return session_id->IsForeign() ?
       RestoreForeignSession(*session_id, browser)
       : RestoreLocalSession(*session_id, browser);
-}
-
-SessionsAPI::SessionsAPI(Profile* profile) {
-}
-
-SessionsAPI::~SessionsAPI() {
-}
-
-static base::LazyInstance<ProfileKeyedAPIFactory<SessionsAPI> >
-    g_factory = LAZY_INSTANCE_INITIALIZER;
-
-// static
-ProfileKeyedAPIFactory<SessionsAPI>*
-    SessionsAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
 }
 
 }  // namespace extensions

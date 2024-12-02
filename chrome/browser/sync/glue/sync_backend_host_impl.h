@@ -46,12 +46,15 @@ class NetworkResources;
 class SyncManagerFactory;
 }
 
+namespace sync_driver {
+class SyncPrefs;
+}
+
 namespace browser_sync {
 
 class ChangeProcessor;
 class SyncBackendHostCore;
 class SyncBackendRegistrar;
-class SyncPrefs;
 class SyncedDeviceTracker;
 struct DoInitializeOptions;
 
@@ -68,10 +71,9 @@ class SyncBackendHostImpl
   // it serves and communicates to via the SyncFrontend interface (on
   // the same thread it used to call the constructor).  Must outlive
   // |sync_prefs|.
-  SyncBackendHostImpl(
-      const std::string& name,
-      Profile* profile,
-      const base::WeakPtr<SyncPrefs>& sync_prefs);
+  SyncBackendHostImpl(const std::string& name,
+                      Profile* profile,
+                      const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs);
   virtual ~SyncBackendHostImpl();
 
   // SyncBackendHost implementation.
@@ -122,6 +124,7 @@ class SyncBackendHostImpl
   virtual void GetModelSafeRoutingInfo(
       syncer::ModelSafeRoutingInfo* out) const OVERRIDE;
   virtual SyncedDeviceTracker* GetSyncedDeviceTracker() const OVERRIDE;
+  virtual void SetForwardProtocolEvents(bool forward) OVERRIDE;
   virtual base::MessageLoop* GetSyncLoopForTesting() OVERRIDE;
 
  protected:
@@ -163,6 +166,11 @@ class SyncBackendHostImpl
   // Downloading of control types failed and will be retried. Invokes the
   // frontend's sync configure retry method.
   void HandleControlTypesDownloadRetry();
+
+  // Forwards a ProtocolEvent to the frontend.  Will not be called unless a
+  // call to SetForwardProtocolEvents() explicitly requested that we start
+  // forwarding these events.
+  void HandleProtocolEventOnFrontendLoop(syncer::ProtocolEvent* event);
 
   SyncFrontend* frontend() { return frontend_; }
 
@@ -260,6 +268,7 @@ class SyncBackendHostImpl
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
       const syncer::ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
+  virtual std::string GetOwnerName() const OVERRIDE;
 
   content::NotificationRegistrar notification_registrar_;
 
@@ -279,7 +288,7 @@ class SyncBackendHostImpl
 
   bool initialized_;
 
-  const base::WeakPtr<SyncPrefs> sync_prefs_;
+  const base::WeakPtr<sync_driver::SyncPrefs> sync_prefs_;
 
   ExtensionsActivityMonitor extensions_activity_monitor_;
 

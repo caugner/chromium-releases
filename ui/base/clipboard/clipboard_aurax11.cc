@@ -278,7 +278,7 @@ class Clipboard::AuraX11Details : public base::MessagePumpDispatcher {
   // Returns a vector with a |format| converted to an X11 atom.
   std::vector< ::Atom> GetAtomsForFormat(const Clipboard::FormatType& format);
 
-  // Clears a certain clipboard type.
+  // Clears a certain clipboard type, whether we own it or not.
   void Clear(ClipboardType type);
 
  private:
@@ -480,9 +480,9 @@ std::vector< ::Atom> Clipboard::AuraX11Details::GetAtomsForFormat(
 
 void Clipboard::AuraX11Details::Clear(ClipboardType type) {
   if (type == CLIPBOARD_TYPE_COPY_PASTE)
-    return clipboard_owner_.Clear();
+    clipboard_owner_.ClearSelectionOwner();
   else
-    return primary_owner_.Clear();
+    primary_owner_.ClearSelectionOwner();
 }
 
 uint32_t Clipboard::AuraX11Details::Dispatch(const base::NativeEvent& event) {
@@ -762,8 +762,11 @@ void Clipboard::WriteBookmark(const char* title_data,
 // Write an extra flavor that signifies WebKit was the last to modify the
 // pasteboard. This flavor has no data.
 void Clipboard::WriteWebSmartPaste() {
-  aurax11_details_->InsertMapping(kMimeTypeWebkitSmartPaste,
-                                  scoped_refptr<base::RefCountedMemory>());
+  std::string empty;
+  aurax11_details_->InsertMapping(
+      kMimeTypeWebkitSmartPaste,
+      scoped_refptr<base::RefCountedMemory>(
+          base::RefCountedString::TakeString(&empty)));
 }
 
 void Clipboard::WriteBitmap(const SkBitmap& bitmap) {

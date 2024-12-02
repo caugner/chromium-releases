@@ -34,10 +34,6 @@ class VIEWS_EXPORT X11DesktopHandler : public base::MessagePumpDispatcher,
   // This method should only be called if the window is already mapped.
   void ActivateWindow(::Window window);
 
-  // Deactivates the |window| and activates the window just below it in z-order.
-  // |window| must be active.
-  void DeactivateWindow(::Window window);
-
   // Checks if the current active window is |window|.
   bool IsActiveWindow(::Window window) const;
 
@@ -53,23 +49,12 @@ class VIEWS_EXPORT X11DesktopHandler : public base::MessagePumpDispatcher,
   virtual void OnWindowInitialized(aura::Window* window) OVERRIDE;
   virtual void OnWillDestroyEnv() OVERRIDE;
 
-  // Allows to override wm_supports_active_window_ value for tests. If the WM
-  // supports _NET_ACTIVE_WINDOW, activation is async otherwise it is sync.
-  void SetWMSupportsActiveWindowForTests(bool value) {
-    wm_supports_active_window_ = value;
-  }
-
  private:
   explicit X11DesktopHandler();
   virtual ~X11DesktopHandler();
 
   // Handles changes in activation.
   void OnActiveWindowChanged(::Window window);
-
-  // Return the next window to activate based on the current list of windows.
-  // This should only be called if there is an active window. In other words, if
-  // current_window_ is different from None.
-  ::Window GetNextToActivateInStack(const std::vector< ::Window >& windows);
 
   // The display and the native X window hosting the root window.
   XDisplay* xdisplay_;

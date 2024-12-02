@@ -17,10 +17,10 @@
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/render_pass_test_common.h"
 #include "cc/test/render_pass_test_utils.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkDevice.h"
 
 namespace cc {
 namespace {
@@ -33,8 +33,9 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
         software_output_device.Pass());
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
-    resource_provider_ =
-        ResourceProvider::Create(output_surface_.get(), NULL, 0, false, 1);
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+    resource_provider_ = ResourceProvider::Create(
+        output_surface_.get(), shared_bitmap_manager_.get(), 0, false, 1);
     renderer_ = SoftwareRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider());
   }
@@ -52,6 +53,7 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
   LayerTreeSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<SoftwareRenderer> renderer_;
 };
@@ -79,9 +81,10 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
       root_render_pass_id, outer_rect, outer_rect, gfx::Transform());
   scoped_ptr<SolidColorDrawQuad> outer_quad = SolidColorDrawQuad::Create();
   outer_quad->SetNew(
-      shared_quad_state.get(), outer_rect, SK_ColorYELLOW, false);
+      shared_quad_state.get(), outer_rect, outer_rect, SK_ColorYELLOW, false);
   scoped_ptr<SolidColorDrawQuad> inner_quad = SolidColorDrawQuad::Create();
-  inner_quad->SetNew(shared_quad_state.get(), inner_rect, SK_ColorCYAN, false);
+  inner_quad->SetNew(
+      shared_quad_state.get(), inner_rect, inner_rect, SK_ColorCYAN, false);
   inner_quad->visible_rect = visible_rect;
   root_render_pass->AppendQuad(inner_quad.PassAs<DrawQuad>());
   root_render_pass->AppendQuad(outer_quad.PassAs<DrawQuad>());
@@ -96,7 +99,6 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
                         device_scale_factor,
                         device_viewport_rect,
                         device_viewport_rect,
-                        true,
                         false);
 
   SkBitmap output;
@@ -174,12 +176,14 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   outer_quad->SetNew(shared_quad_state.get(),
                      outer_rect,
                      outer_rect,
+                     outer_rect,
                      resource_yellow,
                      gfx::RectF(outer_size),
                      outer_size,
                      false);
   scoped_ptr<TileDrawQuad> inner_quad = TileDrawQuad::Create();
   inner_quad->SetNew(shared_quad_state.get(),
+                     inner_rect,
                      inner_rect,
                      inner_rect,
                      resource_cyan,
@@ -199,7 +203,6 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                         device_scale_factor,
                         device_viewport_rect,
                         device_viewport_rect,
-                        true,
                         false);
 
   SkBitmap output;
@@ -263,6 +266,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   quad->SetNew(shared_quad_state.get(),
                tile_rect,
                tile_rect,
+               tile_rect,
                resource_cyan,
                gfx::RectF(tile_size),
                tile_size,
@@ -280,7 +284,6 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
                         device_scale_factor,
                         device_viewport_rect,
                         device_viewport_rect,
-                        true,
                         false);
 
   SkBitmap output;
@@ -336,7 +339,6 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
                         device_scale_factor,
                         viewport_rect,
                         viewport_rect,
-                        true,
                         false);
   renderer()->GetFramebufferPixels(output.getPixels(), viewport_rect);
 
@@ -361,7 +363,6 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
                         device_scale_factor,
                         viewport_rect,
                         viewport_rect,
-                        true,
                         false);
   renderer()->GetFramebufferPixels(output.getPixels(), viewport_rect);
 
@@ -413,7 +414,6 @@ TEST_F(SoftwareRendererTest, RenderPassVisibleRect) {
                         device_scale_factor,
                         viewport_rect,
                         viewport_rect,
-                        true,
                         false);
   renderer()->GetFramebufferPixels(output.getPixels(), viewport_rect);
 

@@ -16,7 +16,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
-#include "google_apis/gaia/oauth2_access_token_fetcher.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -107,9 +106,8 @@ class OAuth2LoginVerifier : public base::SupportsWeakPtr<OAuth2LoginVerifier>,
                     const base::Closure& task_to_retry,
                     const ErrorHandler& error_handler);
 
-  // Delays operation defined with |callback| based on the current networking
-  // conditions.
-  bool DelayNetworkCall(const base::Closure& callback);
+  // Called when network is connected.
+  void VerifyProfileTokensImpl(Profile* profile);
 
   OAuth2LoginVerifier::Delegate* delegate_;
   scoped_refptr<net::URLRequestContextGetter> system_request_context_;

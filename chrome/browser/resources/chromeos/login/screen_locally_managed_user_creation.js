@@ -546,10 +546,7 @@ login.createScreen('LocallyManagedUserCreationScreen',
 
       // Toggle 'animation' class for the duration of WebKit transition.
       this.getScreenElement('flip-photo').addEventListener(
-          'click', function(e) {
-            previewElement.classList.add('animation');
-            imageGrid.flipPhoto = !imageGrid.flipPhoto;
-          });
+          'click', this.handleFlipPhoto_.bind(this));
       this.getScreenElement('image-stream-crop').addEventListener(
           'webkitTransitionEnd', function(e) {
             previewElement.classList.remove('animation');
@@ -1446,14 +1443,29 @@ login.createScreen('LocallyManagedUserCreationScreen',
     },
 
     /**
+     * Handle camera-photo flip.
+     */
+    handleFlipPhoto_: function() {
+      var imageGrid = this.getScreenElement('image-grid');
+      imageGrid.previewElement.classList.add('animation');
+      imageGrid.flipPhoto = !imageGrid.flipPhoto;
+      var flipMessageId = imageGrid.flipPhoto ?
+         'photoFlippedAccessibleText' : 'photoFlippedBackAccessibleText';
+      announceAccessibleMessage(loadTimeData.getString(flipMessageId));
+    },
+
+    /**
      * Handle photo capture from the live camera stream.
      */
     handleTakePhoto_: function(e) {
       this.getScreenElement('image-grid').takePhoto();
+      chrome.send('supervisedUserTakePhoto');
     },
 
     handlePhotoTaken_: function(e) {
       chrome.send('supervisedUserPhotoTaken', [e.dataURL]);
+      announceAccessibleMessage(
+          loadTimeData.getString('photoCaptureAccessibleText'));
     },
 
     /**
@@ -1470,6 +1482,9 @@ login.createScreen('LocallyManagedUserCreationScreen',
     handleDiscardPhoto_: function(e) {
       var imageGrid = this.getScreenElement('image-grid');
       imageGrid.discardPhoto();
+      chrome.send('supervisedUserDiscardPhoto');
+      announceAccessibleMessage(
+          loadTimeData.getString('photoDiscardAccessibleText'));
     },
 
     setCameraPresent: function(present) {

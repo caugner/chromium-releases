@@ -23,11 +23,10 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/window_tree_client.h"
-#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
@@ -35,6 +34,7 @@
 #include "ui/gfx/vector2d.h"
 #include "ui/views/background.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace ash {
 namespace internal {
@@ -235,6 +235,7 @@ class PanelCalloutWidget : public views::Widget {
     params.bounds = ScreenUtil::ConvertRectToScreen(parent, gfx::Rect());
     params.bounds.set_width(kArrowWidth);
     params.bounds.set_height(kArrowHeight);
+    params.accept_events = false;
     // Why do we need this and can_activate = false?
     set_focus_on_creation(false);
     Init(params);
@@ -370,7 +371,6 @@ void PanelLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
     panel_info.slide_in = true;
   }
   panel_windows_.push_back(panel_info);
-  child->AddObserver(this);
   wm::GetWindowState(child)->AddObserver(this);
   Relayout();
 }
@@ -387,7 +387,6 @@ void PanelLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
     delete found->callout_widget;
     panel_windows_.erase(found);
   }
-  child->RemoveObserver(this);
   wm::GetWindowState(child)->RemoveObserver(this);
 
   if (dragged_panel_ == child)
@@ -401,6 +400,8 @@ void PanelLayoutManager::OnWindowRemovedFromLayout(aura::Window* child) {
 
 void PanelLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
                                                         bool visible) {
+  if (visible)
+    wm::GetWindowState(child)->Restore();
   Relayout();
 }
 
@@ -459,9 +460,9 @@ void PanelLayoutManager::OnShelfAlignmentChanged(aura::Window* root_window) {
 /////////////////////////////////////////////////////////////////////////////
 // PanelLayoutManager, WindowObserver implementation:
 
-void PanelLayoutManager::OnPostWindowShowTypeChange(
+void PanelLayoutManager::OnPostWindowStateTypeChange(
     wm::WindowState* window_state,
-    wm::WindowShowType old_type) {
+    wm::WindowStateType old_type) {
   // If the shelf is currently hidden then windows will not actually be shown
   // but the set to restore when the shelf becomes visible is updated.
   if (restore_windows_on_shelf_visible_) {
@@ -478,12 +479,6 @@ void PanelLayoutManager::OnPostWindowShowTypeChange(
     MinimizePanel(window_state->window());
   else
     RestorePanel(window_state->window());
-}
-
-void PanelLayoutManager::OnWindowVisibilityChanged(
-    aura::Window* window, bool visible) {
-  if (visible)
-    wm::GetWindowState(window)->Restore();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -545,7 +540,7 @@ void PanelLayoutManager::WillChangeVisibilityState(
 // PanelLayoutManager private implementation:
 
 void PanelLayoutManager::MinimizePanel(aura::Window* panel) {
-  views::corewm::SetWindowVisibilityAnimationType(
+  ::wm::SetWindowVisibilityAnimationType(
       panel, WINDOW_VISIBILITY_ANIMATION_TYPE_MINIMIZE);
   ui::Layer* layer = panel->layer();
   ui::ScopedLayerAnimationSettings panel_slide_settings(layer->GetAnimator());
@@ -608,8 +603,10 @@ void PanelLayoutManager::Relayout() {
     }
 
     // If the shelf is currently hidden (full-screen mode), minimize panel until
-    // full-screen mode is exited.
-    if (restore_windows_on_shelf_visible_) {
+    // full-screen mode is exited. When a panel is dragged from another display
+    // the shelf state does not update before the panel is added so we exclude
+    // the dragged panel.
+    if (panel != dragged_panel_ && restore_windows_on_shelf_visible_) {
       wm::GetWindowState(panel)->Minimize();
       restore_windows_on_shelf_visible_->Add(panel);
       continue;
@@ -846,16 +843,13 @@ void PanelLayoutManager::UpdateCallouts() {
     SetChildBoundsDirect(callout_widget->GetNativeWindow(), callout_bounds);
     panel_container_->StackChildAbove(callout_widget->GetNativeWindow(),
                                       panel);
-    callout_widget->Show();
 
     ui::Layer* layer = callout_widget->GetNativeWindow()->layer();
     // If the panel is not over the callout position or has just become visible
     // then fade in the callout.
-    if ((distance_until_over_panel > 0 || layer->GetTargetOpacity() < 1) &&
-        panel->layer()->GetTargetTransform().IsIdentity()) {
+    if ((distance_until_over_panel > 0 || layer->GetTargetOpacity() < 1)) {
       if (distance_until_over_panel > 0 &&
           slide_distance >= distance_until_over_panel) {
-        layer->SetOpacity(0);
         // If the panel is not yet over the callout, then delay fading in
         // the callout until after the panel should be over it.
         int delay = kPanelSlideDurationMilliseconds *
@@ -866,16 +860,18 @@ void PanelLayoutManager::UpdateCallouts() {
             base::TimeDelta::FromMilliseconds(delay),
             ui::LayerAnimationElement::OPACITY);
       }
-      {
-        ui::ScopedLayerAnimationSettings callout_settings(layer->GetAnimator());
-        callout_settings.SetPreemptionStrategy(
-            ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
-        callout_settings.SetTransitionDuration(
-            base::TimeDelta::FromMilliseconds(
-                kCalloutFadeDurationMilliseconds));
-        layer->SetOpacity(1);
-      }
+      ui::ScopedLayerAnimationSettings callout_settings(layer->GetAnimator());
+      callout_settings.SetPreemptionStrategy(
+          ui::LayerAnimator::REPLACE_QUEUED_ANIMATIONS);
+      callout_settings.SetTransitionDuration(
+          base::TimeDelta::FromMilliseconds(
+              kCalloutFadeDurationMilliseconds));
+      layer->SetOpacity(1);
     }
+
+    // Show after changing the opacity animation. This way we don't have a
+    // state where the widget is visible but the opacity is 0.
+    callout_widget->Show();
   }
 }
 

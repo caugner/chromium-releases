@@ -13,7 +13,6 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
-#include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
@@ -28,8 +27,9 @@
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/core/browser/autofill_manager.h"
+#include "components/password_manager/core/browser/password_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/view_type_utils.h"
 
@@ -39,11 +39,10 @@
 #include "chrome/browser/ui/android/window_android_helper.h"
 #else
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
-#include "chrome/browser/extensions/extension_web_contents_observer.h"
+#include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
 #include "chrome/browser/net/predictor_tab_helper.h"
 #include "chrome/browser/network_time/navigation_time_helper.h"
-#include "chrome/browser/password_manager/password_generation_manager.h"
 #include "chrome/browser/plugins/plugin_observer.h"
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
@@ -110,9 +109,6 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 
   // Create all the tab helpers.
 
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-
   // SessionTabHelper comes first because it sets up the tab ID, and other
   // helpers may rely on that.
   SessionTabHelper::CreateForWebContents(web_contents);
@@ -121,7 +117,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 
   AlternateErrorPageTabObserver::CreateForWebContents(web_contents);
   autofill::TabAutofillManagerDelegate::CreateForWebContents(web_contents);
-  autofill::AutofillDriverImpl::CreateForWebContentsAndDelegate(
+  autofill::ContentAutofillDriver::CreateForWebContentsAndDelegate(
       web_contents,
       autofill::TabAutofillManagerDelegate::FromWebContents(web_contents),
       g_browser_process->GetApplicationLocale(),
@@ -153,7 +149,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   WindowAndroidHelper::CreateForWebContents(web_contents);
 #else
   chrome_browser_net::PredictorTabHelper::CreateForWebContents(web_contents);
-  extensions::ExtensionWebContentsObserver::CreateForWebContents(web_contents);
+  extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
+      web_contents);
   extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
   ExternalProtocolObserver::CreateForWebContents(web_contents);
   HungPluginTabHelper::CreateForWebContents(web_contents);
@@ -183,6 +180,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 #endif
 
 #if defined(ENABLE_MANAGED_USERS)
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   if (profile->IsManaged()) {
     ManagedModeNavigationObserver::CreateForWebContents(web_contents);
   }

@@ -210,15 +210,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
       }.bind(this));
     }.bind(this));
 
-    // Get the command line option.
-    group.add(function(done) {
-      chrome.commandLinePrivate.hasSwitch(
-          'file-manager-show-checkboxes', function(flag) {
-        this.showCheckboxes_ = flag;
-        done();
-      }.bind(this));
-    }.bind(this));
-
     group.run(callback);
   };
 
@@ -387,7 +378,8 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
                                    this.fileOperationManager_,
                                    this.metadataCache_,
                                    this.directoryModel_,
-                                   this.volumeManager_);
+                                   this.volumeManager_,
+                                   this.ui_.multiProfileShareDialog);
     controller.attachDragSource(this.table_.list);
     controller.attachFileListDropTarget(this.table_.list);
     controller.attachDragSource(this.grid_);
@@ -472,6 +464,10 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         event.preventDefault();
       };
 
+      var minimizeButton = this.dialogDom_.querySelector('#minimize-button');
+      minimizeButton.addEventListener('click', this.onMinimize.bind(this));
+      minimizeButton.addEventListener('mousedown', preventFocus);
+
       var maximizeButton = this.dialogDom_.querySelector('#maximize-button');
       maximizeButton.addEventListener('click', this.onMaximize.bind(this));
       maximizeButton.addEventListener('mousedown', preventFocus);
@@ -493,6 +489,10 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
         e.stopPropagation();
       });
     }
+  };
+
+  FileManager.prototype.onMinimize = function() {
+    chrome.app.window.current().minimize();
   };
 
   FileManager.prototype.onMaximize = function() {
@@ -751,9 +751,6 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     this.grid_ = dom.querySelector('.thumbnail-grid');
     this.spinner_ = dom.querySelector('#list-container > .spinner-layer');
     this.showSpinner_(true);
-
-    // Check the option to hide the selecting checkboxes.
-    this.table_.showCheckboxes = this.showCheckboxes_;
 
     var fullPage = this.dialogType == DialogType.FULL_PAGE;
     FileTable.decorate(this.table_, this.metadataCache_, fullPage);
@@ -1585,7 +1582,9 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
       // Handle restoring after crash, or the gallery action.
       // TODO(mtomasz): Use the gallery action instead of just the gallery
       //     field.
-      if (this.params_.gallery || this.params_.action === 'gallery') {
+      if (this.params_.gallery ||
+          this.params_.action === 'gallery' ||
+          this.params_.action === 'gallery-video') {
         if (!opt_selectionEntry) {
           // Non-existent file or a directory.
           // Reloading while the Gallery is open with empty or multiple
@@ -2172,8 +2171,16 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
 
   /**
    * Called when a dialog is shown or hidden.
-   * @param {boolean} flag True if a dialog is shown, false if hidden.   */
+   * @param {boolean} flag True if a dialog is shown, false if hidden.
+   */
   FileManager.prototype.onDialogShownOrHidden = function(show) {
+    if (show) {
+      // If a dialog is shown, activate the window.
+      var appWindow = chrome.app.window.current();
+      if (appWindow)
+        appWindow.focus();
+    }
+
     // Set/unset a flag to disable dragging on the title area.
     this.dialogContainer_.classList.toggle('disable-header-drag', show);
   };
@@ -2200,7 +2207,7 @@ var BOTTOM_MARGIN_FOR_PREVIEW_PANEL_PX = 52;
     if (!this.currentVolumeInfo_)
       return;
 
-    this.document_.title = this.currentVolumeInfo_.getLabel();
+    this.document_.title = this.currentVolumeInfo_.label;
   };
 
   /**

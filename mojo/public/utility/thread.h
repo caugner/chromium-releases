@@ -12,7 +12,7 @@
 #include <pthread.h>
 #include <stddef.h>
 
-#include "mojo/public/system/macros.h"
+#include "mojo/public/cpp/system/macros.h"
 
 namespace mojo {
 

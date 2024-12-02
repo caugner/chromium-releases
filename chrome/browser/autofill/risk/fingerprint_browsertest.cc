@@ -8,6 +8,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/port.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/common/chrome_content_client.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/autofill/content/browser/risk/proto/fingerprint.pb.h"
 #include "content/public/browser/geolocation_provider.h"
@@ -38,6 +39,7 @@ void GetFingerprintInternal(
     const std::string& accept_languages,
     const base::Time& install_time,
     const std::string& app_locale,
+    const std::string& user_agent,
     const base::TimeDelta& timeout,
     const base::Callback<void(scoped_ptr<Fingerprint>)>& callback);
 
@@ -93,11 +95,15 @@ class AutofillRiskFingerprintTest : public InProcessBrowserTest {
     EXPECT_TRUE(machine.cpu().has_vendor_name());
     EXPECT_TRUE(machine.cpu().has_brand());
     EXPECT_TRUE(machine.has_ram());
-    ASSERT_TRUE(machine.has_graphics_card());
-    EXPECT_TRUE(machine.graphics_card().has_vendor_id());
-    EXPECT_TRUE(machine.graphics_card().has_device_id());
     EXPECT_TRUE(machine.has_browser_build());
     EXPECT_TRUE(machine.has_browser_feature());
+    if (content::GpuDataManager::GetInstance()->GpuAccessAllowed(NULL)) {
+      ASSERT_TRUE(machine.has_graphics_card());
+      EXPECT_TRUE(machine.graphics_card().has_vendor_id());
+      EXPECT_TRUE(machine.graphics_card().has_device_id());
+    } else {
+      EXPECT_FALSE(machine.has_graphics_card());
+    }
 
     ASSERT_TRUE(fingerprint->has_transient_state());
     const Fingerprint::TransientState& transient_state =
@@ -171,11 +177,6 @@ class AutofillRiskFingerprintTest : public InProcessBrowserTest {
 
 // Test that getting a fingerprint works on some basic level.
 IN_PROC_BROWSER_TEST_F(AutofillRiskFingerprintTest, GetFingerprint) {
-  // This test hangs when there is no GPU process.
-  // http://crbug.com/327272
-  if (!content::GpuDataManager::GetInstance()->GpuAccessAllowed(NULL))
-    return;
-
   content::Geoposition position;
   position.latitude = kLatitude;
   position.longitude = kLongitude;
@@ -198,7 +199,7 @@ IN_PROC_BROWSER_TEST_F(AutofillRiskFingerprintTest, GetFingerprint) {
   internal::GetFingerprintInternal(
       kObfuscatedGaiaId, window_bounds_, content_bounds_, screen_info,
       "25.0.0.123", kCharset, kAcceptLanguages, base::Time::Now(),
-      g_browser_process->GetApplicationLocale(),
+      g_browser_process->GetApplicationLocale(), GetUserAgent(),
       base::TimeDelta::FromDays(1),  // Ought to be longer than any test run.
       base::Bind(&AutofillRiskFingerprintTest::GetFingerprintTestCallback,
                  base::Unretained(this)));

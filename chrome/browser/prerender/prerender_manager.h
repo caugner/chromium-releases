@@ -28,7 +28,7 @@
 #include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_origin.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
-#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/session_storage_namespace.h"
@@ -74,7 +74,7 @@ class PrerenderLocalPredictor;
 class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                          public base::NonThreadSafe,
                          public content::NotificationObserver,
-                         public BrowserContextKeyedService,
+                         public KeyedService,
                          public MediaCaptureDevicesDispatcher::Observer {
  public:
   // NOTE: New values need to be appended, since they are used in histograms.
@@ -108,7 +108,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   virtual ~PrerenderManager();
 
-  // From BrowserContextKeyedService:
+  // From KeyedService:
   virtual void Shutdown() OVERRIDE;
 
   // Entry points for adding prerenders.
@@ -276,6 +276,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                           uint8 experiment_id,
                           int cookie_status) const;
 
+  // Record a cookie send type histogram (see prerender_histograms.h).
+  void RecordCookieSendType(Origin origin,
+                            uint8 experiment_id,
+                            int cookie_send_type) const;
+
   // content::NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -339,6 +344,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                                 int frame_id,
                                 const GURL& url,
                                 const GURL& frame_url,
+                                bool is_for_blocking_resource,
                                 PrerenderContents::CookieEvent event,
                                 const net::CookieList* cookie_list);
 
@@ -390,6 +396,8 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
     int handle_count() const { return handle_count_; }
 
+    base::TimeTicks abandon_time() const { return abandon_time_; }
+
     base::TimeTicks expiry_time() const { return expiry_time_; }
     void set_expiry_time(base::TimeTicks expiry_time) {
       expiry_time_ = expiry_time;
@@ -412,6 +420,9 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
     // pending prerenders, this will always be 1, since the PrerenderManager
     // only merges handles of running prerenders.
     int handle_count_;
+
+    // The time when OnHandleNavigatedAway was called.
+    base::TimeTicks abandon_time_;
 
     // After this time, this prerender is no longer fresh, and should be
     // removed.

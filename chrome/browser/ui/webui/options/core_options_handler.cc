@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/net/url_fixer_upper.h"
@@ -24,10 +25,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
-#include "extensions/browser/extension_pref_value_map.h"
-#include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -99,9 +97,9 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
   localized_strings->SetString("controlledSettingExtensionWithName",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_CONTROLLED_SETTING_EXTENSION_WITH_NAME));
-  localized_strings->SetString("controlledSettingManageExtensions",
+  localized_strings->SetString("controlledSettingManageExtension",
       l10n_util::GetStringUTF16(
-          IDS_OPTIONS_CONTROLLED_SETTING_MANAGE_EXTENSIONS));
+          IDS_OPTIONS_CONTROLLED_SETTING_MANAGE_EXTENSION));
   localized_strings->SetString("controlledSettingDisableExtension",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE));
   localized_strings->SetString("controlledSettingRecommended",
@@ -180,6 +178,9 @@ void CoreOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("coreOptionsInitialize",
       base::Bind(&CoreOptionsHandler::HandleInitialize,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("onFinishedLoadingOptions",
+      base::Bind(&CoreOptionsHandler::OnFinishedLoading,
+                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback("fetchPrefs",
       base::Bind(&CoreOptionsHandler::HandleFetchPrefs,
                  base::Unretained(this)));
@@ -218,6 +219,11 @@ void CoreOptionsHandler::RegisterMessages() {
 void CoreOptionsHandler::HandleInitialize(const base::ListValue* args) {
   DCHECK(handlers_host_);
   handlers_host_->InitializeHandlers();
+}
+
+void CoreOptionsHandler::OnFinishedLoading(const base::ListValue* args) {
+  DCHECK(handlers_host_);
+  handlers_host_->OnFinishedLoading();
 }
 
 base::Value* CoreOptionsHandler::FetchPref(const std::string& pref_name) {
@@ -348,28 +354,14 @@ base::Value* CoreOptionsHandler::CreateValueForPref(
   if (!controlling_pref)
     controlling_pref = pref;
 
+  // We don't show a UI here for extension controlled values because we opted to
+  // show a more obvious UI than an extension puzzle piece on the settings page.
   base::DictionaryValue* dict = new base::DictionaryValue;
   dict->Set("value", pref->GetValue()->DeepCopy());
-  if (controlling_pref->IsManaged()) {
+  if (controlling_pref->IsManaged())
     dict->SetString("controlledBy", "policy");
-  } else if (controlling_pref->IsExtensionControlled()) {
-    dict->SetString("controlledBy", "extension");
-    Profile* profile = Profile::FromWebUI(web_ui());
-    ExtensionPrefValueMap* extension_pref_value_map =
-        ExtensionPrefValueMapFactory::GetForBrowserContext(profile);
-    std::string extension_id =
-        extension_pref_value_map->GetExtensionControllingPref(
-            controlling_pref->name());
-
-    ExtensionService* extension_service = extensions::ExtensionSystem::Get(
-        profile)->extension_service();
-    scoped_ptr<base::DictionaryValue> dictionary =
-        extension_service->GetExtensionInfo(extension_id);
-    if (!dictionary->empty())
-      dict->Set("extension", dictionary.release());
-  } else if (controlling_pref->IsRecommended()) {
+  else if (controlling_pref->IsRecommended())
     dict->SetString("controlledBy", "recommended");
-  }
 
   const base::Value* recommended_value =
       controlling_pref->GetRecommendedValue();
@@ -436,7 +428,7 @@ void CoreOptionsHandler::HandleFetchPrefs(const base::ListValue* args) {
 
     result_value.Set(pref_name.c_str(), FetchPref(pref_name));
   }
-  web_ui()->CallJavascriptFunction(UTF16ToASCII(callback_function),
+  web_ui()->CallJavascriptFunction(base::UTF16ToASCII(callback_function),
                                    result_value);
 }
 

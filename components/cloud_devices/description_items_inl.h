@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/numerics/safe_conversions.h"
 #include "components/cloud_devices/description_items.h"
 
 // Implementation of templates defined in header file.
@@ -83,7 +84,7 @@ bool SelectionCapability<Option, Traits>::IsValid() const {
     if (!Traits::IsValid(options_[i]))
       return false;
   }
-  return default_idx_ >= 0 && default_idx_ < static_cast<int>(size());
+  return default_idx_ >= 0 && default_idx_ < base::checked_cast<int>(size());
 }
 
 template <class Option, class Traits>
@@ -124,7 +125,7 @@ void SelectionCapability<Option, Traits>::SaveTo(
   for (size_t i = 0; i < options_.size(); ++i) {
     base::DictionaryValue* option_value = new base::DictionaryValue;
     options_list->Append(option_value);
-    if (static_cast<int>(i) == default_idx_)
+    if (base::checked_cast<int>(i) == default_idx_)
       option_value->SetBoolean(json::kKeyIsDefault, true);
     Traits::Save(options_[i], option_value);
   }
@@ -170,6 +171,41 @@ template <class Traits>
 void EmptyCapability<Traits>::SaveTo(
     CloudDeviceDescription* description) const {
   description->CreateItem(Traits::GetCapabilityPath());
+}
+
+template <class Option, class Traits>
+ValueCapability<Option, Traits>::ValueCapability() {
+  Reset();
+}
+
+template <class Option, class Traits>
+ValueCapability<Option, Traits>::~ValueCapability() {}
+
+template <class Option, class Traits>
+bool ValueCapability<Option, Traits>::IsValid() const {
+  return Traits::IsValid(value());
+}
+
+template <class Option, class Traits>
+bool ValueCapability<Option, Traits>::LoadFrom(
+    const CloudDeviceDescription& description) {
+  Reset();
+  const base::DictionaryValue* option_value =
+      description.GetItem(Traits::GetCapabilityPath());
+  if (!option_value)
+    return false;
+  Option option;
+  if (!Traits::Load(*option_value, &option))
+    return false;
+  set_value(option);
+  return IsValid();
+}
+
+template <class Option, class Traits>
+void ValueCapability<Option, Traits>::SaveTo(
+    CloudDeviceDescription* description) const {
+  DCHECK(IsValid());
+  Traits::Save(value(), description->CreateItem(Traits::GetCapabilityPath()));
 }
 
 template <class Option, class Traits>

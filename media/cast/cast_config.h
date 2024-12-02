@@ -12,10 +12,14 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/shared_memory.h"
+#include "base/single_thread_task_runner.h"
 #include "media/cast/cast_defines.h"
 #include "media/cast/transport/cast_transport_config.h"
 
 namespace media {
+class VideoEncodeAccelerator;
+
 namespace cast {
 
 enum RtcpMode {
@@ -134,19 +138,20 @@ struct PcmAudioFrame {
 typedef transport::Packet Packet;
 typedef transport::PacketList PacketList;
 
-enum CastInitializationStatus {
-  STATUS_INITIALIZED,
-  STATUS_INVALID_CAST_ENVIRONMENT,
-  STATUS_INVALID_CRYPTO_CONFIGURATION,
-  STATUS_UNSUPPORTED_AUDIO_CODEC,
-  STATUS_INVALID_AUDIO_CONFIGURATION,
-  STATUS_INVALID_VIDEO_CONFIGURATION,
-  STATUS_GPU_ACCELERATION_NOT_SUPPORTED,
-  STATUS_GPU_ACCELERATION_ERROR,
-};
-
 typedef base::Callback<void(CastInitializationStatus)>
     CastInitializationCallback;
+
+typedef base::Callback<void(scoped_refptr<base::SingleThreadTaskRunner>,
+                            scoped_ptr<media::VideoEncodeAccelerator>)>
+    ReceiveVideoEncodeAcceleratorCallback;
+typedef base::Callback<void(const ReceiveVideoEncodeAcceleratorCallback&)>
+    CreateVideoEncodeAcceleratorCallback;
+
+typedef base::Callback<void(scoped_ptr<base::SharedMemory>)>
+    ReceiveVideoEncodeMemoryCallback;
+typedef base::Callback<void(size_t size,
+                            const ReceiveVideoEncodeMemoryCallback&)>
+    CreateVideoEncodeMemoryCallback;
 
 }  // namespace cast
 }  // namespace media

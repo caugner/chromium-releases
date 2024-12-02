@@ -47,7 +47,9 @@
 #if defined(OS_WIN)
 #include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
+#include "chrome/common/extensions/api/networking_private/networking_private_crypto.h"
 #include "chrome/utility/media_galleries/itunes_pref_parser_win.h"
+#include "components/wifi/wifi_service.h"
 #include "printing/emf_win.h"
 #include "ui/gfx/gdi_util.h"
 #endif  // defined(OS_WIN)
@@ -296,10 +298,12 @@ typedef PdfFunctionsBase PdfFunctions;
 #endif  // OS_WIN
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-void SendMediaMetadataToHost(
+void FinishParseMediaMetadata(
+    metadata::MediaMetadataParser* parser,
     scoped_ptr<extensions::api::media_galleries::MediaMetadata> metadata) {
   Send(new ChromeUtilityHostMsg_ParseMediaMetadata_Finished(
       true, *(metadata->ToValue().get())));
+  ReleaseProcessIfNeeded();
 }
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
@@ -399,6 +403,11 @@ bool ChromeContentUtilityClient::OnMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeUtilityMsg_IndexPicasaAlbumsContents,
                         OnIndexPicasaAlbumsContents)
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if defined(OS_WIN)
+    IPC_MESSAGE_HANDLER(ChromeUtilityHostMsg_GetAndEncryptWiFiCredentials,
+                        OnGetAndEncryptWiFiCredentials)
+#endif  // defined(OS_WIN)
 
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -572,12 +581,13 @@ void ChromeContentUtilityClient::OnRenderPDFPagesToMetafile(
 void ChromeContentUtilityClient::OnRenderPDFPagesToPWGRaster(
     IPC::PlatformFileForTransit pdf_transit,
     const printing::PdfRenderSettings& settings,
+    const printing::PwgRasterSettings& bitmap_settings,
     IPC::PlatformFileForTransit bitmap_transit) {
   base::PlatformFile pdf =
       IPC::PlatformFileForTransitToPlatformFile(pdf_transit);
   base::PlatformFile bitmap =
       IPC::PlatformFileForTransitToPlatformFile(bitmap_transit);
-  if (RenderPDFPagesToPWGRaster(pdf, settings, bitmap)) {
+  if (RenderPDFPagesToPWGRaster(pdf, settings, bitmap_settings, bitmap)) {
     Send(new ChromeUtilityHostMsg_RenderPDFPagesToPWGRaster_Succeeded());
   } else {
     Send(new ChromeUtilityHostMsg_RenderPDFPagesToPWGRaster_Failed());
@@ -665,6 +675,7 @@ bool ChromeContentUtilityClient::RenderPDFToWinMetafile(
 bool ChromeContentUtilityClient::RenderPDFPagesToPWGRaster(
     base::PlatformFile pdf_file,
     const printing::PdfRenderSettings& settings,
+    const printing::PwgRasterSettings& bitmap_settings,
     base::PlatformFile bitmap_file) {
   bool autoupdate = true;
   if (!g_pdf_lib.Get().IsValid())
@@ -697,14 +708,34 @@ bool ChromeContentUtilityClient::RenderPDFPagesToPWGRaster(
   cloud_print::BitmapImage image(settings.area().size(),
                                  cloud_print::BitmapImage::BGRA);
   for (int i = 0; i < total_page_count; ++i) {
-    if (!g_pdf_lib.Get().RenderPDFPageToBitmap(
-             data.data(), data.size(), i, image.pixel_data(),
-             image.size().width(), image.size().height(), settings.dpi(),
-             settings.dpi(), autoupdate)) {
+    int page_number = i;
+
+    if (bitmap_settings.reverse_page_order) {
+      page_number = total_page_count - 1 - page_number;
+    }
+
+    bool rotate = false;
+
+    // Transform odd pages.
+    if (page_number % 2) {
+      rotate =
+          (bitmap_settings.odd_page_transform != printing::TRANSFORM_NORMAL);
+    }
+
+    if (!g_pdf_lib.Get().RenderPDFPageToBitmap(data.data(),
+                                               data.size(),
+                                               page_number,
+                                               image.pixel_data(),
+                                               image.size().width(),
+                                               image.size().height(),
+                                               settings.dpi(),
+                                               settings.dpi(),
+                                               autoupdate)) {
       return false;
     }
     std::string pwg_page;
-    if (!encoder.EncodePage(image, settings.dpi(), total_page_count, &pwg_page))
+    if (!encoder.EncodePage(
+            image, settings.dpi(), total_page_count, &pwg_page, rotate))
       return false;
     bytes_written = base::WritePlatformFileAtCurrentPos(bitmap_file,
                                                         pwg_page.data(),
@@ -823,13 +854,12 @@ void ChromeContentUtilityClient::OnParseMediaMetadata(
     const std::string& mime_type,
     int64 total_size) {
   // Only one IPCDataSource may be created and added to the list of handlers.
-  CHECK(!media_metadata_parser_);
   metadata::IPCDataSource* source = new metadata::IPCDataSource(total_size);
   handlers_.push_back(source);
 
-  media_metadata_parser_.reset(new metadata::MediaMetadataParser(source,
-                                                                 mime_type));
-  media_metadata_parser_->Start(base::Bind(&SendMediaMetadataToHost));
+  metadata::MediaMetadataParser* parser =
+      new metadata::MediaMetadataParser(source, mime_type);
+  parser->Start(base::Bind(&FinishParseMediaMetadata, base::Owned(parser)));
 }
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
@@ -904,5 +934,28 @@ void ChromeContentUtilityClient::OnIndexPicasaAlbumsContents(
   ReleaseProcessIfNeeded();
 }
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
+
+#if defined(OS_WIN)
+void ChromeContentUtilityClient::OnGetAndEncryptWiFiCredentials(
+    const std::string& network_guid,
+    const std::vector<uint8>& public_key) {
+  scoped_ptr<wifi::WiFiService> wifi_service(wifi::WiFiService::Create());
+  wifi_service->Initialize(NULL);
+
+  std::string key_data;
+  std::string error;
+  wifi_service->GetKeyFromSystem(network_guid, &key_data, &error);
+
+  std::vector<uint8> ciphertext;
+  bool success = error.empty() && !key_data.empty();
+  if (success) {
+    NetworkingPrivateCrypto crypto;
+    success = crypto.EncryptByteString(public_key, key_data, &ciphertext);
+  }
+
+  Send(new ChromeUtilityHostMsg_GotEncryptedWiFiCredentials(ciphertext,
+                                                            success));
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace chrome

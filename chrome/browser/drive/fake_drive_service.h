@@ -238,6 +238,11 @@ class FakeDriveService : public DriveServiceInterface {
   virtual google_apis::CancelCallback GetRemainingResourceList(
       const GURL& next_link,
       const google_apis::GetResourceListCallback& callback) OVERRIDE;
+  virtual google_apis::CancelCallback AddPermission(
+      const std::string& resource_id,
+      const std::string& email,
+      google_apis::drive::PermissionRole role,
+      const google_apis::EntryActionCallback& callback) OVERRIDE;
 
   // Adds a new file with the given parameters. On success, returns
   // HTTP_CREATED with the parsed entry.
@@ -248,6 +253,19 @@ class FakeDriveService : public DriveServiceInterface {
                   const std::string& title,
                   bool shared_with_me,
                   const google_apis::GetResourceEntryCallback& callback);
+
+  // Adds a new file with the given |resource_id|. If the id already exists,
+  // it's an error. This is used for testing cross profile file sharing that
+  // needs to have matching resource IDs in different fake service instances.
+  // |callback| must not be null.
+  void AddNewFileWithResourceId(
+      const std::string& resource_id,
+      const std::string& content_type,
+      const std::string& content_data,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      bool shared_with_me,
+      const google_apis::GetResourceEntryCallback& callback);
 
   // Sets the last modified time for an entry specified by |resource_id|.
   // On success, returns HTTP_SUCCESS with the parsed entry.
@@ -276,13 +294,15 @@ class FakeDriveService : public DriveServiceInterface {
   void UpdateETag(google_apis::FileResource* file);
 
   // Adds a new entry based on the given parameters.
+  // |resource_id| can be empty, in the case, the id is automatically generated.
   // Returns a pointer to the newly added entry, or NULL if failed.
   const EntryInfo* AddNewEntry(
-    const std::string& content_type,
-    const std::string& content_data,
-    const std::string& parent_resource_id,
-    const std::string& title,
-    bool shared_with_me);
+      const std::string& resource_id,
+      const std::string& content_type,
+      const std::string& content_data,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      bool shared_with_me);
 
   // Core implementation of GetResourceList.
   // This method returns the slice of the all matched entries, and its range

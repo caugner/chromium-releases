@@ -19,14 +19,13 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/content_browser_test.h"
+#include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
 #include "media/base/video_frame.h"
 #include "media/filters/skcanvas_video_renderer.h"
 #include "net/base/net_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkBitmapDevice.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/size_conversions.h"
@@ -58,7 +57,7 @@ namespace {
 // Convenience macro: Short-circuit a pass for platforms where setting up
 // high-DPI fails.
 #define PASS_TEST_IF_SCALE_FACTOR_NOT_SUPPORTED(factor) \
-  if (ui::GetImageScale( \
+  if (ui::GetScaleForScaleFactor( \
           GetScaleFactorForView(GetRenderWidgetHostViewPort())) != factor) {  \
     LOG(WARNING) << "Blindly passing this test: failed to set up "  \
                     "scale factor: " << factor;  \
@@ -75,9 +74,8 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
         callback_invoke_count_(0),
         frames_captured_(0) {}
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpOnMainThread() OVERRIDE {
     ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &test_dir_));
-    ContentBrowserTest::SetUpInProcessBrowserTestFixture();
   }
 
   // Attempts to set up the source surface.  Returns false if unsupported on the
@@ -173,7 +171,8 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
           base::Bind(
               &RenderWidgetHostViewBrowserTest::FinishCopyFromBackingStore,
               base::Unretained(this),
-              run_loop.QuitClosure()));
+              run_loop.QuitClosure()),
+          SkBitmap::kARGB_8888_Config);
       run_loop.Run();
 
       if (frames_captured())
@@ -377,7 +376,9 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTest,
       gfx::Rect(),
       frame_size(),
       base::Bind(&RenderWidgetHostViewBrowserTest::FinishCopyFromBackingStore,
-                 base::Unretained(this), run_loop.QuitClosure()));
+                 base::Unretained(this),
+                 run_loop.QuitClosure()),
+      SkBitmap::kARGB_8888_Config);
   // Delete the surface before the callback is run.
   GetRenderWidgetHostViewPort()->AcceleratedSurfaceRelease();
   run_loop.Run();
@@ -582,14 +583,12 @@ class CompositingRenderWidgetHostViewBrowserTestTabCapture
     media::SkCanvasVideoRenderer video_renderer;
 
     SkBitmap bitmap;
-    bitmap.setConfig(SkBitmap::kARGB_8888_Config,
-                     video_frame->visible_rect().width(),
-                     video_frame->visible_rect().height(),
-                     0, kOpaque_SkAlphaType);
+    bitmap.allocPixels(SkImageInfo::Make(video_frame->visible_rect().width(),
+                                         video_frame->visible_rect().height(),
+                                         kPMColor_SkColorType,
+                                         kOpaque_SkAlphaType));
     bitmap.allocPixels();
-
-    SkBitmapDevice device(bitmap);
-    SkCanvas canvas(&device);
+    SkCanvas canvas(bitmap);
 
     video_renderer.Paint(video_frame.get(),
                          &canvas,
@@ -875,12 +874,12 @@ class CompositingRenderWidgetHostViewTabCaptureHighDPI
  public:
   CompositingRenderWidgetHostViewTabCaptureHighDPI() : kScale(2.f) {}
 
-  virtual void SetUpCommandLine(CommandLine* cmd) OVERRIDE {
-    CompositingRenderWidgetHostViewBrowserTestTabCapture::SetUpCommandLine(cmd);
+  virtual void SetUpOnMainThread() OVERRIDE {
+    CommandLine* cmd = CommandLine::ForCurrentProcess();
     cmd->AppendSwitchASCII(switches::kForceDeviceScaleFactor,
                            base::StringPrintf("%f", scale()));
 #if defined(OS_WIN)
-    cmd->AppendSwitchASCII(switches::kHighDPISupport, "1");
+    gfx::ForceHighDPISupportForTesting(scale());
     gfx::EnableHighDPISupport();
 #endif
   }

@@ -31,7 +31,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/history/history_types.h"
@@ -70,6 +69,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/process_type.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
@@ -655,7 +655,7 @@ void ExtensionReadyNotificationObserver::Observe(
 
 ExtensionUnloadNotificationObserver::ExtensionUnloadNotificationObserver()
     : did_receive_unload_notification_(false) {
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::NotificationService::AllSources());
 }
 
@@ -665,7 +665,7 @@ ExtensionUnloadNotificationObserver::~ExtensionUnloadNotificationObserver() {
 void ExtensionUnloadNotificationObserver::Observe(
     int type, const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
+  if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED) {
     did_receive_unload_notification_ = true;
   } else {
     NOTREACHED();
@@ -1751,8 +1751,8 @@ NTPInfoObserver::NTPInfoObserver(AutomationProvider* automation,
   base::ListValue* default_sites_list = new base::ListValue;
   history::MostVisitedURLList urls = top_sites_->GetPrepopulatePages();
   for (size_t i = 0; i < urls.size(); ++i) {
-    default_sites_list->Append(base::Value::CreateStringValue(
-        urls[i].url.possibly_invalid_spec()));
+    default_sites_list->Append(
+        new base::StringValue(urls[i].url.possibly_invalid_spec()));
   }
   ntp_info_->Set("default_sites", default_sites_list);
 
@@ -2110,8 +2110,7 @@ void ProcessInfoObserver::OnDetailsAvailable() {
       base::ListValue* titles = new base::ListValue();
       for (size_t title_index = 0; title_index < iterator->titles.size();
            ++title_index) {
-        titles->Append(
-            base::Value::CreateStringValue(iterator->titles[title_index]));
+        titles->Append(new base::StringValue(iterator->titles[title_index]));
       }
       proc_data->Set("titles", titles);
 

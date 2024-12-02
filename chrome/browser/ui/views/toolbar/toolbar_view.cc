@@ -12,6 +12,8 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -29,17 +31,19 @@
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
+#include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
+#include "chrome/browser/ui/views/location_bar/page_action_with_badge_view.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/location_bar/translate_icon_view.h"
 #include "chrome/browser/ui/views/outdated_upgrade_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/back_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/home_button.h"
-#include "chrome/browser/ui/views/toolbar/origin_chip_view.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_button.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_origin_chip_view.h"
 #include "chrome/browser/ui/views/toolbar/wrench_menu.h"
 #include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "chrome/browser/upgrade_detector.h"
@@ -54,7 +58,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/theme_provider.h"
@@ -78,6 +82,15 @@
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
 #include "ui/native_theme/native_theme_aura.h"
+#endif
+
+#if !defined(OS_CHROMEOS)
+#include "chrome/browser/signin/signin_global_error_factory.h"
+#include "chrome/browser/sync/sync_global_error_factory.h"
+#endif
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
 #endif
 
 using base::UserMetricsAction;
@@ -106,6 +119,16 @@ bool IsStreamlinedHostedAppsEnabled() {
       switches::kEnableStreamlinedHostedApps);
 }
 
+#if !defined(OS_CHROMEOS)
+bool HasAshShell() {
+#if defined(USE_ASH)
+  return ash::Shell::HasInstance();
+#else
+  return false;
+#endif  // USE_ASH
+}
+#endif  // OS_CHROMEOS
+
 }  // namespace
 
 // static
@@ -123,7 +146,10 @@ ToolbarView::ToolbarView(Browser* browser)
       origin_chip_view_(NULL),
       browser_actions_(NULL),
       app_menu_(NULL),
-      browser_(browser) {
+      browser_(browser),
+      extension_message_bubble_factory_(
+          new extensions::ExtensionMessageBubbleFactory(browser->profile(),
+                                                        this)) {
   set_id(VIEW_ID_TOOLBAR);
 
   chrome::AddCommandObserver(browser_, IDC_BACK, this);
@@ -141,6 +167,8 @@ ToolbarView::ToolbarView(Browser* browser)
                  content::NotificationService::AllSources());
   if (OutdatedUpgradeBubbleView::IsAvailable()) {
     registrar_.Add(this, chrome::NOTIFICATION_OUTDATED_INSTALL,
+                   content::NotificationService::AllSources());
+    registrar_.Add(this, chrome::NOTIFICATION_OUTDATED_INSTALL_NO_AU,
                    content::NotificationService::AllSources());
   }
 #if defined(OS_WIN)
@@ -221,7 +249,7 @@ void ToolbarView::Init() {
   app_menu_->set_id(VIEW_ID_APP_MENU);
 
   // Always add children in order from left to right, for accessibility.
-  origin_chip_view_ = new OriginChipView(this);
+  origin_chip_view_ = new ToolbarOriginChipView(this);
   chrome::OriginChipPosition origin_chip_position =
       chrome::GetOriginChipPosition();
   AddChildView(back_);
@@ -241,6 +269,16 @@ void ToolbarView::Init() {
 
   LoadImages();
 
+  // Start global error services now so we badge the menu correctly in non-Ash.
+#if !defined(OS_CHROMEOS)
+  if (!HasAshShell()) {
+    SigninGlobalErrorFactory::GetForProfile(browser_->profile());
+#if !defined(OS_ANDROID)
+    SyncGlobalErrorFactory::GetForProfile(browser_->profile());
+#endif
+  }
+#endif  // OS_CHROMEOS
+
   // Add any necessary badges to the menu item based on the system state.
   // Do this after |app_menu_| has been added as a bubble may be shown that
   // needs the widget (widget found by way of app_menu_->GetWidget()).
@@ -249,8 +287,8 @@ void ToolbarView::Init() {
   location_bar_->Init();
 
   origin_chip_view_->Init();
-  if (chrome::ShouldDisplayOriginChip() || chrome::ShouldDisplayOriginChipV2())
-    location_bar_->set_origin_chip_view(origin_chip_view_);
+  if (origin_chip_view_->ShouldShow())
+    location_bar_->set_toolbar_origin_chip_view(origin_chip_view_);
 
   show_home_button_.Init(prefs::kShowHomeButton,
                          browser_->profile()->GetPrefs(),
@@ -271,11 +309,9 @@ void ToolbarView::Init() {
 
 void ToolbarView::OnWidgetVisibilityChanged(views::Widget* widget,
                                             bool visible) {
-  if (visible) {
-    extensions::ExtensionMessageBubbleView::MaybeShow(
-        browser_, this, app_menu_);
-    GetWidget()->RemoveObserver(this);
-  }
+  // Safe to call multiple times; the bubble will only appear once.
+  if (visible)
+    extension_message_bubble_factory_->MaybeShow(app_menu_);
 }
 
 void ToolbarView::Update(WebContents* tab) {
@@ -318,6 +354,28 @@ views::View* ToolbarView::GetTranslateBubbleAnchor() {
       translate_icon_view : app_menu_;
 }
 
+void ToolbarView::ExecuteExtensionCommand(
+    const extensions::Extension* extension,
+    const extensions::Command& command) {
+  browser_actions_->ExecuteExtensionCommand(extension, command);
+}
+
+void ToolbarView::ShowPageActionPopup(const extensions::Extension* extension) {
+  extensions::ExtensionActionManager* extension_manager =
+      extensions::ExtensionActionManager::Get(browser_->profile());
+  ExtensionAction* extension_action =
+      extension_manager->GetPageAction(*extension);
+  if (extension_action) {
+    location_bar_->GetPageActionView(extension_action)->image_view()->
+        ExecuteAction(ExtensionPopup::SHOW);
+  }
+}
+
+void ToolbarView::ShowBrowserActionPopup(
+    const extensions::Extension* extension) {
+  browser_actions_->ShowPopup(extension, true);
+}
+
 views::MenuButton* ToolbarView::app_menu() const {
   return app_menu_;
 }
@@ -333,8 +391,8 @@ bool ToolbarView::SetPaneFocus(views::View* initial_focus) {
   return true;
 }
 
-void ToolbarView::GetAccessibleState(ui::AccessibleViewState* state) {
-  state->role = ui::AccessibilityTypes::ROLE_TOOLBAR;
+void ToolbarView::GetAccessibleState(ui::AXViewState* state) {
+  state->role = ui::AX_ROLE_TOOLBAR;
   state->name = l10n_util::GetStringUTF16(IDS_ACCNAME_TOOLBAR);
 }
 
@@ -444,17 +502,8 @@ void ToolbarView::EnabledStateChangedForCommand(int id, bool enabled) {
 
 void ToolbarView::ButtonPressed(views::Button* sender,
                                 const ui::Event& event) {
-  int command = sender->tag();
-  WindowOpenDisposition disposition =
-      ui::DispositionFromEventFlags(event.flags());
-  if ((disposition == CURRENT_TAB) &&
-      ((command == IDC_BACK) || (command == IDC_FORWARD))) {
-    // Forcibly reset the location bar, since otherwise it won't discard any
-    // ongoing user edits, since it doesn't realize this is a user-initiated
-    // action.
-    location_bar_->Revert();
-  }
-  chrome::ExecuteCommandWithDisposition(browser_, command, disposition);
+  chrome::ExecuteCommandWithDisposition(
+      browser_, sender->tag(), ui::DispositionFromEventFlags(event.flags()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -471,7 +520,10 @@ void ToolbarView::Observe(int type,
       UpdateAppMenuState();
       break;
     case chrome::NOTIFICATION_OUTDATED_INSTALL:
-      ShowOutdatedInstallNotification();
+      ShowOutdatedInstallNotification(true);
+      break;
+    case chrome::NOTIFICATION_OUTDATED_INSTALL_NO_AU:
+      ShowOutdatedInstallNotification(false);
       break;
 #if defined(OS_WIN)
     case chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED:
@@ -596,8 +648,7 @@ void ToolbarView::Layout() {
   chrome::OriginChipPosition origin_chip_position =
       chrome::GetOriginChipPosition();
   if (origin_chip_view_->visible() &&
-      (chrome::ShouldDisplayOriginChipV2() ||
-       origin_chip_position == chrome::ORIGIN_CHIP_LEADING_LOCATION_BAR)) {
+      origin_chip_position == chrome::ORIGIN_CHIP_LEADING_LOCATION_BAR) {
     origin_chip_view_->SetBounds(next_element_x, child_y,
                                  origin_chip_width, child_height);
     next_element_x = origin_chip_view_->bounds().right() + kStandardSpacing;
@@ -616,8 +667,8 @@ void ToolbarView::Layout() {
     next_element_x = origin_chip_view_->bounds().right();
   }
 
-  browser_actions_->SetBounds(next_element_x, 0,
-                              browser_actions_width, height());
+  browser_actions_->SetBounds(
+      next_element_x, child_y, browser_actions_width, child_height);
   next_element_x = browser_actions_->bounds().right();
 
   // The browser actions need to do a layout explicitly, because when an
@@ -767,14 +818,15 @@ void ToolbarView::ShowCriticalNotification() {
 #if defined(OS_WIN)
   CriticalNotificationBubbleView* bubble_delegate =
       new CriticalNotificationBubbleView(app_menu_);
-  views::BubbleDelegateView::CreateBubble(bubble_delegate);
-  bubble_delegate->StartFade(true);
+  views::BubbleDelegateView::CreateBubble(bubble_delegate)->Show();
 #endif
 }
 
-void ToolbarView::ShowOutdatedInstallNotification() {
-  if (OutdatedUpgradeBubbleView::IsAvailable())
-    OutdatedUpgradeBubbleView::ShowBubble(app_menu_, browser_);
+void ToolbarView::ShowOutdatedInstallNotification(bool auto_update_enabled) {
+  if (OutdatedUpgradeBubbleView::IsAvailable()) {
+    OutdatedUpgradeBubbleView::ShowBubble(
+        app_menu_, browser_, auto_update_enabled);
+  }
 }
 
 void ToolbarView::UpdateAppMenuState() {

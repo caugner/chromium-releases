@@ -8,11 +8,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/options/options_ui_browsertest.h"
+#include "chrome/common/url_constants.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
@@ -142,18 +144,31 @@ class CertificateManagerBrowserTest : public options::OptionsUIBrowserTest {
   }
 #endif
 
-  void ClickElement(const std::string& selector) {
-    EXPECT_TRUE(content::ExecuteScriptInFrame(
+  static bool FrameHasSettingsSourceHost(content::RenderFrameHost* frame) {
+    return frame->GetLastCommittedURL().DomainIs(
+        chrome::kChromeUISettingsFrameHost);
+  }
+
+  content::RenderFrameHost* SettingsFrame() {
+    // NB: The utility function content::FrameHasSourceUrl can't be used because
+    // the settings frame navigates itself to chrome://settings-frame/settings
+    // to indicate that it's showing the top-level settings. Therefore, just
+    // match the host.
+    return content::FrameMatchingPredicate(
         browser()->tab_strip_model()->GetActiveWebContents(),
-        "//div[@id='settings']/iframe",
+        base::Bind(&CertificateManagerBrowserTest::FrameHasSettingsSourceHost));
+  }
+
+  void ClickElement(const std::string& selector) {
+    EXPECT_TRUE(content::ExecuteScript(
+        SettingsFrame(),
         "document.querySelector(\"" + selector + "\").click()"));
   }
 
   bool HasElement(const std::string& selector) {
     bool result;
-    EXPECT_TRUE(content::ExecuteScriptInFrameAndExtractBool(
-        browser()->tab_strip_model()->GetActiveWebContents(),
-        "//div[@id='settings']/iframe",
+    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
+        SettingsFrame(),
         "window.domAutomationController.send("
         "    !!document.querySelector('" + selector + "'));",
         &result));
@@ -170,17 +185,8 @@ class CertificateManagerBrowserTest : public options::OptionsUIBrowserTest {
 #if defined(OS_CHROMEOS)
 // Ensure policy-installed certificates without web trust do not display
 // the managed setting indicator (only on Chrome OS).
-
-// Triggers a Blink ASSERT in Debug configurations: http://crbug.com/337102
-#if !defined(NDEBUG)
-#define MAYBE_PolicyCertificateWithoutWebTrustHasNoIndicator \
-    DISABLED_PolicyCertificateWithoutWebTrustHasNoIndicator
-#else
-#define MAYBE_PolicyCertificateWithoutWebTrustHasNoIndicator \
-    PolicyCertificateWithoutWebTrustHasNoIndicator
-#endif
 IN_PROC_BROWSER_TEST_F(CertificateManagerBrowserTest,
-                       MAYBE_PolicyCertificateWithoutWebTrustHasNoIndicator) {
+                       PolicyCertificateWithoutWebTrustHasNoIndicator) {
   LoadONCPolicy("certificate-authority.onc");
   NavigateToSettings();
   ClickElement("#certificatesManageButton");
@@ -189,21 +195,11 @@ IN_PROC_BROWSER_TEST_F(CertificateManagerBrowserTest,
 }
 #endif
 
-// Triggers a Blink ASSERT in Debug configurations: http://crbug.com/337102
 #if defined(OS_CHROMEOS)
 // Ensure policy-installed certificates with web trust display the
 // managed setting indicator (only on Chrome OS).
-
-// Triggers a Blink ASSERT in Debug configurations: http://crbug.com/337102
-#if !defined(NDEBUG)
-#define MAYBE_PolicyCertificateWithWebTrustHasIndicator \
-    DISABLED_PolicyCertificateWithWebTrustHasIndicator
-#else
-#define MAYBE_PolicyCertificateWithWebTrustHasIndicator \
-    PolicyCertificateWithWebTrustHasIndicator
-#endif
 IN_PROC_BROWSER_TEST_F(CertificateManagerBrowserTest,
-                       MAYBE_PolicyCertificateWithWebTrustHasIndicator) {
+                       PolicyCertificateWithWebTrustHasIndicator) {
   LoadONCPolicy("certificate-web-authority.onc");
   NavigateToSettings();
   ClickElement("#certificatesManageButton");

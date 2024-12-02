@@ -6,12 +6,14 @@
 #define CONTENT_BROWSER_RENDERER_HOST_COMPOSITING_IOSURFACE_MAC_H_
 
 #include <deque>
+#include <list>
 #include <vector>
 
 #import <Cocoa/Cocoa.h>
 #include <QuartzCore/QuartzCore.h>
 
 #include "base/callback.h"
+#include "base/lazy_instance.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
@@ -51,7 +53,7 @@ class CompositingIOSurfaceMac {
       scoped_refptr<CompositingIOSurfaceContext> current_context,
       uint64 io_surface_handle,
       const gfx::Size& size,
-      float scale_factor);
+      float scale_factor) WARN_UNUSED_RESULT;
 
   // Get the CGL renderer ID currently associated with this context.
   int GetRendererID();
@@ -64,7 +66,7 @@ class CompositingIOSurfaceMac {
       scoped_refptr<CompositingIOSurfaceContext> drawing_context,
       const gfx::Rect& window_rect,
       float window_scale_factor,
-      bool flush_drawable);
+      bool flush_drawable) WARN_UNUSED_RESULT;
 
   // Copy the data of the "live" OpenGL texture referring to this IOSurfaceRef
   // into |out|. The copied region is specified with |src_pixel_subrect| and
@@ -100,6 +102,15 @@ class CompositingIOSurfaceMac {
 
   // Returns true if asynchronous readback is supported on this system.
   bool IsAsynchronousReadbackSupported();
+
+  // Scan the list of started asynchronous copies and test if each one has
+  // completed. If |block_until_finished| is true, then block until all
+  // pending copies are finished.
+  void CheckIfAllCopiesAreFinished(bool block_until_finished);
+
+  // Returns true if the offscreen context used by this surface has been
+  // poisoned.
+  bool HasBeenPoisoned() const;
 
  private:
   // Vertex structure for use in glDraw calls.
@@ -204,7 +215,9 @@ class CompositingIOSurfaceMac {
   // Returns true if IOSurface is ready to render. False otherwise.
   bool MapIOSurfaceToTextureWithContextCurrent(
       const scoped_refptr<CompositingIOSurfaceContext>& current_context,
-      uint64 io_surface_handle);
+      const gfx::Size pixel_size,
+      float scale_factor,
+      uint64 io_surface_handle) WARN_UNUSED_RESULT;
 
   void UnrefIOSurfaceWithContextCurrent();
 
@@ -245,10 +258,6 @@ class CompositingIOSurfaceMac {
       const SkBitmap* bitmap_output,
       const scoped_refptr<media::VideoFrame>& video_frame_output);
 
-  // Scan the list of started asynchronous copies and test if each one has
-  // completed. If |block_until_finished| is true, then block until all
-  // pending copies are finished.
-  void CheckIfAllCopiesAreFinished(bool block_until_finished);
   void CheckIfAllCopiesAreFinishedWithinContext(
       bool block_until_finished,
       std::vector<base::Closure>* done_callbacks);
@@ -298,6 +307,26 @@ class CompositingIOSurfaceMac {
 
   // Error saved by GetAndSaveGLError
   GLint gl_error_;
+
+  // Aggressive IOSurface eviction logic. When using CoreAnimation, IOSurfaces
+  // are used only transiently to transfer from the GPU process to the browser
+  // process. Once the IOSurface has been drawn to its CALayer, the CALayer
+  // will not need updating again until its view is hidden and re-shown.
+  // Aggressively evict surfaces when more than 8 (the number allowed by the
+  // memory manager for fast tab switching) are allocated.
+  enum {
+    kMaximumUnevictedSurfaces = 8,
+  };
+  typedef std::list<CompositingIOSurfaceMac*> EvictionQueue;
+  void EvictionMarkUpdated();
+  void EvictionMarkEvicted();
+  EvictionQueue::iterator eviction_queue_iterator_;
+  bool eviction_has_been_drawn_since_updated_;
+
+  static void EvictionScheduleDoEvict();
+  static void EvictionDoEvict();
+  static base::LazyInstance<EvictionQueue> eviction_queue_;
+  static bool eviction_scheduled_;
 };
 
 }  // namespace content

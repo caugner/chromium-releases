@@ -17,12 +17,14 @@ namespace test {
 
 class FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
  public:
-  explicit FakeVideoEncodeAccelerator(VideoEncodeAccelerator::Client* client);
+  FakeVideoEncodeAccelerator();
+  virtual ~FakeVideoEncodeAccelerator();
 
   virtual void Initialize(media::VideoFrame::Format input_format,
                           const gfx::Size& input_visible_size,
                           VideoCodecProfile output_profile,
-                          uint32 initial_bitrate) OVERRIDE;
+                          uint32 initial_bitrate,
+                          Client* client) OVERRIDE;
 
   virtual void Encode(const scoped_refptr<VideoFrame>& frame,
                       bool force_keyframe) OVERRIDE;
@@ -35,8 +37,6 @@ class FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
   virtual void Destroy() OVERRIDE;
 
  private:
-  virtual ~FakeVideoEncodeAccelerator();
-
   VideoEncodeAccelerator::Client* client_;
   bool first_;
 

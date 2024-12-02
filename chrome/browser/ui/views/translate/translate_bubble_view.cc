@@ -16,8 +16,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_manager.h"
+#include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/translate/translate_ui_delegate.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/translate/translate_bubble_model_impl.h"
 #include "chrome/common/url_constants.h"
 #include "components/translate/core/browser/translate_download_manager.h"
@@ -80,7 +82,7 @@ void GetTranslateLanguages(content::WebContents* web_contents,
       return;
     }
   }
-  *target = TranslateManager::GetTargetLanguage(prefs);
+  *target = TranslateService::GetTargetLanguage(prefs);
 }
 
 class TranslateDenialComboboxModel : public ui::ComboboxModel {
@@ -378,7 +380,7 @@ void TranslateBubbleView::HandleButtonPressed(
     }
     case BUTTON_ID_SHOW_ORIGINAL: {
       model_->RevertTranslation();
-      StartFade(false);
+      GetWidget()->Close();
       break;
     }
     case BUTTON_ID_ALWAYS_TRANSLATE: {
@@ -397,10 +399,9 @@ void TranslateBubbleView::HandleLinkClicked(
       break;
     }
     case LINK_ID_LANGUAGE_SETTINGS: {
-      std::string url = std::string(chrome::kChromeUISettingsURL) +
-          chrome::kLanguageOptionsSubPage;
+      GURL url = chrome::GetSettingsUrl(chrome::kLanguageOptionsSubPage);
       web_contents()->OpenURL(content::OpenURLParams(
-          GURL(url),
+          url,
           content::Referrer(),
           NEW_FOREGROUND_TAB,
           content::PAGE_TRANSITION_LINK,
@@ -429,7 +430,7 @@ void TranslateBubbleView::HandleComboboxPerformAction(
           NOTREACHED();
           break;
       }
-      StartFade(false);
+      GetWidget()->Close();
       break;
     }
     case COMBOBOX_ID_SOURCE_LANGUAGE: {

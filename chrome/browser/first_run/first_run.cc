@@ -12,10 +12,10 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -31,6 +31,7 @@
 #include "chrome/browser/importer/importer_uma.h"
 #include "chrome/browser/importer/profile_writer.h"
 #include "chrome/browser/prefs/chrome_pref_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -41,10 +42,12 @@
 #include "chrome/browser/signin/signin_tracker.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -81,8 +84,7 @@ bool g_should_do_autofill_personal_data_manager_first_run = false;
 // ImportEnded() is called asynchronously. Thus we have to handle both cases.
 class ImportEndedObserver : public importer::ImporterProgressObserver {
  public:
-  ImportEndedObserver() : ended_(false),
-                          should_quit_message_loop_(false) {}
+  ImportEndedObserver() : ended_(false) {}
   virtual ~ImportEndedObserver() {}
 
   // importer::ImporterProgressObserver:
@@ -91,12 +93,12 @@ class ImportEndedObserver : public importer::ImporterProgressObserver {
   virtual void ImportItemEnded(importer::ImportItem item) OVERRIDE {}
   virtual void ImportEnded() OVERRIDE {
     ended_ = true;
-    if (should_quit_message_loop_)
-      base::MessageLoop::current()->Quit();
+    if (!callback_for_import_end_.is_null())
+      callback_for_import_end_.Run();
   }
 
-  void set_should_quit_message_loop() {
-    should_quit_message_loop_ = true;
+  void set_callback_for_import_end(const base::Closure& callback) {
+    callback_for_import_end_ = callback;
   }
 
   bool ended() const {
@@ -107,7 +109,9 @@ class ImportEndedObserver : public importer::ImporterProgressObserver {
   // Set if the import has ended.
   bool ended_;
 
-  bool should_quit_message_loop_;
+  base::Closure callback_for_import_end_;
+
+  DISALLOW_COPY_AND_ASSIGN(ImportEndedObserver);
 };
 
 // Helper class that performs delayed first-run tasks that need more of the
@@ -234,8 +238,10 @@ void ImportFromSourceProfile(ExternalProcessImporterHost* importer_host,
                                      new ProfileWriter(target_profile));
   // If the import process has not errored out, block on it.
   if (!observer.ended()) {
-    observer.set_should_quit_message_loop();
-    base::MessageLoop::current()->Run();
+    base::RunLoop loop;
+    observer.set_callback_for_import_end(loop.QuitClosure());
+    loop.Run();
+    observer.set_callback_for_import_end(base::Closure());
   }
 }
 
@@ -361,8 +367,8 @@ void FirstRunBubbleLauncher::Observe(
            chrome::kChromeUIChromeSigninURL ||
        gaia::IsGaiaSignonRealm(contents->GetURL().GetOrigin()) ||
        signin::IsContinueUrlForWebBasedSigninFlow(contents->GetURL()) ||
-       contents->GetURL() == GURL(std::string(chrome::kChromeUISettingsURL) +
-                                  chrome::kSyncSetupSubPage))) {
+       (contents->GetURL() ==
+        chrome::GetSettingsUrl(chrome::kSyncSetupSubPage)))) {
     return;
   }
 
@@ -540,11 +546,18 @@ void SetupMasterPrefsFromInstallPrefs(
       &out_prefs->suppress_default_browser_prompt_for_version);
 }
 
+bool GetFirstRunSentinelFilePath(base::FilePath* path) {
+  base::FilePath user_data_dir;
+  if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
+    return false;
+  *path = user_data_dir.Append(chrome::kFirstRunSentinel);
+  return true;
+}
+
 bool CreateSentinel() {
   base::FilePath first_run_sentinel;
-  if (!internal::GetFirstRunSentinelFilePath(&first_run_sentinel))
-    return false;
-  return file_util::WriteFile(first_run_sentinel, "", 0) != -1;
+  return GetFirstRunSentinelFilePath(&first_run_sentinel) &&
+      base::WriteFile(first_run_sentinel, "", 0) != -1;
 }
 
 // -- Platform-specific functions --
@@ -571,36 +584,25 @@ MasterPrefs::MasterPrefs()
 MasterPrefs::~MasterPrefs() {}
 
 bool IsChromeFirstRun() {
-  if (internal::first_run_ != internal::FIRST_RUN_UNKNOWN)
-    return internal::first_run_ == internal::FIRST_RUN_TRUE;
-
-  internal::first_run_ = internal::FIRST_RUN_FALSE;
-
-  base::FilePath first_run_sentinel;
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kForceFirstRun)) {
-    internal::first_run_ = internal::FIRST_RUN_TRUE;
-  } else if (command_line->HasSwitch(switches::kCancelFirstRun)) {
-    internal::first_run_ = internal::FIRST_RUN_CANCEL;
-  } else if (!command_line->HasSwitch(switches::kNoFirstRun) &&
-             internal::GetFirstRunSentinelFilePath(&first_run_sentinel) &&
-             !base::PathExists(first_run_sentinel)) {
-    internal::first_run_ = internal::FIRST_RUN_TRUE;
+  if (internal::first_run_ == internal::FIRST_RUN_UNKNOWN) {
+    internal::first_run_ = internal::FIRST_RUN_FALSE;
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
+    if (command_line->HasSwitch(switches::kForceFirstRun) ||
+        (!command_line->HasSwitch(switches::kNoFirstRun) &&
+         !internal::IsFirstRunSentinelPresent())) {
+      internal::first_run_ = internal::FIRST_RUN_TRUE;
+    }
   }
-
   return internal::first_run_ == internal::FIRST_RUN_TRUE;
 }
 
 bool IsFirstRunSuppressed(const CommandLine& command_line) {
-  return command_line.HasSwitch(switches::kCancelFirstRun) ||
-      command_line.HasSwitch(switches::kNoFirstRun);
+  return command_line.HasSwitch(switches::kNoFirstRun);
 }
 
 void CreateSentinelIfNeeded() {
-  if (IsChromeFirstRun() ||
-      internal::first_run_ == internal::FIRST_RUN_CANCEL) {
+  if (IsChromeFirstRun())
     internal::CreateSentinel();
-  }
 }
 
 std::string GetPingDelayPrefName() {
@@ -618,9 +620,8 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 
 bool RemoveSentinel() {
   base::FilePath first_run_sentinel;
-  if (!internal::GetFirstRunSentinelFilePath(&first_run_sentinel))
-    return false;
-  return base::DeleteFile(first_run_sentinel, false);
+  return internal::GetFirstRunSentinelFilePath(&first_run_sentinel) &&
+      base::DeleteFile(first_run_sentinel, false);
 }
 
 bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option) {

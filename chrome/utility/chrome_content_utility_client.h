@@ -28,6 +28,7 @@ class MediaMetadataParser;
 
 namespace printing {
 class PdfRenderSettings;
+struct PwgRasterSettings;
 struct PageRange;
 }
 
@@ -62,6 +63,7 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   void OnRenderPDFPagesToPWGRaster(
       IPC::PlatformFileForTransit pdf_transit,
       const printing::PdfRenderSettings& settings,
+      const printing::PwgRasterSettings& bitmap_settings,
       IPC::PlatformFileForTransit bitmap_transit);
   void OnRobustJPEGDecodeImage(
       const std::vector<unsigned char>& encoded_data);
@@ -88,6 +90,7 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   bool RenderPDFPagesToPWGRaster(
       base::PlatformFile pdf_file,
       const printing::PdfRenderSettings& settings,
+      const printing::PwgRasterSettings& bitmap_settings,
       base::PlatformFile bitmap_file);
 
   void OnGetPrinterCapsAndDefaults(const std::string& printer_name);
@@ -122,12 +125,13 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
       const std::vector<picasa::FolderINIContents>& folders_inis);
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
+#if defined(OS_WIN)
+  void OnGetAndEncryptWiFiCredentials(const std::string& network_guid,
+                                      const std::vector<uint8>& public_key);
+#endif  // defined(OS_WIN)
+
   typedef ScopedVector<UtilityMessageHandler> Handlers;
   Handlers handlers_;
-
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
-  scoped_ptr<metadata::MediaMetadataParser> media_metadata_parser_;
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
   // Flag to enable whitelisting.
   bool filter_messages_;

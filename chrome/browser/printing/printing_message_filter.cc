@@ -90,7 +90,8 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
 
 PrintingMessageFilter::PrintingMessageFilter(int render_process_id,
                                              Profile* profile)
-    : profile_io_data_(ProfileIOData::FromResourceContext(
+    : BrowserMessageFilter(PrintMsgStart),
+      profile_io_data_(ProfileIOData::FromResourceContext(
           profile->GetResourceContext())),
       render_process_id_(render_process_id),
       queue_(g_browser_process->print_job_manager()->queue()) {
@@ -245,8 +246,7 @@ void PrintingMessageFilter::CreatePrintDialogForFile(
       path,
       wc->GetTitle(),
       base::string16(),
-      std::string("application/pdf"),
-      false);
+      std::string("application/pdf"));
 }
 #endif  // defined(OS_CHROMEOS)
 

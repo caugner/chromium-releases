@@ -9,13 +9,15 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/cpu.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/media/webrtc_log_upload_list.h"
+#include "chrome/browser/media/webrtc_log_list.h"
 #include "chrome/browser/media/webrtc_log_uploader.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
@@ -109,7 +111,8 @@ void FormatMetaDataAsLogMessage(
 }  // namespace
 
 WebRtcLoggingHandlerHost::WebRtcLoggingHandlerHost(Profile* profile)
-    : profile_(profile),
+    : BrowserMessageFilter(WebRtcLoggingMsgStart),
+      profile_(profile),
       logging_state_(CLOSED),
       upload_log_on_render_close_(false) {
   DCHECK(profile_);
@@ -181,7 +184,12 @@ void WebRtcLoggingHandlerHost::UploadLog(const UploadDoneCallback& callback) {
     return;
   }
   upload_callback_ = callback;
-  TriggerUploadLog();
+  content::BrowserThread::PostTaskAndReplyWithResult(
+      content::BrowserThread::FILE,
+      FROM_HERE,
+      base::Bind(&WebRtcLoggingHandlerHost::GetLogDirectoryAndEnsureExists,
+                 this),
+      base::Bind(&WebRtcLoggingHandlerHost::TriggerUploadLog, this));
 }
 
 void WebRtcLoggingHandlerHost::UploadLogDone() {
@@ -219,7 +227,12 @@ void WebRtcLoggingHandlerHost::OnChannelClosing() {
   if (logging_state_ == STARTED || logging_state_ == STOPPED) {
     if (upload_log_on_render_close_) {
       logging_state_ = STOPPED;
-      TriggerUploadLog();
+      content::BrowserThread::PostTaskAndReplyWithResult(
+          content::BrowserThread::FILE,
+          FROM_HERE,
+          base::Bind(&WebRtcLoggingHandlerHost::GetLogDirectoryAndEnsureExists,
+                     this),
+          base::Bind(&WebRtcLoggingHandlerHost::TriggerUploadLog, this));
     } else {
       g_browser_process->webrtc_log_uploader()->LoggingStoppedDontUpload();
     }
@@ -281,7 +294,6 @@ void WebRtcLoggingHandlerHost::StartLoggingIfAllowed() {
           "simultaneuos logs has been reached.");
     return;
   }
-  system_request_context_ = g_browser_process->system_request_context();
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
       &WebRtcLoggingHandlerHost::DoStartLogging, this));
 }
@@ -297,10 +309,10 @@ void WebRtcLoggingHandlerHost::DoStartLogging() {
                               false));
 
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
-      &WebRtcLoggingHandlerHost::LogMachineInfoOnFileThread, this));
+      &WebRtcLoggingHandlerHost::LogInitialInfoOnFileThread, this));
 }
 
-void WebRtcLoggingHandlerHost::LogMachineInfoOnFileThread() {
+void WebRtcLoggingHandlerHost::LogInitialInfoOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   net::NetworkInterfaceList network_list;
@@ -308,12 +320,20 @@ void WebRtcLoggingHandlerHost::LogMachineInfoOnFileThread() {
                       net::EXCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES);
 
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
-      &WebRtcLoggingHandlerHost::LogMachineInfoOnIOThread, this, network_list));
+      &WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread, this, network_list));
 }
 
-void WebRtcLoggingHandlerHost::LogMachineInfoOnIOThread(
+void WebRtcLoggingHandlerHost::LogInitialInfoOnIOThread(
     const net::NetworkInterfaceList& network_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  // Log start time (current time). We don't use base/i18n/time_formatting.h
+  // here because we don't want the format of the current locale.
+  base::Time::Exploded now = {0};
+  base::Time::Now().LocalExplode(&now);
+  LogToCircularBuffer(base::StringPrintf(
+      "Start %d-%02d-%02d %02d:%02d:%02d", now.year, now.month,
+      now.day_of_month, now.hour, now.minute, now.second));
 
   // Write metadata if received before logging started.
   if (!meta_data_.empty()) {
@@ -368,7 +388,7 @@ void WebRtcLoggingHandlerHost::LogMachineInfoOnIOThread(
                       " network interfaces:");
   for (net::NetworkInterfaceList::const_iterator it = network_list.begin();
        it != network_list.end(); ++it) {
-    LogToCircularBuffer("Name: " + it->name + ", Address: " +
+    LogToCircularBuffer("Name: " + it->friendly_name + ", Address: " +
                         IPAddressToSensitiveString(it->address));
   }
 
@@ -390,14 +410,27 @@ void WebRtcLoggingHandlerHost::LogToCircularBuffer(const std::string& message) {
   circular_buffer_->Write(&eol, 1);
 }
 
-void WebRtcLoggingHandlerHost::TriggerUploadLog() {
+base::FilePath WebRtcLoggingHandlerHost::GetLogDirectoryAndEnsureExists() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  base::FilePath log_dir_path =
+      WebRtcLogList::GetWebRtcLogDirectoryForProfile(profile_->GetPath());
+  base::File::Error error;
+  if (!base::CreateDirectoryAndGetError(log_dir_path, &error)) {
+    DLOG(ERROR) << "Could not create WebRTC log directory, error: " << error;
+    return base::FilePath();
+  }
+  return log_dir_path;
+}
+
+void WebRtcLoggingHandlerHost::TriggerUploadLog(
+    const base::FilePath& log_directory) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(logging_state_ == STOPPED);
 
   logging_state_ = UPLOADING;
   WebRtcLogUploadDoneData upload_done_data;
-  upload_done_data.upload_list_path =
-      WebRtcLogUploadList::GetFilePathForProfile(profile_);
+
+  upload_done_data.log_path = log_directory;
   upload_done_data.callback = upload_callback_;
   upload_done_data.host = this;
   upload_callback_.Reset();
@@ -405,7 +438,6 @@ void WebRtcLoggingHandlerHost::TriggerUploadLog() {
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, base::Bind(
       &WebRtcLogUploader::LoggingStoppedDoUpload,
       base::Unretained(g_browser_process->webrtc_log_uploader()),
-      system_request_context_,
       Passed(&log_buffer_),
       kWebRtcLogSize,
       meta_data_,

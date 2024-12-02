@@ -5,12 +5,11 @@
 #include "chromeos/network/network_connection_handler.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/location.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_number_conversions.h"
 #include "chromeos/cert_loader.h"
-#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/dbus/shill_service_client.h"
@@ -35,10 +34,9 @@ namespace {
 void InvokeErrorCallback(const std::string& service_path,
                          const network_handler::ErrorCallback& error_callback,
                          const std::string& error_name) {
-  std::string error_msg = "Connect Error: " + error_name;
-  NET_LOG_ERROR(error_msg, service_path);
+  NET_LOG_ERROR("Connect Error: " + error_name, service_path);
   network_handler::RunErrorCallback(
-      error_callback, service_path, error_name, error_msg);
+      error_callback, service_path, error_name, "");
 }
 
 bool IsAuthenticationError(const std::string& error) {
@@ -92,11 +90,12 @@ std::string GetDefaultUserProfilePath(const NetworkState* network) {
       !LoginState::Get()->IsUserAuthenticated() ||
       (network && network->type() == shill::kTypeWifi &&
        network->security() == shill::kSecurityNone)) {
-    return NetworkProfileHandler::kSharedProfilePath;
+    return NetworkProfileHandler::GetSharedProfilePath();
   }
   const NetworkProfile* profile  =
       NetworkHandler::Get()->network_profile_handler()->GetDefaultUserProfile();
-  return profile ? profile->path : NetworkProfileHandler::kSharedProfilePath;
+  return profile ? profile->path
+                 : NetworkProfileHandler::GetSharedProfilePath();
 }
 
 }  // namespace
@@ -120,6 +119,8 @@ const char NetworkConnectionHandler::kErrorConfigureFailed[] =
     "configure-failed";
 const char NetworkConnectionHandler::kErrorConnectCanceled[] =
     "connect-canceled";
+const char NetworkConnectionHandler::kErrorCertLoadTimeout[] =
+    "cert-load-timeout";
 
 struct NetworkConnectionHandler::ConnectRequest {
   ConnectRequest(const std::string& service_path,
@@ -167,14 +168,19 @@ void NetworkConnectionHandler::Init(
   if (LoginState::IsInitialized()) {
     LoginState::Get()->AddObserver(this);
     logged_in_ = LoginState::Get()->IsUserLoggedIn();
+    logged_in_time_ = base::TimeTicks::Now();
   }
 
   if (CertLoader::IsInitialized()) {
     cert_loader_ = CertLoader::Get();
     cert_loader_->AddObserver(this);
-    certificates_loaded_ = cert_loader_->certificates_loaded();
+    if (cert_loader_->certificates_loaded()) {
+      NET_LOG_EVENT("Certificates Loaded", "");
+      certificates_loaded_ = true;
+    }
   } else {
     // TODO(tbarzic): Require a mock or stub cert_loader in tests.
+    NET_LOG_EVENT("Certificate Loader not initialized", "");
     certificates_loaded_ = true;
   }
 
@@ -189,6 +195,7 @@ void NetworkConnectionHandler::LoggedInStateChanged() {
   if (LoginState::Get()->IsUserLoggedIn()) {
     logged_in_ = true;
     NET_LOG_EVENT("Logged In", "");
+    logged_in_time_ = base::TimeTicks::Now();
   }
 }
 
@@ -198,18 +205,7 @@ void NetworkConnectionHandler::OnCertificatesLoaded(
   certificates_loaded_ = true;
   NET_LOG_EVENT("Certificates Loaded", "");
   if (queued_connect_) {
-    NET_LOG_EVENT("Connecting to Queued Network",
-                  queued_connect_->service_path);
-
-    // Make a copy of |queued_connect_| parameters, because |queued_connect_|
-    // will get reset at the beginning of |ConnectToNetwork|.
-    std::string service_path = queued_connect_->service_path;
-    base::Closure success_callback = queued_connect_->success_callback;
-    network_handler::ErrorCallback error_callback =
-        queued_connect_->error_callback;
-
-    ConnectToNetwork(service_path, success_callback, error_callback,
-                     false /* check_error_state */);
+    ConnectToQueuedNetwork();
   } else if (initial_load) {
     // Once certificates have loaded, connect to the "best" available network.
     network_state_handler_->ConnectToBestWifiNetwork();
@@ -254,7 +250,7 @@ void NetworkConnectionHandler::ConnectToNetwork(
     }
 
     if (check_error_state) {
-      const std::string& error = network->error();
+      const std::string& error = network->last_error();
       if (error == shill::kErrorBadPassphrase) {
         InvokeErrorCallback(service_path, error_callback, error);
         return;
@@ -424,36 +420,31 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
 
   base::DictionaryValue config_properties;
   if (client_cert_type != client_cert::CONFIG_TYPE_NONE) {
+    // Note: if we get here then a certificate *may* be required, so we want
+    // to ensure that certificates have loaded successfully before attempting
+    // to connect.
+
+    // User must be logged in to connect to a network requiring a certificate.
+    if (!logged_in_ || !cert_loader_) {
+      NET_LOG_ERROR("User not logged in", "");
+      ErrorCallbackForPendingRequest(service_path, kErrorCertificateRequired);
+      return;
+    }
+    // If certificates have not been loaded yet, queue the connect request.
+    if (!certificates_loaded_) {
+      NET_LOG_EVENT("Certificates not loaded", "");
+      QueueConnectRequest(service_path);
+      return;
+    }
+
     // If the client certificate must be configured, this will be set to a
     // non-empty string.
     std::string pkcs11_id;
 
     // Check certificate properties in kUIDataProperty if configured.
     // Note: Wifi/VPNConfigView set these properties explicitly, in which case
-    //   only the TPM must be configured.
+    // only the TPM must be configured.
     if (ui_data && ui_data->certificate_type() == CLIENT_CERT_TYPE_PATTERN) {
-      // User must be logged in to connect to a network requiring a certificate.
-      if (!logged_in_ || !cert_loader_) {
-        ErrorCallbackForPendingRequest(service_path, kErrorCertificateRequired);
-        return;
-      }
-
-      // If certificates have not been loaded yet, queue the connect request.
-      if (!certificates_loaded_) {
-        NET_LOG_EVENT("Certificates not loaded", "");
-        ConnectRequest* request = GetPendingRequest(service_path);
-        if (!request) {
-          NET_LOG_ERROR("No pending request to queue", service_path);
-          return;
-        }
-        NET_LOG_EVENT("Connect Request Queued", service_path);
-        queued_connect_.reset(new ConnectRequest(
-            service_path, request->profile_path,
-            request->success_callback, request->error_callback));
-        pending_requests_.erase(service_path);
-        return;
-      }
-
       pkcs11_id = CertificateIsConfigured(ui_data.get());
       // Ensure the certificate is available and configured.
       if (!cert_loader_->IsHardwareBacked() || pkcs11_id.empty()) {
@@ -525,9 +516,74 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
     CallShillConnect(service_path);
 }
 
+void NetworkConnectionHandler::QueueConnectRequest(
+    const std::string& service_path) {
+  ConnectRequest* request = GetPendingRequest(service_path);
+  if (!request) {
+    NET_LOG_ERROR("No pending request to queue", service_path);
+    return;
+  }
+
+  const int kMaxCertLoadTimeSeconds = 15;
+  base::TimeDelta dtime = base::TimeTicks::Now() - logged_in_time_;
+  if (dtime > base::TimeDelta::FromSeconds(kMaxCertLoadTimeSeconds)) {
+    NET_LOG_ERROR("Certificate load timeout", service_path);
+    InvokeErrorCallback(service_path,
+                        request->error_callback,
+                        kErrorCertLoadTimeout);
+    return;
+  }
+
+  NET_LOG_EVENT("Connect Request Queued", service_path);
+  queued_connect_.reset(new ConnectRequest(
+      service_path, request->profile_path,
+      request->success_callback, request->error_callback));
+  pending_requests_.erase(service_path);
+
+  // Post a delayed task to check to see if certificates have loaded. If they
+  // haven't, and queued_connect_ has not been cleared (e.g. by a successful
+  // connect request), cancel the request and notify the user.
+  base::MessageLoopProxy::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&NetworkConnectionHandler::CheckCertificatesLoaded,
+                 AsWeakPtr()),
+      base::TimeDelta::FromSeconds(kMaxCertLoadTimeSeconds) - dtime);
+}
+
+void NetworkConnectionHandler::CheckCertificatesLoaded() {
+  if (certificates_loaded_)
+    return;
+  // If queued_connect_ has been cleared (e.g. another connect request occurred
+  // and wasn't queued), do nothing here.
+  if (!queued_connect_)
+    return;
+  // Otherwise, notify the user.
+  NET_LOG_ERROR("Certificate load timeout", queued_connect_->service_path);
+  InvokeErrorCallback(queued_connect_->service_path,
+                      queued_connect_->error_callback,
+                      kErrorCertLoadTimeout);
+  queued_connect_.reset();
+}
+
+void NetworkConnectionHandler::ConnectToQueuedNetwork() {
+  DCHECK(queued_connect_);
+
+  // Make a copy of |queued_connect_| parameters, because |queued_connect_|
+  // will get reset at the beginning of |ConnectToNetwork|.
+  std::string service_path = queued_connect_->service_path;
+  base::Closure success_callback = queued_connect_->success_callback;
+  network_handler::ErrorCallback error_callback =
+      queued_connect_->error_callback;
+
+  NET_LOG_EVENT("Connecting to Queued Network", service_path);
+  ConnectToNetwork(service_path, success_callback, error_callback,
+                   false /* check_error_state */);
+}
+
 void NetworkConnectionHandler::CallShillConnect(
     const std::string& service_path) {
   NET_LOG_EVENT("Sending Connect Request to Shill", service_path);
+  network_state_handler_->ClearLastErrorForNetwork(service_path);
   DBusThreadManager::Get()->GetShillServiceClient()->Connect(
       dbus::ObjectPath(service_path),
       base::Bind(&NetworkConnectionHandler::HandleShillConnectSuccess,
@@ -564,7 +620,7 @@ void NetworkConnectionHandler::HandleShillConnectSuccess(
   NET_LOG_EVENT("Connect Request Acknowledged", service_path);
   // Do not call success_callback here, wait for one of the following
   // conditions:
-  // * State transitions to a non connecting state indicating succes or failure
+  // * State transitions to a non connecting state indicating success or failure
   // * Network is no longer in the visible list, indicating failure
   CheckPendingRequest(service_path);
 }
@@ -623,9 +679,6 @@ void NetworkConnectionHandler::CheckPendingRequest(
 
   // Network is neither connecting or connected; an error occurred.
   std::string error_name;  // 'Canceled' or 'Failed'
-  // If network->error() is empty here, we will look it up later, but we
-  // need to preserve it in case Shill clears it before then. crbug.com/302020.
-  std::string shill_error = network->error();
   if (network->connection_state() == shill::kStateIdle &&
       pending_requests_.size() > 1) {
     // Another connect request canceled this one.
@@ -637,17 +690,14 @@ void NetworkConnectionHandler::CheckPendingRequest(
                     service_path);
     }
   }
-  std::string error_msg = error_name;
-  if (!shill_error.empty())
-    error_msg += ": " + shill_error;
-  NET_LOG_ERROR(error_msg, service_path);
 
   network_handler::ErrorCallback error_callback = request->error_callback;
   pending_requests_.erase(service_path);
-  if (error_callback.is_null())
+  if (error_callback.is_null()) {
+    NET_LOG_ERROR("Connect Error, no callback: " + error_name, service_path);
     return;
-  network_handler::RunErrorCallback(
-      error_callback, service_path, error_name, shill_error);
+  }
+  InvokeErrorCallback(service_path, error_callback, error_name);
 }
 
 void NetworkConnectionHandler::CheckAllPendingRequests() {

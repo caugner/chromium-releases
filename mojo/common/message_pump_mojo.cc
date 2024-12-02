@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "mojo/common/message_pump_mojo_handler.h"
+#include "mojo/common/time_helper.h"
 
 namespace mojo {
 namespace common {
@@ -39,6 +40,11 @@ MessagePumpMojo::MessagePumpMojo() : run_state_(NULL), next_handler_id_(0) {
 }
 
 MessagePumpMojo::~MessagePumpMojo() {
+}
+
+// static
+scoped_ptr<base::MessagePump> MessagePumpMojo::Create() {
+  return scoped_ptr<MessagePump>(new MessagePumpMojo());
 }
 
 void MessagePumpMojo::AddHandler(MessagePumpMojoHandler* handler,
@@ -147,7 +153,7 @@ void MessagePumpMojo::DoInternalWork(bool block) {
   // Notify and remove any handlers whose time has expired. Make a copy in case
   // someone tries to add/remove new handlers from notification.
   const HandleToHandler cloned_handlers(handlers_);
-  const base::TimeTicks now(base::TimeTicks::Now());
+  const base::TimeTicks now(internal::NowTicks());
   for (HandleToHandler::const_iterator i = cloned_handlers.begin();
        i != cloned_handlers.end(); ++i) {
     // Since we're iterating over a clone of the handlers, verify the handler is
@@ -213,7 +219,7 @@ MojoDeadline MessagePumpMojo::GetDeadlineForWait() const {
   return min_time.is_null() ? MOJO_DEADLINE_INDEFINITE :
       std::max(static_cast<MojoDeadline>(0),
                static_cast<MojoDeadline>(
-                   (min_time - base::TimeTicks::Now()).InMicroseconds()));
+                   (min_time - internal::NowTicks()).InMicroseconds()));
 }
 
 }  // namespace common

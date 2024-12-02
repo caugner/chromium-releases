@@ -97,10 +97,8 @@ bool SupportsReturningVerifiedChain() {
 
 bool SupportsDetectingKnownRoots() {
 #if defined(OS_ANDROID)
-  // Before API level 17, Android does not expose the APIs necessary to get at
-  // the verified certificate chain and detect known roots.
-  if (base::android::BuildInfo::GetInstance()->sdk_int() < 17)
-    return false;
+  // http://crbug.com/361166
+  return false;
 #endif
   return true;
 }
@@ -157,7 +155,7 @@ TEST_F(CertVerifyProcTest, DISABLED_WithoutRevocationChecking) {
                    &verify_result));
 }
 
-#if defined(OS_ANDROID) || defined(USE_OPENSSL)
+#if defined(OS_ANDROID) || defined(USE_OPENSSL_CERTS)
 // TODO(jnd): http://crbug.com/117478 - EV verification is not yet supported.
 #define MAYBE_EVVerification DISABLED_EVVerification
 #else
@@ -724,7 +722,7 @@ TEST_F(CertVerifyProcTest, InvalidKeyUsage) {
                      NULL,
                      empty_cert_list_,
                      &verify_result);
-#if defined(USE_OPENSSL) && !defined(OS_ANDROID)
+#if defined(USE_OPENSSL_CERTS) && !defined(OS_ANDROID)
   // This certificate has two errors: "invalid key usage" and "untrusted CA".
   // However, OpenSSL returns only one (the latter), and we can't detect
   // the other errors.
@@ -1013,6 +1011,9 @@ TEST_F(CertVerifyProcTest, IsIssuedByKnownRootIgnoresTestRoots) {
   EXPECT_EQ(0U, verify_result.cert_status);
   // But should not be marked as a known root.
   EXPECT_FALSE(verify_result.is_issued_by_known_root);
+
+  root_certs->Clear();
+  EXPECT_TRUE(root_certs->IsEmpty());
 }
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -1133,6 +1134,8 @@ TEST_F(CertVerifyProcTest, CybertrustGTERoot) {
   EXPECT_EQ(OK, error);
   EXPECT_EQ(0U, verify_result.cert_status);
 
+  TestRootCerts::GetInstance()->Clear();
+  EXPECT_TRUE(TestRootCerts::GetInstance()->IsEmpty());
 }
 #endif
 
@@ -1402,7 +1405,7 @@ TEST_P(CertVerifyProcWeakDigestTest, Verify) {
 const WeakDigestTestData kVerifyRootCATestData[] = {
   { "weak_digest_md5_root.pem", "weak_digest_sha1_intermediate.pem",
     "weak_digest_sha1_ee.pem", false, false, false },
-#if defined(USE_OPENSSL) || defined(OS_WIN)
+#if defined(USE_OPENSSL_CERTS) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_md4_root.pem", "weak_digest_sha1_intermediate.pem",
     "weak_digest_sha1_ee.pem", false, false, false },
@@ -1417,7 +1420,7 @@ INSTANTIATE_TEST_CASE_P(VerifyRoot, CertVerifyProcWeakDigestTest,
 const WeakDigestTestData kVerifyIntermediateCATestData[] = {
   { "weak_digest_sha1_root.pem", "weak_digest_md5_intermediate.pem",
     "weak_digest_sha1_ee.pem", true, false, false },
-#if defined(USE_OPENSSL) || defined(OS_WIN)
+#if defined(USE_OPENSSL_CERTS) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_sha1_root.pem", "weak_digest_md4_intermediate.pem",
     "weak_digest_sha1_ee.pem", false, true, false },
@@ -1440,7 +1443,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 const WeakDigestTestData kVerifyEndEntityTestData[] = {
   { "weak_digest_sha1_root.pem", "weak_digest_sha1_intermediate.pem",
     "weak_digest_md5_ee.pem", true, false, false },
-#if defined(USE_OPENSSL) || defined(OS_WIN)
+#if defined(USE_OPENSSL_CERTS) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_sha1_root.pem", "weak_digest_sha1_intermediate.pem",
     "weak_digest_md4_ee.pem", false, true, false },
@@ -1464,7 +1467,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(MAYBE_VerifyEndEntity,
 const WeakDigestTestData kVerifyIncompleteIntermediateTestData[] = {
   { NULL, "weak_digest_md5_intermediate.pem", "weak_digest_sha1_ee.pem",
     true, false, false },
-#if defined(USE_OPENSSL) || defined(OS_WIN)
+#if defined(USE_OPENSSL_CERTS) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { NULL, "weak_digest_md4_intermediate.pem", "weak_digest_sha1_ee.pem",
     false, true, false },
@@ -1489,7 +1492,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 const WeakDigestTestData kVerifyIncompleteEETestData[] = {
   { NULL, "weak_digest_sha1_intermediate.pem", "weak_digest_md5_ee.pem",
     true, false, false },
-#if defined(USE_OPENSSL) || defined(OS_WIN)
+#if defined(USE_OPENSSL_CERTS) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { NULL, "weak_digest_sha1_intermediate.pem", "weak_digest_md4_ee.pem",
     false, true, false },
@@ -1516,7 +1519,7 @@ const WeakDigestTestData kVerifyMixedTestData[] = {
     "weak_digest_md2_ee.pem", true, false, true },
   { "weak_digest_sha1_root.pem", "weak_digest_md2_intermediate.pem",
     "weak_digest_md5_ee.pem", true, false, true },
-#if defined(USE_OPENSSL) || defined(OS_WIN)
+#if defined(USE_OPENSSL_CERTS) || defined(OS_WIN)
   // MD4 is not supported by OS X / NSS
   { "weak_digest_sha1_root.pem", "weak_digest_md4_intermediate.pem",
     "weak_digest_md2_ee.pem", false, true, true },

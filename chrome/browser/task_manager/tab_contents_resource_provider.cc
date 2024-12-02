@@ -76,10 +76,8 @@ class TabContentsResource : public RendererResource {
   // Resource methods:
   virtual Type GetType() const OVERRIDE;
   virtual base::string16 GetTitle() const OVERRIDE;
-  virtual base::string16 GetProfileName() const OVERRIDE;
   virtual gfx::ImageSkia GetIcon() const OVERRIDE;
   virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual const extensions::Extension* GetExtension() const OVERRIDE;
 
  private:
   // Returns true if contains content rendered by an extension.
@@ -139,10 +137,6 @@ base::string16 TabContentsResource::GetTitle() const {
   return l10n_util::GetStringFUTF16(message_id, tab_title);
 }
 
-base::string16 TabContentsResource::GetProfileName() const {
-  return util::GetProfileNameFromInfoCache(profile_);
-}
-
 gfx::ImageSkia TabContentsResource::GetIcon() const {
   if (IsContentsPrerendering(web_contents_))
     return *prerender_icon_;
@@ -153,16 +147,6 @@ gfx::ImageSkia TabContentsResource::GetIcon() const {
 
 WebContents* TabContentsResource::GetWebContents() const {
   return web_contents_;
-}
-
-const Extension* TabContentsResource::GetExtension() const {
-  if (HostsExtension()) {
-    ExtensionService* extension_service = profile_->GetExtensionService();
-    return extension_service->extensions()->GetByID(
-        web_contents_->GetURL().host());
-  }
-
-  return NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

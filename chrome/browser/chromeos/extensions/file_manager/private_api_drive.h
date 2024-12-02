@@ -10,6 +10,7 @@
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
+#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 
 namespace drive {
 class FileCacheEntry;
@@ -18,11 +19,12 @@ struct SearchResultInfo;
 }
 
 namespace extensions {
+
 namespace api {
-namespace file_browser_private{
+namespace file_browser_private {
 struct DriveEntryProperties;
-}
-}
+}  // namespace file_browser_private
+}  // namespace api
 
 // Retrieves property information for an entry and returns it as a dictionary.
 // On error, returns a dictionary with the key "error" set to the error number
@@ -45,14 +47,24 @@ class FileBrowserPrivateGetDriveEntryPropertiesFunction
   void OnGetFileInfo(drive::FileError error,
                      scoped_ptr<drive::ResourceEntry> entry);
 
+  void OnGetRunningPath(drive::FileError error,
+                        const base::FilePath& file_path);
+
+  void OnGetShareInfo(drive::FileError error,
+                      scoped_ptr<drive::ResourceEntry> entry);
+
+  void StartParseFileInfo(bool shared_with_me);
+
   void CacheStateReceived(bool success,
                           const drive::FileCacheEntry& cache_entry);
 
   void CompleteGetFileProperties(drive::FileError error);
 
   base::FilePath file_path_;
-  scoped_ptr<extensions::api::file_browser_private::
-             DriveEntryProperties> properties_;
+  Profile* file_owner_profile_;
+  const scoped_ptr<extensions::api::file_browser_private::DriveEntryProperties>
+      properties_;
+  scoped_ptr<drive::ResourceEntry> owner_resource_entry_;
 };
 
 // Implements the chrome.fileBrowserPrivate.pinDriveFile method.
@@ -127,6 +139,8 @@ class FileBrowserPrivateCancelFileTransfersFunction
 class FileBrowserPrivateSearchDriveFunction
     : public LoggedAsyncExtensionFunction {
  public:
+  typedef std::vector<drive::SearchResultInfo> SearchResultInfoList;
+
   DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.searchDrive",
                              FILEBROWSERPRIVATE_SEARCHDRIVE)
 
@@ -140,6 +154,14 @@ class FileBrowserPrivateSearchDriveFunction
   void OnSearch(drive::FileError error,
                 const GURL& next_link,
                 scoped_ptr<std::vector<drive::SearchResultInfo> > result_paths);
+
+  // Called when |result_paths| in OnSearch() are converted to a list of
+  // entry definitions.
+  void OnEntryDefinitionList(
+      const GURL& next_link,
+      scoped_ptr<SearchResultInfoList> search_result_info_list,
+      scoped_ptr<file_manager::util::EntryDefinitionList>
+          entry_definition_list);
 };
 
 // Similar to FileBrowserPrivateSearchDriveFunction but this one is used for
@@ -159,6 +181,13 @@ class FileBrowserPrivateSearchDriveMetadataFunction
   // Callback for SearchMetadata();
   void OnSearchMetadata(drive::FileError error,
                         scoped_ptr<drive::MetadataSearchResultVector> results);
+
+  // Called when |results| in OnSearchMetadata() are converted to a list of
+  // entry definitions.
+  void OnEntryDefinitionList(
+      scoped_ptr<drive::MetadataSearchResultVector> search_result_info_list,
+      scoped_ptr<file_manager::util::EntryDefinitionList>
+          entry_definition_list);
 };
 
 // Implements the chrome.fileBrowserPrivate.getDriveConnectionState method.
@@ -209,6 +238,22 @@ class FileBrowserPrivateGetShareUrlFunction
   // Callback with an url to the sharing dialog as |share_url|, called by
   // FileSystem::GetShareUrl.
   void OnGetShareUrl(drive::FileError error, const GURL& share_url);
+};
+
+// Implements the chrome.fileBrowserPrivate.requestDriveShare method.
+class FileBrowserPrivateRequestDriveShareFunction
+    : public LoggedAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileBrowserPrivate.requestDriveShare",
+                             FILEBROWSERPRIVATE_REQUESTDRIVESHARE);
+
+ protected:
+  virtual ~FileBrowserPrivateRequestDriveShareFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  // Called back after the drive file system operation is finished.
+  void OnAddPermission(drive::FileError error);
 };
 
 }  // namespace extensions

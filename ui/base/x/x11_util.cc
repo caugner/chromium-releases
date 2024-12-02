@@ -33,9 +33,9 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_byteorder.h"
 #include "base/threading/thread.h"
-#include "base/x11/x11_error_tracker.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkPostConfig.h"
+#include "ui/base/x/x11_menu_list.h"
 #include "ui/base/x/x11_util_internal.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
@@ -48,6 +48,7 @@
 #include "ui/gfx/point_conversions.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+#include "ui/gfx/x/x11_error_tracker.h"
 
 #if defined(OS_FREEBSD)
 #include <sys/sysctl.h>
@@ -317,7 +318,7 @@ static SharedMemorySupport DoQuerySharedMemorySupport(XDisplay* dpy) {
   memset(&shminfo, 0, sizeof(shminfo));
   shminfo.shmid = shmkey;
 
-  base::X11ErrorTracker err_tracker;
+  gfx::X11ErrorTracker err_tracker;
   bool result = XShmAttach(dpy, &shminfo);
   if (result)
     VLOG(1) << "X got shared memory segment " << shmkey;
@@ -396,7 +397,7 @@ void UnrefCustomXCursor(::Cursor cursor) {
 
 XcursorImage* SkBitmapToXcursorImage(const SkBitmap* cursor_image,
                                      const gfx::Point& hotspot) {
-  DCHECK(cursor_image->config() == SkBitmap::kARGB_8888_Config);
+  DCHECK(cursor_image->colorType() == kPMColor_SkColorType);
   gfx::Point hotspot_point = hotspot;
   SkBitmap scaled;
 
@@ -608,6 +609,17 @@ bool IsWindowVisible(XID window) {
     return false;
   if (win_attributes.map_state != IsViewable)
     return false;
+
+  // Minimized windows are not visible.
+  std::vector<Atom> wm_states;
+  if (GetAtomArrayProperty(window, "_NET_WM_STATE", &wm_states)) {
+    Atom hidden_atom = GetAtom("_NET_WM_STATE_HIDDEN");
+    if (std::find(wm_states.begin(), wm_states.end(), hidden_atom) !=
+            wm_states.end()) {
+      return false;
+    }
+  }
+
   // Some compositing window managers (notably kwin) do not actually unmap
   // windows on desktop switch, so we also must check the current desktop.
   int window_desktop, current_desktop;
@@ -632,6 +644,15 @@ bool GetWindowRect(XID window, gfx::Rect* rect) {
     return false;
 
   *rect = gfx::Rect(x, y, width, height);
+
+  std::vector<int> insets;
+  if (GetIntArrayProperty(window, "_NET_FRAME_EXTENTS", &insets) &&
+      insets.size() == 4) {
+    rect->Inset(-insets[0], -insets[2], -insets[1], -insets[3]);
+  }
+  // Not all window managers support _NET_FRAME_EXTENTS so return true even if
+  // requesting the property fails.
+
   return true;
 }
 
@@ -908,7 +929,7 @@ bool SetIntArrayProperty(XID window,
   for (size_t i = 0; i < value.size(); ++i)
     data[i] = value[i];
 
-  base::X11ErrorTracker err_tracker;
+  gfx::X11ErrorTracker err_tracker;
   XChangeProperty(gfx::GetXDisplay(),
                   window,
                   name_atom,
@@ -933,7 +954,7 @@ bool SetAtomArrayProperty(XID window,
   for (size_t i = 0; i < value.size(); ++i)
     data[i] = value[i];
 
-  base::X11ErrorTracker err_tracker;
+  gfx::X11ErrorTracker err_tracker;
   XChangeProperty(gfx::GetXDisplay(),
                   window,
                   name_atom,
@@ -942,6 +963,22 @@ bool SetAtomArrayProperty(XID window,
                   PropModeReplace,
                   reinterpret_cast<const unsigned char*>(data.get()),
                   value.size());  // num items
+  return !err_tracker.FoundNewError();
+}
+
+bool SetStringProperty(XID window,
+                       Atom property,
+                       Atom type,
+                       const std::string& value) {
+  gfx::X11ErrorTracker err_tracker;
+  XChangeProperty(gfx::GetXDisplay(),
+                  window,
+                  property,
+                  type,
+                  8,
+                  PropModeReplace,
+                  reinterpret_cast<const unsigned char*>(value.c_str()),
+                  value.size());
   return !err_tracker.FoundNewError();
 }
 
@@ -1002,6 +1039,26 @@ XID GetHighestAncestorWindow(XID window, XID root) {
   }
 }
 
+bool GetCustomFramePrefDefault() {
+  // Ideally, we'd use the custom frame by default and just fall back on using
+  // system decorations for the few (?) tiling window managers where the custom
+  // frame doesn't make sense (e.g. awesome, ion3, ratpoison, xmonad, etc.) or
+  // other WMs where it has issues (e.g. Fluxbox -- see issue 19130).  The EWMH
+  // _NET_SUPPORTING_WM property makes it easy to look up a name for the current
+  // WM, but at least some of the WMs in the latter group don't set it.
+  // Instead, we default to using system decorations for all WMs and
+  // special-case the ones where the custom frame should be used.
+  ui::WindowManagerName wm_type = GuessWindowManager();
+  return (wm_type == WM_BLACKBOX ||
+          wm_type == WM_COMPIZ ||
+          wm_type == WM_ENLIGHTENMENT ||
+          wm_type == WM_METACITY ||
+          wm_type == WM_MUFFIN ||
+          wm_type == WM_MUTTER ||
+          wm_type == WM_OPENBOX ||
+          wm_type == WM_XFWM4);
+}
+
 bool GetWindowDesktop(XID window, int* desktop) {
   return GetIntProperty(window, "_NET_WM_DESKTOP", desktop);
 }
@@ -1027,6 +1084,18 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
   if (depth > max_depth)
     return false;
 
+  std::vector<XID> windows;
+  std::vector<XID>::iterator iter;
+  if (depth == 0) {
+    XMenuList::GetInstance()->InsertMenuWindowXIDs(&windows);
+    // Enumerate the menus first.
+    for (iter = windows.begin(); iter != windows.end(); iter++) {
+      if (delegate->ShouldStopIterating(*iter))
+        return true;
+    }
+    windows.clear();
+  }
+
   XID root, parent, *children;
   unsigned int num_children;
   int status = XQueryTree(gfx::GetXDisplay(), window, &root, &parent, &children,
@@ -1034,7 +1103,6 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
   if (status == 0)
     return false;
 
-  std::vector<XID> windows;
   for (int i = static_cast<int>(num_children) - 1; i >= 0; i--)
     windows.push_back(children[i]);
 
@@ -1042,7 +1110,6 @@ bool EnumerateChildren(EnumerateWindowsDelegate* delegate, XID window,
 
   // XQueryTree returns the children of |window| in bottom-to-top order, so
   // reverse-iterate the list to check the windows from top-to-bottom.
-  std::vector<XID>::iterator iter;
   for (iter = windows.begin(); iter != windows.end(); iter++) {
     if (IsWindowNamed(*iter) && delegate->ShouldStopIterating(*iter))
       return true;
@@ -1078,6 +1145,7 @@ void EnumerateTopLevelWindows(ui::EnumerateWindowsDelegate* delegate) {
     ui::EnumerateAllWindows(delegate, kMaxSearchDepth);
     return;
   }
+  XMenuList::GetInstance()->InsertMenuWindowXIDs(&stack);
 
   std::vector<XID>::iterator iter;
   for (iter = stack.begin(); iter != stack.end(); iter++) {
@@ -1189,10 +1257,9 @@ bool CopyAreaToCanvas(XID drawable,
       image->data[i + 3] = 0xff;
 
     SkBitmap bitmap;
-    bitmap.setConfig(SkBitmap::kARGB_8888_Config,
-                     image->width, image->height,
-                     image->bytes_per_line);
-    bitmap.setPixels(image->data);
+    bitmap.installPixels(SkImageInfo::MakeN32Premul(image->width,
+                                                    image->height),
+                         image->data, image->bytes_per_line);
     gfx::ImageSkia image_skia;
     gfx::ImageSkiaRep image_rep(bitmap, canvas->image_scale());
     image_skia.AddRepresentation(image_rep);
@@ -1238,7 +1305,7 @@ bool GetWindowManagerName(std::string* wm_name) {
   // _NET_SUPPORTING_WM_CHECK property pointing to itself (to avoid a stale
   // property referencing an ID that's been recycled for another window), so we
   // check that too.
-  base::X11ErrorTracker err_tracker;
+  gfx::X11ErrorTracker err_tracker;
   int wm_window_property = 0;
   bool result = GetIntProperty(
       wm_window, "_NET_SUPPORTING_WM_CHECK", &wm_window_property);

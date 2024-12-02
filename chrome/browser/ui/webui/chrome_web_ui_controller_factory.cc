@@ -41,6 +41,7 @@
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
+#include "chrome/browser/ui/webui/password_manager_internals/password_manager_internals_ui.h"
 #include "chrome/browser/ui/webui/performance_monitor/performance_monitor_ui.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/predictors/predictors_ui.h"
@@ -62,6 +63,7 @@
 #include "components/dom_distiller/core/dom_distiller_constants.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
 #include "components/dom_distiller/webui/dom_distiller_ui.h"
+#include "components/password_manager/core/common/password_manager_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
@@ -103,6 +105,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/bluetooth_pairing_ui.h"
+#include "chrome/browser/ui/webui/chromeos/certificate_manager_dialog_ui.h"
 #include "chrome/browser/ui/webui/chromeos/charger_replacement_ui.h"
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
@@ -124,8 +127,6 @@
 
 #if defined(USE_AURA)
 #include "chrome/browser/ui/webui/gesture_config_ui.h"
-#include "ui/keyboard/keyboard_constants.h"
-#include "ui/keyboard/keyboard_ui_controller.h"
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
@@ -141,7 +142,7 @@
 #include "chrome/browser/ui/webui/certificate_viewer_ui.h"
 #endif
 
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
 #include "chrome/browser/ui/webui/local_discovery/local_discovery_ui.h"
 #endif
 
@@ -249,7 +250,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<ConstrainedWebDialogUI>;
   if (url.host() == chrome::kChromeUICrashesHost)
     return &NewWebUI<CrashesUI>;
-#if defined(ENABLE_MDNS)
+#if defined(ENABLE_SERVICE_DISCOVERY)
   if (url.host() == chrome::kChromeUIDevicesHost &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
            switches::kDisableDeviceDiscovery)) {
@@ -278,10 +279,17 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #endif
   if (url.host() == chrome::kChromeUINetInternalsHost)
     return &NewWebUI<NetInternalsUI>;
+#if !defined(OS_ANDROID)
   if (url.host() == chrome::kChromeUINewTabHost)
     return &NewWebUI<NewTabUI>;
+#endif
   if (url.host() == chrome::kChromeUIOmniboxHost)
     return &NewWebUI<OmniboxUI>;
+  if (url.host() == chrome::kChromeUIPasswordManagerInternalsHost &&
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePasswordManagerInternalsUI)) {
+    return &NewWebUI<PasswordManagerInternalsUI>;
+  }
   if (url.host() == chrome::kChromeUIPredictorsHost)
     return &NewWebUI<PredictorsUI>;
   if (url.host() == chrome::kChromeUIProfilerHost)
@@ -329,11 +337,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Downloads list on Android uses the built-in download manager.
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewWebUI<DownloadsUI>;
-#if defined(ENABLE_ENHANCED_BOOKMARKS)
-  // Bookmarks are part of NTP on Android.
-  if (url.host() == chrome::kChromeUIEnhancedBookmarksHost)
-    return &NewWebUI<BookmarksUI>;
-#endif
   // Flash is not available on android.
   if (url.host() == chrome::kChromeUIFlashHost)
     return &NewWebUI<FlashUI>;
@@ -381,10 +384,16 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if (defined(USE_NSS) || defined(USE_OPENSSL)) && defined(USE_AURA)
   if (url.host() == chrome::kChromeUICertificateViewerHost)
     return &NewWebUI<CertificateViewerUI>;
+#if defined(OS_CHROMEOS)
+  if (url.host() == chrome::kChromeUICertificateViewerDialogHost)
+    return &NewWebUI<CertificateViewerModalDialogUI>;
+#endif
 #endif
 #if defined(OS_CHROMEOS)
   if (url.host() == chrome::kChromeUIBluetoothPairingHost)
     return &NewWebUI<chromeos::BluetoothPairingUI>;
+  if (url.host() == chrome::kChromeUICertificateManagerHost)
+    return &NewWebUI<chromeos::CertificateManagerDialogUI>;
   if (url.host() == chrome::kChromeUIChargerReplacementHost)
     return &NewWebUI<chromeos::ChargerReplacementUI>;
   if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
@@ -448,8 +457,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if defined(USE_AURA)
   if (url.host() == chrome::kChromeUIGestureConfigHost)
     return &NewWebUI<GestureConfigUI>;
-  if (url.host() == keyboard::kKeyboardWebUIHost)
-    return &NewWebUI<keyboard::KeyboardUIController>;
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)

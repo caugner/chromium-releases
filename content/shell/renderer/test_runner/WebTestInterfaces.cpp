@@ -9,7 +9,7 @@
 #include "content/shell/renderer/test_runner/MockWebMediaStreamCenter.h"
 #include "content/shell/renderer/test_runner/MockWebRTCPeerConnectionHandler.h"
 #include "content/shell/renderer/test_runner/TestInterfaces.h"
-#include "content/shell/renderer/test_runner/TestRunner.h"
+#include "content/shell/renderer/test_runner/test_runner.h"
 
 using namespace blink;
 
@@ -71,7 +71,7 @@ TestInterfaces* WebTestInterfaces::testInterfaces()
 
 WebMediaStreamCenter* WebTestInterfaces::createMediaStreamCenter(WebMediaStreamCenterClient* client)
 {
-    return new MockWebMediaStreamCenter(client);
+    return new MockWebMediaStreamCenter(client, m_interfaces.get());
 }
 
 WebRTCPeerConnectionHandler* WebTestInterfaces::createWebRTCPeerConnectionHandler(WebRTCPeerConnectionHandlerClient* client)

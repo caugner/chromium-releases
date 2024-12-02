@@ -11,13 +11,13 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_test_notification_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
@@ -75,17 +75,26 @@ class ExtensionBrowserTest : virtual public InProcessBrowserTest {
 
   // InProcessBrowserTest
   virtual void SetUp() OVERRIDE;
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
+  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
   virtual void SetUpOnMainThread() OVERRIDE;
 
   const extensions::Extension* LoadExtension(const base::FilePath& path);
 
-  // Same as above, but enables the extension in incognito mode first.
+  // Load extension and enable it in incognito mode.
   const extensions::Extension* LoadExtensionIncognito(
       const base::FilePath& path);
 
+  // Load extension from the |path| folder. |flags| is bit mask of values from
+  // |Flags| enum.
   const extensions::Extension* LoadExtensionWithFlags(
       const base::FilePath& path, int flags);
+
+  // Same as above, but sets the installation parameter to the extension
+  // preferences.
+  const extensions::Extension* LoadExtensionWithInstallParam(
+      const base::FilePath& path,
+      int flags,
+      const std::string& install_param);
 
   // Loads unpacked extension from |path| with manifest |manifest_relative_path|
   // and imitates that it is a component extension.

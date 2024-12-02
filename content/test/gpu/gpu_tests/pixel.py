@@ -8,6 +8,7 @@ import os
 import re
 
 import cloud_storage_test_base
+import pixel_expectations
 
 from telemetry import test
 from telemetry.core import bitmap
@@ -45,9 +46,9 @@ class PixelTestFailure(Exception):
 def _DidTestSucceed(tab):
   return tab.EvaluateJavaScript('domAutomationController._succeeded')
 
-class PixelValidator(cloud_storage_test_base.ValidatorBase):
+class _PixelValidator(cloud_storage_test_base.ValidatorBase):
   def __init__(self):
-    super(PixelValidator, self).__init__('ValidatePage')
+    super(_PixelValidator, self).__init__('ValidatePage')
 
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-gpu-benchmarking')
@@ -133,21 +134,22 @@ class PixelValidator(cloud_storage_test_base.ValidatorBase):
     return screenshot
 
 class Pixel(cloud_storage_test_base.TestBase):
-  test = PixelValidator
+  test = _PixelValidator
   page_set = 'page_sets/pixel_tests.json'
 
-  @staticmethod
-  def AddTestCommandLineOptions(parser):
-    group = optparse.OptionGroup(parser, 'Pixel test options')
-    cloud_storage_test_base.TestBase._AddTestCommandLineOptions(parser, group)
+  @classmethod
+  def AddTestCommandLineArgs(cls, group):
+    super(Pixel, cls).AddTestCommandLineArgs(group)
     group.add_option('--reference-dir',
         help='Overrides the default on-disk location for reference images '
         '(only used for local testing without a cloud storage account)',
         default=default_reference_image_dir)
-    parser.add_option_group(group)
 
   def CreatePageSet(self, options):
     page_set = super(Pixel, self).CreatePageSet(options)
     for page in page_set.pages:
       page.script_to_evaluate_on_commit = test_harness_script
     return page_set
+
+  def CreateExpectations(self, page_set):
+    return pixel_expectations.PixelExpectations()

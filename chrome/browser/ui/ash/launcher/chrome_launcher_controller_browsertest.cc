@@ -816,7 +816,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, SetIcon) {
       GetItemController(app_item.id);
   const LauncherItemController* panel_item_controller =
       GetItemController(panel_item.id);
-  // Icons for Apps are set by the ShellWindowLauncherController, so
+  // Icons for Apps are set by the AppWindowLauncherController, so
   // image_set_by_controller() should be set.
   EXPECT_TRUE(app_item_controller->image_set_by_controller());
   EXPECT_TRUE(panel_item_controller->image_set_by_controller());
@@ -1380,6 +1380,45 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, LaunchPanelWindow) {
   EXPECT_EQ(item_count, shelf_model()->item_count());
 }
 
+#if defined(OS_CHROMEOS)
+// Test that we get correct shelf presence with hidden app windows.
+IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, HiddenAppWindows) {
+  int item_count = shelf_model()->item_count();
+  const Extension* extension = LoadAndLaunchPlatformApp("launch");
+  AppWindow::CreateParams params;
+
+  // Create a hidden window.
+  params.hidden = true;
+  AppWindow* window_1 = CreateAppWindowFromParams(extension, params);
+  EXPECT_EQ(item_count, shelf_model()->item_count());
+
+  // Create a visible window.
+  params.hidden = false;
+  AppWindow* window_2 = CreateAppWindowFromParams(extension, params);
+  ++item_count;
+  EXPECT_EQ(item_count, shelf_model()->item_count());
+
+  // Minimize the visible window.
+  window_2->Minimize();
+  EXPECT_EQ(item_count, shelf_model()->item_count());
+
+  // Hide the visible window.
+  window_2->Hide();
+  --item_count;
+  EXPECT_EQ(item_count, shelf_model()->item_count());
+
+  // Show the originally hidden window.
+  window_1->Show(AppWindow::SHOW_ACTIVE);
+  ++item_count;
+  EXPECT_EQ(item_count, shelf_model()->item_count());
+
+  // Close the originally hidden window.
+  CloseAppWindow(window_1);
+  --item_count;
+  EXPECT_EQ(item_count, shelf_model()->item_count());
+}
+#endif
+
 // Test attention states of windows.
 IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, WindowAttentionStatus) {
   const Extension* extension = LoadAndLaunchPlatformApp("launch");
@@ -1737,9 +1776,11 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestWithMultiMonitor,
   EXPECT_EQ(3, model_->item_count());
   EXPECT_TRUE(grid_view->forward_events_to_drag_and_drop_host_for_test());
 
-  // Move it where the item originally was and check that it disappears again.
-  generator.MoveMouseTo(bounds_grid_1.CenterPoint().x(),
-                        bounds_grid_1.CenterPoint().y());
+  // Move it to an empty slot on grid_view.
+  gfx::Rect empty_slot_rect = bounds_grid_1;
+  empty_slot_rect.Offset(0, bounds_grid_1.height());
+  generator.MoveMouseTo(empty_slot_rect.CenterPoint().x(),
+                        empty_slot_rect.CenterPoint().y());
   base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(2, model_->item_count());
   EXPECT_FALSE(grid_view->forward_events_to_drag_and_drop_host_for_test());

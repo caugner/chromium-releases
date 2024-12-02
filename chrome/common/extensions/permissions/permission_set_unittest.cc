@@ -12,14 +12,14 @@
 #include "chrome/common/extensions/extension_test_util.h"
 #include "chrome/common/extensions/features/feature_channel.h"
 #include "chrome/common/extensions/permissions/chrome_permission_message_provider.h"
-#include "chrome/common/extensions/permissions/permission_message_util.h"
-#include "chrome/common/extensions/permissions/socket_permission.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permission_message_provider.h"
+#include "extensions/common/permissions/permission_message_util.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/permissions/permissions_info.h"
+#include "extensions/common/permissions/socket_permission.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using extension_test_util::LoadManifest;
@@ -653,6 +653,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kIdltest);
   skip.insert(APIPermission::kLogPrivate);
   skip.insert(APIPermission::kNotification);
+  skip.insert(APIPermission::kOverrideEscFullscreen);
   skip.insert(APIPermission::kPointerLock);
   skip.insert(APIPermission::kPower);
   skip.insert(APIPermission::kPushMessaging);
@@ -666,7 +667,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kTts);
   skip.insert(APIPermission::kUnlimitedStorage);
   skip.insert(APIPermission::kWebView);
-  skip.insert(APIPermission::kOverrideEscFullscreen);
+  skip.insert(APIPermission::kWindowShape);
 
   // TODO(erikkay) add a string for this permission.
   skip.insert(APIPermission::kBackground);

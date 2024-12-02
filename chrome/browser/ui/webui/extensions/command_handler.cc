@@ -8,6 +8,7 @@
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
+#include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -47,7 +48,7 @@ void CommandHandler::GetLocalizedValues(content::WebUIDataSource* source) {
 void CommandHandler::RegisterMessages() {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_));
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
 
   web_ui()->RegisterMessageCallback("extensionCommandsRequestExtensionsData",
@@ -69,7 +70,7 @@ void CommandHandler::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_LOADED ||
-         type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
+         type == chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED);
   UpdateCommandDataOnPage();
 }
 
@@ -124,8 +125,13 @@ void CommandHandler::HandleSetCommandScope(
 void CommandHandler::HandleSetShortcutHandlingSuspended(
     const base::ListValue* args) {
   bool suspended;
-  if (args->GetBoolean(0, &suspended))
+  if (args->GetBoolean(0, &suspended)) {
+    // Suspend/Resume normal shortcut handling.
     ExtensionKeybindingRegistry::SetShortcutHandlingSuspended(suspended);
+
+    // Suspend/Resume global shortcut handling.
+    ExtensionCommandsGlobalRegistry::SetShortcutHandlingSuspended(suspended);
+  }
 }
 
 void CommandHandler::GetAllCommands(base::DictionaryValue* commands) {

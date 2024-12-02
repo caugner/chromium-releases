@@ -8,6 +8,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
@@ -17,11 +18,11 @@
 #include "base/stl_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/invalidation/fake_invalidation_service.h"
 #include "chrome/browser/invalidation/invalidation_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
-#include "chrome/browser/signin/fake_profile_oauth2_token_service_wrapper.h"
-#include "chrome/browser/signin/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -41,8 +42,10 @@
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_observer.h"
@@ -73,8 +76,8 @@ using browser_sync::SyncBackendHost;
 using content::BrowserThread;
 using content::WebContents;
 using syncer::ChangeRecord;
-using testing::_;
 using testing::Return;
+using testing::_;
 
 namespace browser_sync {
 
@@ -87,7 +90,7 @@ class FakeProfileSyncService : public TestProfileSyncService {
       Profile* profile,
       SigninManagerBase* signin,
       ProfileOAuth2TokenService* oauth2_token_service,
-      ProfileSyncService::StartBehavior behavior)
+      ProfileSyncServiceStartBehavior behavior)
       : TestProfileSyncService(factory,
                                profile,
                                signin,
@@ -136,14 +139,13 @@ class ProfileSyncServiceSessionTest
  protected:
   virtual TestingProfile* CreateProfile() OVERRIDE {
     TestingProfile::Builder builder;
-    builder.AddTestingFactory(
-        ProfileOAuth2TokenServiceFactory::GetInstance(),
-        FakeProfileOAuth2TokenServiceWrapper::BuildAutoIssuingTokenService);
+    builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
+                              BuildAutoIssuingFakeProfileOAuth2TokenService);
     // Don't want the profile to create a real ProfileSyncService.
     builder.AddTestingFactory(ProfileSyncServiceFactory::GetInstance(), NULL);
     scoped_ptr<TestingProfile> profile(builder.Build());
-    invalidation::InvalidationServiceFactory::GetInstance()->
-        SetBuildOnlyFakeInvalidatorsForTest(true);
+    invalidation::InvalidationServiceFactory::GetInstance()->SetTestingFactory(
+        profile.get(), invalidation::FakeInvalidationService::Build);
     return profile.release();
   }
 
@@ -155,6 +157,8 @@ class ProfileSyncServiceSessionTest
         content::NotificationService::AllSources());
     registrar_.Add(this, chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
         content::NotificationService::AllSources());
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kSyncDeferredStartupTimeoutSeconds, "0");
   }
 
   virtual void Observe(int type,
@@ -205,7 +209,7 @@ class ProfileSyncServiceSessionTest
         profile(),
         signin,
         oauth2_token_service,
-        ProfileSyncService::AUTO_START));
+        browser_sync::AUTO_START));
     EXPECT_CALL(*factory, CreateSyncBackendHost(_,_,_)).
         WillOnce(ReturnSyncBackendHost(callback));
 

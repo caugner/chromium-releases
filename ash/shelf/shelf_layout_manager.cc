@@ -36,9 +36,8 @@
 #include "base/i18n/rtl.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/cursor_client.h"
-#include "ui/aura/root_window.h"
+#include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -48,6 +47,7 @@
 #include "ui/events/event_handler.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace ash {
 namespace internal {
@@ -198,6 +198,8 @@ class ShelfLayoutManager::UpdateShelfObserver
 ShelfLayoutManager::ShelfLayoutManager(ShelfWidget* shelf)
     : root_window_(shelf->GetNativeView()->GetRootWindow()),
       updating_bounds_(false),
+      force_shelf_always_visibile_(
+          Shell::GetInstance()->IsMaximizeModeWindowManagerEnabled()),
       auto_hide_behavior_(SHELF_AUTO_HIDE_BEHAVIOR_NEVER),
       alignment_(SHELF_ALIGNMENT_BOTTOM),
       shelf_(shelf),
@@ -318,7 +320,8 @@ void ShelfLayoutManager::UpdateVisibilityState() {
   if (!workspace_controller_)
     return;
 
-  if (Shell::GetInstance()->session_state_delegate()->IsScreenLocked()) {
+  if (Shell::GetInstance()->session_state_delegate()->IsScreenLocked() ||
+      force_shelf_always_visibile_) {
     SetState(SHELF_VISIBLE);
   } else {
     // TODO(zelidrag): Verify shelf drag animation still shows on the device
@@ -393,22 +396,20 @@ void ShelfLayoutManager::RemoveObserver(ShelfLayoutManagerObserver* observer) {
 // ShelfLayoutManager, Gesture functions:
 
 void ShelfLayoutManager::OnGestureEdgeSwipe(const ui::GestureEvent& gesture) {
-  // Edge swipe should exit fullscreen, show the tray, and disable auto-hide.
+  if (force_shelf_always_visibile_)
+    return;
 
-  if (workspace_controller_->GetWindowState() ==
-      WORKSPACE_WINDOW_STATE_FULL_SCREEN) {
-    accelerators::ToggleFullscreen();
-  }
-
-  ShelfVisibilityState visibility = CalculateShelfVisibility();
-  if (visibility == SHELF_AUTO_HIDE &&
-      CalculateAutoHideState(visibility) == SHELF_AUTO_HIDE_HIDDEN) {
-    SetState(SHELF_VISIBLE);
-    SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_NEVER);
+  if (visibility_state() == SHELF_AUTO_HIDE) {
+    gesture_drag_auto_hide_state_ = SHELF_AUTO_HIDE_SHOWN;
+    gesture_drag_status_ = GESTURE_DRAG_COMPLETE_IN_PROGRESS;
+    UpdateVisibilityState();
+    gesture_drag_status_ = GESTURE_DRAG_NONE;
   }
 }
 
 void ShelfLayoutManager::StartGestureDrag(const ui::GestureEvent& gesture) {
+  if (force_shelf_always_visibile_)
+    return;
   gesture_drag_status_ = GESTURE_DRAG_IN_PROGRESS;
   gesture_drag_amount_ = 0.f;
   gesture_drag_auto_hide_state_ = visibility_state() == SHELF_AUTO_HIDE ?
@@ -418,6 +419,8 @@ void ShelfLayoutManager::StartGestureDrag(const ui::GestureEvent& gesture) {
 
 ShelfLayoutManager::DragState ShelfLayoutManager::UpdateGestureDrag(
     const ui::GestureEvent& gesture) {
+  if (force_shelf_always_visibile_)
+    return DRAG_SHELF;
   bool horizontal = IsHorizontalAlignment();
   gesture_drag_amount_ += horizontal ? gesture.details().scroll_y() :
                                        gesture.details().scroll_x();
@@ -442,6 +445,8 @@ ShelfLayoutManager::DragState ShelfLayoutManager::UpdateGestureDrag(
 }
 
 void ShelfLayoutManager::CompleteGestureDrag(const ui::GestureEvent& gesture) {
+  if (force_shelf_always_visibile_)
+    return;
   bool horizontal = IsHorizontalAlignment();
   bool should_change = false;
   if (gesture.type() == ui::ET_GESTURE_SCROLL_END) {
@@ -556,9 +561,25 @@ void ShelfLayoutManager::SetChildBounds(aura::Window* child,
 void ShelfLayoutManager::OnLockStateChanged(bool locked) {
   // Force the shelf to layout for alignment (bottom if locked, restore
   // the previous alignment otherwise).
+  state_.is_screen_locked = locked;
   shelf_->SetAlignment(locked ? SHELF_ALIGNMENT_BOTTOM : alignment_);
   UpdateVisibilityState();
   LayoutShelf();
+}
+
+void ShelfLayoutManager::OnMaximizeModeStarted() {
+  DCHECK(!force_shelf_always_visibile_);
+  force_shelf_always_visibile_ = true;
+  UpdateVisibilityState();
+}
+
+void ShelfLayoutManager::OnMaximizeModeEnded() {
+  DCHECK(force_shelf_always_visibile_);
+  // Note: At this time Ash::Shell::IsMaximizeModeWindowManagerEnabled() will
+  // report true, even though it is in progress of shut down. To address this
+  // |force_shelf_always_visibile_| will be read.
+  force_shelf_always_visibile_ = false;
+  UpdateVisibilityState();
 }
 
 void ShelfLayoutManager::OnWindowActivated(aura::Window* gained_active,
@@ -590,8 +611,6 @@ void ShelfLayoutManager::SetState(ShelfVisibilityState visibility_state) {
   State state;
   state.visibility_state = visibility_state;
   state.auto_hide_state = CalculateAutoHideState(visibility_state);
-  state.is_screen_locked =
-      Shell::GetInstance()->session_state_delegate()->IsScreenLocked();
   state.window_state = workspace_controller_ ?
       workspace_controller_->GetWindowState() : WORKSPACE_WINDOW_STATE_DEFAULT;
 
@@ -721,8 +740,10 @@ void ShelfLayoutManager::UpdateBoundsAndOpacity(
       ScreenUtil::ConvertRectToScreen(
           shelf_->status_area_widget()->GetNativeView()->parent(),
           status_bounds));
-  Shell::GetInstance()->SetDisplayWorkAreaInsets(
-      root_window_, target_bounds.work_area_insets);
+  if (!state_.is_screen_locked) {
+    Shell::GetInstance()->SetDisplayWorkAreaInsets(
+        root_window_, target_bounds.work_area_insets);
+  }
 }
 
 void ShelfLayoutManager::StopAnimating() {
@@ -1009,6 +1030,9 @@ gfx::Rect ShelfLayoutManager::GetAutoHideShowShelfRegionInScreen() const {
 
 ShelfAutoHideState ShelfLayoutManager::CalculateAutoHideState(
     ShelfVisibilityState visibility_state) const {
+  if (force_shelf_always_visibile_)
+    return SHELF_AUTO_HIDE_SHOWN;
+
   if (visibility_state != SHELF_AUTO_HIDE || !shelf_)
     return SHELF_AUTO_HIDE_HIDDEN;
 
@@ -1147,6 +1171,9 @@ void ShelfLayoutManager::OnDockBoundsChanging(
 
 void ShelfLayoutManager::OnLockStateEvent(LockStateObserver::EventType event) {
   if (event == EVENT_LOCK_ANIMATION_STARTED) {
+    // Enter the screen locked state as the animation starts to prevent
+    // layout changes as the screen locks.
+    state_.is_screen_locked = true;
     // Hide the status area widget (using auto hide animation).
     base::AutoReset<ShelfVisibilityState> state(&state_.visibility_state,
                                                 SHELF_HIDDEN);
@@ -1155,21 +1182,6 @@ void ShelfLayoutManager::OnLockStateEvent(LockStateObserver::EventType event) {
     UpdateBoundsAndOpacity(target_bounds, true, NULL);
     UpdateVisibilityState();
   }
-}
-
-gfx::Insets ShelfLayoutManager::GetInsetsForAlignment(int distance) const {
-  switch (GetAlignment()) {
-    case SHELF_ALIGNMENT_BOTTOM:
-      return gfx::Insets(distance, 0, 0, 0);
-    case SHELF_ALIGNMENT_LEFT:
-      return gfx::Insets(0, 0, 0, distance);
-    case SHELF_ALIGNMENT_RIGHT:
-      return gfx::Insets(0, distance, 0, 0);
-    case SHELF_ALIGNMENT_TOP:
-      return gfx::Insets(0, 0, distance, 0);
-  }
-  NOTREACHED();
-  return gfx::Insets();
 }
 
 }  // namespace internal

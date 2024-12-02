@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
+#include <vector>
+
 #include "ash/accessibility_delegate.h"
 #include "ash/magnifier/magnifier_constants.h"
 #include "ash/media_delegate.h"
@@ -11,10 +13,13 @@
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "chrome/browser/accessibility/accessibility_events.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/ash/caps_lock_delegate_views.h"
+#include "chrome/browser/signin/signin_error_notifier_factory_ash.h"
+#include "chrome/browser/sync/sync_error_notifier_factory_ash.h"
 #include "chrome/browser/ui/ash/chrome_new_window_delegate.h"
 #include "chrome/browser/ui/ash/session_state_delegate_views.h"
 #include "chrome/browser/ui/browser.h"
@@ -120,6 +125,8 @@ class EmptyAccessibilityDelegate : public ash::AccessibilityDelegate {
     return false;
   }
 
+  virtual bool IsBrailleDisplayConnected() const OVERRIDE { return false; }
+
   virtual void SilenceSpokenFeedback() const OVERRIDE {
   }
 
@@ -155,7 +162,7 @@ bool ChromeShellDelegate::IsFirstRunAfterBoot() const {
 void ChromeShellDelegate::PreInit() {
 }
 
-void ChromeShellDelegate::Shutdown() {
+void ChromeShellDelegate::PreShutdown() {
 }
 
 ash::NewWindowDelegate* ChromeShellDelegate::CreateNewWindowDelegate() {
@@ -164,10 +171,6 @@ ash::NewWindowDelegate* ChromeShellDelegate::CreateNewWindowDelegate() {
 
 ash::MediaDelegate* ChromeShellDelegate::CreateMediaDelegate() {
   return new MediaDelegateImpl;
-}
-
-ash::CapsLockDelegate* ChromeShellDelegate::CreateCapsLockDelegate() {
-  return new CapsLockDelegate();
 }
 
 ash::SessionStateDelegate* ChromeShellDelegate::CreateSessionStateDelegate() {
@@ -198,7 +201,23 @@ void ChromeShellDelegate::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
   switch (type) {
+    case chrome::NOTIFICATION_PROFILE_ADDED: {
+      // Start the error notifier services to show sync/auth notifications.
+      Profile* profile = content::Source<Profile>(source).ptr();
+      SigninErrorNotifierFactory::GetForProfile(profile);
+      SyncErrorNotifierFactory::GetForProfile(profile);
+      break;
+    }
     case chrome::NOTIFICATION_ASH_SESSION_STARTED: {
+      // Start the error notifier services for the already loaded profiles.
+      const std::vector<Profile*> profiles =
+          g_browser_process->profile_manager()->GetLoadedProfiles();
+      for (std::vector<Profile*>::const_iterator it = profiles.begin();
+           it != profiles.end(); ++it) {
+        SigninErrorNotifierFactory::GetForProfile(*it);
+        SyncErrorNotifierFactory::GetForProfile(*it);
+      }
+
 #if defined(OS_WIN)
       // If we are launched to service a windows 8 search request then let the
       // IPC which carries the search string create the browser and initiate
@@ -252,6 +271,9 @@ void ChromeShellDelegate::Observe(int type,
 
 void ChromeShellDelegate::PlatformInit() {
 #if defined(OS_WIN)
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_PROFILE_ADDED,
+                 content::NotificationService::AllSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_ASH_SESSION_STARTED,
                  content::NotificationService::AllSources());

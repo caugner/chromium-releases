@@ -2,8 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/crypto.gni")
 import("//build/config/ui.gni")
-import("//crypto/ssl/flags.gni")
 import("//tools/grit/grit_rule.gni")
 
 executable("chrome") {
@@ -64,8 +64,6 @@ executable("chrome") {
 }
 
 static_library("browser") {
-  external = true
-
   if (is_linux) {
     if (toolkit_uses_gtk) {
       libs = [ "gconf-2" ]
@@ -83,8 +81,6 @@ static_library("browser") {
 }
 
 static_library("common") {
-  external = true
-
   if (use_nss && is_linux) {
     # common/net uses NSS.
     # TODO(brettw) have a better way to express this without having to do
@@ -170,15 +166,12 @@ source_set("debugger") {
 }
 
 source_set("plugin") {
-  external = true
 }
 
 source_set("renderer") {
-  external = true
 }
 
 source_set("utility") {
-  external = true
 }
 
 
@@ -186,9 +179,9 @@ source_set("utility") {
 
 about_credits_file = "$root_gen_dir/about_credits.html"
 build_relative_about_credits_file =
-  rebase_path(about_credits_file, ".", root_build_dir)
+  rebase_path(about_credits_file, root_build_dir)
 
-custom("about_credits") {
+action("about_credits") {
   script = "//tools/licenses.py"
   outputs = [ about_credits_file ]
 
@@ -258,7 +251,6 @@ custom("about_credits") {
 #  if (!is_ios) {
 #    deps += [
 #      ":component_extension_resources",
-#      ":devtools_discovery_page_resources",
 #      ":options_resources",
 #      ":quota_internals_resources",
 #      ":sync_file_system_internals_resources",
@@ -267,9 +259,6 @@ custom("about_credits") {
 #}
 #grit("component_extension_resources") {
 #  source = "browser/resources/component_extension_resources.grd"
-#}
-#grit("devtools_discovery_page_resources") {
-#  source = "browser/devtools/frontend/devtools_discovery_page_resources.grd"
 #}
 #grit("memory_internals_resources") {
 #  source = "browser/resources/memory_internals_resources.grd"

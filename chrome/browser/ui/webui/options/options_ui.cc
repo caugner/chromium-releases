@@ -322,7 +322,8 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
                           new chromeos::options::StatsOptionsHandler());
 #endif
 #if defined(USE_NSS)
-  AddOptionsPageUIHandler(localized_strings, new CertificateManagerHandler());
+  AddOptionsPageUIHandler(localized_strings,
+                          new CertificateManagerHandler(false));
 #endif
   AddOptionsPageUIHandler(localized_strings, new HandlerOptionsHandler());
 
@@ -357,6 +358,11 @@ OptionsUI::~OptionsUI() {
   // Uninitialize all registered handlers. Deleted by WebUIImpl.
   for (size_t i = 0; i < handlers_.size(); ++i)
     handlers_[i]->Uninitialize();
+}
+
+scoped_ptr<OptionsUI::OnFinishedLoadingCallbackList::Subscription>
+OptionsUI::RegisterOnFinishedLoadingCallback(const base::Closure& callback) {
+  return on_finished_loading_callbacks_.Add(callback);
 }
 
 // static
@@ -429,6 +435,10 @@ void OptionsUI::InitializeHandlers() {
 
   web_ui()->CallJavascriptFunction(
       "BrowserOptions.notifyInitializationComplete");
+}
+
+void OptionsUI::OnFinishedLoading() {
+  on_finished_loading_callbacks_.Notify();
 }
 
 void OptionsUI::AddOptionsPageUIHandler(

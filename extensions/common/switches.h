@@ -13,7 +13,6 @@ namespace switches {
 
 extern const char kAllowHTTPBackgroundPage[];
 extern const char kAllowLegacyExtensionManifests[];
-extern const char kAllowScriptingGallery[];
 extern const char kEasyOffStoreExtensionInstall[];
 extern const char kEnableExperimentalExtensionApis[];
 extern const char kEnableOverrideBookmarksUI[];
@@ -24,7 +23,6 @@ extern const char kExtensionProcess[];
 extern const char kExtensionsOnChromeURLs[];
 extern const char kForceDevModeHighlighting[];
 extern const char kGlobalCommands[];
-extern const char kPromptForExternalExtensions[];
 extern const char kShowComponentExtensionOptions[];
 
 }  // namespace switches

@@ -10,7 +10,10 @@
     "pref_mappings": [
       { "pref": "The affected preference's name.",
         "local_state": "Whether |pref| is registered in local state's PrefService instead of the profile's PrefService. Defaults to |false| if not specified.",
-        "note": "The following entries should be specified if controlled setting indicators exist for |pref| in the settings UI.",
+        "check_for_mandatory": "Should the preference be tested when a mandatory value is set for the policy? Defaults to |true| if not specified.",
+        "check_for_recommended": "Should the preference be tested when a recommended value is set for the policy? Defaults to |true| if not specified.",
+        "note": "When |can_be_recommended| is |false|, the policy is never set to a recommended value so |check_for_recommended| has no effect.",
+        "note 1": "The following entries should be specified if controlled setting indicators exist for |pref| in the settings UI.",
         "indicator_test_setup_js": "Any JavaScript that should be executed before testing the indicators. This should be specified only if an explicit user action must be simulated (e.g. clicking a button).",
         "indicator_selector": "A CSS selector that locates all controlled setting indicators for |pref|. This is appended to the selector 'span.controlled-setting-indicator' and if not specified, defaults to '[pref=(the value of |pref|)', e.g. '[pref=homepage]'.",
         "note 2": "Any number of test cases may be specified in the following array.",
@@ -233,6 +236,14 @@
     ]
   },
 
+  "RemoteAccessHostAllowGnubbyAuth": {
+    "os": [],
+    "test_policy": { "RemoteAccessHostAllowGnubbyAuth": true },
+    "pref_mappings": [
+      { "pref": "remote_access.host_allow_gnubby_auth" }
+    ]
+  },
+
   "PrintingEnabled": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "PrintingEnabled": false },
@@ -405,7 +416,7 @@
   },
 
   "DownloadDirectory": {
-    "os": ["win", "mac", "linux"],
+    "os": ["win", "mac", "linux", "chromeos"],
     "can_be_recommended": true,
     "test_policy": { "DownloadDirectory": "${user_home}/test-downloads" },
     "pref_mappings": [
@@ -415,6 +426,7 @@
         ]
       },
       { "pref": "download.prompt_for_download",
+        "check_for_recommended" : false,
         "indicator_tests": [
           { "policy": { "DownloadDirectory": "${user_home}/test-downloads" } }
         ]
@@ -1443,11 +1455,7 @@
   },
 
   "EnableMemoryInfo": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": { "EnableMemoryInfo": true },
-    "pref_mappings": [
-      { "pref": "enable_memory_info" }
-    ]
+    "note": "This policy is retired, see http://crbug.com/350339."
   },
 
   "DisablePrintPreview": {
@@ -1522,6 +1530,16 @@
     ]
   },
 
+  "WPADQuickCheckEnabled": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "WPADQuickCheckEnabled": true },
+    "pref_mappings": [
+      { "pref": "proxy.quick_check_enabled",
+        "local_state": true
+      }
+    ]
+  },
+
   "HideWebStoreIcon": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "HideWebStoreIcon": true },
@@ -1555,10 +1573,21 @@
     "test_policy": {
       "UserAvatarImage": {
         "url": "http://localhost/",
-        "hash": "01234567890012345678900123456789001234567890"
+        "hash": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
       }
     },
     "indicator_selector": "#account-picture-indicator"
+  },
+
+  "WallpaperImage": {
+    "os": ["chromeos"],
+    "test_policy": {
+      "WallpaperImage": {
+        "url": "http://localhost/",
+        "hash": "baddecafbaddecafbaddecafbaddecafbaddecafbaddecafbaddecafbaddecaf"
+      }
+    },
+    "indicator_selector": "#wallpaper-indicator"
   },
 
   "----- Chrome OS policies ------------------------------------------------": {},
@@ -1853,6 +1882,30 @@
     ]
   },
 
+  "PowerManagementIdleSettings": {
+    "os": ["chromeos"],
+    "test_policy": { "PowerManagementIdleSettings" : { "AC": { "Delays": { "ScreenDim": 5000, "ScreenOff": 7000, "IdleWarning": 8000, "Idle": 9000 }, "IdleAction": "Logout" }, "Battery": { "Delays": { "ScreenDim": 1000, "ScreenOff": 3000, "IdleWarning": 4000, "Idle": 5000 }, "IdleAction": "Logout"} } },
+    "pref_mappings": [
+      { "pref": "power.ac_screen_dim_delay_ms" },
+      { "pref": "power.ac_screen_off_delay_ms" },
+      { "pref": "power.ac_idle_warning_delay_ms" },
+      { "pref": "power.ac_idle_delay_ms" },
+      { "pref": "power.battery_screen_dim_delay_ms" },
+      { "pref": "power.battery_screen_off_delay_ms" },
+      { "pref": "power.battery_idle_warning_delay_ms" },
+      { "pref": "power.battery_idle_delay_ms" }
+    ]
+  },
+
+  "ScreenLockDelays": {
+    "os": ["chromeos"],
+    "test_policy": { "ScreenLockDelays": { "AC": 6000, "Battery": 2000 } },
+    "pref_mappings": [
+      { "pref": "power.ac_screen_lock_delay_ms" },
+      { "pref": "power.battery_screen_lock_delay_ms" }
+    ]
+  },
+
   "TermsOfServiceURL": {
     "os": ["chromeos"],
     "test_policy": { "TermsOfServiceURL": "http://www.example.com/terms_of_service.txt" },
@@ -1929,6 +1982,18 @@
       { "pref": "settings.a11y.virtual_keyboard",
         "indicator_tests": [
           { "policy": { "VirtualKeyboardEnabled": true } }
+        ]
+      }
+    ]
+  },
+
+  "KeyboardDefaultToFunctionKeys": {
+    "os": ["chromeos"],
+    "test_policy": { "KeyboardDefaultToFunctionKeys": true },
+    "pref_mappings": [
+      { "pref": "settings.language.send_function_keys",
+        "indicator_tests": [
+          { "policy": { "KeyboardDefaultToFunctionKeys": true } }
         ]
       }
     ]

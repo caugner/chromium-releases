@@ -16,6 +16,7 @@
 #include "content/browser/renderer_host/gtk_plugin_container_manager.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/content_export.h"
+#include "content/common/cursors/webcursor.h"
 #include "ipc/ipc_sender.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
@@ -24,7 +25,6 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
-#include "webkit/common/cursors/webcursor.h"
 
 typedef struct _GtkClipboard GtkClipboard;
 typedef struct _GtkSelectionData GtkSelectionData;
@@ -175,6 +175,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
   virtual gfx::Point GetLastTouchEventLocation() const OVERRIDE;
   virtual void FatalAccessibilityTreeError() OVERRIDE;
+
+  virtual SkBitmap::Config PreferredReadbackFormat() OVERRIDE;
 
   // Get the root of the AtkObject* tree for accessibility.
   AtkObject* GetAccessible();

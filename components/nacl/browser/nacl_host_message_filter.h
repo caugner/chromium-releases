@@ -5,9 +5,9 @@
 #ifndef COMPONENTS_NACL_BROWSER_NACL_HOST_MESSAGE_FILTER_H_
 #define COMPONENTS_NACL_BROWSER_NACL_HOST_MESSAGE_FILTER_H_
 
+#include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "base/platform_file.h"
 #include "content/public/browser/browser_message_filter.h"
 
 class GURL;
@@ -48,7 +48,6 @@ class NaClHostMessageFilter : public content::BrowserMessageFilter {
 
   virtual ~NaClHostMessageFilter();
 
-#if !defined(DISABLE_NACL)
   void OnLaunchNaCl(const NaClLaunchParams& launch_params,
                     IPC::Message* reply_msg);
   void OnGetReadonlyPnaclFd(const std::string& filename,
@@ -59,16 +58,17 @@ class NaClHostMessageFilter : public content::BrowserMessageFilter {
                    int pp_instance,
                    const PnaclCacheInfo& cache_info);
   void OnTranslationFinished(int instance, bool success);
-  void OnNaClErrorStatus(int render_view_id, int error_id);
+  void OnMissingArchError(int render_view_id);
   void OnOpenNaClExecutable(int render_view_id,
                             const GURL& file_url,
                             IPC::Message* reply_msg);
   void SyncReturnTemporaryFile(IPC::Message* reply_msg,
-                               base::PlatformFile fd);
+                               base::File file);
   void AsyncReturnTemporaryFile(int pp_instance,
                                 base::PlatformFile fd,
                                 bool is_hit);
-#endif
+  void OnNaClDebugEnabledForURL(const GURL& nmf_url, bool* should_debug);
+
   int render_process_id_;
 
   // off_the_record_ is copied from the profile partly so that it can be

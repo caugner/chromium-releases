@@ -25,23 +25,32 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/invalidation_service_factory.h"
 #include "chrome/browser/invalidation/p2p_invalidation_service.h"
+#include "chrome/browser/invalidation/profile_invalidation_auth_provider.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/test/integration/p2p_invalidation_forwarder.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
+#include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
+#include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/webdata/encryptor/encryptor.h"
+#include "components/os_crypt/os_crypt.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -74,6 +83,8 @@ const char kSyncPasswordForTest[] = "sync-password-for-test";
 const char kSyncServerCommandLine[] = "sync-server-command-line";
 }
 
+namespace {
+
 // Helper class that checks whether a sync test server is running or not.
 class SyncServerStatusChecker : public net::URLFetcherDelegate {
  public:
@@ -94,6 +105,25 @@ class SyncServerStatusChecker : public net::URLFetcherDelegate {
   bool running_;
 };
 
+bool IsEncryptionComplete(const ProfileSyncService* service) {
+  return service->EncryptEverythingEnabled() && !service->encryption_pending();
+}
+
+// Helper class to wait for encryption to complete.
+class EncryptionChecker : public SingleClientStatusChangeChecker {
+ public:
+  explicit EncryptionChecker(ProfileSyncService* service)
+      : SingleClientStatusChangeChecker(service) {}
+
+  virtual bool IsExitConditionSatisfied() OVERRIDE {
+    return IsEncryptionComplete(service());
+  }
+
+  virtual std::string GetDebugMessage() const OVERRIDE {
+    return "Encryption";
+  }
+};
+
 void SetProxyConfigCallback(
     base::WaitableEvent* done,
     net::URLRequestContextGetter* url_request_context_getter,
@@ -105,17 +135,30 @@ void SetProxyConfigCallback(
   done->Signal();
 }
 
+KeyedService* BuildP2PInvalidationService(content::BrowserContext* context) {
+  Profile* profile = static_cast<Profile*>(context);
+  return new invalidation::P2PInvalidationService(
+      profile,
+      scoped_ptr<invalidation::InvalidationAuthProvider>(
+          new invalidation::ProfileInvalidationAuthProvider(
+              SigninManagerFactory::GetForProfile(profile),
+              ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
+              LoginUIServiceFactory::GetForProfile(profile))));
+}
+
+}  // namespace
+
 SyncTest::SyncTest(TestType test_type)
     : test_type_(test_type),
       server_type_(SERVER_TYPE_UNDECIDED),
       num_clients_(-1),
       use_verifier_(true),
       notifications_enabled_(true),
-      test_server_handle_(base::kNullProcessHandle),
-      number_of_default_sync_items_(0) {
+      test_server_handle_(base::kNullProcessHandle) {
   sync_datatype_helper::AssociateWithTest(this);
   switch (test_type_) {
-    case SINGLE_CLIENT: {
+    case SINGLE_CLIENT:
+    case SINGLE_CLIENT_LEGACY: {
       num_clients_ = 1;
       break;
     }
@@ -133,7 +176,7 @@ SyncTest::SyncTest(TestType test_type)
 SyncTest::~SyncTest() {}
 
 void SyncTest::SetUp() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kPasswordFileForTest)) {
     ReadPasswordFile();
   } else if (cl->HasSwitch(switches::kSyncUserForTest) &&
@@ -145,42 +188,15 @@ void SyncTest::SetUp() {
     password_ = "password";
   }
 
-  // Only set |server_type_| if it hasn't already been set. This allows for
-  // IN_PROCESS_FAKE_SERVER tests to set this value in each test class.
-  if (server_type_ == SERVER_TYPE_UNDECIDED) {
-    if (!cl->HasSwitch(switches::kSyncServiceURL) &&
-        !cl->HasSwitch(switches::kSyncServerCommandLine)) {
-      // If neither a sync server URL nor a sync server command line is
-      // provided, start up a local python sync test server and point Chrome
-      // to its URL.  This is the most common configuration, and the only
-      // one that makes sense for most developers.
-      server_type_ = LOCAL_PYTHON_SERVER;
-    } else if (cl->HasSwitch(switches::kSyncServiceURL) &&
-               cl->HasSwitch(switches::kSyncServerCommandLine)) {
-      // If a sync server URL and a sync server command line are provided,
-      // start up a local sync server by running the command line. Chrome
-      // will connect to the server at the URL that was provided.
-      server_type_ = LOCAL_LIVE_SERVER;
-    } else if (cl->HasSwitch(switches::kSyncServiceURL) &&
-               !cl->HasSwitch(switches::kSyncServerCommandLine)) {
-      // If a sync server URL is provided, but not a server command line,
-      // it is assumed that the server is already running. Chrome will
-      // automatically connect to it at the URL provided. There is nothing
-      // to do here.
-      server_type_ = EXTERNAL_LIVE_SERVER;
-    } else {
-      // If a sync server command line is provided, but not a server URL,
-      // we flag an error.
-      LOG(FATAL) << "Can't figure out how to run a server.";
-    }
-  }
-
   if (username_.empty() || password_.empty())
     LOG(FATAL) << "Cannot run sync tests without GAIA credentials.";
 
+  // Sets |server_type_| if it wasn't specified by the test.
+  DecideServerType();
+
   // Mock the Mac Keychain service.  The real Keychain can block on user input.
 #if defined(OS_MACOSX)
-  Encryptor::UseMockKeychain(true);
+  OSCrypt::UseMockKeychain(true);
 #endif
 
   // Start up a sync test server if one is needed and setup mock gaia responses.
@@ -206,26 +222,21 @@ void SyncTest::TearDown() {
   TearDownLocalTestServer();
 }
 
-void SyncTest::SetUpCommandLine(CommandLine* cl) {
+void SyncTest::SetUpCommandLine(base::CommandLine* cl) {
   AddTestSwitches(cl);
   AddOptionalTypesToCommandLine(cl);
 }
 
-void SyncTest::AddTestSwitches(CommandLine* cl) {
+void SyncTest::AddTestSwitches(base::CommandLine* cl) {
   // Disable non-essential access of external network resources.
   if (!cl->HasSwitch(switches::kDisableBackgroundNetworking))
     cl->AppendSwitch(switches::kDisableBackgroundNetworking);
 
   if (!cl->HasSwitch(switches::kSyncShortInitialRetryOverride))
     cl->AppendSwitch(switches::kSyncShortInitialRetryOverride);
-
-  // TODO(sync): Fix enable_disable_test.cc to play nice with priority
-  // preferences.
-  if (!cl->HasSwitch(switches::kDisableSyncPriorityPreferences))
-    cl->AppendSwitch(switches::kDisableSyncPriorityPreferences);
 }
 
-void SyncTest::AddOptionalTypesToCommandLine(CommandLine* cl) {}
+void SyncTest::AddOptionalTypesToCommandLine(base::CommandLine* cl) {}
 
 // static
 Profile* SyncTest::MakeProfile(const base::FilePath::StringType name) {
@@ -288,6 +299,7 @@ bool SyncTest::SetupClients() {
   profiles_.resize(num_clients_);
   browsers_.resize(num_clients_);
   clients_.resize(num_clients_);
+  invalidation_forwarders_.resize(num_clients_);
   for (int i = 0; i < num_clients_; ++i) {
     InitializeInstance(i);
   }
@@ -315,8 +327,9 @@ void SyncTest::InitializeInstance(int index) {
                                           << index << ".";
 
   invalidation::P2PInvalidationService* p2p_invalidation_service =
-      InvalidationServiceFactory::GetInstance()->
-          BuildAndUseP2PInvalidationServiceForTest(GetProfile(index));
+      static_cast<invalidation::P2PInvalidationService*>(
+          InvalidationServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+              GetProfile(index), BuildP2PInvalidationService));
   p2p_invalidation_service->UpdateCredentials(username_, password_);
 
   // Make sure the ProfileSyncService has been created before creating the
@@ -329,17 +342,21 @@ void SyncTest::InitializeInstance(int index) {
     // TODO(pvalenzuela): Run the fake server via EmbeddedTestServer.
     profile_sync_service->OverrideNetworkResourcesForTest(
         make_scoped_ptr<syncer::NetworkResources>(
-            new syncer::FakeServerNetworkResources(fake_server_.get())));
+            new fake_server::FakeServerNetworkResources(fake_server_.get())));
   }
 
   clients_[index] =
-      ProfileSyncServiceHarness::CreateForIntegrationTest(
+      ProfileSyncServiceHarness::Create(
           GetProfile(index),
           username_,
-          password_,
-          p2p_invalidation_service);
+          password_);
   EXPECT_FALSE(GetClient(index) == NULL) << "Could not create Client "
                                          << index << ".";
+
+  // Start listening for and emitting notificaitons of commits.
+  invalidation_forwarders_[index] =
+      new P2PInvalidationForwarder(clients_[index]->service(),
+                                   p2p_invalidation_service);
 
   test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(GetProfile(index)));
@@ -367,15 +384,6 @@ bool SyncTest::SetupSync() {
   // changes have propagated between the clients.
   AwaitQuiescence();
 
-  // The number of default entries is the number of entries existing after
-  // sync startup excluding top level folders and other permanent items.
-  // This value must be updated whenever new permanent items are added (although
-  // this should handle new datatype-specific top level folders).
-  number_of_default_sync_items_ = GetClient(0)->GetNumEntries() -
-                                  GetClient(0)->GetNumDatatypes() - 6;
-  DVLOG(1) << "Setting " << number_of_default_sync_items_ << " as default "
-           << " number of entries.";
-
   return true;
 }
 
@@ -394,6 +402,7 @@ void SyncTest::CleanUpOnMainThread() {
   // All browsers should be closed at this point, or else we could see memory
   // corruption in QuitBrowser().
   CHECK_EQ(0U, chrome::GetTotalBrowserCount());
+  invalidation_forwarders_.clear();
   clients_.clear();
 }
 
@@ -418,7 +427,7 @@ void SyncTest::TearDownInProcessBrowserTestFixture() {
 }
 
 void SyncTest::ReadPasswordFile() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   password_file_ = cl->GetSwitchValuePath(switches::kPasswordFileForTest);
   if (password_file_.empty())
     LOG(FATAL) << "Can't run live server test without specifying --"
@@ -510,6 +519,44 @@ void SyncTest::ClearMockGaiaResponses() {
   factory_.reset();
 }
 
+void SyncTest::DecideServerType() {
+  // Only set |server_type_| if it hasn't already been set. This allows for
+  // tests to explicitly set this value in each test class if needed.
+  if (server_type_ == SERVER_TYPE_UNDECIDED) {
+    base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
+    if (!cl->HasSwitch(switches::kSyncServiceURL) &&
+        !cl->HasSwitch(switches::kSyncServerCommandLine)) {
+      // If neither a sync server URL nor a sync server command line is
+      // provided, start up a local sync test server and point Chrome
+      // to its URL.  This is the most common configuration, and the only
+      // one that makes sense for most developers. FakeServer is the
+      // current solution but some scenarios are only supported by the
+      // legacy python server.
+      // TODO(pvalenzuela): Make FAKE_SERVER the default and LOCAL_PYTHON
+      // the exception once more scenarios are supported.
+        server_type_ = test_type_ == SINGLE_CLIENT ?
+              IN_PROCESS_FAKE_SERVER : LOCAL_PYTHON_SERVER;
+    } else if (cl->HasSwitch(switches::kSyncServiceURL) &&
+               cl->HasSwitch(switches::kSyncServerCommandLine)) {
+      // If a sync server URL and a sync server command line are provided,
+      // start up a local sync server by running the command line. Chrome
+      // will connect to the server at the URL that was provided.
+      server_type_ = LOCAL_LIVE_SERVER;
+    } else if (cl->HasSwitch(switches::kSyncServiceURL) &&
+               !cl->HasSwitch(switches::kSyncServerCommandLine)) {
+      // If a sync server URL is provided, but not a server command line,
+      // it is assumed that the server is already running. Chrome will
+      // automatically connect to it at the URL provided. There is nothing
+      // to do here.
+      server_type_ = EXTERNAL_LIVE_SERVER;
+    } else {
+      // If a sync server command line is provided, but not a server URL,
+      // we flag an error.
+      LOG(FATAL) << "Can't figure out how to run a server.";
+    }
+  }
+}
+
 // Start up a local sync server based on the value of server_type_, which
 // was determined from the command line parameters.
 void SyncTest::SetUpTestServerIfRequired() {
@@ -524,7 +571,7 @@ void SyncTest::SetUpTestServerIfRequired() {
     if (!SetUpLocalTestServer())
       LOG(FATAL) << "Failed to set up local test server";
   } else if (server_type_ == IN_PROCESS_FAKE_SERVER) {
-    fake_server_.reset(new syncer::FakeServer());
+    fake_server_.reset(new fake_server::FakeServer());
     // Similar to LOCAL_LIVE_SERVER, we must start this for XMPP.
     SetUpLocalPythonTestServer();
     SetupMockGaiaResponses();
@@ -539,7 +586,7 @@ bool SyncTest::SetUpLocalPythonTestServer() {
   EXPECT_TRUE(sync_server_.Start())
       << "Could not launch local python test server.";
 
-  CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   if (server_type_ == LOCAL_PYTHON_SERVER) {
     std::string sync_service_url = sync_server_.GetURL("chromiumsync").spec();
     cl->AppendSwitchASCII(switches::kSyncServiceURL, sync_service_url);
@@ -573,13 +620,13 @@ bool SyncTest::SetUpLocalPythonTestServer() {
 }
 
 bool SyncTest::SetUpLocalTestServer() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  CommandLine::StringType server_cmdline_string = cl->GetSwitchValueNative(
-      switches::kSyncServerCommandLine);
-  CommandLine::StringVector server_cmdline_vector;
-  CommandLine::StringType delimiters(FILE_PATH_LITERAL(" "));
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
+  base::CommandLine::StringType server_cmdline_string =
+      cl->GetSwitchValueNative(switches::kSyncServerCommandLine);
+  base::CommandLine::StringVector server_cmdline_vector;
+  base::CommandLine::StringType delimiters(FILE_PATH_LITERAL(" "));
   Tokenize(server_cmdline_string, delimiters, &server_cmdline_vector);
-  CommandLine server_cmdline(server_cmdline_vector);
+  base::CommandLine server_cmdline(server_cmdline_vector);
   base::LaunchOptions options;
 #if defined(OS_WIN)
   options.start_hidden = true;
@@ -629,7 +676,7 @@ bool SyncTest::WaitForTestServerToStart(base::TimeDelta wait, int intervals) {
 }
 
 bool SyncTest::IsTestServerRunning() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
   std::string sync_url = cl->GetSwitchValueASCII(switches::kSyncServiceURL);
   GURL sync_url_status(sync_url.append("/healthz"));
   SyncServerStatusChecker delegate;
@@ -666,11 +713,29 @@ void SyncTest::DisableNetwork(Profile* profile) {
 }
 
 bool SyncTest::EnableEncryption(int index) {
-  return GetClient(index)->EnableEncryption();
+  ProfileSyncService* service = GetClient(index)->service();
+
+  if (::IsEncryptionComplete(service))
+    return true;
+
+  service->EnableEncryptEverything();
+
+  // In order to kick off the encryption we have to reconfigure. Just grab the
+  // currently synced types and use them.
+  const syncer::ModelTypeSet synced_datatypes =
+      service->GetPreferredDataTypes();
+  bool sync_everything = synced_datatypes.Equals(syncer::ModelTypeSet::All());
+  service->OnUserChoseDatatypes(sync_everything, synced_datatypes);
+
+  // Wait some time to let the enryption finish.
+  EncryptionChecker checker(service);
+  checker.Await();
+
+  return !checker.TimedOut();
 }
 
 bool SyncTest::IsEncryptionComplete(int index) {
-  return GetClient(index)->IsEncryptionComplete();
+  return ::IsEncryptionComplete(GetClient(index)->service());
 }
 
 bool SyncTest::AwaitQuiescence() {
@@ -689,8 +754,9 @@ void SyncTest::DisableNotificationsImpl() {
   std::string path = "chromiumsync/disablenotifications";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notifications disabled",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 void SyncTest::DisableNotifications() {
@@ -703,8 +769,9 @@ void SyncTest::EnableNotificationsImpl() {
   std::string path = "chromiumsync/enablenotifications";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notifications enabled",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 void SyncTest::EnableNotifications() {
@@ -725,8 +792,9 @@ void SyncTest::TriggerNotification(syncer::ModelTypeSet changed_types) {
       syncer::kSyncP2PNotificationChannel + "&data=" + data;
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Notification sent",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 bool SyncTest::ServerSupportsErrorTriggering() const {
@@ -750,8 +818,9 @@ void SyncTest::TriggerMigrationDoneError(syncer::ModelTypeSet model_types) {
   }
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Migration: 200",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 void SyncTest::TriggerBirthdayError() {
@@ -759,8 +828,9 @@ void SyncTest::TriggerBirthdayError() {
   std::string path = "chromiumsync/birthdayerror";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Birthday error",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 void SyncTest::TriggerTransientError() {
@@ -768,8 +838,9 @@ void SyncTest::TriggerTransientError() {
   std::string path = "chromiumsync/transienterror";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Transient error",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 void SyncTest::TriggerAuthState(PythonServerAuthState auth_state) {
@@ -854,7 +925,7 @@ void SyncTest::TriggerSyncError(const syncer::SyncProtocolError& error,
   path.append(base::StringPrintf("&frequency=%d", frequency));
 
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
-  std::string output = UTF16ToASCII(
+  std::string output = base::UTF16ToASCII(
       browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
   ASSERT_TRUE(output.find("SetError: 200") != base::string16::npos);
 }
@@ -864,12 +935,9 @@ void SyncTest::TriggerCreateSyncedBookmarks() {
   std::string path = "chromiumsync/createsyncedbookmarks";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
   ASSERT_EQ("Synced Bookmarks",
-            UTF16ToASCII(browser()->tab_strip_model()->GetActiveWebContents()->
-                GetTitle()));
-}
-
-int SyncTest::NumberOfDefaultSyncItems() const {
-  return number_of_default_sync_items_;
+            base::UTF16ToASCII(
+                browser()->tab_strip_model()->GetActiveWebContents()->
+                    GetTitle()));
 }
 
 void SyncTest::SetProxyConfig(net::URLRequestContextGetter* context_getter,
@@ -880,9 +948,4 @@ void SyncTest::SetProxyConfig(net::URLRequestContextGetter* context_getter,
       base::Bind(&SetProxyConfigCallback, &done,
                  make_scoped_refptr(context_getter), proxy_config));
   done.Wait();
-}
-
-void SyncTest::UseFakeServer() {
-  DCHECK_EQ(SERVER_TYPE_UNDECIDED, server_type_);
-  server_type_ = IN_PROCESS_FAKE_SERVER;
 }

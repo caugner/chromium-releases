@@ -28,7 +28,7 @@ class MockHotwordService : public HotwordService {
     service_available_ = available;
   }
 
-  static BrowserContextKeyedService* Build(content::BrowserContext* profile) {
+  static KeyedService* Build(content::BrowserContext* profile) {
     return new MockHotwordService(static_cast<Profile*>(profile));
   }
 
@@ -77,6 +77,28 @@ IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, SetEnabled) {
   EXPECT_TRUE(RunComponentExtensionTest("setEnabledFalse")) << message_;
   EXPECT_TRUE(listenerFalse.WaitUntilSatisfied());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled));
+}
+
+IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, SetAudioLoggingEnabled) {
+  EXPECT_FALSE(service()->IsOptedIntoAudioLogging());
+  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
+      prefs::kHotwordAudioLoggingEnabled));
+
+  ExtensionTestMessageListener listenerTrue("ready", false);
+  EXPECT_TRUE(
+      RunComponentExtensionTest("setAudioLoggingEnableTrue")) << message_;
+  EXPECT_TRUE(listenerTrue.WaitUntilSatisfied());
+  EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
+      prefs::kHotwordAudioLoggingEnabled));
+  EXPECT_TRUE(service()->IsOptedIntoAudioLogging());
+
+  ExtensionTestMessageListener listenerFalse("ready", false);
+  EXPECT_TRUE(
+      RunComponentExtensionTest("setAudioLoggingEnableFalse")) << message_;
+  EXPECT_TRUE(listenerFalse.WaitUntilSatisfied());
+  EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
+      prefs::kHotwordAudioLoggingEnabled));
+  EXPECT_FALSE(service()->IsOptedIntoAudioLogging());
 }
 
 IN_PROC_BROWSER_TEST_F(HotwordPrivateApiTest, GetStatus) {

@@ -69,7 +69,7 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "policy/policy_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/views/corewm/corewm_switches.h"
+#include "ui/wm/core/wm_core_switches.h"
 
 using content::BrowserThread;
 
@@ -239,13 +239,21 @@ UserManagerImpl::UserManagerImpl()
 
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  policy_observer_.reset(new policy::CloudExternalDataPolicyObserver(
+  avatar_policy_observer_.reset(new policy::CloudExternalDataPolicyObserver(
       cros_settings_,
       this,
       connector->GetDeviceLocalAccountPolicyService(),
       policy::key::kUserAvatarImage,
       this));
-  policy_observer_->Init();
+  avatar_policy_observer_->Init();
+
+  wallpaper_policy_observer_.reset(new policy::CloudExternalDataPolicyObserver(
+      cros_settings_,
+      this,
+      connector->GetDeviceLocalAccountPolicyService(),
+      policy::key::kWallpaperImage,
+      this));
+  wallpaper_policy_observer_->Init();
 
   UpdateLoginState();
 }
@@ -254,15 +262,13 @@ UserManagerImpl::~UserManagerImpl() {
   // Can't use STLDeleteElements because of the private destructor of User.
   for (UserList::iterator it = users_.begin(); it != users_.end();
        it = users_.erase(it)) {
-    if (active_user_ == *it)
-      active_user_ = NULL;
-    delete *it;
+    DeleteUser(*it);
   }
   // These are pointers to the same User instances that were in users_ list.
   logged_in_users_.clear();
   lru_logged_in_users_.clear();
 
-  delete active_user_;
+  DeleteUser(active_user_);
 }
 
 void UserManagerImpl::Shutdown() {
@@ -281,7 +287,8 @@ void UserManagerImpl::Shutdown() {
     it->second->Shutdown();
   }
   multi_profile_user_controller_.reset();
-  policy_observer_.reset();
+  avatar_policy_observer_.reset();
+  wallpaper_policy_observer_.reset();
 }
 
 MultiProfileUserController* UserManagerImpl::GetMultiProfileUserController() {
@@ -293,10 +300,7 @@ UserImageManager* UserManagerImpl::GetUserImageManager(
   UserImageManagerMap::iterator ui = user_image_managers_.find(user_id);
   if (ui != user_image_managers_.end())
     return ui->second.get();
-  linked_ptr<UserImageManagerImpl> mgr(new UserImageManagerImpl(
-      user_id,
-      cros_settings_,
-      this));
+  linked_ptr<UserImageManagerImpl> mgr(new UserImageManagerImpl(user_id, this));
   user_image_managers_[user_id] = mgr;
   return mgr.get();
 }
@@ -556,12 +560,16 @@ void UserManagerImpl::RemoveUser(const std::string& user_id,
                 user->GetType() != User::USER_TYPE_LOCALLY_MANAGED))
     return;
 
-  // Sanity check: we must not remove single user. This check may seem
-  // redundant at a first sight because this single user must be an owner and
-  // we perform special check later in order not to remove an owner.  However
-  // due to non-instant nature of ownership assignment this later check may
-  // sometimes fail. See http://crosbug.com/12723
-  if (users_.size() < 2)
+  // Sanity check: we must not remove single user unless it's an enterprise
+  // device. This check may seem redundant at a first sight because
+  // this single user must be an owner and we perform special check later
+  // in order not to remove an owner. However due to non-instant nature of
+  // ownership assignment this later check may sometimes fail.
+  // See http://crosbug.com/12723
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()
+          ->browser_policy_connector_chromeos();
+  if (users_.size() < 2 && !connector->IsEnterpriseManaged())
     return;
 
   // Sanity check: do not allow any of the the logged in users to be removed.
@@ -612,8 +620,7 @@ void UserManagerImpl::RemoveUserFromList(const std::string& user_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RemoveNonCryptohomeData(user_id);
   if (user_loading_stage_ == STAGE_LOADED) {
-    User* user = RemoveRegularOrLocallyManagedUserFromList(user_id);
-    delete user;
+    DeleteUser(RemoveRegularOrLocallyManagedUserFromList(user_id));
   } else if (user_loading_stage_ == STAGE_LOADING) {
     DCHECK(gaia::ExtractDomainName(user_id) ==
         UserManager::kLocallyManagedUserDomain);
@@ -904,7 +911,8 @@ bool UserManagerImpl::RespectLocalePreference(
 }
 
 void UserManagerImpl::StopPolicyObserverForTesting() {
-  policy_observer_.reset();
+  avatar_policy_observer_.reset();
+  wallpaper_policy_observer_.reset();
 }
 
 void UserManagerImpl::Observe(int type,
@@ -921,8 +929,14 @@ void UserManagerImpl::Observe(int type,
         if (device_local_account_policy_service_)
           device_local_account_policy_service_->AddObserver(this);
       }
-      RetrieveTrustedDevicePolicies();
-      UpdateOwnership();
+      // Making this call synchronously is not gonna cut it because
+      // notification order is not defined and in a single message loop run and
+      // getting trusted settings rely on a reload that happens on the very same
+      // notification observation.
+      base::MessageLoop::current()->PostTask(FROM_HERE,
+            base::Bind(&UserManagerImpl::RetrieveTrustedDevicePolicies,
+                       base::Unretained(this)));
+      UserManagerImpl::UpdateOwnership();
       break;
     case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED: {
       Profile* profile = content::Details<Profile>(details).ptr();
@@ -971,18 +985,33 @@ void UserManagerImpl::Observe(int type,
 
 void UserManagerImpl::OnExternalDataSet(const std::string& policy,
                                         const std::string& user_id) {
-  GetUserImageManager(user_id)->OnExternalDataSet(policy);
+  if (policy == policy::key::kUserAvatarImage)
+    GetUserImageManager(user_id)->OnExternalDataSet(policy);
+  else if (policy == policy::key::kWallpaperImage)
+    WallpaperManager::Get()->OnPolicySet(policy, user_id);
+  else
+    NOTREACHED();
 }
 
 void UserManagerImpl::OnExternalDataCleared(const std::string& policy,
                                             const std::string& user_id) {
-  GetUserImageManager(user_id)->OnExternalDataCleared(policy);
+  if (policy == policy::key::kUserAvatarImage)
+    GetUserImageManager(user_id)->OnExternalDataCleared(policy);
+  else if (policy == policy::key::kWallpaperImage)
+    WallpaperManager::Get()->OnPolicyCleared(policy, user_id);
+  else
+    NOTREACHED();
 }
 
 void UserManagerImpl::OnExternalDataFetched(const std::string& policy,
                                             const std::string& user_id,
                                             scoped_ptr<std::string> data) {
-  GetUserImageManager(user_id)->OnExternalDataFetched(policy, data.Pass());
+  if (policy == policy::key::kUserAvatarImage)
+    GetUserImageManager(user_id)->OnExternalDataFetched(policy, data.Pass());
+  else if (policy == policy::key::kWallpaperImage)
+    WallpaperManager::Get()->OnPolicyFetched(policy, user_id, data.Pass());
+  else
+    NOTREACHED();
 }
 
 void UserManagerImpl::OnPolicyUpdated(const std::string& user_id) {
@@ -1282,7 +1311,7 @@ void UserManagerImpl::RetrieveTrustedDevicePolicies() {
       if ((*it)->GetType() == User::USER_TYPE_REGULAR &&
           user_email != owner_email_) {
         RemoveNonCryptohomeData(user_email);
-        delete *it;
+        DeleteUser(*it);
         it = users_.erase(it);
         changed = true;
       } else {
@@ -1483,7 +1512,7 @@ void UserManagerImpl::KioskAppLoggedIn(const std::string& app_id) {
   // Disable window animation since kiosk app runs in a single full screen
   // window and window animation causes start-up janks.
   command_line->AppendSwitch(
-      views::corewm::switches::kWindowAnimationsDisabled);
+      wm::switches::kWindowAnimationsDisabled);
 }
 
 void UserManagerImpl::DemoAccountLoggedIn() {
@@ -1495,7 +1524,7 @@ void UserManagerImpl::DemoAccountLoggedIn() {
   // Disable window animation since the demo app runs in a single full screen
   // window and window animation causes start-up janks.
   CommandLine::ForCurrentProcess()->AppendSwitch(
-      views::corewm::switches::kWindowAnimationsDisabled);
+      wm::switches::kWindowAnimationsDisabled);
 }
 
 void UserManagerImpl::RetailModeUserLoggedIn() {
@@ -1711,7 +1740,7 @@ bool UserManagerImpl::UpdateAndCleanUpPublicAccounts(
   for (UserList::iterator it = users_.begin(); it != users_.end();) {
     if ((*it)->GetType() == User::USER_TYPE_PUBLIC_ACCOUNT) {
       if (*it != GetLoggedInUser())
-        delete *it;
+        DeleteUser(*it);
       it = users_.erase(it);
     } else {
       ++it;
@@ -2052,6 +2081,13 @@ void UserManagerImpl::UpdateNumberOfUsers() {
 
   base::debug::SetCrashKeyValue(crash_keys::kNumberOfUsers,
       base::StringPrintf("%" PRIuS, GetLoggedInUsers().size()));
+}
+
+void UserManagerImpl::DeleteUser(User* user) {
+  const bool is_active_user = (user == active_user_);
+  delete user;
+  if (is_active_user)
+    active_user_ = NULL;
 }
 
 }  // namespace chromeos

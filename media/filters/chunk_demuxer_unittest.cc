@@ -154,7 +154,8 @@ class ChunkDemuxerTest : public testing::Test {
     return GenerateCluster(46, 66, 5);
   }
 
-  ChunkDemuxerTest() {
+  ChunkDemuxerTest()
+      : append_window_end_for_next_append_(kInfiniteDuration()) {
     CreateNewDemuxer();
   }
 
@@ -163,8 +164,8 @@ class ChunkDemuxerTest : public testing::Test {
         base::Bind(&ChunkDemuxerTest::DemuxerOpened, base::Unretained(this));
     Demuxer::NeedKeyCB need_key_cb =
         base::Bind(&ChunkDemuxerTest::DemuxerNeedKey, base::Unretained(this));
-    demuxer_.reset(new ChunkDemuxer(open_cb, need_key_cb,
-                                    base::Bind(&LogFunc)));
+    demuxer_.reset(
+        new ChunkDemuxer(open_cb, need_key_cb, base::Bind(&LogFunc), false));
   }
 
   virtual ~ChunkDemuxerTest() {
@@ -394,7 +395,13 @@ class ChunkDemuxerTest : public testing::Test {
   void AppendData(const std::string& source_id,
                   const uint8* data, size_t length) {
     EXPECT_CALL(host_, AddBufferedTimeRange(_, _)).Times(AnyNumber());
-    demuxer_->AppendData(source_id, data, length);
+
+    // TODO(wolenetz): Test timestamp offset updating once "sequence" append
+    // mode processing is implemented. See http://crbug.com/249422.
+    demuxer_->AppendData(source_id, data, length,
+                         append_window_start_for_next_append_,
+                         append_window_end_for_next_append_,
+                         &timestamp_offset_map_[source_id]);
   }
 
   void AppendDataInPieces(const uint8* data, size_t length) {
@@ -535,14 +542,14 @@ class ChunkDemuxerTest : public testing::Test {
   // bear-640x360.webm VideoDecoderConfig returns 640x360 for its natural_size()
   // The resulting video stream returns data from each file for the following
   // time ranges.
-  // bear-320x240.webm : [0-501)       [801-2737)
+  // bear-320x240.webm : [0-501)       [801-2736)
   // bear-640x360.webm :       [527-793)
   //
   // bear-320x240.webm AudioDecoderConfig returns 3863 for its extra_data_size()
   // bear-640x360.webm AudioDecoderConfig returns 3935 for its extra_data_size()
   // The resulting audio stream returns data from each file for the following
   // time ranges.
-  // bear-320x240.webm : [0-524)       [779-2737)
+  // bear-320x240.webm : [0-524)       [779-2736)
   // bear-640x360.webm :       [527-759)
   bool InitDemuxerWithConfigChangeData() {
     scoped_refptr<DecoderBuffer> bear1 = ReadTestDataFile("bear-320x240.webm");
@@ -558,7 +565,11 @@ class ChunkDemuxerTest : public testing::Test {
 
     // Append the whole bear1 file.
     AppendData(bear1->data(), bear1->data_size());
-    CheckExpectedRanges(kSourceId, "{ [0,2737) }");
+    // Last audio frame has timestamp 2721 and duration 24 (estimated from max
+    // seen so far for audio track).
+    // Last video frame has timestamp 2703 and duration 33 (from TrackEntry
+    // DefaultDuration for video track).
+    CheckExpectedRanges(kSourceId, "{ [0,2736) }");
 
     // Append initialization segment for bear2.
     // Note: Offsets here and below are derived from
@@ -570,13 +581,13 @@ class ChunkDemuxerTest : public testing::Test {
 
     // Append a media segment that goes from [0.527000, 1.014000).
     AppendData(bear2->data() + 55290, 18785);
-    CheckExpectedRanges(kSourceId, "{ [0,1028) [1201,2737) }");
+    CheckExpectedRanges(kSourceId, "{ [0,1027) [1201,2736) }");
 
     // Append initialization segment for bear1 & fill gap with [779-1197)
     // segment.
     AppendData(bear1->data(), 4370);
     AppendData(bear1->data() + 72737, 28183);
-    CheckExpectedRanges(kSourceId, "{ [0,2737) }");
+    CheckExpectedRanges(kSourceId, "{ [0,2736) }");
 
     MarkEndOfStream(PIPELINE_OK);
     return true;
@@ -939,10 +950,26 @@ class ChunkDemuxerTest : public testing::Test {
     message_loop_.RunUntilIdle();
   }
 
+  bool SetTimestampOffset(const std::string& id,
+                          base::TimeDelta timestamp_offset) {
+    if (demuxer_->IsParsingMediaSegment(id))
+      return false;
+
+    timestamp_offset_map_[id] = timestamp_offset;
+    return true;
+  }
+
   base::MessageLoop message_loop_;
   MockDemuxerHost host_;
 
   scoped_ptr<ChunkDemuxer> demuxer_;
+
+  base::TimeDelta append_window_start_for_next_append_;
+  base::TimeDelta append_window_end_for_next_append_;
+
+  // Map of source id to timestamp offset to use for the next AppendData()
+  // operation for that source id.
+  std::map<std::string, base::TimeDelta> timestamp_offset_map_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChunkDemuxerTest);
@@ -1216,8 +1243,10 @@ TEST_F(ChunkDemuxerTest, AppendDataBeforeInit) {
   int info_tracks_size = 0;
   CreateInitSegment(HAS_AUDIO | HAS_VIDEO,
                     false, false, &info_tracks, &info_tracks_size);
-
-  demuxer_->AppendData(kSourceId, info_tracks.get(), info_tracks_size);
+  demuxer_->AppendData(kSourceId, info_tracks.get(), info_tracks_size,
+                       append_window_start_for_next_append_,
+                       append_window_end_for_next_append_,
+                       &timestamp_offset_map_[kSourceId]);
 }
 
 // Make sure Read() callbacks are dispatched with the proper data.
@@ -1250,7 +1279,10 @@ TEST_F(ChunkDemuxerTest, OutOfOrderClusters) {
 
   // Verify that AppendData() can still accept more data.
   scoped_ptr<Cluster> cluster_c(GenerateCluster(45, 2));
-  demuxer_->AppendData(kSourceId, cluster_c->data(), cluster_c->size());
+  demuxer_->AppendData(kSourceId, cluster_c->data(), cluster_c->size(),
+                       append_window_start_for_next_append_,
+                       append_window_end_for_next_append_,
+                       &timestamp_offset_map_[kSourceId]);
 }
 
 TEST_F(ChunkDemuxerTest, NonMonotonicButAboveClusterTimecode) {
@@ -1272,7 +1304,10 @@ TEST_F(ChunkDemuxerTest, NonMonotonicButAboveClusterTimecode) {
 
   // Verify that AppendData() ignores data after the error.
   scoped_ptr<Cluster> cluster_b(GenerateCluster(20, 2));
-  demuxer_->AppendData(kSourceId, cluster_b->data(), cluster_b->size());
+  demuxer_->AppendData(kSourceId, cluster_b->data(), cluster_b->size(),
+                       append_window_start_for_next_append_,
+                       append_window_end_for_next_append_,
+                       &timestamp_offset_map_[kSourceId]);
 }
 
 TEST_F(ChunkDemuxerTest, BackwardsAndBeforeClusterTimecode) {
@@ -1294,7 +1329,10 @@ TEST_F(ChunkDemuxerTest, BackwardsAndBeforeClusterTimecode) {
 
   // Verify that AppendData() ignores data after the error.
   scoped_ptr<Cluster> cluster_b(GenerateCluster(6, 2));
-  demuxer_->AppendData(kSourceId, cluster_b->data(), cluster_b->size());
+  demuxer_->AppendData(kSourceId, cluster_b->data(), cluster_b->size(),
+                       append_window_start_for_next_append_,
+                       append_window_end_for_next_append_,
+                       &timestamp_offset_map_[kSourceId]);
 }
 
 
@@ -1751,7 +1789,10 @@ TEST_F(ChunkDemuxerTest, ParseErrorDuringInit) {
   ASSERT_EQ(AddId(), ChunkDemuxer::kOk);
 
   uint8 tmp = 0;
-  demuxer_->AppendData(kSourceId, &tmp, 1);
+  demuxer_->AppendData(kSourceId, &tmp, 1,
+                       append_window_start_for_next_append_,
+                       append_window_end_for_next_append_,
+                       &timestamp_offset_map_[kSourceId]);
 }
 
 TEST_F(ChunkDemuxerTest, AVHeadersWithAudioOnlyType) {
@@ -2582,8 +2623,7 @@ TEST_F(ChunkDemuxerTest, ConfigChange_Seek) {
 TEST_F(ChunkDemuxerTest, TimestampPositiveOffset) {
   ASSERT_TRUE(InitDemuxer(HAS_AUDIO | HAS_VIDEO));
 
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
-      kSourceId, base::TimeDelta::FromSeconds(30)));
+  ASSERT_TRUE(SetTimestampOffset(kSourceId, base::TimeDelta::FromSeconds(30)));
   AppendCluster(GenerateCluster(0, 2));
 
   Seek(base::TimeDelta::FromMilliseconds(30000));
@@ -2594,8 +2634,7 @@ TEST_F(ChunkDemuxerTest, TimestampPositiveOffset) {
 TEST_F(ChunkDemuxerTest, TimestampNegativeOffset) {
   ASSERT_TRUE(InitDemuxer(HAS_AUDIO | HAS_VIDEO));
 
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
-      kSourceId, base::TimeDelta::FromSeconds(-1)));
+  ASSERT_TRUE(SetTimestampOffset(kSourceId, base::TimeDelta::FromSeconds(-1)));
   AppendCluster(GenerateCluster(1000, 2));
 
   GenerateExpectedReads(0, 2);
@@ -2606,9 +2645,9 @@ TEST_F(ChunkDemuxerTest, TimestampOffsetSeparateStreams) {
   std::string video_id = "video1";
   ASSERT_TRUE(InitDemuxerAudioAndVideoSources(audio_id, video_id));
 
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
+  ASSERT_TRUE(SetTimestampOffset(
       audio_id, base::TimeDelta::FromMilliseconds(-2500)));
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
+  ASSERT_TRUE(SetTimestampOffset(
       video_id, base::TimeDelta::FromMilliseconds(-2500)));
   AppendCluster(audio_id, GenerateSingleStreamCluster(2500,
       2500 + kAudioBlockDuration * 4, kAudioTrackNum, kAudioBlockDuration));
@@ -2619,9 +2658,9 @@ TEST_F(ChunkDemuxerTest, TimestampOffsetSeparateStreams) {
 
   Seek(base::TimeDelta::FromMilliseconds(27300));
 
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
+  ASSERT_TRUE(SetTimestampOffset(
       audio_id, base::TimeDelta::FromMilliseconds(27300)));
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
+  ASSERT_TRUE(SetTimestampOffset(
       video_id, base::TimeDelta::FromMilliseconds(27300)));
   AppendCluster(audio_id, GenerateSingleStreamCluster(
       0, kAudioBlockDuration * 4, kAudioTrackNum, kAudioBlockDuration));
@@ -2631,25 +2670,23 @@ TEST_F(ChunkDemuxerTest, TimestampOffsetSeparateStreams) {
   GenerateAudioStreamExpectedReads(27300, 4);
 }
 
-TEST_F(ChunkDemuxerTest, TimestampOffsetMidMediaSegment) {
+TEST_F(ChunkDemuxerTest, IsParsingMediaSegmentMidMediaSegment) {
   ASSERT_TRUE(InitDemuxer(HAS_AUDIO | HAS_VIDEO));
 
   scoped_ptr<Cluster> cluster = GenerateCluster(0, 2);
   // Append only part of the cluster data.
   AppendData(cluster->data(), cluster->size() - 13);
 
-  // Setting a timestamp should fail because we're in the middle of a cluster.
-  ASSERT_FALSE(demuxer_->SetTimestampOffset(
-      kSourceId, base::TimeDelta::FromSeconds(25)));
+  // Confirm we're in the middle of parsing a media segment.
+  ASSERT_TRUE(demuxer_->IsParsingMediaSegment(kSourceId));
 
   demuxer_->Abort(kSourceId);
-  // After Abort(), setting a timestamp should succeed since we're no longer
-  // in the middle of a cluster
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(
-      kSourceId, base::TimeDelta::FromSeconds(25)));
+  // After Abort(), parsing should no longer be in the middle of a media
+  // segment.
+  ASSERT_FALSE(demuxer_->IsParsingMediaSegment(kSourceId));
 }
 
-TEST_F(ChunkDemuxerTest, WebMParsingMediaSegmentDetection) {
+TEST_F(ChunkDemuxerTest, WebMIsParsingMediaSegmentDetection) {
   // TODO(wolenetz): Also test 'unknown' sized clusters.
   // See http://crbug.com/335676.
   const uint8 kBuffer[] = {
@@ -2657,13 +2694,11 @@ TEST_F(ChunkDemuxerTest, WebMParsingMediaSegmentDetection) {
     0xE7, 0x81, 0x01,                // Cluster TIMECODE (value = 1)
   };
 
-  // Setting timestamp offset or append mode is allowed only while not
-  // parsing a media segment. This array indicates whether or not these
-  // operations are allowed following each incrementally appended byte in
-  // |kBuffer|.
+  // This array indicates expected return value of IsParsingMediaSegment()
+  // following each incrementally appended byte in |kBuffer|.
   const bool kExpectedReturnValues[] = {
-    true, true, true, true, false,
-    false, false, true,
+    false, false, false, false, true,
+    true, true, false,
   };
 
   COMPILE_ASSERT(arraysize(kBuffer) == arraysize(kExpectedReturnValues),
@@ -2676,31 +2711,9 @@ TEST_F(ChunkDemuxerTest, WebMParsingMediaSegmentDetection) {
     DVLOG(3) << "Appending and testing index " << i;
     AppendData(kBuffer + i, 1);
     bool expected_return_value = kExpectedReturnValues[i];
-    EXPECT_EQ(expected_return_value, demuxer_->SetTimestampOffset(
-        kSourceId, base::TimeDelta::FromSeconds(25)));
-    EXPECT_EQ(expected_return_value, demuxer_->SetSequenceMode(
-        kSourceId, true));
-    EXPECT_EQ(expected_return_value, demuxer_->SetSequenceMode(
-        kSourceId, false));
+    EXPECT_EQ(expected_return_value,
+              demuxer_->IsParsingMediaSegment(kSourceId));
   }
-}
-
-TEST_F(ChunkDemuxerTest, SetSequenceModeMidMediaSegment) {
-  ASSERT_TRUE(InitDemuxer(HAS_AUDIO | HAS_VIDEO));
-
-  scoped_ptr<Cluster> cluster = GenerateCluster(0, 2);
-  // Append only part of the cluster data.
-  AppendData(cluster->data(), cluster->size() - 13);
-
-  // Setting append mode should fail because we're in the middle of a cluster.
-  ASSERT_FALSE(demuxer_->SetSequenceMode(kSourceId, true));
-  ASSERT_FALSE(demuxer_->SetSequenceMode(kSourceId, false));
-
-  demuxer_->Abort(kSourceId);
-  // After Abort(), setting append mode should succeed since we're no longer
-  // in the middle of a cluster.
-  ASSERT_TRUE(demuxer_->SetSequenceMode(kSourceId, true));
-  ASSERT_TRUE(demuxer_->SetSequenceMode(kSourceId, false));
 }
 
 TEST_F(ChunkDemuxerTest, DurationChange) {
@@ -2735,7 +2748,7 @@ TEST_F(ChunkDemuxerTest, DurationChange) {
 TEST_F(ChunkDemuxerTest, DurationChangeTimestampOffset) {
   ASSERT_TRUE(InitDemuxer(HAS_AUDIO | HAS_VIDEO));
 
-  ASSERT_TRUE(demuxer_->SetTimestampOffset(kSourceId, kDefaultDuration()));
+  ASSERT_TRUE(SetTimestampOffset(kSourceId, kDefaultDuration()));
 
   EXPECT_CALL(host_, SetDuration(
       kDefaultDuration() + base::TimeDelta::FromMilliseconds(
@@ -2942,10 +2955,8 @@ TEST_F(ChunkDemuxerTest, AppendWindow_Video) {
   DemuxerStream* stream = demuxer_->GetStream(DemuxerStream::VIDEO);
 
   // Set the append window to [20,280).
-  demuxer_->SetAppendWindowStart(kSourceId,
-                                 base::TimeDelta::FromMilliseconds(20));
-  demuxer_->SetAppendWindowEnd(kSourceId,
-                               base::TimeDelta::FromMilliseconds(280));
+  append_window_start_for_next_append_ = base::TimeDelta::FromMilliseconds(20);
+  append_window_end_for_next_append_ = base::TimeDelta::FromMilliseconds(280);
 
   // Append a cluster that starts before and ends after the append window.
   AppendSingleStreamCluster(kSourceId, kVideoTrackNum,
@@ -2958,8 +2969,7 @@ TEST_F(ChunkDemuxerTest, AppendWindow_Video) {
   CheckExpectedBuffers(stream, "120 150 180 210 240 270");
 
   // Extend the append window to [20,650).
-  demuxer_->SetAppendWindowEnd(kSourceId,
-                               base::TimeDelta::FromMilliseconds(650));
+  append_window_end_for_next_append_ = base::TimeDelta::FromMilliseconds(650);
 
   // Append more data and verify that adding buffers start at the next
   // keyframe.
@@ -2973,10 +2983,8 @@ TEST_F(ChunkDemuxerTest, AppendWindow_Audio) {
   DemuxerStream* stream = demuxer_->GetStream(DemuxerStream::AUDIO);
 
   // Set the append window to [20,280).
-  demuxer_->SetAppendWindowStart(kSourceId,
-                                 base::TimeDelta::FromMilliseconds(20));
-  demuxer_->SetAppendWindowEnd(kSourceId,
-                               base::TimeDelta::FromMilliseconds(280));
+  append_window_start_for_next_append_ = base::TimeDelta::FromMilliseconds(20);
+  append_window_end_for_next_append_ = base::TimeDelta::FromMilliseconds(280);
 
   // Append a cluster that starts before and ends after the append window.
   AppendSingleStreamCluster(
@@ -2990,8 +2998,7 @@ TEST_F(ChunkDemuxerTest, AppendWindow_Audio) {
   CheckExpectedBuffers(stream, "30 60 90 120 150 180 210 240 270");
 
   // Extend the append window to [20,650).
-  demuxer_->SetAppendWindowEnd(kSourceId,
-                               base::TimeDelta::FromMilliseconds(650));
+  append_window_end_for_next_append_ = base::TimeDelta::FromMilliseconds(650);
 
   // Append more data and verify that a new range is created.
   AppendSingleStreamCluster(
@@ -3008,10 +3015,8 @@ TEST_F(ChunkDemuxerTest, AppendWindow_Text) {
   DemuxerStream* video_stream = demuxer_->GetStream(DemuxerStream::VIDEO);
 
   // Set the append window to [20,280).
-  demuxer_->SetAppendWindowStart(kSourceId,
-                                 base::TimeDelta::FromMilliseconds(20));
-  demuxer_->SetAppendWindowEnd(kSourceId,
-                               base::TimeDelta::FromMilliseconds(280));
+  append_window_start_for_next_append_ = base::TimeDelta::FromMilliseconds(20);
+  append_window_end_for_next_append_ = base::TimeDelta::FromMilliseconds(280);
 
   // Append a cluster that starts before and ends after the append
   // window.
@@ -3027,8 +3032,7 @@ TEST_F(ChunkDemuxerTest, AppendWindow_Text) {
   CheckExpectedBuffers(text_stream, "100 200");
 
   // Extend the append window to [20,650).
-  demuxer_->SetAppendWindowEnd(kSourceId,
-                               base::TimeDelta::FromMilliseconds(650));
+  append_window_end_for_next_append_ = base::TimeDelta::FromMilliseconds(650);
 
   // Append more data and verify that a new range is created.
   AppendSingleStreamCluster(kSourceId, kVideoTrackNum,

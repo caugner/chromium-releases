@@ -65,8 +65,8 @@ class TextureLayerTest : public testing::Test {
  public:
   TextureLayerTest()
       : fake_client_(
-          FakeLayerTreeHostClient(FakeLayerTreeHostClient::DIRECT_3D)),
-        host_impl_(&proxy_) {}
+            FakeLayerTreeHostClient(FakeLayerTreeHostClient::DIRECT_3D)),
+        host_impl_(&proxy_, &shared_bitmap_manager_) {}
 
  protected:
   virtual void SetUp() {
@@ -85,6 +85,7 @@ class TextureLayerTest : public testing::Test {
   scoped_ptr<MockLayerTreeHost> layer_tree_host_;
   FakeImplProxy proxy_;
   FakeLayerTreeHostClient fake_client_;
+  TestSharedBitmapManager shared_bitmap_manager_;
   FakeLayerTreeHostImpl host_impl_;
 };
 
@@ -457,6 +458,33 @@ TEST_F(TextureLayerWithMailboxTest, ReplaceMailboxOnMainThreadBeforeCommit) {
   test_layer->SetTextureMailbox(
       test_data_.mailbox1_,
       SingleReleaseCallback::Create(test_data_.release_mailbox1_));
+}
+
+TEST_F(TextureLayerTest, SetTextureMailboxWithoutReleaseCallback) {
+  scoped_refptr<TextureLayer> test_layer = TextureLayer::CreateForMailbox(NULL);
+  ASSERT_TRUE(test_layer.get());
+
+  // These use the same gpu::Mailbox, but different sync points.
+  TextureMailbox mailbox1(MailboxFromChar('a'), GL_TEXTURE_2D, 1);
+  TextureMailbox mailbox2(MailboxFromChar('a'), GL_TEXTURE_2D, 2);
+
+  EXPECT_CALL(*layer_tree_host_, AcquireLayerTextures()).Times(0);
+  EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(AnyNumber());
+  layer_tree_host_->SetRootLayer(test_layer);
+  Mock::VerifyAndClearExpectations(layer_tree_host_.get());
+
+  // Set the mailbox the first time. It should cause a commit.
+  EXPECT_CALL(*layer_tree_host_, AcquireLayerTextures()).Times(0);
+  EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(AtLeast(1));
+  test_layer->SetTextureMailboxWithoutReleaseCallback(mailbox1);
+  Mock::VerifyAndClearExpectations(layer_tree_host_.get());
+
+  // Set the mailbox again with a new sync point, as the backing texture has
+  // been updated. It should cause a new commit.
+  EXPECT_CALL(*layer_tree_host_, AcquireLayerTextures()).Times(0);
+  EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(AtLeast(1));
+  test_layer->SetTextureMailboxWithoutReleaseCallback(mailbox2);
+  Mock::VerifyAndClearExpectations(layer_tree_host_.get());
 }
 
 class TextureLayerMailboxHolderTest : public TextureLayerTest {

@@ -5,7 +5,7 @@
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
-#include "content/test/content_browser_test.h"
+#include "content/public/test/content_browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -30,6 +30,7 @@ class ContextProviderCommandBufferBrowserTest : public ContentBrowserTest {
   }
 
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateContext3d() {
+    bool lose_context_when_out_of_memory = false;
     scoped_refptr<GpuChannelHost> gpu_channel_host(
         GetFactory()->EstablishGpuChannelSync(
             CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE));
@@ -37,8 +38,10 @@ class ContextProviderCommandBufferBrowserTest : public ContentBrowserTest {
         WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
             gpu_channel_host.get(),
             blink::WebGraphicsContext3D::Attributes(),
+            lose_context_when_out_of_memory,
             GURL("chrome://gpu/ContextProviderCommandBufferTest"),
-            WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits()));
+            WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits(),
+            NULL));
     return context.Pass();
   }
 };

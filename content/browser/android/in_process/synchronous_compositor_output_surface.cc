@@ -15,7 +15,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
-#include "third_party/skia/include/core/SkBitmapDevice.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
@@ -38,9 +37,7 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
   : public cc::SoftwareOutputDevice {
  public:
   SoftwareDevice(SynchronousCompositorOutputSurface* surface)
-    : surface_(surface),
-      null_device_(SkBitmap::kARGB_8888_Config, 1, 1),
-      null_canvas_(&null_device_) {
+    : surface_(surface) {
   }
   virtual void Resize(const gfx::Size& size) OVERRIDE {
     // Intentional no-op: canvas size is controlled by the embedder.
@@ -56,13 +53,12 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
   }
   virtual void EndPaint(cc::SoftwareFrameData* frame_data) OVERRIDE {
   }
-  virtual void CopyToBitmap(const gfx::Rect& rect, SkBitmap* output) OVERRIDE {
+  virtual void CopyToPixels(const gfx::Rect& rect, void* pixels) OVERRIDE {
     NOTIMPLEMENTED();
   }
 
  private:
   SynchronousCompositorOutputSurface* surface_;
-  SkBitmapDevice null_device_;
   SkCanvas null_canvas_;
 
   DISALLOW_COPY_AND_ASSIGN(SoftwareDevice);
@@ -73,7 +69,6 @@ SynchronousCompositorOutputSurface::SynchronousCompositorOutputSurface(
     : cc::OutputSurface(
           scoped_ptr<cc::SoftwareOutputDevice>(new SoftwareDevice(this))),
       routing_id_(routing_id),
-      needs_begin_impl_frame_(false),
       invoking_composite_(false),
       did_swap_buffer_(false),
       current_sw_canvas_(NULL),
@@ -130,10 +125,10 @@ void SynchronousCompositorOutputSurface::Reshape(
 void SynchronousCompositorOutputSurface::SetNeedsBeginImplFrame(
     bool enable) {
   DCHECK(CalledOnValidThread());
-  cc::OutputSurface::SetNeedsBeginImplFrame(enable);
   needs_begin_impl_frame_ = enable;
+  client_ready_for_begin_impl_frame_ = true;
   SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
-  if (delegate)
+  if (delegate && !invoking_composite_)
     delegate->SetContinuousInvalidate(needs_begin_impl_frame_);
 }
 
@@ -228,9 +223,7 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
   SetExternalDrawConstraints(
       adjusted_transform, viewport, clip, valid_for_tile_management);
   SetNeedsRedrawRect(gfx::Rect(viewport.size()));
-
-  if (needs_begin_impl_frame_)
-    BeginImplFrame(cc::BeginFrameArgs::CreateForSynchronousCompositor());
+  BeginImplFrame(cc::BeginFrameArgs::CreateForSynchronousCompositor());
 
   // After software draws (which might move the viewport arbitrarily), restore
   // the previous hardware viewport to allow CC's tile manager to prioritize
@@ -246,6 +239,10 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
 
   if (did_swap_buffer_)
     OnSwapBuffersComplete();
+
+  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
+  if (delegate)
+    delegate->SetContinuousInvalidate(needs_begin_impl_frame_);
 }
 
 void

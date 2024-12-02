@@ -23,14 +23,14 @@
 #include "content/public/common/content_paths.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/content_browser_test.h"
+#include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/accessibility_browser_test_utils.h"
-#include "content/test/content_browser_test.h"
-#include "content/test/content_browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-// TODO(dmazzoni): Disabled accessibility tests on Win64. crbug.com/179717
-#if defined(OS_WIN) && defined(ARCH_CPU_X86_64)
+// TODO(aboxhall): Create expectations on Android for these
+#if defined(OS_ANDROID)
 #define MAYBE(x) DISABLED_##x
 #else
 #define MAYBE(x) x
@@ -233,7 +233,7 @@ void DumpAccessibilityTreeTest::RunTest(
         base::FilePath(html_file.RemoveExtension().value() +
                        AccessibilityTreeFormatter::GetActualFileSuffix());
 
-    EXPECT_TRUE(file_util::WriteFile(
+    EXPECT_TRUE(base::WriteFile(
         actual_file, actual_contents.c_str(), actual_contents.size()));
 
     ADD_FAILURE() << "No expectation found. Create it by doing:\n"
@@ -254,6 +254,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAName) {
   RunTest(FILE_PATH_LITERAL("a-name.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityANoText) {
+  RunTest(FILE_PATH_LITERAL("a-no-text.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAOnclick) {
   RunTest(FILE_PATH_LITERAL("a-onclick.html"));
 }
@@ -268,8 +272,16 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunTest(FILE_PATH_LITERAL("aria-autocomplete.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaCombobox) {
+// crbug.com/98976 will cause new elements to be added to the Blink a11y tree
+// Re-baseline after the Blink change goes in
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       DISABLED_AccessibilityAriaCombobox) {
   RunTest(FILE_PATH_LITERAL("aria-combobox.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       MAYBE(AccessibilityAriaFlowto)) {
+  RunTest(FILE_PATH_LITERAL("aria-flowto.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityAriaInvalid) {
@@ -413,7 +425,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunTest(FILE_PATH_LITERAL("input-text-name-calc.html"));
 }
 
-IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest, AccessibilityInputTypes) {
+// crbug.com/98976 will cause new elements to be added to the Blink a11y tree
+// Re-baseline after the Blink change goes in
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
+                       DISABLED_AccessibilityInputTypes) {
   RunTest(FILE_PATH_LITERAL("input-types.html"));
 }
 
@@ -444,8 +459,10 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
   RunTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-closed.html"));
 }
 
+// TODO(dmazzoni): fix this test after Blink change that broke it lands.
+// http://crbug.com/353067
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityTreeTest,
-                       AccessibilityModalDialogInIframeOpened) {
+                       DISABLED_AccessibilityModalDialogInIframeOpened) {
   RunTest(FILE_PATH_LITERAL("modal-dialog-in-iframe-opened.html"));
 }
 
