@@ -41,6 +41,7 @@ import org.chromium.chrome.browser.ui.android.webid.AccountSelectionProperties.C
 import org.chromium.chrome.browser.ui.android.webid.AccountSelectionProperties.DataSharingConsentProperties;
 import org.chromium.chrome.browser.ui.android.webid.AccountSelectionProperties.HeaderProperties;
 import org.chromium.chrome.browser.ui.android.webid.AccountSelectionProperties.HeaderProperties.HeaderType;
+import org.chromium.chrome.browser.ui.android.webid.AccountSelectionProperties.IdpSignInProperties;
 import org.chromium.chrome.browser.ui.android.webid.AccountSelectionProperties.ItemProperties;
 import org.chromium.chrome.browser.ui.android.webid.data.Account;
 import org.chromium.chrome.browser.ui.android.webid.data.IdentityProviderMetadata;
@@ -48,6 +49,7 @@ import org.chromium.ui.base.TestActivity;
 import org.chromium.ui.modelutil.MVCListAdapter;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.widget.ButtonCompat;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
 import org.chromium.url.ShadowGURL;
@@ -129,7 +131,7 @@ public class AccountSelectionViewTest {
         assertEquals("Incorrect title",
                 mResources.getString(R.string.account_selection_sheet_title_explicit_signin,
                         "example.org", "idp.org"),
-                title.getText());
+                title.getText().toString());
         assertEquals("Incorrect subtitle", "", subtitle.getText());
     }
 
@@ -150,7 +152,7 @@ public class AccountSelectionViewTest {
         assertEquals("Incorrect title",
                 mResources.getString(R.string.account_selection_sheet_title_explicit_signin,
                         "iframe-example.org", "idp.org"),
-                title.getText());
+                title.getText().toString());
         assertEquals("Incorrect subtitle",
                 mResources.getString(
                         R.string.account_selection_sheet_subtitle_explicit, "example.org"),
@@ -171,7 +173,7 @@ public class AccountSelectionViewTest {
         TextView subtitle = mContentView.findViewById(R.id.header_subtitle);
 
         assertEquals("Incorrect title", mResources.getString(R.string.verify_sheet_title),
-                title.getText());
+                title.getText().toString());
         assertEquals("Incorrect subtitle", "", subtitle.getText());
     }
 
@@ -189,7 +191,8 @@ public class AccountSelectionViewTest {
         TextView subtitle = mContentView.findViewById(R.id.header_subtitle);
 
         assertEquals("Incorrect title",
-                mResources.getString(R.string.verify_sheet_title_auto_reauthn), title.getText());
+                mResources.getString(R.string.verify_sheet_title_auto_reauthn),
+                title.getText().toString());
         assertEquals("Incorrect subtitle", "", subtitle.getText());
     }
 
@@ -303,7 +306,7 @@ public class AccountSelectionViewTest {
 
             assertEquals("Incorrect title",
                     mResources.getString(rpContext.mTitleId, "example.org", "idp.org"),
-                    title.getText());
+                    title.getText().toString());
             assertEquals("Incorrect subtitle", "", subtitle.getText());
         }
     }
@@ -325,12 +328,36 @@ public class AccountSelectionViewTest {
 
             assertEquals("Incorrect title",
                     mResources.getString(rpContext.mTitleId, "iframe-example.org", "idp.org"),
-                    title.getText());
+                    title.getText().toString());
             assertEquals("Incorrect subtitle",
                     mResources.getString(
                             R.string.account_selection_sheet_subtitle_explicit, "example.org"),
                     subtitle.getText());
         }
+    }
+
+    @Test
+    public void testIdpSignInDisplayed() {
+        final String idpEtldPlusOne = "idp.org";
+        mModel.set(ItemProperties.IDP_SIGNIN, buildIdpSignInItem(idpEtldPlusOne));
+        assertEquals(View.VISIBLE, mContentView.getVisibility());
+        TextView consent = mContentView.findViewById(R.id.idp_signin);
+        assertTrue(consent.isShown());
+        String expectedText = mResources.getString(
+                R.string.idp_signin_status_mismatch_dialog_body, idpEtldPlusOne);
+        // We use toString() here because otherwise getText() returns a
+        // Spanned, which is not equal to the string we get from the resources.
+        assertEquals("Incorrect IDP sign in mismatch body dialog text", expectedText,
+                consent.getText().toString());
+
+        mModel.set(ItemProperties.CONTINUE_BUTTON, buildContinueButton(null, null));
+        ButtonCompat continueButton =
+                mContentView.findViewById(R.id.account_selection_continue_btn);
+        assertTrue(continueButton.isShown());
+        assertEquals("Continue", continueButton.getText());
+        continueButton.performClick();
+
+        waitForEvent(mAccountCallback).onResult(eq(null));
     }
 
     private RecyclerView getAccounts() {
@@ -380,6 +407,12 @@ public class AccountSelectionViewTest {
 
         return new PropertyModel.Builder(DataSharingConsentProperties.ALL_KEYS)
                 .with(DataSharingConsentProperties.PROPERTIES, properties)
+                .build();
+    }
+
+    private PropertyModel buildIdpSignInItem(String idpEtldPlusOne) {
+        return new PropertyModel.Builder(IdpSignInProperties.ALL_KEYS)
+                .with(IdpSignInProperties.IDP_FOR_DISPLAY, idpEtldPlusOne)
                 .build();
     }
 }

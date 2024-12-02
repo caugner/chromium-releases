@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'chrome://webui-test/mojo_webui_test_support.js';
 import 'chrome://shopping-insights-side-panel.top-chrome/app.js';
 
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
@@ -146,7 +145,7 @@ suite('ShoppingInsightsAppTest', () => {
     assertTrue(!!historyTitle);
     assertTrue(isVisible(historyTitle));
     assertEquals(
-        loadTimeData.getString('lowPriceMultipleOptions'),
+        loadTimeData.getString('historyTitle'),
         historyTitle.textContent!.trim());
 
     const attributesRow =
@@ -282,7 +281,7 @@ suite('ShoppingInsightsAppTest', () => {
         shoppingInsightsApp.shadowRoot!.querySelector('#historyTitle');
     assertTrue(!!historyTitle);
     assertEquals(
-        loadTimeData.getString('highPriceSingleOption'),
+        loadTimeData.getString('historyTitle'),
         historyTitle.textContent!.trim());
     assertFalse(
         isVisible(historySection.querySelector('catalog-attributes-row')));

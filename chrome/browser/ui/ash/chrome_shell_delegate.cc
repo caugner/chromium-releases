@@ -11,9 +11,11 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/game_dashboard/game_dashboard_delegate.h"
+#include "ash/public/cpp/app_types_util.h"
 #include "ash/public/cpp/assistant/assistant_state.h"
 #include "ash/public/cpp/new_window_delegate.h"
 #include "ash/public/cpp/system_sounds_delegate.h"
+#include "ash/wm/window_state.h"
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
@@ -62,6 +64,7 @@
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
+#include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
 #include "chromeos/ash/services/multidevice_setup/multidevice_setup_service.h"
 #include "components/ui_devtools/devtools_server.h"
 #include "components/user_manager/user_manager.h"
@@ -271,11 +274,24 @@ ChromeShellDelegate::GetMediaSessionService() {
 }
 
 bool ChromeShellDelegate::IsSessionRestoreInProgress() const {
-  Profile* profile = ProfileManager::GetActiveUserProfile();
-  return SessionRestore::IsRestoring(profile);
+  // Must be called with an active user.
+  const user_manager::User* active_user =
+      user_manager::UserManager::Get()->GetActiveUser();
+  CHECK(active_user);
+
+  // User profile is not yet loaded. Consider loading user profile is part of
+  // session restore.
+  if (!active_user->is_profile_created()) {
+    return true;
+  }
+
+  return SessionRestore::IsRestoring(Profile::FromBrowserContext(
+      ash::BrowserContextHelper::Get()->GetBrowserContextByUser(active_user)));
 }
 
-void ChromeShellDelegate::SetUpEnvironmentForLockedFullscreen(bool locked) {
+void ChromeShellDelegate::SetUpEnvironmentForLockedFullscreen(
+    const ash::WindowState& window_state) {
+  bool locked = window_state.IsPinned();
   // Reset the clipboard and kill dev tools when entering or exiting locked
   // fullscreen (security concerns).
   ui::Clipboard::GetForCurrentThread()->Clear(ui::ClipboardBuffer::kCopyPaste);
@@ -296,7 +312,8 @@ void ChromeShellDelegate::SetUpEnvironmentForLockedFullscreen(bool locked) {
   // Disable ARC while in the locked fullscreen mode.
   arc::ArcSessionManager* const arc_session_manager =
       arc::ArcSessionManager::Get();
-  if (arc_session_manager && arc::IsArcAllowedForProfile(profile)) {
+  if (!ash::IsArcWindow(window_state.window()) && arc_session_manager &&
+      arc::IsArcAllowedForProfile(profile)) {
     if (locked) {
       // Disable ARC, preserve data.
       arc_session_manager->RequestDisable();

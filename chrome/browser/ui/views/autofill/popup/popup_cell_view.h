@@ -10,6 +10,7 @@
 
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
+#include "components/autofill/core/common/aliases.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/base/metadata/metadata_header_macros.h"
@@ -48,7 +49,9 @@ class PopupCellView : public views::View {
 
   METADATA_HEADER(PopupCellView);
 
-  PopupCellView();
+  explicit PopupCellView(
+      bool should_ignore_mouse_observed_outside_item_bounds_check = false);
+
   PopupCellView(const PopupCellView&) = delete;
   PopupCellView& operator=(const PopupCellView&) = delete;
   ~PopupCellView() override;
@@ -157,6 +160,20 @@ class PopupCellView : public views::View {
   // a double click were executed at intervals larger than the threshold (500ms)
   // checked in the controller (crbug.com/1418837).
   bool mouse_observed_outside_item_bounds_ = false;
+
+  // Whether the `mouse_observed_outside_item_bounds_` will be ignored or not.
+  // Today this happens when:
+  // 1. The AutofillSuggestionTriggerSource is
+  // `kManualFallbackForAutocompleteUnrecognized`. This is because in this
+  // situation even though the popup could appear behind the cursor, the user
+  // intention about opening it is explicit.
+  //
+  // 2. The suggestions are of autocomplete type and were regenerated due to a
+  // suggestion being removed. We want to ignore the check in this case because
+  // the cursor can be above the popup after a row is deleted. This however does
+  // not mean that the popup just showed up to the user so there is no need to
+  // move the cursor out and in.
+  bool should_ignore_mouse_observed_outside_item_bounds_check_;
 };
 
 BEGIN_VIEW_BUILDER(/* no export*/, PopupCellView, views::View)

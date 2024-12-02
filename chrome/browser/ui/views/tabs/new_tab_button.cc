@@ -60,30 +60,13 @@ class NewTabButton::HighlightPathGenerator
 NewTabButton::NewTabButton(TabStrip* tab_strip, PressedCallback callback)
     : views::ImageButton(std::move(callback)), tab_strip_(tab_strip) {
   SetAnimateOnStateChange(true);
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  SetTriggerableEventFlags(GetTriggerableEventFlags() |
-                           ui::EF_MIDDLE_MOUSE_BUTTON);
-#endif
 
-  if (features::IsChromeRefresh2023()) {
-    foreground_frame_active_color_id_ =
-        kColorNewTabButtonCRForegroundFrameActive;
-    foreground_frame_inactive_color_id_ =
-        kColorNewTabButtonCRForegroundFrameInactive;
-    background_frame_active_color_id_ =
-        kColorNewTabButtonCRBackgroundFrameActive;
-    background_frame_inactive_color_id_ =
-        kColorNewTabButtonCRBackgroundFrameInactive;
-  } else {
-    foreground_frame_active_color_id_ = kColorNewTabButtonForegroundFrameActive;
-    foreground_frame_inactive_color_id_ =
-        kColorNewTabButtonForegroundFrameInactive;
-    background_frame_active_color_id_ = kColorNewTabButtonBackgroundFrameActive;
-    background_frame_inactive_color_id_ =
-        kColorNewTabButtonBackgroundFrameInactive;
-  }
+  foreground_frame_active_color_id_ = kColorNewTabButtonForegroundFrameActive;
+  foreground_frame_inactive_color_id_ =
+      kColorNewTabButtonForegroundFrameInactive;
+  background_frame_active_color_id_ = kColorNewTabButtonBackgroundFrameActive;
+  background_frame_inactive_color_id_ =
+      kColorNewTabButtonBackgroundFrameInactive;
 
   ink_drop_container_ =
       AddChildView(std::make_unique<views::InkDropContainerView>());
