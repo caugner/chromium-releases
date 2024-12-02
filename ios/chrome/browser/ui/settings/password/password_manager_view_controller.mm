@@ -1,4 +1,4 @@
-// Copyright 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,34 +6,34 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/ios/ios_util.h"
-#include "base/mac/foundation_util.h"
-#include "base/metrics/histogram_functions.h"
-#include "base/metrics/user_metrics.h"
-#include "base/strings/sys_string_conversions.h"
-#include "components/google/core/common/google_util.h"
-#include "components/keyed_service/core/service_access_type.h"
-#include "components/password_manager/core/browser/password_list_sorter.h"
-#include "components/password_manager/core/browser/password_manager_constants.h"
-#include "components/password_manager/core/browser/password_manager_metrics_util.h"
-#include "components/password_manager/core/browser/password_ui_utils.h"
-#include "components/password_manager/core/browser/ui/credential_ui_entry.h"
-#include "components/password_manager/core/browser/ui/password_check_referrer.h"
-#include "components/password_manager/core/common/password_manager_features.h"
-#include "components/password_manager/core/common/password_manager_pref_names.h"
-#include "components/prefs/pref_service.h"
-#include "components/strings/grit/components_strings.h"
-#include "components/sync/driver/sync_service.h"
-#include "components/sync/driver/sync_service_utils.h"
-#include "components/sync/driver/sync_user_settings.h"
-#include "ios/chrome/browser/application_context.h"
-#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/chrome_url_constants.h"
+#import "base/ios/ios_util.h"
+#import "base/mac/foundation_util.h"
+#import "base/metrics/histogram_functions.h"
+#import "base/metrics/user_metrics.h"
+#import "base/strings/sys_string_conversions.h"
+#import "components/google/core/common/google_util.h"
+#import "components/keyed_service/core/service_access_type.h"
+#import "components/password_manager/core/browser/password_list_sorter.h"
+#import "components/password_manager/core/browser/password_manager_constants.h"
+#import "components/password_manager/core/browser/password_manager_metrics_util.h"
+#import "components/password_manager/core/browser/password_ui_utils.h"
+#import "components/password_manager/core/browser/ui/credential_ui_entry.h"
+#import "components/password_manager/core/browser/ui/password_check_referrer.h"
+#import "components/password_manager/core/common/password_manager_features.h"
+#import "components/password_manager/core/common/password_manager_pref_names.h"
+#import "components/prefs/pref_service.h"
+#import "components/strings/grit/components_strings.h"
+#import "components/sync/driver/sync_service.h"
+#import "components/sync/driver/sync_service_utils.h"
+#import "components/sync/driver/sync_user_settings.h"
+#import "ios/chrome/browser/application_context/application_context.h"
+#import "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/chrome_url_constants.h"
+#import "ios/chrome/browser/flags/system_flags.h"
 #import "ios/chrome/browser/main/browser.h"
 #import "ios/chrome/browser/net/crurl.h"
 #import "ios/chrome/browser/signin/chrome_account_manager_service_factory.h"
 #import "ios/chrome/browser/signin/chrome_account_manager_service_observer_bridge.h"
-#include "ios/chrome/browser/system_flags.h"
 #import "ios/chrome/browser/ui/elements/home_waiting_view.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_check_cell.h"
 #import "ios/chrome/browser/ui/settings/cells/settings_check_item.h"
@@ -67,14 +67,14 @@
 #import "ios/chrome/common/ui/favicon/favicon_view.h"
 #import "ios/chrome/common/ui/reauthentication/reauthentication_module.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
-#include "ios/chrome/grit/ios_chromium_strings.h"
-#include "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/grit/ios_chromium_strings.h"
+#import "ios/chrome/grit/ios_strings.h"
 #import "net/base/mac/url_conversions.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
-#include "ui/base/device_form_factor.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/l10n/l10n_util_mac.h"
-#include "url/gurl.h"
+#import "third_party/abseil-cpp/absl/types/optional.h"
+#import "ui/base/device_form_factor.h"
+#import "ui/base/l10n/l10n_util.h"
+#import "ui/base/l10n/l10n_util_mac.h"
+#import "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -246,6 +246,9 @@ bool ShouldShowSettingsUI() {
   // Boolean containing whether `self` should be updated after dismissing
   // the Search Controller.
   BOOL _shouldUpdateAfterSearchControllerDismissed;
+  // Whether the table view is in search mode. That is, it only has the search
+  // bar potentially saved passwords and blocked sites.
+  BOOL _tableIsInSearchMode;
 }
 
 // Object handling passwords export operations.
@@ -417,8 +420,9 @@ bool ShouldShowSettingsUI() {
   if (ShouldShowSettingsUI() && [self allowsAddPassword]) {
     self.shouldShowAddButtonInToolbar = YES;
     self.addButtonInToolbar.enabled = YES;
-  } else {
-    self.shouldShowAddButtonInToolbar = NO;
+  } else if (!ShouldShowSettingsUI()) {
+    self.shouldShowSettingsButtonInToolbar = YES;
+    self.settingsButtonInToolbar.enabled = YES;
   }
 
   [self loadModel];
@@ -515,7 +519,7 @@ bool ShouldShowSettingsUI() {
   if (ShouldShowSettingsUI()) {
     // Save passwords switch and manage account message. Only show this section
     // when the searchController is not active.
-    if (!self.navigationItem.searchController.active) {
+    if (!_tableIsInSearchMode) {
       [model addSectionWithIdentifier:SectionIdentifierSavePasswordsSwitch];
 
       if (_browserState->GetPrefs()->IsManagedPreference(
@@ -599,10 +603,12 @@ bool ShouldShowSettingsUI() {
   }
 
   // Export passwords button.
-  [model addSectionWithIdentifier:SectionIdentifierExportPasswordsButton];
-  _exportPasswordsItem = [self exportPasswordsItem];
-  [model addItem:_exportPasswordsItem
-      toSectionWithIdentifier:SectionIdentifierExportPasswordsButton];
+  if (ShouldShowSettingsUI()) {
+    [model addSectionWithIdentifier:SectionIdentifierExportPasswordsButton];
+    _exportPasswordsItem = [self exportPasswordsItem];
+    [model addItem:_exportPasswordsItem
+        toSectionWithIdentifier:SectionIdentifierExportPasswordsButton];
+  }
 
   // Add the descriptive text at the top of the screen. Do this at the end to
   // ensure the section to which it's being attached already exists.
@@ -611,6 +617,7 @@ bool ShouldShowSettingsUI() {
       forSectionWithIdentifier:[self sectionForManageAccountLinkHeader]];
 
   [self filterItems:self.searchTerm];
+  _tableIsInSearchMode = NO;
 }
 
 - (void)deleteItems:(NSArray<NSIndexPath*>*)indexPaths {
@@ -734,6 +741,10 @@ bool ShouldShowSettingsUI() {
 
 - (void)addButtonCallback {
   [self.handler showAddPasswordSheet];
+}
+
+- (void)settingsButtonCallback {
+  [self.presentationDelegate showPasswordSettingsSubmenu];
 }
 
 - (void)editButtonPressed {
@@ -955,7 +966,7 @@ bool ShouldShowSettingsUI() {
   passwordItem.title = text;
   passwordItem.credential = credential;
   passwordItem.detailText = detailText;
-  passwordItem.URL = [[CrURL alloc] initWithGURL:GURL(credential.url)];
+  passwordItem.URL = [[CrURL alloc] initWithGURL:GURL(credential.GetURL())];
   passwordItem.accessibilityTraits |= UIAccessibilityTraitButton;
   passwordItem.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
   if (self.mostRecentlyUpdatedPassword) {
@@ -974,7 +985,7 @@ bool ShouldShowSettingsUI() {
   PasswordFormContentItem* passwordItem =
       [[PasswordFormContentItem alloc] initWithType:ItemTypeBlocked];
   passwordItem.credential = credential;
-  passwordItem.URL = [[CrURL alloc] initWithGURL:GURL(credential.url)];
+  passwordItem.URL = [[CrURL alloc] initWithGURL:GURL(credential.GetURL())];
   passwordItem.accessibilityTraits |= UIAccessibilityTraitButton;
   passwordItem.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
   return passwordItem;
@@ -1112,7 +1123,7 @@ bool ShouldShowSettingsUI() {
 
   // During searching Password Check section is hidden so cells should not be
   // reconfigured.
-  if (self.navigationItem.searchController.active) {
+  if (_tableIsInSearchMode) {
     _passwordCheckState = state;
     return;
   }
@@ -1205,7 +1216,7 @@ bool ShouldShowSettingsUI() {
 }
 
 - (void)updateOnDeviceEncryptionSessionAndUpdateTableView {
-  if (!self.navigationItem.searchController.active) {
+  if (!_tableIsInSearchMode) {
     [self
         updateOnDeviceEncryptionSessionWithUpdateTableView:YES
                                           withRowAnimation:
@@ -1221,6 +1232,7 @@ bool ShouldShowSettingsUI() {
   // Remove save passwords switch section, password check section and
   // on device encryption.
 
+  _tableIsInSearchMode = YES;
   [self
       performBatchTableViewUpdates:^{
         // Sections must be removed from bottom to top, otherwise it crashes
@@ -1363,6 +1375,7 @@ bool ShouldShowSettingsUI() {
         [self updateOnDeviceEncryptionSessionWithUpdateTableView:YES
                                                 withRowAnimation:
                                                     UITableViewRowAnimationTop];
+        _tableIsInSearchMode = NO;
       }
                completion:nil];
 }
@@ -1724,6 +1737,10 @@ bool ShouldShowSettingsUI() {
 }
 
 - (void)setExportPasswordsButtonEnabled:(BOOL)enabled {
+  // Will be nil when settings content in this UI is disabled.
+  if (!_exportPasswordsItem)
+    return;
+
   if (enabled) {
     DCHECK(_exportReady && !self.editing);
     _exportPasswordsItem.textColor = [UIColor colorNamed:kBlueColor];
@@ -1777,7 +1794,7 @@ bool ShouldShowSettingsUI() {
   [self presentViewController:exportConfirmation animated:YES completion:nil];
 }
 
-// Removes the given section if it exists and if isEmpty is true.
+// Removes the given section if it exists.
 - (void)clearSectionWithIdentifier:(NSInteger)sectionIdentifier
                   withRowAnimation:(UITableViewRowAnimation)animation {
   TableViewModel* model = self.tableViewModel;

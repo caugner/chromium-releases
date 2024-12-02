@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -362,11 +362,12 @@ RenderWidgetHostImpl* TestWebContents::CreateNewPopupWidget(
   return nullptr;
 }
 
-void TestWebContents::ShowCreatedWindow(RenderFrameHostImpl* opener,
-                                        int route_id,
-                                        WindowOpenDisposition disposition,
-                                        const gfx::Rect& initial_rect,
-                                        bool user_gesture) {}
+void TestWebContents::ShowCreatedWindow(
+    RenderFrameHostImpl* opener,
+    int route_id,
+    WindowOpenDisposition disposition,
+    const blink::mojom::WindowFeatures& window_features,
+    bool user_gesture) {}
 
 void TestWebContents::ShowCreatedWidget(int process_id,
                                         int route_id,
