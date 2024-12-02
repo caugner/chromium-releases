@@ -80,6 +80,7 @@
 <translation id="1847880352285315359">تم الحفظ</translation>
 <translation id="1864756863218646478">تعذر العثور على الملف.</translation>
 <translation id="1921986354447415460">‏لوحة مفاتيح Turkish-F</translation>
+<translation id="1924372192547904021">تم ضبط <ph name="DRIVE_NAME" /></translation>
 <translation id="1931134289871235022">السلوفاكية</translation>
 <translation id="1933345018156373194">تعذَّر النقل، خطأ غير متوقِّع: <ph name="ERROR_MESSAGE" /></translation>
 <translation id="1936717151811561466">الفنلندية</translation>
@@ -163,6 +164,7 @@
 <translation id="2942290791863759244">‏لوحة المفاتيح الألمانية Neo 2</translation>
 <translation id="2943400156390503548">الشرائح</translation>
 <translation id="2943503720238418293">استخدم اسم أقصر</translation>
+<translation id="2949781154072577687">جارٍ ضبط <ph name="DRIVE_NAME" />...</translation>
 <translation id="2951236788251446349">قنديل البحر</translation>
 <translation id="2963783323012015985">لوحة المفاتيح التركية</translation>
 <translation id="2966459079597787514">لوحة المفاتيح السويدية</translation>
@@ -275,6 +277,7 @@
 <translation id="4336032328163998280">تعذّر إتمام عملية النسخ. <ph name="ERROR_MESSAGE" /></translation>
 <translation id="4364327530094270451">شمام</translation>
 <translation id="4372884569765913867">1x1</translation>
+<translation id="4394214039309501350">رابط خارجي</translation>
 <translation id="4425149324548788773">ملفاتي</translation>
 <translation id="4465830120256509958">لوحة المفاتيح البرازيلية</translation>
 <translation id="4470564870223067757">المجموعة رقم 2 الهانغولية</translation>
@@ -408,7 +411,7 @@
 <translation id="5691596662111998220">عذرًا، لم يعد <ph name="FILE_NAME" /> متوفرًا.</translation>
 <translation id="5700087501958648444">معلومات الملف الصوتي</translation>
 <translation id="5731409020711461763">صورة واحدة جديدة</translation>
-<translation id="5752453871435543420">‏النسخ الاحتياطي في السحاب عبر نظام التشغيل Chrome</translation>
+<translation id="5752453871435543420">‏النسخ الاحتياطي في السحابة الإلكترونية عبر نظام التشغيل Chrome</translation>
 <translation id="5756666464756035725">‏QWERTY المجرية</translation>
 <translation id="5771585441665576801">‏التحويل الصوتي (جيا ← γεια)</translation>
 <translation id="5776325638577448643">المحو والتنسيق</translation>
@@ -439,7 +442,7 @@
 <translation id="6012987430370760224">لوحة المفاتيح الماراثية (صوتية)</translation>
 <translation id="6019169947004469866">الاقتصاص</translation>
 <translation id="60357267506638014">‏تخطيط QWERTY للتشيكية</translation>
-<translation id="604001903249547235">النسخ الاحتياطي عبر السحاب.</translation>
+<translation id="604001903249547235">النسخ الاحتياطي عبر السحابة الإلكترونية.</translation>
 <translation id="6040143037577758943">إغلاق</translation>
 <translation id="6054173164583630569">لوحة المفاتيح الفرنسية</translation>
 <translation id="6074825444536523002">‏نموذج Google</translation>
@@ -505,7 +508,7 @@
 <translation id="6878261347041253038">لوحة المفاتيح الديفانغارية (صوتية)</translation>
 <translation id="6885780034956018177">حلزون</translation>
 <translation id="6896758677409633944">نسخ</translation>
-<translation id="691516599546977041">يتعذَّر الحفظ في <ph name="FOLDER_NAME" />. سيتم حفظ الصور التي تم تعديلها في مجلَّد "التنزيلات".</translation>
+<translation id="691516599546977041">يتعذَّر الحفظ في <ph name="FOLDER_NAME" />. سيتم حفظ الصور التي تم تعديلها في مجلَّد مجلد "المحتوى الذي تم تنزيله".</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
 <translation id="6930242544192836755">المدة</translation>
@@ -515,7 +518,7 @@
 <translation id="6935521024859866267">رأسًا على عقب</translation>
 <translation id="6939777852457331078">‏لوحة مفاتيح US Workman</translation>
 <translation id="696203921837389374">تفعيل المزامنة عبر بيانات الجوّال</translation>
-<translation id="6965382102122355670">موافق</translation>
+<translation id="6965382102122355670">حسنًا</translation>
 <translation id="6970230597523682626">البلغارية</translation>
 <translation id="6978611942794658017">‏تم تصميم هذا الملف لأجهزة الكمبيوتر باستخدام برنامج Windows. هذا غير متوافق مع جهازك الذي يعمل بنظام التشغيل Chrome OS. يُرجى البحث في سوق Chrome الإلكتروني للحصول على تطبيق بديل مناسب.</translation>
 <translation id="6979158407327259162">Google Drive</translation>
@@ -568,17 +571,18 @@
 <translation id="7649070708921625228">مساعدة</translation>
 <translation id="7654209398114106148">جارٍ نقل <ph name="NUMBER_OF_ITEMS" /> من العناصر...</translation>
 <translation id="7658239707568436148">إلغاء</translation>
+<translation id="7695430100978772476">تعذّر ضبط <ph name="DRIVE_NAME" /></translation>
 <translation id="770015031906360009">اليونانية</translation>
 <translation id="7706319470528945664">لوحة المفاتيح البرتغالية</translation>
 <translation id="7711920809702896782">معلومات الصورة</translation>
 <translation id="7724603315864178912">قص</translation>
-<translation id="7730494089396812859">عرض تفاصيل النسخ الاحتياطي عبر السحاب</translation>
+<translation id="7730494089396812859">عرض تفاصيل النسخ الاحتياطي عبر السحابة الإلكترونية</translation>
 <translation id="7748626145866214022">‏تتوفر مزيد من الخيارات على شريط الإجراءات. يُرجى الضغط على "Alt + A" لتركيز هذا الشريط.</translation>
 <translation id="7765158879357617694">نقل</translation>
 <translation id="7774365994322694683">طائر</translation>
 <translation id="7788080748068240085">لحفظ "<ph name="FILE_NAME" />" بلا إنترنت، يجب توفير مساحة إضافية تبلغ <ph name="TOTAL_FILE_SIZE" />:<ph name="MARKUP_1" />
     <ph name="MARKUP_2" />احرص على إزالة الملفات التي لم تعد بحاجة إلى الدخول إليها بلا إنترنت<ph name="MARKUP_3" />
-    <ph name="MARKUP_4" />احذف الملفات من مجلد التنزيلات<ph name="MARKUP_5" /></translation>
+    <ph name="MARKUP_4" />احذف الملفات من مجلد "المحتوى الذي تم تنزيله"<ph name="MARKUP_5" /></translation>
 <translation id="7794058097940213561">إعداد الجهاز</translation>
 <translation id="7799329977874311193">‏مستند HTML</translation>
 <translation id="7805768142964895445">الحالة</translation>
@@ -593,7 +597,7 @@
 <translation id="7846076177841592234">إلغاء الاختيار</translation>
 <translation id="7853966320808728790">‏BÉPO الفرنسية</translation>
 <translation id="7864662577698025113">إضافة خدمة جديدة</translation>
-<translation id="7873831373602885875">يتعذَّر الحفظ في <ph name="FOLDER_NAME" />. وسيتم حفظ جميع التعديلات في <ph name="DOWNLOADS_FOLDER" /> في مجلَّد "التنزيلات".</translation>
+<translation id="7873831373602885875">يتعذَّر الحفظ في <ph name="FOLDER_NAME" />. وسيتم حفظ جميع التعديلات في <ph name="DOWNLOADS_FOLDER" /> في مجلَّد مجلد "المحتوى الذي تم تنزيله".</translation>
 <translation id="7881969471599061635">إيقاف الترجمات المصاحبة</translation>
 <translation id="78946041517601018">‏مساحات Drive المشتركة</translation>
 <translation id="7896906914454843592">لوحة المفاتيح الأمريكية الموسعة</translation>

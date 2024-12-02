@@ -35,6 +35,7 @@ def _read_file(p):
     if p == '$I/Product Packaging/pkg_postinstall.in':
         return """app dir is '@APP_DIR@'
 app product is '@APP_PRODUCT@'
+brand code is '@BRAND_CODE@'
 framework dir is '@FRAMEWORK_DIR@'"""
 
     raise
@@ -269,7 +270,11 @@ class TestPipelineHelpers(unittest.TestCase):
         for attr in kwargs:
             manager.attach_mock(kwargs[attr], attr)
 
-        dist = model.Distribution()
+        dist = model.Distribution(
+            branding_code='MOO',
+            packaging_name_fragment='ForCows',
+            package_as_dmg=False,
+            package_as_pkg=True)
         dist_config = dist.to_config(test_config.TestConfig())
         paths = self.paths.replace_work('$W')
 
@@ -286,6 +291,7 @@ class TestPipelineHelpers(unittest.TestCase):
         self.assertEqual(
             postinstall_string, """app dir is 'App Product.app'
 app product is 'App Product'
+brand code is 'MOO'
 framework dir is 'App Product.app/Contents/Frameworks/Product Framework.framework'"""
         )
 
@@ -550,6 +556,29 @@ framework dir is 'App Product.app/Contents/Frameworks/Product Framework.framewor
                 '$I/Product Packaging/chrome_canary_dmg_dsstore:/.DS_Store'
             ]))
 
+    def test_package_dmg_no_customize_not_chrome(self, **kwargs):
+        dist = model.Distribution()
+        config = test_config.TestConfigNonChromeBranded()
+        paths = self.paths.replace_work('$W')
+
+        dmg_path = pipeline._package_dmg(paths, dist, config)
+        self.assertEqual('$O/AppProduct-99.0.9999.99.dmg', dmg_path)
+
+        pkg_dmg_args = kwargs['run_command'].mock_calls[0][1][0]
+
+        self.assertEqual(dmg_path, _get_adjacent_item(pkg_dmg_args, '--target'))
+        self.assertEqual('App Product',
+                         _get_adjacent_item(pkg_dmg_args, '--volname'))
+        self.assertEqual('$W/empty', _get_adjacent_item(pkg_dmg_args,
+                                                        '--source'))
+
+        copy_specs = [
+            pkg_dmg_args[i + 1]
+            for i, arg in enumerate(pkg_dmg_args)
+            if arg == '--copy'
+        ]
+        self.assertEqual(set(copy_specs), set(['$W/App Product.app:/']))
+
     def test_package_installer_tools(self, **kwargs):
         manager = mock.Mock()
         for attr in kwargs:
@@ -615,6 +644,36 @@ framework dir is 'App Product.app/Contents/Frameworks/Product Framework.framewor
         self.assertEqual(len(verified_files), len(files_to_sign))
         self.assertEqual(set(signed_files), files_to_sign)
         self.assertEqual(set(verified_files), files_to_sign)
+
+    def test_package_installer_tools_not_chrome(self, **kwargs):
+        manager = mock.Mock()
+        for attr in kwargs:
+            manager.attach_mock(kwargs[attr], attr)
+
+        config = test_config.TestConfigNonChromeBranded()
+        pipeline._package_installer_tools(self.paths, config)
+
+        files_to_copy = set([
+            'goobspatch',
+            'liblzma_decompress.dylib',
+            'goobsdiff',
+            'xz',
+            'xzdec',
+            'dirdiffer.sh',
+            'dirpatcher.sh',
+            'dmgdiffer.sh',
+            'pkg-dmg',
+        ])
+        copied_files = []
+        for call in manager.mock_calls:
+            if call[0] == 'copy_files':
+                args = call[1]
+                self.assertTrue(args[0].startswith('$I/Product Packaging/'))
+                self.assertEqual('$W_1/diff_tools', args[1])
+                copied_files.append(os.path.basename(args[0]))
+
+        self.assertEqual(len(copied_files), len(files_to_copy))
+        self.assertEqual(set(copied_files), files_to_copy)
 
 
 @mock.patch.multiple(

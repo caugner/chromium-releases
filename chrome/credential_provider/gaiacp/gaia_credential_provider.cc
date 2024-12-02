@@ -92,8 +92,8 @@ HRESULT InitializeReauthCredential(
     if (FAILED(hr))
       LOGFN(ERROR) << "reauth->SetEmailForReauth hr=" << putHR(hr);
   } else {
-    LOGFN(INFO) << "reauth for sid " << sid
-                << " doesn't contain the email association";
+    LOGFN(VERBOSE) << "reauth for sid " << sid
+                   << " doesn't contain the email association";
   }
 
   return S_OK;
@@ -119,14 +119,12 @@ HRESULT CreateCredentialObject(
 // the provider |event_handler| object of this event.
 class BackgroundTokenHandleUpdater {
  public:
-  BackgroundTokenHandleUpdater(CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
-                               ICredentialUpdateEventsHandler* event_handler);
+  explicit BackgroundTokenHandleUpdater(
+      ICredentialUpdateEventsHandler* event_handler);
   ~BackgroundTokenHandleUpdater();
 
  private:
   static unsigned __stdcall PeriodicTokenHandleUpdate(void* param);
-
-  CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus_;
 
   // Raw pointer to the interface on CGaiaCredentialProvider that is used
   // to notify that token handle validity has changed. Any instance of this
@@ -139,9 +137,8 @@ class BackgroundTokenHandleUpdater {
 };
 
 BackgroundTokenHandleUpdater::BackgroundTokenHandleUpdater(
-    CREDENTIAL_PROVIDER_USAGE_SCENARIO cpus,
     ICredentialUpdateEventsHandler* event_handler)
-    : cpus_(cpus), event_handler_(event_handler) {
+    : event_handler_(event_handler) {
   unsigned wait_thread_id;
   uintptr_t wait_thread =
       _beginthreadex(nullptr, 0, PeriodicTokenHandleUpdate,
@@ -177,12 +174,12 @@ unsigned __stdcall BackgroundTokenHandleUpdater::PeriodicTokenHandleUpdate(
       break;
 
     bool user_access_changed =
-        AssociatedUserValidator::Get()
-            ->DenySigninForUsersWithInvalidTokenHandles(updater->cpus_);
+        AssociatedUserValidator::Get()->IsAuthEnforcedOnAssociatedUsers();
     if (user_access_changed) {
-      LOGFN(INFO) << "A user token handle has been invalidated. Refreshing "
-                     "credentials";
+      LOGFN(VERBOSE) << "A user token handle has been invalidated. Refreshing "
+                        "credentials";
     }
+
     event_handler->UpdateCredentialsIfNeeded(user_access_changed);
   }
 
@@ -290,13 +287,13 @@ CGaiaCredentialProvider::CGaiaCredentialProvider() {}
 CGaiaCredentialProvider::~CGaiaCredentialProvider() {}
 
 HRESULT CGaiaCredentialProvider::FinalConstruct() {
-  LOGFN(INFO);
+  LOGFN(VERBOSE);
   CleanupOlderVersions();
   return S_OK;
 }
 
 void CGaiaCredentialProvider::FinalRelease() {
-  LOGFN(INFO);
+  LOGFN(VERBOSE);
   CHECK(!token_handle_updater_);
   ClearTransient();
   // Unlock all the users that had their access locked due to invalid token
@@ -305,7 +302,7 @@ void CGaiaCredentialProvider::FinalRelease() {
 }
 
 HRESULT CGaiaCredentialProvider::DestroyCredentials() {
-  LOGFN(INFO);
+  LOGFN(VERBOSE);
   for (auto it = users_.begin(); it != users_.end(); ++it)
     (*it)->Terminate();
 
@@ -314,7 +311,7 @@ HRESULT CGaiaCredentialProvider::DestroyCredentials() {
 }
 
 void CGaiaCredentialProvider::ClearTransient() {
-  LOGFN(INFO);
+  LOGFN(VERBOSE);
   CHECK(!token_handle_updater_);
   // Reset event support.
   advise_context_ = 0;
@@ -383,8 +380,9 @@ HRESULT CGaiaCredentialProvider::CreateReauthCredentials(
     return hr;
   }
 
-  LOGFN(INFO) << "count=" << count;
+  LOGFN(VERBOSE) << "count=" << count;
 
+  std::vector<base::string16> reauth_cred_sids;
   for (DWORD i = 0; i < count; ++i) {
     Microsoft::WRL::ComPtr<ICredentialProviderUser> user;
     hr = users->GetAt(i, &user);
@@ -423,7 +421,7 @@ HRESULT CGaiaCredentialProvider::CreateReauthCredentials(
       user_id[0] = L'\0';
 
     bool is_token_handle_valid_for_user =
-        (AssociatedUserValidator::Get()->IsTokenHandleValidForUser(sid));
+        (!AssociatedUserValidator::Get()->IsAuthEnforcedForUser(sid));
 
     // (1) If device doesn't have internet and if the device online login
     // attempt is not stale, then don't add the reauth credential.
@@ -438,7 +436,7 @@ HRESULT CGaiaCredentialProvider::CreateReauthCredentials(
     if (!AssociatedUserValidator::Get()->HasInternetConnection() &&
         !AssociatedUserValidator::Get()->IsOnlineLoginStale(sid)) {
       continue;
-    } else if (CGaiaCredentialBase::IsAdToGoogleAssociationEnabled() &&
+    } else if (CGaiaCredentialBase::IsCloudAssociationEnabled() &&
                OSUserManager::Get()->IsUserDomainJoined(sid)) {
       if (user_id[0] && is_token_handle_valid_for_user) {
         continue;
@@ -465,7 +463,17 @@ HRESULT CGaiaCredentialProvider::CreateReauthCredentials(
     }
 
     AddCredentialAndCheckAutoLogon(cred.gaia_cred, sid, auto_logon_credential);
+
+    // Add SID to the vector to keep track of all the users that have a reauth
+    // credential created.
+    reauth_cred_sids.push_back(sid);
+
+    LOGFN(VERBOSE) << "Reauth SID : " << sid;
   }
+
+  // Deny sign in access for users that have a reauth credential added to them.
+  AssociatedUserValidator::Get()->DenySigninForUsersWithInvalidTokenHandles(
+      cpus_, reauth_cred_sids);
 
   return S_OK;
 }
@@ -501,7 +509,7 @@ void CGaiaCredentialProvider::AddCredentialAndCheckAutoLogon(
 
 void CGaiaCredentialProvider::RecreateCredentials(
     GaiaCredentialComPtrStorage* auto_logon_credential) {
-  LOGFN(INFO);
+  LOGFN(VERBOSE);
   DCHECK(user_array_);
 
   DestroyCredentials();
@@ -562,7 +570,7 @@ HRESULT CGaiaCredentialProvider::OnUserAuthenticatedImpl(
       events_->CredentialsChanged(advise_context_);
   }
 
-  LOGFN(INFO) << "Signing in authenticated sid=" << OLE2CW(sid);
+  LOGFN(VERBOSE) << "Signing in authenticated sid=" << OLE2CW(sid);
   return S_OK;
 }
 
@@ -624,7 +632,7 @@ HRESULT CGaiaCredentialProvider::OnUserAuthenticated(
 
 HRESULT CGaiaCredentialProvider::SetUserArray(
     ICredentialProviderUserArray* users) {
-  LOGFN(INFO);
+  LOGFN(VERBOSE);
   CHECK(!token_handle_updater_);
 
   if (!IsUsageScenarioSupported(cpus_))
@@ -653,7 +661,7 @@ HRESULT CGaiaCredentialProvider::SetUsageScenario(
   cpus_ = cpus;
   cpus_flags_ = flags;
 
-  LOGFN(INFO) << " cpu=" << cpus << " flags=" << std::setbase(16) << flags;
+  LOGFN(VERBOSE) << " cpu=" << cpus << " flags=" << std::setbase(16) << flags;
   return IsUsageScenarioSupported(cpus_) ? S_OK : E_NOTIMPL;
 }
 
@@ -695,7 +703,7 @@ HRESULT CGaiaCredentialProvider::Advise(ICredentialProviderEvents* pcpe,
 
   if (AssociatedUserValidator::Get()->IsUserAccessBlockingEnforced(cpus_)) {
     token_handle_updater_ =
-        std::make_unique<BackgroundTokenHandleUpdater>(cpus_, this);
+        std::make_unique<BackgroundTokenHandleUpdater>(this);
   }
 
   return S_OK;
@@ -806,8 +814,8 @@ HRESULT CGaiaCredentialProvider::GetCredentialCount(
     *autologin_with_default = *default_index != CREDENTIAL_PROVIDER_NO_DEFAULT;
   }
 
-  LOGFN(INFO) << " count=" << *count << " default=" << *default_index
-              << " auto=" << *autologin_with_default;
+  LOGFN(VERBOSE) << " count=" << *count << " default=" << *default_index
+                 << " auto=" << *autologin_with_default;
   return S_OK;
 }
 
@@ -824,7 +832,7 @@ HRESULT CGaiaCredentialProvider::GetCredentialAt(
   hr = users_[index]->QueryInterface(IID_ICredentialProviderCredential,
                                      (void**)ppcpc);
 
-  LOGFN(INFO) << "hr=" << putHR(hr) << " index=" << index;
+  LOGFN(VERBOSE) << "hr=" << putHR(hr) << " index=" << index;
   return hr;
 }
 

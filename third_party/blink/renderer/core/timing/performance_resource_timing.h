@@ -35,6 +35,7 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/timing/performance_mark_or_measure.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/timing/resource_timing.mojom-blink.h"
 #include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
 #include "third_party/blink/renderer/core/timing/performance_entry.h"
@@ -45,7 +46,6 @@
 namespace blink {
 
 class ResourceLoadTiming;
-struct WebResourceTimingInfo;
 
 class CORE_EXPORT PerformanceResourceTiming
     : public PerformanceEntry,
@@ -56,12 +56,13 @@ class CORE_EXPORT PerformanceResourceTiming
  public:
   // This constructor is for PerformanceNavigationTiming.
   // Related doc: https://goo.gl/uNecAj.
-  PerformanceResourceTiming(const AtomicString& name,
-                            base::TimeTicks time_origin,
-                            bool is_secure_context,
-                            const WebVector<WebServerTimingInfo>&);
   PerformanceResourceTiming(
-      const WebResourceTimingInfo&,
+      const AtomicString& name,
+      base::TimeTicks time_origin,
+      bool is_secure_context,
+      HeapVector<Member<PerformanceServerTiming>> server_timing);
+  PerformanceResourceTiming(
+      const mojom::blink::ResourceTimingInfo&,
       base::TimeTicks time_origin,
       const AtomicString& initiator_type,
       mojo::PendingReceiver<mojom::blink::WorkerTimingContainer>
@@ -132,6 +133,8 @@ class CORE_EXPORT PerformanceResourceTiming
   uint64_t encoded_body_size_ = 0;
   uint64_t decoded_body_size_ = 0;
   bool did_reuse_connection_ = false;
+  // Do not access allow_timing_details_ directly.  Instead use the
+  // AllowTimingDetails() method which is overridden by some sub-classes.
   bool allow_timing_details_ = false;
   bool allow_redirect_details_ = false;
   bool allow_negative_value_ = false;

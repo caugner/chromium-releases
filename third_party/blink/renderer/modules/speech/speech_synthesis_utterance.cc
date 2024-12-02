@@ -33,6 +33,11 @@
 namespace blink {
 
 SpeechSynthesisUtterance* SpeechSynthesisUtterance::Create(
+    ExecutionContext* context) {
+  return MakeGarbageCollected<SpeechSynthesisUtterance>(context, String());
+}
+
+SpeechSynthesisUtterance* SpeechSynthesisUtterance::Create(
     ExecutionContext* context,
     const String& text) {
   return MakeGarbageCollected<SpeechSynthesisUtterance>(context, text);
@@ -135,6 +140,10 @@ void SpeechSynthesisUtterance::Start(SpeechSynthesis* synthesis) {
   // Add a disconnect handler so we can cleanup appropriately.
   receiver_.set_disconnect_handler(WTF::Bind(
       &SpeechSynthesisUtterance::OnDisconnected, WrapWeakPersistent(this)));
+}
+
+void SpeechSynthesisUtterance::Dispose() {
+  receiver_.reset();
 }
 
 void SpeechSynthesisUtterance::OnDisconnected() {

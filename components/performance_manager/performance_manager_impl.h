@@ -66,9 +66,8 @@ class PerformanceManagerImpl : public PerformanceManager {
   static std::unique_ptr<PerformanceManagerImpl> Create(
       GraphImplCallback on_start);
 
-  // Unregisters |instance| if it's currently registered and arranges for its
-  // deletion on its sequence.
-  static void Destroy(std::unique_ptr<PerformanceManagerImpl> instance);
+  // Unregisters |instance| and arranges for its deletion on its sequence.
+  static void Destroy(std::unique_ptr<PerformanceManager> instance);
 
   // Creates a new node of the requested type and adds it to the graph.
   // May be called from any sequence. If a |creation_callback| is provided it
@@ -102,8 +101,7 @@ class PerformanceManagerImpl : public PerformanceManager {
 
   // Destroys a node returned from the creation functions above.
   // May be called from any sequence.
-  template <typename NodeType>
-  void DeleteNode(std::unique_ptr<NodeType> node);
+  void DeleteNode(std::unique_ptr<NodeBase> node);
 
   // Each node in |nodes| must have been returned from one of the creation
   // functions above. This function takes care of removing them from the graph
@@ -130,9 +128,14 @@ class PerformanceManagerImpl : public PerformanceManager {
       base::OnceCallback<void(NodeType*)> creation_callback,
       Args&&... constructor_args);
 
-  void PostDeleteNode(std::unique_ptr<NodeBase> node);
-  void DeleteNodeImpl(std::unique_ptr<NodeBase> node);
-  void BatchDeleteNodesImpl(std::vector<std::unique_ptr<NodeBase>> nodes);
+  // Helper functions that removes a node/vector of nodes from the graph on the
+  // PM sequence and deletes them.
+  //
+  // Note that this function has similar semantics to
+  // SequencedTaskRunner::DeleteSoon(). The node/vector of nodes is passed via a
+  // regular pointer so that they are not deleted if the task is not executed.
+  void DeleteNodeImpl(NodeBase* node_ptr);
+  void BatchDeleteNodesImpl(std::vector<std::unique_ptr<NodeBase>>* nodes_ptr);
 
   void OnStartImpl(GraphImplCallback graph_callback);
   static void RunCallbackWithGraphImpl(GraphImplCallback graph_callback);
@@ -148,11 +151,6 @@ class PerformanceManagerImpl : public PerformanceManager {
 
   DISALLOW_COPY_AND_ASSIGN(PerformanceManagerImpl);
 };
-
-template <typename NodeType>
-void PerformanceManagerImpl::DeleteNode(std::unique_ptr<NodeType> node) {
-  PostDeleteNode(std::move(node));
-}
 
 template <typename TaskReturnType>
 void PerformanceManagerImpl::CallOnGraphAndReplyWithResult(

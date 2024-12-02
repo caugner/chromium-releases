@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/limits.h"
+#include "media/mojo/mojom/video_encoder_info.mojom.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 
@@ -49,10 +50,15 @@ void MojoVideoEncodeAcceleratorService::Initialize(
     InitializeCallback success_callback) {
   DVLOG(1) << __func__ << " " << config.AsHumanReadableString();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!encoder_);
   DCHECK(config.input_format == PIXEL_FORMAT_I420 ||
          config.input_format == PIXEL_FORMAT_NV12)
       << "Only I420 or NV12 format supported";
+
+  if (encoder_) {
+    DLOG(ERROR) << __func__ << " VEA is already initialized";
+    std::move(success_callback).Run(false);
+    return;
+  }
 
   if (!client) {
     DLOG(ERROR) << __func__ << "null |client|";
@@ -193,6 +199,16 @@ void MojoVideoEncodeAcceleratorService::NotifyError(
     return;
 
   vea_client_->NotifyError(error);
+}
+
+void MojoVideoEncodeAcceleratorService::NotifyEncoderInfoChange(
+    const ::media::VideoEncoderInfo& info) {
+  DVLOG(4) << __func__;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!vea_client_)
+    return;
+
+  vea_client_->NotifyEncoderInfoChange(info);
 }
 
 }  // namespace media

@@ -26,12 +26,12 @@
 #include "third_party/blink/renderer/modules/webaudio/media_element_audio_source_node.h"
 
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_media_element_audio_source_options.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
-#include "third_party/blink/renderer/modules/webaudio/media_element_audio_source_options.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -106,6 +106,13 @@ void MediaElementAudioSourceHandler::SetFormat(uint32_t number_of_channels,
     PrintCorsMessage(MediaElement()->currentSrc().GetString());
   }
 
+  {
+    // Make sure |is_origin_tainted_| matches |is_tainted|.  But need to
+    // synchronize with process() to set this.
+    MediaElementAudioSourceHandlerLocker locker(*this);
+    is_origin_tainted_ = is_tainted;
+  }
+
   if (number_of_channels != source_number_of_channels_ ||
       source_sample_rate != source_sample_rate_) {
     if (!number_of_channels ||
@@ -118,16 +125,13 @@ void MediaElementAudioSourceHandler::SetFormat(uint32_t number_of_channels,
       MediaElementAudioSourceHandlerLocker locker(*this);
       source_number_of_channels_ = 0;
       source_sample_rate_ = 0;
-      is_origin_tainted_ = is_tainted;
       return;
     }
 
     // Synchronize with process() to protect |source_number_of_channels_|,
-    // |source_sample_rate_|, |multi_channel_resampler_|. and
-    // |is_origin_tainted_|.
+    // |source_sample_rate_|, |multi_channel_resampler_|.
     MediaElementAudioSourceHandlerLocker locker(*this);
 
-    is_origin_tainted_ = is_tainted;
     source_number_of_channels_ = number_of_channels;
     source_sample_rate_ = source_sample_rate;
 
