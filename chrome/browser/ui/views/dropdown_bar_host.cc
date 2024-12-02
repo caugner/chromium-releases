@@ -14,9 +14,9 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/scrollbar_size.h"
-#include "views/focus/external_focus_tracker.h"
-#include "views/focus/view_storage.h"
-#include "views/widget/widget.h"
+#include "ui/views/focus/external_focus_tracker.h"
+#include "ui/views/focus/view_storage.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
 #include "ui/gfx/scoped_sk_region.h"
@@ -152,8 +152,8 @@ bool DropdownBarHost::IsVisible() const {
 
 ////////////////////////////////////////////////////////////////////////////////
 // DropdownBarHost, views::FocusChangeListener implementation:
-void DropdownBarHost::FocusWillChange(views::View* focused_before,
-                                      views::View* focused_now) {
+void DropdownBarHost::OnWillChangeFocus(views::View* focused_before,
+                                        views::View* focused_now) {
   // First we need to determine if one or both of the views passed in are child
   // views of our view.
   bool our_view_before = focused_before && view_->Contains(focused_before);
@@ -173,6 +173,10 @@ void DropdownBarHost::FocusWillChange(views::View* focused_before,
     // original handler for Escape.
     UnregisterAccelerators();
   }
+}
+
+void DropdownBarHost::OnDidChangeFocus(views::View* focused_before,
+                                       views::View* focused_now) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -331,14 +335,14 @@ void DropdownBarHost::UpdateWindowEdges(const gfx::Rect& new_pos) {
 
 void DropdownBarHost::RegisterAccelerators() {
   DCHECK(!esc_accel_target_registered_);
-  views::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
+  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
   focus_manager_->RegisterAccelerator(escape, this);
   esc_accel_target_registered_ = true;
 }
 
 void DropdownBarHost::UnregisterAccelerators() {
   DCHECK(esc_accel_target_registered_);
-  views::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
+  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
   focus_manager_->UnregisterAccelerator(escape, this);
   esc_accel_target_registered_ = false;
 }

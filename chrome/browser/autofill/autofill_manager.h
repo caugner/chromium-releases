@@ -14,6 +14,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
@@ -23,6 +24,7 @@
 #include "chrome/browser/autofill/form_structure.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 
+class AutofillExternalDelegate;
 class AutofillField;
 class AutofillProfile;
 class AutofillMetrics;
@@ -33,6 +35,10 @@ class RenderViewHost;
 class TabContentsWrapper;
 
 struct ViewHostMsg_FrameNavigate_Params;
+
+namespace gfx {
+class Rect;
+};
 
 namespace IPC {
 class Message;
@@ -46,33 +52,46 @@ struct FormField;
 // Manages saving and restoring the user's personal information entered into web
 // forms.
 class AutofillManager : public TabContentsObserver,
-                        public AutofillDownloadManager::Observer {
+                        public AutofillDownloadManager::Observer,
+                        public base::RefCounted<AutofillManager> {
  public:
   explicit AutofillManager(TabContentsWrapper* tab_contents);
-  virtual ~AutofillManager();
 
   // Registers our Enable/Disable Autofill pref.
   static void RegisterUserPrefs(PrefService* prefs);
 
-  // TabContentsObserver implementation.
-  virtual void DidNavigateMainFramePostCommit(
-      const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params);
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  // Set our external delegate.
+  // TODO(jrg): consider passing delegate into the ctor.  That won't
+  // work if the delegate has a pointer to the AutofillManager, but
+  // future directions may not need such a pointer.
+  void SetExternalDelegate(AutofillExternalDelegate* delegate) {
+    external_delegate_ = delegate;
+  }
 
-  // AutofillDownloadManager::Observer implementation:
-  virtual void OnLoadedServerPredictions(const std::string& response_xml);
-  virtual void OnUploadedPossibleFieldTypes();
-  virtual void OnServerRequestError(
-      const std::string& form_signature,
-      AutofillDownloadManager::AutofillRequestType request_type,
-      int http_error);
+  // Called from our external delegate so they cannot be private.
+  void OnFillAutofillFormData(int query_id,
+                              const webkit_glue::FormData& form,
+                              const webkit_glue::FormField& field,
+                              int unique_id);
+  void OnDidShowAutofillSuggestions(bool is_new_popup);
+  void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
+
+ protected:
+  // Only test code should subclass AutofillManager.
+  friend class base::RefCounted<AutofillManager>;
+  virtual ~AutofillManager();
+
+  // The string/int pair is composed of the guid string and variant index
+  // respectively.  The variant index is an index into the multi-valued item
+  // (where applicable).
+  typedef std::pair<std::string, size_t> GUIDPair;
+
+  // Test code should prefer to use this constructor.
+  AutofillManager(TabContentsWrapper* tab_contents,
+                  PersonalDataManager* personal_data);
 
   // Returns the value of the AutofillEnabled pref.
   virtual bool IsAutofillEnabled() const;
-
-  // Imports the form data, submitted by the user, into |personal_data_|.
-  void ImportFormData(const FormStructure& submitted_form);
 
   // Uploads the form data to the Autofill server.
   virtual void UploadFormData(const FormStructure& submitted_form);
@@ -80,25 +99,13 @@ class AutofillManager : public TabContentsObserver,
   // Reset cache.
   void Reset();
 
- protected:
-  // For tests:
-
-  // The string/int pair is composed of the guid string and variant index
-  // respectively.  The variant index is an index into the multi-valued item
-  // (where applicable).
-  typedef std::pair<std::string, size_t> GUIDPair;
-
-  AutofillManager(TabContentsWrapper* tab_contents,
-                  PersonalDataManager* personal_data);
-
-  void set_personal_data_manager(PersonalDataManager* personal_data) {
-    personal_data_ = personal_data;
-  }
-
-  const AutofillMetrics* metric_logger() const { return metric_logger_.get(); }
-  void set_metric_logger(const AutofillMetrics* metric_logger);
-
-  ScopedVector<FormStructure>* form_structures() { return &form_structures_; }
+  // Logs quality metrics for the |submitted_form| and uploads the form data
+  // to the crowdsourcing server, if appropriate.
+  virtual void UploadFormDataAsyncCallback(
+      const FormStructure* submitted_form,
+      const base::TimeTicks& load_time,
+      const base::TimeTicks& interaction_time,
+      const base::TimeTicks& submission_time);
 
   // Maps GUIDs to and from IDs that are used to identify profiles and credit
   // cards sent to and from the renderer process.
@@ -110,25 +117,49 @@ class AutofillManager : public TabContentsObserver,
   int PackGUIDs(const GUIDPair& cc_guid, const GUIDPair& profile_guid) const;
   void UnpackGUIDs(int id, GUIDPair* cc_guid, GUIDPair* profile_guid) const;
 
- private:
-  void OnFormSubmitted(const webkit_glue::FormData& form,
+  const AutofillMetrics* metric_logger() const { return metric_logger_.get(); }
+  void set_metric_logger(const AutofillMetrics* metric_logger);
+
+  ScopedVector<FormStructure>* form_structures() { return &form_structures_; }
+
+  // Exposed for testing.
+  AutofillExternalDelegate* external_delegate() {
+    return external_delegate_;
+  }
+
+  // Processes the submitted |form|, saving any new Autofill data and uploading
+  // the possible field types for the submitted fields to the crowdsouring
+  // server.  Returns false if this form is not relevant for Autofill.
+  bool OnFormSubmitted(const webkit_glue::FormData& form,
                        const base::TimeTicks& timestamp);
+
+ private:
+  // TabContentsObserver:
+  virtual void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+
+  // AutofillDownloadManager::Observer:
+  virtual void OnLoadedServerPredictions(
+      const std::string& response_xml) OVERRIDE;
+
   void OnFormsSeen(const std::vector<webkit_glue::FormData>& forms,
                    const base::TimeTicks& timestamp);
   void OnTextFieldDidChange(const webkit_glue::FormData& form,
                             const webkit_glue::FormField& field,
                             const base::TimeTicks& timestamp);
+
+  // The |bounding_box| is a window relative value.
   void OnQueryFormFieldAutofill(int query_id,
                                 const webkit_glue::FormData& form,
-                                const webkit_glue::FormField& field);
-  void OnFillAutofillFormData(int query_id,
-                              const webkit_glue::FormData& form,
-                              const webkit_glue::FormField& field,
-                              int unique_id);
+                                const webkit_glue::FormField& field,
+                                const gfx::Rect& bounding_box,
+                                bool display_warning);
   void OnShowAutofillDialog();
   void OnDidPreviewAutofillFormData();
-  void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
-  void OnDidShowAutofillSuggestions(bool is_new_popup);
+  void OnDidEndTextFieldEditing();
+  void OnHideAutofillPopup();
 
   // Fills |host| with the RenderViewHost for this tab.
   // Returns false if Autofill is disabled or if the host is unavailable.
@@ -213,9 +244,8 @@ class AutofillManager : public TabContentsObserver,
   // Parses the forms using heuristic matching and querying the Autofill server.
   void ParseForms(const std::vector<webkit_glue::FormData>& forms);
 
-  // Uses existing personal data to determine possible field types for the
-  // |submitted_form|.
-  void DeterminePossibleFieldTypesForUpload(FormStructure* submitted_form);
+  // Imports the form data, submitted by the user, into |personal_data_|.
+  void ImportFormData(const FormStructure& submitted_form);
 
   // If |initial_interaction_timestamp_| is unset or is set to a later time than
   // |interaction_timestamp|, updates the cached timestamp.  The latter check is
@@ -275,6 +305,10 @@ class AutofillManager : public TabContentsObserver,
   mutable std::map<GUIDPair, int> guid_id_map_;
   mutable std::map<int, GUIDPair> id_guid_map_;
 
+  // Delegate to perform external processing (display, selection) on
+  // our behalf.  Weak.
+  AutofillExternalDelegate* external_delegate_;
+
   friend class AutofillManagerTest;
   friend class FormStructureBrowserTest;
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
@@ -289,6 +323,9 @@ class AutofillManager : public TabContentsObserver,
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsForFailure);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, QualityMetricsWithExperimentId);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, SaneMetricsWithCacheMismatch);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, TestExternalDelegate);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           TestTabContentsWithExternalDelegate);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest,
                            UserHappinessFormLoadAndSubmission);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, UserHappinessFormInteraction);

@@ -27,17 +27,19 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::BrowserThread;
 
 // For malware interstitial pages, we link the problematic URL to Google's
 // diagnostic page.
@@ -100,7 +102,7 @@ static const char* const kBoxChecked = "boxchecked";
 SafeBrowsingBlockingPageFactory* SafeBrowsingBlockingPage::factory_ = NULL;
 
 static base::LazyInstance<SafeBrowsingBlockingPage::UnsafeResourceMap>
-    g_unsafe_resource_map(base::LINKER_INITIALIZED);
+    g_unsafe_resource_map = LAZY_INSTANCE_INITIALIZER;
 
 // The default SafeBrowsingBlockingPageFactory.  Global, made a singleton so we
 // don't leak it.
@@ -125,7 +127,7 @@ class SafeBrowsingBlockingPageFactoryImpl
 };
 
 static base::LazyInstance<SafeBrowsingBlockingPageFactoryImpl>
-    g_safe_browsing_blocking_page_factory_impl(base::LINKER_INITIALIZED);
+    g_safe_browsing_blocking_page_factory_impl = LAZY_INSTANCE_INITIALIZER;
 
 SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
     SafeBrowsingService* sb_service,

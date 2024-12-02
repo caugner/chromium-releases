@@ -7,9 +7,12 @@
 #include <map>
 #include <set>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
 #include "webkit/quota/quota_manager.h"
+
+using content::BrowserThread;
 
 // static
 BrowsingDataQuotaHelper* BrowsingDataQuotaHelper::Create(Profile* profile) {
@@ -19,11 +22,12 @@ BrowsingDataQuotaHelper* BrowsingDataQuotaHelper::Create(Profile* profile) {
       profile->GetQuotaManager());
 }
 
-void BrowsingDataQuotaHelperImpl::StartFetching(FetchResultCallback* callback) {
-  DCHECK(callback);
-  DCHECK(!callback_.get());
+void BrowsingDataQuotaHelperImpl::StartFetching(
+    const FetchResultCallback& callback) {
+  DCHECK_EQ(false, callback.is_null());
+  DCHECK(callback_.is_null());
   DCHECK(!is_fetching_);
-  callback_.reset(callback);
+  callback_ = callback;
   quota_info_.clear();
   is_fetching_ = true;
 
@@ -31,23 +35,21 @@ void BrowsingDataQuotaHelperImpl::StartFetching(FetchResultCallback* callback) {
 }
 
 void BrowsingDataQuotaHelperImpl::CancelNotification() {
-  callback_.reset();
+  callback_.Reset();
 }
 
 void BrowsingDataQuotaHelperImpl::RevokeHostQuota(const std::string& host) {
   if (!io_thread_->BelongsToCurrentThread()) {
     io_thread_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &BrowsingDataQuotaHelperImpl::RevokeHostQuota,
-            host));
+        base::Bind(&BrowsingDataQuotaHelperImpl::RevokeHostQuota, this, host));
     return;
   }
 
   quota_manager_->SetPersistentHostQuota(
-      host, 0, callback_factory_.NewCallback(
-          &BrowsingDataQuotaHelperImpl::DidRevokeHostQuota));
+      host, 0,
+      base::Bind(&BrowsingDataQuotaHelperImpl::DidRevokeHostQuota,
+                 weak_factory_.GetWeakPtr()));
 }
 
 BrowsingDataQuotaHelperImpl::BrowsingDataQuotaHelperImpl(
@@ -59,7 +61,7 @@ BrowsingDataQuotaHelperImpl::BrowsingDataQuotaHelperImpl(
       is_fetching_(false),
       ui_thread_(ui_thread),
       io_thread_(io_thread),
-      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(quota_manager);
 }
 
@@ -69,17 +71,15 @@ void BrowsingDataQuotaHelperImpl::FetchQuotaInfo() {
   if (!io_thread_->BelongsToCurrentThread()) {
     io_thread_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &BrowsingDataQuotaHelperImpl::FetchQuotaInfo));
+        base::Bind(&BrowsingDataQuotaHelperImpl::FetchQuotaInfo, this));
     return;
   }
 
   quota_manager_->GetOriginsModifiedSince(
       quota::kStorageTypeTemporary,
       base::Time(),
-      callback_factory_.NewCallback(
-          &BrowsingDataQuotaHelperImpl::GotOrigins));
+      base::Bind(&BrowsingDataQuotaHelperImpl::GotOrigins,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void BrowsingDataQuotaHelperImpl::GotOrigins(
@@ -96,8 +96,8 @@ void BrowsingDataQuotaHelperImpl::GotOrigins(
     quota_manager_->GetOriginsModifiedSince(
         quota::kStorageTypePersistent,
         base::Time(),
-        callback_factory_.NewCallback(
-            &BrowsingDataQuotaHelperImpl::GotOrigins));
+        base::Bind(&BrowsingDataQuotaHelperImpl::GotOrigins,
+                   weak_factory_.GetWeakPtr()));
   } else {
     // type == quota::kStorageTypePersistent
     ProcessPendingHosts();
@@ -122,8 +122,8 @@ void BrowsingDataQuotaHelperImpl::GetHostUsage(const std::string& host,
   DCHECK(quota_manager_.get());
   quota_manager_->GetHostUsage(
       host, type,
-      callback_factory_.NewCallback(
-          &BrowsingDataQuotaHelperImpl::GotHostUsage));
+      base::Bind(&BrowsingDataQuotaHelperImpl::GotHostUsage,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void BrowsingDataQuotaHelperImpl::GotHostUsage(const std::string& host,
@@ -144,15 +144,13 @@ void BrowsingDataQuotaHelperImpl::GotHostUsage(const std::string& host,
 
 void BrowsingDataQuotaHelperImpl::OnComplete() {
   // Check if CancelNotification was called
-  if (!callback_.get())
+  if (callback_.is_null())
     return;
 
   if (!ui_thread_->BelongsToCurrentThread()) {
     ui_thread_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &BrowsingDataQuotaHelperImpl::OnComplete));
+        base::Bind(&BrowsingDataQuotaHelperImpl::OnComplete, this));
     return;
   }
 
@@ -173,8 +171,8 @@ void BrowsingDataQuotaHelperImpl::OnComplete() {
     result.push_back(*info);
   }
 
-  callback_->Run(result);
-  callback_.reset();
+  callback_.Run(result);
+  callback_.Reset();
 }
 
 void BrowsingDataQuotaHelperImpl::DidRevokeHostQuota(

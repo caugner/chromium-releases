@@ -8,9 +8,9 @@
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_store_observer_mock.h"
-#include "content/common/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -61,7 +61,7 @@ TEST_P(ConfigurationPolicyPrefStoreListTest, SetValue) {
   in_value->Append(Value::CreateStringValue("test1"));
   in_value->Append(Value::CreateStringValue("test2,"));
   provider_.AddPolicy(GetParam().type(), in_value);
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   const Value* value = NULL;
   EXPECT_EQ(PrefStore::READ_OK,
             store_->GetValue(GetParam().pref_name(), &value));
@@ -108,7 +108,7 @@ TEST_P(ConfigurationPolicyPrefStoreStringTest, GetDefault) {
 TEST_P(ConfigurationPolicyPrefStoreStringTest, SetValue) {
   provider_.AddPolicy(GetParam().type(),
                       Value::CreateStringValue("http://chromium.org"));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   const Value* value = NULL;
   EXPECT_EQ(PrefStore::READ_OK,
             store_->GetValue(GetParam().pref_name(), &value));
@@ -158,7 +158,7 @@ TEST_P(ConfigurationPolicyPrefStoreBooleanTest, GetDefault) {
 
 TEST_P(ConfigurationPolicyPrefStoreBooleanTest, SetValue) {
   provider_.AddPolicy(GetParam().type(), Value::CreateBooleanValue(false));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   const Value* value = NULL;
   EXPECT_EQ(PrefStore::READ_OK,
             store_->GetValue(GetParam().pref_name(), &value));
@@ -169,7 +169,7 @@ TEST_P(ConfigurationPolicyPrefStoreBooleanTest, SetValue) {
   EXPECT_FALSE(boolean_value);
 
   provider_.AddPolicy(GetParam().type(), Value::CreateBooleanValue(true));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   value = NULL;
   EXPECT_EQ(PrefStore::READ_OK,
             store_->GetValue(GetParam().pref_name(), &value));
@@ -205,18 +205,18 @@ INSTANTIATE_TEST_CASE_P(
                     prefs::kShowHomeButton),
         TypeAndName(kPolicyPrintingEnabled,
                     prefs::kPrintingEnabled),
-        TypeAndName(kPolicyJavascriptEnabled,
-                    prefs::kWebKitJavascriptEnabled),
-        TypeAndName(kPolicyRemoteAccessClientFirewallTraversal,
-                    prefs::kRemoteAccessClientFirewallTraversal),
         TypeAndName(kPolicyRemoteAccessHostFirewallTraversal,
                     prefs::kRemoteAccessHostFirewallTraversal),
         TypeAndName(kPolicyCloudPrintProxyEnabled,
                     prefs::kCloudPrintProxyEnabled),
+        TypeAndName(kPolicyCloudPrintSubmitEnabled,
+                    prefs::kCloudPrintSubmitEnabled),
         TypeAndName(kPolicySavingBrowserHistoryDisabled,
                     prefs::kSavingBrowserHistoryDisabled),
         TypeAndName(kPolicySavingBrowserHistoryDisabled,
                     prefs::kSavingBrowserHistoryDisabled),
+        TypeAndName(kPolicyEnableOriginBoundCerts,
+                    prefs::kEnableOriginBoundCerts),
         TypeAndName(kPolicyDisableAuthNegotiateCnameLookup,
                     prefs::kDisableAuthNegotiateCnameLookup),
         TypeAndName(kPolicyEnableAuthNegotiatePort,
@@ -254,7 +254,9 @@ INSTANTIATE_TEST_CASE_P(
         TypeAndName(kPolicyImportSearchEngine,
                     prefs::kImportSearchEngine),
         TypeAndName(kPolicyImportSavedPasswords,
-                    prefs::kImportSavedPasswords)));
+                    prefs::kImportSavedPasswords),
+        TypeAndName(kPolicyDeveloperToolsDisabled,
+                    prefs::kDevToolsDisabled)));
 
 #if defined(OS_CHROMEOS)
 INSTANTIATE_TEST_CASE_P(
@@ -278,7 +280,7 @@ TEST_P(ConfigurationPolicyPrefStoreIntegerTest, GetDefault) {
 
 TEST_P(ConfigurationPolicyPrefStoreIntegerTest, SetValue) {
   provider_.AddPolicy(GetParam().type(), Value::CreateIntegerValue(2));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   const Value* value = NULL;
   EXPECT_EQ(PrefStore::READ_OK,
             store_->GetValue(GetParam().pref_name(), &value));
@@ -289,8 +291,24 @@ INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyPrefStoreIntegerTestInstance,
     ConfigurationPolicyPrefStoreIntegerTest,
     testing::Values(
+        TypeAndName(kPolicyDefaultCookiesSetting,
+                    prefs::kManagedDefaultCookiesSetting),
+        TypeAndName(kPolicyDefaultImagesSetting,
+                    prefs::kManagedDefaultImagesSetting),
+        TypeAndName(kPolicyDefaultPluginsSetting,
+                    prefs::kManagedDefaultPluginsSetting),
+        TypeAndName(kPolicyDefaultPopupsSetting,
+                    prefs::kManagedDefaultPopupsSetting),
+        TypeAndName(kPolicyDefaultNotificationsSetting,
+                    prefs::kManagedDefaultNotificationsSetting),
+        TypeAndName(kPolicyDefaultGeolocationSetting,
+                    prefs::kManagedDefaultGeolocationSetting),
         TypeAndName(kPolicyRestoreOnStartup,
                     prefs::kRestoreOnStartup),
+        TypeAndName(kPolicyDiskCacheSize,
+                    prefs::kDiskCacheSize),
+        TypeAndName(kPolicyMediaCacheSize,
+                    prefs::kMediaCacheSize),
         TypeAndName(kPolicyPolicyRefreshRate,
                     prefs::kUserPolicyRefreshRate),
         TypeAndName(kPolicyMaxConnectionsPerProxy,
@@ -814,7 +832,7 @@ TEST_F(ConfigurationPolicyPrefStoreSyncTest, Default) {
 
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Enabled) {
   provider_.AddPolicy(kPolicySyncDisabled, Value::CreateBooleanValue(false));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   // Enabling Sync should not set the pref.
   EXPECT_EQ(PrefStore::READ_NO_VALUE,
             store_->GetValue(prefs::kSyncManaged, NULL));
@@ -822,7 +840,7 @@ TEST_F(ConfigurationPolicyPrefStoreSyncTest, Enabled) {
 
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Disabled) {
   provider_.AddPolicy(kPolicySyncDisabled, Value::CreateBooleanValue(true));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   // Sync should be flagged as managed.
   const Value* value = NULL;
   EXPECT_EQ(PrefStore::READ_OK, store_->GetValue(prefs::kSyncManaged, &value));
@@ -849,7 +867,7 @@ TEST_F(ConfigurationPolicyPrefStorePromptDownloadTest, SetDownloadDirectory) {
   EXPECT_EQ(PrefStore::READ_NO_VALUE,
             store_->GetValue(prefs::kPromptForDownload, NULL));
   provider_.AddPolicy(kPolicyDownloadDirectory, Value::CreateStringValue(""));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
 
   // Setting a DownloadDirectory should disable the PromptForDownload pref.
   const Value* value = NULL;
@@ -869,7 +887,7 @@ TEST_F(ConfigurationPolicyPrefStorePromptDownloadTest,
             store_->GetValue(prefs::kPromptForDownload, NULL));
   provider_.AddPolicy(kPolicyAllowFileSelectionDialogs,
                       Value::CreateBooleanValue(true));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
 
   // Allowing file-selection dialogs should not influence the PromptForDownload
   // pref.
@@ -883,7 +901,7 @@ TEST_F(ConfigurationPolicyPrefStorePromptDownloadTest,
             store_->GetValue(prefs::kPromptForDownload, NULL));
   provider_.AddPolicy(kPolicyAllowFileSelectionDialogs,
                       Value::CreateBooleanValue(false));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
 
   // Disabling file-selection dialogs should disable the PromptForDownload pref.
   const Value* value = NULL;
@@ -903,20 +921,20 @@ class ConfigurationPolicyPrefStoreAutofillTest
 
 TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Default) {
   EXPECT_EQ(PrefStore::READ_NO_VALUE,
-            store_->GetValue(prefs::kSyncManaged, NULL));
+            store_->GetValue(prefs::kAutofillEnabled, NULL));
 }
 
 TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Enabled) {
   provider_.AddPolicy(kPolicyAutoFillEnabled, Value::CreateBooleanValue(true));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   // Enabling Autofill should not set the pref.
   EXPECT_EQ(PrefStore::READ_NO_VALUE,
-            store_->GetValue(prefs::kSyncManaged, NULL));
+            store_->GetValue(prefs::kAutofillEnabled, NULL));
 }
 
 TEST_F(ConfigurationPolicyPrefStoreAutofillTest, Disabled) {
   provider_.AddPolicy(kPolicyAutoFillEnabled, Value::CreateBooleanValue(false));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   // Disabling Autofill should switch the pref to managed.
   const Value* value = NULL;
   EXPECT_EQ(PrefStore::READ_OK,
@@ -951,19 +969,19 @@ TEST_F(ConfigurationPolicyPrefStoreRefreshTest, Refresh) {
   EXPECT_CALL(observer_, OnPrefValueChanged(prefs::kHomePage)).Times(1);
   provider_.AddPolicy(kPolicyHomepageLocation,
                       Value::CreateStringValue("http://www.chromium.org"));
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_EQ(PrefStore::READ_OK,
             store_->GetValue(prefs::kHomePage, &value));
   EXPECT_TRUE(StringValue("http://www.chromium.org").Equals(value));
 
   EXPECT_CALL(observer_, OnPrefValueChanged(_)).Times(0);
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   Mock::VerifyAndClearExpectations(&observer_);
 
   EXPECT_CALL(observer_, OnPrefValueChanged(prefs::kHomePage)).Times(1);
   provider_.RemovePolicy(kPolicyHomepageLocation);
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_EQ(PrefStore::READ_NO_VALUE,
             store_->GetValue(prefs::kHomePage, NULL));
@@ -977,9 +995,51 @@ TEST_F(ConfigurationPolicyPrefStoreRefreshTest, Initialization) {
   provider_.SetInitializationComplete(true);
   EXPECT_FALSE(store_->IsInitializationComplete());
 
-  store_->OnUpdatePolicy();
+  store_->OnUpdatePolicy(&provider_);
   Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_TRUE(store_->IsInitializationComplete());
+}
+
+// Tests for policies that don't quite fit the previous patterns.
+class ConfigurationPolicyPrefStoreOthersTest
+    : public ConfigurationPolicyPrefStoreTestBase<testing::Test> {
+};
+
+TEST_F(ConfigurationPolicyPrefStoreOthersTest, JavascriptEnabled) {
+  // This is a boolean policy, but affects an integer preference.
+  EXPECT_EQ(PrefStore::READ_NO_VALUE,
+            store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, NULL));
+  provider_.AddPolicy(kPolicyJavascriptEnabled,
+                      Value::CreateBooleanValue(true));
+  store_->OnUpdatePolicy(&provider_);
+  EXPECT_EQ(PrefStore::READ_NO_VALUE,
+            store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, NULL));
+  provider_.AddPolicy(kPolicyJavascriptEnabled,
+                      Value::CreateBooleanValue(false));
+  store_->OnUpdatePolicy(&provider_);
+  const Value* value = NULL;
+  EXPECT_EQ(PrefStore::READ_OK,
+            store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, &value));
+  EXPECT_TRUE(base::FundamentalValue(CONTENT_SETTING_BLOCK).Equals(value));
+}
+
+TEST_F(ConfigurationPolicyPrefStoreOthersTest, JavascriptEnabledOverridden) {
+  EXPECT_EQ(PrefStore::READ_NO_VALUE,
+            store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, NULL));
+  provider_.AddPolicy(kPolicyJavascriptEnabled,
+                      Value::CreateBooleanValue(false));
+  store_->OnUpdatePolicy(&provider_);
+  const Value* value = NULL;
+  EXPECT_EQ(PrefStore::READ_OK,
+            store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, &value));
+  EXPECT_TRUE(base::FundamentalValue(CONTENT_SETTING_BLOCK).Equals(value));
+  // DefaultJavaScriptSetting overrides JavascriptEnabled.
+  provider_.AddPolicy(kPolicyDefaultJavaScriptSetting,
+                      Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+  store_->OnUpdatePolicy(&provider_);
+  EXPECT_EQ(PrefStore::READ_OK,
+            store_->GetValue(prefs::kManagedDefaultJavaScriptSetting, &value));
+  EXPECT_TRUE(base::FundamentalValue(CONTENT_SETTING_ALLOW).Equals(value));
 }
 
 }  // namespace policy

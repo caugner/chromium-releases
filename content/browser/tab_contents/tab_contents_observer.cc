@@ -11,19 +11,28 @@
 void TabContentsObserver::RenderViewCreated(RenderViewHost* render_view_host) {
 }
 
+void TabContentsObserver::RenderViewDeleted(RenderViewHost* render_view_host) {
+}
+
+void TabContentsObserver::RenderViewReady() {
+}
+
+void TabContentsObserver::RenderViewGone(base::TerminationStatus status) {
+}
+
 void TabContentsObserver::NavigateToPendingEntry(
     const GURL& url,
     NavigationController::ReloadType reload_type) {
 }
 
-void TabContentsObserver::DidNavigateMainFramePostCommit(
+void TabContentsObserver::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
 }
 
-void TabContentsObserver::DidNavigateAnyFramePostCommit(
+void TabContentsObserver::DidNavigateAnyFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
 }
 
 void TabContentsObserver::DidStartProvisionalLoadForFrame(
@@ -54,10 +63,23 @@ void TabContentsObserver::DidFailProvisionalLoad(
     const string16& error_description) {
 }
 
+void TabContentsObserver::DocumentAvailableInMainFrame() {
+}
+
 void TabContentsObserver::DocumentLoadedInFrame(int64 frame_id) {
 }
 
-void TabContentsObserver::DidFinishLoad(int64 frame_id) {
+void TabContentsObserver::DidFinishLoad(
+     int64 frame_id,
+     const GURL& validated_url,
+     bool is_main_frame) {
+}
+
+void TabContentsObserver::DidFailLoad(int64 frame_id,
+                                      const GURL& validated_url,
+                                      bool is_main_frame,
+                                      int error_code,
+                                      const string16& error_description) {
 }
 
 void TabContentsObserver::DidGetUserGesture() {
@@ -75,14 +97,11 @@ void TabContentsObserver::DidStartLoading() {
 void TabContentsObserver::DidStopLoading() {
 }
 
-void TabContentsObserver::RenderViewGone() {
-}
-
 void TabContentsObserver::StopNavigation() {
 }
 
 void TabContentsObserver::DidOpenURL(const GURL& url,
-                                     const GURL& referrer,
+                                     const content::Referrer& referrer,
                                      WindowOpenDisposition disposition,
                                      content::PageTransition transition) {
 }
@@ -90,7 +109,7 @@ void TabContentsObserver::DidOpenURL(const GURL& url,
 void TabContentsObserver::DidOpenRequestedURL(
     TabContents* new_contents,
     const GURL& url,
-    const GURL& referrer,
+    const content::Referrer& referrer,
     WindowOpenDisposition disposition,
     content::PageTransition transition,
     int64 source_frame_id) {
@@ -101,12 +120,12 @@ void TabContentsObserver::AppCacheAccessed(const GURL& manifest_url,
 }
 
 TabContentsObserver::TabContentsObserver(TabContents* tab_contents)
-    : tab_contents_(NULL), routing_id_(MSG_ROUTING_NONE) {
+    : tab_contents_(NULL) {
   Observe(tab_contents);
 }
 
 TabContentsObserver::TabContentsObserver()
-    : tab_contents_(NULL), routing_id_(MSG_ROUTING_NONE) {
+    : tab_contents_(NULL) {
 }
 
 TabContentsObserver::~TabContentsObserver() {
@@ -119,7 +138,6 @@ void TabContentsObserver::Observe(TabContents* tab_contents) {
     tab_contents_->RemoveObserver(this);
   tab_contents_ = tab_contents;
   if (tab_contents_) {
-    routing_id_ = tab_contents->render_view_host()->routing_id();
     tab_contents_->AddObserver(this);
   }
 }

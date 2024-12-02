@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/compiler_specific.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window_delegate.h"
 
 namespace aura {
@@ -19,8 +20,9 @@ class TestWindowDelegate : public WindowDelegate {
   virtual ~TestWindowDelegate();
 
   // Overridden from WindowDelegate:
+  virtual gfx::Size GetMinimumSize() const OVERRIDE;
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds);
+                               const gfx::Rect& new_bounds) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual bool OnKeyEvent(KeyEvent* event) OVERRIDE;
@@ -28,6 +30,7 @@ class TestWindowDelegate : public WindowDelegate {
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
   virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) OVERRIDE;
+  virtual bool CanFocus() OVERRIDE;
   virtual bool ShouldActivate(Event* event) OVERRIDE;
   virtual void OnActivated() OVERRIDE;
   virtual void OnLostActive() OVERRIDE;
@@ -39,6 +42,54 @@ class TestWindowDelegate : public WindowDelegate {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
+};
+
+// A simple WindowDelegate implementation for these tests. It owns itself
+// (deletes itself when the Window it is attached to is destroyed).
+class ColorTestWindowDelegate : public TestWindowDelegate {
+ public:
+  explicit ColorTestWindowDelegate(SkColor color);
+  virtual ~ColorTestWindowDelegate();
+
+  ui::KeyboardCode last_key_code() const { return last_key_code_; }
+
+  // Overridden from TestWindowDelegate:
+  virtual bool OnKeyEvent(KeyEvent* event) OVERRIDE;
+  virtual void OnWindowDestroyed() OVERRIDE;
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+
+ private:
+  SkColor color_;
+  ui::KeyboardCode last_key_code_;
+
+  DISALLOW_COPY_AND_ASSIGN(ColorTestWindowDelegate);
+};
+
+class ActivateWindowDelegate : public TestWindowDelegate {
+ public:
+  ActivateWindowDelegate();
+  explicit ActivateWindowDelegate(bool activate);
+
+  void set_activate(bool v) { activate_ = v; }
+  int activated_count() const { return activated_count_; }
+  int lost_active_count() const { return lost_active_count_; }
+  int should_activate_count() const { return should_activate_count_; }
+  void Clear() {
+    activated_count_ = lost_active_count_ = should_activate_count_ = 0;
+  }
+
+  // Overridden from TestWindowDelegate:
+  virtual bool ShouldActivate(Event* event) OVERRIDE;
+  virtual void OnActivated() OVERRIDE;
+  virtual void OnLostActive() OVERRIDE;
+
+ private:
+  bool activate_;
+  int activated_count_;
+  int lost_active_count_;
+  int should_activate_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(ActivateWindowDelegate);
 };
 
 }  // namespace test

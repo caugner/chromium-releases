@@ -10,7 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/task.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros/power_library.h"
+#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "net/base/network_change_notifier.h"
 
 namespace chromeos {
@@ -19,18 +19,27 @@ class OnlineStatusReportThreadTask;
 
 class NetworkChangeNotifierChromeos
     : public net::NetworkChangeNotifier,
-      public chromeos::PowerLibrary::Observer,
+      public chromeos::PowerManagerClient::Observer,
       public chromeos::NetworkLibrary::NetworkObserver,
       public chromeos::NetworkLibrary::NetworkManagerObserver {
  public:
   NetworkChangeNotifierChromeos();
   virtual ~NetworkChangeNotifierChromeos();
 
+  // Initializes the network change notifier. Starts to observe changes
+  // from the power manager and the network manager.
+  void Init();
+
+  // Shutdowns the network change notifier. Stops observing changes from
+  // the power manager and the network manager.
+  void Shutdown();
+
  private:
   friend class OnlineStatusReportThreadTask;
 
-  // PowerLibrary::Observer overrides.
-  virtual void PowerChanged(PowerLibrary* obj) OVERRIDE;
+  // PowerManagerClient::Observer overrides.
+  virtual void PowerChanged(const PowerSupplyStatus& status) OVERRIDE;
+
   virtual void SystemResumed() OVERRIDE;
 
   // NetworkChangeNotifier overrides.
@@ -72,6 +81,6 @@ class NetworkChangeNotifierChromeos
   DISALLOW_COPY_AND_ASSIGN(NetworkChangeNotifierChromeos);
 };
 
-}  // namespace net
+}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_NET_NETWORK_CHANGE_NOTIFIER_CHROMEOS_H_

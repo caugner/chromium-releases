@@ -7,20 +7,20 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/task.h"
 #include "base/test/test_timeouts.h"
 #include "base/tracked_objects.h"
-#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
+#include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/glue/non_frontend_data_type_controller.h"
 #include "chrome/browser/sync/glue/non_frontend_data_type_controller_mock.h"
-#include "chrome/browser/sync/glue/model_associator_mock.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
 using base::WaitableEvent;
 using browser_sync::ChangeProcessorMock;
@@ -30,6 +30,7 @@ using browser_sync::NonFrontendDataTypeController;
 using browser_sync::NonFrontendDataTypeControllerMock;
 using browser_sync::ModelAssociatorMock;
 using browser_sync::StartCallback;
+using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
@@ -48,7 +49,7 @@ ACTION_P(SignalEvent, event) {
 class NonFrontendDataTypeControllerFake : public NonFrontendDataTypeController {
  public:
   NonFrontendDataTypeControllerFake(
-      ProfileSyncFactory* profile_sync_factory,
+      ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile,
       NonFrontendDataTypeControllerMock* mock)
       : NonFrontendDataTypeController(profile_sync_factory,
@@ -62,7 +63,7 @@ class NonFrontendDataTypeControllerFake : public NonFrontendDataTypeController {
 
  private:
   virtual void CreateSyncComponents() {
-    ProfileSyncFactory::SyncComponents sync_components =
+    ProfileSyncComponentsFactory::SyncComponents sync_components =
         profile_sync_factory()->
             CreateBookmarkSyncComponents(profile_sync_service(), this);
     set_model_associator(sync_components.model_associator);
@@ -71,16 +72,12 @@ class NonFrontendDataTypeControllerFake : public NonFrontendDataTypeController {
   virtual bool StartAssociationAsync() {
     mock_->StartAssociationAsync();
     return BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &NonFrontendDataTypeControllerFake::StartAssociation));
+        base::Bind(&NonFrontendDataTypeControllerFake::StartAssociation, this));
   }
   virtual bool StopAssociationAsync() {
     mock_->StopAssociationAsync();
     return BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &NonFrontendDataTypeControllerFake::StopAssociation));
+        base::Bind(&NonFrontendDataTypeControllerFake::StopAssociation, this));
   }
 
   // We mock the following methods because their default implementations do
@@ -118,7 +115,8 @@ class NonFrontendDataTypeControllerTest : public testing::Test {
     EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
         Return(&service_));
     db_thread_.Start();
-    profile_sync_factory_.reset(new StrictMock<ProfileSyncFactoryMock>());
+    profile_sync_factory_.reset(
+        new StrictMock<ProfileSyncComponentsFactoryMock>());
 
     // Both of these are refcounted, so don't need to be released.
     dtc_mock_ = new StrictMock<NonFrontendDataTypeControllerMock>();
@@ -138,8 +136,8 @@ class NonFrontendDataTypeControllerTest : public testing::Test {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
     EXPECT_CALL(*profile_sync_factory_, CreateBookmarkSyncComponents(_, _)).
-        WillOnce(Return(ProfileSyncFactory::SyncComponents(model_associator_,
-                                                           change_processor_)));
+        WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
+            model_associator_, change_processor_)));
   }
 
   void SetAssociateExpectations() {
@@ -178,8 +176,7 @@ class NonFrontendDataTypeControllerTest : public testing::Test {
   void WaitForDTC() {
     WaitableEvent done(true, false);
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-       NewRunnableFunction(&NonFrontendDataTypeControllerTest::SignalDone,
-                           &done));
+        base::Bind(&NonFrontendDataTypeControllerTest::SignalDone, &done));
     done.TimedWait(base::TimeDelta::FromMilliseconds(
         TestTimeouts::action_timeout_ms()));
     if (!done.IsSignaled()) {
@@ -189,10 +186,10 @@ class NonFrontendDataTypeControllerTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   scoped_refptr<NonFrontendDataTypeControllerFake> non_frontend_dtc_;
-  scoped_ptr<ProfileSyncFactoryMock> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   scoped_refptr<NonFrontendDataTypeControllerMock> dtc_mock_;
   ProfileMock profile_;
   ProfileSyncServiceMock service_;
@@ -379,9 +376,9 @@ TEST_F(NonFrontendDataTypeControllerTest, OnUnrecoverableError) {
   EXPECT_EQ(DataTypeController::RUNNING, non_frontend_dtc_->state());
   // This should cause non_frontend_dtc_->Stop() to be called.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      NewRunnableMethod(
-          non_frontend_dtc_.get(),
+      base::Bind(
           &NonFrontendDataTypeControllerFake::OnUnrecoverableError,
+          non_frontend_dtc_.get(),
           FROM_HERE,
           std::string("Test")));
   WaitForDTC();

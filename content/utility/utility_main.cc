@@ -8,8 +8,8 @@
 #include "base/threading/platform_thread.h"
 #include "content/common/child_process.h"
 #include "content/common/hi_res_timer_manager.h"
-#include "content/common/main_function_params.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/main_function_params.h"
 #include "content/utility/utility_thread_impl.h"
 
 #if defined(OS_WIN)
@@ -17,7 +17,7 @@
 #endif
 
 // Mainline routine for running as the utility process.
-int UtilityMain(const MainFunctionParams& parameters) {
+int UtilityMain(const content::MainFunctionParams& parameters) {
   // The main message loop of the utility process.
   MessageLoop main_message_loop;
   base::PlatformThread::SetName("CrUtilityMain");
@@ -29,10 +29,10 @@ int UtilityMain(const MainFunctionParams& parameters) {
   utility_process.set_main_thread(new UtilityThreadImpl());
 
 #if defined(OS_WIN)
-  bool no_sandbox = parameters.command_line_.HasSwitch(switches::kNoSandbox);
+  bool no_sandbox = parameters.command_line.HasSwitch(switches::kNoSandbox);
   if (!no_sandbox) {
     sandbox::TargetServices* target_services =
-        parameters.sandbox_info_.TargetServices();
+        parameters.sandbox_info->target_services;
     if (!target_services)
       return false;
     target_services->LowerToken();

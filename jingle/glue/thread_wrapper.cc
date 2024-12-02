@@ -4,6 +4,8 @@
 
 #include "jingle/glue/thread_wrapper.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/threading/thread_local.h"
 
@@ -23,7 +25,7 @@ struct JingleThreadWrapper::PendingSend {
 };
 
 base::LazyInstance<base::ThreadLocalPointer<JingleThreadWrapper> >
-    g_jingle_thread_wrapper(base::LINKER_INITIALIZED);
+    g_jingle_thread_wrapper = LAZY_INSTANCE_INITIALIZER;
 
 // static
 void JingleThreadWrapper::EnsureForCurrentThread() {
@@ -43,6 +45,7 @@ JingleThreadWrapper* JingleThreadWrapper::current() {
 JingleThreadWrapper::JingleThreadWrapper(MessageLoop* message_loop)
     : message_loop_(message_loop),
       send_allowed_(false),
+      last_task_id_(0),
       pending_send_event_(true, false) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
@@ -153,8 +156,9 @@ void JingleThreadWrapper::Send(talk_base::MessageHandler *handler, uint32 id,
   // Need to signal |pending_send_event_| here in case the thread is
   // sending message to another thread.
   pending_send_event_.Signal();
-  message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &JingleThreadWrapper::ProcessPendingSends));
+  message_loop_->PostTask(FROM_HERE,
+                          base::Bind(&JingleThreadWrapper::ProcessPendingSends,
+                                     base::Unretained(this)));
 
 
   while (!pending_send.done_event.IsSignaled()) {
@@ -204,13 +208,14 @@ void JingleThreadWrapper::PostTaskInternal(
   }
 
   if (delay_ms <= 0) {
-    message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &JingleThreadWrapper::RunTask, task_id));
+    message_loop_->PostTask(FROM_HERE,
+                            base::Bind(&JingleThreadWrapper::RunTask,
+                                       base::Unretained(this), task_id));
   } else {
-    message_loop_->PostDelayedTask(
-        FROM_HERE,
-        NewRunnableMethod(this, &JingleThreadWrapper::RunTask, task_id),
-        delay_ms);
+    message_loop_->PostDelayedTask(FROM_HERE,
+                                   base::Bind(&JingleThreadWrapper::RunTask,
+                                              base::Unretained(this), task_id),
+                                   delay_ms);
   }
 }
 

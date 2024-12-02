@@ -53,15 +53,25 @@ chrome.fileBrowserPrivate = {
   /**
    * Disk mount/unmount notification.
    */
-  onDiskChanged: {
-    callbacks: [],
-    addListener: function(cb) { this.callbacks.push(cb) }
-  },
-
   onMountCompleted: {
     callbacks: [],
     addListener: function(cb) { this.callbacks.push(cb) }
   },
+
+  /**
+   * File system change notification.
+   */
+  onFileChanged: {
+    callbacks: [],
+    addListener: function(cb) { this.callbacks.push(cb) }
+  },
+
+  /**
+   * File watchers.
+   */
+  addFileWatch: function(path, callback) { callback(true) },
+
+  removeFileWatch: function(path, callback) { callback(true) },
 
   /**
    * Returns common tasks for a given list of files.
@@ -94,7 +104,7 @@ chrome.fileBrowserPrivate = {
       },
       {
         taskId: extensionId + '|gallery',
-        title: 'View and edit',
+        title: 'View and Edit',
         regexp: /\.(jpe?g|gif|png|cr2?|tiff|webp|bmp)$/i,
         iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAOCAYAAAAmL5yKAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9sEEBcOAw9XftIAAADFSURBVCjPrZKxCsIwEIa/FHFwsvYxROjSQXAoqLiIL+xgBtvZ91A6uOnQc2hT0zRqkR4c3P25+/PfJTCwLU6wEpgBWkDXuInDPSwF5r7mJIeNQFTnIiCeONpVdYlLoK9wEUhNg8+B9FDVaZcgCKAovjTXfvPJFwGZtKW60pt8bOGBzfLouemnFY/MAs8wDeEI4NzaybewBu4AysKVgrK0gfe5iB9vjdAUqQ/S1Y/R3IX9Zc1zxc7zxe2/0Iskt7AsG0hhx14W8XV43FgV4gAAAABJRU5ErkJggg=='
       }
@@ -190,6 +200,8 @@ chrome.fileBrowserPrivate = {
     }
   },
 
+  getSizeStats: function() {},
+
   /**
    * Return localized strings.
    */
@@ -235,7 +247,7 @@ chrome.fileBrowserPrivate = {
       UNMOUNT_ARCHIVE: 'Close archive',
       FORMAT_DEVICE: 'Format device',
 
-      GALLERY: 'View and edit',
+      GALLERY: 'View and Edit',
       GALLERY_EDIT: 'Edit',
       GALLERY_SHARE: 'Share',
       GALLERY_AUTOFIX: 'Auto-fix',
@@ -249,6 +261,7 @@ chrome.fileBrowserPrivate = {
       GALLERY_ENTER_WHEN_DONE: 'Press Enter when done',
       GALLERY_UNDO: 'Undo',
       GALLERY_REDO: 'Redo',
+      GALLERY_FILE_EXISTS: 'File already exists',
 
       CONFIRM_OVERWRITE_FILE: 'A file named "$1" already exists. Do you want to replace it?',
       FILE_ALREADY_EXISTS: 'The file named "$1" already exists. Please choose a different name.',
@@ -287,7 +300,7 @@ chrome.fileBrowserPrivate = {
       CANCEL_LABEL: 'Cancel',
       OPEN_LABEL: 'Open',
       SAVE_LABEL: 'Save',
-      OK_LABEL: 'Ok',
+      OK_LABEL: 'OK',
 
       DEFAULT_NEW_FOLDER_NAME: 'New Folder',
       MORE_FILES: 'Show all files',
@@ -352,13 +365,6 @@ chrome.fileBrowserPrivate = {
   }
 };
 
-chrome.fileBrowserHandler = {
-  onExecute: {
-    callbacks: [],
-    addListener: function(cb) { this.callbacks.push(cb) }
-  }
-};
-
 chrome.extension = {
   getURL: function(path) {
     return path || document.location.href;
@@ -387,4 +393,12 @@ chrome.tabs = {
   create: function(createOptions) {
     window.open(createOptions.url);
   }
+};
+
+chrome.metricsPrivate = {
+  recordMediumCount: function() {},
+  recordSmallCount: function() {},
+  recordTime: function() {},
+  recordUserAction: function() {},
+  recordValue: function() {}
 };

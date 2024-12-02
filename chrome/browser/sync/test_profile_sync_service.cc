@@ -9,7 +9,7 @@
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/internal_api/user_share.h"
 #include "chrome/browser/sync/js/js_reply_handler.h"
-#include "chrome/browser/sync/profile_sync_factory.h"
+#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
@@ -135,16 +135,16 @@ browser_sync::SyncBackendHostForProfileSyncTest*
 }
 
 TestProfileSyncService::TestProfileSyncService(
-    ProfileSyncFactory* factory,
+    ProfileSyncComponentsFactory* factory,
     Profile* profile,
     const std::string& test_user,
     bool synchronous_backend_initialization,
-    Task* initial_condition_setup_task)
+    const base::Closure& callback)
     : ProfileSyncService(factory, profile, new FakeSigninManager(), test_user),
       synchronous_backend_initialization_(
           synchronous_backend_initialization),
       synchronous_sync_configuration_(false),
-      initial_condition_setup_task_(initial_condition_setup_task),
+      callback_(callback),
       set_initial_sync_ended_on_init_(true),
       fail_initial_download_(false) {
   SetSyncSetupCompleted();
@@ -176,9 +176,9 @@ void TestProfileSyncService::OnBackendInitialized(
     backend_initialized_ = true;
 
     // Set up any nodes the test wants around before model association.
-    if (initial_condition_setup_task_) {
-      initial_condition_setup_task_->Run();
-      initial_condition_setup_task_ = NULL;
+    if (!callback_.is_null()) {
+      callback_.Run();
+      callback_.Reset();
     }
 
     // Pretend we downloaded initial updates and set initial sync ended bits
@@ -215,9 +215,10 @@ void TestProfileSyncService::OnBackendInitialized(
   }
 }
 
-void TestProfileSyncService::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void TestProfileSyncService::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   ProfileSyncService::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_SYNC_CONFIGURE_DONE &&
       !synchronous_sync_configuration_) {

@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/debug/debugger.h"
 #include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/field_trial.h"
 #include "base/message_loop.h"
@@ -18,14 +19,16 @@
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "content/common/content_counters.h"
-#include "content/common/main_function_params.h"
 #include "content/common/hi_res_timer_manager.h"
 #include "content/common/pepper_plugin_registry.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/main_function_params.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "ui/base/ui_base_switches.h"
+#include "webkit/plugins/ppapi/ppapi_interface_factory.h"
 
 #if defined(OS_MACOSX)
 #include <Carbon/Carbon.h>
@@ -33,6 +36,7 @@
 #include <unistd.h>
 
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "third_party/mach_override/mach_override.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #endif  // OS_MACOSX
@@ -90,9 +94,11 @@ static void HandleRendererErrorTestParameters(const CommandLine& command_line) {
     *bad_pointer = 0;
   }
 
-  if (command_line.HasSwitch(switches::kRendererStartupDialog)) {
+  if (command_line.HasSwitch(switches::kWaitForDebugger))
+    base::debug::WaitForDebugger(60, true);
+
+  if (command_line.HasSwitch(switches::kRendererStartupDialog))
     ChildProcess::WaitForDebugger("Renderer");
-  }
 }
 
 // This is a simplified version of the browser Jankometer, which measures
@@ -121,13 +127,13 @@ class RendererMessageLoopObserver : public MessageLoop::TaskObserver {
 };
 
 // mainline routine for running as the Renderer process
-int RendererMain(const MainFunctionParams& parameters) {
+int RendererMain(const content::MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN_ETW("RendererMain", 0, "");
 
-  const CommandLine& parsed_command_line = parameters.command_line_;
-  base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool_;
+  const CommandLine& parsed_command_line = parameters.command_line;
 
 #if defined(OS_MACOSX)
+  base::mac::ScopedNSAutoreleasePool* pool = parameters.autorelease_pool;
   InstallFrameworkHacks();
 #endif  // OS_MACOSX
 
@@ -150,6 +156,11 @@ int RendererMain(const MainFunctionParams& parameters) {
   HandleRendererErrorTestParameters(parsed_command_line);
 
   RendererMainPlatformDelegate platform(parameters);
+
+  webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager =
+      webkit::ppapi::PpapiInterfaceFactoryManager::GetInstance();
+  content::GetContentClient()->renderer()->RegisterPPAPIInterfaceFactories(
+      factory_manager);
 
   base::StatsScope<base::StatsCounterTimer>
       startup_timer(content::Counters::renderer_main());
@@ -222,8 +233,10 @@ int RendererMain(const MainFunctionParams& parameters) {
     startup_timer.Stop();  // End of Startup Time Measurement.
 
     if (run_loop) {
+#if defined(OS_MACOSX)
       if (pool)
         pool->Recycle();
+#endif
       TRACE_EVENT_BEGIN_ETW("RendererMain.START_MSG_LOOP", 0, 0);
       MessageLoop::current()->Run();
       TRACE_EVENT_END_ETW("RendererMain.START_MSG_LOOP", 0, 0);

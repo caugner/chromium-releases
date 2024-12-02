@@ -249,7 +249,6 @@ cr.define('options', function() {
           "syncExtensions": syncAll || $('extensions-checkbox').checked,
           "syncTypedUrls": syncAll || $('typed-urls-checkbox').checked,
           "syncApps": syncAll || $('apps-checkbox').checked,
-          "syncSearchEngines": syncAll || $('search-engines-checkbox').checked,
           "syncSessions": syncAll || $('sessions-checkbox').checked,
           "encryptAllData": encryptAllData,
           "usePassphrase": usePassphrase,
@@ -343,12 +342,6 @@ cr.define('options', function() {
         $('apps-item').className = "sync-item-show";
       } else {
         $('apps-item').className = "sync-item-hide";
-      }
-      if (args.searchEnginesRegistered) {
-        $('search-engines-checkbox').checked = args.syncSearchEngines;
-        $('search-engines-item').className = "sync-item-show";
-      } else {
-        $('search-engines-item').className = "sync-item-hide";
       }
       if (args.sessionsRegistered) {
         $('sessions-checkbox').checked = args.syncSessions;
@@ -545,10 +538,15 @@ cr.define('options', function() {
         this.showOverlay_();
     },
 
+    /**
+     * Changes the visibility of throbbers on this page.
+     * @param {boolean} visible Whether or not to set all throbber nodes
+     *     visible.
+     */
     setThrobbersVisible_: function(visible) {
       var throbbers = document.getElementsByClassName("throbber");
-        for (var i = 0; i < throbbers.length; i++)
-          throbbers[i].style.visibility = visible ? "visible" : "hidden";
+      for (var i = 0; i < throbbers.length; i++)
+        throbbers[i].style.visibility = visible ? "visible" : "hidden";
     },
 
     loginSetFocus_: function() {
@@ -561,12 +559,40 @@ cr.define('options', function() {
       }
     },
 
+    /**
+     * Get the login email text input DOM element.
+     * @return {DOMElement} The login email text input.
+     * @private
+     */
+    getLoginEmail_: function() {
+      return $('gaia-email');
+    },
+
+    /**
+     * Get the login password text input DOM element.
+     * @return {DOMElement} The login password text input.
+     * @private
+     */
+    getLoginPasswd_: function() {
+      return $('gaia-passwd');
+    },
+
+    /**
+     * Get the sign in button DOM element.
+     * @return {DOMElement} The sign in button.
+     * @private
+     */
+    getSignInButton_: function() {
+      return $('sign-in');
+    },
+
     showAccessCodeRequired_: function() {
       $('password-row').hidden = true;
       $('email-row').hidden = true;
 
       $('access-code-input-row').hidden = false;
       $('access-code').disabled = false;
+      $('access-code').focus();
     },
 
     showCaptcha_: function(args) {
@@ -609,8 +635,6 @@ cr.define('options', function() {
           function(elt) { elt.disabled = true; });
       forEach(page.getElementsByClassName('reset-enabled'),
           function(elt) { elt.disabled = false; });
-      forEach(page.getElementsByClassName('reset-visibility-hidden'),
-          function(elt) { elt.style.visibility = 'hidden'; });
       forEach(page.getElementsByClassName('reset-value'),
           function(elt) { elt.value = ''; });
       forEach(page.getElementsByClassName('reset-opaque'),
@@ -696,7 +720,7 @@ cr.define('options', function() {
         $('error-custom').hidden = true;
       }
 
-      $('top-blurb-error').style.visibility = "visible";
+      $('top-blurb-error').hidden = false;
       $('gaia-email').disabled = false;
       $('gaia-passwd').disabled = false;
     },
@@ -753,7 +777,7 @@ cr.define('options', function() {
       $('captcha-value').disabled = true;
       $('access-code').disabled = true;
 
-      $('logging-in-throbber').style.visibility = "visible";
+      this.setThrobbersVisible_(true);
 
       var f = $('gaia-login-form');
       var email = $('gaia-email');
@@ -773,7 +797,7 @@ cr.define('options', function() {
 
     showSuccessAndSettingUp_: function() {
       $('sign-in').value = localStrings.getString('settingUp');
-      $('top-blurb-error').style.visibility = "hidden";
+      $('top-blurb-error').hidden = true;
     },
 
     /**
@@ -821,6 +845,20 @@ cr.define('options', function() {
     }
   };
 
+  // These get methods should only be called by the WebUI tests.
+  SyncSetupOverlay.getLoginEmail = function() {
+    return SyncSetupOverlay.getInstance().getLoginEmail_();
+  };
+
+  SyncSetupOverlay.getLoginPasswd = function() {
+    return SyncSetupOverlay.getInstance().getLoginPasswd_();
+  };
+
+  SyncSetupOverlay.getSignInButton = function() {
+    return SyncSetupOverlay.getInstance().getSignInButton_();
+  };
+
+  // These methods are for general consumption.
   SyncSetupOverlay.showErrorUI = function() {
     SyncSetupOverlay.getInstance().showErrorUI_();
   };

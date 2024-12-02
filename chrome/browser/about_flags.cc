@@ -20,10 +20,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
-#include "content/public/common/content_switches.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/gl/gl_switches.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/aura_switches.h"
+#endif
 
 namespace about_flags {
 
@@ -128,13 +131,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableCrxlessWebApps)
   },
   {
-    "lazy-background-pages",
-    IDS_FLAGS_LAZY_BACKGROUND_PAGES_NAME,
-    IDS_FLAGS_LAZY_BACKGROUND_PAGES_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableLazyBackgroundPages)
-  },
-  {
     "ignore-gpu-blacklist",
     IDS_FLAGS_IGNORE_GPU_BLACKLIST_NAME,
     IDS_FLAGS_IGNORE_GPU_BLACKLIST_DESCRIPTION,
@@ -154,6 +150,17 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_COMPOSITED_LAYER_BORDERS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kShowCompositedLayerBorders)
+  },
+  {
+    "accelerated-drawing",
+    IDS_FLAGS_ACCELERATED_DRAWING_NAME,
+    IDS_FLAGS_ACCELERATED_DRAWING_DESCRIPTION,
+#if defined(USE_SKIA)
+    kOsAll,
+#else
+    0,
+#endif
+    SINGLE_VALUE_TYPE(switches::kEnableAcceleratedDrawing)
   },
   {
     "show-fps-counter",
@@ -233,13 +240,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kExperimentalLocationFeatures)
   },
   {
-    "block-reading-third-party-cookies",
-    IDS_FLAGS_BLOCK_ALL_THIRD_PARTY_COOKIES_NAME,
-    IDS_FLAGS_BLOCK_ALL_THIRD_PARTY_COOKIES_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kBlockReadingThirdPartyCookies)
-  },
-  {
     "disable-interactive-form-validation",
     IDS_FLAGS_DISABLE_INTERACTIVE_FORM_VALIDATION_NAME,
     IDS_FLAGS_DISABLE_INTERACTIVE_FORM_VALIDATION_DESCRIPTION,
@@ -259,13 +259,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_TAB_GROUPS_CONTEXT_MENU_DESCRIPTION,
     kOsWin,
     SINGLE_VALUE_TYPE(switches::kEnableTabGroupsContextMenu)
-  },
-  {
-    "ppapi-flash-in-process",
-    IDS_FLAGS_PPAPI_FLASH_IN_PROCESS_NAME,
-    IDS_FLAGS_PPAPI_FLASH_IN_PROCESS_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kPpapiFlashInProcess)
   },
   {
     "preload-instant-search",
@@ -301,11 +294,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableSyncTabs)
   },
   {
-    "sync-search-engines",
-    IDS_FLAGS_SYNC_SEARCH_ENGINES_NAME,
-    IDS_FLAGS_SYNC_SEARCH_ENGINES_DESCRIPTION,
+    "sync-app-notifications",
+    IDS_FLAGS_SYNC_APP_NOTIFICATIONS_NAME,
+    IDS_FLAGS_SYNC_APP_NOTIFICATIONS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSyncSearchEngines)
+    SINGLE_VALUE_TYPE(switches::kDisableSyncAppNotifications)
   },
   {
     "enable-smooth-scrolling",  // FLAGS:RECORD_UMA
@@ -324,27 +317,20 @@ const Experiment kExperiments[] = {
     MULTI_VALUE_TYPE(kPrerenderFromOmniboxChoices)
   },
   {
-    "panels",
+    "enable-panels",
     IDS_FLAGS_ENABLE_PANELS_NAME,
     IDS_FLAGS_ENABLE_PANELS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnablePanels)
   },
   {
-    "enable-shortcuts-provider",
-    IDS_FLAGS_ENABLE_SHORTCUTS_PROVIDER,
-    IDS_FLAGS_ENABLE_SHORTCUTS_PROVIDER_DESCRIPTION,
+    "disable-shortcuts-provider",
+    IDS_FLAGS_DISABLE_SHORTCUTS_PROVIDER,
+    IDS_FLAGS_DISABLE_SHORTCUTS_PROVIDER_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableShortcutsProvider)
+    SINGLE_VALUE_TYPE(switches::kDisableShortcutsProvider)
   },
 #if defined(OS_CHROMEOS)
-  {
-    "enable-archives",
-    IDS_FILE_BROWSER_MOUNT_ARCHIVE,
-    IDS_FILE_MANAGER,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableArchives)
-  },
   {
     "enable-bluetooth",
     IDS_FLAGS_ENABLE_BLUETOOTH_NAME,
@@ -365,15 +351,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE("")
 #endif
   },
-#if defined(TOUCH_UI)
-  {
-    "touchui-views-desktop",
-    IDS_FLAGS_DISABLE_VIEWS_DESKTOP_NAME,
-    IDS_FLAGS_DISABLE_VIEWS_DESKTOP_DESCRIPTION,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE_AND_VALUE(switches::kViewsDesktop, "disabled")
-  },
-#endif
   {
     "downloads-new-ui",  // FLAGS:RECORD_UMA
     IDS_FLAGS_DOWNLOADS_NEW_UI_NAME,
@@ -395,12 +372,18 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kUseMoreWebUI)
   },
+  // TODO(flackr): Remove this flag and views screen locker when the WebUI
+  // locker is mature (crbug.com/105263).
   {
-    "enable-ntp-bookmark-features",
-    IDS_FLAGS_ENABLE_NTP_BOOKMARK_FEATURES_NAME,
-    IDS_FLAGS_ENABLE_NTP_BOOKMARK_FEATURES_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableNTPBookmarkFeatures)
+    "disable-webui-lock-screen",
+    IDS_FLAGS_WEBUI_LOCK_NAME,
+    IDS_FLAGS_WEBUI_LOCK_DESCRIPTION,
+    kOsCrOS,
+#if defined(OS_CHROMEOS)
+    SINGLE_VALUE_TYPE(switches::kDisableWebUILockScreen)
+#else
+    SINGLE_VALUE_TYPE("")
+#endif
   },
   {
     "enable-video-track",
@@ -408,6 +391,43 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_VIDEO_TRACK_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableVideoTrack)
+  },
+  {
+    "extension-alerts",
+    IDS_FLAGS_ENABLE_EXTENSION_ALERTS_NAME,
+    IDS_FLAGS_ENABLE_EXTENSION_ALERTS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableExtensionAlerts)
+  },
+  {
+    "enable-media-source",
+    IDS_FLAGS_ENABLE_MEDIA_SOURCE_NAME,
+    IDS_FLAGS_ENABLE_MEDIA_SOURCE_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableMediaSource)
+  },
+  {
+    "enable-pointer-lock",
+    IDS_FLAGS_ENABLE_POINTER_LOCK_NAME,
+    IDS_FLAGS_ENABLE_POINTER_LOCK_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnablePointerLock)
+  },
+#if defined(USE_AURA)
+  {
+    "aura-windows",
+    IDS_FLAGS_AURA_WINDOWS_NAME,
+    IDS_FLAGS_AURA_WINDOWS_DESCRIPTION,
+    kOsWin | kOsLinux | kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kAuraWindows)
+  },
+#endif
+  {
+    "enable-gamepad",
+    IDS_FLAGS_ENABLE_GAMEPAD_NAME,
+    IDS_FLAGS_ENABLE_GAMEPAD_DESCRIPTION,
+    kOsWin,
+    SINGLE_VALUE_TYPE(switches::kEnableGamepad)
   },
 };
 
@@ -647,7 +667,7 @@ int GetCurrentPlatform() {
   return kOsWin;
 #elif defined(OS_CHROMEOS)  // Needs to be before the OS_LINUX check.
   return kOsCrOS;
-#elif defined(OS_LINUX)
+#elif defined(OS_LINUX) || defined(OS_OPENBSD)
   return kOsLinux;
 #else
 #error Unknown platform

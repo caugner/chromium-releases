@@ -4,6 +4,7 @@
 
 #include <list>
 
+#include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
@@ -15,6 +16,7 @@
 #include "chrome/test/base/test_url_request_context_getter.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -22,6 +24,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "webkit/glue/form_data.h"
 
+using content::BrowserThread;
 using webkit_glue::FormData;
 using webkit_glue::FormField;
 using WebKit::WebInputElement;
@@ -64,22 +67,18 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
                              public testing::Test {
  public:
   AutofillDownloadTest()
-      : download_manager_(&profile_),
+      : download_manager_(&profile_, this),
         io_thread_(BrowserThread::IO) {
   }
 
   virtual void SetUp() {
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
+    io_thread_.StartIOThread();
     profile_.CreateRequestContext();
-    download_manager_.SetObserver(this);
   }
 
   virtual void TearDown() {
     profile_.ResetRequestContext();
     io_thread_.Stop();
-    download_manager_.SetObserver(NULL);
   }
 
   void LimitCache(size_t cache_size) {
@@ -87,14 +86,15 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
   }
 
   // AutofillDownloadManager::Observer implementation.
-  virtual void OnLoadedServerPredictions(const std::string& response_xml) {
+  virtual void OnLoadedServerPredictions(
+      const std::string& response_xml) OVERRIDE {
     ResponseData response;
     response.response = response_xml;
     response.type_of_response = QUERY_SUCCESSFULL;
     responses_.push_back(response);
   }
 
-  virtual void OnUploadedPossibleFieldTypes() {
+  virtual void OnUploadedPossibleFieldTypes() OVERRIDE {
     ResponseData response;
     response.type_of_response = UPLOAD_SUCCESSFULL;
     responses_.push_back(response);
@@ -103,7 +103,7 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
   virtual void OnServerRequestError(
       const std::string& form_signature,
       AutofillDownloadManager::AutofillRequestType request_type,
-      int http_error) {
+      int http_error) OVERRIDE {
     ResponseData response;
     response.signature = form_signature;
     response.error = http_error;
@@ -113,7 +113,7 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
     responses_.push_back(response);
   }
 
-  enum TYPE_OF_RESPONSE {
+  enum ResponseType {
     QUERY_SUCCESSFULL,
     UPLOAD_SUCCESSFULL,
     REQUEST_QUERY_FAILED,
@@ -121,12 +121,12 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
   };
 
   struct ResponseData {
-    TYPE_OF_RESPONSE type_of_response;
+    ResponseType type_of_response;
     int error;
     std::string signature;
     std::string response;
-    ResponseData() : type_of_response(REQUEST_QUERY_FAILED), error(0) {
-    }
+
+    ResponseData() : type_of_response(REQUEST_QUERY_FAILED), error(0) {}
   };
   std::list<ResponseData> responses_;
 
@@ -134,9 +134,8 @@ class AutofillDownloadTest : public AutofillDownloadManager::Observer,
   AutofillDownloadManager download_manager_;
 
  private:
-  // |request_context_getter_| must be released on the IO thread.
-  MessageLoop* io_thread_loop() { return io_thread_.message_loop(); }
-  BrowserThread io_thread_;
+  // The profile's request context must be released on the IO thread.
+  content::TestBrowserThread io_thread_;
 };
 
 TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
@@ -216,7 +215,7 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   MockAutofillMetrics mock_metric_logger;
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures.get(),
                                                   mock_metric_logger));
   // Set upload to 100% so requests happen.
   download_manager_.SetPositiveUploadRate(1.0);
@@ -308,11 +307,11 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   // Request with id 3.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures.get(),
                                                   mock_metric_logger));
   fetcher = factory.GetFetcherByID(3);
   ASSERT_TRUE(fetcher);
-  fetcher->set_backoff_delay_for_testing(
+  fetcher->set_backoff_delay(
       base::TimeDelta::FromMilliseconds(TestTimeouts::action_max_timeout_ms()));
   FakeOnURLFetchComplete(fetcher, 500, std::string(responses[0]));
 
@@ -326,7 +325,7 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   // Query requests should be ignored for the next 10 seconds.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(0);
-  EXPECT_FALSE(download_manager_.StartQueryRequest(form_structures,
+  EXPECT_FALSE(download_manager_.StartQueryRequest(form_structures.get(),
                                                    mock_metric_logger));
   fetcher = factory.GetFetcherByID(4);
   EXPECT_EQ(NULL, fetcher);
@@ -338,7 +337,7 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
       *(form_structures[0]), true, FieldTypeSet()));
   fetcher = factory.GetFetcherByID(4);
   ASSERT_TRUE(fetcher);
-  fetcher->set_backoff_delay_for_testing(
+  fetcher->set_backoff_delay(
       base::TimeDelta::FromMilliseconds(TestTimeouts::action_max_timeout_ms()));
   FakeOnURLFetchComplete(fetcher, 503, std::string(responses[2]));
   EXPECT_EQ(AutofillDownloadTest::REQUEST_UPLOAD_FAILED,
@@ -425,7 +424,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   MockAutofillMetrics mock_metric_logger;
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures0,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures0.get(),
                                                   mock_metric_logger));
   // No responses yet
   EXPECT_EQ(static_cast<size_t>(0), responses_.size());
@@ -441,7 +440,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   // No actual request - should be a cache hit.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures0,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures0.get(),
                                                   mock_metric_logger));
   // Data is available immediately from cache - no over-the-wire trip.
   ASSERT_EQ(static_cast<size_t>(1), responses_.size());
@@ -451,7 +450,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   // Request with id 1.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures1,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures1.get(),
                                                   mock_metric_logger));
   // No responses yet
   EXPECT_EQ(static_cast<size_t>(0), responses_.size());
@@ -467,7 +466,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   // Request with id 2.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures2,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures2.get(),
                                                   mock_metric_logger));
 
   fetcher = factory.GetFetcherByID(2);
@@ -481,12 +480,12 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   // No actual requests - should be a cache hit.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures1,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures1.get(),
                                                   mock_metric_logger));
 
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures2,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures2.get(),
                                                   mock_metric_logger));
 
   ASSERT_EQ(static_cast<size_t>(2), responses_.size());
@@ -498,7 +497,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   // Request with id 3.
   EXPECT_CALL(mock_metric_logger,
               LogServerQueryMetric(AutofillMetrics::QUERY_SENT)).Times(1);
-  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures0,
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures0.get(),
                                                   mock_metric_logger));
   // No responses yet
   EXPECT_EQ(static_cast<size_t>(0), responses_.size());

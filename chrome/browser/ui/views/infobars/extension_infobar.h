@@ -6,13 +6,13 @@
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_EXTENSION_INFOBAR_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class Browser;
-class TabContentsWrapper;
 namespace views {
 class MenuButton;
 }
@@ -39,13 +39,13 @@ class ExtensionInfoBar : public InfoBarView,
   // ImageLoadingTracker::Observer:
   virtual void OnImageLoaded(SkBitmap* image,
                              const ExtensionResource& resource,
-                             int index);
+                             int index) OVERRIDE;
 
   // ExtensionInfoBarDelegate::DelegateObserver:
-  virtual void OnDelegateDeleted();
+  virtual void OnDelegateDeleted() OVERRIDE;
 
   // views::ViewMenuDelegate:
-  virtual void RunMenu(View* source, const gfx::Point& pt);
+  virtual void RunMenu(View* source, const gfx::Point& pt) OVERRIDE;
 
   ExtensionInfoBarDelegate* GetDelegate();
 

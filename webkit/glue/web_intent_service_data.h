@@ -8,10 +8,13 @@
 
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/glue/webkit_glue_export.h"
 #include <iosfwd>
 
+namespace webkit_glue {
+
 // Describes the relevant elements of a WebIntent service.
-struct WebIntentServiceData {
+struct WEBKIT_GLUE_EXPORT WebIntentServiceData {
   // An intents disposition determines which context the service is opened in.
   enum Disposition {
     DISPOSITION_WINDOW,  // Open service inside a new window. (Default)
@@ -19,9 +22,15 @@ struct WebIntentServiceData {
   };
 
   WebIntentServiceData();
+  WebIntentServiceData(const GURL& service_url,
+                       const string16& action,
+                       const string16& type,
+                       const string16& title);
   ~WebIntentServiceData();
 
   bool operator==(const WebIntentServiceData& other) const;
+
+  void setDisposition(const string16& disp);
 
   GURL service_url;  // URL for service invocation.
   string16 action;  // Name of action provided by service.
@@ -31,6 +40,10 @@ struct WebIntentServiceData {
 };
 
 // Printing operator - helps gtest produce readable error messages.
-std::ostream& operator<<(std::ostream& os, const WebIntentServiceData& intent);
+WEBKIT_GLUE_EXPORT std::ostream& operator<<(
+    std::ostream& os,
+    const webkit_glue::WebIntentServiceData& intent);
+
+}  // namespace webkit_glue
 
 #endif  // CHROME_BROWSER_INTENTS_WEB_INTENT_SERVICE_DATA_H_

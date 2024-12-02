@@ -4,6 +4,8 @@
 
 #include "net/ftp/ftp_network_transaction.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
@@ -248,10 +250,13 @@ int FtpNetworkTransaction::Start(const FtpRequestInfo* request_info,
   request_ = request_info;
 
   if (request_->url.has_username()) {
-    GetIdentityFromURL(request_->url, &username_, &password_);
+    string16 username;
+    string16 password;
+    GetIdentityFromURL(request_->url, &username, &password);
+    credentials_.Set(username, password);
   } else {
-    username_ = ASCIIToUTF16("anonymous");
-    password_ = ASCIIToUTF16("chrome@example.com");
+    credentials_.Set(ASCIIToUTF16("anonymous"),
+                     ASCIIToUTF16("chrome@example.com"));
   }
 
   DetectTypecode();
@@ -263,13 +268,11 @@ int FtpNetworkTransaction::Start(const FtpRequestInfo* request_info,
   return rv;
 }
 
-int FtpNetworkTransaction::RestartWithAuth(const string16& username,
-                                           const string16& password,
+int FtpNetworkTransaction::RestartWithAuth(const AuthCredentials& credentials,
                                            OldCompletionCallback* callback) {
   ResetStateForRestart();
 
-  username_ = username;
-  password_ = password;
+  credentials_ = credentials;
 
   next_state_ = STATE_CTRL_RESOLVE_HOST;
   int rv = DoLoop(OK);
@@ -626,7 +629,10 @@ int FtpNetworkTransaction::DoCtrlResolveHost() {
 
   HostResolver::RequestInfo info(HostPortPair::FromURL(request_->url));
   // No known referrer.
-  return resolver_.Resolve(info, &addresses_, &io_callback_, net_log_);
+  return resolver_.Resolve(
+      info, &addresses_,
+      base::Bind(&FtpNetworkTransaction::OnIOComplete, base::Unretained(this)),
+      net_log_);
 }
 
 int FtpNetworkTransaction::DoCtrlResolveHostComplete(int result) {
@@ -668,8 +674,10 @@ int FtpNetworkTransaction::DoCtrlReadComplete(int result) {
     // Some servers (for example Pure-FTPd) apparently close the control
     // connection when anonymous login is not permitted. For more details
     // see http://crbug.com/25023.
-    if (command_sent_ == COMMAND_USER && username_ == ASCIIToUTF16("anonymous"))
+    if (command_sent_ == COMMAND_USER &&
+        credentials_.username() == ASCIIToUTF16("anonymous")) {
       response_.needs_auth = true;
+    }
     return Stop(ERR_EMPTY_RESPONSE);
   }
   if (result < 0)
@@ -715,7 +723,7 @@ int FtpNetworkTransaction::DoCtrlWriteComplete(int result) {
 
 // USER Command.
 int FtpNetworkTransaction::DoCtrlWriteUSER() {
-  std::string command = "USER " + UTF16ToUTF8(username_);
+  std::string command = "USER " + UTF16ToUTF8(credentials_.username());
 
   if (!IsValidFTPCommandString(command))
     return Stop(ERR_MALFORMED_IDENTITY);
@@ -746,7 +754,7 @@ int FtpNetworkTransaction::ProcessResponseUSER(
 
 // PASS command.
 int FtpNetworkTransaction::DoCtrlWritePASS() {
-  std::string command = "PASS " + UTF16ToUTF8(password_);
+  std::string command = "PASS " + UTF16ToUTF8(credentials_.password());
 
   if (!IsValidFTPCommandString(command))
     return Stop(ERR_MALFORMED_IDENTITY);

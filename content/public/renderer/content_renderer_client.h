@@ -10,10 +10,9 @@
 
 #include "base/string16.h"
 #include "ipc/ipc_message.h"
-#include "content/common/content_client.h"
+#include "content/public/common/content_client.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 
-class FilePath;
 class GURL;
 class SkBitmap;
 
@@ -23,6 +22,12 @@ class WebPlugin;
 class WebURLRequest;
 struct WebPluginParams;
 struct WebURLError;
+}
+
+namespace webkit {
+namespace ppapi {
+class PpapiInterfaceFactoryManager;
+}
 }
 
 namespace v8 {
@@ -139,9 +144,11 @@ class ContentRendererClient {
                                       const GURL& first_party_for_cookies,
                                       const std::string& value) = 0;
 
-  // True if the protocol implemented to serve |url| supports features required
-  // by the media engine.
-  virtual bool IsProtocolSupportedForMedia(const GURL& url) = 0;
+  virtual void RegisterPPAPIInterfaceFactories(
+    webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) = 0;
+
+  // Return true if given URL can use TCP/UDP socket APIs.
+  virtual bool AllowSocketAPI(const GURL& url) = 0;
 };
 
 }  // namespace content

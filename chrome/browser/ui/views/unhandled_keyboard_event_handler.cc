@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
 
 #include "base/logging.h"
-#include "views/focus/focus_manager.h"
+#include "ui/views/focus/focus_manager.h"
 
 UnhandledKeyboardEventHandler::UnhandledKeyboardEventHandler() {
   ignore_next_char_event_ = false;
@@ -33,7 +33,7 @@ void UnhandledKeyboardEventHandler::HandleKeyboardEvent(
   ignore_next_char_event_ = false;
 
   if (event.type == WebKit::WebInputEvent::RawKeyDown) {
-    views::Accelerator accelerator(
+    ui::Accelerator accelerator(
         static_cast<ui::KeyboardCode>(event.windowsKeyCode),
         (event.modifiers & NativeWebKeyboardEvent::ShiftKey) ==
             NativeWebKeyboardEvent::ShiftKey,
@@ -57,11 +57,10 @@ void UnhandledKeyboardEventHandler::HandleKeyboardEvent(
     ignore_next_char_event_ = false;
   }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Any unhandled keyboard/character messages should be defproced.
   // This allows stuff like F10, etc to work correctly.
   DefWindowProc(event.os_event.hwnd, event.os_event.message,
                 event.os_event.wParam, event.os_event.lParam);
 #endif
 }
-

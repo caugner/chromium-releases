@@ -14,6 +14,7 @@
 class ChromeDownloadManagerDelegate;
 class DownloadManager;
 class Profile;
+class DownloadIdFactory;
 
 // Owning class for DownloadManager (content) and
 // ChromeDownloadManagerDelegate (chrome)
@@ -22,12 +23,20 @@ class DownloadService : public ProfileKeyedService {
   explicit DownloadService(Profile* profile);
   virtual ~DownloadService();
 
+  DownloadIdFactory* GetDownloadIdFactory() const;
+
   // Get the download manager.  Creates the download manager if
   // it does not already exist.
   DownloadManager* GetDownloadManager();
 
   // Has a download manager been created?  (By calling above function.)
   bool HasCreatedDownloadManager();
+
+  // Number of downloads associated with this instance of the service.
+  int DownloadCount() const;
+
+  // Number of downloads associated with all profiles.
+  static int DownloadCountAllProfiles();
 
   // Sets the DownloadManagerDelegate associated with this object and
   // its DownloadManager.  Takes ownership of |delegate|, and destroys
@@ -40,6 +49,8 @@ class DownloadService : public ProfileKeyedService {
   virtual void Shutdown() OVERRIDE;
 
  private:
+  scoped_refptr<DownloadIdFactory> id_factory_;
+
   bool download_manager_created_;
   Profile* profile_;
 

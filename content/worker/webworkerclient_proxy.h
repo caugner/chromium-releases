@@ -7,9 +7,9 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "ipc/ipc_channel.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWorkerClient.h"
 
 namespace WebKit {
@@ -20,7 +20,7 @@ class WebWorker;
 }
 
 class SharedWorkerDevToolsAgent;
-class WebWorkerStubBase;
+class WebSharedWorkerStub;
 
 // This class receives IPCs from the renderer and calls the WebCore::Worker
 // implementation (after the data types have been converted by glue code).  It
@@ -29,7 +29,7 @@ class WebWorkerStubBase;
 // calls by WebWorkerProxy.
 class WebWorkerClientProxy : public WebKit::WebWorkerClient {
  public:
-  WebWorkerClientProxy(int route_id, WebWorkerStubBase* stub);
+  WebWorkerClientProxy(int route_id, WebSharedWorkerStub* stub);
   virtual ~WebWorkerClientProxy();
 
   // WebWorkerClient implementation.
@@ -93,8 +93,8 @@ class WebWorkerClientProxy : public WebKit::WebWorkerClient {
 
   int route_id_;
   int appcache_host_id_;
-  WebWorkerStubBase* stub_;
-  ScopedRunnableMethodFactory<WebWorkerClientProxy> kill_process_factory_;
+  WebSharedWorkerStub* stub_;
+  base::WeakPtrFactory<WebWorkerClientProxy> weak_factory_;
   SharedWorkerDevToolsAgent* devtools_agent_;
 
   DISALLOW_COPY_AND_ASSIGN(WebWorkerClientProxy);

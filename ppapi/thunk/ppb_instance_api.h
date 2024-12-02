@@ -11,7 +11,12 @@
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/private/ppb_instance_private.h"
-#include "ppapi/proxy/interface_id.h"
+#include "ppapi/shared_impl/api_id.h"
+
+// Windows headers interfere with this file.
+#ifdef PostMessage
+#undef PostMessage
+#endif
 
 namespace ppapi {
 namespace thunk {
@@ -83,9 +88,6 @@ class PPB_Instance_FunctionAPI {
                                  double minimum_factor,
                                  double maximium_factor) = 0;
 
-  // QueryPolicy.
-  virtual void SubscribeToPolicyUpdates(PP_Instance instance) = 0;
-
   // URLUtil.
   virtual PP_Var ResolveRelativeToDocument(
       PP_Instance instance,
@@ -99,8 +101,7 @@ class PPB_Instance_FunctionAPI {
   virtual PP_Var GetPluginInstanceURL(PP_Instance instance,
                                       PP_URLComponents_Dev* components) = 0;
 
-  static const proxy::InterfaceID interface_id =
-      proxy::INTERFACE_ID_PPB_INSTANCE;
+  static const ApiID kApiID = API_ID_PPB_INSTANCE;
 };
 
 }  // namespace thunk

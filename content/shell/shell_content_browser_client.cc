@@ -29,7 +29,7 @@ ShellContentBrowserClient::~ShellContentBrowserClient() {
 }
 
 BrowserMainParts* ShellContentBrowserClient::CreateBrowserMainParts(
-    const MainFunctionParams& parameters) {
+    const content::MainFunctionParams& parameters) {
   return new ShellBrowserMainParts(parameters);
 }
 
@@ -55,16 +55,12 @@ void ShellContentBrowserClient::RenderViewHostCreated(
     RenderViewHost* render_view_host) {
 }
 
-void ShellContentBrowserClient::BrowserRenderProcessHostCreated(
-    BrowserRenderProcessHost* host) {
+void ShellContentBrowserClient::RenderProcessHostCreated(
+    RenderProcessHost* host) {
 }
 
 void ShellContentBrowserClient::PluginProcessHostCreated(
     PluginProcessHost* host) {
-}
-
-void ShellContentBrowserClient::WorkerProcessHostCreated(
-    WorkerProcessHost* host) {
 }
 
 WebUIFactory* ShellContentBrowserClient::GetWebUIFactory() {
@@ -92,6 +88,14 @@ bool ShellContentBrowserClient::IsSuitableHost(
   return true;
 }
 
+void ShellContentBrowserClient::SiteInstanceGotProcess(
+    SiteInstance* site_instance) {
+}
+
+void ShellContentBrowserClient::SiteInstanceDeleting(
+    SiteInstance* site_instance) {
+}
+
 bool ShellContentBrowserClient::ShouldSwapProcessesForNavigation(
     const GURL& current_url,
     const GURL& new_url) {
@@ -111,7 +115,8 @@ std::string ShellContentBrowserClient::GetApplicationLocale() {
   return std::string();
 }
 
-std::string ShellContentBrowserClient::GetAcceptLangs(const TabContents* tab) {
+std::string ShellContentBrowserClient::GetAcceptLangs(
+    content::BrowserContext* context) {
   return std::string();
 }
 
@@ -150,6 +155,23 @@ bool ShellContentBrowserClient::AllowSetCookie(
 
 bool ShellContentBrowserClient::AllowSaveLocalState(
     const content::ResourceContext& context) {
+  return true;
+}
+
+bool ShellContentBrowserClient::AllowWorkerDatabase(
+    int worker_route_id,
+    const GURL& url,
+    const string16& name,
+    const string16& display_name,
+    unsigned long estimated_size,
+    WorkerProcessHost* worker_process_host) {
+  return true;
+}
+
+bool ShellContentBrowserClient::AllowWorkerFileSystem(
+    int worker_route_id,
+    const GURL& url,
+    WorkerProcessHost* worker_process_host) {
   return true;
 }
 
@@ -197,13 +219,14 @@ void ShellContentBrowserClient::RequestDesktopNotificationPermission(
 
 WebKit::WebNotificationPresenter::Permission
     ShellContentBrowserClient::CheckDesktopNotificationPermission(
-        const GURL& source_url,
-        const content::ResourceContext& context) {
+        const GURL& source_origin,
+        const content::ResourceContext& context,
+        int render_process_id) {
   return WebKit::WebNotificationPresenter::PermissionAllowed;
 }
 
 void ShellContentBrowserClient::ShowDesktopNotification(
-    const DesktopNotificationHostMsg_Show_Params& params,
+    const content::ShowDesktopNotificationHostMsgParams& params,
     int render_process_id,
     int render_view_id,
     bool worker) {
@@ -216,9 +239,10 @@ void ShellContentBrowserClient::CancelDesktopNotification(
 }
 
 bool ShellContentBrowserClient::CanCreateWindow(
-    const GURL& source_url,
+    const GURL& origin,
     WindowContainerType container_type,
-    const content::ResourceContext& context) {
+    const content::ResourceContext& context,
+    int render_process_id) {
   return true;
 }
 
@@ -239,10 +263,6 @@ MHTMLGenerationManager* ShellContentBrowserClient::GetMHTMLGenerationManager() {
   return NULL;
 }
 
-DevToolsManager* ShellContentBrowserClient::GetDevToolsManager() {
-  return NULL;
-}
-
 net::NetLog* ShellContentBrowserClient::GetNetLog() {
   return NULL;
 }
@@ -260,9 +280,7 @@ bool ShellContentBrowserClient::IsFastShutdownPossible() {
   return true;
 }
 
-WebPreferences ShellContentBrowserClient::GetWebkitPrefs(
-    content::BrowserContext* browser_context,
-    bool is_web_ui) {
+WebPreferences ShellContentBrowserClient::GetWebkitPrefs(RenderViewHost* rvh) {
   return WebPreferences();
 }
 
@@ -285,6 +303,10 @@ void ShellContentBrowserClient::ClearCookies(RenderViewHost* rvh) {
 
 FilePath ShellContentBrowserClient::GetDefaultDownloadDirectory() {
   return FilePath();
+}
+
+std::string ShellContentBrowserClient::GetDefaultDownloadName() {
+  return "download";
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)

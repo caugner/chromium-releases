@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "net/disk_cache/disk_format.h"
 #include "net/disk_cache/rankings.h"
 
@@ -48,6 +48,7 @@ class Eviction {
   void PostDelayedTrim();
   void DelayedTrim();
   bool ShouldTrim();
+  bool ShouldTrimDeleted();
   void ReportTrimTimes(EntryImpl* entry);
   Rankings::List GetListForEntry(EntryImpl* entry);
   bool EvictEntry(CacheRankingsBlock* node, bool empty, Rankings::List list);
@@ -81,7 +82,7 @@ class Eviction {
   bool init_;
   bool test_mode_;
   bool in_experiment_;
-  ScopedRunnableMethodFactory<Eviction> factory_;
+  base::WeakPtrFactory<Eviction> ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Eviction);
 };

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -20,20 +21,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/base/x/x11_util.h"
-
-namespace {
-
-// The name of ChromeOS's window manager.
-const char* kChromeOsWindowManagerName = "chromeos-wm";
-
-}  // namespace
 
 namespace chromeos {
 
 class NotificationTest : public InProcessBrowserTest,
-                         public NotificationObserver {
+                         public content::NotificationObserver {
  public:
   NotificationTest()
       : under_chromeos_(false),
@@ -49,13 +43,12 @@ class NotificationTest : public InProcessBrowserTest,
   virtual void SetUp() {
     // Detect if we're running under ChromeOS WindowManager. See
     // the description for "under_chromeos_" below for why we need this.
-    std::string wm_name;
-    bool wm_name_valid = ui::GetWindowManagerName(&wm_name);
+    ui::WindowManagerName wm_type = ui::GuessWindowManager();
     // NOTE: On Chrome OS the wm and Chrome are started in parallel. This
     // means it's possible for us not to be able to get the name of the window
     // manager. We assume that when this happens we're on Chrome OS.
-    under_chromeos_ = (!wm_name_valid ||
-                       wm_name == kChromeOsWindowManagerName);
+    under_chromeos_ = (wm_type == ui::WM_CHROME_OS ||
+                       wm_type == ui::WM_UNKNOWN);
     InProcessBrowserTest::SetUp();
   }
 
@@ -112,8 +105,8 @@ class NotificationTest : public InProcessBrowserTest,
 
   // NotificationObserver overrides.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     ASSERT_TRUE(chrome::NOTIFICATION_PANEL_STATE_CHANGED == type);
     PanelController::State* state =
         reinterpret_cast<PanelController::State*>(details.map_key());
@@ -301,10 +294,10 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestStateTransition1) {
 // 0. This test explicitly controls the stale state instead.
 IN_PROC_BROWSER_TEST_F(NotificationTest, TestStateTransition2) {
   // Register observer here as the registration does not work in SetUp().
-  NotificationRegistrar registrar;
+  content::NotificationRegistrar registrar;
   registrar.Add(this,
                 chrome::NOTIFICATION_PANEL_STATE_CHANGED,
-                NotificationService::AllSources());
+                content::NotificationService::AllSources());
 
   BalloonCollectionImpl* collection = GetBalloonCollectionImpl();
   NotificationPanel* panel = GetNotificationPanel();
@@ -368,10 +361,10 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestStateTransition2) {
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationTest, TestCleanupOnExit) {
-  NotificationRegistrar registrar;
+  content::NotificationRegistrar registrar;
   registrar.Add(this,
                 chrome::NOTIFICATION_PANEL_STATE_CHANGED,
-                NotificationService::AllSources());
+                content::NotificationService::AllSources());
 
   BalloonCollectionImpl* collection = GetBalloonCollectionImpl();
   NotificationPanel* panel = GetNotificationPanel();
@@ -558,25 +551,22 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestAddWebUIMessageCallback) {
   EXPECT_TRUE(collection->AddWebUIMessageCallback(
       NewMockNotification("1"),
       "test",
-      NewCallback(
-          static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleWebUIMessage)));
+      base::Bind(&NotificationTest::HandleWebUIMessage,
+          base::Unretained(static_cast<NotificationTest*>(this)))));
 
   // Adding callback for the same message twice should fail.
   EXPECT_FALSE(collection->AddWebUIMessageCallback(
       NewMockNotification("1"),
       "test",
-      NewCallback(
-          static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleWebUIMessage)));
+      base::Bind(&NotificationTest::HandleWebUIMessage,
+          base::Unretained(static_cast<NotificationTest*>(this)))));
 
   // Adding callback to nonexistent notification should fail.
   EXPECT_FALSE(collection->AddWebUIMessageCallback(
       NewMockNotification("2"),
       "test1",
-      NewCallback(
-          static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleWebUIMessage)));
+      base::Bind(&NotificationTest::HandleWebUIMessage,
+          base::Unretained(static_cast<NotificationTest*>(this)))));
 }
 
 // Occasional crash: http://crbug.com/96461
@@ -597,9 +587,8 @@ IN_PROC_BROWSER_TEST_F(NotificationTest, TestWebUIMessageCallback) {
   EXPECT_TRUE(collection->AddWebUIMessageCallback(
       NewMockNotification("1"),
       "test",
-      NewCallback(
-          static_cast<NotificationTest*>(this),
-          &NotificationTest::HandleWebUIMessage)));
+      base::Bind(&NotificationTest::HandleWebUIMessage,
+          base::Unretained(static_cast<NotificationTest*>(this)))));
   MessageLoop::current()->Run();
 }
 

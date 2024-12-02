@@ -6,9 +6,10 @@
 #define CHROME_BROWSER_PROFILES_PROFILE_IO_DATA_H_
 #pragma once
 
-#include <set>
+#include <string>
+
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -16,14 +17,14 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/resource_context.h"
 #include "net/base/cookie_monster.h"
 
-class CommandLine;
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
+class CookieSettings;
 class DesktopNotificationService;
+class DownloadIdFactory;
 class ExtensionInfoMap;
 class HostContentSettingsMap;
 class HostZoomMap;
@@ -45,7 +46,6 @@ class CookieStore;
 class DnsCertProvenanceChecker;
 class FraudulentCertificateReporter;
 class HttpTransactionFactory;
-class NetLog;
 class OriginBoundCertService;
 class ProxyConfigService;
 class ProxyService;
@@ -101,6 +101,7 @@ class ProfileIOData {
   // that profile.
   ExtensionInfoMap* GetExtensionInfoMap() const;
   HostContentSettingsMap* GetHostContentSettingsMap() const;
+  CookieSettings* GetCookieSettings() const;
   DesktopNotificationService* GetNotificationService() const;
 
   BooleanPrefMember* clear_local_state_on_exit()  const {
@@ -147,6 +148,7 @@ class ProfileIOData {
     std::string referrer_charset;
     IOThread* io_thread;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
+    scoped_refptr<CookieSettings> cookie_settings;
     scoped_refptr<HostZoomMap> host_zoom_map;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
@@ -166,7 +168,6 @@ class ProfileIOData {
     // ensure it's not accidently used on the IO thread. Before using it on the
     // UI thread, call ProfileManager::IsValidProfile to ensure it's alive.
     void* profile;
-
   };
 
   explicit ProfileIOData(bool is_incognito);
@@ -229,7 +230,7 @@ class ProfileIOData {
     virtual ~ResourceContext();
 
    private:
-    virtual void EnsureInitialized() const;
+    virtual void EnsureInitialized() const OVERRIDE;
 
     const ProfileIOData* const io_data_;
   };
@@ -294,12 +295,13 @@ class ProfileIOData {
   mutable scoped_refptr<fileapi::FileSystemContext> file_system_context_;
   mutable scoped_refptr<quota::QuotaManager> quota_manager_;
   mutable scoped_refptr<HostZoomMap> host_zoom_map_;
-  mutable DownloadManager::GetNextIdThunkType next_download_id_thunk_;
+  mutable scoped_refptr<DownloadIdFactory> download_id_factory_;
   mutable scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
 
   // TODO(willchan): Remove from ResourceContext.
   mutable scoped_refptr<ExtensionInfoMap> extension_info_map_;
   mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+  mutable scoped_refptr<CookieSettings> cookie_settings_;
   mutable DesktopNotificationService* notification_service_;
 
   mutable ResourceContext resource_context_;
@@ -313,6 +315,9 @@ class ProfileIOData {
   mutable scoped_refptr<ChromeURLRequestContext> extensions_request_context_;
   // One AppRequestContext per isolated app.
   mutable AppRequestContextMap app_request_context_map_;
+
+  // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
+  bool initialized_on_UI_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileIOData);
 };

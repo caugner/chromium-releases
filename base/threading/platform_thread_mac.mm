@@ -10,12 +10,19 @@
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
 
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/threading/thread_local.h"
 
 namespace base {
 
-static ThreadLocalPointer<char> current_thread_name;
+namespace {
+
+LazyInstance<ThreadLocalPointer<char>,
+             LeakyLazyInstanceTraits<ThreadLocalPointer<char> > >
+    current_thread_name = LAZY_INSTANCE_INITIALIZER;
+
+}  // namespace
 
 // If Cocoa is to be used on more than one thread, it must know that the
 // application is multithreaded.  Since it's possible to enter Cocoa code
@@ -40,7 +47,7 @@ void InitThreading() {
 
 // static
 void PlatformThread::SetName(const char* name) {
-  current_thread_name.Set(const_cast<char*>(name));
+  current_thread_name.Pointer()->Set(const_cast<char*>(name));
 
   // pthread_setname_np is only available in 10.6 or later, so test
   // for it at runtime.
@@ -61,7 +68,7 @@ void PlatformThread::SetName(const char* name) {
 
 // static
 const char* PlatformThread::GetName() {
-  return current_thread_name.Get();
+  return current_thread_name.Pointer()->Get();
 }
 
 namespace {
@@ -77,7 +84,7 @@ void SetPriorityNormal(mach_port_t mach_thread_id) {
                                            THREAD_STANDARD_POLICY_COUNT);
 
   if (result != KERN_SUCCESS)
-    VLOG(1) << "thread_policy_set() failure: " << result;
+    DVLOG(1) << "thread_policy_set() failure: " << result;
 }
 
 // Enables time-contraint policy and priority suitable for low-latency,
@@ -100,7 +107,7 @@ void SetPriorityRealtimeAudio(mach_port_t mach_thread_id) {
                              (thread_policy_t)&policy,
                              THREAD_EXTENDED_POLICY_COUNT);
   if (result != KERN_SUCCESS) {
-    VLOG(1) << "thread_policy_set() failure: " << result;
+    DVLOG(1) << "thread_policy_set() failure: " << result;
     return;
   }
 
@@ -112,7 +119,7 @@ void SetPriorityRealtimeAudio(mach_port_t mach_thread_id) {
                              (thread_policy_t)&precedence,
                              THREAD_PRECEDENCE_POLICY_COUNT);
   if (result != KERN_SUCCESS) {
-    VLOG(1) << "thread_policy_set() failure: " << result;
+    DVLOG(1) << "thread_policy_set() failure: " << result;
     return;
   }
 
@@ -156,7 +163,7 @@ void SetPriorityRealtimeAudio(mach_port_t mach_thread_id) {
                              (thread_policy_t)&time_constraints,
                              THREAD_TIME_CONSTRAINT_POLICY_COUNT);
   if (result != KERN_SUCCESS)
-    VLOG(1) << "thread_policy_set() failure: " << result;
+    DVLOG(1) << "thread_policy_set() failure: " << result;
 
   return;
 }

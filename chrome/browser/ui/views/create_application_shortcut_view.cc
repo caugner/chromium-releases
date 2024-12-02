@@ -6,7 +6,8 @@
 
 #include <algorithm>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
@@ -34,12 +35,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/codec/png_codec.h"
-#include "views/controls/button/checkbox.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/checkbox.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -109,8 +110,8 @@ void AppInfoView::Init(const string16& title_text,
 void AppInfoView::PrepareDescriptionLabel(const string16& description) {
   DCHECK(!description.empty());
 
-  static const size_t kMaxLength = 200;
-  static const string16 kEllipsis(ASCIIToUTF16(" ... "));
+  const size_t kMaxLength = 200;
+  const string16 kEllipsis(ASCIIToUTF16(" ... "));
 
   string16 text = description;
   if (text.length() > kMaxLength) {
@@ -324,15 +325,15 @@ gfx::Size CreateApplicationShortcutView::GetPreferredSize() {
 }
 
 string16 CreateApplicationShortcutView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_COMMIT);
   return string16();
 }
 
 bool CreateApplicationShortcutView::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return desktop_check_box_->checked() ||
            ((menu_check_box_ != NULL) &&
             menu_check_box_->checked()) ||
@@ -359,7 +360,7 @@ string16 CreateApplicationShortcutView::GetWindowTitle() const {
 }
 
 bool CreateApplicationShortcutView::Accept() {
-  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK))
+  if (!IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK))
     return false;
 
   shortcut_info_.create_on_desktop = desktop_check_box_->checked();
@@ -459,7 +460,8 @@ void CreateUrlApplicationShortcutView::FetchIcon() {
       std::max(unprocessed_icons_.back().width,
                unprocessed_icons_.back().height),
       history::FAVICON,
-      NewCallback(pending_download_, &IconDownloadCallbackFunctor::Run));
+      base::Bind(&IconDownloadCallbackFunctor::Run,
+                 base::Unretained(pending_download_)));
 
   unprocessed_icons_.pop_back();
 }

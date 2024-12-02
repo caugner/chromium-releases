@@ -16,7 +16,7 @@
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
     <script type="text/javascript" src="js/sidebar.js"></script>
-  <title>chrome.experimental.devtools.panels - Google Chrome Extensions - Google Code</title></head>
+  <meta name="description" content="Documentation for the chrome.experimental.devtools.panels module, which is part of the Google Chrome  extension APIs."><title>chrome.experimental.devtools.panels - Google Chrome Extensions - Google Code</title></head>
   <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
         You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
@@ -107,6 +107,46 @@
             </div>
           </dl>
         </div>
+
+        <!-- Individual subsections from the table of contents -->
+        <ol>
+          <li id="propertiesTocTemplate">
+            <a href="#properties">Properties</a>
+            <ol>
+              <li>
+                <a href="#property-anchor">propertyName</a>
+              </li>
+            </ol>
+          </li>
+          <li id="methodsTocTemplate">
+            <a>Methods</a>
+            <ol>
+              <li>
+                <a href="#method-anchor">methodName</a>
+              </li>
+            </ol>
+          </li>
+          <li id="eventsTocTemplate">
+            <a>Events</a>
+            <ol>
+              <li>
+                <a href="#event-anchor">eventName</a>
+              </li>
+            </ol>
+          </li>
+          <li id="typesTocTemplate">
+            <a href="#types">Types</a>
+            <ol>
+              <li>
+                <a href="#id-anchor">id</a>
+                <ol>
+                  <div></div>
+                  <div></div>
+                </ol>
+              </li>
+            </ol>
+          </li>
+        </ol>
       </div> <!-- /SUBTEMPLATES -->
 
   <a id="top"></a>
@@ -130,10 +170,10 @@
             </div>
           </form>
 
-          <script type="text/javascript" src="http://www.google.com/jsapi"></script>
+          <script type="text/javascript" src="https://www.google.com/jsapi"></script>
           <script type="text/javascript">google.load("elements", "1", {packages: "transliteration"});</script>
-          <script type="text/javascript" src="http://www.google.com/coop/cse/t13n?form=cse&amp;t13n_langs=en"></script>
-          <script type="text/javascript" src="http://www.google.com/coop/cse/brand?form=cse&amp;lang=en"></script>
+          <script type="text/javascript" src="https://www.google.com/coop/cse/t13n?form=cse&amp;t13n_langs=en"></script>
+          <script type="text/javascript" src="https://www.google.com/coop/cse/brand?form=cse&amp;lang=en"></script>
         </td>
       </tr>
     </tbody></table>
@@ -158,6 +198,9 @@
           </li>
           <li id="group_link">
             <a href="http://groups.google.com/a/chromium.org/group/chromium-extensions" title="Google Chrome Extensions developer forum">Group</a>
+          </li>
+          <li id="so_link">
+            <a href="http://stackoverflow.com/questions/tagged/google-chrome-extension" title="[google-chrome-extension] tag on Stack Overflow">Questions?</a>
           </li>
         </ul>
       </div> <!-- end gc-topnav -->
@@ -276,45 +319,129 @@
                 <a href="#apiReference">API reference: chrome.experimental.devtools.panels</a>
                 <ol>
                   <li>
-                    <a href="#properties">Properties</a>
-                    <ol>
-                      <li>
-                        <a href="#property-elements">elements</a>
-                      </li>
-                    </ol>
-                  </li>
+            <a href="#properties">Properties</a>
+            <ol>
+              <li>
+                <a href="#property-elements">elements</a>
+              </li>
+            </ol>
+          </li>
                   <li>
-                    <a href="#global-methods">Methods</a>
-                    <ol>
-                      <li>
-                        <a href="#method-create">create</a>
-                      </li><li>
-                        <a href="#method-setOpenResourceHandler">setOpenResourceHandler</a>
-                      </li>
-                    </ol>
-                  </li>
+            <a href="#global-methods">Methods</a>
+            <ol>
+              <li>
+                <a href="#method-create">create</a>
+              </li><li>
+                <a href="#method-setOpenResourceHandler">setOpenResourceHandler</a>
+              </li>
+            </ol>
+          </li>
                   <li style="display: none; ">
-                    <a>Events</a>
-                    <ol>
-                      <li>
-                        <a href="#event-anchor">eventName</a>
-                      </li>
-                    </ol>
-                  </li>
+            <a>Events</a>
+            <ol>
+              <li>
+                <a href="#event-anchor">eventName</a>
+              </li>
+            </ol>
+          </li>
                   <li>
-                    <a href="#types">Types</a>
-                    <ol>
-                      <li>
-                        <a href="#type-PanelWithSidebars">PanelWithSidebars</a>
-                      </li><li>
-                        <a href="#type-ElementsPanel">ElementsPanel</a>
-                      </li><li>
-                        <a href="#type-ExtensionPanel">ExtensionPanel</a>
-                      </li><li>
-                        <a href="#type-ExtensionSidebarPane">ExtensionSidebarPane</a>
-                      </li>
-                    </ol>
-                  </li>
+            <a href="#types">Types</a>
+            <ol>
+              <li>
+                <a href="#type-ElementsPanel">ElementsPanel</a>
+                <ol>
+                  <li>
+            <a href="#global-ElementsPanel-methods">Methods</a>
+            <ol>
+              <li>
+                <a href="#method-ElementsPanel-createSidebarPane">createSidebarPane</a>
+              </li>
+            </ol>
+          </li>
+                  <li>
+            <a href="#global-ElementsPanel-events">Events</a>
+            <ol>
+              <li>
+                <a href="#event-ElementsPanel-onSelectionChanged">onSelectionChanged</a>
+              </li>
+            </ol>
+          </li>
+                </ol>
+              </li><li>
+                <a href="#type-ExtensionPanel">ExtensionPanel</a>
+                <ol>
+                  <li>
+            <a href="#global-ExtensionPanel-methods">Methods</a>
+            <ol>
+              <li>
+                <a href="#method-ExtensionPanel-createStatusBarButton">createStatusBarButton</a>
+              </li>
+            </ol>
+          </li>
+                  <li>
+            <a href="#global-ExtensionPanel-events">Events</a>
+            <ol>
+              <li>
+                <a href="#event-ExtensionPanel-onHidden">onHidden</a>
+              </li><li>
+                <a href="#event-ExtensionPanel-onSearch">onSearch</a>
+              </li><li>
+                <a href="#event-ExtensionPanel-onShown">onShown</a>
+              </li>
+            </ol>
+          </li>
+                </ol>
+              </li><li>
+                <a href="#type-ExtensionSidebarPane">ExtensionSidebarPane</a>
+                <ol>
+                  <li>
+            <a href="#global-ExtensionSidebarPane-methods">Methods</a>
+            <ol>
+              <li>
+                <a href="#method-ExtensionSidebarPane-setExpression">setExpression</a>
+              </li><li>
+                <a href="#method-ExtensionSidebarPane-setHeight">setHeight</a>
+              </li><li>
+                <a href="#method-ExtensionSidebarPane-setObject">setObject</a>
+              </li><li>
+                <a href="#method-ExtensionSidebarPane-setPage">setPage</a>
+              </li>
+            </ol>
+          </li>
+                  <li>
+            <a href="#global-ExtensionSidebarPane-events">Events</a>
+            <ol>
+              <li>
+                <a href="#event-ExtensionSidebarPane-onHidden">onHidden</a>
+              </li><li>
+                <a href="#event-ExtensionSidebarPane-onShown">onShown</a>
+              </li>
+            </ol>
+          </li>
+                </ol>
+              </li><li>
+                <a href="#type-Button">Button</a>
+                <ol>
+                  <li>
+            <a href="#global-Button-methods">Methods</a>
+            <ol>
+              <li>
+                <a href="#method-Button-update">update</a>
+              </li>
+            </ol>
+          </li>
+                  <li>
+            <a href="#global-Button-events">Events</a>
+            <ol>
+              <li>
+                <a href="#event-Button-onClicked">onClicked</a>
+              </li>
+            </ol>
+          </li>
+                </ol>
+              </li>
+            </ol>
+          </li>
                 </ol>
               </li>
           </ol>
@@ -491,8 +618,8 @@ You can find examples that use this API in
                   <!-- Note: intentionally longer 80 columns -->
                   <span>chrome.experimental.devtools.panels.create</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
                       <var><span>title</span></var></span><span class="null"><span>, </span><span>string</span>
-                      <var><span>iconURL</span></var></span><span class="null"><span>, </span><span>string</span>
-                      <var><span>pageURL</span></var></span><span class="null"><span>, </span><span>function</span>
+                      <var><span>iconPath</span></var></span><span class="null"><span>, </span><span>string</span>
+                      <var><span>pagePath</span></var></span><span class="optional"><span>, </span><span>function</span>
                       <var><span>callback</span></var></span>)</div>
 
               <div class="description">
@@ -533,7 +660,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>Title that is displayed under the extension icon in the toolbar.</dd>
+          <dd>Title that is displayed next to the extension icon in the Developer Tools toolbar.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -573,7 +700,7 @@ You can find examples that use this API in
                   </div><div>
                     <div>
           <dt>
-            <var>iconURL</var>
+            <var>iconPath</var>
               <em>
 
                 <!-- TYPE -->
@@ -601,7 +728,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A URL of the toolbar icon.</dd>
+          <dd>Path of the panel's icon relative to the extension directory.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -641,7 +768,7 @@ You can find examples that use this API in
                   </div><div>
                     <div>
           <dt>
-            <var>pageURL</var>
+            <var>pagePath</var>
               <em>
 
                 <!-- TYPE -->
@@ -669,7 +796,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A URL of the page that represents this panel.</dd>
+          <dd>Path of the panel's HTML page relative to the extension directory.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -715,7 +842,7 @@ You can find examples that use this API in
                 <!-- TYPE -->
                 <div style="display:inline">
                   (
-                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="optional">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
@@ -737,7 +864,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A function that is called upon request completion.</dd>
+          <dd>A function that is called when the panel is created.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -790,11 +917,11 @@ You can find examples that use this API in
                 <div>
                   <div>
                   <h4>Callback function</h4>
-                  <p>
+                  <p style="display: none; ">
                     The callback <em>parameter</em> should specify a function
                     that looks like this:
                   </p>
-                  <p style="display: none; ">
+                  <p>
                     If you specify the <em>callback</em> parameter, it should
                     specify a function that looks like this:
                   </p>
@@ -1145,8 +1272,8 @@ You can find examples that use this API in
 
             <!-- iterates over all types -->
             <div class="apiItem">
-              <a name="type-PanelWithSidebars"></a>
-              <h4>PanelWithSidebars</h4>
+              <a name="type-ElementsPanel"></a>
+              <h4>ElementsPanel</h4>
 
               <div>
           <dt>
@@ -1166,7 +1293,7 @@ You can find examples that use this API in
                         <span style="display: none; ">
                           array of <span><span></span></span>
                         </span>
-                        <span>Panel</span>
+                        <span>object</span>
                         <span style="display: none; "></span>
                       </span>
                     </span>
@@ -1178,7 +1305,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A panel within Web Inspector UI that has sidebars.</dd>
+          <dd>Represents the Elements panel.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -1202,18 +1329,18 @@ You can find examples that use this API in
           <!-- OBJECT METHODS -->
           <dd>
             <div class="apiGroup">
-            <a name="global-PanelWithSidebars-methods"></a>
-            <h3>Methods of PanelWithSidebars</h3>
+            <a name="global-ElementsPanel-methods"></a>
+            <h3>Methods of ElementsPanel</h3>
 
             <!-- iterates over all functions -->
             <div class="apiItem">
-              <a name="method-PanelWithSidebars-createSidebarPane"></a> <!-- method-anchor -->
+              <a name="method-ElementsPanel-createSidebarPane"></a> <!-- method-anchor -->
               <h4>createSidebarPane</h4>
 
               <div class="summary"><span style="display: none; ">void</span>
                   <!-- Note: intentionally longer 80 columns -->
-                  <span>panelWithSidebars.createSidebarPane</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
-                      <var><span>title</span></var></span><span class="null"><span>, </span><span>function</span>
+                  <span>elementsPanel.createSidebarPane</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
+                      <var><span>title</span></var></span><span class="optional"><span>, </span><span>function</span>
                       <var><span>callback</span></var></span>)</div>
 
               <div class="description">
@@ -1254,7 +1381,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A text that is displayed in sidebar caption.</dd>
+          <dd>Text that is displayed in sidebar caption.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -1300,7 +1427,7 @@ You can find examples that use this API in
                 <!-- TYPE -->
                 <div style="display:inline">
                   (
-                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="optional" style="">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
@@ -1322,7 +1449,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A callback invoked when sidebar is created.</dd>
+          <dd>A callback invoked when the sidebar is created.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -1375,11 +1502,11 @@ You can find examples that use this API in
                 <div>
                   <div>
                   <h4>Callback function</h4>
-                  <p>
+                  <p style="display: none; ">
                     The callback <em>parameter</em> should specify a function
                     that looks like this:
                   </p>
-                  <p style="display: none; ">
+                  <p>
                     If you specify the <em>callback</em> parameter, it should
                     specify a function that looks like this:
                   </p>
@@ -1475,78 +1602,6 @@ You can find examples that use this API in
           </dd>
 
           <!-- OBJECT EVENT FIELDS -->
-          <dd style="display: none; ">
-            <div></div>
-          </dd>
-
-          <!-- FUNCTION PARAMETERS -->
-          <dd style="display: none; ">
-            <div></div>
-          </dd>
-
-        </div>
-
-            </div><div class="apiItem">
-              <a name="type-ElementsPanel"></a>
-              <h4>ElementsPanel</h4>
-
-              <div>
-          <dt>
-            <var style="display: none; ">paramName</var>
-              <em>
-
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span class="optional" style="display: none; ">optional</span>
-                    <span class="enum" style="display: none; ">enumerated</span>
-                    <span id="typeTemplate">
-                      <span style="display: none; ">
-                        <a> Type</a>
-                      </span>
-                      <span>
-                        <span style="display: none; ">
-                          array of <span><span></span></span>
-                        </span>
-                        <span>PanelWithSidebars</span>
-                        <span style="display: none; "></span>
-                      </span>
-                    </span>
-                  )
-                </div>
-
-              </em>
-          </dt>
-          <dd class="todo" style="display: none; ">
-            Undocumented.
-          </dd>
-          <dd>Represents Elements panel</dd>
-          <dd style="display: none; ">
-            This parameter was added in version
-            <b><span></span></b>.
-            You must omit this parameter in earlier versions,
-            and you may omit it in any version.  If you require this
-            parameter, the manifest key
-            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
-            can ensure that your extension won't be run in an earlier browser version.
-          </dd>
-
-          <!-- OBJECT PROPERTIES -->
-          <dd style="display: none; ">
-            <dl>
-              <div>
-                <div>
-                </div>
-              </div>
-            </dl>
-          </dd>
-
-          <!-- OBJECT METHODS -->
-          <dd style="display: none; ">
-            <div></div>
-          </dd>
-
-          <!-- OBJECT EVENT FIELDS -->
           <dd>
             <div class="apiGroup" style="">
             <a name="global-ElementsPanel-events"></a>
@@ -1631,7 +1686,7 @@ You can find examples that use this API in
                         <span style="display: none; ">
                           array of <span><span></span></span>
                         </span>
-                        <span>Panel</span>
+                        <span>object</span>
                         <span style="display: none; "></span>
                       </span>
                     </span>
@@ -1665,8 +1720,414 @@ You can find examples that use this API in
           </dd>
 
           <!-- OBJECT METHODS -->
+          <dd>
+            <div class="apiGroup">
+            <a name="global-ExtensionPanel-methods"></a>
+            <h3>Methods of ExtensionPanel</h3>
+
+            <!-- iterates over all functions -->
+            <div class="apiItem">
+              <a name="method-ExtensionPanel-createStatusBarButton"></a> <!-- method-anchor -->
+              <h4>createStatusBarButton</h4>
+
+              <div class="summary"><span style="">Button</span>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>extensionPanel.createStatusBarButton</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
+                      <var><span>iconPath</span></var></span><span class="null"><span>, </span><span>string</span>
+                      <var><span>tooltipText</span></var></span><span class="null"><span>, </span><span>boolean</span>
+                      <var><span>disabled</span></var></span>)</div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Appends a button to the status bar of the panel.</p>
+
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>iconPath</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Path to the icon of the button. The file should contain a 64x24-pixel image composed of two 32x24 icons. The left icon is used when the button is inactive; the right icon is displayed when the button is pressed.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
           <dd style="display: none; ">
             <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>tooltipText</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Text shown as a tooltip when user hovers the mouse over the button.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>disabled</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>boolean</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Whether the button is disabled.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div>
+                </dl>
+
+                <!-- RETURNS -->
+                <h4 style="">Returns</h4>
+                <dl>
+                  <div style="">
+                    <div>
+          <dt>
+            <var style="display: none; ">paramName</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.devtools.panels.html#type-Button">Button</a>
+                      </span>
+                      <span style="display: none; ">
+                        <span>
+                          array of <span><span></span></span>
+                        </span>
+                        <span>paramType</span>
+                        <span></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <dd style="display: none; ">
+            Description of this parameter from the json schema.
+          </dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div>
+                </dl>
+
+                <!-- CALLBACK -->
+                <div style="display: none; ">
+                  <div>
+                  <h4>Callback function</h4>
+                  <p style="display: none; ">
+                    The callback <em>parameter</em> should specify a function
+                    that looks like this:
+                  </p>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span>ExtensionPanel panel</span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>panel</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.devtools.panels.html#type-ExtensionPanel">ExtensionPanel</a>
+                      </span>
+                      <span style="display: none; ">
+                        <span>
+                          array of <span><span></span></span>
+                        </span>
+                        <span>paramType</span>
+                        <span></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>An ExtensionPanel object representing the created panel.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                    </div>
+                  </dl>
+                  </div>
+                </div>
+
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
+              </div> <!-- /description -->
+
+            </div>  <!-- /apiItem -->
+
+          </div>
           </dd>
 
           <!-- OBJECT EVENT FIELDS -->
@@ -1676,6 +2137,51 @@ You can find examples that use this API in
             <h3>Events of ExtensionPanel</h3>
             <!-- iterates over all events -->
             <div class="apiItem">
+              <a name="event-ExtensionPanel-onHidden"></a>
+              <h4>onHidden</h4>
+
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">extensionPanel.</span><span>onHidden</span><span class="subdued">.addListener</span>(function(<span></span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Fired when the user switches away from the panel.</p>
+
+                <!-- LISTENER PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- EXTRA PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Extra parameters to addListener</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- LISTENER RETURN VALUE -->
+                <h4 style="display: none; ">Listener returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+              </div> <!-- /description -->
+            </div><div class="apiItem">
               <a name="event-ExtensionPanel-onSearch"></a>
               <h4>onSearch</h4>
 
@@ -1686,7 +2192,7 @@ You can find examples that use this API in
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
-                <p>Fired upon a search action (start of a new search, search result navigation or search being canceled).</p>
+                <p>Fired upon a search action (start of a new search, search result navigation, or search being canceled).</p>
 
                 <!-- LISTENER PARAMETERS -->
                 <div>
@@ -1853,6 +2359,116 @@ You can find examples that use this API in
                 </dl>
 
               </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="event-ExtensionPanel-onShown"></a>
+              <h4>onShown</h4>
+
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">extensionPanel.</span><span>onShown</span><span class="subdued">.addListener</span>(function(<span>DOMWindow window</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Fired when the user switches to the panel.</p>
+
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>window</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>DOMWindow</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The <code>window</code> object of panel's page.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- EXTRA PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Extra parameters to addListener</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- LISTENER RETURN VALUE -->
+                <h4 style="display: none; ">Listener returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+              </div> <!-- /description -->
             </div> <!-- /apiItem -->
 
           </div>
@@ -1935,7 +2551,8 @@ You can find examples that use this API in
                   <!-- Note: intentionally longer 80 columns -->
                   <span>extensionSidebarPane.setExpression</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
                       <var><span>expression</span></var></span><span class="optional"><span>, </span><span>string</span>
-                      <var><span>rootTitle</span></var></span>)</div>
+                      <var><span>rootTitle</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
@@ -2080,6 +2697,74 @@ You can find examples that use this API in
           </dd>
 
         </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>function</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>A callback invoked after the sidebar pane is updated with the expression evaluation results.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
                   </div>
                 </dl>
 
@@ -2093,22 +2778,22 @@ You can find examples that use this API in
                 </dl>
 
                 <!-- CALLBACK -->
-                <div style="display: none; ">
+                <div>
                   <div>
                   <h4>Callback function</h4>
-                  <p>
+                  <p style="display: none; ">
                     The callback <em>parameter</em> should specify a function
                     that looks like this:
                   </p>
-                  <p style="display: none; ">
+                  <p>
                     If you specify the <em>callback</em> parameter, it should
                     specify a function that looks like this:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>ExtensionPanel panel</span>) <span class="subdued">{...}</span>;</pre>
+                  <pre>function(<span>null</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
-                    <div>
+                    <div style="display: none; ">
                       <div>
           <dt>
             <var>panel</var>
@@ -2237,7 +2922,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A CSS-like size specification, e.g. '10px' or '12pt'.</dd>
+          <dd>A CSS-like size specification, such as <code>'100px'</code> or <code>'12ex'</code>.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -2392,7 +3077,8 @@ You can find examples that use this API in
                   <!-- Note: intentionally longer 80 columns -->
                   <span>extensionSidebarPane.setObject</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
                       <var><span>jsonObject</span></var></span><span class="optional"><span style="">, </span><span>string</span>
-                      <var><span>rootTitle</span></var></span>)</div>
+                      <var><span>rootTitle</span></var></span><span class="optional"><span style="">, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
@@ -2537,6 +3223,74 @@ You can find examples that use this API in
           </dd>
 
         </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>function</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>A callback invoked after the sidebar is updated with the object.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
                   </div>
                 </dl>
 
@@ -2550,7 +3304,7 @@ You can find examples that use this API in
                 </dl>
 
                 <!-- CALLBACK -->
-                <div style="display: none; ">
+                <div>
                   <div>
                   <h4>Callback function</h4>
                   <p style="display: none; ">
@@ -2563,9 +3317,9 @@ You can find examples that use this API in
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>object Resource</span>) <span class="subdued">{...}</span>;</pre>
+                  <pre>function(<span>null</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
-                    <div>
+                    <div style="display: none; ">
                       <div>
           <dt>
             <var>Resource</var>
@@ -2654,7 +3408,7 @@ You can find examples that use this API in
               <div class="summary"><span style="display: none; ">void</span>
                   <!-- Note: intentionally longer 80 columns -->
                   <span>extensionSidebarPane.setPage</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
-                      <var><span>url</span></var></span>)</div>
+                      <var><span>path</span></var></span>)</div>
 
               <div class="description">
                 <p class="todo" style="display: none; ">Undocumented.</p>
@@ -2666,7 +3420,7 @@ You can find examples that use this API in
                   <div>
                     <div>
           <dt>
-            <var>url</var>
+            <var>path</var>
               <em>
 
                 <!-- TYPE -->
@@ -2694,7 +3448,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>A URL of an extension page to display within the sidebar.</dd>
+          <dd>Relative path of an extension page to display within the sidebar.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -2847,8 +3601,631 @@ You can find examples that use this API in
           </dd>
 
           <!-- OBJECT EVENT FIELDS -->
+          <dd>
+            <div class="apiGroup" style="">
+            <a name="global-ExtensionSidebarPane-events"></a>
+            <h3>Events of ExtensionSidebarPane</h3>
+            <!-- iterates over all events -->
+            <div class="apiItem">
+              <a name="event-ExtensionSidebarPane-onHidden"></a>
+              <h4>onHidden</h4>
+
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">extensionSidebarPane.</span><span>onHidden</span><span class="subdued">.addListener</span>(function(<span></span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Fired when the sidebar pane becomes hidden as a result of the user switching away from the panel that hosts the sidebar pane.</p>
+
+                <!-- LISTENER PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- EXTRA PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Extra parameters to addListener</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- LISTENER RETURN VALUE -->
+                <h4 style="display: none; ">Listener returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="event-ExtensionSidebarPane-onShown"></a>
+              <h4>onShown</h4>
+
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">extensionSidebarPane.</span><span>onShown</span><span class="subdued">.addListener</span>(function(<span>DOMWindow window</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Fired when the sidebar pane becomes visible as a result of user switching to the panel that hosts it.</p>
+
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>window</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>DOMWindow</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>The <code>window</code> object of the sidebar page, if one was set with the <code>setPage()</code> method.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
           <dd style="display: none; ">
             <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- EXTRA PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Extra parameters to addListener</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- LISTENER RETURN VALUE -->
+                <h4 style="display: none; ">Listener returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+              </div> <!-- /description -->
+            </div> <!-- /apiItem -->
+
+          </div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+
+            </div><div class="apiItem">
+              <a name="type-Button"></a>
+              <h4>Button</h4>
+
+              <div>
+          <dt>
+            <var style="display: none; ">paramName</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>object</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>A button created by the extension.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd>
+            <div class="apiGroup">
+            <a name="global-Button-methods"></a>
+            <h3>Methods of Button</h3>
+
+            <!-- iterates over all functions -->
+            <div class="apiItem">
+              <a name="method-Button-update"></a> <!-- method-anchor -->
+              <h4>update</h4>
+
+              <div class="summary"><span style="display: none; ">void</span>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>button.update</span>(<span class="optional"><span style="display: none; ">, </span><span>string</span>
+                      <var><span>iconPath</span></var></span><span class="optional"><span>, </span><span>string</span>
+                      <var><span>tooltipText</span></var></span><span class="optional"><span>, </span><span>boolean</span>
+                      <var><span>disabled</span></var></span>)</div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Updates the attributes of the button. If some of the arguments are omitted or <code>null</code>, the corresponding attributes are not updated.</p>
+
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>iconPath</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Path to the new icon of the button.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>tooltipText</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Text shown as a tooltip when user hovers the mouse over the button.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>disabled</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>boolean</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>Whether the button is disabled.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div>
+                </dl>
+
+                <!-- RETURNS -->
+                <h4 style="display: none; ">Returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+                <!-- CALLBACK -->
+                <div style="display: none; ">
+                  <div>
+                  <h4>Callback function</h4>
+                  <p style="display: none; ">
+                    The callback <em>parameter</em> should specify a function
+                    that looks like this:
+                  </p>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span>ExtensionPanel panel</span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>panel</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.devtools.panels.html#type-ExtensionPanel">ExtensionPanel</a>
+                      </span>
+                      <span style="display: none; ">
+                        <span>
+                          array of <span><span></span></span>
+                        </span>
+                        <span>paramType</span>
+                        <span></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>An ExtensionPanel object representing the created panel.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                    </div>
+                  </dl>
+                  </div>
+                </div>
+
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
+              </div> <!-- /description -->
+
+            </div>  <!-- /apiItem -->
+
+          </div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd>
+            <div class="apiGroup" style="">
+            <a name="global-Button-events"></a>
+            <h3>Events of Button</h3>
+            <!-- iterates over all events -->
+            <div class="apiItem">
+              <a name="event-Button-onClicked"></a>
+              <h4>onClicked</h4>
+
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">button.</span><span>onClicked</span><span class="subdued">.addListener</span>(function(<span></span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Fired when the button is clicked.</p>
+
+                <!-- LISTENER PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- EXTRA PARAMETERS -->
+                <div style="display: none; ">
+                  <h4>Extra parameters to addListener</h4>
+                  <dl>
+                    <div>
+                      <div>
+                      </div>
+                    </div>
+                  </dl>
+                </div>
+
+                <!-- LISTENER RETURN VALUE -->
+                <h4 style="display: none; ">Listener returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+              </div> <!-- /description -->
+            </div> <!-- /apiItem -->
+
+          </div>
           </dd>
 
           <!-- FUNCTION PARAMETERS -->
@@ -2879,8 +4256,8 @@ You can find examples that use this API in
   </p>
 
 <!-- begin analytics -->
-<script src="http://www.google-analytics.com/urchin.js" type="text/javascript"></script>
-<script src="http://www.google-analytics.com/ga.js" type="text/javascript"></script>
+<script src="https://www.google-analytics.com/urchin.js" type="text/javascript"></script>
+<script src="https://www.google-analytics.com/ga.js" type="text/javascript"></script>
 
 <script type="text/javascript">
   // chrome doc tracking

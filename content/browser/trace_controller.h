@@ -13,6 +13,7 @@
 #include "base/memory/singleton.h"
 #include "content/common/content_export.h"
 
+class CommandLine;
 class TraceMessageFilter;
 
 // Objects interested in receiving trace data derive from TraceSubscriber.
@@ -23,12 +24,16 @@ class CONTENT_EXPORT TraceSubscriber {
   // Called once after TraceController::EndTracingAsync.
   virtual void OnEndTracingComplete() = 0;
   // Called 0 or more times between TraceController::BeginTracing and
-  // OnEndTracingComplete.
-  virtual void OnTraceDataCollected(const std::string& json_events) = 0;
+  // OnEndTracingComplete. Use base::debug::TraceResultBuffer to convert one or
+  // more trace fragments to JSON.
+  virtual void OnTraceDataCollected(const std::string& trace_fragment) = 0;
   // Called once after TraceController::GetKnownCategoriesAsync.
   virtual void OnKnownCategoriesCollected(
-      const std::set<std::string>& known_categories) {}
-  virtual void OnTraceBufferPercentFullReply(float percent_full) {}
+      const std::set<std::string>& known_categories);
+  virtual void OnTraceBufferPercentFullReply(float percent_full);
+
+ protected:
+  virtual ~TraceSubscriber();
 };
 
 // TraceController is used on the browser processes to enable/disable
@@ -38,6 +43,10 @@ class CONTENT_EXPORT TraceSubscriber {
 class CONTENT_EXPORT TraceController {
  public:
   static TraceController* GetInstance();
+
+  // Called on the main thread of the browser process to initialize
+  // startup tracing.
+  void InitStartupTracing(const CommandLine& command_line);
 
   // Get set of known categories. This can change as new code paths are reached.
   // If true is returned, subscriber->OnKnownCategoriesCollected will be called
@@ -65,6 +74,16 @@ class CONTENT_EXPORT TraceController {
   bool BeginTracing(TraceSubscriber* subscriber,
                     const std::vector<std::string>& included_categories,
                     const std::vector<std::string>& excluded_categories);
+
+  // |categories| is a comma-delimited list of category wildcards.
+  // A category can have an optional '-' prefix to make it an excluded category.
+  // All the same rules apply above, so for example, having both included and
+  // excluded categories in the same list would not be supported.
+  //
+  // Example: BeginTracing("test_MyTest*");
+  // Example: BeginTracing("test_MyTest*,test_OtherStuff");
+  // Example: BeginTracing("-excluded_category1,-excluded_category2");
+  bool BeginTracing(TraceSubscriber* subscriber, const std::string& categories);
 
   // Called by browser process to stop tracing events on all processes.
   //
@@ -123,18 +142,20 @@ class CONTENT_EXPORT TraceController {
         pending_bpf_ack_count_ == 0;
   }
 
-  bool can_begin_tracing() const { return !is_tracing_; }
+  bool can_begin_tracing(TraceSubscriber* subscriber) const {
+    return !is_tracing_ &&
+        (subscriber_ == NULL || subscriber == subscriber_);
+  }
 
   // Methods for use by TraceMessageFilter.
 
-  // Passing as scoped_refptr so that the method can be run asynchronously as
-  // a task safely (otherwise the TraceMessageFilter could be destructed).
   void AddFilter(TraceMessageFilter* filter);
   void RemoveFilter(TraceMessageFilter* filter);
+  void OnTracingBegan(TraceSubscriber* subscriber);
   void OnEndTracingAck(const std::vector<std::string>& known_categories);
   void OnTraceDataCollected(
       const scoped_refptr<base::debug::TraceLog::RefCountedString>&
-          json_events_str_ptr);
+          events_str_ptr);
   void OnTraceBufferFull();
   void OnTraceBufferPercentFullReply(float percent_full);
 

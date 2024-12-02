@@ -43,18 +43,14 @@ class SystemKeyEventListener : public MessageLoopForUI::Observer {
   // Defines the delete on exit Singleton traits we like.  Best to have this
   // and const/dest private as recommended for Singletons.
   friend struct DefaultSingletonTraits<SystemKeyEventListener>;
+  friend class SystemKeyEventListenerTest;
 
   SystemKeyEventListener();
   virtual ~SystemKeyEventListener();
 
   AudioHandler* GetAudioHandler() const;
 
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-  // MessageLoopForUI::Observer overrides.
-  virtual base::EventStatus WillProcessEvent(
-      const base::NativeEvent& event) OVERRIDE;
-  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
-#else
+#if defined(TOOLKIT_USES_GTK)
   // This event filter intercepts events before they reach GDK, allowing us to
   // check for system level keyboard events regardless of which window has
   // focus.
@@ -65,6 +61,11 @@ class SystemKeyEventListener : public MessageLoopForUI::Observer {
   // MessageLoopForUI::Observer overrides.
   virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {}
   virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {}
+#else
+  // MessageLoopForUI::Observer overrides.
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 #endif
 
   // Tell X we are interested in the specified key/mask combination.
@@ -100,6 +101,8 @@ class SystemKeyEventListener : public MessageLoopForUI::Observer {
 
   bool stopped_;
 
+  const unsigned int num_lock_mask_;
+  bool num_lock_is_on_;
   bool caps_lock_is_on_;
   ObserverList<CapsLockObserver> caps_lock_observers_;
 

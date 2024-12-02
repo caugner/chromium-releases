@@ -6,14 +6,13 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
@@ -23,60 +22,44 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/dom_storage_common.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
-#include "content/public/common/view_types.h"
+#include "content/public/common/view_type.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_context_getter.h"
 
+using content::BrowserThread;
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
 
 namespace {
 
-class ResourceRequestTask : public Task {
- public:
-  ResourceRequestTask(int process_id,
-                      int render_view_host_id,
-                      ResourceRequestAction action)
-      : action_(action),
-        process_id_(process_id),
-        render_view_host_id_(render_view_host_id),
-        resource_dispatcher_host_(
-            content::GetContentClient()->browser()->
-                GetResourceDispatcherHost()) {
+void ResourceRequestHelper(ResourceDispatcherHost* resource_dispatcher_host,
+                           int process_id,
+                           int render_view_host_id,
+                           ResourceRequestAction action) {
+  switch (action) {
+    case BLOCK:
+      resource_dispatcher_host->BlockRequestsForRoute(
+          process_id, render_view_host_id);
+      break;
+    case RESUME:
+      resource_dispatcher_host->ResumeBlockedRequestsForRoute(
+          process_id, render_view_host_id);
+      break;
+    case CANCEL:
+      resource_dispatcher_host->CancelBlockedRequestsForRoute(
+          process_id, render_view_host_id);
+      break;
+    default:
+      NOTREACHED();
   }
-
-  virtual void Run() {
-    switch (action_) {
-      case BLOCK:
-        resource_dispatcher_host_->BlockRequestsForRoute(
-            process_id_, render_view_host_id_);
-        break;
-      case RESUME:
-        resource_dispatcher_host_->ResumeBlockedRequestsForRoute(
-            process_id_, render_view_host_id_);
-        break;
-      case CANCEL:
-        resource_dispatcher_host_->CancelBlockedRequestsForRoute(
-            process_id_, render_view_host_id_);
-        break;
-      default:
-        NOTREACHED();
-    }
-  }
-
- private:
-  ResourceRequestAction action_;
-  int process_id_;
-  int render_view_host_id_;
-  ResourceDispatcherHost* resource_dispatcher_host_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResourceRequestTask);
-};
+}
 
 }  // namespace
 
@@ -140,7 +123,7 @@ InterstitialPage::InterstitialPage(TabContents* tab,
       enabled_(true),
       action_taken_(NO_ACTION),
       render_view_host_(NULL),
-      original_child_id_(tab->render_view_host()->process()->id()),
+      original_child_id_(tab->render_view_host()->process()->GetID()),
       original_rvh_id_(tab->render_view_host()->routing_id()),
       should_revert_tab_title_(false),
       tab_was_loading_(false),
@@ -194,7 +177,7 @@ void InterstitialPage::Show() {
   // already been destroyed.
   notification_registrar_.Add(
       this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
-      Source<RenderWidgetHost>(tab_->render_view_host()));
+      content::Source<RenderWidgetHost>(tab_->render_view_host()));
 
   // Update the tab_to_interstitial_page_ map.
   iter = tab_to_interstitial_page_->find(tab_);
@@ -205,7 +188,7 @@ void InterstitialPage::Show() {
     NavigationEntry* entry = new NavigationEntry;
     entry->set_url(url_);
     entry->set_virtual_url(url_);
-    entry->set_page_type(INTERSTITIAL_PAGE);
+    entry->set_page_type(content::PAGE_TYPE_INTERSTITIAL);
 
     // Give sub-classes a chance to set some states on the navigation entry.
     UpdateEntry(entry);
@@ -218,16 +201,16 @@ void InterstitialPage::Show() {
   CreateTabContentsView();
 
   std::string data_url = "data:text/html;charset=utf-8," +
-                         EscapePath(GetHTMLContents());
+                         net::EscapePath(GetHTMLContents());
   render_view_host_->NavigateToURL(GURL(data_url));
 
   notification_registrar_.Add(this,
                               content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                              Source<TabContents>(tab_));
+                              content::Source<TabContents>(tab_));
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      Source<NavigationController>(&tab_->controller()));
+      content::Source<NavigationController>(&tab_->controller()));
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-      Source<NavigationController>(&tab_->controller()));
+      content::Source<NavigationController>(&tab_->controller()));
 }
 
 void InterstitialPage::Hide() {
@@ -262,8 +245,8 @@ void InterstitialPage::Hide() {
 }
 
 void InterstitialPage::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_NAV_ENTRY_PENDING:
       // We are navigating away from the interstitial (the user has typed a URL
@@ -283,8 +266,8 @@ void InterstitialPage::Observe(int type,
         // The RenderViewHost is being destroyed (as part of the tab being
         // closed); make sure we clear the blocked requests.
         RenderViewHost* rvh = static_cast<RenderViewHost*>(
-            Source<RenderWidgetHost>(source).ptr());
-        DCHECK(rvh->process()->id() == original_child_id_ &&
+            content::Source<RenderWidgetHost>(source).ptr());
+        DCHECK(rvh->process()->GetID() == original_child_id_ &&
                rvh->routing_id() == original_rvh_id_);
         TakeActionOnResourceDispatcher(CANCEL);
       }
@@ -348,10 +331,10 @@ void InterstitialPage::DidNavigate(
   // after the interstitial page was registered with |tab_|, since there will be
   // a callback to |tab_| testing if an interstitial page is showing before
   // hiding the bookmark bar.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-      Source<TabContents>(tab_),
-      NotificationService::NoDetails());
+      content::Source<TabContents>(tab_),
+      content::NotificationService::NoDetails());
 
   RenderWidgetHostView* rwh_view = tab_->render_view_host()->view();
 
@@ -405,7 +388,7 @@ void InterstitialPage::UpdateTitle(RenderViewHost* render_view_host,
   tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
 }
 
-RendererPreferences InterstitialPage::GetRendererPrefs(
+content::RendererPreferences InterstitialPage::GetRendererPrefs(
     content::BrowserContext* browser_context) const {
   return renderer_preferences_;
 }
@@ -562,8 +545,14 @@ void InterstitialPage::TakeActionOnResourceDispatcher(
   }
 
   BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      new ResourceRequestTask(original_child_id_, original_rvh_id_, action));
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(
+          &ResourceRequestHelper,
+          content::GetContentClient()->browser()->GetResourceDispatcherHost(),
+          original_child_id_,
+          original_rvh_id_,
+          action));
 }
 
 // static

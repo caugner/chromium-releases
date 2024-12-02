@@ -11,6 +11,7 @@
 #include "content/browser/browser_message_filter.h"
 #include "webkit/database/database_connections.h"
 #include "webkit/database/database_tracker.h"
+#include "webkit/quota/quota_types.h"
 
 class DatabaseMessageFilter
     : public BrowserMessageFilter,
@@ -19,11 +20,12 @@ class DatabaseMessageFilter
   explicit DatabaseMessageFilter(webkit_database::DatabaseTracker* db_tracker);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
-  virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+  virtual void OnChannelClosing() OVERRIDE;
+  virtual void OverrideThreadForMessage(
+      const IPC::Message& message,
+      content::BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   webkit_database::DatabaseTracker* database_tracker() const {
     return db_tracker_.get();
@@ -52,6 +54,10 @@ class DatabaseMessageFilter
   // Quota message handler (io thread)
   void OnDatabaseGetSpaceAvailable(const string16& origin_identifier,
                                    IPC::Message* reply_msg);
+  void OnDatabaseGetUsageAndQuota(IPC::Message* reply_msg,
+                                  quota::QuotaStatusCode status,
+                                  int64 usage,
+                                  int64 quota);
 
   // Database tracker message handlers (file thread)
   void OnDatabaseOpened(const string16& origin_identifier,
@@ -66,9 +72,10 @@ class DatabaseMessageFilter
   // DatabaseTracker::Observer callbacks (file thread)
   virtual void OnDatabaseSizeChanged(const string16& origin_identifier,
                                      const string16& database_name,
-                                     int64 database_size);
-  virtual void OnDatabaseScheduledForDeletion(const string16& origin_identifier,
-                                              const string16& database_name);
+                                     int64 database_size) OVERRIDE;
+  virtual void OnDatabaseScheduledForDeletion(
+      const string16& origin_identifier,
+      const string16& database_name) OVERRIDE;
 
   void DatabaseDeleteFile(const string16& vfs_file_name,
                           bool sync_dir,

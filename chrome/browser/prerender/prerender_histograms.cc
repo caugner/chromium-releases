@@ -9,6 +9,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/prerender/prerender_util.h"
+#include "chrome/browser/prerender/prerender_field_trial.h"
 
 namespace prerender {
 
@@ -29,24 +30,25 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
                              bool is_wash, const std::string& name) {
   if (is_wash)
     return ComposeHistogramName("wash", name);
+
+  if (origin == ORIGIN_GWS_PRERENDER) {
+    if (experiment_id == kNoExperiment)
+      return ComposeHistogramName("gws", name);
+    return ComposeHistogramName("exp" + std::string(1, experiment_id + '0'),
+                                name);
+  }
+
+  if (experiment_id != kNoExperiment)
+    return ComposeHistogramName("wash", name);
+
   switch (origin) {
-    case ORIGIN_OMNIBOX_ORIGINAL:
-      if (experiment_id != kNoExperiment)
-        return ComposeHistogramName("wash", name);
-      return ComposeHistogramName("omnibox_original", name);
-    case ORIGIN_OMNIBOX_CONSERVATIVE:
-      if (experiment_id != kNoExperiment)
-        return ComposeHistogramName("wash", name);
-      return ComposeHistogramName("omnibox_conservative", name);
+    case ORIGIN_OMNIBOX_EXACT:
+      return ComposeHistogramName("omnibox_exact", name);
+    case ORIGIN_OMNIBOX_EXACT_FULL:
+      return ComposeHistogramName("omnibox_exact_full", name);
     case ORIGIN_LINK_REL_PRERENDER:
-      if (experiment_id != kNoExperiment)
-        return ComposeHistogramName("wash", name);
       return ComposeHistogramName("web", name);
-    case ORIGIN_GWS_PRERENDER:
-      if (experiment_id == kNoExperiment)
-        return ComposeHistogramName("gws", name);
-      return ComposeHistogramName("exp" + std::string(1, experiment_id + '0'),
-                                  name);
+    case ORIGIN_GWS_PRERENDER:  // Handled above.
     default:
       NOTREACHED();
       break;
@@ -55,6 +57,10 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
   // Dummy return value to make the compiler happy.
   NOTREACHED();
   return ComposeHistogramName("wash", name);
+}
+
+bool OriginIsOmnibox(Origin origin) {
+  return origin == ORIGIN_OMNIBOX_EXACT || origin == ORIGIN_OMNIBOX_EXACT_FULL;
 }
 
 }  // namespace
@@ -93,9 +99,8 @@ std::string GetHistogramName(Origin origin, uint8 experiment_id,
               experiment != recording_experiment)) { \
   } else if (origin == ORIGIN_LINK_REL_PRERENDER) { \
     HISTOGRAM; \
-  } else if (origin == ORIGIN_OMNIBOX_ORIGINAL) { \
-    HISTOGRAM; \
-  } else if (origin == ORIGIN_OMNIBOX_CONSERVATIVE) { \
+  } else if (origin == ORIGIN_OMNIBOX_EXACT || \
+             origin == ORIGIN_OMNIBOX_EXACT_FULL) { \
     HISTOGRAM; \
   } else if (experiment != kNoExperiment) { \
     HISTOGRAM; \
@@ -141,6 +146,20 @@ void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
   seen_pageload_started_after_prerender_ = false;
 }
 
+void PrerenderHistograms::RecordPrerenderStarted(Origin origin) const {
+  if (OriginIsOmnibox(origin)) {
+    UMA_HISTOGRAM_COUNTS("Prerender.OmniboxPrerenderCount_" +
+                         GetOmniboxHistogramSuffix(), 1);
+  }
+}
+
+void PrerenderHistograms::RecordUsedPrerender(Origin origin) const {
+  if (OriginIsOmnibox(origin)) {
+    UMA_HISTOGRAM_COUNTS("Prerender.OmniboxNavigationsUsedPrerenderCount_" +
+                         GetOmniboxHistogramSuffix(), 1);
+  }
+}
+
 base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
   return base::TimeTicks::Now();
 }
@@ -159,7 +178,7 @@ base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
 
 void PrerenderHistograms::RecordPerceivedPageLoadTime(
     base::TimeDelta perceived_page_load_time, bool was_prerender,
-    const GURL& url) {
+    bool was_complete_prerender, const GURL& url) {
   if (!IsWebURL(url))
     return;
   bool within_window = WithinWindow();
@@ -167,8 +186,11 @@ void PrerenderHistograms::RecordPerceivedPageLoadTime(
   RECORD_PLT("PerceivedPLT", perceived_page_load_time);
   if (within_window)
     RECORD_PLT("PerceivedPLTWindowed", perceived_page_load_time);
-  if (was_prerender) {
-    RECORD_PLT("PerceivedPLTMatched", perceived_page_load_time);
+  if (was_prerender || was_complete_prerender) {
+    if (was_prerender)
+      RECORD_PLT("PerceivedPLTMatched", perceived_page_load_time);
+    if (was_complete_prerender)
+      RECORD_PLT("PerceivedPLTMatchedComplete", perceived_page_load_time);
     seen_any_pageload_ = true;
     seen_pageload_started_after_prerender_ = true;
   } else if (within_window) {

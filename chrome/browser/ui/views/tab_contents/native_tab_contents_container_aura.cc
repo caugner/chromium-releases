@@ -5,16 +5,15 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_aura.h"
 
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/aura/window.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "views/views_delegate.h"
-#include "views/focus/focus_manager.h"
-#include "views/focus/widget_focus_manager.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/focus/widget_focus_manager.h"
+#include "ui/views/views_delegate.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsContainerAura, public:
@@ -45,22 +44,18 @@ void NativeTabContentsContainerAura::DetachContents(TabContents* contents) {
   // TabContentsViewViews so that the window hierarchy is intact for any
   // cleanup during Detach().
   Detach();
-
-  // TODO(brettw) should this move to NativeViewHost::Detach?  It
-  // needs cleanup regardless.
-  aura::Window* container_window = contents->GetNativeView();
-  if (container_window) {
-    // Hide the contents before adjusting its parent to avoid a full desktop
-    // flicker.
-    container_window->Hide();
-
-    // Reset the parent to NULL to ensure hidden tabs don't receive messages.
-    static_cast<TabContentsViewViews*>(contents->view())->Unparent();
-  }
 }
 
 void NativeTabContentsContainerAura::SetFastResize(bool fast_resize) {
-  NOTIMPLEMENTED();
+  set_fast_resize(fast_resize);
+}
+
+bool NativeTabContentsContainerAura::GetFastResize() const {
+  return fast_resize();
+}
+
+bool NativeTabContentsContainerAura::FastResizeAtLastLayout() const {
+  return fast_resize_at_last_layout();
 }
 
 void NativeTabContentsContainerAura::RenderViewHostChanged(
@@ -151,7 +146,5 @@ gfx::NativeViewAccessible
 // static
 NativeTabContentsContainer* NativeTabContentsContainer::CreateNativeContainer(
     TabContentsContainer* container) {
-  return new NativeTabContentsContainerViews(container);
-  // TODO(beng): switch this over once we're using this container.
-  // return new NativeTabContentsContainerAura(container);
+  return new NativeTabContentsContainerAura(container);
 }

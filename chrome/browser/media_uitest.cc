@@ -31,12 +31,15 @@ class MediaTest : public UITest {
     const std::wstring kPlaying = L"PLAYING";
     const std::wstring kFailed = L"FAILED";
     const std::wstring kError = L"ERROR";
-    for (int i = 0; i < 10; ++i) {
-      base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
+    const int kSleepIntervalMs = 250;
+    const int kNumIntervals =
+        TestTimeouts::action_timeout_ms() / kSleepIntervalMs;
+    for (int i = 0; i < kNumIntervals; ++i) {
       const std::wstring& title = GetActiveTabTitle();
       if (title == kPlaying || title == kFailed ||
           StartsWith(title, kError, true))
         break;
+      base::PlatformThread::Sleep(kSleepIntervalMs);
     }
 
     EXPECT_EQ(kPlaying, GetActiveTabTitle());
@@ -55,11 +58,11 @@ class MediaTest : public UITest {
 // http://crbug.com/88834 - VideoBearTheora, VideoBearWav and VideoBearWebm
 // are flaky on Mac.
 #define MAYBE_VideoBearTheora FLAKY_VideoBearTheora
-#define MAYBE_VideoBearWav FLAKY_VideoBearWav
+#define MAYBE_VideoBearWavPcm FLAKY_VideoBearWavPcm
 #define MAYBE_VideoBearWebm FLAKY_VideoBearWebm
 #else
 #define MAYBE_VideoBearTheora VideoBearTheora
-#define MAYBE_VideoBearWav  VideoBearWav
+#define MAYBE_VideoBearWavPcm  VideoBearWavPcm
 #define MAYBE_VideoBearWebm VideoBearWebm
 #endif
 
@@ -89,18 +92,47 @@ TEST_F(MediaTest, VideoBearSilentMp4) {
 }
 #endif
 
-TEST_F(MediaTest, MAYBE_VideoBearWav) {
-  PlayVideo("bear.wav");
+#if defined(OS_CHROMEOS)
+#if defined(GOOGLE_CHROME_BUILD) || defined(USE_PROPRIETARY_CODECS)
+TEST_F(MediaTest, VideoBearAviMp3Mpeg4) {
+  PlayVideo("bear_mpeg4_mp3.avi");
 }
 
-#if defined(OS_MACOSX)
-// http://crbug.com/95274 - MediaUILayoutTest is flaky on Mac.
-#define MAYBE_MediaUILayoutTest FLAKY_MediaUILayoutTest
-#else
-#define MAYBE_MediaUILayoutTest MediaUILayoutTest
+TEST_F(MediaTest, VideoBearAviMp3Divx) {
+  PlayVideo("bear_divx_mp3.avi");
+}
+
+TEST_F(MediaTest, VideoBear3gpAacH264) {
+  PlayVideo("bear_h264_aac.3gp");
+}
+
+TEST_F(MediaTest, VideoBear3gpAmrnbMpeg4) {
+  PlayVideo("bear_mpeg4_amrnb.3gp");
+}
+
+// TODO(ihf): Enable these audio codecs for CrOS.
+// TEST_F(MediaTest, VideoBearWavAlaw) {
+//   PlayVideo("bear_alaw.wav");
+// }
+// TEST_F(MediaTest, VideoBearWavGsmms) {
+//   PlayVideo("bear_gsmms.wav");
+// }
+
+TEST_F(MediaTest, VideoBearWavMulaw) {
+  PlayVideo("bear_mulaw.wav");
+}
+
+TEST_F(MediaTest, VideoBearFlac) {
+  PlayVideo("bear.flac");
+}
+#endif
 #endif
 
-TEST_F(UILayoutTest, MAYBE_MediaUILayoutTest) {
+TEST_F(MediaTest, MAYBE_VideoBearWavPcm) {
+  PlayVideo("bear_pcm.wav");
+}
+
+TEST_F(UILayoutTest, MediaUILayoutTest) {
   static const char* kResources[] = {
     "content",
     "media-file.js",

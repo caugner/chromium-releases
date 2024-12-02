@@ -119,24 +119,31 @@ void DeviceTokenFetcher::OnError(DeviceManagementBackend::ErrorCode code) {
   switch (code) {
     case DeviceManagementBackend::kErrorServiceManagementNotSupported:
       SetUnmanagedState();
-      break;
+      return;
     case DeviceManagementBackend::kErrorRequestFailed:
     case DeviceManagementBackend::kErrorTemporaryUnavailable:
     case DeviceManagementBackend::kErrorServiceDeviceNotFound:
     case DeviceManagementBackend::kErrorServiceDeviceIdConflict:
       SetState(STATE_TEMPORARY_ERROR);
-      break;
+      return;
     case DeviceManagementBackend::kErrorServiceManagementTokenInvalid:
       // Most probably the GAIA auth cookie has expired. We can not do anything
       // until the user logs-in again.
       SetState(STATE_BAD_AUTH);
-      break;
+      return;
     case DeviceManagementBackend::kErrorServiceInvalidSerialNumber:
       SetSerialNumberInvalidState();
-      break;
-    default:
+      return;
+    case DeviceManagementBackend::kErrorRequestInvalid:
+    case DeviceManagementBackend::kErrorHttpStatus:
+    case DeviceManagementBackend::kErrorResponseDecoding:
+    case DeviceManagementBackend::kErrorServiceActivationPending:
+    case DeviceManagementBackend::kErrorServicePolicyNotFound:
       SetState(STATE_ERROR);
+      return;
   }
+  NOTREACHED();
+  SetState(STATE_ERROR);
 }
 
 void DeviceTokenFetcher::Initialize(DeviceManagementService* service,
@@ -224,6 +231,10 @@ void DeviceTokenFetcher::SetState(FetcherState state) {
     scheduler_->PostDelayedWork(
         base::Bind(&DeviceTokenFetcher::DoWork, base::Unretained(this)), delay);
   }
+
+  // Inform the cache if a token fetch attempt has failed.
+  if (state_ != STATE_INACTIVE && state_ != STATE_TOKEN_AVAILABLE)
+    cache_->SetFetchingDone();
 }
 
 void DeviceTokenFetcher::DoWork() {

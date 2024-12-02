@@ -17,27 +17,13 @@
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "views/view.h"
+#include "ui/views/view.h"
 #endif
 
-class BaseDownloadItemModel;
-class CrxInstaller;
 class DownloadItem;
-class GURL;
-class Profile;
-class ResourceDispatcherHost;
-class SkBitmap;
-
-struct DownloadCreateInfo;
-struct DownloadSaveInfo;
 
 namespace base {
 class DictionaryValue;
-class TimeTicks;
-}
-
-namespace content {
-class ResourceContext;
 }
 
 namespace gfx {
@@ -60,14 +46,6 @@ bool DownloadPathIsDangerous(const FilePath& download_path);
 // default name.
 void GenerateFileNameFromRequest(const DownloadItem& download_item,
                                  FilePath* generated_name);
-
-// Generate a filename based on the URL, a suggested name and a MIME
-// type.  Similar in operation to net::GenerateFileName(), but uses a
-// localized default name.
-void GenerateFileNameFromSuggestedName(const GURL& url,
-                                       const std::string& suggested_name,
-                                       const std::string& mime_type,
-                                       FilePath* generated_name);
 
 // Download progress animations ------------------------------------------------
 

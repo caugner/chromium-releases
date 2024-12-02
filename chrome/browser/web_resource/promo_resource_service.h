@@ -44,8 +44,8 @@ class PromoResourceService
   // Checks for conditions to show promo: start/end times, channel, etc.
   static bool CanShowNotificationPromo(Profile* profile);
 
-  // Checks if this user is in a group for sync promo roll-out.
-  static bool CanShowSyncPromo(Profile* profile);
+  // Checks if this user is in a group for sign-in promo roll-out.
+  static bool CanShowNTPSignInPromo(Profile* profile);
 
   static void RegisterPrefs(PrefService* local_state);
 
@@ -60,7 +60,7 @@ class PromoResourceService
   static const char* kDefaultPromoResourceServer;
 
  private:
-  friend class SyncPromoTest;
+  friend class NTPSignInPromoTest;
   FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, IsBuildTargetedTest);
   FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackLogoSignal);
   FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackWebStoreSignal);
@@ -113,7 +113,7 @@ class PromoResourceService
   //       {
   //         "answer_id": "1067976",
   //         "name": "promo_start",
-  //         "question": "1:24:10:10",
+  //         "question": "1:24:10:20:7:0",
   //         "tooltip":
   //       "Click \u003ca href=http://www.google.com\u003ehere\u003c/a\u003e!",
   //         "inproduct": "10/8/09 12:00",
@@ -140,12 +140,16 @@ class PromoResourceService
   // For "promo_start", the promotional line itself is given in the "tooltip"
   // field. The "question" field gives the type of builds that should be shown
   // this promo (see the BuildType enum in web_resource_service.cc), the
-  // number of hours that each promo group should see it, and the maximum promo
-  // group that should see it, separated by ":".
-  // For example, "7:24:5:10" would indicate that all groups with ids less than
-  // 5, and with dev, beta and stable builds, should see the promo a maximum of
-  // 10 times. The groups ramp up so 1 additional group sees the promo every
-  // 24 hours.
+  // number of hours that each promo group should see it, the maximum promo
+  // group that should see it, the maximum number of views of the promo,the
+  // platforms that this promo is suitable for, and a mask of features which
+  // must be present in order for the promo to be shown (0 => no feaures needed
+  // 1 => user must be logged in to gplus), separated by ":".
+  // For example, "7:24:5:10:7:0" would indicate that all groups with ids less
+  // than 5, and with dev, beta and stable builds on Windows, Mac and Linux,
+  // should see the promo a maximum of 10 times, the promo is suitable for Mac
+  // Linux and Windows platforms, and no features are required to show it. The
+  // groups ramp up so one additional group sees the promo every 24 hours.
   //
   void UnpackNotificationSignal(const base::DictionaryValue& parsed_json);
 
@@ -209,25 +213,25 @@ class PromoResourceService
   //   answer_id: the promo's id
   void UnpackWebStoreSignal(const base::DictionaryValue& parsed_json);
 
-  // Unpack the sync promo. Expects JSON delivery in the following format:
+  // Unpack the NTP sign in promo. Expects JSON in the following format:
   // {
   //   "topic": {
   //     "answers": [
   //       ...
   //       {
   //         "answer_id": "XXXXXXX",
-  //         "name": "sync_promo",
+  //         "name": "sign_in_promo",
   //         "question": "1:5"
   //       }
   //     ]
   //   }
   // }
-  //
   // The question is in the form of "<build>:<group_max>".
-  void UnpackSyncPromoSignal(const base::DictionaryValue& parsed_json);
+  void UnpackNTPSignInPromoSignal(const base::DictionaryValue& parsed_json);
 
   // NotificationPromo::Delegate override.
-  virtual void OnNewNotification(double start, double end) OVERRIDE;
+  virtual void OnNotificationParsed(double start, double end,
+                                    bool new_notification) OVERRIDE;
 
   // The profile this service belongs to.
   Profile* profile_;

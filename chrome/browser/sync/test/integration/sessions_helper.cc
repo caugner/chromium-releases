@@ -10,15 +10,15 @@
 #include "base/test/test_timeouts.h"
 #include "base/time.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
-#include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 using sync_datatype_helper::test;
@@ -63,7 +63,7 @@ bool ModelAssociatorHasTabWithUrl(int index, const GURL& url) {
   }
 
   if (local_session->windows.size() == 0) {
-    VLOG(1) << "Empty windows vector";
+    DVLOG(1) << "Empty windows vector";
     return false;
   }
 
@@ -73,34 +73,35 @@ bool ModelAssociatorHasTabWithUrl(int index, const GURL& url) {
            local_session->windows.begin();
        it != local_session->windows.end(); ++it) {
     if (it->second->tabs.size() == 0) {
-      VLOG(1) << "Empty tabs vector";
+      DVLOG(1) << "Empty tabs vector";
       continue;
     }
     for (std::vector<SessionTab*>::const_iterator tab_it =
              it->second->tabs.begin();
          tab_it != it->second->tabs.end(); ++tab_it) {
       if ((*tab_it)->navigations.size() == 0) {
-        VLOG(1) << "Empty navigations vector";
+        DVLOG(1) << "Empty navigations vector";
         continue;
       }
       nav_index = (*tab_it)->current_navigation_index;
       nav = (*tab_it)->navigations[nav_index];
       if (nav.virtual_url() == url) {
-        VLOG(1) << "Found tab with url " << url.spec();
+        DVLOG(1) << "Found tab with url " << url.spec();
         if (nav.title().empty()) {
-          VLOG(1) << "No title!";
+          DVLOG(1) << "No title!";
           continue;
         }
         return true;
       }
     }
   }
-  VLOG(1) << "Could not find tab with url " << url.spec();
+  DVLOG(1) << "Could not find tab with url " << url.spec();
   return false;
 }
 
 bool OpenTab(int index, const GURL& url) {
-  VLOG(1) << "Opening tab: " << url.spec() << " using profile " << index << ".";
+  DVLOG(1) << "Opening tab: " << url.spec() << " using profile "
+           << index << ".";
   test()->GetBrowser(index)->ShowSingletonTab(url);
   return WaitForTabsToLoad(index, std::vector<GURL>(1, url));
 }
@@ -109,15 +110,15 @@ bool OpenMultipleTabs(int index, const std::vector<GURL>& urls) {
   Browser* browser = test()->GetBrowser(index);
   for (std::vector<GURL>::const_iterator it = urls.begin();
        it != urls.end(); ++it) {
-    VLOG(1) << "Opening tab: " << it->spec() << " using profile " << index
-            << ".";
+    DVLOG(1) << "Opening tab: " << it->spec() << " using profile " << index
+             << ".";
     browser->ShowSingletonTab(*it);
   }
   return WaitForTabsToLoad(index, urls);
 }
 
 bool WaitForTabsToLoad(int index, const std::vector<GURL>& urls) {
-  VLOG(1) << "Waiting for session to propagate to associator.";
+  DVLOG(1) << "Waiting for session to propagate to associator.";
   static const int timeout_milli = TestTimeouts::action_max_timeout_ms();
   base::TimeTicks start_time = base::TimeTicks::Now();
   base::TimeTicks end_time = start_time +
@@ -236,9 +237,9 @@ bool NavigationEquals(const TabNavigation& expected,
                << ", actual " << actual.virtual_url();
     return false;
   }
-  if (expected.referrer() != actual.referrer()) {
-    LOG(ERROR) << "Expected referrer " << expected.referrer()
-               << ", actual " << actual.referrer();
+  if (expected.referrer().url != actual.referrer().url) {
+    LOG(ERROR) << "Expected referrer " << expected.referrer().url
+               << ", actual " << actual.referrer().url;
     return false;
   }
   if (expected.title() != actual.title()) {

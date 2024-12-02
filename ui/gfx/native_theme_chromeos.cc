@@ -4,6 +4,7 @@
 
 #include "ui/gfx/native_theme_chromeos.h"
 
+#include "base/basictypes.h"
 #include "base/logging.h"
 #include "grit/gfx_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -230,15 +231,16 @@ void GetRadioIndicatorGradientPaint(const gfx::Rect bounds,
 
 }  // namespace
 
+namespace gfx {
+
 // static
-const gfx::NativeTheme* gfx::NativeTheme::instance() {
+const NativeTheme* NativeTheme::instance() {
   return NativeThemeChromeos::instance();
 }
 
 // static
 const NativeThemeChromeos* NativeThemeChromeos::instance() {
-  // The global NativeThemeChromeos instance.
-  static NativeThemeChromeos s_native_theme;
+  CR_DEFINE_STATIC_LOCAL(NativeThemeChromeos, s_native_theme, ());
   return &s_native_theme;
 }
 
@@ -254,11 +256,7 @@ gfx::Size NativeThemeChromeos::GetPartSize(Part part,
   // This function might be called from Worker process during html layout
   // without calling GfxModule::SetResourceProvider. So using dimension
   // constants instead of getting it from resource images.
-#if defined(TOUCH_UI)
-  static const int kScrollbarWidth = 0;
-#else
   static const int kScrollbarWidth = 13;
-#endif
   static const int kScrollbarArrowUpHeight = 12;
   static const int kScrollbarArrowDownHeight = 12;
 
@@ -353,6 +351,26 @@ void NativeThemeChromeos::PaintScrollbarTrack(
   }
 }
 
+void NativeThemeChromeos::PaintArrowButton(SkCanvas* canvas,
+    const gfx::Rect& rect, Part part, State state) const {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  int resource_id =
+      (part == kScrollbarUpArrow || part == kScrollbarLeftArrow) ?
+          IDR_SCROLL_ARROW_UP : IDR_SCROLL_ARROW_DOWN;
+  if (state == kHovered)
+    resource_id++;
+  else if (state == kPressed)
+    resource_id += 2;
+  SkBitmap* bitmap;
+  if (part == kScrollbarUpArrow || part == kScrollbarDownArrow)
+    bitmap = rb.GetBitmapNamed(resource_id);
+  else
+    bitmap = GetHorizontalBitmapNamed(resource_id);
+  DrawBitmapInt(canvas, *bitmap,
+      0, 0, bitmap->width(), bitmap->height(),
+      rect.x(), rect.y(), rect.width(), rect.height());
+}
+
 void NativeThemeChromeos::PaintScrollbarThumb(SkCanvas* canvas,
     Part part, State state, const gfx::Rect& rect) const {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -396,26 +414,6 @@ void NativeThemeChromeos::PaintScrollbarThumb(SkCanvas* canvas,
         8, 0, 5, bitmap->height(),
         rect.x() + rect.width() - 5, rect.y(), 5, rect.height());
   }
-}
-
-void NativeThemeChromeos::PaintArrowButton(SkCanvas* canvas,
-    const gfx::Rect& rect, Part part, State state) const {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  int resource_id =
-      (part == kScrollbarUpArrow || part == kScrollbarLeftArrow) ?
-          IDR_SCROLL_ARROW_UP : IDR_SCROLL_ARROW_DOWN;
-  if (state == kHovered)
-    resource_id++;
-  else if (state == kPressed)
-    resource_id += 2;
-  SkBitmap* bitmap;
-  if (part == kScrollbarUpArrow || part == kScrollbarDownArrow)
-    bitmap = rb.GetBitmapNamed(resource_id);
-  else
-    bitmap = GetHorizontalBitmapNamed(resource_id);
-  DrawBitmapInt(canvas, *bitmap,
-      0, 0, bitmap->width(), bitmap->height(),
-      rect.x(), rect.y(), rect.width(), rect.height());
 }
 
 void NativeThemeChromeos::PaintCheckbox(SkCanvas* canvas,
@@ -580,6 +578,43 @@ void NativeThemeChromeos::PaintInnerSpinButton(SkCanvas* canvas,
   NativeThemeBase::PaintInnerSpinButton(canvas, state, bounds, spin_button);
 }
 
+void NativeThemeChromeos::PaintMenuPopupBackground(
+    SkCanvas* canvas,
+    State state,
+    const gfx::Rect& rect,
+    const MenuListExtraParams& menu_list) const {
+  static const SkColor kGradientColors[2] = {
+      SK_ColorWHITE,
+      SkColorSetRGB(0xF0, 0xF0, 0xF0)
+  };
+
+  static const SkScalar kGradientPoints[2] = {
+      SkIntToScalar(0),
+      SkIntToScalar(1)
+  };
+
+  SkPoint points[2];
+  points[0].set(SkIntToScalar(0), SkIntToScalar(0));
+  points[1].set(SkIntToScalar(0), SkIntToScalar(rect.height()));
+
+  SkShader* shader = SkGradientShader::CreateLinear(points,
+      kGradientColors, kGradientPoints, arraysize(kGradientPoints),
+      SkShader::kRepeat_TileMode);
+  DCHECK(shader);
+
+  SkPaint paint;
+  paint.setShader(shader);
+  shader->unref();
+
+  paint.setStyle(SkPaint::kFill_Style);
+  paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+
+  SkRect sk_rect;
+  sk_rect.set(SkIntToScalar(0), SkIntToScalar(0),
+              SkIntToScalar(rect.width()), SkIntToScalar(rect.height()));
+  canvas->drawRect(sk_rect, paint);
+}
+
 void NativeThemeChromeos::PaintProgressBar(SkCanvas* canvas,
     State state,
     const gfx::Rect& rect,
@@ -722,3 +757,6 @@ void NativeThemeChromeos::PaintButtonLike(SkCanvas* canvas,
     canvas->drawPath(border, stroke_paint);
   }
 }
+
+}  // namespace gfx
+

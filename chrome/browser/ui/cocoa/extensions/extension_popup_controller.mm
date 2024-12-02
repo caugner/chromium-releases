@@ -15,9 +15,9 @@
 #import "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
 
 namespace {
 // The duration for any animations that might be invoked by this controller.
@@ -34,23 +34,25 @@ CGFloat Clamp(CGFloat value, CGFloat min, CGFloat max) {
 
 }  // namespace
 
-class DevtoolsNotificationBridge : public NotificationObserver {
+class DevtoolsNotificationBridge : public content::NotificationObserver {
  public:
   explicit DevtoolsNotificationBridge(ExtensionPopupController* controller)
     : controller_(controller) {}
 
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     switch (type) {
       case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
-        if (Details<ExtensionHost>([controller_ extensionHost]) == details)
+        if (content::Details<ExtensionHost>([controller_ extensionHost]) ==
+                details) {
           [controller_ showDevTools];
+        }
         break;
       }
       case content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING: {
         RenderViewHost* rvh = [controller_ extensionHost]->render_view_host();
-        if (Details<RenderViewHost>(rvh) == details)
+        if (content::Details<RenderViewHost>(rvh) == details)
           // Allow the devtools to finish detaching before we close the popup
           [controller_ performSelector:@selector(close)
                             withObject:nil
@@ -128,13 +130,13 @@ class DevtoolsNotificationBridge : public NotificationObserver {
   if (beingInspected_) {
     // Listen for the the devtools window closing.
     notificationBridge_.reset(new DevtoolsNotificationBridge(self));
-    registrar_.reset(new NotificationRegistrar);
+    registrar_.reset(new content::NotificationRegistrar);
     registrar_->Add(notificationBridge_.get(),
                     content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-                    Source<content::BrowserContext>(host->profile()));
+                    content::Source<content::BrowserContext>(host->profile()));
     registrar_->Add(notificationBridge_.get(),
                     chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                    Source<Profile>(host->profile()));
+                    content::Source<Profile>(host->profile()));
   }
   return self;
 }

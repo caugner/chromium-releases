@@ -8,7 +8,6 @@
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
-#include "chrome/browser/chromeos/cros/mock_power_library.h"
 #include "chrome/browser/chromeos/cros/mock_screen_lock_library.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -20,11 +19,8 @@
 
 namespace chromeos {
 using ::testing::_;
-using ::testing::AnyNumber;
-using ::testing::InvokeWithoutArgs;
-using ::testing::NiceMock;
+using ::testing::AtLeast;
 using ::testing::Return;
-using ::testing::ReturnRef;
 
 class LoginTestBase : public CrosInProcessBrowserTest {
  public:
@@ -56,7 +52,11 @@ class LoginUserTest : public LoginTestBase {
   virtual void SetUpInProcessBrowserTestFixture() {
     LoginTestBase::SetUpInProcessBrowserTestFixture();
     EXPECT_CALL(*mock_screen_lock_library_, AddObserver(_))
-        .WillOnce(Return());
+       .Times(AtLeast(1))
+       .WillRepeatedly(Return());
+    EXPECT_CALL(*mock_screen_lock_library_, RemoveObserver(_))
+       .Times(AtLeast(1))
+       .WillRepeatedly(Return());
   }
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
@@ -66,7 +66,7 @@ class LoginUserTest : public LoginTestBase {
   }
 };
 
-class LoginProfileTest : public LoginTestBase {
+class LoginProfileTest : public LoginUserTest {
  protected:
   virtual void SetUpCommandLine(CommandLine* command_line) {
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");

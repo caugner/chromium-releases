@@ -8,13 +8,15 @@
 #include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/cert_database.h"
 #include "net/base/net_errors.h"
 #include "net/base/x509_certificate.h"
 #include "net/url_request/url_request.h"
+
+using content::BrowserThread;
 
 SSLAddCertHandler::SSLAddCertHandler(net::URLRequest* request,
                                      net::X509Certificate* cert,

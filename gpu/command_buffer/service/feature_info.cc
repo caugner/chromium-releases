@@ -6,7 +6,11 @@
 #include <string>
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gl_utils.h"
+#include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_implementation.h"
+#if defined(OS_MACOSX)
+#include "ui/gfx/surface/io_surface_support_mac.h"
+#endif
 
 namespace gpu {
 namespace gles2 {
@@ -96,7 +100,11 @@ bool FeatureInfo::Initialize(const DisallowedFeatures& disallowed_features,
 void FeatureInfo::AddFeatures(const char* desired_features) {
   // Figure out what extensions to turn on.
   ExtensionHelper ext(
-      reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)),
+      // Some unittests execute without a context made current
+      // so fall back to glGetString
+      gfx::GLContext::GetCurrent() ?
+          gfx::GLContext::GetCurrent()->GetExtensions().c_str() :
+          reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)),
       desired_features);
 
   bool npot_ok = false;
@@ -106,7 +114,12 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   AddExtensionString("GL_CHROMIUM_strict_attribs");
   AddExtensionString("GL_CHROMIUM_swapbuffers_complete_callback");
   AddExtensionString("GL_CHROMIUM_rate_limit_offscreen_context");
+  AddExtensionString("GL_CHROMIUM_set_visibility");
   AddExtensionString("GL_ANGLE_translated_shader_source");
+
+  if (ext.Have("GL_ANGLE_translated_shader_source")) {
+    feature_flags_.angle_translated_shader_source = true;
+  }
 
   // Only turn this feature on if it is requested. Not by default.
   if (desired_features && ext.Desire("GL_CHROMIUM_webglsl")) {
@@ -344,6 +357,30 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
     feature_flags_.chromium_stream_texture = true;
   }
 
+  // Ideally we would only expose this extension on Mac OS X, to
+  // support GL_CHROMIUM_iosurface and the compositor. We don't want
+  // applications to start using it; they should use ordinary non-
+  // power-of-two textures. However, for unit testing purposes we
+  // expose it on all supported platforms.
+  if (ext.HaveAndDesire("GL_ARB_texture_rectangle")) {
+    AddExtensionString("GL_ARB_texture_rectangle");
+    feature_flags_.arb_texture_rectangle = true;
+    validators_.texture_bind_target.AddValue(GL_TEXTURE_RECTANGLE_ARB);
+    // For the moment we don't add this enum to the texture_target
+    // validator. This implies that the only way to get image data into a
+    // rectangular texture is via glTexImageIOSurface2DCHROMIUM, which is
+    // just fine since again we don't want applications depending on this
+    // extension.
+    validators_.get_tex_param_target.AddValue(GL_TEXTURE_RECTANGLE_ARB);
+    validators_.g_l_state.AddValue(GL_TEXTURE_BINDING_RECTANGLE_ARB);
+  }
+
+#if defined(OS_MACOSX)
+  if (IOSurfaceSupport::Initialize()) {
+    AddExtensionString("GL_CHROMIUM_iosurface");
+  }
+#endif
+
   // TODO(gman): Add support for these extensions.
   //     GL_OES_depth32
   //     GL_OES_element_index_uint
@@ -352,6 +389,22 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
   feature_flags_.enable_texture_half_float_linear =
       enable_texture_half_float_linear;
   feature_flags_.npot_ok = npot_ok;
+
+  if (ext.HaveAndDesire("GL_CHROMIUM_post_sub_buffer")) {
+    AddExtensionString("GL_CHROMIUM_post_sub_buffer");
+  }
+
+  if (ext.HaveAndDesire("GL_CHROMIUM_front_buffer_cached")) {
+    AddExtensionString("GL_CHROMIUM_front_buffer_cached");
+  }
+
+  if (ext.Desire("GL_ANGLE_pack_reverse_row_order") &&
+      ext.Have("GL_ANGLE_pack_reverse_row_order")) {
+    AddExtensionString("GL_ANGLE_pack_reverse_row_order");
+    feature_flags_.angle_pack_reverse_row_order = true;
+    validators_.pixel_store.AddValue(GL_PACK_REVERSE_ROW_ORDER_ANGLE);
+    validators_.g_l_state.AddValue(GL_PACK_REVERSE_ROW_ORDER_ANGLE);
+  }
 }
 
 void FeatureInfo::AddExtensionString(const std::string& str) {

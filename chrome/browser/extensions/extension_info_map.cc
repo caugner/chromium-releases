@@ -5,11 +5,15 @@
 #include "chrome/browser/extensions/extension_info_map.h"
 
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/url_constants.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace {
 
-static void CheckOnValidThread() {
+void CheckOnValidThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 }
 
@@ -40,6 +44,10 @@ ExtensionInfoMap::ExtensionInfoMap() {
 ExtensionInfoMap::~ExtensionInfoMap() {
 }
 
+const extensions::ProcessMap& ExtensionInfoMap::process_map() const {
+  return process_map_;
+}
+
 void ExtensionInfoMap::AddExtension(const Extension* extension,
                                     base::Time install_time,
                                     bool incognito_enabled) {
@@ -56,11 +64,13 @@ void ExtensionInfoMap::RemoveExtension(const std::string& extension_id,
   CheckOnValidThread();
   const Extension* extension = extensions_.GetByID(extension_id);
   extra_data_.erase(extension_id);  // we don't care about disabled extra data
+  bool was_uninstalled = (reason != extension_misc::UNLOAD_REASON_DISABLE &&
+                          reason != extension_misc::UNLOAD_REASON_TERMINATE);
   if (extension) {
-    if (reason == extension_misc::UNLOAD_REASON_DISABLE)
+    if (!was_uninstalled)
       disabled_extensions_.Insert(extension);
     extensions_.Remove(extension_id);
-  } else if (reason != extension_misc::UNLOAD_REASON_DISABLE) {
+  } else if (was_uninstalled) {
     // If the extension was uninstalled, make sure it's removed from the map of
     // disabled extensions.
     disabled_extensions_.Remove(extension_id);
@@ -96,20 +106,45 @@ bool ExtensionInfoMap::CanCrossIncognito(const Extension* extension) {
       !extension->incognito_split_mode();
 }
 
-// These are duplicated from ExtensionProcessManager so that we can have the
-// information on the IO thread :(.
-void ExtensionInfoMap::BindingsEnabledForProcess(int render_process_id) {
-  extension_bindings_process_ids_.insert(render_process_id);
+void ExtensionInfoMap::RegisterExtensionProcess(const std::string& extension_id,
+                                                int process_id,
+                                                int site_instance_id) {
+  if (!process_map_.Insert(extension_id, process_id, site_instance_id)) {
+    NOTREACHED() << "Duplicate extension process registration for: "
+                 << extension_id << "," << process_id << ".";
+  }
 }
 
-void ExtensionInfoMap::BindingsDisabledForProcess(int render_process_id) {
-  extension_bindings_process_ids_.erase(render_process_id);
+void ExtensionInfoMap::UnregisterExtensionProcess(
+    const std::string& extension_id,
+    int process_id,
+    int site_instance_id) {
+  if (!process_map_.Remove(extension_id, process_id, site_instance_id)) {
+    NOTREACHED() << "Unknown extension process registration for: "
+                 << extension_id << "," << process_id << ".";
+  }
 }
 
-bool ExtensionInfoMap::AreBindingsEnabledForProcess(
-    int render_process_id) const {
-  // Must behave logically the same as AreBindingsEnabledForProcess() in
-  // extension_process_manager.cc.
-  return extension_bindings_process_ids_.find(render_process_id) !=
-      extension_bindings_process_ids_.end();
+void ExtensionInfoMap::UnregisterAllExtensionsInProcess(int process_id) {
+  process_map_.RemoveAllFromProcess(process_id);
+}
+
+bool ExtensionInfoMap::SecurityOriginHasAPIPermission(
+    const GURL& origin, int process_id,
+    ExtensionAPIPermission::ID permission) const {
+  if (origin.SchemeIs(chrome::kExtensionScheme)) {
+    const std::string& id = origin.host();
+    return extensions_.GetByID(id)->HasAPIPermission(permission) &&
+        process_map_.Contains(id, process_id);
+  }
+
+  ExtensionSet::ExtensionMap::const_iterator i = extensions_.begin();
+  for (; i != extensions_.end(); ++i) {
+    if (i->second->web_extent().MatchesSecurityOrigin(origin) &&
+        process_map_.Contains(i->first, process_id) &&
+        i->second->HasAPIPermission(permission)) {
+      return true;
+    }
+  }
+  return false;
 }

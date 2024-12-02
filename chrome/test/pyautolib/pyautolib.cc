@@ -9,7 +9,6 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/test/automation/automation_proxy.h"
-#include "chrome/test/automation/extension_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/pyautolib/pyautolib.h"
 #include "googleurl/src/gurl.h"
@@ -26,7 +25,9 @@ PyUITestSuiteBase::PyUITestSuiteBase(int argc, char** argv)
 }
 
 PyUITestSuiteBase::~PyUITestSuiteBase() {
+#if defined(OS_MACOSX)
   pool_.Recycle();
+#endif
   Shutdown();
 }
 
@@ -125,6 +126,16 @@ bool PyUITestBase::RunCommand(int browser_command, int window_index) {
   return browser_proxy->RunCommand(browser_command);
 }
 
+bool PyUITestBase::IsMenuCommandEnabled(int id, int window_index) {
+  scoped_refptr<BrowserProxy> browser_proxy =
+      automation()->GetBrowserWindow(window_index);
+  EXPECT_TRUE(browser_proxy.get());
+  bool enabled = false;
+  if (browser_proxy.get())
+    EXPECT_TRUE(browser_proxy->IsMenuCommandEnabled(id, &enabled));
+  return enabled;
+}
+
 bool PyUITestBase::ActivateTab(int tab_index, int window_index) {
   scoped_refptr<BrowserProxy> browser_proxy =
       automation()->GetBrowserWindow(window_index);
@@ -204,22 +215,7 @@ int PyUITestBase::GetBrowserWindowCount() {
   return num_windows;
 }
 
-std::string PyUITestBase::InstallExtension(const std::string& extension_path,
-                                           bool with_ui) {
-#if defined(OS_WIN)
-  FilePath extension_file_path = FilePath(ASCIIToWide(extension_path));
-#else
-  FilePath extension_file_path = FilePath(extension_path);
-#endif
-  scoped_refptr<ExtensionProxy> proxy =
-      automation()->InstallExtension(extension_file_path, with_ui);
-  std::string id;
-  if (!proxy.get() || !proxy.get()->GetId(&id))
-    return "";
-  return id;
-}
-
-bool PyUITestBase::GetBookmarkBarVisibility() {
+bool PyUITestBase::GetBookmarkBarState(bool* visible, bool* detached) {
   scoped_refptr<BrowserProxy> browser_proxy =
       automation()->GetBrowserWindow(0);  // Window doesn't matter.
   EXPECT_TRUE(browser_proxy.get());
@@ -227,9 +223,27 @@ bool PyUITestBase::GetBookmarkBarVisibility() {
     return false;
 
   // We have no use for animating in this context.
-  bool visible, animating;
-  EXPECT_TRUE(browser_proxy->GetBookmarkBarVisibility(&visible, &animating));
+  bool animating;
+  EXPECT_TRUE(browser_proxy->GetBookmarkBarVisibility(visible,
+                                                      &animating,
+                                                      detached));
+  return true;
+}
+
+bool PyUITestBase::GetBookmarkBarVisibility() {
+  // We have no use for detached in this context.
+  bool visible, detached;
+  if (!GetBookmarkBarState(&visible, &detached))
+    return false;
   return visible;
+}
+
+bool PyUITestBase::IsBookmarkBarDetached() {
+  // We have no use for visible in this context.
+  bool visible, detached;
+  if (!GetBookmarkBarState(&visible, &detached))
+    return false;
+  return detached;
 }
 
 bool PyUITestBase::WaitForBookmarkBarVisibilityChange(bool wait_for_open) {

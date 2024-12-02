@@ -12,13 +12,14 @@
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_proxy.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::BrowserThread;
 using webkit_glue::PasswordForm;
 
 // We could localize this string, but then changing your locale would cause

@@ -21,7 +21,6 @@ namespace appcache {
 
 // Defines constants, types, and abstract classes used in the main
 // process and in child processes.
-extern const char kManifestMimeType[];
 
 static const int kNoHostId = 0;
 static const int64 kNoCacheId = 0;
@@ -64,6 +63,7 @@ struct APPCACHE_EXPORT AppCacheInfo {
   base::Time last_update_time;
   base::Time last_access_time;
   int64 cache_id;
+  int64 group_id;
   Status status;
   int64 size;
   bool is_complete;

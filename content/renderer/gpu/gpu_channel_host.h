@@ -15,8 +15,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
 #include "base/synchronization/lock.h"
-#include "content/common/gpu/gpu_info.h"
 #include "content/common/message_router.h"
+#include "content/public/common/gpu_info.h"
 #include "content/renderer/gpu/gpu_video_decode_accelerator_host.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -26,7 +26,6 @@
 #include "ui/gfx/size.h"
 
 class CommandBufferProxy;
-class GpuSurfaceProxy;
 class GURL;
 class TransportTextureService;
 
@@ -67,13 +66,13 @@ class GpuChannelHost : public IPC::Message::Sender,
   void SetStateLost();
 
   // The GPU stats reported by the GPU process.
-  void set_gpu_info(const GPUInfo& gpu_info);
-  const GPUInfo& gpu_info() const;
+  void set_gpu_info(const content::GPUInfo& gpu_info);
+  const content::GPUInfo& gpu_info() const;
 
   void OnChannelError();
 
   // IPC::Message::Sender implementation:
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // Create and connect to a command buffer in the GPU process.
   CommandBufferProxy* CreateViewCommandBuffer(
@@ -150,7 +149,7 @@ class GpuChannelHost : public IPC::Message::Sender,
   // to the correct message loop.
   class MessageFilter : public IPC::ChannelProxy::MessageFilter {
    public:
-    MessageFilter(GpuChannelHost* parent);
+    explicit MessageFilter(GpuChannelHost* parent);
     virtual ~MessageFilter();
 
     void AddRoute(int route_id,
@@ -159,8 +158,8 @@ class GpuChannelHost : public IPC::Message::Sender,
     void RemoveRoute(int route_id);
 
     // IPC::ChannelProxy::MessageFilter implementation:
-    virtual bool OnMessageReceived(const IPC::Message& msg);
-    virtual void OnChannelError();
+    virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+    virtual void OnChannelError() OVERRIDE;
 
    private:
     GpuChannelHost* parent_;
@@ -172,7 +171,7 @@ class GpuChannelHost : public IPC::Message::Sender,
 
   State state_;
 
-  GPUInfo gpu_info_;
+  content::GPUInfo gpu_info_;
 
   scoped_ptr<IPC::SyncChannel> channel_;
   scoped_refptr<MessageFilter> channel_filter_;

@@ -4,42 +4,46 @@
 
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 
+#include <vector>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
-#include "chrome/browser/chromeos/login/views_login_display.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/status/status_area_view.h"
-#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace chromeos {
 
@@ -79,57 +83,64 @@ ExistingUserController* ExistingUserController::current_controller_ = NULL;
 ExistingUserController::ExistingUserController(LoginDisplayHost* host)
     : login_status_consumer_(NULL),
       host_(host),
+      login_display_(host_->CreateLoginDisplay(this)),
       num_login_attempts_(0),
-      user_settings_(new UserCrosSettingsProvider),
+      cros_settings_(CrosSettings::Get()),
       weak_factory_(this),
       is_owner_login_(false) {
   DCHECK(current_controller_ == NULL);
   current_controller_ = this;
 
-  login_display_ = host_->CreateLoginDisplay(this);
-
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
-void ExistingUserController::Init(const UserVector& users) {
-  UserVector filtered_users;
-  if (UserCrosSettingsProvider::cached_show_users_on_signin()) {
-    for (size_t i = 0; i < users.size(); ++i)
+void ExistingUserController::Init(const UserList& users) {
+  UserList filtered_users;
+  bool show_users_on_signin;
+
+  // TODO(pastarmovj): Make this class an observer of the CrosSettings to be
+  // able to update the UI whenever policy is loaded.
+  cros_settings_->GetBoolean(kAccountsPrefShowUserNamesOnSignIn,
+                             &show_users_on_signin);
+  if (show_users_on_signin) {
+    bool allow_new_user = false;
+    cros_settings_->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
+    for (UserList::const_iterator it = users.begin(); it != users.end(); ++it) {
       // TODO(xiyuan): Clean user profile whose email is not in whitelist.
-      if (UserCrosSettingsProvider::cached_allow_new_user() ||
-          UserCrosSettingsProvider::IsEmailInCachedWhitelist(
-              users[i].email())) {
-        filtered_users.push_back(users[i]);
+      if (allow_new_user ||
+          cros_settings_->FindEmailInList(kAccountsPrefUsers,
+                                          (*it)->email())) {
+        filtered_users.push_back(*it);
       }
+    }
   }
 
   // If no user pods are visible, fallback to single new user pod which will
   // have guest session link.
-  bool show_guest = UserCrosSettingsProvider::cached_allow_guest() &&
-                    !filtered_users.empty();
+  bool show_guest;
+  cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &show_guest);
+  show_guest &= !filtered_users.empty();
   bool show_new_user = true;
   login_display_->set_parent_window(GetNativeWindow());
   login_display_->Init(filtered_users, show_guest, show_new_user);
 
   LoginUtils::Get()->PrewarmAuthentication();
-  if (CrosLibrary::Get()->EnsureLoaded())
-    CrosLibrary::Get()->GetLoginLibrary()->EmitLoginPromptReady();
+  DBusThreadManager::Get()->GetSessionManagerClient()->EmitLoginPromptReady();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ExistingUserController, NotificationObserver implementation:
+// ExistingUserController, content::NotificationObserver implementation:
 //
 
-void ExistingUserController::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void ExistingUserController::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type != chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED)
     return;
-
-  UserManager::User* user = Details<UserManager::User>(details).ptr();
-  login_display_->OnUserImageChanged(user);
+  login_display_->OnUserImageChanged(*content::Details<User>(details).ptr());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -143,9 +154,7 @@ ExistingUserController::~ExistingUserController() {
   } else {
     NOTREACHED() << "More than one controller are alive.";
   }
-  DCHECK(login_display_ != NULL);
-  login_display_->Destroy();
-  login_display_ = NULL;
+  DCHECK(login_display_.get());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -165,6 +174,10 @@ string16 ExistingUserController::GetConnectedNetworkName() {
 void ExistingUserController::FixCaptivePortal() {
   guest_mode_url_ = GURL(kCaptivePortalLaunchURL);
   LoginAsGuest();
+}
+
+void ExistingUserController::SetDisplayEmail(const std::string& email) {
+  display_email_ = email;
 }
 
 void ExistingUserController::CompleteLogin(const std::string& username,
@@ -234,7 +247,8 @@ void ExistingUserController::LoginAsGuest() {
 
   // Check allow_guest in case this call is fired from key accelerator.
   // Must not proceed without signature verification.
-  bool trusted_setting_available = user_settings_->RequestTrustedAllowGuest(
+  bool trusted_setting_available = cros_settings_->GetTrusted(
+      kAccountsPrefAllowGuest,
       base::Bind(&ExistingUserController::LoginAsGuest,
                  weak_factory_.GetWeakPtr()));
   if (!trusted_setting_available) {
@@ -242,7 +256,9 @@ void ExistingUserController::LoginAsGuest() {
     // Another attempt will be invoked again after verification completion.
     return;
   }
-  if (!UserCrosSettingsProvider::cached_allow_guest()) {
+  bool allow_guest;
+  cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &allow_guest);
+  if (!allow_guest) {
     // Disallowed.
     return;
   }
@@ -295,7 +311,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
   bool is_known_user =
       UserManager::Get()->IsKnownUser(last_login_attempt_username_);
   NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
-  if (!network || !CrosLibrary::Get()->EnsureLoaded()) {
+  if (!network) {
     ShowError(IDS_LOGIN_ERROR_NO_NETWORK_LIBRARY, error);
   } else if (!network->Connected()) {
     if (is_known_user)
@@ -313,7 +329,7 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
         view->Init();
         view->set_delegate(this);
         views::Widget* window = browser::CreateViewsWindow(
-            GetNativeWindow(), view);
+            GetNativeWindow(), view, STYLE_GENERIC);
         window->SetAlwaysOnTop(true);
         window->Show();
       } else {
@@ -333,7 +349,9 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
       // 1. ClientLogin returns ServiceUnavailable code.
       // 2. Internet connectivity may be behind the captive portal.
       // Suggesting user to try sign in to a portal in Guest mode.
-      if (UserCrosSettingsProvider::cached_allow_guest())
+      bool allow_guest;
+      cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &allow_guest);
+      if (allow_guest)
         ShowError(IDS_LOGIN_ERROR_CAPTIVE_PORTAL, error);
       else
         ShowError(IDS_LOGIN_ERROR_CAPTIVE_PORTAL_NO_GUEST_MODE, error);
@@ -351,6 +369,9 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
 
   if (login_status_consumer_)
     login_status_consumer_->OnLoginFailure(failure);
+
+  // Clear the recorded displayed email so it won't affect any future attempts.
+  display_email_.clear();
 }
 
 void ExistingUserController::OnLoginSuccess(
@@ -376,11 +397,11 @@ void ExistingUserController::OnLoginSuccess(
   // Even in case when following online,offline protocol and returning
   // requests_pending = false, let LoginPerformer delete itself.
   login_performer_->set_delegate(NULL);
-  LoginPerformer* performer = login_performer_.release();
-  performer = NULL;
+  ignore_result(login_performer_.release());
 
   // Will call OnProfilePrepared() in the end.
   LoginUtils::Get()->PrepareProfile(username,
+                                    display_email_,
                                     password,
                                     credentials,
                                     pending_requests,
@@ -388,6 +409,7 @@ void ExistingUserController::OnLoginSuccess(
                                     has_cookies,
                                     this);
 
+  display_email_.clear();
 
   // Notifiy LoginDisplay to allow it provide visual feedback to user.
   login_display_->OnLoginSuccess(username);
@@ -397,7 +419,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
   // TODO(nkostylev): May add login UI implementation callback call.
   if (!ready_for_browser_launch_) {
     // Add the appropriate first-login URL.
-#if !defined(TOUCH_UI)
+    std::vector<std::string> start_urls;
     PrefService* prefs = g_browser_process->local_state();
     const std::string current_locale =
         StringToLowerASCII(prefs->GetString(prefs::kApplicationLocale));
@@ -411,8 +433,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
         url = kGetStartedOwnerURLPattern;
       start_url = base::StringPrintf(url, current_locale.c_str());
     }
-    CommandLine::ForCurrentProcess()->AppendArg(start_url);
-#endif
+    start_urls.push_back(start_url);
 
     ServicesCustomizationDocument* customization =
       ServicesCustomizationDocument::GetInstance();
@@ -422,7 +443,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
       std::string initial_start_page =
           customization->GetInitialStartPage(locale);
       if (!initial_start_page.empty())
-        CommandLine::ForCurrentProcess()->AppendArg(initial_start_page);
+        start_urls.push_back(initial_start_page);
       customization->ApplyCustomization();
     }
 
@@ -430,9 +451,15 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
       // If we have a two factor error and and this is a new user,
       // load the personal settings page.
       // TODO(stevenjb): direct the user to a lightweight sync login page.
-      CommandLine::ForCurrentProcess()->AppendArg(kSettingsSyncLoginURL);
+      start_urls.push_back(kSettingsSyncLoginURL);
     }
 
+    // Don't specify start URLs if the administrator has configured the start
+    // URLs via policy.
+    if (!SessionStartupPref::TypeIsManaged(profile->GetPrefs())) {
+      for (size_t i = 0; i < start_urls.size(); ++i)
+        CommandLine::ForCurrentProcess()->AppendArg(start_urls[i]);
+    }
 #ifndef NDEBUG
     if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kOobeSkipPostLogin)) {
@@ -464,6 +491,11 @@ void ExistingUserController::OnOffTheRecordLoginSuccess() {
     LoginUtils::Get()->CompleteOffTheRecordLogin(guest_mode_url_);
   } else {
     // Postpone CompleteOffTheRecordLogin until registration completion.
+    // TODO(nkostylev): Kind of hack. We have to instruct UserManager here
+    // that we're actually logged in as Guest user as we'll ask UserManager
+    // later in the code path whether we've signed in as Guest and depending
+    // on that would either show image screen or call CompleteOffTheRecordLogin.
+    UserManager::Get()->GuestUserLoggedIn();
     ActivateWizard(WizardController::kRegistrationScreenName);
   }
 
@@ -474,9 +506,11 @@ void ExistingUserController::OnOffTheRecordLoginSuccess() {
 void ExistingUserController::OnPasswordChangeDetected(
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
   // Must not proceed without signature verification.
-  bool trusted_setting_available = user_settings_->RequestTrustedOwner(
+  bool trusted_setting_available = cros_settings_->GetTrusted(
+      kDeviceOwner,
       base::Bind(&ExistingUserController::OnPasswordChangeDetected,
                  weak_factory_.GetWeakPtr(), credentials));
+
   if (!trusted_setting_available) {
     // Value of owner email is still not verified.
     // Another attempt will be invoked after verification completion.
@@ -489,12 +523,16 @@ void ExistingUserController::OnPasswordChangeDetected(
   // TODO(gspencer): We shouldn't have to erase stateful data when
   // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
   PasswordChangedView* view = new PasswordChangedView(this, false);
-  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(), view);
+  views::Widget* window = browser::CreateViewsWindow(GetNativeWindow(),
+                                                     view,
+                                                     STYLE_GENERIC);
   window->SetAlwaysOnTop(true);
   window->Show();
 
   if (login_status_consumer_)
     login_status_consumer_->OnPasswordChangeDetected(credentials);
+
+  display_email_.clear();
 }
 
 void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
@@ -503,6 +541,8 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
   // Reenable clicking on other windows and status area.
   login_display_->SetUIEnabled(true);
   SetStatusAreaEnabled(true);
+
+  display_email_.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -579,7 +619,8 @@ void ExistingUserController::ShowError(int error_id,
 }
 
 void ExistingUserController::SetOwnerUserInCryptohome() {
-  bool trusted_owner_available = user_settings_->RequestTrustedOwner(
+  bool trusted_owner_available = cros_settings_->GetTrusted(
+      kDeviceOwner,
       base::Bind(&ExistingUserController::SetOwnerUserInCryptohome,
                  weak_factory_.GetWeakPtr()));
   if (!trusted_owner_available) {
@@ -587,15 +628,14 @@ void ExistingUserController::SetOwnerUserInCryptohome() {
     // Another attempt will be invoked after verification completion.
     return;
   }
-  if (CrosLibrary::Get()->EnsureLoaded()) {
-    CryptohomeLibrary* cryptohomed = CrosLibrary::Get()->GetCryptohomeLibrary();
-    cryptohomed->AsyncSetOwnerUser(
-        UserCrosSettingsProvider::cached_owner(), NULL);
+  CryptohomeLibrary* cryptohomed = CrosLibrary::Get()->GetCryptohomeLibrary();
+  std::string owner;
+  cros_settings_->GetString(kDeviceOwner, &owner);
+  cryptohomed->AsyncSetOwnerUser(owner, NULL);
 
-    // Do not invoke AsyncDoAutomaticFreeDiskSpaceControl(NULL) here
-    // so it does not delay the following mount. Cleanup will be
-    // started in Cryptohomed by timer.
-  }
+  // Do not invoke AsyncDoAutomaticFreeDiskSpaceControl(NULL) here
+  // so it does not delay the following mount. Cleanup will be
+  // started in Cryptohomed by timer.
 }
 
 }  // namespace chromeos

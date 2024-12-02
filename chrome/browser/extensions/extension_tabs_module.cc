@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/base64.h"
+#include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
@@ -30,6 +31,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/browser/web_applications/web_app.h"
@@ -46,7 +48,8 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -248,6 +251,56 @@ bool GetAllWindowsFunction::RunImpl() {
   return true;
 }
 
+bool CreateWindowFunction::ShouldOpenIncognitoWindow(
+    const base::DictionaryValue* args,
+    std::vector<GURL>* urls,
+    bool* is_error) {
+  *is_error = false;
+  const IncognitoModePrefs::Availability incognito_availability =
+      IncognitoModePrefs::GetAvailability(profile_->GetPrefs());
+  bool incognito = false;
+  if (args && args->HasKey(keys::kIncognitoKey)) {
+    EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kIncognitoKey,
+                                                 &incognito));
+    if (incognito && incognito_availability == IncognitoModePrefs::DISABLED) {
+      error_ = keys::kIncognitoModeIsDisabled;
+      *is_error = true;
+      return false;
+    }
+    if (!incognito && incognito_availability == IncognitoModePrefs::FORCED) {
+      error_ = keys::kIncognitoModeIsForced;
+      *is_error = true;
+      return false;
+    }
+  } else if (incognito_availability == IncognitoModePrefs::FORCED) {
+    // If incognito argument is not specified explicitly, we default to
+    // incognito when forced so by policy.
+    incognito = true;
+  }
+
+  // Remove all URLs that are not allowed in an incognito session. Note that a
+  // ChromeOS guest session is not considered incognito in this case.
+  if (incognito && !Profile::IsGuestSession()) {
+    std::string first_url_erased;
+    for (size_t i = 0; i < urls->size();) {
+      if (browser::IsURLAllowedInIncognito((*urls)[i])) {
+        i++;
+      } else {
+        if (first_url_erased.empty())
+          first_url_erased = (*urls)[i].spec();
+        urls->erase(urls->begin() + i);
+      }
+    }
+    if (urls->empty() && !first_url_erased.empty()) {
+      error_ = ExtensionErrorUtils::FormatErrorMessage(
+          keys::kURLsNotAllowedInIncognitoError, first_url_erased);
+      *is_error = true;
+      return false;
+    }
+  }
+  return incognito;
+}
+
 bool CreateWindowFunction::RunImpl() {
   DictionaryValue* args = NULL;
   std::vector<GURL> urls;
@@ -321,15 +374,13 @@ bool CreateWindowFunction::RunImpl() {
 
   // Try to position the new browser relative its originating browser window.
   gfx::Rect  window_bounds;
-  bool maximized;
   // The call offsets the bounds by kWindowTilePixels (defined in WindowSizer to
   // be 10)
   //
   // NOTE(rafaelw): It's ok if GetCurrentBrowser() returns NULL here.
   // GetBrowserWindowBounds will default to saved "default" values for the app.
   WindowSizer::GetBrowserWindowBounds(std::string(), gfx::Rect(),
-                                      GetCurrentBrowser(), &window_bounds,
-                                      &maximized);
+                                      GetCurrentBrowser(), &window_bounds);
 
   // Calculate popup and panels bounds separately.
   gfx::Rect popup_bounds;
@@ -349,6 +400,18 @@ bool CreateWindowFunction::RunImpl() {
   bool focused = true;
   bool saw_focus_key = false;
   std::string extension_id;
+
+  // Decide whether we are opening a normal window or an incognito window.
+  bool is_error;
+  bool open_incognito_window = ShouldOpenIncognitoWindow(args, &urls,
+                                                         &is_error);
+  if (is_error) {
+    // error_ member variable is set inside of ShouldOpenIncognitoWindow.
+    return false;
+  }
+  if (open_incognito_window) {
+    window_profile = window_profile->GetOffTheRecordProfile();
+  }
 
   if (args) {
     // Any part of the bounds can optionally be set by the caller.
@@ -385,30 +448,6 @@ bool CreateWindowFunction::RunImpl() {
       panel_bounds.set_height(bounds_val);
     }
 
-    bool incognito = false;
-    if (args->HasKey(keys::kIncognitoKey)) {
-      EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kIncognitoKey,
-                                                   &incognito));
-      if (IncognitoModePrefs::GetAvailability(profile_->GetPrefs()) ==
-          IncognitoModePrefs::DISABLED) {
-        error_ = keys::kIncognitoModeIsDisabled;
-        return false;
-      }
-
-      if (incognito) {
-        // Guest session is an exception as it always opens in incognito mode.
-        for (size_t i = 0; i < urls.size();) {
-          if (browser::IsURLAllowedInIncognito(urls[i]) &&
-              !Profile::IsGuestSession()) {
-            urls.erase(urls.begin() + i);
-          } else {
-            i++;
-          }
-        }
-        window_profile = window_profile->GetOffTheRecordProfile();
-      }
-    }
-
     if (args->HasKey(keys::kFocusedKey)) {
       EXTENSION_FUNCTION_VALIDATE(args->GetBoolean(keys::kFocusedKey,
                                                    &focused));
@@ -423,15 +462,14 @@ bool CreateWindowFunction::RunImpl() {
         window_type = Browser::TYPE_POPUP;
         extension_id = GetExtension()->id();
       } else if (type_str == keys::kWindowTypeValuePanel) {
-        if (CommandLine::ForCurrentProcess()->HasSwitch(
-                switches::kEnablePanels)) {
-          window_type = Browser::TYPE_PANEL;
-        } else {
-          window_type = Browser::TYPE_POPUP;
-        }
         extension_id = GetExtension()->id();
+        if (PanelManager::ShouldUsePanels(extension_id))
+          window_type = Browser::TYPE_PANEL;
+        else
+          window_type = Browser::TYPE_POPUP;
       } else if (type_str != keys::kWindowTypeValueNormal) {
-        EXTENSION_FUNCTION_VALIDATE(false);
+        error_ = keys::kInvalidWindowTypeError;
+        return false;
       }
     }
   }
@@ -491,8 +529,40 @@ bool UpdateWindowFunction::RunImpl() {
     return false;
   }
 
+  ui::WindowShowState show_state = ui::SHOW_STATE_DEFAULT;  // No change.
+  std::string state_str;
+  if (update_props->HasKey(keys::kShowStateKey)) {
+    EXTENSION_FUNCTION_VALIDATE(update_props->GetString(keys::kShowStateKey,
+                                                        &state_str));
+    if (state_str == keys::kShowStateValueNormal) {
+      show_state = ui::SHOW_STATE_NORMAL;
+    } else if (state_str == keys::kShowStateValueMinimized) {
+      show_state = ui::SHOW_STATE_MINIMIZED;
+    } else if (state_str == keys::kShowStateValueMaximized) {
+      show_state = ui::SHOW_STATE_MAXIMIZED;
+    } else {
+      error_ = keys::kInvalidWindowStateError;
+      return false;
+    }
+  }
+
+  switch (show_state) {
+    case ui::SHOW_STATE_MINIMIZED:
+      browser->window()->Minimize();
+      break;
+    case ui::SHOW_STATE_MAXIMIZED:
+      browser->window()->Maximize();
+      break;
+    case ui::SHOW_STATE_NORMAL:
+      browser->window()->Restore();
+      break;
+    default:
+      break;
+  }
+
   gfx::Rect bounds = browser->window()->GetRestoredBounds();
   bool set_bounds = false;
+
   // Any part of the bounds can optionally be set by the caller.
   int bounds_val;
   if (update_props->HasKey(keys::kLeftKey)) {
@@ -526,17 +596,33 @@ bool UpdateWindowFunction::RunImpl() {
     bounds.set_height(bounds_val);
     set_bounds = true;
   }
-  if (set_bounds)
+
+  if (set_bounds) {
+    if (show_state == ui::SHOW_STATE_MINIMIZED ||
+        show_state == ui::SHOW_STATE_MAXIMIZED) {
+      error_ = keys::kInvalidWindowStateError;
+      return false;
+    }
     browser->window()->SetBounds(bounds);
+  }
 
   bool active_val = false;
   if (update_props->HasKey(keys::kFocusedKey)) {
     EXTENSION_FUNCTION_VALIDATE(update_props->GetBoolean(
         keys::kFocusedKey, &active_val));
-    if (active_val)
+    if (active_val) {
+      if (show_state == ui::SHOW_STATE_MINIMIZED) {
+        error_ = keys::kInvalidWindowStateError;
+        return false;
+      }
       browser->window()->Activate();
-    else
+    } else {
+      if (show_state == ui::SHOW_STATE_MAXIMIZED) {
+        error_ = keys::kInvalidWindowStateError;
+        return false;
+      }
       browser->window()->Deactivate();
+    }
   }
 
   bool draw_attention = false;
@@ -997,7 +1083,7 @@ bool UpdateTabFunction::RunImpl() {
     }
 
     controller.LoadURL(
-        url, GURL(), content::PAGE_TRANSITION_LINK, std::string());
+        url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 
     // The URL of a tab contents never actually changes to a JavaScript URL, so
     // this check only makes sense in other cases.
@@ -1363,7 +1449,7 @@ bool CaptureVisibleTabFunction::RunImpl() {
   wrapper->CaptureSnapshot();
   registrar_.Add(this,
                  chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN,
-                 Source<TabContentsWrapper>(wrapper));
+                 content::Source<TabContentsWrapper>(wrapper));
   AddRef();  // Balanced in CaptureVisibleTabFunction::Observe().
 
   return true;
@@ -1391,12 +1477,14 @@ bool CaptureVisibleTabFunction::CaptureSnapshotFromBackingStore(
 // If a backing store was not available in CaptureVisibleTabFunction::RunImpl,
 // than the renderer was asked for a snapshot.  Listen for a notification
 // that the snapshot is available.
-void CaptureVisibleTabFunction::Observe(int type,
-                                        const NotificationSource& source,
-                                        const NotificationDetails& details) {
+void CaptureVisibleTabFunction::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN);
 
-  const SkBitmap *screen_capture = Details<const SkBitmap>(details).ptr();
+  const SkBitmap *screen_capture =
+      content::Details<const SkBitmap>(details).ptr();
   const bool error = screen_capture->empty();
 
   if (error) {
@@ -1494,28 +1582,31 @@ bool DetectTabLanguageFunction::RunImpl() {
   if (!helper->language_state().original_language().empty()) {
     // Delay the callback invocation until after the current JS call has
     // returned.
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &DetectTabLanguageFunction::GotLanguage,
+    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+        &DetectTabLanguageFunction::GotLanguage, this,
         helper->language_state().original_language()));
     return true;
   }
   // The tab contents does not know its language yet.  Let's  wait until it
   // receives it, or until the tab is closed/navigates to some other page.
   registrar_.Add(this, chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
-                 Source<TabContents>(contents->tab_contents()));
-  registrar_.Add(this, content::NOTIFICATION_TAB_CLOSING,
-                 Source<NavigationController>(&(contents->controller())));
-  registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                 Source<NavigationController>(&(contents->controller())));
+                 content::Source<TabContents>(contents->tab_contents()));
+  registrar_.Add(
+      this, content::NOTIFICATION_TAB_CLOSING,
+      content::Source<NavigationController>(&(contents->controller())));
+  registrar_.Add(
+      this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::Source<NavigationController>(&(contents->controller())));
   return true;
 }
 
-void DetectTabLanguageFunction::Observe(int type,
-                                        const NotificationSource& source,
-                                        const NotificationDetails& details) {
+void DetectTabLanguageFunction::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   std::string language;
   if (type == chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED)
-    language = *Details<std::string>(details).ptr();
+    language = *content::Details<std::string>(details).ptr();
 
   registrar_.RemoveAll();
 

@@ -6,18 +6,21 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/string_util.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/dom_storage_area.h"
 #include "content/browser/in_process_webkit/dom_storage_namespace.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/common/dom_storage_common.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/quota/special_storage_policy.h"
+
+using content::BrowserThread;
 
 using WebKit::WebSecurityOrigin;
 
@@ -91,9 +94,9 @@ int64 DOMStorageContext::CloneSessionStorage(int64 original_id) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
   int64 clone_id = AllocateSessionStorageNamespaceId();
   BrowserThread::PostTask(
-      BrowserThread::WEBKIT, FROM_HERE, NewRunnableFunction(
-          &DOMStorageContext::CompleteCloningSessionStorage,
-          this, original_id, clone_id));
+      BrowserThread::WEBKIT, FROM_HERE,
+      base::Bind(&DOMStorageContext::CompleteCloningSessionStorage, this,
+                 original_id, clone_id));
   return clone_id;
 }
 

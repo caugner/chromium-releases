@@ -13,6 +13,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "grit/theme_resources.h"
 
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
+#endif
+
 namespace chromeos {
 
 class InputMethodMenuButtonTest : public CrosInProcessBrowserTest {
@@ -26,15 +30,20 @@ class InputMethodMenuButtonTest : public CrosInProcessBrowserTest {
     cros_mock_->SetStatusAreaMocksExpectations();
   }
 
-  InputMethodMenuButton* GetInputMethodMenuButton() {
-    BrowserView* view = static_cast<BrowserView*>(browser()->window());
-    return static_cast<StatusAreaView*>(view->
-        GetViewByID(VIEW_ID_STATUS_AREA))->input_method_view();
+  const InputMethodMenuButton* GetInputMethodMenuButton() {
+    const views::View* view =
+#if defined(USE_AURA)
+        ChromeShellDelegate::instance()->GetStatusArea();
+#else
+        static_cast<BrowserView*>(browser()->window());
+#endif
+    return static_cast<const InputMethodMenuButton*>(
+        view->GetViewByID(VIEW_ID_STATUS_BUTTON_INPUT_METHOD));
   }
 };
 
 IN_PROC_BROWSER_TEST_F(InputMethodMenuButtonTest, InitialIndicatorTest) {
-  InputMethodMenuButton* input_method = GetInputMethodMenuButton();
+  const InputMethodMenuButton* input_method = GetInputMethodMenuButton();
   ASSERT_TRUE(input_method != NULL);
 
   // By default, show the indicator of the hardware keyboard, which is set

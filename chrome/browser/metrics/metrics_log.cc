@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_util.h"
+#include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
 #include "base/string_util.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/metrics/display_utils.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -28,6 +28,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/gpu/gpu_data_manager.h"
 #include "googleurl/src/gurl.h"
+#include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
 
 #define OPEN_ELEMENT_FOR_SCOPE(name) ScopedElement scoped_element(this, name)
@@ -36,6 +37,10 @@
 #if defined(OS_WIN)
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 #endif
+
+static base::LazyInstance<std::string,
+                          base::LeakyLazyInstanceTraits<std::string > >
+  g_version_extension = LAZY_INSTANCE_INITIALIZER;
 
 MetricsLog::MetricsLog(const std::string& client_id, int session_id)
     : MetricsLogBase(client_id, session_id, MetricsLog::GetVersionString()) {}
@@ -81,8 +86,8 @@ std::string MetricsLog::GetVersionString() {
   }
 
   std::string version = version_info.Version();
-  if (!version_extension_.empty())
-    version += version_extension_;
+  if (!version_extension().empty())
+    version += version_extension();
   if (!version_info.IsOfficialBuild())
     version.append("-devel");
   return version;
@@ -90,6 +95,16 @@ std::string MetricsLog::GetVersionString() {
 
 MetricsLog* MetricsLog::AsMetricsLog() {
   return this;
+}
+
+// static
+void MetricsLog::set_version_extension(const std::string& extension) {
+  g_version_extension.Get() = extension;
+}
+
+// static
+const std::string& MetricsLog::version_extension() {
+  return g_version_extension.Get();
 }
 
 void MetricsLog::RecordIncrementalStabilityElements() {
@@ -358,12 +373,10 @@ void MetricsLog::RecordEnvironment(
 
   {
     OPEN_ELEMENT_FOR_SCOPE("display");
-    int width = 0;
-    int height = 0;
-    DisplayUtils::GetPrimaryDisplayDimensions(&width, &height);
-    WriteIntAttribute("xsize", width);
-    WriteIntAttribute("ysize", height);
-    WriteIntAttribute("screens", DisplayUtils::GetDisplayCount());
+    const gfx::Size display_size = gfx::Screen::GetPrimaryMonitorSize();
+    WriteIntAttribute("xsize", display_size.width());
+    WriteIntAttribute("ysize", display_size.height());
+    WriteIntAttribute("screens", gfx::Screen::GetNumMonitors());
   }
 
   {

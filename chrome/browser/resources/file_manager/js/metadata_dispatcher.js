@@ -17,7 +17,10 @@ importScripts('byte_reader.js');
  * Dispatches metadata requests to the correct parser.
  */
 function MetadataDispatcher() {
+  // Make sure to ipdate component_extension_resources.grd
+  // when adding new parsers.
   importScripts('exif_parser.js');
+  importScripts('image_parsers.js');
   importScripts('mpeg_parser.js');
   importScripts('id3_parser.js');
 
@@ -25,7 +28,6 @@ function MetadataDispatcher() {
 
   for (var i = 0; i < MetadataDispatcher.parserClasses_.length; i++) {
     var parserClass = MetadataDispatcher.parserClasses_[i];
-    this.log('new parser: ' + parserClass.parserType);
     var parser = new parserClass(this);
     this.parserInstances_.push(parser);
     patterns.push(parser.urlFilter.source);
@@ -65,7 +67,7 @@ MetadataDispatcher.prototype.messageHandlers = {
           self.postMessage('result', [fileURL, metadata]);
       });
     } catch (ex) {
-      this.error(ex);
+      this.error(fileURL, ex);
     }
   }
 };
@@ -124,8 +126,11 @@ MetadataDispatcher.prototype.processOneFile = function(fileURL, callback) {
     steps[++currentStep].apply(self, arguments);
   }
 
+  var metadata;
+
   function onError(err, stepName) {
-    self.error(fileURL, stepName || steps[currentStep].name, err);
+    self.error(fileURL, stepName || steps[currentStep].name, err.toString(),
+        metadata);
   }
 
   var steps =
@@ -134,6 +139,9 @@ MetadataDispatcher.prototype.processOneFile = function(fileURL, callback) {
       for (var i = 0; i != self.parserInstances_.length; i++) {
         var parser = self.parserInstances_[i];
         if (fileURL.match(parser.urlFilter)) {
+          // Create the metadata object as early as possible so that we can
+          // pass it with the error message.
+          metadata = parser.createDefaultMetadata();
           nextStep(parser);
           return;
         }
@@ -156,7 +164,8 @@ MetadataDispatcher.prototype.processOneFile = function(fileURL, callback) {
 
     // Step four, parse the file content.
     function parseContent(file, parser) {
-      parser.parse(file, callback, onError);
+      metadata.fileSize = file.size;
+      parser.parse(file, metadata, callback, onError);
     }
   ];
 
@@ -182,7 +191,8 @@ MetadataDispatcher.prototype.processOneFile = function(fileURL, callback) {
       function detectFormat(mimeType, arrayBuffer) {
         for (var i = 0; i != self.parserInstances_.length; i++) {
           var parser = self.parserInstances_[i];
-          if (parser.mimeType && mimeType.match(parser.mimeType)) {
+          if (parser.acceptsMimeType(mimeType)) {
+            metadata = parser.createDefaultMetadata();
             var blobBuilder = new WebKitBlobBuilder();
             blobBuilder.append(arrayBuffer);
             nextStep(blobBuilder.getBlob(), parser);

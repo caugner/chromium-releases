@@ -7,6 +7,7 @@
 #ifndef NDEBUG
 #include "base/base64.h"
 #endif
+#include "base/bind.h"
 #include "base/environment.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
@@ -20,7 +21,8 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -28,6 +30,7 @@
 
 using base::Time;
 using base::TimeDelta;
+using content::BrowserThread;
 
 // Maximum time, in seconds, from start up before we must issue an update query.
 static const int kSbTimerStartIntervalSec = 5 * 60;
@@ -168,16 +171,17 @@ void SafeBrowsingProtocolManager::GetFullHash(
   }
   bool use_mac = !client_key_.empty();
   GURL gethash_url = GetHashUrl(use_mac);
-  URLFetcher* fetcher = new URLFetcher(gethash_url, URLFetcher::POST, this);
+  content::URLFetcher* fetcher = content::URLFetcher::Create(
+      gethash_url, content::URLFetcher::POST, this);
   hash_requests_[fetcher] = check;
 
   std::string get_hash;
   SafeBrowsingProtocolParser parser;
   parser.FormatGetHash(prefixes, &get_hash);
 
-  fetcher->set_load_flags(net::LOAD_DISABLE_CACHE);
-  fetcher->set_request_context(request_context_getter_);
-  fetcher->set_upload_data("text/plain", get_hash);
+  fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  fetcher->SetRequestContext(request_context_getter_);
+  fetcher->SetUploadData("text/plain", get_hash);
   fetcher->Start();
 }
 
@@ -195,7 +199,7 @@ void SafeBrowsingProtocolManager::GetNextUpdate() {
     IssueUpdateRequest();
 }
 
-// URLFetcher::Delegate implementation -----------------------------------------
+// content::URLFetcherDelegate implementation ----------------------------------
 
 // All SafeBrowsing request responses are handled here.
 // TODO(paulg): Clarify with the SafeBrowsing team whether a failed parse of a
@@ -206,22 +210,17 @@ void SafeBrowsingProtocolManager::GetNextUpdate() {
 //              do will report all the chunks we have. If that chunk is still
 //              required, the SafeBrowsing servers will tell us to get it again.
 void SafeBrowsingProtocolManager::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
-  scoped_ptr<const URLFetcher> fetcher;
+    const content::URLFetcher* source) {
+  scoped_ptr<const content::URLFetcher> fetcher;
   bool parsed_ok = true;
   bool must_back_off = false;  // Reduce SafeBrowsing service query frequency.
 
   // See if this is a safebrowsing report fetcher. We don't take any action for
   // the response to those.
-  std::set<const URLFetcher*>::iterator sit = safebrowsing_reports_.find(
-      source);
+  std::set<const content::URLFetcher*>::iterator sit =
+      safebrowsing_reports_.find(source);
   if (sit != safebrowsing_reports_.end()) {
-    const URLFetcher* report = *sit;
+    const content::URLFetcher* report = *sit;
     safebrowsing_reports_.erase(sit);
     delete report;
     return;
@@ -234,10 +233,10 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
     SafeBrowsingService::SafeBrowsingCheck* check = it->second;
     std::vector<SBFullHashResult> full_hashes;
     bool can_cache = false;
-    if (response_code == 200 || response_code == 204) {
+    if (source->GetResponseCode() == 200 || source->GetResponseCode() == 204) {
       // For tracking our GetHash false positive (204) rate, compared to real
       // (200) responses.
-      if (response_code == 200)
+      if (source->GetResponseCode() == 200)
         RecordGetHashResult(check->is_download, GET_HASH_STATUS_200);
       else
         RecordGetHashResult(check->is_download, GET_HASH_STATUS_204);
@@ -246,11 +245,14 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       gethash_back_off_mult_ = 1;
       bool re_key = false;
       SafeBrowsingProtocolParser parser;
-      parsed_ok = parser.ParseGetHash(data.data(),
-                                      static_cast<int>(data.length()),
-                                      client_key_,
-                                      &re_key,
-                                      &full_hashes);
+      std::string data;
+      source->GetResponseAsString(&data);
+      parsed_ok = parser.ParseGetHash(
+          data.data(),
+          static_cast<int>(data.length()),
+          client_key_,
+          &re_key,
+          &full_hashes);
       if (!parsed_ok) {
         // If we fail to parse it, we must still inform the SafeBrowsingService
         // so that it doesn't hold up the user's request indefinitely. Not sure
@@ -262,12 +264,12 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       }
     } else {
       HandleGetHashError(Time::Now());
-      if (status.status() == net::URLRequestStatus::FAILED) {
-        VLOG(1) << "SafeBrowsing GetHash request for: " << source->url()
-                << " failed with error: " << status.error();
+      if (source->GetStatus().status() == net::URLRequestStatus::FAILED) {
+        VLOG(1) << "SafeBrowsing GetHash request for: " << source->GetURL()
+                << " failed with error: " << source->GetStatus().error();
       } else {
-        VLOG(1) << "SafeBrowsing GetHash request for: " << source->url()
-                << " failed with error: " << response_code;
+        VLOG(1) << "SafeBrowsing GetHash request for: " << source->GetURL()
+                << " failed with error: " << source->GetResponseCode();
       }
     }
 
@@ -292,13 +294,14 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       update_timer_.Stop();
     }
 
-    if (response_code == 200) {
+    if (source->GetResponseCode() == 200) {
       // We have data from the SafeBrowsing service.
-      parsed_ok = HandleServiceResponse(source->url(),
-                                        data.data(),
-                                        static_cast<int>(data.length()));
+      std::string data;
+      source->GetResponseAsString(&data);
+      parsed_ok = HandleServiceResponse(
+          source->GetURL(), data.data(), static_cast<int>(data.length()));
       if (!parsed_ok) {
-        VLOG(1) << "SafeBrowsing request for: " << source->url()
+        VLOG(1) << "SafeBrowsing request for: " << source->GetURL()
                 << " failed parse.";
         must_back_off = true;
         chunk_request_urls_.clear();
@@ -336,12 +339,12 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       if (request_type_ == CHUNK_REQUEST)
         chunk_request_urls_.clear();
       UpdateFinished(false);
-      if (status.status() == net::URLRequestStatus::FAILED) {
-        VLOG(1) << "SafeBrowsing request for: " << source->url()
-                << " failed with error: " << status.error();
+      if (source->GetStatus().status() == net::URLRequestStatus::FAILED) {
+        VLOG(1) << "SafeBrowsing request for: " << source->GetURL()
+                << " failed with error: " << source->GetStatus().error();
       } else {
-        VLOG(1) << "SafeBrowsing request for: " << source->url()
-                << " failed with error: " << response_code;
+        VLOG(1) << "SafeBrowsing request for: " << source->GetURL()
+                << " failed with error: " << source->GetResponseCode();
       }
     }
   }
@@ -431,7 +434,7 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
         std::string data_str;
         data_str.assign(data, length);
         std::string encoded_chunk;
-        base::Base64Encode(data, &encoded_chunk);
+        base::Base64Encode(data_str, &encoded_chunk);
         VLOG(1) << "ParseChunk error for chunk: " << chunk_url.url
                 << ", client_key: " << client_key_
                 << ", wrapped_key: " << wrapped_key_
@@ -462,9 +465,8 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
       wrapped_key_ = wrapped_key;
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(
-              sb_service_, &SafeBrowsingService::OnNewMacKeys, client_key_,
-              wrapped_key_));
+          base::Bind(&SafeBrowsingService::OnNewMacKeys,
+                     sb_service_, client_key_, wrapped_key_));
       break;
     }
 
@@ -562,9 +564,10 @@ void SafeBrowsingProtocolManager::IssueChunkRequest() {
   DCHECK(!next_chunk.url.empty());
   GURL chunk_url = NextChunkUrl(next_chunk.url);
   request_type_ = CHUNK_REQUEST;
-  request_.reset(new URLFetcher(chunk_url, URLFetcher::GET, this));
-  request_->set_load_flags(net::LOAD_DISABLE_CACHE);
-  request_->set_request_context(request_context_getter_);
+  request_.reset(content::URLFetcher::Create(
+      chunk_url, content::URLFetcher::GET, this));
+  request_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  request_->SetRequestContext(request_context_getter_);
   chunk_request_start_ = base::Time::Now();
   request_->Start();
 }
@@ -572,9 +575,10 @@ void SafeBrowsingProtocolManager::IssueChunkRequest() {
 void SafeBrowsingProtocolManager::IssueKeyRequest() {
   GURL key_url = MacKeyUrl();
   request_type_ = GETKEY_REQUEST;
-  request_.reset(new URLFetcher(key_url, URLFetcher::GET, this));
-  request_->set_load_flags(net::LOAD_DISABLE_CACHE);
-  request_->set_request_context(request_context_getter_);
+  request_.reset(content::URLFetcher::Create(
+      key_url, content::URLFetcher::GET, this));
+  request_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  request_->SetRequestContext(request_context_getter_);
   request_->Start();
 }
 
@@ -613,10 +617,11 @@ void SafeBrowsingProtocolManager::OnGetChunksComplete(
         SBListChunkRanges(safe_browsing_util::kMalwareList), use_mac));
 
   GURL update_url = UpdateUrl(use_mac);
-  request_.reset(new URLFetcher(update_url, URLFetcher::POST, this));
-  request_->set_load_flags(net::LOAD_DISABLE_CACHE);
-  request_->set_request_context(request_context_getter_);
-  request_->set_upload_data("text/plain", list_data);
+  request_.reset(content::URLFetcher::Create(
+      update_url, content::URLFetcher::POST, this));
+  request_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  request_->SetRequestContext(request_context_getter_);
+  request_->SetUploadData("text/plain", list_data);
   request_->Start();
 
   // Begin the update request timeout.
@@ -656,12 +661,14 @@ void SafeBrowsingProtocolManager::ReportSafeBrowsingHit(
   GURL report_url = SafeBrowsingHitUrl(malicious_url, page_url,
                                        referrer_url, is_subresource,
                                        threat_type);
-  URLFetcher* report = new URLFetcher(
-      report_url, post_data.empty() ? URLFetcher::GET : URLFetcher::POST, this);
-  report->set_load_flags(net::LOAD_DISABLE_CACHE);
-  report->set_request_context(request_context_getter_);
+  content::URLFetcher* report = content::URLFetcher::Create(
+      report_url,
+      post_data.empty() ? content::URLFetcher::GET : content::URLFetcher::POST,
+      this);
+  report->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  report->SetRequestContext(request_context_getter_);
   if (!post_data.empty())
-    report->set_upload_data("text/plain", post_data);
+    report->SetUploadData("text/plain", post_data);
   report->Start();
   safebrowsing_reports_.insert(report);
 }
@@ -670,12 +677,13 @@ void SafeBrowsingProtocolManager::ReportSafeBrowsingHit(
 void SafeBrowsingProtocolManager::ReportMalwareDetails(
     const std::string& report) {
   GURL report_url = MalwareDetailsUrl();
-  URLFetcher* fetcher = new URLFetcher(report_url, URLFetcher::POST, this);
-  fetcher->set_load_flags(net::LOAD_DISABLE_CACHE);
-  fetcher->set_request_context(request_context_getter_);
-  fetcher->set_upload_data("application/octet-stream", report);
+  content::URLFetcher* fetcher = content::URLFetcher::Create(
+      report_url, content::URLFetcher::POST, this);
+  fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  fetcher->SetRequestContext(request_context_getter_);
+  fetcher->SetUploadData("application/octet-stream", report);
   // Don't try too hard to send reports on failures.
-  fetcher->set_automatically_retry_on_5xx(false);
+  fetcher->SetAutomaticallyRetryOn5xx(false);
   fetcher->Start();
   safebrowsing_reports_.insert(fetcher);
 }

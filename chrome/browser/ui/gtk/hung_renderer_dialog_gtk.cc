@@ -13,10 +13,10 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/logging_chrome.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/result_codes.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -33,7 +33,7 @@ namespace {
 class HungRendererDialogGtk {
  public:
   HungRendererDialogGtk();
-  virtual ~HungRendererDialogGtk() {}
+  ~HungRendererDialogGtk() {}
   void ShowForTabContents(TabContents* hung_contents);
   void Hide();
   void EndForTabContents(TabContents* hung_contents);
@@ -49,7 +49,7 @@ class HungRendererDialogGtk {
     }
 
     // TabContentsObserver overrides:
-    virtual void RenderViewGone() OVERRIDE {
+    virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE {
       dialog_->Hide();
     }
     virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE {

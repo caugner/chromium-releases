@@ -23,11 +23,13 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
 using base::TimeDelta;
+
+using content::BrowserThread;
 
 namespace {
 
@@ -151,8 +153,8 @@ class ShortcutsProviderTest : public testing::Test,
                std::string expected_top_result);
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   scoped_ptr<TestingProfile> profile_;
 

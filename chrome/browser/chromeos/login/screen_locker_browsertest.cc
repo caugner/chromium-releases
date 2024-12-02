@@ -19,22 +19,23 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "views/controls/textfield/textfield.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/widget/native_widget_gtk.h"
 
 namespace {
 
 // An object that wait for lock state and fullscreen state.
-class Waiter : public NotificationObserver {
+class Waiter : public content::NotificationObserver {
  public:
   explicit Waiter(Browser* browser)
       : browser_(browser),
         running_(false) {
     registrar_.Add(this,
                    chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
     handler_id_ = g_signal_connect(
         G_OBJECT(browser_->window()->GetNativeHandle()),
         "window-state-event",
@@ -49,8 +50,8 @@ class Waiter : public NotificationObserver {
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     DCHECK(type == chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED);
     if (running_)
       MessageLoop::current()->Quit();
@@ -76,7 +77,7 @@ class Waiter : public NotificationObserver {
  private:
   Browser* browser_;
   gulong handler_id_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Are we currently running the message loop?
   bool running_;
@@ -111,13 +112,13 @@ class ScreenLockerTest : public CrosInProcessBrowserTest {
     EXPECT_CALL(*mock_screen_lock_library_, NotifyScreenLockCompleted())
         .Times(1)
         .RetiresOnSaturation();
-    UserManager::Get()->OffTheRecordUserLoggedIn();
+    UserManager::Get()->GuestUserLoggedIn();
     ScreenLocker::Show();
     scoped_ptr<test::ScreenLockerTester> tester(ScreenLocker::GetTester());
     tester->EmulateWindowManagerReady();
     ui_test_utils::WindowedNotificationObserver lock_state_observer(
         chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-        NotificationService::AllSources());
+        content::NotificationService::AllSources());
     if (!chromeos::ScreenLocker::GetTester()->IsLocked())
       lock_state_observer.Wait();
     EXPECT_TRUE(tester->IsLocked());
@@ -141,7 +142,7 @@ class ScreenLockerTest : public CrosInProcessBrowserTest {
     tester->EmulateWindowManagerReady();
     ui_test_utils::WindowedNotificationObserver lock_state_observer(
         chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-        NotificationService::AllSources());
+        content::NotificationService::AllSources());
     if (!tester->IsLocked())
       lock_state_observer.Wait();
     EXPECT_TRUE(tester->IsLocked());
@@ -187,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(ScreenLockerTest, DISABLED_TestBasic) {
   tester->EmulateWindowManagerReady();
   ui_test_utils::WindowedNotificationObserver lock_state_observer(
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   if (!chromeos::ScreenLocker::GetTester()->IsLocked())
     lock_state_observer.Wait();
 

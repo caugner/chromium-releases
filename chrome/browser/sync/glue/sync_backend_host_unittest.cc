@@ -12,14 +12,16 @@
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/browser/sync/syncable/model_type.h"
+#include "chrome/test/base/test_url_request_context_getter.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/test_url_request_context_getter.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -37,7 +39,9 @@ class MockSyncFrontend : public SyncFrontend {
   MOCK_METHOD0(OnClearServerDataFailed, void());
   MOCK_METHOD1(OnPassphraseRequired, void(sync_api::PassphraseRequiredReason));
   MOCK_METHOD0(OnPassphraseAccepted, void());
-  MOCK_METHOD1(OnEncryptionComplete, void(const syncable::ModelTypeSet&));
+  MOCK_METHOD2(OnEncryptedTypesChanged,
+               void(const syncable::ModelTypeSet&, bool));
+  MOCK_METHOD0(OnEncryptionComplete, void());
   MOCK_METHOD1(OnMigrationNeededForTypes, void(const syncable::ModelTypeSet&));
   MOCK_METHOD1(OnDataTypesChanged, void(const syncable::ModelTypeSet&));
   MOCK_METHOD1(OnActionableError,
@@ -55,9 +59,7 @@ class SyncBackendHostTest : public testing::Test {
   virtual ~SyncBackendHostTest() {}
 
   virtual void SetUp() {
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
+    io_thread_.StartIOThread();
   }
 
   virtual void TearDown() {
@@ -71,8 +73,8 @@ class SyncBackendHostTest : public testing::Test {
 
  private:
   MessageLoop ui_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
 };
 
 TEST_F(SyncBackendHostTest, InitShutdown) {

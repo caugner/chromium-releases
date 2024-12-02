@@ -14,18 +14,17 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
-#include "chrome/browser/ui/views/accessible_pane_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/reload_button.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/animation/slide_animation.h"
-#include "ui/base/models/accelerator.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/menu/view_menu_delegate.h"
-#include "views/view.h"
+#include "ui/views/accessible_pane_view.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/view.h"
 
 class BrowserActionsContainer;
 class Browser;
-class Profile;
 class WrenchMenu;
 
 namespace views {
@@ -33,16 +32,16 @@ class MenuListener;
 }
 
 // The Browser Window's toolbar.
-class ToolbarView : public AccessiblePaneView,
+class ToolbarView : public views::AccessiblePaneView,
                     public views::ViewMenuDelegate,
                     public ui::AcceleratorProvider,
                     public LocationBarView::Delegate,
-                    public NotificationObserver,
+                    public content::NotificationObserver,
                     public CommandUpdater::CommandObserver,
                     public views::ButtonListener {
  public:
   // The view class name.
-  static char kViewClassName[];
+  static const char kViewClassName[];
 
   explicit ToolbarView(Browser* browser);
   virtual ~ToolbarView();
@@ -58,13 +57,13 @@ class ToolbarView : public AccessiblePaneView,
 
   // Set focus to the toolbar with complete keyboard access, with the
   // focus initially set to the location bar. Focus will be restored
-  // to the ViewStorage with id |view_storage_id| if the user escapes.
-  void SetPaneFocusAndFocusLocationBar(int view_storage_id);
+  // to the last focused view if the user escapes.
+  void SetPaneFocusAndFocusLocationBar();
 
   // Set focus to the toolbar with complete keyboard access, with the
   // focus initially set to the app menu. Focus will be restored
-  // to the ViewStorage with id |view_storage_id| if the user escapes.
-  void SetPaneFocusAndFocusAppMenu(int view_storage_id);
+  // to the last focused view if the user escapes.
+  void SetPaneFocusAndFocusAppMenu();
 
   // Returns true if the app menu is focused.
   bool IsAppMenuFocused();
@@ -89,7 +88,7 @@ class ToolbarView : public AccessiblePaneView,
   views::MenuButton* app_menu() const { return app_menu_; }
 
   // Overridden from AccessiblePaneView
-  virtual bool SetPaneFocus(int view_storage_id, View* initial_focus) OVERRIDE;
+  virtual bool SetPaneFocus(View* initial_focus) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // Overridden from views::ViewMenuDelegate:
@@ -107,10 +106,10 @@ class ToolbarView : public AccessiblePaneView,
   virtual void ButtonPressed(views::Button* sender, const views::Event& event)
       OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from ui::AcceleratorProvider:
   virtual bool GetAcceleratorForCommandId(
@@ -128,6 +127,7 @@ class ToolbarView : public AccessiblePaneView,
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
+  virtual bool AcceleratorPressed(const ui::Accelerator& acc) OVERRIDE;
 
   // The apparent horizontal space between most items, and the vertical padding
   // above and below them.
@@ -137,7 +137,6 @@ class ToolbarView : public AccessiblePaneView,
   static const int kVertSpacing;
 
  protected:
-
   // Overridden from AccessiblePaneView
   virtual views::View* GetDefaultFocusableChild() OVERRIDE;
   virtual void RemovePaneFocus() OVERRIDE;
@@ -171,8 +170,8 @@ class ToolbarView : public AccessiblePaneView,
   // Shows the critical notification bubble against the wrench menu.
   void ShowCriticalNotification();
 
-  // Updates the badge on the app menu (Wrench).
-  void UpdateAppMenuBadge();
+  // Updates the badge and the accessible name of the app menu (Wrench).
+  void UpdateAppMenuState();
 
   // Gets a badge for the wrench icon corresponding to the number of
   // unacknowledged background pages in the system.
@@ -209,7 +208,7 @@ class ToolbarView : public AccessiblePaneView,
   // A list of listeners to call when the menu opens.
   ObserverList<views::MenuListener> menu_listeners_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ToolbarView);
 };

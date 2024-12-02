@@ -6,32 +6,31 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_BACKGROUND_VIEW_H_
 #pragma once
 
+#include <string>
+
 #include "chrome/browser/chromeos/login/login_html_dialog.h"
-#include "chrome/browser/chromeos/status/status_area_host.h"
 #include "chrome/browser/chromeos/login/version_info_updater.h"
-#include "views/view.h"
+#include "chrome/browser/chromeos/status/status_area_button.h"
+#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
+#include "ui/views/view.h"
+
+class DOMView;
+class GURL;
 
 namespace views {
 class Label;
-class TextButton;
 class Widget;
 class WidgetDelegate;
 }
 
-class DOMView;
-class GURL;
-class Profile;
-
 namespace chromeos {
 
-class OobeProgressBar;
 class ShutdownButton;
-class StatusAreaView;
 
 // View used to render the background during login. BackgroundView contains
 // StatusAreaView.
 class BackgroundView : public views::View,
-                       public StatusAreaHost,
+                       public StatusAreaButton::Delegate,
                        public LoginHtmlDialog::Delegate,
                        public VersionInfoUpdater::Delegate {
  public:
@@ -68,23 +67,14 @@ class BackgroundView : public views::View,
   // Create a modal popup view.
   void CreateModalPopup(views::WidgetDelegate* view);
 
-  // Overridden from StatusAreaHost:
-  virtual gfx::NativeWindow GetNativeWindow() const;
+  // Gets the native window from the view widget.
+  gfx::NativeWindow GetNativeWindow() const;
 
   // Toggles status area visibility.
   void SetStatusAreaVisible(bool visible);
 
   // Toggles whether status area is enabled.
   void SetStatusAreaEnabled(bool enable);
-
-  // Toggles OOBE progress bar visibility, the bar is hidden by default.
-  void SetOobeProgressBarVisible(bool visible);
-
-  // Gets progress bar visibility.
-  bool IsOobeProgressBarVisible();
-
-  // Sets current step on OOBE progress bar.
-  void SetOobeProgress(LoginStep step);
 
   // Shows screen saver.
   void ShowScreenSaver();
@@ -109,14 +99,13 @@ class BackgroundView : public views::View,
   virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
   virtual void OnLocaleChanged() OVERRIDE;
 
-  // Overridden from StatusAreaHost:
-  virtual Profile* GetProfile() const OVERRIDE;
-  virtual void ExecuteBrowserCommand(int id) const OVERRIDE {}
-  virtual bool ShouldOpenButtonOptions(
-      const views::View* button_view) const OVERRIDE;
-  virtual void OpenButtonOptions(const views::View* button_view) OVERRIDE;
-  virtual ScreenMode GetScreenMode() const OVERRIDE;
-  virtual TextStyle GetTextStyle() const OVERRIDE;
+  // Overridden from StatusAreaButton::Delegate:
+  virtual bool ShouldExecuteStatusAreaCommand(
+      const views::View* button_view, int command_id) const OVERRIDE;
+  virtual void ExecuteStatusAreaCommand(
+      const views::View* button_view, int command_id) OVERRIDE;
+  virtual gfx::Font GetStatusAreaFont(const gfx::Font& font) const OVERRIDE;
+  virtual StatusAreaButton::TextStyle GetStatusAreaTextStyle() const OVERRIDE;
   virtual void ButtonVisibilityChanged(views::View* button_view) OVERRIDE;
 
   // Overridden from LoginHtmlDialog::Delegate:
@@ -133,18 +122,15 @@ class BackgroundView : public views::View,
   void InitStatusArea();
   // Creates and adds the labels for version and boot time.
   void InitInfoLabels();
-  // Creates and add OOBE progress bar.
-  void InitProgressBar();
 
   // Invokes SetWindowType for the window. This is invoked during startup and
   // after we've painted.
   void UpdateWindowType();
 
   // All of these variables could be NULL.
-  StatusAreaView* status_area_;
+  StatusAreaViewChromeos* status_area_;
   views::Label* os_version_label_;
   views::Label* boot_times_label_;
-  OobeProgressBar* progress_bar_;
   ShutdownButton* shutdown_button_;
 
   // True if running official BUILD.

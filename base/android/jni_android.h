@@ -30,6 +30,18 @@ void InitApplicationContext(jobject context);
 // Returns the application context assigned by InitApplicationContext().
 jobject GetApplicationContext();
 
+// Gets the method ID from the class name. Clears the pending Java exception
+// and returns NULL if the method is not found. Caches results. Note that
+// GetMethodID() below avoids a class lookup, but does not cache results.
+// Strings passed to this function are held in the cache and MUST remain valid
+// beyond the duration of all future calls to this function, across all
+// threads. In practice, this means that the function should only be used with
+// string constants.
+jmethodID GetMethodIDFromClassName(JNIEnv* env,
+                                   const char* class_name,
+                                   const char* method,
+                                   const char* jni_signature);
+
 // Get the method ID for a method. Will clear the pending Java
 // exception and return 0 if the method is not found.
 jmethodID GetMethodID(JNIEnv* env,
@@ -44,8 +56,15 @@ jmethodID GetStaticMethodID(JNIEnv* env,
                             const char* const method,
                             const char* const jni_signature);
 
-// Returns true if an exception is pending in the provided JNIEnv*.
-// If an exception is pending, it is printed.
+// Gets the field ID for a class field. Clears the pending Java exception and
+// returns NULL if the field is not found.
+jfieldID GetFieldID(JNIEnv* env,
+                    jclass clazz,
+                    const char* field,
+                    const char* jni_signature);
+
+// Returns true if an exception is pending in the provided JNIEnv*. If an
+// exception is pending, this function prints and then clears it.
 bool CheckException(JNIEnv* env);
 
 }  // namespace android

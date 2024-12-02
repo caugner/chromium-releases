@@ -13,6 +13,7 @@
 #include "chrome/browser/importer/profile_import_process_messages.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_utility_messages.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
@@ -31,8 +32,6 @@
 #include "base/path_service.h"
 #include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
-#include "content/common/child_process_messages.h"
-#include "content/common/sandbox_init_wrapper.h"
 #include "content/public/common/content_switches.h"
 #include "printing/emf_win.h"
 #endif  // defined(OS_WIN)
@@ -95,8 +94,13 @@ bool ChromeContentUtilityClient::Send(IPC::Message* message) {
 }
 
 void ChromeContentUtilityClient::OnUnpackExtension(
-    const FilePath& extension_path) {
-  ExtensionUnpacker unpacker(extension_path);
+    const FilePath& extension_path, int location, int creation_flags) {
+  CHECK(location > Extension::INVALID);
+  CHECK(location < Extension::NUM_LOCATIONS);
+  ExtensionUnpacker unpacker(
+      extension_path,
+      static_cast<Extension::Location>(location),
+      creation_flags);
   if (unpacker.Run() && unpacker.DumpImagesToFile() &&
       unpacker.DumpMessageCatalogsToFile()) {
     Send(new ChromeUtilityHostMsg_UnpackExtension_Succeeded(
@@ -234,12 +238,9 @@ DWORD WINAPI UtilityProcess_GetFontDataPatch(
     LOGFONT logfont;
     if (GetObject(font, sizeof(LOGFONT), &logfont)) {
       std::vector<char> font_data;
-      if (content::UtilityThread::Get()->Send(
-              new ChildProcessHostMsg_PreCacheFont(logfont))) {
-        rv = GetFontData(hdc, table, offset, buffer, length);
-        content::UtilityThread::Get()->Send(
-            new ChildProcessHostMsg_ReleaseCachedFonts());
-      }
+      content::UtilityThread::Get()->PreCacheFont(logfont);
+      rv = GetFontData(hdc, table, offset, buffer, length);
+      content::UtilityThread::Get()->ReleaseCachedFonts();
     }
   }
   return rv;
@@ -373,7 +374,8 @@ void ChromeContentUtilityClient::OnImportStart(
     const importer::SourceProfile& source_profile,
     uint16 items,
     const DictionaryValue& localized_strings) {
-  bridge_ = new ExternalProcessImporterBridge(localized_strings);
+  bridge_ = new ExternalProcessImporterBridge(
+      localized_strings, content::UtilityThread::Get());
   importer_ = importer::CreateImporterByType(source_profile.importer_type);
   if (!importer_) {
     Send(new ProfileImportProcessHostMsg_Import_Finished(false,

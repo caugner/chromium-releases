@@ -11,12 +11,6 @@
 #include "media/base/video_frame.h"
 #include "remoting/protocol/connection_to_host.h"
 
-class MessageLoop;
-
-namespace base {
-class WaitableEvent;
-}  // namespace base
-
 namespace remoting {
 
 static const uint32 kCreatedColor = 0xffccccff;
@@ -55,11 +49,6 @@ class ChromotingView {
   // Record the update the state of the connection, updating the UI as needed.
   virtual void SetConnectionState(protocol::ConnectionToHost::State state,
                                   protocol::ConnectionToHost::Error error) = 0;
-
-  // Update the status of the last login attempt. Updating the UI as needed.
-  // |success| is set to true if the last login successful otherwise false.
-  // |info| contains the error information if available.
-  virtual void UpdateLoginStatus(bool success, const std::string& info) = 0;
 
   // Return the horizontal scale factor of this view.
   virtual double GetHorizontalScaleRatio() const = 0;

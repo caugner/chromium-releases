@@ -6,10 +6,10 @@
 #define UI_AURA_SHELL_EXAMPLES_WINDOW_TYPE_LAUNCHER_H_
 #pragma once
 
-#include "views/context_menu_controller.h"
-#include "views/controls/button/button.h"
-#include "views/controls/menu/menu_delegate.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace views {
 class MenuRunner;
@@ -66,6 +66,9 @@ class WindowTypeLauncher : public views::WidgetDelegateView,
   views::NativeTextButton* bubble_button_;
   views::NativeTextButton* lock_button_;
   views::NativeTextButton* widgets_button_;
+  views::NativeTextButton* modal_button_;
+  views::NativeTextButton* transient_button_;
+  views::NativeTextButton* examples_button_;
   scoped_ptr<views::MenuRunner> menu_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowTypeLauncher);

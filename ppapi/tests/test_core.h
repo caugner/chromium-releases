@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef PPAPI_TEST_TEST_CORE_H_
-#define PPAPI_TEST_TEST_CORE_H_
+#ifndef PPAPI_TESTS_TEST_CORE_H_
+#define PPAPI_TESTS_TEST_CORE_H_
 
 #include <string>
 
 #include "ppapi/tests/test_case.h"
-
-struct PPB_Core;
 
 class TestCore : public TestCase {
  public:
@@ -18,12 +16,10 @@ class TestCore : public TestCase {
  private:
   // TestCase implementation.
   virtual bool Init();
-  virtual void RunTest();
+  virtual void RunTests(const std::string& filter);
 
   std::string TestTime();
   std::string TestTimeTicks();
-
 };
 
-#endif  // PPAPI_TEST_TEST_CORE_H_
-
+#endif  // PPAPI_TESTS_TEST_CORE_H_

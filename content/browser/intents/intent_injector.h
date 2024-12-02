@@ -10,23 +10,17 @@
 #include "base/string16.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/common/content_export.h"
-#include "content/common/intents_messages.h"
-
-class RenderViewHost;
-class TabContents;
+#include "webkit/glue/web_intent_reply_data.h"
 
 namespace webkit_glue {
 struct WebIntentData;
 }
 
-namespace IPC {
-class Message;
-}
-
 // Injects an intent into the renderer of a TabContents. The intent dispatch
 // logic will create one of these to take care of passing intent data down into
 // the context of the service, which will be running in the TabContents on which
-// this class is an observer. Deletes itself when the tab is closed.
+// this class is an observer. Attaches to the service tab and deletes itself
+// when that TabContents is closed.
 class CONTENT_EXPORT IntentInjector : public TabContentsObserver {
  public:
   // |tab_contents| must not be NULL.
@@ -35,16 +29,20 @@ class CONTENT_EXPORT IntentInjector : public TabContentsObserver {
 
   // TabContentsObserver implementation.
   virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void DidNavigateMainFramePostCommit(
+  virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
 
+  // Used to notify the object that the source tab has been destroyed.
+  virtual void SourceTabContentsDestroyed(TabContents* tab);
+
   // Sets the intent data to be injected. Call after the user has selected a
   // service to pass the intent data to that service.
-  // |source_tab| is a sender to use to communicate to the source tab. Takes
-  // ownership of |source_tab|.
+  // |source_tab| is a sender to use to communicate to the source tab. The
+  // caller must ensure that SourceTabContentsDestroyed is called when this
+  // object becomes unusable.
   // |intent| is the intent data from the source
   // |intent_id| is the ID assigned to the intent invocation from the source
   // context.
@@ -65,8 +63,8 @@ class CONTENT_EXPORT IntentInjector : public TabContentsObserver {
   // Source intent data provided by caller.
   scoped_ptr<webkit_glue::WebIntentData> source_intent_;
 
-  // The tab invoking the intent.
-  scoped_ptr<IPC::Message::Sender> source_tab_;
+  // Weak pointer to the message forwarder to the tab invoking the intent.
+  IPC::Message::Sender* source_tab_;
 
   // Unique ID assigned to the intent by the source tab.
   int intent_id_;

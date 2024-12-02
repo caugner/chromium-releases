@@ -15,7 +15,7 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
-#include "views/controls/message_box_view.h"
+#include "ui/views/controls/message_box_view.h"
 
 namespace browser {
 
@@ -55,10 +55,10 @@ string16 RepostFormWarningView::GetWindowTitle() const {
 }
 
 string16 RepostFormWarningView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_HTTP_POST_WARNING_RESEND);
-  if (button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL)
+  if (button == ui::DIALOG_BUTTON_CANCEL)
     return l10n_util::GetStringUTF16(IDS_CANCEL);
   return string16();
 }

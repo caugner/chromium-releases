@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
@@ -12,11 +13,12 @@
 #include "chrome/browser/history/shortcuts_backend.h"
 #include "chrome/browser/history/shortcuts_database.h"
 #include "chrome/common/guid.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "sql/statement.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
 using shortcuts_provider::Shortcut;
 using shortcuts_provider::ShortcutMap;
 
@@ -43,8 +45,8 @@ class ShortcutsBackendTest : public testing::Test,
   ScopedTempDir temp_dir_;
   scoped_refptr<ShortcutsBackend> backend_;
   MessageLoopForUI ui_message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
 
   bool load_notified_;
 };

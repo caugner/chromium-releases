@@ -11,12 +11,12 @@
 #include "net/http/http_util.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPBody.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPBody.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -42,33 +42,6 @@ namespace {
 
 const int32_t kDefaultPrefetchBufferUpperThreshold = 100 * 1000 * 1000;
 const int32_t kDefaultPrefetchBufferLowerThreshold = 50 * 1000 * 1000;
-
-bool IsValidToken(const std::string& token) {
-  size_t length = token.size();
-  if (length == 0)
-    return false;
-
-  for (size_t i = 0; i < length; i++) {
-    char c = token[i];
-    if (c >= 127 || c <= 32)
-      return false;
-    if (c == '(' || c == ')' || c == '<' || c == '>' || c == '@' ||
-        c == ',' || c == ';' || c == ':' || c == '\\' || c == '\"' ||
-        c == '/' || c == '[' || c == ']' || c == '?' || c == '=' ||
-        c == '{' || c == '}')
-      return false;
-  }
-  return true;
-}
-
-bool AreValidHeaders(const std::string& headers) {
-  net::HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\n");
-  while (it.GetNext()) {
-    if (!net::HttpUtil::IsSafeHeader(it.name()))
-      return false;
-  }
-  return true;
-}
 
 }  // namespace
 
@@ -132,13 +105,11 @@ bool PPB_URLRequestInfo_Impl::ToWebURLRequest(WebFrame* frame,
     dest->setHTTPBody(http_body);
   }
 
-  if (data().has_custom_referrer_url) {
-    if (!data().custom_referrer_url.empty())
-      frame->setReferrerForRequest(*dest, GURL(data().custom_referrer_url));
-  } else if (!data().allow_cross_origin_requests) {
-    // Use default, except for cross-origin requests, since 'referer' is not
-    // whitelisted and will cause the request to fail.
-    frame->setReferrerForRequest(*dest, WebURL());
+  // Add the "Referer" header if there is a custom referrer. Such requests
+  // require universal access. For all other requests, "Referer" will be set
+  // after header security checks are done in AssociatedURLLoader.
+  if (data().has_custom_referrer_url && !data().custom_referrer_url.empty()) {
+    frame->setReferrerForRequest(*dest, GURL(data().custom_referrer_url));
   }
 
   if (data().has_custom_content_transfer_encoding) {
@@ -160,17 +131,6 @@ bool PPB_URLRequestInfo_Impl::RequiresUniversalAccess() const {
 }
 
 bool PPB_URLRequestInfo_Impl::ValidateData() {
-  // Method should either be empty or a valid one.
-  if (!data().method.empty()) {
-    std::string canonicalized = ValidateMethod(data().method);
-    if (canonicalized.empty())
-      return false;
-    data().method = canonicalized;
-  }
-
-  if (!AreValidHeaders(data().headers))
-    return false;
-
   // Get the Resource objects for any file refs with only host resource (this
   // is the state of the request as it comes off IPC).
   for (size_t i = 0; i < data().body.size(); ++i) {

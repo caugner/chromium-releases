@@ -44,12 +44,28 @@ cr.define('print_preview', function() {
         closePrintPreviewTab();
       }.bind(this);
       this.printButton_.onclick = this.onPrintButtonClicked_.bind(this);
-      document.addEventListener('updateSummary',
+      document.addEventListener(customEvents.UPDATE_SUMMARY,
                                 this.updateSummary_.bind(this));
-      document.addEventListener('updatePrintButton',
+      document.addEventListener(customEvents.UPDATE_PRINT_BUTTON,
                                 this.updatePrintButton_.bind(this));
-      document.addEventListener('disableCancelButton',
-                                this.disableCancelButton.bind(this));
+      document.addEventListener(customEvents.PDF_GENERATION_ERROR,
+                                this.onPDFGenerationError_.bind(this));
+    },
+
+    /**
+     * Enables the cancel button and attaches its keydown event listener.
+     */
+    enableCancelButton: function() {
+      window.onkeydown = onKeyDown;
+      this.cancelButton_.disabled = false;
+    },
+
+    /**
+     * Executes when a |customEvents.PDF_GENERATION_ERROR| event occurs.
+     * @private
+     */
+    onPDFGenerationError_: function() {
+      this.printButton_.disabled = true;
     },
 
     /**
@@ -109,6 +125,9 @@ cr.define('print_preview', function() {
 
       var pageSet = pageSettings.selectedPagesSet;
       var numOfSheets = pageSet.length;
+      if (numOfSheets == 0)
+        return;
+
       var summaryLabel =
           localStrings.getString('printPreviewSheetsLabelSingular');
       var numOfPagesText = '';
@@ -122,7 +141,7 @@ cr.define('print_preview', function() {
       numOfSheets *= copies;
 
       if (numOfSheets > 1) {
-        summaryLabel =  printToPDF ? pagesLabel :
+        summaryLabel = printToPDF ? pagesLabel :
             localStrings.getString('printPreviewSheetsLabelPlural');
       }
 

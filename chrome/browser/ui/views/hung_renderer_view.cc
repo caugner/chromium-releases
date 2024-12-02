@@ -12,25 +12,25 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/logging_chrome.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/result_codes.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/table/group_table_view.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
-#include "views/window/client_view.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/table/group_table_view.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/client_view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class HungRendererDialogView;
 
@@ -61,7 +61,7 @@ class HungPagesTableModel : public views::GroupTableModel {
 
   // Returns the first RenderProcessHost, or NULL if there aren't any
   // TabContents.
-  RenderProcessHost* GetRenderProcessHost();
+  content::RenderProcessHost* GetRenderProcessHost();
 
   // Returns the first RenderViewHost, or NULL if there aren't any TabContents.
   RenderViewHost* GetRenderViewHost();
@@ -90,7 +90,7 @@ class HungPagesTableModel : public views::GroupTableModel {
     }
 
     // TabContentsObserver overrides:
-    virtual void RenderViewGone() OVERRIDE;
+    virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
     virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
 
    private:
@@ -124,7 +124,7 @@ HungPagesTableModel::HungPagesTableModel(Delegate* delegate)
 HungPagesTableModel::~HungPagesTableModel() {
 }
 
-RenderProcessHost* HungPagesTableModel::GetRenderProcessHost() {
+content::RenderProcessHost* HungPagesTableModel::GetRenderProcessHost() {
   return tab_observers_.empty() ? NULL :
       tab_observers_[0]->tab_contents()->GetRenderProcessHost();
 }
@@ -212,7 +212,8 @@ HungPagesTableModel::TabContentsObserverImpl::TabContentsObserverImpl(
       tab_(tab) {
 }
 
-void HungPagesTableModel::TabContentsObserverImpl::RenderViewGone() {
+void HungPagesTableModel::TabContentsObserverImpl::RenderViewGone(
+    base::TerminationStatus status) {
   model_->TabDestroyed(this);
 }
 
@@ -238,8 +239,7 @@ class HungRendererDialogView : public views::DialogDelegateView,
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual views::View* GetExtraView() OVERRIDE;
   virtual bool Accept(bool window_closing)  OVERRIDE;
   virtual views::View* GetContentsView()  OVERRIDE;
@@ -337,9 +337,9 @@ void HungRendererDialogView::ShowForTabContents(TabContents* contents) {
     gfx::Rect bounds = GetDisplayBounds(contents);
     views::Widget* insert_after =
         views::Widget::GetWidgetForNativeView(frame_hwnd);
-    GetWidget()->SetBoundsConstrained(bounds, insert_after);
+    GetWidget()->SetBoundsConstrained(bounds);
     if (insert_after)
-      GetWidget()->MoveAboveWidget(insert_after);
+      GetWidget()->StackAboveWidget(insert_after);
 
     // We only do this if the window isn't active (i.e. hasn't been shown yet,
     // or is currently shown but deactivated for another TabContents). This is
@@ -383,12 +383,12 @@ int HungRendererDialogView::GetDialogButtons() const {
   // the OK button to wait for responsiveness (and close the dialog) and our
   // additional button (which we create) to kill the process (which will result
   // in the dialog being destroyed).
-  return MessageBoxFlags::DIALOGBUTTON_OK;
+  return ui::DIALOG_BUTTON_OK;
 }
 
 string16 HungRendererDialogView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_BROWSER_HANGMONITOR_RENDERER_WAIT);
   return string16();
 }

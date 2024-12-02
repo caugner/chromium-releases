@@ -4,7 +4,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/dummy_resource_handler.h"
 #include "content/browser/renderer_host/global_request_id.h"
@@ -14,6 +14,8 @@
 #include "net/url_request/url_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 using content::DummyResourceHandler;
 
 namespace {
@@ -22,9 +24,10 @@ const char kTestUrl[] = "data:text/plain,Hello World!";
 
 ResourceDispatcherHostRequestInfo* GetRequestInfo(int request_id) {
   return new ResourceDispatcherHostRequestInfo(
-      new DummyResourceHandler(), ChildProcessInfo::RENDER_PROCESS, 0, 0, 0,
-      request_id, false, -1, ResourceType::MAIN_FRAME,
+      new DummyResourceHandler(), content::PROCESS_TYPE_RENDERER, 0, 0, 0,
+      request_id, false, -1, false, -1, ResourceType::MAIN_FRAME,
       content::PAGE_TRANSITION_LINK, 0, false, false, false,
+      WebKit::WebReferrerPolicyDefault,
       content::MockResourceContext::GetInstance());
 }
 
@@ -123,8 +126,8 @@ class ResourceQueueTest : public testing::Test,
 
  private:
   MessageLoop message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  BrowserThreadImpl ui_thread_;
+  BrowserThreadImpl io_thread_;
 };
 
 TEST_F(ResourceQueueTest, Basic) {

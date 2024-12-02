@@ -40,7 +40,7 @@ button {
 }
 
 #inner-container {
-  -webkit-transition: height .2s ease-in-out;
+  -webkit-transition: height 200ms ease-in-out;
   height: 294px;
   padding: 20px;
   position: relative;
@@ -116,14 +116,14 @@ hr.bottom {
 }
 
 .header-section {
-  -webkit-transition: left .2s, opacity .2s ease-in-out;
+  -webkit-transition: left 200ms, opacity 200ms ease-in-out;
   position: absolute;
   text-transform: lowercase;
   width: 20em;
 }
 
 html[dir=rtl] .header-section {
-  -webkit-transition: right .2s, opacity .2s ease-in-out;
+  -webkit-transition: right 200ms, opacity 200ms ease-in-out;
 }
 
 .header-section.right {
@@ -150,12 +150,12 @@ html[dir=rtl]  .header-section.left {
 }
 
 html[dir=ltr] .step {
-  -webkit-transition: left .2s, opacity .2s, visibility .2s ease-in-out;
+  -webkit-transition: left 200ms, opacity 200ms, visibility 200ms ease-in-out;
   left: 0;
 }
 
 html[dir=rtl] .step {
-  -webkit-transition: right .2s, opacity .2s, visibility .2s ease-in-out;
+  -webkit-transition: right 200ms, opacity 200ms, visibility 200ms ease-in-out;
   right: 0;
 }
 
@@ -252,6 +252,10 @@ html[dir=rtl]  .step.left {
   -webkit-margin-end: 10px;
 }
 
+#user-image {
+  margin: 0 20px;
+}
+
 #user-image-grid {
   -webkit-user-drag: none;
   -webkit-user-select: none;
@@ -269,7 +273,7 @@ html[dir=rtl]  .step.left {
   width: 50px;
 }
 
-#user-image-grid span[role=listitem] {
+#user-image-grid [role=listitem] {
   border-radius: 4px;
   border: 1px solid rgba(0, 0, 0, 0.15);
   display: inline-block;
@@ -277,9 +281,34 @@ html[dir=rtl]  .step.left {
   padding: 3px;
 }
 
-#user-image-grid span[selected] {
+#user-image-grid [selected] {
   border: 2px solid rgb(0, 102, 204);
   padding: 2px;
+}
+
+#profile-image {
+  position: relative;
+}
+
+/* White background for spinner styled like user image */
+#profile-image .spinner-bg {
+  background-color: white;
+  height: 50px;
+  left: 3px;
+  position: absolute;
+  top: 3px;
+  visibility: hidden;
+  width: 50px;
+}
+
+.profile-image-loading #profile-image .spinner-bg {
+  visibility: visible;
+}
+
+#profile-image .spinner {
+  position: absolute;
+  left: 14px;
+  top: 14px;
 }
 
 #user-image-preview {
@@ -307,20 +336,9 @@ html[dir=rtl] #user-image-preview {
   color: dimGray;
   font-size: smaller;
   margin: 8px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-#user-image-preview-caption .spinner {
-  display: inline-block;
-  visibility: hidden;
-  vertical-align: -6px;
-  width: 0;
-}
-
-.profile-image.profile-image-loading #user-image-preview-caption .spinner {
-  margin-right: 2px;
-  visibility: visible;
-  width: 22px;
 }
 
 #footer {
@@ -495,7 +513,7 @@ button {
 #popup-overlay {
   -webkit-box-align: center;
   -webkit-box-pack: center;
-  -webkit-transition: 0.25s opacity;
+  -webkit-transition: 250ms opacity;
   background: rgba(255, 255, 255, .75);
   bottom: 0;
   display: -webkit-box;
@@ -641,7 +659,7 @@ button {
 }
 
 #bubble {
-  -webkit-transition: 0.25s opacity;
+  -webkit-transition: 250ms opacity;
 }
 
 html[dir=rtl] #header {
@@ -649,7 +667,7 @@ html[dir=rtl] #header {
 }
 
 body.login-display #oobe hr.shadow {
-  -webkit-transition: all .8s ease;
+  -webkit-transition: all 800ms ease;
   width: 1100px;  /* Necessary. Otherwise hr shrinks to 0 first when switching
                      from 640px to full width. */
 }
@@ -703,7 +721,7 @@ html[dir=rtl] .error-message {
 }
 
 #version-labels {
-  -webkit-transition: all .5s linear;
+  -webkit-transition: all 500ms linear;
   bottom: 10px;
   color: #999;
   font-size: 11px;

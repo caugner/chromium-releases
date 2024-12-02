@@ -12,17 +12,20 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 #if defined(TOOLKIT_USES_GTK) && !defined(OS_CHROMEOS)
 #include "chrome/browser/printing/print_dialog_gtk.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -104,7 +107,7 @@ NOINLINE void ShutdownFDClosedError() {
   sleep(UINT_MAX);
 }
 
-NOINLINE void CloseAllBrowsersAndExitPosted() {
+NOINLINE void ExitPosted() {
   // Ensure function isn't optimized away.
   asm("");
   sleep(UINT_MAX);
@@ -135,9 +138,9 @@ void ShutdownDetector::ThreadMain() {
   VLOG(1) << "Handling shutdown for signal " << signal << ".";
 #if defined(OS_CHROMEOS)
   // On ChromeOS, exiting on signal should be always clean.
-  Task* task = NewRunnableFunction(BrowserList::ExitCleanly);
+  base::Closure task = base::Bind(&BrowserList::ExitCleanly);
 #else
-  Task* task = NewRunnableFunction(BrowserList::AttemptExit);
+  base::Closure task = base::Bind(&BrowserList::AttemptExit);
 #endif
 
   if (!BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, task)) {
@@ -160,7 +163,7 @@ void ShutdownDetector::ThreadMain() {
     RAW_LOG(WARNING, "Still here, exiting really ungracefully.");
     _exit(signal | (1 << 7));
   }
-  CloseAllBrowsersAndExitPosted();
+  ExitPosted();
 }
 
 // Sets the file descriptor soft limit to |max_descriptors| or the OS hard
@@ -186,11 +189,13 @@ void SetFileDescriptorLimit(unsigned int max_descriptors) {
 // ChromeBrowserMainPartsPosix -------------------------------------------------
 
 ChromeBrowserMainPartsPosix::ChromeBrowserMainPartsPosix(
-    const MainFunctionParams& parameters)
+    const content::MainFunctionParams& parameters)
     : ChromeBrowserMainParts(parameters) {
 }
 
 void ChromeBrowserMainPartsPosix::PreEarlyInitialization() {
+  ChromeBrowserMainParts::PreEarlyInitialization();
+
   // We need to accept SIGCHLD, even though our handler is a no-op because
   // otherwise we cannot wait on children. (According to POSIX 2001.)
   struct sigaction action;
@@ -217,6 +222,8 @@ void ChromeBrowserMainPartsPosix::PreEarlyInitialization() {
 }
 
 void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
+  ChromeBrowserMainParts::PostMainMessageLoopStart();
+
   int pipefd[2];
   int ret = pipe(pipefd);
   if (ret < 0) {
@@ -256,7 +263,7 @@ void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
   CHECK(sigaction(SIGHUP, &action, NULL) == 0);
 
 #if defined(TOOLKIT_USES_GTK) && !defined(OS_CHROMEOS)
-  printing::PrintingContextCairo::SetCreatePrintDialogFunction(
+  printing::PrintingContextGtk::SetCreatePrintDialogFunction(
       &PrintDialogGtk::CreatePrintDialog);
 #endif
 }

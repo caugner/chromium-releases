@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/values.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_content_settings_api_constants.h"
 #include "chrome/browser/extensions/extension_content_settings_helpers.h"
@@ -21,6 +22,8 @@
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "content/browser/plugin_service.h"
 #include "webkit/plugins/npapi/plugin_group.h"
+
+using content::BrowserThread;
 
 namespace helpers = extension_content_settings_helpers;
 namespace keys = extension_content_settings_api_constants;
@@ -128,6 +131,7 @@ bool GetContentSettingFunction::RunImpl() {
   }
 
   HostContentSettingsMap* map;
+  CookieSettings* cookie_settings;
   if (incognito) {
     if (!profile()->HasOffTheRecordProfile()) {
       // TODO(bauerb): Allow reading incognito content settings
@@ -136,16 +140,19 @@ bool GetContentSettingFunction::RunImpl() {
       return false;
     }
     map = profile()->GetOffTheRecordProfile()->GetHostContentSettingsMap();
+    cookie_settings = CookieSettings::GetForProfile(
+        profile()->GetOffTheRecordProfile());
   } else {
     map = profile()->GetHostContentSettingsMap();
+    cookie_settings = CookieSettings::GetForProfile(profile());
   }
 
   ContentSetting setting;
   if (content_type == CONTENT_SETTINGS_TYPE_COOKIES) {
     // TODO(jochen): Do we return the value for setting or for reading cookies?
     bool setting_cookie = false;
-    setting = map->GetCookieContentSetting(primary_url, secondary_url,
-                                           setting_cookie);
+    setting = cookie_settings->GetCookieSetting(primary_url, secondary_url,
+                                                setting_cookie, NULL);
   } else {
     setting = map->GetContentSetting(primary_url, secondary_url, content_type,
                                      resource_identifier);

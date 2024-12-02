@@ -13,6 +13,7 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "chrome/browser/net/preconnect.h" // TODO: remove this.
+#include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/browser/browser_context.h"
 
@@ -27,7 +28,6 @@ class ResetDefaultProxyConfigServiceTask;
 
 namespace fileapi {
 class FileSystemContext;
-class SandboxedFileSystemContext;
 }
 
 namespace history {
@@ -37,10 +37,6 @@ class ShortcutsBackend;
 
 namespace net {
 class SSLConfigService;
-}
-
-namespace speech_input {
-class SpeechRecognizer;
 }
 
 namespace chrome_browser_net {
@@ -56,25 +52,20 @@ class ExtensionDevToolsManager;
 class ExtensionEventRouter;
 class ExtensionInfoMap;
 class ExtensionMessageService;
-class ExtensionPrefValueMap;
 class ExtensionProcessManager;
 class ExtensionService;
 class ExtensionSpecialStoragePolicy;
 class FaviconService;
 class FindBarState;
+class GAIAInfoUpdateService;
 class HistoryService;
 class HostContentSettingsMap;
-class NavigationController;
+class NetworkActionPredictor;
 class PasswordStore;
-class PrefProxyConfigTracker;
 class PrefService;
-class ProfileSyncFactory;
 class ProfileSyncService;
 class PromoCounter;
-class PromoResourceService;
 class ProtocolHandlerRegistry;
-class SQLitePersistentCookieStore;
-class SSLConfigServiceManager;
 class SpeechInputPreferences;
 class SpellCheckHost;
 class TemplateURLFetcher;
@@ -82,7 +73,6 @@ class TestingProfile;
 class TokenService;
 class UserScriptMaster;
 class UserStyleSheetWatcher;
-class VisitedLinkEventListener;
 class VisitedLinkMaster;
 class WebDataService;
 class WebUI;
@@ -120,6 +110,15 @@ class Profile : public content::BrowserContext {
     // when you are about to perform an operation which is incompatible with the
     // incognito mode.
     IMPLICIT_ACCESS
+  };
+
+  enum CreateStatus {
+    // Profile services were not created.
+    CREATE_STATUS_FAIL,
+    // Profile created but before initializing extensions and promo resources.
+    CREATE_STATUS_CREATED,
+    // Profile is created, extensions and promo resources are initialized.
+    CREATE_STATUS_INITIALIZED,
   };
 
   class Delegate {
@@ -217,6 +216,10 @@ class Profile : public content::BrowserContext {
   // Return the incognito version of this profile. The returned pointer
   // is owned by the receiving profile. If the receiving profile is off the
   // record, the same profile is returned.
+  //
+  // WARNING: This will create the OffTheRecord profile if it doesn't already
+  // exist. If this isn't what you want, you need to check
+  // HasOffTheRecordProfile() first.
   virtual Profile* GetOffTheRecordProfile() = 0;
 
   // Destroys the incognito profile.
@@ -281,6 +284,9 @@ class Profile : public content::BrowserContext {
   // |access| defines what the caller plans to do with the service. See
   // the ServiceAccessType definition above.
   virtual FaviconService* GetFaviconService(ServiceAccessType access) = 0;
+
+  // Accessor. The instance is created upon first access.
+  virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() = 0;
 
   // Retrieves a pointer to the HistoryService associated with this
   // profile.  The HistoryService is lazily created the first time
@@ -489,6 +495,16 @@ class Profile : public content::BrowserContext {
   // The implementation is free to run this on a background thread, so when this
   // method returns data is not guaranteed to be deleted.
   virtual void ClearNetworkingHistorySince(base::Time time) = 0;
+
+  // Returns the home page for this profile.
+  virtual GURL GetHomePage() = 0;
+
+  // Returns the NetworkActionPredictor used by the Omnibox to decide when to
+  // prerender or prefetch a result.
+  virtual NetworkActionPredictor* GetNetworkActionPredictor() = 0;
+
+  // Makes the session state, e.g., cookies, persistent across the next restart.
+  virtual void SaveSessionState() {}
 
   std::string GetDebugName();
 

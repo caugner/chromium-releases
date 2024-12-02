@@ -44,11 +44,11 @@ DiskCacheBasedSSLHostInfo::DiskCacheBasedSSLHostInfo(
                                  &DiskCacheBasedSSLHostInfo::OnIOComplete)),
       state_(GET_BACKEND),
       ready_(false),
+      found_entry_(false),
       hostname_(hostname),
       http_cache_(http_cache),
       backend_(NULL),
-      entry_(NULL),
-      user_callback_(NULL) {
+      entry_(NULL) {
 }
 
 void DiskCacheBasedSSLHostInfo::Start() {
@@ -57,16 +57,19 @@ void DiskCacheBasedSSLHostInfo::Start() {
   DoLoop(OK);
 }
 
-int DiskCacheBasedSSLHostInfo::WaitForDataReady(OldCompletionCallback* callback) {
+int DiskCacheBasedSSLHostInfo::WaitForDataReady(
+    const CompletionCallback& callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(state_ != GET_BACKEND);
 
   if (ready_)
     return OK;
-  if (callback) {
-    DCHECK(!user_callback_);
+
+  if (!callback.is_null()) {
+    DCHECK(user_callback_.is_null());
     user_callback_ = callback;
   }
+
   return ERR_IO_PENDING;
 }
 
@@ -76,18 +79,18 @@ void DiskCacheBasedSSLHostInfo::Persist() {
 
   DCHECK(new_data_.empty());
   CHECK(ready_);
-  DCHECK(user_callback_ == NULL);
+  DCHECK(user_callback_.is_null());
   new_data_ = Serialize();
 
   if (!backend_)
     return;
 
-  state_ = CREATE;
+  state_ = CREATE_OR_OPEN;
   DoLoop(OK);
 }
 
 DiskCacheBasedSSLHostInfo::~DiskCacheBasedSSLHostInfo() {
-  DCHECK(!user_callback_);
+  DCHECK(user_callback_.is_null());
   if (entry_)
     entry_->Close();
   if (!IsCallbackPending())
@@ -100,11 +103,10 @@ std::string DiskCacheBasedSSLHostInfo::key() const {
 
 void DiskCacheBasedSSLHostInfo::OnIOComplete(int rv) {
   rv = DoLoop(rv);
-  if (rv != ERR_IO_PENDING) {
-    OldCompletionCallback* callback = user_callback_;
-    user_callback_ = NULL;
-    if (callback)
-      callback->Run(rv);
+  if (rv != ERR_IO_PENDING && !user_callback_.is_null()) {
+    CompletionCallback callback = user_callback_;
+    user_callback_.Reset();
+    callback.Run(rv);
   }
 }
 
@@ -132,11 +134,11 @@ int DiskCacheBasedSSLHostInfo::DoLoop(int rv) {
       case WAIT_FOR_DATA_READY_DONE:
         rv = DoWaitForDataReadyDone();
         break;
-      case CREATE:
-        rv = DoCreate();
+      case CREATE_OR_OPEN:
+        rv = DoCreateOrOpen();
         break;
-      case CREATE_COMPLETE:
-        rv = DoCreateComplete(rv);
+      case CREATE_OR_OPEN_COMPLETE:
+        rv = DoCreateOrOpenComplete(rv);
         break;
       case WRITE:
         rv = DoWrite();
@@ -170,6 +172,7 @@ int DiskCacheBasedSSLHostInfo::DoOpenComplete(int rv) {
   if (rv == OK) {
     entry_ = callback_->entry();
     state_ = READ;
+    found_entry_ = true;
   } else {
     state_ = WAIT_FOR_DATA_READY_DONE;
   }
@@ -190,7 +193,7 @@ int DiskCacheBasedSSLHostInfo::DoWriteComplete(int rv) {
   return OK;
 }
 
-int DiskCacheBasedSSLHostInfo::DoCreateComplete(int rv) {
+int DiskCacheBasedSSLHostInfo::DoCreateOrOpenComplete(int rv) {
   if (rv != OK) {
     state_ = SET_DONE;
   } else {
@@ -232,9 +235,12 @@ int DiskCacheBasedSSLHostInfo::DoWrite() {
                            new_data_.size(), callback_, true /* truncate */);
 }
 
-int DiskCacheBasedSSLHostInfo::DoCreate() {
+int DiskCacheBasedSSLHostInfo::DoCreateOrOpen() {
   DCHECK(entry_ == NULL);
-  state_ = CREATE_COMPLETE;
+  state_ = CREATE_OR_OPEN_COMPLETE;
+  if (found_entry_)
+    return backend_->OpenEntry(key(), callback_->entry_pointer(), callback_);
+
   return backend_->CreateEntry(key(), callback_->entry_pointer(), callback_);
 }
 
@@ -264,7 +270,7 @@ bool DiskCacheBasedSSLHostInfo::IsCallbackPending() const {
     case GET_BACKEND_COMPLETE:
     case OPEN_COMPLETE:
     case READ_COMPLETE:
-    case CREATE_COMPLETE:
+    case CREATE_OR_OPEN_COMPLETE:
     case WRITE_COMPLETE:
       return true;
     default:

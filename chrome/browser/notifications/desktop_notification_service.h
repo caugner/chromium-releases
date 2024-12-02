@@ -14,28 +14,27 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/content_settings.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 
 class ContentSettingsPattern;
-class Extension;
 class Notification;
-class NotificationDelegate;
 class NotificationUIManager;
-class PrefService;
 class Profile;
 class TabContents;
-struct DesktopNotificationHostMsg_Show_Params;
+
+namespace content {
+struct ShowDesktopNotificationHostMsgParams;
+}
 
 // The DesktopNotificationService is an object, owned by the Profile,
 // which provides the creation of desktop "toasts" to web pages and workers.
-class DesktopNotificationService : public NotificationObserver,
+class DesktopNotificationService : public content::NotificationObserver,
                                    public ProfileKeyedService {
  public:
   enum DesktopNotificationSource {
@@ -63,7 +62,7 @@ class DesktopNotificationService : public NotificationObserver,
   // whether the script is in a worker or page. |params| contains all the
   // other parameters supplied by the worker or page.
   bool ShowDesktopNotification(
-      const DesktopNotificationHostMsg_Show_Params& params,
+      const content::ShowDesktopNotificationHostMsgParams& params,
       int process_id, int route_id, DesktopNotificationSource source);
 
   // Cancels a notification.  If it has already been shown, it will be
@@ -77,10 +76,10 @@ class DesktopNotificationService : public NotificationObserver,
   void GrantPermission(const GURL& origin);
   void DenyPermission(const GURL& origin);
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Creates a data:xxxx URL which contains the full HTML for a notification
   // using supplied icon, title, and text, run through a template which contains
@@ -97,18 +96,17 @@ class DesktopNotificationService : public NotificationObserver,
                                 const std::vector<std::string>& subst);
 
   // The default content setting determines how to handle origins that haven't
-  // been allowed or denied yet.
-  ContentSetting GetDefaultContentSetting();
+  // been allowed or denied yet. If |provider_id| is not NULL, the id of the
+  // provider which provided the default setting is assigned to it.
+  ContentSetting GetDefaultContentSetting(std::string* provider_id);
   void SetDefaultContentSetting(ContentSetting setting);
-  bool IsDefaultContentSettingManaged() const;
 
   // NOTE: This should only be called on the UI thread.
   void ResetToDefaultContentSetting();
 
   // Returns all notifications settings. |settings| is cleared before
   // notifications setting are passed to it.
-  void GetNotificationsSettings(
-      HostContentSettingsMap::SettingsForOneType* settings);
+  void GetNotificationsSettings(ContentSettingsForOneType* settings);
 
   // Clears the notifications setting for the given pattern.
   void ClearSetting(const ContentSettingsPattern& pattern);
@@ -138,6 +136,8 @@ class DesktopNotificationService : public NotificationObserver,
   // Notifies the observers when permissions settings change.
   void NotifySettingsChange();
 
+  NotificationUIManager* GetUIManager();
+
   // The profile which owns this object.
   Profile* profile_;
 
@@ -145,7 +145,7 @@ class DesktopNotificationService : public NotificationObserver,
   // UI for desktop toasts.
   NotificationUIManager* ui_manager_;
 
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopNotificationService);
 };

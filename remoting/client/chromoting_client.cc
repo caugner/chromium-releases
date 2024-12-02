@@ -28,7 +28,7 @@ ChromotingClient::ChromotingClient(const ClientConfig& config,
                                    ChromotingView* view,
                                    RectangleUpdateDecoder* rectangle_decoder,
                                    InputHandler* input_handler,
-                                   Task* client_done)
+                                   const base::Closure& client_done)
     : config_(config),
       context_(context),
       connection_(connection),
@@ -64,6 +64,12 @@ void ChromotingClient::Stop(const base::Closure& shutdown_task) {
     return;
   }
 
+  // Drop all pending packets.
+  while(!received_packets_.empty()) {
+    received_packets_.front().done.Run();
+    received_packets_.pop_front();
+  }
+
   connection_->Disconnect(base::Bind(&ChromotingClient::OnDisconnected,
                                      base::Unretained(this), shutdown_task));
 }
@@ -75,8 +81,9 @@ void ChromotingClient::OnDisconnected(const base::Closure& shutdown_task) {
 }
 
 void ChromotingClient::ClientDone() {
-  if (client_done_ != NULL) {
+  if (!client_done_.is_null()) {
     message_loop()->PostTask(FROM_HERE, client_done_);
+    client_done_.Reset();
   }
 }
 
@@ -100,10 +107,11 @@ void ChromotingClient::ProcessVideoPacket(const VideoPacket* packet,
     return;
   }
 
-  // Record size of the packet for statistics.
-  stats_.video_bandwidth()->Record(packet->data().size());
+  // Add one frame to the counter.
+  stats_.video_frame_rate()->Record(1);
 
-  // Record statistics received from host.
+  // Record other statistics received from host.
+  stats_.video_bandwidth()->Record(packet->data().size());
   if (packet->has_capture_time_ms())
     stats_.video_capture_ms()->Record(packet->capture_time_ms());
   if (packet->has_encode_time_ms())
@@ -145,8 +153,8 @@ void ChromotingClient::DispatchPacket() {
     decode_start = base::Time::Now();
 
   rectangle_decoder_->DecodePacket(
-      packet, NewRunnableMethod(this, &ChromotingClient::OnPacketDone,
-                                last_packet, decode_start));
+      packet, base::Bind(&ChromotingClient::OnPacketDone,
+                         base::Unretained(this), last_packet, decode_start));
 }
 
 void ChromotingClient::OnConnectionState(
@@ -154,7 +162,8 @@ void ChromotingClient::OnConnectionState(
     protocol::ConnectionToHost::Error error) {
   DCHECK(message_loop()->BelongsToCurrentThread());
   VLOG(1) << "ChromotingClient::OnConnectionState(" << state << ")";
-  if (state == protocol::ConnectionToHost::CONNECTED)
+  if (state == protocol::ConnectionToHost::CONNECTED ||
+      state == protocol::ConnectionToHost::AUTHENTICATED)
     Initialize();
   view_->SetConnectionState(state, error);
 }
@@ -200,29 +209,6 @@ void ChromotingClient::Initialize() {
 
   // Schedule the input handler to process the event queue.
   input_handler_->Initialize();
-}
-
-////////////////////////////////////////////////////////////////////////////
-// ClientStub control channel interface.
-void ChromotingClient::BeginSessionResponse(
-    const protocol::LocalLoginStatus* msg, const base::Closure& done) {
-  if (!message_loop()->BelongsToCurrentThread()) {
-    thread_proxy_.PostTask(FROM_HERE, base::Bind(
-        &ChromotingClient::BeginSessionResponse, base::Unretained(this),
-        msg, done));
-    return;
-  }
-
-  VLOG(1) << "BeginSessionResponse received";
-
-  // Inform the connection that the client has been authenticated. This will
-  // enable the communication channels.
-  if (msg->success()) {
-    connection_->OnClientAuthenticated();
-  }
-
-  view_->UpdateLoginStatus(msg->success(), msg->error_info());
-  done.Run();
 }
 
 }  // namespace remoting

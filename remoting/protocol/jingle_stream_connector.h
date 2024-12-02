@@ -5,6 +5,8 @@
 #ifndef REMOTING_PROTOCOL_JINGLE_STREAM_CONNECTOR_H_
 #define REMOTING_PROTOCOL_JINGLE_STREAM_CONNECTOR_H_
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "net/base/completion_callback.h"
 #include "remoting/protocol/channel_authenticator.h"
@@ -15,15 +17,10 @@ namespace cricket {
 class TransportChannel;
 }  // namespace cricket
 
-namespace jingle_glue {
-class TransportChannelSocketAdapter;
-}  // namespace jingle_glue
-
 namespace net {
 class CertVerifier;
 class StreamSocket;
-class SSLClientSocket;
-class SSLServerSocket;
+class SSLSocket;
 }  // namespace net
 
 namespace remoting {
@@ -44,24 +41,14 @@ class JingleStreamConnector : public JingleChannelConnector {
                         const Session::StreamChannelCallback& callback);
   virtual ~JingleStreamConnector();
 
-  // Starts connection process for the channel. |local_private_key| is
-  // owned by the caller, and must exist until this object is
-  // destroyed.
-  virtual void Connect(bool initiator,
-                       const std::string& local_cert,
-                       const std::string& remote_cert,
-                       crypto::RSAPrivateKey* local_private_key,
+  // JingleChannelConnector implementation.
+  virtual void Connect(ChannelAuthenticator* authenticator,
                        cricket::TransportChannel* raw_channel) OVERRIDE;
 
  private:
   bool EstablishTCPConnection(net::Socket* socket);
   void OnTCPConnect(int result);
-
-  bool EstablishSSLConnection();
-  void OnSSLConnect(int result);
-
-  void AuthenticateChannel();
-  void OnAuthenticationDone(ChannelAuthenticator::Result result);
+  void OnAuthenticationDone(net::Error error, net::StreamSocket* socket);
 
   void NotifyDone(net::StreamSocket* socket);
   void NotifyError();
@@ -70,26 +57,14 @@ class JingleStreamConnector : public JingleChannelConnector {
   std::string name_;
   Session::StreamChannelCallback callback_;
 
-  bool initiator_;
-  std::string local_cert_;
-  std::string remote_cert_;
-  crypto::RSAPrivateKey* local_private_key_;
-
   cricket::TransportChannel* raw_channel_;
-  scoped_ptr<net::StreamSocket> socket_;
-
-  // TODO(wez): Ugly up-casts needed so we can fetch SSL keying material.
-  net::SSLClientSocket* ssl_client_socket_;
-  net::SSLServerSocket* ssl_server_socket_;
-
-  // Used to verify the certificate received in SSLClientSocket.
-  scoped_ptr<net::CertVerifier> cert_verifier_;
+  scoped_ptr<net::StreamSocket> tcp_socket_;
+  scoped_ptr<net::SSLSocket> socket_;
 
   scoped_ptr<ChannelAuthenticator> authenticator_;
 
   // Callback called by the TCP and SSL layers.
   net::OldCompletionCallbackImpl<JingleStreamConnector> tcp_connect_callback_;
-  net::OldCompletionCallbackImpl<JingleStreamConnector> ssl_connect_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleStreamConnector);
 };

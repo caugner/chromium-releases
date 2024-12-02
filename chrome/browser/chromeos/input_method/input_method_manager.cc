@@ -23,19 +23,21 @@
 #include "chrome/browser/chromeos/input_method/virtual_keyboard_selector.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/language_preferences.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 
-#if !defined(TOUCH_UI)
+#if !defined(USE_VIRTUAL_KEYBOARD)
 #include "chrome/browser/chromeos/input_method/candidate_window.h"
 #endif
 
 #include <X11/X.h>  // ShiftMask, ControlMask, etc.
 #include <X11/Xutil.h>  // for XK_* macros.
+
+using content::BrowserThread;
 
 namespace {
 
@@ -129,7 +131,7 @@ namespace input_method {
 // The implementation of InputMethodManager.
 class InputMethodManagerImpl : public HotkeyManager::Observer,
                                public InputMethodManager,
-                               public NotificationObserver,
+                               public content::NotificationObserver,
                                public IBusController::Observer {
  public:
   InputMethodManagerImpl()
@@ -150,7 +152,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
     // upstart script. See crosbug.com/6515 and crosbug.com/6995 for
     // details.
     notification_registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
-                                NotificationService::AllSources());
+                                content::NotificationService::AllSources());
 
     // The observer should be added before Connect() so we can capture the
     // initial connection change.
@@ -397,7 +399,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
     std::string virtual_layouts = JoinString(layouts, ',');
 
     extra_input_method_ids_[id] = ibus_controller_->CreateInputMethodDescriptor(
-        id, virtual_layouts, language);
+        id, name, virtual_layouts, language);
     active_input_method_ids_.push_back(id);
     // TODO(yusukes): Call UpdateInputMethodSpecificHotkeys() here once IME
     // extension supports hotkeys.
@@ -683,19 +685,23 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
                                         const ImeConfigValue& value) {
     if (section == language_prefs::kGeneralSectionName &&
         config_name == language_prefs::kPreloadEnginesConfigName) {
-      if (value.string_list_value.size() == 1) {
+      if (value.string_list_value.size() == 1 ||
+          (value.string_list_value.size() != 0 &&
+           current_input_method_.id().empty())) {
         // This is necessary to initialize current_input_method_. This is also
         // necessary when the current layout (e.g. INTL) out of two (e.g. US and
         // INTL) is disabled.
         ChangeCurrentInputMethodFromId(value.string_list_value[0]);
       }
+      DCHECK(!current_input_method_.id().empty());
+
       // Update the indicator.
       // TODO(yusukes): Remove ActiveInputMethodsChanged notification in
       // FlushImeConfig().
       const size_t num_active_input_methods = GetNumActiveInputMethods();
       FOR_EACH_OBSERVER(InputMethodManager::Observer, observers_,
                         ActiveInputMethodsChanged(this,
-                                                  current_input_method_,
+                                                  current_input_method(),
                                                   num_active_input_methods));
     }
   }
@@ -938,7 +944,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
   }
 
   void UpdateVirtualKeyboardUI() {
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
     const VirtualKeyboard* virtual_keyboard = NULL;
     std::string virtual_keyboard_layout = "";
 
@@ -1005,7 +1011,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
                                                *virtual_keyboard,
                                                virtual_keyboard_layout));
     }
-#endif  // TOUCH_UI
+#endif  // USE_VIRTUAL_KEYBOARD
   }
 
   // Changes the current input method from the given input method ID.
@@ -1093,7 +1099,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
       return false;
     }
 
-#if !defined(TOUCH_UI)
+#if !defined(USE_VIRTUAL_KEYBOARD)
     if (!candidate_window_controller_.get()) {
       candidate_window_controller_.reset(new CandidateWindowController);
       if (!candidate_window_controller_->Init()) {
@@ -1162,16 +1168,16 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
     enable_auto_ime_shutdown_ = enable;
   }
 
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     // Stop the input method daemon on browser shutdown.
     if (type == content::NOTIFICATION_APP_TERMINATING) {
       shutting_down_ = true;
       notification_registrar_.RemoveAll();
       StopInputMethodDaemon();
-#if !defined(TOUCH_UI)
+#if !defined(USE_VIRTUAL_KEYBOARD)
       candidate_window_controller_.reset(NULL);
 #endif
     }
@@ -1318,7 +1324,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
   InputMethodConfigRequests current_config_values_;
 
   // This is used to register this object to APP_TERMINATING notification.
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   // True if we should launch the input method daemon.
   bool should_launch_ime_;
@@ -1338,7 +1344,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
 
   // The candidate window.  This will be deleted when the APP_TERMINATING
   // message is sent.
-#if !defined(TOUCH_UI)
+#if !defined(USE_VIRTUAL_KEYBOARD)
   scoped_ptr<CandidateWindowController> candidate_window_controller_;
 #endif
 

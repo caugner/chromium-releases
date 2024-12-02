@@ -6,6 +6,9 @@
 #define CONTENT_RENDERER_INDEXED_DB_DISPATCHER_H_
 #pragma once
 
+#include <map>
+#include <vector>
+
 #include "base/id_map.h"
 #include "base/nullable_string16.h"
 #include "ipc/ipc_channel.h"
@@ -16,13 +19,16 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransactionCallbacks.h"
 
 class IndexedDBKey;
-class SerializedScriptValue;
+class RendererWebIDBCursorImpl;
 
 namespace WebKit {
-class WebDOMStringList;
 class WebFrame;
 class WebIDBKeyRange;
 class WebIDBTransaction;
+}
+
+namespace content {
+class SerializedScriptValue;
 }
 
 // Handle the indexed db related communication for this entire renderer.
@@ -32,7 +38,8 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
   virtual ~IndexedDBDispatcher();
 
   // IPC::Channel::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  void Send(IPC::Message* msg);
 
   void RequestIDBFactoryGetDatabaseNames(
       WebKit::WebIDBCallbacks* callbacks,
@@ -52,7 +59,7 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       WebKit::WebFrame* web_frame);
 
   void RequestIDBCursorUpdate(
-      const SerializedScriptValue& value,
+      const content::SerializedScriptValue& value,
       WebKit::WebIDBCallbacks* callbacks_ptr,
       int32 idb_cursor_id,
       WebKit::WebExceptionCode* ec);
@@ -62,6 +69,15 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       WebKit::WebIDBCallbacks* callbacks_ptr,
       int32 idb_cursor_id,
       WebKit::WebExceptionCode* ec);
+
+  void RequestIDBCursorPrefetch(
+      int n,
+      WebKit::WebIDBCallbacks* callbacks_ptr,
+      int32 idb_cursor_id,
+      WebKit::WebExceptionCode* ec);
+
+  void RequestIDBCursorPrefetchReset(int used_prefetches, int unused_prefetches,
+                                     int32 idb_cursor_id);
 
   void RequestIDBCursorDelete(
       WebKit::WebIDBCallbacks* callbacks_ptr,
@@ -115,7 +131,7 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
                                 const WebKit::WebIDBTransaction& transaction,
                                 WebKit::WebExceptionCode* ec);
 
-  void RequestIDBObjectStorePut(const SerializedScriptValue& value,
+  void RequestIDBObjectStorePut(const content::SerializedScriptValue& value,
                                 const IndexedDBKey& key,
                                 WebKit::WebIDBObjectStore::PutMode putMode,
                                 WebKit::WebIDBCallbacks* callbacks,
@@ -148,6 +164,8 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       WebKit::WebIDBTransactionCallbacks* callbacks,
       int32 id);
 
+  void CursorDestroyed(int32 cursor_id);
+
   static int32 TransactionId(const WebKit::WebIDBTransaction& transaction);
 
  private:
@@ -159,16 +177,31 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
   void OnSuccessOpenCursor(int32 response_id, int32 object_id,
                            const IndexedDBKey& key,
                            const IndexedDBKey& primary_key,
-                           const SerializedScriptValue& value);
+                           const content::SerializedScriptValue& value);
+  void OnSuccessCursorContinue(int32 response_id,
+                               int32 cursor_id,
+                               const IndexedDBKey& key,
+                               const IndexedDBKey& primary_key,
+                               const content::SerializedScriptValue& value);
+  void OnSuccessCursorPrefetch(
+      int32 response_id,
+      int32 cursor_id,
+      const std::vector<IndexedDBKey>& keys,
+      const std::vector<IndexedDBKey>& primary_keys,
+      const std::vector<content::SerializedScriptValue>& values);
   void OnSuccessStringList(int32 response_id,
                            const std::vector<string16>& value);
-  void OnSuccessSerializedScriptValue(int32 response_id,
-                                      const SerializedScriptValue& value);
+  void OnSuccessSerializedScriptValue(
+      int32 response_id,
+      const content::SerializedScriptValue& value);
   void OnError(int32 response_id, int code, const string16& message);
   void OnBlocked(int32 response_id);
   void OnAbort(int32 transaction_id);
   void OnComplete(int32 transaction_id);
   void OnVersionChange(int32 database_id, const string16& newVersion);
+
+  // Reset cursor prefetch caches for all cursors except exception_cursor_id.
+  void ResetCursorPrefetchCaches(int32 exception_cursor_id = -1);
 
   // Careful! WebIDBCallbacks wraps non-threadsafe data types. It must be
   // destroyed and used on the same thread it was created on.
@@ -177,6 +210,9 @@ class IndexedDBDispatcher : public IPC::Channel::Listener {
       pending_transaction_callbacks_;
   IDMap<WebKit::WebIDBDatabaseCallbacks, IDMapOwnPointer>
       pending_database_callbacks_;
+
+  // Map from cursor id to RendererWebIDBCursorImpl.
+  std::map<int32, RendererWebIDBCursorImpl*> cursors_;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBDispatcher);
 };

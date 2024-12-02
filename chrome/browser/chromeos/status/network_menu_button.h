@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/message_bubble.h"
@@ -19,13 +19,7 @@
 
 class PrefService;
 
-namespace gfx {
-class Canvas;
-}
-
 namespace chromeos {
-
-class StatusAreaHost;
 
 // The network menu button in the status area.
 // This class will handle getting the wifi networks and populating the menu.
@@ -59,9 +53,10 @@ class NetworkMenuButton : public StatusAreaButton,
                           public NetworkLibrary::NetworkManagerObserver,
                           public NetworkLibrary::NetworkObserver,
                           public NetworkLibrary::CellularDataPlanObserver,
-                          public MessageBubbleDelegate {
+                          public views::Widget::Observer,
+                          public MessageBubbleLinkListener {
  public:
-  explicit NetworkMenuButton(StatusAreaHost* host);
+  explicit NetworkMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~NetworkMenuButton();
 
   static void RegisterPrefs(PrefService* local_state);
@@ -95,10 +90,10 @@ class NetworkMenuButton : public StatusAreaButton,
   // views::ViewMenuDelegate implementation.
   virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
 
-  // MessageBubbleDelegate implementation:
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
-  virtual bool CloseOnEscape() OVERRIDE;
-  virtual bool FadeInOnShow() OVERRIDE;
+  // views::Widget::Observer implementation:
+  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+
+  // MessageBubbleLinkListener implementation:
   virtual void OnLinkActivated(size_t index) OVERRIDE;
 
  private:
@@ -139,9 +134,6 @@ class NetworkMenuButton : public StatusAreaButton,
   // Notification bubble for 3G promo.
   MessageBubble* mobile_data_bubble_;
 
-  // Set to true if the browser is visible (i.e. not login/oobe).
-  bool is_browser_mode_;
-
   // True if check for promo needs to be done,
   // otherwise just ignore it for current session.
   bool check_for_promo_;
@@ -160,7 +152,7 @@ class NetworkMenuButton : public StatusAreaButton,
   std::string deal_topup_url_;
 
   // Factory for delaying showing promo notification.
-  ScopedRunnableMethodFactory<NetworkMenuButton> method_factory_;
+  base::WeakPtrFactory<NetworkMenuButton> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkMenuButton);
 };

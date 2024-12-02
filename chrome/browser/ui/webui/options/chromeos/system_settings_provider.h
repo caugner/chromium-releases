@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/callback.h"
 #include "base/string16.h"
 #include "chrome/browser/chromeos/cros_settings_provider.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
@@ -15,6 +16,7 @@
 namespace base {
 class Value;
 class ListValue;
+class StringValue;
 }
 
 namespace chromeos {
@@ -26,9 +28,11 @@ class SystemSettingsProvider : public CrosSettingsProvider,
   virtual ~SystemSettingsProvider();
 
   // CrosSettingsProvider overrides.
-  virtual bool Get(const std::string& path,
-                   base::Value** out_value) const OVERRIDE;
+  virtual const base::Value* Get(const std::string& path) const OVERRIDE;
+  virtual bool GetTrusted(const std::string& path,
+                          const base::Closure& callback) OVERRIDE;
   virtual bool HandlesSetting(const std::string& path) const OVERRIDE;
+  virtual void Reload() OVERRIDE;
 
   // Overridden from TimezoneSettings::Observer:
   virtual void TimezoneChanged(const icu::TimeZone& timezone) OVERRIDE;
@@ -38,7 +42,8 @@ class SystemSettingsProvider : public CrosSettingsProvider,
 
  private:
   // CrosSettingsProvider overrides.
-  virtual void DoSet(const std::string& path, base::Value* in_value) OVERRIDE;
+  virtual void DoSet(const std::string& path,
+                     const base::Value& in_value) OVERRIDE;
 
   // Gets timezone name.
   static string16 GetTimezoneName(const icu::TimeZone& timezone);
@@ -60,6 +65,8 @@ class SystemSettingsProvider : public CrosSettingsProvider,
 
   // Timezones.
   std::vector<icu::TimeZone*> timezones_;
+
+  scoped_ptr<base::Value> timezone_value_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemSettingsProvider);
 };

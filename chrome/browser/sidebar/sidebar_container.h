@@ -8,14 +8,12 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 
-class BrowserWindow;
-class Profile;
-class RenderViewHost;
 class SkBitmap;
 class TabContents;
 
@@ -25,9 +23,8 @@ class TabContents;
 //  Stores one particular sidebar state: sidebar's content, its content id,
 //  tab it is linked to, mini tab icon, title etc.
 //
-class SidebarContainer
-    : public TabContentsDelegate,
-      private ImageLoadingTracker::Observer {
+class SidebarContainer : public TabContentsDelegate,
+                         private ImageLoadingTracker::Observer {
  public:
   // Interface to implement to listen for sidebar update notification.
   class Delegate {
@@ -93,15 +90,14 @@ class SidebarContainer
   void SetTitle(const string16& title);
 
  private:
-  // Overridden from TabContentsDelegate.
-  virtual bool IsPopup(const TabContents* source) const;
+  // Overridden from TabContentsDelegate:
   virtual content::JavaScriptDialogCreator*
       GetJavaScriptDialogCreator() OVERRIDE;
 
-  // Overridden from ImageLoadingTracker::Observer.
+  // Overridden from ImageLoadingTracker::Observer:
   virtual void OnImageLoaded(SkBitmap* image,
                              const ExtensionResource& resource,
-                             int index);
+                             int index) OVERRIDE;
 
   // Returns an extension this sidebar belongs to.
   const Extension* GetExtension() const;

@@ -11,6 +11,7 @@
 
 #include "base/string16.h"
 #include "ui/gfx/rect.h"
+#include "webkit/glue/webkit_glue_export.h"
 
 namespace WebKit {
 class WebAccessibilityObject;
@@ -21,7 +22,7 @@ namespace webkit_glue {
 // A compact representation of the accessibility information for a
 // single web object, in a form that can be serialized and sent from
 // the renderer process to the browser process.
-struct WebAccessibility {
+struct WEBKIT_GLUE_EXPORT WebAccessibility {
  public:
   // An enumeration of accessibility roles.
   enum Role {
@@ -189,9 +190,13 @@ struct WebAccessibility {
   };
 
   enum IntAttribute {
-    // Document attributes.
-    ATTR_DOC_SCROLLX,
-    ATTR_DOC_SCROLLY,
+    // Scrollable container attributes.
+    ATTR_SCROLL_X,
+    ATTR_SCROLL_X_MIN,
+    ATTR_SCROLL_X_MAX,
+    ATTR_SCROLL_Y,
+    ATTR_SCROLL_Y_MIN,
+    ATTR_SCROLL_Y_MAX,
 
     // Editable text attributes.
     ATTR_TEXT_SEL_START,
@@ -209,6 +214,9 @@ struct WebAccessibility {
 
     // Tree control attributes.
     ATTR_HIERARCHICAL_LEVEL,
+
+    // Relationships between this element and other elements.
+    ATTR_TITLE_UI_ELEMENT,
   };
 
   enum FloatAttribute {

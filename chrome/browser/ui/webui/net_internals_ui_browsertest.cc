@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -17,12 +18,60 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/address_list.h"
+#include "net/base/host_cache.h"
+#include "net/base/host_resolver.h"
+#include "net/base/host_resolver_proc.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
+
 namespace {
+
+// Called on IO thread.  Adds an entry to the cache for the specified hostname.
+// Either |net_error| must be net::OK, or |address| must be NULL.
+void AddCacheEntryOnIOThread(net::URLRequestContextGetter* context_getter,
+                             const std::string& hostname,
+                             const std::string& ip_literal,
+                             int net_error,
+                             int expire_days_from_now) {
+  ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  net::URLRequestContext* context = context_getter->GetURLRequestContext();
+  net::HostCache* cache = context->host_resolver()->GetHostCache();
+  ASSERT_TRUE(cache);
+
+  net::HostCache::Key key(hostname, net::ADDRESS_FAMILY_UNSPECIFIED, 0);
+  base::TimeTicks expires =
+      base::TimeTicks::Now() + base::TimeDelta::FromDays(expire_days_from_now);
+
+  net::AddressList address_list;
+  if (net_error == net::OK) {
+    // If |net_error| does not indicate an error, convert |ip_literal| to a
+    // net::AddressList, so it can be used with the cache.
+    int rv = net::SystemHostResolverProc(ip_literal,
+                                         net::ADDRESS_FAMILY_UNSPECIFIED,
+                                         0,
+                                         &address_list,
+                                         NULL);
+    ASSERT_EQ(net::OK, rv);
+  } else {
+    ASSERT_TRUE(ip_literal.empty());
+  }
+
+  // Add entry to the cache.
+  cache->Set(net::HostCache::Key(hostname, net::ADDRESS_FAMILY_UNSPECIFIED, 0),
+             net_error,
+             address_list,
+             expires);
+}
 
 // Class to handle messages from the renderer needed by certain tests.
 class NetInternalsTestMessageHandler : public WebUIMessageHandler {
@@ -37,8 +86,17 @@ class NetInternalsTestMessageHandler : public WebUIMessageHandler {
  private:
   virtual void RegisterMessages() OVERRIDE;
 
-  // Opens the given URL in a new tab.
+  // Opens the given URL in a new background tab.
   void OpenNewTab(const ListValue* list_value);
+
+  // Adds a new entry to the host cache.  Takes in hostname, ip address,
+  // net error code, and expiration time (as number of days from now).
+  void AddCacheEntry(const ListValue* list_value);
+
+  // Navigates to the prerender in the background tab. This assumes that
+  // there is a "Click()" function in the background tab which will navigate
+  // there, and that the background tab exists at slot 1.
+  void NavigateToPrerender(const ListValue* list_value);
 
   Browser* browser_;
 
@@ -54,6 +112,13 @@ void NetInternalsTestMessageHandler::RegisterMessages() {
       "openNewTab",
       base::Bind(&NetInternalsTestMessageHandler::OpenNewTab,
                  base::Unretained(this)));
+  web_ui_->RegisterMessageCallback(
+      "addCacheEntry",
+      base::Bind(&NetInternalsTestMessageHandler::AddCacheEntry,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("navigateToPrerender",
+       base::Bind(&NetInternalsTestMessageHandler::NavigateToPrerender,
+                  base::Unretained(this)));
 }
 
 void NetInternalsTestMessageHandler::OpenNewTab(const ListValue* list_value) {
@@ -67,6 +132,38 @@ void NetInternalsTestMessageHandler::OpenNewTab(const ListValue* list_value) {
       ui_test_utils::BROWSER_TEST_NONE);
 }
 
+// Called on UI thread.  Adds an entry to the cache for the specified hostname
+// by posting a task to the IO thread.  Takes the host name, ip address, net
+// error code, and expiration time in days from now as parameters.  If the error
+// code indicates failure, the ip address must be an empty string.
+void NetInternalsTestMessageHandler::AddCacheEntry(
+    const ListValue* list_value) {
+  std::string hostname;
+  std::string ip_literal;
+  double net_error;
+  double expire_days_from_now;
+  ASSERT_TRUE(list_value->GetString(0, &hostname));
+  ASSERT_TRUE(list_value->GetString(1, &ip_literal));
+  ASSERT_TRUE(list_value->GetDouble(2, &net_error));
+  ASSERT_TRUE(list_value->GetDouble(3, &expire_days_from_now));
+  ASSERT_TRUE(browser_);
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&AddCacheEntryOnIOThread,
+                 make_scoped_refptr(browser_->profile()->GetRequestContext()),
+                 hostname,
+                 ip_literal,
+                 static_cast<int>(net_error),
+                 static_cast<int>(expire_days_from_now)));
+}
+
+void NetInternalsTestMessageHandler::NavigateToPrerender(
+    const ListValue* list_value) {
+  RenderViewHost* host = browser_->GetTabContentsAt(1)->render_view_host();
+  host->ExecuteJavascriptInWebFrame(string16(), ASCIIToUTF16("Click()"));
+}
+
 class NetInternalsTest : public WebUIBrowserTest {
  public:
   NetInternalsTest();
@@ -76,6 +173,20 @@ class NetInternalsTest : public WebUIBrowserTest {
   virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE;
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
   virtual void SetUpOnMainThread() OVERRIDE;
+
+ protected:
+  GURL CreatePrerenderLoaderUrl(const GURL& prerender_url) {
+    std::vector<net::TestServer::StringPair> replacement_text;
+    replacement_text.push_back(
+        make_pair("REPLACE_WITH_PRERENDER_URL", prerender_url.spec()));
+    std::string replacement_path;
+    EXPECT_TRUE(net::TestServer::GetFilePathWithReplacements(
+        "files/prerender/prerender_loader.html",
+        replacement_text,
+        &replacement_path));
+    GURL url_loader = test_server()->GetURL(replacement_path);
+    return url_loader;
+  }
 
  private:
   virtual WebUIMessageHandler* GetMockMessageHandler() OVERRIDE {
@@ -110,12 +221,14 @@ void NetInternalsTest::SetUpInProcessBrowserTestFixture() {
                           "net_internals/net_internals_test.js")));
 
   // Add Javascript files needed for individual tests.
+  AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/dns_view.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/hsts_view.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/log_util.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/log_view_painter.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/main.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/prerender_view.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/test_view.js")));
+  AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/timeline_view.js")));
 }
 
 void NetInternalsTest::SetUpOnMainThread() {
@@ -187,6 +300,72 @@ IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTourTabs) {
 // TODO(mmenke):  Add a test for a log created with --log-net-log.
 IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsExportImportDump) {
   EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsExportImportDump"));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// timeline_view.js
+////////////////////////////////////////////////////////////////////////////////
+
+// TODO(mmenke):  Add tests for labels and DataSeries.
+
+// Tests setting and updating range.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewRange) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewRange"));
+}
+
+// Tests using the scroll bar.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewScrollbar) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewScrollbar"));
+}
+
+// Tests case of having no events.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewNoEvents) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewNoEvents"));
+}
+
+// Dumps a log file to memory, modifies its events, loads it again, and
+// makes sure the range is correctly set and not automatically updated.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewLoadLog) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewLoadLog"));
+}
+
+// Zooms out twice, and then zooms in once.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewZoomOut) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewZoomOut"));
+}
+
+// Zooms in as much as allowed, and zooms out once.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewZoomIn) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewZoomIn"));
+}
+
+// Tests case of all events having the same time.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTimelineViewDegenerate) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsTimelineViewDegenerate"));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// dns_view.js
+////////////////////////////////////////////////////////////////////////////////
+
+// Adds a successful lookup to the DNS cache, then clears the cache.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsDnsViewSuccess) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsDnsViewSuccess"));
+}
+
+// Adds a failed lookup to the DNS cache, then clears the cache.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsDnsViewFail) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsDnsViewFail"));
+}
+
+// Adds an expired successful lookup to the DNS cache, then clears the cache.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsDnsViewExpired) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsDnsViewExpired"));
+}
+
+// Adds two entries to the DNS cache, clears the cache, and then repeats.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsDnsViewAddTwoTwice) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsDnsViewAddTwoTwice"));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -284,27 +463,29 @@ IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddTwice) {
 // Prerender a page and navigate to it, once prerendering starts.
 IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsPrerenderViewSucceed) {
   ASSERT_TRUE(test_server()->Start());
-  EXPECT_TRUE(RunJavascriptAsyncTest(
-      "netInternalsPrerenderView",
-      // URL that can be prerendered.
-      Value::CreateStringValue(
-          test_server()->GetURL("files/title1.html").spec()),
-      Value::CreateBooleanValue(true),
-      Value::CreateStringValue(
-          prerender::NameFromFinalStatus(prerender::FINAL_STATUS_USED))));
+  GURL prerender_url = test_server()->GetURL("files/title1.html");
+  GURL loader_url = CreatePrerenderLoaderUrl(prerender_url);
+  ConstValueVector args;
+  args.push_back(Value::CreateStringValue(prerender_url.spec()));
+  args.push_back(Value::CreateStringValue(loader_url.spec()));
+  args.push_back(Value::CreateBooleanValue(true));
+  args.push_back(Value::CreateStringValue(
+      prerender::NameFromFinalStatus(prerender::FINAL_STATUS_USED)));
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsPrerenderView", args));
 }
 
 // Prerender a page that is expected to fail.
 IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsPrerenderViewFail) {
   ASSERT_TRUE(test_server()->Start());
-  EXPECT_TRUE(RunJavascriptAsyncTest(
-      "netInternalsPrerenderView",
-      // URL that can't be prerendered, since it triggers a download.
-      Value::CreateStringValue(
-          test_server()->GetURL("files/download-test1.lib").spec()),
-      Value::CreateBooleanValue(false),
-      Value::CreateStringValue(
-          prerender::NameFromFinalStatus(prerender::FINAL_STATUS_DOWNLOAD))));
+  GURL prerender_url = test_server()->GetURL("files/download-test1.lib");
+  GURL loader_url = CreatePrerenderLoaderUrl(prerender_url);
+  ConstValueVector args;
+  args.push_back(Value::CreateStringValue(prerender_url.spec()));
+  args.push_back(Value::CreateStringValue(loader_url.spec()));
+  args.push_back(Value::CreateBooleanValue(false));
+  args.push_back(Value::CreateStringValue(
+      prerender::NameFromFinalStatus(prerender::FINAL_STATUS_DOWNLOAD)));
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsPrerenderView", args));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

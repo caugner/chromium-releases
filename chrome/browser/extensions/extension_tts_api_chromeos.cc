@@ -2,23 +2,38 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/extensions/extension_tts_api_chromeos.h"
+
+#include <list>
+
+#include "base/bind.h"
 #include "base/memory/singleton.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/stl_util.h"
 #include "base/string_number_conversions.h"
-#include "base/task.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/speech_synthesis_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/speech_synthesizer_client.h"
 #include "chrome/browser/extensions/extension_tts_api_controller.h"
 #include "chrome/browser/extensions/extension_tts_api_platform.h"
 
 using base::DoubleToString;
 
 namespace {
-const char kCrosLibraryNotLoadedError[] = "Cros shared library not loaded.";
 const int kSpeechCheckDelayIntervalMs = 100;
 };
 
-class ExtensionTtsPlatformImplChromeOs : public ExtensionTtsPlatformImpl {
+// Very simple queue of utterances that can't be spoken because audio
+// isn't initialized yet.
+struct QueuedUtterance {
+  int utterance_id;
+  std::string utterance;
+  std::string lang;
+  UtteranceContinuousParameters params;
+};
+
+class ExtensionTtsPlatformImplChromeOs
+    : public ExtensionTtsPlatformImpl {
  public:
   virtual bool PlatformImplAvailable() {
     return true;
@@ -37,12 +52,15 @@ class ExtensionTtsPlatformImplChromeOs : public ExtensionTtsPlatformImpl {
   // Get the single instance of this class.
   static ExtensionTtsPlatformImplChromeOs* GetInstance();
 
+  // TTS won't begin until this is called.
+  void Enable();
+
  private:
-  ExtensionTtsPlatformImplChromeOs()
-      : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
+  ExtensionTtsPlatformImplChromeOs();
   virtual ~ExtensionTtsPlatformImplChromeOs() {}
 
   void PollUntilSpeechFinishes(int utterance_id);
+  void ContinuePollingIfSpeechIsNotFinished(int utterance_id, bool result);
 
   void AppendSpeakOption(std::string key,
                          std::string value,
@@ -50,7 +68,9 @@ class ExtensionTtsPlatformImplChromeOs : public ExtensionTtsPlatformImpl {
 
   int utterance_id_;
   int utterance_length_;
-  ScopedRunnableMethodFactory<ExtensionTtsPlatformImplChromeOs> method_factory_;
+  std::list<QueuedUtterance*> queued_utterances_;
+  bool enabled_;
+  base::WeakPtrFactory<ExtensionTtsPlatformImplChromeOs> weak_ptr_factory_;
 
   friend struct DefaultSingletonTraits<ExtensionTtsPlatformImplChromeOs>;
 
@@ -62,15 +82,24 @@ ExtensionTtsPlatformImpl* ExtensionTtsPlatformImpl::GetInstance() {
   return ExtensionTtsPlatformImplChromeOs::GetInstance();
 }
 
+ExtensionTtsPlatformImplChromeOs::ExtensionTtsPlatformImplChromeOs()
+    : enabled_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+}
+
 bool ExtensionTtsPlatformImplChromeOs::Speak(
     int utterance_id,
     const std::string& utterance,
     const std::string& lang,
     const UtteranceContinuousParameters& params) {
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  if (!cros_library->EnsureLoaded()) {
-    set_error(kCrosLibraryNotLoadedError);
-    return false;
+  if (!enabled_) {
+    QueuedUtterance *queued = new QueuedUtterance();
+    queued->utterance_id = utterance_id;
+    queued->utterance = utterance;
+    queued->lang = lang;
+    queued->params = params;
+    queued_utterances_.push_back(queued);
+    return true;
   }
 
   utterance_id_ = utterance_id;
@@ -80,14 +109,14 @@ bool ExtensionTtsPlatformImplChromeOs::Speak(
 
   if (!lang.empty()) {
     AppendSpeakOption(
-        chromeos::SpeechSynthesisLibrary::kSpeechPropertyLocale,
+        chromeos::SpeechSynthesizerClient::kSpeechPropertyLocale,
         lang,
         &options);
   }
 
   if (params.rate >= 0.0) {
     AppendSpeakOption(
-        chromeos::SpeechSynthesisLibrary::kSpeechPropertyRate,
+        chromeos::SpeechSynthesizerClient::kSpeechPropertyRate,
         DoubleToString(params.rate),
         &options);
   }
@@ -95,7 +124,7 @@ bool ExtensionTtsPlatformImplChromeOs::Speak(
   if (params.pitch >= 0.0) {
     // The TTS service allows a range of 0 to 2 for speech pitch.
     AppendSpeakOption(
-        chromeos::SpeechSynthesisLibrary::kSpeechPropertyPitch,
+        chromeos::SpeechSynthesizerClient::kSpeechPropertyPitch,
         DoubleToString(params.pitch),
         &options);
   }
@@ -104,36 +133,37 @@ bool ExtensionTtsPlatformImplChromeOs::Speak(
     // The Chrome OS TTS service allows a range of 0 to 5 for speech volume,
     // but 5 clips, so map to a range of 0...4.
     AppendSpeakOption(
-        chromeos::SpeechSynthesisLibrary::kSpeechPropertyVolume,
+        chromeos::SpeechSynthesizerClient::kSpeechPropertyVolume,
         DoubleToString(params.volume * 4),
         &options);
   }
 
-  if (!options.empty()) {
-    cros_library->GetSpeechSynthesisLibrary()->SetSpeakProperties(
-        options.c_str());
-  }
+  chromeos::SpeechSynthesizerClient* speech_synthesizer_client =
+      chromeos::DBusThreadManager::Get()->GetSpeechSynthesizerClient();
 
-  bool result =
-      cros_library->GetSpeechSynthesisLibrary()->Speak(utterance.c_str());
+  if (!options.empty())
+    speech_synthesizer_client->SetSpeakProperties(options);
 
-  if (result) {
+  speech_synthesizer_client->Speak(utterance);
+  if (utterance_id_ >= 0) {
     ExtensionTtsController* controller = ExtensionTtsController::GetInstance();
     controller->OnTtsEvent(utterance_id_, TTS_EVENT_START, 0, std::string());
     PollUntilSpeechFinishes(utterance_id_);
   }
 
-  return result;
+  return true;
 }
 
 bool ExtensionTtsPlatformImplChromeOs::StopSpeaking() {
-  if (chromeos::CrosLibrary::Get()->EnsureLoaded()) {
-    return chromeos::CrosLibrary::Get()->GetSpeechSynthesisLibrary()->
-        StopSpeaking();
+  // If we haven't been enabled yet, clear the internal queue.
+  if (!enabled_) {
+    STLDeleteElements(&queued_utterances_);
+    return true;
   }
 
-  set_error(kCrosLibraryNotLoadedError);
-  return false;
+  chromeos::DBusThreadManager::Get()->GetSpeechSynthesizerClient()->
+      StopSpeaking();
+  return true;
 }
 
 bool ExtensionTtsPlatformImplChromeOs::SendsEvent(TtsEventType event_type) {
@@ -142,31 +172,49 @@ bool ExtensionTtsPlatformImplChromeOs::SendsEvent(TtsEventType event_type) {
           event_type == TTS_EVENT_ERROR);
 }
 
+void ExtensionTtsPlatformImplChromeOs::Enable() {
+  enabled_ = true;
+  while (!queued_utterances_.empty()) {
+    QueuedUtterance* queued = queued_utterances_.front();
+    Speak(queued->utterance_id,
+          queued->utterance,
+          queued->lang,
+          queued->params);
+    delete queued;
+    queued_utterances_.pop_front();
+  }
+}
+
 void ExtensionTtsPlatformImplChromeOs::PollUntilSpeechFinishes(
     int utterance_id) {
   if (utterance_id != utterance_id_) {
     // This utterance must have been interrupted or cancelled.
     return;
   }
+  chromeos::SpeechSynthesizerClient* speech_synthesizer_client =
+      chromeos::DBusThreadManager::Get()->GetSpeechSynthesizerClient();
+  speech_synthesizer_client->IsSpeaking(base::Bind(
+      &ExtensionTtsPlatformImplChromeOs::ContinuePollingIfSpeechIsNotFinished,
+      weak_ptr_factory_.GetWeakPtr(), utterance_id));
+}
 
-  chromeos::CrosLibrary* cros_library = chromeos::CrosLibrary::Get();
-  ExtensionTtsController* controller = ExtensionTtsController::GetInstance();
-
-  if (!cros_library->EnsureLoaded()) {
-    controller->OnTtsEvent(
-        utterance_id_, TTS_EVENT_ERROR, 0, kCrosLibraryNotLoadedError);
+void ExtensionTtsPlatformImplChromeOs::ContinuePollingIfSpeechIsNotFinished(
+    int utterance_id, bool is_speaking) {
+  if (utterance_id != utterance_id_) {
+    // This utterance must have been interrupted or cancelled.
     return;
   }
-
-  if (!cros_library->GetSpeechSynthesisLibrary()->IsSpeaking()) {
+  if (!is_speaking) {
+    ExtensionTtsController* controller = ExtensionTtsController::GetInstance();
     controller->OnTtsEvent(
         utterance_id_, TTS_EVENT_END, utterance_length_, std::string());
     return;
   }
-
+  // Continue polling.
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, method_factory_.NewRunnableMethod(
+      FROM_HERE, base::Bind(
           &ExtensionTtsPlatformImplChromeOs::PollUntilSpeechFinishes,
+          weak_ptr_factory_.GetWeakPtr(),
           utterance_id),
       kSpeechCheckDelayIntervalMs);
 }
@@ -177,13 +225,18 @@ void ExtensionTtsPlatformImplChromeOs::AppendSpeakOption(
     std::string* options) {
   *options +=
       key +
-      chromeos::SpeechSynthesisLibrary::kSpeechPropertyEquals +
+      chromeos::SpeechSynthesizerClient::kSpeechPropertyEquals +
       value +
-      chromeos::SpeechSynthesisLibrary::kSpeechPropertyDelimiter;
+      chromeos::SpeechSynthesizerClient::kSpeechPropertyDelimiter;
 }
 
 // static
 ExtensionTtsPlatformImplChromeOs*
 ExtensionTtsPlatformImplChromeOs::GetInstance() {
   return Singleton<ExtensionTtsPlatformImplChromeOs>::get();
+}
+
+// global
+void EnableChromeOsTts() {
+  ExtensionTtsPlatformImplChromeOs::GetInstance()->Enable();
 }

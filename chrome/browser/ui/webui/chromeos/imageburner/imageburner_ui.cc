@@ -3,22 +3,24 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
-#include "chrome/browser/ui/webui/chromeos/imageburner/webui_handler.h"
+
+#include <string>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chromeos/imageburner/webui_handler.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -26,7 +28,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/bytes_formatting.h"
 
-namespace {
+using content::BrowserThread;
 
 const char kPropertyDevicePath[] = "devicePath";
 const char kPropertyFilePath[] = "filePath";
@@ -34,7 +36,7 @@ const char kPropertyLabel[] = "label";
 const char kPropertyPath[] = "path";
 
 // Name for hwid in machine statistics.
-const std::string kHwidStatistic = "hardware_class";
+const char kHwidStatistic[] = "hardware_class";
 
 const char kImageZipFileName[] = "chromeos_image.bin.zip";
 
@@ -42,11 +44,13 @@ const char kImageZipFileName[] = "chromeos_image.bin.zip";
 const uint64 kMinDeviceSize = static_cast<uint64>(3.9) * 1000 * 1000 * 1000;
 
 // Link displayed on imageburner ui.
-const std::string kMoreInfoLink =
+const char kMoreInfoLink[] =
     "http://www.chromium.org/chromium-os/chromiumos-design-docs/recovery-mode";
 
-ChromeWebUIDataSource *CreateImageburnerUIHTMLSource() {
-  ChromeWebUIDataSource *source =
+namespace {
+
+ChromeWebUIDataSource* CreateImageburnerUIHTMLSource() {
+  ChromeWebUIDataSource* source =
       new ChromeWebUIDataSource(chrome::kChromeUIImageBurnerHost);
 
     source->AddLocalizedString("headerTitle", IDS_IMAGEBURN_HEADER_TITLE);
@@ -124,7 +128,7 @@ WebUIHandler::WebUIHandler(TabContents* contents)
       state_machine_(NULL),
       observing_burn_lib_(false),
       working_(false) {
-  chromeos::CrosLibrary::Get()->GetMountLibrary()->AddObserver(this);
+  chromeos::disks::DiskMountManager::GetInstance()->AddObserver(this);
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
       AddNetworkManagerObserver(this);
   burn_manager_ = BurnManager::GetInstance();
@@ -133,7 +137,8 @@ WebUIHandler::WebUIHandler(TabContents* contents)
 }
 
 WebUIHandler::~WebUIHandler() {
-  chromeos::CrosLibrary::Get()->GetMountLibrary()->RemoveObserver(this);
+  chromeos::disks::DiskMountManager::GetInstance()->
+      RemoveObserver(this);
   chromeos::CrosLibrary::Get()->GetBurnLibrary()->RemoveObserver(this);
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
       RemoveNetworkManagerObserver(this);
@@ -158,15 +163,16 @@ void WebUIHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void WebUIHandler::DiskChanged(chromeos::MountLibraryEventType event,
-                                   const chromeos::MountLibrary::Disk* disk) {
+void WebUIHandler::DiskChanged(
+    chromeos::disks::DiskMountManagerEventType event,
+    const chromeos::disks::DiskMountManager::Disk* disk) {
   if (!disk->is_parent() || disk->on_boot_device())
     return;
-  if (event == chromeos::MOUNT_DISK_ADDED) {
+  if (event == chromeos::disks::MOUNT_DISK_ADDED) {
     DictionaryValue disk_value;
     CreateDiskValue(*disk, &disk_value);
     web_ui_->CallJavascriptFunction("browserBridge.deviceAdded", disk_value);
-  } else if (event == chromeos::MOUNT_DISK_REMOVED) {
+  } else if (event == chromeos::disks::MOUNT_DISK_REMOVED) {
     StringValue device_path_value(disk->device_path());
     web_ui_->CallJavascriptFunction("browserBridge.deviceRemoved",
         device_path_value);
@@ -178,8 +184,8 @@ void WebUIHandler::DiskChanged(chromeos::MountLibraryEventType event,
 }
 
 void WebUIHandler::BurnProgressUpdated(chromeos::BurnLibrary* object,
-                                           chromeos::BurnEvent evt,
-                                           const ImageBurnStatus& status) {
+                                       chromeos::BurnEvent evt,
+                                       const ImageBurnStatus& status) {
   switch (evt) {
     case(chromeos::BURN_SUCCESS):
       FinalizeBurn();
@@ -219,20 +225,20 @@ void WebUIHandler::OnDownloadUpdated(DownloadItem* download) {
     DownloadCompleted(false);
     DCHECK(!active_download_item_);
   } else if (download->IsComplete()) {
-    burn_manager_->set_final_zip_file_path(download->full_path());
+    burn_manager_->set_final_zip_file_path(download->GetFullPath());
     DownloadCompleted(true);
     DCHECK(!active_download_item_);
   } else if (download->IsPartialDownload() &&
       state_machine_->state() == StateMachine::DOWNLOADING) {
     base::TimeDelta remaining_time;
     download->TimeRemaining(&remaining_time);
-    SendProgressSignal(DOWNLOAD, download->received_bytes(),
-        download->total_bytes(), &remaining_time);
+    SendProgressSignal(DOWNLOAD, download->GetReceivedBytes(),
+        download->GetTotalBytes(), &remaining_time);
   }
 }
 
 void WebUIHandler::OnDownloadOpened(DownloadItem* download) {
-  if (download->safety_state() == DownloadItem::DANGEROUS)
+  if (download->GetSafetyState() == DownloadItem::DANGEROUS)
     download->DangerousDownloadValidated();
 }
 
@@ -246,7 +252,7 @@ void WebUIHandler::ModelChanged() {
   for (std::vector<DownloadItem*>::const_iterator it = downloads.begin();
       it != downloads.end();
       ++it) {
-    if ((*it)->original_url() == image_download_url_) {
+    if ((*it)->GetOriginalUrl() == image_download_url_) {
       (*it)->AddObserver(this);
       active_download_item_ = *it;
       break;
@@ -276,7 +282,8 @@ void WebUIHandler::OnError(int error_message_id) {
   working_ = false;
 }
 
-void WebUIHandler::CreateDiskValue(const chromeos::MountLibrary::Disk& disk,
+void WebUIHandler::CreateDiskValue(
+    const chromeos::disks::DiskMountManager::Disk& disk,
     DictionaryValue* disk_value) {
   string16 label = ASCIIToUTF16(disk.drive_label());
   base::i18n::AdjustStringForLocaleDirection(&label);
@@ -286,14 +293,16 @@ void WebUIHandler::CreateDiskValue(const chromeos::MountLibrary::Disk& disk,
 }
 
 void WebUIHandler::HandleGetDevices(const ListValue* args) {
-  chromeos::MountLibrary* mount_lib =
-      chromeos::CrosLibrary::Get()->GetMountLibrary();
-  const chromeos::MountLibrary::DiskMap& disks = mount_lib->disks();
+  chromeos::disks::DiskMountManager* disk_mount_manager =
+      chromeos::disks::DiskMountManager::GetInstance();
+  const chromeos::disks::DiskMountManager::DiskMap& disks =
+      disk_mount_manager->disks();
   ListValue results_value;
-  for (chromeos::MountLibrary::DiskMap::const_iterator iter =  disks.begin();
+  for (chromeos::disks::DiskMountManager::DiskMap::const_iterator iter =
+           disks.begin();
        iter != disks.end();
        ++iter) {
-    chromeos::MountLibrary::Disk* disk = iter->second;
+    chromeos::disks::DiskMountManager::Disk* disk = iter->second;
     if (disk->is_parent() && !disk->on_boot_device()) {
       DictionaryValue* disk_value = new DictionaryValue();
       CreateDiskValue(*disk, disk_value);
@@ -352,7 +361,7 @@ void WebUIHandler::HandleBurnImage(const ListValue* args) {
     scoped_refptr<WebUIHandlerTaskProxy> task = new WebUIHandlerTaskProxy(this);
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(task.get(), &WebUIHandlerTaskProxy::CreateImageDir));
+        base::Bind(&WebUIHandlerTaskProxy::CreateImageDir, task.get()));
   } else {
     ImageDirCreatedOnUIThread(true);
   }
@@ -369,8 +378,8 @@ void WebUIHandler::OnImageDirCreated(bool success) {
   scoped_refptr<WebUIHandlerTaskProxy> task = new WebUIHandlerTaskProxy(this);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(task.get(), &WebUIHandlerTaskProxy::OnImageDirCreated,
-                        success));
+      base::Bind(&WebUIHandlerTaskProxy::OnImageDirCreated,
+                 task.get(), success));
 }
 
 void WebUIHandler::ImageDirCreatedOnUIThread(bool success) {
@@ -611,10 +620,11 @@ void WebUIHandler::ExtractTargetedDevicePath(
 }
 
 int64 WebUIHandler::GetDeviceSize(const std::string& device_path) {
-  chromeos::MountLibrary* mount_lib =
-      chromeos::CrosLibrary::Get()->GetMountLibrary();
-  const chromeos::MountLibrary::DiskMap& disks = mount_lib->disks();
-  return disks.find(device_path)->second->total_size();
+  chromeos::disks::DiskMountManager* disk_mount_manager =
+      chromeos::disks::DiskMountManager::GetInstance();
+  const chromeos::disks::DiskMountManager::DiskMap& disks =
+      disk_mount_manager->disks();
+  return disks.find(device_path)->second->total_size_in_bytes();
 }
 
 bool WebUIHandler::CheckNetwork() {

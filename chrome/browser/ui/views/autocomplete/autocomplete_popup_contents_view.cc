@@ -29,19 +29,19 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
+#include "ui/views/bubble/bubble_border.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/painter.h"
+#include "ui/views/widget/widget.h"
 #include "unicode/ubidi.h"
-#include "views/bubble/bubble_border.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/label.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/painter.h"
-#include "views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_gdi_object.h"
 #if !defined(USE_AURA)
-#include "views/widget/native_widget_win.h"
+#include "ui/views/widget/native_widget_win.h"
 #endif
 #endif
 
@@ -174,7 +174,8 @@ class AutocompletePopupContentsView::InstantOptInView
 
   virtual void OnPaint(gfx::Canvas* canvas) {
     canvas->Save();
-    canvas->TranslateInt(kOptInBackgroundHInset, kOptInBackgroundVInset);
+    canvas->Translate(gfx::Point(kOptInBackgroundHInset,
+                                 kOptInBackgroundVInset));
     bg_painter_->Paint(width() - kOptInBackgroundHInset * 2,
                        height() - kOptInBackgroundVInset * 2, canvas);
     canvas->DrawRectInt(ResourceBundle::toolbar_separator_color, 0, 0,
@@ -190,8 +191,8 @@ class AutocompletePopupContentsView::InstantOptInView
     // native buttons don't draw  in layered windows.
     // TODO(sky): these buttons look crap. Figure out the right
     // border/background to use.
-    views::TextButton* button =
-        new views::TextButton(this, UTF16ToWide(l10n_util::GetStringUTF16(id)));
+    views::TextButton* button = new views::TextButton(
+        this, l10n_util::GetStringUTF16(id));
     button->set_border(new OptInButtonBorder());
     button->set_tag(id);
     button->SetFont(font);
@@ -225,7 +226,8 @@ AutocompletePopupContentsView::AutocompletePopupContentsView(
   // The following little dance is required because set_border() requires a
   // pointer to a non-const object.
   views::BubbleBorder* bubble_border =
-      new views::BubbleBorder(views::BubbleBorder::NONE);
+      new views::BubbleBorder(views::BubbleBorder::NONE,
+                              views::BubbleBorder::NO_SHADOW);
   bubble_border_ = bubble_border;
   set_border(bubble_border);
   // The contents is owned by the LocationBarView.
@@ -345,7 +347,7 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     params.bounds = GetPopupBounds();
     popup_->Init(params);
     popup_->SetContentsView(this);
-    popup_->MoveAbove(omnibox_view_->GetRelativeWindowForPopup());
+    popup_->StackAbove(omnibox_view_->GetRelativeWindowForPopup());
     if (!popup_.get()) {
       // For some IMEs GetRelativeWindowForPopup triggers the omnibox to lose
       // focus, thereby closing (and destroying) the popup.

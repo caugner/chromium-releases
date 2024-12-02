@@ -39,12 +39,11 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
-#include "content/common/renderer_preferences.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "net/http/http_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -86,7 +85,7 @@ const char* const InstantLoader::kInstantHeaderValue = "instant";
 
 // FrameLoadObserver is responsible for determining if the page supports
 // instant after it has loaded.
-class InstantLoader::FrameLoadObserver : public NotificationObserver {
+class InstantLoader::FrameLoadObserver : public content::NotificationObserver {
  public:
   FrameLoadObserver(InstantLoader* loader,
                     TabContents* tab_contents,
@@ -98,7 +97,7 @@ class InstantLoader::FrameLoadObserver : public NotificationObserver {
         verbatim_(verbatim),
         unique_id_(tab_contents_->controller().pending_entry()->unique_id()) {
     registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-                   Source<TabContents>(tab_contents_));
+                   content::Source<TabContents>(tab_contents_));
   }
 
   // Sets the text to send to the page.
@@ -107,10 +106,10 @@ class InstantLoader::FrameLoadObserver : public NotificationObserver {
   // Sets whether verbatim results are obtained rather than predictive.
   void set_verbatim(bool verbatim) { verbatim_ = verbatim; }
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   InstantLoader* loader_;
@@ -128,18 +127,18 @@ class InstantLoader::FrameLoadObserver : public NotificationObserver {
   const int unique_id_;
 
   // Registers and unregisters us for notifications.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameLoadObserver);
 };
 
 void InstantLoader::FrameLoadObserver::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
-      int page_id = *(Details<int>(details).ptr());
+      int page_id = *(content::Details<int>(details).ptr());
       NavigationEntry* active_entry =
           tab_contents_->controller().GetActiveEntry();
       if (!active_entry || active_entry->page_id() != page_id ||
@@ -166,7 +165,7 @@ class InstantLoader::TabContentsDelegateImpl
     : public TabContentsDelegate,
       public TabContentsWrapperDelegate,
       public ConstrainedWindowTabHelperDelegate,
-      public NotificationObserver,
+      public content::NotificationObserver,
       public TabContentsObserver {
  public:
   explicit TabContentsDelegateImpl(InstantLoader* loader);
@@ -196,8 +195,8 @@ class InstantLoader::TabContentsDelegateImpl
 
   // NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // TabContentsDelegate:
   virtual void NavigationStateChanged(const TabContents* source,
@@ -252,7 +251,7 @@ class InstantLoader::TabContentsDelegateImpl
 
   InstantLoader* loader_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // If we are registered for paint notifications on a RenderWidgetHost this
   // will contain a pointer to it.
@@ -287,9 +286,10 @@ InstantLoader::TabContentsDelegateImpl::TabContentsDelegateImpl(
       user_typed_before_load_(false) {
   DCHECK(loader->preview_contents());
   registrar_.Add(this, content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-      Source<TabContents>(loader->preview_contents()->tab_contents()));
+      content::Source<TabContents>(loader->preview_contents()->tab_contents()));
   registrar_.Add(this, content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
-      Source<NavigationController>(&loader->preview_contents()->controller()));
+      content::Source<NavigationController>(
+          &loader->preview_contents()->controller()));
 }
 
 void InstantLoader::TabContentsDelegateImpl::PrepareForNewLoad() {
@@ -370,8 +370,8 @@ void InstantLoader::TabContentsDelegateImpl::RegisterForPaintNotifications(
     RenderWidgetHost* render_widget_host) {
   DCHECK(registered_render_widget_host_ == NULL);
   registered_render_widget_host_ = render_widget_host;
-  Source<RenderWidgetHost> source =
-      Source<RenderWidgetHost>(registered_render_widget_host_);
+  content::Source<RenderWidgetHost> source =
+      content::Source<RenderWidgetHost>(registered_render_widget_host_);
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
                  source);
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
@@ -380,8 +380,8 @@ void InstantLoader::TabContentsDelegateImpl::RegisterForPaintNotifications(
 
 void InstantLoader::TabContentsDelegateImpl::UnregisterForPaintNotifications() {
   if (registered_render_widget_host_) {
-    Source<RenderWidgetHost> source =
-        Source<RenderWidgetHost>(registered_render_widget_host_);
+    content::Source<RenderWidgetHost> source =
+        content::Source<RenderWidgetHost>(registered_render_widget_host_);
     registrar_.Remove(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
                       source);
     registrar_.Remove(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
@@ -392,11 +392,12 @@ void InstantLoader::TabContentsDelegateImpl::UnregisterForPaintNotifications() {
 
 void InstantLoader::TabContentsDelegateImpl::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR:
-      if (Details<ProvisionalLoadDetails>(details)->url() == loader_->url_) {
+      if (content::Details<ProvisionalLoadDetails>(details)->url() ==
+          loader_->url_) {
         // This typically happens with downloads (which are disabled with
         // instant active). To ensure the download happens when the user presses
         // enter we set needs_reload_ to true, which triggers a reload.
@@ -563,10 +564,10 @@ void InstantLoader::TabContentsDelegateImpl::OnInstantSupportDetermined(
       page_id != source->controller().GetActiveEntry()->page_id())
     return;
 
-  Details<const bool> details(&result);
-  NotificationService::current()->Notify(
+  content::Details<const bool> details(&result);
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
-      NotificationService::AllSources(),
+      content::NotificationService::AllSources(),
       details);
 
   if (result)
@@ -688,8 +689,8 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
     DCHECK(template_url_id_ == 0);
     preview_tab_contents_delegate_->PrepareForNewLoad();
     frame_load_observer_.reset(NULL);
-    preview_contents_->controller().LoadURL(url_, GURL(), transition_type,
-                                            std::string());
+    preview_contents_->controller().LoadURL(url_, content::Referrer(),
+                                            transition_type, std::string());
   }
   return true;
 }
@@ -767,7 +768,8 @@ TabContentsWrapper* InstantLoader::ReleasePreviewContents(
       registrar_.Remove(
           this,
           content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-          Source<NavigationController>(&preview_contents_->controller()));
+          content::Source<NavigationController>(
+              &preview_contents_->controller()));
 #endif
     }
     preview_contents_->tab_contents()->set_delegate(NULL);
@@ -808,8 +810,8 @@ bool InstantLoader::IsNavigationPending() const {
 }
 
 void InstantLoader::Observe(int type,
-                            const NotificationSource& source,
-                            const NotificationDetails& details) {
+                            const content::NotificationSource& source,
+                            const content::NotificationDetails& details) {
 #if defined(OS_MACOSX)
   if (type == content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED) {
     if (preview_contents_->tab_contents()->GetRenderWidgetHostView()) {
@@ -821,7 +823,7 @@ void InstantLoader::Observe(int type,
 #endif
   if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     content::LoadCommittedDetails* load_details =
-        Details<content::LoadCommittedDetails>(details).ptr();
+        content::Details<content::LoadCommittedDetails>(details).ptr();
     if (load_details->is_main_frame) {
       if (load_details->http_status_code == kHostBlacklistStatusCode) {
         delegate_->AddToBlacklist(this, load_details->entry->url());
@@ -982,13 +984,14 @@ void InstantLoader::ReplacePreviewContents(TabContentsWrapper* old_tc,
   old_tc->set_delegate(NULL);
 
 #if defined(OS_MACOSX)
-  registrar_.Remove(this,
-                    content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-                    Source<NavigationController>(&old_tc->controller()));
+  registrar_.Remove(
+      this,
+      content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
+      content::Source<NavigationController>(&old_tc->controller()));
 #endif
   registrar_.Remove(this,
                  content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                 Source<NavigationController>(&old_tc->controller()));
+                 content::Source<NavigationController>(&old_tc->controller()));
 
   // We prerendered so we should be ready to show. If we're ready, swap in
   // immediately, otherwise show the preview as normal.
@@ -1024,13 +1027,13 @@ void InstantLoader::SetupPreviewContents(TabContentsWrapper* tab_contents) {
   registrar_.Add(
       this,
       content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-      Source<NavigationController>(&preview_contents_->controller()));
+      content::Source<NavigationController>(&preview_contents_->controller()));
 #endif
 
   registrar_.Add(
       this,
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      Source<NavigationController>(&preview_contents_->controller()));
+      content::Source<NavigationController>(&preview_contents_->controller()));
 
   gfx::Rect tab_bounds;
   tab_contents->view()->GetContainerBounds(&tab_bounds);
@@ -1069,9 +1072,10 @@ void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
   CommandLine* cl = CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kInstantURL))
     instant_url = GURL(cl->GetSwitchValueASCII(switches::kInstantURL));
-  preview_contents_->controller().LoadURL(instant_url, GURL(), transition_type,
-                                          std::string());
+  preview_contents_->controller().LoadURL(instant_url, content::Referrer(),
+                                          transition_type, std::string());
   RenderViewHost* host = preview_contents_->render_view_host();
+  preview_contents_->tab_contents()->HideContents();
 
   // If user_text is empty, this must be a preload of the search homepage. In
   // that case, send down a SearchBoxResize message, which will switch the page

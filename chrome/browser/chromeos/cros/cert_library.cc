@@ -7,17 +7,26 @@
 #include <algorithm>
 
 #include "base/observer_list_threadsafe.h"
+#include "base/string_number_conversions.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"  // g_browser_process
+#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/common/net/x509_certificate_model.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "crypto/encryptor.h"
 #include "crypto/nss_util.h"
+#include "crypto/sha2.h"
+#include "crypto/symmetric_key.h"
 #include "grit/generated_resources.h"
 #include "net/base/cert_database.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_collator.h"
 #include "unicode/coll.h"  // icu::Collator
+
+using content::BrowserThread;
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -28,6 +37,32 @@ const char kRootCertificateTokenName[] = "Builtin Object Token";
 
 // Delay between certificate requests while waiting for TPM/PKCS#11 init.
 const int kRequestDelayMs = 500;
+
+const size_t kKeySize = 16;
+
+// Decrypts (AES) hex encoded encrypted token given |key| and |salt|.
+std::string DecryptTokenWithKey(
+    crypto::SymmetricKey* key,
+    const std::string& salt,
+    const std::string& encrypted_token_hex) {
+  std::vector<uint8> encrypted_token_bytes;
+  if (!base::HexStringToBytes(encrypted_token_hex, &encrypted_token_bytes))
+    return std::string();
+
+  std::string encrypted_token(
+      reinterpret_cast<char*>(encrypted_token_bytes.data()),
+      encrypted_token_bytes.size());
+  crypto::Encryptor encryptor;
+  if (!encryptor.Init(key, crypto::Encryptor::CTR, std::string()))
+    return std::string();
+
+  std::string nonce = salt.substr(0, kKeySize);
+  std::string token;
+  CHECK(encryptor.SetCounter(nonce));
+  if (!encryptor.Decrypt(encrypted_token, &token))
+    return std::string();
+  return token;
+}
 
 string16 GetDisplayString(net::X509Certificate* cert, bool hardware_backed) {
   std::string org;
@@ -63,6 +98,9 @@ namespace chromeos {
 
 //////////////////////////////////////////////////////////////////////////////
 
+// base::Unretained(this) in the class is safe. By the time this object is
+// deleted as part of CrosLibrary, the DB thread and the UI message loop
+// are already terminated.
 class CertLibraryImpl
     : public CertLibrary,
       public net::CertDatabase::Observer {
@@ -71,8 +109,8 @@ class CertLibraryImpl
 
   CertLibraryImpl() :
       observer_list_(new CertLibraryObserverList),
-      request_task_(NULL),
       user_logged_in_(false),
+      certificates_requested_(false),
       certificates_loaded_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(certs_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(user_certs_(this)),
@@ -83,9 +121,7 @@ class CertLibraryImpl
   }
 
   ~CertLibraryImpl() {
-    // CertLibraryImpl is a singleton, so do not attempt to cleanup
-    // request_task_ on destruction.
-    DCHECK(request_task_ == NULL);
+    DCHECK(request_task_.is_null());
     net::CertDatabase::RemoveObserver(this);
   }
 
@@ -93,17 +129,21 @@ class CertLibraryImpl
   virtual void RequestCertificates() OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
+    certificates_requested_ = true;
+
     if (!UserManager::Get()->user_is_logged_in()) {
       // If we are not logged in, we cannot load any certificates.
       // Set 'loaded' to true for the UI, since we are not waiting on loading.
       LOG(WARNING) << "Requesting certificates before login.";
       certificates_loaded_ = true;
+      supplemental_user_key_.reset(NULL);
       return;
     }
 
     if (!user_logged_in_) {
       user_logged_in_ = true;
       certificates_loaded_ = false;
+      supplemental_user_key_.reset(NULL);
     }
 
     VLOG(1) << "Requesting Certificates.";
@@ -120,11 +160,11 @@ class CertLibraryImpl
     } else {
       if (crypto::IsTPMTokenAvailable()) {
         VLOG(1) << "TPM token not ready.";
-        if (request_task_ == NULL) {
+        if (request_task_.is_null()) {
           // Cryptohome does not notify us when the token is ready, so call
           // this again after a delay.
-          request_task_ = NewRunnableMethod(
-              this, &CertLibraryImpl::RequestCertificatesTask);
+          request_task_ = base::Bind(&CertLibraryImpl::RequestCertificatesTask,
+                                     base::Unretained(this));
           BrowserThread::PostDelayedTask(
               BrowserThread::UI, FROM_HERE, request_task_, kRequestDelayMs);
         }
@@ -137,7 +177,8 @@ class CertLibraryImpl
     // tpm_token_name_ is set, load the certificates on the DB thread.
     BrowserThread::PostTask(
         BrowserThread::DB, FROM_HERE,
-        NewRunnableMethod(this, &CertLibraryImpl::LoadCertificates));
+        base::Bind(&CertLibraryImpl::LoadCertificates,
+                   base::Unretained(this)));
   }
 
   virtual void AddObserver(CertLibrary::Observer* observer) OVERRIDE {
@@ -146,6 +187,10 @@ class CertLibraryImpl
 
   virtual void RemoveObserver(CertLibrary::Observer* observer) OVERRIDE {
     observer_list_->RemoveObserver(observer);
+  }
+
+  virtual bool CertificatesLoading() const OVERRIDE {
+    return certificates_requested_ && !certificates_loaded_;
   }
 
   virtual bool CertificatesLoaded() const OVERRIDE {
@@ -176,8 +221,33 @@ class CertLibraryImpl
     return server_ca_certs_;
   }
 
-  virtual crypto::SymmetricKey* GetSupplementalUserKey() const {
-    return crypto::GetSupplementalUserKey();
+  virtual std::string EncryptToken(const std::string& token) OVERRIDE {
+    if (!LoadSupplementalUserKey())
+      return std::string();
+    crypto::Encryptor encryptor;
+    if (!encryptor.Init(supplemental_user_key_.get(), crypto::Encryptor::CTR,
+                        std::string()))
+      return std::string();
+    std::string salt =
+        CrosLibrary::Get()->GetCryptohomeLibrary()->GetSystemSalt();
+    std::string nonce = salt.substr(0, kKeySize);
+    std::string encoded_token;
+    CHECK(encryptor.SetCounter(nonce));
+    if (!encryptor.Encrypt(token, &encoded_token))
+      return std::string();
+
+    return StringToLowerASCII(base::HexEncode(
+        reinterpret_cast<const void*>(encoded_token.data()),
+        encoded_token.size()));
+  }
+
+  virtual std::string DecryptToken(
+      const std::string& encrypted_token_hex) OVERRIDE {
+    if (!LoadSupplementalUserKey())
+      return std::string();
+    return DecryptTokenWithKey(supplemental_user_key_.get(),
+        CrosLibrary::Get()->GetCryptohomeLibrary()->GetSystemSalt(),
+        encrypted_token_hex);
   }
 
   // net::CertDatabase::Observer implementation. Observer added on UI thread.
@@ -195,7 +265,8 @@ class CertLibraryImpl
       // ref counted list directly. Instead, re-load the certificate list.
       BrowserThread::PostTask(
           BrowserThread::DB, FROM_HERE,
-          NewRunnableMethod(this, &CertLibraryImpl::LoadCertificates));
+          base::Bind(&CertLibraryImpl::LoadCertificates,
+                     base::Unretained(this)));
     }
   }
 
@@ -213,8 +284,8 @@ class CertLibraryImpl
     // Pass the list to the UI thread to safely update the local lists.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &CertLibraryImpl::UpdateCertificates,
-                          cert_list));
+        base::Bind(&CertLibraryImpl::UpdateCertificates,
+                   base::Unretained(this), cert_list));
   }
 
   // Comparison functor for locale-sensitive sorting of certificates by name.
@@ -238,8 +309,8 @@ class CertLibraryImpl
 
   void RequestCertificatesTask() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    // This will only get called from request_task_ which will delete itself.
-    request_task_ = NULL;
+    // Reset the task to the initial state so is_null() returns true.
+    request_task_ = base::Closure();
     RequestCertificates();
   }
 
@@ -315,17 +386,34 @@ class CertLibraryImpl
     }
   }
 
+  bool LoadSupplementalUserKey() {
+    if (!user_logged_in_) {
+      // If we are not logged in, we cannot load any certificates.
+      // Set 'loaded' to true for the UI, since we are not waiting on loading.
+      LOG(WARNING) << "Requesting supplemental use key before login.";
+      return false;
+    }
+    if (!supplemental_user_key_.get()) {
+      supplemental_user_key_.reset(crypto::GetSupplementalUserKey());
+    }
+    return supplemental_user_key_.get() != NULL;
+  }
+
   // Observers.
   const scoped_refptr<CertLibraryObserverList> observer_list_;
 
   // Active request task for re-requests while waiting for TPM init.
-  CancelableTask* request_task_;
+  base::Closure request_task_;
 
   // Cached TPM token name.
   std::string tpm_token_name_;
 
+  // Supplemental user key.
+  scoped_ptr<crypto::SymmetricKey> supplemental_user_key_;
+
   // Local state.
   bool user_logged_in_;
+  bool certificates_requested_;
   bool certificates_loaded_;
 
   // Certificates.
@@ -406,7 +494,3 @@ int CertLibrary::CertList::FindCertByPkcs11Id(
 }
 
 }  // chromeos
-
-// Allows InvokeLater without adding refcounting. This class is a singleton and
-// won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::CertLibraryImpl);

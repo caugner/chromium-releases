@@ -29,6 +29,10 @@ std::string GetAbsoluteSignalName(
   return interface_name + "." + signal_name;
 }
 
+// An empty function used for ObjectProxy::EmptyResponseCallback().
+void EmptyResponseCallbackBody(dbus::Response* unused_response) {
+}
+
 }  // namespace
 
 namespace dbus {
@@ -130,14 +134,21 @@ void ObjectProxy::Detach() {
     }
   }
 
-  for (size_t i = 0; i < match_rules_.size(); ++i) {
+  for (std::set<std::string>::iterator iter = match_rules_.begin();
+       iter != match_rules_.end(); ++iter) {
     ScopedDBusError error;
-    bus_->RemoveMatch(match_rules_[i], error.get());
+    bus_->RemoveMatch(*iter, error.get());
     if (error.is_set()) {
       // There is nothing we can do to recover, so just print the error.
-      LOG(ERROR) << "Failed to remove match rule: " << match_rules_[i];
+      LOG(ERROR) << "Failed to remove match rule: " << *iter;
     }
   }
+  match_rules_.clear();
+}
+
+// static
+ObjectProxy::ResponseCallback ObjectProxy::EmptyResponseCallback() {
+  return base::Bind(&EmptyResponseCallbackBody);
 }
 
 ObjectProxy::OnPendingCallIsCompleteData::OnPendingCallIsCompleteData(
@@ -212,7 +223,7 @@ void ObjectProxy::RunResponseCallback(ResponseCallback response_callback,
                                       DBusMessage* response_message) {
   bus_->AssertOnOriginThread();
 
-  bool response_callback_called = false;
+  bool method_call_successful = false;
   if (!response_message) {
     // The response is not received.
     response_callback.Run(NULL);
@@ -235,14 +246,14 @@ void ObjectProxy::RunResponseCallback(ResponseCallback response_callback,
         dbus::Response::FromRawMessage(response_message));
     // The response is successfully received.
     response_callback.Run(response.get());
-    response_callback_called = true;
+    method_call_successful = true;
     // Record time spent for the method call. Don't include failures.
     UMA_HISTOGRAM_TIMES("DBus.AsyncMethodCallTime",
                         base::TimeTicks::Now() - start_time);
   }
   // Record if the method call is successful, or not. 1 if successful.
   UMA_HISTOGRAM_ENUMERATION("DBus.AsyncMethodCallSuccess",
-                            response_callback_called,
+                            method_call_successful,
                             kSuccessRatioHistogramMaxValue);
 }
 
@@ -295,14 +306,22 @@ void ObjectProxy::ConnectToSignalInternal(
     const std::string match_rule =
         base::StringPrintf("type='signal', interface='%s'",
                            interface_name.c_str());
-    ScopedDBusError error;
-    bus_->AddMatch(match_rule, error.get());;
-    if (error.is_set()) {
-      LOG(ERROR) << "Failed to add match rule: " << match_rule;
+
+    // Add the match rule if we don't have it.
+    if (match_rules_.find(match_rule) == match_rules_.end()) {
+      ScopedDBusError error;
+      bus_->AddMatch(match_rule, error.get());;
+      if (error.is_set()) {
+        LOG(ERROR) << "Failed to add match rule: " << match_rule;
+      } else {
+        // Store the match rule, so that we can remove this in Detach().
+        match_rules_.insert(match_rule);
+        // Add the signal callback to the method table.
+        method_table_[absolute_signal_name] = signal_callback;
+        success = true;
+      }
     } else {
-      // Store the match rule, so that we can remove this in Detach().
-      match_rules_.push_back(match_rule);
-      // Add the signal callback to the method table.
+      // We already have the match rule.
       method_table_[absolute_signal_name] = signal_callback;
       success = true;
     }

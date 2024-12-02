@@ -9,22 +9,12 @@
 #include "base/memory/singleton.h"
 #include "content/browser/javascript_dialogs.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/intents_host.h"
 #include "content/public/common/url_constants.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/web_intent_data.h"
 
 TabContentsDelegate::TabContentsDelegate() {
-}
-
-TabContents* TabContentsDelegate::OpenURLFromTab(
-    TabContents* source,
-    const GURL& url,
-    const GURL& referrer,
-    WindowOpenDisposition disposition,
-    content::PageTransition transition) {
-  return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition,
-                                      false));
 }
 
 TabContents* TabContentsDelegate::OpenURLFromTab(TabContents* source,
@@ -60,6 +50,9 @@ void TabContentsDelegate::LoadProgressChanged(double progress) {
 }
 
 void TabContentsDelegate::CloseContents(TabContents* source) {
+}
+
+void TabContentsDelegate::SwappedOut(TabContents* source) {
 }
 
 void TabContentsDelegate::MoveContents(TabContents* source,
@@ -156,11 +149,9 @@ void TabContentsDelegate::ViewSourceForTab(TabContents* source,
   // it with proper implementation.
   GURL url = GURL(chrome::kViewSourceScheme + std::string(":") +
                       page_url.spec());
-  OpenURLFromTab(source,
-                 url,
-                 GURL(),
-                 NEW_FOREGROUND_TAB,
-                 content::PAGE_TRANSITION_LINK);
+  OpenURLFromTab(source, OpenURLParams(url, content::Referrer(),
+                                       NEW_FOREGROUND_TAB,
+                                       content::PAGE_TRANSITION_LINK, false));
 }
 
 void TabContentsDelegate::ViewSourceForFrame(TabContents* source,
@@ -169,11 +160,9 @@ void TabContentsDelegate::ViewSourceForFrame(TabContents* source,
   // Same as ViewSourceForTab, but for given subframe.
   GURL url = GURL(chrome::kViewSourceScheme + std::string(":") +
                       frame_url.spec());
-  OpenURLFromTab(source,
-                 url,
-                 GURL(),
-                 NEW_FOREGROUND_TAB,
-                 content::PAGE_TRANSITION_LINK);
+  OpenURLFromTab(source, OpenURLParams(url, content::Referrer(),
+                                       NEW_FOREGROUND_TAB,
+                                       content::PAGE_TRANSITION_LINK, false));
 }
 
 bool TabContentsDelegate::PreHandleKeyboardEvent(
@@ -184,6 +173,9 @@ bool TabContentsDelegate::PreHandleKeyboardEvent(
 
 void TabContentsDelegate::HandleKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
+}
+
+void TabContentsDelegate::HandleMouseDown() {
 }
 
 void TabContentsDelegate::HandleMouseUp() {
@@ -273,7 +265,7 @@ TabContentsDelegate::GetJavaScriptDialogCreator() {
 }
 
 void TabContentsDelegate::RunFileChooser(
-  TabContents* tab, const ViewHostMsg_RunFileChooser_Params& params) {
+  TabContents* tab, const content::FileChooserParams& params) {
 }
 
 void TabContentsDelegate::EnumerateDirectory(TabContents* tab, int request_id,
@@ -301,14 +293,16 @@ void TabContentsDelegate::RegisterIntentHandler(TabContents* tab,
                                                 const string16& action,
                                                 const string16& type,
                                                 const string16& href,
-                                                const string16& title) {
+                                                const string16& title,
+                                                const string16& disposition) {
 }
 
 void TabContentsDelegate::WebIntentDispatch(
     TabContents* tab,
-    int routing_id,
-    const webkit_glue::WebIntentData& intent,
-    int intent_id) {
+    content::IntentsHost* intents_host) {
+  // The caller passes this method ownership of the |intents_host|, but this
+  // empty implementation will not use it, so we delete it immediately.
+  delete intents_host;
 }
 
 void TabContentsDelegate::FindReply(TabContents* tab,
@@ -323,8 +317,14 @@ void TabContentsDelegate::CrashedPlugin(TabContents* tab,
                                         const FilePath& plugin_path) {
 }
 
-void TabContentsDelegate::UpdatePreferredSize(TabContents* source,
+void TabContentsDelegate::UpdatePreferredSize(TabContents* tab,
                                               const gfx::Size& pref_size) {
+}
+
+void TabContentsDelegate::WebUISend(TabContents* tab,
+                                    const GURL& source_url,
+                                    const std::string& name,
+                                    const base::ListValue& args) {
 }
 
 void TabContentsDelegate::RequestToLockMouse(TabContents* tab) {

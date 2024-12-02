@@ -32,7 +32,21 @@ namespace browser_sync {
 using sessions::ConflictProgress;
 using sessions::StatusController;
 
+namespace {
+
 const int SYNC_CYCLES_BEFORE_ADMITTING_DEFEAT = 8;
+
+// Enumeration of different conflict resolutions. Used for histogramming.
+enum SimpleConflictResolutions {
+  OVERWRITE_LOCAL,           // Resolved by overwriting local changes.
+  OVERWRITE_SERVER,          // Resolved by overwriting server changes.
+  UNDELETE,                  // Resolved by undeleting local item.
+  IGNORE_ENCRYPTION,         // Resolved by ignoring an encryption-only server
+                             // change. TODO(zea): implement and use this.
+  CONFLICT_RESOLUTION_SIZE,
+};
+
+}  // namespace
 
 ConflictResolver::ConflictResolver() {
 }
@@ -44,9 +58,8 @@ void ConflictResolver::IgnoreLocalChanges(MutableEntry* entry) {
   // An update matches local actions, merge the changes.
   // This is a little fishy because we don't actually merge them.
   // In the future we should do a 3-way merge.
-  VLOG(1) << "Server and local changes match, merging:" << entry;
+  DVLOG(1) << "Resolving conflict by ignoring local changes:" << entry;
   // With IS_UNSYNCED false, changes should be merged.
-  // METRIC simple conflict resolved by merge.
   entry->Put(syncable::IS_UNSYNCED, false);
 }
 
@@ -57,9 +70,9 @@ void ConflictResolver::OverwriteServerChanges(WriteTransaction* trans,
   // made our local client changes.
   // TODO(chron): This is really a general property clobber. We clobber
   // the server side property. Perhaps we should actually do property merging.
+  DVLOG(1) << "Resolving conflict by ignoring server changes:" << entry;
   entry->Put(syncable::BASE_VERSION, entry->Get(syncable::SERVER_VERSION));
   entry->Put(syncable::IS_UNAPPLIED_UPDATE, false);
-  // METRIC conflict resolved by overwrite.
 }
 
 ConflictResolver::ProcessSimpleConflictResult
@@ -77,12 +90,12 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
 
   if (!entry.Get(syncable::IS_UNAPPLIED_UPDATE)) {
     if (!entry.Get(syncable::PARENT_ID).ServerKnows()) {
-      VLOG(1) << "Item conflicting because its parent not yet committed. Id: "
-              << id;
+      DVLOG(1) << "Item conflicting because its parent not yet committed. Id: "
+               << id;
     } else {
-      VLOG(1) << "No set for conflicting entry id " << id << ". There should "
-                 "be an update/commit that will fix this soon. This message "
-                 "should not repeat.";
+      DVLOG(1) << "No set for conflicting entry id " << id << ". There should "
+               << "be an update/commit that will fix this soon. This message "
+               << "should not repeat.";
     }
     return NO_SYNC_PROGRESS;
   }
@@ -115,15 +128,21 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
       // TODO(zea): We may prefer to choose the local changes over the server
       // if we know the local changes happened before (or vice versa).
       // See http://crbug.com/76596
-      VLOG(1) << "Resolving simple conflict, ignoring local changes for:"
-              << entry;
+      DVLOG(1) << "Resolving simple conflict, ignoring local changes for:"
+               << entry;
       IgnoreLocalChanges(&entry);
       status->increment_num_local_overwrites();
+      UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
+                                OVERWRITE_LOCAL,
+                                CONFLICT_RESOLUTION_SIZE);
     } else {
-      VLOG(1) << "Resolving simple conflict, overwriting server changes for:"
-              << entry;
+      DVLOG(1) << "Resolving simple conflict, overwriting server changes for:"
+               << entry;
       OverwriteServerChanges(trans, &entry);
       status->increment_num_server_overwrites();
+      UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
+                                OVERWRITE_SERVER,
+                                CONFLICT_RESOLUTION_SIZE);
     }
     return SYNC_PROGRESS;
   } else {  // SERVER_IS_DEL is true
@@ -134,8 +153,8 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
                                               entry.Get(syncable::ID),
                                               &children);
       if (0 != children.size()) {
-        VLOG(1) << "Entry is a server deleted directory with local contents, "
-                   "should be in a set. (race condition).";
+        DVLOG(1) << "Entry is a server deleted directory with local contents, "
+                 << "should be in a set. (race condition).";
         return NO_SYNC_PROGRESS;
       }
     }
@@ -149,6 +168,9 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
           "when server-deleted.";
       OverwriteServerChanges(trans, &entry);
       status->increment_num_server_overwrites();
+      UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
+                                OVERWRITE_SERVER,
+                                CONFLICT_RESOLUTION_SIZE);
       // Clobber the versions, just in case the above DCHECK is violated.
       entry.Put(syncable::SERVER_VERSION, 0);
       entry.Put(syncable::BASE_VERSION, 0);
@@ -162,6 +184,9 @@ ConflictResolver::ProcessSimpleConflict(WriteTransaction* trans,
       CHECK(server_update.Get(syncable::META_HANDLE) !=
             entry.Get(syncable::META_HANDLE))
           << server_update << entry;
+      UMA_HISTOGRAM_ENUMERATION("Sync.ResolveSimpleConflict",
+                                UNDELETE,
+                                CONFLICT_RESOLUTION_SIZE);
     }
     return SYNC_PROGRESS;
   }
@@ -213,7 +238,7 @@ bool AttemptToFixCircularConflict(WriteTransaction* trans,
     }
     if (parentid.IsRoot())
       continue;
-    VLOG(1) << "Overwriting server changes to avoid loop: " << entryi;
+    DVLOG(1) << "Overwriting server changes to avoid loop: " << entryi;
     entryi.Put(syncable::BASE_VERSION, entryi.Get(syncable::SERVER_VERSION));
     entryi.Put(syncable::IS_UNSYNCED, true);
     entryi.Put(syncable::IS_UNAPPLIED_UPDATE, false);
@@ -255,7 +280,7 @@ bool AttemptToFixUnsyncedEntryInDeletedServerTree(WriteTransaction* trans,
     MutableEntry parent(trans, syncable::GET_BY_ID, id);
     if (!binary_search(conflict_set->begin(), conflict_set->end(), id))
       break;
-    VLOG(1) << "Giving directory a new id so we can undelete it " << parent;
+    DVLOG(1) << "Giving directory a new id so we can undelete it " << parent;
     ClearServerData(&parent);
     SyncerUtil::ChangeEntryIDAndUpdateChildren(trans, &parent,
         trans->directory()->NextId());
@@ -332,8 +357,8 @@ bool AttemptToFixUpdateEntryInDeletedLocalTree(WriteTransaction* trans,
     }
     MutableEntry entry(trans, syncable::GET_BY_ID, id);
 
-    VLOG(1) << "Undoing our deletion of " << entry
-            << ", will have name " << entry.Get(syncable::NON_UNIQUE_NAME);
+    DVLOG(1) << "Undoing our deletion of " << entry
+             << ", will have name " << entry.Get(syncable::NON_UNIQUE_NAME);
 
     Id parent_id = entry.Get(syncable::PARENT_ID);
     if (parent_id == reroot_id) {
@@ -384,7 +409,7 @@ bool ConflictResolver::ProcessConflictSet(WriteTransaction* trans,
     return false;
   }
 
-  VLOG(1) << "Fixing a set containing " << set_size << " items";
+  DVLOG(1) << "Fixing a set containing " << set_size << " items";
 
   // Fix circular conflicts.
   if (AttemptToFixCircularConflict(trans, conflict_set))
@@ -430,14 +455,15 @@ bool ConflictResolver::LogAndSignalIfConflictStuck(
   // that's obviously not working.
 }
 
-bool ConflictResolver::ResolveSimpleConflicts(const ScopedDirLookup& dir,
-                                              StatusController* status) {
+bool ConflictResolver::ResolveSimpleConflicts(
+    const ScopedDirLookup& dir,
+    const ConflictProgress& progress,
+    sessions::StatusController* status) {
   WriteTransaction trans(FROM_HERE, syncable::SYNCER, dir);
   bool forward_progress = false;
-  const ConflictProgress& progress = status->conflict_progress();
   // First iterate over simple conflict items (those that belong to no set).
   set<Id>::const_iterator conflicting_item_it;
-  for (conflicting_item_it = progress.ConflictingItemsBeginConst();
+  for (conflicting_item_it = progress.ConflictingItemsBegin();
        conflicting_item_it != progress.ConflictingItemsEnd();
        ++conflicting_item_it) {
     Id id = *conflicting_item_it;
@@ -472,10 +498,10 @@ bool ConflictResolver::ResolveSimpleConflicts(const ScopedDirLookup& dir,
 }
 
 bool ConflictResolver::ResolveConflicts(const ScopedDirLookup& dir,
-                                        StatusController* status) {
-  const ConflictProgress& progress = status->conflict_progress();
+                                        const ConflictProgress& progress,
+                                        sessions::StatusController* status) {
   bool rv = false;
-  if (ResolveSimpleConflicts(dir, status))
+  if (ResolveSimpleConflicts(dir, progress, status))
     rv = true;
   WriteTransaction trans(FROM_HERE, syncable::SYNCER, dir);
   set<ConflictSet*>::const_iterator set_it;

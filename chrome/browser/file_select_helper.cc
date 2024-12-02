@@ -14,19 +14,20 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/common/file_chooser_params.h"
 #include "grit/generated_resources.h"
 #include "net/base/mime_util.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -196,14 +197,8 @@ void FileSelectHelper::OnListDone(int id, int error) {
 }
 
 SelectFileDialog::FileTypeInfo* FileSelectHelper::GetFileTypesFromAcceptType(
-    const string16& accept_types) {
+    const std::vector<string16>& accept_types) {
   if (accept_types.empty())
-    return NULL;
-
-  // Split the accept-type string on commas.
-  std::vector<string16> mime_types;
-  base::SplitStringUsingSubstr(accept_types, ASCIIToUTF16(","), &mime_types);
-  if (mime_types.empty())
     return NULL;
 
   // Create FileTypeInfo and pre-allocate for the first extension list.
@@ -216,13 +211,14 @@ SelectFileDialog::FileTypeInfo* FileSelectHelper::GetFileTypesFromAcceptType(
   // Find the correspondinge extensions.
   int valid_type_count = 0;
   int description_id = 0;
-  for (size_t i = 0; i < mime_types.size(); ++i) {
-    string16 mime_type = mime_types[i];
-    std::string ascii_mime_type = StringToLowerASCII(UTF16ToASCII(mime_type));
-
-    TrimWhitespace(ascii_mime_type, TRIM_ALL, &ascii_mime_type);
-    if (ascii_mime_type.empty())
-      continue;
+  for (size_t i = 0; i < accept_types.size(); ++i) {
+    std::string ascii_mime_type = UTF16ToASCII(accept_types[i]);
+    // WebKit normalizes MIME types.  See HTMLInputElement::acceptMIMETypes().
+    DCHECK(StringToLowerASCII(ascii_mime_type) == ascii_mime_type)
+        << "A MIME type contains uppercase letter: " << ascii_mime_type;
+    DCHECK(TrimWhitespaceASCII(ascii_mime_type, TRIM_ALL, &ascii_mime_type)
+        == TRIM_NONE)
+        << "A MIME type contains whitespace: '" << ascii_mime_type << "'";
 
     size_t old_extension_size = extensions->size();
     if (ascii_mime_type == "image/*") {
@@ -268,7 +264,7 @@ SelectFileDialog::FileTypeInfo* FileSelectHelper::GetFileTypesFromAcceptType(
 void FileSelectHelper::RunFileChooser(
     RenderViewHost* render_view_host,
     TabContents* tab_contents,
-    const ViewHostMsg_RunFileChooser_Params& params) {
+    const content::FileChooserParams& params) {
   DCHECK(!render_view_host_);
   DCHECK(!tab_contents_);
   render_view_host_ = render_view_host;
@@ -276,10 +272,10 @@ void FileSelectHelper::RunFileChooser(
   notification_registrar_.RemoveAll();
   notification_registrar_.Add(
       this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
-      Source<RenderWidgetHost>(render_view_host_));
+      content::Source<RenderWidgetHost>(render_view_host_));
   notification_registrar_.Add(
       this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(tab_contents_));
+      content::Source<TabContents>(tab_contents_));
 
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
@@ -294,7 +290,7 @@ void FileSelectHelper::RunFileChooser(
 }
 
 void FileSelectHelper::RunFileChooserOnFileThread(
-    const ViewHostMsg_RunFileChooser_Params& params) {
+    const content::FileChooserParams& params) {
   select_file_types_.reset(
       GetFileTypesFromAcceptType(params.accept_types));
 
@@ -304,7 +300,7 @@ void FileSelectHelper::RunFileChooserOnFileThread(
 }
 
 void FileSelectHelper::RunFileChooserOnUIThread(
-    const ViewHostMsg_RunFileChooser_Params& params) {
+    const content::FileChooserParams& params) {
   if (!render_view_host_ || !tab_contents_)
     return;
 
@@ -312,16 +308,16 @@ void FileSelectHelper::RunFileChooserOnUIThread(
     select_file_dialog_ = SelectFileDialog::Create(this);
 
   switch (params.mode) {
-    case ViewHostMsg_RunFileChooser_Mode::Open:
+    case content::FileChooserParams::Open:
       dialog_type_ = SelectFileDialog::SELECT_OPEN_FILE;
       break;
-    case ViewHostMsg_RunFileChooser_Mode::OpenMultiple:
+    case content::FileChooserParams::OpenMultiple:
       dialog_type_ = SelectFileDialog::SELECT_OPEN_MULTI_FILE;
       break;
-    case ViewHostMsg_RunFileChooser_Mode::OpenFolder:
+    case content::FileChooserParams::OpenFolder:
       dialog_type_ = SelectFileDialog::SELECT_FOLDER;
       break;
-    case ViewHostMsg_RunFileChooser_Mode::Save:
+    case content::FileChooserParams::Save:
       dialog_type_ = SelectFileDialog::SELECT_SAVEAS_FILE;
       break;
     default:
@@ -380,17 +376,18 @@ void FileSelectHelper::EnumerateDirectoryEnd() {
 }
 
 void FileSelectHelper::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED: {
-      DCHECK(Source<RenderWidgetHost>(source).ptr() == render_view_host_);
+      DCHECK(content::Source<RenderWidgetHost>(source).ptr() ==
+             render_view_host_);
       render_view_host_ = NULL;
       break;
     }
 
     case content::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
-      DCHECK(Source<TabContents>(source).ptr() == tab_contents_);
+      DCHECK(content::Source<TabContents>(source).ptr() == tab_contents_);
       tab_contents_ = NULL;
       break;
     }

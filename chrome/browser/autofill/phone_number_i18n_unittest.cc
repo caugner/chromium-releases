@@ -2,18 +2,31 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/message_loop.h"
+#include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/phone_number_i18n.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using autofill_i18n::NormalizePhoneNumber;
 using autofill_i18n::ParsePhoneNumber;
 using autofill_i18n::ConstructPhoneNumber;
-using autofill_i18n::FormatPhone;
-using autofill_i18n::ComparePhones;
 using autofill_i18n::PhoneNumbersMatch;
+using content::BrowserThread;
 
-typedef testing::Test PhoneNumberI18NTest;
+class PhoneNumberI18NTest : public testing::Test {
+ public:
+  // In order to access the application locale -- which the tested functions do
+  // internally -- this test must run on the UI thread.
+  PhoneNumberI18NTest() : ui_thread_(BrowserThread::UI, &message_loop_) {}
+
+ private:
+  MessageLoopForUI message_loop_;
+  content::TestBrowserThread ui_thread_;
+
+  DISALLOW_COPY_AND_ASSIGN(PhoneNumberI18NTest);
+};
 
 TEST_F(PhoneNumberI18NTest, NormalizePhoneNumber) {
   // "Large" digits.
@@ -275,22 +288,22 @@ TEST_F(PhoneNumberI18NTest, ConstructPhoneNumber) {
                                    autofill_i18n::RFC3966,
                                    &number));
   EXPECT_EQ(number, ASCIIToUTF16("+1-650-234-5678"));
-  EXPECT_TRUE(ConstructPhoneNumber(ASCIIToUTF16(""),
+  EXPECT_TRUE(ConstructPhoneNumber(string16(),
                                    ASCIIToUTF16("650"),
                                    ASCIIToUTF16("2345678"),
                                    "US",
                                    autofill_i18n::INTERNATIONAL,
                                    &number));
   EXPECT_EQ(number, ASCIIToUTF16("+1 650-234-5678"));
-  EXPECT_TRUE(ConstructPhoneNumber(ASCIIToUTF16(""),
-                                   ASCIIToUTF16(""),
+  EXPECT_TRUE(ConstructPhoneNumber(string16(),
+                                   string16(),
                                    ASCIIToUTF16("6502345678"),
                                    "US",
                                    autofill_i18n::INTERNATIONAL,
                                    &number));
   EXPECT_EQ(number, ASCIIToUTF16("+1 650-234-5678"));
 
-  EXPECT_FALSE(ConstructPhoneNumber(ASCIIToUTF16(""),
+  EXPECT_FALSE(ConstructPhoneNumber(string16(),
                                     ASCIIToUTF16("650"),
                                     ASCIIToUTF16("234567890"),
                                     "US",
@@ -298,7 +311,7 @@ TEST_F(PhoneNumberI18NTest, ConstructPhoneNumber) {
                                     &number));
   EXPECT_EQ(number, string16());
   // Italian number
-  EXPECT_TRUE(ConstructPhoneNumber(ASCIIToUTF16(""),
+  EXPECT_TRUE(ConstructPhoneNumber(string16(),
                                    ASCIIToUTF16("347"),
                                    ASCIIToUTF16("2345678"),
                                    "IT",
@@ -321,54 +334,6 @@ TEST_F(PhoneNumberI18NTest, ConstructPhoneNumber) {
                                    autofill_i18n::INTERNATIONAL,
                                    &number));
   EXPECT_EQ(number, ASCIIToUTF16("+49 2423/45678901"));
-}
-
-TEST_F(PhoneNumberI18NTest, FormatPhone) {
-  EXPECT_EQ(FormatPhone(ASCIIToUTF16("1[650]234-56-78"), "US",
-            autofill_i18n::NATIONAL),
-            ASCIIToUTF16("(650) 234-5678"));
-  EXPECT_EQ(FormatPhone(ASCIIToUTF16("(650)234-56-78"), "US",
-            autofill_i18n::NATIONAL),
-            ASCIIToUTF16("(650) 234-5678"));
-  EXPECT_EQ(FormatPhone(ASCIIToUTF16("(650)234-56-78"), "US",
-            autofill_i18n::INTERNATIONAL),
-            ASCIIToUTF16("+1 650-234-5678"));
-  EXPECT_EQ(FormatPhone(ASCIIToUTF16("01139236618300"), "US",
-            autofill_i18n::INTERNATIONAL),
-            ASCIIToUTF16("+39 236618300"));
-  EXPECT_EQ(FormatPhone(ASCIIToUTF16("1(650)234-56-78"), "CZ",
-            autofill_i18n::NATIONAL),
-            ASCIIToUTF16("16502345678"));
-  EXPECT_EQ(FormatPhone(ASCIIToUTF16("1(650)234-56-78"), "CZ",
-            autofill_i18n::INTERNATIONAL),
-            ASCIIToUTF16("+420 16502345678"));
-}
-
-TEST_F(PhoneNumberI18NTest, ComparePhones) {
-  EXPECT_EQ(ComparePhones(ASCIIToUTF16("1(650)234-56-78"),
-                          ASCIIToUTF16("+16502345678"),
-                          "US"),
-            autofill_i18n::PHONES_EQUAL);
-  EXPECT_EQ(ComparePhones(ASCIIToUTF16("1(650)234-56-78"),
-                          ASCIIToUTF16("6502345678"),
-                          "US"),
-            autofill_i18n::PHONES_EQUAL);
-  EXPECT_EQ(ComparePhones(ASCIIToUTF16("1-800-FLOWERS"),
-                          ASCIIToUTF16("18003569377"),
-                          "US"),
-            autofill_i18n::PHONES_EQUAL);
-  EXPECT_EQ(ComparePhones(ASCIIToUTF16("1(650)234-56-78"),
-                          ASCIIToUTF16("2345678"),
-                          "US"),
-            autofill_i18n::PHONES_SUBMATCH);
-  EXPECT_EQ(ComparePhones(ASCIIToUTF16("234-56-78"),
-                          ASCIIToUTF16("+16502345678"),
-                          "US"),
-            autofill_i18n::PHONES_SUBMATCH);
-  EXPECT_EQ(ComparePhones(ASCIIToUTF16("1650234"),
-                          ASCIIToUTF16("+16502345678"),
-                          "US"),
-            autofill_i18n::PHONES_NOT_EQUAL);
 }
 
 TEST_F(PhoneNumberI18NTest, PhoneNumbersMatch) {
@@ -399,9 +364,17 @@ TEST_F(PhoneNumberI18NTest, PhoneNumbersMatch) {
   EXPECT_TRUE(PhoneNumbersMatch(ASCIIToUTF16("4158889999"),
                                 ASCIIToUTF16("415 TUV WXYZ"),
                                 "US"));
+  EXPECT_TRUE(PhoneNumbersMatch(ASCIIToUTF16("1(415)888-99-99"),
+                                ASCIIToUTF16("+14158889999"),
+                                "US"));
 
   // Partial matches don't count.
   EXPECT_FALSE(PhoneNumbersMatch(ASCIIToUTF16("14158889999"),
                                  ASCIIToUTF16("8889999"),
+                                 "US"));
+
+  // Different numbers don't match.
+  EXPECT_FALSE(PhoneNumbersMatch(ASCIIToUTF16("14158889999"),
+                                 ASCIIToUTF16("1415888"),
                                  "US"));
 }

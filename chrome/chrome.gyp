@@ -124,7 +124,6 @@
     'chrome_common.gypi',
     'chrome_dll.gypi',
     'chrome_exe.gypi',
-    'chrome_dll_syzygy.gypi',  # This must follow chrome_dll and chrome_exe.
     'chrome_installer.gypi',
     'chrome_installer_util.gypi',
     'chrome_renderer.gypi',
@@ -133,229 +132,6 @@
     'nacl.gypi',
   ],
   'targets': [
-    {
-      # TODO(mark): It would be better if each static library that needed
-      # to run grit would list its own .grd files, but unfortunately some
-      # of the static libraries currently have circular dependencies among
-      # generated headers.
-      'target_name': 'chrome_resources',
-      'type': 'none',
-      'actions': [
-        # Data resources.
-        {
-          'action_name': 'browser_resources',
-          'variables': {
-            'grit_grd_file': 'browser/browser_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'common_resources',
-          'variables': {
-            'grit_grd_file': 'common/common_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'renderer_resources',
-          'variables': {
-            'grit_grd_file': 'renderer/renderer_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
-    {
-      # TODO(mark): It would be better if each static library that needed
-      # to run grit would list its own .grd files, but unfortunately some
-      # of the static libraries currently have circular dependencies among
-      # generated headers.
-      'target_name': 'chrome_strings',
-      'type': 'none',
-      'conditions': [
-        ['OS=="win"', {
-          # HACK(nsylvain): We want to enforce a fake dependency on
-          # intaller_util_string.  install_util depends on both
-          # chrome_strings and installer_util_strings, but for some reasons
-          # Incredibuild does not enforce it (most likely a bug). By changing
-          # the type and making sure we depend on installer_util_strings, it
-          # will always get built before installer_util.
-          'type': 'dummy_executable',
-          'dependencies': ['installer_util_strings'],
-        }],
-      ],
-      'actions': [
-        # Localizable resources.
-        {
-          'action_name': 'locale_settings',
-          'variables': {
-            'grit_grd_file': 'app/resources/locale_settings.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'chromium_strings.grd',
-          'variables': {
-            'grit_grd_file': 'app/chromium_strings.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'generated_resources',
-          'variables': {
-            'grit_grd_file': 'app/generated_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'google_chrome_strings',
-          'variables': {
-            'grit_grd_file': 'app/google_chrome_strings.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
-    {
-      'target_name': 'theme_resources',
-      'type': 'none',
-      'actions': [
-        {
-          'action_name': 'theme_resources',
-          'variables': {
-            'grit_grd_file': 'app/theme/theme_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'theme_resources_large',
-          'variables': {
-            'grit_grd_file': 'app/theme/theme_resources_large.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'theme_resources_standard',
-          'variables': {
-            'grit_grd_file': 'app/theme/theme_resources_standard.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
-    {
-      'target_name': 'platform_locale_settings',
-      'type': 'none',
-      'actions': [
-        {
-          'action_name': 'platform_locale_settings',
-          'variables': {
-            'grit_grd_file': '<(platform_locale_settings_grd)',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
-    {
-      'target_name': 'chrome_extra_resources',
-      'type': 'none',
-      'dependencies': [
-        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:generate_devtools_grd',
-      ],
-      # These resources end up in resources.pak because they are resources
-      # used by internal pages.  Putting them in a spearate pak file makes
-      # it easier for us to reference them internally.
-      'actions': [
-        {
-          'action_name': 'component_extension_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/component_extension_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'net_internals_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/net_internals_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'options_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/options_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'quota_internals_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/quota_internals_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'shared_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/shared_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'sync_internals_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/sync_internals_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'workers_resources',
-          'variables': {
-            'grit_grd_file': 'browser/resources/workers_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ],
-        },
-        {
-          'action_name': 'devtools_frontend_resources',
-          'variables': {
-            'grit_grd_file':
-               'browser/debugger/frontend/devtools_frontend_resources.grd',
-          },
-          'includes': [ '../build/grit_action.gypi' ]
-        },
-        {
-          'action_name': 'devtools_resources',
-          # This can't use ../build/grit_action.gypi because the grd file
-          # is generated a build time, so the trick of using grit_info to get
-          # the real inputs/outputs at GYP time isn't possible.
-          'variables': {
-            'grit_cmd': ['python', '../tools/grit/grit.py'],
-            'grit_grd_file': '<(SHARED_INTERMEDIATE_DIR)/devtools/devtools_resources.grd',
-          },
-          'inputs': [
-            '<(grit_grd_file)',
-            '<!@pymod_do_main(grit_info --inputs)',
-          ],
-          'outputs': [
-            '<(grit_out_dir)/grit/devtools_resources.h',
-            '<(grit_out_dir)/devtools_resources.pak',
-            '<(grit_out_dir)/grit/devtools_resources_map.cc',
-            '<(grit_out_dir)/grit/devtools_resources_map.h',
-          ],
-          'action': ['<@(grit_cmd)',
-                     '-i', '<(grit_grd_file)', 'build',
-                     '-o', '<(grit_out_dir)',
-                     '-D', 'SHARED_INTERMEDIATE_DIR=<(SHARED_INTERMEDIATE_DIR)',
-                     '<@(grit_defines)' ],
-          'message': 'Generating resources from <(grit_grd_file)',
-        },
-      ],
-      'includes': [ '../build/grit_target.gypi' ],
-    },
     {
       'target_name': 'default_extensions',
       'type': 'none',
@@ -386,11 +162,12 @@
       # TODO(joi): Move debugger-related build rules to content/
       'target_name': 'debugger',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
-        'chrome_extra_resources',
-        'chrome_resources',
-        'chrome_strings',
-        'theme_resources',
+        'chrome_resources.gyp:chrome_extra_resources',
+        'chrome_resources.gyp:chrome_resources',
+        'chrome_resources.gyp:chrome_strings',
+        'chrome_resources.gyp:theme_resources',
         '../base/base.gyp:base',
         '../content/content.gyp:content_browser',
         '../net/net.gyp:http_server',
@@ -406,26 +183,11 @@
       'sources': [
         'browser/debugger/browser_list_tabcontents_provider.cc',
         'browser/debugger/browser_list_tabcontents_provider.h',
-        'browser/debugger/debugger_remote_service.cc',
-        'browser/debugger/debugger_remote_service.h',
         'browser/debugger/devtools_file_util.cc',
         'browser/debugger/devtools_file_util.h',
-        'browser/debugger/devtools_protocol_handler.cc',
-        'browser/debugger/devtools_protocol_handler.h',
-        'browser/debugger/devtools_remote.h',
-        'browser/debugger/devtools_remote_listen_socket.cc',
-        'browser/debugger/devtools_remote_listen_socket.h',
-        'browser/debugger/devtools_remote_message.cc',
-        'browser/debugger/devtools_remote_message.h',
-        'browser/debugger/devtools_remote_service.cc',
-        'browser/debugger/devtools_remote_service.h',
         'browser/debugger/devtools_toggle_action.h',
         'browser/debugger/devtools_window.cc',
         'browser/debugger/devtools_window.h',
-        'browser/debugger/extension_ports_remote_service.cc',
-        'browser/debugger/extension_ports_remote_service.h',
-        'browser/debugger/inspectable_tab_proxy.cc',
-        'browser/debugger/inspectable_tab_proxy.h',
         'browser/debugger/remote_debugging_server.cc',
         'browser/debugger/remote_debugging_server.h',
       ],
@@ -440,7 +202,9 @@
     {
       'target_name': 'plugin',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
+        'chrome_resources.gyp:chrome_strings',
         '../base/base.gyp:base',
         '../content/content.gyp:content_plugin',
       ],
@@ -452,10 +216,11 @@
         '..',
         '<(grit_out_dir)',
       ],
-    },        
+    },
     {
       'target_name': 'utility',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         '../base/base.gyp:base',
         '../content/content.gyp:content_utility',
@@ -481,6 +246,7 @@
       # or from compiling a stub implementation.
       'target_name': 'syncapi_core',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'sources': [
         'browser/sync/engine/syncapi_internal.cc',
         'browser/sync/engine/syncapi_internal.h',
@@ -545,6 +311,7 @@
       # Provides the API that Chrome services use to talk to sync.
       'target_name': 'syncapi_service',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'sources': [
         'browser/sync/api/syncable_service.cc',
         'browser/sync/api/syncable_service.h',
@@ -578,6 +345,7 @@
     {
       'target_name': 'sync',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'sources': [
         'browser/sync/engine/all_status.cc',
         'browser/sync/engine/all_status.h',
@@ -601,6 +369,8 @@
         'browser/sync/engine/model_changing_syncer_command.h',
         'browser/sync/engine/model_safe_worker.cc',
         'browser/sync/engine/model_safe_worker.h',
+        'browser/sync/engine/passive_model_worker.cc',
+        'browser/sync/engine/passive_model_worker.h',
         'browser/sync/engine/net/server_connection_manager.cc',
         'browser/sync/engine/net/server_connection_manager.h',
         'browser/sync/engine/net/url_translator.cc',
@@ -696,9 +466,11 @@
         'browser/sync/syncable/transaction_observer.h',
         'browser/sync/util/cryptographer.cc',
         'browser/sync/util/cryptographer.h',
-        'browser/sync/util/dbgq.h',
         'browser/sync/util/extensions_activity_monitor.cc',
         'browser/sync/util/extensions_activity_monitor.h',
+        'browser/sync/util/get_session_name_task.cc',
+        'browser/sync/util/get_session_name_task.h',
+        'browser/sync/util/get_session_name_task_mac.mm',
         'browser/sync/util/immutable.h',
         'browser/sync/util/logging.cc',
         'browser/sync/util/logging.h',
@@ -710,10 +482,8 @@
         'browser/sync/util/sqlite_utils.h',
         'browser/sync/util/time.cc',
         'browser/sync/util/time.h',
-        'browser/sync/util/user_settings.cc',
-        'browser/sync/util/user_settings.h',
-        'browser/sync/util/user_settings_posix.cc',
-        'browser/sync/util/user_settings_win.cc',
+        'browser/sync/util/unrecoverable_error_info.h',
+        'browser/sync/util/unrecoverable_error_info.cc',
         'browser/sync/util/weak_handle.cc',
         'browser/sync/util/weak_handle.h',
       ],
@@ -775,6 +545,7 @@
     {
       'target_name': 'sync_notifier',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'sources': [
         'browser/sync/notifier/cache_invalidation_packet_handler.cc',
         'browser/sync/notifier/cache_invalidation_packet_handler.h',
@@ -818,8 +589,9 @@
     {
       'target_name': 'service',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
-        'chrome_strings',
+        'chrome_resources.gyp:chrome_strings',
         'common',
         'common_net',
         '../base/base.gyp:base',
@@ -832,8 +604,6 @@
       'sources': [
         'service/chrome_service_application_mac.h',
         'service/chrome_service_application_mac.mm',
-        'service/service_child_process_host.cc',
-        'service/service_child_process_host.h',
         'service/service_ipc_server.cc',
         'service/service_ipc_server.h',
         'service/service_main.cc',
@@ -843,6 +613,10 @@
         'service/service_process_prefs.h',
         'service/service_utility_process_host.cc',
         'service/service_utility_process_host.h',
+        'service/cloud_print/cloud_print_auth.cc',
+        'service/cloud_print/cloud_print_auth.h',
+        'service/cloud_print/cloud_print_connector.cc',
+        'service/cloud_print/cloud_print_connector.h',
         'service/cloud_print/cloud_print_consts.cc',
         'service/cloud_print/cloud_print_consts.h',
         'service/cloud_print/cloud_print_helpers.cc',
@@ -904,6 +678,7 @@
     {
       'target_name': 'ipclist',
       'type': 'executable',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         'test_support_common',
         '../skia/skia.gyp:skia',
@@ -922,6 +697,7 @@
         {
           'target_name': 'helper_app',
           'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'product_name': '<(mac_product_name) Helper',
           'mac_bundle': 1,
           'dependencies': [
@@ -1037,6 +813,7 @@
           # itself is responsible for producing bundles.
           'target_name': 'app_mode_app',
           'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'product_name': '<(mac_product_name) App Mode Loader',
           'sources': [
             'app/app_mode_loader_mac.mm',
@@ -1085,6 +862,7 @@
           # build without actually linking to the resulting library.
           'target_name': 'interpose_dependency_shim',
           'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'dependencies': [
             'plugin_carbon_interpose',
           ],
@@ -1108,6 +886,7 @@
           # dylib for interposing Carbon calls in the plugin process.
           'target_name': 'plugin_carbon_interpose',
           'type': 'shared_library',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'dependencies': [
             'chrome_dll',
           ],
@@ -1147,8 +926,9 @@
         {
           'target_name': 'infoplist_strings_tool',
           'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'dependencies': [
-            'chrome_strings',
+            'chrome_resources.gyp:chrome_strings',
             '../base/base.gyp:base',
             '../ui/ui.gyp:ui',
           ],
@@ -1165,6 +945,7 @@
         {
           'target_name': 'convert_dict',
           'type': 'executable',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
@@ -1179,6 +960,7 @@
           'target_name': 'convert_dict_lib',
           'product_name': 'convert_dict',
           'type': 'static_library',
+          'variables': { 'enable_wexit_time_destructors': 1, },
           'include_dirs': [
             '..',
           ],
@@ -1205,49 +987,8 @@
             'tools/perf/flush_cache/flush_cache.cc',
           ],
         },
-        {
-          # Mac needs 'process_outputs_as_mac_bundle_resources' to be set,
-          # and the option is only effective when the target type is native
-          # binary. Hence we cannot build the Mac bundle resources here and
-          # the action is duplicated in chrome_dll.gypi.
-          'target_name': 'packed_extra_resources',
-          'type': 'none',
-          'variables': {
-            'repack_path': '../tools/grit/grit/format/repack.py',
-          },
-          'dependencies': [
-            'chrome_extra_resources',
-          ],
-          'actions': [
-            {
-              'action_name': 'repack_resources',
-              'variables': {
-                'pak_inputs': [
-                  '<(grit_out_dir)/component_extension_resources.pak',
-                  '<(grit_out_dir)/devtools_frontend_resources.pak',
-                  '<(grit_out_dir)/devtools_resources.pak',
-                  '<(grit_out_dir)/options_resources.pak',
-                  '<(grit_out_dir)/net_internals_resources.pak',
-                  '<(grit_out_dir)/quota_internals_resources.pak',
-                  '<(grit_out_dir)/shared_resources.pak',
-                  '<(grit_out_dir)/sync_internals_resources.pak',
-                  '<(grit_out_dir)/workers_resources.pak',
-                ],
-              },
-              'inputs': [
-                '<(repack_path)',
-                '<@(pak_inputs)',
-              ],
-              'outputs': [
-                '<(PRODUCT_DIR)/resources.pak',
-              ],
-              'action': ['python', '<(repack_path)', '<@(_outputs)',
-                         '<@(pak_inputs)'],
-            },
-          ]
-        }
       ],
-    },],  # OS!="mac"
+    }],  # OS!="mac"
     ['OS=="linux"',
       { 'targets': [
         {
@@ -1476,10 +1217,8 @@
           'target_name': 'automation',
           'type': 'static_library',
           'dependencies': [
-            'theme_resources',
-            '../base/base.gyp:test_support_base',
+            'chrome_resources.gyp:theme_resources',
             '../skia/skia.gyp:skia',
-            '../testing/gtest.gyp:gtest',
           ],
           'include_dirs': [
             '..',
@@ -1565,168 +1304,5 @@
         },
       ]},  # 'targets'
     ],  # OS=="win"
-    ['OS != "mac"', {
-      'targets': [{
-        'target_name': 'packed_resources',
-        'type': 'none',
-        'variables': {
-          'repack_path': '../tools/grit/grit/format/repack.py',
-        },
-        'dependencies': [
-          # MSVS needs the dependencies explictly named, Make is able to
-          # derive the dependencies from the output files.
-          'chrome_resources',
-          'chrome_strings',
-          'default_plugin/default_plugin.gyp:default_plugin_resources',
-          'platform_locale_settings',
-          'theme_resources',
-          '<(DEPTH)/net/net.gyp:net_resources',
-          '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
-          '<(DEPTH)/ui/ui.gyp:gfx_resources',
-          '<(DEPTH)/ui/ui.gyp:ui_resources',
-          '<(DEPTH)/ui/ui.gyp:ui_resources_large',
-          '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
-          '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
-          '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
-        ],
-        'actions': [
-          # TODO(mark): These actions are duplicated for the Mac in the
-          # chrome_dll target.  Can they be unified?
-          #
-          # Mac needs 'process_outputs_as_mac_bundle_resources' to be set,
-          # and the option is only effective when the target type is native
-          # binary. Hence we cannot build the Mac bundle resources here.
-          {
-            'action_name': 'repack_chrome',
-            'variables': {
-              'pak_inputs': [
-                '<(grit_out_dir)/browser_resources.pak',
-                '<(grit_out_dir)/common_resources.pak',
-                '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
-                '<(grit_out_dir)/renderer_resources.pak',
-                '<(grit_out_dir)/theme_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
-                '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
-              ],
-              'conditions': [
-                ['touchui==0', {
-                  'pak_inputs': [
-                    '<(grit_out_dir)/theme_resources_standard.pak',
-                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
-                  ],
-                }, {  # else: touchui!=0
-                  'pak_inputs': [
-                    '<(grit_out_dir)/theme_resources_large.pak',
-                    '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_large/ui_resources_large.pak',
-                  ],
-                }],
-              ],
-            },
-            'inputs': [
-              '<(repack_path)',
-              '<@(pak_inputs)',
-            ],
-            'outputs': [
-              '<(INTERMEDIATE_DIR)/repack/chrome.pak',
-            ],
-            'action': ['python', '<(repack_path)', '<@(_outputs)',
-                       '<@(pak_inputs)'],
-          },
-          {
-            'action_name': 'repack_locales',
-            'variables': {
-              'conditions': [
-                ['branding=="Chrome"', {
-                  'branding_flag': ['-b', 'google_chrome',],
-                }, {  # else: branding!="Chrome"
-                  'branding_flag': ['-b', 'chromium',],
-                }],
-              ],
-            },
-            'inputs': [
-              'tools/build/repack_locales.py',
-              '<!@pymod_do_main(repack_locales -i <(branding_flag) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(locales))'
-            ],
-            'outputs': [
-              '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(locales))'
-            ],
-            'action': [
-              '<@(repack_locales_cmd)',
-              '<@(branding_flag)',
-              '-g', '<(grit_out_dir)',
-              '-s', '<(SHARED_INTERMEDIATE_DIR)',
-              '-x', '<(INTERMEDIATE_DIR)',
-              '<@(locales)',
-            ],
-          },
-          {
-              'action_name': 'repack_pseudo_locales',
-              'variables': {
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    'branding_flag': ['-b', 'google_chrome',],
-                  }, {  # else: branding!="Chrome"
-                    'branding_flag': ['-b', 'chromium',],
-                  }],
-                ],
-              },
-              'inputs': [
-                'tools/build/repack_locales.py',
-                '<!@pymod_do_main(repack_locales -i <(branding_flag) -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
-              ],
-              'outputs': [
-                '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
-              ],
-              'action': [
-                '<@(repack_locales_cmd)',
-                '<@(branding_flag)',
-                '-g', '<(grit_out_dir)',
-                '-s', '<(SHARED_INTERMEDIATE_DIR)',
-                '-x', '<(INTERMEDIATE_DIR)',
-                '<@(pseudo_locales)',
-              ],
-            },
-        ],
-        # We'll install the resource files to the product directory.
-        'copies': [
-          {
-            'destination': '<(PRODUCT_DIR)/locales',
-            'files': [
-              '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(locales))'
-            ],
-          },
-          {
-              'destination': '<(PRODUCT_DIR)/pseudo_locales',
-              'files': [
-                '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(INTERMEDIATE_DIR) <(pseudo_locales))'
-              ],
-            },
-          {
-            'destination': '<(PRODUCT_DIR)',
-            'files': [
-              '<(INTERMEDIATE_DIR)/repack/chrome.pak'
-            ],
-          },
-        ],
-        'conditions': [
-          ['branding=="Chrome"', {
-            'copies': [
-              {
-                # This location is for the Windows and Linux builds. For
-                # Windows, the chrome.release file ensures that these files are
-                # copied into the installer. Note that we have a separate
-                # section in chrome_dll.gyp to copy these files for Mac, as it
-                # needs to be dropped inside the framework.
-                'destination': '<(PRODUCT_DIR)/default_apps',
-                'files': ['<@(default_apps_list)']
-              },
-            ],
-          }],
-        ],
-      }],  # targets
-    }],  # OS != "mac"
   ],  # 'conditions'
 }

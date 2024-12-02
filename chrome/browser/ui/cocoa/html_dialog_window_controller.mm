@@ -11,6 +11,7 @@
 #import "chrome/browser/ui/browser_dialogs.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/webui/html_dialog_tab_contents_delegate.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -76,10 +77,21 @@ private:
 
 namespace browser {
 
-gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent, Profile* profile,
-                                 HtmlDialogUIDelegate* delegate) {
+gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
+                                 Profile* profile,
+                                 HtmlDialogUIDelegate* delegate,
+                                 DialogStyle style) {
+  // It's not always safe to display an html dialog with an off the record
+  // profile.  If the last browser with that profile is closed it will go
+  // away.
+  // On most platforms we insist on the dialog being modal if we're off the
+  // record to prevent that.  That wont work on the Mac since we don't have
+  // modal dialogs.
+  // Fall back to the old (incorrect) behavior of grabbing the original
+  // profile.
   // NOTE: Use the parent parameter once we implement modal dialogs.
-  return [HtmlDialogWindowController showHtmlDialog:delegate profile:profile];
+  return [HtmlDialogWindowController showHtmlDialog:delegate
+      profile:profile->GetOriginalProfile()];
 }
 
 }  // namespace html_dialog_window_controller
@@ -249,11 +261,8 @@ void HtmlDialogWindowDelegateBridge::HandleKeyboardEvent(
   gfx::Size dialogSize;
   delegate->GetDialogSize(&dialogSize);
   NSRect dialogRect = NSMakeRect(0, 0, dialogSize.width(), dialogSize.height());
-  // TODO(akalin): Make the window resizable (but with the minimum size being
-  // dialog_size and always on top (but not modal) to match the Windows
-  // behavior.  On the other hand, the fact that HTML dialogs on Windows
-  // are resizable could just be an accident.  Investigate futher...
-  NSUInteger style = NSTitledWindowMask | NSClosableWindowMask;
+  NSUInteger style = NSTitledWindowMask | NSClosableWindowMask |
+      NSResizableWindowMask;
   scoped_nsobject<ChromeEventProcessingWindow> window(
       [[ChromeEventProcessingWindow alloc]
            initWithContentRect:dialogRect
@@ -270,6 +279,7 @@ void HtmlDialogWindowDelegateBridge::HandleKeyboardEvent(
   [window setWindowController:self];
   [window setDelegate:self];
   [window setTitle:base::SysUTF16ToNSString(delegate->GetDialogTitle())];
+  [window setMinSize:dialogRect.size];
   [window center];
   delegate_.reset(new HtmlDialogWindowDelegateBridge(self, profile, delegate));
   return self;
@@ -287,7 +297,7 @@ void HtmlDialogWindowDelegateBridge::HandleKeyboardEvent(
                                                   delegate_.get());
 
   tabContents_->controller().LoadURL(delegate_->GetDialogContentURL(),
-                                      GURL(),
+                                      content::Referrer(),
                                       content::PAGE_TRANSITION_START_PAGE,
                                       std::string());
 

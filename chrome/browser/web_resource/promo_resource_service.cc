@@ -20,8 +20,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -35,11 +35,11 @@ static const int kTestCacheUpdateDelay = 3 * 60 * 1000;
 
 // The version of the service (used to expire the cache when upgrading Chrome
 // to versions with different types of promos).
-static const int kPromoServiceVersion = 2;
+static const int kPromoServiceVersion = 7;
 
-// The number of groups sync promo users will be divided into (which gives us a
-// 1/N granularity when targeting more groups).
-static const int kSyncPromoNumberOfGroups = 100;
+// The number of groups sign-in promo users will be divided into (which gives us
+// a 1/N granularity when targeting more groups).
+static const int kNTPSignInPromoNumberOfGroups = 100;
 
 // Properties used by the server.
 static const char kAnswerIdProperty[] = "answer_id";
@@ -70,6 +70,8 @@ int GetCacheUpdateDelay() {
 const char* PromoResourceService::kDefaultPromoResourceServer =
     "https://www.google.com/support/chrome/bin/topic/1142433/inproduct?hl=";
 
+
+
 // static
 void PromoResourceService::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterIntegerPref(prefs::kNTPPromoVersion, 0);
@@ -84,10 +86,10 @@ void PromoResourceService::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterDoublePref(prefs::kNTPCustomLogoEnd,
                             0,
                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kNTPSyncPromoGroup,
+  prefs->RegisterIntegerPref(prefs::kNTPSignInPromoGroup,
                              0,
                              PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterIntegerPref(prefs::kNTPSyncPromoGroupMax,
+  prefs->RegisterIntegerPref(prefs::kNTPSignInPromoGroupMax,
                              0,
                              PrefService::UNSYNCABLE_PREF);
   NotificationPromo::RegisterUserPrefs(prefs);
@@ -154,11 +156,14 @@ void PromoResourceService::Unpack(const DictionaryValue& parsed_json) {
   UnpackLogoSignal(parsed_json);
   UnpackNotificationSignal(parsed_json);
   UnpackWebStoreSignal(parsed_json);
-  UnpackSyncPromoSignal(parsed_json);
+  UnpackNTPSignInPromoSignal(parsed_json);
 }
 
-void PromoResourceService::OnNewNotification(double start, double end) {
-  ScheduleNotification(start, end);
+void PromoResourceService::OnNotificationParsed(double start, double end,
+                                                bool new_notification) {
+  if (new_notification) {
+    ScheduleNotification(start, end);
+  }
 }
 
 void PromoResourceService::ScheduleNotification(double promo_start,
@@ -215,14 +220,16 @@ std::string PromoResourceService::GetPromoLocale() {
 
 void PromoResourceService::UnpackNotificationSignal(
     const DictionaryValue& parsed_json) {
-  NotificationPromo notification_promo(prefs_, this);
-  notification_promo.InitFromJson(parsed_json);
+  scoped_refptr<NotificationPromo> notification_promo =
+      NotificationPromo::Create(profile_, this);
+  notification_promo->InitFromJson(parsed_json, true);
 }
 
 bool PromoResourceService::CanShowNotificationPromo(Profile* profile) {
-  NotificationPromo notification_promo(profile->GetPrefs(), NULL);
-  notification_promo.InitFromPrefs();
-  return notification_promo.CanShow();
+  scoped_refptr<NotificationPromo> notification_promo =
+      NotificationPromo::Create(profile, NULL);
+  notification_promo->InitFromPrefs();
+  return notification_promo->CanShow();
 }
 
 void PromoResourceService::UnpackWebStoreSignal(
@@ -368,14 +375,15 @@ void PromoResourceService::UnpackLogoSignal(
       !(old_logo_end == logo_end)) {
     prefs_->SetDouble(prefs::kNTPCustomLogoStart, logo_start);
     prefs_->SetDouble(prefs::kNTPCustomLogoEnd, logo_end);
-    NotificationService* service = NotificationService::current();
+    content::NotificationService* service =
+        content::NotificationService::current();
     service->Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-                    Source<WebResourceService>(this),
-                    NotificationService::NoDetails());
+                    content::Source<WebResourceService>(this),
+                    content::NotificationService::NoDetails());
   }
 }
 
-void PromoResourceService::UnpackSyncPromoSignal(
+void PromoResourceService::UnpackNTPSignInPromoSignal(
     const DictionaryValue& parsed_json) {
 #if defined(OS_CHROMEOS)
   // Don't bother with this signal on ChromeOS. Users are already synced.
@@ -397,7 +405,7 @@ void PromoResourceService::UnpackSyncPromoSignal(
       continue;
     DictionaryValue* a_dic = static_cast<DictionaryValue*>(*answer_iter);
     std::string name;
-    if (a_dic->GetString("name", &name) && name == "sync_promo") {
+    if (a_dic->GetString("name", &name) && name == "sign_in_promo") {
       a_dic->GetString("question", &question);
       break;
     }
@@ -412,17 +420,17 @@ void PromoResourceService::UnpackSyncPromoSignal(
       !base::StringToInt(question.substr(build_index + 1), &new_group_max)) {
     // If anything about the response was invalid or this build is no longer
     // targeted and there are existing prefs, clear them and notify.
-    if (prefs_->HasPrefPath(prefs::kNTPSyncPromoGroup) ||
-        prefs_->HasPrefPath(prefs::kNTPSyncPromoGroupMax)) {
+    if (prefs_->HasPrefPath(prefs::kNTPSignInPromoGroup) ||
+        prefs_->HasPrefPath(prefs::kNTPSignInPromoGroupMax)) {
       // Make sure we clear first, as the following notification may possibly
-      // depend on calling CanShowSyncPromo synchronously.
-      prefs_->ClearPref(prefs::kNTPSyncPromoGroup);
-      prefs_->ClearPref(prefs::kNTPSyncPromoGroupMax);
+      // depend on calling CanShowNTPSignInPromo synchronously.
+      prefs_->ClearPref(prefs::kNTPSignInPromoGroup);
+      prefs_->ClearPref(prefs::kNTPSignInPromoGroupMax);
       // Notify the NTP resource cache if the promo has been disabled.
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-          Source<WebResourceService>(this),
-          NotificationService::NoDetails());
+          content::Source<WebResourceService>(this),
+          content::NotificationService::NoDetails());
     }
     return;
   }
@@ -431,26 +439,26 @@ void PromoResourceService::UnpackSyncPromoSignal(
 
   // If we successfully parsed a response and it differs from our user prefs,
   // set pref for next time to compare.
-  if (new_group_max != prefs_->GetInteger(prefs::kNTPSyncPromoGroupMax))
-    prefs_->SetInteger(prefs::kNTPSyncPromoGroupMax, new_group_max);
+  if (new_group_max != prefs_->GetInteger(prefs::kNTPSignInPromoGroupMax))
+    prefs_->SetInteger(prefs::kNTPSignInPromoGroupMax, new_group_max);
 }
 
 // static
-bool PromoResourceService::CanShowSyncPromo(Profile* profile) {
+bool PromoResourceService::CanShowNTPSignInPromo(Profile* profile) {
   DCHECK(profile);
   PrefService* prefs = profile->GetPrefs();
 
-  if (!prefs->HasPrefPath(prefs::kNTPSyncPromoGroupMax))
+  if (!prefs->HasPrefPath(prefs::kNTPSignInPromoGroupMax))
     return false;
 
   // If there's a max group set and the user hasn't been bucketed yet, do it.
-  if (!prefs->HasPrefPath(prefs::kNTPSyncPromoGroup)) {
-    prefs->SetInteger(prefs::kNTPSyncPromoGroup,
-                      base::RandInt(1, kSyncPromoNumberOfGroups));
+  if (!prefs->HasPrefPath(prefs::kNTPSignInPromoGroup)) {
+    prefs->SetInteger(prefs::kNTPSignInPromoGroup,
+                      base::RandInt(1, kNTPSignInPromoNumberOfGroups));
   }
 
   // A response is not kept if the build wasn't targeted, so the only thing
   // required to check is the group this client has been tagged in.
-  return prefs->GetInteger(prefs::kNTPSyncPromoGroupMax) >=
-         prefs->GetInteger(prefs::kNTPSyncPromoGroup);
+  return prefs->GetInteger(prefs::kNTPSignInPromoGroupMax) >=
+         prefs->GetInteger(prefs::kNTPSignInPromoGroup);
 }

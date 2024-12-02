@@ -8,17 +8,17 @@
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 using views::FocusManager;
 

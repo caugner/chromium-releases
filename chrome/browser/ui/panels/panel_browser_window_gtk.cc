@@ -4,14 +4,16 @@
 
 #include "chrome/browser/ui/panels/panel_browser_window_gtk.h"
 
+#include "base/bind.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_settings_menu_model.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
+#include "ui/base/x/work_area_watcher_x.h"
 
 namespace {
 
@@ -28,8 +30,7 @@ const float kDrawAttentionBFraction = kDrawAttentionB / 255.0;
 
 // Delay before click on a titlebar is allowed to minimize the panel after
 // the 'draw attention' mode has been cleared.
-const base::TimeDelta kSuspendMinimizeOnClickIntervalMs =
-    base::TimeDelta::FromMilliseconds(500);
+const int kSuspendMinimizeOnClickIntervalMs = 500;
 
 // Markup for title text in draw attention state. Set to color white.
 const char* const kDrawAttentionTitleMarkupPrefix =
@@ -68,6 +69,8 @@ PanelBrowserWindowGtk::~PanelBrowserWindowGtk() {
     gtk_grab_remove(drag_widget_);
     DestroyDragWidget();
   }
+  panel_->OnNativePanelClosed();
+  ui::WorkAreaWatcherX::RemoveObserver(this);
 }
 
 void PanelBrowserWindowGtk::Init() {
@@ -90,6 +93,8 @@ void PanelBrowserWindowGtk::Init() {
                    G_CALLBACK(OnTitlebarButtonPressEventThunk), this);
   g_signal_connect(titlebar_widget(), "button-release-event",
                    G_CALLBACK(OnTitlebarButtonReleaseEventThunk), this);
+
+  ui::WorkAreaWatcherX::AddObserver(this);
 }
 
 bool PanelBrowserWindowGtk::GetWindowEdge(int x, int y, GdkWindowEdge* edge) {
@@ -140,18 +145,17 @@ void PanelBrowserWindowGtk::OnSizeChanged(int width, int height) {
     return;
 
   window_size_known_ = true;
-  int bottom = panel_->manager()->GetBottomPositionForExpansionState(
-      panel_->expansion_state());
-  int top = bottom - height;
+  int top = bounds_.bottom() - height;
+  int left = bounds_.right() - width;
 
-  gtk_window_move(window_, bounds_.x(), top);
-  StartBoundsAnimation(gfx::Rect(bounds_.x(), top, width, height));
+  gtk_window_move(window_, left, top);
+  StartBoundsAnimation(gfx::Rect(left, top, width, height));
   panel_->OnWindowSizeAvailable();
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
-      Source<Panel>(panel_.get()),
-      NotificationService::NoDetails());
+      content::Source<Panel>(panel_.get()),
+      content::NotificationService::NoDetails());
 }
 
 bool PanelBrowserWindowGtk::UseCustomFrame() {
@@ -196,10 +200,10 @@ void PanelBrowserWindowGtk::ActiveWindowChanged(GdkWindow* active_window) {
   if (was_active == IsActive())  // State didn't change.
     return;
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
-      Source<Panel>(panel_.get()),
-      NotificationService::NoDetails());
+      content::Source<Panel>(panel_.get()),
+      content::NotificationService::NoDetails());
 }
 
 BrowserWindowGtk::TitleDecoration PanelBrowserWindowGtk::GetWindowTitle(
@@ -223,6 +227,10 @@ BrowserWindowGtk::TitleDecoration PanelBrowserWindowGtk::GetWindowTitle(
   }
 }
 
+void PanelBrowserWindowGtk::WorkAreaChanged() {
+  panel_->manager()->OnDisplayChanged();
+}
+
 void PanelBrowserWindowGtk::ShowPanel() {
   Show();
 }
@@ -236,10 +244,19 @@ gfx::Rect PanelBrowserWindowGtk::GetPanelBounds() const {
 }
 
 void PanelBrowserWindowGtk::SetPanelBounds(const gfx::Rect& bounds) {
+  SetBoundsInternal(bounds, true);
+}
+
+void PanelBrowserWindowGtk::SetPanelBoundsInstantly(const gfx::Rect& bounds) {
+  SetBoundsInternal(bounds, false);
+}
+
+void PanelBrowserWindowGtk::SetBoundsInternal(const gfx::Rect& bounds,
+                                              bool animate) {
   if (bounds == bounds_)
     return;
 
-  if (drag_widget_) {
+  if (drag_widget_ || !animate) {
     DCHECK(!bounds_animator_.get() || !bounds_animator_->is_animating());
     // If the current panel is being dragged, it should just move with the
     // user drag, we should not animate.
@@ -262,13 +279,21 @@ void PanelBrowserWindowGtk::ClosePanel() {
 }
 
 void PanelBrowserWindowGtk::ActivatePanel() {
-  if (IsActive())
-    return;
+  gdk_window_set_accept_focus(GTK_WIDGET(window())->window, TRUE);
   Activate();
 }
 
 void PanelBrowserWindowGtk::DeactivatePanel() {
-  Deactivate();
+  BrowserWindow* browser_window =
+      panel_->manager()->GetNextBrowserWindowToActivate(panel_.get());
+  if (browser_window) {
+    browser_window->Activate();
+  } else {
+    Deactivate();
+  }
+
+  if (panel_->expansion_state() == Panel::MINIMIZED)
+    gdk_window_set_accept_focus(GTK_WIDGET(window())->window, FALSE);
 }
 
 bool PanelBrowserWindowGtk::IsPanelActive() const {
@@ -341,6 +366,11 @@ bool PanelBrowserWindowGtk::PreHandlePanelKeyboardEvent(
   return PreHandleKeyboardEvent(event, is_keyboard_shortcut);
 }
 
+void PanelBrowserWindowGtk::FullScreenModeChanged(bool is_full_screen) {
+  // Nothing to do here as z-order rules for panels ensures that they're below
+  // any app running in full screen mode.
+}
+
 void PanelBrowserWindowGtk::HandlePanelKeyboardEvent(
     const NativeWebKeyboardEvent& event) {
   HandleKeyboardEvent(event);
@@ -352,6 +382,15 @@ Browser* PanelBrowserWindowGtk::GetPanelBrowser() const {
 
 void PanelBrowserWindowGtk::DestroyPanelBrowser() {
   DestroyBrowser();
+}
+
+gfx::Size PanelBrowserWindowGtk::IconOnlySize() const {
+  // TODO(prasdt): to be implemented.
+  return gfx::Size();
+}
+
+void PanelBrowserWindowGtk::EnsurePanelFullyVisible() {
+  // TODO(prasdt): to be implemented.
 }
 
 gfx::Size PanelBrowserWindowGtk::WindowSizeFromContentSize(
@@ -428,10 +467,10 @@ void PanelBrowserWindowGtk::DidProcessEvent(GdkEvent* event) {
 }
 
 void PanelBrowserWindowGtk::AnimationEnded(const ui::Animation* animation) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
-      Source<Panel>(panel_.get()),
-      NotificationService::NoDetails());
+      content::Source<Panel>(panel_.get()),
+      content::NotificationService::NoDetails());
 }
 
 void PanelBrowserWindowGtk::AnimationProgressed(
@@ -486,14 +525,14 @@ void PanelBrowserWindowGtk::DestroyDragWidget() {
 void PanelBrowserWindowGtk::EndDrag(bool canceled) {
   // Make sure we only run EndDrag once by canceling any tasks that want
   // to call EndDrag.
-  drag_end_factory_.RevokeAll();
+  drag_end_factory_.InvalidateWeakPtrs();
 
   // We must let gtk clean up after we handle the drag operation, otherwise
   // there will be outstanding references to the drag widget when we try to
   // destroy it.
   MessageLoop::current()->PostTask(FROM_HERE,
-      destroy_drag_widget_factory_.NewRunnableMethod(
-      &PanelBrowserWindowGtk::DestroyDragWidget));
+      base::Bind(&PanelBrowserWindowGtk::DestroyDragWidget,
+                 drag_end_factory_.GetWeakPtr()));
   CleanupDragDrop();
   panel_->manager()->EndDragging(canceled);
 }
@@ -546,16 +585,15 @@ gboolean PanelBrowserWindowGtk::OnTitlebarButtonReleaseEvent(
 
   CleanupDragDrop();
 
-  Panel::ExpansionState new_expansion_state;
   if (panel_->expansion_state() == Panel::EXPANDED) {
     if (base::Time::Now() < disableMinimizeUntilTime_)
       return TRUE;
 
-    new_expansion_state = Panel::MINIMIZED;
+    panel_->SetExpansionState(Panel::MINIMIZED);
+
   } else {
-    new_expansion_state = Panel::EXPANDED;
+    panel_->Activate();
   }
-  panel_->SetExpansionState(new_expansion_state);
 
   return TRUE;
 }
@@ -569,10 +607,10 @@ void PanelBrowserWindowGtk::HandleFocusIn(GtkWidget* widget,
 
   is_drawing_attention_ = false;
   UpdateTitleBar();
-  panel_->SetExpansionState(Panel::EXPANDED);
+  DCHECK(panel_->expansion_state() == Panel::EXPANDED);
 
-  disableMinimizeUntilTime_ =
-      base::Time::Now() + kSuspendMinimizeOnClickIntervalMs;
+  disableMinimizeUntilTime_ = base::Time::Now() +
+      base::TimeDelta::FromMilliseconds(kSuspendMinimizeOnClickIntervalMs);
 }
 
 void PanelBrowserWindowGtk::OnDragBegin(GtkWidget* widget,
@@ -601,8 +639,9 @@ gboolean PanelBrowserWindowGtk::OnDragButtonReleased(GtkWidget* widget,
   // GTK+ a chance to send the drag-failed event with the right status.  If
   // GTK+ does send the drag-failed event, we cancel the task.
   MessageLoop::current()->PostTask(FROM_HERE,
-      drag_end_factory_.NewRunnableMethod(
-          &PanelBrowserWindowGtk::EndDrag, false));
+      base::Bind(&PanelBrowserWindowGtk::EndDrag,
+                 drag_end_factory_.GetWeakPtr(),
+                 false));
   return TRUE;
 }
 
@@ -705,7 +744,7 @@ bool NativePanelTestingGtk::VerifyDrawingAttention() const {
 }
 
 bool NativePanelTestingGtk::VerifyActiveState(bool is_active) {
-  // TODO(jianli): to be implemented.
+  // TODO(jianli): to be implemented. http://crbug.com/102737
   return false;
 }
 

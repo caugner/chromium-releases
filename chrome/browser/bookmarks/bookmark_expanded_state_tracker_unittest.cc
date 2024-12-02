@@ -7,8 +7,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 class BookmarkExpandedStateTrackerTest : public testing::Test {
  public:
@@ -23,8 +25,8 @@ class BookmarkExpandedStateTrackerTest : public testing::Test {
  private:
   scoped_ptr<TestingProfile> profile_;
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkExpandedStateTrackerTest);
 };

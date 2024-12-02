@@ -12,14 +12,17 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace base {
 class WaitableEvent;
 }
 
-class Profile;
+namespace content {
 class RenderProcessHost;
+}
+
+class Profile;
 class SpellCheckHostMetrics;
 class SpellCheckProfileProvider;
 
@@ -48,9 +51,7 @@ class URLRequestContextGetter;
 // retrieve the instance via Profile::GetSpellCheckHost().
 // Users should not hold the reference over the function scope because
 // the instance can be invalidated during the browser's lifecycle.
-class SpellCheckHost
-    : public base::RefCountedThreadSafe<SpellCheckHost,
-                                        BrowserThread::DeleteOnFileThread> {
+class SpellCheckHost {
  public:
   // Event types used for reporting the status of this class and its derived
   // classes to browser tests.
@@ -62,7 +63,7 @@ class SpellCheckHost
   virtual ~SpellCheckHost() {}
 
   // Creates the instance of SpellCheckHost implementation object.
-  static scoped_refptr<SpellCheckHost> Create(
+  static SpellCheckHost* Create(
       SpellCheckProfileProvider* profile,
       const std::string& language,
       net::URLRequestContextGetter* request_context_getter,
@@ -74,7 +75,7 @@ class SpellCheckHost
 
   // Pass the renderer some basic intialization information. Note that the
   // renderer will not load Hunspell until it needs to.
-  virtual void InitForRenderer(RenderProcessHost* process) = 0;
+  virtual void InitForRenderer(content::RenderProcessHost* process) = 0;
 
   // Adds the given word to the custom words list and inform renderer of the
   // update.

@@ -13,17 +13,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/login/oobe_progress_bar.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/shutdown_button.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "chrome/browser/chromeos/status/clock_menu_button.h"
-#include "chrome/browser/chromeos/status/input_method_menu_button.h"
-#include "chrome/browser/chromeos/status/network_menu_button.h"
-#include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_version_info.h"
@@ -36,12 +32,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/gtk_util.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/label.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
 using views::Widget;
@@ -83,7 +79,6 @@ BackgroundView::BackgroundView()
     : status_area_(NULL),
       os_version_label_(NULL),
       boot_times_label_(NULL),
-      progress_bar_(NULL),
       shutdown_button_(NULL),
 #if defined(OFFICIAL_BUILD)
       is_official_build_(true),
@@ -159,7 +154,7 @@ views::Widget* BackgroundView::CreateWindowContainingView(
 
 void BackgroundView::CreateModalPopup(views::WidgetDelegate* view) {
   views::Widget* window = browser::CreateViewsWindow(
-      GetNativeWindow(), view);
+      GetNativeWindow(), view, STYLE_GENERIC);
   window->SetAlwaysOnTop(true);
   window->Show();
 }
@@ -174,24 +169,6 @@ void BackgroundView::SetStatusAreaVisible(bool visible) {
 
 void BackgroundView::SetStatusAreaEnabled(bool enable) {
   status_area_->MakeButtonsActive(enable);
-}
-
-void BackgroundView::SetOobeProgressBarVisible(bool visible) {
-  if (!progress_bar_ && visible)
-    InitProgressBar();
-
-  if (progress_bar_)
-    progress_bar_->SetVisible(visible);
-}
-
-bool BackgroundView::IsOobeProgressBarVisible() {
-  return progress_bar_ && progress_bar_->IsVisible();
-}
-
-void BackgroundView::SetOobeProgress(LoginStep step) {
-  DCHECK(step < STEPS_COUNT);
-  if (progress_bar_)
-    progress_bar_->SetStep(GetStepId(step));
 }
 
 void BackgroundView::ShowScreenSaver() {
@@ -216,7 +193,7 @@ bool BackgroundView::ScreenSaverEnabled() {
 
 void BackgroundView::SetDefaultUse24HourClock(bool use_24hour_clock) {
   DCHECK(status_area_);
-  status_area_->clock_view()->SetDefaultUse24HourClock(use_24hour_clock);
+  status_area_->SetDefaultUse24HourClock(use_24hour_clock);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -227,9 +204,6 @@ void BackgroundView::Layout() {
   const int kInfoLeftPadding = 10;
   const int kInfoBottomPadding = 10;
   const int kInfoBetweenLinesPadding = 1;
-  const int kProgressBarBottomPadding = 20;
-  const int kProgressBarWidth = 750;
-  const int kProgressBarHeight = 70;
   gfx::Size status_area_size = status_area_->GetPreferredSize();
   status_area_->SetBounds(
       width() - status_area_size.width() - kCornerPadding,
@@ -252,13 +226,6 @@ void BackgroundView::Layout() {
         width() - 2 * kInfoLeftPadding,
         version_size.height());
   }
-  if (progress_bar_) {
-    progress_bar_->SetBounds(
-        (width() - kProgressBarWidth) / 2,
-        (height() - kProgressBarBottomPadding - kProgressBarHeight),
-        kProgressBarWidth,
-        kProgressBarHeight);
-  }
   if (shutdown_button_) {
     shutdown_button_->LayoutIn(this);
   }
@@ -271,24 +238,18 @@ void BackgroundView::ChildPreferredSizeChanged(View* child) {
   SchedulePaint();
 }
 
-Profile* BackgroundView::GetProfile() const {
-  return NULL;
-}
+// Overridden from StatusAreaButton::Delegate:
 
-bool BackgroundView::ShouldOpenButtonOptions(
-    const views::View* button_view) const {
-  if (button_view == status_area_->network_view()) {
+bool BackgroundView::ShouldExecuteStatusAreaCommand(
+    const views::View* button_view, int command_id) const {
+  if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS)
     return true;
-  }
-  if (button_view == status_area_->clock_view() ||
-      button_view == status_area_->input_method_view()) {
-    return false;
-  }
-  return true;
+  return false;
 }
 
-void BackgroundView::OpenButtonOptions(const views::View* button_view) {
-  if (button_view == status_area_->network_view()) {
+void BackgroundView::ExecuteStatusAreaCommand(
+    const views::View* button_view, int command_id) {
+  if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS) {
     if (proxy_settings_dialog_.get() == NULL) {
       proxy_settings_dialog_.reset(new ProxySettingsDialog(
           this, GetNativeWindow()));
@@ -297,19 +258,20 @@ void BackgroundView::OpenButtonOptions(const views::View* button_view) {
   }
 }
 
-StatusAreaHost::ScreenMode BackgroundView::GetScreenMode() const {
-  return kViewsLoginMode;
+gfx::Font BackgroundView::GetStatusAreaFont(const gfx::Font& font) const {
+  return font.DeriveFont(0, gfx::Font::BOLD);
 }
 
-StatusAreaHost::TextStyle BackgroundView::GetTextStyle() const {
-  return kGrayPlain;
+StatusAreaButton::TextStyle BackgroundView::GetStatusAreaTextStyle() const {
+  return StatusAreaButton::GRAY_PLAIN;
 }
 
 void BackgroundView::ButtonVisibilityChanged(views::View* button_view) {
-  status_area_->ButtonVisibilityChanged(button_view);
+  status_area_->UpdateButtonVisibility();
 }
 
 // Overridden from LoginHtmlDialog::Delegate:
+
 void BackgroundView::OnLocaleChanged() {
   // Proxy settings dialog contains localized strings.
   proxy_settings_dialog_.reset();
@@ -332,8 +294,8 @@ void BackgroundView::OnBootTimesLabelTextUpdated(
 
 void BackgroundView::InitStatusArea() {
   DCHECK(status_area_ == NULL);
-  status_area_ = new StatusAreaView(this);
-  status_area_->Init();
+  status_area_ = new StatusAreaViewChromeos();
+  status_area_->Init(this);
   AddChildView(status_area_);
 }
 
@@ -368,22 +330,6 @@ void BackgroundView::InitInfoLabels() {
   }
 
   version_info_updater_.StartUpdate(is_official_build_);
-}
-
-void BackgroundView::InitProgressBar() {
-  std::vector<int> steps;
-  steps.push_back(GetStepId(SELECT_NETWORK));
-#if defined(OFFICIAL_BUILD)
-  steps.push_back(GetStepId(EULA));
-#endif
-  steps.push_back(GetStepId(SIGNIN));
-#if defined(OFFICIAL_BUILD)
-  if (WizardController::IsRegisterScreenDefined())
-    steps.push_back(GetStepId(REGISTRATION));
-#endif
-  steps.push_back(GetStepId(PICTURE));
-  progress_bar_ = new OobeProgressBar(steps);
-  AddChildView(progress_bar_);
 }
 
 void BackgroundView::UpdateWindowType() {

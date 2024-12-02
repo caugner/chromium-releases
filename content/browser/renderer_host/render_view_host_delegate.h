@@ -11,40 +11,39 @@
 
 #include "base/basictypes.h"
 #include "base/i18n/rtl.h"
-#include "base/memory/ref_counted.h"
 #include "base/process_util.h"
 #include "base/string16.h"
-#include "base/values.h"
 #include "content/common/content_export.h"
-#include "content/common/window_container_type.h"
-#include "content/public/common/view_types.h"
+#include "content/public/common/view_type.h"
 #include "ipc/ipc_channel.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "webkit/glue/window_open_disposition.h"
 
-class BackgroundContents;
-struct BookmarkNodeData;
-class BookmarkNode;
-struct ContextMenuParams;
 class GURL;
-struct NativeWebKeyboardEvent;
-struct RendererPreferences;
-class RenderProcessHost;
 class RenderViewHost;
 class SkBitmap;
 class TabContents;
+class WebKeyboardEvent;
+struct ContextMenuParams;
+struct GlobalRequestID;
+struct NativeWebKeyboardEvent;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_FrameNavigate_Params;
 struct WebDropData;
 struct WebMenuItem;
-class WebKeyboardEvent;
 struct WebPreferences;
-struct ViewHostMsg_RunFileChooser_Params;
+
+namespace base {
+class ListValue;
+}
 
 namespace content {
 class BrowserContext;
+struct FileChooserParams;
+struct Referrer;
+struct RendererPreferences;
 }
 
 namespace gfx {
@@ -83,8 +82,6 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
     //
     // Note: this is not called "CreateWindow" because that will clash with
     // the Windows function which is actually a #define.
-    //
-    // NOTE: this takes ownership of @modal_dialog_event
     virtual void CreateNewWindow(
         int route_id,
         const ViewHostMsg_CreateWindow_Params& params) = 0;
@@ -176,10 +173,6 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
     virtual void OnCrossSiteResponse(int new_render_process_host_id,
                                      int new_request_id) = 0;
 
-    // Called the ResourceDispatcherHost's associate CrossSiteRequestHandler
-    // when a cross-site navigation has been canceled.
-    virtual void OnCrossSiteNavigationCanceled() = 0;
-
    protected:
     virtual ~RendererManagement() {}
   };
@@ -193,7 +186,7 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // IPC::Channel::Listener implementation.
   // This is used to give the delegate a chance to filter IPC messages.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Gets the URL that is currently being displayed, if there is one.
   virtual const GURL& GetURL() const;
@@ -202,11 +195,6 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
   // not a TabContents, returns NULL. DEPRECATED: Be sure to include brettw and
   // jam as reviewers before you use this method. http://crbug.com/82582
   virtual TabContents* GetAsTabContents();
-
-  // Return this object cast to a BackgroundContents, if it is one. If the
-  // object is not a BackgroundContents, returns NULL.
-  // DEPRECATED: http://crbug.com/98934
-  virtual BackgroundContents* GetAsBackgroundContents();
 
   // Return type of RenderView which is attached with this object.
   virtual content::ViewType GetRenderViewType() const = 0;
@@ -253,6 +241,9 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
 
+  // The RenderViewHost has been swapped out.
+  virtual void SwappedOut(RenderViewHost* render_view_host) {}
+
   // The page is trying to move the RenderView's representation in the client.
   virtual void RequestMove(const gfx::Rect& new_bounds) {}
 
@@ -283,9 +274,16 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // The page wants to open a URL with the specified disposition.
   virtual void RequestOpenURL(const GURL& url,
-                              const GURL& referrer,
+                              const content::Referrer& referrer,
                               WindowOpenDisposition disposition,
                               int64 source_frame_id) {}
+
+  // The page wants to transfer the request to a new renderer.
+  virtual void RequestTransferURL(const GURL& url,
+                                  const content::Referrer& referrer,
+                                  WindowOpenDisposition disposition,
+                                  int64 source_frame_id,
+                                  const GlobalRequestID& old_request_id) {}
 
   // A javascript message, confirmation or prompt should be shown.
   virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
@@ -302,7 +300,7 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // Return a dummy RendererPreferences object that will be used by the renderer
   // associated with the owning RenderViewHost.
-  virtual RendererPreferences GetRendererPrefs(
+  virtual content::RendererPreferences GetRendererPrefs(
       content::BrowserContext* browser_context) const = 0;
 
   // Returns a WebPreferences object that will be used by the renderer
@@ -371,7 +369,7 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
   // Called when a file selection is to be done.
   virtual void RunFileChooser(
       RenderViewHost* render_view_host,
-      const ViewHostMsg_RunFileChooser_Params& params) {}
+      const content::FileChooserParams& params) {}
 
   // Notification that the page wants to go into or out of fullscreen mode.
   virtual void ToggleFullscreenMode(bool enter_fullscreen) {}

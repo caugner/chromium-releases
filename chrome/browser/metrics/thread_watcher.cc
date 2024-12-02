@@ -7,7 +7,9 @@
 #include <math.h>  // ceil
 
 #include "base/bind.h"
+#include "base/compiler_specific.h"
 #include "base/debug/alias.h"
+#include "base/lazy_instance.h"
 #include "base/string_tokenizer.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -15,11 +17,105 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
-#include "content/common/notification_service.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
+
+using content::BrowserThread;
+
+namespace {
+
+// The following are unique function names for forcing the crash when a thread
+// is unresponsive. This makes it possible to tell from the callstack alone what
+// thread was unresponsive.
+//
+// We disable optimizations for this block of functions so the compiler doesn't
+// merge them all together.
+
+// TODO(eroman): What is the equivalent for other compilers?
+#if defined(COMPILER_MSVC)
+#pragma optimize("", off)
+MSVC_PUSH_DISABLE_WARNING(4748)
+#endif
+
+void ThreadUnresponsive_UI() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_DB() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_WEBKIT() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_FILE() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_FILE_USER_BLOCKING() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_PROCESS_LAUNCHER() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_CACHE() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_IO() {
+  CHECK(false);
+}
+
+void ThreadUnresponsive_WEB_SOCKET_PROXY() {
+  CHECK(false);
+}
+
+#if defined(COMPILER_MSVC)
+MSVC_POP_WARNING()
+#pragma optimize("", on)
+#endif
+
+void CrashBecauseThreadWasUnresponsive(BrowserThread::ID thread_id) {
+  base::debug::Alias(&thread_id);
+
+  switch (thread_id) {
+    case BrowserThread::UI:
+      return ThreadUnresponsive_UI();
+    case BrowserThread::DB:
+      return ThreadUnresponsive_DB();
+    case BrowserThread::WEBKIT:
+      return ThreadUnresponsive_WEBKIT();
+    case BrowserThread::FILE:
+      return ThreadUnresponsive_FILE();
+    case BrowserThread::FILE_USER_BLOCKING:
+      return ThreadUnresponsive_FILE_USER_BLOCKING();
+    case BrowserThread::PROCESS_LAUNCHER:
+      return ThreadUnresponsive_PROCESS_LAUNCHER();
+    case BrowserThread::CACHE:
+      return ThreadUnresponsive_CACHE();
+    case BrowserThread::IO:
+      return ThreadUnresponsive_IO();
+#if defined(OS_CHROMEOS)
+    case BrowserThread::WEB_SOCKET_PROXY:
+      return ThreadUnresponsive_WEB_SOCKET_PROXY();
+#endif
+    case BrowserThread::ID_COUNT:
+      CHECK(false);  // This shouldn't actually be reached!
+      break;
+
+    // Omission of the default hander is intentional -- that way the compiler
+    // should warn if our switch becomes outdated.
+  }
+
+  CHECK(false);  // Shouldn't be reached.
+}
+
+}  // namespace
 
 // ThreadWatcher methods and members.
 ThreadWatcher::ThreadWatcher(const WatchingParams& params)
@@ -287,10 +383,13 @@ void ThreadWatcher::GotNoResponse() {
 
   // Crash the browser if the watched thread is to be crashed on hang and if the
   // number of other threads responding is equal to live_threads_threshold_.
-  int thread_id = thread_id_;
-  base::debug::Alias(&thread_id);
-  if (crash_on_hang_ && responding_thread_count == live_threads_threshold_)
-    CHECK(false);
+  if (crash_on_hang_ && responding_thread_count == live_threads_threshold_) {
+    static bool crashed_once = false;
+    if (!crashed_once) {
+      crashed_once = true;
+      CrashBecauseThreadWasUnresponsive(thread_id_);
+    }
+  }
 
   hung_processing_complete_ = true;
 }
@@ -490,6 +589,10 @@ void ThreadWatcherList::InitializeAndStartWatching(
   StartWatching(BrowserThread::FILE, "FILE", kSleepTime, kUnresponsiveTime,
                 unresponsive_threshold, crash_on_hang_thread_names,
                 live_threads_threshold);
+  StartWatching(BrowserThread::FILE_USER_BLOCKING, "FILE_USER_BLOCKING",
+                kSleepTime, kUnresponsiveTime,
+                unresponsive_threshold, crash_on_hang_thread_names,
+                live_threads_threshold);
   StartWatching(BrowserThread::CACHE, "CACHE", kSleepTime, kUnresponsiveTime,
                 unresponsive_threshold, crash_on_hang_thread_names,
                 live_threads_threshold);
@@ -497,7 +600,7 @@ void ThreadWatcherList::InitializeAndStartWatching(
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,
-      NewRunnableFunction(StartupTimeBomb::Disarm));
+      base::Bind(&StartupTimeBomb::DisarmStartupTimeBomb));
 }
 
 // static
@@ -595,9 +698,10 @@ void ThreadWatcherObserver::RemoveNotifications() {
   delete g_thread_watcher_observer_;
 }
 
-void ThreadWatcherObserver::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void ThreadWatcherObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   // There is some user activity, see if thread watchers are to be awakened.
   base::TimeTicks now = base::TimeTicks::Now();
   if ((now - last_wakeup_time_) < wakeup_interval_)
@@ -609,30 +713,32 @@ void ThreadWatcherObserver::Observe(int type,
 }
 
 // WatchDogThread methods and members.
-//
-// static
-base::Lock WatchDogThread::lock_;
-// static
-WatchDogThread* WatchDogThread::watchdog_thread_ = NULL;
+
+// This lock protects g_watchdog_thread.
+static base::LazyInstance<base::Lock,
+                          base::LeakyLazyInstanceTraits<base::Lock> >
+    g_watchdog_lock = LAZY_INSTANCE_INITIALIZER;
+
+// The singleton of this class.
+static WatchDogThread* g_watchdog_thread = NULL;
+
 
 // The WatchDogThread object must outlive any tasks posted to the IO thread
 // before the Quit task.
 DISABLE_RUNNABLE_METHOD_REFCOUNT(WatchDogThread);
 
-WatchDogThread::WatchDogThread() : Thread("WATCHDOG") {
+WatchDogThread::WatchDogThread() : Thread("BrowserWatchdog") {
 }
 
 WatchDogThread::~WatchDogThread() {
-  // We cannot rely on our base class to stop the thread since we want our
-  // CleanUp function to run.
   Stop();
 }
 
 // static
 bool WatchDogThread::CurrentlyOnWatchDogThread() {
-  base::AutoLock lock(lock_);
-  return watchdog_thread_ &&
-    watchdog_thread_->message_loop() == MessageLoop::current();
+  base::AutoLock lock(g_watchdog_lock.Get());
+  return g_watchdog_thread &&
+    g_watchdog_thread->message_loop() == MessageLoop::current();
 }
 
 // static
@@ -654,10 +760,10 @@ bool WatchDogThread::PostTaskHelper(
     const base::Closure& task,
     int64 delay_ms) {
   {
-    base::AutoLock lock(lock_);
+    base::AutoLock lock(g_watchdog_lock.Get());
 
-    MessageLoop* message_loop = watchdog_thread_ ?
-        watchdog_thread_->message_loop() : NULL;
+    MessageLoop* message_loop = g_watchdog_thread ?
+        g_watchdog_thread->message_loop() : NULL;
     if (message_loop) {
       message_loop->PostDelayedTask(from_here, task, delay_ms);
       return true;
@@ -671,14 +777,14 @@ void WatchDogThread::Init() {
   // This thread shouldn't be allowed to perform any blocking disk I/O.
   base::ThreadRestrictions::SetIOAllowed(false);
 
-  base::AutoLock lock(lock_);
-  CHECK(!watchdog_thread_);
-  watchdog_thread_ = this;
+  base::AutoLock lock(g_watchdog_lock.Get());
+  CHECK(!g_watchdog_thread);
+  g_watchdog_thread = this;
 }
 
 void WatchDogThread::CleanUp() {
-  base::AutoLock lock(lock_);
-  watchdog_thread_ = NULL;
+  base::AutoLock lock(g_watchdog_lock.Get());
+  g_watchdog_thread = NULL;
 }
 
 namespace {
@@ -732,18 +838,33 @@ class ShutdownWatchDogThread : public base::Watchdog {
 // StartupTimeBomb methods and members.
 //
 // static
-base::Watchdog* StartupTimeBomb::startup_watchdog_ = NULL;
+StartupTimeBomb* StartupTimeBomb::g_startup_timebomb_ = NULL;
 
-// static
+StartupTimeBomb::StartupTimeBomb()
+    : startup_watchdog_(NULL),
+      thread_id_(base::PlatformThread::CurrentId()) {
+  CHECK(!g_startup_timebomb_);
+  g_startup_timebomb_ = this;
+}
+
+StartupTimeBomb::~StartupTimeBomb() {
+  DCHECK(this == g_startup_timebomb_);
+  DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
+  if (startup_watchdog_)
+    Disarm();
+  g_startup_timebomb_ = NULL;
+}
+
 void StartupTimeBomb::Arm(const base::TimeDelta& duration) {
+  DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!startup_watchdog_);
   startup_watchdog_ = new StartupWatchDogThread(duration);
   startup_watchdog_->Arm();
 }
 
-// static
 void StartupTimeBomb::Disarm() {
+  DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (startup_watchdog_) {
     startup_watchdog_->Disarm();
@@ -755,14 +876,24 @@ void StartupTimeBomb::Disarm() {
   }
 }
 
+// static
+void StartupTimeBomb::DisarmStartupTimeBomb() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (g_startup_timebomb_)
+    g_startup_timebomb_->Disarm();
+}
+
 // ShutdownWatcherHelper methods and members.
 //
 // ShutdownWatcherHelper is a wrapper class for detecting hangs during
 // shutdown.
-ShutdownWatcherHelper::ShutdownWatcherHelper() : shutdown_watchdog_(NULL) {
+ShutdownWatcherHelper::ShutdownWatcherHelper()
+    : shutdown_watchdog_(NULL),
+      thread_id_(base::PlatformThread::CurrentId()) {
 }
 
 ShutdownWatcherHelper::~ShutdownWatcherHelper() {
+  DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
   if (shutdown_watchdog_) {
     shutdown_watchdog_->Disarm();
     delete shutdown_watchdog_;
@@ -771,6 +902,7 @@ ShutdownWatcherHelper::~ShutdownWatcherHelper() {
 }
 
 void ShutdownWatcherHelper::Arm(const base::TimeDelta& duration) {
+  DCHECK_EQ(thread_id_, base::PlatformThread::CurrentId());
   DCHECK(!shutdown_watchdog_);
   base::TimeDelta actual_duration = duration;
 

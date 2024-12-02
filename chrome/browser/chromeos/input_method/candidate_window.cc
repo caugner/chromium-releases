@@ -16,19 +16,20 @@
 #include "base/stringprintf.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/input_method/candidate_window_view.h"
 #include "chrome/browser/chromeos/input_method/ibus_ui_controller.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/screen.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/events/event.h"
-#include "views/layout/fill_layout.h"
-#include "views/layout/grid_layout.h"
-#include "views/widget/widget.h"
-#include "views/window/non_client_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/events/event.h"
+#include "ui/views/layout/fill_layout.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/non_client_view.h"
 
 namespace chromeos {
 namespace input_method {
@@ -79,6 +80,10 @@ const int kInfolistHideDelayMilliSeconds = 500;
 // VerticalCandidateLabel is used for rendering candidate text in
 // the vertical candidate window.
 class VerticalCandidateLabel : public views::Label {
+ public:
+  VerticalCandidateLabel() {}
+
+ private:
   virtual ~VerticalCandidateLabel() {}
 
   // Returns the preferred size, but guarantees that the width has at
@@ -97,6 +102,8 @@ class VerticalCandidateLabel : public views::Label {
     }
     return size;
   }
+
+  DISALLOW_COPY_AND_ASSIGN(VerticalCandidateLabel);
 };
 
 // Wraps the given view with some padding, and returns it.
@@ -313,6 +320,8 @@ int ComputeAnnotationColumnWidth(const InputMethodLookupTable& lookup_table) {
   return annotation_column_width;
 }
 
+}  // namespace
+
 // HidableArea is used as an area to place optional information that can be
 // turned displaying off if it is unnecessary.
 class HidableArea : public views::View {
@@ -368,6 +377,8 @@ class HidableArea : public views::View {
  private:
   scoped_ptr<views::View> contents_;
   scoped_ptr<views::View> place_holder_;
+
+  DISALLOW_COPY_AND_ASSIGN(HidableArea);
 };
 
 // InformationTextArea is a HidableArea having a single Label in it.
@@ -410,173 +421,8 @@ class InformationTextArea : public HidableArea {
  private:
   views::Label* label_;
   int minWidth_;
-};
 
-}  // namespace
-
-class CandidateView;
-
-// CandidateWindowView is the main container of the candidate window UI.
-class CandidateWindowView : public views::View {
- public:
-  // The object can be monitored by the observer.
-  class Observer {
-   public:
-    virtual ~Observer() {}
-    // The function is called when a candidate is committed.
-    // See comments at NotifyCandidateClicked() in chromeos_input_method_ui.h
-    // for details about the parameters.
-    virtual void OnCandidateCommitted(int index, int button, int flag) = 0;
-  };
-
-  explicit CandidateWindowView(views::Widget* parent_frame);
-  virtual ~CandidateWindowView() {}
-  void Init();
-
-  // Adds the given observer. The ownership is not transferred.
-  void AddObserver(Observer* observer) {
-    observers_.AddObserver(observer);
-  }
-
-  // Removes the given observer.
-  void RemoveObserver(Observer* observer) {
-    observers_.RemoveObserver(observer);
-  }
-
-  // Selects the candidate specified by the index in the current page
-  // (zero-origin).  Changes the appearance of the selected candidate,
-  // updates the information in the candidate window as needed.
-  void SelectCandidateAt(int index_in_page);
-
-  // The function is called when a candidate is being dragged. From the
-  // given point, locates the candidate under the mouse cursor, and
-  // selects it.
-  void OnCandidatePressed(const gfx::Point& point);
-
-  // Commits the candidate currently being selected.
-  void CommitCandidate();
-
-  // Hides the lookup table.
-  void HideLookupTable();
-
-  // Hides the auxiliary text.
-  void HideAuxiliaryText();
-
-  // Hides the preedit text.
-  void HidePreeditText();
-
-  // Hides whole the candidate window.
-  void HideAll();
-
-  // Shows the lookup table.
-  void ShowLookupTable();
-
-  // Shows the auxiliary text.
-  void ShowAuxiliaryText();
-
-  // Shows the preedit text.
-  void ShowPreeditText();
-
-  // Updates the auxiliary text.
-  void UpdateAuxiliaryText(const std::string& utf8_text);
-
-  // Updates the preedit text.
-  void UpdatePreeditText(const std::string& utf8_text);
-
-  // Returns true if we should update candidate views in the window.  For
-  // instance, if we are going to show the same candidates as before, we
-  // don't have to update candidate views. This happens when the user just
-  // moves the cursor in the same page in the candidate window.
-  bool ShouldUpdateCandidateViews(
-      const InputMethodLookupTable& old_table,
-      const InputMethodLookupTable& new_table);
-
-  // Updates candidates of the candidate window from |lookup_table|.
-  // Candidates are arranged per |orientation|.
-  void UpdateCandidates(const InputMethodLookupTable& lookup_table);
-
-  // Resizes and moves the parent frame. The two actions should be
-  // performed consecutively as resizing may require the candidate window
-  // to move. For instance, we may need to move the candidate window from
-  // below the cursor to above the cursor, if the candidate window becomes
-  // too big to be shown near the bottom of the screen.  This function
-  // needs to be called when the visible contents of the candidate window
-  // are modified.
-  void ResizeAndMoveParentFrame();
-
-  // Returns the horizontal offset used for placing the vertical candidate
-  // window so that the first candidate is aligned with the the text being
-  // converted like:
-  //
-  //      XXX           <- The user is converting XXX
-  //   +-----+
-  //   |1 XXX|
-  //   |2 YYY|
-  //   |3 ZZZ|
-  //
-  // Returns 0 if no candidate is present.
-  int GetHorizontalOffset();
-
-  void set_cursor_location(const gfx::Rect& cursor_location) {
-    cursor_location_ = cursor_location;
-  }
-
-  const gfx::Rect& cursor_location() const { return cursor_location_; }
-
- protected:
-  // Override View::VisibilityChanged()
-  virtual void VisibilityChanged(View* starting_from, bool is_visible) OVERRIDE;
-
-  // Override View::OnBoundsChanged()
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-
- private:
-  // Initializes the candidate views if needed.
-  void MaybeInitializeCandidateViews(
-      const InputMethodLookupTable& lookup_table);
-
-  // Returns the appropriate area (header or footer) to put auxiliary texts.
-  InformationTextArea* GetAuxiliaryTextArea();
-
-  // The lookup table (candidates).
-  InputMethodLookupTable lookup_table_;
-
-  // The index in the current page of the candidate currently being selected.
-  int selected_candidate_index_in_page_;
-
-  // The observers of the object.
-  ObserverList<Observer> observers_;
-
-  // The parent frame.
-  views::Widget* parent_frame_;
-
-  // Views created in the class will be part of tree of |this|, so these
-  // child views will be deleted when |this| is deleted.
-
-  // The preedit area is where the preedit text is shown, if it is needed
-  // in cases such as the focus is on a plugin that doesn't support in-line
-  // preedit drawing.
-  InformationTextArea* preedit_area_;
-  // The header area is where the auxiliary text is shown, if the
-  // orientation is horizontal. If the auxiliary text is not provided, we
-  // show nothing.  For instance, we show pinyin text like "zhong'guo".
-  InformationTextArea* header_area_;
-  // The candidate area is where candidates are rendered.
-  HidableArea* candidate_area_;
-  // The candidate views are used for rendering candidates.
-  std::vector<CandidateView*> candidate_views_;
-  // The footer area is where the auxiliary text is shown, if the
-  // orientation is vertical. Usually the auxiliary text is used for
-  // showing candidate number information like 2/19.
-  InformationTextArea* footer_area_;
-
-  // Current columns width in |candidate_area_|.
-  int previous_shortcut_column_width_;
-  int previous_candidate_column_width_;
-  int previous_annotation_column_width_;
-
-  // The last cursor location.
-  gfx::Rect cursor_location_;
+  DISALLOW_COPY_AND_ASSIGN(InformationTextArea);
 };
 
 // CandidateRow renderes a row of a candidate.
@@ -649,6 +495,8 @@ class CandidateView : public views::View {
   // The infolist icon.
   views::Label* infolist_label_;
   bool infolist_icon_enabled_;
+
+  DISALLOW_COPY_AND_ASSIGN(CandidateView);
 };
 
 class InfolistView;
@@ -698,6 +546,8 @@ class InfolistWindowView : public views::View {
   bool visible_;
 
   base::OneShotTimer<InfolistWindowView> show_hide_timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(InfolistWindowView);
 };
 
 // InfolistRow renderes a row of a infolist.
@@ -737,8 +587,9 @@ class InfolistView : public views::View {
   views::Label* title_label_;
   // The description label.
   views::Label* description_label_;
-};
 
+  DISALLOW_COPY_AND_ASSIGN(InfolistView);
+};
 
 // The implementation of CandidateWindowController.
 // CandidateWindowController controls the CandidateWindow.
@@ -788,6 +639,8 @@ class CandidateWindowController::Impl : public CandidateWindowView::Observer,
   // This is the outer frame of the infolist window view. The frame will
   // own |infolist_window_|.
   scoped_ptr<views::Widget> infolist_frame_;
+
+  DISALLOW_COPY_AND_ASSIGN(Impl);
 };
 
 CandidateView::CandidateView(
@@ -981,6 +834,9 @@ CandidateWindowView::CandidateWindowView(views::Widget* parent_frame)
       previous_shortcut_column_width_(0),
       previous_candidate_column_width_(0),
       previous_annotation_column_width_(0) {
+}
+
+CandidateWindowView::~CandidateWindowView() {
 }
 
 void CandidateWindowView::Init() {
@@ -1673,8 +1529,10 @@ void CandidateWindowController::Impl::CreateView() {
   // Create a non-decorated frame.
   frame_.reset(new views::Widget);
   // The size is initially zero.
-  frame_->Init(
-      views::Widget::InitParams(views::Widget::InitParams::TYPE_POPUP));
+  views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
+  // Show the candidate window always on top
+  params.keep_on_top = true;
+  frame_->Init(params);
 
   // Create the candidate window.
   candidate_window_ = new CandidateWindowView(frame_.get());
@@ -1686,8 +1544,7 @@ void CandidateWindowController::Impl::CreateView() {
 
   // Create the infolist window.
   infolist_frame_.reset(new views::Widget);
-  infolist_frame_->Init(
-      views::Widget::InitParams(views::Widget::InitParams::TYPE_POPUP));
+  infolist_frame_->Init(params);
   infolist_window_ = new InfolistWindowView(
       infolist_frame_.get(), frame_.get());
   infolist_window_->Init();

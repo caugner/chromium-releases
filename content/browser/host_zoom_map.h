@@ -16,23 +16,17 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
-#include "content/browser/browser_thread.h"
 #include "content/common/content_export.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-
-namespace base {
-class DictionaryValue;
-}
-
-class GURL;
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 // HostZoomMap needs to be deleted on the UI thread because it listens
 // to notifications on there (and holds a NotificationRegistrar).
 class CONTENT_EXPORT HostZoomMap
-    : public NotificationObserver,
-      public base::RefCountedThreadSafe<HostZoomMap,
-                                        BrowserThread::DeleteOnUIThread> {
+    : public content::NotificationObserver,
+      public base::RefCountedThreadSafe<
+          HostZoomMap, content::BrowserThread::DeleteOnUIThread> {
  public:
   explicit HostZoomMap();
   explicit HostZoomMap(HostZoomMap* original);
@@ -70,10 +64,10 @@ class CONTENT_EXPORT HostZoomMap
                              int render_view_id,
                              double level);
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   double default_zoom_level() const { return default_zoom_level_; }
   void set_default_zoom_level(double level) { default_zoom_level_ = level; }
@@ -81,9 +75,10 @@ class CONTENT_EXPORT HostZoomMap
   HostZoomMap* GetOriginal() const { return original_; }
 
  private:
-  friend class base::RefCountedThreadSafe<HostZoomMap,
-                                          BrowserThread::DeleteOnUIThread>;
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend class base::RefCountedThreadSafe<
+      HostZoomMap, content::BrowserThread::DeleteOnUIThread>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
   friend class DeleteTask<HostZoomMap>;
 
   typedef std::map<std::string, double> HostZoomLevels;
@@ -112,7 +107,7 @@ class CONTENT_EXPORT HostZoomMap
   // |temporary_zoom_levels_| to guarantee thread safety.
   mutable base::Lock lock_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(HostZoomMap);
 };

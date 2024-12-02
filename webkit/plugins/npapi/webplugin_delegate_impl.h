@@ -6,7 +6,7 @@
 #define WEBKIT_PLUGINS_NPAPI_WEBPLUGIN_DELEGATE_IMPL_H_
 
 #include <string>
-#include <list>
+#include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -19,6 +19,11 @@
 #include "ui/gfx/rect.h"
 #include "webkit/plugins/npapi/webplugin_delegate.h"
 #include "webkit/glue/webcursor.h"
+#include "webkit/plugins/webkit_plugins_export.h"
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+#include "base/memory/weak_ptr.h"
+#endif
 
 #if defined(USE_X11)
 #include "ui/base/x/x11_util.h"
@@ -27,10 +32,6 @@ typedef struct _GdkDrawable GdkPixmap;
 #endif
 
 class FilePath;
-
-namespace WebKit {
-class WebMouseEvent;
-}
 
 #if defined(OS_MACOSX)
 #ifdef __OBJC__
@@ -61,7 +62,7 @@ class WebPluginIMEWin;
 
 // An implementation of WebPluginDelegate that runs in the plugin process,
 // proxied from the renderer by WebPluginDelegateProxy.
-class WebPluginDelegateImpl : public WebPluginDelegate {
+class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
  public:
   enum PluginQuirks {
     PLUGIN_QUIRK_SETWINDOW_TWICE = 1,  // Win32
@@ -103,35 +104,36 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
                           const std::vector<std::string>& arg_names,
                           const std::vector<std::string>& arg_values,
                           WebPlugin* plugin,
-                          bool load_manually);
-  virtual void PluginDestroyed();
+                          bool load_manually) OVERRIDE;
+  virtual void PluginDestroyed() OVERRIDE;
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
-                              const gfx::Rect& clip_rect);
-  virtual void Paint(WebKit::WebCanvas* canvas, const gfx::Rect& rect);
-  virtual void SetFocus(bool focused);
+                              const gfx::Rect& clip_rect) OVERRIDE;
+  virtual void Paint(WebKit::WebCanvas* canvas, const gfx::Rect& rect) OVERRIDE;
+  virtual void SetFocus(bool focused) OVERRIDE;
   virtual bool HandleInputEvent(const WebKit::WebInputEvent& event,
-                                WebKit::WebCursorInfo* cursor_info);
-  virtual NPObject* GetPluginScriptableObject();
-  virtual bool GetFormValue(string16* value);
-  virtual void DidFinishLoadWithReason(
-      const GURL& url, NPReason reason, int notify_id);
-  virtual int GetProcessId();
+                                WebKit::WebCursorInfo* cursor_info) OVERRIDE;
+  virtual NPObject* GetPluginScriptableObject() OVERRIDE;
+  virtual bool GetFormValue(string16* value) OVERRIDE;
+  virtual void DidFinishLoadWithReason(const GURL& url,
+                                       NPReason reason,
+                                       int notify_id) OVERRIDE;
+  virtual int GetProcessId() OVERRIDE;
   virtual void SendJavaScriptStream(const GURL& url,
                                     const std::string& result,
                                     bool success,
-                                    int notify_id);
+                                    int notify_id) OVERRIDE;
   virtual void DidReceiveManualResponse(const GURL& url,
                                         const std::string& mime_type,
                                         const std::string& headers,
                                         uint32 expected_length,
-                                        uint32 last_modified);
-  virtual void DidReceiveManualData(const char* buffer, int length);
-  virtual void DidFinishManualLoading();
-  virtual void DidManualLoadFail();
+                                        uint32 last_modified) OVERRIDE;
+  virtual void DidReceiveManualData(const char* buffer, int length) OVERRIDE;
+  virtual void DidFinishManualLoading() OVERRIDE;
+  virtual void DidManualLoadFail() OVERRIDE;
   virtual WebPluginResourceClient* CreateResourceClient(
-      unsigned long resource_id, const GURL& url, int notify_id);
+      unsigned long resource_id, const GURL& url, int notify_id) OVERRIDE;
   virtual WebPluginResourceClient* CreateSeekableResourceClient(
-      unsigned long resource_id, int range_request_id);
+      unsigned long resource_id, int range_request_id) OVERRIDE;
   // End of WebPluginDelegate implementation.
 
   bool IsWindowless() const { return windowless_ ; }
@@ -162,7 +164,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   bool GetIMEStatus(int* input_type, gfx::Rect* caret_rect);
 #endif
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(USE_AURA)
   // Informs the plugin that the geometry has changed, as with UpdateGeometry,
   // but also includes the new buffer context for that new geometry.
   void UpdateGeometryAndContext(const gfx::Rect& window_rect,
@@ -210,7 +212,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   void CGPaint(CGContextRef context, const gfx::Rect& rect);
 
   bool AllowBufferFlipping();
-#endif  // OS_MACOSX
+#endif  // OS_MACOSX && !USE_AURA
 
   gfx::PluginWindowHandle windowed_handle() const {
     return windowed_handle_;
@@ -233,7 +235,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   friend class WebPluginDelegate;
 
   WebPluginDelegateImpl(gfx::PluginWindowHandle containing_view,
-                        PluginInstance *instance);
+                        PluginInstance* instance);
   virtual ~WebPluginDelegateImpl();
 
   // Called by Initialize() for platform-specific initialization.
@@ -423,7 +425,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   // Calls SetCapture/ReleaseCapture based on the message type.
   static void HandleCaptureForMessage(HWND window, UINT message);
 
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) && !defined(USE_AURA)
   // Sets window_rect_ to |rect|
   void SetPluginRect(const gfx::Rect& rect);
   // Sets content_area_origin to |origin|
@@ -474,6 +476,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   CALayer* layer_;  // Used for CA drawing mode. Weak, retained by plug-in.
   WebPluginAcceleratedSurface* surface_;  // Weak ref.
+  bool composited_;  // If CA plugin, whether it's rendering via compositor.
   CARenderer* renderer_;  // Renders layer_ to surface_.
   scoped_ptr<base::RepeatingTimer<WebPluginDelegateImpl> > redraw_timer_;
 
@@ -492,7 +495,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
   int keyup_ignore_count_;
 
   scoped_ptr<ExternalDragTracker> external_drag_tracker_;
-#endif  // OS_MACOSX
+#endif  // OS_MACOSX && !USE_AURA
 
   // Called by the message filter hook when the plugin enters a modal loop.
   void OnModalLoopEntered();
@@ -519,7 +522,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
 
   // Runnable Method Factory used to invoke the OnUserGestureEnd method
   // asynchronously.
-  ScopedRunnableMethodFactory<WebPluginDelegateImpl> user_gesture_msg_factory_;
+  base::WeakPtrFactory<WebPluginDelegateImpl> user_gesture_msg_factory_;
 
   // Handle to the mouse hook installed for certain windowed plugins like
   // flash.

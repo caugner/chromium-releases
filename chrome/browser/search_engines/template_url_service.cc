@@ -22,6 +22,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_set_observer.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/protector/base_setting_change.h"
+#include "chrome/browser/protector/protector.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
@@ -38,7 +40,7 @@
 #include "chrome/common/guid.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -111,7 +113,8 @@ TemplateURLService::TemplateURLService(Profile* profile)
       time_provider_(&base::Time::Now),
       models_associated_(false),
       processing_syncer_changes_(false),
-      sync_processor_(NULL) {
+      sync_processor_(NULL),
+      pending_synced_default_search_(false) {
   DCHECK(profile_);
   Init(NULL, 0);
 }
@@ -129,7 +132,8 @@ TemplateURLService::TemplateURLService(const Initializer* initializers,
       time_provider_(&base::Time::Now),
       models_associated_(false),
       processing_syncer_changes_(false),
-      sync_processor_(NULL) {
+      sync_processor_(NULL),
+      pending_synced_default_search_(false) {
   Init(initializers, count);
 }
 
@@ -436,8 +440,8 @@ void TemplateURLService::SetDefaultSearchProvider(const TemplateURL* url) {
     NOTREACHED();
     return;
   }
-  if (default_search_provider_ == url)
-    return;
+  // Always persist the setting in the database, that way if the backup
+  // signature has changed out from under us it gets reset correctly.
   SetDefaultSearchProviderNoNotify(url);
   NotifyObservers();
 }
@@ -448,6 +452,19 @@ const TemplateURL* TemplateURLService::GetDefaultSearchProvider() {
 
   // We're not loaded, rely on the default search provider stored in prefs.
   return initial_default_search_provider_.get();
+}
+
+const TemplateURL* TemplateURLService::FindNewDefaultSearchProvider() {
+  // See if the prepoluated default still exists.
+  scoped_ptr<TemplateURL> prepopulated_default(
+      TemplateURLPrepopulateData::GetPrepopulatedDefaultSearch(GetPrefs()));
+  for (TemplateURLVector::iterator i = template_urls_.begin();
+       i != template_urls_.end(); ++i) {
+    if ((*i)->prepopulate_id() == prepopulated_default->prepopulate_id())
+      return *i;
+  }
+  // If not, use the first of the templates.
+  return template_urls_.empty() ? NULL : template_urls_[0];
 }
 
 void TemplateURLService::AddObserver(TemplateURLServiceObserver* observer) {
@@ -511,11 +528,34 @@ void TemplateURLService::OnWebDataServiceRequestDone(
   LoadDefaultSearchProviderFromPrefs(&default_from_prefs,
                                      &is_default_search_managed_);
 
+  // Check if the default search provider has been changed and notify
+  // Protector instance about it. Don't check if the default search is
+  // managed.
+  const TemplateURL* backup_default_search_provider = NULL;
+  if (!is_default_search_managed_ &&
+      DidDefaultSearchProviderChange(
+          *result,
+          template_urls,
+          &backup_default_search_provider) &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoProtector)) {
+    // TODO: need to handle no default_search_provider better. Likely need to
+    // make sure the default search engine is there, and if not assume it was
+    // deleted and add it back.
+
+    // Protector will delete itself when it's needed no longer.
+    protector::Protector* protector = new protector::Protector(profile());
+    protector->ShowChange(protector::CreateDefaultSearchProviderChange(
+        default_search_provider,
+        backup_default_search_provider));
+  }
+
   // Remove entries that were created because of policy as they may have
   // changed since the database was saved.
   RemoveProvidersCreatedByPolicy(&template_urls,
                                  &default_search_provider,
                                  default_from_prefs.get());
+
+  PatchMissingSyncGUIDs(&template_urls);
 
   if (is_default_search_managed_) {
     SetTemplateURLs(template_urls);
@@ -540,12 +580,17 @@ void TemplateURLService::OnWebDataServiceRequestDone(
     // Note that this saves the default search provider to prefs.
     SetDefaultSearchProviderNoNotify(default_search_provider);
   } else {
-    // If we had a managed default, replace it with the first provider of
-    // the list.
-    if (database_specified_a_default &&
-        NULL == default_search_provider &&
-        !template_urls.empty())
+    // If we had a managed default, replace it with the synced default if
+    // applicable, or the first provider of the list.
+    const TemplateURL* synced_default = GetPendingSyncedDefaultSearchProvider();
+    if (synced_default) {
+      default_search_provider = synced_default;
+      pending_synced_default_search_ = false;
+    } else if (database_specified_a_default &&
+               NULL == default_search_provider &&
+               !template_urls.empty()) {
       default_search_provider = template_urls[0];
+    }
 
     // If the default search provider existed previously, then just
     // set the member variable. Otherwise, we'll set it using the method
@@ -598,10 +643,10 @@ string16 TemplateURLService::GetKeywordShortName(const string16& keyword,
 }
 
 void TemplateURLService::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_HISTORY_URL_VISITED) {
-    Details<history::URLVisitedDetails> visit_details(details);
+    content::Details<history::URLVisitedDetails> visit_details(details);
     if (!loaded())
       visits_to_add_.push_back(*visit_details.ptr());
     else
@@ -610,8 +655,29 @@ void TemplateURLService::Observe(int type,
     if (loaded_)
       GoogleBaseURLChanged();
   } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    const std::string* pref_name = Details<std::string>(details).ptr();
+    const std::string* pref_name = content::Details<std::string>(details).ptr();
     if (!pref_name || default_search_prefs_->IsObserved(*pref_name)) {
+      // Listen for changes to the default search from Sync. If it is
+      // specifically the synced default search provider GUID that changed, we
+      // have to set it (or wait for it).
+      PrefService* prefs = GetPrefs();
+      if (pref_name && *pref_name == prefs::kSyncedDefaultSearchProviderGUID &&
+          prefs) {
+        const TemplateURL* new_default_search = GetTemplateURLForGUID(
+            prefs->GetString(prefs::kSyncedDefaultSearchProviderGUID));
+        if (new_default_search && !is_default_search_managed_) {
+          if (new_default_search != GetDefaultSearchProvider()) {
+            SetDefaultSearchProvider(new_default_search);
+            pending_synced_default_search_ = false;
+          }
+        } else {
+          // If it's not there, or if default search is currently managed, set a
+          // flag to indicate that we waiting on the search engine entry to come
+          // in through Sync.
+          pending_synced_default_search_ = true;
+        }
+      }
+
       // A preference related to default search engine has changed.
       // Update the model if needed.
       UpdateDefaultSearch();
@@ -669,17 +735,35 @@ SyncError TemplateURLService::ProcessSyncChanges(
         GetTemplateURLForKeyword(turl->keyword());
 
     if (iter->change_type() == SyncChange::ACTION_DELETE && existing_turl) {
-      Remove(existing_turl);
+      bool delete_default = (existing_turl == GetDefaultSearchProvider());
+
+      if (delete_default && is_default_search_managed_) {
+        NOTREACHED() << "Tried to delete managed default search provider";
+      } else {
+        if (delete_default)
+          default_search_provider_ = NULL;
+
+        Remove(existing_turl);
+
+        if (delete_default)
+          SetDefaultSearchProvider(FindNewDefaultSearchProvider());
+      }
     } else if (iter->change_type() == SyncChange::ACTION_ADD &&
                !existing_turl) {
+      std::string guid = turl->sync_guid();
       if (existing_keyword_turl)
         ResolveSyncKeywordConflict(turl.get(), &new_changes);
       // Force the local ID to 0 so we can add it.
       turl->set_id(0);
       Add(turl.release());
+
+      // Possibly set the newly added |turl| as the default search provider.
+      SetDefaultSearchProviderIfNewlySynced(guid);
     } else if (iter->change_type() == SyncChange::ACTION_UPDATE &&
                existing_turl) {
-      if (existing_keyword_turl)
+      // Possibly resolve a keyword conflict if they have the same keywords but
+      // are not the same entry.
+      if (existing_keyword_turl && existing_keyword_turl != existing_turl)
         ResolveSyncKeywordConflict(turl.get(), &new_changes);
       ResetTemplateURL(existing_turl, turl->short_name(), turl->keyword(),
           turl->url() ? turl->url()->url() : std::string());
@@ -713,6 +797,18 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
   DCHECK_EQ(type, syncable::SEARCH_ENGINES);
   DCHECK(!sync_processor_);
   sync_processor_ = sync_processor;
+
+  // We just started syncing, so set our wait-for-default flag if we are
+  // expecting a default from Sync.
+  if (GetPrefs()) {
+    std::string default_guid = GetPrefs()->GetString(
+        prefs::kSyncedDefaultSearchProviderGUID);
+    const TemplateURL* current_default = GetDefaultSearchProvider();
+
+    if (!default_guid.empty() &&
+        (!current_default || current_default->sync_guid() != default_guid))
+      pending_synced_default_search_ = true;
+  }
 
   // We do a lot of calls to Add/Remove/ResetTemplateURL here, so ensure we
   // don't step on our own toes.
@@ -773,6 +869,7 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
                                        &new_changes);
         local_data_map.erase(old_guid);
       } else {
+        std::string guid = sync_turl->sync_guid();
         // Keyword conflict is possible in this case. Resolve it first before
         // adding the new TemplateURL. Note that we don't remove the local TURL
         // from local_data_map in this case as it may still need to be pushed to
@@ -781,6 +878,9 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
         // Force the local ID to 0 so we can add it.
         sync_turl->set_id(0);
         Add(sync_turl.release());
+
+        // Possibly set the newly added |turl| as the default search provider.
+        SetDefaultSearchProviderIfNewlySynced(guid);
       }
     }
   }  // for
@@ -913,7 +1013,7 @@ void TemplateURLService::SetKeywordSearchTermsForURL(const TemplateURL* t_url,
 }
 
 void TemplateURLService::Init(const Initializer* initializers,
-                            int num_initializers) {
+                              int num_initializers) {
   // Register for notifications.
   if (profile_) {
     // TODO(sky): bug 1166191. The keywords should be moved into the history
@@ -921,13 +1021,13 @@ void TemplateURLService::Init(const Initializer* initializers,
     // backend can handle automatically adding the search terms as the user
     // navigates.
     registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URL_VISITED,
-                   Source<Profile>(profile_->GetOriginalProfile()));
+                   content::Source<Profile>(profile_->GetOriginalProfile()));
     PrefService* prefs = GetPrefs();
     default_search_prefs_.reset(
         PrefSetObserver::CreateDefaultSearchPrefSetObserver(prefs, this));
   }
   registrar_.Add(this, chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 
   if (num_initializers > 0) {
     // This path is only hit by test code and is used to simulate a loaded
@@ -1043,10 +1143,10 @@ void TemplateURLService::ChangeToLoadedState() {
 }
 
 void TemplateURLService::NotifyLoaded() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
-      Source<TemplateURLService>(this),
-      NotificationService::NoDetails());
+      content::Source<TemplateURLService>(this),
+      content::NotificationService::NoDetails());
 
   for (size_t i = 0; i < pending_extension_ids_.size(); ++i) {
     const Extension* extension = profile_->GetExtensionService()->
@@ -1449,25 +1549,16 @@ void TemplateURLService::UpdateDefaultSearch() {
       default_search_provider_ = NULL;
       RemoveNoNotify(old_default);
     }
-    SetDefaultSearchProviderNoNotify(FindNewDefaultSearchProvider());
+
+    // The likely default should be from Sync if we were waiting on Sync.
+    // Otherwise, it should be FindNewDefaultSearchProvider.
+    const TemplateURL* synced_default = GetPendingSyncedDefaultSearchProvider();
+    if (synced_default)
+      pending_synced_default_search_ = false;
+    SetDefaultSearchProviderNoNotify(synced_default ? synced_default :
+        FindNewDefaultSearchProvider());
   }
   NotifyObservers();
-}
-
-const TemplateURL* TemplateURLService::FindNewDefaultSearchProvider() {
-  // See if the prepoluated default still exists.
-  scoped_ptr<TemplateURL> prepopulated_default(
-      TemplateURLPrepopulateData::GetPrepopulatedDefaultSearch(GetPrefs()));
-  for (TemplateURLVector::iterator i = template_urls_.begin();
-      i != template_urls_.end(); ) {
-    if ((*i)->prepopulate_id() == prepopulated_default->prepopulate_id())
-      return *i;
-  }
-  // If not, use the first of the templates.
-  if (!template_urls_.empty()) {
-    return template_urls_[0];
-  }
-  return NULL;
 }
 
 void TemplateURLService::SetDefaultSearchProviderNoNotify(
@@ -1497,8 +1588,16 @@ void TemplateURLService::SetDefaultSearchProviderNoNotify(
     }
   }
 
-  if (!is_default_search_managed_)
+  if (!is_default_search_managed_) {
     SaveDefaultSearchProviderToPrefs(url);
+
+    // If we are syncing, we want to set the synced pref that will notify other
+    // instances to change their default to this new search provider.
+    if (sync_processor_ && !url->sync_guid().empty() && GetPrefs()) {
+      GetPrefs()->SetString(prefs::kSyncedDefaultSearchProviderGUID,
+                            url->sync_guid());
+    }
+  }
 
   if (service_.get())
     service_->SetDefaultSearchProvider(url);
@@ -1550,12 +1649,12 @@ void TemplateURLService::RemoveNoNotify(const TemplateURL* template_url) {
   ProcessTemplateURLChange(template_url, SyncChange::ACTION_DELETE);
 
   if (profile_) {
-    Source<Profile> source(profile_);
+    content::Source<Profile> source(profile_);
     TemplateURLID id = template_url->id();
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_TEMPLATE_URL_REMOVED,
         source,
-        Details<TemplateURLID>(&id));
+        content::Details<TemplateURLID>(&id));
   }
 
   // We own the TemplateURL and need to delete it.
@@ -1658,7 +1757,8 @@ bool TemplateURLService::ResolveSyncKeywordConflict(
 
   const TemplateURL* existing_turl =
       GetTemplateURLForKeyword(sync_turl->keyword());
-  if (!existing_turl)
+  // If there is no conflict, or it's just conflicting with itself, return.
+  if (!existing_turl || existing_turl->sync_guid() == sync_turl->sync_guid())
     return false;
 
   if (existing_turl->last_modified() > sync_turl->last_modified() ||
@@ -1707,10 +1807,22 @@ void TemplateURLService::MergeSyncAndLocalURLDuplicates(
     // rather than ResetTemplateURL, |sync_url| is added with a fresh
     // TemplateURLID. We don't need to sync the new ID back to the server since
     // it's only relevant locally.
-    Remove(local_turl);
-    // Force the local ID to 0 so we can add it.
-    scoped_sync_turl->set_id(0);
-    Add(scoped_sync_turl.release());
+    bool delete_default = (local_turl == GetDefaultSearchProvider());
+    if (delete_default && is_default_search_managed_) {
+      NOTREACHED() << "Tried to delete managed default search provider";
+    } else {
+      if (delete_default)
+        default_search_provider_ = NULL;
+
+      Remove(local_turl);
+
+      // Force the local ID to 0 so we can add it.
+      scoped_sync_turl->set_id(0);
+      TemplateURL* temp = scoped_sync_turl.release();
+      Add(temp);
+      if (delete_default)
+        SetDefaultSearchProvider(temp);
+    }
   } else {
     // Change the local TURL's GUID to the server's GUID and push an update to
     // Sync. This ensures that the rest of local_url's fields are sync'd up to
@@ -1719,5 +1831,48 @@ void TemplateURLService::MergeSyncAndLocalURLDuplicates(
     ResetTemplateURLGUID(local_turl, sync_turl->sync_guid());
     SyncData sync_data = CreateSyncDataFromTemplateURL(*local_turl);
     change_list->push_back(SyncChange(SyncChange::ACTION_UPDATE, sync_data));
+  }
+}
+
+void TemplateURLService::SetDefaultSearchProviderIfNewlySynced(
+    const std::string& guid) {
+  // If we're not syncing or if default search is managed by policy, ignore.
+  if (!sync_processor_ || is_default_search_managed_)
+    return;
+
+  PrefService* prefs = GetPrefs();
+  if (prefs && pending_synced_default_search_ &&
+      prefs->GetString(prefs::kSyncedDefaultSearchProviderGUID) == guid) {
+    // Make sure this actually exists. We should not be calling this unless we
+    // really just added this TemplateURL.
+    const TemplateURL* turl_from_sync = GetTemplateURLForGUID(guid);
+    DCHECK(turl_from_sync);
+    SetDefaultSearchProvider(turl_from_sync);
+    pending_synced_default_search_ = false;
+  }
+}
+
+const TemplateURL* TemplateURLService::GetPendingSyncedDefaultSearchProvider() {
+  PrefService* prefs = GetPrefs();
+  if (!prefs || !pending_synced_default_search_)
+    return NULL;
+
+  // Could be NULL if no such thing exists.
+  return GetTemplateURLForGUID(
+      prefs->GetString(prefs::kSyncedDefaultSearchProviderGUID));
+}
+
+void TemplateURLService::PatchMissingSyncGUIDs(
+    std::vector<TemplateURL*>* template_urls) {
+  DCHECK(template_urls);
+  for (std::vector<TemplateURL*>::iterator i = template_urls->begin();
+       i != template_urls->end(); ++i) {
+    TemplateURL* template_url = *i;
+    DCHECK(template_url);
+    if (template_url->sync_guid().empty()) {
+      template_url->set_sync_guid(guid::GenerateGUID());
+      if (service_.get())
+        service_->UpdateKeyword(*template_url);
+    }
   }
 }

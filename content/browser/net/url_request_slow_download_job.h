@@ -3,63 +3,97 @@
 // found in the LICENSE file.
 // This class simulates a slow download.  This used in a UI test to test the
 // download manager.  Requests to |kUnknownSizeUrl| and |kKnownSizeUrl| start
-// downloads that pause after the first
+// downloads that pause after the first N bytes, to be completed by sending a
+// request to |kFinishDownloadUrl|.
 
 #ifndef CONTENT_BROWSER_NET_URL_REQUEST_SLOW_DOWNLOAD_JOB_H_
 #define CONTENT_BROWSER_NET_URL_REQUEST_SLOW_DOWNLOAD_JOB_H_
 #pragma once
 
+#include <set>
 #include <string>
-#include <vector>
 
-#include "base/task.h"
+#include "base/lazy_instance.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "net/url_request/url_request_job.h"
 
 class URLRequestSlowDownloadJob : public net::URLRequestJob {
  public:
-  explicit URLRequestSlowDownloadJob(net::URLRequest* request);
+  // Test URLs.
+  CONTENT_EXPORT static const char kUnknownSizeUrl[];
+  CONTENT_EXPORT static const char kKnownSizeUrl[];
+  CONTENT_EXPORT static const char kFinishDownloadUrl[];
+
+  // Download sizes.
+  CONTENT_EXPORT static const int kFirstDownloadSize;
+  CONTENT_EXPORT static const int kSecondDownloadSize;
 
   // Timer callback, used to check to see if we should finish our download and
   // send the second chunk.
   void CheckDoneStatus();
 
   // net::URLRequestJob methods
-  virtual void Start();
-  virtual bool GetMimeType(std::string* mime_type) const;
-  virtual void GetResponseInfo(net::HttpResponseInfo* info);
-  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
+  virtual void Start() OVERRIDE;
+  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
+  virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE;
+  virtual bool ReadRawData(net::IOBuffer* buf,
+                           int buf_size,
+                           int *bytes_read) OVERRIDE;
 
   static net::URLRequestJob* Factory(net::URLRequest* request,
                                      const std::string& scheme);
 
-  // Test URLs.
-  CONTENT_EXPORT static const char kUnknownSizeUrl[];
-  CONTENT_EXPORT static const char kKnownSizeUrl[];
-  CONTENT_EXPORT static const char kFinishDownloadUrl[];
+  // Returns the current number of URLRequestSlowDownloadJobs that have
+  // not yet completed.
+  CONTENT_EXPORT static size_t NumberOutstandingRequests();
 
   // Adds the testing URLs to the net::URLRequestFilter.
   CONTENT_EXPORT static void AddUrlHandler();
 
  private:
+  explicit URLRequestSlowDownloadJob(net::URLRequest* request);
   virtual ~URLRequestSlowDownloadJob();
+
+  // Enum indicating where we are in the read after a call to
+  // FillBufferHelper.
+  enum ReadStatus {
+    // The buffer was filled with data and may be returned.
+    BUFFER_FILLED,
+
+    // No data was added to the buffer because kFinishDownloadUrl has
+    // not yet been seen and we've already returned the first chunk.
+    REQUEST_BLOCKED,
+
+    // No data was added to the buffer because we've already returned
+    // all the data.
+    REQUEST_COMPLETE
+  };
+  ReadStatus FillBufferHelper(
+      net::IOBuffer* buf,
+      int buf_size,
+      int* bytes_written);
 
   void GetResponseInfoConst(net::HttpResponseInfo* info) const;
 
   // Mark all pending requests to be finished.  We keep track of pending
-  // requests in |kPendingRequests|.
+  // requests in |pending_requests_|.
   static void FinishPendingRequests();
-  static std::vector<URLRequestSlowDownloadJob*> kPendingRequests;
+  typedef std::set<URLRequestSlowDownloadJob*> SlowJobsSet;
+  static base::LazyInstance<SlowJobsSet,
+                            base::LeakyLazyInstanceTraits<SlowJobsSet> >
+      pending_requests_;
 
   void StartAsync();
 
   void set_should_finish_download() { should_finish_download_ = true; }
 
-  int first_download_size_remaining_;
+  int bytes_already_sent_;
   bool should_finish_download_;
-  bool should_send_second_chunk_;
+  scoped_refptr<net::IOBuffer> buffer_;
+  int buffer_size_;
 
-  ScopedRunnableMethodFactory<URLRequestSlowDownloadJob> method_factory_;
+  base::WeakPtrFactory<URLRequestSlowDownloadJob> weak_factory_;
 };
 
 #endif  // CONTENT_BROWSER_NET_URL_REQUEST_SLOW_DOWNLOAD_JOB_H_

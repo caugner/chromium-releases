@@ -8,10 +8,12 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_navigation_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chrome/test/test_navigation_observer.h"
 #include "content/browser/net/url_request_failed_dns_job.h"
 #include "content/browser/net/url_request_mock_http_job.h"
+
+using content::BrowserThread;
 
 class ErrorPageTest : public InProcessBrowserTest {
  public:
@@ -78,7 +80,7 @@ class ErrorPageTest : public InProcessBrowserTest {
         ASCIIToUTF16(expected_title));
 
     TestNavigationObserver test_navigation_observer(
-        Source<NavigationController>(
+        content::Source<NavigationController>(
             &browser()->GetSelectedTabContentsWrapper()->controller()),
         NULL,
         num_navigations);

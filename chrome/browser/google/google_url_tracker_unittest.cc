@@ -13,27 +13,29 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/url_fetcher.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
+
 // TestNotificationObserver ---------------------------------------------------
 
 namespace {
 
-class TestNotificationObserver : public NotificationObserver {
+class TestNotificationObserver : public content::NotificationObserver {
  public:
   TestNotificationObserver();
   virtual ~TestNotificationObserver();
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
   bool notified() const { return notified_; }
   void clear_notified() { notified_ = false; }
 
@@ -47,9 +49,10 @@ TestNotificationObserver::TestNotificationObserver() : notified_(false) {
 TestNotificationObserver::~TestNotificationObserver() {
 }
 
-void TestNotificationObserver::Observe(int type,
-                                       const NotificationSource& source,
-                                       const NotificationDetails& details) {
+void TestNotificationObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   notified_ = true;
 }
 
@@ -132,12 +135,12 @@ class GoogleURLTrackerTest : public testing::Test {
 
  private:
   MessageLoop message_loop_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread io_thread_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   ScopedTestingLocalState local_state_;
 
   TestURLFetcherFactory fetcher_factory_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
 GoogleURLTrackerTest::GoogleURLTrackerTest()
@@ -178,9 +181,10 @@ void GoogleURLTrackerTest::MockSearchDomainCheckResponse(
   TestURLFetcher* fetcher = fetcher_factory_.GetFetcherByID(expected_id);
   if (!fetcher)
     return;
-  fetcher->delegate()->OnURLFetchComplete(fetcher,
-      GURL(GoogleURLTracker::kSearchDomainCheckURL), net::URLRequestStatus(),
-      200, net::ResponseCookies(), domain);
+  fetcher->set_url(GURL(GoogleURLTracker::kSearchDomainCheckURL));
+  fetcher->set_response_code(200);
+  fetcher->SetResponseString(domain);
+  fetcher->delegate()->OnURLFetchComplete(fetcher);
   // At this point, |fetcher| is deleted.
   MessageLoop::current()->RunAllPending();
 }
@@ -188,9 +192,9 @@ void GoogleURLTrackerTest::MockSearchDomainCheckResponse(
 void GoogleURLTrackerTest::RequestServerCheck() {
   if (!registrar_.IsRegistered(observer_.get(),
                                chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-                               NotificationService::AllSources())) {
+                               content::NotificationService::AllSources())) {
     registrar_.Add(observer_.get(), chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
   GoogleURLTracker::RequestServerCheck();
   MessageLoop::current()->RunAllPending();
@@ -230,7 +234,7 @@ void GoogleURLTrackerTest::SearchCommitted(const GURL& search_url) {
   google_url_tracker->SearchCommitted();
   if (google_url_tracker->registrar_.IsRegistered(google_url_tracker,
       content::NOTIFICATION_NAV_ENTRY_PENDING,
-      NotificationService::AllSources()))
+      content::NotificationService::AllSources()))
     google_url_tracker->search_url_ = search_url;
 }
 

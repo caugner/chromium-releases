@@ -9,9 +9,11 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/media/media_internals.h"
 #include "chrome/browser/ui/webui/media/media_internals_handler.h"
-#include "content/common/notification_service.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
+
+using content::BrowserThread;
 
 static const int kMediaInternalsProxyEventDelayMilliseconds = 100;
 
@@ -27,16 +29,18 @@ MediaInternalsProxy::MediaInternalsProxy()
     : ThreadSafeObserverImpl(net::NetLog::LOG_ALL_BUT_BYTES) {
   io_thread_ = g_browser_process->io_thread();
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
-void MediaInternalsProxy::Observe(int type, const NotificationSource& source,
-                                  const NotificationDetails& details) {
+void MediaInternalsProxy::Observe(int type,
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(type, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
-  RenderProcessHost* process = Source<RenderProcessHost>(source).ptr();
+  content::RenderProcessHost* process =
+      content::Source<content::RenderProcessHost>(source).ptr();
   CallJavaScriptFunctionOnUIThread("media.onRendererTerminated",
-      base::Value::CreateIntegerValue(process->id()));
+      base::Value::CreateIntegerValue(process->GetID()));
 }
 
 void MediaInternalsProxy::Attach(MediaInternalsMessageHandler* handler) {

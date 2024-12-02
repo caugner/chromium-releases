@@ -15,12 +15,17 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "net/url_request/url_request.h"
+
+using content::BrowserThread;
+
+namespace {
 
 class FakeDelegate : public ProtocolHandlerRegistry::Delegate {
  public:
@@ -138,30 +143,31 @@ ShellIntegration::DefaultProtocolClientWorker* FakeDelegate::CreateShellWorker(
   return new FakeProtocolClientWorker(observer, protocol, force_os_failure_);
 }
 
-class NotificationCounter : public NotificationObserver {
+class NotificationCounter : public content::NotificationObserver {
  public:
   explicit NotificationCounter(Profile* profile)
       : events_(0),
         notification_registrar_() {
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-        Source<Profile>(profile));
+        content::Source<Profile>(profile));
   }
 
   int events() { return events_; }
   bool notified() { return events_ > 0; }
   void Clear() { events_ = 0; }
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     ++events_;
   }
 
   int events_;
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 };
 
-class QueryProtocolHandlerOnChange : public NotificationObserver {
+class QueryProtocolHandlerOnChange
+    : public content::NotificationObserver {
  public:
   QueryProtocolHandlerOnChange(Profile* profile,
                                ProtocolHandlerRegistry* registry)
@@ -170,12 +176,12 @@ class QueryProtocolHandlerOnChange : public NotificationObserver {
       notification_registrar_() {
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-        Source<Profile>(profile));
+        content::Source<Profile>(profile));
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     std::vector<std::string> output;
     registry_->GetRegisteredProtocols(&output);
     called_ = true;
@@ -183,8 +189,10 @@ class QueryProtocolHandlerOnChange : public NotificationObserver {
 
   ProtocolHandlerRegistry* registry_;
   bool called_;
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 };
+
+}  // namespace
 
 class ProtocolHandlerRegistryTest : public testing::Test {
  protected:
@@ -222,16 +230,13 @@ class ProtocolHandlerRegistryTest : public testing::Test {
 
   virtual void SetUp() {
     ui_message_loop_.reset(new MessageLoopForUI());
-    ui_thread_.reset(new BrowserThread(BrowserThread::UI,
-                                       MessageLoop::current()));
-    io_thread_.reset(new BrowserThread(BrowserThread::IO));
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_->StartWithOptions(options);
+    ui_thread_.reset(new content::TestBrowserThread(BrowserThread::UI,
+                                                    MessageLoop::current()));
+    io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO));
+    io_thread_->StartIOThread();
 
-    file_thread_.reset(new BrowserThread(BrowserThread::FILE));
-    options.message_loop_type = MessageLoop::TYPE_DEFAULT;
-    file_thread_->StartWithOptions(options);
+    file_thread_.reset(new content::TestBrowserThread(BrowserThread::FILE));
+    file_thread_->Start();
 
     profile_.reset(new TestingProfile());
     profile_->SetPrefService(new TestingPrefService());
@@ -260,9 +265,9 @@ class ProtocolHandlerRegistryTest : public testing::Test {
   }
 
   scoped_ptr<MessageLoopForUI> ui_message_loop_;
-  scoped_ptr<BrowserThread> ui_thread_;
-  scoped_ptr<BrowserThread> io_thread_;
-  scoped_ptr<BrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> ui_thread_;
+  scoped_ptr<content::TestBrowserThread> io_thread_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
 
   FakeDelegate* delegate_;
   scoped_ptr<TestingProfile> profile_;
@@ -460,6 +465,38 @@ TEST_F(ProtocolHandlerRegistryTest, TestIsEquivalentRegistered) {
   ASSERT_TRUE(registry()->HasRegisteredEquivalent(ph2));
 }
 
+TEST_F(ProtocolHandlerRegistryTest, TestSilentlyRegisterHandler) {
+  ProtocolHandler ph1 = CreateProtocolHandler("test", GURL("http://test/%s"),
+                                              "test1");
+  ProtocolHandler ph2 = CreateProtocolHandler("test", GURL("http://test/%s"),
+                                              "test2");
+  ProtocolHandler ph3 = CreateProtocolHandler("ignore", GURL("http://test/%s"),
+                                              "ignore1");
+  ProtocolHandler ph4 = CreateProtocolHandler("ignore", GURL("http://test/%s"),
+                                              "ignore2");
+
+  ASSERT_FALSE(registry()->SilentlyHandleRegisterHandlerRequest(ph1));
+  ASSERT_FALSE(registry()->IsRegistered(ph1));
+
+  registry()->OnAcceptRegisterProtocolHandler(ph1);
+  ASSERT_TRUE(registry()->IsRegistered(ph1));
+
+  ASSERT_TRUE(registry()->SilentlyHandleRegisterHandlerRequest(ph2));
+  ASSERT_FALSE(registry()->IsRegistered(ph1));
+  ASSERT_TRUE(registry()->IsRegistered(ph2));
+
+  ASSERT_FALSE(registry()->SilentlyHandleRegisterHandlerRequest(ph3));
+  ASSERT_FALSE(registry()->IsRegistered(ph3));
+
+  registry()->OnIgnoreRegisterProtocolHandler(ph3);
+  ASSERT_FALSE(registry()->IsRegistered(ph3));
+  ASSERT_TRUE(registry()->IsIgnored(ph3));
+
+  ASSERT_TRUE(registry()->SilentlyHandleRegisterHandlerRequest(ph4));
+  ASSERT_FALSE(registry()->IsRegistered(ph4));
+  ASSERT_TRUE(registry()->HasIgnoredEquivalent(ph4));
+}
+
 TEST_F(ProtocolHandlerRegistryTest, TestRemoveHandlerRemovesDefault) {
   ProtocolHandler ph1 = CreateProtocolHandler("test", "test1");
   ProtocolHandler ph2 = CreateProtocolHandler("test", "test2");
@@ -574,13 +611,9 @@ TEST_F(ProtocolHandlerRegistryTest, TestOSRegistration) {
   registry()->OnAcceptRegisterProtocolHandler(ph_do2);
 }
 
-#if defined(OS_LINUX)
-// TODO(benwells): When Linux support is more reliable and
-// http://crbut.com/88255 is fixed this test will pass.
-#define MAYBE_TestOSRegistrationFailure FAILS_TestOSRegistrationFailure
-#else
-#define MAYBE_TestOSRegistrationFailure TestOSRegistrationFailure
-#endif
+// Test fails on 963 branch.
+#define MAYBE_TestOSRegistrationFailure DISABLED_TestOSRegistrationFailure
+
 
 TEST_F(ProtocolHandlerRegistryTest, MAYBE_TestOSRegistrationFailure) {
   ProtocolHandler ph_do = CreateProtocolHandler("do", "test1");
@@ -614,7 +647,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestMaybeCreateTaskWorksFromIOThread) {
   GURL url("mailto:someone@something.com");
   scoped_refptr<ProtocolHandlerRegistry> r(registry());
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          NewRunnableFunction(MakeRequest, url, r));
+                          base::Bind(MakeRequest, url, r));
   MessageLoop::current()->Run();
 }
 
@@ -633,7 +666,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestIsHandledProtocolWorksOnIOThread) {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableFunction(CheckIsHandled, scheme, true, r));
+      base::Bind(CheckIsHandled, scheme, true, r));
 }
 
 TEST_F(ProtocolHandlerRegistryTest, TestRemovingDefaultFallsBackToOldDefault) {
@@ -682,7 +715,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestClearDefaultGetsPropagatedToIO) {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableFunction(CheckIsHandled, scheme, false, r));
+      base::Bind(CheckIsHandled, scheme, false, r));
 }
 
 static void QuitUILoop() {
@@ -694,7 +727,7 @@ TEST_F(ProtocolHandlerRegistryTest, TestLoadEnabledGetsPropogatedToIO) {
   registry()->Disable();
   ReloadProtocolHandlerRegistry();
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          NewRunnableFunction(QuitUILoop));
+                          base::Bind(QuitUILoop));
   MessageLoop::current()->Run();
   ASSERT_FALSE(enabled_io());
 }

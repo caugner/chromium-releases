@@ -58,7 +58,7 @@
         '<(libjpeg_gyp_path):*',
       ],
       'conditions': [
-        ['OS=="mac" or OS=="linux"', {
+        ['os_posix==1 and OS!="android"', {
           'dependencies': [
             '../third_party/yasm/yasm.gyp:*#host',
             '../cloud_print/virtual_driver/virtual_driver_posix.gyp:*',
@@ -128,7 +128,7 @@
         }],
         ['toolkit_views==1', {
           'dependencies': [
-            '../views/views.gyp:*',
+            '../ui/views/views.gyp:*',
           ],
         }],
         ['use_aura==1', {
@@ -149,6 +149,18 @@
         }],
       ],
     }, # target_name: All
+    {
+      'target_name': 'All_syzygy',
+      'type': 'none',
+      'conditions': [
+        ['OS=="win" and fastbuild==0', {
+            'dependencies': [
+              '../chrome/installer/mini_installer_syzygy.gyp:*',
+            ],
+          },
+        ],
+      ],
+    }, # target_name: All_syzygy
     {
       'target_name': 'chromium_builder_tests',
       'type': 'none',
@@ -196,8 +208,8 @@
             '../sandbox/sandbox.gyp:sbox_integration_tests',
             '../sandbox/sandbox.gyp:sbox_unittests',
             '../sandbox/sandbox.gyp:sbox_validation_tests',
-            '../views/views.gyp:views_unittests',
             '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
+            '../ui/views/views.gyp:views_unittests',
             # TODO(nsylvain) ui_tests.exe depends on test_shell_common.
             # This should:
             # 1) not be the case. OR.
@@ -255,8 +267,8 @@
             '../sandbox/sandbox.gyp:sbox_integration_tests',
             '../sandbox/sandbox.gyp:sbox_unittests',
             '../sandbox/sandbox.gyp:sbox_validation_tests',
-            '../views/views.gyp:views_unittests',
             '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
+            '../ui/views/views.gyp:views_unittests',
             # TODO(nsylvain) ui_tests.exe depends on test_shell_common.
             # This should:
             # 1) not be the case. OR.
@@ -462,7 +474,7 @@
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
             '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber_unittests',
             '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
-            '../views/views.gyp:views_unittests',
+            '../ui/views/views.gyp:views_unittests',
             # TODO(nsylvain) ui_tests.exe depends on test_shell_common.
             # This should:
             # 1) not be the case. OR.
@@ -541,6 +553,7 @@
                 '../chrome_frame/chrome_frame.gyp:npchrome_frame',
                 '../courgette/courgette.gyp:courgette',
                 '../courgette/courgette.gyp:courgette64',
+                '../cloud_print/virtual_driver/virtual_driver.gyp:virtual_driver',
                 '../remoting/remoting.gyp:webapp_it2me',
                 '../third_party/adobe/flash/flash_player.gyp:flash_player',
               ],
@@ -592,7 +605,7 @@
             '../sql/sql.gyp:sql_unittests',
             '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
             '../third_party/libphonenumber/libphonenumber.gyp:libphonenumber_unittests',
-            '../views/views.gyp:views_unittests',
+            '../ui/views/views.gyp:views_unittests',
             'temp_gyp/googleurl.gyp:googleurl_unittests',
           ],
         },
@@ -605,15 +618,13 @@
           'type': 'none',
           'dependencies': [
             '../chrome/chrome.gyp:chrome',
+            '../chrome/chrome.gyp:unit_tests',
             '../ui/aura_shell/aura_shell.gyp:aura_shell_exe',
             '../ui/aura_shell/aura_shell.gyp:aura_shell_unittests',
             '../ui/aura/aura.gyp:*',
             '../ui/gfx/compositor/compositor.gyp:*',
-            '../views/views.gyp:views',
-            '../views/views.gyp:views_aura_desktop',
-            '../views/views.gyp:views_desktop',
-            '../views/views.gyp:views_desktop_lib',
-            '../views/views.gyp:views_unittests',
+            '../ui/views/views.gyp:views',
+            '../ui/views/views.gyp:views_unittests',
             '../webkit/webkit.gyp:pull_in_webkit_unit_tests',
           ],
           'conditions': [
@@ -631,9 +642,13 @@
               ],
             }],
             ['OS=="linux"', {
-              # Aura unit_tests currently only work on Linux.
+              # Tests that currently only work on Linux.
               'dependencies': [
-                '../chrome/chrome.gyp:unit_tests',
+                '../chrome/chrome.gyp:sync_unit_tests',
+                '../content/content.gyp:content_unittests',
+                '../ipc/ipc.gyp:ipc_tests',
+                '../sql/sql.gyp:sql_unittests',
+                '../ui/ui.gyp:gfx_unittests',
               ],
             }],
           ],

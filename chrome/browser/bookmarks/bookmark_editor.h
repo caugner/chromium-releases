@@ -15,6 +15,7 @@
 class BookmarkNode;
 class GURL;
 class Profile;
+class Browser;
 
 // Small, cross platform interface that shows the correct platform specific
 // bookmark editor dialog.
@@ -33,12 +34,14 @@ class BookmarkEditor {
     static EditDetails EditNode(const BookmarkNode* node);
 
     // Returns an EditDetails instance for the user adding a bookmark within
-    // a given parent node.
-    static EditDetails AddNodeInFolder(const BookmarkNode* parent_node);
+    // a given parent node with a specified index.
+    static EditDetails AddNodeInFolder(const BookmarkNode* parent_node,
+                                       int index);
 
     // Returns an EditDetails instance for the user adding a folder within a
-    // given parent node.
-    static EditDetails AddFolder(const BookmarkNode* parent_node);
+    // given parent node with a specified index.
+    static EditDetails AddFolder(const BookmarkNode* parent_node,
+                                 int index);
 
     enum Type {
       // The user is editing an existing node in the model. The node the user
@@ -67,6 +70,10 @@ class BookmarkEditor {
     // to place the new node in.
     const BookmarkNode* parent_node;
 
+    // If type == NEW_URL or type == NEW_FOLDER this gives the index to insert
+    // the new node at.
+    int index;
+
     // If type == NEW_FOLDER, this is the urls/title pairs to add to the
     // folder.
     std::vector<std::pair<GURL, string16> > urls;
@@ -86,6 +93,15 @@ class BookmarkEditor {
                    Profile* profile,
                    const EditDetails& details,
                    Configuration configuration);
+
+  // Shows the bookmark all tabs dialog.
+  static void ShowBookmarkAllTabsDialog(Browser* browser);
+
+#if !defined(USE_AURA)
+  // Shows the native bookmark all tabs dialog. This is delegated from
+  // ShowBookmarkAllTabsDialog() when use_aura is not set.
+  static void ShowNativeBookmarkAllTabsDialog(Browser* browser);
+#endif  // !defined(USE_AURA)
 
  private:
   // Shows the native bookmark editor.

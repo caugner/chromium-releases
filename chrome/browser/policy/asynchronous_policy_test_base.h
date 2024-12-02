@@ -9,7 +9,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/policy/asynchronous_policy_provider.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,19 +34,15 @@ class AsynchronousPolicyTestBase : public testing::Test {
   virtual ~AsynchronousPolicyTestBase();
 
   // testing::Test:
-  virtual void SetUp();
-  virtual void TearDown();
+  virtual void TearDown() OVERRIDE;
 
  protected:
-  MessageLoop loop_;
-
-  // The mocks that are used in the test must outlive the scope of the test
-  // because they still get accessed in the RunAllPending of the TearDown.
-  scoped_ptr<ProviderDelegateMock> delegate_;
+  // Create an actual IO loop (needed by FilePathWatcher).
+  MessageLoopForIO loop_;
 
  private:
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(AsynchronousPolicyTestBase);
 };

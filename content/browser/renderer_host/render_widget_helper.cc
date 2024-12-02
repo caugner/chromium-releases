@@ -4,13 +4,16 @@
 
 #include "content/browser/renderer_host/render_widget_helper.h"
 
+#include "base/bind.h"
 #include "base/eintr_wrapper.h"
 #include "base/threading/thread.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 // A Task used with InvokeLater that we hold a pointer to in pending_paints_.
 // Instances are deleted by MessageLoop after it calls their Run method.
@@ -80,18 +83,18 @@ void RenderWidgetHelper::CancelResourceRequests(int render_widget_id) {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this,
-                        &RenderWidgetHelper::OnCancelResourceRequests,
-                        render_widget_id));
+      base::Bind(&RenderWidgetHelper::OnCancelResourceRequests,
+                 this,
+                 render_widget_id));
 }
 
 void RenderWidgetHelper::CrossSiteSwapOutACK(
     const ViewMsg_SwapOut_Params& params) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this,
-                        &RenderWidgetHelper::OnCrossSiteSwapOutACK,
-                        params));
+      base::Bind(&RenderWidgetHelper::OnCrossSiteSwapOutACK,
+                 this,
+                 params));
 }
 
 bool RenderWidgetHelper::WaitForUpdateMsg(int render_widget_id,
@@ -191,7 +194,8 @@ void RenderWidgetHelper::OnDispatchUpdateMsg(UpdateMsgProxy* proxy) {
   OnDiscardUpdateMsg(proxy);
 
   // It is reasonable for the host to no longer exist.
-  RenderProcessHost* host = RenderProcessHost::FromID(render_process_id_);
+  content::RenderProcessHost* host =
+      content::RenderProcessHost::FromID(render_process_id_);
   if (host)
     host->OnMessageReceived(proxy->message);
 }
@@ -219,8 +223,8 @@ void RenderWidgetHelper::CreateNewWindow(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &RenderWidgetHelper::OnCreateWindowOnUI, params, *route_id));
+      base::Bind(
+          &RenderWidgetHelper::OnCreateWindowOnUI, this, params, *route_id));
 }
 
 void RenderWidgetHelper::OnCreateWindowOnUI(
@@ -233,8 +237,7 @@ void RenderWidgetHelper::OnCreateWindowOnUI(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &RenderWidgetHelper::OnCreateWindowOnIO,
-                        route_id));
+      base::Bind(&RenderWidgetHelper::OnCreateWindowOnIO, this, route_id));
 }
 
 void RenderWidgetHelper::OnCreateWindowOnIO(int route_id) {
@@ -248,8 +251,8 @@ void RenderWidgetHelper::CreateNewWidget(int opener_id,
   *route_id = GetNextRoutingID();
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &RenderWidgetHelper::OnCreateWidgetOnUI, opener_id, *route_id,
+      base::Bind(
+          &RenderWidgetHelper::OnCreateWidgetOnUI, this, opener_id, *route_id,
           popup_type));
 }
 
@@ -258,8 +261,8 @@ void RenderWidgetHelper::CreateNewFullscreenWidget(int opener_id,
   *route_id = GetNextRoutingID();
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &RenderWidgetHelper::OnCreateFullscreenWidgetOnUI,
+      base::Bind(
+          &RenderWidgetHelper::OnCreateFullscreenWidgetOnUI, this,
           opener_id, *route_id));
 }
 

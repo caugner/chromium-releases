@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 
 class GURL;
 
@@ -30,8 +30,8 @@ class AuthResponseHandler {
   // the next step, sets |catcher| to get called back when that fetcher is done.
   // Starts the fetch and returns the fetcher, so the the caller can handle
   // the object lifetime.
-  virtual URLFetcher* Handle(const std::string& to_process,
-                             URLFetcher::Delegate* catcher) = 0;
+  virtual content::URLFetcher* Handle(const std::string& to_process,
+                                      content::URLFetcherDelegate* catcher) = 0;
 };
 
 }  // namespace chromeos

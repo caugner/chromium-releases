@@ -24,23 +24,23 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDeviceOrientationClientMock.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDragData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebDragData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebImage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebImage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGeolocationClientMock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupMenu.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRange.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
@@ -48,24 +48,25 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputControllerMock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputListener.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWindowFeatures.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/media/video_renderer_impl.h"
 #include "webkit/glue/webdropdata.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/glue/webmediaplayer_impl.h"
 #include "webkit/glue/webpreferences.h"
+#include "webkit/glue/weburlrequest_extradata_impl.h"
 #include "webkit/glue/window_open_disposition.h"
+#include "webkit/media/video_renderer_impl.h"
+#include "webkit/media/webmediaplayer_impl.h"
 #include "webkit/plugins/npapi/webplugin_impl.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin_delegate_impl.h"
@@ -75,7 +76,6 @@
 #include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
 #include "webkit/tools/test_shell/test_shell.h"
-#include "webkit/tools/test_shell/test_web_worker.h"
 
 #if defined(OS_WIN)
 // TODO(port): make these files work everywhere.
@@ -640,11 +640,6 @@ WebPlugin* TestWebViewDelegate::createPlugin(WebFrame* frame,
       frame, params, plugins.front().path, AsWeakPtr());
 }
 
-WebWorker* TestWebViewDelegate::createWorker(WebFrame* frame,
-                                             WebWorkerClient* client) {
-  return new TestWebWorker();
-}
-
 WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
     WebFrame* frame, WebMediaPlayerClient* client) {
   scoped_ptr<media::MessageLoopFactory> message_loop_factory(
@@ -653,17 +648,15 @@ WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
 
-  scoped_refptr<webkit_glue::VideoRendererImpl> video_renderer(
-      new webkit_glue::VideoRendererImpl(false));
-  collection->AddVideoRenderer(video_renderer);
-
-  scoped_ptr<webkit_glue::WebMediaPlayerImpl> result(
-      new webkit_glue::WebMediaPlayerImpl(client,
-                                          collection.release(),
-                                          message_loop_factory.release(),
-                                          NULL,
-                                          new media::MediaLog()));
-  if (!result->Initialize(frame, false, video_renderer)) {
+  scoped_ptr<webkit_media::WebMediaPlayerImpl> result(
+      new webkit_media::WebMediaPlayerImpl(
+          client,
+          base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
+          collection.release(),
+          message_loop_factory.release(),
+          NULL,
+          new media::MediaLog()));
+  if (!result->Initialize(frame, false)) {
     return NULL;
   }
   return result.release();
@@ -882,6 +875,9 @@ void TestWebViewDelegate::willSendRequest(
     const WebURLResponse& redirect_response) {
   GURL url = request.url();
   std::string request_url = url.possibly_invalid_spec();
+
+  request.setExtraData(
+      new webkit_glue::WebURLRequestExtraDataImpl(frame->referrerPolicy()));
 
   if (!redirect_response.isNull() && block_redirects_) {
     printf("Returning null for this redirect\n");

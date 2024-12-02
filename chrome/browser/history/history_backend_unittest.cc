@@ -23,8 +23,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -178,8 +178,8 @@ class HistoryBackendTest : public testing::Test {
   void BroadcastNotifications(int type,
                                       HistoryDetails* details) {
     // Send the notifications directly to the in-memory database.
-    Details<HistoryDetails> det(details);
-    mem_backend_->Observe(type, Source<HistoryBackendTest>(NULL), det);
+    content::Details<HistoryDetails> det(details);
+    mem_backend_->Observe(type, content::Source<HistoryBackendTest>(NULL), det);
 
     // The backend passes ownership of the details pointer to us.
     delete details;
@@ -700,7 +700,7 @@ TEST_F(HistoryBackendTest, AddPageVisitSource) {
   // Check if all the visits to the url are stored in database.
   ASSERT_EQ(3U, visits.size());
   VisitSourceMap visit_sources;
-  backend_->db_->GetVisitsSource(visits, &visit_sources);
+  ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
   ASSERT_EQ(3U, visit_sources.size());
   int sources = 0;
   for (int i = 0; i < 3; i++) {
@@ -754,7 +754,7 @@ TEST_F(HistoryBackendTest, AddPageArgsSource) {
   ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
   ASSERT_EQ(3U, visits.size());
   VisitSourceMap visit_sources;
-  backend_->db_->GetVisitsSource(visits, &visit_sources);
+  ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
   ASSERT_EQ(1U, visit_sources.size());
   EXPECT_EQ(history::SOURCE_SYNCED, visit_sources.begin()->second);
 }
@@ -793,14 +793,14 @@ TEST_F(HistoryBackendTest, AddVisitsSource) {
   ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
   ASSERT_EQ(3U, visits.size());
   VisitSourceMap visit_sources;
-  backend_->db_->GetVisitsSource(visits, &visit_sources);
+  ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
   ASSERT_EQ(3U, visit_sources.size());
   for (int i = 0; i < 3; i++)
     EXPECT_EQ(history::SOURCE_IE_IMPORTED, visit_sources[visits[i].visit_id]);
   id = backend_->db()->GetRowForURL(url2, &row);
   ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
   ASSERT_EQ(2U, visits.size());
-  backend_->db_->GetVisitsSource(visits, &visit_sources);
+  ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
   ASSERT_EQ(2U, visit_sources.size());
   for (int i = 0; i < 2; i++)
     EXPECT_EQ(history::SOURCE_SYNCED, visit_sources[visits[i].visit_id]);
@@ -925,12 +925,12 @@ TEST_F(HistoryBackendTest, RemoveVisitsSource) {
 
   // Now check only url2's source in visit_source table.
   VisitSourceMap visit_sources;
-  backend_->db_->GetVisitsSource(visits, &visit_sources);
+  ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
   ASSERT_EQ(0U, visit_sources.size());
   id = backend_->db()->GetRowForURL(url2, &row);
   ASSERT_TRUE(backend_->db()->GetVisitsForURL(id, &visits));
   ASSERT_EQ(2U, visits.size());
-  backend_->db_->GetVisitsSource(visits, &visit_sources);
+  ASSERT_TRUE(backend_->GetVisitsSource(visits, &visit_sources));
   ASSERT_EQ(2U, visit_sources.size());
   for (int i = 0; i < 2; i++)
     EXPECT_EQ(history::SOURCE_SYNCED, visit_sources[visits[i].visit_id]);
@@ -1133,5 +1133,36 @@ TEST_F(HistoryBackendTest, GetFaviconForURL) {
   EXPECT_EQ(TOUCH_ICON, favicon.icon_type);
   EXPECT_EQ(icon_url, favicon.icon_url);
   EXPECT_EQ(blob_data, touchicon_data);
+}
+
+TEST_F(HistoryBackendTest, CloneFaviconIsRestrictedToSameDomain) {
+  const GURL url("http://www.google.com/");
+  const GURL icon_url("http://www.google.com/icon");
+  const GURL same_domain_url("http://www.google.com/subdir/index.html");
+  const GURL foreign_domain_url("http://www.not-google.com/");
+
+  // Add a favicon
+  std::vector<unsigned char> data(blob1, blob1 + sizeof(blob1));
+  scoped_refptr<RefCountedBytes> bytes(new RefCountedBytes(data));
+  backend_->SetFavicon(
+      url, icon_url, bytes.get(), FAVICON);
+  EXPECT_TRUE(backend_->thumbnail_db_->GetIconMappingForPageURL(
+      url, FAVICON, NULL));
+
+  // Validate starting state.
+  FaviconData favicon;
+  EXPECT_TRUE(backend_->GetFaviconFromDB(url, FAVICON, &favicon));
+  EXPECT_FALSE(backend_->GetFaviconFromDB(same_domain_url, FAVICON, &favicon));
+  EXPECT_FALSE(backend_->GetFaviconFromDB(foreign_domain_url,
+                                          FAVICON, &favicon));
+
+  // Same-domain cloning should work.
+  backend_->CloneFavicon(url, same_domain_url);
+  EXPECT_TRUE(backend_->GetFaviconFromDB(same_domain_url, FAVICON, &favicon));
+
+  // Foreign-domain cloning is forbidden.
+  backend_->CloneFavicon(url, foreign_domain_url);
+  EXPECT_FALSE(backend_->GetFaviconFromDB(foreign_domain_url,
+                                          FAVICON, &favicon));
 }
 }  // namespace history

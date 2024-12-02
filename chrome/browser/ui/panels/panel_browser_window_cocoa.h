@@ -8,6 +8,7 @@
 #import <Foundation/Foundation.h>
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "ui/gfx/rect.h"
 
@@ -19,7 +20,8 @@ class Panel;
 // Bridges between C++ and the Cocoa NSWindow. Cross-platform code will
 // interact with this object when it needs to manipulate the window.
 
-class PanelBrowserWindowCocoa : public NativePanel {
+class PanelBrowserWindowCocoa : public NativePanel,
+                                public TabStripModelObserver {
  public:
   PanelBrowserWindowCocoa(Browser* browser, Panel* panel,
                           const gfx::Rect& bounds);
@@ -30,6 +32,7 @@ class PanelBrowserWindowCocoa : public NativePanel {
   virtual void ShowPanelInactive() OVERRIDE;
   virtual gfx::Rect GetPanelBounds() const OVERRIDE;
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual void SetPanelBoundsInstantly(const gfx::Rect& bounds) OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
@@ -51,8 +54,11 @@ class PanelBrowserWindowCocoa : public NativePanel {
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
   virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
+  virtual gfx::Size IconOnlySize() const OVERRIDE;
+  virtual void EnsurePanelFullyVisible() OVERRIDE;
 
   // These sizes are in screen coordinates.
   virtual gfx::Size WindowSizeFromContentSize(
@@ -61,13 +67,19 @@ class PanelBrowserWindowCocoa : public NativePanel {
       const gfx::Size& window_size) const OVERRIDE;
   virtual int TitleOnlyHeight() const OVERRIDE;
 
+  // Overridden from TabStripModelObserver.
+  virtual void TabInsertedAt(TabContentsWrapper* contents,
+                             int index,
+                             bool foreground) OVERRIDE;
+  virtual void TabDetachedAt(TabContentsWrapper* contents, int index) OVERRIDE;
+
   Panel* panel() { return panel_.get(); }
   Browser* browser() const { return browser_.get(); }
 
   // Callback from PanelWindowControllerCocoa that native window was actually
   // closed. The window may not close right away because of onbeforeunload
   // handlers.
-  void didCloseNativeWindow();
+  void DidCloseNativeWindow();
 
  private:
   friend class PanelBrowserWindowCocoaTest;
@@ -84,6 +96,8 @@ class PanelBrowserWindowCocoa : public NativePanel {
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserWindowCocoaTest, ActivatePanel);
 
   bool isClosed();
+
+  void setBoundsInternal(const gfx::Rect& bounds, bool animate);
 
   scoped_ptr<Browser> browser_;
   scoped_ptr<Panel> panel_;

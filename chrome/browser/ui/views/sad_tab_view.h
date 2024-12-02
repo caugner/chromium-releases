@@ -8,8 +8,9 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "views/controls/link_listener.h"
-#include "views/view.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/link_listener.h"
+#include "ui/views/view.h"
 
 class TabContents;
 
@@ -18,8 +19,8 @@ class Font;
 }
 
 namespace views {
-class ImageView;
 class Label;
+class TextButton;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -31,7 +32,8 @@ class Label;
 //
 ///////////////////////////////////////////////////////////////////////////////
 class SadTabView : public views::View,
-                   public views::LinkListener {
+                   public views::LinkListener,
+                   public views::ButtonListener {
  public:
   // NOTE: Do not remove or reorder the elements in this enum, and only add new
   // items at the end. We depend on these specific values in a histogram.
@@ -48,6 +50,10 @@ class SadTabView : public views::View,
 
   // Overridden from views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* source,
+                             const views::Event& event) OVERRIDE;
 
  protected:
   // Overridden from views::View:
@@ -67,6 +73,7 @@ class SadTabView : public views::View,
   views::Label* message_;
   views::Link* help_link_;
   views::Link* feedback_link_;
+  views::TextButton* reload_button_;
 
   DISALLOW_COPY_AND_ASSIGN(SadTabView);
 };

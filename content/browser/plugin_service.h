@@ -9,6 +9,7 @@
 #define CONTENT_BROWSER_PLUGIN_SERVICE_H_
 #pragma once
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -21,8 +22,8 @@
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/ppapi_plugin_process_host.h"
 #include "content/common/content_export.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel_handle.h"
 
@@ -31,12 +32,12 @@
 #include "base/win/registry.h"
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
 #include "base/files/file_path_watcher.h"
 #endif
 
-struct PepperPluginInfo;
 class PluginDirWatcherDelegate;
+class PluginLoaderPosix;
 
 namespace base {
 class MessageLoopProxy;
@@ -45,6 +46,7 @@ class MessageLoopProxy;
 namespace content {
 class BrowserContext;
 class ResourceContext;
+struct PepperPluginInfo;
 class PluginServiceFilter;
 struct PluginServiceFilterParams;
 }
@@ -62,7 +64,7 @@ class PluginList;
 // doing expensive disk operations on the IO/UI threads.
 class CONTENT_EXPORT PluginService
     : public base::WaitableEventWatcher::Delegate,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   struct OverriddenPlugin {
     int render_process_id;
@@ -78,6 +80,9 @@ class CONTENT_EXPORT PluginService
 
   // Returns the PluginService singleton.
   static PluginService* GetInstance();
+
+  // Must be called on the instance to finish initialization.
+  void Init();
 
   // Starts watching for changes in the list of installed plug-ins.
   void StartWatchingPlugins();
@@ -150,10 +155,6 @@ class CONTENT_EXPORT PluginService
   bool GetPluginInfoByPath(const FilePath& plugin_path,
                            webkit::WebPluginInfo* info);
 
-  // Marks the plugin list as dirty and will cause the plugins to be reloaded
-  // on the next access through GetPlugins() or GetPluginGroups().
-  void RefreshPluginList();
-
   // Asynchronously loads plugins if necessary and then calls back to the
   // provided function on the calling MessageLoop on completion.
   void GetPlugins(const GetPluginsCallback& callback);
@@ -161,6 +162,12 @@ class CONTENT_EXPORT PluginService
   // Asynchronously loads the list of plugin groups if necessary and then calls
   // back to the provided function on the calling MessageLoop on completion.
   void GetPluginGroups(const GetPluginGroupsCallback& callback);
+
+  // Returns information about a pepper plugin if it exists, otherwise NULL.
+  // The caller does not own the pointer, and it's not guaranteed to live past
+  // the call stack.
+  content::PepperPluginInfo* GetRegisteredPpapiPluginInfo(
+      const FilePath& plugin_path);
 
   // Tells all the renderer processes associated with the given browser context
   // to throw away their cache of the plugin list, and optionally also reload
@@ -175,6 +182,23 @@ class CONTENT_EXPORT PluginService
   }
   content::PluginServiceFilter* filter() { return filter_; }
 
+  // The following functions are wrappers around webkit::npapi::PluginList.
+  // These must be used instead of those in order to ensure that we have a
+  // single global list in the component build and so that we don't
+  // accidentally load plugins in the wrong process or thread. Refer to
+  // PluginList for further documentation of these functions.
+  void RefreshPlugins();
+  void AddExtraPluginPath(const FilePath& path);
+  void RemoveExtraPluginPath(const FilePath& path);
+  void UnregisterInternalPlugin(const FilePath& path);
+  void RegisterInternalPlugin(const webkit::WebPluginInfo& info);
+  string16 GetPluginGroupName(const std::string& plugin_name);
+
+  // TODO(dpranke): This should be private.
+  webkit::npapi::PluginList* plugin_list() { return plugin_list_; }
+
+  void SetPluginListForTesting(webkit::npapi::PluginList* plugin_list);
+
  private:
   friend struct DefaultSingletonTraits<PluginService>;
 
@@ -184,15 +208,15 @@ class CONTENT_EXPORT PluginService
   virtual ~PluginService();
 
   // base::WaitableEventWatcher::Delegate implementation.
-  virtual void OnWaitableEventSignaled(base::WaitableEvent* waitable_event);
+  virtual void OnWaitableEventSignaled(
+      base::WaitableEvent* waitable_event) OVERRIDE;
 
-  // NotificationObserver implementation
-  virtual void Observe(int type, const NotificationSource& source,
-                       const NotificationDetails& details);
+  // content::NotificationObserver implementation
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   void RegisterPepperPlugins();
-
-  PepperPluginInfo* GetRegisteredPpapiPluginInfo(const FilePath& plugin_path);
 
   // Function that is run on the FILE thread to load the plugins synchronously.
   void GetPluginsInternal(base::MessageLoopProxy* target_loop,
@@ -222,7 +246,7 @@ class CONTENT_EXPORT PluginService
       const FilePath& plugin_path,
       PluginProcessHost::Client* client);
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
   // Registers a new FilePathWatcher for a given path.
   static void RegisterFilePathWatcher(
       base::files::FilePathWatcher* watcher,
@@ -230,10 +254,13 @@ class CONTENT_EXPORT PluginService
       base::files::FilePathWatcher::Delegate* delegate);
 #endif
 
+  // The plugin list instance.
+  webkit::npapi::PluginList* plugin_list_;
+
   // The browser's UI locale.
   const std::string ui_locale_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
 #if defined(OS_WIN)
   // Registry keys for getting notifications when new plugins are installed.
@@ -245,17 +272,21 @@ class CONTENT_EXPORT PluginService
   base::WaitableEventWatcher hklm_watcher_;
 #endif
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
   ScopedVector<base::files::FilePathWatcher> file_watchers_;
   scoped_refptr<PluginDirWatcherDelegate> file_watcher_delegate_;
 #endif
 
-  std::vector<PepperPluginInfo> ppapi_plugins_;
+  std::vector<content::PepperPluginInfo> ppapi_plugins_;
 
   // Weak pointer; outlives us.
   content::PluginServiceFilter* filter_;
 
   std::set<PluginProcessHost::Client*> pending_plugin_clients_;
+
+#if defined(OS_POSIX)
+  scoped_refptr<PluginLoaderPosix> plugin_loader_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(PluginService);
 };

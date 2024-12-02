@@ -6,28 +6,23 @@
 #define CHROME_BROWSER_RENDERER_HOST_CHROME_RENDER_MESSAGE_FILTER_H_
 #pragma once
 
+#include <string>
+#include <vector>
+
+#include "base/file_path.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/common/content_settings.h"
-#include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/browser/browser_message_filter.h"
-#include "content/common/dom_storage_common.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
-struct ChromeViewHostMsg_GetPluginInfo_Status;
-class ContentSettingsPattern;
+class CookieSettings;
 struct ExtensionHostMsg_Request_Params;
 class ExtensionInfoMap;
-class FilePath;
 class GURL;
-class HostContentSettingsMap;
 
 namespace net {
 class URLRequestContextGetter;
-}
-
-namespace webkit {
-struct WebPluginInfo;
 }
 
 // This class filters out incoming Chrome-specific IPC messages for the renderer
@@ -40,22 +35,22 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
 
   // BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
-  virtual void OnDestruct() const;
-  virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+                                 bool* message_was_ok) OVERRIDE;
+  virtual void OverrideThreadForMessage(
+      const IPC::Message& message,
+      content::BrowserThread::ID* thread) OVERRIDE;
 
  private:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<ChromeRenderMessageFilter>;
-
-  struct GetPluginInfo_Params;
 
   virtual ~ChromeRenderMessageFilter();
 
+#if !defined(DISABLE_NACL)
   void OnLaunchNaCl(const std::wstring& url,
-                    int channel_descriptor,
+                    int socket_count,
                     IPC::Message* reply_msg);
+#endif
   void OnDnsPrefetch(const std::vector<std::string>& hostnames);
   void OnRendererHistograms(int sequence_number,
                             const std::vector<std::string>& histogram_info);
@@ -91,6 +86,8 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
                               const std::string& event_name);
   void OnExtensionRemoveListener(const std::string& extension_id,
                                  const std::string& event_name);
+  void OnExtensionIdle(const std::string& extension_id);
+  void OnExtensionEventAck(const std::string& extension_id);
   void OnExtensionCloseChannel(int port_id);
   void OnExtensionRequestForIOThread(
       int routing_id,
@@ -100,8 +97,6 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
   void OnWriteTcmallocHeapProfile(const FilePath::StringType& filename,
                                   const std::string& output);
 #endif
-  void OnGetPluginPolicies(ContentSetting* outdated_policy,
-                           ContentSetting* authorize_policy);
   void OnAllowDatabase(int render_view_id,
                        const GURL& origin_url,
                        const GURL& top_origin_url,
@@ -111,7 +106,7 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
   void OnAllowDOMStorage(int render_view_id,
                          const GURL& origin_url,
                          const GURL& top_origin_url,
-                         DOMStorageType type,
+                         bool local,
                          bool* allowed);
   void OnAllowFileSystem(int render_view_id,
                          const GURL& origin_url,
@@ -122,30 +117,8 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
                         const GURL& top_origin_url,
                         const string16& name,
                         bool* allowed);
-  void OnGetPluginContentSetting(const GURL& policy_url,
-                                 const std::string& resource,
-                                 ContentSetting* setting,
-                                 ContentSettingsPattern* primary_pattern,
-                                 ContentSettingsPattern* secondary_pattern);
-  void OnGetPluginInfo(int render_view_id,
-                       const GURL& url,
-                       const GURL& top_origin_url,
-                       const std::string& mime_type,
-                       IPC::Message* reply_msg);
-  // |params| wraps the parameters passed to |OnGetPluginInfo|, because
-  // |base::Bind| doesn't support the required arity <http://crbug.com/98542>.
-  void PluginsLoaded(const GetPluginInfo_Params& params,
-                     IPC::Message* reply_msg,
-                     const std::vector<webkit::WebPluginInfo>& plugins);
-  void GetPluginInfo(int render_view_id,
-                     const GURL& url,
-                     const GURL& top_origin_url,
-                     const std::string& mime_type,
-                     ChromeViewHostMsg_GetPluginInfo_Status* status,
-                     webkit::WebPluginInfo* plugin,
-                     std::string* actual_mime_type);
-  void OnCanTriggerClipboardRead(const GURL& url, bool* allowed);
-  void OnCanTriggerClipboardWrite(const GURL& url, bool* allowed);
+  void OnCanTriggerClipboardRead(const GURL& origin, bool* allowed);
+  void OnCanTriggerClipboardWrite(const GURL& origin, bool* allowed);
   void OnGetCookies(const GURL& url,
                     const GURL& first_party_for_cookies,
                     IPC::Message* reply_msg);
@@ -162,12 +135,9 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
   scoped_refptr<net::URLRequestContextGetter> request_context_;
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
   // Used to look up permissions at database creation time.
-  scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
+  scoped_refptr<CookieSettings> cookie_settings_;
 
   const content::ResourceContext& resource_context_;
-
-  BooleanPrefMember allow_outdated_plugins_;
-  BooleanPrefMember always_authorize_plugins_;
 
   base::WeakPtrFactory<ChromeRenderMessageFilter> weak_ptr_factory_;
 

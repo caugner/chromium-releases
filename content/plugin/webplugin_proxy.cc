@@ -6,16 +6,17 @@
 
 #include "build/build_config.h"
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_handle.h"
 #include "base/shared_memory.h"
 #include "build/build_config.h"
-#include "content/common/content_client.h"
 #include "content/common/npobject_proxy.h"
 #include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
 #include "content/plugin/plugin_channel.h"
 #include "content/plugin/plugin_thread.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/platform_device.h"
@@ -28,11 +29,6 @@
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "content/plugin/webplugin_accelerated_surface_proxy_mac.h"
-#endif
-
-#if defined(OS_WIN)
-#include "content/common/section_util_win.h"
-#include "ui/gfx/gdi_util.h"
 #endif
 
 #if defined(USE_X11)
@@ -63,7 +59,7 @@ WebPluginProxy::WebPluginProxy(
       transparent_(false),
       windowless_buffer_index_(0),
       host_render_view_routing_id_(host_render_view_routing_id),
-      ALLOW_THIS_IN_INITIALIZER_LIST(runnable_method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 #if defined(USE_X11)
   windowless_shm_pixmaps_[0] = None;
   windowless_shm_pixmaps_[1] = None;
@@ -198,8 +194,8 @@ void WebPluginProxy::InvalidateRect(const gfx::Rect& rect) {
     // Invalidates caused by calls to NPN_InvalidateRect/NPN_InvalidateRgn
     // need to be painted asynchronously as per the NPAPI spec.
     MessageLoop::current()->PostTask(FROM_HERE,
-        runnable_method_factory_.NewRunnableMethod(
-            &WebPluginProxy::OnPaint, damaged_rect_));
+        base::Bind(&WebPluginProxy::OnPaint, weak_factory_.GetWeakPtr(),
+            damaged_rect_));
     damaged_rect_ = gfx::Rect();
   }
 }
@@ -472,9 +468,11 @@ void WebPluginProxy::CreateCanvasFromHandle(
   // Create a canvas that will reference the shared bits. We have to handle
   // errors here since we're mapping a large amount of memory that may not fit
   // in our address space, or go wrong in some other way.
-  HANDLE section = chrome::GetSectionFromProcess(dib_handle,
-                                                 channel_->renderer_handle(),
-                                                 false);
+  HANDLE section;
+  DuplicateHandle(channel_->renderer_handle(), dib_handle, GetCurrentProcess(),
+                  &section,
+                  STANDARD_RIGHTS_REQUIRED | FILE_MAP_READ | FILE_MAP_WRITE,
+                  FALSE, 0);
   scoped_ptr<skia::PlatformCanvas> canvas(new skia::PlatformCanvas);
   if (!canvas->initialize(
           window_rect.width(),
@@ -676,8 +674,8 @@ void WebPluginProxy::BindFakePluginWindowHandle(bool opaque) {
 WebPluginAcceleratedSurface* WebPluginProxy::GetAcceleratedSurface(
     gfx::GpuPreference gpu_preference) {
   if (!accelerated_surface_.get())
-    accelerated_surface_.reset(new WebPluginAcceleratedSurfaceProxy(
-        this, gpu_preference));
+    accelerated_surface_.reset(
+        WebPluginAcceleratedSurfaceProxy::Create(this, gpu_preference));
   return accelerated_surface_.get();
 }
 
@@ -711,6 +709,22 @@ void WebPluginProxy::AllocSurfaceDIB(const size_t size,
 
 void WebPluginProxy::FreeSurfaceDIB(TransportDIB::Id dib_id) {
   Send(new PluginHostMsg_FreeTransportDIB(route_id_, dib_id));
+}
+
+void WebPluginProxy::AcceleratedPluginEnabledRendering() {
+  Send(new PluginHostMsg_AcceleratedPluginEnabledRendering(route_id_));
+}
+
+void WebPluginProxy::AcceleratedPluginAllocatedIOSurface(int32 width,
+                                                         int32 height,
+                                                         uint32 surface_id) {
+  Send(new PluginHostMsg_AcceleratedPluginAllocatedIOSurface(
+      route_id_, width, height, surface_id));
+}
+
+void WebPluginProxy::AcceleratedPluginSwappedIOSurface() {
+  Send(new PluginHostMsg_AcceleratedPluginSwappedIOSurface(
+      route_id_));
 }
 #endif
 

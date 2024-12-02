@@ -11,6 +11,7 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
@@ -99,7 +100,8 @@ class PhishingClassifierTest : public RenderViewFakeResourcesTest {
 
     classifier_->BeginClassification(
         page_text,
-        NewCallback(this, &PhishingClassifierTest::ClassificationFinished));
+        base::Bind(&PhishingClassifierTest::ClassificationFinished,
+                   base::Unretained(this)));
     message_loop_.Run();
 
     *phishy_score = verdict_.client_score();
@@ -191,6 +193,19 @@ TEST_F(PhishingClassifierTest, TestClassification) {
   EXPECT_FALSE(RunPhishingClassifier(&page_text, &phishy_score, &features));
   EXPECT_EQ(0U, features.features().size());
   EXPECT_EQ(PhishingClassifier::kInvalidScore, phishy_score);
+}
+
+TEST_F(PhishingClassifierTest, DisableDetection) {
+  // No scorer yet, so the classifier is not ready.
+  EXPECT_FALSE(classifier_->is_ready());
+
+  // Now set the scorer.
+  classifier_->set_phishing_scorer(scorer_.get());
+  EXPECT_TRUE(classifier_->is_ready());
+
+  // Set a NULL scorer, which turns detection back off.
+  classifier_->set_phishing_scorer(NULL);
+  EXPECT_FALSE(classifier_->is_ready());
 }
 
 }  // namespace safe_browsing

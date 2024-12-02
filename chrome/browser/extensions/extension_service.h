@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_SERVICE_H_
 #pragma once
 
+#include <list>
 #include <map>
 #include <set>
 #include <string>
@@ -18,52 +19,48 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
+#include "base/property_bag.h"
 #include "base/time.h"
 #include "base/tuple.h"
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/extensions/extension_icon_manager.h"
 #include "chrome/browser/extensions/extension_menu_manager.h"
-#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_permissions_api.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
-#include "chrome/browser/extensions/extension_settings_frontend.h"
 #include "chrome/browser/extensions/extension_sync_data.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
 #include "chrome/browser/extensions/external_extension_provider_interface.h"
 #include "chrome/browser/extensions/pending_extension_manager.h"
+#include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/extensions/sandboxed_extension_unpacker.h"
-#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/property_bag.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class AppNotificationManager;
+class BookmarkExtensionEventRouter;
 class CrxInstaller;
-class ExtensionBookmarkEventRouter;
 class ExtensionBrowserEventRouter;
 class ExtensionContentSettingsStore;
 class ExtensionCookiesEventRouter;
 class ExtensionDownloadsEventRouter;
 class ExtensionFileBrowserEventRouter;
 class ExtensionGlobalError;
-class ExtensionHistoryEventRouter;
-class ExtensionInstallUI;
 class ExtensionManagementEventRouter;
 class ExtensionPreferenceEventRouter;
-class ExtensionServiceBackend;
 class ExtensionSyncData;
 class ExtensionToolbarModel;
 class ExtensionUpdater;
 class ExtensionWebNavigationEventRouter;
+class HistoryExtensionEventRouter;
 class GURL;
 class PendingExtensionManager;
 class Profile;
@@ -72,7 +69,12 @@ class Version;
 
 namespace chromeos {
 class ExtensionInputMethodEventRouter;
-}  // namespace chromeos
+}
+
+namespace extensions {
+class ComponentLoader;
+class SettingsFrontend;
+}
 
 // This is an interface class to encapsulate the dependencies that
 // various classes have on ExtensionService. This allows easy mocking.
@@ -112,31 +114,24 @@ class ExtensionServiceInterface : public SyncableService {
   // TODO(akalin): Remove this method (and others) once we refactor
   // themes sync to not use it directly.
   virtual void CheckForUpdatesSoon() = 0;
+
+  virtual void AddExtension(const Extension* extension) = 0;
+
+  virtual void UnloadExtension(
+      const std::string& extension_id,
+      extension_misc::UnloadedExtensionReason reason) = 0;
+
+  virtual bool is_ready() = 0;
 };
 
 // Manages installed and running Chromium extensions.
 class ExtensionService
     : public ExtensionServiceInterface,
       public ExternalExtensionProviderInterface::VisitorInterface,
-      public NotificationObserver {
+      public base::SupportsWeakPtr<ExtensionService>,
+      public content::NotificationObserver {
  public:
-  // Information about a registered component extension.
-  struct ComponentExtensionInfo {
-    ComponentExtensionInfo(const std::string& manifest,
-                           const FilePath& root_directory)
-        : manifest(manifest),
-          root_directory(root_directory) {
-    }
-
-    bool Equals(const ComponentExtensionInfo& other) const;
-
-    // The extension's manifest. This is required for component extensions so
-    // that ExtensionService doesn't need to go to disk to load them.
-    std::string manifest;
-
-    // Directory where the extension is stored.
-    FilePath root_directory;
-  };
+  using base::SupportsWeakPtr<ExtensionService>::AsWeakPtr;
 
   // The name of the directory inside the profile where extensions are
   // installed to.
@@ -145,19 +140,27 @@ class ExtensionService
   // If auto-updates are turned on, default to running every 5 hours.
   static const int kDefaultUpdateFrequencySeconds = 60 * 60 * 5;
 
-  // The name of the directory inside the profile where per-extension settings
+  // The name of the directory inside the profile where per-app local settings
   // are stored.
-  static const char* kSettingsDirectoryName;
+  static const char* kLocalAppSettingsDirectoryName;
+
+  // The name of the directory inside the profile where per-extension local
+  // settings are stored.
+  static const char* kLocalExtensionSettingsDirectoryName;
+
+  // The name of the directory inside the profile where per-app synced settings
+  // are stored.
+  static const char* kSyncAppSettingsDirectoryName;
+
+  // The name of the directory inside the profile where per-extension synced
+  // settings are stored.
+  static const char* kSyncExtensionSettingsDirectoryName;
 
   // Determine if a given extension download should be treated as if it came
   // from the gallery. Note that this is requires *both* that the download_url
   // match and that the download was referred from a gallery page.
   bool IsDownloadFromGallery(const GURL& download_url,
                              const GURL& referrer_url);
-
-  // Determine if the downloaded extension came from the theme mini-gallery,
-  // Used to test if we need to show the "Loading" dialog for themes.
-  static bool IsDownloadFromMiniGallery(const GURL& download_url);
 
   // Returns the Extension of hosted or packaged apps, NULL otherwise.
   const Extension* GetInstalledApp(const GURL& url);
@@ -196,23 +199,25 @@ class ExtensionService
   // Gets the object managing the set of pending extensions.
   virtual PendingExtensionManager* pending_extension_manager() OVERRIDE;
 
-  // Registers an extension to be loaded as a component extension.
-  void register_component_extension(const ComponentExtensionInfo& info) {
-    component_extension_manifests_.push_back(info);
-  }
-
-  // Unregisters a component extension from the list of extensions to be loaded
-  void UnregisterComponentExtension(const ComponentExtensionInfo& info);
-
   const FilePath& install_directory() const { return install_directory_; }
 
   AppsPromo* apps_promo() { return &apps_promo_; }
-  WebstoreInstaller* webstore_installer() { return &webstore_installer_; }
+
+  extensions::ProcessMap* process_map() { return &process_map_; }
 
   // Whether this extension can run in an incognito window.
   virtual bool IsIncognitoEnabled(const std::string& extension_id) const;
   virtual void SetIsIncognitoEnabled(const std::string& extension_id,
                                      bool enabled);
+
+  // When app notification setup is done, we call this to save the developer's
+  // oauth client id which we'll need at uninstall time to revoke the oauth
+  // permission grant for sending notifications.
+  virtual void SetAppNotificationSetupDone(const std::string& extension_id,
+                                           const std::string& oauth_client_id);
+
+  virtual void SetAppNotificationDisabled(const std::string& extension_id,
+      bool value);
 
   // Returns true if the given extension can see events and data from another
   // sub-profile (incognito to original profile, or vice versa).
@@ -242,8 +247,14 @@ class ExtensionService
   bool IsBeingUpgraded(const Extension* extension);
   void SetBeingUpgraded(const Extension* extension, bool value);
 
+  // Getter and setter for the flag that specifies if the extension has used
+  // the webrequest API.
+  // TODO(mpcomplete): remove. http://crbug.com/100411
+  bool HasUsedWebRequest(const Extension* extension);
+  void SetHasUsedWebRequest(const Extension* extension, bool value);
+
   // Getter for the extension's runtime data PropertyBag.
-  PropertyBag* GetPropertyBag(const Extension* extension);
+  base::PropertyBag* GetPropertyBag(const Extension* extension);
 
   // Initialize and start all installed extensions.
   void Init();
@@ -284,9 +295,14 @@ class ExtensionService
   // with extensions that exist. |external_uninstall| is a magical parameter
   // that is only used to send information to ExtensionPrefs, which external
   // callers should never set to true.
+  //
+  // We pass the |extension_id| by value to avoid having it deleted from under
+  // us incase someone calls it with Extension::id() or another string that we
+  // are going to delete in this function.
+  //
   // TODO(aa): Remove |external_uninstall| -- this information should be passed
   // to ExtensionPrefs some other way.
-  virtual bool UninstallExtension(const std::string& extension_id,
+  virtual bool UninstallExtension(std::string extension_id,
                                   bool external_uninstall,
                                   std::string* error);
 
@@ -316,34 +332,13 @@ class ExtensionService
   void UpdateActivePermissions(const Extension* extension,
                                const ExtensionPermissionSet* permissions);
 
-  // Loads the extension from the directory |extension_path|.
-  void LoadExtension(const FilePath& extension_path);
-
-  // Loads the extension from the directory |extension_path|.
-  // This version of this method is intended for testing only.
-  void LoadExtension(const FilePath& extension_path, bool prompt_for_plugins);
-
-  // Same as above, but for use with command line switch --load-extension=path.
-  void LoadExtensionFromCommandLine(const FilePath& extension_path);
-
-  // Loads any component extensions.
-  void LoadComponentExtensions();
-
-  // Loads particular component extension.
-  const Extension* LoadComponentExtension(const ComponentExtensionInfo& info);
-
-  // Unloads particular component extension.
-  void UnloadComponentExtension(const ComponentExtensionInfo& info);
-
-  // Loads all known extensions (used by startup and testing code).
-  void LoadAllExtensions();
-
   // Check for updates (or potentially new extensions from external providers)
   void CheckForExternalUpdates();
 
   // Unload the specified extension.
-  void UnloadExtension(const std::string& extension_id,
-                       extension_misc::UnloadedExtensionReason reason);
+  virtual void UnloadExtension(
+      const std::string& extension_id,
+      extension_misc::UnloadedExtensionReason reason) OVERRIDE;
 
   // Unload all extensions. This is currently only called on shutdown, and
   // does not send notifications.
@@ -390,11 +385,7 @@ class ExtensionService
   // Adds |extension| to this ExtensionService and notifies observers than an
   // extension has been loaded.  Called by the backend after an extension has
   // been loaded from a file and installed.
-  void AddExtension(const Extension* extension);
-
-  // Called by the backend when an unpacked extension has been loaded.
-  void OnLoadSingleExtension(const Extension* extension,
-                             bool prompt_for_plugins);
+  virtual void AddExtension(const Extension* extension) OVERRIDE;
 
   // Called by the backend when an extension has been installed.
   void OnExtensionInstalled(
@@ -444,13 +435,16 @@ class ExtensionService
   // ExtensionPrefs* mutable_extension_prefs().
   ExtensionPrefs* extension_prefs();
 
-  ExtensionSettingsFrontend* extension_settings_frontend();
+  extensions::SettingsFrontend* settings_frontend();
 
   ExtensionContentSettingsStore* GetExtensionContentSettingsStore();
 
   // Whether the extension service is ready.
-  // TODO(skerner): Get rid of this method.  crbug.com/63756
-  bool is_ready() { return ready_; }
+  virtual bool is_ready() OVERRIDE;
+
+  extensions::ComponentLoader* component_loader() {
+    return component_loader_.get();
+  }
 
   // Note that this may return NULL if autoupdate is not turned on.
   ExtensionUpdater* updater();
@@ -483,7 +477,10 @@ class ExtensionService
 #endif
 
   // Notify the frontend that there was an error loading an extension.
-  // This method is public because ExtensionServiceBackend can post to here.
+  // This method is public because UnpackedInstaller and InstalledLoader
+  // can post to here.
+  // TODO(aa): Remove this. It doesn't do enough to be worth the dependency
+  // of these classes on ExtensionService.
   void ReportExtensionLoadError(const FilePath& extension_path,
                                 const std::string& error,
                                 bool be_noisy);
@@ -507,7 +504,8 @@ class ExtensionService
   virtual void OnExternalExtensionFileFound(const std::string& id,
                                             const Version* version,
                                             const FilePath& path,
-                                            Extension::Location location)
+                                            Extension::Location location,
+                                            int creation_flags)
       OVERRIDE;
 
   virtual void OnExternalExtensionUpdateUrlFound(const std::string& id,
@@ -515,7 +513,10 @@ class ExtensionService
                                                  Extension::Location location)
       OVERRIDE;
 
-  virtual void OnExternalProviderReady() OVERRIDE;
+  virtual void OnExternalProviderReady(
+      const ExternalExtensionProviderInterface* provider) OVERRIDE;
+
+  void OnAllExternalProvidersReady();
 
   // Once all external providers are done, generates any needed alerts about
   // extensions.
@@ -534,10 +535,10 @@ class ExtensionService
   // Displays the extension alert in the last-active browser window.
   void ShowExtensionAlert(ExtensionGlobalError* global_error);
 
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Whether there are any apps installed. Component apps are not included.
   bool HasApps() const;
@@ -551,9 +552,6 @@ class ExtensionService
   // need to be made more efficient.
   static void RecordPermissionMessagesHistogram(
       const Extension* e, const char* histogram);
-
-  // |client| can be NULL for a silent install.
-  scoped_refptr<CrxInstaller> MakeCrxInstaller(ExtensionInstallUI* client);
 
 #if defined(UNIT_TEST)
   void TrackTerminatedExtensionForTest(const Extension* extension) {
@@ -589,8 +587,11 @@ class ExtensionService
     // True while the extension is being upgraded.
     bool being_upgraded;
 
+    // True if the extension has used the webRequest API.
+    bool has_used_webrequest;
+
     // Generic bag of runtime data that users can associate with extensions.
-    PropertyBag property_bag;
+    base::PropertyBag property_bag;
 
     ExtensionRuntimeData();
     ~ExtensionRuntimeData();
@@ -663,9 +664,6 @@ class ExtensionService
   // Helper that updates the active extension list used for crash reporting.
   void UpdateActiveExtensionsInCrashReporter();
 
-  // Helper method. Loads extension from prefs.
-  void LoadInstalledExtension(const ExtensionInfo& info, bool write_to_prefs);
-
   // We implement some Pepper plug-ins using NaCl to take advantage of NaCl's
   // strong sandbox. Typically, these NaCl modules are stored in extensions
   // and registered here. Not all NaCl modules need to register for a MIME
@@ -681,15 +679,6 @@ class ExtensionService
 
   NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
 
-  // Returns the flags that should be used with Extension::Create() for an
-  // extension that is already installed.
-  int GetExtensionCreateFlagsForInstalledExtension(
-      const ExtensionInfo* info);
-
-  base::WeakPtrFactory<ExtensionService> weak_ptr_factory_;
-
-  ScopedRunnableMethodFactory<ExtensionService> method_factory_;
-
   // The profile this ExtensionService is part of.
   Profile* profile_;
 
@@ -697,7 +686,7 @@ class ExtensionService
   ExtensionPrefs* extension_prefs_;
 
   // Settings for the owning profile.
-  ExtensionSettingsFrontend extension_settings_frontend_;
+  scoped_ptr<extensions::SettingsFrontend> settings_frontend_;
 
   // The current list of installed extensions.
   // TODO(aa): This should use chrome/common/extensions/extension_set.h.
@@ -732,9 +721,6 @@ class ExtensionService
   // Whether to notify users when they attempt to install an extension.
   bool show_extensions_prompts_;
 
-  // The backend that will do IO on behalf of this instance.
-  scoped_refptr<ExtensionServiceBackend> backend_;
-
   // Used by dispatchers to limit API quota for individual extensions.
   ExtensionsQuotaService quota_service_;
 
@@ -765,8 +751,11 @@ class ExtensionService
   typedef std::map<std::string, int> OrphanedDevTools;
   OrphanedDevTools orphaned_dev_tools_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
+
+  // Keeps track of loading and unloading component extensions.
+  scoped_ptr<extensions::ComponentLoader> component_loader_;
 
   // Keeps track of menu items added by extensions.
   ExtensionMenuManager menu_manager_;
@@ -781,28 +770,21 @@ class ExtensionService
   ExtensionIconManager omnibox_icon_manager_;
   ExtensionIconManager omnibox_popup_icon_manager_;
 
-  // List of registered component extensions (see Extension::Location).
-  typedef std::vector<ComponentExtensionInfo> RegisteredComponentExtensions;
-  RegisteredComponentExtensions component_extension_manifests_;
-
   // Manages the promotion of the web store.
   AppsPromo apps_promo_;
-
-  // Coordinates the extension download and install process from the gallery.
-  WebstoreInstaller webstore_installer_;
 
   // Flag to make sure event routers are only initialized once.
   bool event_routers_initialized_;
 
   scoped_ptr<ExtensionDownloadsEventRouter> downloads_event_router_;
 
-  scoped_ptr<ExtensionHistoryEventRouter> history_event_router_;
+  scoped_ptr<HistoryExtensionEventRouter> history_event_router_;
 
   scoped_ptr<ExtensionBrowserEventRouter> browser_event_router_;
 
   scoped_ptr<ExtensionPreferenceEventRouter> preference_event_router_;
 
-  scoped_ptr<ExtensionBookmarkEventRouter> bookmark_event_router_;
+  scoped_ptr<BookmarkExtensionEventRouter> bookmark_event_router_;
 
   scoped_ptr<ExtensionCookiesEventRouter> cookies_event_router_;
 
@@ -833,6 +815,8 @@ class ExtensionService
 
   // Contains an entry for each warning that shall be currently shown.
   ExtensionWarningSet extension_warnings_;
+
+  extensions::ProcessMap process_map_;
 
   FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            InstallAppsWithUnlimtedStorage);

@@ -6,12 +6,13 @@
 #define CHROME_RENDERER_CHROME_RENDER_VIEW_OBSERVER_H_
 #pragma once
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPermissionClient.h"
@@ -21,15 +22,15 @@ class ContentSettingsObserver;
 class DomAutomationController;
 class ExtensionDispatcher;
 class ExternalHostBindings;
-class FilePath;
 class SkBitmap;
 class TranslateHelper;
 struct ThumbnailScore;
-struct ViewMsg_Navigate_Params;
+class WebViewColorOverlay;
 
 namespace WebKit {
 class WebView;
 }
+
 namespace safe_browsing {
 class PhishingClassifierDelegate;
 }
@@ -89,6 +90,9 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
                             bool enabled_per_settings) OVERRIDE;
   virtual bool allowScript(WebKit::WebFrame* frame,
                            bool enabled_per_settings) OVERRIDE;
+  virtual bool allowScriptFromSource(WebKit::WebFrame* frame,
+                                     bool enabled_per_settings,
+                                     const WebKit::WebURL& script_url) OVERRIDE;
   virtual bool allowScriptExtension(WebKit::WebFrame* frame,
                                     const WebKit::WebString& extension_name,
                                     int extension_group) OVERRIDE;
@@ -125,8 +129,11 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   void OnSetAllowDisplayingInsecureContent(bool allow);
   void OnSetAllowRunningInsecureContent(bool allow);
   void OnSetClientSidePhishingDetection(bool enable_phishing_detection);
+  void OnSetVisuallyDeemphasized(bool deemphasized);
   void OnStartFrameSniffer(const string16& frame_name);
   void OnGetFPS();
+  void OnAddStrictSecurityHost(const std::string& host);
+  void OnSetAsInterstitial();
 
   // Captures the thumbnail and text contents for indexing for the given load
   // ID. If the view's load ID is different than the parameter, this call is
@@ -174,6 +181,9 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // Decodes a data: URL image or returns an empty image in case of failure.
   SkBitmap ImageFromDataUrl(const GURL&) const;
 
+  // Determines if a host is in the strict security host set.
+  bool IsStrictSecurityHost(const std::string& host);
+
   // Save the JavaScript to preload if a ViewMsg_WebUIJavaScript is received.
   scoped_ptr<WebUIJavaScript> webui_javascript_;
 
@@ -197,6 +207,7 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // Insecure content may be permitted for the duration of this render view.
   bool allow_displaying_insecure_content_;
   bool allow_running_insecure_content_;
+  std::set<std::string> strict_security_hosts_;
 
   // Allows JS to access DOM automation. The JS object is only exposed when the
   // DOM automation bindings are enabled.
@@ -205,14 +216,16 @@ class ChromeRenderViewObserver : public content::RenderViewObserver,
   // External host exposed through automation controller.
   scoped_ptr<ExternalHostBindings> external_host_bindings_;
 
-  ScopedRunnableMethodFactory<ChromeRenderViewObserver>
-      page_info_method_factory_;
+  base::WeakPtrFactory<ChromeRenderViewObserver> weak_factory_;
 
   typedef std::vector<linked_ptr<webkit_glue::ImageResourceFetcher> >
       ImageResourceFetcherList;
 
   // ImageResourceFetchers schedule via DownloadImage.
   ImageResourceFetcherList image_fetchers_;
+
+  // A color page overlay when visually de-emaphasized.
+  scoped_ptr<WebViewColorOverlay> dimmed_color_overlay_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderViewObserver);
 };

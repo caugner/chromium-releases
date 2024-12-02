@@ -18,12 +18,12 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/rect.h"
-#include "views/background.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/link_listener.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/link_listener.h"
 
 namespace {
 
@@ -118,7 +118,7 @@ class RemoveButton : public views::TextButton {
                const SkBitmap& icon,
                const string16& text,
                const gfx::Point& top_right)
-    : views::TextButton(listener, std::wstring()),
+    : views::TextButton(listener, string16()),
       icon_(icon),
       text_(text),
       top_right_(top_right),

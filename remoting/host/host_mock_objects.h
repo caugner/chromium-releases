@@ -5,7 +5,6 @@
 #ifndef REMOTING_HOST_HOST_MOCK_OBJECTS_H_
 #define REMOTING_HOST_HOST_MOCK_OBJECTS_H_
 
-#include "remoting/host/access_verifier.h"
 #include "remoting/host/capturer.h"
 #include "remoting/host/curtain.h"
 #include "remoting/host/chromoting_host_context.h"
@@ -30,7 +29,8 @@ class MockCapturer : public Capturer {
   MOCK_METHOD1(InvalidateRegion, void(const SkRegion& invalid_region));
   MOCK_METHOD1(InvalidateScreen, void(const SkISize&));
   MOCK_METHOD0(InvalidateFullScreen, void());
-  MOCK_METHOD1(CaptureInvalidRegion, void(CaptureCompletedCallback* callback));
+  MOCK_METHOD1(CaptureInvalidRegion,
+               void(const CaptureCompletedCallback& callback));
   MOCK_CONST_METHOD0(size_most_recent, const SkISize&());
 
  private:
@@ -69,7 +69,9 @@ class MockContinueWindow : public ContinueWindow {
   MockContinueWindow();
   virtual ~MockContinueWindow();
 
-  MOCK_METHOD1(Show, void(remoting::ChromotingHost* host));
+  MOCK_METHOD2(Show, void(
+      remoting::ChromotingHost* host,
+      const remoting::ContinueWindow::ContinueSessionCallback& callback));
   MOCK_METHOD0(Hide, void());
 };
 
@@ -95,11 +97,12 @@ class MockClientSessionEventHandler : public ClientSession::EventHandler {
   MockClientSessionEventHandler();
   virtual ~MockClientSessionEventHandler();
 
-  MOCK_METHOD1(LocalLoginSucceeded,
-               void(scoped_refptr<protocol::ConnectionToClient>));
-  MOCK_METHOD1(LocalLoginFailed,
-               void(scoped_refptr<protocol::ConnectionToClient>));
-
+  MOCK_METHOD1(OnSessionAuthenticated, void(ClientSession* client));
+  MOCK_METHOD1(OnSessionAuthenticationFailed, void(ClientSession* client));
+  MOCK_METHOD1(OnSessionClosed, void(ClientSession* client));
+  MOCK_METHOD1(OnSessionFailed, void(ClientSession* client));
+  MOCK_METHOD2(OnSessionSequenceNumber, void(ClientSession* client,
+                                             int64 sequence_number));
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientSessionEventHandler);
 };
@@ -126,18 +129,6 @@ class MockUserAuthenticator : public UserAuthenticator {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockUserAuthenticator);
-};
-
-class MockAccessVerifier : public AccessVerifier {
- public:
-  MockAccessVerifier();
-  virtual ~MockAccessVerifier();
-
-  MOCK_METHOD2(VerifyPermissions, bool(const std::string& client_jid,
-                                       const std::string& token));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockAccessVerifier);
 };
 
 }  // namespace remoting

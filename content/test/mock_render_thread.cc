@@ -19,6 +19,17 @@ MockRenderThread::MockRenderThread()
 MockRenderThread::~MockRenderThread() {
 }
 
+void MockRenderThread::VerifyRunJavaScriptMessageSend(
+    const string16& expected_alert_message) {
+  const IPC::Message* alert_msg =
+      sink_.GetUniqueMessageMatching(ViewHostMsg_RunJavaScriptMessage::ID);
+  ASSERT_TRUE(alert_msg);
+  void* iter = IPC::SyncMessage::GetDataIterator(alert_msg);
+  ViewHostMsg_RunJavaScriptMessage::SendParam alert_param;
+  ASSERT_TRUE(IPC::ReadParam(alert_msg, &iter, &alert_param));
+  EXPECT_EQ(expected_alert_message, alert_param.a);
+}
+
 // Called by the Widget. Used to send messages to the browser.
 // We short-circuit the mechanism and handle the messages right here on this
 // class.
@@ -127,18 +138,18 @@ bool MockRenderThread::IsRegisteredExtension(
   return false;
 }
 
-void MockRenderThread::ScheduleIdleHandler(double initial_delay_s) {
+void MockRenderThread::ScheduleIdleHandler(int64 initial_delay_ms) {
 }
 
 void MockRenderThread::IdleHandler() {
 }
 
-double MockRenderThread::GetIdleNotificationDelayInS() const {
-  return 0.0;
+int64 MockRenderThread::GetIdleNotificationDelayInMs() const {
+  return 0;
 }
 
-void MockRenderThread::SetIdleNotificationDelayInS(
-    double idle_notification_delay_in_s) {
+void MockRenderThread::SetIdleNotificationDelayInMs(
+    int64 idle_notification_delay_in_ms) {
 }
 
 #if defined(OS_WIN)

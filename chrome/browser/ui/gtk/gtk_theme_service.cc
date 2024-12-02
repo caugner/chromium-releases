@@ -1,3 +1,4 @@
+
 // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -17,7 +18,6 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/chrome_gtk_frame.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
@@ -26,9 +26,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
@@ -42,6 +42,7 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
@@ -121,7 +122,7 @@ const int kAutocompleteImages[] = {
 };
 
 bool IsOverridableImage(int id) {
-  static std::set<int> images;
+  CR_DEFINE_STATIC_LOCAL(std::set<int>, images, ());
   if (images.empty()) {
     images.insert(kThemeImages, kThemeImages + arraysize(kThemeImages));
     images.insert(kAutocompleteImages,
@@ -302,19 +303,25 @@ void GtkThemeService::Init(Profile* profile) {
 }
 
 SkBitmap* GtkThemeService::GetBitmapNamed(int id) const {
+  // TODO(erg): Remove this const cast. The gfx::Image interface returns its
+  // images const. GetBitmapNamed() also should but doesn't and has a million
+  // callsites.
+  return const_cast<SkBitmap*>(GetImageNamed(id)->ToSkBitmap());
+}
+
+const gfx::Image* GtkThemeService::GetImageNamed(int id) const {
   // Try to get our cached version:
   ImageCache::const_iterator it = gtk_images_.find(id);
   if (it != gtk_images_.end())
     return it->second;
 
   if (use_gtk_ && IsOverridableImage(id)) {
-    // We haven't built this image yet:
-    SkBitmap* bitmap = GenerateGtkThemeBitmap(id);
-    gtk_images_[id] = bitmap;
-    return bitmap;
+    gfx::Image* image = new gfx::Image(GenerateGtkThemeBitmap(id));
+    gtk_images_[id] = image;
+    return image;
   }
 
-  return ThemeService::GetBitmapNamed(id);
+  return ThemeService::GetImageNamed(id);
 }
 
 SkColor GtkThemeService::GetColor(int id) const {
@@ -336,8 +343,8 @@ bool GtkThemeService::HasCustomImage(int id) const {
 
 void GtkThemeService::InitThemesFor(NotificationObserver* observer) {
   observer->Observe(chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                    Source<ThemeService>(this),
-                    NotificationService::NoDetails());
+                    content::Source<ThemeService>(this),
+                    content::NotificationService::NoDetails());
 }
 
 void GtkThemeService::SetTheme(const Extension* extension) {
@@ -368,10 +375,11 @@ bool GtkThemeService::UsingNativeTheme() const {
 }
 
 void GtkThemeService::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if ((type == chrome::NOTIFICATION_PREF_CHANGED) &&
-      (*Details<std::string>(details).ptr() == prefs::kUsesSystemTheme)) {
+      (*content::Details<std::string>(details).ptr() ==
+          prefs::kUsesSystemTheme)) {
 #if !defined(OS_CHROMEOS)
     use_gtk_ = profile()->GetPrefs()->GetBoolean(prefs::kUsesSystemTheme);
 #endif
@@ -561,16 +569,17 @@ void GtkThemeService::GetScrollbarColors(GdkColor* thumb_active_color,
     *track_color = *theme_trough_color;
 }
 
-CairoCachedSurface* GtkThemeService::GetSurfaceNamed(
+gfx::CairoCachedSurface* GtkThemeService::GetSurfaceNamed(
     int id,
     GtkWidget* widget_on_display) {
-  return GetSurfaceNamedImpl(id,
-                             &per_display_surfaces_,
-                             GetPixbufNamed(id),
-                             widget_on_display);
+  return GetSurfaceNamedImpl(
+      id,
+      &per_display_surfaces_,
+      &GtkThemeService::GetPixbufNamed,
+      widget_on_display);
 }
 
-CairoCachedSurface* GtkThemeService::GetRTLEnabledSurfaceNamed(
+gfx::CairoCachedSurface* GtkThemeService::GetRTLEnabledSurfaceNamed(
     int id,
     GtkWidget* widget_on_display) {
   // We flip the sign of |id| when passing it to GetSurfaceNamedImpl() for the
@@ -578,19 +587,29 @@ CairoCachedSurface* GtkThemeService::GetRTLEnabledSurfaceNamed(
   // location calls this function with a resource ID, and another place calls
   // GetSurfaceNamed() with the same ID, they'll correctly get different
   // surfaces in RTL mode.
-  return GetSurfaceNamedImpl(-id,
-                             &per_display_surfaces_,
-                             GetRTLEnabledPixbufNamed(id),
-                             widget_on_display);
+  return GetSurfaceNamedImpl(
+      -id,
+      &per_display_surfaces_,
+      &GtkThemeService::GetRTLEnabledPixbufNamedWrapper,
+      widget_on_display);
 }
 
-CairoCachedSurface* GtkThemeService::GetUnthemedSurfaceNamed(
+gfx::CairoCachedSurface* GtkThemeService::GetUnthemedSurfaceNamed(
     int id,
     GtkWidget* widget_on_display) {
   return GetSurfaceNamedImpl(id,
       &per_display_unthemed_surfaces_,
-      ResourceBundle::GetSharedInstance().GetNativeImageNamed(id),
+      &GtkThemeService::GetUnthemedNativePixbuf,
       widget_on_display);
+}
+
+gfx::CairoCachedSurface* GtkThemeService::GetCairoIcon(
+    int id,
+    GtkWidget* widget_on_display) {
+  return GetSurfaceNamedImpl(id,
+                             &per_display_icon_surfaces_,
+                             &GtkThemeService::GetPixbufForIconId,
+                             widget_on_display);
 }
 
 // static
@@ -702,6 +721,7 @@ void GtkThemeService::FreePlatformCaches() {
   ThemeService::FreePlatformCaches();
   FreePerDisplaySurfaces(&per_display_surfaces_);
   FreePerDisplaySurfaces(&per_display_unthemed_surfaces_);
+  FreePerDisplaySurfaces(&per_display_icon_surfaces_);
   STLDeleteValues(&gtk_images_);
 }
 
@@ -738,8 +758,6 @@ void GtkThemeService::LoadGtkValues() {
 
   GtkStyle* window_style = gtk_rc_get_style(fake_window_);
   SetThemeColorFromGtk(ThemeService::COLOR_CONTROL_BACKGROUND,
-                       &window_style->bg[GTK_STATE_NORMAL]);
-  SetThemeColorFromGtk(ThemeService::COLOR_BUTTON_BACKGROUND,
                        &window_style->bg[GTK_STATE_NORMAL]);
 
   GdkColor toolbar_color = window_style->bg[GTK_STATE_NORMAL];
@@ -1063,9 +1081,9 @@ SkBitmap* GtkThemeService::GenerateFrameImage(
     canvas.DrawRectInt(0, 0, kToolbarImageWidth, gradient_size, paint);
   }
 
-  canvas.FillRectInt(base, 0, gradient_size,
-                     kToolbarImageWidth,
-                     kToolbarImageHeight - gradient_size);
+  canvas.FillRect(base, gfx::Rect(0, gradient_size,
+                                  kToolbarImageWidth,
+                                  kToolbarImageHeight - gradient_size));
   return new SkBitmap(canvas.ExtractBitmap());
 }
 
@@ -1119,10 +1137,10 @@ void GtkThemeService::GetSelectedEntryForegroundHSL(
   color_utils::SkColorToHSL(GdkToSkColor(&color), tint);
 }
 
-CairoCachedSurface* GtkThemeService::GetSurfaceNamedImpl(
+gfx::CairoCachedSurface* GtkThemeService::GetSurfaceNamedImpl(
     int id,
     PerDisplaySurfaceMap* display_surface_map,
-    GdkPixbuf* pixbuf,
+    PixbufProvidingMethod provider,
     GtkWidget* widget_on_display) {
   GdkDisplay* display = gtk_widget_get_display(widget_on_display);
   CairoCachedSurfaceMap& surface_map = (*display_surface_map)[display];
@@ -1132,12 +1150,42 @@ CairoCachedSurface* GtkThemeService::GetSurfaceNamedImpl(
   if (found != surface_map.end())
     return found->second;
 
-  CairoCachedSurface* surface = new CairoCachedSurface;
-  surface->UsePixbuf(pixbuf);
+  gfx::CairoCachedSurface* surface = new gfx::CairoCachedSurface;
+  surface->UsePixbuf((this->*provider)(id));
 
   surface_map[id] = surface;
 
   return surface;
+}
+
+// PixbufProvidingMethod that undoes the negative sign on |id|.
+GdkPixbuf* GtkThemeService::GetRTLEnabledPixbufNamedWrapper(int id) const {
+  return GetRTLEnabledPixbufNamed(-id);
+}
+
+// PixbufProvidingMethod that just calls ResourceBundle. We want to minimize
+// the calls to this method because it aquires an AutoLock and we don't want
+// this to happen all the time.
+GdkPixbuf* GtkThemeService::GetUnthemedNativePixbuf(int id) const {
+  return ResourceBundle::GetSharedInstance().GetNativeImageNamed(id);
+}
+
+// PixbufProvidingMethod that maps a GtkThemeService::CairoDefaultIcon to a
+// GdkPixbuf.
+GdkPixbuf* GtkThemeService::GetPixbufForIconId(int id) const {
+  switch (id) {
+    case GtkThemeService::NATIVE_FAVICON:
+      return GtkThemeService::GetDefaultFavicon(true);
+    case GtkThemeService::CHROME_FAVICON:
+      return GtkThemeService::GetDefaultFavicon(false);
+    case GtkThemeService::NATIVE_FOLDER:
+      return GtkThemeService::GetFolderIcon(true);
+    case GtkThemeService::CHROME_FOLDER:
+      return GtkThemeService::GetFolderIcon(false);
+    default:
+      NOTREACHED();
+      return NULL;
+  }
 }
 
 void GtkThemeService::OnDestroyChromeButton(GtkWidget* button) {
@@ -1175,11 +1223,13 @@ gboolean GtkThemeService::OnSeparatorExpose(GtkWidget* widget,
       static_cast<double>(bottom_color.green / 257) / 255.0,
       static_cast<double>(bottom_color.blue / 257) / 255.0, };
 
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+
   cairo_pattern_t* pattern =
-      cairo_pattern_create_linear(widget->allocation.x, widget->allocation.y,
-                                  widget->allocation.x,
-                                  widget->allocation.y +
-                                  widget->allocation.height);
+      cairo_pattern_create_linear(allocation.x, allocation.y,
+                                  allocation.x,
+                                  allocation.y + allocation.height);
   cairo_pattern_add_color_stop_rgb(
       pattern, 0.0,
       kTopSeparatorColor[0], kTopSeparatorColor[1], kTopSeparatorColor[2]);
@@ -1191,12 +1241,11 @@ gboolean GtkThemeService::OnSeparatorExpose(GtkWidget* widget,
       bottom_color_rgb[0], bottom_color_rgb[1], bottom_color_rgb[2]);
   cairo_set_source(cr, pattern);
 
-  double start_x = 0.5 + widget->allocation.x;
+  double start_x = 0.5 + allocation.x;
   cairo_new_path(cr);
   cairo_set_line_width(cr, 1.0);
-  cairo_move_to(cr, start_x, widget->allocation.y);
-  cairo_line_to(cr, start_x,
-                widget->allocation.y + widget->allocation.height);
+  cairo_move_to(cr, start_x, allocation.y);
+  cairo_line_to(cr, start_x, allocation.y + allocation.height);
   cairo_stroke(cr);
   cairo_destroy(cr);
   cairo_pattern_destroy(pattern);

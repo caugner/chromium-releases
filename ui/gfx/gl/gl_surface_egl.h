@@ -10,6 +10,7 @@
 #include <windows.h>
 #endif
 
+#include "base/compiler_specific.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
@@ -18,7 +19,9 @@ typedef void* EGLConfig;
 typedef void* EGLDisplay;
 typedef void* EGLSurface;
 
-#if defined(OS_WIN)
+#if defined(OS_ANDROID)
+typedef void* EGLNativeDisplayType;
+#elif defined(OS_WIN)
 typedef HDC EGLNativeDisplayType;
 #elif defined(USE_WAYLAND)
 typedef struct wl_display* EGLNativeDisplayType;
@@ -34,14 +37,16 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   GLSurfaceEGL();
   virtual ~GLSurfaceEGL();
 
+  // Implement GLSurface.
+  virtual EGLDisplay GetDisplay() OVERRIDE;
+  virtual EGLConfig GetConfig() OVERRIDE;
+
   static bool InitializeOneOff();
-  EGLDisplay GetDisplay();
-  EGLConfig GetConfig();
   static EGLDisplay GetHardwareDisplay();
   static EGLDisplay GetSoftwareDisplay();
   static EGLNativeDisplayType GetNativeDisplay();
 
-protected:
+ protected:
   bool software_;
 
  private:
@@ -55,16 +60,19 @@ class NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   virtual ~NativeViewGLSurfaceEGL();
 
   // Implement GLSurface.
-  virtual bool Initialize();
-  virtual void Destroy();
-  virtual bool IsOffscreen();
-  virtual bool SwapBuffers();
-  virtual gfx::Size GetSize();
-  virtual EGLSurface GetHandle();
+  virtual bool Initialize() OVERRIDE;
+  virtual void Destroy() OVERRIDE;
+  virtual bool IsOffscreen() OVERRIDE;
+  virtual bool SwapBuffers() OVERRIDE;
+  virtual gfx::Size GetSize() OVERRIDE;
+  virtual EGLSurface GetHandle() OVERRIDE;
+  virtual std::string GetExtensions() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
 
  private:
   gfx::PluginWindowHandle window_;
   EGLSurface surface_;
+  bool supports_post_sub_buffer_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceEGL);
 };
@@ -76,12 +84,14 @@ class GL_EXPORT PbufferGLSurfaceEGL : public GLSurfaceEGL {
   virtual ~PbufferGLSurfaceEGL();
 
   // Implement GLSurface.
-  virtual bool Initialize();
-  virtual void Destroy();
-  virtual bool IsOffscreen();
-  virtual bool SwapBuffers();
-  virtual gfx::Size GetSize();
-  virtual EGLSurface GetHandle();
+  virtual bool Initialize() OVERRIDE;
+  virtual void Destroy() OVERRIDE;
+  virtual bool IsOffscreen() OVERRIDE;
+  virtual bool SwapBuffers() OVERRIDE;
+  virtual gfx::Size GetSize() OVERRIDE;
+  virtual bool Resize(const gfx::Size& size) OVERRIDE;
+  virtual EGLSurface GetHandle() OVERRIDE;
+  virtual void* GetShareHandle() OVERRIDE;
 
  private:
   gfx::Size size_;

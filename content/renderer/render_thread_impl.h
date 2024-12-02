@@ -28,26 +28,14 @@ class AudioMessageFilter;
 class CompositorThread;
 class DBMessageFilter;
 class DevToolsAgentFilter;
-class FilePath;
+struct DOMStorageMsg_Event_Params;
 class GpuChannelHost;
 class IndexedDBDispatcher;
-class RendererHistogram;
-class RendererHistogramSnapshots;
-class RendererNetPredictor;
 class RendererWebKitPlatformSupportImpl;
 class SkBitmap;
 class VideoCaptureImplManager;
-class WebDatabaseObserverImpl;
-
-struct RendererPreferences;
-struct DOMStorageMsg_Event_Params;
-struct GPUInfo;
 struct ViewMsg_New_Params;
-struct WebPreferences;
-
-namespace IPC {
-struct ChannelHandle;
-}
+class WebDatabaseObserverImpl;
 
 namespace WebKit {
 class WebStorageEventDispatcher;
@@ -56,6 +44,9 @@ class WebStorageEventDispatcher;
 namespace base {
 class MessageLoopProxy;
 class Thread;
+namespace win {
+class ScopedCOMInitializer;
+}
 }
 
 namespace content {
@@ -116,11 +107,11 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   virtual void RegisterExtension(v8::Extension* extension) OVERRIDE;
   virtual bool IsRegisteredExtension(
       const std::string& v8_extension_name) const OVERRIDE;
-  virtual void ScheduleIdleHandler(double initial_delay_s) OVERRIDE;
+  virtual void ScheduleIdleHandler(int64 initial_delay_ms) OVERRIDE;
   virtual void IdleHandler() OVERRIDE;
-  virtual double GetIdleNotificationDelayInS() const OVERRIDE;
-  virtual void SetIdleNotificationDelayInS(
-      double idle_notification_delay_in_s) OVERRIDE;
+  virtual int64 GetIdleNotificationDelayInMs() const OVERRIDE;
+  virtual void SetIdleNotificationDelayInMs(
+      int64 idle_notification_delay_in_ms) OVERRIDE;
 #if defined(OS_WIN)
   virtual void PreCacheFont(const LOGFONT& log_font) OVERRIDE;
   virtual void ReleaseCachedFonts() OVERRIDE;
@@ -134,6 +125,7 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   void DoNotSuspendWebKitSharedTimer();
   void DoNotNotifyWebKitOfModalLoop();
 
+  // Will be NULL if threaded compositing has not been enabled.
   CompositorThread* compositor_thread() const {
     return compositor_thread_.get();
   }
@@ -175,8 +167,13 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // on the renderer's main thread.
   scoped_refptr<base::MessageLoopProxy> GetFileThreadMessageLoopProxy();
 
+  // Causes the idle handler to skip sending idle notifications
+  // on the two next scheduled calls, so idle notifications are
+  // not sent for at least one notification delay.
+  void PostponeIdleNotification();
+
  private:
-  virtual bool OnControlMessageReceived(const IPC::Message& msg);
+  virtual bool OnControlMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   void Init();
 
@@ -189,6 +186,9 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   void OnPurgePluginListCache(bool reload_pages);
   void OnNetworkStateChanged(bool online);
   void OnGetAccessibilityTree();
+  void OnTempCrashWithData(const GURL& data);
+
+  void IdleHandlerInForegroundTab();
 
   // These objects live solely on the render thread.
   scoped_ptr<ScopedRunnableMethodFactory<RenderThreadImpl> > task_factory_;
@@ -209,6 +209,9 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // Used on multiple script execution context threads.
   scoped_ptr<WebDatabaseObserverImpl> web_database_observer_impl_;
 
+  // Initialize COM when using plugins outside the sandbox (Windows only).
+  scoped_ptr<base::win::ScopedCOMInitializer> initialize_com_;
+
   // If true, then a GetPlugins call is allowed to rescan the disk.
   bool plugin_refresh_allowed_;
 
@@ -219,7 +222,10 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   int hidden_widget_count_;
 
   // The current value of the idle notification timer delay.
-  double idle_notification_delay_in_s_;
+  int64 idle_notification_delay_in_ms_;
+
+  // The number of idle handler calls that skip sending idle notifications.
+  int idle_notifications_to_skip_;
 
   bool suspend_webkit_shared_timer_;
   bool notify_webkit_of_modal_loop_;
@@ -236,6 +242,7 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   // Map of registered v8 extensions. The key is the extension name.
   std::set<std::string> v8_extensions_;
 
+  bool compositor_initialized_;
   scoped_ptr<CompositorThread> compositor_thread_;
 
   ObserverList<content::RenderProcessObserver> observers_;

@@ -17,12 +17,10 @@
 #include "chrome/browser/ntp_background_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_menu_controller_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
-#include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
@@ -38,7 +36,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -47,6 +46,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
 
 namespace {
@@ -130,7 +130,6 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
       tabstrip_origin_provider_(tabstrip_origin_provider),
       model_(NULL),
       instructions_(NULL),
-      sync_service_(NULL),
       dragged_node_(NULL),
       drag_icon_(NULL),
       toolbar_drop_item_(NULL),
@@ -143,14 +142,6 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
       weak_factory_(this),
       bookmark_bar_state_(BookmarkBar::DETACHED),
       max_height_(0) {
-  Profile* profile = browser->profile();
-  if (profile->GetProfileSyncService()) {
-    // Obtain a pointer to the profile sync service and add our instance as an
-    // observer.
-    sync_service_ = profile->GetProfileSyncService();
-    sync_service_->AddObserver(this);
-  }
-
   Init();
   // Force an update by simulating being in the wrong state.
   // BrowserWindowGtk sets our true state after we're created.
@@ -158,10 +149,10 @@ BookmarkBarGtk::BookmarkBarGtk(BrowserWindowGtk* window,
                       BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
 
   edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
-                               profile->GetPrefs(), this);
+                               browser_->profile()->GetPrefs(), this);
   OnEditBookmarksEnabledChanged();
 }
 
@@ -268,22 +259,6 @@ void BookmarkBarGtk::Init() {
                      FALSE, FALSE, 0);
   gtk_widget_set_no_show_all(other_padding_, TRUE);
 
-  sync_error_button_ = theme_service_->BuildChromeButton();
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  gtk_widget_set_tooltip_text(
-      sync_error_button_,
-      l10n_util::GetStringUTF8(IDS_SYNC_BOOKMARK_BAR_ERROR_DESC).c_str());
-  gtk_button_set_label(
-      GTK_BUTTON(sync_error_button_),
-      l10n_util::GetStringUTF8(IDS_SYNC_BOOKMARK_BAR_ERROR).c_str());
-  gtk_button_set_image(
-      GTK_BUTTON(sync_error_button_),
-      gtk_image_new_from_pixbuf(rb.GetNativeImageNamed(IDR_WARNING)));
-  g_signal_connect(sync_error_button_, "button-press-event",
-                   G_CALLBACK(OnSyncErrorButtonPressedThunk), this);
-  gtk_box_pack_start(GTK_BOX(bookmark_hbox_), sync_error_button_,
-                     FALSE, FALSE, 0);
-
   gtk_widget_set_size_request(event_box_.get(), -1, kBookmarkBarMinimumHeight);
 
   ViewIDUtil::SetID(other_bookmarks_button_, VIEW_ID_OTHER_BOOKMARKS);
@@ -321,7 +296,9 @@ void BookmarkBarGtk::SetBookmarkBarState(
 }
 
 int BookmarkBarGtk::GetHeight() {
-  return event_box_->allocation.height - kBookmarkBarMinimumHeight;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(event_box_.get(), &allocation);
+  return allocation.height - kBookmarkBarMinimumHeight;
 }
 
 bool BookmarkBarGtk::IsAnimating() {
@@ -329,7 +306,6 @@ bool BookmarkBarGtk::IsAnimating() {
 }
 
 void BookmarkBarGtk::CalculateMaxHeight() {
-
   if (theme_service_->UsingNativeTheme()) {
     // Get the requisition of our single child instead of the event box itself
     // because the event box probably already has a size request.
@@ -389,11 +365,10 @@ void BookmarkBarGtk::PopupForButton(GtkWidget* button) {
   }
 
   current_menu_.reset(
-      new BookmarkMenuController(browser_, browser_->profile(), page_navigator_,
-                                 GTK_WINDOW(gtk_widget_get_toplevel(button)),
-                                 node,
-                                 button == overflow_button_ ?
-                                     first_hidden : 0));
+      new BookmarkMenuController(browser_->profile(), page_navigator_,
+          GTK_WINDOW(gtk_widget_get_toplevel(button)),
+          node,
+          button == overflow_button_ ? first_hidden : 0));
   menu_bar_helper_.MenuStartedShowing(button, current_menu_->widget());
   GdkEvent* event = gtk_get_current_event();
   current_menu_->Popup(button, event->button.button, event->button.time);
@@ -468,10 +443,6 @@ void BookmarkBarGtk::Show(BookmarkBar::State old_state,
     }
   }
 
-  gtk_widget_set_visible(
-      sync_error_button_,
-      sync_ui_util::ShouldShowSyncErrorButton(sync_service_));
-
   // Maybe show the instructions
   gtk_widget_set_visible(bookmark_toolbar_.get(), !show_instructions_);
   gtk_widget_set_visible(instructions_, show_instructions_);
@@ -485,7 +456,8 @@ void BookmarkBarGtk::Hide(BookmarkBar::State old_state,
 
   // After coming out of fullscreen, the browser window sets the bookmark bar
   // to the "hidden" state, which means we need to show our minimum height.
-  gtk_widget_show(widget());
+  if (!window_->IsFullscreen())
+    gtk_widget_show(widget());
   CalculateMaxHeight();
   // Sometimes we get called without a matching call to open. If that happens
   // then force hide.
@@ -517,8 +489,11 @@ void BookmarkBarGtk::SetChevronState() {
   }
 
   int extra_space = 0;
-  if (gtk_widget_get_visible(overflow_button_))
-    extra_space = overflow_button_->allocation.width;
+  if (gtk_widget_get_visible(overflow_button_)) {
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(overflow_button_, &allocation);
+    extra_space = allocation.width;
+  }
 
   int overflow_idx = GetFirstHiddenBookmark(extra_space, NULL);
   if (overflow_idx == -1)
@@ -600,7 +575,9 @@ int BookmarkBarGtk::GetFirstHiddenBookmark(int extra_space,
   // last buttons on the bar.
   // TODO(gideonwald): figure out the precise source of these extra two pixels
   // and make this calculation more reliable.
-  int total_width = bookmark_toolbar_.get()->allocation.width - 2;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(bookmark_toolbar_.get(), &allocation);
+  int total_width = allocation.width - 2;
   bool overflow = false;
   GtkRequisition requested_size_;
   GList* toolbar_items =
@@ -823,10 +800,13 @@ gboolean BookmarkBarGtk::ItemDraggedOverToolbar(GdkDragContext* context,
   return TRUE;
 }
 
-int BookmarkBarGtk::GetToolbarIndexForDragOverFolder(
-    GtkWidget* button, gint x) {
-  int margin = std::min(15, static_cast<int>(0.3 * button->allocation.width));
-  if (x > margin && x < (button->allocation.width - margin))
+int BookmarkBarGtk::GetToolbarIndexForDragOverFolder(GtkWidget* button,
+                                                     gint x) {
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(button, &allocation);
+
+  int margin = std::min(15, static_cast<int>(0.3 * allocation.width));
+  if (x > margin && x < (allocation.width - margin))
     return -1;
 
   gint index = gtk_toolbar_get_item_index(GTK_TOOLBAR(bookmark_toolbar_.get()),
@@ -954,8 +934,8 @@ void BookmarkBarGtk::BookmarkNodeChildrenReordered(BookmarkModel* model,
 }
 
 void BookmarkBarGtk::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     if (model_ && model_->IsLoaded()) {
       // Regenerate the bookmark bar with all new objects with their theme
@@ -982,7 +962,8 @@ void BookmarkBarGtk::Observe(int type,
 
     SetOverflowButtonAppearance();
   } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    const std::string& pref_name = *Details<std::string>(details).ptr();
+    const std::string& pref_name =
+        *content::Details<std::string>(details).ptr();
     if (pref_name == prefs::kEditBookmarksEnabled)
       OnEditBookmarksEnabledChanged();
   }
@@ -1140,16 +1121,6 @@ gboolean BookmarkBarGtk::OnButtonPressed(GtkWidget* sender,
   return FALSE;
 }
 
-gboolean BookmarkBarGtk::OnSyncErrorButtonPressed(GtkWidget* sender,
-                                                  GdkEventButton* event) {
-  if (sender == sync_error_button_) {
-    DCHECK(sync_service_ && !sync_service_->IsManaged());
-    sync_service_->ShowErrorUI();
-  }
-
-  return FALSE;
-}
-
 void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
   const BookmarkNode* node = GetNodeForToolButton(sender);
   DCHECK(node);
@@ -1257,15 +1228,14 @@ gboolean BookmarkBarGtk::OnToolbarDragMotion(GtkWidget* toolbar,
 
 void BookmarkBarGtk::OnToolbarSizeAllocate(GtkWidget* widget,
                                            GtkAllocation* allocation) {
-  if (bookmark_toolbar_.get()->allocation.width ==
-      last_allocation_width_) {
+  if (allocation->width == last_allocation_width_) {
     // If the width hasn't changed, then the visibility of the chevron
     // doesn't need to change. This check prevents us from getting stuck in a
     // loop where allocates are queued indefinitely while the visibility of
     // overflow chevron toggles without actual resizes of the toolbar.
     return;
   }
-  last_allocation_width_ = bookmark_toolbar_.get()->allocation.width;
+  last_allocation_width_ = allocation->width;
 
   SetChevronState();
 }
@@ -1422,9 +1392,12 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
       return FALSE;
     gfx::CanvasSkiaPaint canvas(event, true);
 
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+
     gfx::Rect area = GTK_WIDGET_NO_WINDOW(widget) ?
-        gfx::Rect(widget->allocation) :
-        gfx::Rect(0, 0, widget->allocation.width, widget->allocation.height);
+        gfx::Rect(allocation) :
+        gfx::Rect(0, 0, allocation.width, allocation.height);
     NtpBackgroundUtil::PaintBackgroundDetachedMode(theme_provider, &canvas,
         area, tab_contents_size.height());
   }
@@ -1435,9 +1408,6 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
 void BookmarkBarGtk::OnEventBoxDestroy(GtkWidget* widget) {
   if (model_)
     model_->RemoveObserver(this);
-
-  if (sync_service_)
-    sync_service_->RemoveObserver(this);
 }
 
 void BookmarkBarGtk::OnParentSizeAllocate(GtkWidget* widget,
@@ -1456,12 +1426,6 @@ void BookmarkBarGtk::OnParentSizeAllocate(GtkWidget* widget,
 
 void BookmarkBarGtk::OnThrobbingWidgetDestroy(GtkWidget* widget) {
   SetThrobbingWidget(NULL);
-}
-
-void BookmarkBarGtk::OnStateChanged() {
-  gtk_widget_set_visible(
-      sync_error_button_,
-      sync_ui_util::ShouldShowSyncErrorButton(sync_service_));
 }
 
 void BookmarkBarGtk::ShowImportDialog() {

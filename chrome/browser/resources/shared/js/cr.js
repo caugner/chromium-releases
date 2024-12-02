@@ -23,12 +23,6 @@ const cr = (function() {
   const isChromeOS = /CrOS/.test(navigator.userAgent);
 
   /**
-   * Whether this is on touchui build or not.
-   * @type {boolean}
-   */
-  const isTouch = /Touch/.test(navigator.userAgent);
-
-  /**
    * Whether this is on vanilla Linux (not chromeOS).
    * @type {boolean}
    */
@@ -47,6 +41,12 @@ const cr = (function() {
   const isViews = /views/.test(chrome.toolkit);
 
   /**
+   * Whether this window is optimized for touch-based input.
+   * @type {boolean}
+   */
+  const isTouchOptimized = !!chrome.touchOptimized;
+
+  /**
    * Sets the os and toolkit attributes in the <html> element so that platform
    * specific css rules can be applied.
    */
@@ -63,6 +63,8 @@ const cr = (function() {
       doc.documentElement.setAttribute('toolkit', 'gtk');
     if (isViews)
       doc.documentElement.setAttribute('toolkit', 'views');
+    if (isTouchOptimized)
+      doc.documentElement.setAttribute('touch-optimized', '');
   }
 
   /**
@@ -134,6 +136,16 @@ const cr = (function() {
   }
 
   /**
+   * Converts a camelCase javascript property name to a hyphenated-lower-case
+   * attribute name.
+   * @param {string} jsName The javascript camelCase property name.
+   * @return {string} The equivalent hyphenated-lower-case attribute name.
+   */
+  function getAttributeName(jsName) {
+    return jsName.replace(/([A-Z])/g, '-$1').toLowerCase();
+  }
+
+  /**
    * The kind of property to define in {@code defineProperty}.
    * @enum {number}
    */
@@ -171,12 +183,14 @@ const cr = (function() {
           return this[privateName];
         };
       case PropertyKind.ATTR:
+        var attributeName = getAttributeName(name);
         return function() {
-          return this.getAttribute(name);
+          return this.getAttribute(attributeName);
         };
       case PropertyKind.BOOL_ATTR:
+        var attributeName = getAttributeName(name);
         return function() {
-          return this.hasAttribute(name);
+          return this.hasAttribute(attributeName);
         };
     }
   }
@@ -207,13 +221,14 @@ const cr = (function() {
         };
 
       case PropertyKind.ATTR:
+        var attributeName = getAttributeName(name);
         return function(value) {
-          var oldValue = this[name];
+          var oldValue = this[attributeName];
           if (value !== oldValue) {
             if (value == undefined)
-              this.removeAttribute(name);
+              this.removeAttribute(attributeName);
             else
-              this.setAttribute(name, value);
+              this.setAttribute(attributeName, value);
             if (opt_setHook)
               opt_setHook.call(this, value, oldValue);
             dispatchPropertyChange(this, name, value, oldValue);
@@ -221,13 +236,14 @@ const cr = (function() {
         };
 
       case PropertyKind.BOOL_ATTR:
+        var attributeName = getAttributeName(name);
         return function(value) {
-          var oldValue = this[name];
+          var oldValue = this[attributeName];
           if (value !== oldValue) {
             if (value)
-              this.setAttribute(name, name);
+              this.setAttribute(attributeName, name);
             else
-              this.removeAttribute(name);
+              this.removeAttribute(attributeName);
             if (opt_setHook)
               opt_setHook.call(this, value, oldValue);
             dispatchPropertyChange(this, name, value, oldValue);
@@ -358,7 +374,7 @@ const cr = (function() {
     isWindows: isWindows,
     isLinux: isLinux,
     isViews: isViews,
-    isTouch: isTouch,
+    isTouchOptimized: isTouchOptimized,
     enablePlatformSpecificCSSRules: enablePlatformSpecificCSSRules,
     define: define,
     defineProperty: defineProperty,

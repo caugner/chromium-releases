@@ -255,7 +255,7 @@ class SpdyWebSocketStreamTest : public testing::Test {
 
     if (throttling) {
       // Set max concurrent streams to 1.
-      spdy_session_pool->mutable_spdy_settings()->Set(
+      spdy_session_pool->http_server_properties()->SetSpdySettings(
           host_port_pair_, spdy_settings_to_set_);
     }
 
@@ -263,13 +263,13 @@ class SpdyWebSocketStreamTest : public testing::Test {
     session_ = spdy_session_pool->Get(host_port_proxy_pair_, BoundNetLog());
     EXPECT_TRUE(spdy_session_pool->HasSession(host_port_proxy_pair_));
     transport_params_ = new TransportSocketParams(host_port_pair_, MEDIUM,
-                                                  GURL(), false, false);
+                                                  false, false);
     TestOldCompletionCallback callback;
     scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
     EXPECT_EQ(ERR_IO_PENDING,
               connection->Init(host_port_pair_.ToString(), transport_params_,
                                MEDIUM, &callback,
-                               http_session_->transport_socket_pool(),
+                               http_session_->GetTransportSocketPool(),
                                BoundNetLog()));
     EXPECT_EQ(OK, callback.WaitForResult());
     return session_->InitializeWithSocket(connection.release(), false, OK);

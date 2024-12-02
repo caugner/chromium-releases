@@ -28,18 +28,20 @@ class NaClProcessHost : public BrowserChildProcessHost {
   explicit NaClProcessHost(const std::wstring& url);
   virtual ~NaClProcessHost();
 
+  // Do any minimal work that must be done at browser startup.
+  static void EarlyStartup();
+
   // Initialize the new NaCl process, returning true on success.
   bool Launch(ChromeRenderMessageFilter* chrome_render_message_filter,
               int socket_count,
               IPC::Message* reply_msg);
 
-  virtual bool OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   void OnProcessLaunchedByBroker(base::ProcessHandle handle);
 
  protected:
-  virtual base::TerminationStatus GetChildTerminationStatus(int* exit_code);
-  virtual void OnChildDied();
+  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
  private:
   // Internal class that holds the nacl::Handle objecs so that
@@ -50,17 +52,10 @@ class NaClProcessHost : public BrowserChildProcessHost {
 
   bool LaunchSelLdr();
 
-  // Get the architecture-specific filename of NaCl's integrated
-  // runtime (IRT) library, relative to the plugins directory.
-  FilePath::StringType GetIrtLibraryFilename();
+  virtual void OnProcessLaunched() OVERRIDE;
 
-  virtual void OnProcessLaunched();
-
-  void OpenIrtFileDone(base::PlatformFileError error_code,
-                       base::PassPlatformFile file,
-                       bool created);
-
-  virtual bool CanShutdown();
+  void IrtReady();
+  void SendStart(base::PlatformFile irt_file);
 
  private:
   // The ChromeRenderMessageFilter that requested this NaCl process.  We use
@@ -72,9 +67,6 @@ class NaClProcessHost : public BrowserChildProcessHost {
 
   // Socket pairs for the NaCl process and renderer.
   scoped_ptr<NaClInternal> internal_;
-
-  // Windows platform flag
-  bool running_on_wow64_;
 
   base::WeakPtrFactory<NaClProcessHost> weak_factory_;
 

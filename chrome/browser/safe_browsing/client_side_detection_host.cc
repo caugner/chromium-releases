@@ -21,18 +21,21 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_request_details.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/common/frame_navigate_params.h"
 #include "googleurl/src/gurl.h"
+
+using content::BrowserThread;
 
 namespace safe_browsing {
 
@@ -47,7 +50,7 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     : public base::RefCountedThreadSafe<
           ClientSideDetectionHost::ShouldClassifyUrlRequest> {
  public:
-  ShouldClassifyUrlRequest(const ViewHostMsg_FrameNavigate_Params& params,
+  ShouldClassifyUrlRequest(const content::FrameNavigateParams& params,
                            TabContents* tab_contents,
                            ClientSideDetectionService* csd_service,
                            SafeBrowsingService* sb_service,
@@ -112,9 +115,8 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &ShouldClassifyUrlRequest::CheckCsdWhitelist,
-                          params_.url));
+        base::Bind(&ShouldClassifyUrlRequest::CheckCsdWhitelist,
+                   this, params_.url));
   }
 
   void Cancel() {
@@ -161,8 +163,7 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &ShouldClassifyUrlRequest::CheckCache));
+        base::Bind(&ShouldClassifyUrlRequest::CheckCache, this));
   }
 
   void CheckCache() {
@@ -211,7 +212,7 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
   // No need to protect |canceled_| with a lock because it is only read and
   // written by the UI thread.
   bool canceled_;
-  ViewHostMsg_FrameNavigate_Params params_;
+  content::FrameNavigateParams params_;
   TabContents* tab_contents_;
   ClientSideDetectionService* csd_service_;
   // We keep a ref pointer here just to make sure the service class stays alive
@@ -257,7 +258,7 @@ ClientSideDetectionHost* ClientSideDetectionHost::Create(
 ClientSideDetectionHost::ClientSideDetectionHost(TabContents* tab)
     : TabContentsObserver(tab),
       csd_service_(NULL),
-      cb_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       unsafe_unique_page_id_(-1) {
   DCHECK(tab);
   csd_service_ = g_browser_process->safe_browsing_detection_service();
@@ -265,7 +266,7 @@ ClientSideDetectionHost::ClientSideDetectionHost(TabContents* tab)
   sb_service_ = g_browser_process->safe_browsing_service();
   // Note: csd_service_ and sb_service_ will be NULL here in testing.
   registrar_.Add(this, content::NOTIFICATION_RESOURCE_RESPONSE_STARTED,
-                 Source<RenderViewHostDelegate>(tab));
+                 content::Source<RenderViewHostDelegate>(tab));
   if (sb_service_) {
     sb_service_->AddObserver(this);
   }
@@ -287,9 +288,9 @@ bool ClientSideDetectionHost::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void ClientSideDetectionHost::DidNavigateMainFramePostCommit(
+void ClientSideDetectionHost::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   // TODO(noelutz): move this DCHECK to TabContents and fix all the unit tests
   // that don't call this method on the UI thread.
   // DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -304,7 +305,7 @@ void ClientSideDetectionHost::DidNavigateMainFramePostCommit(
   // an interstitial for the wrong page.  Note that this won't cancel
   // the server ping back but only cancel the showing of the
   // interstial.
-  cb_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
 
   if (!csd_service_) {
     return;
@@ -323,6 +324,7 @@ void ClientSideDetectionHost::DidNavigateMainFramePostCommit(
   }
   browse_info_->host_redirects = cur_host_redirects_;
   browse_info_->url_redirects = params.redirects;
+  browse_info_->http_status_code = details.http_status_code;
 
   // Notify the renderer if it should classify this URL.
   classification_request_ = new ShouldClassifyUrlRequest(params,
@@ -339,7 +341,7 @@ void ClientSideDetectionHost::OnSafeBrowsingHit(
   // either a malware or phishing hit.  In this case we store the unique page
   // ID for later.
   if (tab_contents() &&
-      tab_contents()->GetRenderProcessHost()->id() ==
+      tab_contents()->GetRenderProcessHost()->GetID() ==
           resource.render_process_host_id &&
       tab_contents()->render_view_host()->routing_id() ==
           resource.render_view_id &&
@@ -374,14 +376,14 @@ void ClientSideDetectionHost::OnPhishingDetectionDone(
   DCHECK(csd_service_);
   // There shouldn't be any pending requests because we revoke them everytime
   // we navigate away.
-  DCHECK(!cb_factory_.HasPendingCallbacks());
+  DCHECK(!weak_factory_.HasWeakPtrs());
   DCHECK(browse_info_.get());
 
   // We parse the protocol buffer here.  If we're unable to parse it we won't
   // send the verdict further.
   scoped_ptr<ClientPhishingRequest> verdict(new ClientPhishingRequest);
   if (csd_service_ &&
-      !cb_factory_.HasPendingCallbacks() &&
+      !weak_factory_.HasWeakPtrs() &&
       browse_info_.get() &&
       verdict->ParseFromString(verdict_str) &&
       verdict->IsInitialized() &&
@@ -398,7 +400,8 @@ void ClientSideDetectionHost::OnPhishingDetectionDone(
     feature_extractor_->ExtractFeatures(
         browse_info_.get(),
         verdict.release(),
-        NewCallback(this, &ClientSideDetectionHost::FeatureExtractionDone));
+        base::Bind(&ClientSideDetectionHost::FeatureExtractionDone,
+                   weak_factory_.GetWeakPtr()));
   }
   browse_info_.reset();
 }
@@ -417,7 +420,7 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(GURL phishing_url,
       resource.is_subresource = false;
       resource.threat_type = SafeBrowsingService::CLIENT_SIDE_PHISHING_URL;
       resource.render_process_host_id =
-          tab_contents()->GetRenderProcessHost()->id();
+          tab_contents()->GetRenderProcessHost()->GetID();
       resource.render_view_id =
           tab_contents()->render_view_host()->routing_id();
       if (!sb_service_->IsWhitelisted(resource)) {
@@ -440,25 +443,26 @@ void ClientSideDetectionHost::FeatureExtractionDone(
   }
   VLOG(2) << "Feature extraction done (success:" << success << ") for URL: "
           << request->url() << ". Start sending client phishing request.";
-  ClientSideDetectionService::ClientReportPhishingRequestCallback* cb = NULL;
+  ClientSideDetectionService::ClientReportPhishingRequestCallback callback;
   // If the client-side verdict isn't phishing we don't care about the server
   // response because we aren't going to display a warning.
   if (request->is_phishing()) {
-    cb = cb_factory_.NewCallback(
-        &ClientSideDetectionHost::MaybeShowPhishingWarning);
+    callback = base::Bind(&ClientSideDetectionHost::MaybeShowPhishingWarning,
+                          weak_factory_.GetWeakPtr());
   }
   // Send ping even if the browser feature extraction failed.
   csd_service_->SendClientReportPhishingRequest(
       request,  // The service takes ownership of the request object.
-      cb);
+      callback);
 }
 
-void ClientSideDetectionHost::Observe(int type,
-                                      const NotificationSource& source,
-                                      const NotificationDetails& details) {
+void ClientSideDetectionHost::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(type, content::NOTIFICATION_RESOURCE_RESPONSE_STARTED);
-  const ResourceRequestDetails* req = Details<ResourceRequestDetails>(
+  const ResourceRequestDetails* req = content::Details<ResourceRequestDetails>(
       details).ptr();
   if (req && browse_info_.get()) {
     browse_info_->ips.insert(req->socket_address().host());

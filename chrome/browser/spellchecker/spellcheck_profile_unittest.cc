@@ -4,18 +4,21 @@
 
 #include <vector>
 
+#include "base/scoped_temp_dir.h"
 #include "chrome/browser/spellchecker/spellcheck_host.h"
 #include "chrome/browser/spellchecker/spellcheck_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
 class MockSpellCheckHost : public SpellCheckHost {
  public:
   MOCK_METHOD0(UnsetProfile, void());
-  MOCK_METHOD1(InitForRenderer, void(RenderProcessHost* process));
+  MOCK_METHOD1(InitForRenderer, void(content::RenderProcessHost* process));
   MOCK_METHOD1(AddWord, void(const std::string& word));
   MOCK_CONST_METHOD0(GetDictionaryFile, const base::PlatformFile&());
   MOCK_CONST_METHOD0(GetCustomWords,
@@ -29,17 +32,17 @@ class MockSpellCheckHost : public SpellCheckHost {
 
 class TestingSpellCheckProfile : public SpellCheckProfile {
  public:
-  TestingSpellCheckProfile()
-      : create_host_calls_(0) {
+  explicit TestingSpellCheckProfile(const FilePath& profile_dir)
+      : SpellCheckProfile(profile_dir),
+        create_host_calls_(0) {
   }
-
   virtual SpellCheckHost* CreateHost(
       SpellCheckProfileProvider* profile,
       const std::string& language,
       net::URLRequestContextGetter* request_context,
       SpellCheckHostMetrics* metrics) {
     create_host_calls_++;
-    return returning_from_create_.get();
+    return returning_from_create_.release();
   }
 
   virtual bool IsTesting() const {
@@ -47,17 +50,17 @@ class TestingSpellCheckProfile : public SpellCheckProfile {
   }
 
   bool IsCreatedHostReady() {
-    return GetHost() == returning_from_create_.get();
+    return !!GetHost();
   }
 
   void SetHostToBeCreated(MockSpellCheckHost* host) {
     EXPECT_CALL(*host, UnsetProfile()).Times(1);
     EXPECT_CALL(*host, IsReady()).WillRepeatedly(testing::Return(true));
-    returning_from_create_ = host;
+    returning_from_create_.reset(host);
   }
 
   size_t create_host_calls_;
-  scoped_refptr<SpellCheckHost> returning_from_create_;
+  scoped_ptr<SpellCheckHost> returning_from_create_;
 };
 
 typedef SpellCheckProfile::ReinitializeResult ResultType;
@@ -70,13 +73,15 @@ class SpellCheckProfileTest : public testing::Test {
   }
 
   // SpellCheckHost will be deleted on FILE thread.
-  BrowserThread file_thread_;
+  content::TestBrowserThread file_thread_;
 };
 
 TEST_F(SpellCheckProfileTest, ReinitializeEnabled) {
-  scoped_refptr<MockSpellCheckHost> host(new MockSpellCheckHost());
-  TestingSpellCheckProfile target;
-  target.SetHostToBeCreated(host.get());
+  scoped_ptr<MockSpellCheckHost> host(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
+  target.SetHostToBeCreated(host.release());
 
   // The first call should create host.
   ResultType result1 = target.ReinitializeHost(false, true, "", NULL);
@@ -95,9 +100,12 @@ TEST_F(SpellCheckProfileTest, ReinitializeEnabled) {
 }
 
 TEST_F(SpellCheckProfileTest, ReinitializeDisabled) {
-  scoped_refptr<MockSpellCheckHost> host(new MockSpellCheckHost());
-  TestingSpellCheckProfile target;
-  target.returning_from_create_ = host.get();
+  scoped_ptr<MockSpellCheckHost> host(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
+
+  target.returning_from_create_.reset(host.release());
 
   // If enabled is false, nothing should happen
   ResultType result1 = target.ReinitializeHost(false, false, "", NULL);
@@ -111,10 +119,12 @@ TEST_F(SpellCheckProfileTest, ReinitializeDisabled) {
 }
 
 TEST_F(SpellCheckProfileTest, ReinitializeRemove) {
-  scoped_refptr<MockSpellCheckHost> host(new MockSpellCheckHost());
-  TestingSpellCheckProfile target;
-  target.SetHostToBeCreated(host.get());
+  scoped_ptr<MockSpellCheckHost> host(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
 
+  target.SetHostToBeCreated(host.release());
 
   // At first, create the host.
   ResultType result1 = target.ReinitializeHost(false, true, "", NULL);
@@ -130,9 +140,12 @@ TEST_F(SpellCheckProfileTest, ReinitializeRemove) {
 }
 
 TEST_F(SpellCheckProfileTest, ReinitializeRecreate) {
-  scoped_refptr<MockSpellCheckHost> host1(new MockSpellCheckHost());
-  TestingSpellCheckProfile target;
-  target.SetHostToBeCreated(host1.get());
+  scoped_ptr<MockSpellCheckHost> host1(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
+
+  target.SetHostToBeCreated(host1.release());
 
   // At first, create the host.
   ResultType result1 = target.ReinitializeHost(false, true, "", NULL);
@@ -142,8 +155,8 @@ TEST_F(SpellCheckProfileTest, ReinitializeRecreate) {
   EXPECT_TRUE(target.IsCreatedHostReady());
 
   // Then the host should be re-created if it's forced to recreate.
-  scoped_refptr<MockSpellCheckHost> host2(new MockSpellCheckHost());
-  target.SetHostToBeCreated(host2.get());
+  scoped_ptr<MockSpellCheckHost> host2(new MockSpellCheckHost());
+  target.SetHostToBeCreated(host2.release());
 
   ResultType result2 = target.ReinitializeHost(true, true, "", NULL);
   target.SpellCheckHostInitialized(0);
@@ -153,9 +166,12 @@ TEST_F(SpellCheckProfileTest, ReinitializeRecreate) {
 }
 
 TEST_F(SpellCheckProfileTest, SpellCheckHostInitializedWithCustomWords) {
-  scoped_refptr<MockSpellCheckHost> host(new MockSpellCheckHost());
-  TestingSpellCheckProfile target;
-  target.SetHostToBeCreated(host.get());
+  scoped_ptr<MockSpellCheckHost> host(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
+
+  target.SetHostToBeCreated(host.release());
   target.ReinitializeHost(false, true, "", NULL);
 
   scoped_ptr<SpellCheckProfile::CustomWordList> loaded_custom_words
@@ -168,9 +184,12 @@ TEST_F(SpellCheckProfileTest, SpellCheckHostInitializedWithCustomWords) {
 }
 
 TEST_F(SpellCheckProfileTest, CustomWordAddedLocally) {
-  scoped_refptr<MockSpellCheckHost> host(new MockSpellCheckHost());
-  TestingSpellCheckProfile target;
-  target.SetHostToBeCreated(host.get());
+  scoped_ptr<MockSpellCheckHost> host(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
+
+  target.SetHostToBeCreated(host.release());
   target.ReinitializeHost(false, true, "", NULL);
 
   scoped_ptr<SpellCheckProfile::CustomWordList> loaded_custom_words
@@ -184,4 +203,81 @@ TEST_F(SpellCheckProfileTest, CustomWordAddedLocally) {
   target.CustomWordAddedLocally("bar");
   expected.push_back("bar");
   EXPECT_EQ(target.GetCustomWords(), expected);
+}
+
+TEST_F(SpellCheckProfileTest, SaveAndLoad) {
+  scoped_ptr<MockSpellCheckHost> host(new MockSpellCheckHost());
+  ScopedTempDir dir;
+  ASSERT_TRUE(dir.CreateUniqueTempDir());
+  TestingSpellCheckProfile target(dir.path());
+
+  target.SetHostToBeCreated(host.release());
+  target.ReinitializeHost(false, true, "", NULL);
+
+  scoped_ptr<SpellCheckProfile::CustomWordList> loaded_custom_words(
+    new SpellCheckProfile::CustomWordList());
+  target.LoadCustomDictionary(loaded_custom_words.get());
+
+  // The custom word list should be empty now.
+  SpellCheckProfile::CustomWordList expected;
+  EXPECT_EQ(*loaded_custom_words, expected);
+
+  target.WriteWordToCustomDictionary("foo");
+  expected.push_back("foo");
+
+  target.WriteWordToCustomDictionary("bar");
+  expected.push_back("bar");
+
+  // The custom word list should include written words.
+  target.LoadCustomDictionary(loaded_custom_words.get());
+  EXPECT_EQ(*loaded_custom_words, expected);
+
+  // Load in another instance of SpellCheckProfile.
+  // The result should be the same.
+  scoped_ptr<MockSpellCheckHost> host2(new MockSpellCheckHost());
+  TestingSpellCheckProfile target2(dir.path());
+  target2.SetHostToBeCreated(host2.release());
+  target2.ReinitializeHost(false, true, "", NULL);
+  scoped_ptr<SpellCheckProfile::CustomWordList> loaded_custom_words2(
+      new SpellCheckProfile::CustomWordList());
+  target2.LoadCustomDictionary(loaded_custom_words2.get());
+  EXPECT_EQ(*loaded_custom_words2, expected);
+}
+
+TEST_F(SpellCheckProfileTest, MultiProfile) {
+  scoped_ptr<MockSpellCheckHost> host1(new MockSpellCheckHost());
+  scoped_ptr<MockSpellCheckHost> host2(new MockSpellCheckHost());
+
+  ScopedTempDir dir1;
+  ScopedTempDir dir2;
+  ASSERT_TRUE(dir1.CreateUniqueTempDir());
+  ASSERT_TRUE(dir2.CreateUniqueTempDir());
+  TestingSpellCheckProfile target1(dir1.path());
+  TestingSpellCheckProfile target2(dir2.path());
+
+  target1.SetHostToBeCreated(host1.release());
+  target1.ReinitializeHost(false, true, "", NULL);
+  target2.SetHostToBeCreated(host2.release());
+  target2.ReinitializeHost(false, true, "", NULL);
+
+  SpellCheckProfile::CustomWordList expected1;
+  SpellCheckProfile::CustomWordList expected2;
+
+  target1.WriteWordToCustomDictionary("foo");
+  target1.WriteWordToCustomDictionary("bar");
+  expected1.push_back("foo");
+  expected1.push_back("bar");
+
+  target2.WriteWordToCustomDictionary("hoge");
+  target2.WriteWordToCustomDictionary("fuga");
+  expected2.push_back("hoge");
+  expected2.push_back("fuga");
+
+  SpellCheckProfile::CustomWordList actual1;
+  target1.LoadCustomDictionary(&actual1);
+  EXPECT_EQ(actual1, expected1);
+
+  SpellCheckProfile::CustomWordList actual2;
+  target2.LoadCustomDictionary(&actual2);
+  EXPECT_EQ(actual2, expected2);
 }

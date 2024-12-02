@@ -46,16 +46,14 @@ class NET_EXPORT MappedHostResolver : public HostResolver {
   // HostResolver methods:
   virtual int Resolve(const RequestInfo& info,
                       AddressList* addresses,
-                      OldCompletionCallback* callback,
+                      const CompletionCallback& callback,
                       RequestHandle* out_req,
                       const BoundNetLog& net_log) OVERRIDE;
   virtual int ResolveFromCache(const RequestInfo& info,
                                AddressList* addresses,
                                const BoundNetLog& net_log) OVERRIDE;
   virtual void CancelRequest(RequestHandle req) OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual HostResolverImpl* GetAsHostResolverImpl() OVERRIDE;
+  virtual void ProbeIPv6Support() OVERRIDE;
   virtual HostCache* GetHostCache() OVERRIDE;
 
  private:

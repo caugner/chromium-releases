@@ -17,8 +17,9 @@
 #include "chrome/browser/password_manager/password_store_mac.h"
 #include "chrome/browser/password_manager/password_store_mac_internal.h"
 #include "chrome/common/chrome_paths.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
+using content::BrowserThread;
 using webkit_glue::PasswordForm;
 using testing::_;
 using testing::DoAll;
@@ -920,7 +921,7 @@ class PasswordStoreMacTest : public testing::Test {
 
  protected:
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 
   MockKeychain* keychain_;  // Owned by store_.
   LoginDatabase* login_db_;  // Owned by store_.

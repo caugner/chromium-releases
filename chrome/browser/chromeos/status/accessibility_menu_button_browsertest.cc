@@ -4,13 +4,17 @@
 
 #include "chrome/browser/chromeos/status/accessibility_menu_button.h"
 
-#include "chrome/browser/chromeos/accessibility_util.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/frame/browser_view.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
+#endif
 
 namespace chromeos {
 
@@ -19,16 +23,21 @@ class AccessibilityMenuButtonTest : public InProcessBrowserTest {
   AccessibilityMenuButtonTest() : InProcessBrowserTest() {
   }
 
-  AccessibilityMenuButton* GetAccessibilityMenuButton() {
-    BrowserView* view = static_cast<BrowserView*>(browser()->window());
-    return static_cast<StatusAreaView*>(view->
-        GetViewByID(VIEW_ID_STATUS_AREA))->accessibility_view();
+  const AccessibilityMenuButton* GetAccessibilityMenuButton() {
+    const views::View* view =
+#if defined(USE_AURA)
+        ChromeShellDelegate::instance()->GetStatusArea();
+#else
+        static_cast<BrowserView*>(browser()->window());
+#endif
+    return static_cast<const AccessibilityMenuButton*>(
+        view->GetViewByID(VIEW_ID_STATUS_BUTTON_ACCESSIBILITY));
   }
 };
 
 IN_PROC_BROWSER_TEST_F(AccessibilityMenuButtonTest,
                        VisibilityIsSyncedWithPreference) {
-  AccessibilityMenuButton* button = GetAccessibilityMenuButton();
+  const AccessibilityMenuButton* button = GetAccessibilityMenuButton();
   ASSERT_TRUE(button != NULL);
 
   accessibility::EnableAccessibility(true, NULL);

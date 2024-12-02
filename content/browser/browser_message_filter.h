@@ -7,8 +7,8 @@
 #pragma once
 
 #include "base/process.h"
-#include "content/browser/browser_thread.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_channel_proxy.h"
 
 // Base class for message filters in the browser process.  You can receive and
@@ -31,14 +31,14 @@ class CONTENT_EXPORT BrowserMessageFilter :
   // IPC::Message::Sender implementation.  Can be called on any thread.  Can't
   // send sync messages (since we don't want to block the browser on any other
   // process).
-  virtual bool Send(IPC::Message* message);
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
   // If you want the given message to be dispatched to your OnMessageReceived on
   // a different thread, change |thread| to the id of the target thread.
   // If you don't handle this message, or want to keep it on the IO thread, do
   // nothing.
   virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+                                        content::BrowserThread::ID* thread);
 
   // Override this to receive messages.
   // Your function will normally be called on the IO thread.  However, if your

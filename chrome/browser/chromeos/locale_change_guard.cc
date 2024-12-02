@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/locale_change_guard.h"
 
+#include "base/bind.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -16,8 +17,8 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -45,14 +46,14 @@ LocaleChangeGuard::LocaleChangeGuard(Profile* profile)
       reverted_(false) {
   DCHECK(profile_);
   registrar_.Add(this, chrome::NOTIFICATION_OWNERSHIP_CHECKED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 LocaleChangeGuard::~LocaleChangeGuard() {}
 
 void LocaleChangeGuard::OnLogin() {
   registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
 void LocaleChangeGuard::RevertLocaleChange(const ListValue* list) {
@@ -76,18 +77,18 @@ void LocaleChangeGuard::RevertLocaleChange(const ListValue* list) {
 }
 
 void LocaleChangeGuard::Observe(int type,
-                                const NotificationSource& source,
-                                const NotificationDetails& details) {
+                                const content::NotificationSource& source,
+                                const content::NotificationDetails& details) {
   if (profile_ == NULL) {
     NOTREACHED();
     return;
   }
   switch (type) {
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
-      if (profile_ == Source<TabContents>(source)->browser_context()) {
+      if (profile_ == content::Source<TabContents>(source)->browser_context()) {
         // We need to perform locale change check only once, so unsubscribe.
         registrar_.Remove(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-                          NotificationService::AllSources());
+                          content::NotificationService::AllSources());
         Check();
       }
       break;
@@ -165,9 +166,10 @@ void LocaleChangeGuard::Check() {
       title_text_));
   note_->Show(
       message_text_, revert_link_text_,
-      NewCallback(this, &LocaleChangeGuard::RevertLocaleChange),
-      true,  // urgent
-      false);  // non-sticky
+      base::Bind(&LocaleChangeGuard::RevertLocaleChange,
+                 AsWeakPtr()),
+                 true,  // urgent
+                 false);  // non-sticky
 }
 
 void LocaleChangeGuard::AcceptLocaleChange() {

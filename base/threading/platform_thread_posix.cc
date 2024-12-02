@@ -7,11 +7,13 @@
 #include <errno.h>
 #include <sched.h>
 
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/safe_strerror_posix.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/tracked_objects.h"
 
 #if defined(OS_MACOSX)
 #include <mach/mach.h>
@@ -38,7 +40,12 @@ void InitThreading();
 
 namespace {
 
-static ThreadLocalPointer<char> current_thread_name;
+#if !defined(OS_MACOSX)
+// Mac name code is in in platform_thread_mac.mm.
+LazyInstance<ThreadLocalPointer<char>,
+             LeakyLazyInstanceTraits<ThreadLocalPointer<char> > >
+    current_thread_name = LAZY_INSTANCE_INITIALIZER;
+#endif
 
 struct ThreadParams {
   PlatformThread::Delegate* delegate;
@@ -168,7 +175,8 @@ void PlatformThread::Sleep(int duration_ms) {
 void PlatformThread::SetName(const char* name) {
   // have to cast away const because ThreadLocalPointer does not support const
   // void*
-  current_thread_name.Set(const_cast<char*>(name));
+  current_thread_name.Pointer()->Set(const_cast<char*>(name));
+  tracked_objects::ThreadData::InitializeThreadContext(name);
 
   // http://0pointer.de/blog/projects/name-your-threads.html
 
@@ -186,14 +194,14 @@ void PlatformThread::SetName(const char* name) {
     int err = dynamic_pthread_setname_np(pthread_self(),
                                          shortened_name.c_str());
     if (err < 0)
-      LOG(ERROR) << "pthread_setname_np: " << safe_strerror(err);
+      DLOG(ERROR) << "pthread_setname_np: " << safe_strerror(err);
   } else {
     // Implementing this function without glibc is simple enough.  (We
     // don't do the name length clipping as above because it will be
     // truncated by the callee (see TASK_COMM_LEN above).)
     int err = prctl(PR_SET_NAME, name);
     if (err < 0)
-      PLOG(ERROR) << "prctl(PR_SET_NAME)";
+      DPLOG(ERROR) << "prctl(PR_SET_NAME)";
   }
 }
 #elif defined(OS_MACOSX)
@@ -203,7 +211,8 @@ void PlatformThread::SetName(const char* name) {
 void PlatformThread::SetName(const char* name) {
   // have to cast away const because ThreadLocalPointer does not support const
   // void*
-  current_thread_name.Set(const_cast<char*>(name));
+  current_thread_name.Pointer()->Set(const_cast<char*>(name));
+  tracked_objects::ThreadData::InitializeThreadContext(name);
 
   // (This should be relatively simple to implement for the BSDs; I
   // just don't have one handy to test the code on.)
@@ -215,7 +224,7 @@ void PlatformThread::SetName(const char* name) {
 // Mac is implemented in platform_thread_mac.mm.
 // static
 const char* PlatformThread::GetName() {
-  return current_thread_name.Get();
+  return current_thread_name.Pointer()->Get();
 }
 #endif
 

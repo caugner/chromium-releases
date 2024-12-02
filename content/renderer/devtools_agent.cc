@@ -6,19 +6,18 @@
 
 #include <map>
 
-#include "base/command_line.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/process.h"
 #include "base/string_number_conversions.h"
 #include "content/common/devtools_messages.h"
 #include "content/common/view_messages.h"
-#include "content/public/common/content_switches.h"
 #include "content/renderer/devtools_agent_filter.h"
 #include "content/renderer/devtools_client.h"
 #include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebDevToolsAgent;
@@ -51,18 +50,16 @@ class WebKitClientMessageLoopImpl
   MessageLoop* message_loop_;
 };
 
-} //  namespace
+typedef std::map<int, DevToolsAgent*> IdToAgentMap;
+base::LazyInstance<IdToAgentMap, base::LeakyLazyInstanceTraits<IdToAgentMap> >
+    g_agent_for_routing_id = LAZY_INSTANCE_INITIALIZER;
 
-// static
-std::map<int, DevToolsAgent*> DevToolsAgent::agent_for_routing_id_;
+} //  namespace
 
 DevToolsAgent::DevToolsAgent(RenderViewImpl* render_view)
     : content::RenderViewObserver(render_view),
       is_attached_(false) {
-  agent_for_routing_id_[routing_id()] = this;
-
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
-  expose_v8_debugger_protocol_ = cmd->HasSwitch(switches::kRemoteShellPort);
+  g_agent_for_routing_id.Get()[routing_id()] = this;
 
   render_view->webview()->setDevToolsAgentClient(this);
   render_view->webview()->devToolsAgent()->setProcessId(
@@ -70,7 +67,7 @@ DevToolsAgent::DevToolsAgent(RenderViewImpl* render_view)
 }
 
 DevToolsAgent::~DevToolsAgent() {
-  agent_for_routing_id_.erase(routing_id());
+  g_agent_for_routing_id.Get().erase(routing_id());
 }
 
 // Called on the Renderer thread.
@@ -80,7 +77,6 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Attach, OnAttach)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Reattach, OnReattach)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Detach, OnDetach)
-    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_FrontendLoaded, OnFrontendLoaded)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DispatchOnInspectorBackend,
                         OnDispatchOnInspectorBackend)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_InspectElement, OnInspectElement)
@@ -96,16 +92,8 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
 
 void DevToolsAgent::sendMessageToInspectorFrontend(
     const WebKit::WebString& message) {
-  Send(new DevToolsHostMsg_ForwardToClient(
-      routing_id(),
-      DevToolsClientMsg_DispatchOnInspectorFrontend(MSG_ROUTING_NONE,
-                                                    message.utf8())));
-}
-
-void DevToolsAgent::sendDebuggerOutput(const WebKit::WebString& data) {
-  Send(new DevToolsHostMsg_ForwardToClient(
-      routing_id(),
-      DevToolsClientMsg_DebuggerOutput(MSG_ROUTING_NONE, data.utf8())));
+  Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(routing_id(),
+                                                         message.utf8()));
 }
 
 int DevToolsAgent::hostIdentifier() {
@@ -122,10 +110,6 @@ WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
   return new WebKitClientMessageLoopImpl();
 }
 
-bool DevToolsAgent::exposeV8DebuggerProtocol() {
-  return expose_v8_debugger_protocol_;
-}
-
 void DevToolsAgent::clearBrowserCache() {
   Send(new DevToolsHostMsg_ClearBrowserCache(routing_id()));
 }
@@ -136,9 +120,8 @@ void DevToolsAgent::clearBrowserCookies() {
 
 // static
 DevToolsAgent* DevToolsAgent::FromHostId(int host_id) {
-  std::map<int, DevToolsAgent*>::iterator it =
-      agent_for_routing_id_.find(host_id);
-  if (it != agent_for_routing_id_.end()) {
+  IdToAgentMap::iterator it = g_agent_for_routing_id.Get().find(host_id);
+  if (it != g_agent_for_routing_id.Get().end()) {
     return it->second;
   }
   return NULL;
@@ -166,12 +149,6 @@ void DevToolsAgent::OnDetach() {
     web_agent->detach();
     is_attached_ = false;
   }
-}
-
-void DevToolsAgent::OnFrontendLoaded() {
-  WebDevToolsAgent* web_agent = GetWebAgent();
-  if (web_agent)
-    web_agent->frontendLoaded();
 }
 
 void DevToolsAgent::OnDispatchOnInspectorBackend(const std::string& message) {

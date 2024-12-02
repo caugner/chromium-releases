@@ -37,7 +37,8 @@ bool ReadMenuItems(
 
     std::string id;
     std::string label;
-    int style = chromeos::InputMethodEngine::MENU_ITEM_STYLE_NONE;
+    chromeos::InputMethodEngine::MenuItemStyle style =
+        chromeos::InputMethodEngine::MENU_ITEM_STYLE_NONE;
     bool visible = true;
     bool enabled = true;
     bool checked = false;
@@ -167,14 +168,16 @@ bool ReadMenuItems(
 
 namespace events {
 
-const char kOnActivate[] = "experimental.input.onActivate";
-const char kOnDeactivated[] = "experimental.input.onDeactivated";
-const char kOnFocus[] = "experimental.input.onFocus";
-const char kOnBlur[] = "experimental.input.onBlur";
-const char kOnInputContextUpdate[] = "experimental.input.onInputContextUpdate";
-const char kOnKeyEvent[] = "experimental.input.onKeyEvent";
-const char kOnCandidateClicked[] = "experimental.input.onCandidateClicked";
-const char kOnMenuItemActivated[] = "experimental.input.onMenuItemActivated";
+const char kOnActivate[] = "experimental.input.ime.onActivate";
+const char kOnDeactivated[] = "experimental.input.ime.onDeactivated";
+const char kOnFocus[] = "experimental.input.ime.onFocus";
+const char kOnBlur[] = "experimental.input.ime.onBlur";
+const char kOnInputContextUpdate[] =
+    "experimental.input.ime.onInputContextUpdate";
+const char kOnKeyEvent[] = "experimental.input.ime.onKeyEvent";
+const char kOnCandidateClicked[] = "experimental.input.ime.onCandidateClicked";
+const char kOnMenuItemActivated[] =
+    "experimental.input.ime.onMenuItemActivated";
 
 }  // namespace events
 
@@ -295,9 +298,10 @@ class ImeObserver : public chromeos::InputMethodEngine::Observer {
         extension_id_, events::kOnKeyEvent, json_args, profile_, GURL());
   }
 
-  virtual void OnCandidateClicked(const std::string& engine_id,
-                                  int candidate_id,
-                                  int button) {
+  virtual void OnCandidateClicked(
+      const std::string& engine_id,
+      int candidate_id,
+      chromeos::InputMethodEngine::MouseButtonEvent button) {
     if (profile_ == NULL || extension_id_.empty())
       return;
 
@@ -504,26 +508,27 @@ bool SetCompositionFunction::RunImpl() {
   std::string text;
   int selection_start;
   int selection_end;
+  int cursor;
   std::vector<chromeos::InputMethodEngine::SegmentInfo> segments;
 
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kContextIdKey,
                                                &context_id));
   EXTENSION_FUNCTION_VALIDATE(args->GetString(keys::kTextKey, &text));
+  EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kCursorKey, &cursor));
   if (args->HasKey(keys::kSelectionStartKey)) {
     EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kSelectionStartKey,
                                                  &selection_start));
   } else {
-    selection_start = 0;
+    selection_start = cursor;
   }
   if (args->HasKey(keys::kSelectionEndKey)) {
     EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kSelectionEndKey,
                                                  &selection_end));
   } else {
-    selection_end = 0;
+    selection_end = cursor;
   }
 
   if (args->HasKey(keys::kSegmentsKey)) {
-    // TODO: Handle segments
     ListValue* segment_list;
     EXTENSION_FUNCTION_VALIDATE(args->GetList(keys::kSegmentsKey,
                                               &segment_list));
@@ -549,7 +554,7 @@ bool SetCompositionFunction::RunImpl() {
   }
 
   if (engine->SetComposition(context_id, text.c_str(), selection_start,
-                             selection_end, segments, &error_)) {
+                             selection_end, cursor, segments, &error_)) {
     result_.reset(Value::CreateBooleanValue(true));
   } else {
     result_.reset(Value::CreateBooleanValue(false));
@@ -775,9 +780,9 @@ bool SetCursorPositionFunction::RunImpl() {
   int candidate_id;
 
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kContextIdKey,
-                                                     &context_id));
+                                               &context_id));
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(keys::kCandidateIdKey,
-                                                     &candidate_id));
+                                               &candidate_id));
 
   if (engine->SetCursorPosition(context_id, candidate_id, &error_)) {
     result_.reset(Value::CreateBooleanValue(true));

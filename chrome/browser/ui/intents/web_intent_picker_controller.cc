@@ -13,6 +13,7 @@
 #include "chrome/browser/intents/web_intents_registry.h"
 #include "chrome/browser/intents/web_intents_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_factory.h"
@@ -20,7 +21,8 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "content/browser/intents/intent_injector.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/intents_host.h"
+#include "content/public/browser/notification_source.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "webkit/glue/web_intent_service_data.h"
 
@@ -58,7 +60,7 @@ class WebIntentPickerController::WebIntentDataFetcher
   // WebIntentsRegistry::Consumer implementation.
   virtual void OnIntentsQueryDone(
       WebIntentsRegistry::QueryID,
-      const std::vector<WebIntentServiceData>& intents) OVERRIDE;
+      const std::vector<webkit_glue::WebIntentServiceData>& services) OVERRIDE;
 
   // A weak pointer to the picker controller.
   WebIntentPickerController* controller_;
@@ -113,25 +115,23 @@ WebIntentPickerController::WebIntentPickerController(
               new FaviconFetcher(this, GetFaviconService(wrapper))),
           picker_(NULL),
           pending_async_count_(0),
-          routing_id_(0),
-          intent_id_(0) {
+          service_tab_(NULL) {
   NavigationController* controller = &wrapper->controller();
   registrar_.Add(this, content::NOTIFICATION_LOAD_START,
-                 Source<NavigationController>(controller));
+                 content::Source<NavigationController>(controller));
   registrar_.Add(this, content::NOTIFICATION_TAB_CLOSING,
-                 Source<NavigationController>(controller));
+                 content::Source<NavigationController>(controller));
 }
 
 WebIntentPickerController::~WebIntentPickerController() {
 }
 
-void WebIntentPickerController::SetIntent(
-    int routing_id,
-    const webkit_glue::WebIntentData& intent,
-    int intent_id) {
-  routing_id_ = routing_id;
-  intent_ = intent;
-  intent_id_ = intent_id;
+void WebIntentPickerController::SetIntentsHost(
+    content::IntentsHost* intents_host) {
+  intents_host_.reset(intents_host);
+  intents_host_->RegisterReplyNotification(
+      base::Bind(&WebIntentPickerController::OnSendReturnMessage,
+                 base::Unretained(this)));
 }
 
 void WebIntentPickerController::ShowDialog(Browser* browser,
@@ -150,70 +150,85 @@ void WebIntentPickerController::ShowDialog(Browser* browser,
   web_intent_data_fetcher_->Fetch(action, type);
 }
 
-void WebIntentPickerController::Observe(int type,
-                                        const NotificationSource& source,
-                                        const NotificationDetails& details) {
+void WebIntentPickerController::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_LOAD_START ||
          type == content::NOTIFICATION_TAB_CLOSING);
   ClosePicker();
 }
 
-// Used to forward messages to the source tab from the service context.
-// TODO(gbillock): Add an observer here to make sure the source tab isn't
-// closed when we try to send to it?
-class InvokingTabReplyForwarder : public IPC::Message::Sender {
- public:
-  InvokingTabReplyForwarder(TabContentsWrapper* wrapper, int routing_id)
-      : wrapper_(wrapper),
-        routing_id_(routing_id) {}
-  virtual ~InvokingTabReplyForwarder() {}
-
-  virtual bool Send(IPC::Message* message) OVERRIDE {
-    message->set_routing_id(routing_id_);
-    return wrapper_->Send(message);
-  }
-
- private:
-  // Weak pointer to the source tab invoking the intent.
-  TabContentsWrapper* wrapper_;
-
-  // Renderer-side object invoking the intent.
-  int routing_id_;
-};
-
 void WebIntentPickerController::OnServiceChosen(size_t index) {
   DCHECK(index < urls_.size());
 
-  // TODO(gbillock): This really only handles the 'window' disposition in a
-  // quite prototype way. We need to flesh out what happens to the picker during
-  // the lifetime of the service url context, and that may mean we need to pass
-  // more information into the injector to find the picker again and close it.
-  browser::NavigateParams params(NULL, urls_[index],
-                                 content::PAGE_TRANSITION_AUTO_BOOKMARK);
-  params.disposition = NEW_FOREGROUND_TAB;
-  params.profile = wrapper_->profile();
-  browser::Navigate(&params);
+  bool inline_disposition = service_data_[index].disposition ==
+      webkit_glue::WebIntentServiceData::DISPOSITION_INLINE;
+  TabContents* new_tab_contents = NULL;
+  if (inline_disposition)
+    new_tab_contents = picker_->SetInlineDisposition(urls_[index]);
 
-  IntentInjector* injector = new IntentInjector(
-      params.target_contents->tab_contents());
-  injector->SetIntent(new InvokingTabReplyForwarder(wrapper_, routing_id_),
-                      intent_,
-                      intent_id_);
+  if (new_tab_contents == NULL) {
+    // TODO(gbillock): This really only handles the 'window' disposition in a
+    // quite prototype way. We need to flesh out what happens to the picker
+    // during the lifetime of the service url context, and that may mean we
+    // need to pass more information into the injector to find the picker again
+    // and close it. Also: the above conditional construction is just because
+    // there isn't Mac/Win support yet. When that's there, it'll be an else.
+    browser::NavigateParams params(NULL, urls_[index],
+                                   content::PAGE_TRANSITION_AUTO_BOOKMARK);
+    params.disposition = NEW_FOREGROUND_TAB;
+    params.profile = wrapper_->profile();
+    browser::Navigate(&params);
+    new_tab_contents = params.target_contents->tab_contents();
+    service_tab_ = new_tab_contents;
 
-  ClosePicker();
+    ClosePicker();
+  }
+
+  intents_host_->DispatchIntent(new_tab_contents);
 }
 
 void WebIntentPickerController::OnCancelled() {
-  // TODO(binji) Tell the renderer that the intent was cancelled.
+  if (!intents_host_.get())
+    return;
+
+  if (service_tab_) {
+    intents_host_->SendReplyMessage(webkit_glue::WEB_INTENT_SERVICE_TAB_CLOSED,
+                                    string16());
+  } else {
+    intents_host_->SendReplyMessage(webkit_glue::WEB_INTENT_PICKER_CANCELLED,
+                                    string16());
+  }
+
   ClosePicker();
 }
 
-void WebIntentPickerController::OnWebIntentDataAvailable(
-    const std::vector<WebIntentServiceData>& intent_data) {
-  urls_.clear();
-  for (size_t i = 0; i < intent_data.size(); ++i) {
-    urls_.push_back(intent_data[i].service_url);
+void WebIntentPickerController::OnClosing() {
+}
+
+void WebIntentPickerController::OnSendReturnMessage() {
+  ClosePicker();
+
+  if (service_tab_) {
+    int index = TabStripModel::kNoTab;
+    Browser* browser = Browser::GetBrowserForController(
+        &service_tab_->controller(), &index);
+    if (browser) {
+      browser->tabstrip_model()->CloseTabContentsAt(
+          index, TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
+    }
+    service_tab_ = NULL;
   }
+}
+
+void WebIntentPickerController::OnWebIntentDataAvailable(
+    const std::vector<webkit_glue::WebIntentServiceData>& services) {
+  urls_.clear();
+  for (size_t i = 0; i < services.size(); ++i) {
+    urls_.push_back(services[i].service_url);
+  }
+  service_data_ = services;
 
   // Tell the picker to initialize N urls to the default favicon
   picker_->SetServiceURLs(urls_);
@@ -256,13 +271,13 @@ void WebIntentPickerController::WebIntentDataFetcher::Fetch(
     const string16& type) {
   DCHECK(query_id_ == -1) << "Fetch already in process.";
   controller_->pending_async_count_++;
-  query_id_ = web_intents_registry_->GetIntentProviders(action, this);
+  query_id_ = web_intents_registry_->GetIntentProviders(action, type, this);
 }
 
 void WebIntentPickerController::WebIntentDataFetcher::OnIntentsQueryDone(
     WebIntentsRegistry::QueryID,
-    const std::vector<WebIntentServiceData>& intents) {
-  controller_->OnWebIntentDataAvailable(intents);
+    const std::vector<webkit_glue::WebIntentServiceData>& services) {
+  controller_->OnWebIntentDataAvailable(services);
   query_id_ = -1;
 }
 

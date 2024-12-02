@@ -21,7 +21,6 @@ class GURL;
 class URLPattern;
 class UserScriptSlave;
 struct ExtensionMsg_Loaded_Params;
-struct ExtensionMsg_UpdatePermissions_Params;
 
 namespace WebKit {
 class WebFrame;
@@ -70,13 +69,28 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
 
   void SetTestExtensionId(const std::string& extension_id);
 
+  // TODO(mpcomplete): remove. http://crbug.com/100411
+  bool IsAdblockWithWebRequestInstalled() const {
+    return webrequest_adblock_;
+  }
+  bool IsAdblockPlusWithWebRequestInstalled() const {
+    return webrequest_adblock_plus_;
+  }
+  bool IsOtherExtensionWithWebRequestInstalled() const {
+    return webrequest_other_;
+  }
+
+  // If the extension is in fact idle, tell the browser process to close
+  // the background page.
+  void CheckIdleStatus(const std::string& extension_id);
+
  private:
   friend class RenderViewTest;
 
   // RenderProcessObserver implementation:
-  virtual bool OnControlMessageReceived(const IPC::Message& message);
-  virtual void WebKitInitialized();
-  virtual void IdleNotification();
+  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void WebKitInitialized() OVERRIDE;
+  virtual void IdleNotification() OVERRIDE;
 
   void OnMessageInvoke(const std::string& extension_id,
                        const std::string& function_name,
@@ -84,7 +98,8 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                        const GURL& event_url);
   void OnDeliverMessage(int target_port_id, const std::string& message);
   void OnSetFunctionNames(const std::vector<std::string>& names);
-  void OnLoaded(const ExtensionMsg_Loaded_Params& params);
+  void OnLoaded(
+      const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
   void OnUnloaded(const std::string& id);
   void OnSetScriptingWhitelist(
       const Extension::ScriptingWhitelist& extension_ids);
@@ -98,6 +113,10 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                            const URLPatternSet& explicit_hosts,
                            const URLPatternSet& scriptable_hosts);
   void OnUpdateUserScripts(base::SharedMemoryHandle table);
+  void OnUsingWebRequestAPI(
+      bool adblock,
+      bool adblock_plus,
+      bool other_webrequest);
 
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
@@ -146,6 +165,12 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   bool is_webkit_initialized_;
 
   std::string test_extension_id_;
+
+  // Status of webrequest usage for known extensions.
+  // TODO(mpcomplete): remove. http://crbug.com/100411
+  bool webrequest_adblock_;
+  bool webrequest_adblock_plus_;
+  bool webrequest_other_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDispatcher);
 };

@@ -31,7 +31,6 @@ using syncable::IS_UNSYNCED;
 using syncable::MTIME;
 using syncable::PARENT_ID;
 using syncable::ScopedDirLookup;
-using syncable::SyncName;
 
 namespace browser_sync {
 using sessions::SyncSession;
@@ -76,7 +75,7 @@ void LogResponseProfilingData(const ClientToServerResponse& response) {
       response_trace << " total time: "
                      << response.profiling_data().total_request_time() << "ms";
     }
-    VLOG(1) << response_trace.str();
+    DVLOG(1) << response_trace.str();
   }
 }
 
@@ -94,7 +93,8 @@ void SyncerProtoUtil::HandleMigrationDoneResponse(
         response->migrated_data_type_id(i)));
   }
   // TODO(akalin): This should be a set union.
-  session->status_controller()->set_types_needing_local_migration(to_migrate);
+  session->mutable_status_controller()->
+      set_types_needing_local_migration(to_migrate);
 }
 
 // static
@@ -109,7 +109,7 @@ bool SyncerProtoUtil::VerifyResponseBirthday(syncable::Directory* dir,
       return false;
     }
 
-    VLOG(1) << "New store birthday: " << response->store_birthday();
+    DVLOG(1) << "New store birthday: " << response->store_birthday();
     dir->set_store_birthday(response->store_birthday());
     return true;
   }
@@ -140,7 +140,6 @@ bool SyncerProtoUtil::PostAndProcessHeaders(ServerConnectionManager* scm,
                                             sessions::SyncSession* session,
                                             const ClientToServerMessage& msg,
                                             ClientToServerResponse* response) {
-
   ServerConnectionManager::PostBufferParams params;
   msg.SerializeToString(&params.buffer_in);
 
@@ -187,6 +186,20 @@ base::TimeDelta SyncerProtoUtil::GetThrottleDelay(
     }
   }
   return throttle_delay;
+}
+
+void SyncerProtoUtil::HandleThrottleError(
+    const SyncProtocolError& error,
+    const base::TimeTicks& throttled_until,
+    sessions::SyncSessionContext* context,
+    sessions::SyncSession::Delegate* delegate) {
+  DCHECK_EQ(error.error_type, browser_sync::THROTTLED);
+  if (error.error_data_types.size() > 0) {
+     context->SetUnthrottleTime(error.error_data_types, throttled_until);
+  } else {
+    // No datatypes indicates the client should be completely throttled.
+    delegate->OnSilencedUntil(throttled_until);
+  }
 }
 
 namespace {
@@ -260,6 +273,17 @@ browser_sync::SyncProtocolError ConvertErrorPBToLocalType(
   sync_protocol_error.url = error.url();
   sync_protocol_error.action = ConvertClientActionPBToLocalClientAction(
       error.action());
+
+  if (error.error_data_type_ids_size() > 0) {
+    // THROTTLED is currently the only error code that uses |error_data_types|.
+    DCHECK_EQ(error.error_type(), ClientToServerResponse::THROTTLED);
+    for (int i = 0; i < error.error_data_type_ids_size(); ++i) {
+      sync_protocol_error.error_data_types.insert(
+          syncable::GetModelTypeFromExtensionFieldNumber(
+              error.error_data_type_ids(i)));
+    }
+  }
+
   return sync_protocol_error;
 }
 
@@ -315,7 +339,7 @@ bool SyncerProtoUtil::PostClientToServerMessage(
   }
 
   // Now set the error into the status so the layers above us could read it.
-  sessions::StatusController* status = session->status_controller();
+  sessions::StatusController* status = session->mutable_status_controller();
   status->set_sync_protocol_error(sync_protocol_error);
 
   // Inform the delegate of the error we got.
@@ -333,8 +357,10 @@ bool SyncerProtoUtil::PostClientToServerMessage(
       return true;
     case browser_sync::THROTTLED:
       LOG(WARNING) << "Client silenced by server.";
-      session->delegate()->OnSilencedUntil(base::TimeTicks::Now() +
-          GetThrottleDelay(*response));
+      HandleThrottleError(sync_protocol_error,
+                          base::TimeTicks::Now() + GetThrottleDelay(*response),
+                          session->context(),
+                          session->delegate());
       return false;
     case browser_sync::TRANSIENT_ERROR:
       return false;

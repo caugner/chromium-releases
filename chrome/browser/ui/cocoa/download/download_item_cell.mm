@@ -175,7 +175,7 @@ const int kInterruptedAnimationDuration = 2.5;
     [self showSecondaryTitle];
   }
 
-  switch (downloadModel->download()->state()) {
+  switch (downloadModel->download()->GetState()) {
     case DownloadItem::COMPLETE:
       // Small downloads may start in a complete state due to asynchronous
       // notifications. In this case, we'll get a second complete notification
@@ -210,7 +210,7 @@ const int kInterruptedAnimationDuration = 2.5;
       percentDone_ = -2;
       break;
     case DownloadItem::IN_PROGRESS:
-      percentDone_ = downloadModel->download()->is_paused() ?
+      percentDone_ = downloadModel->download()->IsPaused() ?
           -1 : downloadModel->download()->PercentComplete();
       break;
     default:
@@ -336,7 +336,7 @@ const int kInterruptedAnimationDuration = 2.5;
 
 - (NSString*)elideTitle:(int)availableWidth {
   NSFont* font = [self font];
-  gfx::Font font_chr(base::SysNSStringToUTF16([font fontName]),
+  gfx::Font font_chr(base::SysNSStringToUTF8([font fontName]),
                      [font pointSize]);
 
   return base::SysUTF16ToNSString(
@@ -345,7 +345,7 @@ const int kInterruptedAnimationDuration = 2.5;
 
 - (NSString*)elideStatus:(int)availableWidth {
   NSFont* font = [self secondaryFont];
-  gfx::Font font_chr(base::SysNSStringToUTF16([font fontName]),
+  gfx::Font font_chr(base::SysNSStringToUTF8([font fontName]),
                      [font pointSize]);
 
   return base::SysUTF16ToNSString(ui::ElideText(

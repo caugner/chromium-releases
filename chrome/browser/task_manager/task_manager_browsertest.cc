@@ -28,6 +28,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "net/base/mock_host_resolver.h"
@@ -38,8 +39,6 @@
 // In some environments this test fails about 1/6 http://crbug/84850
 #if defined(OS_LINUX)
 #define MAYBE_KillExtension DISABLED_KillExtension
-#elif defined(TOUCH_UI)
-#define MAYBE_KillExtension FLAKY_KillExtension
 #else
 #define MAYBE_KillExtension KillExtension
 #endif
@@ -59,7 +58,7 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
 
 // Flaky crashes on ChromeOS (triggers pure virtual function call), see
 // http://crbug.com/92297 for details
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_LINUX)
 #define MAYBE_ShutdownWhileOpen DISABLED_ShutdownWhileOpen
 #else
 #define MAYBE_ShutdownWhileOpen ShutdownWhileOpen
@@ -148,7 +147,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillBGContents) {
 
   ui_test_utils::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-      Source<Profile>(browser()->profile()));
+      content::Source<Profile>(browser()->profile()));
 
   BackgroundContentsService* service =
       BackgroundContentsServiceFactory::GetForProfile(browser()->profile());
@@ -207,6 +206,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeExtensionTabs) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();
+  // Wait for loading of task manager.
+  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
 
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("good").AppendASCII("Extensions")
@@ -246,6 +247,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeAppTabs) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();
+  // Wait for loading of task manager.
+  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
 
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("packaged_app")));
@@ -296,9 +299,11 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeHostedAppTabs) {
 
   // Open a new tab to an app URL before the app is loaded.
   GURL url(base_url.Resolve("path1/empty.html"));
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+      content::NotificationService::AllSources());
   AddTabAtIndex(0, url, content::PAGE_TRANSITION_TYPED);
-  ui_test_utils::WaitForNavigation(
-      &browser()->GetSelectedTabContents()->controller());
+  observer.Wait();
 
   // Check that the third entry's title starts with "Tab:".
   string16 tab_prefix = l10n_util::GetStringFUTF16(
@@ -330,6 +335,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_KillExtension) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();
+  // Wait for loading of task manager.
+  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
 
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("common").AppendASCII("background_page")));
@@ -355,6 +362,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();
+  // Wait for loading of task manager.
+  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
 
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("common").AppendASCII("background_page")));
@@ -384,8 +393,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest,
   TaskManagerBrowserTestUtil::WaitForResourceChange(3);
 }
 
-#if defined(OS_WIN)
-// Bug 93158.
+#if defined(OS_LINUX) || defined(OS_WIN)
+// http://crbug.com/93158.
 #define MAYBE_ReloadExtension FLAKY_ReloadExtension
 #else
 #define MAYBE_ReloadExtension ReloadExtension
@@ -396,6 +405,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_ReloadExtension) {
   // Show the task manager. This populates the model, and helps with debugging
   // (you see the task manager).
   browser()->window()->ShowTaskManager();
+  // Wait for loading of task manager.
+  TaskManagerBrowserTestUtil::WaitForResourceChange(2);
 
   LOG(INFO) << "loading extension";
   ASSERT_TRUE(LoadExtension(

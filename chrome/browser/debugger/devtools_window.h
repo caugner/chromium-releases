@@ -10,13 +10,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
-#include "content/browser/debugger/devtools_client_host.h"
-#include "content/browser/renderer_host/render_view_host_observer.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/devtools_client_host.h"
+#include "content/public/browser/devtools_frontend_host_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 namespace IPC {
 class Message;
@@ -33,17 +32,23 @@ namespace base {
 class Value;
 }
 
-class DevToolsWindow
-    : public DevToolsClientHost,
-      private NotificationObserver,
-      private TabContentsDelegate,
-      private RenderViewHostObserver {
+namespace content {
+class DevToolsAgentHost;
+class DevToolsClientHost;
+}
+
+class DevToolsWindow : private content::NotificationObserver,
+                       private TabContentsDelegate,
+                       private content::DevToolsFrontendHostDelegate {
  public:
   static const char kDevToolsApp[];
   static void RegisterUserPrefs(PrefService* prefs);
   static TabContentsWrapper* GetDevToolsContents(TabContents* inspected_tab);
-  static DevToolsWindow* FindDevToolsWindow(RenderViewHost* window_rvh);
+  static bool IsDevToolsWindow(RenderViewHost* window_rvh);
 
+  static DevToolsWindow* OpenDevToolsWindowForWorker(
+      Profile* profile,
+      content::DevToolsAgentHost* worker_agent);
   static DevToolsWindow* CreateDevToolsWindowForWorker(Profile* profile);
   static DevToolsWindow* OpenDevToolsWindow(RenderViewHost* inspected_rvh);
   static DevToolsWindow* ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
@@ -53,10 +58,8 @@ class DevToolsWindow
   virtual ~DevToolsWindow();
 
   // Overridden from DevToolsClientHost.
-  virtual void SendMessageToClient(const IPC::Message& message);
-  virtual void InspectedTabClosing();
-  virtual void TabReplaced(TabContents* new_tab);
-  virtual RenderViewHost* GetClientRenderViewHost();
+  virtual void InspectedTabClosing() OVERRIDE;
+  virtual void TabReplaced(TabContents* new_tab) OVERRIDE;
   RenderViewHost* GetRenderViewHost();
 
   void Show(DevToolsToggleAction action);
@@ -64,6 +67,9 @@ class DevToolsWindow
   TabContentsWrapper* tab_contents() { return tab_contents_; }
   Browser* browser() { return browser_; }  // For tests.
   bool is_docked() { return docked_; }
+  content::DevToolsClientHost* devtools_client_host() {
+    return frontend_host_;
+  }
 
  private:
   static DevToolsWindow* Create(Profile* profile,
@@ -78,10 +84,10 @@ class DevToolsWindow
   bool IsInspectedBrowserPopupOrPanel();
   void UpdateFrontendAttachedState();
 
-  // Overridden from NotificationObserver.
+  // Overridden from content::NotificationObserver.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   void ScheduleAction(DevToolsToggleAction action);
   void DoAction();
@@ -92,44 +98,38 @@ class DevToolsWindow
   void CallClientFunction(const string16& function_name,
                           const base::Value& arg);
   // Overridden from TabContentsDelegate.
-  // Deprecated. Use two-arguments variant instead.
-  virtual TabContents* OpenURLFromTab(
-      TabContents* source,
-      const GURL& url,
-      const GURL& referrer,
-      WindowOpenDisposition disposition,
-      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
   virtual void AddNewContents(TabContents* source,
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture);
-  virtual void CloseContents(TabContents* source) {}
-  virtual bool CanReloadContents(TabContents* source) const;
+                              bool user_gesture) OVERRIDE;
+  virtual void CloseContents(TabContents* source) OVERRIDE {}
+  virtual bool CanReloadContents(TabContents* source) const OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator();
+                                      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual content::JavaScriptDialogCreator*
+      GetJavaScriptDialogCreator() OVERRIDE;
 
-  virtual void FrameNavigating(const std::string& url) {}
+  virtual void FrameNavigating(const std::string& url) OVERRIDE {}
 
   static DevToolsWindow* ToggleDevToolsWindow(RenderViewHost* inspected_rvh,
                                               bool force_open,
                                               DevToolsToggleAction action);
-  static DevToolsWindow* AsDevToolsWindow(DevToolsClientHost*);
+  static DevToolsWindow* AsDevToolsWindow(content::DevToolsClientHost*);
 
-  // RenderViewHostObserver overrides.
-  virtual void RenderViewHostDestroyed() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  // content::DevToolsClientHandlerDelegate overrides.
+  virtual void ActivateWindow() OVERRIDE;
+  virtual void CloseWindow() OVERRIDE;
+  virtual void MoveWindow(int x, int y) OVERRIDE;
+  virtual void DockWindow() OVERRIDE;
+  virtual void UndockWindow() OVERRIDE;
+  virtual void SaveToFile(const std::string& suggested_file_name,
+                          const std::string& content) OVERRIDE;
 
-  void OnActivateWindow();
-  void OnCloseWindow();
-  void OnRequestDockWindow();
-  void OnRequestUndockWindow();
-  void OnSaveAs(const std::string& file_name,
-                const std::string& content);
   void RequestSetDocked(bool docked);
 
   Profile* profile_;
@@ -139,7 +139,8 @@ class DevToolsWindow
   bool docked_;
   bool is_loaded_;
   DevToolsToggleAction action_on_load_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
+  content::DevToolsClientHost* frontend_host_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };
 

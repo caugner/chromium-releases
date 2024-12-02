@@ -30,7 +30,7 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
   BrowserOptionsHandler();
   virtual ~BrowserOptionsHandler();
 
-  virtual void Initialize();
+  virtual void Initialize() OVERRIDE;
 
   // OptionsPageUIHandler implementation.
   virtual void GetLocalizedValues(DictionaryValue* localized_strings) OVERRIDE;
@@ -53,10 +53,10 @@ class BrowserOptionsHandler : public OptionsPageUIHandler,
   virtual void OnItemsRemoved(int start, int length) OVERRIDE;
 
  private:
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Makes this the default browser. Called from WebUI.
   void BecomeDefaultBrowser(const ListValue* args);

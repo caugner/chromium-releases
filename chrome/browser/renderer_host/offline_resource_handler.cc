@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
@@ -14,14 +15,16 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+
+using content::BrowserThread;
 
 OfflineResourceHandler::OfflineResourceHandler(
     ResourceHandler* handler,
@@ -42,7 +45,7 @@ OfflineResourceHandler::OfflineResourceHandler(
 
 OfflineResourceHandler::~OfflineResourceHandler() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DCHECK(!appcache_completion_callback_.get());
+  DCHECK(appcache_completion_callback_.IsCancelled());
 }
 
 bool OfflineResourceHandler::OnUploadProgress(int request_id,
@@ -51,16 +54,18 @@ bool OfflineResourceHandler::OnUploadProgress(int request_id,
   return next_handler_->OnUploadProgress(request_id, position, size);
 }
 
-bool OfflineResourceHandler::OnRequestRedirected(int request_id,
-                                                 const GURL& new_url,
-                                                 ResourceResponse* response,
-                                                 bool* defer) {
+bool OfflineResourceHandler::OnRequestRedirected(
+    int request_id,
+    const GURL& new_url,
+    content::ResourceResponse* response,
+    bool* defer) {
   return next_handler_->OnRequestRedirected(
       request_id, new_url, response, defer);
 }
 
-bool OfflineResourceHandler::OnResponseStarted(int request_id,
-                                                ResourceResponse* response) {
+bool OfflineResourceHandler::OnResponseStarted(
+    int request_id,
+    content::ResourceResponse* response) {
   return next_handler_->OnResponseStarted(request_id, response);
 }
 
@@ -72,55 +77,57 @@ bool OfflineResourceHandler::OnResponseCompleted(
 }
 
 void OfflineResourceHandler::OnRequestClosed() {
-  if (appcache_completion_callback_) {
-    appcache_completion_callback_->Cancel();
-    appcache_completion_callback_.release();
-    Release();  // Balanced with OnWillStart
-  }
+  if (!appcache_completion_callback_.IsCancelled())
+    appcache_completion_callback_.Cancel();
+
   next_handler_->OnRequestClosed();
 }
 
 void OfflineResourceHandler::OnCanHandleOfflineComplete(int rv) {
-  CHECK(appcache_completion_callback_);
-  appcache_completion_callback_ = NULL;
+  // Cancel() to break the circular reference cycle.
+  appcache_completion_callback_.Cancel();
+
   if (deferred_request_id_ == -1) {
-    LOG(WARNING) << "OnCanHandleOfflineComplete called after completion: "
-                 << " this=" << this;
-    NOTREACHED();
+    DLOG(FATAL) << "OnCanHandleOfflineComplete called after completion: "
+                << " this=" << this;
     return;
   }
+
   if (rv == net::OK) {
     Resume();
-    Release();  // Balanced with OnWillStart
   } else {
-    // Skipping AddRef/Release because they're redundant.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &OfflineResourceHandler::ShowOfflinePage));
+        base::Bind(&OfflineResourceHandler::ShowOfflinePage, this));
   }
 }
 
 bool OfflineResourceHandler::OnWillStart(int request_id,
                                          const GURL& url,
                                          bool* defer) {
-  if (ShouldShowOfflinePage(url)) {
-    deferred_request_id_ = request_id;
-    deferred_url_ = url;
-    DVLOG(1) << "OnWillStart: this=" << this << ", request id=" << request_id
-             << ", url=" << url;
-    AddRef();  //  Balanced with OnCanHandleOfflineComplete
-    DCHECK(!appcache_completion_callback_);
-    appcache_completion_callback_ =
-        new net::CancelableOldCompletionCallback<OfflineResourceHandler>(
-            this, &OfflineResourceHandler::OnCanHandleOfflineComplete);
-    appcache_service_->CanHandleMainResourceOffline(
-        url, request_->first_party_for_cookies(),
-        appcache_completion_callback_);
+  if (!ShouldShowOfflinePage(url))
+    return next_handler_->OnWillStart(request_id, url, defer);
 
-    *defer = true;
-    return true;
-  }
-  return next_handler_->OnWillStart(request_id, url, defer);
+  deferred_request_id_ = request_id;
+  deferred_url_ = url;
+  DVLOG(1) << "OnWillStart: this=" << this << ", request id=" << request_id
+           << ", url=" << url;
+
+  DCHECK(appcache_completion_callback_.IsCancelled());
+
+  // |appcache_completion_callback_| holds a reference to |this|, so there is a
+  // circular reference; however, either
+  // OfflineResourceHandler::OnCanHandleOfflineComplete cancels the callback
+  // (thus dropping the reference), or CanHandleMainResourceOffline calls the
+  // callback which Resets it.
+  appcache_completion_callback_.Reset(
+      base::Bind(&OfflineResourceHandler::OnCanHandleOfflineComplete, this));
+  appcache_service_->CanHandleMainResourceOffline(
+      url, request_->first_party_for_cookies(),
+      appcache_completion_callback_.callback());
+
+  *defer = true;
+  return true;
 }
 
 // We'll let the original event handler provide a buffer, and reuse it for
@@ -138,9 +145,8 @@ void OfflineResourceHandler::OnBlockingPageComplete(bool proceed) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this,
-                          &OfflineResourceHandler::OnBlockingPageComplete,
-                          proceed));
+        base::Bind(&OfflineResourceHandler::OnBlockingPageComplete,
+                   this, proceed));
     return;
   }
 
@@ -158,7 +164,6 @@ void OfflineResourceHandler::OnBlockingPageComplete(bool proceed) {
     ClearRequestInfo();
     rdh_->CancelRequest(process_host_id_, request_id, false);
   }
-  Release();  // Balanced with OnWillStart
 }
 
 void OfflineResourceHandler::ClearRequestInfo() {

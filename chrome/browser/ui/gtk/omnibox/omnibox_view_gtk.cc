@@ -11,6 +11,7 @@
 
 #include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversion_utils.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
@@ -21,18 +22,22 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/platform_util.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "third_party/undoview/undo_view.h"
 #include "ui/base/animation/multi_animation.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/gtk_dnd_util.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -45,8 +50,8 @@
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
-#include "views/controls/textfield/native_textfield_views.h"
-#include "views/events/event.h"
+#include "ui/views/controls/textfield/native_textfield_views.h"
+#include "ui/views/events/event.h"
 #else
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
@@ -101,8 +106,9 @@ struct AutocompleteEditState {
 
 // Returns a lazily initialized property bag accessor for saving our state in a
 // TabContents.
-PropertyAccessor<AutocompleteEditState>* GetStateAccessor() {
-  static PropertyAccessor<AutocompleteEditState> state;
+base::PropertyAccessor<AutocompleteEditState>* GetStateAccessor() {
+  CR_DEFINE_STATIC_LOCAL(
+      base::PropertyAccessor<AutocompleteEditState>, state, ());
   return &state;
 }
 
@@ -411,7 +417,7 @@ void OmniboxViewGtk::Init() {
 #if !defined(TOOLKIT_VIEWS)
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 #else
   // Manually invoke SetBaseColor() because TOOLKIT_VIEWS doesn't observe
@@ -588,7 +594,7 @@ bool OmniboxViewGtk::DeleteAtEndPressed() {
 }
 
 void OmniboxViewGtk::GetSelectionBounds(string16::size_type* start,
-                                        string16::size_type* end) {
+                                        string16::size_type* end) const {
   CharRange selection = GetSelection();
   *start = static_cast<size_t>(selection.cp_min);
   *end = static_cast<size_t>(selection.cp_max);
@@ -760,7 +766,7 @@ gfx::NativeView OmniboxViewGtk::GetNativeView() const {
 
 gfx::NativeView OmniboxViewGtk::GetRelativeWindowForPopup() const {
   GtkWidget* toplevel = gtk_widget_get_toplevel(GetNativeView());
-  DCHECK(GTK_WIDGET_TOPLEVEL(toplevel));
+  DCHECK(gtk_widget_is_toplevel(toplevel));
   return toplevel;
 }
 
@@ -853,6 +859,10 @@ bool OmniboxViewGtk::IsImeComposing() const {
 }
 
 #if defined(TOOLKIT_VIEWS)
+int OmniboxViewGtk::GetMaxEditWidth(int entry_width) const {
+  return entry_width;
+}
+
 views::View* OmniboxViewGtk::AddToView(views::View* parent) {
   views::NativeViewHost* host = new views::NativeViewHost;
   parent->AddChildView(host);
@@ -871,9 +881,7 @@ int OmniboxViewGtk::OnPerformDrop(
     if (data.GetURLAndTitle(&url, &title))
       text = UTF8ToUTF16(url.spec());
   } else {
-    string16 data_string;
-    if (data.GetString(&data_string))
-      text = CollapseWhitespace(data_string, true);
+    data.GetString(&text);
   }
 
   if (!text.empty() && OnPerformDropImpl(text))
@@ -881,46 +889,11 @@ int OmniboxViewGtk::OnPerformDrop(
 
   return ui::DragDropTypes::DRAG_NONE;
 }
-
-// static
-OmniboxView* OmniboxViewGtk::Create(AutocompleteEditController* controller,
-                                    ToolbarModel* toolbar_model,
-                                    Profile* profile,
-                                    CommandUpdater* command_updater,
-                                    bool popup_window_mode,
-                                    views::View* location_bar) {
-  if (views::Widget::IsPureViews()) {
-    OmniboxViewViews* omnibox_view = new OmniboxViewViews(controller,
-                                                          toolbar_model,
-                                                          profile,
-                                                          command_updater,
-                                                          popup_window_mode,
-                                                          location_bar);
-    omnibox_view->Init();
-    return omnibox_view;
-  }
-
-  OmniboxViewGtk* omnibox_view = new OmniboxViewGtk(controller,
-                                                    toolbar_model,
-                                                    profile,
-                                                    command_updater,
-                                                    popup_window_mode,
-                                                    location_bar);
-  omnibox_view->Init();
-
-  // Make all the children of the widget visible. NOTE: this won't display
-  // anything, it just toggles the visible flag.
-  gtk_widget_show_all(omnibox_view->GetNativeView());
-  // Hide the widget. NativeViewHostGtk will make it visible again as necessary.
-  gtk_widget_hide(omnibox_view->GetNativeView());
-
-  return omnibox_view;
-}
-#endif
+#endif  // defined(TOOLKIT_VIEWS)
 
 void OmniboxViewGtk::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
 
   SetBaseColor();
@@ -1472,10 +1445,14 @@ void OmniboxViewGtk::HandlePopulatePopup(GtkWidget* sender, GtkMenu* menu) {
   // back after shutdown, and similar issues.
   GtkClipboard* x_clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
   gchar* text = gtk_clipboard_wait_for_text(x_clipboard);
-  string16 text_wstr = UTF8ToUTF16(text ? text : "");
+  string16 sanitized_text(text ?
+      StripJavascriptSchemas(CollapseWhitespace(UTF8ToUTF16(text), true)) :
+      string16());
   g_free(text);
 
-  // Paste and Go menu item.
+  // Paste and Go menu item. Note that CanPasteAndGo() needs to be called
+  // before is_paste_and_search() in order to set up the paste-and-go state.
+  bool can_paste_and_go = model_->CanPasteAndGo(sanitized_text);
   GtkWidget* paste_go_menuitem = gtk_menu_item_new_with_mnemonic(
       gfx::ConvertAcceleratorsFromWindowsStyle(
           l10n_util::GetStringUTF8(model_->is_paste_and_search() ?
@@ -1483,8 +1460,7 @@ void OmniboxViewGtk::HandlePopulatePopup(GtkWidget* sender, GtkMenu* menu) {
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste_go_menuitem);
   g_signal_connect(paste_go_menuitem, "activate",
                    G_CALLBACK(HandlePasteAndGoThunk), this);
-  gtk_widget_set_sensitive(paste_go_menuitem,
-                           model_->CanPasteAndGo(text_wstr));
+  gtk_widget_set_sensitive(paste_go_menuitem, can_paste_and_go);
   gtk_widget_show(paste_go_menuitem);
 
   g_signal_connect(menu, "deactivate",
@@ -1589,7 +1565,7 @@ void OmniboxViewGtk::HandleDragDataReceived(GtkWidget* sender,
   string16 possible_url = UTF8ToUTF16(reinterpret_cast<char*>(text));
   g_free(text);
   if (OnPerformDropImpl(possible_url)) {
-    gtk_drag_finish(context, TRUE, TRUE, time);
+    gtk_drag_finish(context, TRUE, FALSE, time);
 
     static guint signal_id =
         g_signal_lookup("drag-data-received", GTK_TYPE_WIDGET);
@@ -1603,24 +1579,56 @@ void OmniboxViewGtk::HandleDragDataGet(GtkWidget* widget,
                                        guint target_type,
                                        guint time) {
   DCHECK(text_view_);
-  // If GTK put the normal textual version of the selection in our drag data,
-  // put our doctored selection that might have the 'http://' prefix. Also, GTK
-  // is confused about signedness of its datatypes, leading to the weird switch
-  // statement (no set of casts fixes this).
+
   switch (target_type) {
     case GTK_TEXT_BUFFER_TARGET_INFO_TEXT: {
       gtk_selection_data_set_text(selection_data, dragged_text_.c_str(), -1);
+      break;
+    }
+    case ui::CHROME_NAMED_URL: {
+      TabContents* current_tab =
+          BrowserList::GetLastActive()->GetSelectedTabContents();
+      string16 tab_title = current_tab->GetTitle();
+      // Pass an empty string if user has edited the URL.
+      if (current_tab->GetURL().spec() != dragged_text_)
+        tab_title = string16();
+      ui::WriteURLWithName(selection_data, GURL(dragged_text_),
+                           tab_title, target_type);
+      break;
     }
   }
 }
 
 void OmniboxViewGtk::HandleDragBegin(GtkWidget* widget,
                                        GdkDragContext* context) {
+  string16 text = UTF8ToUTF16(GetSelectedText());
+
+  if (text.empty())
+    return;
+
+  // Use AdjustTextForCopy to make sure we prefix the text with 'http://'.
+  CharRange selection = GetSelection();
+  GURL url;
+  bool write_url;
+  model_->AdjustTextForCopy(selection.selection_min(), IsSelectAll(), &text,
+                            &url, &write_url);
+  if (write_url) {
+    selected_text_ = UTF16ToUTF8(text);
+    GtkTargetList* copy_targets =
+        gtk_text_buffer_get_copy_target_list(text_buffer_);
+    gtk_target_list_add(copy_targets,
+                        ui::GetAtomForTarget(ui::CHROME_NAMED_URL),
+                        GTK_TARGET_SAME_APP, ui::CHROME_NAMED_URL);
+  }
   dragged_text_ = selected_text_;
 }
 
 void OmniboxViewGtk::HandleDragEnd(GtkWidget* widget,
                                        GdkDragContext* context) {
+  GdkAtom atom = ui::GetAtomForTarget(ui::CHROME_NAMED_URL);
+  GtkTargetList* copy_targets =
+      gtk_text_buffer_get_copy_target_list(text_buffer_);
+  gtk_target_list_remove(copy_targets, atom);
   dragged_text_.clear();
 }
 
@@ -1628,7 +1636,7 @@ void OmniboxViewGtk::HandleInsertText(GtkTextBuffer* buffer,
                                       GtkTextIter* location,
                                       const gchar* text,
                                       gint len) {
-  std::string filtered_text;
+  string16 filtered_text;
   filtered_text.reserve(len);
 
   // Filter out new line and tab characters.
@@ -1642,29 +1650,31 @@ void OmniboxViewGtk::HandleInsertText(GtkTextBuffer* buffer,
   if (len == 1 && (text[0] == '\n' || text[0] == '\r'))
     enter_was_inserted_ = true;
 
-  const gchar* p = text;
-  while (*p && (p - text) < len) {
+  for (const gchar* p = text; *p && (p - text) < len;
+       p = g_utf8_next_char(p)) {
     gunichar c = g_utf8_get_char(p);
-    const gchar* next = g_utf8_next_char(p);
 
     // 0x200B is Zero Width Space, which is inserted just before the instant
     // anchor for working around the GtkTextView's misalignment bug.
     // This character might be captured and inserted into the content by undo
     // manager, so we need to filter it out here.
-    if (c != L'\n' && c != L'\r' && c != L'\t' && c != 0x200B)
-      filtered_text.append(p, next);
-
-    p = next;
+    if (c != 0x200B)
+      base::WriteUnicodeCharacter(c, &filtered_text);
   }
 
-  if (filtered_text.length()) {
+  if (model_->is_pasting())
+    filtered_text = StripJavascriptSchemas(
+        CollapseWhitespace(filtered_text, true));
+
+  if (!filtered_text.empty()) {
     // Avoid inserting the text after the instant anchor.
     ValidateTextBufferIter(location);
 
     // Call the default handler to insert filtered text.
     GtkTextBufferClass* klass = GTK_TEXT_BUFFER_GET_CLASS(buffer);
-    klass->insert_text(buffer, location, filtered_text.data(),
-                       static_cast<gint>(filtered_text.length()));
+    std::string utf8_text = UTF16ToUTF8(filtered_text);
+    klass->insert_text(buffer, location, utf8_text.data(),
+                       static_cast<gint>(utf8_text.length()));
   }
 
   // Stop propagating the signal emission to prevent the default handler from
@@ -1791,7 +1801,8 @@ void OmniboxViewGtk::HandleCopyOrCutClipboard(bool copy) {
 }
 
 bool OmniboxViewGtk::OnPerformDropImpl(const string16& text) {
-  if (model_->CanPasteAndGo(CollapseWhitespace(text, true))) {
+  if (model_->CanPasteAndGo(StripJavascriptSchemas(
+      CollapseWhitespace(text, true)))) {
     model_->PasteAndGo();
     return true;
   }
@@ -1928,7 +1939,7 @@ void OmniboxViewGtk::SelectAllInternal(bool reversed,
 }
 
 void OmniboxViewGtk::StartUpdatingHighlightedText() {
-  if (GTK_WIDGET_REALIZED(text_view_)) {
+  if (gtk_widget_get_realized(text_view_)) {
     GtkClipboard* clipboard =
         gtk_widget_get_clipboard(text_view_, GDK_SELECTION_PRIMARY);
     DCHECK(clipboard);
@@ -1940,7 +1951,7 @@ void OmniboxViewGtk::StartUpdatingHighlightedText() {
 }
 
 void OmniboxViewGtk::FinishUpdatingHighlightedText() {
-  if (GTK_WIDGET_REALIZED(text_view_)) {
+  if (gtk_widget_get_realized(text_view_)) {
     GtkClipboard* clipboard =
         gtk_widget_get_clipboard(text_view_, GDK_SELECTION_PRIMARY);
     DCHECK(clipboard);
@@ -2359,3 +2370,41 @@ void OmniboxViewGtk::AdjustVerticalAlignmentOfInstantView() {
   pango_layout_iter_free(iter);
   g_object_set(instant_anchor_tag_, "rise", baseline - height, NULL);
 }
+
+#if defined(TOOLKIT_VIEWS)
+// static
+OmniboxView* OmniboxView::CreateOmniboxView(
+    AutocompleteEditController* controller,
+    ToolbarModel* toolbar_model,
+    Profile* profile,
+    CommandUpdater* command_updater,
+    bool popup_window_mode,
+    LocationBarView* location_bar) {
+  if (views::Widget::IsPureViews()) {
+    OmniboxViewViews* omnibox_view = new OmniboxViewViews(controller,
+                                                          toolbar_model,
+                                                          profile,
+                                                          command_updater,
+                                                          popup_window_mode,
+                                                          location_bar);
+    omnibox_view->Init();
+    return omnibox_view;
+  }
+
+  OmniboxViewGtk* omnibox_view = new OmniboxViewGtk(controller,
+                                                    toolbar_model,
+                                                    profile,
+                                                    command_updater,
+                                                    popup_window_mode,
+                                                    location_bar);
+  omnibox_view->Init();
+
+  // Make all the children of the widget visible. NOTE: this won't display
+  // anything, it just toggles the visible flag.
+  gtk_widget_show_all(omnibox_view->GetNativeView());
+  // Hide the widget. NativeViewHostGtk will make it visible again as necessary.
+  gtk_widget_hide(omnibox_view->GetNativeView());
+
+  return omnibox_view;
+}
+#endif

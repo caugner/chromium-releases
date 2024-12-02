@@ -25,13 +25,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 
 namespace {
 
@@ -68,10 +68,10 @@ TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
   DCHECK(delegate_);
   registrar_.Add(this,
                  content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_));
   order_controller_ = new TabStripModelOrderController(this);
 }
 
@@ -990,17 +990,17 @@ bool TabStripModel::WillContextMenuPin(int index) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// TabStripModel, NotificationObserver implementation:
+// TabStripModel, content::NotificationObserver implementation:
 
 void TabStripModel::Observe(int type,
-                            const NotificationSource& source,
-                            const NotificationDetails& details) {
+                            const content::NotificationSource& source,
+                            const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
       // Sometimes, on qemu, it seems like a TabContents object can be destroyed
       // while we still have a reference to it. We need to break this reference
       // here so we don't crash later.
-      int index = GetWrapperIndex(Source<TabContents>(source).ptr());
+      int index = GetWrapperIndex(content::Source<TabContents>(source).ptr());
       if (index != TabStripModel::kNoTab) {
         // Note that we only detach the contents here, not close it - it's
         // already been closed. We just want to undo our bookkeeping.
@@ -1011,7 +1011,7 @@ void TabStripModel::Observe(int type,
 
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       const Extension* extension =
-          Details<UnloadedExtensionInfo>(details)->extension;
+          content::Details<UnloadedExtensionInfo>(details)->extension;
       // Iterate backwards as we may remove items while iterating.
       for (int i = count() - 1; i >= 0; i--) {
         TabContentsWrapper* contents = GetTabContentsAt(i);
@@ -1139,12 +1139,12 @@ bool TabStripModel::InternalCloseTabs(const std::vector<int>& in_indices,
   if (browser_shutdown::GetShutdownType() == browser_shutdown::NOT_VALID) {
     // Construct a map of processes to the number of associated tabs that are
     // closing.
-    std::map<RenderProcessHost*, size_t> processes;
+    std::map<content::RenderProcessHost*, size_t> processes;
     for (size_t i = 0; i < indices.size(); ++i) {
       TabContentsWrapper* detached_contents = GetContentsAt(indices[i]);
-      RenderProcessHost* process =
+      content::RenderProcessHost* process =
           detached_contents->tab_contents()->GetRenderProcessHost();
-      std::map<RenderProcessHost*, size_t>::iterator iter =
+      std::map<content::RenderProcessHost*, size_t>::iterator iter =
           processes.find(process);
       if (iter == processes.end()) {
         processes[process] = 1;
@@ -1154,7 +1154,7 @@ bool TabStripModel::InternalCloseTabs(const std::vector<int>& in_indices,
     }
 
     // Try to fast shutdown the tabs that can close.
-    for (std::map<RenderProcessHost*, size_t>::iterator iter =
+    for (std::map<content::RenderProcessHost*, size_t>::iterator iter =
             processes.begin();
         iter != processes.end(); ++iter) {
       iter->first->FastShutdownForPageCount(iter->second);

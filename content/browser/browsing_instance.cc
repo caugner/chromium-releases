@@ -7,16 +7,18 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/webui/web_ui_factory.h"
-#include "content/common/content_client.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 
 // static
-BrowsingInstance::ContextSiteInstanceMap
-    BrowsingInstance::context_site_instance_map_;
+base::LazyInstance<
+    BrowsingInstance::ContextSiteInstanceMap,
+    base::LeakyLazyInstanceTraits<BrowsingInstance::ContextSiteInstanceMap> >
+        BrowsingInstance::context_site_instance_map_ =
+            LAZY_INSTANCE_INITIALIZER;
 
 BrowsingInstance::BrowsingInstance(content::BrowserContext* browser_context)
     : browser_context_(browser_context) {
@@ -61,7 +63,7 @@ BrowsingInstance::SiteInstanceMap* BrowsingInstance::GetSiteInstanceMap(
 
   // Otherwise, process-per-site is in use, at least for this URL.  Look up the
   // global map for this context, creating an entry if necessary.
-  return &context_site_instance_map_[browser_context];
+  return &context_site_instance_map_.Get()[browser_context];
 }
 
 bool BrowsingInstance::HasSiteInstance(const GURL& url) {
@@ -130,7 +132,9 @@ void BrowsingInstance::UnregisterSiteInstance(SiteInstance* site_instance) {
   if (!RemoveSiteInstanceFromMap(&site_instance_map_, site, site_instance)) {
     // Wasn't in our local map, so look in the static per-browser context map.
     RemoveSiteInstanceFromMap(
-        &context_site_instance_map_[browser_context_], site, site_instance);
+        &context_site_instance_map_.Get()[browser_context_],
+        site,
+        site_instance);
   }
 }
 

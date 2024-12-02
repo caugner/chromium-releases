@@ -79,8 +79,11 @@ MEDIA_EXPORT void InterleaveFloatToInt16(const std::vector<float*>& source,
                                          int16* destination,
                                          size_t number_of_frames);
 
-// Returns the default audio hardware sample-rate.
+// Returns the default audio output hardware sample-rate.
 MEDIA_EXPORT double GetAudioHardwareSampleRate();
+
+// Returns the default audio input hardware sample-rate.
+MEDIA_EXPORT double GetAudioInputHardwareSampleRate();
 
 // Returns the optimal low-latency buffer size for the audio hardware.
 // This is the smallest buffer size the system can comfortably render
@@ -101,6 +104,14 @@ MEDIA_EXPORT void SetUnknownDataSize(base::SharedMemory* shared_memory,
                                      uint32 shared_memory_size);
 MEDIA_EXPORT bool IsUnknownDataSize(base::SharedMemory* shared_memory,
                                     uint32 shared_memory_size);
+
+#if defined(OS_WIN)
+
+// Does Windows support WASAPI? We are checking in lot of places, and
+// sometimes check was written incorrectly, so move into separate function.
+MEDIA_EXPORT bool IsWASAPISupported();
+
+#endif  // defined(OS_WIN)
 
 }  // namespace media
 

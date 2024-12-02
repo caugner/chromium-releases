@@ -2,25 +2,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_SUPPORT_WEBIT_SUPPORT_H_
-#define WEBKIT_SUPPORT_WEBIT_SUPPORT_H_
+#ifndef WEBKIT_SUPPORT_WEBKIT_SUPPORT_H_
+#define WEBKIT_SUPPORT_WEBKIT_SUPPORT_H_
 
 #include <string>
-#include <vector>
 
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
-class WebURLLoaderMockFactory;
 namespace WebKit {
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
-class WebCString;
 class WebFileSystemCallbacks;
 class WebFrame;
+class WebGamepads;
 class WebKitPlatformSupport;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
@@ -220,6 +218,14 @@ int NativeKeyCodeForWindowsKeyCode(int keycode, bool shift);
 
 double GetForegroundTabTimerInterval();
 
+// - Logging
+
+void EnableWebCoreLogChannels(const std::string& channels);
+
+// - Gamepad
+
+void SetGamepadData(const WebKit::WebGamepads& pads);
+
 }  // namespace webkit_support
 
-#endif  // WEBKIT_SUPPORT_WEBIT_CLIENT_IMPL_H_
+#endif  // WEBKIT_SUPPORT_WEBKIT_SUPPORT_H_

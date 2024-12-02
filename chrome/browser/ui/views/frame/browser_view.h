@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "build/build_config.h"
@@ -17,41 +18,36 @@
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/frame/browser_bubble_host.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tabs/abstract_tab_strip_view.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/native_widget_types.h"
-#include "views/controls/single_split_view.h"
-#include "views/widget/widget_delegate.h"
-#include "views/window/client_view.h"
+#include "ui/views/controls/single_split_view_listener.h"
+#include "ui/views/widget/widget_delegate.h"
+#include "ui/views/window/client_view.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/hang_monitor/hung_plugin_action.h"
 #include "chrome/browser/hang_monitor/hung_window_detector.h"
-#include "views/controls/menu/native_menu_win.h"
+#include "ui/views/controls/menu/native_menu_win.h"
 #endif
 
 // NOTE: For more information about the objects and files in this directory,
 // view: http://dev.chromium.org/developers/design-documents/browser-window
 
-class AccessiblePaneView;
 class BookmarkBarView;
 class Browser;
-class BrowserBubble;
 class BrowserViewLayout;
 class ContentsContainer;
 class DownloadShelfView;
 class EncodingMenuModel;
 class Extension;
 class FullscreenExitBubbleViews;
-class HtmlDialogUIDelegate;
 class InfoBarContainerView;
 class LocationBarView;
-class SideTabStrip;
 class StatusBubbleViews;
 class TabContentsContainer;
 class TabStripModel;
@@ -67,7 +63,12 @@ class JumpList;
 class LauncherIconUpdater;
 #endif
 
+namespace ui {
+class Accelerator;
+}
+
 namespace views {
+class AccessiblePaneView;
 class ExternalFocusTracker;
 class Menu;
 }
@@ -78,17 +79,16 @@ class Menu;
 //  A ClientView subclass that provides the contents of a browser window,
 //  including the TabStrip, toolbars, download shelves, the content area etc.
 //
-class BrowserView : public BrowserBubbleHost,
-                    public BrowserWindow,
+class BrowserView : public BrowserWindow,
                     public BrowserWindowTesting,
-                    public NotificationObserver,
+                    public content::NotificationObserver,
                     public TabStripModelObserver,
                     public ui::SimpleMenuModel::Delegate,
                     public views::WidgetDelegate,
                     public views::Widget::Observer,
                     public views::ClientView,
                     public InfoBarContainer::Delegate,
-                    public views::SingleSplitView::Observer {
+                    public views::SingleSplitViewListener {
  public:
   // The browser view's class name.
   static const char kViewClassName[];
@@ -162,7 +162,7 @@ class BrowserView : public BrowserBubbleHost,
   virtual bool ShouldShowAvatar() const;
 
   // Handle the specified |accelerator| being pressed.
-  virtual bool AcceleratorPressed(const views::Accelerator& accelerator);
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
   // Provides the containing frame with the accelerator for the specified
   // command id. This can be used to provide menu item shortcut hints etc.
@@ -225,7 +225,7 @@ class BrowserView : public BrowserBubbleHost,
   bool IsPositionInWindowCaption(const gfx::Point& point);
 
   // Returns whether the fullscreen bubble is visible or not.
-  virtual bool IsFullscreenBubbleVisible() const;
+  virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
 
   // Invoked from the frame when the full screen state changes. This is only
   // used on Linux.
@@ -258,6 +258,9 @@ class BrowserView : public BrowserBubbleHost,
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
+  virtual void Maximize() OVERRIDE;
+  virtual void Minimize() OVERRIDE;
+  virtual void Restore() OVERRIDE;
   virtual void EnterFullscreen(
       const GURL& url, FullscreenExitBubbleType bubble_type) OVERRIDE;
   virtual void ExitFullscreen() OVERRIDE;
@@ -299,7 +302,6 @@ class BrowserView : public BrowserBubbleHost,
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) OVERRIDE;
   virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) OVERRIDE;
-  virtual void ShowThemeInstallBubble() OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
@@ -327,10 +329,12 @@ class BrowserView : public BrowserBubbleHost,
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
 #if defined(OS_CHROMEOS)
+  virtual void ShowMobileSetup() OVERRIDE;
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) OVERRIDE;
 #endif
   virtual void ShowAvatarBubble(TabContents* tab_contents,
                                 const gfx::Rect& rect) OVERRIDE;
+  virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
 
   // Overridden from BrowserWindowTesting:
   virtual BookmarkBarView* GetBookmarkBarView() const OVERRIDE;
@@ -339,10 +343,10 @@ class BrowserView : public BrowserBubbleHost,
   virtual views::View* GetSidebarContainerView() const OVERRIDE;
   virtual ToolbarView* GetToolbarView() const OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from TabStripModelObserver:
   virtual void TabDetachedAt(TabContentsWrapper* contents, int index) OVERRIDE;
@@ -406,18 +410,15 @@ class BrowserView : public BrowserBubbleHost,
   virtual void InfoBarContainerStateChanged(bool is_animating) OVERRIDE;
   virtual bool DrawInfoBarArrows(int* x) const OVERRIDE;
 
-  // views::SingleSplitView::Observer overrides:
-  virtual bool SplitHandleMoved(views::SingleSplitView* view) OVERRIDE;
+  // views::SingleSplitViewListener overrides:
+  virtual bool SplitHandleMoved(views::SingleSplitView* sender) OVERRIDE;
 
  protected:
   // Appends to |toolbars| a pointer to each AccessiblePaneView that
   // can be traversed using F6, in the order they should be traversed.
   // Abstracted here so that it can be extended for Chrome OS.
   virtual void GetAccessiblePanes(
-      std::vector<AccessiblePaneView*>* panes);
-
-  // Save the current focused view to view storage
-  void SaveFocusedView();
+      std::vector<views::AccessiblePaneView*>* panes);
 
   int last_focused_view_storage_id() const {
     return last_focused_view_storage_id_;
@@ -456,6 +457,19 @@ class BrowserView : public BrowserBubbleHost,
   friend class BrowserViewLayout;
   FRIEND_TEST_ALL_PREFIXES(BrowserViewsAccessibilityTest,
                            TestAboutChromeViewAccObj);
+
+  // We store this on linux because we must call ProcessFullscreen()
+  // asynchronously from FullScreenStateChanged() instead of directly from
+  // EnterFullscreen().
+  struct PendingFullscreenRequest {
+    PendingFullscreenRequest()
+        : pending(false),
+          bubble_type(FEB_TYPE_NONE) {}
+
+    bool pending;
+    GURL url;
+    FullscreenExitBubbleType bubble_type;
+  };
 
 #if defined(OS_WIN)
   // Creates the system menu.
@@ -537,7 +551,7 @@ class BrowserView : public BrowserBubbleHost,
   // Possibly records a user metrics action corresponding to the passed-in
   // accelerator.  Only implemented for Chrome OS, where we're interested in
   // learning about how frequently the top-row keys are used.
-  void UpdateAcceleratorMetrics(const views::Accelerator& accelerator,
+  void UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
                                 int command_id);
 
   // Invoked from ActiveTabChanged or when instant is made active.
@@ -616,7 +630,7 @@ class BrowserView : public BrowserBubbleHost,
   // The Bookmark Bar View for this window. Lazily created.
   scoped_ptr<BookmarkBarView> bookmark_bar_view_;
 
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) || defined(USE_AURA)
   // The download shelf view (view at the bottom of the page).  ChromiumOS
   // uses ActiveDownloadsUI instead.
   scoped_ptr<DownloadShelfView> download_shelf_;
@@ -655,7 +669,7 @@ class BrowserView : public BrowserBubbleHost,
   scoped_ptr<StatusBubbleViews> status_bubble_;
 
   // A mapping between accelerators and commands.
-  std::map<views::Accelerator, int> accelerator_table_;
+  std::map<ui::Accelerator, int> accelerator_table_;
 
   // True if we have already been initialized.
   bool initialized_;
@@ -703,7 +717,7 @@ class BrowserView : public BrowserBubbleHost,
 
   UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Used to measure the loading spinner animation rate.
   base::TimeTicks last_animation_time_;
@@ -711,6 +725,8 @@ class BrowserView : public BrowserBubbleHost,
   // If this flag is set then SetFocusToLocationBar() will set focus to the
   // location bar even if the browser window is not active.
   bool force_location_bar_focus_;
+
+  PendingFullscreenRequest fullscreen_request_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserView);
 };

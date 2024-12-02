@@ -61,7 +61,9 @@ class NET_EXPORT_PRIVATE SpdyFramerVisitorInterface {
   // Called if an error is detected in the SpdyFrame protocol.
   virtual void OnError(SpdyFramer* framer) = 0;
 
-  // Called when a control frame is received.
+  // Called when a control frame is received. Note that SYN_STREAM, SYN_REPLY,
+  // and HEADER control frames do not include the header block data.
+  // (See OnControlFrameHeaderData().)
   virtual void OnControl(const SpdyControlFrame* frame) = 0;
 
   // Called when a chunk of header data is available. This is called
@@ -304,11 +306,17 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   void set_validate_control_frame_sizes(bool value);
   static void set_enable_compression_default(bool value);
 
+  // Used only in log messages.
+  void set_display_protocol(const std::string& protocol) {
+    display_protocol_ = protocol;
+  }
+
   // For debugging.
   static const char* StateToString(int state);
   static const char* ErrorCodeToString(int error_code);
   static const char* StatusCodeToString(int status_code);
   static const char* ControlTypeToString(SpdyControlType type);
+
   static void set_protocol_version(int version) { spdy_version_= version; }
   static int protocol_version() { return spdy_version_; }
 
@@ -321,8 +329,6 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, ExpandBuffer_HeapSmash);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, HugeHeaderBlock);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, UnclosedStreamDataCompressors);
-  FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest,
-                           UncompressLargerThanFrameBufferInitialSize);
   friend class net::HttpNetworkLayer;  // This is temporary for the server.
   friend class net::HttpNetworkTransactionTest;
   friend class net::HttpProxyClientSocketPoolTest;
@@ -337,17 +343,6 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   friend void test::FramerSetEnableCompressionHelper(SpdyFramer* framer,
                                                      bool compress);
 
-  // The initial size of the control frame buffer; this is used internally
-  // as we parse through control frames. (It is exposed here for unit test
-  // purposes.)
-  // This is only used when compression is enabled; otherwise,
-  // kUncompressedControlFrameBufferInitialSize is used.
-  static size_t kControlFrameBufferInitialSize;
-
-  // The maximum size of the control frame buffer that we support.
-  // TODO(mbelshe): We should make this stream-based so there are no limits.
-  static size_t kControlFrameBufferMaxSize;
-
  private:
   typedef std::map<SpdyStreamId, z_stream*> CompressorMap;
 
@@ -357,8 +352,6 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   void ProcessControlFrameHeader();
   size_t ProcessControlFramePayload(const char* data, size_t len);
   size_t ProcessControlFrameBeforeHeaderBlock(const char* data, size_t len);
-  // TODO(hkhalil): Rename to ProcessControlFrameHeaderBlock once said flag is
-  // removed, replacing the old method.
   size_t NewProcessControlFrameHeaderBlock(const char* data, size_t len);
   size_t ProcessControlFrameHeaderBlock(const char* data, size_t len);
   size_t ProcessDataFramePayload(const char* data, size_t len);
@@ -394,7 +387,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // Deliver the given control frame's compressed headers block to the visitor
   // in decompressed form, in chunks. Returns true if the visitor has
   // accepted all of the chunks.
-  bool IncrementallyDecompressControlFrameHeaderData(
+  bool NewIncrementallyDecompressControlFrameHeaderData(
       const SpdyControlFrame* frame,
       const char* data,
       size_t len);
@@ -429,6 +422,13 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   int num_stream_compressors() const { return stream_compressors_.size(); }
   int num_stream_decompressors() const { return stream_decompressors_.size(); }
 
+  // The initial size of the control frame buffer; this is used internally
+  // as we parse through control frames. (It is exposed here for unit test
+  // purposes.)
+  // This is only used when compression is enabled; otherwise,
+  // kUncompressedControlFrameBufferInitialSize is used.
+  static size_t kControlFrameBufferInitialSize;
+
   // The initial size of the control frame buffer when compression is disabled.
   // This exists because we don't do stream (de)compressed control frame data to
   // our visitor; we instead buffer the entirety of the control frame and then
@@ -438,7 +438,13 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // streamed to the visitor.
   // In addition to the maximum control frame header size, we account for any
   // LOAS checksumming (16B) that may occur in the VTL case.
+  // TODO(hkhalil): Remove post code-yellow once streamed inflate is properly
+  // implemented.
   static const size_t kUncompressedControlFrameBufferInitialSize = 18 + 16;
+
+  // The maximum size of the control frame buffer that we support.
+  // TODO(mbelshe): We should make this stream-based so there are no limits.
+  static size_t kControlFrameBufferMaxSize;
 
   // The size of the buffer into which compressed frames are inflated.
   static const size_t kDecompressionBufferSize = 8 * 1024;
@@ -471,6 +477,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   CompressorMap stream_decompressors_;
 
   SpdyFramerVisitorInterface* visitor_;
+
+  std::string display_protocol_;
 
   static bool compression_default_;
   static int spdy_version_;

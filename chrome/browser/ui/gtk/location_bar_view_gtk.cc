@@ -15,7 +15,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/accessibility_events.h"
+#include "chrome/browser/accessibility/accessibility_events.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/command_updater.h"
@@ -36,7 +36,6 @@
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
-#include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/content_setting_bubble_gtk.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/first_run_bubble.h"
@@ -54,7 +53,7 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -332,7 +331,7 @@ void LocationBarViewGtk::Init(bool popup_window_mode) {
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
   edit_bookmarks_enabled_.Init(prefs::kEditBookmarksEnabled,
                                profile->GetPrefs(), this);
 
@@ -553,9 +552,10 @@ void LocationBarViewGtk::OnSetFocus() {
   Profile* profile = browser_->profile();
   AccessibilityTextBoxInfo info(profile,
       l10n_util::GetStringUTF8(IDS_ACCNAME_LOCATION), false);
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
-      Source<Profile>(profile), Details<AccessibilityTextBoxInfo>(&info));
+      content::Source<Profile>(profile),
+      content::Details<AccessibilityTextBoxInfo>(&info));
 
   // Update the keyword and search hint states.
   OnChanged();
@@ -658,10 +658,10 @@ void LocationBarViewGtk::UpdatePageActions() {
       gtk_box_pack_end(GTK_BOX(page_action_hbox_.get()),
                        page_action_views_[i]->widget(), FALSE, FALSE, 0);
     }
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
-        Source<LocationBar>(this),
-        NotificationService::NoDetails());
+        content::Source<LocationBar>(this),
+        content::NotificationService::NoDetails());
   }
 
   TabContents* contents = GetTabContents();
@@ -684,10 +684,10 @@ void LocationBarViewGtk::InvalidatePageActions() {
   size_t count_before = page_action_views_.size();
   page_action_views_.reset();
   if (page_action_views_.size() != count_before) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
-        Source<LocationBar>(this),
-        NotificationService::NoDetails());
+        content::Source<LocationBar>(this),
+        content::NotificationService::NoDetails());
   }
 }
 
@@ -754,8 +754,8 @@ void LocationBarViewGtk::TestPageActionPressed(size_t index) {
 }
 
 void LocationBarViewGtk::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     UpdateStarIcon();
     return;
@@ -1055,7 +1055,8 @@ gboolean LocationBarViewGtk::OnIconReleased(GtkWidget* sender,
       return FALSE;
 
     tab->OpenURL(OpenURLParams(
-        url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
+        url, content::Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     return TRUE;
   }
 
@@ -1534,10 +1535,10 @@ void LocationBarViewGtk::PageActionViewGtk::UpdateVisibility(
     gtk_widget_hide_all(event_box_.get());
 
   if (visible != old_visible) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
-        Source<ExtensionAction>(page_action_),
-        Details<TabContents>(contents));
+        content::Source<ExtensionAction>(page_action_),
+        content::Details<TabContents>(contents));
   }
 }
 

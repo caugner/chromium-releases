@@ -10,6 +10,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 
+using content::BrowserThread;
+
 namespace subtle {
 
 PrefMemberBase::PrefMemberBase()
@@ -25,7 +27,7 @@ PrefMemberBase::~PrefMemberBase() {
 
 void PrefMemberBase::Init(const char* pref_name,
                           PrefService* prefs,
-                          NotificationObserver* observer) {
+                          content::NotificationObserver* observer) {
   DCHECK(pref_name);
   DCHECK(prefs);
   DCHECK(pref_name_.empty());  // Check that Init is only called once.
@@ -55,8 +57,8 @@ void PrefMemberBase::MoveToThread(BrowserThread::ID thread_id) {
 }
 
 void PrefMemberBase::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
   VerifyValuePrefName();
   DCHECK(chrome::NOTIFICATION_PREF_CHANGED == type);
   UpdateValueFromPref();

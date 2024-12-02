@@ -5,6 +5,8 @@
 #include "ui/base/clipboard/clipboard.h"
 
 #include <gtk/gtk.h>
+#include <X11/extensions/Xfixes.h>
+#include <X11/Xatom.h>
 #include <map>
 #include <set>
 #include <string>
@@ -12,9 +14,12 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/singleton.h"
 #include "base/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/clipboard/custom_data_helper.h"
+#include "ui/base/gtk/gtk_signal.h"
+#include "ui/base/x/x11_util.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/size.h"
@@ -23,9 +28,87 @@ namespace ui {
 
 namespace {
 
+class SelectionChangeObserver {
+ public:
+  static SelectionChangeObserver* GetInstance();
+
+  uint64 clipboard_sequence_number() const {
+    return clipboard_sequence_number_;
+  }
+  uint64 primary_sequence_number() const { return primary_sequence_number_; }
+
+ private:
+  friend struct DefaultSingletonTraits<SelectionChangeObserver>;
+
+  SelectionChangeObserver();
+  ~SelectionChangeObserver();
+
+  CHROMEG_CALLBACK_1(SelectionChangeObserver, GdkFilterReturn, OnXEvent,
+                     GdkXEvent*, GdkEvent*);
+
+  int event_base_;
+  Atom clipboard_atom_;
+  uint64 clipboard_sequence_number_;
+  uint64 primary_sequence_number_;
+
+  DISALLOW_COPY_AND_ASSIGN(SelectionChangeObserver);
+};
+
+SelectionChangeObserver::SelectionChangeObserver()
+    : event_base_(-1),
+      clipboard_atom_(None),
+      clipboard_sequence_number_(0),
+      primary_sequence_number_(0) {
+  int ignored;
+  if (XFixesQueryExtension(GetXDisplay(), &event_base_, &ignored)) {
+    clipboard_atom_ = XInternAtom(GetXDisplay(), "CLIPBOARD", false);
+    XFixesSelectSelectionInput(GetXDisplay(), GetX11RootWindow(),
+                               clipboard_atom_,
+                               XFixesSetSelectionOwnerNotifyMask |
+                               XFixesSelectionWindowDestroyNotifyMask |
+                               XFixesSelectionClientCloseNotifyMask);
+    // This seems to be semi-optional. For some reason, registering for any
+    // selection notify events seems to subscribe us to events for both the
+    // primary and the clipboard buffers. Register anyway just to be safe.
+    XFixesSelectSelectionInput(GetXDisplay(), GetX11RootWindow(),
+                               XA_PRIMARY,
+                               XFixesSetSelectionOwnerNotifyMask |
+                               XFixesSelectionWindowDestroyNotifyMask |
+                               XFixesSelectionClientCloseNotifyMask);
+    gdk_window_add_filter(NULL, &SelectionChangeObserver::OnXEventThunk, this);
+  }
+}
+
+SelectionChangeObserver::~SelectionChangeObserver() {
+}
+
+SelectionChangeObserver* SelectionChangeObserver::GetInstance() {
+  return Singleton<SelectionChangeObserver>::get();
+}
+
+GdkFilterReturn SelectionChangeObserver::OnXEvent(GdkXEvent* xevent,
+                                                  GdkEvent* event) {
+  XEvent* xev = static_cast<XEvent*>(xevent);
+
+  if (xev->type == event_base_ + XFixesSelectionNotify) {
+    XFixesSelectionNotifyEvent* ev =
+        reinterpret_cast<XFixesSelectionNotifyEvent*>(xev);
+    if (ev->selection == clipboard_atom_) {
+      clipboard_sequence_number_++;
+    } else if (ev->selection == XA_PRIMARY) {
+      primary_sequence_number_++;
+    } else {
+      DLOG(ERROR) << "Unexpected selection atom: " << ev->selection;
+    }
+  }
+  return GDK_FILTER_CONTINUE;
+}
+
 const char kMimeTypeBitmap[] = "image/bmp";
 const char kMimeTypeMozillaURL[] = "text/x-moz-url";
 const char kMimeTypeWebkitSmartPaste[] = "chromium/x-webkit-paste";
+// TODO(dcheng): This name is temporary. See crbug.com/106449
+const char kMimeTypeWebCustomData[] = "chromium/x-web-custom-data";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
   gchar* name = gdk_atom_name(atom);
@@ -310,6 +393,17 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
   if (IsFormatAvailable(GetBitmapFormatType(), buffer))
     types->push_back(UTF8ToUTF16(kMimeTypePNG));
   *contains_filenames = false;
+
+  GtkClipboard* clipboard = LookupBackingClipboard(buffer);
+  if (!clipboard)
+    return;
+
+  GtkSelectionData* data = gtk_clipboard_wait_for_contents(
+      clipboard, StringToGdkAtom(GetWebCustomDataFormatType()));
+  if (!data)
+    return;
+  ReadCustomDataTypes(data->data, data->length, types);
+  gtk_selection_data_free(data);
 }
 
 
@@ -408,12 +502,27 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   return canvas.ExtractBitmap();
 }
 
+void Clipboard::ReadCustomData(Buffer buffer,
+                               const string16& type,
+                               string16* result) const {
+  GtkClipboard* clipboard = LookupBackingClipboard(buffer);
+  if (!clipboard)
+    return;
+
+  GtkSelectionData* data = gtk_clipboard_wait_for_contents(
+      clipboard, StringToGdkAtom(GetWebCustomDataFormatType()));
+  if (!data)
+    return;
+  ReadCustomDataForType(data->data, data->length, type, result);
+  gtk_selection_data_free(data);
+}
+
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {
   // TODO(estade): implement this.
   NOTIMPLEMENTED();
 }
 
-void Clipboard::ReadData(const std::string& format, std::string* result) {
+void Clipboard::ReadData(const std::string& format, std::string* result) const {
   GtkSelectionData* data =
       gtk_clipboard_wait_for_contents(clipboard_, StringToGdkAtom(format));
   if (!data)
@@ -422,11 +531,11 @@ void Clipboard::ReadData(const std::string& format, std::string* result) {
   gtk_selection_data_free(data);
 }
 
-uint64 Clipboard::GetSequenceNumber() {
-  // TODO(cdn): implement this. For now this interface will advertise
-  // that the Linux clipboard never changes. That's fine as long as we
-  // don't rely on this signal.
-  return 0;
+uint64 Clipboard::GetSequenceNumber(Buffer buffer) {
+  if (buffer == BUFFER_STANDARD)
+    return SelectionChangeObserver::GetInstance()->clipboard_sequence_number();
+  else
+    return SelectionChangeObserver::GetInstance()->primary_sequence_number();
 }
 
 // static
@@ -452,6 +561,11 @@ Clipboard::FormatType Clipboard::GetBitmapFormatType() {
 // static
 Clipboard::FormatType Clipboard::GetWebKitSmartPasteFormatType() {
   return std::string(kMimeTypeWebkitSmartPaste);
+}
+
+// static
+Clipboard::FormatType Clipboard::GetWebCustomDataFormatType() {
+  return std::string(kMimeTypeWebCustomData);
 }
 
 void Clipboard::InsertMapping(const char* key,

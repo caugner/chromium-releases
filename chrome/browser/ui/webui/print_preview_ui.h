@@ -12,7 +12,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/time.h"
 #include "chrome/browser/printing/print_preview_data_service.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "chrome/browser/ui/webui/constrained_html_ui.h"
 
 class PrintPreviewDataService;
 class PrintPreviewHandler;
@@ -22,7 +22,7 @@ namespace printing {
 struct PageSizeMargins;
 }
 
-class PrintPreviewUI : public ChromeWebUI {
+class PrintPreviewUI : public ConstrainedHtmlUI {
  public:
   explicit PrintPreviewUI(TabContents* contents);
   virtual ~PrintPreviewUI();
@@ -49,6 +49,12 @@ class PrintPreviewUI : public ChromeWebUI {
                                   const string16& initiator_tab_title);
 
   string16 initiator_tab_title() { return initiator_tab_title_; }
+
+  bool source_is_modifiable() { return source_is_modifiable_; }
+
+  // Set |source_is_modifiable_| for |print_preview_tab|'s PrintPreviewUI.
+  static void SetSourceIsModifiable(TabContentsWrapper* print_preview_tab,
+                                    bool source_is_modifiable);
 
   // Determines whether to cancel a print preview request based on
   // |preview_ui_addr| and |request_id|.
@@ -96,12 +102,13 @@ class PrintPreviewUI : public ChromeWebUI {
   // Notifies the Web UI that the print preview failed to render.
   void OnPrintPreviewFailed();
 
+  // Notified the Web UI that this print preview tab's RenderProcess has been
+  // closed, which may occur for several reasons, e.g. tab closure or crash.
+  void OnPrintPreviewTabClosed();
+
   // Notifies the Web UI that initiator tab is closed, so we can disable all the
   // controls that need the initiator tab for generating the preview data.
   void OnInitiatorTabClosed();
-
-  // Notifies the Web UI that the initiator tab has crashed.
-  void OnInitiatorTabCrashed();
 
   // Notifies the Web UI renderer that file selection has been cancelled.
   void OnFileSelectionCancelled();
@@ -113,7 +120,25 @@ class PrintPreviewUI : public ChromeWebUI {
   // Notifies the Web UI to cancel the pending preview request.
   void OnCancelPendingPreviewRequest();
 
+  // Hides the print preview tab.
+  void OnHidePreviewTab();
+
+  // Closes the print preview tab.
+  void OnClosePrintPreviewTab();
+
+  // Reload the printers list.
+  void OnReloadPrintersList();
+
  private:
+  friend class PrintPreviewHandlerTest;
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, StickyMarginsCustom);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest, StickyMarginsDefault);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
+                           StickyMarginsCustomThenDefault);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
+                           GetLastUsedMarginSettingsCustom);
+  FRIEND_TEST_ALL_PREFIXES(PrintPreviewHandlerTest,
+                           GetLastUsedMarginSettingsDefault);
   FRIEND_TEST_ALL_PREFIXES(PrintPreviewTabControllerUnitTest,
                            TitleAfterReload);
 
@@ -132,9 +157,15 @@ class PrintPreviewUI : public ChromeWebUI {
   // when the initiator tab is closed/crashed.
   std::string initiator_url_;
 
+  // Indicates whether the source document can be modified.
+  bool source_is_modifiable_;
+
   // Store the initiator tab title, used for populating the print preview tab
   // title.
   string16 initiator_tab_title_;
+
+  // Keeps track of whether OnClosePrintPreviewTab() has been called or not.
+  bool tab_closed_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewUI);
 };

@@ -125,7 +125,7 @@ cr.define('ntp4', function() {
 
       this.classList.add('dragging');
       // offsetLeft is mirrored in RTL. Un-mirror it.
-      var offsetLeft = ntp4.isRTL() ?
+      var offsetLeft = isRTL() ?
           this.parentNode.clientWidth - this.offsetLeft :
           this.offsetLeft;
       this.dragOffsetX = e.x - offsetLeft - this.parentNode.offsetLeft;
@@ -232,7 +232,7 @@ cr.define('ntp4', function() {
       this.appendChild(clone);
       this.doppleganger_ = clone;
 
-      if (ntp4.isRTL())
+      if (isRTL())
         x *= -1;
 
       this.doppleganger_.style.WebkitTransform = 'translate(' + x + 'px, ' +
@@ -304,7 +304,7 @@ cr.define('ntp4', function() {
       if (this.firstChild.classList.contains('new-tile-contents'))
         this.firstChild.classList.remove('new-tile-contents');
       if (this.firstChild.classList.contains('removing-tile-contents'))
-        this.tilePage.removeTile(this);
+        this.tilePage.removeTile(this, true);
     },
   };
 
@@ -446,7 +446,7 @@ cr.define('ntp4', function() {
       this.addEventListener('mousewheel', this.onMouseWheel_);
       this.content_.addEventListener('scroll', this.onScroll_.bind(this));
 
-      this.dragWrapper_ = new DragWrapper(this.tileGrid_, this);
+      this.dragWrapper_ = new cr.ui.DragWrapper(this.tileGrid_, this);
 
       this.addEventListener('cardselected', this.handleCardSelection_);
       this.addEventListener('carddeselected', this.handleCardDeselection_);
@@ -544,7 +544,7 @@ cr.define('ntp4', function() {
      * Removes the given tile and animates the respositioning of the other
      * tiles.
      * @param {HTMLElement} tile The tile to remove from |tileGrid_|.
-     * @param {?boolean} animate If true, tiles will animate.
+     * @param {?boolean} animate If true, remaining tiles will animate.
      */
     removeTile: function(tile, animate) {
       if (animate)
@@ -552,9 +552,7 @@ cr.define('ntp4', function() {
       var index = tile.index;
       tile.parentNode.removeChild(tile);
       this.calculateLayoutValues_();
-      for (var i = index; i < this.tileElements_.length; i++) {
-        this.positionTile_(i);
-      }
+      this.cleanupDrag();
     },
 
     /**
@@ -613,6 +611,10 @@ cr.define('ntp4', function() {
             Array.prototype.indexOf.call(this.focusableElements_,
                                          focusable);
         this.updateFocusElement_();
+      } else {
+        // This prevents the tile page from getting focus when the user clicks
+        // inside the grid but outside of any tile.
+        e.preventDefault();
       }
     },
 
@@ -675,7 +677,7 @@ cr.define('ntp4', function() {
      */
     updateFocusElement_: function() {
       this.focusElementIndex_ = Math.min(this.focusableElements_.length - 1,
-                                       this.focusElementIndex_);
+                                         this.focusElementIndex_);
       this.focusElementIndex_ = Math.max(0, this.focusElementIndex_);
 
       var newFocusElement = this.focusableElements_[this.focusElementIndex_];
@@ -826,7 +828,7 @@ cr.define('ntp4', function() {
       if (col < 0 || col >= layout.numRowTiles)
         return -1;
 
-      if (ntp4.isRTL())
+      if (isRTL())
         col = layout.numRowTiles - 1 - col;
 
       var row = Math.floor((y - gridClientRect.top) / layout.rowHeight);

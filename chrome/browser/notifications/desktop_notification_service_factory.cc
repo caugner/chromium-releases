@@ -8,7 +8,9 @@
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 // static
 DesktopNotificationService* DesktopNotificationServiceFactory::GetForProfile(
@@ -33,9 +35,8 @@ DesktopNotificationServiceFactory::~DesktopNotificationServiceFactory() {
 
 ProfileKeyedService* DesktopNotificationServiceFactory::BuildServiceInstanceFor(
     Profile* profile) const {
-  DesktopNotificationService* service = new DesktopNotificationService(profile,
-      g_browser_process->notification_ui_manager());
-
+  DesktopNotificationService* service =
+      new DesktopNotificationService(profile, NULL);
   return service;
 }
 

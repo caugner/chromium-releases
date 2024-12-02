@@ -97,11 +97,63 @@ class CONTENT_EXPORT BrowserAccessibility {
   // of its parent.
   BrowserAccessibility* GetNextSibling();
 
-  // Returns the bounds of this object in screen coordinates.
-  gfx::Rect GetBoundsRect();
+  // Returns the bounds of this object in coordinates relative to the
+  // top-left corner of the overall web area.
+  gfx::Rect GetLocalBoundsRect();
 
-  // Returns the deepest descendant that contains the specified point.
+  // Returns the bounds of this object in screen coordinates.
+  gfx::Rect GetGlobalBoundsRect();
+
+  // Returns the deepest descendant that contains the specified point
+  // (in global screen coordinates).
   BrowserAccessibility* BrowserAccessibilityForPoint(const gfx::Point& point);
+
+  // Scrolls this element so that the |focus| rect (in local coordinates
+  // relative to this element) is scrolled to fit within the given
+  // |viewport| (which is clipped to the actual bounds of this
+  // object if you specify something larger). If the whole focus area
+  // doesn't fit, you can specify |subfocus|, which will prioritize
+  // a smaller area within |focus|.
+  //
+  // Note that "focus" doesn't necessarily mean the rectangle must correspond
+  // to a focused element on the page; assistive technology might request
+  // that any object be made visible.
+  void ScrollToMakeVisible(const gfx::Rect& subfocus,
+                           const gfx::Rect& focus,
+                           const gfx::Rect& viewport);
+
+  // This is a 1-dimensional scroll offset helper function that's applied
+  // separately in the horizontal and vertical directions, because the
+  // logic is the same.  The goal is to compute the best scroll offset
+  // in order to make a focused item visible within a viewport.
+  //
+  // In case the whole focused item cannot fit, you can specify a
+  // subfocus - a smaller region within the focus that should
+  // be prioritized. If the whole focused item can fit, the subfocus is
+  // ignored.
+  //
+  // Example: the viewport is scrolled to the right just enough
+  // that the focus is in view.
+  //   Before:
+  //   +----------Viewport---------+
+  //                         +----Focus---+
+  //                         +--SubFocus--+
+  //
+  //   After:
+  //          +----------Viewport---------+
+  //                         +----Focus---+
+  //                         +--SubFocus--+
+  //
+  // When constraints cannot be fully satisfied, the min
+  // (left/top) position takes precedence over the max (right/bottom).
+  //
+  // Note that the return value represents the ideal new scroll offset.
+  // This may be out of range - the calling function should clip this
+  // to the available range.
+  static int ComputeBestScrollOffset(int current_scroll_offset,
+                                     int subfocus_min, int subfocus_max,
+                                     int focus_min, int focus_max,
+                                     int viewport_min, int viewport_max);
 
   //
   // Reference counting
@@ -217,8 +269,14 @@ class CONTENT_EXPORT BrowserAccessibility {
   // returns true if found.
   bool GetHtmlAttribute(const char* attr, string16* value) const;
 
+  // Returns true if the bit corresponding to the given state enum is 1.
+  bool HasState(WebAccessibility::State state_enum) const;
+
   // Returns true if this node is an editable text field of any kind.
   bool IsEditableText() const;
+
+  // Append the text from this node and its children.
+  string16 GetTextRecursive() const;
 
  protected:
   BrowserAccessibility();

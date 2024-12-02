@@ -11,11 +11,11 @@
 #include "base/string16.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
-#include "chrome/browser/ui/shell_dialogs.h"
-#include "views/controls/button/button.h"
-#include "views/controls/combobox/combobox.h"
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/view.h"
+#include "chrome/browser/ui/select_file_dialog.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/combobox/combobox_listener.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/view.h"
 
 namespace views {
 class Label;
@@ -27,31 +27,32 @@ namespace chromeos {
 class VPNConfigView : public ChildNetworkConfigView,
                       public views::TextfieldController,
                       public views::ButtonListener,
-                      public views::Combobox::Listener,
+                      public views::ComboboxListener,
                       public CertLibrary::Observer {
  public:
   VPNConfigView(NetworkConfigView* parent, VirtualNetwork* vpn);
   explicit VPNConfigView(NetworkConfigView* parent);
   virtual ~VPNConfigView();
 
-  // views::TextfieldController methods.
-  virtual void ContentsChanged(
-      views::Textfield* sender, const string16& new_contents) OVERRIDE;
-  virtual bool HandleKeyEvent(
-      views::Textfield* sender, const views::KeyEvent& key_event) OVERRIDE;
+  // views::TextfieldController:
+  virtual void ContentsChanged(views::Textfield* sender,
+                               const string16& new_contents) OVERRIDE;
+  virtual bool HandleKeyEvent(views::Textfield* sender,
+                              const views::KeyEvent& key_event) OVERRIDE;
 
-  // views::ButtonListener
-  virtual void ButtonPressed(
-      views::Button* sender, const views::Event& event) OVERRIDE;
+  // views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
-  // views::Combobox::Listener
-  virtual void ItemChanged(
-      views::Combobox* combo_box, int prev_index, int new_index) OVERRIDE;
+  // views::ComboboxListener:
+  virtual void ItemChanged(views::Combobox* combo_box,
+                           int prev_index,
+                           int new_index) OVERRIDE;
 
   // CertLibrary::Observer:
   virtual void OnCertificatesLoaded(bool initial_load) OVERRIDE;
 
-  // ChildNetworkConfigView implementation.
+  // ChildNetworkConfigView:
   virtual string16 GetTitle() OVERRIDE;
   virtual bool CanLogin() OVERRIDE;
   virtual bool Login() OVERRIDE;
@@ -112,6 +113,13 @@ class VPNConfigView : public ChildNetworkConfigView,
   bool enable_server_ca_cert_;
   bool enable_otp_;
   bool enable_group_name_;
+
+  NetworkPropertyUIData ca_cert_ui_data_;
+  NetworkPropertyUIData psk_passphrase_ui_data_;
+  NetworkPropertyUIData user_cert_ui_data_;
+  NetworkPropertyUIData username_ui_data_;
+  NetworkPropertyUIData user_passphrase_ui_data_;
+  NetworkPropertyUIData group_name_ui_data_;
 
   views::Textfield* server_textfield_;
   views::Label* service_text_;

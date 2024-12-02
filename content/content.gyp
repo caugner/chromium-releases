@@ -22,8 +22,14 @@
    # upstream unnecessarily (e.g., content_renderer depends on allocator
    # and chrome_exe depends on content_common but we don't want
    # chrome_exe to have to depend on allocator).
-   # TODO(dpranke): Uncomment: ['component == "static_library"', {
-   ['1 == 1', {
+   #
+   # TODO(dpranke): Remove the mac conditional once the circular
+   # dependencies in WebKit.gyp are fixed.
+   # See https://bugs.webkit.org/show_bug.cgi?id=68463
+   ['OS=="mac" or component=="static_library" or incremental_chrome_dll==1', {
+     'target_defines': [
+       'COMPILE_CONTENT_STATICALLY',
+     ],
      'targets': [
       {'target_name': 'content',
        'type': 'none',
@@ -41,6 +47,7 @@
       },
       {'target_name': 'content_app',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_app.gypi',
         ],
@@ -50,6 +57,7 @@
       },
       {'target_name': 'content_browser',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_browser.gypi',
         ],
@@ -59,12 +67,17 @@
       },
       {'target_name': 'content_common',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_common.gypi',
+        ],
+       'dependencies': [
+          'content_resources.gyp:content_resources',
         ],
       },
       {'target_name': 'content_gpu',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_gpu.gypi',
         ],
@@ -74,6 +87,7 @@
       },
       {'target_name': 'content_plugin',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_plugin.gypi',
         ],
@@ -83,12 +97,14 @@
       },
       {'target_name': 'content_ppapi_plugin',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_ppapi_plugin.gypi',
         ],
       },
       {'target_name': 'content_renderer',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_renderer.gypi',
         ],
@@ -98,6 +114,7 @@
       },
       {'target_name': 'content_utility',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_utility.gypi',
         ],
@@ -107,6 +124,7 @@
       },
       {'target_name': 'content_worker',
        'type': 'static_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
           'content_worker.gypi',
        ],
@@ -180,11 +198,10 @@
       ],
     },
     { # component != static_library
-     'target_defaults': {
-     },
      'targets': [
       {'target_name': 'content',
        'type': 'shared_library',
+       'variables': { 'enable_wexit_time_destructors': 1, },
        'includes': [
         'content_app.gypi',
         'content_browser.gypi',
@@ -207,7 +224,7 @@
       },
       {'target_name': 'content_common',
        'type': 'none',
-       'dependencies': ['content'],
+       'dependencies': ['content', 'content_resources.gyp:content_resources'],
       },
       {'target_name': 'content_gpu',
        'type': 'none',

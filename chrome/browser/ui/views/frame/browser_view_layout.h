@@ -7,8 +7,9 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "ui/gfx/rect.h"
-#include "views/layout/layout_manager.h"
+#include "ui/views/layout/layout_manager.h"
 
 class AbstractTabStripView;
 class BookmarkBarView;
@@ -46,17 +47,17 @@ class BrowserViewLayout : public views::LayoutManager {
 
   // Tests to see if the specified |point| (in nonclient view's coordinates)
   // is within the views managed by the laymanager. Returns one of
-  // HitTestCompat enum defined in views/window/hit_test.h.
+  // HitTestCompat enum defined in ui/base/hit_test.h.
   // See also ClientView::NonClientHitTest.
   virtual int NonClientHitTest(const gfx::Point& point);
 
   // views::LayoutManager overrides:
-  virtual void Installed(views::View* host);
-  virtual void Uninstalled(views::View* host);
-  virtual void ViewAdded(views::View* host, views::View* view);
-  virtual void ViewRemoved(views::View* host, views::View* view);
-  virtual void Layout(views::View* host);
-  virtual gfx::Size GetPreferredSize(views::View* host);
+  virtual void Installed(views::View* host) OVERRIDE;
+  virtual void Uninstalled(views::View* host) OVERRIDE;
+  virtual void ViewAdded(views::View* host, views::View* view) OVERRIDE;
+  virtual void ViewRemoved(views::View* host, views::View* view) OVERRIDE;
+  virtual void Layout(views::View* host) OVERRIDE;
+  virtual gfx::Size GetPreferredSize(views::View* host) OVERRIDE;
 
  protected:
   Browser* browser();

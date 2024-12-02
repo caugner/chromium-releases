@@ -4,22 +4,23 @@
 
 #include "chrome/browser/ui/login/login_prompt.h"
 
+#include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/login_view.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
+using content::BrowserThread;
 using webkit_glue::PasswordForm;
 
 // ----------------------------------------------------------------------------
@@ -37,15 +38,15 @@ class LoginHandlerWin : public LoginHandler,
   }
 
   // LoginModelObserver implementation.
-  virtual void OnAutofillDataAvailable(const std::wstring& username,
-                                       const std::wstring& password) OVERRIDE {
+  virtual void OnAutofillDataAvailable(const string16& username,
+                                       const string16& password) OVERRIDE {
     // Nothing to do here since LoginView takes care of autofil for win.
   }
 
   // views::DialogDelegate methods:
   virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE {
-    if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
+      ui::DialogButton button) const OVERRIDE {
+    if (button == ui::DIALOG_BUTTON_OK)
       return l10n_util::GetStringUTF16(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);
     return DialogDelegate::GetDialogButtonLabel(button);
   }

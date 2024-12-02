@@ -9,13 +9,14 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 
 class Profile;
 class ProfileSyncService;
-class ProfileSyncFactory;
+class ProfileSyncComponentsFactory;
 class SyncError;
 
 namespace base { class TimeDelta; }
@@ -40,22 +41,22 @@ class ChangeProcessor;
 class NonFrontendDataTypeController : public DataTypeController {
  public:
   NonFrontendDataTypeController(
-      ProfileSyncFactory* profile_sync_factory,
+      ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile);
   virtual ~NonFrontendDataTypeController();
 
   // DataTypeController interface.
-  virtual void Start(StartCallback* start_callback);
-  virtual void Stop();
+  virtual void Start(StartCallback* start_callback) OVERRIDE;
+  virtual void Stop() OVERRIDE;
   virtual syncable::ModelType type() const = 0;
   virtual browser_sync::ModelSafeGroup model_safe_group() const = 0;
-  virtual std::string name() const;
-  virtual State state() const;
+  virtual std::string name() const OVERRIDE;
+  virtual State state() const OVERRIDE;
 
   // UnrecoverableErrorHandler interface.
   // Note: this is performed on the datatype's thread.
   virtual void OnUnrecoverableError(const tracked_objects::Location& from_here,
-                                    const std::string& message);
+                                    const std::string& message) OVERRIDE;
  protected:
   // For testing only.
   NonFrontendDataTypeController();
@@ -130,7 +131,7 @@ class NonFrontendDataTypeController : public DataTypeController {
   virtual void RecordStartFailure(StartResult result) = 0;
 
   // Accessors and mutators used by derived classes.
-  ProfileSyncFactory* profile_sync_factory() const;
+  ProfileSyncComponentsFactory* profile_sync_factory() const;
   Profile* profile() const;
   ProfileSyncService* profile_sync_service() const;
   void set_start_callback(StartCallback* callback);
@@ -142,7 +143,7 @@ class NonFrontendDataTypeController : public DataTypeController {
   virtual void set_change_processor(ChangeProcessor* change_processor);
 
  private:
-  ProfileSyncFactory* const profile_sync_factory_;
+  ProfileSyncComponentsFactory* const profile_sync_factory_;
   Profile* const profile_;
   ProfileSyncService* const profile_sync_service_;
 

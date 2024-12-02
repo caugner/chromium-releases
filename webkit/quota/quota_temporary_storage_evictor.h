@@ -9,17 +9,12 @@
 #include <map>
 #include <string>
 
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer.h"
 #include "webkit/quota/quota_types.h"
 
 class GURL;
-
-namespace base {
-class MessageLoopProxy;
-}
 
 namespace quota {
 
@@ -132,8 +127,6 @@ class QuotaTemporaryStorageEvictor : public base::NonThreadSafe {
 
   base::OneShotTimer<QuotaTemporaryStorageEvictor> eviction_timer_;
   base::RepeatingTimer<QuotaTemporaryStorageEvictor> histogram_timer_;
-
-  base::ScopedCallbackFactory<QuotaTemporaryStorageEvictor> callback_factory_;
   base::WeakPtrFactory<QuotaTemporaryStorageEvictor> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(QuotaTemporaryStorageEvictor);

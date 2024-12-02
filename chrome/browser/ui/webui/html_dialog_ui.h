@@ -11,17 +11,17 @@
 
 #include "base/string16.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "content/common/property_bag.h"
 #include "googleurl/src/gurl.h"
-
-namespace gfx {
-class Size;
-}
 
 struct ContextMenuParams;
 
 namespace base {
 class ListValue;
+template<class T> class PropertyAccessor;
+}
+
+namespace gfx {
+class Size;
 }
 
 // Implement this class to receive notifications.
@@ -105,7 +105,7 @@ class HtmlDialogUI : public ChromeWebUI {
 
   // Returns the PropertyBag accessor object used to write the delegate pointer
   // into the TabContents (see class-level comment above).
-  static PropertyAccessor<HtmlDialogUIDelegate*>& GetPropertyAccessor();
+  static base::PropertyAccessor<HtmlDialogUIDelegate*>& GetPropertyAccessor();
 
  private:
   // WebUI
@@ -120,7 +120,7 @@ class HtmlDialogUI : public ChromeWebUI {
 // Displays external URL contents inside a modal HTML dialog.
 //
 // Intended to be the place to collect the settings and lockdowns
-// necessary for running external UI conponents securely (e.g., the
+// necessary for running external UI components securely (e.g., the
 // cloud print dialog).
 class ExternalHtmlDialogUI : public HtmlDialogUI {
  public:

@@ -6,25 +6,28 @@
 #define UI_GFX_COMPOSITOR_LAYER_H_
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebContentLayerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebLayer.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebLayerClient.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/compositor/compositor.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/layer_animator_delegate.h"
+#include "ui/gfx/compositor/layer_animation_delegate.h"
 #include "ui/gfx/compositor/layer_delegate.h"
 
 class SkCanvas;
 
 namespace ui {
 
-class Animation;
 class Compositor;
+class LayerAnimator;
 class Texture;
 
 // Layer manages a texture, transform and a set of child Layers. Any View that
@@ -35,17 +38,18 @@ class Texture;
 // NOTE: unlike Views, each Layer does *not* own its children views. If you
 // delete a Layer and it has children, the parent of each child layer is set to
 // NULL, but the children are not deleted.
-class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
+class COMPOSITOR_EXPORT Layer :
+    public LayerAnimationDelegate,
+    NON_EXPORTED_BASE(public WebKit::WebLayerClient),
+    NON_EXPORTED_BASE(public WebKit::WebContentLayerClient) {
  public:
   enum LayerType {
     LAYER_HAS_NO_TEXTURE = 0,
     LAYER_HAS_TEXTURE = 1
   };
 
-  // |compositor| can be NULL, and will be set later when the Layer is added to
-  // a Compositor.
-  explicit Layer(Compositor* compositor);
-  Layer(Compositor* compositor, LayerType type);
+  Layer();
+  explicit Layer(LayerType type);
   virtual ~Layer();
 
   // Retrieves the Layer's compositor. The Layer will walk up its parent chain
@@ -65,8 +69,13 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
   // Removes a Layer from this Layer.
   void Remove(Layer* child);
 
-  // Moves a child to the end of the child list.
-  void MoveToFront(Layer* child);
+  // Stacks |child| above all other children.
+  void StackAtTop(Layer* child);
+
+  // Stacks |child| directly above |other|.  Both must be children of this
+  // layer.  Note that if |child| is initially stacked even higher, calling this
+  // method will result in |child| being lowered in the stacking order.
+  void StackAbove(Layer* child, Layer* other);
 
   // Returns the child Layers.
   const std::vector<Layer*>& children() const { return children_; }
@@ -78,29 +87,39 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
   // Returns true if this Layer contains |other| somewhere in its children.
   bool Contains(const Layer* other) const;
 
-  // Sets the animation to use for changes to opacity, position or transform.
-  // That is, if you invoke this with non-NULL |animation| is started and any
-  // changes to opacity, position or transform are animated between the current
-  // value and target value. If the current animation is NULL or completed,
-  // changes are immediate. If the opacity, transform or bounds are changed
-  // and the animation is part way through, the animation is canceled and
-  // the bounds, opacity and transfrom and set to the target value.
-  // Layer takes ownership of |animation| and installs it's own delegate on the
-  // animation.
-  void SetAnimation(Animation* animation);
+  // The layer's animator is responsible for causing automatic animations when
+  // properties are set. It also manages a queue of pending animations and
+  // handles blending of animations. The layer takes ownership of the animator.
+  void SetAnimator(LayerAnimator* animator);
+
+  // Returns the layer's animator. Creates a default animator of one has not
+  // been set. Will not return NULL.
+  LayerAnimator* GetAnimator();
 
   // The transform, relative to the parent.
-  void SetTransform(const ui::Transform& transform);
-  const ui::Transform& transform() const { return transform_; }
+  void SetTransform(const Transform& transform);
+  const Transform& transform() const { return transform_; }
+
+  // Return the target transform if animator is running, or the current
+  // transform otherwise.
+  Transform GetTargetTransform() const;
 
   // The bounds, relative to the parent.
   void SetBounds(const gfx::Rect& bounds);
   const gfx::Rect& bounds() const { return bounds_; }
 
+  // Return the target bounds if animator is running, or the current bounds
+  // otherwise.
+  gfx::Rect GetTargetBounds() const;
+
   // The opacity of the layer. The opacity is applied to each pixel of the
   // texture (resulting alpha = opacity * alpha).
   float opacity() const { return opacity_; }
   void SetOpacity(float opacity);
+
+  // Return the target opacity if animator is running, or the current opacity
+  // otherwise.
+  float GetTargetOpacity() const;
 
   // Sets the visibility of the Layer. A Layer may be visible but not
   // drawn. This happens if any ancestor of a Layer is not visible.
@@ -113,7 +132,7 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
 
   // Returns true if this layer can have a texture (has_texture_ is true)
   // and is not completely obscured by a child.
-  bool ShouldDraw();
+  bool ShouldDraw() const;
 
   // Converts a point from the coordinates of |source| to the coordinates of
   // |target|. Necessarily, |source| and |target| must inhabit the same Layer
@@ -126,11 +145,14 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
   void SetFillsBoundsOpaquely(bool fills_bounds_opaquely);
   bool fills_bounds_opaquely() const { return fills_bounds_opaquely_; }
 
+  // Returns the invalid rectangle. That is, the region of the layer that needs
+  // to be repainted. This is exposed for testing and isn't generally useful.
+  const gfx::Rect& invalid_rect() const { return invalid_rect_; }
+
   const gfx::Rect& hole_rect() const {  return hole_rect_; }
 
-  // The compositor.
-  const Compositor* compositor() const { return compositor_; }
-  Compositor* compositor() { return compositor_; }
+  const std::string& name() const { return name_; }
+  void set_name(const std::string& name) { name_ = name; }
 
   const ui::Texture* texture() const { return texture_.get(); }
 
@@ -158,10 +180,26 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
   void DrawTree();
 
   // Sometimes the Layer is being updated by something other than SetCanvas
-  // (e.g. the GPU process on TOUCH_UI).
+  // (e.g. the GPU process on UI_COMPOSITOR_IMAGE_TRANSPORT).
   bool layer_updated_externally() const { return layer_updated_externally_; }
 
+  // WebLayerClient
+  virtual void notifyNeedsComposite();
+
+  // WebContentLayerClient
+  virtual void paintContents(WebKit::WebCanvas*, const WebKit::WebRect& clip);
+
+#if defined(USE_WEBKIT_COMPOSITOR)
+  WebKit::WebLayer web_layer() { return web_layer_; }
+#endif
+
  private:
+  struct LayerProperties {
+   public:
+    ui::Layer* layer;
+    ui::Transform transform_relative_to_root;
+  };
+
   // TODO(vollick): Eventually, if a non-leaf node has an opacity of less than
   // 1.0, we'll render to a separate texture, and then apply the alpha.
   // Currently, we multiply our opacity by all our ancestor's opacities and
@@ -172,18 +210,31 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
   // delegate.
   void UpdateLayerCanvas();
 
+  // Called to indicate that a layer's properties have changed and that the
+  // holes for the layers must be recomputed.
+  void SetNeedsToRecomputeHole();
+
+  // Resets |hole_rect_| to the empty rect for all layers below and
+  // including this one.
+  void ClearHoleRects();
+
+  // Does a preorder traversal of layers starting with this layer. Omits layers
+  // which cannot punch a hole in another layer such as non visible layers
+  // and layers which don't fill their bounds opaquely.
+  void GetLayerProperties(const ui::Transform& current_transform,
+                          std::vector<LayerProperties>* traverasal);
+
   // A hole in a layer is an area in the layer that does not get drawn
   // because this area is covered up with another layer which is known to be
   // opaque.
   // This method computes the dimension of the hole (if there is one)
   // based on whether one of its child nodes is always opaque.
-  // Note: For simplicity's sake, currently a hole is only created if the child
-  // view has no transform with respect to its parent.
+  // Note: This method should only be called from the root.
   void RecomputeHole();
 
-  // Returns true if the layer paints every pixel (fills_bounds_opaquely)
-  // and the alpha of the layer is 1.0f.
-  bool IsCompletelyOpaque() const;
+  void set_hole_rect(const gfx::Rect& hole_rect) {
+    hole_rect_ = hole_rect;
+  }
 
   // Determines the regions that don't intersect |rect| and places the
   // result in |sides|.
@@ -203,6 +254,9 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
                         const gfx::Rect& region_to_punch_out,
                         std::vector<gfx::Rect>* sides);
 
+  // Drops texture just for this layer.
+  void DropTexture();
+
   // Drop all textures for layers below and including this one. Called when
   // the layer is removed from a hierarchy. Textures will be re-generated if
   // the layer is subsequently re-attached and needs to be drawn.
@@ -219,21 +273,27 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
   // should have valid alpha.
   bool has_valid_alpha_channel() const { return !layer_updated_externally_; }
 
-  // If the animation is running and has progressed, it is stopped and all
-  // properties that are animated (except |property|) are immediately set to
-  // their target value.
-  void StopAnimatingIfNecessary(LayerAnimator::AnimationProperty property);
-
   // Following are invoked from the animation or if no animation exists to
   // update the values immediately.
   void SetBoundsImmediately(const gfx::Rect& bounds);
   void SetTransformImmediately(const ui::Transform& transform);
   void SetOpacityImmediately(float opacity);
 
-  // LayerAnimatorDelegate overrides:
-  virtual void SetBoundsFromAnimator(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SetTransformFromAnimator(const Transform& transform) OVERRIDE;
-  virtual void SetOpacityFromAnimator(float opacity) OVERRIDE;
+  // Implementation of LayerAnimatorDelegate
+  virtual void SetBoundsFromAnimation(const gfx::Rect& bounds) OVERRIDE;
+  virtual void SetTransformFromAnimation(const Transform& transform) OVERRIDE;
+  virtual void SetOpacityFromAnimation(float opacity) OVERRIDE;
+  virtual void ScheduleDrawForAnimation() OVERRIDE;
+  virtual const gfx::Rect& GetBoundsForAnimation() const OVERRIDE;
+  virtual const Transform& GetTransformForAnimation() const OVERRIDE;
+  virtual float GetOpacityForAnimation() const OVERRIDE;
+
+#if defined(USE_WEBKIT_COMPOSITOR)
+  void CreateWebLayer();
+  void RecomputeTransform();
+  void RecomputeDrawsContentAndUVRect();
+  void RecomputeDebugBorderColor();
+#endif
 
   const LayerType type_;
 
@@ -243,6 +303,7 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
 
   Layer* parent_;
 
+  // This layer's children, in bottom-to-top stacking order.
   std::vector<Layer*> children_;
 
   ui::Transform transform_;
@@ -256,6 +317,8 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
 
   gfx::Rect hole_rect_;
 
+  bool recompute_hole_;
+
   gfx::Rect invalid_rect_;
 
   // If true the layer is always up to date.
@@ -263,9 +326,17 @@ class COMPOSITOR_EXPORT Layer : public LayerAnimatorDelegate {
 
   float opacity_;
 
+  std::string name_;
+
   LayerDelegate* delegate_;
 
   scoped_ptr<LayerAnimator> animator_;
+
+#if defined(USE_WEBKIT_COMPOSITOR)
+  WebKit::WebLayer web_layer_;
+  bool web_layer_is_accelerated_;
+  bool show_debug_borders_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(Layer);
 };

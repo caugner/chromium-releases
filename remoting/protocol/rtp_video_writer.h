@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,10 @@ class RtpVideoWriter : public VideoWriter {
   virtual ~RtpVideoWriter();
 
   // VideoWriter interface.
-  virtual void Init(protocol::Session* session,
+  virtual void Init(Session* session,
                     const InitializedCallback& callback) OVERRIDE;
   virtual void Close() OVERRIDE;
+  virtual bool is_connected() OVERRIDE;
 
   // VideoStub interface.
   virtual void ProcessVideoPacket(const VideoPacket* packet,
@@ -35,6 +36,8 @@ class RtpVideoWriter : public VideoWriter {
 
  private:
   void OnChannelReady(bool rtp, net::Socket* socket);
+
+  Session* session_;
 
   bool initialized_;
   InitializedCallback initialized_callback_;

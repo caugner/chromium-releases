@@ -23,14 +23,16 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/browser/browser_thread_impl.h"
+#include "content/browser/notification_service_impl.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 
 using base::Time;
+using content::BrowserThread;
 
 // Addition types data can be generated for. By default only urls/visits are
 // added.
@@ -233,10 +235,10 @@ int main(int argc, const char* argv[]) {
   chrome::RegisterPathProvider();
   ui::RegisterPathProvider();
   ResourceBundle::InitSharedInstance("en-US");
-  NotificationService notification_service;
+  NotificationServiceImpl notification_service;
   MessageLoopForUI message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  BrowserThread db_thread(BrowserThread::DB, &message_loop);
+  content::BrowserThreadImpl ui_thread(BrowserThread::UI, &message_loop);
+  content::BrowserThreadImpl db_thread(BrowserThread::DB, &message_loop);
   TestingProfile profile;
   profile.CreateHistoryService(false, false);
   if (types & TOP_SITES) {

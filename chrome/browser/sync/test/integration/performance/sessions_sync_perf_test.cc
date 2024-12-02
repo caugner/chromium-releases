@@ -62,7 +62,10 @@ void SessionsSyncPerfTest::UpdateTabs(int profile) {
     browser->SelectNumberedTab(i);
     url = NextURL();
     browser->OpenURL(
-        OpenURLParams(url, GURL("http://localhost"), CURRENT_TAB,
+        OpenURLParams(url,
+        content::Referrer(GURL("http://localhost"),
+                          WebKit::WebReferrerPolicyDefault),
+        CURRENT_TAB,
         content::PageTransitionFromInt(0), false));
     urls.push_back(url);
   }
@@ -79,14 +82,14 @@ int SessionsSyncPerfTest::GetTabCount(int profile) {
   SyncedSessionVector sessions;
 
   if (!GetLocalSession(profile, &local_session)) {
-    VLOG(1) << "GetLocalSession returned false";
+    DVLOG(1) << "GetLocalSession returned false";
     return -1;
   }
 
   if (!GetSessionData(profile, &sessions)) {
     // Foreign session data may be empty.  In this case we only count tabs in
     // the local session.
-    VLOG(1) << "GetSessionData returned false";
+    DVLOG(1) << "GetSessionData returned false";
   }
 
   sessions.push_back(local_session);

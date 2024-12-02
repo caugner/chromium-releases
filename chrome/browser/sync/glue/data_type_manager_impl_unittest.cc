@@ -17,11 +17,11 @@
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_observer_mock.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/notification_observer_mock.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,6 +30,7 @@ using browser_sync::DataTypeManagerImpl;
 using browser_sync::DataTypeController;
 using browser_sync::DataTypeControllerMock;
 using browser_sync::SyncBackendHostMock;
+using content::BrowserThread;
 using testing::_;
 using testing::AtLeast;
 using testing::DoAll;
@@ -46,9 +47,9 @@ using testing::Return;
 using testing::SaveArg;
 
 DataTypeManager::ConfigureStatus GetStatus(
-    const NotificationDetails& details) {
+    const content::NotificationDetails& details) {
   const DataTypeManager::ConfigureResult* result =
-      Details<const DataTypeManager::ConfigureResult>(
+      content::Details<const DataTypeManager::ConfigureResult>(
       details).ptr();
   return result->status;
 }
@@ -57,9 +58,9 @@ void DoConfigureDataTypes(
     const syncable::ModelTypeSet& types_to_add,
     const syncable::ModelTypeSet& types_to_remove,
     sync_api::ConfigureReason reason,
-    base::Callback<void(bool)> ready_task,
+    base::Callback<void(const syncable::ModelTypeSet&)> ready_task,
     bool enable_nigori) {
-  ready_task.Run(true);
+  ready_task.Run(syncable::ModelTypeSet());
 }
 
 void QuitMessageLoop() {
@@ -78,10 +79,10 @@ class DataTypeManagerImplTest : public testing::Test {
   virtual void SetUp() {
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_SYNC_CONFIGURE_START,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_SYNC_CONFIGURE_DONE,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
   DataTypeControllerMock* MakeBookmarkDTC() {
@@ -240,8 +241,9 @@ class DataTypeManagerImplTest : public testing::Test {
     EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
   }
 
-  void RunConfigureWhileDownloadPendingTest(bool enable_nigori,
-                                            bool first_configure_result) {
+  void RunConfigureWhileDownloadPendingTest(
+      bool enable_nigori,
+      const syncable::ModelTypeSet& first_configure_result) {
     DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
     SetStartStopExpectations(bookmark_dtc);
     controllers_[syncable::BOOKMARKS] = bookmark_dtc;
@@ -253,7 +255,7 @@ class DataTypeManagerImplTest : public testing::Test {
     DataTypeManagerImpl dtm(&backend_, &controllers_);
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::OK);
-    base::Callback<void(bool)> task;
+    base::Callback<void(const syncable::ModelTypeSet&)> task;
     // Grab the task the first time this is called so we can configure
     // before it is finished.
     EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, enable_nigori)).
@@ -282,11 +284,11 @@ class DataTypeManagerImplTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   DataTypeController::TypeMap controllers_;
   NiceMock<SyncBackendHostMock> backend_;
-  NotificationObserverMock observer_;
-  NotificationRegistrar registrar_;
+  content::NotificationObserverMock observer_;
+  content::NotificationRegistrar registrar_;
   std::set<syncable::ModelType> types_;
 };
 
@@ -561,24 +563,30 @@ TEST_F(DataTypeManagerImplTest, OneControllerFailsAssociation) {
 
 
 TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPending) {
-  RunConfigureWhileDownloadPendingTest(true /* enable_nigori */,
-                                       true /* first_configure_result */);
+  RunConfigureWhileDownloadPendingTest(
+      true /* enable_nigori */,
+      syncable::ModelTypeSet() /* first_configure_result */);
 }
 
 TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPendingWithoutNigori) {
-  RunConfigureWhileDownloadPendingTest(false /* enable_nigori */,
-                                       true /* first_configure_result */);
+  RunConfigureWhileDownloadPendingTest(
+      false /* enable_nigori */,
+      syncable::ModelTypeSet() /* first_configure_result */);
 }
 
 TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPendingFail) {
-  RunConfigureWhileDownloadPendingTest(true /* enable_nigori */,
-                                       false /* first_configure_result */);
+  syncable::ModelTypeSet first_configure_result;
+  first_configure_result.insert(syncable::BOOKMARKS);
+  RunConfigureWhileDownloadPendingTest(
+      true /* enable_nigori */, first_configure_result);
 }
 
 TEST_F(DataTypeManagerImplTest,
        ConfigureWhileDownloadPendingFailWithoutNigori) {
-  RunConfigureWhileDownloadPendingTest(false /* enable_nigori */,
-                                       false /* first_configure_result */);
+  syncable::ModelTypeSet first_configure_result;
+  first_configure_result.insert(syncable::BOOKMARKS);
+  RunConfigureWhileDownloadPendingTest(
+      false /* enable_nigori */, first_configure_result);
 }
 
 TEST_F(DataTypeManagerImplTest, StopWhileDownloadPending) {
@@ -589,7 +597,7 @@ TEST_F(DataTypeManagerImplTest, StopWhileDownloadPending) {
   DataTypeManagerImpl dtm(&backend_, &controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::ABORTED);
-  base::Callback<void(bool)> task;
+  base::Callback<void(const syncable::ModelTypeSet&)> task;
   // Grab the task the first time this is called so we can stop
   // before it is finished.
   EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).
@@ -606,5 +614,5 @@ TEST_F(DataTypeManagerImplTest, StopWhileDownloadPending) {
 
   // It should be perfectly safe to run this task even though the DTM
   // has been stopped.
-  task.Run(true);
+  task.Run(syncable::ModelTypeSet());
 }

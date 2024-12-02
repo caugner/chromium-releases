@@ -72,6 +72,16 @@ class MEDIA_EXPORT AudioOutputStream {
     // playback will not continue. |code| is an error code that is platform
     // specific.
     virtual void OnError(AudioOutputStream* stream, int code) = 0;
+
+    // Waits till data becomes available. Used when buffering data starting
+    // new audio stream.
+    // Polling is not the best approach, but incorporating messaging loop
+    // with delayed tasks into guts of complex code is even worse, as it is
+    // very error-prone. We cannot easily add synchronization, interface is
+    // already cut in stone because of need of backward compatibility with
+    // plugins. In any case, data is usually immediately available,
+    // so there would be no delay.
+    virtual void WaitTillDataReady() {}
   };
 
   virtual ~AudioOutputStream() {}
@@ -102,7 +112,7 @@ class MEDIA_EXPORT AudioOutputStream {
 };
 
 // Models an audio sink receiving recorded audio from the audio driver.
-class AudioInputStream {
+class MEDIA_EXPORT AudioInputStream {
  public:
   class MEDIA_EXPORT AudioInputCallback {
    public:

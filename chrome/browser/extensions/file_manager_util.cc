@@ -7,16 +7,21 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/simple_message_box.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/plugin_service.h"
 #include "content/browser/user_metrics.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -28,8 +33,14 @@
 #include "chrome/browser/chromeos/media/media_player.h"
 #endif
 
+using content::BrowserThread;
+
 #define FILEBROWSER_DOMAIN "hhaomjibdihmijegdhdafkllkbggdgoj"
 const char kFileBrowserDomain[] = FILEBROWSER_DOMAIN;
+
+namespace file_manager_util {
+namespace {
+
 #define FILEBROWSER_URL(PATH) \
     ("chrome-extension://" FILEBROWSER_DOMAIN "/" PATH)
 // This is the "well known" url for the file manager extension from
@@ -40,11 +51,15 @@ const char kBaseFileBrowserUrl[] = FILEBROWSER_URL("main.html");
 const char kMediaPlayerUrl[] = FILEBROWSER_URL("mediaplayer.html");
 const char kMediaPlayerPlaylistUrl[] = FILEBROWSER_URL("playlist.html");
 #undef FILEBROWSER_URL
+#undef FILEBROWSER_DOMAIN
 
+const char kPdfExtension[] = ".pdf";
 // List of file extension we can open in tab.
 const char* kBrowserSupportedExtensions[] = {
-    ".bmp", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".pdf", ".txt", ".html",
-    ".htm"
+#if defined(GOOGLE_CHROME_BUILD)
+    ".pdf",
+#endif
+    ".bmp", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".txt", ".html", ".htm"
 };
 // List of file extension that can be handled with the media player.
 const char* kAVExtensions[] = {
@@ -85,9 +100,27 @@ bool IsSupportedAVExtension(const char* ext) {
   return false;
 }
 
-// static
-GURL FileManagerUtil::GetFileBrowserExtensionUrl() {
-  return GURL(kFileBrowserExtensionUrl);
+// If pdf plugin is enabled, we should open pdf files in a tab.
+bool ShouldBeOpenedWithPdfPlugin(const char* ext) {
+  if (base::strcasecmp(ext, kPdfExtension) != 0)
+    return false;
+
+  Browser* browser = BrowserList::GetLastActive();
+  if (!browser)
+    return false;
+
+  FilePath pdf_path;
+  PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path);
+
+  webkit::WebPluginInfo plugin;
+  if (!PluginService::GetInstance()->GetPluginInfoByPath(pdf_path, &plugin))
+    return false;
+
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(browser->profile());
+  if (!plugin_prefs)
+    return false;
+
+  return plugin_prefs->IsPluginEnabled(plugin);
 }
 
 // Returns index |ext| has in the |array|. If there is no |ext| in |array|, last
@@ -103,23 +136,57 @@ int UMAExtensionIndex(const char *ext,
   return 0;
 }
 
-// static
-GURL FileManagerUtil::GetFileBrowserUrl() {
+// Convert numeric dialog type to a string.
+std::string GetDialogTypeAsString(
+    SelectFileDialog::Type dialog_type) {
+  std::string type_str;
+  switch (dialog_type) {
+    case SelectFileDialog::SELECT_NONE:
+      type_str = "full-page";
+      break;
+
+    case SelectFileDialog::SELECT_FOLDER:
+      type_str = "folder";
+      break;
+
+    case SelectFileDialog::SELECT_SAVEAS_FILE:
+      type_str = "saveas-file";
+      break;
+
+    case SelectFileDialog::SELECT_OPEN_FILE:
+      type_str = "open-file";
+      break;
+
+    case SelectFileDialog::SELECT_OPEN_MULTI_FILE:
+      type_str = "open-multi-file";
+      break;
+
+    default:
+      NOTREACHED();
+  }
+
+  return type_str;
+}
+
+}  // namespace
+
+GURL GetFileBrowserExtensionUrl() {
+  return GURL(kFileBrowserExtensionUrl);
+}
+
+GURL GetFileBrowserUrl() {
   return GURL(kBaseFileBrowserUrl);
 }
 
-// static
-GURL FileManagerUtil::GetMediaPlayerUrl() {
+GURL GetMediaPlayerUrl() {
   return GURL(kMediaPlayerUrl);
 }
 
-// static
-GURL FileManagerUtil::GetMediaPlayerPlaylistUrl() {
+GURL GetMediaPlayerPlaylistUrl() {
   return GURL(kMediaPlayerPlaylistUrl);
 }
 
-// static
-bool FileManagerUtil::ConvertFileToFileSystemUrl(
+bool ConvertFileToFileSystemUrl(
     Profile* profile, const FilePath& full_file_path, const GURL& origin_url,
     GURL* url) {
   FilePath virtual_path;
@@ -134,8 +201,7 @@ bool FileManagerUtil::ConvertFileToFileSystemUrl(
   return true;
 }
 
-// static
-bool FileManagerUtil::ConvertFileToRelativeFileSystemPath(
+bool ConvertFileToRelativeFileSystemPath(
     Profile* profile, const FilePath& full_file_path, FilePath* virtual_path) {
   fileapi::FileSystemPathManager* path_manager =
       profile->GetFileSystemContext()->path_manager();
@@ -151,8 +217,7 @@ bool FileManagerUtil::ConvertFileToRelativeFileSystemPath(
   return true;
 }
 
-// static
-GURL FileManagerUtil::GetFileBrowserUrlWithParams(
+GURL GetFileBrowserUrlWithParams(
     SelectFileDialog::Type type,
     const string16& title,
     const FilePath& default_virtual_path,
@@ -195,58 +260,65 @@ GURL FileManagerUtil::GetFileBrowserUrlWithParams(
 
   // kChromeUIFileManagerURL could not be used since query parameters are not
   // supported for it.
-  std::string url = FileManagerUtil::GetFileBrowserUrl().spec() +
-                    '?' + EscapeUrlEncodedData(json_args, false);
+  std::string url = GetFileBrowserUrl().spec() +
+                    '?' + net::EscapeUrlEncodedData(json_args, false);
   return GURL(url);
-
 }
 
-// static
-void FileManagerUtil::ShowFullTabUrl(Profile*,
-                                     const FilePath& dir) {
+void ViewFolder(const FilePath& dir) {
   Browser* browser = BrowserList::GetLastActive();
   if (!browser)
     return;
 
   FilePath virtual_path;
-  if (!FileManagerUtil::ConvertFileToRelativeFileSystemPath(browser->profile(),
-                                                            dir,
-                                                            &virtual_path)) {
+  if (!ConvertFileToRelativeFileSystemPath(browser->profile(), dir,
+                                           &virtual_path)) {
     return;
   }
 
   std::string url = chrome::kChromeUIFileManagerURL;
-  url += "#/" + EscapeUrlEncodedData(virtual_path.value(), false);
+  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(), false);
 
   UserMetrics::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
   browser->ShowSingletonTabRespectRef(GURL(url));
 }
 
-void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
-  std::string ext = full_path.Extension();
-  // For things supported natively by the browser, we should open it
-  // in a tab.
-  if (IsSupportedBrowserExtension(ext.data())) {
-    std::string path;
-    path = "file://";
-    path.append(EscapeUrlEncodedData(full_path.value(), false));
-    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      bool result = BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          base::Bind(&ViewItem, full_path, enqueue));
-      DCHECK(result);
-      return;
-    }
-    Browser* browser = BrowserList::GetLastActive();
-    if (browser)
-      browser->AddSelectedTabWithURL(GURL(path), content::PAGE_TRANSITION_LINK);
-    return;
-  }
-#if defined(OS_CHROMEOS)
-  if (IsSupportedAVExtension(ext.data())) {
+void ViewFile(const FilePath& full_path, bool enqueue) {
+  if (!TryViewingFile(full_path, enqueue)) {
     Browser* browser = BrowserList::GetLastActive();
     if (!browser)
       return;
+    browser::ShowErrorBox(
+        browser->window()->GetNativeHandle(),
+        l10n_util::GetStringFUTF16(
+            IDS_FILE_BROWSER_ERROR_VIEWING_FILE_TITLE,
+            UTF8ToUTF16(full_path.BaseName().value())),
+        l10n_util::GetStringUTF16(
+            IDS_FILE_BROWSER_ERROR_VIEWING_FILE));
+  }
+}
+
+bool TryViewingFile(const FilePath& full_path, bool enqueue) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // There is nothing we can do if the browser is not present.
+  Browser* browser = BrowserList::GetLastActive();
+  if (!browser)
+    return true;
+
+  std::string ext = full_path.Extension();
+  // For things supported natively by the browser, we should open it
+  // in a tab.
+  if (IsSupportedBrowserExtension(ext.data()) ||
+      ShouldBeOpenedWithPdfPlugin(ext.data())) {
+    std::string path;
+    path = "file://";
+    path.append(net::EscapeUrlEncodedData(full_path.value(), false));
+    browser->AddSelectedTabWithURL(GURL(path), content::PAGE_TRANSITION_LINK);
+    return true;
+  }
+#if defined(OS_CHROMEOS)
+  if (IsSupportedAVExtension(ext.data())) {
     MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
 
     if (mediaplayer->GetPlaylist().empty())
@@ -260,7 +332,7 @@ void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
       mediaplayer->PopupMediaPlayer(browser);
       mediaplayer->ForcePlayMediaFile(browser->profile(), full_path);
     }
-    return;
+    return true;
   }
 #endif  // OS_CHROMEOS
 
@@ -271,48 +343,8 @@ void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
   UMA_HISTOGRAM_ENUMERATION("FileBrowser.OpeningFileType",
                             extension_index,
                             arraysize(kUMATrackingExtensions) - 1);
-
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(
-          &browser::ShowErrorBox,
-          static_cast<gfx::NativeWindow>(NULL),
-          l10n_util::GetStringFUTF16(
-              IDS_FILEBROWSER_ERROR_VIEWING_FILE_TITLE,
-              UTF8ToUTF16(full_path.BaseName().value())),
-          l10n_util::GetStringUTF16(
-              IDS_FILEBROWSER_ERROR_VIEWING_FILE)
-          ));
+  return false;
 }
 
-// static
-std::string FileManagerUtil::GetDialogTypeAsString(
-    SelectFileDialog::Type dialog_type) {
-  std::string type_str;
-  switch (dialog_type) {
-    case SelectFileDialog::SELECT_NONE:
-      type_str = "full-page";
-      break;
+}  // namespace file_manager_util
 
-    case SelectFileDialog::SELECT_FOLDER:
-      type_str = "folder";
-      break;
-
-    case SelectFileDialog::SELECT_SAVEAS_FILE:
-      type_str = "saveas-file";
-      break;
-
-    case SelectFileDialog::SELECT_OPEN_FILE:
-      type_str = "open-file";
-      break;
-
-    case SelectFileDialog::SELECT_OPEN_MULTI_FILE:
-      type_str = "open-multi-file";
-      break;
-
-    default:
-      NOTREACHED();
-  }
-
-  return type_str;
-}

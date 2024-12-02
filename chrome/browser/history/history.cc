@@ -30,6 +30,7 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/task.h"
+#include "base/threading/thread.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_backend.h"
@@ -47,9 +48,9 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_persistent_store_info.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -97,17 +98,16 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
       int type,
       history::HistoryDetails* details) OVERRIDE {
     // Send the notification on the history thread.
-    if (NotificationService::current()) {
-      Details<history::HistoryDetails> det(details);
-      NotificationService::current()->Notify(type,
-                                             Source<Profile>(profile_),
-                                             det);
+    if (content::NotificationService::current()) {
+      content::Details<history::HistoryDetails> det(details);
+      content::NotificationService::current()->Notify(
+          type, content::Source<Profile>(profile_), det);
     }
     // Send the notification to the history service on the main thread.
     message_loop_->PostTask(
         FROM_HERE,
-        base::Bind(&HistoryService::BroadcastNotifications,
-                   history_service_.get(), type, details));
+        base::Bind(&HistoryService::BroadcastNotificationsHelper,
+                   history_service_.get(), type, base::Owned(details)));
   }
 
   virtual void DBLoaded(int backend_id) OVERRIDE {
@@ -153,9 +153,9 @@ HistoryService::HistoryService(Profile* profile)
       needs_top_sites_migration_(false) {
   DCHECK(profile_);
   registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_REMOVED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_));
 }
 
 HistoryService::~HistoryService() {
@@ -498,6 +498,12 @@ void HistoryService::SetFaviconOutOfDateForPage(const GURL& page_url) {
                     &HistoryBackend::SetFaviconOutOfDateForPage, page_url);
 }
 
+void HistoryService::CloneFavicon(const GURL& old_page_url,
+                                  const GURL& new_page_url) {
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::CloneFavicon,
+                    old_page_url, new_page_url);
+}
+
 void HistoryService::SetImportedFavicons(
     const std::vector<history::ImportedFaviconUsage>& favicon_usage) {
   ScheduleAndForget(PRIORITY_NORMAL,
@@ -634,8 +640,8 @@ HistoryService::Handle HistoryService::QueryMostVisitedURLs(
 }
 
 void HistoryService::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
   if (!thread_)
     return;
 
@@ -652,7 +658,7 @@ void HistoryService::Observe(int type,
       // isn't. Therefore, we update the delete URLs after the fact.
       if (!profile_)
         return;  // No profile, probably unit testing.
-      Details<history::URLsDeletedDetails> deleted_details(details);
+      content::Details<history::URLsDeletedDetails> deleted_details(details);
       VisitedLinkMaster* visited_links = profile_->GetVisitedLinkMaster();
       if (!visited_links)
         return;  // Nobody to update.
@@ -664,7 +670,8 @@ void HistoryService::Observe(int type,
     }
 
     case chrome::NOTIFICATION_TEMPLATE_URL_REMOVED:
-      DeleteAllSearchTermsForKeyword(*(Details<TemplateURLID>(details).ptr()));
+      DeleteAllSearchTermsForKeyword(
+          *(content::Details<TemplateURLID>(details).ptr()));
       break;
 
     default:
@@ -767,12 +774,9 @@ void HistoryService::ExpireHistoryBetween(
            restrict_urls, begin_time, end_time);
 }
 
-void HistoryService::BroadcastNotifications(
+void HistoryService::BroadcastNotificationsHelper(
     int type,
-    history::HistoryDetails* details_deleted) {
-  // We take ownership of the passed-in pointer and delete it. It was made for
-  // us on another thread, so the caller doesn't know when we will handle it.
-  scoped_ptr<history::HistoryDetails> details(details_deleted);
+    history::HistoryDetails* details) {
   // TODO(evanm): this is currently necessitated by generate_profile, which
   // runs without a browser process. generate_profile should really create
   // a browser process, at which point this check can then be nuked.
@@ -784,14 +788,14 @@ void HistoryService::BroadcastNotifications(
 
   // The source of all of our notifications is the profile. Note that this
   // pointer is NULL in unit tests.
-  Source<Profile> source(profile_);
+  content::Source<Profile> source(profile_);
 
   // The details object just contains the pointer to the object that the
   // backend has allocated for us. The receiver of the notification will cast
   // this to the proper type.
-  Details<history::HistoryDetails> det(details_deleted);
+  content::Details<history::HistoryDetails> det(details);
 
-  NotificationService::current()->Notify(type, source, det);
+  content::NotificationService::current()->Notify(type, source, det);
 }
 
 void HistoryService::LoadBackendIfNecessary() {
@@ -821,9 +825,10 @@ void HistoryService::OnDBLoaded(int backend_id) {
     return;
   }
   backend_loaded_ = true;
-  NotificationService::current()->Notify(chrome::NOTIFICATION_HISTORY_LOADED,
-                                         Source<Profile>(profile_),
-                                         Details<HistoryService>(this));
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_HISTORY_LOADED,
+      content::Source<Profile>(profile_),
+      content::Details<HistoryService>(this));
   if (thread_ && profile_) {
     // We don't want to force creation of TopSites.
     history::TopSites* ts = profile_->GetTopSitesWithoutCreating();

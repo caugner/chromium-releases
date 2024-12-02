@@ -13,8 +13,8 @@
 #include "chrome/browser/extensions/webstore_install_helper.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class ProfileSyncService;
 
@@ -27,6 +27,10 @@ class WebstorePrivateApi {
   // Allows you to override the WebstoreInstaller delegate for testing.
   static void SetWebstoreInstallerDelegateForTesting(
       WebstoreInstaller::Delegate* delegate);
+
+  // If |allow| is true, then the extension IDs used by the SilentlyInstall
+  // apitest will be trusted.
+  static void SetTrustTestIDsForTesting(bool allow);
 };
 
 class BeginInstallWithManifestFunction
@@ -66,9 +70,11 @@ class BeginInstallWithManifestFunction
 
   // Implementing WebstoreInstallHelper::Delegate interface.
   virtual void OnWebstoreParseSuccess(
+      const std::string& id,
       const SkBitmap& icon,
       base::DictionaryValue* parsed_manifest) OVERRIDE;
   virtual void OnWebstoreParseFailure(
+      const std::string& id,
       InstallHelperResultCode result_code,
       const std::string& error_message) OVERRIDE;
 
@@ -78,7 +84,7 @@ class BeginInstallWithManifestFunction
 
  protected:
   virtual ~BeginInstallWithManifestFunction();
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
 
   // Sets the result_ as a string based on |code|.
   void SetResult(ResultCode code);
@@ -103,22 +109,53 @@ class BeginInstallWithManifestFunction
 };
 
 class CompleteInstallFunction : public SyncExtensionFunction {
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.completeInstall");
 };
 
+class SilentlyInstallFunction : public AsyncExtensionFunction,
+                                public WebstoreInstallHelper::Delegate,
+                                public WebstoreInstaller::Delegate {
+ public:
+  SilentlyInstallFunction();
+
+  // WebstoreInstallHelper::Delegate implementation.
+  virtual void OnWebstoreParseSuccess(
+      const std::string& id,
+      const SkBitmap& icon,
+      base::DictionaryValue* parsed_manifest) OVERRIDE;
+  virtual void OnWebstoreParseFailure(
+      const std::string& id,
+      InstallHelperResultCode result_code,
+      const std::string& error_message) OVERRIDE;
+
+  // WebstoreInstaller::Delegate implementation.
+  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
+  virtual void OnExtensionInstallFailure(const std::string& id,
+                                         const std::string& error) OVERRIDE;
+
+ protected:
+  virtual ~SilentlyInstallFunction();
+  virtual bool RunImpl() OVERRIDE;
+
+ private:
+  std::string id_;
+  std::string manifest_;
+  DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.silentlyInstall");
+};
+
 class GetBrowserLoginFunction : public SyncExtensionFunction {
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.getBrowserLogin");
 };
 
 class GetStoreLoginFunction : public SyncExtensionFunction {
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.getStoreLogin");
 };
 
 class SetStoreLoginFunction : public SyncExtensionFunction {
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("webstorePrivate.setStoreLogin");
 };
 

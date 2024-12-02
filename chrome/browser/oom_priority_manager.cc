@@ -9,8 +9,8 @@
 
 #include "base/process.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
 #include "base/string16.h"
+#include "base/string_number_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/timer.h"
@@ -20,13 +20,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/zygote_host_linux.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 
 #if !defined(OS_CHROMEOS)
 #error This file only meant to be compiled on ChromeOS
@@ -36,6 +36,7 @@ using base::TimeDelta;
 using base::TimeTicks;
 using base::ProcessHandle;
 using base::ProcessMetrics;
+using content::BrowserThread;
 
 namespace {
 
@@ -92,13 +93,13 @@ OomPriorityManager::OomPriorityManager()
   : focused_tab_pid_(0) {
   registrar_.Add(this,
       content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-      NotificationService::AllBrowserContextsAndSources());
+      content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
       content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-      NotificationService::AllBrowserContextsAndSources());
+      content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
       content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-      NotificationService::AllBrowserContextsAndSources());
+      content::NotificationService::AllBrowserContextsAndSources());
 }
 
 OomPriorityManager::~OomPriorityManager() {
@@ -184,22 +185,30 @@ void OomPriorityManager::OnFocusTabScoreAdjustmentTimeout() {
           this, &OomPriorityManager::AdjustFocusedTabScoreOnFileThread));
 }
 
-void OomPriorityManager::Observe(int type, const NotificationSource& source,
-                                 const NotificationDetails& details) {
+void OomPriorityManager::Observe(int type,
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   base::ProcessHandle handle = 0;
   base::AutoLock pid_to_oom_score_autolock(pid_to_oom_score_lock_);
   switch (type) {
-    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED:
+    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
+      handle =
+          content::Details<content::RenderProcessHost::RendererClosedDetails>(
+              details)->handle;
+      pid_to_oom_score_.erase(handle);
+      break;
+    }
     case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
-      handle = Source<RenderProcessHost>(source)->GetHandle();
+      handle = content::Source<content::RenderProcessHost>(source)->
+          GetHandle();
       pid_to_oom_score_.erase(handle);
       break;
     }
     case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED: {
-      bool visible = *Details<bool>(details).ptr();
+      bool visible = *content::Details<bool>(details).ptr();
       if (visible) {
-        focused_tab_pid_ =
-            Source<RenderWidgetHost>(source).ptr()->process()->GetHandle();
+        focused_tab_pid_ = content::Source<RenderWidgetHost>(source).ptr()->
+            process()->GetHandle();
 
         // If the currently focused tab already has a lower score, do not
         // set it. This can happen in case the newly focused tab is script

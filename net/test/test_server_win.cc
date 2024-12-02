@@ -8,10 +8,12 @@
 #include <wincrypt.h>
 
 #include "base/base_paths.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/test/test_timeouts.h"
@@ -50,8 +52,7 @@ bool ReadData(HANDLE read_fd, HANDLE write_fd,
   // Prepare a timeout in case the server fails to start.
   bool unblocked = false;
   thread.message_loop()->PostDelayedTask(
-      FROM_HERE,
-      NewRunnableFunction(UnblockPipe, write_fd, bytes_max, &unblocked),
+      FROM_HERE, base::Bind(UnblockPipe, write_fd, bytes_max, &unblocked),
       TestTimeouts::action_timeout_ms());
 
   DWORD bytes_read = 0;
@@ -132,11 +133,7 @@ bool TestServer::LaunchPython(const FilePath& testserver_path) {
     return false;
   }
 
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit_info = {0};
-  limit_info.BasicLimitInformation.LimitFlags =
-      JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  if (0 == SetInformationJobObject(job_handle_.Get(),
-    JobObjectExtendedLimitInformation, &limit_info, sizeof(limit_info))) {
+  if (!base::SetJobObjectAsKillOnJobClose(job_handle_.Get())) {
     LOG(ERROR) << "Could not SetInformationJobObject.";
     return false;
   }

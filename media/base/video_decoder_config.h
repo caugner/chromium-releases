@@ -15,18 +15,22 @@
 namespace media {
 
 enum VideoCodec {
-  kUnknownVideoCodec,
+  // These values are histogrammed over time; do not change their ordinal
+  // values.  When deleting a codec replace it with a dummy value; when adding a
+  // codec, do so at the bottom (and update kVideoCodecMax).
+  kUnknownVideoCodec = 0,
   kCodecH264,
   kCodecVC1,
   kCodecMPEG2,
   kCodecMPEG4,
   kCodecTheora,
   kCodecVP8,
-
   // DO NOT ADD RANDOM VIDEO CODECS!
   //
   // The only acceptable time to add a new codec is if there is production code
   // that uses said codec in the same CL.
+
+  kVideoCodecMax = kCodecVP8  // Must equal the last "real" codec above.
 };
 
 class MEDIA_EXPORT VideoDecoderConfig {
@@ -42,6 +46,7 @@ class MEDIA_EXPORT VideoDecoderConfig {
                      const gfx::Size& coded_size,
                      const gfx::Rect& visible_rect,
                      int frame_rate_numerator, int frame_rate_denominator,
+                     int aspect_ratio_numerator, int aspect_ratio_denominator,
                      const uint8* extra_data, size_t extra_data_size);
 
   ~VideoDecoderConfig();
@@ -52,6 +57,7 @@ class MEDIA_EXPORT VideoDecoderConfig {
                   const gfx::Size& coded_size,
                   const gfx::Rect& visible_rect,
                   int frame_rate_numerator, int frame_rate_denominator,
+                  int aspect_ratio_numerator, int aspect_ratio_denominator,
                   const uint8* extra_data, size_t extra_data_size);
 
   // Returns true if this object has appropriate configuration values, false
@@ -70,10 +76,24 @@ class MEDIA_EXPORT VideoDecoderConfig {
   // Region of |coded_size_| that is visible.
   gfx::Rect visible_rect() const;
 
+  // Final visible width and height of a video frame with aspect ratio taken
+  // into account.
+  gfx::Size natural_size() const;
+
   // Frame rate in seconds expressed as a fraction.
-  // TODO(scherkus): fairly certain decoders don't require frame rates.
+  //
+  // This information is required to properly timestamp video frames for
+  // codecs that contain repeated frames, such as found in H.264's
+  // supplemental enhancement information.
   int frame_rate_numerator() const;
   int frame_rate_denominator() const;
+
+  // Aspect ratio of the decoded video frame expressed as a fraction.
+  //
+  // TODO(scherkus): think of a better way to avoid having video decoders
+  // handle tricky aspect ratio dimension calculations.
+  int aspect_ratio_numerator() const;
+  int aspect_ratio_denominator() const;
 
   // Optional byte data required to initialize video decoders, such as H.264
   // AAVC data.
@@ -87,9 +107,13 @@ class MEDIA_EXPORT VideoDecoderConfig {
 
   gfx::Size coded_size_;
   gfx::Rect visible_rect_;
+  gfx::Size natural_size_;
 
   int frame_rate_numerator_;
   int frame_rate_denominator_;
+
+  int aspect_ratio_numerator_;
+  int aspect_ratio_denominator_;
 
   scoped_array<uint8> extra_data_;
   size_t extra_data_size_;

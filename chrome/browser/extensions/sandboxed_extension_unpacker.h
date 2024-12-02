@@ -11,6 +11,7 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/scoped_temp_dir.h"
+#include "chrome/common/extensions/extension.h"
 #include "content/browser/utility_process_host.h"
 
 class Extension;
@@ -101,7 +102,9 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   // sandboxed subprocess. Otherwise, it is done in-process.
   SandboxedExtensionUnpacker(const FilePath& crx_path,
                              ResourceDispatcherHost* rdh,
-                             SandboxedExtensionUnpackerClient* cilent);
+                             Extension::Location location,
+                             int creation_flags,
+                             SandboxedExtensionUnpackerClient* client);
 
   // Start unpacking the extension. The client is called with the results.
   void Start();
@@ -191,8 +194,8 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   void StartProcessOnIOThread(const FilePath& temp_crx_path);
 
   // UtilityProcessHost::Client
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void OnProcessCrashed(int exit_code);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
   // IPC message handlers.
   void OnUnpackExtensionSucceeded(const base::DictionaryValue& manifest);
@@ -215,7 +218,7 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   FilePath crx_path_;
 
   // Our client's thread. This is the thread we respond on.
-  BrowserThread::ID thread_identifier_;
+  content::BrowserThread::ID thread_identifier_;
 
   // ResourceDispatcherHost to pass to the utility process.
   ResourceDispatcherHost* rdh_;
@@ -240,6 +243,13 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
 
   // Time at which unpacking started. Used to compute the time unpacking takes.
   base::TimeTicks unpack_start_time_;
+
+  // Location to use for the unpacked extension.
+  Extension::Location location_;
+
+  // Creation flags to use for the extension.  These flags will be used
+  // when calling Extenion::Create() by the crx installer.
+  int creation_flags_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_SANDBOXED_EXTENSION_UNPACKER_H_

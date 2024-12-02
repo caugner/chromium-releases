@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -31,11 +32,11 @@ const int kThrobDurationMs = 750;
 
 // Network strength bars images.
 const int kNumBarsImages = 5;
-SkBitmap kBarsImagesAnimating[kNumBarsImages - 1];
+SkBitmap* kBarsImagesAnimating[kNumBarsImages - 1];
 
 // Network strength arcs images.
 const int kNumArcsImages = 5;
-SkBitmap kArcsImagesAnimating[kNumArcsImages - 1];
+SkBitmap* kArcsImagesAnimating[kNumArcsImages - 1];
 
 // Badge offsets.  If a badge is large enough that it won't fit within the icon
 // when using the right or bottom offset, it gets shifted inwards so it will.
@@ -207,6 +208,14 @@ class NetworkIcon {
       }
     }
     bool dirty = bitmap_.empty();
+    bool speak = false;
+    if (accessibility::IsAccessibilityEnabled()) {
+      if ((Network::IsConnectedState(state_) && !network->connected()) ||
+          (Network::IsConnectingState(state_) && !network->connecting()) ||
+          (Network::IsDisconnectedState(state_) && !network->disconnected())) {
+        speak = true;
+      }
+    }
     if (state_ != network->state()) {
       state_ = network->state();
       dirty = true;
@@ -246,6 +255,35 @@ class NetworkIcon {
     if (dirty) {
       UpdateIcon(network);
       GenerateBitmap();
+    }
+    if (speak) {
+      std::string connection_string;
+      if (Network::IsConnectedState(state_)) {
+        switch (network->type()) {
+          case TYPE_ETHERNET:
+            connection_string = l10n_util::GetStringFUTF8(
+                IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+                l10n_util::GetStringUTF16(
+                    IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
+            break;
+          default:
+            connection_string = l10n_util::GetStringFUTF8(
+                IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
+                UTF8ToUTF16(network->name()));
+            break;
+        }
+      } else if (Network::IsConnectingState(state_)) {
+        const Network* connecting_network = cros->connecting_network();
+        if (connecting_network && connecting_network->type() != TYPE_ETHERNET) {
+          connection_string = l10n_util::GetStringFUTF8(
+              IDS_STATUSBAR_NETWORK_CONNECTING_TOOLTIP,
+              UTF8ToUTF16(connecting_network->name()));
+        }
+      } else if (Network::IsDisconnectedState(state_)) {
+        connection_string = l10n_util::GetStringUTF8(
+            IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP);
+      }
+      accessibility::Speak(connection_string.c_str());
     }
   }
 
@@ -488,7 +526,7 @@ void NetworkMenuIcon::SetConnectingIcon(const Network* network,
                                         double animation) {
   int image_count;
   BitmapType bitmap_type;
-  SkBitmap* images;
+  SkBitmap** images;
 
   if (network->type() == TYPE_WIFI) {
     image_count = kNumArcsImages - 1;
@@ -504,11 +542,12 @@ void NetworkMenuIcon::SetConnectingIcon(const Network* network,
   index = max(min(index, image_count - 1), 0);
 
   // Lazily cache images.
-  if (images[index].empty()) {
+  if (!images[index]) {
     SkBitmap source = GetBitmap(bitmap_type, index + 1);
-    images[index] = NetworkMenuIcon::GenerateConnectingBitmap(source);
+    images[index] =
+        new SkBitmap(NetworkMenuIcon::GenerateConnectingBitmap(source));
   }
-  icon_->set_icon(images[index]);
+  icon_->set_icon(*images[index]);
 }
 
 // Sets up the icon and badges for GenerateBitmap().
@@ -661,7 +700,7 @@ const SkBitmap NetworkMenuIcon::GenerateBitmapFromComponents(
 // We blend connecting icons with a black image to generate a faded icon.
 const SkBitmap NetworkMenuIcon::GenerateConnectingBitmap(
     const SkBitmap& source) {
-  static SkBitmap empty_badge;
+  CR_DEFINE_STATIC_LOCAL(SkBitmap, empty_badge, ());
   if (empty_badge.empty()) {
     empty_badge.setConfig(SkBitmap::kARGB_8888_Config,
                           source.width(), source.height(), 0);

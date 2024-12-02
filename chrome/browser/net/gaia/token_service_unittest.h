@@ -8,14 +8,15 @@
 #define CHROME_BROWSER_NET_GAIA_TOKEN_SERVICE_UNITTEST_H_
 #pragma once
 
+#include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/test/base/signaling_task.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_notification_tracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -33,8 +34,8 @@ class TokenAvailableTracker : public TestNotificationTracker {
 
  private:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   TokenService::TokenAvailableDetails details_;
 };
@@ -50,8 +51,8 @@ class TokenFailedTracker : public TestNotificationTracker {
 
  private:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   TokenService::TokenRequestFailedDetails details_;
 };
@@ -61,15 +62,15 @@ class TokenServiceTestHarness : public testing::Test {
   TokenServiceTestHarness();
   virtual ~TokenServiceTestHarness();
 
-  virtual void SetUp();
+  virtual void SetUp() OVERRIDE;
 
-  virtual void TearDown();
+  virtual void TearDown() OVERRIDE;
 
   void WaitForDBLoadCompletion();
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;  // Mostly so DCHECKS pass.
-  BrowserThread db_thread_;  // WDS on here
+  content::TestBrowserThread ui_thread_;  // Mostly so DCHECKS pass.
+  content::TestBrowserThread db_thread_;  // WDS on here
 
   TokenService service_;
   TokenAvailableTracker success_tracker_;

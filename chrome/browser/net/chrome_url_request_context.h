@@ -11,8 +11,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -23,9 +23,6 @@ class Profile;
 class ProfileIOData;
 namespace base {
 class WaitableEvent;
-}
-namespace net {
-class NetworkDelegate;
 }
 
 // Subclass of net::URLRequestContext which can be used to store extra
@@ -44,7 +41,7 @@ class ChromeURLRequestContext : public net::URLRequestContext {
     return is_incognito_;
   }
 
-  virtual const std::string& GetUserAgent(const GURL& url) const;
+  virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
 
   // TODO(willchan): Get rid of the need for this accessor. Really, this should
   // move completely to ProfileIOData.
@@ -90,7 +87,7 @@ class ChromeURLRequestContext : public net::URLRequestContext {
 // Most methods are expected to be called on the UI thread, except for
 // the destructor and GetURLRequestContext().
 class ChromeURLRequestContextGetter : public net::URLRequestContextGetter,
-                                      public NotificationObserver {
+                                      public content::NotificationObserver {
  public:
   // Constructs a ChromeURLRequestContextGetter that will use |factory| to
   // create the ChromeURLRequestContext. If |profile| is non-NULL, then the
@@ -105,9 +102,10 @@ class ChromeURLRequestContextGetter : public net::URLRequestContextGetter,
   // GetIOMessageLoopProxy however can be called from any thread.
   //
   // net::URLRequestContextGetter implementation.
-  virtual net::URLRequestContext* GetURLRequestContext();
-  virtual net::CookieStore* DONTUSEME_GetCookieStore();
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
+  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
+  virtual net::CookieStore* DONTUSEME_GetCookieStore() OVERRIDE;
+  virtual scoped_refptr<base::MessageLoopProxy>
+      GetIOMessageLoopProxy() const OVERRIDE;
 
   // Convenience overload of GetURLRequestContext() that returns a
   // ChromeURLRequestContext* rather than a net::URLRequestContext*.
@@ -159,10 +157,10 @@ class ChromeURLRequestContextGetter : public net::URLRequestContextGetter,
   // thread before the instance is deleted on the IO thread.
   void CleanupOnUIThread();
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Must be called on the IO thread.

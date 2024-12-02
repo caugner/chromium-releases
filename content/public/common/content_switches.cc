@@ -181,6 +181,10 @@ const char kEnableAccessibility[]           = "enable-accessibility";
 // Turns on extremely verbose logging of accessibility events.
 const char kEnableAccessibilityLogging[]    = "enable-accessibility-logging";
 
+// Enables the creation of compositing layers for fixed position elements.
+const char kEnableCompositingForFixedPosition[] =
+     "enable-fixed-position-compositing";
+
 // Enable DNS side checking of certificates. Still experimental, should only
 // be used by developers at the current time.
 const char kEnableDNSCertProvenanceChecking[] =
@@ -192,12 +196,21 @@ const char kEnableDeviceMotion[]            = "enable-device-motion";
 // Enable the JavaScript Full Screen API.
 const char kDisableFullScreen[]             = "disable-fullscreen";
 
+// Enable the JavaScript Pointer Lock API.
+const char kEnablePointerLock[]             = "enable-pointer-lock";
+
+// Enable the Gamepad API
+const char kEnableGamepad[]                 = "enable-gamepad";
+
 // Enable the GPU plugin and Pepper 3D rendering.
 const char kEnableGPUPlugin[]               = "enable-gpu-plugin";
 
 // Force logging to be enabled.  Logging is disabled by default in release
 // builds.
 const char kEnableLogging[]                 = "enable-logging";
+
+// Enables Media Source API on <audio>/<video> elements.
+const char kEnableMediaSource[]              = "enable-media-source";
 
 // Enable media stream in WebKit.
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/dnd.html#mediastream
@@ -214,6 +227,11 @@ const char kEnableOriginBoundCerts[]  = "enable-origin-bound-certs";
 // Enable caching of pre-parsed JS script data.  See http://crbug.com/32407.
 const char kEnablePreparsedJsCaching[]      = "enable-preparsed-js-caching";
 
+// Enable privileged WebGL extensions; without this switch such extensions are
+// available only to Chrome extensions.
+const char kEnablePrivilegedWebGLExtensions[] =
+    "enable-privileged-webgl-extensions";
+
 // Enables TLS cached info extension.
 const char kEnableSSLCachedInfo[]  = "enable-ssl-cached-info";
 
@@ -227,6 +245,16 @@ const char kEnableSeccompSandbox[]          = "enable-seccomp-sandbox";
 // Enables StatsTable, logging statistics to a global named shared memory table.
 const char kEnableStatsTable[]              = "enable-stats-table";
 
+// Experimentally ensures that each renderer process:
+// 1) Only handles rendering for a single page.
+// (Note that a page can reference content from multiple origins due to images,
+// iframes, etc).
+// 2) Only has authority to see or use cookies for the page's top-level origin.
+// (So if a.com iframe's b.com, the b.com network request will be sent without
+// cookies).
+// This is expected to break compatibility with many pages for now.
+const char kEnableStrictSiteIsolation[]     = "enable-strict-site-isolation";
+
 // Enable multithreaded GPU compositing of web content.
 const char kEnableThreadedCompositing[]     = "enable-threaded-compositing";
 
@@ -234,13 +262,12 @@ const char kEnableThreadedCompositing[]     = "enable-threaded-compositing";
 // SYN packet.
 const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
 
+// Enable support for JavaScript touch events.
+const char kEnableTouchEvents[]             = "enable-touch-events";
+
 // Enables support for fullscreen video. Current implementation is
 // incomplete and this flag is used for development and testing.
 const char kEnableVideoFullscreen[]         = "enable-video-fullscreen";
-
-// Enables video logging where video elements log playback performance data to
-// the debug log.
-const char kEnableVideoLogging[]            = "enable-video-logging";
 
 // Enables support for video tracks. Current implementation is
 // incomplete and this flag is used for development and testing.
@@ -404,9 +431,6 @@ const char kProcessType[]                   = "type";
 // Register Pepper plugins (see pepper_plugin_registry.cc for its format).
 const char kRegisterPepperPlugins[]         = "register-pepper-plugins";
 
-// Enable remote debug / automation shell on the specified port.
-const char kRemoteShellPort[]               = "remote-shell-port";
-
 // Causes the renderer process to throw an assertion on launch.
 const char kRendererAssertTest[]            = "renderer-assert-test";
 
@@ -437,12 +461,37 @@ const char kSimpleDataSource[]              = "simple-data-source";
 // Runs the renderer and plugins in the same process as the browser
 const char kSingleProcess[]                 = "single-process";
 
-// Use SQLite as back-end for Indexed Database API.
-// Used for debugging differences between the LevelDB and SQLite back-end.
-const char kSQLiteIndexedDatabase[]         = "indexeddb-use-sqlite";
+// Skip gpu info collection, blacklist loading, and blacklist auto-update
+// scheduling at browser startup time.
+// Therefore, all GPU features are available, and about:gpu page shows empty
+// content. The switch is intended only for tests.
+const char kSkipGpuDataLoading[]            = "skip-gpu-data-loading";
 
 // Runs the security test for the renderer sandbox.
 const char kTestSandbox[]                   = "test-sandbox";
+
+// Causes TRACE_EVENT flags to be recorded from startup. Optionally, can
+// specify the specific trace categories to include (e.g.
+// --trace-startup=base,net) otherwise, all events are recorded. Setting this
+// flag results in the first call to BeginTracing() to receive all trace events
+// since startup. In Chrome, you may find --trace-startup-file and
+// --trace-startup-duration to control the auto-saving of the trace (not
+// supported in the base-only TraceLog component).
+const char kTraceStartup[]                  = "trace-startup";
+
+// If supplied, sets the file which startup tracing will be stored into, if
+// omitted the default will be used "chrometrace.log" in the current directory.
+// Has no effect unless --trace-startup is also supplied.
+// Example: --trace-startup --trace-startup-file=/tmp/trace_event.log
+// As a special case, can be set to 'none' - this disables automatically saving
+// the result to a file and the first manually recorded trace will then receive
+// all events since startup.
+const char kTraceStartupFile[]              = "trace-startup-file";
+
+// Sets the time in seconds until startup tracing ends. If omitted a default of
+// 5 seconds is used. Has no effect without --trace-startup, or if
+// --startup-trace-file=none was supplied.
+const char kTraceStartupDuration[]          = "trace-startup-duration";
 
 // A string used to override the default user agent with a custom one.
 const char kUserAgent[]                     = "user-agent";
@@ -483,6 +532,9 @@ const char kZygoteCmdPrefix[]               = "zygote-cmd-prefix";
 
 // Causes the process to run as a renderer zygote.
 const char kZygoteProcess[]                 = "zygote";
+
+// Enables moving cursor by word in visual order.
+const char kEnableVisualWordMovement[]      = "enable-visual-word-movement";
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 // Specify the amount the trackpad should scroll by.

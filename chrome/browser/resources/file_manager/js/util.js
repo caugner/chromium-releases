@@ -152,6 +152,10 @@ var util = {
   forEachDirEntry: function(dirEntry, callback) {
     var reader;
 
+    function onError(err) {
+      console.error('Failed to read  dir entries at ' + dirEntry.fullPath);
+    }
+
     function onReadSome(results) {
       if (results.length == 0)
         return callback(null);
@@ -159,11 +163,11 @@ var util = {
       for (var i = 0; i < results.length; i++)
         callback(results[i]);
 
-      reader.readEntries(onReadSome);
+      reader.readEntries(onReadSome, onError);
     };
 
     reader = dirEntry.createReader();
-    reader.readEntries(onReadSome);
+    reader.readEntries(onReadSome, onError);
   },
 
   /**
@@ -244,9 +248,9 @@ var util = {
                 path, {create: false},
                 resultCallback,
                 errorCallback);
-            } else  {
-              errorCallback(err);
-            }
+          } else  {
+            errorCallback(err);
+          }
         });
   },
 
@@ -303,7 +307,7 @@ var util = {
   /**
    * Lookup tables used by bytesToSi.
    */
-  units_: ['B', 'k', 'M', 'G', 'T', 'P'],
+  units_: ['B', 'KB', 'MB', 'GB', 'TB', 'PB'],
   scale_: [1, 1e3, 1e6, 1e9, 1e12, 1e15],
 
   /**

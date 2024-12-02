@@ -6,6 +6,7 @@
 
 #include "webkit/glue/weburlloader_impl.h"
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -18,19 +19,21 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/http/http_response_headers.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPHeaderVisitor.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebHTTPLoadInfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPHeaderVisitor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebHTTPLoadInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoadTiming.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoadTiming.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "webkit/glue/ftp_directory_listing_response_delegate.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/webkitplatformsupport_impl.h"
+#include "webkit/glue/weburlrequest_extradata_impl.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -38,6 +41,7 @@ using WebKit::WebData;
 using WebKit::WebHTTPBody;
 using WebKit::WebHTTPHeaderVisitor;
 using WebKit::WebHTTPLoadInfo;
+using WebKit::WebReferrerPolicy;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -226,7 +230,7 @@ void PopulateURLResponse(
   std::string value;
   if (headers->EnumerateHeader(NULL, "content-disposition", &value)) {
     response->setSuggestedFileName(
-        net::GetSuggestedFilename(url, value, "", "", "", string16()));
+        net::GetSuggestedFilename(url, value, "", "", "", std::string()));
   }
 
   Time time_val;
@@ -261,7 +265,8 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   void SetDefersLoading(bool value);
   void Start(
       const WebURLRequest& request,
-      ResourceLoaderBridge::SyncLoadResponse* sync_load_response);
+      ResourceLoaderBridge::SyncLoadResponse* sync_load_response,
+      WebKitPlatformSupportImpl* platform);
   void UpdateRoutingId(int new_routing_id);
 
   // ResourceLoaderBridge::Peer methods:
@@ -292,6 +297,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   WebURLLoaderImpl* loader_;
   WebURLRequest request_;
   WebURLLoaderClient* client_;
+  WebReferrerPolicy referrer_policy_;
   scoped_ptr<ResourceLoaderBridge> bridge_;
   scoped_ptr<FtpDirectoryListingResponseDelegate> ftp_listing_delegate_;
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
@@ -300,7 +306,8 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
 
 WebURLLoaderImpl::Context::Context(WebURLLoaderImpl* loader)
     : loader_(loader),
-      client_(NULL) {
+      client_(NULL),
+      referrer_policy_(WebKit::WebReferrerPolicyDefault) {
 }
 
 void WebURLLoaderImpl::Context::Cancel() {
@@ -331,7 +338,8 @@ void WebURLLoaderImpl::Context::UpdateRoutingId(int new_routing_id) {
 
 void WebURLLoaderImpl::Context::Start(
     const WebURLRequest& request,
-    ResourceLoaderBridge::SyncLoadResponse* sync_load_response) {
+    ResourceLoaderBridge::SyncLoadResponse* sync_load_response,
+    WebKitPlatformSupportImpl* platform) {
   DCHECK(!bridge_.get());
 
   request_ = request;  // Save the request.
@@ -348,7 +356,7 @@ void WebURLLoaderImpl::Context::Start(
     } else {
       AddRef();  // Balanced in OnCompletedRequest
       MessageLoop::current()->PostTask(FROM_HERE,
-          NewRunnableMethod(this, &Context::HandleDataURL));
+          base::Bind(&Context::HandleDataURL, this));
     }
     return;
   }
@@ -412,7 +420,12 @@ void WebURLLoaderImpl::Context::Start(
   request_info.download_to_file = request.downloadToFile();
   request_info.has_user_gesture = request.hasUserGesture();
   request_info.extra_data = request.extraData();
-  bridge_.reset(ResourceLoaderBridge::Create(request_info));
+  if (request.extraData()) {
+    referrer_policy_ = static_cast<WebURLRequestExtraDataImpl*>(
+        request.extraData())->referrer_policy();
+    request_info.referrer_policy = referrer_policy_;
+  }
+  bridge_.reset(platform->CreateResourceLoader(request_info));
 
   if (!request.httpBody().isNull()) {
     // GET and HEAD requests shouldn't have http bodies.
@@ -488,8 +501,11 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
   new_request.setDownloadToFile(request_.downloadToFile());
 
   WebString referrer_string = WebString::fromUTF8("Referer");
-  WebString referrer = request_.httpHeaderField(referrer_string);
-  if (!WebSecurityPolicy::shouldHideReferrer(new_url, referrer))
+  WebString referrer = WebSecurityPolicy::generateReferrerHeader(
+      referrer_policy_,
+      new_url,
+      request_.httpHeaderField(referrer_string));
+  if (!referrer.isEmpty())
     new_request.setHTTPHeaderField(referrer_string, referrer);
 
   if (response.httpStatusCode() == 307)
@@ -675,8 +691,9 @@ void WebURLLoaderImpl::Context::HandleDataURL() {
 
 // WebURLLoaderImpl -----------------------------------------------------------
 
-WebURLLoaderImpl::WebURLLoaderImpl()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(context_(new Context(this))) {
+WebURLLoaderImpl::WebURLLoaderImpl(WebKitPlatformSupportImpl* platform)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(context_(new Context(this))),
+      platform_(platform) {
 }
 
 WebURLLoaderImpl::~WebURLLoaderImpl() {
@@ -688,7 +705,7 @@ void WebURLLoaderImpl::loadSynchronously(const WebURLRequest& request,
                                          WebURLError& error,
                                          WebData& data) {
   ResourceLoaderBridge::SyncLoadResponse sync_load_response;
-  context_->Start(request, &sync_load_response);
+  context_->Start(request, &sync_load_response, platform_);
 
   const GURL& final_url = sync_load_response.url;
 
@@ -716,7 +733,7 @@ void WebURLLoaderImpl::loadAsynchronously(const WebURLRequest& request,
   DCHECK(!context_->client());
 
   context_->set_client(client);
-  context_->Start(request, NULL);
+  context_->Start(request, NULL, platform_);
 }
 
 void WebURLLoaderImpl::cancel() {

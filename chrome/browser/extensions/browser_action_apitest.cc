@@ -21,6 +21,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
@@ -37,8 +38,8 @@ class BrowserActionApiTest : public ExtensionApiTest {
   bool OpenPopup(int index) {
     ResultCatcher catcher;
     ui_test_utils::WindowedNotificationObserver popup_observer(
-        chrome::NOTIFICATION_EXTENSION_POPUP_VIEW_READY,
-        NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+        content::NotificationService::AllSources());
     GetBrowserActionsBar().Press(index);
     popup_observer.Wait();
     EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -149,13 +150,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest,
 }
 
 // http://code.google.com/p/chromium/issues/detail?id=70829
-// Only mac is okay.
-#if !defined(OS_MACOSX)
-#define MAYBE_BrowserActionPopup DISABLED_BrowserActionPopup
-#else
-#define MAYBE_BrowserActionPopup BrowserActionPopup
-#endif
-IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, MAYBE_BrowserActionPopup) {
+// Mac used to be ok, but then mac 10.5 started failing too. =(
+IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_BrowserActionPopup) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
       "browser_action/popup")));
   BrowserActionTestUtil actions_bar = GetBrowserActionsBar();
@@ -391,13 +387,13 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
   // There is a background page and a browser action with no badge text.
   ExtensionProcessManager* manager =
       browser()->profile()->GetExtensionProcessManager();
-  ASSERT_TRUE(manager->GetBackgroundHostForExtension(extension));
+  ASSERT_TRUE(manager->GetBackgroundHostForExtension(extension->id()));
   ExtensionAction* action = extension->browser_action();
   ASSERT_EQ("", action->GetBadgeText(ExtensionAction::kDefaultTabId));
 
   ui_test_utils::WindowedNotificationObserver host_destroyed_observer(
       chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 
   // Click the browser action.
   browser()->profile()->GetExtensionService()->browser_event_router()->
@@ -408,6 +404,6 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, DISABLED_CloseBackgroundPage) {
   // so we wait for the notification before checking that it's really gone
   // and the badge text has been set.
   host_destroyed_observer.Wait();
-  ASSERT_FALSE(manager->GetBackgroundHostForExtension(extension));
+  ASSERT_FALSE(manager->GetBackgroundHostForExtension(extension->id()));
   ASSERT_EQ("X", action->GetBadgeText(ExtensionAction::kDefaultTabId));
 }

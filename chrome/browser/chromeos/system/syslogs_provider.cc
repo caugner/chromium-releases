@@ -18,7 +18,9 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 namespace system {
@@ -258,7 +260,7 @@ class SyslogsMemoryHandler : public MemoryDetails {
              chrome.processes.begin();
          iter1 != chrome.processes.end(); ++iter1) {
       std::string process_string(
-          ChildProcessInfo::GetFullTypeNameInEnglish(
+          ProcessMemoryInformation::GetFullTypeNameInEnglish(
               iter1->type, iter1->renderer_type));
       if (!iter1->titles.empty()) {
         std::string titles(" [");

@@ -14,7 +14,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 class IndexedDBMsg_CallbacksSuccessIDBDatabase;
 class IndexedDBMsg_CallbacksSuccessIDBTransaction;
@@ -76,7 +76,8 @@ class IndexedDBCallbacks : public IndexedDBCallbacksBase {
   DISALLOW_IMPLICIT_CONSTRUCTORS(IndexedDBCallbacks);
 };
 
-// WebIDBCursor uses onSuccess(WebIDBCursor*) to indicate it has data, and
+// WebIDBCursor uses onSuccess(WebIDBCursor*) when a cursor has been opened,
+// onSuccessWithContinuation() when a continue() call has succeeded, or
 // onSuccess() without params to indicate it does not contain any data, i.e.,
 // there is no key within the key range, or it has reached the end.
 template <>
@@ -84,13 +85,24 @@ class IndexedDBCallbacks<WebKit::WebIDBCursor>
     : public IndexedDBCallbacksBase {
  public:
   IndexedDBCallbacks(
-      IndexedDBDispatcherHost* dispatcher_host, int32 response_id)
-      : IndexedDBCallbacksBase(dispatcher_host, response_id) { }
+      IndexedDBDispatcherHost* dispatcher_host, int32 response_id,
+      int32 cursor_id)
+      : IndexedDBCallbacksBase(dispatcher_host, response_id),
+        cursor_id_(cursor_id) { }
 
   virtual void onSuccess(WebKit::WebIDBCursor* idb_object);
   virtual void onSuccess(const WebKit::WebSerializedScriptValue& value);
+  virtual void onSuccessWithContinuation();
+  virtual void onSuccessWithPrefetch(
+      const WebKit::WebVector<WebKit::WebIDBKey>& keys,
+      const WebKit::WebVector<WebKit::WebIDBKey>& primaryKeys,
+      const WebKit::WebVector<WebKit::WebSerializedScriptValue>& values);
 
  private:
+  // The id of the cursor this callback concerns, or -1 if the cursor
+  // does not exist yet.
+  int32 cursor_id_;
+
   DISALLOW_IMPLICIT_CONSTRUCTORS(IndexedDBCallbacks);
 };
 

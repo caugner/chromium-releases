@@ -21,7 +21,7 @@ BrowserAccessibility* BrowserAccessibilityFactory::Create() {
 // static
 int32 BrowserAccessibilityManager::next_child_id_ = -1;
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if (defined(OS_POSIX) && !defined(OS_MACOSX)) || defined(USE_AURA)
 // There's no OS-specific implementation of BrowserAccessibilityManager
 // on Unix, so just instantiate the base class.
 // static
@@ -204,6 +204,22 @@ void BrowserAccessibilityManager::DoDefaultAction(
     const BrowserAccessibility& node) {
   if (delegate_)
     delegate_->AccessibilityDoDefaultAction(node.renderer_id());
+}
+
+void BrowserAccessibilityManager::ChangeScrollPosition(
+    const BrowserAccessibility& node, int scroll_x, int scroll_y) {
+  if (delegate_) {
+    delegate_->AccessibilityChangeScrollPosition(
+        node.renderer_id(), scroll_x, scroll_y);
+  }
+}
+
+void BrowserAccessibilityManager::SetTextSelection(
+    const BrowserAccessibility& node, int start_offset, int end_offset) {
+  if (delegate_) {
+    delegate_->AccessibilitySetTextSelection(
+        node.renderer_id(), start_offset, end_offset);
+  }
 }
 
 gfx::Rect BrowserAccessibilityManager::GetViewBounds() {

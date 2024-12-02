@@ -5,17 +5,18 @@
 #include "chrome/browser/printing/print_dialog_gtk.h"
 
 #include <fcntl.h>
-#include <gtk/gtkpagesetupunixdialog.h>
-#include <gtk/gtkprintjob.h>
+#include <gtk/gtkunixprint.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
 #include "base/logging.h"
+#include "base/message_loop_proxy.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -24,6 +25,7 @@
 #include "printing/print_settings.h"
 #include "printing/print_settings_initializer_gtk.h"
 
+using content::BrowserThread;
 using printing::PageRanges;
 using printing::PrintSettings;
 
@@ -92,14 +94,13 @@ class GtkPrinterList {
 
 // static
 printing::PrintDialogGtkInterface* PrintDialogGtk::CreatePrintDialog(
-    PrintingContextCairo* context) {
+    PrintingContextGtk* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return new PrintDialogGtk(context);
 }
 
-PrintDialogGtk::PrintDialogGtk(PrintingContextCairo* context)
-    : callback_(NULL),
-      context_(context),
+PrintDialogGtk::PrintDialogGtk(PrintingContextGtk* context)
+    : context_(context),
       dialog_(NULL),
       gtk_settings_(NULL),
       page_setup_(NULL),
@@ -190,6 +191,7 @@ bool PrintDialogGtk::UpdateSettings(const DictionaryValue& job_settings,
     gtk_print_settings_set_n_copies(gtk_settings_, copies);
     gtk_print_settings_set_collate(gtk_settings_, collate);
 
+#if defined(USE_CUPS)
     std::string color_value;
     std::string color_setting_name;
     printing::GetColorModelForMode(color, &color_setting_name, &color_value);
@@ -214,6 +216,7 @@ bool PrintDialogGtk::UpdateSettings(const DictionaryValue& job_settings,
       }
       gtk_print_settings_set(gtk_settings_, kCUPSDuplex, cups_duplex_mode);
     }
+#endif
   }
   if (!page_setup_)
     page_setup_ = gtk_page_setup_new();
@@ -228,7 +231,7 @@ bool PrintDialogGtk::UpdateSettings(const DictionaryValue& job_settings,
 }
 
 void PrintDialogGtk::ShowDialog(
-    PrintingContextCairo::PrintSettingsCallback* callback) {
+    const PrintingContextGtk::PrintSettingsCallback& callback) {
   callback_ = callback;
 
   GtkWindow* parent = BrowserList::GetLastActive()->window()->GetNativeHandle();
@@ -285,9 +288,8 @@ void PrintDialogGtk::PrintDocument(const printing::Metafile* metafile,
     // No errors, continue printing.
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &PrintDialogGtk::SendDocumentToPrinter,
-                          document_name));
+        base::Bind(&PrintDialogGtk::SendDocumentToPrinter, this,
+                   document_name));
   }
 }
 
@@ -340,14 +342,14 @@ void PrintDialogGtk::OnResponse(GtkWidget* dialog, int response_id) {
       printing::PrintSettingsInitializerGtk::InitPrintSettings(
           gtk_settings_, page_setup_, ranges_vector, false, &settings);
       context_->InitWithSettings(settings);
-      callback_->Run(PrintingContextCairo::OK);
-      callback_ = NULL;
+      callback_.Run(PrintingContextGtk::OK);
+      callback_.Reset();
       return;
     }
     case GTK_RESPONSE_DELETE_EVENT:  // Fall through.
     case GTK_RESPONSE_CANCEL: {
-      callback_->Run(PrintingContextCairo::CANCEL);
-      callback_ = NULL;
+      callback_.Run(PrintingContextGtk::CANCEL);
+      callback_.Reset();
       return;
     }
     case GTK_RESPONSE_APPLY:

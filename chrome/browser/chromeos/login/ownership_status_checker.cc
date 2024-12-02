@@ -5,7 +5,9 @@
 #include "chrome/browser/chromeos/login/ownership_status_checker.h"
 
 #include "base/bind.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 

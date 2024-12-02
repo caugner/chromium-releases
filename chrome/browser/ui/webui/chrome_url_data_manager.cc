@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -17,7 +18,7 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/platform_locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -25,8 +26,11 @@
 #include "base/win/windows_version.h"
 #endif
 
-// static
-base::Lock ChromeURLDataManager::delete_lock_;
+using content::BrowserThread;
+
+static base::LazyInstance<base::Lock,
+                          base::LeakyLazyInstanceTraits<base::Lock> >
+    g_delete_lock = LAZY_INSTANCE_INITIALIZER;
 
 // static
 ChromeURLDataManager::DataSources* ChromeURLDataManager::data_sources_ = NULL;
@@ -60,7 +64,7 @@ void ChromeURLDataManager::DeleteDataSources() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DataSources sources;
   {
-    base::AutoLock lock(delete_lock_);
+    base::AutoLock lock(g_delete_lock.Get());
     if (!data_sources_)
       return;
     data_sources_->swap(sources);
@@ -82,7 +86,7 @@ void ChromeURLDataManager::DeleteDataSource(const DataSource* data_source) {
   // to delete.
   bool schedule_delete = false;
   {
-    base::AutoLock lock(delete_lock_);
+    base::AutoLock lock(g_delete_lock.Get());
     if (!data_sources_)
       data_sources_ = new DataSources();
     schedule_delete = data_sources_->empty();
@@ -99,7 +103,7 @@ void ChromeURLDataManager::DeleteDataSource(const DataSource* data_source) {
 // static
 bool ChromeURLDataManager::IsScheduledForDeletion(
     const DataSource* data_source) {
-  base::AutoLock lock(delete_lock_);
+  base::AutoLock lock(g_delete_lock.Get());
   if (!data_sources_)
     return false;
   return std::find(data_sources_->begin(), data_sources_->end(), data_source) !=

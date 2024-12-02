@@ -80,20 +80,12 @@ extern const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle;
 // Preferred infobar border padding in pixels.
 extern const int kInfoBarBorderPaddingVertical;
 
-// Max tab count allowed.
-// TODO(alicet): This is added to allow different tab limits for touch_ui.
-// This is temporary, and should be removed asap.
-extern const int kMaxTabCount;
-
 //=============================================================================
 // Runtime "const" - set only once after parsing command line option and should
 // never be modified after that.
 
 // Are bookmark enabled? True by default.
 extern bool bookmarks_enabled;
-
-// Should we skip the user's preference for restore. False by default.
-extern bool skip_restore;
 
 // Whether HelpApp is enabled. True by default. This is only used by Chrome OS
 // today.

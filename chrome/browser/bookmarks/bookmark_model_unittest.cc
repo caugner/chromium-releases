@@ -5,10 +5,10 @@
 #include <set>
 #include <string>
 
-#include "base/basictypes.h"
-#include "base/compiler_specific.h"
 #include "base/base_paths.h"
+#include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
 #include "base/path_service.h"
@@ -27,18 +27,48 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/model_test_utils.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "ui/base/models/tree_node_model.h"
 
 using base::Time;
 using base::TimeDelta;
+using content::BrowserThread;
 
 namespace {
+
+// Test cases used to test the removal of extra whitespace when adding
+// a new folder/bookmark or updating a title of a folder/bookmark.
+static struct {
+  const std::string input_title;
+  const std::string expected_title;
+} whitespace_test_cases[] = {
+  {"foobar", "foobar"},
+  // Newlines.
+  {"foo\nbar", "foo bar"},
+  {"foo\n\nbar", "foo bar"},
+  {"foo\n\n\nbar", "foo bar"},
+  {"foo\r\nbar", "foo bar"},
+  {"foo\r\n\r\nbar", "foo bar"},
+  {"\nfoo\nbar\n", "foo bar"},
+  // Spaces.
+  {"foo  bar", "foo bar"},
+  {" foo bar ", "foo bar"},
+  {"  foo  bar  ", "foo bar"},
+  // Tabs.
+  {"\tfoo\tbar\t", "foo bar"},
+  {"\tfoo bar\t", "foo bar"},
+  // Mixed cases.
+  {"\tfoo\nbar\t", "foo bar"},
+  {"\tfoo\r\nbar\t", "foo bar"},
+  {"  foo\tbar\n", "foo bar"},
+  {"\t foo \t  bar  \t", "foo bar"},
+  {"\n foo\r\n\tbar\n \t", "foo bar"},
+};
 
 // Helper to get a mutable bookmark node.
 BookmarkNode* AsMutable(const BookmarkNode* node) {
@@ -87,14 +117,9 @@ class BookmarkModelTest : public testing::Test,
   };
 
   BookmarkModelTest()
-    : model_(NULL),
-      original_command_line_(*CommandLine::ForCurrentProcess()) {
+    : model_(NULL) {
     model_.AddObserver(this);
     ClearCounts();
-  }
-
-  virtual void TearDown() OVERRIDE {
-    *CommandLine::ForCurrentProcess() = original_command_line_;
   }
 
   void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE {
@@ -166,8 +191,6 @@ class BookmarkModelTest : public testing::Test,
   ObserverDetails observer_details_;
 
  private:
-  CommandLine original_command_line_;
-
   int added_count_;
   int moved_count_;
   int removed_count_;
@@ -188,14 +211,14 @@ TEST_F(BookmarkModelTest, InitialState) {
   EXPECT_EQ(0, other_node->child_count());
   EXPECT_EQ(BookmarkNode::OTHER_NODE, other_node->type());
 
-  const BookmarkNode* synced_node = model_.synced_node();
-  ASSERT_TRUE(synced_node != NULL);
-  EXPECT_EQ(0, synced_node->child_count());
-  EXPECT_EQ(BookmarkNode::SYNCED, synced_node->type());
+  const BookmarkNode* mobile_node = model_.mobile_node();
+  ASSERT_TRUE(mobile_node != NULL);
+  EXPECT_EQ(0, mobile_node->child_count());
+  EXPECT_EQ(BookmarkNode::MOBILE, mobile_node->type());
 
   EXPECT_TRUE(bb_node->id() != other_node->id());
-  EXPECT_TRUE(bb_node->id() != synced_node->id());
-  EXPECT_TRUE(other_node->id() != synced_node->id());
+  EXPECT_TRUE(bb_node->id() != mobile_node->id());
+  EXPECT_TRUE(other_node->id() != mobile_node->id());
 }
 
 TEST_F(BookmarkModelTest, AddURL) {
@@ -215,11 +238,27 @@ TEST_F(BookmarkModelTest, AddURL) {
 
   EXPECT_TRUE(new_node->id() != root->id() &&
               new_node->id() != model_.other_node()->id() &&
-              new_node->id() != model_.synced_node()->id());
+              new_node->id() != model_.mobile_node()->id());
 }
 
-TEST_F(BookmarkModelTest, AddURLToSyncedBookmarks) {
-  const BookmarkNode* root = model_.synced_node();
+TEST_F(BookmarkModelTest, AddURLWithWhitespaceTitle) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(whitespace_test_cases); ++i) {
+    const BookmarkNode* root = model_.bookmark_bar_node();
+    const string16 title(ASCIIToUTF16(whitespace_test_cases[i].input_title));
+    const GURL url("http://foo.com");
+
+    const BookmarkNode* new_node = model_.AddURL(root, i, title, url);
+
+    int size = i + 1;
+    EXPECT_EQ(size, root->child_count());
+    EXPECT_EQ(ASCIIToUTF16(whitespace_test_cases[i].expected_title),
+              new_node->GetTitle());
+    EXPECT_EQ(BookmarkNode::URL, new_node->type());
+  }
+}
+
+TEST_F(BookmarkModelTest, AddURLToMobileBookmarks) {
+  const BookmarkNode* root = model_.mobile_node();
   const string16 title(ASCIIToUTF16("foo"));
   const GURL url("http://foo.com");
 
@@ -235,7 +274,7 @@ TEST_F(BookmarkModelTest, AddURLToSyncedBookmarks) {
 
   EXPECT_TRUE(new_node->id() != root->id() &&
               new_node->id() != model_.other_node()->id() &&
-              new_node->id() != model_.synced_node()->id());
+              new_node->id() != model_.mobile_node()->id());
 }
 
 TEST_F(BookmarkModelTest, AddFolder) {
@@ -252,13 +291,28 @@ TEST_F(BookmarkModelTest, AddFolder) {
 
   EXPECT_TRUE(new_node->id() != root->id() &&
               new_node->id() != model_.other_node()->id() &&
-              new_node->id() != model_.synced_node()->id());
+              new_node->id() != model_.mobile_node()->id());
 
   // Add another folder, just to make sure folder_ids are incremented correctly.
   ClearCounts();
   model_.AddFolder(root, 0, title);
   AssertObserverCount(1, 0, 0, 0, 0);
   observer_details_.ExpectEquals(root, NULL, 0, -1);
+}
+
+TEST_F(BookmarkModelTest, AddFolderWithWhitespaceTitle) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(whitespace_test_cases); ++i) {
+    const BookmarkNode* root = model_.bookmark_bar_node();
+    const string16 title(ASCIIToUTF16(whitespace_test_cases[i].input_title));
+
+    const BookmarkNode* new_node = model_.AddFolder(root, i, title);
+
+    int size = i + 1;
+    EXPECT_EQ(size, root->child_count());
+    EXPECT_EQ(ASCIIToUTF16(whitespace_test_cases[i].expected_title),
+              new_node->GetTitle());
+    EXPECT_EQ(BookmarkNode::FOLDER, new_node->type());
+  }
 }
 
 TEST_F(BookmarkModelTest, RemoveURL) {
@@ -313,6 +367,20 @@ TEST_F(BookmarkModelTest, SetTitle) {
   AssertObserverCount(0, 0, 0, 1, 0);
   observer_details_.ExpectEquals(node, NULL, -1, -1);
   EXPECT_EQ(title, node->GetTitle());
+}
+
+TEST_F(BookmarkModelTest, SetTitleWithWhitespace) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(whitespace_test_cases); ++i) {
+    const BookmarkNode* root = model_.bookmark_bar_node();
+    string16 title(ASCIIToUTF16("dummy"));
+    const GURL url("http://foo.com");
+    const BookmarkNode* node = model_.AddURL(root, 0, title, url);
+
+    title = ASCIIToUTF16(whitespace_test_cases[i].input_title);
+    model_.SetTitle(node, title);
+    EXPECT_EQ(ASCIIToUTF16(whitespace_test_cases[i].expected_title),
+              node->GetTitle());
+  }
 }
 
 TEST_F(BookmarkModelTest, SetURL) {
@@ -423,14 +491,14 @@ TEST_F(BookmarkModelTest, ParentForNewNodes) {
 }
 
 // Tests that adding a URL to a folder updates the last modified time.
-TEST_F(BookmarkModelTest, ParentForNewSyncedNodes) {
+TEST_F(BookmarkModelTest, ParentForNewMobileNodes) {
   ASSERT_EQ(model_.bookmark_bar_node(), model_.GetParentForNewNodes());
 
   const string16 title(ASCIIToUTF16("foo"));
   const GURL url("http://foo.com");
 
-  model_.AddURL(model_.synced_node(), 0, title, url);
-  ASSERT_EQ(model_.synced_node(), model_.GetParentForNewNodes());
+  model_.AddURL(model_.mobile_node(), 0, title, url);
+  ASSERT_EQ(model_.mobile_node(), model_.GetParentForNewNodes());
 }
 
 // Make sure recently modified stays in sync when adding a URL.
@@ -540,22 +608,23 @@ TEST_F(BookmarkModelTest, HasBookmarks) {
   EXPECT_TRUE(model_.HasBookmarks());
 }
 
-// NotificationObserver implementation used in verifying we've received the
-// NOTIFY_URLS_STARRED method correctly.
-class StarredListener : public NotificationObserver {
+// content::NotificationObserver implementation used in verifying we've received
+// the NOTIFY_URLS_STARRED method correctly.
+class StarredListener : public content::NotificationObserver {
  public:
   StarredListener() : notification_count_(0), details_(false) {
     registrar_.Add(this, chrome::NOTIFICATION_URLS_STARRED,
-                   Source<Profile>(NULL));
+                   content::Source<Profile>(NULL));
   }
 
   // NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
     if (type == chrome::NOTIFICATION_URLS_STARRED) {
       notification_count_++;
-      details_ = *(Details<history::URLsStarredDetails>(details).ptr());
+      details_ =
+          *(content::Details<history::URLsStarredDetails>(details).ptr());
     }
   }
 
@@ -566,7 +635,7 @@ class StarredListener : public NotificationObserver {
   history::URLsStarredDetails details_;
 
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(StarredListener);
 };
@@ -753,8 +822,8 @@ class BookmarkModelTestWithProfile : public testing::Test {
 
  private:
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 };
 
 // Creates a set of nodes in the bookmark bar model, then recreates the
@@ -767,7 +836,7 @@ TEST_F(BookmarkModelTestWithProfile, CreateAndRestore) {
     // Structure of the children of the other node.
     const std::string other_contents;
     // Structure of the children of the synced node.
-    const std::string synced_contents;
+    const std::string mobile_contents;
   } data[] = {
     // See PopulateNodeFromString for a description of these strings.
     { "", "" },
@@ -795,16 +864,16 @@ TEST_F(BookmarkModelTestWithProfile, CreateAndRestore) {
     PopulateNodeFromString(data[i].other_contents, &other);
     PopulateBookmarkNode(&other, bb_model_, bb_model_->other_node());
 
-    TestNode synced;
-    PopulateNodeFromString(data[i].synced_contents, &synced);
-    PopulateBookmarkNode(&synced, bb_model_, bb_model_->synced_node());
+    TestNode mobile;
+    PopulateNodeFromString(data[i].mobile_contents, &mobile);
+    PopulateBookmarkNode(&mobile, bb_model_, bb_model_->mobile_node());
 
     profile_->CreateBookmarkModel(false);
     BlockTillBookmarkModelLoaded();
 
     VerifyModelMatchesNode(&bbn, bb_model_->bookmark_bar_node());
     VerifyModelMatchesNode(&other, bb_model_->other_node());
-    VerifyModelMatchesNode(&synced, bb_model_->synced_node());
+    VerifyModelMatchesNode(&mobile, bb_model_->mobile_node());
     VerifyNoDuplicateIDs(bb_model_);
   }
 }
@@ -874,7 +943,7 @@ class BookmarkModelTestWithProfile2 : public BookmarkModelTestWithProfile {
     ASSERT_TRUE(child->url() ==
                 GURL("http://www.google.com/intl/en/about.html"));
 
-    parent = bb_model_->synced_node();
+    parent = bb_model_->mobile_node();
     ASSERT_EQ(0, parent->child_count());
 
     ASSERT_TRUE(bb_model_->IsBookmarked(GURL("http://www.google.com")));
@@ -1015,8 +1084,8 @@ TEST_F(BookmarkModelTest, Sort) {
 TEST_F(BookmarkModelTest, NodeVisibility) {
   EXPECT_TRUE(model_.bookmark_bar_node()->IsVisible());
   EXPECT_TRUE(model_.other_node()->IsVisible());
-  // Sync node invisible by default
-  EXPECT_FALSE(model_.synced_node()->IsVisible());
+  // Mobile node invisible by default
+  EXPECT_FALSE(model_.mobile_node()->IsVisible());
 
   // Arbitrary node should be visible
   TestNode bbn;
@@ -1026,19 +1095,13 @@ TEST_F(BookmarkModelTest, NodeVisibility) {
   EXPECT_TRUE(parent->GetChild(0)->IsVisible());
 }
 
-TEST_F(BookmarkModelTest, SyncNodeVisibileIfFlagSet) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableSyncedBookmarksFolder);
-  EXPECT_TRUE(model_.synced_node()->IsVisible());
-}
-
-TEST_F(BookmarkModelTest, SyncNodeVisibileWithChildren) {
-  const BookmarkNode* root = model_.synced_node();
+TEST_F(BookmarkModelTest, MobileNodeVisibileWithChildren) {
+  const BookmarkNode* root = model_.mobile_node();
   const string16 title(ASCIIToUTF16("foo"));
   const GURL url("http://foo.com");
 
   model_.AddURL(root, 0, title, url);
-  EXPECT_TRUE(model_.synced_node()->IsVisible());
+  EXPECT_TRUE(model_.mobile_node()->IsVisible());
 }
 
 }  // namespace

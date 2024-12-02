@@ -7,20 +7,20 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_accessibility_api.h"
+#include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/ui/views/accessibility_event_router_views.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "views/controls/button/text_button.h"
-#include "views/layout/grid_layout.h"
-#include "views/views_delegate.h"
-#include "views/widget/native_widget.h"
-#include "views/widget/root_view.h"
-#include "views/widget/widget.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/views_delegate.h"
+#include "ui/views/widget/native_widget.h"
+#include "ui/views/widget/root_view.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 #if defined(TOOLKIT_VIEWS)
 
@@ -31,7 +31,6 @@ class AccessibilityViewsDelegate : public views::ViewsDelegate {
 
   // Overridden from views::ViewsDelegate:
   virtual ui::Clipboard* GetClipboard() const OVERRIDE { return NULL; }
-  virtual views::View* GetDefaultParentView() OVERRIDE { return NULL; }
   virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::string& window_name,
                                    const gfx::Rect& bounds,
@@ -87,35 +86,32 @@ class AccessibilityWindowDelegate : public views::WidgetDelegate {
 
 class AccessibilityEventRouterViewsTest
     : public testing::Test,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   virtual void SetUp() {
     views::ViewsDelegate::views_delegate = new AccessibilityViewsDelegate();
-    window_delegate_ = NULL;
   }
 
   virtual void TearDown() {
     delete views::ViewsDelegate::views_delegate;
     views::ViewsDelegate::views_delegate = NULL;
-    if (window_delegate_)
-      delete window_delegate_;
   }
 
   views::Widget* CreateWindowWithContents(views::View* contents) {
-    window_delegate_ = new AccessibilityWindowDelegate(contents);
-    return views::Widget::CreateWindowWithBounds(window_delegate_,
-                                                 gfx::Rect(0, 0, 500, 500));
+    return views::Widget::CreateWindowWithBounds(
+        new AccessibilityWindowDelegate(contents),
+        gfx::Rect(0, 0, 500, 500));
   }
 
  protected:
   // Implement NotificationObserver::Observe and store information about a
   // ACCESSIBILITY_CONTROL_FOCUSED event.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     ASSERT_EQ(type, chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED);
     const AccessibilityControlInfo* info =
-        Details<const AccessibilityControlInfo>(details).ptr();
+        content::Details<const AccessibilityControlInfo>(details).ptr();
     focus_event_count_++;
     last_control_name_ = info->name();
   }
@@ -123,16 +119,9 @@ class AccessibilityEventRouterViewsTest
   MessageLoopForUI message_loop_;
   int focus_event_count_;
   std::string last_control_name_;
-  AccessibilityWindowDelegate* window_delegate_;
 };
 
-// Crashes on Linux Aura, http://crbug.com/100338
-#if defined(USE_AURA) && !defined(OS_WIN)
-#define MAYBE_TestFocusNotification DISABLED_TestFocusNotification
-#else
-#define MAYBE_TestFocusNotification TestFocusNotification
-#endif
-TEST_F(AccessibilityEventRouterViewsTest, MAYBE_TestFocusNotification) {
+TEST_F(AccessibilityEventRouterViewsTest, TestFocusNotification) {
   const char kButton1ASCII[] = "Button1";
   const char kButton2ASCII[] = "Button2";
   const char kButton3ASCII[] = "Button3";
@@ -141,13 +130,13 @@ TEST_F(AccessibilityEventRouterViewsTest, MAYBE_TestFocusNotification) {
   // Create a contents view with 3 buttons.
   views::View* contents = new views::View();
   views::NativeTextButton* button1 = new views::NativeTextButton(
-      NULL, ASCIIToWide(kButton1ASCII));
+      NULL, ASCIIToUTF16(kButton1ASCII));
   contents->AddChildView(button1);
   views::NativeTextButton* button2 = new views::NativeTextButton(
-      NULL, ASCIIToWide(kButton2ASCII));
+      NULL, ASCIIToUTF16(kButton2ASCII));
   contents->AddChildView(button2);
   views::NativeTextButton* button3 = new views::NativeTextButton(
-      NULL, ASCIIToWide(kButton3ASCII));
+      NULL, ASCIIToUTF16(kButton3ASCII));
   contents->AddChildView(button3);
 
   // Put the view in a window.
@@ -157,10 +146,10 @@ TEST_F(AccessibilityEventRouterViewsTest, MAYBE_TestFocusNotification) {
   button1->RequestFocus();
 
   // Start listening to ACCESSIBILITY_CONTROL_FOCUSED notifications.
-  NotificationRegistrar registrar;
+  content::NotificationRegistrar registrar;
   registrar.Add(this,
                 chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED,
-                NotificationService::AllSources());
+                content::NotificationService::AllSources());
 
   // Switch on accessibility event notifications.
   ExtensionAccessibilityEventRouter* accessibility_event_router =
@@ -191,6 +180,8 @@ TEST_F(AccessibilityEventRouterViewsTest, MAYBE_TestFocusNotification) {
   focus_manager->AdvanceFocus(false);
   EXPECT_EQ(3, focus_event_count_);
   EXPECT_EQ(kButton1ASCII, last_control_name_);
+
+  window->CloseNow();
 }
 
 #endif  // defined(TOOLKIT_VIEWS)

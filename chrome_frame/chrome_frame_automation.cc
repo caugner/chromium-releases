@@ -4,6 +4,8 @@
 
 #include "chrome_frame/chrome_frame_automation.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -196,8 +198,6 @@ struct LaunchTimeStats {
 #endif
 };
 
-DISABLE_RUNNABLE_METHOD_REFCOUNT(AutomationProxyCacheEntry);
-
 AutomationProxyCacheEntry::AutomationProxyCacheEntry(
     ChromeFrameLaunchParams* params, LaunchDelegate* delegate)
     : profile_name(params->profile_name()),
@@ -208,8 +208,9 @@ AutomationProxyCacheEntry::AutomationProxyCacheEntry(
   // Use scoped_refptr so that the params will get released when the task
   // has been run.
   scoped_refptr<ChromeFrameLaunchParams> ref_params(params);
-  thread_->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(this,
-      &AutomationProxyCacheEntry::CreateProxy, ref_params, delegate));
+  thread_->message_loop()->PostTask(
+      FROM_HERE, base::Bind(&AutomationProxyCacheEntry::CreateProxy,
+                            base::Unretained(this), ref_params, delegate));
 }
 
 AutomationProxyCacheEntry::~AutomationProxyCacheEntry() {
@@ -409,8 +410,6 @@ void AutomationProxyCacheEntry::OnChannelError() {
   }
 }
 
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ProxyFactory);
-
 ProxyFactory::ProxyFactory() {
 }
 
@@ -445,8 +444,9 @@ void ProxyFactory::GetAutomationServer(
   } else if (delegate) {
     // Notify the new delegate of the launch status from the worker thread
     // and add it to the list of delegates.
-    entry->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(entry.get(),
-        &AutomationProxyCacheEntry::AddDelegate, delegate));
+    entry->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&AutomationProxyCacheEntry::AddDelegate,
+                              base::Unretained(entry.get()), delegate));
   }
 
   DCHECK(automation_server_id != NULL);
@@ -483,9 +483,10 @@ bool ProxyFactory::ReleaseAutomationServer(void* server_id,
   bool last_delegate = false;
   if (delegate) {
     base::WaitableEvent done(true, false);
-    entry->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(entry,
-        &AutomationProxyCacheEntry::RemoveDelegate, delegate, &done,
-        &last_delegate));
+    entry->message_loop()->PostTask(
+        FROM_HERE,
+        base::Bind(&AutomationProxyCacheEntry::RemoveDelegate,
+                   base::Unretained(entry), delegate, &done, &last_delegate));
     done.Wait();
   }
 
@@ -505,7 +506,7 @@ bool ProxyFactory::ReleaseAutomationServer(void* server_id,
 
 static base::LazyInstance<ProxyFactory,
                           base::LeakyLazyInstanceTraits<ProxyFactory> >
-    g_proxy_factory(base::LINKER_INITIALIZED);
+    g_proxy_factory = LAZY_INSTANCE_INITIALIZER;
 
 template <> struct RunnableMethodTraits<ChromeFrameAutomationClient> {
   static void RetainCallee(ChromeFrameAutomationClient* obj) {}
@@ -767,7 +768,6 @@ void ChromeFrameAutomationClient::FindInPage(const std::wstring& search_string,
   // the SyncMessageReplyDispatcher to avoid concerns about blocking
   // synchronous messages.
   AutomationMsg_Find_Params params;
-  params.unused = 0;
   params.search_string = WideToUTF16Hack(search_string);
   params.find_next = find_next;
   params.match_case = (match_case == CASE_SENSITIVE);
@@ -798,18 +798,18 @@ void ChromeFrameAutomationClient::CreateExternalTab() {
     navigate_after_initialization_ = false;
   }
 
-  const ExternalTabSettings settings(
-      m_hWnd,
-      gfx::Rect(),
-      WS_CHILD,
-      chrome_launch_params_->incognito(),
-      !use_chrome_network_,
-      handle_top_level_requests_,
-      chrome_launch_params_->url(),
-      chrome_launch_params_->referrer(),
-      // Infobars disabled in widget mode.
-      !chrome_launch_params_->widget_mode(),
-      chrome_launch_params_->route_all_top_level_navigations());
+  ExternalTabSettings settings;
+  settings.parent = m_hWnd;
+  settings.style = WS_CHILD;
+  settings.is_incognito = chrome_launch_params_->incognito();
+  settings.load_requests_via_automation = !use_chrome_network_;
+  settings.handle_top_level_requests = handle_top_level_requests_;
+  settings.initial_url = chrome_launch_params_->url();
+  settings.referrer = chrome_launch_params_->referrer();
+  // Infobars disabled in widget mode.
+  settings.infobars_enabled = !chrome_launch_params_->widget_mode();
+  settings.route_all_top_level_navigations =
+      chrome_launch_params_->route_all_top_level_navigations();
 
   UMA_HISTOGRAM_CUSTOM_COUNTS(
       "ChromeFrame.HostNetworking", !use_chrome_network_, 0, 1, 2);
@@ -883,19 +883,21 @@ void ChromeFrameAutomationClient::LaunchComplete(
     }
   } else {
     // Launch failed. Note, we cannot delete proxy here.
-    PostTask(FROM_HERE, NewRunnableMethod(this,
-        &ChromeFrameAutomationClient::InitializeComplete, result));
+    PostTask(FROM_HERE,
+             base::Bind(&ChromeFrameAutomationClient::InitializeComplete,
+                        base::Unretained(this), result));
   }
 }
 
 void ChromeFrameAutomationClient::AutomationServerDied() {
   // Make sure we notify our delegate.
-  PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ChromeFrameAutomationClient::InitializeComplete,
-      AUTOMATION_SERVER_CRASHED));
+  PostTask(
+      FROM_HERE, base::Bind(&ChromeFrameAutomationClient::InitializeComplete,
+                            base::Unretained(this), AUTOMATION_SERVER_CRASHED));
   // Then uninitialize.
-  PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ChromeFrameAutomationClient::Uninitialize));
+  PostTask(
+      FROM_HERE, base::Bind(&ChromeFrameAutomationClient::Uninitialize,
+                            base::Unretained(this)));
 }
 
 void ChromeFrameAutomationClient::InitializeComplete(
@@ -995,8 +997,10 @@ bool ChromeFrameAutomationClient::ProcessUrlRequestMessage(TabProxy* tab,
       break;
   }
 
-  PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ChromeFrameAutomationClient::ProcessUrlRequestMessage, tab, msg, true));
+  PostTask(
+      FROM_HERE, base::IgnoreReturn<bool>(base::Bind(
+          &ChromeFrameAutomationClient::ProcessUrlRequestMessage,
+          base::Unretained(this), tab, msg, true)));
   return true;
 }
 
@@ -1015,8 +1019,9 @@ bool ChromeFrameAutomationClient::OnMessageReceived(TabProxy* tab,
   if (chrome_frame_delegate_ == NULL)
     return false;
 
-  PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ChromeFrameAutomationClient::OnMessageReceivedUIThread, msg));
+  PostTask(FROM_HERE,
+           base::Bind(&ChromeFrameAutomationClient::OnMessageReceivedUIThread,
+                      base::Unretained(this), msg));
   return true;
 }
 
@@ -1026,8 +1031,10 @@ void ChromeFrameAutomationClient::OnChannelError(TabProxy* tab) {
   if (chrome_frame_delegate_ == NULL)
     return;
 
-  PostTask(FROM_HERE, NewRunnableMethod(this,
-      &ChromeFrameAutomationClient::OnChannelErrorUIThread));
+  PostTask(
+      FROM_HERE,
+      base::Bind(&ChromeFrameAutomationClient::OnChannelErrorUIThread,
+                 base::Unretained(this)));
 }
 
 void ChromeFrameAutomationClient::OnMessageReceivedUIThread(
@@ -1059,9 +1066,9 @@ void ChromeFrameAutomationClient::ReportNavigationError(
   if (ui_thread_id_ == base::PlatformThread::CurrentId()) {
     chrome_frame_delegate_->OnLoadFailed(error_code, url);
   } else {
-    PostTask(FROM_HERE, NewRunnableMethod(this,
-        &ChromeFrameAutomationClient::ReportNavigationError,
-        error_code, url));
+    PostTask(FROM_HERE,
+             base::Bind(&ChromeFrameAutomationClient::ReportNavigationError,
+                        base::Unretained(this), error_code, url));
   }
 }
 
@@ -1211,7 +1218,7 @@ void ChromeFrameAutomationClient::SetUrlFetcher(
   url_fetcher_->set_delegate(this);
 }
 
-void ChromeFrameAutomationClient::SetZoomLevel(PageZoom::Function zoom_level) {
+void ChromeFrameAutomationClient::SetZoomLevel(content::PageZoom zoom_level) {
   if (automation_server_) {
     automation_server_->Send(new AutomationMsg_SetZoomLevel(tab_handle_,
                                                             zoom_level));
@@ -1242,14 +1249,15 @@ void ChromeFrameAutomationClient::OnResponseStarted(int request_id,
     const char* mime_type,  const char* headers, int size,
     base::Time last_modified, const std::string& redirect_url,
     int redirect_status, const net::HostPortPair& socket_address) {
-  const AutomationURLResponse response(
-      mime_type,
-      headers ? headers : "",
-      size,
-      last_modified,
-      redirect_url,
-      redirect_status,
-      socket_address);
+  AutomationURLResponse response;
+  response.mime_type = mime_type;
+  if (headers)
+    response.headers = headers;
+  response.content_length = size;
+  response.last_modified = last_modified;
+  response.redirect_url = redirect_url;
+  response.redirect_status = redirect_status;
+  response.socket_address = socket_address;
 
   automation_server_->Send(new AutomationMsg_RequestStarted(
       tab_->handle(), request_id, response));

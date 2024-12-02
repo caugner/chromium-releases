@@ -15,13 +15,16 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/common/metrics_helpers.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/process_type.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
@@ -29,17 +32,18 @@
 
 class BookmarkModel;
 class BookmarkNode;
-class HistogramSynchronizer;
-class MetricsLogBase;
 class MetricsReportingScheduler;
 class PrefService;
 class Profile;
-class RenderProcessHost;
 class TemplateURLService;
 
 namespace base {
 class DictionaryValue;
 class MessageLoopProxy;
+}
+
+namespace content {
+class RenderProcessHost;
 }
 
 namespace prerender {
@@ -51,8 +55,8 @@ struct WebPluginInfo;
 }
 
 
-class MetricsService : public NotificationObserver,
-                       public URLFetcher::Delegate,
+class MetricsService : public content::NotificationObserver,
+                       public content::URLFetcherDelegate,
                        public MetricsServiceBase {
  public:
   MetricsService();
@@ -77,13 +81,13 @@ class MetricsService : public NotificationObserver,
   // Set up notifications which indicate that a user is performing work. This is
   // useful to allow some features to sleep, until the machine becomes active,
   // such as precluding UMA uploads unless there was recent activity.
-  static void SetUpNotifications(NotificationRegistrar* registrar,
-                                 NotificationObserver* observer);
+  static void SetUpNotifications(content::NotificationRegistrar* registrar,
+                                 content::NotificationObserver* observer);
 
-  // Implementation of NotificationObserver
+  // Implementation of content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Invoked when we get a WM_SESSIONEND. This places a value in prefs that is
   // reset when RecordCompletedSessionEnd is invoked.
@@ -229,14 +233,9 @@ class MetricsService : public NotificationObserver,
   // copy of the staged log.
   void PrepareFetchWithStagedLog();
 
-  // Implementation of URLFetcher::Delegate. Called after transmission
+  // Implementation of content::URLFetcherDelegate. Called after transmission
   // completes (either successfully or with failure).
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Logs debugging details, for the case where the server returns a response
   // code other than 200.
@@ -244,8 +243,8 @@ class MetricsService : public NotificationObserver,
 
   // Records a window-related notification.
   void LogWindowChange(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
 
   // Reads, increments and then sets the specified integer preference.
   void IncrementPrefValue(const char* path);
@@ -255,7 +254,7 @@ class MetricsService : public NotificationObserver,
   void IncrementLongPrefsValue(const char* path);
 
   // Records a renderer process crash.
-  void LogRendererCrash(RenderProcessHost* host,
+  void LogRendererCrash(content::RenderProcessHost* host,
                         base::TerminationStatus status,
                         bool was_alive);
 
@@ -279,8 +278,8 @@ class MetricsService : public NotificationObserver,
   // in-object buffer because these notifications are sent on page load, and we
   // don't want to slow that down.
   void LogChildProcessChange(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details);
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details);
 
   // Logs keywords specific metrics. Keyword metrics are recorded in the
   // profile specific metrics.
@@ -299,18 +298,22 @@ class MetricsService : public NotificationObserver,
 
   // Records a page load notification.
   void LogLoadComplete(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
 
   // Checks whether a notification can be logged.
   bool CanLogNotification(int type,
-                          const NotificationSource& source,
-                          const NotificationDetails& details);
+                          const content::NotificationSource& source,
+                          const content::NotificationDetails& details);
 
   // Sets the value of the specified path in prefs and schedules a save.
   void RecordBooleanPrefValue(const char* path, bool value);
 
-  NotificationRegistrar registrar_;
+  // Returns true if process of type |type| should be counted as a plugin
+  // process, and false otherwise.
+  static bool IsPluginProcess(content::ProcessType type);
+
+  content::NotificationRegistrar registrar_;
 
   // Indicate whether recording and reporting are currently happening.
   // These should not be set directly, but by calling SetRecording and
@@ -332,7 +335,7 @@ class MetricsService : public NotificationObserver,
   std::vector<webkit::WebPluginInfo> plugins_;
 
   // The outstanding transmission appears as a URL Fetch operation.
-  scoped_ptr<URLFetcher> current_fetch_;
+  scoped_ptr<content::URLFetcher> current_fetch_;
 
   // The URL for the metrics server.
   std::wstring server_url_;
@@ -367,8 +370,8 @@ class MetricsService : public NotificationObserver,
   struct ChildProcessStats;
   std::map<string16, ChildProcessStats> child_process_stats_buffer_;
 
-  ScopedRunnableMethodFactory<MetricsService> log_sender_factory_;
-  ScopedRunnableMethodFactory<MetricsService> state_saver_factory_;
+  base::WeakPtrFactory<MetricsService> log_sender_factory_;
+  base::WeakPtrFactory<MetricsService> state_saver_factory_;
 
   // Dictionary containing all the profile specific metrics. This is set
   // at creation time from the prefs.
@@ -390,9 +393,8 @@ class MetricsService : public NotificationObserver,
   // exited-cleanly bit in the prefs.
   static ShutdownCleanliness clean_shutdown_status_;
 
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdGeneratesAllZeroes);
-  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdGeneratesCorrectly);
   FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, ClientIdCorrectlyFormatted);
+  FRIEND_TEST_ALL_PREFIXES(MetricsServiceTest, IsPluginProcess);
 
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };

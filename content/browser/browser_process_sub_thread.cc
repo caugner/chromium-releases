@@ -5,18 +5,18 @@
 #include "content/browser/browser_process_sub_thread.h"
 
 #include "build/build_config.h"
-#include "content/common/notification_service.h"
+#include "content/browser/notification_service_impl.h"
 
 #if defined(OS_WIN)
 #include <Objbase.h>
 #endif
 
+namespace content {
+
 BrowserProcessSubThread::BrowserProcessSubThread(BrowserThread::ID identifier)
-      : BrowserThread(identifier) {}
+    : BrowserThreadImpl(identifier) {}
 
 BrowserProcessSubThread::~BrowserProcessSubThread() {
-  // We cannot rely on our base class to stop the thread since we want our
-  // CleanUp function to run.
   Stop();
 }
 
@@ -26,10 +26,14 @@ void BrowserProcessSubThread::Init() {
   CoInitialize(NULL);
 #endif
 
-  notification_service_ = new NotificationService;
+  notification_service_ = new NotificationServiceImpl;
+
+  BrowserThreadImpl::Init();
 }
 
 void BrowserProcessSubThread::CleanUp() {
+  BrowserThreadImpl::CleanUp();
+
   delete notification_service_;
   notification_service_ = NULL;
 
@@ -39,3 +43,5 @@ void BrowserProcessSubThread::CleanUp() {
   CoUninitialize();
 #endif
 }
+
+}  // namespace content

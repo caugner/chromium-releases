@@ -9,15 +9,19 @@
 #include <deque>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 
 namespace net {
 class URLRequestContextGetter;
+class URLRequestStatus;
+typedef std::vector<std::string> ResponseCookies;
 }
 
 namespace policy {
@@ -28,7 +32,7 @@ class DeviceManagementBackend;
 // communication with the device management server. It creates the backends
 // objects that the device management policy provider and friends use to issue
 // requests.
-class DeviceManagementService : public URLFetcher::Delegate {
+class DeviceManagementService : public content::URLFetcherDelegate {
  public:
   // Describes a device management job handled by the service.
   class DeviceManagementJob {
@@ -45,7 +49,7 @@ class DeviceManagementService : public URLFetcher::Delegate {
     virtual GURL GetURL(const std::string& server_url) = 0;
 
     // Configures the fetcher, setting up payload and headers.
-    virtual void ConfigureRequest(URLFetcher* fetcher) = 0;
+    virtual void ConfigureRequest(content::URLFetcher* fetcher) = 0;
   };
 
   explicit DeviceManagementService(const std::string& server_url);
@@ -76,16 +80,12 @@ class DeviceManagementService : public URLFetcher::Delegate {
   virtual void StartJob(DeviceManagementJob* job, bool bypass_proxy);
 
  private:
-  typedef std::map<const URLFetcher*, DeviceManagementJob*> JobFetcherMap;
+  typedef std::map<const content::URLFetcher*, DeviceManagementJob*>
+      JobFetcherMap;
   typedef std::deque<DeviceManagementJob*> JobQueue;
 
-  // URLFetcher::Delegate override.
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) OVERRIDE;
+  // content::URLFetcherDelegate override.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Does the actual initialization using the request context specified for
   // |PrepareInitialization|. This will also fire any pending network requests.

@@ -14,10 +14,12 @@
 #include "chrome/browser/ui/intents/web_intent_picker.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/intents/web_intent_picker_factory.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/intents_host.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/web_intent_service_data.h"
@@ -43,69 +45,114 @@ MATCHER_P(VectorIsOfSize, n, "") {
 
 class WebIntentPickerMock : public WebIntentPicker {
  public:
-  MOCK_METHOD1(SetServiceURLs, void(const std::vector<GURL>& urls));
-  MOCK_METHOD2(SetServiceIcon, void(size_t index, const SkBitmap& icon));
-  MOCK_METHOD1(SetDefaultServiceIcon, void(size_t index));
-  MOCK_METHOD0(Show, void(void));
-  MOCK_METHOD0(Close, void(void));
+  WebIntentPickerMock() : num_urls_(0), num_default_icons_(0) {}
+
+  virtual void SetServiceURLs(const std::vector<GURL>& urls) {
+    num_urls_ = urls.size();
+  }
+
+  virtual void SetServiceIcon(size_t index, const SkBitmap& icon) {}
+
+  virtual void SetDefaultServiceIcon(size_t index) {
+    num_default_icons_++;
+  }
+
+  virtual void WaitFor(int target_num_urls, int target_num_default_icons) {
+    while (num_urls_ != target_num_urls ||
+           num_default_icons_ != target_num_default_icons) {
+      MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+      ui_test_utils::RunAllPendingInMessageLoop();
+    }
+  }
+
+  virtual void Close() {}
+
+  TabContents* SetInlineDisposition(const GURL& url) { return NULL; }
+
+  int num_urls_;
+  int num_default_icons_;
 };
+
 
 class WebIntentPickerFactoryMock : public WebIntentPickerFactory {
  public:
-  MOCK_METHOD3(Create,
-               WebIntentPicker*(Browser* browser,
-                                TabContentsWrapper* wrapper,
-                                WebIntentPickerDelegate* delegate));
-  MOCK_METHOD1(ClosePicker, void(WebIntentPicker* picker));
+  explicit WebIntentPickerFactoryMock(WebIntentPickerMock* mock)
+      : picker_(mock) {}
+
+  virtual WebIntentPicker* Create(Browser* browser,
+                                  TabContentsWrapper* wrapper,
+                                  WebIntentPickerDelegate* delegate) {
+    return picker_;
+  }
+
+  virtual void ClosePicker(WebIntentPicker* picker) {
+    if (picker_) {
+      picker_->Close();
+      picker_ = NULL;
+    }
+  }
+
+  void Close() {
+    picker_ = NULL;
+  }
+
+  WebIntentPicker* picker_;
+};
+
+class IntentsHostMock : public content::IntentsHost {
+ public:
+  explicit IntentsHostMock(const webkit_glue::WebIntentData& intent)
+      : intent_(intent),
+        dispatched_(false) {}
+
+  virtual const webkit_glue::WebIntentData& GetIntent() {
+    return intent_;
+  }
+
+  virtual void DispatchIntent(TabContents* tab_contents) {
+    dispatched_ = true;
+  }
+
+  virtual void SendReplyMessage(webkit_glue::WebIntentReplyType reply_type,
+                                const string16& data) {
+  }
+
+  virtual void RegisterReplyNotification(const base::Closure&) {
+  }
+
+  webkit_glue::WebIntentData intent_;
+  bool dispatched_;
 };
 
 class WebIntentPickerControllerBrowserTest : public InProcessBrowserTest {
  protected:
   void AddWebIntentService(const string16& action,
                            const GURL& service_url) {
-    WebIntentServiceData web_intent_service_data;
-    web_intent_service_data.action = action;
-    web_intent_service_data.type = kType;
-    web_intent_service_data.service_url = service_url;
-    web_data_service_->AddWebIntent(web_intent_service_data);
+    webkit_glue::WebIntentServiceData service;
+    service.action = action;
+    service.type = kType;
+    service.service_url = service_url;
+    web_data_service_->AddWebIntentService(service);
   }
 
-  void SetPickerExpectations(int expected_service_count,
-                             int expected_default_favicons) {
-    EXPECT_CALL(*picker_factory_, Create(_, _, _)).
-        WillOnce(DoAll(SaveArg<2>(&delegate_), Return(&picker_)));
-    EXPECT_CALL(picker_,
-                SetServiceURLs(VectorIsOfSize(expected_service_count))).
-        Times(1);
-    EXPECT_CALL(picker_, SetDefaultServiceIcon(_)).
-        Times(expected_default_favicons);
-    EXPECT_CALL(*picker_factory_, ClosePicker(_));
+  void OnSendReturnMessage(WebIntentPickerController* controller) {
+    controller->OnSendReturnMessage();
   }
 
-  void CheckPendingAsync() {
-    if (controller_->pending_async_count() > 0) {
-      MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&WebIntentPickerControllerBrowserTest::CheckPendingAsync,
-                     base::Unretained(this)));
-      return;
-    }
-
-    MessageLoop::current()->Quit();
+  void OnServiceChosen(WebIntentPickerController* controller, size_t index) {
+    controller->OnServiceChosen(index);
   }
 
-  void WaitForDialogToShow() {
-    CheckPendingAsync();
-    MessageLoop::current()->Run();
+  void SetPickerFactory(WebIntentPickerController* controller,
+                        WebIntentPickerFactory* factory) {
+    controller->picker_factory_.reset(factory);
   }
 
   WebIntentPickerMock picker_;
 
-  // |controller_| takes ownership.
+  // The picker controller takes ownership.
   WebIntentPickerFactoryMock* picker_factory_;
 
-  scoped_ptr<WebIntentPickerController> controller_;
-  WebIntentPickerDelegate* delegate_;
   WebDataService* web_data_service_;
   FaviconService* favicon_service_;
 };
@@ -119,17 +166,29 @@ IN_PROC_BROWSER_TEST_F(WebIntentPickerControllerBrowserTest, ChooseService) {
   favicon_service_ =
       browser()->profile()->GetFaviconService(Profile::EXPLICIT_ACCESS);
 
-  picker_factory_ = new WebIntentPickerFactoryMock();
-  controller_.reset(new WebIntentPickerController(
-      browser()->GetSelectedTabContentsWrapper(), picker_factory_));
+  picker_factory_ = new WebIntentPickerFactoryMock(&picker_);
+  WebIntentPickerController* controller = browser()->
+      GetSelectedTabContentsWrapper()->web_intent_picker_controller();
+  SetPickerFactory(controller, picker_factory_);
 
-  SetPickerExpectations(2, 2);
+  controller->ShowDialog(browser(), kAction1, kType);
+  picker_.WaitFor(2, 2);
+  EXPECT_EQ(2, picker_.num_urls_);
+  EXPECT_EQ(2, picker_.num_default_icons_);
 
-  controller_->ShowDialog(NULL, kAction1, kType);
-  WaitForDialogToShow();
+  webkit_glue::WebIntentData intent;
+  intent.action = ASCIIToUTF16("a");
+  intent.type = ASCIIToUTF16("b");
+  IntentsHostMock* host = new IntentsHostMock(intent);
+  controller->SetIntentsHost(host);
 
-  delegate_->OnServiceChosen(1);
+  OnServiceChosen(controller, 1);
   ASSERT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GURL(kServiceURL2),
             browser()->GetSelectedTabContents()->GetURL());
+
+  EXPECT_TRUE(host->dispatched_);
+
+  OnSendReturnMessage(controller);
+  ASSERT_EQ(1, browser()->tab_count());
 }

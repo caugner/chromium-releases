@@ -41,10 +41,10 @@
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/base/dragdrop/os_exchange_data.h"
-#include "views/drag_utils.h"
-#include "views/events/event.h"
-#include "views/widget/native_widget.h"
-#include "views/widget/widget.h"
+#include "ui/views/drag_utils.h"
+#include "ui/views/events/event.h"
+#include "ui/views/widget/native_widget.h"
+#include "ui/views/widget/widget.h"
 #endif
 
 #if defined(TOOLKIT_GTK)
@@ -77,8 +77,9 @@ class NewBrowserPageNavigator : public PageNavigator {
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
                                content::PageTransition transition) OVERRIDE {
-    return OpenURL(OpenURLParams(url, referrer, disposition, transition,
-                                 false));
+    DCHECK(referrer.is_empty());
+    return OpenURL(OpenURLParams(url, content::Referrer(), disposition,
+                                 transition, false));
   }
 
   virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
@@ -155,8 +156,9 @@ void OpenAllImpl(const BookmarkNode* node,
       disposition = NEW_BACKGROUND_TAB;
     else
       disposition = initial_disposition;
-    (*navigator)->OpenURL(OpenURLParams(node->url(), GURL(), disposition,
-                          content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
+    (*navigator)->OpenURL(OpenURLParams(node->url(), content::Referrer(),
+                          disposition, content::PAGE_TRANSITION_AUTO_BOOKMARK,
+                          false));
     if (!*opened_url) {
       *opened_url = true;
       // We opened the first URL which may have opened a new window or clobbered
@@ -221,7 +223,7 @@ bool DoesBookmarkContainWords(const BookmarkNode* node,
       DoesBookmarkTextContainWords(UTF8ToUTF16(node->url().spec()), words) ||
       DoesBookmarkTextContainWords(net::FormatUrl(
           node->url(), languages, net::kFormatUrlOmitNothing,
-          UnescapeRule::NORMAL, NULL, NULL, NULL), words);
+          net::UnescapeRule::NORMAL, NULL, NULL, NULL), words);
 }
 
 }  // namespace
@@ -462,17 +464,24 @@ bool CanPasteFromClipboard(const BookmarkNode* node) {
 
 string16 GetNameForURL(const GURL& url) {
   if (url.is_valid()) {
-    return net::GetSuggestedFilename(url, "", "", "", "", string16());
+    return net::GetSuggestedFilename(url, "", "", "", "", std::string());
   } else {
     return l10n_util::GetStringUTF16(IDS_APP_UNTITLED_SHORTCUT_FILE_NAME);
   }
+}
+
+// This is used with a tree iterator to skip subtrees which are not visible.
+static bool PruneInvisibleFolders(const BookmarkNode* node) {
+  return !node->IsVisible();
 }
 
 std::vector<const BookmarkNode*> GetMostRecentlyModifiedFolders(
     BookmarkModel* model,
     size_t max_count) {
   std::vector<const BookmarkNode*> nodes;
-  ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
+  ui::TreeNodeIterator<const BookmarkNode>
+      iterator(model->root_node(), PruneInvisibleFolders);
+
   while (iterator.has_next()) {
     const BookmarkNode* parent = iterator.Next();
     if (parent->is_folder() && parent->date_folder_modified() > base::Time()) {
@@ -493,21 +502,19 @@ std::vector<const BookmarkNode*> GetMostRecentlyModifiedFolders(
   }
 
   if (nodes.size() < max_count) {
-    // Add the bookmark bar and other nodes if there is space.
-    if (find(nodes.begin(), nodes.end(), model->bookmark_bar_node()) ==
-        nodes.end()) {
-      nodes.push_back(model->bookmark_bar_node());
-    }
+    // Add the permanent nodes if there is space. The permanent nodes are the
+    // only children of the root_node.
+    const BookmarkNode* root_node = model->root_node();
 
-    if (nodes.size() < max_count &&
-        find(nodes.begin(), nodes.end(), model->other_node()) == nodes.end()) {
-      nodes.push_back(model->other_node());
-    }
+    for (int i = 0; i < root_node->child_count(); ++i) {
+      const BookmarkNode* node = root_node->GetChild(i);
+      if (node->IsVisible() &&
+          find(nodes.begin(), nodes.end(), node) == nodes.end()) {
+        nodes.push_back(node);
 
-    if (nodes.size() < max_count && model->synced_node()->IsVisible() &&
-        find(nodes.begin(), nodes.end(),
-             model->synced_node()) == nodes.end()) {
-      nodes.push_back(model->synced_node());
+        if (nodes.size() == max_count)
+          break;
+      }
     }
   }
   return nodes;

@@ -13,26 +13,13 @@
 #include "ui/gfx/gl/gl_surface_osmesa.h"
 #include "ui/gfx/gl/gl_surface_stub.h"
 
+#if defined(USE_AURA)
+#include "ui/gfx/gl/gl_surface_nsview.h"
+#endif
+
 namespace gfx {
 
-bool GLSurface::InitializeOneOff() {
-  static bool initialized = false;
-  if (initialized)
-    return true;
-
-  static const GLImplementation kAllowedGLImplementations[] = {
-    kGLImplementationDesktopGL,
-    kGLImplementationOSMesaGL
-  };
-
-  if (!InitializeRequestedGLBindings(
-           kAllowedGLImplementations,
-           kAllowedGLImplementations + arraysize(kAllowedGLImplementations),
-           kGLImplementationDesktopGL)) {
-    LOG(ERROR) << "InitializeRequestedGLBindings failed.";
-    return false;
-  }
-
+bool GLSurface::InitializeOneOffInternal() {
   switch (GetGLImplementation()) {
     case kGLImplementationDesktopGL:
       if (!GLSurfaceCGL::InitializeOneOff()) {
@@ -43,15 +30,33 @@ bool GLSurface::InitializeOneOff() {
     default:
       break;
   }
-
-  initialized = true;
   return true;
 }
 
 scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
     bool software,
     gfx::PluginWindowHandle window) {
-  return CreateOffscreenGLSurface(software, gfx::Size(1, 1));
+#if defined(USE_AURA)
+  if (software)
+    return NULL;
+
+  switch (GetGLImplementation()) {
+    case kGLImplementationDesktopGL: {
+      scoped_refptr<GLSurface> surface(new GLSurfaceNSView(window));
+      if (!surface->Initialize())
+        return NULL;
+
+      return surface;
+    }
+    case kGLImplementationMockGL:
+      return new GLSurfaceStub;
+    default:
+      NOTREACHED();
+      return NULL;
+  }
+#else
+  return CreateOffscreenGLSurface(software, gfx::Size(1,1));
+#endif
 }
 
 scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(

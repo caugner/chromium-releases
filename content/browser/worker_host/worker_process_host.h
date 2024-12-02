@@ -7,20 +7,20 @@
 #pragma once
 
 #include <list>
+#include <utility>
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "content/browser/browser_child_process_host.h"
+#include "content/common/content_export.h"
 #include "content/browser/worker_host/worker_document_set.h"
 #include "googleurl/src/gurl.h"
 
 class ResourceDispatcherHost;
+
 namespace content {
 class ResourceContext;
 }  // namespace content
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
 
 // The WorkerProcessHost is the interface that represents the browser side of
 // the browser <-> worker communication channel. There will be one
@@ -30,17 +30,14 @@ class URLRequestContextGetter;
 // BrowserContext.
 class WorkerProcessHost : public BrowserChildProcessHost {
  public:
-
   // Contains information about each worker instance, needed to forward messages
   // between the renderer and worker processes.
   class WorkerInstance {
    public:
     WorkerInstance(const GURL& url,
-                   bool shared,
                    const string16& name,
                    int worker_route_id,
                    int parent_process_id,
-                   int parent_appcache_host_id,
                    int64 main_resource_appcache_id,
                    const content::ResourceContext* resource_context);
     // Used for pending instances. Rest of the parameters are ignored.
@@ -82,14 +79,12 @@ class WorkerProcessHost : public BrowserChildProcessHost {
     };
 
     // Accessors
-    bool shared() const { return shared_; }
     bool closed() const { return closed_; }
     void set_closed(bool closed) { closed_ = closed; }
     const GURL& url() const { return url_; }
     const string16 name() const { return name_; }
     int worker_route_id() const { return worker_route_id_; }
     int parent_process_id() const { return parent_process_id_; }
-    int parent_appcache_host_id() const { return parent_appcache_host_id_; }
     int64 main_resource_appcache_id() const {
       return main_resource_appcache_id_;
     }
@@ -103,12 +98,10 @@ class WorkerProcessHost : public BrowserChildProcessHost {
    private:
     // Set of all filters (clients) associated with this worker.
     GURL url_;
-    bool shared_;
     bool closed_;
     string16 name_;
     int worker_route_id_;
     int parent_process_id_;
-    int parent_appcache_host_id_;
     int64 main_resource_appcache_id_;
     FilterList filters_;
     scoped_refptr<WorkerDocumentSet> worker_document_set_;
@@ -139,6 +132,9 @@ class WorkerProcessHost : public BrowserChildProcessHost {
   void DocumentDetached(WorkerMessageFilter* filter,
                         unsigned long long document_id);
 
+  // Terminates the given worker, i.e. based on a UI action.
+  CONTENT_EXPORT void TerminateWorker(int worker_route_id);
+
   typedef std::list<WorkerInstance> Instances;
   const Instances& instances() const { return instances_; }
 
@@ -153,14 +149,14 @@ class WorkerProcessHost : public BrowserChildProcessHost {
 
  private:
   // Called when the process has been launched successfully.
-  virtual void OnProcessLaunched();
+  virtual void OnProcessLaunched() OVERRIDE;
 
   // Creates and adds the message filters.
   void CreateMessageFilters(int render_process_id);
 
   // IPC::Channel::Listener implementation:
   // Called when a message arrives from the worker process.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnWorkerContextClosed(int worker_route_id);
   void OnAllowDatabase(int worker_route_id,
@@ -179,7 +175,7 @@ class WorkerProcessHost : public BrowserChildProcessHost {
                     WorkerMessageFilter* filter,
                     int route_id);
 
-  virtual bool CanShutdown();
+  virtual bool CanShutdown() OVERRIDE;
 
   // Updates the title shown in the task manager.
   void UpdateTitle();

@@ -4,6 +4,7 @@
 
 // TODO(akalin): Rename this file to migration_test.cc.
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
@@ -349,8 +350,9 @@ IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
 
 // Triggers a server migration on two datatypes, then makes a local
 // modification to one of them.
+// Flaky. crbug.com/100382.
 IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
-                       MigratePrefsAndBookmarksThenModifyBookmark) {
+                       FLAKY_MigratePrefsAndBookmarksThenModifyBookmark) {
   RunTwoClientMigrationTest(
       MakeList(syncable::PREFERENCES, syncable::BOOKMARKS),
       MODIFY_BOOKMARK);

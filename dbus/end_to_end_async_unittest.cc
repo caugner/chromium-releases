@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
+#include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "dbus/bus.h"
@@ -54,11 +55,24 @@ class EndToEndAsyncTest : public testing::Test {
                                          "/org/chromium/TestObject");
     ASSERT_TRUE(bus_->HasDBusThread());
 
-    // Connect to the "Test" signal from the remote object.
+    // Connect to the "Test" signal of "org.chromium.TestInterface" from
+    // the remote object.
     object_proxy_->ConnectToSignal(
         "org.chromium.TestInterface",
         "Test",
         base::Bind(&EndToEndAsyncTest::OnTestSignal,
+                   base::Unretained(this)),
+        base::Bind(&EndToEndAsyncTest::OnConnected,
+                   base::Unretained(this)));
+    // Connect to the "Test2" signal of "org.chromium.TestInterface" from
+    // the remote object. There was a bug where we were emitting error
+    // messages like "Requested to remove an unknown match rule: ..." at
+    // the shutdown of Bus when an object proxy is connected to more than
+    // one signal of the same interface. See crosbug.com/23382 for details.
+    object_proxy_->ConnectToSignal(
+        "org.chromium.TestInterface",
+        "Test2",
+        base::Bind(&EndToEndAsyncTest::OnTest2Signal,
                    base::Unretained(this)),
         base::Bind(&EndToEndAsyncTest::OnConnected,
                    base::Unretained(this)));
@@ -118,6 +132,12 @@ class EndToEndAsyncTest : public testing::Test {
   void OnTestSignal(dbus::Signal* signal) {
     dbus::MessageReader reader(signal);
     ASSERT_TRUE(reader.PopString(&test_signal_string_));
+    message_loop_.Quit();
+  }
+
+  // Called when the "Test2" signal is received, in the main thread.
+  void OnTest2Signal(dbus::Signal* signal) {
+    dbus::MessageReader reader(signal);
     message_loop_.Quit();
   }
 
@@ -203,6 +223,24 @@ TEST_F(EndToEndAsyncTest, Timeout) {
   ASSERT_EQ("", response_strings_[0]);
 }
 
+// Tests calling a method that sends its reply asynchronously.
+TEST_F(EndToEndAsyncTest, AsyncEcho) {
+  const char* kHello = "hello";
+
+  // Create the method call.
+  dbus::MethodCall method_call("org.chromium.TestInterface", "AsyncEcho");
+  dbus::MessageWriter writer(&method_call);
+  writer.AppendString(kHello);
+
+  // Call the method.
+  const int timeout_ms = dbus::ObjectProxy::TIMEOUT_USE_DEFAULT;
+  CallMethod(&method_call, timeout_ms);
+
+  // Check the response.
+  WaitForResponses(1);
+  EXPECT_EQ(kHello, response_strings_[0]);
+}
+
 TEST_F(EndToEndAsyncTest, NonexistentMethod) {
   dbus::MethodCall method_call("org.chromium.TestInterface", "Nonexistent");
 
@@ -223,6 +261,28 @@ TEST_F(EndToEndAsyncTest, BrokenMethod) {
 
   // Should fail because the method is broken.
   ASSERT_EQ("", response_strings_[0]);
+}
+
+TEST_F(EndToEndAsyncTest, EmptyResponseCallback) {
+  const char* kHello = "hello";
+
+  // Create the method call.
+  dbus::MethodCall method_call("org.chromium.TestInterface", "Echo");
+  dbus::MessageWriter writer(&method_call);
+  writer.AppendString(kHello);
+
+  // Call the method with an empty callback.
+  const int timeout_ms = dbus::ObjectProxy::TIMEOUT_USE_DEFAULT;
+  object_proxy_->CallMethod(&method_call,
+                            timeout_ms,
+                            dbus::ObjectProxy::EmptyResponseCallback());
+  // Post a delayed task to quit the message loop.
+  message_loop_.PostDelayedTask(FROM_HERE,
+                                MessageLoop::QuitClosure(),
+                                TestTimeouts::tiny_timeout_ms());
+  message_loop_.Run();
+  // We cannot tell if the empty callback is called, but at least we can
+  // check if the test does not crash.
 }
 
 TEST_F(EndToEndAsyncTest, TestSignal) {

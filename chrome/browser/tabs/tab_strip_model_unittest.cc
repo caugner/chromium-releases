@@ -11,6 +11,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/property_bag.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -28,24 +29,25 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_observer_mock.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
-#include "content/common/property_bag.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/test/notification_observer_mock.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
 using testing::_;
 
 namespace {
 
 // Class used to delete a TabContents when another TabContents is destroyed.
-class DeleteTabContentsOnDestroyedObserver : public NotificationObserver {
+class DeleteTabContentsOnDestroyedObserver
+    : public content::NotificationObserver {
  public:
   DeleteTabContentsOnDestroyedObserver(TabContentsWrapper* source,
                                        TabContentsWrapper* tab_to_delete)
@@ -53,12 +55,12 @@ class DeleteTabContentsOnDestroyedObserver : public NotificationObserver {
         tab_to_delete_(tab_to_delete) {
     registrar_.Add(this,
                    content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                   Source<TabContents>(source->tab_contents()));
+                   content::Source<TabContents>(source->tab_contents()));
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     TabContentsWrapper* tab_to_delete = tab_to_delete_;
     tab_to_delete_ = NULL;
     delete tab_to_delete;
@@ -67,7 +69,7 @@ class DeleteTabContentsOnDestroyedObserver : public NotificationObserver {
  private:
   TabContentsWrapper* source_;
   TabContentsWrapper* tab_to_delete_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(DeleteTabContentsOnDestroyedObserver);
 };
@@ -103,7 +105,7 @@ class TabStripDummyDelegate : public TabStripModelDelegate {
   virtual int GetDragActions() const { return 0; }
   virtual TabContentsWrapper* CreateTabContentsForURL(
       const GURL& url,
-      const GURL& referrer,
+      const content::Referrer& referrer,
       Profile* profile,
       content::PageTransition transition,
       bool defer_load,
@@ -167,7 +169,7 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   // Forwards a URL "load" request through to our dummy TabContents
   // implementation.
   void LoadURL(TabContents* con, const std::wstring& url) {
-    controller().LoadURL(GURL(WideToUTF16(url)), GURL(),
+    controller().LoadURL(GURL(WideToUTF16(url)), content::Referrer(),
                          content::PAGE_TRANSITION_LINK, std::string());
   }
 
@@ -254,12 +256,12 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   }
 
  private:
-  PropertyAccessor<int>* GetIDAccessor() {
-    static PropertyAccessor<int> accessor;
+  base::PropertyAccessor<int>* GetIDAccessor() {
+    static base::PropertyAccessor<int> accessor;
     return &accessor;
   }
 
-  BrowserThread browser_thread_;
+  content::TestBrowserThread browser_thread_;
 
   std::wstring test_dir_;
   std::wstring profile_path_;
@@ -1745,7 +1747,7 @@ TEST_F(TabStripModelTest, FastShutdown) {
     // On a mock RPH this checks whether we *attempted* fast shutdown.
     // A real RPH would reject our attempt since there is an unload handler.
     EXPECT_TRUE(contents1->tab_contents()->
-        GetRenderProcessHost()->fast_shutdown_started());
+      GetRenderProcessHost()->FastShutdownStarted());
     EXPECT_EQ(2, tabstrip.count());
 
     delegate.set_run_unload_listener(false);
@@ -1768,7 +1770,7 @@ TEST_F(TabStripModelTest, FastShutdown) {
 
     tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
     EXPECT_FALSE(contents1->tab_contents()->
-        GetRenderProcessHost()->fast_shutdown_started());
+        GetRenderProcessHost()->FastShutdownStarted());
     EXPECT_EQ(1, tabstrip.count());
 
     tabstrip.CloseAllTabs();

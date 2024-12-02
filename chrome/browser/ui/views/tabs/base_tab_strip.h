@@ -12,11 +12,11 @@
 #include "chrome/browser/ui/views/tabs/abstract_tab_strip_view.h"
 #include "chrome/browser/ui/views/tabs/base_tab.h"
 #include "chrome/browser/ui/views/tabs/tab_controller.h"
-#include "views/animation/bounds_animator.h"
-#include "views/view.h"
+#include "ui/views/animation/bounds_animator.h"
+#include "ui/views/view.h"
 
 class BaseTab;
-class DraggedTabController;
+class TabDragController;
 class TabStripController;
 class TabStripSelectionModel;
 
@@ -111,6 +111,7 @@ class BaseTabStrip : public AbstractTabStripView,
   virtual void UpdateLoadingAnimations() OVERRIDE;
 
   // TabController overrides:
+  virtual const TabStripSelectionModel& GetSelectionModel() OVERRIDE;
   virtual void SelectTab(BaseTab* tab) OVERRIDE;
   virtual void ExtendSelectionTo(BaseTab* tab) OVERRIDE;
   virtual void ToggleSelected(BaseTab* tab) OVERRIDE;
@@ -122,8 +123,10 @@ class BaseTabStrip : public AbstractTabStripView,
   virtual bool IsTabSelected(const BaseTab* tab) const OVERRIDE;
   virtual bool IsTabPinned(const BaseTab* tab) const OVERRIDE;
   virtual bool IsTabCloseable(const BaseTab* tab) const OVERRIDE;
-  virtual void MaybeStartDrag(BaseTab* tab,
-                              const views::MouseEvent& event) OVERRIDE;
+  virtual void MaybeStartDrag(
+      BaseTab* tab,
+      const views::MouseEvent& event,
+      const TabStripSelectionModel& original_selection) OVERRIDE;
   virtual void ContinueDrag(const views::MouseEvent& event) OVERRIDE;
   virtual bool EndDrag(bool canceled) OVERRIDE;
   virtual BaseTab* GetTabAt(BaseTab* tab,
@@ -207,7 +210,7 @@ class BaseTabStrip : public AbstractTabStripView,
   // Destroys the active drag controller.
   void DestroyDragController();
 
-  // Used by DraggedTabController when the user starts or stops dragging tabs.
+  // Used by TabDragController when the user starts or stops dragging tabs.
   void StartedDraggingTabs(const std::vector<BaseTab*>& tabs);
   void StoppedDraggingTabs(const std::vector<BaseTab*>& tabs);
 
@@ -240,7 +243,7 @@ class BaseTabStrip : public AbstractTabStripView,
  private:
   class RemoveTabDelegate;
 
-  friend class DraggedTabController;
+  friend class DefaultTabDragController;
 
   // Invoked from StoppedDraggingTabs to cleanup |tab|. If |tab| is known
   // |is_first_tab| is set to true.
@@ -255,7 +258,7 @@ class BaseTabStrip : public AbstractTabStripView,
 
   // The controller for a drag initiated from a Tab. Valid for the lifetime of
   // the drag session.
-  scoped_ptr<DraggedTabController> drag_controller_;
+  scoped_ptr<TabDragController> drag_controller_;
 
   // If true, the insert is a result of a drag attaching the tab back to the
   // model.

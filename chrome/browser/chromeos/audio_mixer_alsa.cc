@@ -17,12 +17,14 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/extension_tts_api_chromeos.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 typedef long alsa_long_t;  // 'long' is required for ALSA API calls.
 
+using content::BrowserThread;
 using std::max;
 using std::min;
 using std::string;
@@ -300,6 +302,12 @@ bool AudioMixerAlsa::ConnectInternal() {
     max_volume_db_ = max_volume_db;
     volume_db_ = min(max(volume_db_, min_volume_db_), max_volume_db_);
   }
+
+  // The speech synthesis service shouldn't be initialized until after
+  // we get to this point, so we call this function to tell it that it's
+  // safe to do TTS now.  NotificationService would be cleaner,
+  // but it's not available at this point.
+  EnableChromeOsTts();
 
   ApplyState();
   return true;

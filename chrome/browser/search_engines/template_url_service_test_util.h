@@ -15,7 +15,7 @@
 #include "base/string16.h"
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
 class TemplateURLService;
 class TemplateURLServiceTestingProfile;
@@ -40,7 +40,7 @@ class TemplateURLServiceTestUtil : public TemplateURLServiceObserver {
   void TearDown();
 
   // TemplateURLServiceObserver implemementation.
-  virtual void OnTemplateURLServiceChanged();
+  virtual void OnTemplateURLServiceChanged() OVERRIDE;
 
   // Gets the observer count.
   int GetObserverCount();
@@ -93,7 +93,7 @@ class TemplateURLServiceTestUtil : public TemplateURLServiceObserver {
   MessageLoopForUI message_loop_;
   // Needed to make the DeleteOnUIThread trait of WebDataService work
   // properly.
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   scoped_ptr<TemplateURLServiceTestingProfile> profile_;
   scoped_ptr<TestingTemplateURLService> model_;
   int changed_count_;

@@ -27,7 +27,7 @@
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -35,6 +35,7 @@
 using base::Time;
 using base::TimeDelta;
 using base::TimeTicks;
+using content::BrowserThread;
 
 // Filename constants.
 static const FilePath::CharType kHistoryFile[] = FILE_PATH_LITERAL("History");
@@ -103,8 +104,8 @@ class ExpireHistoryTest : public testing::Test,
   BookmarkModel bookmark_model_;
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
 
   ExpireHistoryBackend expirer_;
 
@@ -337,7 +338,7 @@ bool ExpireHistoryTest::HasThumbnail(URLID url_id) {
   if (!main_db_->GetURLRow(url_id, &info))
     return false;
   GURL url = info.url();
-  scoped_refptr<RefCountedBytes> data;
+  scoped_refptr<RefCountedMemory> data;
   return top_sites_->GetPageThumbnail(url, &data);
 }
 

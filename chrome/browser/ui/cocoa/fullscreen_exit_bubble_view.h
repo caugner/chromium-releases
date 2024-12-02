@@ -8,15 +8,8 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "chrome/browser/ui/cocoa/background_gradient_view.h"
-
 // A view that handles painting the background for the Fullscreen Exit Bubble.
-@interface FullscreenExitBubbleView : BackgroundGradientView
-
-// Specifies that mouse events over this view should be ignored by the
-// render host.
-- (BOOL)nonWebContentView;
-
+@interface FullscreenExitBubbleView : NSView
 @end
 
 #endif  // CHROME_BROWSER_UI_COCOA_FULLSCREEN_EXIT_BUBBLE_VIEW_H_

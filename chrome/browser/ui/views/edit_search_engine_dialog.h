@@ -13,8 +13,8 @@
 
 #include <windows.h>
 
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class Label;
@@ -25,7 +25,6 @@ class EditSearchEngineController;
 class EditSearchEngineControllerDelegate;
 class Profile;
 class TemplateURL;
-class TemplateURLService;
 
 class EditSearchEngineDialog : public views::TextfieldController,
                                public views::DialogDelegateView {
@@ -45,8 +44,7 @@ class EditSearchEngineDialog : public views::TextfieldController,
   // views::DialogDelegate:
   virtual bool IsModal() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;

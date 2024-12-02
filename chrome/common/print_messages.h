@@ -27,7 +27,7 @@ struct PrintMsg_Print_Params {
   void Reset();
 
   gfx::Size page_size;
-  gfx::Size printable_size;
+  gfx::Size content_size;
   int margin_top;
   int margin_left;
   double dpi;
@@ -70,7 +70,7 @@ IPC_STRUCT_TRAITS_BEGIN(PrintMsg_Print_Params)
   IPC_STRUCT_TRAITS_MEMBER(page_size)
 
   // In pixels according to dpi_x and dpi_y.
-  IPC_STRUCT_TRAITS_MEMBER(printable_size)
+  IPC_STRUCT_TRAITS_MEMBER(content_size)
 
   // The y-offset of the printable area, in pixels according to dpi.
   IPC_STRUCT_TRAITS_MEMBER(margin_top)
@@ -237,7 +237,6 @@ IPC_STRUCT_END()
 
 // Parameters for the IPC message ViewHostMsg_ScriptedPrint
 IPC_STRUCT_BEGIN(PrintHostMsg_ScriptedPrint_Params)
-  IPC_STRUCT_MEMBER(int, routing_id)
   IPC_STRUCT_MEMBER(gfx::NativeViewId, host_window_id)
   IPC_STRUCT_MEMBER(int, cookie)
   IPC_STRUCT_MEMBER(int, expected_pages_count)
@@ -344,7 +343,7 @@ IPC_MESSAGE_CONTROL1(PrintHostMsg_TempFileForPrintingWritten,
 #endif
 
 // Asks the browser to do print preview.
-IPC_MESSAGE_ROUTED0(PrintHostMsg_RequestPrintPreview)
+IPC_MESSAGE_ROUTED1(PrintHostMsg_RequestPrintPreview, bool /* is_modifiable */)
 
 // Notify the browser the number of pages in the print preview document.
 IPC_MESSAGE_ROUTED1(PrintHostMsg_DidGetPreviewPageCount,
@@ -388,3 +387,8 @@ IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewCancelled,
 // driver is bogus).
 IPC_MESSAGE_ROUTED1(PrintHostMsg_PrintPreviewInvalidPrinterSettings,
                     int /* document cookie */)
+
+// Run a nested message loop in the renderer until print preview for
+// window.print() finishes.
+IPC_SYNC_MESSAGE_ROUTED1_0(PrintHostMsg_ScriptedPrintPreview,
+                           bool /* is_modifiable */)

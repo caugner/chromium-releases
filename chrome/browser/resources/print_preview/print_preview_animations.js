@@ -20,6 +20,18 @@ function addAnimation(code) {
 }
 
 /**
+ * Generates css code for fading in an element by animating the height.
+ * @param {number} targetHeight The desired height in pixels after the animation
+ *     ends.
+ * @return {string} The css code for the fade in animation.
+ */
+function getFadeInAnimationCode(targetHeight) {
+  return '0% { opacity: 0; height: 0; } ' +
+      '80% { height: ' + (targetHeight + 4) + 'px; }' +
+      '100% { opacity: 1; height: ' + targetHeight + 'px; }';
+}
+
+/**
  * Fades in an element. Used for both printing options and error messages
  * appearing underneath the textfields.
  * @param {HTMLElement} el The element to be faded in.
@@ -28,21 +40,17 @@ function fadeInElement(el) {
   if (el.classList.contains('visible'))
     return;
   el.classList.remove('closing');
+  el.hidden = false;
   el.style.height = 'auto';
   var height = el.offsetHeight;
   el.style.height = height + 'px';
-  var animName = addAnimation(
-    '0% { opacity: 0; height: 0; } ' +
-    '80% { height: ' + (height + 4) + 'px; }' +
-    '100% { opacity: 1; height: ' + height + 'px; }');
+  var animName = addAnimation(getFadeInAnimationCode(height));
+  var eventTracker = new EventTracker();
+  eventTracker.add(el, 'webkitAnimationEnd',
+                   onFadeInAnimationEnd.bind(el, eventTracker),
+                   false);
   el.style.webkitAnimationName = animName;
   el.classList.add('visible');
-  el.addEventListener('webkitAnimationEnd', function() {
-    el.style.height = '';
-    el.style.webkitAnimationName = '';
-    fadeInOutCleanup(animName);
-    el.removeEventListener('webkitAnimationEnd', arguments.callee, false);
-  }, false );
 }
 
 /**
@@ -56,16 +64,41 @@ function fadeOutElement(el) {
   el.style.height = 'auto';
   var height = el.offsetHeight;
   el.style.height = height + 'px';
-  var animName = addAnimation(
-    '0% { opacity: 1; height: ' + height + 'px; }' +
-    '100% { opacity: 1; height: 0; }');
-  el.style.webkitAnimationName = animName;
+  var animName = addAnimation('');
+  var eventTracker = new EventTracker();
+  eventTracker.add(el, 'webkitTransitionEnd',
+                   onFadeOutTransitionEnd.bind(el, animName, eventTracker),
+                   false);
   el.classList.add('closing');
   el.classList.remove('visible');
-  el.addEventListener('webkitAnimationEnd', function() {
-    fadeInOutCleanup(animName);
-    el.removeEventListener('webkitAnimationEnd', arguments.callee, false);
-  }, false );
+}
+
+/**
+ * Executes when a fade out animation ends.
+ * @param {string} animationName The name of the animation to be removed.
+ * @param {EventTracker} eventTracker The |EventTracker| object that was used
+ *     for adding this listener.
+ * @param {WebkitTransitionEvent} event The event that triggered this listener.
+ */
+function onFadeOutTransitionEnd(animationName, eventTracker, event) {
+  if (event.propertyName != 'height')
+    return;
+  fadeInOutCleanup(animationName);
+  eventTracker.remove(this, 'webkitTransitionEnd');
+  this.hidden = true;
+}
+
+/**
+ * Executes when a fade in animation ends.
+ * @param {EventTracker} eventTracker The |EventTracker| object that was used
+ *     for adding this listener.
+ * @param {WebkitAnimationEvent} event The event that triggered this listener.
+ */
+function onFadeInAnimationEnd(eventTracker, event) {
+  this.style.height = '';
+  this.style.webkitAnimationName = '';
+  fadeInOutCleanup(event.animationName);
+  eventTracker.remove(this, 'webkitAnimationEnd');
 }
 
 /**
@@ -79,39 +112,59 @@ function fadeInOutCleanup(animationName) {
 }
 
 /**
- * Displays |message| followed by three dancing dots animation.
+ * Fades in a printing option existing under |el|.
+ * @param {HTMLElement} el The element to hide.
  */
-function showCustomMessage(message) {
-  $('custom-message-with-dots').innerHTML = message +
-      $('dancing-dots-text').innerHTML;
-  $('custom-message-with-dots').hidden = false;
-  var pdfViewer = $('pdf-viewer');
-  if (pdfViewer)
-    pdfViewer.classList.add('invisible');
-  $('overlay-layer').classList.remove('invisible');
+function fadeInOption(el) {
+  if (el.classList.contains('visible'))
+    return;
+
+  wrapContentsInDiv(el.querySelector('h1'), ['invisible']);
+  var rightColumn = el.querySelector('.right-column');
+  wrapContentsInDiv(rightColumn, ['invisible']);
+
+  var toAnimate = el.querySelectorAll('.collapsible');
+  for (var i = 0; i < toAnimate.length; i++)
+    fadeInElement(toAnimate[i]);
+  el.classList.add('visible');
 }
 
 /**
- * Displays the "Preview loading..." animation.
+ * Fades out a printing option existing under |el|.
+ * @param {HTMLElement} el The element to hide.
  */
-function showLoadingAnimation() {
-  showCustomMessage(localStrings.getString('loading'));
+function fadeOutOption(el) {
+  if (!el.classList.contains('visible'))
+    return;
+
+  wrapContentsInDiv(el.querySelector('h1'), ['visible']);
+  var rightColumn = el.querySelector('.right-column');
+  wrapContentsInDiv(rightColumn, ['visible']);
+
+  var toAnimate = el.querySelectorAll('.collapsible');
+  for (var i = 0; i < toAnimate.length; i++)
+    fadeOutElement(toAnimate[i]);
+  el.classList.remove('visible');
 }
 
 /**
- * Hides the |overlay-layer| and any messages currently displayed.
+ * Wraps the contents of |el| in a div element and attaches css classes
+ * |classes| in the new div, only if has not been already done. It is neccesary
+ * for animating the height of table cells.
+ * @param {HTMLElement} el The element to be processed.
+ * @param {array} classes The css classes to add.
  */
-function hideOverlayLayer() {
-  var overlayLayer = $('overlay-layer');
-  overlayLayer.addEventListener('webkitTransitionEnd', loadingAnimationCleanup);
-  var pdfViewer = $('pdf-viewer');
-  if (pdfViewer)
-    pdfViewer.classList.remove('invisible');
-  overlayLayer.classList.add('invisible');
-}
+function wrapContentsInDiv(el, classes) {
+  var div = el.querySelector('div');
+  if (!div || !div.classList.contains('collapsible')) {
+    div = document.createElement('div');
+    while (el.childNodes.length > 0)
+      div.appendChild(el.firstChild);
+    el.appendChild(div);
+  }
 
-function loadingAnimationCleanup() {
-  $('custom-message-with-dots').hidden = true;
-  $('overlay-layer').removeEventListener('webkitTransitionEnd',
-                                         loadingAnimationCleanup);
+  div.className = '';
+  div.classList.add('collapsible');
+  for (var i = 0; i < classes.length; i++)
+    div.classList.add(classes[i]);
 }

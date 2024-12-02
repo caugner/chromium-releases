@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_FAVICON_SOURCE_H_
 #pragma once
 
+#include <map>
 #include <string>
 
 #include "base/basictypes.h"
@@ -13,7 +14,6 @@
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 
-class GURL;
 class Profile;
 
 // FaviconSource is the gateway between network-level chrome:
@@ -35,11 +35,11 @@ class FaviconSource : public ChromeURLDataManager::DataSource {
   // the path we registered.
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
-                                int request_id);
+                                int request_id) OVERRIDE;
 
-  virtual std::string GetMimeType(const std::string&) const;
+  virtual std::string GetMimeType(const std::string&) const OVERRIDE;
 
-  virtual bool ShouldReplaceExistingSource() const;
+  virtual bool ShouldReplaceExistingSource() const OVERRIDE;
 
  private:
   // Called when favicon data is available from the history backend.

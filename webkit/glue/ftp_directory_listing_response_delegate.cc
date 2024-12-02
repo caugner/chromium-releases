@@ -17,8 +17,8 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/ftp/ftp_directory_listing_parser.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
 
 using net::FtpDirectoryListingEntry;
 
@@ -93,8 +93,8 @@ void FtpDirectoryListingResponseDelegate::OnCompletedRequest() {
 }
 
 void FtpDirectoryListingResponseDelegate::Init(const GURL& response_url) {
-  UnescapeRule::Type unescape_rules = UnescapeRule::SPACES |
-                                      UnescapeRule::URL_SPECIAL_CHARS;
+  net::UnescapeRule::Type unescape_rules = net::UnescapeRule::SPACES |
+                                           net::UnescapeRule::URL_SPECIAL_CHARS;
   std::string unescaped_path = net::UnescapeURLComponent(response_url.path(),
                                                          unescape_rules);
   SendDataToClient(net::GetDirectoryListingHeader(

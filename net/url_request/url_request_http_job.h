@@ -12,7 +12,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/string16.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "net/base/auth.h"
@@ -62,8 +61,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void OnReadCompleted(int result);
   void NotifyBeforeSendHeadersCallback(int result);
 
-  void RestartTransactionWithAuth(const string16& username,
-                                  const string16& password);
+  void RestartTransactionWithAuth(const AuthCredentials& credentials);
 
   // Overridden from URLRequestJob:
   virtual void SetUpload(UploadData* upload) OVERRIDE;
@@ -82,8 +80,7 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual bool IsSafeRedirect(const GURL& location) OVERRIDE;
   virtual bool NeedsAuth() OVERRIDE;
   virtual void GetAuthChallengeInfo(scoped_refptr<AuthChallengeInfo>*) OVERRIDE;
-  virtual void SetAuth(const string16& username,
-                       const string16& password) OVERRIDE;
+  virtual void SetAuth(const AuthCredentials& credentials) OVERRIDE;
   virtual void CancelAuth() OVERRIDE;
   virtual void ContinueWithCertificate(X509Certificate* client_cert) OVERRIDE;
   virtual void ContinueDespiteLastError() OVERRIDE;
@@ -107,14 +104,11 @@ class URLRequestHttpJob : public URLRequestJob {
   // Auth states for proxy and origin server.
   AuthState proxy_auth_state_;
   AuthState server_auth_state_;
-
-  string16 username_;
-  string16 password_;
+  AuthCredentials auth_credentials_;
 
   OldCompletionCallbackImpl<URLRequestHttpJob> start_callback_;
   OldCompletionCallbackImpl<URLRequestHttpJob> read_callback_;
-  OldCompletionCallbackImpl<URLRequestHttpJob>
-      notify_before_headers_sent_callback_;
+  CompletionCallback notify_before_headers_sent_callback_;
 
   bool read_in_progress_;
 
@@ -154,7 +148,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void RecordTimer();
   void ResetTimer();
 
-  virtual void UpdatePacketReadTimes();
+  virtual void UpdatePacketReadTimes() OVERRIDE;
   void RecordPacketStats(FilterContext::StatisticSelector statistic) const;
 
   void RecordCompressionHistograms();
@@ -169,6 +163,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void DoneWithRequest(CompletionCause reason);
 
   // Callback functions for Cookie Monster
+  void DoLoadCookies();
   void CheckCookiePolicyAndLoad(const CookieList& cookie_list);
   void OnCookiesLoaded(
       const std::string& cookie_line,
@@ -222,8 +217,11 @@ class URLRequestHttpJob : public URLRequestJob {
   ScopedRunnableMethodFactory<URLRequestHttpJob> method_factory_;
   base::WeakPtrFactory<URLRequestHttpJob> weak_ptr_factory_;
 
-  OldCompletionCallbackImpl<URLRequestHttpJob> on_headers_received_callback_;
+  CompletionCallback on_headers_received_callback_;
 
+  // We allow the network delegate to modify a copy of the response headers.
+  // This prevents modifications of headers that are shared with the underlying
+  // layers of the network stack.
   scoped_refptr<HttpResponseHeaders> override_response_headers_;
 
   // Flag used to verify that |this| is not deleted while we are awaiting

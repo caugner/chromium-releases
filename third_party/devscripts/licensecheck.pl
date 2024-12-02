@@ -125,7 +125,7 @@ Adam D. Barratt <adam@adam-barratt.org.uk>
 
 use strict;
 use warnings;
-use Getopt::Long;
+use Getopt::Long qw(:config gnu_getopt);
 use File::Basename;
 
 sub fatal($);
@@ -428,11 +428,13 @@ sub parselicense($) {
 
     if ($licensetext =~ /opensource\.org\/licenses\/mit-license\.php/) {
 	$license = "MIT/X11 (BSD like) $license";
-    } elsif ($licensetext =~ /Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files \(the Software\), to deal in the Software/) {
+    } elsif ($licensetext =~ /Permission is hereby granted, free of charge, to any person obtaining a copy of this software and(\/or)? associated documentation files \(the (Software|Materials)\), to deal in the (Software|Materials)/) {
+	$license = "MIT/X11 (BSD like) $license";
+    } elsif ($licensetext =~ /Permission is hereby granted, without written agreement and without license or royalty fees, to use, copy, modify, and distribute this software and its documentation for any purpose/) {
 	$license = "MIT/X11 (BSD like) $license";
     }
 
-    if ($licensetext  =~ /Permission to use, copy, modify, and(\/or)? distribute this software for any purpose with or without fee is hereby granted, provided.*copyright notice.*permission notice.*all copies/) {
+    if ($licensetext  =~ /Permission to use, copy, modify, and(\/or)? distribute this software for any purpose (with or )?without fee is hereby granted, provided.*(copyright|entire) notice.*all copies/) {
 	$license = "ISC $license";
     }
 
@@ -488,7 +490,7 @@ sub parselicense($) {
 	$license = "CeCILL-$1 $license";
     }
 
-    if ($licensetext =~ /under the SGI Free Software License B/) {
+    if ($licensetext =~ /under the SGI Free Software (B License|License B)/) {
 	$license = "SGI Free Software License B $license";
     }
 
@@ -525,6 +527,10 @@ sub parselicense($) {
 	$license = "zlib/libpng $license";
     } elsif ($licensetext =~ /This code is released under the libpng license/) {
         $license = "libpng $license";
+    }
+
+    if ($licensetext =~ /under MIT license/) {
+        $license = "MIT/X11 (BSD like) $license";
     }
 
     $license = "UNKNOWN" if (!length($license));

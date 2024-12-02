@@ -12,10 +12,12 @@
 #include "base/file_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/chromeos/login/signed_settings_cache.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -56,7 +58,7 @@ void OwnerManager::LoadOwnerKey() {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&OwnerManager::SendNotification, this, result,
-                 NotificationService::NoDetails()));
+                 content::NotificationService::NoDetails()));
 }
 
 bool OwnerManager::EnsurePublicKey() {
@@ -133,11 +135,12 @@ void OwnerManager::Verify(const BrowserThread::ID thread_id,
   BootTimesLoader::Get()->AddLoginTimeMarker("VerifyEnd", false);
 }
 
-void OwnerManager::SendNotification(int type,
-                                    const NotificationDetails& details) {
-  NotificationService::current()->Notify(
+void OwnerManager::SendNotification(
+    int type,
+    const content::NotificationDetails& details) {
+  content::NotificationService::current()->Notify(
       type,
-      NotificationService::AllSources(),
+      content::NotificationService::AllSources(),
       details);
 }
 

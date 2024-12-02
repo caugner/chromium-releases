@@ -17,6 +17,7 @@ ProxyChannel::ProxyChannel(base::ProcessHandle remote_process_handle)
 }
 
 ProxyChannel::~ProxyChannel() {
+  DVLOG(1) << "ProxyChannel::~ProxyChannel()";
 }
 
 bool ProxyChannel::InitWithChannel(Delegate* delegate,
@@ -41,9 +42,9 @@ void ProxyChannel::OnChannelError() {
 }
 
 #if defined(OS_POSIX)
-int ProxyChannel::GetRendererFD() {
+int ProxyChannel::TakeRendererFD() {
   DCHECK(channel());
-  return channel()->GetClientFileDescriptor();
+  return channel()->TakeClientFileDescriptor();
 }
 #endif
 

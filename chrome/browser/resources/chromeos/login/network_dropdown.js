@@ -88,7 +88,6 @@ cr.define('cr.ui', function() {
       this.appendChild(this.title_ = this.createTitle_());
       this.appendChild(new DropDownContainer());
 
-      this.isShown = false;
       this.addEventListener('keydown', this.keyDownHandler_);
 
       this.title_.id = this.id + '-dropdown';
@@ -355,8 +354,8 @@ cr.define('cr.ui', function() {
    * @param {!Object} data Networks list.
    */
   DropDown.updateNetworks = function(data) {
-    var elementId = DropDown.activeElementId_;
-    $(elementId).setItems(data);
+    if (DropDown.activeElementId_)
+      $(DropDown.activeElementId_).setItems(data);
   };
 
   /**
@@ -365,26 +364,36 @@ cr.define('cr.ui', function() {
    * @param {!Object} icon Icon to be displayed.
    */
   DropDown.updateNetworkTitle = function(title, icon) {
-    var elementId = DropDown.activeElementId_;
-    $(elementId).setTitle(title, icon);
+    if (DropDown.activeElementId_)
+      $(DropDown.activeElementId_).setTitle(title, icon);
   };
 
   /**
-   * Activates or deactivates network drop-down. Only one network drop-down
+   * Activates network drop-down. Only one network drop-down
    * can be active at the same time. So activating new drop-down deactivates
-   * the previous one. Deactivating not active drop-down does nothing.
-   * @param {string} element_id Id of the element which is network drop-down.
-   * @param {boolean} is_active Is drop-down active?
+   * the previous one.
+   * @param {string} elementId Id of network drop-down element.
+   * @param {boolean} isOobe Whether drop-down is used by an Oobe screen.
+   * @param {integer} lastNetworkType Last active network type. Pass -1 if it
+   *   isn't known.
    */
-  DropDown.setActive = function(elementId, isActive) {
-    if (isActive) {
+  DropDown.show = function(elementId, isOobe, lastNetworkType) {
+    $(elementId).isShown = false;
+    if (DropDown.activeElementId_ != elementId) {
       DropDown.activeElementId_ = elementId;
-      chrome.send('networkDropdownShow', [elementId]);
-    } else {
-      if (DropDown.activeElementId_ == elementId) {
-        DropDown.activeElementId_ = '';
-        chrome.send('networkDropdownHide', []);
-      }
+      chrome.send('networkDropdownShow', [elementId, isOobe, lastNetworkType]);
+    }
+  };
+
+  /**
+   * Deactivates network drop-down. Deactivating inactive drop-down does
+   * nothing.
+   * @param {string} elementId Id of network drop-down element.
+   */
+  DropDown.hide = function(elementId) {
+    if (DropDown.activeElementId_ == elementId) {
+      DropDown.activeElementId_ = '';
+      chrome.send('networkDropdownHide', []);
     }
   };
 

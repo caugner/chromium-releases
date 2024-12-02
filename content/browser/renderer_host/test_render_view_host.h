@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_BROWSER_RENDERER_HOST_TEST_TEST_RENDER_VIEW_HOST_H_
-#define CONTENT_BROWSER_RENDERER_HOST_TEST_TEST_RENDER_VIEW_HOST_H_
+#ifndef CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_
+#define CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_
 #pragma once
 
 #include "base/basictypes.h"
@@ -19,6 +19,7 @@
 
 namespace content {
 class BrowserContext;
+class RenderProcessHostFactory;
 }
 
 namespace gfx {
@@ -28,7 +29,6 @@ class Rect;
 class NavigationController;
 class SiteInstance;
 class TestTabContents;
-struct WebMenuItem;
 struct ViewHostMsg_FrameNavigate_Params;
 
 // Utility function to initialize ViewHostMsg_NavigateParams_Params
@@ -69,7 +69,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE {}
   virtual void Focus() OVERRIDE {}
   virtual void Blur() OVERRIDE {}
-  virtual bool HasFocus() OVERRIDE;
+  virtual bool HasFocus() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual bool IsShowing() OVERRIDE;
@@ -88,6 +88,13 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void Destroy() OVERRIDE {}
   virtual void SetTooltipText(const string16& tooltip_text) OVERRIDE {}
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
+      int gpu_host_id) OVERRIDE;
+  virtual void AcceleratedSurfacePostSubBuffer(
+      const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
+      int gpu_host_id) OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE {}
   virtual gfx::Rect GetViewCocoaBounds() const OVERRIDE;
@@ -112,44 +119,30 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
       int32 width,
       int32 height,
       TransportDIB::Handle transport_dib) OVERRIDE;
-  virtual void AcceleratedSurfaceBuffersSwapped(
-      gfx::PluginWindowHandle window,
-      uint64 surface_id,
-      int renderer_id,
-      int32 route_id,
-      int gpu_host_id) OVERRIDE;
-  virtual void GpuRenderingStateDidChange() OVERRIDE;
-#elif defined(OS_WIN)
+#elif defined(OS_WIN) && !defined(USE_AURA)
   virtual void WillWmDestroy() OVERRIDE;
-  virtual void ShowCompositorHostWindow(bool show) OVERRIDE;
 #endif
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(USE_AURA)
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE {}
   virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
 #endif
-  virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate) { }
   virtual void UnhandledWheelEvent(
-      const WebKit::WebMouseWheelEvent& event) { }
+      const WebKit::WebMouseWheelEvent& event) OVERRIDE { }
   virtual void SetHasHorizontalScrollbar(
-      bool has_horizontal_scrollbar) { }
+      bool has_horizontal_scrollbar) OVERRIDE { }
   virtual void SetScrollOffsetPinning(
-      bool is_pinned_to_left, bool is_pinned_to_right) { }
+      bool is_pinned_to_left, bool is_pinned_to_right) OVERRIDE { }
 
 #if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   virtual void AcceleratedSurfaceNew(
       int32 width, int32 height, uint64* surface_id,
-      TransportDIB::Handle* surface_handle) { }
-  virtual void AcceleratedSurfaceBuffersSwapped(
-      uint64 surface_id,
-      int32 route_id,
-      int gpu_host_id) OVERRIDE {}
-  virtual void AcceleratedSurfaceRelease(uint64 surface_id) { }
+      TransportDIB::Handle* surface_handle) OVERRIDE { }
+  virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE { }
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
-  virtual void CreatePluginContainer(gfx::PluginWindowHandle id) { }
-  virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) { }
-  virtual void AcceleratedCompositingActivated(bool activated) { }
+  virtual void CreatePluginContainer(gfx::PluginWindowHandle id) OVERRIDE { }
+  virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE { }
 #endif
 
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
@@ -234,8 +227,8 @@ class TestRenderViewHost : public RenderViewHost {
 
   // RenderViewHost overrides --------------------------------------------------
 
-  virtual bool CreateRenderView(const string16& frame_name);
-  virtual bool IsRenderViewLive() const;
+  virtual bool CreateRenderView(const string16& frame_name) OVERRIDE;
+  virtual bool IsRenderViewLive() const OVERRIDE;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(RenderViewHostTest, FilterNavigate);
@@ -264,16 +257,17 @@ class TestRenderViewHost : public RenderViewHost {
 // registered at a time, you can only have one of these objects at a time.
 class TestRenderViewHostFactory : public RenderViewHostFactory {
  public:
-  explicit TestRenderViewHostFactory(RenderProcessHostFactory* rph_factory);
+  explicit TestRenderViewHostFactory(
+      content::RenderProcessHostFactory* rph_factory);
   virtual ~TestRenderViewHostFactory();
 
   virtual void set_render_process_host_factory(
-      RenderProcessHostFactory* rph_factory);
+      content::RenderProcessHostFactory* rph_factory);
   virtual RenderViewHost* CreateRenderViewHost(
       SiteInstance* instance,
       RenderViewHostDelegate* delegate,
       int routing_id,
-      SessionStorageNamespace* session_storage);
+      SessionStorageNamespace* session_storage) OVERRIDE;
 
  private:
   // This is a bit of a hack. With the current design of the site instances /
@@ -283,7 +277,7 @@ class TestRenderViewHostFactory : public RenderViewHostFactory {
   // Instead, we set it right before we create a new RenderViewHost, which
   // happens before the RenderProcessHost is created. This way, the instance
   // has the correct factory and creates our special RenderProcessHosts.
-  RenderProcessHostFactory* render_process_host_factory_;
+  content::RenderProcessHostFactory* render_process_host_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewHostFactory);
 };
@@ -322,8 +316,8 @@ class RenderViewHostTestHarness : public testing::Test {
 
  protected:
   // testing::Test
-  virtual void SetUp();
-  virtual void TearDown();
+  virtual void SetUp() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
 
   // This browser context will be created in SetUp if it has not already been
   // created.  This allows tests to override the browser context if they so
@@ -342,4 +336,4 @@ class RenderViewHostTestHarness : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestHarness);
 };
 
-#endif  // CONTENT_BROWSER_RENDERER_HOST_TEST_TEST_RENDER_VIEW_HOST_H_
+#endif  // CONTENT_BROWSER_RENDERER_HOST_TEST_RENDER_VIEW_HOST_H_

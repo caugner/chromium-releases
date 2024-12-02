@@ -6,9 +6,11 @@
 #define CHROME_BROWSER_CHROMEOS_CROS_NETWORK_LIBRARY_H_
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
@@ -25,8 +27,8 @@ class Value;
 
 namespace chromeos {
 
-class NetworkParser;
 class NetworkDeviceParser;
+class NetworkParser;
 
 // This is the list of all implementation classes that are allowed
 // access to the internals of the network library classes.
@@ -88,6 +90,8 @@ enum PropertyIndex {
   PROPERTY_INDEX_IDENTITY,
   PROPERTY_INDEX_IMEI,
   PROPERTY_INDEX_IMSI,
+  PROPERTY_INDEX_IPSEC_AUTHENTICATIONTYPE,
+  PROPERTY_INDEX_IPSEC_IKEVERSION,
   PROPERTY_INDEX_IS_ACTIVE,
   PROPERTY_INDEX_L2TPIPSEC_CA_CERT_NSS,
   PROPERTY_INDEX_L2TPIPSEC_CLIENT_CERT_ID,
@@ -107,6 +111,47 @@ enum PropertyIndex {
   PROPERTY_INDEX_NETWORKS,
   PROPERTY_INDEX_NETWORK_TECHNOLOGY,
   PROPERTY_INDEX_OFFLINE_MODE,
+  PROPERTY_INDEX_OLP,
+  PROPERTY_INDEX_ONC_CLIENT_CERT_PATTERN,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_CLIENT_CERT_REF,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_CLIENT_CERT_TYPE,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_IPSEC,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_L2TP,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_OPENVPN,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_REMOVE,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_WIFI,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_VPN,  // Used internally for ONC parsing
+  PROPERTY_INDEX_OPEN_VPN_AUTH,
+  PROPERTY_INDEX_OPEN_VPN_AUTHRETRY,
+  PROPERTY_INDEX_OPEN_VPN_AUTHNOCACHE,
+  PROPERTY_INDEX_OPEN_VPN_AUTHUSERPASS,
+  PROPERTY_INDEX_OPEN_VPN_CACERT,
+  PROPERTY_INDEX_OPEN_VPN_CERT,
+  PROPERTY_INDEX_OPEN_VPN_CIPHER,
+  PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_ID,
+  PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_SLOT,
+  PROPERTY_INDEX_OPEN_VPN_COMPLZO,
+  PROPERTY_INDEX_OPEN_VPN_COMPNOADAPT,
+  PROPERTY_INDEX_OPEN_VPN_KEYDIRECTION,
+  PROPERTY_INDEX_OPEN_VPN_MGMT_ENABLE,
+  PROPERTY_INDEX_OPEN_VPN_NSCERTTYPE,
+  PROPERTY_INDEX_OPEN_VPN_OTP,
+  PROPERTY_INDEX_OPEN_VPN_PASSWORD,
+  PROPERTY_INDEX_OPEN_VPN_PIN,
+  PROPERTY_INDEX_OPEN_VPN_PORT,
+  PROPERTY_INDEX_OPEN_VPN_PROTO,
+  PROPERTY_INDEX_OPEN_VPN_PKCS11_PROVIDER,
+  PROPERTY_INDEX_OPEN_VPN_PUSHPEERINFO,
+  PROPERTY_INDEX_OPEN_VPN_REMOTECERTEKU,
+  PROPERTY_INDEX_OPEN_VPN_REMOTECERTKU,
+  PROPERTY_INDEX_OPEN_VPN_REMOTECERTTLS,
+  PROPERTY_INDEX_OPEN_VPN_RENEGSEC,
+  PROPERTY_INDEX_OPEN_VPN_SERVERPOLLTIMEOUT,
+  PROPERTY_INDEX_OPEN_VPN_SHAPER,
+  PROPERTY_INDEX_OPEN_VPN_STATICCHALLENGE,
+  PROPERTY_INDEX_OPEN_VPN_TLSAUTHCONTENTS,
+  PROPERTY_INDEX_OPEN_VPN_TLSREMOTE,
+  PROPERTY_INDEX_OPEN_VPN_USER,
   PROPERTY_INDEX_OPERATOR_CODE,
   PROPERTY_INDEX_OPERATOR_NAME,
   PROPERTY_INDEX_PASSPHRASE,
@@ -114,12 +159,13 @@ enum PropertyIndex {
   PROPERTY_INDEX_PORTAL_URL,
   PROPERTY_INDEX_POWERED,
   PROPERTY_INDEX_PRIORITY,
+  PROPERTY_INDEX_PROVIDER_HOST,
+  PROPERTY_INDEX_PROVIDER_TYPE,
   PROPERTY_INDEX_PRL_VERSION,
   PROPERTY_INDEX_PROFILE,
   PROPERTY_INDEX_PROFILES,
   PROPERTY_INDEX_PROVIDER,
   PROPERTY_INDEX_PROXY_CONFIG,
-  PROPERTY_INDEX_REMOVE,
   PROPERTY_INDEX_ROAMING_STATE,
   PROPERTY_INDEX_SAVE_CREDENTIALS,
   PROPERTY_INDEX_SCANNING,
@@ -130,21 +176,20 @@ enum PropertyIndex {
   PROPERTY_INDEX_SERVING_OPERATOR,
   PROPERTY_INDEX_SIGNAL_STRENGTH,
   PROPERTY_INDEX_SIM_LOCK,
+  PROPERTY_INDEX_SSID,
   PROPERTY_INDEX_STATE,
   PROPERTY_INDEX_SUPPORT_NETWORK_SCAN,
   PROPERTY_INDEX_TECHNOLOGY_FAMILY,
   PROPERTY_INDEX_TYPE,
+  PROPERTY_INDEX_UI_DATA,
   PROPERTY_INDEX_UNKNOWN,
   PROPERTY_INDEX_USAGE_URL,
-  PROPERTY_INDEX_OLP,
-  PROPERTY_INDEX_OPEN_VPN_USER,
-  PROPERTY_INDEX_OPEN_VPN_PASSWORD,
-  PROPERTY_INDEX_OPEN_VPN_CLIENT_CERT_ID,
+  PROPERTY_INDEX_VPN_DOMAIN,
   PROPERTY_INDEX_WIFI_AUTH_MODE,
   PROPERTY_INDEX_WIFI_FREQUENCY,
   PROPERTY_INDEX_WIFI_HEX_SSID,
   PROPERTY_INDEX_WIFI_HIDDEN_SSID,
-  PROPERTY_INDEX_WIFI_PHY_MODE,
+  PROPERTY_INDEX_WIFI_PHY_MODE
 };
 
 // Connection enums (see flimflam/include/service.h)
@@ -617,6 +662,9 @@ class Network {
 
   const std::string& proxy_config() const { return proxy_config_; }
 
+  const DictionaryValue* ui_data() const { return &ui_data_; }
+  DictionaryValue* ui_data() { return &ui_data_; }
+
   void set_notify_failure(bool state) { notify_failure_ = state; }
 
   void SetPreferred(bool preferred);
@@ -664,12 +712,19 @@ class Network {
                             const base::Value& value,
                             PropertyIndex* index);
 
+  // Retrieves a property from the property_map_.  If |value| is NULL,
+  // just returns whether or not the given property was found.
+  bool GetProperty(PropertyIndex index, const base::Value** value) const;
+
  protected:
   Network(const std::string& service_path,
           ConnectionType type);
 
   NetworkParser* network_parser() { return network_parser_.get(); }
   void SetNetworkParser(NetworkParser* parser);
+
+  // Updates property_map_ for the corresponding property index.
+  void UpdatePropertyMap(PropertyIndex index, const base::Value& value);
 
   // Set the state and update flags if necessary.
   void SetState(ConnectionState state);
@@ -699,6 +754,8 @@ class Network {
   void set_unique_id(const std::string& unique_id) { unique_id_ = unique_id; }
 
  private:
+  typedef std::map<PropertyIndex, base::Value*> PropertyMap;
+
   // This allows NetworkParser and its subclasses access to device
   // privates so that they can be reconstituted during parsing.  The
   // parsers only access things through the private set_ functions so
@@ -708,6 +765,7 @@ class Network {
   friend class NativeNetworkParser;
   friend class NativeVirtualNetworkParser;
   friend class OncNetworkParser;
+  friend class OncWifiNetworkParser;
   friend class OncVirtualNetworkParser;
 
   // This allows the implementation classes access to privates.
@@ -784,9 +842,18 @@ class Network {
   std::string service_path_;
   ConnectionType type_;
 
+  // UI-level state that is opaque to the connection manager. It's kept in a
+  // DictionaryValue to allow for simple addition of new settings. The value is
+  // stored in JSON-serialized from in the connection manager.
+  DictionaryValue ui_data_;
+
   // This is the parser we use to parse messages from the native
   // network layer.
   scoped_ptr<NetworkParser> network_parser_;
+
+  // This map stores the set of properties for the network.
+  // Not all properties in this map are exposed via get methods.
+  PropertyMap property_map_;
 
   DISALLOW_COPY_AND_ASSIGN(Network);
 };
@@ -822,8 +889,8 @@ class VirtualNetwork : public Network {
       const std::string& slot, const std::string& pin);
 
   // Network overrides.
-  virtual bool RequiresUserProfile() const;
-  virtual void CopyCredentialsFromRemembered(Network* remembered);
+  virtual bool RequiresUserProfile() const OVERRIDE;
+  virtual void CopyCredentialsFromRemembered(Network* remembered) OVERRIDE;
 
   // Public getters.
   bool NeedMoreInfoToConnect() const;
@@ -1153,7 +1220,7 @@ class WifiNetwork : public WirelessNetwork {
   void SetCertificatePin(const std::string& pin);
 
   // Network overrides.
-  virtual bool RequiresUserProfile() const;
+  virtual bool RequiresUserProfile() const OVERRIDE;
 
   // Return a string representation of the encryption code.
   // This not translated and should be only used for debugging purposes.
@@ -1346,7 +1413,7 @@ class NetworkLibrary {
     // for example, networks have appeared or disappeared.
     virtual void OnNetworkManagerChanged(NetworkLibrary* obj) = 0;
    protected:
-    ~NetworkManagerObserver() { }
+    virtual ~NetworkManagerObserver() { }
   };
 
   class NetworkObserver {
@@ -1356,7 +1423,7 @@ class NetworkLibrary {
     virtual void OnNetworkChanged(NetworkLibrary* cros,
                                   const Network* network) = 0;
    protected:
-    ~NetworkObserver() {}
+    virtual ~NetworkObserver() {}
   };
 
   class NetworkDeviceObserver {
@@ -1373,7 +1440,7 @@ class NetworkLibrary {
     virtual void OnNetworkDeviceSimLockChanged(NetworkLibrary* cros,
                                                const NetworkDevice* device) {}
    protected:
-    ~NetworkDeviceObserver() {}
+    virtual ~NetworkDeviceObserver() {}
   };
 
   class CellularDataPlanObserver {
@@ -1381,7 +1448,7 @@ class NetworkLibrary {
     // Called when the cellular data plan has changed.
     virtual void OnCellularDataPlanChanged(NetworkLibrary* obj) = 0;
    protected:
-    ~CellularDataPlanObserver() {}
+    virtual ~CellularDataPlanObserver() {}
   };
 
   class PinOperationObserver {
@@ -1391,7 +1458,7 @@ class NetworkLibrary {
     virtual void OnPinOperationCompleted(NetworkLibrary* cros,
                                          PinOperationError error) = 0;
    protected:
-    ~PinOperationObserver() {}
+    virtual ~PinOperationObserver() {}
   };
 
   class UserActionObserver {
@@ -1401,7 +1468,7 @@ class NetworkLibrary {
     virtual void OnConnectionInitiated(NetworkLibrary* cros,
                                        const Network* network) = 0;
    protected:
-    ~UserActionObserver() {}
+    virtual ~UserActionObserver() {}
   };
 
   virtual ~NetworkLibrary() {}
@@ -1722,7 +1789,8 @@ class NetworkLibrary {
   virtual void SwitchToPreferredNetwork() = 0;
 
   // Load networks from an Open Network Configuration blob.
-  virtual bool LoadOncNetworks(const std::string& onc_blob) = 0;
+  virtual bool LoadOncNetworks(const std::string& onc_blob,
+                               const std::string& passcode) = 0;
 
   // This sets the active network for the network type. Note: priority order
   // is unchanged (i.e. if a wifi network is set to active, but an ethernet

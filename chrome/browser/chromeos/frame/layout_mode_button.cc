@@ -6,18 +6,19 @@
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
 namespace {
@@ -28,6 +29,7 @@ namespace chromeos {
 
 LayoutModeButton::LayoutModeButton()
     : ALLOW_THIS_IN_INITIALIZER_LIST(ImageButton(this)) {
+  set_id(VIEW_ID_LAYOUT_MODE_BUTTON);
 }
 
 LayoutModeButton::~LayoutModeButton() {
@@ -47,8 +49,8 @@ bool LayoutModeButton::HitTest(const gfx::Point& l) const {
 }
 
 void LayoutModeButton::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_LAYOUT_MODE_CHANGED);
   UpdateForCurrentLayoutMode();
 }
@@ -58,7 +60,7 @@ void LayoutModeButton::Init() {
   WmIpc* wm_ipc = WmIpc::instance();
   registrar_.Add(this,
                  chrome::NOTIFICATION_LAYOUT_MODE_CHANGED,
-                 Source<WmIpc>(wm_ipc));
+                 content::Source<WmIpc>(wm_ipc));
 #endif
   UpdateForCurrentLayoutMode();
 }

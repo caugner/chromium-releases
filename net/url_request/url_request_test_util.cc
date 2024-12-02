@@ -174,6 +174,7 @@ TestDelegate::TestDelegate()
       received_data_before_response_(false),
       request_failed_(false),
       have_certificate_errors_(false),
+      is_hsts_host_(false),
       auth_required_(false),
       buf_(new net::IOBuffer(kBufferSize)) {
 }
@@ -195,8 +196,8 @@ void TestDelegate::OnReceivedRedirect(net::URLRequest* request,
 void TestDelegate::OnAuthRequired(net::URLRequest* request,
                                   net::AuthChallengeInfo* auth_info) {
   auth_required_ = true;
-  if (!username_.empty() || !password_.empty()) {
-    request->SetAuth(username_, password_);
+  if (!credentials_.Empty()) {
+    request->SetAuth(credentials_);
   } else {
     request->CancelAuth();
   }
@@ -209,6 +210,7 @@ void TestDelegate::OnSSLCertificateError(net::URLRequest* request,
   // independent of any possible errors, or whether it wants SSL errors to
   // cancel the request.
   have_certificate_errors_ = true;
+  is_hsts_host_ = is_hsts_host;
   if (allow_certificate_errors_)
     request->ContinueDespiteLastError();
   else
@@ -337,7 +339,7 @@ void TestNetworkDelegate::InitRequestStatesIfNew(int request_id) {
 
 int TestNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
-    net::OldCompletionCallback* callback,
+    const net::CompletionCallback& callback,
     GURL* new_url ) {
   int req_id = request->identifier();
   InitRequestStatesIfNew(req_id);
@@ -356,7 +358,7 @@ int TestNetworkDelegate::OnBeforeURLRequest(
 
 int TestNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
-    net::OldCompletionCallback* callback,
+    const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
   int req_id = request->identifier();
   InitRequestStatesIfNew(req_id);
@@ -385,7 +387,7 @@ void TestNetworkDelegate::OnSendHeaders(
 
 int TestNetworkDelegate::OnHeadersReceived(
     net::URLRequest* request,
-    net::OldCompletionCallback* callback,
+    const net::CompletionCallback& callback,
     net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
   int req_id = request->identifier();

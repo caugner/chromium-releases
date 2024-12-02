@@ -65,7 +65,7 @@ class PipelineImplTest : public ::testing::Test {
     pipeline_->Init(
         base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
-        PipelineStatusCB());
+        Pipeline::NetworkEventCB());
     mocks_.reset(new MockFilterCollection());
 
     // InitializeDemuxer adds overriding expectations for expected non-NULL
@@ -163,13 +163,13 @@ class PipelineImplTest : public ::testing::Test {
   void InitializeAudioRenderer(bool disable_after_init_callback = false) {
     if (disable_after_init_callback) {
       EXPECT_CALL(*mocks_->audio_renderer(),
-                  Initialize(mocks_->audio_decoder(), _))
-          .WillOnce(DoAll(Invoke(&RunFilterCallback),
+                  Initialize(mocks_->audio_decoder(), _, _))
+          .WillOnce(DoAll(Invoke(&RunFilterCallback3),
                           DisableAudioRenderer(mocks_->audio_renderer())));
     } else {
       EXPECT_CALL(*mocks_->audio_renderer(),
-                  Initialize(mocks_->audio_decoder(), _))
-          .WillOnce(Invoke(&RunFilterCallback));
+                  Initialize(mocks_->audio_decoder(), _, _))
+          .WillOnce(Invoke(&RunFilterCallback3));
     }
     EXPECT_CALL(*mocks_->audio_renderer(), SetPlaybackRate(0.0f));
     EXPECT_CALL(*mocks_->audio_renderer(), SetVolume(1.0f));
@@ -550,11 +550,6 @@ TEST_F(PipelineImplTest, GetBufferedTime) {
   // If media has been fully received, we should return the duration
   // of the media.
   pipeline_->SetBufferedBytes(kTotalBytes);
-  EXPECT_EQ(kDuration.ToInternalValue(),
-            pipeline_->GetBufferedTime().ToInternalValue());
-
-  // If media is loaded, we should return duration of media.
-  pipeline_->SetLoaded(true);
   EXPECT_EQ(kDuration.ToInternalValue(),
             pipeline_->GetBufferedTime().ToInternalValue());
 }

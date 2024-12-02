@@ -103,8 +103,9 @@ struct OmniboxViewMacState {
 // state in a TabContents.  When constructed |accessor| generates a
 // globally-unique id used to index into the per-tab PropertyBag used
 // to store the state data.
-PropertyAccessor<OmniboxViewMacState>* GetStateAccessor() {
-  static PropertyAccessor<OmniboxViewMacState> accessor;
+base::PropertyAccessor<OmniboxViewMacState>* GetStateAccessor() {
+  CR_DEFINE_STATIC_LOCAL(
+      base::PropertyAccessor<OmniboxViewMacState>, accessor, ());
   return &accessor;
 }
 
@@ -391,7 +392,7 @@ bool OmniboxViewMac::DeleteAtEndPressed() {
 }
 
 void OmniboxViewMac::GetSelectionBounds(string16::size_type* start,
-                                        string16::size_type* end) {
+                                        string16::size_type* end) const {
   if (![field_ currentEditor]) {
     *start = *end = 0;
     return;

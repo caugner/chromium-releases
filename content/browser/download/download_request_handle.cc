@@ -4,12 +4,15 @@
 
 #include "content/browser/download/download_request_handle.h"
 
+#include "base/bind.h"
 #include "base/stringprintf.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 // IO Thread indirections to resource dispatcher host.
 // Provided as targets for PostTask from within this object
@@ -61,15 +64,16 @@ TabContents* DownloadRequestHandle::GetTabContents() const {
 }
 
 DownloadManager* DownloadRequestHandle::GetDownloadManager() const {
-  TabContents* contents = GetTabContents();
-  if (!contents)
+  RenderViewHost* rvh = RenderViewHost::FromID(child_id_, render_view_id_);
+  if (rvh == NULL)
     return NULL;
-
-  content::BrowserContext* browser_context = contents->browser_context();
-  if (!browser_context)
+  content::RenderProcessHost* rph = rvh->process();
+  if (rph == NULL)
     return NULL;
-
-  return browser_context->GetDownloadManager();
+  content::BrowserContext* context = rph->GetBrowserContext();
+  if (context == NULL)
+    return NULL;
+  return context->GetDownloadManager();
 }
 
 void DownloadRequestHandle::PauseRequest() const {
@@ -78,8 +82,8 @@ void DownloadRequestHandle::PauseRequest() const {
   if (rdh_) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(&ResourceDispatcherHostPauseRequest,
-                            rdh_, child_id_, request_id_, true));
+        base::Bind(&ResourceDispatcherHostPauseRequest,
+                   rdh_, child_id_, request_id_, true));
   }
 }
 
@@ -89,8 +93,8 @@ void DownloadRequestHandle::ResumeRequest() const {
   if (rdh_) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(&ResourceDispatcherHostPauseRequest,
-                            rdh_, child_id_, request_id_, false));
+        base::Bind(&ResourceDispatcherHostPauseRequest,
+                   rdh_, child_id_, request_id_, false));
   }
 }
 
@@ -100,8 +104,8 @@ void DownloadRequestHandle::CancelRequest() const {
   if (rdh_) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(&ResourceDispatcherHostCancelRequest,
-                            rdh_, child_id_, request_id_));
+        base::Bind(&ResourceDispatcherHostCancelRequest,
+                  rdh_, child_id_, request_id_));
   }
 }
 

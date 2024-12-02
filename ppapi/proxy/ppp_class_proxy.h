@@ -13,7 +13,6 @@
 #include "ppapi/proxy/interface_proxy.h"
 
 struct PPB_Var_Deprecated;
-struct PPP_Class_Deprecated;
 
 namespace ppapi {
 namespace proxy {
@@ -28,7 +27,7 @@ class PPP_Class_Proxy : public InterfaceProxy {
  public:
   // PPP_Class isn't a normal interface that you can query for, so this
   // constructor doesn't take an interface pointer.
-  PPP_Class_Proxy(Dispatcher* dispatcher);
+  explicit PPP_Class_Proxy(Dispatcher* dispatcher);
   virtual ~PPP_Class_Proxy();
 
   // Factory function used for registration (normal code can just use the
@@ -42,6 +41,11 @@ class PPP_Class_Proxy : public InterfaceProxy {
                                     PP_Module module_id,
                                     int64 ppp_class,
                                     int64 class_data);
+
+  static PP_Bool IsInstanceOf(const PPB_Var_Deprecated* ppb_var_impl,
+                              const PP_Var& var,
+                              int64 ppp_class,
+                              int64* ppp_class_data);
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);

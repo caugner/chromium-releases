@@ -9,6 +9,7 @@
 #include <list>
 #include <string>
 
+#include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
@@ -65,6 +66,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
     PRERENDER_MODE_ENABLED,
     PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP,
     PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP,
+    PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP,
     PRERENDER_MODE_MAX
   };
 
@@ -96,13 +98,17 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // If the RenderViewHost source is itself prerendering, the prerender is added
   // as a pending prerender.
   bool AddPrerenderFromLinkRelPrerender(int process_id, int route_id,
-                                        const GURL& url, const GURL& referrer);
+                                        const GURL& url,
+                                        const content::Referrer& referrer);
 
   // Adds a prerender for |url| if valid. As the prerender request is coming
   // from a source without a RenderViewHost (i.e., the omnibox) we don't have a
   // child or route id, or a referrer. This method uses sensible values for
-  // those.
-  bool AddPrerenderFromOmnibox(const GURL& url);
+  // those. The |session_storage_namespace| matches the namespace of the active
+  // tab at the time the prerender is generated from the omnibox.
+  bool AddPrerenderFromOmnibox(
+      const GURL& url,
+      SessionStorageNamespace* session_storage_namespace);
 
   // Destroy all prerenders for the given child route id pair and assign a final
   // status to them.
@@ -124,7 +130,8 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // Moves a PrerenderContents to the pending delete list from the list of
   // active prerenders when prerendering should be cancelled.
-  void MoveEntryToPendingDelete(PrerenderContents* entry);
+  void MoveEntryToPendingDelete(PrerenderContents* entry,
+                                FinalStatus final_status);
 
   // Records the perceived page load time for a page - effectively the time from
   // when the user navigates to a page to when it finishes loading. The actual
@@ -148,7 +155,9 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   static PrerenderManagerMode GetMode();
   static void SetMode(PrerenderManagerMode mode);
   static bool IsPrerenderingPossible();
+  static bool ActuallyPrerendering();
   static bool IsControlGroup();
+  static bool IsNoUseGroup();
 
   // Query the list of current prerender pages to see if the given tab contents
   // is prerendering a page.
@@ -220,21 +229,21 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // Test that needs needs access to internal functions.
   friend class PrerenderBrowserTest;
-  FRIEND_TEST(PrerenderManagerTest, AliasURLTest);
-  FRIEND_TEST(PrerenderManagerTest, ClearTest);
-  FRIEND_TEST(PrerenderManagerTest, ControlGroup);
-  FRIEND_TEST(PrerenderManagerTest, DropOldestRequestTest);
-  FRIEND_TEST(PrerenderManagerTest, DropSecondRequestTest);
-  FRIEND_TEST(PrerenderManagerTest, ExpireTest);
-  FRIEND_TEST(PrerenderManagerTest, FoundTest);
-  FRIEND_TEST(PrerenderManagerTest, FragmentMatchesFragmentTest);
-  FRIEND_TEST(PrerenderManagerTest, FragmentMatchesPageTest);
-  FRIEND_TEST(PrerenderManagerTest, PageMatchesFragmentTest);
-  FRIEND_TEST(PrerenderManagerTest, PendingPrerenderTest);
-  FRIEND_TEST(PrerenderManagerTest, RateLimitInWindowTest);
-  FRIEND_TEST(PrerenderManagerTest, RateLimitOutsideWindowTest);
-  FRIEND_TEST(PrerenderManagerTest, SourceRenderViewClosed);
-  FRIEND_TEST(PrerenderManagerTest, TwoElementPrerenderTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, AliasURLTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ClearTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ControlGroup);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, DropOldestRequestTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, DropSecondRequestTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ExpireTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, FoundTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, FragmentMatchesFragmentTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, FragmentMatchesPageTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, PageMatchesFragmentTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, PendingPrerenderTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, RateLimitInWindowTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, RateLimitOutsideWindowTest);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, SourceRenderViewClosed);
+  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, TwoElementPrerenderTest);
 
   struct PrerenderContentsData;
   struct NavigationRecord;
@@ -245,12 +254,15 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // Adds a prerender for |url| from referrer |referrer| initiated from the
   // RenderViewHost specified by |child_route_id_pair|. The |origin| specifies
-  // how the prerender was added.
+  // how the prerender was added. If the |session_storage_namespace| is NULL,
+  // it is discovered using the RenderViewHost specified by
+  // |child_route_id_pair|.
   bool AddPrerender(
       Origin origin,
       const std::pair<int, int>& child_route_id_pair,
       const GURL& url,
-      const GURL& referrer);
+      const content::Referrer& referrer,
+      SessionStorageNamespace* session_storage_namespace);
 
   // Adds a pending preload issued by the prerendering RenderView identified by
   // |child_route_id_pair|.  If and when that prerendering RenderView is used,
@@ -258,7 +270,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   void AddPendingPrerender(Origin origin,
                            const std::pair<int, int>& child_route_id_pair,
                            const GURL& url,
-                           const GURL& referrer);
+                           const content::Referrer& referrer);
 
   // Retrieves the PrerenderContents object for the specified URL, if it
   // has been prerendered.  The caller will then have ownership of the
@@ -293,10 +305,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   void DeleteOldEntries();
   virtual base::Time GetCurrentTime() const;
   virtual base::TimeTicks GetCurrentTimeTicks() const;
-  virtual PrerenderContents* CreatePrerenderContents(const GURL& url,
-                                                     const GURL& referrer,
-                                                     Origin origin,
-                                                     uint8 experiment_id);
+  virtual PrerenderContents* CreatePrerenderContents(
+      const GURL& url,
+      const content::Referrer& referrer,
+      Origin origin,
+      uint8 experiment_id);
 
   // Checks if the PrerenderContents has been added to the pending delete list.
   bool IsPendingDelete(PrerenderContents* entry) const;

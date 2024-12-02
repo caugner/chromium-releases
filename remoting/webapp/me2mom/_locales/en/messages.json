@@ -103,13 +103,9 @@
     "message": "The server failed to respond to the network request.",
     "description": "Error displayed by the client if the server does not respond to a network request."
   },
-  "ERROR_UNABLE_TO_GET_TOKEN": {
-    "message": "There was a problem accessing the server. Please try again.",
-    "description": "Error message displayed if an access token could not be generated."
-  },
-  "FOOTER_CHROME_OS": {
-    "message": "Sharing your Chromebook will be supported in a future update\u2026 stay tuned.",
-    "description": "Footer text displayed on ChromeOS in lieu of the mode switch hyperlink."
+  "ERROR_UNEXPECTED": {
+    "message": "An unexpected error occurred. Please report this problem to the developers.",
+    "description": "Error displayed in situations where things go wrong in ways not anticipated by the developers. There is typically no user-workaround to suggest, other than reporting the error so that we can investigate further."
   },
   "FOOTER_WAITING": {
     "message": "waiting for connection\u2026",
@@ -127,6 +123,10 @@
     "message": "See and control a shared computer.",
     "description": "Description of the 'access' or 'client' functionality, displayed next to a button that instigates an access operation."
   },
+  "HOME_MY_COMPUTERS_TITLE": {
+    "message": "My Computers",
+    "description": "Title for the portion of the home page showing the list of hosts the user has previously registered for remote access at any time."
+  },
   "HOME_SHARE_BUTTON": {
     "message": "Share Now",
     "description": "Clicking this button starts the desktop sharing process."
@@ -134,6 +134,10 @@
   "HOME_SHARE_DESCRIPTION": {
     "message": "Share this computer for another user to see and control.",
     "description": "Description of the 'share' or 'host' functionality, displayed next to a button that instigates a share operation."
+  },
+  "HOME_SHARE_DESCRIPTION_CHROME_OS": {
+    "message": "(this feature is not yet available for Chromebooks\u2026 stay tuned)",
+    "description": "Text displayed below the description of the 'share' or 'host' functionality on ChromeOS devices, where it is not yet supported."
   },
   "INSTRUCTIONS_SHARE_ABOVE": {
     "message": "To begin sharing your desktop, give the access code below to the person who will be assisting you.",
@@ -146,6 +150,10 @@
   "LABEL_CONNECTED": {
     "message": "Connected:",
     "description": "String displayed in front of the host when a connection is active informing the client user who they are connected to."
+  },
+  "MESSAGE_CONNECTING": {
+    "message": "Connecting\u2026",
+    "description": "Message displayed on the client while a connection to the host is being established."
   },
   "MESSAGE_GENERATING": {
     "message": "Generating access code\u2026",
@@ -181,6 +189,10 @@
     "message": "OK",
     "description": "Label for general-purpose OK buttons."
   },
+  "OFFLINE": {
+    "message": "Offline",
+    "description": "Label indicating that a host in the list is not currently available for remote access."
+  },
   "PRODUCT_DESCRIPTION": {
     "message": "Access other computers or allow another user to access your computer securely over the Internet.",
     "description": "Web-app description. Displayed in Chromium's extensions page."
@@ -200,10 +212,6 @@
   "TOOLTIP_SCALING": {
     "message": "Scale to fit",
     "description": "The tool-tip shown when the user hovers over the scale to fit button. Clicking this button toggles between scaling down the remote desktop to fit it inside the Chromium browser window and displaying it at 1:1 scale."
-  },
-  "VERIFYING_CODE": {
-    "message": "Verifying access code\u2026",
-    "description": "Message displayed on the client while the access code is verified."
   },
   "WARNING_NAT_DISABLED": {
     "message": "NOTE: Policy settings permit connections only between computers within your network.",

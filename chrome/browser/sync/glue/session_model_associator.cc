@@ -8,6 +8,7 @@
 #include <set>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/sys_info.h"
@@ -25,11 +26,12 @@
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/syncable/syncable.h"
+#include "chrome/browser/sync/util/get_session_name_task.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/navigation_entry.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_details.h"
 #if defined(OS_LINUX)
 #include "base/linux_util.h"
 #elif defined(OS_WIN)
@@ -38,6 +40,7 @@
 
 namespace browser_sync {
 
+using content::BrowserThread;
 using syncable::SESSIONS;
 
 namespace {
@@ -101,7 +104,7 @@ bool SessionModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   }
   // The sync model has user created nodes iff the sessions folder has
   // any children.
-  *has_nodes = root.GetFirstChildId() != sync_api::kInvalidId;
+  *has_nodes = root.HasChildren();
   return true;
 }
 
@@ -142,14 +145,14 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs) {
       synced_session_tracker_.GetSession(local_tag);
   current_session->modified_time = base::Time::Now();
   header_s->set_client_name(current_session_name_);
-#if defined(OS_LINUX)
+#if defined(OS_CHROMEOS)
+  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_CROS);
+#elif defined(OS_LINUX)
   header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_LINUX);
 #elif defined(OS_MACOSX)
   header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_MAC);
 #elif defined(OS_WIN)
   header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_WIN);
-#elif defined(OS_CHROMEOS)
-  header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_CROS);
 #else
   header_s->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_OTHER);
 #endif
@@ -169,8 +172,8 @@ bool SessionModelAssociator::AssociateWindows(bool reload_tabs) {
     if (ShouldSyncWindow(*i) && (*i)->GetTabCount() && (*i)->HasWindow()) {
       sync_pb::SessionWindow window_s;
       SessionID::id_type window_id = (*i)->GetSessionId();
-      VLOG(1) << "Associating window " << window_id << " with " <<
-          (*i)->GetTabCount() << " tabs.";
+      DVLOG(1) << "Associating window " << window_id << " with "
+               << (*i)->GetTabCount() << " tabs.";
       window_s.set_window_id(window_id);
       window_s.set_selected_tab_index((*i)->GetActiveIndex());
       if ((*i)->IsTypeTabbed()) {
@@ -297,7 +300,7 @@ bool SessionModelAssociator::AssociateTab(const SyncedTabDelegate& tab) {
     sync_id = tablink->second.sync_id();
   }
 
-  VLOG(1) << "Reloading tab " << id << " from window " << tab.GetWindowId();
+  DVLOG(1) << "Reloading tab " << id << " from window " << tab.GetWindowId();
   const SyncedWindowDelegate* window =
       SyncedWindowDelegate::FindSyncedWindowDelegateWithId(
           tab.GetWindowId());
@@ -335,9 +338,9 @@ bool SessionModelAssociator::WriteTabContentsToSyncModel(
     DCHECK(entry);
     if (entry->virtual_url().is_valid()) {
       if (i == max_index - 1) {
-        VLOG(1) << "Associating tab " << tab_id << " with sync id " << sync_id
-            << ", url " << entry->virtual_url().possibly_invalid_spec()
-            << " and title " << entry->title();
+        DVLOG(1) << "Associating tab " << tab_id << " with sync id " << sync_id
+                 << ", url " << entry->virtual_url().possibly_invalid_spec()
+                 << " and title " << entry->title();
       }
       TabNavigation tab_nav;
       tab_nav.SetFromNavigationEntry(*entry);
@@ -378,7 +381,8 @@ void SessionModelAssociator::PopulateSessionSpecificsNavigation(
     sync_pb::TabNavigation* tab_navigation) {
   tab_navigation->set_index(navigation->index());
   tab_navigation->set_virtual_url(navigation->virtual_url().spec());
-  tab_navigation->set_referrer(navigation->referrer().spec());
+  // FIXME(zea): Support referrer policy?
+  tab_navigation->set_referrer(navigation->referrer().url.spec());
   tab_navigation->set_title(UTF16ToUTF8(navigation->title()));
   switch (navigation->transition()) {
     case content::PAGE_TRANSITION_LINK:
@@ -516,14 +520,14 @@ bool SessionModelAssociator::AssociateModels(SyncError* error) {
     return false;
   }
 
-  VLOG(1) << "Session models associated.";
+  DVLOG(1) << "Session models associated.";
 
   return true;
 }
 
 bool SessionModelAssociator::DisassociateModels(SyncError* error) {
   DCHECK(CalledOnValidThread());
-  VLOG(1) << "Disassociating local session " << GetCurrentMachineTag();
+  DVLOG(1) << "Disassociating local session " << GetCurrentMachineTag();
   synced_session_tracker_.Clear();
   tab_map_.clear();
   tab_pool_.clear();
@@ -533,10 +537,10 @@ bool SessionModelAssociator::DisassociateModels(SyncError* error) {
 
   // There is no local model stored with which to disassociate, just notify
   // foreign session handlers.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FOREIGN_SESSION_DISABLED,
-      Source<Profile>(sync_service_->profile()),
-      NotificationService::NoDetails());
+      content::Source<Profile>(sync_service_->profile()),
+      content::NotificationService::NoDetails());
   return true;
 }
 
@@ -546,59 +550,29 @@ void SessionModelAssociator::InitializeCurrentMachineTag(
   syncable::Directory* dir = trans->GetWrappedWriteTrans()->directory();
   current_machine_tag_ = "session_sync";
   current_machine_tag_.append(dir->cache_guid());
-  VLOG(1) << "Creating machine tag: " << current_machine_tag_;
+  DVLOG(1) << "Creating machine tag: " << current_machine_tag_;
   tab_pool_.set_machine_tag(current_machine_tag_);
 }
 
 void SessionModelAssociator::OnSessionNameInitialized(const std::string name) {
   DCHECK(CalledOnValidThread());
   // Only use the default machine name if it hasn't already been set.
-  if (current_session_name_.empty()) {
+  if (current_session_name_.empty())
     current_session_name_ = name;
-  }
 }
-
-// Task which runs on the file thread because it runs system calls which can
-// block while retrieving sytem information.
-class GetSessionNameTask : public Task {
- public:
-  explicit GetSessionNameTask(
-      const WeakHandle<SessionModelAssociator> associator) :
-    associator_(associator) {}
-
-  virtual void Run() {
-#if defined(OS_LINUX)
-    std::string session_name = base::GetLinuxDistro();
-#elif defined(OS_MACOSX)
-    std::string session_name = SessionModelAssociator::GetHardwareModelName();
-#elif defined(OS_WIN)
-    std::string session_name = SessionModelAssociator::GetComputerName();
-#else
-    std::string session_name;
-#endif
-    if (session_name == "Unknown" || session_name.empty()) {
-      session_name = base::SysInfo::OperatingSystemName();
-    }
-    associator_.Call(FROM_HERE,
-                     &SessionModelAssociator::OnSessionNameInitialized,
-                     session_name);
-  }
-  const WeakHandle<SessionModelAssociator> associator_;
-
-  DISALLOW_COPY_AND_ASSIGN(GetSessionNameTask);
-};
 
 void SessionModelAssociator::InitializeCurrentSessionName() {
   DCHECK(CalledOnValidThread());
   if (setup_for_test_) {
     OnSessionNameInitialized("TestSessionName");
   } else {
-#if defined(OS_CHROMEOS)
-    OnSessionNameInitialized("Chromebook");
-#else
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        new GetSessionNameTask(MakeWeakHandle(AsWeakPtr())));
-#endif
+    scoped_refptr<GetSessionNameTask> task = new GetSessionNameTask(
+        base::Bind(&SessionModelAssociator::OnSessionNameInitialized,
+                   AsWeakPtr()));
+    BrowserThread::PostTask(
+        BrowserThread::FILE,
+        FROM_HERE,
+        base::Bind(&GetSessionNameTask::GetSessionNameAsync, task.get()));
   }
 }
 
@@ -690,8 +664,8 @@ bool SessionModelAssociator::AssociateForeignSpecifics(
 
     // Process all the windows and their tab information.
     int num_windows = header.window_size();
-    VLOG(1) << "Associating " << foreign_session_tag << " with "
-            << num_windows << " windows.";
+    DVLOG(1) << "Associating " << foreign_session_tag << " with "
+             << num_windows << " windows.";
     for (int i = 0; i < num_windows; ++i) {
       const sync_pb::SessionWindow& window_s = header.window(i);
       SessionID::id_type window_id = window_s.window_id();
@@ -726,11 +700,11 @@ bool SessionModelAssociator::DisassociateForeignSession(
     const std::string& foreign_session_tag) {
   DCHECK(CalledOnValidThread());
   if (foreign_session_tag == GetCurrentMachineTag()) {
-    VLOG(1) << "Local session deleted! Doing nothing until a navigation is "
-            << "triggered.";
+    DVLOG(1) << "Local session deleted! Doing nothing until a navigation is "
+             << "triggered.";
     return false;
   }
-  VLOG(1) << "Disassociating session " << foreign_session_tag;
+  DVLOG(1) << "Disassociating session " << foreign_session_tag;
   return synced_session_tracker_.DeleteSession(foreign_session_tag);
 }
 
@@ -902,8 +876,10 @@ void SessionModelAssociator::AppendSessionTabNavigation(
         }
     }
   }
-  TabNavigation tab_navigation(index, virtual_url, referrer, title, state,
-                               transition);
+  TabNavigation tab_navigation(
+      index, virtual_url,
+      content::Referrer(referrer, WebKit::WebReferrerPolicyDefault), title,
+      state, transition);
   navigations->insert(navigations->end(), tab_navigation);
 }
 
@@ -957,7 +933,8 @@ int64 SessionModelAssociator::TabNodePool::GetFreeTabNode() {
     // to put the node's id in the pool now, since the pool is still empty.
     // The id will be added when that tab is closed and the node is freed.
     tab_syncid_pool_.resize(tab_node_id + 1);
-    VLOG(1) << "Adding sync node " << tab_node.GetId() << " to tab syncid pool";
+    DVLOG(1) << "Adding sync node "
+             << tab_node.GetId() << " to tab syncid pool";
     return tab_node.GetId();
   } else {
     // There are nodes available, grab next free and decrement free pointer.
@@ -1018,8 +995,8 @@ void SessionModelAssociator::DeleteStaleSessions() {
     if (session_age_in_days > 0 &&  // If false, local clock is not trustworty.
         static_cast<size_t>(session_age_in_days) >
             stale_session_threshold_days_) {
-      VLOG(1) << "Found stale session " << session_tag
-              << " with age " << session_age_in_days << ", deleting.";
+      DVLOG(1) << "Found stale session " << session_tag
+               << " with age " << session_age_in_days << ", deleting.";
       DeleteForeignSession(session_tag);
     }
   }
@@ -1097,7 +1074,7 @@ bool SessionModelAssociator::IsValidTab(const SyncedTabDelegate& tab) const {
 
 void SessionModelAssociator::QuitLoopForSubtleTesting() {
   if (waiting_for_change_) {
-    VLOG(1) << "Quitting MessageLoop for test.";
+    DVLOG(1) << "Quitting MessageLoop for test.";
     waiting_for_change_ = false;
     test_method_factory_.RevokeAll();
     MessageLoop::current()->Quit();
@@ -1275,19 +1252,5 @@ bool SessionModelAssociator::CryptoReadyIfNecessary() {
   return encrypted_types.count(SESSIONS) == 0 ||
          sync_service_->IsCryptographerReady(&trans);
 }
-
-#if defined(OS_WIN)
-// Static
-// TODO(nzea): This isn't safe to call on the UI-thread. Move it out to a util
-// or object that lives on the FILE thread.
-std::string SessionModelAssociator::GetComputerName() {
-  char computer_name[MAX_COMPUTERNAME_LENGTH + 1];
-  DWORD size = sizeof(computer_name);
-  if (GetComputerNameA(computer_name, &size)) {
-    return computer_name;
-  }
-  return std::string();
-}
-#endif
 
 }  // namespace browser_sync

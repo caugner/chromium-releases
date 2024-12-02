@@ -15,13 +15,13 @@
 #include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/table/table_view.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/table/table_view.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 using views::GridLayout;
 using views::ImageView;
@@ -84,11 +84,11 @@ string16 EditSearchEngineDialog::GetWindowTitle() const {
 }
 
 bool EditSearchEngineDialog::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
-    return (controller_->IsKeywordValid(WideToUTF16(keyword_tf_->text())) &&
-            controller_->IsTitleValid(WideToUTF16(title_tf_->text())) &&
-            controller_->IsURLValid(WideToUTF8(url_tf_->text())));
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK) {
+    return (controller_->IsKeywordValid(keyword_tf_->text()) &&
+            controller_->IsTitleValid(title_tf_->text()) &&
+            controller_->IsURLValid(UTF16ToUTF8(url_tf_->text())));
   }
   return true;
 }
@@ -99,9 +99,8 @@ bool EditSearchEngineDialog::Cancel() {
 }
 
 bool EditSearchEngineDialog::Accept() {
-  controller_->AcceptAddOrEdit(WideToUTF16(title_tf_->text()),
-                               WideToUTF16(keyword_tf_->text()),
-                               WideToUTF8(url_tf_->text()));
+  controller_->AcceptAddOrEdit(title_tf_->text(), keyword_tf_->text(),
+                               UTF16ToUTF8(url_tf_->text()));
   return true;
 }
 
@@ -241,13 +240,12 @@ Textfield* EditSearchEngineDialog::CreateTextfield(const std::wstring& text,
 }
 
 void EditSearchEngineDialog::UpdateImageViews() {
-  UpdateImageView(keyword_iv_,
-                  controller_->IsKeywordValid(WideToUTF16(keyword_tf_->text())),
+  UpdateImageView(keyword_iv_, controller_->IsKeywordValid(keyword_tf_->text()),
                   IDS_SEARCH_ENGINES_INVALID_KEYWORD_TT);
-  UpdateImageView(url_iv_, controller_->IsURLValid(WideToUTF8(url_tf_->text())),
+  UpdateImageView(url_iv_,
+                  controller_->IsURLValid(UTF16ToUTF8(url_tf_->text())),
                   IDS_SEARCH_ENGINES_INVALID_URL_TT);
-  UpdateImageView(title_iv_,
-                  controller_->IsTitleValid(WideToUTF16(title_tf_->text())),
+  UpdateImageView(title_iv_, controller_->IsTitleValid(title_tf_->text()),
                   IDS_SEARCH_ENGINES_INVALID_TITLE_TT);
 }
 

@@ -27,9 +27,11 @@
 #include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/net/url_request_mock_http_job.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -82,19 +84,12 @@ class SavePageBrowserTest : public InProcessBrowserTest {
     ui_test_utils::TestNotificationObserver observer;
     ui_test_utils::RegisterAndWait(&observer,
         content::NOTIFICATION_SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-        NotificationService::AllSources());
-    return Details<DownloadItem>(observer.details()).ptr()->original_url();
+        content::NotificationService::AllSources());
+    return content::Details<DownloadItem>(observer.details()).ptr()->
+        GetOriginalUrl();
   }
 
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
-  const ActiveDownloadsUI::DownloadList& GetDownloads() const {
-    TabContents* download_contents = ActiveDownloadsUI::GetPopup(NULL);
-    ActiveDownloadsUI* downloads_ui = static_cast<ActiveDownloadsUI*>(
-        download_contents->web_ui());
-    EXPECT_TRUE(downloads_ui);
-    return downloads_ui->GetDownloads();
-  }
-#elif defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
   const ActiveDownloadsUI::DownloadList& GetDownloads() const {
     Browser* popup = ActiveDownloadsUI::GetPopup();
     EXPECT_TRUE(popup);
@@ -106,13 +101,13 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 #endif
 
   void CheckDownloadUI(const FilePath& download_path) const {
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
     const ActiveDownloadsUI::DownloadList& downloads = GetDownloads();
     EXPECT_EQ(downloads.size(), 1U);
 
     bool found = false;
     for (size_t i = 0; i < downloads.size(); ++i) {
-      if (downloads[i]->full_path() == download_path) {
+      if (downloads[i]->GetFullPath() == download_path) {
         found = true;
         break;
       }
@@ -317,7 +312,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, RemoveFromList) {
 
   EXPECT_EQ(GetDownloadManager()->RemoveAllDownloads(), 1);
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
   EXPECT_EQ(GetDownloads().size(), 0U);
 #endif
 

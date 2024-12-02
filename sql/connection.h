@@ -13,6 +13,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
+#include "sql/sql_export.h"
 
 class FilePath;
 struct sqlite3;
@@ -76,7 +77,7 @@ class Connection;
 // the OnError() callback.
 // The tipical usage is to centralize the code designed to handle database
 // corruption, low-level IO errors or locking violations.
-class ErrorDelegate : public base::RefCounted<ErrorDelegate> {
+class SQL_EXPORT ErrorDelegate : public base::RefCounted<ErrorDelegate> {
  public:
   ErrorDelegate();
 
@@ -99,7 +100,7 @@ class ErrorDelegate : public base::RefCounted<ErrorDelegate> {
   virtual ~ErrorDelegate();
 };
 
-class Connection {
+class SQL_EXPORT Connection {
  private:
   class StatementRef;  // Forward declaration, see real one below.
 
@@ -293,7 +294,7 @@ class Connection {
   //
   // The Connection may revoke a StatementRef in some error cases, so callers
   // should always check validity before using.
-  class StatementRef : public base::RefCounted<StatementRef> {
+  class SQL_EXPORT StatementRef : public base::RefCounted<StatementRef> {
    public:
     // Default constructor initializes to an invalid statement.
     StatementRef();

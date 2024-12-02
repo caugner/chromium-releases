@@ -4,16 +4,15 @@
 
 #include "chrome/test/automation/automation_proxy.h"
 
-#include <gtest/gtest.h>
-
 #include <sstream>
 
 #include "base/basictypes.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/threading/platform_thread.h"
 #include "base/process_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_version_info.h"
@@ -25,7 +24,7 @@
 #include "ipc/ipc_descriptors.h"
 #if defined(OS_WIN)
 // TODO(port): Enable when dialog_delegate is ported.
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 #endif
 
 using base::TimeDelta;
@@ -160,22 +159,21 @@ void AutomationProxy::InitializeChannel(const std::string& channel_id,
   // The shutdown event could be global on the same lines as the automation
   // provider, where we use the shutdown event provided by the chrome browser
   // process.
-  IPC::Channel::Mode mode =
-      use_named_interface ? IPC::Channel::MODE_NAMED_CLIENT
-                          : IPC::Channel::MODE_SERVER;
-  // Create the pipe immediately if we are serving, so that Chrome doesn't try
-  // to connect an unready server. Create it asynchronously if we are the
-  // client, otherwise the filter may not be in place before Chrome sends
-  // the first automation Hello message.
-  bool create_pipe_now = mode & IPC::Channel::MODE_SERVER_FLAG;
   channel_.reset(new IPC::SyncChannel(
-    channel_id,
-    mode,
-    this,  // we are the listener
-    thread_->message_loop_proxy(),
-    create_pipe_now,
-    shutdown_event_.get()));
+      this,  // we are the listener
+      thread_->message_loop_proxy(),
+      shutdown_event_.get()));
   channel_->AddFilter(new AutomationMessageFilter(this));
+
+  // Create the pipe synchronously so that Chrome doesn't try to connect to an
+  // unready server. Note this is done after adding a message filter to
+  // guarantee that it doesn't miss any messages when we are the client.
+  // See crbug.com/102894.
+  channel_->Init(
+      channel_id,
+      use_named_interface ? IPC::Channel::MODE_NAMED_CLIENT
+                          : IPC::Channel::MODE_SERVER,
+      true /* create_pipe_now */);
 }
 
 void AutomationProxy::InitializeHandleTracker() {
@@ -251,15 +249,9 @@ scoped_refptr<ExtensionProxy> AutomationProxy::InstallExtension(
   return ProxyObjectFromHandle<ExtensionProxy>(handle);
 }
 
-void AutomationProxy::EnsureExtensionTestResult() {
-  bool result;
-  std::string message;
-  if (!Send(new AutomationMsg_WaitForExtensionTestResult(&result,
-                                                         &message))) {
-    FAIL() << "Could not send WaitForExtensionTestResult message";
-    return;
-  }
-  ASSERT_TRUE(result) << "Extension test message: " << message;
+bool AutomationProxy::GetExtensionTestResult(
+    bool* result, std::string* message) {
+  return Send(new AutomationMsg_WaitForExtensionTestResult(result, message));
 }
 
 bool AutomationProxy::GetBrowserWindowCount(int* num_windows) {
@@ -289,9 +281,8 @@ bool AutomationProxy::WaitForWindowCountToBecome(int count) {
   return wait_success;
 }
 
-bool AutomationProxy::GetShowingAppModalDialog(
-    bool* showing_app_modal_dialog,
-    ui::MessageBoxFlags::DialogButton* button) {
+bool AutomationProxy::GetShowingAppModalDialog(bool* showing_app_modal_dialog,
+                                               ui::DialogButton* button) {
   if (!showing_app_modal_dialog || !button) {
     NOTREACHED();
     return false;
@@ -304,12 +295,11 @@ bool AutomationProxy::GetShowingAppModalDialog(
     return false;
   }
 
-  *button = static_cast<ui::MessageBoxFlags::DialogButton>(button_int);
+  *button = static_cast<ui::DialogButton>(button_int);
   return true;
 }
 
-bool AutomationProxy::ClickAppModalDialogButton(
-    ui::MessageBoxFlags::DialogButton button) {
+bool AutomationProxy::ClickAppModalDialogButton(ui::DialogButton button) {
   bool succeeded = false;
 
   if (!Send(new AutomationMsg_ClickAppModalDialogButton(
@@ -500,7 +490,7 @@ scoped_refptr<TabProxy> AutomationProxy::CreateExternalTab(
     return NULL;
   }
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   DCHECK(IsWindow(*external_tab_container));
 #else  // defined(OS_WIN)
   DCHECK(*external_tab_container);
@@ -548,6 +538,43 @@ bool AutomationProxy::LoginWithUserAndPass(const std::string& username,
   return sent && success;
 }
 #endif
+
+bool AutomationProxy::BeginTracing(const std::string& categories) {
+  bool result = false;
+  bool send_success = Send(new AutomationMsg_BeginTracing(categories,
+                                                          &result));
+  return send_success && result;
+}
+
+bool AutomationProxy::EndTracing(std::string* json_trace_output) {
+  bool success = false;
+  size_t num_trace_chunks = 0;
+  if (!Send(new AutomationMsg_EndTracing(&num_trace_chunks, &success)) ||
+      !success)
+    return false;
+
+  std::string chunk;
+  base::debug::TraceResultBuffer buffer;
+  base::debug::TraceResultBuffer::SimpleOutput output;
+  buffer.SetOutputCallback(output.GetCallback());
+
+  // TODO(jbates): See bug 100255, IPC send fails if message is too big. This
+  // code can be simplified if that limitation is fixed.
+  // Workaround IPC payload size limitation by getting chunks.
+  buffer.Start();
+  for (size_t i = 0; i < num_trace_chunks; ++i) {
+    // The broswer side AutomationProvider resets state at BeginTracing,
+    // so it can recover even after this fails mid-way.
+    if (!Send(new AutomationMsg_GetTracingOutput(&chunk, &success)) ||
+        !success)
+      return false;
+    buffer.AddFragment(chunk);
+  }
+  buffer.Finish();
+
+  *json_trace_output = output.json_output;
+  return true;
+}
 
 bool AutomationProxy::ResetToDefaultTheme() {
   return Send(new AutomationMsg_ResetToDefaultTheme());

@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "content/browser/tab_contents/navigation_entry.h"
 #include "ui/gfx/native_widget_types.h"
 
 // This file contains functions for running a variety of browser dialogs and
@@ -22,32 +23,36 @@ class EditSearchEngineControllerDelegate;
 class Extension;
 class FindBar;
 class GURL;
-class BubbleDelegate;
 class Profile;
 class TabContents;
 class TabContentsWrapper;
 class TemplateURL;
 
 namespace gfx {
-class Rect;
 class Size;
 }
 
 namespace views {
+class View;
 class Widget;
 }
 
 namespace browser {
 
-// Shows or hides the global bookmark bubble for the star button.
-void ShowBookmarkBubbleView(views::Widget* parent,
-                            const gfx::Rect& bounds,
-                            BubbleDelegate* delegate,
+// Shows or hides the bookmark bubble anchored to the supplied view.
+void ShowBookmarkBubbleView(views::View* anchor_view,
                             Profile* profile,
                             const GURL& url,
                             bool newly_bookmarked);
 void HideBookmarkBubbleView();
 bool IsBookmarkBubbleViewShowing();
+
+// Shows the page info bubble anchored to the supplied view.
+void ShowPageInfoBubble(views::View* anchor_view,
+                        Profile* profile,
+                        const GURL& url,
+                        const NavigationEntry::SSLStatus& ssl,
+                        bool show_history);
 
 // Shows the about dialog. See AboutChromeView.
 views::Widget* ShowAboutChromeView(gfx::NativeWindow parent,

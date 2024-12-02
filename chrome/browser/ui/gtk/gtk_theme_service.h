@@ -9,17 +9,21 @@
 #include <map>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "content/common/notification_observer.h"
-#include "ui/base/gtk/gtk_integers.h"
+#include "content/public/browser/notification_observer.h"
+#include "ui/base/glib/glib_integers.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/owned_widget_gtk.h"
 #include "ui/gfx/color_utils.h"
 
-class CairoCachedSurface;
 class Profile;
+
+namespace gfx {
+class CairoCachedSurface;
+}
 
 namespace ui {
 class GtkSignalRegistrar;
@@ -35,6 +39,15 @@ typedef struct _GtkWidget GtkWidget;
 // Specialization of ThemeService which supplies system colors.
 class GtkThemeService : public ThemeService {
  public:
+  // A list of integer keys for a separate PerDisplaySurfaceMap that keeps
+  // what would otherwise be static icons on the X11 server.
+  enum CairoDefaultIcon {
+    NATIVE_FAVICON = 1,
+    CHROME_FAVICON,
+    NATIVE_FOLDER,
+    CHROME_FOLDER
+  };
+
   // Returns GtkThemeService, casted from our superclass.
   static GtkThemeService* GetFrom(Profile* profile);
 
@@ -43,26 +56,27 @@ class GtkThemeService : public ThemeService {
 
   // Calls |observer|.Observe() for the browser theme with this provider as the
   // source.
-  void InitThemesFor(NotificationObserver* observer);
+  void InitThemesFor(content::NotificationObserver* observer);
 
   // Overridden from ThemeService:
   //
   // Sets that we aren't using the system theme, then calls
   // ThemeService's implementation.
-  virtual void Init(Profile* profile);
-  virtual SkBitmap* GetBitmapNamed(int id) const;
-  virtual SkColor GetColor(int id) const;
-  virtual bool HasCustomImage(int id) const;
-  virtual void SetTheme(const Extension* extension);
-  virtual void UseDefaultTheme();
-  virtual void SetNativeTheme();
-  virtual bool UsingDefaultTheme() const;
-  virtual bool UsingNativeTheme() const;
+  virtual void Init(Profile* profile) OVERRIDE;
+  virtual SkBitmap* GetBitmapNamed(int id) const OVERRIDE;
+  virtual const gfx::Image* GetImageNamed(int id) const OVERRIDE;
+  virtual SkColor GetColor(int id) const OVERRIDE;
+  virtual bool HasCustomImage(int id) const OVERRIDE;
+  virtual void SetTheme(const Extension* extension) OVERRIDE;
+  virtual void UseDefaultTheme() OVERRIDE;
+  virtual void SetNativeTheme() OVERRIDE;
+  virtual bool UsingDefaultTheme() const OVERRIDE;
+  virtual bool UsingNativeTheme() const OVERRIDE;
 
-  // Overridden from ThemeService, NotificationObserver:
+  // Overridden from ThemeService, content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Creates a GtkChromeButton instance, registered with this theme provider,
   // with a "destroy" signal to remove it from our internal list when it goes
@@ -106,19 +120,24 @@ class GtkThemeService : public ThemeService {
   // Returns a CairoCachedSurface for a particular Display. CairoCachedSurfaces
   // (hopefully) live on the X server, instead of the client so we don't have
   // to send the image to the server on each expose.
-  CairoCachedSurface* GetSurfaceNamed(int id, GtkWidget* widget_on_display);
+  gfx::CairoCachedSurface* GetSurfaceNamed(
+      int id, GtkWidget* widget_on_display);
 
   // Same as above, but auto-mirrors the underlying pixbuf in RTL mode.
-  CairoCachedSurface* GetRTLEnabledSurfaceNamed(int id,
-                                                GtkWidget* widget_on_display);
+  gfx::CairoCachedSurface* GetRTLEnabledSurfaceNamed(
+      int id, GtkWidget* widget_on_display);
 
   // Same as above, but gets the resource from the ResourceBundle instead of the
   // ThemeService.
   // NOTE: Never call this with resource IDs that are ever passed to the above
   // two functions!  Depending on which call comes first, all callers will
   // either get the themed or the unthemed version.
-  CairoCachedSurface* GetUnthemedSurfaceNamed(int id,
-                                              GtkWidget* widget_on_display);
+  gfx::CairoCachedSurface* GetUnthemedSurfaceNamed(
+      int id, GtkWidget* widget_on_display);
+
+  // A way to get a cached cairo surface for the equivalent of GetFolderIcon()
+  // or GetDefaultFavicon(). Uses the ids defined in CairoDefaultIcon.
+  gfx::CairoCachedSurface* GetCairoIcon(int id, GtkWidget* widget_on_display);
 
   // Returns colors that we pass to webkit to match the system theme.
   const SkColor& get_focus_ring_color() const { return focus_ring_color_; }
@@ -152,21 +171,23 @@ class GtkThemeService : public ThemeService {
  private:
   typedef std::map<int, SkColor> ColorMap;
   typedef std::map<int, color_utils::HSL> TintMap;
-  typedef std::map<int, SkBitmap*> ImageCache;
-  typedef std::map<int, CairoCachedSurface*> CairoCachedSurfaceMap;
+  typedef std::map<int, gfx::Image*> ImageCache;
+  typedef std::map<int, gfx::CairoCachedSurface*> CairoCachedSurfaceMap;
   typedef std::map<GdkDisplay*, CairoCachedSurfaceMap> PerDisplaySurfaceMap;
 
+  typedef GdkPixbuf*(GtkThemeService::*PixbufProvidingMethod)(int id) const;
+
   // Clears all the GTK color overrides.
-  virtual void ClearAllThemeData();
+  virtual void ClearAllThemeData() OVERRIDE;
 
   // Load theme data from preferences, possibly picking colors from GTK.
-  virtual void LoadThemePrefs();
+  virtual void LoadThemePrefs() OVERRIDE;
 
   // Let all the browser views know that themes have changed.
-  virtual void NotifyThemeChanged();
+  virtual void NotifyThemeChanged() OVERRIDE;
 
   // Additionally frees the CairoCachedSurfaces.
-  virtual void FreePlatformCaches();
+  virtual void FreePlatformCaches() OVERRIDE;
 
   // Extracts colors and tints from the GTK theme, both for the
   // ThemeService interface and the colors we send to webkit.
@@ -235,10 +256,21 @@ class GtkThemeService : public ThemeService {
   void GetSelectedEntryForegroundHSL(color_utils::HSL* tint) const;
 
   // Implements GetXXXSurfaceNamed(), given the appropriate pixbuf to use.
-  CairoCachedSurface* GetSurfaceNamedImpl(int id,
-                                          PerDisplaySurfaceMap* surface_map,
-                                          GdkPixbuf* pixbuf,
-                                          GtkWidget* widget_on_display);
+  gfx::CairoCachedSurface* GetSurfaceNamedImpl(
+      int id,
+      PerDisplaySurfaceMap* surface_map,
+      PixbufProvidingMethod provider,
+      GtkWidget* widget_on_display);
+
+  // PixbufProvidingMethods passed to GetSurfaceNamedImpl from GetSurface*
+  // methods. We don't want to always fetch the pixbuf and pass the pixbuf to
+  // GetSurfaceNamedImpl which will throw away the result most of the time.
+  //
+  // Especially since GetUnthemedNativePixbuf always locks and
+  // GetRTLEnabledPixbufNamedWrapper locks in debug builds.
+  GdkPixbuf* GetRTLEnabledPixbufNamedWrapper(int id) const;
+  GdkPixbuf* GetUnthemedNativePixbuf(int id) const;
+  GdkPixbuf* GetPixbufForIconId(int id) const;
 
   // Handles signal from GTK that our theme has been changed.
   CHROMEGTK_CALLBACK_1(GtkThemeService, void, OnStyleSet, GtkStyle*);
@@ -306,6 +338,7 @@ class GtkThemeService : public ThemeService {
   // Cairo surfaces for each GdkDisplay.
   PerDisplaySurfaceMap per_display_surfaces_;
   PerDisplaySurfaceMap per_display_unthemed_surfaces_;
+  PerDisplaySurfaceMap per_display_icon_surfaces_;
 
   PrefChangeRegistrar registrar_;
 

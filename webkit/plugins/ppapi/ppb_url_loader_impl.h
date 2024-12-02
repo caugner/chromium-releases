@@ -14,19 +14,17 @@
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/shared_impl/url_request_info_impl.h"
 #include "ppapi/thunk/ppb_url_loader_api.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
 #include "webkit/plugins/ppapi/callbacks.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 namespace WebKit {
-class WebFrame;
 class WebURL;
 }
 
 namespace webkit {
 namespace ppapi {
 
-class PPB_URLRequestInfo_Impl;
 class PPB_URLResponseInfo_Impl;
 
 class PPB_URLLoader_Impl : public ::ppapi::Resource,

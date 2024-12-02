@@ -21,12 +21,13 @@
 #include "base/environment.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
+#include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -37,13 +38,17 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/common/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_log.h"
 #include "net/test/python_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -351,7 +356,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
 class SafeBrowsingServiceTestHelper
     : public base::RefCountedThreadSafe<SafeBrowsingServiceTestHelper>,
       public SafeBrowsingService::Client,
-      public URLFetcher::Delegate {
+      public content::URLFetcherDelegate {
  public:
   explicit SafeBrowsingServiceTestHelper(
       SafeBrowsingServiceTest* safe_browsing_test)
@@ -507,14 +512,9 @@ class SafeBrowsingServiceTestHelper
   }
 
   // Callback for URLFetcher.
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) {
-    response_data_ = data;
-    response_status_ = status.status();
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) {
+    source->GetResponseAsString(&response_data_);
+    response_status_ = source->GetStatus().status();
     StopUILoop();
   }
 
@@ -532,9 +532,10 @@ class SafeBrowsingServiceTestHelper
   // Fetch a URL. If message_loop_started is true, starts the message loop
   // so the caller could wait till OnURLFetchComplete is called.
   net::URLRequestStatus::Status FetchUrl(const GURL& url) {
-    url_fetcher_.reset(new URLFetcher(url, URLFetcher::GET, this));
-    url_fetcher_->set_load_flags(net::LOAD_DISABLE_CACHE);
-    url_fetcher_->set_request_context(
+    url_fetcher_.reset(content::URLFetcher::Create(
+        url, content::URLFetcher::GET, this));
+    url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+    url_fetcher_->SetRequestContext(
         Profile::Deprecated::GetDefaultRequestContext());
     url_fetcher_->Start();
     ui_test_utils::RunMessageLoop();
@@ -543,19 +544,14 @@ class SafeBrowsingServiceTestHelper
 
   base::OneShotTimer<SafeBrowsingServiceTestHelper> check_update_timer_;
   SafeBrowsingServiceTest* safe_browsing_test_;
-  scoped_ptr<URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher_;
   std::string response_data_;
   net::URLRequestStatus::Status response_status_;
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingServiceTestHelper);
 };
 
-#if defined(OS_WIN) && defined(NDEBUG)
-#define MAYBE_SafeBrowsingSystemTest FLAKY_SafeBrowsingSystemTest
-#else
-#define MAYBE_SafeBrowsingSystemTest SafeBrowsingServiceTest
-#endif
-// See http://crbug.com/96489
-IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, MAYBE_SafeBrowsingSystemTest) {
+// See http://crbug.com/96459
+IN_PROC_BROWSER_TEST_F(SafeBrowsingServiceTest, FLAKY_SafeBrowsingSystemTest) {
   LOG(INFO) << "Start test";
   const char* server_host = SafeBrowsingTestServer::Host();
   int server_port = SafeBrowsingTestServer::Port();

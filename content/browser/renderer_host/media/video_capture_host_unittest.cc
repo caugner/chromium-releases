@@ -12,7 +12,7 @@
 #include "base/process_util.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_host.h"
@@ -31,6 +31,9 @@ using ::testing::DoAll;
 using ::testing::InSequence;
 using ::testing::Mock;
 using ::testing::Return;
+using content::BrowserThread;
+
+using content::BrowserThreadImpl;
 
 // Id used to identify the capture session between renderer and
 // video_capture_host.
@@ -85,7 +88,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
   MOCK_METHOD3(OnBufferFilled,
                void(int device_id, int buffer_id, base::Time timestamp));
   MOCK_METHOD2(OnStateChanged,
-               void(int device_id, media::VideoCapture::State state));
+               void(int device_id, video_capture::State state));
   MOCK_METHOD1(OnDeviceInfo, void(int device_id));
 
   // Use class DumpVideo to write I420 video to file.
@@ -163,7 +166,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
   }
 
   void OnStateChangedDispatch(int device_id,
-                              media::VideoCapture::State state) {
+                              video_capture::State state) {
     OnStateChanged(device_id, state);
   }
 
@@ -195,10 +198,12 @@ class VideoCaptureHostTest : public testing::Test {
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
 
     // ResourceContext must be created on the UI thread.
-    ui_thread_.reset(new BrowserThread(BrowserThread::UI, message_loop_.get()));
+    ui_thread_.reset(new BrowserThreadImpl(BrowserThread::UI,
+                                           message_loop_.get()));
 
     // MediaStreamManager must be created on the IO thread.
-    io_thread_.reset(new BrowserThread(BrowserThread::IO, message_loop_.get()));
+    io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
+                                           message_loop_.get()));
 
     // Create a MediaStreamManager instance and hand over pointer to
     // ResourceContext.
@@ -223,7 +228,7 @@ class VideoCaptureHostTest : public testing::Test {
     Mock::VerifyAndClearExpectations(host_);
 
     EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
-                                       media::VideoCapture::kStopped))
+                                       video_capture::kStopped))
         .Times(AnyNumber());
 
     // Simulate closing the IPC channel.
@@ -269,17 +274,17 @@ class VideoCaptureHostTest : public testing::Test {
 
   void StartCapture() {
     InSequence s;
-    // 1. Newly created buffers will arrive.
+    // 1. First - get info about the new resolution
+    EXPECT_CALL(*host_, OnDeviceInfo(kDeviceId));
+
+    // 2. Change state to started
+    EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
+                                       video_capture::kStarted));
+
+    // 3. Newly created buffers will arrive.
     EXPECT_CALL(*host_, OnNewBufferCreated(kDeviceId, _, _, _))
         .Times(AnyNumber())
         .WillRepeatedly(Return());
-
-    // 2. First - get info about the new resolution
-    EXPECT_CALL(*host_, OnDeviceInfo(kDeviceId));
-
-    // 3. Change state to started
-    EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
-                                       media::VideoCapture::kStarted));
 
     // 4. First filled buffer will arrive.
     EXPECT_CALL(*host_, OnBufferFilled(kDeviceId, _, _))
@@ -302,7 +307,7 @@ class VideoCaptureHostTest : public testing::Test {
 
     // 2. Change state to started
     EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
-                                       media::VideoCapture::kStarted));
+                                       video_capture::kStarted));
 
     // 3. First filled buffer will arrive.
     EXPECT_CALL(*host_, OnBufferFilled(kDeviceId, _, _))
@@ -321,7 +326,7 @@ class VideoCaptureHostTest : public testing::Test {
 
   void StopCapture() {
     EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
-                                       media::VideoCapture::kStopped))
+                                       video_capture::kStopped))
         .Times(AtLeast(1));
 
     host_->OnStopCapture(kDeviceId);
@@ -349,7 +354,7 @@ class VideoCaptureHostTest : public testing::Test {
   void SimulateError() {
     // Expect a change state to error state  sent through IPC.
     EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
-                                       media::VideoCapture::kError))
+                                       video_capture::kError))
         .Times(1);
     VideoCaptureControllerID id(kDeviceId);
     host_->OnError(id);
@@ -360,8 +365,8 @@ class VideoCaptureHostTest : public testing::Test {
 
  private:
   scoped_ptr<MessageLoop> message_loop_;
-  scoped_ptr<BrowserThread> ui_thread_;
-  scoped_ptr<BrowserThread> io_thread_;
+  scoped_ptr<BrowserThreadImpl> ui_thread_;
+  scoped_ptr<BrowserThreadImpl> io_thread_;
   scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHostTest);
@@ -387,7 +392,7 @@ TEST_F(VideoCaptureHostTest, StartCaptureErrorStop) {
 
 TEST_F(VideoCaptureHostTest, StartCaptureError) {
   EXPECT_CALL(*host_, OnStateChanged(kDeviceId,
-                                     media::VideoCapture::kStopped))
+                                     video_capture::kStopped))
       .Times(0);
   StartCapture();
   NotifyPacketReady();

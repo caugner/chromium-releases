@@ -24,6 +24,10 @@ class RenderViewHost;
 class TabContents;
 struct ExtensionHostMsg_Request_Params;
 
+namespace extensions {
+class ProcessMap;
+}
+
 // A factory function for creating new ExtensionFunction instances.
 typedef ExtensionFunction* (*ExtensionFunctionFactory)();
 
@@ -77,7 +81,7 @@ class ExtensionFunctionDispatcher
   // Dispatches an IO-thread extension function. Only used for specific
   // functions that must be handled on the IO-thread.
   static void DispatchOnIOThread(
-      const ExtensionInfoMap* extension_info_map,
+      ExtensionInfoMap* extension_info_map,
       void* profile,
       int render_process_id,
       base::WeakPtr<ChromeRenderMessageFilter> ipc_sender,
@@ -117,6 +121,8 @@ class ExtensionFunctionDispatcher
   static ExtensionFunction* CreateExtensionFunction(
       const ExtensionHostMsg_Request_Params& params,
       const Extension* extension,
+      int requesting_process_id,
+      const extensions::ProcessMap& process_map,
       void* profile,
       IPC::Message::Sender* ipc_sender,
       int routing_id);

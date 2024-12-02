@@ -11,9 +11,10 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
-#include "content/browser/download/download_manager_delegate.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "chrome/browser/safe_browsing/download_protection_service.h"
+#include "content/public/browser/download_manager_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class CrxInstaller;
 class DownloadHistory;
@@ -39,8 +40,8 @@ struct hash<CrxInstaller*> {
 // This is the Chrome side helper for the download system.
 class ChromeDownloadManagerDelegate
     : public base::RefCountedThreadSafe<ChromeDownloadManagerDelegate>,
-      public DownloadManagerDelegate,
-      public NotificationObserver {
+      public content::DownloadManagerDelegate,
+      public content::NotificationObserver {
  public:
   explicit ChromeDownloadManagerDelegate(Profile* profile);
 
@@ -58,11 +59,10 @@ class ChromeDownloadManagerDelegate
                                         FilePath* intermediate_path) OVERRIDE;
   virtual TabContents* GetAlternativeTabContentsToNotifyForDownload() OVERRIDE;
   virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path) OVERRIDE;
-  virtual bool ShouldOpenDownload(DownloadItem* item) OVERRIDE;
   virtual bool ShouldCompleteDownload(DownloadItem* item) OVERRIDE;
+  virtual bool ShouldOpenDownload(DownloadItem* item) OVERRIDE;
   virtual bool GenerateFileHash() OVERRIDE;
-  virtual void OnResponseCompleted(DownloadItem* item,
-                                   const std::string& hash) OVERRIDE;
+  virtual void OnResponseCompleted(DownloadItem* item) OVERRIDE;
   virtual void AddItemToPersistentStore(DownloadItem* item) OVERRIDE;
   virtual void UpdateItemInPersistentStore(DownloadItem* item) OVERRIDE;
   virtual void UpdatePathForItemInPersistentStore(
@@ -94,13 +94,24 @@ class ChromeDownloadManagerDelegate
  private:
   friend class base::RefCountedThreadSafe<ChromeDownloadManagerDelegate>;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // Returns the SafeBrowsing download protection service if it's
+  // enabled. Returns NULL otherwise.
+  safe_browsing::DownloadProtectionService* GetDownloadProtectionService();
 
   // Callback function after url is checked with safebrowsing service.
-  void CheckDownloadUrlDone(int32 download_id, bool is_dangerous_url);
+  void CheckDownloadUrlDone(
+      int32 download_id,
+      safe_browsing::DownloadProtectionService::DownloadCheckResult result);
+
+  // Callback function after the DownloadProtectionService completes.
+  void CheckClientDownloadDone(
+      int32 download_id,
+      safe_browsing::DownloadProtectionService::DownloadCheckResult result);
 
   // Callback function after we check whether the referrer URL has been visited
   // before today.
@@ -130,10 +141,6 @@ class ChromeDownloadManagerDelegate
   // Callback from history system.
   void OnItemAddedToPersistentStore(int32 download_id, int64 db_handle);
 
-  // Callback function after download file hash is checked with safebrowsing
-  // service.
-  void CheckDownloadHashDone(int32 download_id, bool is_dangerous_hash);
-
   Profile* profile_;
   scoped_ptr<DownloadPrefs> download_prefs_;
   scoped_ptr<DownloadHistory> download_history_;
@@ -142,7 +149,17 @@ class ChromeDownloadManagerDelegate
   typedef base::hash_map<CrxInstaller*, int> CrxInstallerMap;
   CrxInstallerMap crx_installers_;
 
-  NotificationRegistrar registrar_;
+  // Maps the SafeBrowsing download check state to a DownloadItem ID.
+  struct SafeBrowsingState {
+    // If true the SafeBrowsing check is not done yet.
+    bool pending;
+    // The verdict that we got from calling CheckClientDownload.
+    safe_browsing::DownloadProtectionService::DownloadCheckResult verdict;
+  };
+  typedef base::hash_map<int, SafeBrowsingState> SafeBrowsingStateMap;
+  SafeBrowsingStateMap safe_browsing_state_;
+
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeDownloadManagerDelegate);
 };

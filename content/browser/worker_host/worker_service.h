@@ -12,20 +12,18 @@
 #include "base/threading/non_thread_safe.h"
 #include "content/browser/worker_host/worker_process_host.h"
 #include "content/common/content_export.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
+
+struct ViewHostMsg_CreateWorker_Params;
+class WorkerServiceObserver;
 
 namespace content {
 class ResourceContext;
 }  // namespace content
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
-class WorkerServiceObserver;
-struct ViewHostMsg_CreateWorker_Params;
 
 // A singleton for managing HTML5 web workers.
-class WorkerService {
+class CONTENT_EXPORT WorkerService {
  public:
   // Returns the WorkerService singleton.
   static WorkerService* GetInstance();
@@ -67,7 +65,7 @@ class WorkerService {
 
   void NotifyWorkerDestroyed(
       WorkerProcessHost* process,
-      const WorkerProcessHost::WorkerInstance& instance);
+      int worker_route_id);
   void NotifyWorkerContextStarted(
       WorkerProcessHost* process,
       int worker_route_id);
@@ -76,8 +74,8 @@ class WorkerService {
   static const int kMaxWorkerProcessesWhenSharing;
 
   // Used when we run each worker in a separate process.
-  CONTENT_EXPORT static const int kMaxWorkersWhenSeparate;
-  CONTENT_EXPORT static const int kMaxWorkersPerTabWhenSeparate;
+  static const int kMaxWorkersWhenSeparate;
+  static const int kMaxWorkersPerTabWhenSeparate;
 
  private:
   friend struct DefaultSingletonTraits<WorkerService>;
@@ -133,7 +131,7 @@ class WorkerService {
       const string16& name,
       const content::ResourceContext* resource_context);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   int next_worker_route_id_;
 
   WorkerProcessHost::Instances queued_workers_;

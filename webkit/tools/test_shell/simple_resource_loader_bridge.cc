@@ -123,8 +123,6 @@ class IOThread : public base::Thread {
   }
 
   ~IOThread() {
-    // We cannot rely on our base class to stop the thread since we want our
-    // CleanUp function to run.
     Stop();
   }
 
@@ -587,15 +585,13 @@ class RequestProxy : public net::URLRequest::Delegate,
     if (!g_file_over_http_params || !params->url.SchemeIsFile())
       return;
 
-    // For file protocol, method must be GET or NULL.
-    DCHECK(params->method == "GET" || params->method.empty());
-    // File protocol doesn't support upload.
-    DCHECK(!params->upload);
-    DCHECK(params->referrer.is_empty());
+    // For file protocol, method must be GET, POST or NULL.
+    DCHECK(params->method == "GET" || params->method == "POST" ||
+           params->method.empty());
     DCHECK(!params->download_to_file);
 
-    // "GET" is the only method we allow.
-    params->method = "GET";
+    if (params->method.empty())
+      params->method = "GET";
     std::string original_request = params->url.spec();
     std::string::size_type found =
         original_request.find(g_file_over_http_params->file_path_template);
@@ -909,18 +905,6 @@ class CookieGetter : public base::RefCountedThreadSafe<CookieGetter> {
 
 //-----------------------------------------------------------------------------
 
-namespace webkit_glue {
-
-// Factory function.
-ResourceLoaderBridge* ResourceLoaderBridge::Create(
-    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
-  return new ResourceLoaderBridgeImpl(request_info);
-}
-
-}  // namespace webkit_glue
-
-//-----------------------------------------------------------------------------
-
 // static
 void SimpleResourceLoaderBridge::Init(
     const FilePath& cache_path,
@@ -1048,4 +1032,10 @@ void SimpleResourceLoaderBridge::AllowFileOverHTTP(
          (http_prefix.SchemeIs("http") || http_prefix.SchemeIs("https")));
   g_file_over_http_params = new FileOverHTTPParams(file_path_template,
                                                    http_prefix);
+}
+
+// static
+webkit_glue::ResourceLoaderBridge* SimpleResourceLoaderBridge::Create(
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
+  return new ResourceLoaderBridgeImpl(request_info);
 }

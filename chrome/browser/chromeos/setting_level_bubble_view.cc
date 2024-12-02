@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/canvas.h"
-#include "views/controls/progress_bar.h"
+#include "ui/views/controls/progress_bar.h"
 
 using views::Background;
 using views::View;
@@ -28,14 +28,14 @@ const int kProgressBarHeight = 17;
 namespace chromeos {
 
 SettingLevelBubbleView::SettingLevelBubbleView()
-    : progress_bar_(NULL),
+    : progress_bar_(new views::ProgressBar()),
       icon_(NULL) {
 }
 
 void SettingLevelBubbleView::Init(SkBitmap* icon, double level, bool enabled) {
+  DCHECK(!icon_);
   DCHECK(icon);
   icon_ = icon;
-  progress_bar_ = new views::ProgressBar();
   AddChildView(progress_bar_);
   progress_bar_->SetDisplayRange(0.0, 100.0);
   progress_bar_->EnableCanvasFlippingForRTLUI(true);

@@ -14,8 +14,6 @@ using WebKit::WebConsoleMessage;
 
 namespace appcache {
 
-const char kManifestMimeType[] = "text/cache-manifest";
-
 const char kHttpScheme[] = "http";
 const char kHttpsScheme[] = "https";
 const char kHttpGETMethod[] = "GET";
@@ -25,6 +23,7 @@ const FilePath::CharType kAppCacheDatabaseName[] = FILE_PATH_LITERAL("Index");
 
 AppCacheInfo::AppCacheInfo()
     : cache_id(kNoCacheId),
+      group_id(0),
       status(UNCACHED),
       size(0),
       is_complete(false) {

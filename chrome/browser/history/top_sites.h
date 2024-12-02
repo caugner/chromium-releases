@@ -25,6 +25,7 @@
 #include "chrome/common/thumbnail_score.h"
 #include "content/browser/cancelable_request.h"
 #include "googleurl/src/gurl.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/image/image.h"
 
 class FilePath;
@@ -50,7 +51,7 @@ class TopSitesTest;
 // db using TopSitesBackend.
 class TopSites
     : public base::RefCountedThreadSafe<TopSites>,
-      public NotificationObserver,
+      public content::NotificationObserver,
       public CancelableRequestProvider {
  public:
   explicit TopSites(Profile* profile);
@@ -81,7 +82,7 @@ class TopSites
   // As this method may be invoked on any thread the ref count needs to be
   // incremented before this method returns, so this takes a scoped_refptr*.
   bool GetPageThumbnail(const GURL& url,
-                        scoped_refptr<RefCountedBytes>* bytes);
+                        scoped_refptr<RefCountedMemory>* bytes);
 
   // Get a thumbnail score for a given page. Returns true iff we have the
   // thumbnail score.  This may be invoked on any thread. The score will
@@ -173,6 +174,19 @@ class TopSites
 
   // Returns the set of prepopulate pages.
   static MostVisitedURLList GetPrepopulatePages();
+
+  struct PrepopulatedPage {
+    // The string resource for the url.
+    int url_id;
+    // The string resource for the page title.
+    int title_id;
+    // The raw data resource for the favicon.
+    int favicon_id;
+    // The raw data resource for the thumbnail.
+    int thumbnail_id;
+    // The best color to highlight the page (should roughly match favicon).
+    SkColor color;
+  };
 
  protected:
   // For allowing inheritance.
@@ -278,10 +292,10 @@ class TopSites
       const PendingCallbackSet& pending_callbacks,
       const MostVisitedURLList& urls);
 
-  // Implementation of NotificationObserver.
+  // Implementation of content::NotificationObserver.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Resets top_sites_ and updates the db (in the background). All mutations to
   // top_sites_ *must* go through this.
@@ -344,7 +358,7 @@ class TopSites
   // The time we started |timer_| at. Only valid if |timer_| is running.
   base::TimeTicks timer_start_time_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The number of URLs changed on the last update.
   size_t last_num_urls_changed_;
@@ -385,6 +399,8 @@ class TopSites
 
   DISALLOW_COPY_AND_ASSIGN(TopSites);
 };
+
+extern const TopSites::PrepopulatedPage kPrepopulatedPages[2];
 
 }  // namespace history
 

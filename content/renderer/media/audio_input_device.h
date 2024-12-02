@@ -72,9 +72,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/threading/simple_thread.h"
+#include "content/common/content_export.h"
 #include "content/renderer/media/audio_input_message_filter.h"
 #include "media/audio/audio_parameters.h"
 
@@ -83,12 +85,12 @@
 // TODO(henrika): Add support for event handling (e.g. OnStateChanged,
 // OnCaptureStopped etc.) and ensure that we can deliver these notifications
 // to any clients using this class.
-class AudioInputDevice
+class CONTENT_EXPORT AudioInputDevice
     : public AudioInputMessageFilter::Delegate,
       public base::DelegateSimpleThread::Delegate,
       public base::RefCountedThreadSafe<AudioInputDevice> {
  public:
-  class CaptureCallback {
+  class CONTENT_EXPORT CaptureCallback {
    public:
     virtual void Capture(const std::vector<float*>& audio_data,
                          size_t number_of_frames,
@@ -97,11 +99,12 @@ class AudioInputDevice
     virtual ~CaptureCallback() {}
   };
 
-  class CaptureEventHandler {
+  class CONTENT_EXPORT CaptureEventHandler {
    public:
-    // Notification to the client that the device with the specific index has
-    // been started. This callback is triggered as a result of StartDevice().
-    virtual void OnDeviceStarted(int device_index) = 0;
+    // Notification to the client that the device with the specific |device_id|
+    // has been started.
+    // This callback is triggered as a result of StartDevice().
+    virtual void OnDeviceStarted(const std::string& device_id) = 0;
 
     // Notification to the client that the device has been stopped.
     virtual void OnDeviceStopped() = 0;
@@ -147,10 +150,10 @@ class AudioInputDevice
   // AudioInputMessageFilter::Delegate impl., called by AudioInputMessageFilter
   virtual void OnLowLatencyCreated(base::SharedMemoryHandle handle,
                                    base::SyncSocket::Handle socket_handle,
-                                   uint32 length);
-  virtual void OnVolume(double volume);
-  virtual void OnStateChanged(AudioStreamState state);
-  virtual void OnDeviceReady(int index);
+                                   uint32 length) OVERRIDE;
+  virtual void OnVolume(double volume) OVERRIDE;
+  virtual void OnStateChanged(AudioStreamState state) OVERRIDE;
+  virtual void OnDeviceReady(const std::string& device_id) OVERRIDE;
 
  private:
   // Methods called on IO thread ----------------------------------------------
@@ -170,7 +173,7 @@ class AudioInputDevice
   void FireCaptureCallback();
 
   // DelegateSimpleThread::Delegate implementation.
-  virtual void Run();
+  virtual void Run() OVERRIDE;
 
   // Format
   AudioParameters audio_parameters_;

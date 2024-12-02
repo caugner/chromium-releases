@@ -9,12 +9,12 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/callback.h"
+#include "base/bind_helpers.h"
 #include "base/memory/linked_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_cookie_helper.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "grit/generated_resources.h"
@@ -452,13 +452,17 @@ CookieTreeQuotaNode* CookieTreeOriginNode::UpdateOrCreateQuotaNode(
 }
 
 void CookieTreeOriginNode::CreateContentException(
-    HostContentSettingsMap* content_settings, ContentSetting setting) const {
+    CookieSettings* cookie_settings, ContentSetting setting) const {
+  DCHECK(setting == CONTENT_SETTING_ALLOW ||
+         setting == CONTENT_SETTING_BLOCK ||
+         setting == CONTENT_SETTING_SESSION_ONLY);
   if (CanCreateContentException()) {
-    content_settings->AddExceptionForURL(url_,
-                                         url_,
-                                         CONTENT_SETTINGS_TYPE_COOKIES,
-                                         "",
-                                         setting);
+    cookie_settings->ResetCookieSetting(
+        ContentSettingsPattern::FromURLNoWildcard(url_),
+        ContentSettingsPattern::Wildcard());
+    cookie_settings->SetCookieSetting(
+        ContentSettingsPattern::FromURL(url_),
+        ContentSettingsPattern::Wildcard(), setting);
   }
 }
 
@@ -629,36 +633,43 @@ CookiesTreeModel::CookiesTreeModel(
       base::Bind(&CookiesTreeModel::OnCookiesModelInfoLoaded,
                  base::Unretained(this)));
   DCHECK(database_helper_);
-  database_helper_->StartFetching(NewCallback(
-      this, &CookiesTreeModel::OnDatabaseModelInfoLoaded));
+  database_helper_->StartFetching(
+      base::Bind(&CookiesTreeModel::OnDatabaseModelInfoLoaded,
+                 base::Unretained(this)));
   DCHECK(local_storage_helper_);
-  local_storage_helper_->StartFetching(NewCallback(
-      this, &CookiesTreeModel::OnLocalStorageModelInfoLoaded));
+  local_storage_helper_->StartFetching(
+      base::Bind(&CookiesTreeModel::OnLocalStorageModelInfoLoaded,
+                 base::Unretained(this)));
   if (session_storage_helper_) {
-    session_storage_helper_->StartFetching(NewCallback(
-        this, &CookiesTreeModel::OnSessionStorageModelInfoLoaded));
+    session_storage_helper_->StartFetching(
+        base::Bind(&CookiesTreeModel::OnSessionStorageModelInfoLoaded,
+                   base::Unretained(this)));
   }
 
-  // TODO(michaeln): when all of the ui impls have been updated,
-  // make this a required parameter.
+  // TODO(michaeln): When all of the UI implementations have been updated, make
+  // this a required parameter.
   if (appcache_helper_) {
-    appcache_helper_->StartFetching(NewCallback(
-        this, &CookiesTreeModel::OnAppCacheModelInfoLoaded));
+    appcache_helper_->StartFetching(
+        base::Bind(&CookiesTreeModel::OnAppCacheModelInfoLoaded,
+                   base::Unretained(this)));
   }
 
   if (indexed_db_helper_) {
-    indexed_db_helper_->StartFetching(NewCallback(
-        this, &CookiesTreeModel::OnIndexedDBModelInfoLoaded));
+    indexed_db_helper_->StartFetching(
+        base::Bind(&CookiesTreeModel::OnIndexedDBModelInfoLoaded,
+                   base::Unretained(this)));
   }
 
   if (file_system_helper_) {
-    file_system_helper_->StartFetching(NewCallback(
-        this, &CookiesTreeModel::OnFileSystemModelInfoLoaded));
+    file_system_helper_->StartFetching(
+        base::Bind(&CookiesTreeModel::OnFileSystemModelInfoLoaded,
+                   base::Unretained(this)));
   }
 
   if (quota_helper_) {
-    quota_helper_->StartFetching(NewCallback(
-        this, &CookiesTreeModel::OnQuotaModelInfoLoaded));
+    quota_helper_->StartFetching(
+        base::Bind(&CookiesTreeModel::OnQuotaModelInfoLoaded,
+                   base::Unretained(this)));
   }
 }
 
@@ -840,6 +851,7 @@ void CookiesTreeModel::PopulateCookieInfoWithFilter(
   // mmargh mmargh mmargh! delicious!
 
   CookieTreeRootNode* root = static_cast<CookieTreeRootNode*>(GetRoot());
+  NotifyObserverBeginBatch();
   for (CookieList::iterator it = cookie_list_.begin();
        it != cookie_list_.end(); ++it) {
     std::string source_string = it->Source();
@@ -865,6 +877,8 @@ void CookiesTreeModel::PopulateCookieInfoWithFilter(
       cookies_node->AddCookieNode(new_cookie);
     }
   }
+  NotifyObserverTreeNodeChanged(root);
+  NotifyObserverEndBatch();
 }
 
 void CookiesTreeModel::OnDatabaseModelInfoLoaded(

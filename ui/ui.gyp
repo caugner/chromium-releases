@@ -5,20 +5,6 @@
 {
   'variables': {
     'chromium_code': 1,
-    'toolkit_views2': 0,  # ui/views/ is an experimental framework on Windows.
-  },
-  'target_defaults': {
-    'conditions': [
-      ['OS=="win"',
-        {'variables': {'toolkit_views2': 1}},
-      ],
-      ['toolkit_views2==0', {'sources/': [
-        ['exclude', 'views/'],
-      ]}],
-      ['touchui==0', {'sources/': [
-        ['exclude', '_(touch)\\.cc$'],
-      ]}],
-    ],
   },
   'includes': [
     'ui_resources.gypi',
@@ -27,6 +13,7 @@
     {
       'target_name': 'ui',
       'type': '<(component)',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
@@ -53,7 +40,16 @@
         '../third_party/icu/icu.gyp:icuuc',
       ],
       'sources': [
+        'base/accelerators/accelerator.cc',
+        'base/accelerators/accelerator.h',
+        'base/accelerators/accelerator_cocoa.h',
+        'base/accelerators/accelerator_cocoa.mm',
+        'base/accelerators/accelerator_gtk.h',
+        'base/accelerators/accelerator_manager.cc',
+        'base/accelerators/accelerator_manager.h',
         'base/accessibility/accessibility_types.h',
+        'base/accessibility/accessible_text_utils.cc',
+        'base/accessibility/accessible_text_utils.h',
         'base/accessibility/accessible_view_state.cc',
         'base/accessibility/accessible_view_state.h',
         'base/animation/animation.cc',
@@ -75,16 +71,20 @@
         'base/animation/tween.h',
         'base/clipboard/clipboard.cc',
         'base/clipboard/clipboard.h',
-        'base/clipboard/clipboard_aura.cc',
+        'base/clipboard/clipboard_aurax11.cc',
         'base/clipboard/clipboard_gtk.cc',
         'base/clipboard/clipboard_mac.mm',
         'base/clipboard/clipboard_util_win.cc',
         'base/clipboard/clipboard_util_win.h',
         'base/clipboard/clipboard_win.cc',
+        'base/clipboard/custom_data_helper.cc',
+        'base/clipboard/custom_data_helper.h',
         'base/clipboard/scoped_clipboard_writer.cc',
         'base/clipboard/scoped_clipboard_writer.h',
         'base/cocoa/base_view.h',
         'base/cocoa/base_view.mm',
+        'base/dragdrop/cocoa_dnd_util.h',
+        'base/dragdrop/cocoa_dnd_util.mm',
         'base/dragdrop/drag_drop_types_gtk.cc',
         'base/dragdrop/drag_drop_types.h',
         'base/dragdrop/drag_drop_types_win.cc',
@@ -97,6 +97,7 @@
         'base/dragdrop/os_exchange_data.cc',
         'base/dragdrop/os_exchange_data.h',
         'base/dragdrop/os_exchange_data_provider_aura.cc',
+        'base/dragdrop/os_exchange_data_provider_aura.h',
         'base/dragdrop/os_exchange_data_provider_gtk.cc',
         'base/dragdrop/os_exchange_data_provider_gtk.h',
         'base/dragdrop/os_exchange_data_provider_win.cc',
@@ -104,6 +105,8 @@
         'base/events.h',
         'base/gtk/event_synthesis_gtk.cc',
         'base/gtk/event_synthesis_gtk.h',
+        'base/gtk/focus_store_gtk.cc',
+        'base/gtk/focus_store_gtk.h',
         'base/gtk/g_object_destructor_filo.cc',
         'base/gtk/g_object_destructor_filo.h',
         'base/gtk/gtk_expanded_container.cc',
@@ -124,10 +127,25 @@
         'base/gtk/owned_widget_gtk.h',
         'base/gtk/tooltip_window_gtk.cc',
         'base/gtk/tooltip_window_gtk.h',
+        'base/hit_test.h',
+        'base/ime/character_composer.cc',
+        'base/ime/character_composer.h',
         'base/ime/composition_text.cc',
         'base/ime/composition_text.h',
         'base/ime/composition_underline.h',
+        'base/ime/input_method.h',
+        'base/ime/input_method_base.cc',
+        'base/ime/input_method_base.h',
+        'base/ime/input_method_delegate.h',
+        'base/ime/input_method_ibus.cc',
+        'base/ime/input_method_ibus.h',
+        'base/ime/mock_input_method.cc',
+        'base/ime/mock_input_method.h',
+        'base/ime/text_input_client.cc',
+        'base/ime/text_input_client.h',
         'base/ime/text_input_type.h',
+        'base/keycodes/keyboard_code_conversion.cc',
+        'base/keycodes/keyboard_code_conversion.h',
         'base/keycodes/keyboard_code_conversion_gtk.cc',
         'base/keycodes/keyboard_code_conversion_gtk.h',
         'base/keycodes/keyboard_code_conversion_mac.h',
@@ -150,10 +168,6 @@
         'base/message_box_flags.h',
         'base/message_box_win.cc',
         'base/message_box_win.h',
-        'base/models/accelerator_cocoa.h',
-        'base/models/accelerator_cocoa.mm',
-        'base/models/accelerator_gtk.h',
-        'base/models/accelerator.h',
         'base/models/button_menu_item_model.cc',
         'base/models/button_menu_item_model.h',
         'base/models/combobox_model.h',
@@ -177,6 +191,7 @@
         'base/resource/data_pack.h',
         'base/resource/resource_bundle.cc',
         'base/resource/resource_bundle.h',
+        'base/resource/resource_bundle_android.cc',
         'base/resource/resource_bundle_aurax11.cc',
         'base/resource/resource_bundle_gtk.cc',
         'base/resource/resource_bundle_linux.cc',
@@ -201,6 +216,7 @@
         'base/view_prop.cc',
         'base/view_prop.h',
         'base/wayland/events_wayland.cc',
+        'base/win/atl_module.h',
         'base/win/events_win.cc',
         'base/win/hwnd_util.cc',
         'base/win/hwnd_util.h',
@@ -214,7 +230,13 @@
         'base/win/window_impl.h',
         'base/x/active_window_watcher_x.cc',
         'base/x/active_window_watcher_x.h',
+        'base/x/active_window_watcher_x_observer.h',
         'base/x/events_x.cc',
+        'base/x/root_window_property_watcher_x.cc',
+        'base/x/root_window_property_watcher_x.h',
+        'base/x/work_area_watcher_x.cc',
+        'base/x/work_area_watcher_x.h',
+        'base/x/work_area_watcher_x_observer.h',
         'base/x/x11_util.cc',
         'base/x/x11_util.h',
         'base/x/x11_util_internal.h',
@@ -225,6 +247,7 @@
         'gfx/canvas.h',
         'gfx/canvas_skia.h',
         'gfx/canvas_skia.cc',
+        'gfx/canvas_skia_android.cc',
         'gfx/canvas_skia_linux.cc',
         'gfx/canvas_skia_mac.mm',
         'gfx/canvas_skia_paint.h',
@@ -257,6 +280,8 @@
         'gfx/mac/scoped_ns_disable_screen_updates.h',
         'gfx/native_theme.cc',
         'gfx/native_theme.h',
+        'gfx/native_theme_android.cc',
+        'gfx/native_theme_android.h',
         'gfx/native_theme_aura.cc',
         'gfx/native_theme_aura.h',
         'gfx/native_theme_base.cc',
@@ -326,25 +351,53 @@
             ['exclude', 'gfx/native_theme_chromeos.cc'],
             ['exclude', 'gfx/native_theme_chromeos.h'],
             ['exclude', 'gfx/screen_win.cc'],
+            ['exclude', 'base/view_prop.cc'],
+            ['exclude', 'base/view_prop.h'],
             ['exclude', 'base/win/mouse_wheel_util.cc'],
             ['exclude', 'base/win/mouse_wheel_util.h'],
             ['exclude', 'base/x/active_window_watcher_x.cc'],
             ['exclude', 'base/x/active_window_watcher_x.h'],
+            ['exclude', 'base/x/active_window_watcher_x_observer.h'],
+            ['exclude', 'base/x/root_window_property_watcher_x.cc'],
+            ['exclude', 'base/x/root_window_property_watcher_x.h'],
+            ['exclude', 'base/x/work_area_watcher_x.cc'],
+            ['exclude', 'base/x/work_area_watcher_x.h'],
+            ['exclude', 'base/x/work_area_watcher_x_observer.h'],
            ],
         }, {  # use_aura!=1
           'sources!': [
+            'base/ime/input_method_ibus.cc',
+            'base/ime/input_method_ibus.h',
+            'base/ime/mock_input_method.cc',
+            'base/ime/mock_input_method.h',
             'gfx/native_theme_aura.cc',
             'gfx/native_theme_aura.h',
           ]
         }],
         ['use_aura==1 and OS=="win"', {
           'sources/': [
-            ['exclude', 'base/dragdrop/os_exchange_data_provider_aura.cc'],
+            ['exclude', 'base/dragdrop/os_exchange_data_provider_win.cc'],
+            ['exclude', 'base/dragdrop/os_exchange_data_provider_win.h'],
             ['exclude', 'gfx/native_theme_win.cc'],
             ['exclude', 'gfx/native_theme_win.h'],
             ['exclude', 'gfx/path_win.cc'],
           ],
         }],
+        ['use_ibus==1', {
+          'dependencies': [
+            '../build/linux/system.gyp:ibus',
+          ],
+          'sources/': [
+            ['exclude', 'base/ime/mock_input_method.cc'],
+            ['exclude', 'base/ime/mock_input_method.h'],
+          ],
+        }, { # else: use_ibus != 1
+          'sources/': [
+            ['exclude', 'base/ime/input_method_ibus.cc'],
+            ['exclude', 'base/ime/input_method_ibus.h'],
+          ],
+        }],
+
         ['use_glib == 1', {
           'dependencies': [
             # font_gtk.cc uses fontconfig.
@@ -353,6 +406,7 @@
             '../build/linux/system.gyp:pangocairo',
             '../build/linux/system.gyp:x11',
             '../build/linux/system.gyp:xext',
+            '../build/linux/system.gyp:xfixes',
           ],
           'sources': [
             'gfx/linux_util.cc',
@@ -394,9 +448,8 @@
             'gfx/gtk_preserve_window.h',
             'gfx/gtk_util.cc',
             'gfx/gtk_util.h',
-          ],
-          'sources!': [
-            'base/clipboard/clipboard_aura.cc',
+            'gfx/image/cairo_cached_surface.cc',
+            'gfx/image/cairo_cached_surface.h',
           ],
         }, {  # toolkit_uses_gtk != 1
           'sources!': [
@@ -414,8 +467,6 @@
             ['include', 'base/dragdrop/os_exchange_data_provider_gtk.h'],
             ['include', 'base/keycodes/keyboard_code_conversion_x.cc'],
             ['include', 'base/keycodes/keyboard_code_conversion_x.h'],
-            ['include', 'base/view_prop.cc'],
-            ['include', 'base/view_prop.h'],
             ['include', 'gfx/gtk_util.cc'],
             ['include', 'gfx/gtk_util.h'],
             ['include', 'gfx/path_gtk.cc'],
@@ -425,10 +476,14 @@
             ['include', 'gfx/linux_util.h'],
           ],
         }],
+        ['use_ibus != 1', {
+          'sources/': [
+            ['exclude', 'base/ime/character_composer.cc'],
+            ['exclude', 'base/ime/character_composer.h'],
+          ],
+        }],
         ['OS=="win"', {
           'sources': [
-            'gfx/canvas_direct2d.cc',
-            'gfx/canvas_direct2d.h',
             'gfx/gdi_util.cc',
             'gfx/gdi_util.h',
             'gfx/icon_util.cc',
@@ -439,7 +494,6 @@
             'gfx/win_util.h',
           ],
           'sources!': [
-            'base/clipboard/clipboard_aura.cc',
             'base/touch/touch_factory.cc',
             'base/touch/touch_factory.h',
             'gfx/pango_util.h',
@@ -478,6 +532,8 @@
             'base/dragdrop/drop_target.cc',
             'base/dragdrop/drop_target.h',
             'base/dragdrop/os_exchange_data.cc',
+            'base/view_prop.cc',
+            'base/view_prop.h',
             'gfx/native_theme_win.cc',
             'gfx/native_theme_win.h',
           ],
@@ -501,6 +557,14 @@
             ],
           },
         }],
+        ['OS=="android"', {
+          'sources!': [
+            'gfx/pango_util.h',
+            'gfx/pango_util.cc',
+            'gfx/platform_font_pango.h',
+            'gfx/platform_font_pango.cc',
+          ],
+        }],
         ['use_x11==1', {
           'all_dependent_settings': {
             'ldflags': [
@@ -509,7 +573,6 @@
             'link_settings': {
               'libraries': [
                 '-lX11',
-                '-ldl',
               ],
             },
           },
@@ -517,12 +580,7 @@
           'sources!': [
             'base/keycodes/keyboard_code_conversion_x.cc',
             'base/keycodes/keyboard_code_conversion_x.h',
-            'base/x/active_window_watcher_x.cc',
-            'base/x/active_window_watcher_x.h',
-            'base/x/events_x.cc',
-            'base/x/x11_util.cc',
-            'base/x/x11_util.h',
-            'base/x/x11_util_internal.h',
+            'base/x/',
           ],
         }],
         ['chromeos==1', {
@@ -539,14 +597,13 @@
         }],
         ['toolkit_views==0', {
           'sources!': [
-            'base/view_prop.cc',
-            'base/view_prop.h',
             'gfx/render_text.cc',
             'gfx/render_text.h',
             'gfx/render_text_linux.cc',
             'gfx/render_text_linux.h',
             'gfx/render_text_win.cc',
             'gfx/render_text_win.h',
+            'base/x/events_x.cc',
           ],
         }],
         ['OS=="android"', {
@@ -557,6 +614,16 @@
             'gfx/pango_util.cc',
             'gfx/platform_font_pango.cc',
             'gfx/platform_font_pango.h',
+          ],
+        }],
+        ['OS=="linux"', {
+          'libraries': [
+            '-ldl',
+          ],
+        }],
+        ['os_bsd==1 and use_system_libjpeg==1', {
+          'include_dirs': [
+            '/usr/local/include',
           ],
         }],
       ],
@@ -580,11 +647,6 @@
     },
   ],
   'conditions': [
-    ['toolkit_views2==1', {
-      'includes': [
-        'ui_views.gypi',
-      ],
-    }],
     ['inside_chromium_build==1', {
       'includes': [
         'ui_unittests.gypi',

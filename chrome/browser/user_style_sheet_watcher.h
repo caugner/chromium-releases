@@ -10,9 +10,9 @@
 #include "base/files/file_path_watcher.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
 class Profile;
@@ -21,9 +21,10 @@ class UserStyleSheetLoader;
 // Watches the user style sheet file and triggers reloads on the file thread
 // whenever the file changes.
 class UserStyleSheetWatcher
-    : public base::RefCountedThreadSafe<UserStyleSheetWatcher,
-                                        BrowserThread::DeleteOnUIThread>,
-      public NotificationObserver {
+    : public base::RefCountedThreadSafe<
+          UserStyleSheetWatcher,
+          content::BrowserThread::DeleteOnUIThread>,
+      public content::NotificationObserver {
  public:
   UserStyleSheetWatcher(Profile* profile, const FilePath& profile_path);
 
@@ -31,13 +32,14 @@ class UserStyleSheetWatcher
 
   GURL user_style_sheet() const;
 
-  // NotificationObserver interface
+  // content::NotificationObserver interface
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
   friend class DeleteTask<UserStyleSheetWatcher>;
 
   virtual ~UserStyleSheetWatcher();
@@ -54,7 +56,7 @@ class UserStyleSheetWatcher
   // Watches for changes to the css file so we can reload the style sheet.
   scoped_ptr<base::files::FilePathWatcher> file_watcher_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(UserStyleSheetWatcher);
 };

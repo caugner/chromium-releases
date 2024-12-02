@@ -8,9 +8,11 @@
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/events/event.h"
+#include "ui/views/events/event.h"
+
+using content::BrowserThread;
 
 namespace {
 

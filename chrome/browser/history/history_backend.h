@@ -239,6 +239,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   void SetFaviconOutOfDateForPage(const GURL& page_url);
 
+  void CloneFavicon(const GURL& old_page_url, const GURL& new_page_url);
+
   void SetImportedFavicons(
       const std::vector<ImportedFaviconUsage>& favicon_usage);
 
@@ -300,6 +302,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                          VisitSource visit_source);
 
   virtual bool RemoveVisits(const VisitVector& visits);
+
+  // Returns the VisitSource associated with each one of the passed visits.
+  // If there is no entry in the map for a given visit, that means the visit
+  // was SOURCE_BROWSED. Returns false if there is no HistoryDatabase..
+  bool GetVisitsSource(const VisitVector& visits, VisitSourceMap* sources);
 
   virtual bool GetURL(const GURL& url, history::URLRow* url_row);
 
@@ -367,6 +374,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddOrUpdateIconMapping);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetMostRecentVisits);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconForURL);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           CloneFaviconIsRestrictedToSameDomain);
 
   friend class ::TestingProfile;
 
@@ -506,7 +515,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // details argument will have ownership taken by this function (it will be
   // sent to the main thread and deleted there).
   virtual void BroadcastNotifications(int type,
-                                      HistoryDetails* details_deleted);
+                                      HistoryDetails* details_deleted) OVERRIDE;
 
   // Deleting all history ------------------------------------------------------
 

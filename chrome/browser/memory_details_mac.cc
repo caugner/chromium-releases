@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_version_info.h"
 #include "base/mac/mac_util.h"
-#include "base/string_util.h"
 #include "base/process_util.h"
+#include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/process_info_snapshot.h"
@@ -20,12 +21,14 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_child_process_host.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/process_type.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::BrowserThread;
 
 // TODO(viettrungluu): Many of the TODOs below are subsumed by a general need to
 // refactor the about:memory code (not just on Mac, but probably on other
@@ -51,7 +54,7 @@ enum BrowserType {
 
 
 MemoryDetails::MemoryDetails() {
-  static const std::string google_browser_name =
+  const std::string google_browser_name =
       l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
   // (Human and process) names of browsers; should match the ordering for
   // |BrowserProcess| (i.e., |BrowserType|).
@@ -148,7 +151,7 @@ void MemoryDetails::CollectProcessData(
          it != pids_by_browser[index].end(); ++it) {
       ProcessMemoryInformation info;
       info.pid = *it;
-      info.type = ChildProcessInfo::UNKNOWN_PROCESS;
+      info.type = content::PROCESS_TYPE_UNKNOWN;
 
       // Try to get version information. To do this, we need first to get the
       // executable's name (we can only believe |proc_info.command| if it looks
@@ -199,7 +202,7 @@ void MemoryDetails::CollectProcessData(
   // Finally return to the browser thread.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &MemoryDetails::CollectChildInfoOnUIThread));
+      base::Bind(&MemoryDetails::CollectChildInfoOnUIThread, this));
 }
 
 void MemoryDetails::CollectProcessDataChrome(
@@ -209,9 +212,9 @@ void MemoryDetails::CollectProcessDataChrome(
   ProcessMemoryInformation info;
   info.pid = pid;
   if (info.pid == base::GetCurrentProcId())
-    info.type = ChildProcessInfo::BROWSER_PROCESS;
+    info.type = content::PROCESS_TYPE_BROWSER;
   else
-    info.type = ChildProcessInfo::UNKNOWN_PROCESS;
+    info.type = content::PROCESS_TYPE_UNKNOWN;
 
   chrome::VersionInfo version_info;
   if (version_info.is_valid()) {

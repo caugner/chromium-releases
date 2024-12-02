@@ -20,6 +20,36 @@
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/plugin_switches.h"
 
+namespace {
+
+static const char kApplicationOctetStream[] = "application/octet-stream";
+
+base::LazyInstance<webkit::npapi::PluginList> g_singleton =
+    LAZY_INSTANCE_INITIALIZER;
+
+bool AllowMimeTypeMismatch(const std::string& orig_mime_type,
+                           const std::string& actual_mime_type) {
+  if (orig_mime_type == actual_mime_type) {
+    NOTREACHED();
+    return true;
+  }
+
+  // We do not permit URL-sniff based plug-in MIME type overrides aside from
+  // the case where the "type" was initially missing or generic
+  // (application/octet-stream).
+  // We collected stats to determine this approach isn't a major compat issue,
+  // and we defend against content confusion attacks in various cases, such
+  // as when the user doesn't have the Flash plug-in enabled.
+  bool allow = orig_mime_type.empty() ||
+               orig_mime_type == kApplicationOctetStream;
+  LOG_IF(INFO, !allow) << "Ignoring plugin with unexpected MIME type "
+                       << actual_mime_type << " (expected " << orig_mime_type
+                       << ")";
+  return allow;
+}
+
+}
+
 namespace webkit {
 namespace npapi {
 
@@ -28,11 +58,15 @@ FilePath::CharType kDefaultPluginLibraryName[] =
 
 // Some version ranges can be shared across operating systems. This should be
 // done where possible to avoid duplication.
+// This is up to date with
+// http://www.adobe.com/support/security/bulletins/apsb11-26.html
 static const VersionRangeDefinition kFlashVersionRange[] = {
-    { "", "", "10.2.153", false }
+    { "", "", "10.3.183", false }
 };
+// This is up to date with
+// http://www.adobe.com/support/security/bulletins/apsb11-19.html
 static const VersionRangeDefinition kShockwaveVersionRange[] = {
-    { "",  "", "11.5.9.620", true }
+    { "",  "", "11.6.1.629", true }
 };
 static const VersionRangeDefinition kSilverlightVersionRange[] = {
     { "0", "4", "3.0.50611.0", false },
@@ -41,19 +75,19 @@ static const VersionRangeDefinition kSilverlightVersionRange[] = {
 
 // Similarly, try and share the group definition for plug-ins that are
 // very consistent across OS'es.
-static const PluginGroupDefinition kFlashDefinition = {
-    "adobe-flash-player", "Flash", "Shockwave Flash", kFlashVersionRange,
-    arraysize(kFlashVersionRange), "http://get.adobe.com/flashplayer/" };
+#define kFlashDefinition { \
+    "adobe-flash-player", "Flash", "Shockwave Flash", kFlashVersionRange,\
+    arraysize(kFlashVersionRange), "http://get.adobe.com/flashplayer/" }
 
-static const PluginGroupDefinition kShockwaveDefinition = {
-    "shockwave", PluginGroup::kShockwaveGroupName, "Shockwave for Director",
-    kShockwaveVersionRange, arraysize(kShockwaveVersionRange),
-    "http://www.adobe.com/shockwave/download/" };
+#define kShockwaveDefinition { \
+    "shockwave", PluginGroup::kShockwaveGroupName, "Shockwave for Director", \
+    kShockwaveVersionRange, arraysize(kShockwaveVersionRange), \
+    "http://www.adobe.com/shockwave/download/" }
 
-static const PluginGroupDefinition kSilverlightDefinition = {
-    "silverlight", PluginGroup::kSilverlightGroupName, "Silverlight",
-    kSilverlightVersionRange, arraysize(kSilverlightVersionRange),
-    "http://www.microsoft.com/getsilverlight/" };
+#define kSilverlightDefinition { \
+    "silverlight", PluginGroup::kSilverlightGroupName, "Silverlight", \
+    kSilverlightVersionRange, arraysize(kSilverlightVersionRange), \
+    "http://www.microsoft.com/getsilverlight/" }
 
 #if defined(OS_MACOSX)
 // Plugin Groups for Mac.
@@ -64,7 +98,8 @@ static const VersionRangeDefinition kQuicktimeVersionRange[] = {
 };
 static const VersionRangeDefinition kJavaVersionRange[] = {
     { "0", "13.0", "12.8.0", true },  // Leopard
-    { "13.0", "14.0", "13.4.0", true }  // Snow Leopard
+    { "13.0", "14.0", "13.5.0", true },  // Snow Leopard
+    { "14.0", "", "14.0.3", true }  // Lion
 };
 static const VersionRangeDefinition kFlip4MacVersionRange[] = {
     { "", "", "2.2.1", true }
@@ -93,14 +128,15 @@ static const VersionRangeDefinition kQuicktimeVersionRange[] = {
     { "", "", "7.6.9", true }
 };
 static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "0", "7", "6.0.260", true }  // "260" is not a typo.
+    { "0", "7", "6.0.290", true },  // "290" is not a typo.
+    { "7", "", "10.1", true }  // JDK7u1 identifies itself as 10.1
 };
 // This is up to date with
-// http://www.adobe.com/support/security/bulletins/apsb11-08.html
+// http://www.adobe.com/support/security/bulletins/apsb11-24.html
 static const VersionRangeDefinition kAdobeReaderVersionRange[] = {
-    { "10", "11", "10.0.1", false },
-    { "9", "10", "9.4.4", false },
-    { "0", "9", "8.2.6", false }
+    { "10", "11", "10.1.1", false },
+    { "9", "10", "9.4.6", false },
+    { "0", "9", "8.3.1", false }
 };
 static const VersionRangeDefinition kDivXVersionRange[] = {
     { "", "", "1.4.3.4", false }
@@ -146,12 +182,14 @@ static const PluginGroupDefinition kGroupDefinitions[] = { };
 
 #else  // Most importantly, covers desktop Linux.
 static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "0", "1.7", "1.6.0.26", true }
+    { "0", "1.7", "1.6.0.29", true },
+    { "1.7", "", "1.7.0.1", true }
 };
 
 static const VersionRangeDefinition kRedhatIcedTeaVersionRange[] = {
-    { "0", "1.9", "1.8.8", true },
-    { "1.9", "1.10", "1.9.8", true },
+    { "0", "1.9", "1.8.10", true },
+    { "1.9", "1.10", "1.9.10", true },
+    { "1.10", "", "1.10.4", true }
 };
 
 static const PluginGroupDefinition kGroupDefinitions[] = {
@@ -166,8 +204,6 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
     "http://www.linuxsecurity.com/content/section/3/170/" },
 };
 #endif
-
-base::LazyInstance<PluginList> g_singleton(base::LINKER_INITIALIZED);
 
 // static
 PluginList* PluginList::Singleton() {
@@ -223,26 +259,22 @@ void PluginList::RegisterInternalPlugin(const webkit::WebPluginInfo& info) {
     default_plugin_enabled_ = true;
 }
 
-void PluginList::RegisterInternalPlugin(const FilePath& filename,
-                                        const std::string& name,
-                                        const std::string& description,
-                                        const std::string& mime_type_str,
-                                        const PluginEntryPoints& entry_points) {
-  InternalPlugin plugin;
-  plugin.info.path = filename;
-  plugin.info.name = ASCIIToUTF16(name);
-  plugin.info.version = ASCIIToUTF16("1");
-  plugin.info.desc = ASCIIToUTF16(description);
-
-  webkit::WebPluginMimeType mime_type;
-  mime_type.mime_type = mime_type_str;
-  plugin.info.mime_types.push_back(mime_type);
-
-  plugin.entry_points = entry_points;
+void PluginList::RegisterInternalPlugin(const webkit::WebPluginInfo& info,
+                                        const PluginEntryPoints& entry_points,
+                                        bool add_at_beginning) {
+  InternalPlugin plugin = { info, entry_points };
 
   base::AutoLock lock(lock_);
-  internal_plugins_.push_back(plugin);
-  if (filename.value() == kDefaultPluginLibraryName)
+
+  if (add_at_beginning) {
+    // Newer registrations go earlier in the list so they can override the MIME
+    // types of older registrations.
+    internal_plugins_.insert(internal_plugins_.begin(), plugin);
+  } else {
+    internal_plugins_.push_back(plugin);
+  }
+
+  if (info.path.value() == kDefaultPluginLibraryName)
     default_plugin_enabled_ = true;
 }
 
@@ -255,6 +287,17 @@ void PluginList::UnregisterInternalPlugin(const FilePath& path) {
     }
   }
   NOTREACHED();
+}
+
+void PluginList::GetInternalPlugins(
+    std::vector<webkit::WebPluginInfo>* internal_plugins) {
+  base::AutoLock lock(lock_);
+
+  for (std::vector<InternalPlugin>::iterator it = internal_plugins_.begin();
+       it != internal_plugins_.end();
+       ++it) {
+    internal_plugins->push_back(it->info);
+  }
 }
 
 bool PluginList::ReadPluginInfo(const FilePath& filename,
@@ -348,11 +391,6 @@ PluginGroup* PluginList::CreatePluginGroup(
 }
 
 void PluginList::LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups) {
-  // Don't want to hold the lock while loading new plugins, so we don't block
-  // other methods if they're called on other threads.
-  std::vector<FilePath> extra_plugin_paths;
-  std::vector<FilePath> extra_plugin_dirs;
-  std::vector<InternalPlugin> internal_plugins;
   base::Closure will_load_callback;
   {
     base::AutoLock lock(lock_);
@@ -360,53 +398,19 @@ void PluginList::LoadPluginsInternal(ScopedVector<PluginGroup>* plugin_groups) {
     // reach the end of the method.
     plugins_need_refresh_ = false;
     will_load_callback = will_load_plugins_callback_;
-    extra_plugin_paths = extra_plugin_paths_;
-    extra_plugin_dirs = extra_plugin_dirs_;
-    internal_plugins = internal_plugins_;
   }
 
   if (!will_load_callback.is_null())
     will_load_callback.Run();
 
-  std::set<FilePath> visited_plugins;
+  std::vector<FilePath> plugin_paths;
+  GetPluginPathsToLoad(&plugin_paths);
 
-  std::vector<FilePath> directories_to_scan;
-  GetPluginDirectories(&directories_to_scan);
-
-  // Load internal plugins first so that, if both an internal plugin and a
-  // "discovered" plugin want to handle the same type, the internal plugin
-  // will have precedence.
-  for (size_t i = 0; i < internal_plugins.size(); ++i) {
-    if (internal_plugins[i].info.path.value() == kDefaultPluginLibraryName)
-      continue;
-    LoadPlugin(internal_plugins[i].info.path, plugin_groups);
+  for (std::vector<FilePath>::const_iterator it = plugin_paths.begin();
+       it != plugin_paths.end();
+       ++it) {
+    LoadPlugin(*it, plugin_groups);
   }
-
-  for (size_t i = 0; i < extra_plugin_paths.size(); ++i) {
-    const FilePath& path = extra_plugin_paths[i];
-    if (visited_plugins.find(path) != visited_plugins.end())
-      continue;
-    LoadPlugin(path, plugin_groups);
-    visited_plugins.insert(path);
-  }
-
-  for (size_t i = 0; i < extra_plugin_dirs.size(); ++i) {
-    LoadPluginsFromDir(
-        extra_plugin_dirs[i], plugin_groups, &visited_plugins);
-  }
-
-  for (size_t i = 0; i < directories_to_scan.size(); ++i) {
-    LoadPluginsFromDir(
-        directories_to_scan[i], plugin_groups, &visited_plugins);
-  }
-
-#if defined(OS_WIN)
-  LoadPluginsFromRegistry(plugin_groups, &visited_plugins);
-#endif
-
-  // Load the default plugin last.
-  if (default_plugin_enabled_)
-    LoadPlugin(FilePath(kDefaultPluginLibraryName), plugin_groups);
 }
 
 void PluginList::LoadPlugins() {
@@ -456,20 +460,53 @@ void PluginList::LoadPlugin(const FilePath& path,
   AddToPluginGroups(plugin_info, plugin_groups);
 }
 
-void PluginList::GetPluginPathListsToLoad(
-    std::vector<FilePath>* extra_plugin_paths,
-    std::vector<FilePath>* extra_plugin_dirs,
-    std::vector<webkit::WebPluginInfo>* internal_plugins) {
-  base::AutoLock lock(lock_);
-  *extra_plugin_paths = extra_plugin_paths_;
-  *extra_plugin_dirs = extra_plugin_dirs_;
-
-  *internal_plugins = std::vector<webkit::WebPluginInfo>();
-  for (std::vector<InternalPlugin>::iterator it = internal_plugins_.begin();
-       it != internal_plugins_.end();
-       ++it) {
-    internal_plugins->push_back(it->info);
+void PluginList::GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths) {
+  // Don't want to hold the lock while loading new plugins, so we don't block
+  // other methods if they're called on other threads.
+  std::vector<FilePath> extra_plugin_paths;
+  std::vector<FilePath> extra_plugin_dirs;
+  std::vector<InternalPlugin> internal_plugins;
+  {
+    base::AutoLock lock(lock_);
+    extra_plugin_paths = extra_plugin_paths_;
+    extra_plugin_dirs = extra_plugin_dirs_;
+    internal_plugins = internal_plugins_;
   }
+
+  std::vector<FilePath> directories_to_scan;
+  GetPluginDirectories(&directories_to_scan);
+
+  // Load internal plugins first so that, if both an internal plugin and a
+  // "discovered" plugin want to handle the same type, the internal plugin
+  // will have precedence.
+  for (size_t i = 0; i < internal_plugins.size(); ++i) {
+    if (internal_plugins[i].info.path.value() == kDefaultPluginLibraryName)
+      continue;
+    plugin_paths->push_back(internal_plugins[i].info.path);
+  }
+
+  for (size_t i = 0; i < extra_plugin_paths.size(); ++i) {
+    const FilePath& path = extra_plugin_paths[i];
+    if (std::find(plugin_paths->begin(), plugin_paths->end(), path) !=
+        plugin_paths->end()) {
+      continue;
+    }
+    plugin_paths->push_back(path);
+  }
+
+  for (size_t i = 0; i < extra_plugin_dirs.size(); ++i)
+    GetPluginsInDir(extra_plugin_dirs[i], plugin_paths);
+
+  for (size_t i = 0; i < directories_to_scan.size(); ++i)
+    GetPluginsInDir(directories_to_scan[i], plugin_paths);
+
+#if defined(OS_WIN)
+  GetPluginPathsFromRegistry(plugin_paths);
+#endif
+
+  // Load the default plugin last.
+  if (default_plugin_enabled_)
+    plugin_paths->push_back(FilePath(kDefaultPluginLibraryName));
 }
 
 void PluginList::SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins) {
@@ -565,7 +602,8 @@ void PluginList::GetPluginInfoArray(
         if (SupportsExtension(plugins[i], extension, &actual_mime_type)) {
           FilePath path = plugins[i].path;
           if (path.value() != kDefaultPluginLibraryName &&
-              visited_plugins.insert(path).second) {
+              visited_plugins.insert(path).second &&
+              AllowMimeTypeMismatch(mime_type, actual_mime_type)) {
             info->push_back(plugins[i]);
             if (actual_mime_types)
               actual_mime_types->push_back(actual_mime_type);

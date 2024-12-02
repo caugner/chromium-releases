@@ -11,7 +11,6 @@
 #include "base/basictypes.h"
 
 namespace views {
-class Button;
 class Textfield;
 class Widget;
 }  // namespace views
@@ -19,6 +18,7 @@ class Widget;
 namespace chromeos {
 
 class ScreenLocker;
+class ScreenLockerViews;
 
 namespace test {
 
@@ -49,6 +49,9 @@ class ScreenLockerTester {
   views::Widget* GetWidget() const;
 
   views::Widget* GetChildWidget() const;
+
+  // Returns the ScreenLockerViews object.
+  ScreenLockerViews* screen_locker_views() const;
 
  private:
   friend class chromeos::ScreenLocker;

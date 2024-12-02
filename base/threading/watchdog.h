@@ -22,6 +22,7 @@
 #include <string>
 
 #include "base/base_export.h"
+#include "base/compiler_specific.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
@@ -58,7 +59,7 @@ class BASE_EXPORT Watchdog {
    public:
     explicit ThreadDelegate(Watchdog* watchdog) : watchdog_(watchdog) {
     }
-    virtual void ThreadMain();
+    virtual void ThreadMain() OVERRIDE;
    private:
     void SetThreadName() const;
 
@@ -78,18 +79,6 @@ class BASE_EXPORT Watchdog {
   ThreadDelegate delegate_;  // Store it, because it must outlive the thread.
 
   TimeTicks start_time_;  // Start of epoch, and alarm after duration_.
-
-  // When the debugger breaks (when we alarm), all the other alarms that are
-  // armed will expire (also alarm).  To diminish this effect, we track any
-  // delay due to debugger breaks, and we *try* to adjust the effective start
-  // time of other alarms to step past the debugging break.
-  // Without this safety net, any alarm will typically trigger a host of follow
-  // on alarms from callers that specify old times.
-  static Lock static_lock_;  // Lock for access of static data...
-  // When did we last alarm and get stuck (for a while) in a debugger?
-  static TimeTicks last_debugged_alarm_time_;
-  // How long did we sit on a break in the debugger?
-  static TimeDelta last_debugged_alarm_delay_;
 
   DISALLOW_COPY_AND_ASSIGN(Watchdog);
 };

@@ -7,13 +7,14 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/threading/worker_pool.h"
 #include "base/win/scoped_com_initializer.h"
 #include "build/build_config.h"
 #include "content/common/child_process.h"
-#include "content/common/content_client.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/gpu/gpu_info_collector.h"
 #include "content/gpu/gpu_watchdog_thread.h"
@@ -102,10 +103,12 @@ void GpuChildThread::OnInitialize() {
       !CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessGPU))
     logging::SetLogMessageHandler(GpuProcessLogMessageHandler);
 
-  gpu_info_collector::CollectGraphicsInfo(&gpu_info_);
-
+  // Always set gpu info and send it back, even if there's an error and it's
+  // impartially collected.
+  bool succeeded = gpu_info_collector::CollectGraphicsInfo(&gpu_info_);
   content::GetContentClient()->SetGpuInfo(gpu_info_);
-  LOG(INFO) << "gpu_info_collector::CollectGraphicsInfo complete";
+  LOG(INFO) << "gpu_info_collector::CollectGraphicsInfo complete. success = " <<
+               succeeded;
 
   // Record initialization only after collecting the GPU info because that can
   // take a significant amount of time.
@@ -172,8 +175,7 @@ void GpuChildThread::OnCollectGraphicsInfo() {
     // Asynchronously collect the DirectX diagnostics because this can take a
     // couple of seconds.
     if (!base::WorkerPool::PostTask(
-        FROM_HERE,
-        NewRunnableFunction(&GpuChildThread::CollectDxDiagnostics, this),
+        FROM_HERE, base::Bind(&GpuChildThread::CollectDxDiagnostics, this),
         true)) {
       // Flag GPU info as complete if the DirectX diagnostics cannot be
       // collected.
@@ -216,17 +218,16 @@ void GpuChildThread::OnHang() {
 void GpuChildThread::CollectDxDiagnostics(GpuChildThread* thread) {
   base::win::ScopedCOMInitializer com_initializer;
 
-  DxDiagNode node;
+  content::DxDiagNode node;
   gpu_info_collector::GetDxDiagnostics(&node);
 
   thread->message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableFunction(&GpuChildThread::SetDxDiagnostics, thread, node));
+      FROM_HERE, base::Bind(&GpuChildThread::SetDxDiagnostics, thread, node));
 }
 
 // Runs on the main thread.
 void GpuChildThread::SetDxDiagnostics(GpuChildThread* thread,
-                                      const DxDiagNode& node) {
+                                      const content::DxDiagNode& node) {
   thread->gpu_info_.dx_diagnostics = node;
   thread->gpu_info_.finalized = true;
   thread->collecting_dx_diagnostics_ = false;

@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 var timeutil = (function() {
+  'use strict';
+
   /**
    * Offset needed to convert event times to Date objects.
    * Updated whenever constants are loaded.
@@ -30,8 +32,18 @@ var timeutil = (function() {
     return new Date(timeStampMs);
   }
 
+  /**
+   * Returns the current time.
+   *
+   * @returns {number} Milliseconds since the Unix epoch.
+   */
+  function getCurrentTime() {
+    return (new Date()).getTime();
+  }
+
   return {
     setTimeTickOffset: setTimeTickOffset,
-    convertTimeTicksToDate: convertTimeTicksToDate
+    convertTimeTicksToDate: convertTimeTicksToDate,
+    getCurrentTime: getCurrentTime
   };
 })();

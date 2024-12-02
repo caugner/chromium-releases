@@ -29,27 +29,29 @@
 #include "skia/ext/skia_utils_mac.h"
 #endif
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGlyphCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebImage.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebImage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #if defined(OS_WIN)
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
 #endif
+#include "v8/include/v8.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/user_agent.h"
-#include "v8/include/v8.h"
 
 using WebKit::WebCanvas;
 using WebKit::WebData;
+using WebKit::WebDevToolsAgent;
 using WebKit::WebElement;
 using WebKit::WebFrame;
 using WebKit::WebGlyphCache;
@@ -213,7 +215,7 @@ static std::string DumpHistoryItem(const WebHistoryItem& item,
     url.replace(0, pos + kLayoutTestsPatternSize, kFileTestPrefix);
   } else if (url.find(kDataUrlPattern) == 0) {
     // URL-escape data URLs to match results upstream.
-    std::string path = EscapePath(url.substr(kDataUrlPatternSize));
+    std::string path = net::EscapePath(url.substr(kDataUrlPatternSize));
     url.replace(kDataUrlPatternSize, url.length(), path);
   }
 
@@ -348,8 +350,8 @@ class UserAgentState {
 
  private:
   mutable std::string user_agent_;
-  // The UA string when we're pretending to be Mac Safari.
-  mutable std::string mimic_mac_safari_user_agent_;
+  // The UA string when we're pretending to be Mac Safari or Win Firefox.
+  mutable std::string user_agent_for_spoofing_hack_;
 
   mutable bool user_agent_requested_;
   bool user_agent_is_overridden_;
@@ -382,6 +384,44 @@ void UserAgentState::Set(const std::string& user_agent, bool overriding) {
   user_agent_ = user_agent;
 }
 
+bool IsMicrosoftSiteThatNeedsSpoofingForSilverlight(const GURL& url) {
+#if defined(OS_MACOSX)
+  // The landing page for updating Silverlight gives a confusing experience
+  // in browsers that Silverlight doesn't officially support; spoof as
+  // Safari to reduce the chance that users won't complete updates.
+  // Should be removed if the sniffing is removed: http://crbug.com/88211
+  if (url.host() == "www.microsoft.com" &&
+      StartsWithASCII(url.path(), "/getsilverlight", false)) {
+    return true;
+  }
+#endif
+  return false;
+}
+
+bool IsYahooSiteThatNeedsSpoofingForSilverlight(const GURL& url) {
+  // The following Yahoo! JAPAN pages erroneously judge that Silverlight does
+  // not support Chromium. Until the pages are fixed, spoof the UA.
+  // http://crbug.com/104426
+  if (url.host() == "headlines.yahoo.co.jp" &&
+      StartsWithASCII(url.path(), "/videonews/", true)) {
+    return true;
+  }
+#if defined(OS_MACOSX)
+  if ((url.host() == "downloads.yahoo.co.jp" &&
+      StartsWithASCII(url.path(), "/docs/silverlight/", true)) ||
+      url.host() == "gyao.yahoo.co.jp") {
+    return true;
+  }
+#elif defined(OS_WIN)
+  if ((url.host() == "weather.yahoo.co.jp" &&
+        StartsWithASCII(url.path(), "/weather/zoomradar/", true)) ||
+      url.host() == "promotion.shopping.yahoo.co.jp") {
+    return true;
+  }
+#endif
+  return false;
+}
+
 const std::string& UserAgentState::Get(const GURL& url) const {
   base::AutoLock auto_lock(lock_);
   user_agent_requested_ = true;
@@ -390,26 +430,28 @@ const std::string& UserAgentState::Get(const GURL& url) const {
 
   // Workarounds for sites that use misguided UA sniffing.
   if (!user_agent_is_overridden_) {
+    if (IsMicrosoftSiteThatNeedsSpoofingForSilverlight(url) ||
+        IsYahooSiteThatNeedsSpoofingForSilverlight(url)) {
+      if (user_agent_for_spoofing_hack_.empty()) {
 #if defined(OS_MACOSX)
-    if (url.host() == "www.microsoft.com" &&
-        StartsWithASCII(url.path(), "/getsilverlight", false)) {
-      // The landing page for updating Silverlight gives a confusing experience
-      // in browsers that Silverlight doesn't officially support; spoof as
-      // Safari to reduce the chance that users won't complete updates.
-      // Should be removed if the sniffing is removed: http://crbug.com/88211
-      if (mimic_mac_safari_user_agent_.empty()) {
-        mimic_mac_safari_user_agent_ =
-            BuildUserAgentFromProduct("Version/5.0.4 Safari/533.20.27");
-      }
-      return mimic_mac_safari_user_agent_;
-    }
+        user_agent_for_spoofing_hack_ =
+            BuildUserAgentFromProduct("Version/5.1.1 Safari/534.51.22");
+#elif defined(OS_WIN)
+        // Pretend to be Firefox. Silverlight doesn't support Win Safari.
+        base::StringAppendF(
+            &user_agent_for_spoofing_hack_,
+            "Mozilla/5.0 (%s) Gecko/20100101 Firefox/8.0",
+            webkit_glue::BuildOSCpuInfo().c_str());
 #endif
+      }
+      return user_agent_for_spoofing_hack_;
+    }
   }
 
   return user_agent_;
 }
 
-base::LazyInstance<UserAgentState> g_user_agent(base::LINKER_INITIALIZED);
+base::LazyInstance<UserAgentState> g_user_agent = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -442,6 +484,15 @@ WebCanvas* ToWebCanvas(skia::PlatformCanvas* canvas) {
 
 int GetGlyphPageCount() {
   return WebGlyphCache::pageCount();
+}
+
+std::string GetInspectorProtocolVersion() {
+  return WebDevToolsAgent::inspectorProtocolVersion().utf8();
+}
+
+bool IsInspectorProtocolVersionSupported(const std::string& version) {
+  return WebDevToolsAgent::supportsInspectorProtocolVersion(
+      WebString::fromUTF8(version));
 }
 
 } // namespace webkit_glue

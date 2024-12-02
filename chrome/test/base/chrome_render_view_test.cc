@@ -13,12 +13,11 @@
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
-#include "chrome/renderer/extensions/extension_process_bindings.h"
-#include "chrome/renderer/extensions/renderer_extension_bindings.h"
+#include "chrome/renderer/extensions/miscellaneous_bindings.h"
+#include "chrome/renderer/extensions/schema_generated_bindings.h"
 #include "content/common/dom_storage_common.h"
-#include "content/common/renderer_preferences.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/test/mock_render_process.h"
@@ -29,7 +28,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -37,6 +36,8 @@
 #include "ui/base/gtk/event_synthesis_gtk.h"
 #endif
 
+using extensions::MiscellaneousBindings;
+using extensions::SchemaGeneratedBindings;
 using WebKit::WebFrame;
 using WebKit::WebInputEvent;
 using WebKit::WebMouseEvent;
@@ -66,9 +67,9 @@ void ChromeRenderViewTest::SetUp() {
       "extensions/json_schema.js", IDR_JSON_SCHEMA_JS, NULL));
   WebScriptController::registerExtension(EventBindings::Get(
       extension_dispatcher_));
-  WebScriptController::registerExtension(RendererExtensionBindings::Get(
+  WebScriptController::registerExtension(MiscellaneousBindings::Get(
       extension_dispatcher_));
-  WebScriptController::registerExtension(ExtensionProcessBindings::Get(
+  WebScriptController::registerExtension(SchemaGeneratedBindings::Get(
       extension_dispatcher_));
   WebScriptController::registerExtension(new ChromeV8Extension(
       "extensions/apitest.js", IDR_EXTENSION_APITEST_JS, NULL));

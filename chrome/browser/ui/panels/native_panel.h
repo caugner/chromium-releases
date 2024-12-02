@@ -38,6 +38,7 @@ class NativePanel {
   virtual void ShowPanelInactive() = 0;
   virtual gfx::Rect GetPanelBounds() const = 0;
   virtual void SetPanelBounds(const gfx::Rect& bounds) = 0;
+  virtual void SetPanelBoundsInstantly(const gfx::Rect& bounds) = 0;
   virtual void ClosePanel() = 0;
   virtual void ActivatePanel() = 0;
   virtual void DeactivatePanel() = 0;
@@ -58,6 +59,7 @@ class NativePanel {
       const NativeWebKeyboardEvent& event, bool* is_keyboard_shortcut) = 0;
   virtual void HandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event) = 0;
+  virtual void FullScreenModeChanged(bool is_full_screen) = 0;
 
   virtual Browser* GetPanelBrowser() const = 0;
   virtual void DestroyPanelBrowser() = 0;
@@ -70,6 +72,14 @@ class NativePanel {
       const gfx::Size& window_size) const = 0;
 
   virtual int TitleOnlyHeight() const = 0;
+
+  // Returns the size of the iconified panel. This is the size we use to draw
+  // the panel put in the overflow area.
+  virtual gfx::Size IconOnlySize() const = 0;
+
+  // Brings the panel to the top of the z-order without activating it. This
+  // will make sure that the panel is not obscured by other top-most windows.
+  virtual void EnsurePanelFullyVisible() = 0;
 };
 
 // A NativePanel utility interface used for accessing elements of the

@@ -69,19 +69,22 @@ class CONTENT_EXPORT MediaStreamManager
   void StopGeneratedStream(const std::string& label);
 
   // Implements MediaStreamProviderListener.
-  virtual void Opened(MediaStreamType stream_type, int capture_session_id);
-  virtual void Closed(MediaStreamType stream_type, int capture_session_id);
+  virtual void Opened(MediaStreamType stream_type,
+                      int capture_session_id) OVERRIDE;
+  virtual void Closed(MediaStreamType stream_type,
+                      int capture_session_id) OVERRIDE;
   virtual void DevicesEnumerated(MediaStreamType stream_type,
-                                 const StreamDeviceInfoArray& devices);
-  virtual void Error(MediaStreamType stream_type, int capture_session_id,
-                     MediaStreamProviderError error);
+                                 const StreamDeviceInfoArray& devices) OVERRIDE;
+  virtual void Error(MediaStreamType stream_type,
+                     int capture_session_id,
+                     MediaStreamProviderError error) OVERRIDE;
 
   // Implements SettingsRequester.
   virtual void GetDevices(const std::string& label,
-                          MediaStreamType stream_type);
+                          MediaStreamType stream_type) OVERRIDE;
   virtual void DevicesAccepted(const std::string& label,
-                               const StreamDeviceInfoArray& devices);
-  virtual void SettingsError(const std::string& label);
+                               const StreamDeviceInfoArray& devices) OVERRIDE;
+  virtual void SettingsError(const std::string& label) OVERRIDE;
 
   // Used by unit test to make sure fake devices are used instead of a real
   // devices, which is needed for server based testing.
@@ -89,25 +92,7 @@ class CONTENT_EXPORT MediaStreamManager
 
  private:
   // Contains all data needed to keep track of requests.
-  struct DeviceRequest {
-    DeviceRequest();
-    DeviceRequest(MediaStreamRequester* requester,
-                  const StreamOptions& request_options);
-    ~DeviceRequest();
-    enum RequestState {
-      kNotRequested = 0,
-      kRequested,
-      kOpening,
-      kDone,
-      kError
-    };
-
-    MediaStreamRequester* requester;
-    StreamOptions options;
-    std::vector<RequestState> state;
-    StreamDeviceInfoArray audio_devices;
-    StreamDeviceInfoArray video_devices;
-  };
+  struct DeviceRequest;
 
   // Helpers.
   bool RequestDone(const MediaStreamManager::DeviceRequest& request) const;

@@ -9,10 +9,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/time.h"
+#include "content/common/content_export.h"
 #include "content/renderer/media/audio_device.h"
 #include "content/renderer/media/audio_input_device.h"
 #include "third_party/webrtc/modules/audio_device/main/interface/audio_device.h"
@@ -90,8 +92,8 @@
 //  - The webrtc::AudioDeviceModule is reference counted.
 //  - Recording is currently not supported on Mac OS X.
 //
-class WebRtcAudioDeviceImpl
-    : public webrtc::AudioDeviceModule,
+class CONTENT_EXPORT WebRtcAudioDeviceImpl
+    : NON_EXPORTED_BASE(public webrtc::AudioDeviceModule),
       public AudioDevice::RenderCallback,
       public AudioInputDevice::CaptureCallback,
       public AudioInputDevice::CaptureEventHandler {
@@ -119,8 +121,8 @@ class WebRtcAudioDeviceImpl
                        size_t audio_delay_milliseconds) OVERRIDE;
 
   // AudioInputDevice::CaptureEventHandler implementation.
-  virtual void OnDeviceStarted(int device_index);
-  virtual void OnDeviceStopped();
+  virtual void OnDeviceStarted(const std::string& device_id) OVERRIDE;
+  virtual void OnDeviceStopped() OVERRIDE;
 
   // webrtc::Module implementation.
   virtual int32_t Version(char* version,
@@ -162,7 +164,7 @@ class WebRtcAudioDeviceImpl
   virtual int32_t InitPlayout() OVERRIDE;
   virtual bool PlayoutIsInitialized() const OVERRIDE;
   virtual int32_t RecordingIsAvailable(bool* available) OVERRIDE;
-  virtual int32_t InitRecording();
+  virtual int32_t InitRecording() OVERRIDE;
   virtual bool RecordingIsInitialized() const OVERRIDE;
 
   virtual int32_t StartPlayout() OVERRIDE;
@@ -256,6 +258,15 @@ class WebRtcAudioDeviceImpl
   size_t output_buffer_size() const { return output_buffer_size_; }
   int input_channels() const { return input_channels_; }
   int output_channels() const { return output_channels_; }
+  int input_sample_rate() const { return static_cast<int>(input_sample_rate_); }
+  int output_sample_rate() const {
+    return static_cast<int>(output_sample_rate_);
+  }
+  int input_delay_ms() const { return input_delay_ms_; }
+  int output_delay_ms() const { return output_delay_ms_; }
+  bool initialized() const { return initialized_; }
+  bool playing() const { return playing_; }
+  bool recording() const { return recording_; }
 
  private:
   // Make destructor private to ensure that we can only be deleted by Release().
@@ -310,7 +321,7 @@ class WebRtcAudioDeviceImpl
   // on the input/capture side.
   int session_id_;
 
-  // Protect |recording_|.
+  // Protects |recording_|.
   base::Lock lock_;
 
   int bytes_per_sample_;

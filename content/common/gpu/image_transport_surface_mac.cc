@@ -34,6 +34,8 @@ class IOSurfaceImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   virtual void Destroy() OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual std::string GetExtensions() OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
@@ -43,6 +45,8 @@ class IOSurfaceImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   virtual void OnNewSurfaceACK(uint64 surface_id,
                                TransportDIB::Handle shm_handle) OVERRIDE;
   virtual void OnBuffersSwappedACK() OVERRIDE;
+  virtual void OnPostSubBufferACK() OVERRIDE;
+  virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
  private:
@@ -85,6 +89,8 @@ class TransportDIBImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   virtual void Destroy() OVERRIDE;
   virtual bool IsOffscreen() OVERRIDE;
   virtual bool SwapBuffers() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual std::string GetExtensions() OVERRIDE;
   virtual gfx::Size GetSize() OVERRIDE;
   virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
   virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
@@ -92,8 +98,10 @@ class TransportDIBImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
  protected:
   // ImageTransportSurface implementation
   virtual void OnBuffersSwappedACK() OVERRIDE;
+  virtual void OnPostSubBufferACK() OVERRIDE;
   virtual void OnNewSurfaceACK(uint64 surface_id,
                                TransportDIB::Handle shm_handle) OVERRIDE;
+  virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
 
  private:
@@ -201,7 +209,7 @@ bool IOSurfaceImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
 
   GLenum status = glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
-    LOG(ERROR) << "Framebuffer incomplete.";
+    DLOG(ERROR) << "Framebuffer incomplete.";
     return false;
   }
 
@@ -224,6 +232,19 @@ bool IOSurfaceImageTransportSurface::SwapBuffers() {
   return true;
 }
 
+bool IOSurfaceImageTransportSurface::PostSubBuffer(
+    int x, int y, int width, int height) {
+  NOTREACHED();
+  return false;
+}
+
+std::string IOSurfaceImageTransportSurface::GetExtensions() {
+  std::string extensions = gfx::GLSurface::GetExtensions();
+  extensions += extensions.empty() ? "" : " ";
+  extensions += "GL_CHROMIUM_front_buffer_cached";
+  return extensions;
+}
+
 gfx::Size IOSurfaceImageTransportSurface::GetSize() {
   return size_;
 }
@@ -232,11 +253,19 @@ void IOSurfaceImageTransportSurface::OnBuffersSwappedACK() {
   helper_->SetScheduled(true);
 }
 
+void IOSurfaceImageTransportSurface::OnPostSubBufferACK() {
+  NOTREACHED();
+}
+
 void IOSurfaceImageTransportSurface::OnNewSurfaceACK(
     uint64 surface_id,
     TransportDIB::Handle /* shm_handle */) {
   DCHECK_EQ(io_surface_id_, surface_id);
   helper_->SetScheduled(true);
+}
+
+void IOSurfaceImageTransportSurface::OnResizeViewACK() {
+  NOTREACHED();
 }
 
 void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
@@ -386,7 +415,7 @@ bool TransportDIBImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
 
   GLenum status = glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT);
   if (status != GL_FRAMEBUFFER_COMPLETE) {
-    LOG(ERROR) << "Framebuffer incomplete.";
+    DLOG(ERROR) << "Framebuffer incomplete.";
     return false;
   }
 
@@ -426,12 +455,29 @@ bool TransportDIBImageTransportSurface::SwapBuffers() {
   return true;
 }
 
+bool TransportDIBImageTransportSurface::PostSubBuffer(
+    int x, int y, int width, int height) {
+  NOTREACHED();
+  return false;
+}
+
+std::string TransportDIBImageTransportSurface::GetExtensions() {
+  std::string extensions = gfx::GLSurface::GetExtensions();
+  extensions += extensions.empty() ? "" : " ";
+  extensions += "GL_CHROMIUM_front_buffer_cached";
+  return extensions;
+}
+
 gfx::Size TransportDIBImageTransportSurface::GetSize() {
   return size_;
 }
 
 void TransportDIBImageTransportSurface::OnBuffersSwappedACK() {
   helper_->SetScheduled(true);
+}
+
+void TransportDIBImageTransportSurface::OnPostSubBufferACK() {
+  NOTREACHED();
 }
 
 void TransportDIBImageTransportSurface::OnNewSurfaceACK(
@@ -441,6 +487,10 @@ void TransportDIBImageTransportSurface::OnNewSurfaceACK(
 
   shared_mem_.reset(TransportDIB::Map(shm_handle));
   DCHECK_NE(shared_mem_.get(), static_cast<void*>(NULL));
+}
+
+void TransportDIBImageTransportSurface::OnResizeViewACK() {
+  NOTREACHED();
 }
 
 void TransportDIBImageTransportSurface::OnResize(gfx::Size size) {

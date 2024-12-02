@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
@@ -15,8 +16,11 @@
 #include "base/string_number_conversions.h"
 #include "base/task.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_protocols.h"
 #include "chrome/browser/io_thread.h"
@@ -26,7 +30,6 @@
 #include "chrome/browser/net/chrome_fraudulent_certificate_reporter.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
-#include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/policy/url_blacklist_manager.h"
@@ -40,14 +43,15 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/chrome_blob_storage_context.h"
+#include "content/browser/download/download_id_factory.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/resource_context.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/origin_bound_cert_service.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/http/http_util.h"
@@ -64,7 +68,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #endif  // defined(OS_CHROMEOS)
+
+using content::BrowserThread;
 
 namespace {
 
@@ -86,11 +93,8 @@ class ChromeCookieMonsterDelegate : public net::CookieMonster::Delegate {
       net::CookieMonster::Delegate::ChangeCause cause) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-            &ChromeCookieMonsterDelegate::OnCookieChangedAsyncHelper,
-            cookie,
-            removed,
-            cause));
+        base::Bind(&ChromeCookieMonsterDelegate::OnCookieChangedAsyncHelper,
+                   this, cookie, removed, cause));
   }
 
  private:
@@ -103,10 +107,10 @@ class ChromeCookieMonsterDelegate : public net::CookieMonster::Delegate {
     Profile* profile = profile_getter_.Run();
     if (profile) {
       ChromeCookieDetails cookie_details(&cookie, removed, cause);
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_COOKIE_CHANGED,
-          Source<Profile>(profile),
-          Details<ChromeCookieDetails>(&cookie_details));
+          content::Source<Profile>(profile),
+          content::Details<ChromeCookieDetails>(&cookie_details));
     }
   }
 
@@ -186,7 +190,8 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   PrefService* pref_service = profile->GetPrefs();
 
-  next_download_id_thunk_ = profile->GetDownloadManager()->GetNextIdThunk();
+  download_id_factory_ = DownloadServiceFactory::GetForProfile(profile)->
+    GetDownloadIdFactory();
 
   scoped_ptr<ProfileParams> params(new ProfileParams);
   params->path = profile->GetPath();
@@ -220,6 +225,7 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
   params->io_thread = g_browser_process->io_thread();
 
   params->host_content_settings_map = profile->GetHostContentSettingsMap();
+  params->cookie_settings = CookieSettings::GetForProfile(profile);
   params->host_zoom_map = profile->GetHostZoomMap();
   params->ssl_config_service = profile->GetSSLConfigService();
   base::Callback<Profile*(void)> profile_getter =
@@ -237,9 +243,11 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
       DesktopNotificationServiceFactory::GetForProfile(profile);
   params->protocol_handler_registry = profile->GetProtocolHandlerRegistry();
 
-  params->proxy_config_service.reset(
-      ProxyServiceFactory::CreateProxyConfigService(
-          profile->GetProxyConfigTracker()));
+  ChromeProxyConfigService* proxy_config_service =
+      ProxyServiceFactory::CreateProxyConfigService();
+  params->proxy_config_service.reset(proxy_config_service);
+  profile->GetProxyConfigTracker()->SetChromeProxyConfigService(
+      proxy_config_service);
   params->profile = profile;
   profile_params_.reset(params.release());
 
@@ -251,6 +259,8 @@ void ProfileIOData::InitializeOnUIThread(Profile* profile) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   url_blacklist_manager_.reset(new policy::URLBlacklistManager(pref_service));
 #endif
+
+  initialized_on_UI_thread_ = true;
 }
 
 ProfileIOData::AppRequestContext::AppRequestContext() {}
@@ -278,7 +288,8 @@ ProfileIOData::ProfileParams::~ProfileParams() {}
 
 ProfileIOData::ProfileIOData(bool is_incognito)
     : initialized_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(resource_context_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(resource_context_(this)),
+      initialized_on_UI_thread_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -371,6 +382,10 @@ HostContentSettingsMap* ProfileIOData::GetHostContentSettingsMap() const {
   return host_content_settings_map_;
 }
 
+CookieSettings* ProfileIOData::GetCookieSettings() const {
+  return cookie_settings_;
+}
+
 DesktopNotificationService* ProfileIOData::GetNotificationService() const {
   return notification_service_;
 }
@@ -390,7 +405,12 @@ void ProfileIOData::LazyInitialize() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (initialized_)
     return;
-  DCHECK(profile_params_.get());
+
+  // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
+  CHECK(initialized_on_UI_thread_);
+
+  // TODO(jhawkins): Return to DCHECK once crbug.com/102004 is fixed.
+  CHECK(profile_params_.get());
 
   IOThread* const io_thread = profile_params_->io_thread;
   IOThread::Globals* const io_thread_globals = io_thread->globals();
@@ -430,7 +450,7 @@ void ProfileIOData::LazyInitialize() const {
   transport_security_persister_.reset(
       new TransportSecurityPersister(transport_security_state_.get(),
                                      profile_params_->path,
-                                     !profile_params_->is_incognito));
+                                     profile_params_->is_incognito));
 
   // NOTE(willchan): Keep these protocol handlers in sync with
   // ProfileIOData::IsHandledProtocol().
@@ -468,13 +488,13 @@ void ProfileIOData::LazyInitialize() const {
           profile_params_->file_system_context,
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE)));
   DCHECK(set_protocol);
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(GOOGLE_CHROME_BUILD)
   // Install the GView request interceptor that will redirect requests
   // of compatible documents (PDF, etc) to the GView document viewer.
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(switches::kEnableGView))
     job_factory_->AddInterceptor(new chromeos::GViewRequestInterceptor);
-#endif  // defined(OS_CHROMEOS)
+#endif  // defined(OS_CHROMEOS) && !defined(GOOGLE_CHROME_BUILD)
 
   media_stream_manager_.reset(new media_stream::MediaStreamManager);
 
@@ -486,6 +506,7 @@ void ProfileIOData::LazyInitialize() const {
   quota_manager_ = profile_params_->quota_manager;
   host_zoom_map_ = profile_params_->host_zoom_map;
   host_content_settings_map_ = profile_params_->host_content_settings_map;
+  cookie_settings_ = profile_params_->cookie_settings;
   notification_service_ = profile_params_->notification_service;
   extension_info_map_ = profile_params_->extension_info_map;
 
@@ -500,7 +521,7 @@ void ProfileIOData::LazyInitialize() const {
   resource_context_.SetUserData(NULL, const_cast<ProfileIOData*>(this));
   resource_context_.set_media_observer(
       io_thread_globals->media.media_internals.get());
-  resource_context_.set_next_download_id_thunk(next_download_id_thunk_);
+  resource_context_.set_download_id_factory(download_id_factory_);
   resource_context_.set_media_stream_manager(media_stream_manager_.get());
 
   LazyInitializeInternal(profile_params_.get());

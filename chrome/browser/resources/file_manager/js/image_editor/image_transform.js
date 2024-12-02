@@ -15,8 +15,6 @@ ImageEditor.Mode.Crop.prototype = {__proto__: ImageEditor.Mode.prototype};
 ImageEditor.Mode.Crop.prototype.setUp = function() {
   ImageEditor.Mode.prototype.setUp.apply(this, arguments);
 
-  this.createDefaultCrop();
-
   var container = this.getImageView().container_;
   var doc = container.ownerDocument;
 
@@ -64,40 +62,45 @@ ImageEditor.Mode.Crop.prototype.setUp = function() {
   addCropFrame('bottom horizontal');
   addCropFrame('right bottom corner');
 
-  this.positionDOM();
+  this.createDefaultCrop();
+};
+
+ImageEditor.Mode.Crop.prototype.reset = function() {
+  ImageEditor.Mode.prototype.reset.call(this);
+  this.createDefaultCrop();
 };
 
 ImageEditor.Mode.Crop.prototype.positionDOM = function() {
   var screenClipped = this.viewport_.getScreenClipped();
 
+  var screenCrop = this.viewport_.imageToScreenRect(this.cropRect_.getRect());
   this.editor_.hideOverlappingTools(
-      this.viewport_.imageToScreenRect(this.cropRect_.getRect()));
+      screenCrop.inflate(ImageEditor.Mode.Crop.GRAB_RADIUS,
+                         ImageEditor.Mode.Crop.GRAB_RADIUS),
+      screenCrop.inflate(-ImageEditor.Mode.Crop.GRAB_RADIUS,
+                         -ImageEditor.Mode.Crop.GRAB_RADIUS));
 
   this.domOverlay_.style.left = screenClipped.left + 'px';
   this.domOverlay_.style.top  = screenClipped.top + 'px';
   this.domOverlay_.style.width = screenClipped.width + 'px';
   this.domOverlay_.style.height = screenClipped.height + 'px';
 
-  this.shadowLeft_.style.width =
-      this.viewport_.imageToScreenX(this.cropRect_.getLeft())
-          - screenClipped.left + 'px';
+  this.shadowLeft_.style.width = screenCrop.left - screenClipped.left + 'px';
 
-  this.shadowTop_.style.height  =
-      this.viewport_.imageToScreenY(this.cropRect_.getTop())
-          - screenClipped.top + 'px';
+  this.shadowTop_.style.height  = screenCrop.top - screenClipped.top + 'px';
 
   this.shadowRight_.style.width = screenClipped.left + screenClipped.width -
-      this.viewport_.imageToScreenX(this.cropRect_.getRight()) + 'px';
+      (screenCrop.left + screenCrop.width) + 'px';
 
   this.shadowBottom_.style.height = screenClipped.top + screenClipped.height -
-      this.viewport_.imageToScreenY(this.cropRect_.getBottom()) + 'px';
+      (screenCrop.top + screenCrop.height) + 'px';
 };
 
 ImageEditor.Mode.Crop.prototype.cleanUpUI = function() {
   ImageEditor.Mode.prototype.cleanUpUI.apply(this, arguments);
   this.domOverlay_.parentNode.removeChild(this.domOverlay_);
   this.domOverlay_ = null;
-  this.editor_.hideOverlappingTools(null);
+  this.editor_.hideOverlappingTools();
 };
 
 ImageEditor.Mode.Crop.GRAB_RADIUS = 6;
@@ -114,6 +117,7 @@ ImageEditor.Mode.Crop.prototype.createDefaultCrop = function() {
       -Math.round(rect.width / 6), -Math.round(rect.height / 6));
   this.cropRect_ = new DraggableRect(
       rect, this.getViewport(), ImageEditor.Mode.Crop.GRAB_RADIUS);
+  this.positionDOM();
 };
 
 ImageEditor.Mode.Crop.prototype.getCursorStyle = function(x, y, mouseDown) {
@@ -226,7 +230,9 @@ DraggableRect.prototype.getDragMode = function(x, y) {
   } else if (xBetween && yBetween) {
     result.whole = true;
   } else {
-    result.outside = true;
+    result.newcrop = true;
+    result.xSide = DraggableRect.RIGHT;
+    result.ySide = DraggableRect.BOTTOM;
   }
 
   return result;
@@ -241,7 +247,7 @@ DraggableRect.prototype.getCursorStyle = function(x, y, mouseDown) {
         this.viewport_.screenToImageX(x), this.viewport_.screenToImageY(y));
   }
   if (mode.whole) return 'move';
-  if (mode.outside) return 'crop';
+  if (mode.newcrop) return 'crop';
   return this.cssSide_[mode.ySide] + this.cssSide_[mode.xSide] + '-resize';
 };
 
@@ -279,12 +285,14 @@ DraggableRect.prototype.getDragHandler = function(x, y) {
       self.bounds_.bottom = self.bounds_.top + fixedHeight;
     };
   } else {
-    if (this.dragMode_.outside) {
-      this.dragMode_.outside = false;
-      this.dragMode_.xSide = DraggableRect.RIGHT;
-      this.dragMode_.ySide = DraggableRect.BOTTOM;
-      this.bounds_.left = this.bounds_.right = x;
-      this.bounds_.top = this.bounds_.bottom = y;
+    function checkNewCrop() {
+      if (self.dragMode_.newcrop) {
+        self.dragMode_.newcrop = false;
+        self.bounds_.left = self.bounds_.right = x;
+        self.bounds_.top = self.bounds_.bottom = y;
+        mouseBiasX = 0;
+        mouseBiasY = 0;
+      }
     }
 
     function flipSide(side) {
@@ -298,6 +306,7 @@ DraggableRect.prototype.getDragHandler = function(x, y) {
     if (this.dragMode_.xSide != DraggableRect.NONE) {
       mouseBiasX = self.bounds_[this.dragMode_.xSide] - x;
       resizeFuncX = function(x) {
+        checkNewCrop();
         self.bounds_[self.dragMode_.xSide] = x;
         if (self.bounds_.left > self.bounds_.right) {
           self.dragMode_.xSide = flipSide(self.dragMode_.xSide);
@@ -307,6 +316,7 @@ DraggableRect.prototype.getDragHandler = function(x, y) {
     if (this.dragMode_.ySide != DraggableRect.NONE) {
       mouseBiasY = self.bounds_[this.dragMode_.ySide] - y;
       resizeFuncY = function(y) {
+        checkNewCrop();
         self.bounds_[self.dragMode_.ySide] = y;
         if (self.bounds_.top > self.bounds_.bottom) {
           self.dragMode_.ySide = flipSide(self.dragMode_.ySide);

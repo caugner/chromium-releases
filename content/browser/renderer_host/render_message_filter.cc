@@ -7,33 +7,34 @@
 #include <map>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/process_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/download/download_stats.h"
 #include "content/browser/download/download_types.h"
 #include "content/browser/plugin_process_host.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/plugin_service_filter.h"
 #include "content/browser/ppapi_plugin_process_host.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/media/media_observer.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/resource_context.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/child_process_host.h"
+#include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/desktop_notification_messages.h"
-#include "content/common/notification_service.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "ipc/ipc_channel_handle.h"
@@ -65,12 +66,18 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
-using net::CookieStore;
+using content::BrowserThread;
+using content::ChildProcessHostImpl;
 using content::PluginServiceFilter;
+using net::CookieStore;
 
 namespace {
 
 const int kPluginsRefreshThresholdInSeconds = 3;
+
+// When two CPU usage queries arrive within this interval, we sample the CPU
+// usage only once and send it as a response for both queries.
+static const int64 kCPUUsageSampleIntervalMs = 900;
 
 // Common functionality for converting a sync renderer message to a callback
 // function in the browser. Derive from this, create it on the heap when
@@ -153,6 +160,11 @@ class OpenChannelToPpapiBrokerCallback
 
   virtual void OnChannelOpened(base::ProcessHandle broker_process_handle,
                                const IPC::ChannelHandle& channel_handle) {
+#if defined(OS_POSIX)
+    // Check the validity of fd for bug investigation. Remove after fixed.
+    // See for details: crbug.com/103957.
+    CHECK_NE(-1, channel_handle.socket.fd);
+#endif
     filter_->Send(new ViewMsg_PpapiBrokerChannelCreated(routing_id_,
                                                         request_id_,
                                                         broker_process_handle,
@@ -296,30 +308,31 @@ void RenderMessageFilter::OnChannelClosing() {
   plugin_host_clients_.clear();
 }
 
-#if defined (OS_WIN)
-void RenderMessageFilter::OnChannelError() {
-  ChildProcessHost::ReleaseCachedFonts(render_process_id_);
-}
+void RenderMessageFilter::OnChannelConnected(int32 peer_id) {
+  BrowserMessageFilter::OnChannelConnected(peer_id);
+  base::ProcessHandle handle = peer_handle();
+#if defined(OS_MACOSX)
+  process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(handle,
+                                                                    NULL));
+#else
+  process_metrics_.reset(base::ProcessMetrics::CreateProcessMetrics(handle));
 #endif
+  cpu_usage_ = process_metrics_->GetCPUUsage(); // Initialize CPU usage counters
+  cpu_usage_sample_time_ = base::TimeTicks::Now();
+}
 
 bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                                             bool* message_was_ok) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(RenderMessageFilter, message, *message_was_ok)
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
     // On Windows, we handle these on the IO thread to avoid a deadlock with
     // plugins.  On non-Windows systems, we need to handle them on the UI
     // thread.
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetScreenInfo, OnGetScreenInfo)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetWindowRect, OnGetWindowRect)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetRootWindowRect, OnGetRootWindowRect)
-
-    // This hack is Windows-specific.
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_PreCacheFont, OnPreCacheFont)
-    IPC_MESSAGE_HANDLER(ChildProcessHostMsg_ReleaseCachedFonts,
-                        OnReleaseCachedFonts)
 #endif
-
     IPC_MESSAGE_HANDLER(ViewHostMsg_GenerateRoutingID, OnGenerateRoutingID)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWindow, OnMsgCreateWindow)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWidget, OnMsgCreateWidget)
@@ -356,6 +369,11 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message,
                         OnCacheableMetadataAvailable)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_Keygen, OnKeygen)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AsyncOpenFile, OnAsyncOpenFile)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetCPUUsage, OnGetCPUUsage)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareBufferSize,
+                        OnGetHardwareBufferSize)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareInputSampleRate,
+                        OnGetHardwareInputSampleRate)
     IPC_MESSAGE_HANDLER(ViewHostMsg_GetHardwareSampleRate,
                         OnGetHardwareSampleRate)
     IPC_MESSAGE_HANDLER(ViewHostMsg_MediaLogEvent, OnMediaLogEvent)
@@ -377,7 +395,8 @@ void RenderMessageFilter::OnMsgCreateWindow(
     const ViewHostMsg_CreateWindow_Params& params,
     int* route_id, int64* cloned_session_storage_namespace_id) {
   if (!content::GetContentClient()->browser()->CanCreateWindow(
-          params.opener_url, params.window_container_type, resource_context_)) {
+          GURL(params.opener_security_origin), params.window_container_type,
+          resource_context_, render_process_id_)) {
     *route_id = MSG_ROUTING_NONE;
     return;
   }
@@ -405,6 +424,11 @@ void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       const std::string& cookie) {
+  ChildProcessSecurityPolicy* policy =
+      ChildProcessSecurityPolicy::GetInstance();
+  if (!policy->CanUseCookiesForOrigin(render_process_id_, url))
+    return;
+
   net::CookieOptions options;
   if (content::GetContentClient()->browser()->AllowSetCookie(
           url, first_party_for_cookies, cookie,
@@ -420,6 +444,13 @@ void RenderMessageFilter::OnSetCookie(const IPC::Message& message,
 void RenderMessageFilter::OnGetCookies(const GURL& url,
                                        const GURL& first_party_for_cookies,
                                        IPC::Message* reply_msg) {
+  ChildProcessSecurityPolicy* policy =
+      ChildProcessSecurityPolicy::GetInstance();
+  if (!policy->CanUseCookiesForOrigin(render_process_id_, url)) {
+    SendGetCookiesResponse(reply_msg, std::string());
+    return;
+  }
+
   net::URLRequestContext* context = GetRequestContextForURL(url);
   net::CookieMonster* cookie_monster =
       context->cookie_store()->GetCookieMonster();
@@ -432,13 +463,16 @@ void RenderMessageFilter::OnGetRawCookies(
     const GURL& url,
     const GURL& first_party_for_cookies,
     IPC::Message* reply_msg) {
+  ChildProcessSecurityPolicy* policy =
+      ChildProcessSecurityPolicy::GetInstance();
   // Only return raw cookies to trusted renderers or if this request is
   // not targeted to an an external host like ChromeFrame.
   // TODO(ananta) We need to support retreiving raw cookies from external
   // hosts.
-  if (!ChildProcessSecurityPolicy::GetInstance()->CanReadRawCookies(
-          render_process_id_)) {
+  if (!policy->CanReadRawCookies(render_process_id_) ||
+      !policy->CanUseCookiesForOrigin(render_process_id_, url)) {
     SendGetRawCookiesResponse(reply_msg, net::CookieList());
+    return;
   }
 
   // We check policy here to avoid sending back cookies that would not normally
@@ -454,6 +488,11 @@ void RenderMessageFilter::OnGetRawCookies(
 
 void RenderMessageFilter::OnDeleteCookie(const GURL& url,
                                          const std::string& cookie_name) {
+  ChildProcessSecurityPolicy* policy =
+      ChildProcessSecurityPolicy::GetInstance();
+  if (!policy->CanUseCookiesForOrigin(render_process_id_, url))
+    return;
+
   net::URLRequestContext* context = GetRequestContextForURL(url);
   context->cookie_store()->DeleteCookieAsync(url, cookie_name, base::Closure());
 }
@@ -494,16 +533,6 @@ void RenderMessageFilter::OnLoadFont(const FontDescriptor& font,
 }
 #endif  // OS_MACOSX
 
-#if defined(OS_WIN)  // This hack is Windows-specific.
-void RenderMessageFilter::OnPreCacheFont(const LOGFONT& font) {
-  ChildProcessHost::PreCacheFont(font, render_process_id_);
-}
-
-void RenderMessageFilter::OnReleaseCachedFonts() {
-  ChildProcessHost::ReleaseCachedFonts(render_process_id_);
-}
-#endif  // OS_WIN
-
 void RenderMessageFilter::OnGetPlugins(
     bool refresh,
     IPC::Message* reply_msg) {
@@ -519,7 +548,7 @@ void RenderMessageFilter::OnGetPlugins(
     const base::TimeTicks now = base::TimeTicks::Now();
     if (now - last_plugin_refresh_time_ >= threshold) {
       // Only refresh if the threshold hasn't been exceeded yet.
-      PluginService::GetInstance()->RefreshPluginList();
+      PluginService::GetInstance()->RefreshPlugins();
       last_plugin_refresh_time_ = now;
     }
   }
@@ -603,6 +632,24 @@ void RenderMessageFilter::OnGenerateRoutingID(int* route_id) {
   *route_id = render_widget_helper_->GetNextRoutingID();
 }
 
+void RenderMessageFilter::OnGetCPUUsage(int* cpu_usage) {
+  base::TimeTicks now = base::TimeTicks::Now();
+  int64 since_last_sample_ms = (now - cpu_usage_sample_time_).InMilliseconds();
+  if (since_last_sample_ms > kCPUUsageSampleIntervalMs) {
+    cpu_usage_sample_time_ = now;
+    cpu_usage_ = static_cast<int>(process_metrics_->GetCPUUsage());
+  }
+  *cpu_usage = cpu_usage_;
+}
+
+void RenderMessageFilter::OnGetHardwareBufferSize(uint32* buffer_size) {
+  *buffer_size = static_cast<uint32>(media::GetAudioHardwareBufferSize());
+}
+
+void RenderMessageFilter::OnGetHardwareInputSampleRate(double* sample_rate) {
+  *sample_rate = media::GetAudioInputHardwareSampleRate();
+}
+
 void RenderMessageFilter::OnGetHardwareSampleRate(double* sample_rate) {
   *sample_rate = media::GetAudioHardwareSampleRate();
 }
@@ -631,15 +678,16 @@ void RenderMessageFilter::OnDownloadUrl(const IPC::Message& message,
 }
 
 void RenderMessageFilter::OnCheckNotificationPermission(
-    const GURL& source_url, int* result) {
+    const GURL& source_origin, int* result) {
   *result = content::GetContentClient()->browser()->
-      CheckDesktopNotificationPermission(source_url, resource_context_);
+      CheckDesktopNotificationPermission(source_origin, resource_context_,
+                                         render_process_id_);
 }
 
 void RenderMessageFilter::OnAllocateSharedMemory(
     uint32 buffer_size,
     base::SharedMemoryHandle* handle) {
-  ChildProcessHost::OnAllocateSharedMemory(
+  ChildProcessHostImpl::AllocateSharedMemory(
       buffer_size, peer_handle(), handle);
 }
 
@@ -721,8 +769,8 @@ void RenderMessageFilter::OnKeygen(uint32 key_size_index,
   // Dispatch to worker pool, so we do not block the IO thread.
   if (!base::WorkerPool::PostTask(
            FROM_HERE,
-           NewRunnableMethod(
-               this, &RenderMessageFilter::OnKeygenOnWorkerThread,
+           base::Bind(
+               &RenderMessageFilter::OnKeygenOnWorkerThread, this,
                key_size_in_bits, challenge_string, url, reply_msg),
            true)) {
     NOTREACHED() << "Failed to dispatch keygen task to worker pool";
@@ -769,8 +817,8 @@ void RenderMessageFilter::OnAsyncOpenFile(const IPC::Message& msg,
   }
 
   BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
-          this, &RenderMessageFilter::AsyncOpenFileOnFileThread,
+      BrowserThread::FILE, FROM_HERE, base::Bind(
+          &RenderMessageFilter::AsyncOpenFileOnFileThread, this,
           path, flags, message_id, msg.routing_id()));
 }
 
@@ -790,8 +838,8 @@ void RenderMessageFilter::AsyncOpenFileOnFileThread(const FilePath& path,
   IPC::Message* reply = new ViewMsg_AsyncOpenFile_ACK(
       routing_id, error_code, file_for_transit, message_id);
   BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE, NewRunnableMethod(
-          this, &RenderMessageFilter::Send, reply));
+      BrowserThread::IO, FROM_HERE, base::IgnoreReturn<bool>(base::Bind(
+          &RenderMessageFilter::Send, this, reply)));
 }
 
 void RenderMessageFilter::OnMediaLogEvent(const media::MediaLogEvent& event) {

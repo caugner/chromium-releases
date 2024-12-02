@@ -12,10 +12,10 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
@@ -27,15 +27,10 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/render_text.h"
-#include "views/border.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/layout/fill_layout.h"
-
-#if defined(TOUCH_UI)
-#include "chrome/browser/ui/views/autocomplete/touch_autocomplete_popup_contents_view.h"
-#else
-#include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
-#endif
+#include "ui/views/border.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/events/event.h"
+#include "ui/views/layout/fill_layout.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
@@ -80,6 +75,10 @@ class AutocompleteTextfield : public views::Textfield {
     return views::View::IsFocusable();
   }
 
+  virtual bool OnMousePressed(const views::MouseEvent& event) OVERRIDE {
+    return omnibox_view_->HandleMousePressEvent(event);
+  }
+
  private:
   OmniboxViewViews* omnibox_view_;
 
@@ -109,8 +108,9 @@ struct AutocompleteEditState {
 
 // Returns a lazily initialized property bag accessor for saving our state in a
 // TabContents.
-PropertyAccessor<AutocompleteEditState>* GetStateAccessor() {
-  static PropertyAccessor<AutocompleteEditState> state;
+base::PropertyAccessor<AutocompleteEditState>* GetStateAccessor() {
+  CR_DEFINE_STATIC_LOCAL(
+      base::PropertyAccessor<AutocompleteEditState>, state, ());
   return &state;
 }
 
@@ -149,7 +149,7 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
                                    Profile* profile,
                                    CommandUpdater* command_updater,
                                    bool popup_window_mode,
-                                   views::View* location_bar)
+                                   LocationBarView* location_bar)
     : model_(new AutocompleteEditModel(this, controller, profile)),
       popup_view_(CreatePopupView(location_bar)),
       controller_(controller),
@@ -158,7 +158,8 @@ OmniboxViewViews::OmniboxViewViews(AutocompleteEditController* controller,
       popup_window_mode_(popup_window_mode),
       security_level_(ToolbarModel::NONE),
       ime_composing_before_change_(false),
-      delete_at_end_pressed_(false) {
+      delete_at_end_pressed_(false),
+      location_bar_view_(location_bar) {
   set_border(views::Border::CreateEmptyBorder(kAutocompleteVerticalMargin, 0,
                                               kAutocompleteVerticalMargin, 0));
 }
@@ -180,11 +181,6 @@ void OmniboxViewViews::Init() {
   textfield_ = new AutocompleteTextfield(this);
   textfield_->SetController(this);
   textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_URL);
-
-#if defined(TOUCH_UI)
-  textfield_->SetFont(ui::ResourceBundle::GetSharedInstance().GetFont(
-                      ResourceBundle::LargeFont));
-#endif
 
   if (popup_window_mode_)
     textfield_->SetReadOnly(true);
@@ -264,6 +260,16 @@ bool OmniboxViewViews::HandleKeyReleaseEvent(const views::KeyEvent& event) {
     model_->OnControlKeyChanged(false);
     return true;
   }
+  return false;
+}
+
+bool OmniboxViewViews::HandleMousePressEvent(const views::MouseEvent& event) {
+  if (!textfield_->HasFocus() && !textfield_->HasSelection()) {
+    textfield_->SelectAll();
+    textfield_->RequestFocus();
+    return true;
+  }
+
   return false;
 }
 
@@ -429,7 +435,7 @@ bool OmniboxViewViews::DeleteAtEndPressed() {
 }
 
 void OmniboxViewViews::GetSelectionBounds(string16::size_type* start,
-                                          string16::size_type* end) {
+                                          string16::size_type* end) const {
   ui::Range range;
   textfield_->GetSelectedRange(&range);
   *start = static_cast<size_t>(range.end());
@@ -563,12 +569,17 @@ CommandUpdater* OmniboxViewViews::GetCommandUpdater() {
 
 void OmniboxViewViews::SetInstantSuggestion(const string16& input,
                                             bool animate_to_complete) {
-  NOTIMPLEMENTED();
+#if defined(OS_WIN) || defined(USE_AURA)
+  location_bar_view_->SetInstantSuggestion(input, animate_to_complete);
+#endif
 }
 
 string16 OmniboxViewViews::GetInstantSuggestion() const {
-  NOTIMPLEMENTED();
+#if defined(OS_WIN) || defined(USE_AURA)
+  return location_bar_view_->GetInstantSuggestion();
+#else
   return string16();
+#endif
 }
 
 int OmniboxViewViews::TextWidth() const {
@@ -578,6 +589,10 @@ int OmniboxViewViews::TextWidth() const {
 
 bool OmniboxViewViews::IsImeComposing() const {
   return false;
+}
+
+int OmniboxViewViews::GetMaxEditWidth(int entry_width) const {
+  return entry_width;
 }
 
 views::View* OmniboxViewViews::AddToView(views::View* parent) {
@@ -592,11 +607,11 @@ int OmniboxViewViews::OnPerformDrop(const views::DropTargetEvent& event) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// OmniboxViewViews, NotificationObserver implementation:
+// OmniboxViewViews, content::NotificationObserver implementation:
 
 void OmniboxViewViews::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED);
   SetBaseColor();
 }
@@ -707,11 +722,27 @@ string16 OmniboxViewViews::GetSelectedText() const {
 
 AutocompletePopupView* OmniboxViewViews::CreatePopupView(
     View* location_bar) {
-#if defined(TOUCH_UI)
-  typedef TouchAutocompletePopupContentsView AutocompleteContentsView;
-#else
   typedef AutocompletePopupContentsView AutocompleteContentsView;
-#endif
   return new AutocompleteContentsView(gfx::Font(), this, model_.get(),
                                       location_bar);
 }
+
+#if defined(USE_AURA)
+// static
+OmniboxView* OmniboxView::CreateOmniboxView(
+    AutocompleteEditController* controller,
+    ToolbarModel* toolbar_model,
+    Profile* profile,
+    CommandUpdater* command_updater,
+    bool popup_window_mode,
+    LocationBarView* location_bar) {
+  OmniboxViewViews* omnibox_view = new OmniboxViewViews(controller,
+                                                        toolbar_model,
+                                                        profile,
+                                                        command_updater,
+                                                        popup_window_mode,
+                                                        location_bar);
+  omnibox_view->Init();
+  return omnibox_view;
+}
+#endif

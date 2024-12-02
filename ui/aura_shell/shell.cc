@@ -5,21 +5,43 @@
 #include "ui/aura_shell/shell.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
+#include "ui/aura/aura_switches.h"
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/desktop.h"
-#include "ui/aura/toplevel_window_container.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_types.h"
+#include "ui/aura_shell/app_list.h"
+#include "ui/aura_shell/default_container_event_filter.h"
+#include "ui/aura_shell/default_container_layout_manager.h"
+#include "ui/aura_shell/desktop_event_filter.h"
 #include "ui/aura_shell/desktop_layout_manager.h"
+#include "ui/aura_shell/drag_drop_controller.h"
 #include "ui/aura_shell/launcher/launcher.h"
+#include "ui/aura_shell/modal_container_layout_manager.h"
+#include "ui/aura_shell/shadow_controller.h"
+#include "ui/aura_shell/shelf_layout_controller.h"
+#include "ui/aura_shell/shell_accelerator_controller.h"
+#include "ui/aura_shell/shell_accelerator_filter.h"
 #include "ui/aura_shell/shell_delegate.h"
 #include "ui/aura_shell/shell_factory.h"
+#include "ui/aura_shell/shell_tooltip_manager.h"
 #include "ui/aura_shell/shell_window_ids.h"
+#include "ui/aura_shell/stacking_controller.h"
+#include "ui/aura_shell/toplevel_layout_manager.h"
+#include "ui/aura_shell/toplevel_window_event_filter.h"
+#include "ui/aura_shell/workspace_controller.h"
 #include "ui/gfx/compositor/layer.h"
-#include "views/widget/widget.h"
+#include "ui/gfx/compositor/layer_animator.h"
+#include "ui/views/widget/native_widget_aura.h"
+#include "ui/views/widget/widget.h"
 
 namespace aura_shell {
 
 namespace {
+
+using views::Widget;
 
 // Creates each of the special window containers that holds windows of various
 // types in the shell UI. They are added to |containers| from back to front in
@@ -30,11 +52,15 @@ void CreateSpecialContainers(aura::Window::Windows* containers) {
       internal::kShellWindowId_DesktopBackgroundContainer);
   containers->push_back(background_container);
 
-  aura::Window* default_container = new aura::ToplevelWindowContainer;
+  aura::Window* default_container = new aura::Window(NULL);
+  default_container->SetEventFilter(
+      new ToplevelWindowEventFilter(default_container));
   default_container->set_id(internal::kShellWindowId_DefaultContainer);
   containers->push_back(default_container);
 
-  aura::Window* always_on_top_container = new aura::ToplevelWindowContainer;
+  aura::Window* always_on_top_container = new aura::Window(NULL);
+  always_on_top_container->SetEventFilter(
+      new ToplevelWindowEventFilter(always_on_top_container));
   always_on_top_container->set_id(
       internal::kShellWindowId_AlwaysOnTopContainer);
   containers->push_back(always_on_top_container);
@@ -43,10 +69,28 @@ void CreateSpecialContainers(aura::Window::Windows* containers) {
   launcher_container->set_id(internal::kShellWindowId_LauncherContainer);
   containers->push_back(launcher_container);
 
+  aura::Window* modal_container = new aura::Window(NULL);
+  modal_container->SetEventFilter(
+      new ToplevelWindowEventFilter(modal_container));
+  modal_container->SetLayoutManager(
+      new internal::ModalContainerLayoutManager(modal_container));
+  modal_container->set_id(internal::kShellWindowId_ModalContainer);
+  containers->push_back(modal_container);
+
+  // TODO(beng): Figure out if we can make this use ModalityEventFilter instead
+  //             of stops_event_propagation.
   aura::Window* lock_container = new aura::Window(NULL);
   lock_container->set_stops_event_propagation(true);
   lock_container->set_id(internal::kShellWindowId_LockScreenContainer);
   containers->push_back(lock_container);
+
+  aura::Window* lock_modal_container = new aura::Window(NULL);
+  lock_modal_container->SetEventFilter(
+      new ToplevelWindowEventFilter(lock_modal_container));
+  lock_modal_container->SetLayoutManager(
+      new internal::ModalContainerLayoutManager(lock_modal_container));
+  lock_modal_container->set_id(internal::kShellWindowId_LockModalContainer);
+  containers->push_back(lock_modal_container);
 
   aura::Window* status_container = new aura::Window(NULL);
   status_container->set_id(internal::kShellWindowId_StatusContainer);
@@ -57,60 +101,6 @@ void CreateSpecialContainers(aura::Window::Windows* containers) {
   containers->push_back(menu_container);
 }
 
-typedef std::pair<aura::Window*, gfx::Rect> WindowAndBoundsPair;
-
-void CalculateWindowBoundsAndScaleForTiling(
-    const gfx::Size& containing_size,
-    const aura::Window::Windows& windows,
-    float* x_scale,
-    float* y_scale,
-    std::vector<WindowAndBoundsPair>* bounds) {
-  *x_scale = 1.0f;
-  *y_scale = 1.0f;
-  int total_width = 0;
-  int max_height = 0;
-  int shown_window_count = 0;
-  for (aura::Window::Windows::const_iterator i = windows.begin();
-       i != windows.end(); ++i) {
-    if ((*i)->IsVisible()) {
-      total_width += (*i)->bounds().width();
-      max_height = std::max((*i)->bounds().height(), max_height);
-      shown_window_count++;
-    }
-  }
-
-  if (shown_window_count == 0)
-    return;
-
-  const int kPadding = 10;
-  total_width += (shown_window_count - 1) * kPadding;
-  if (total_width > containing_size.width()) {
-    *x_scale = static_cast<float>(containing_size.width()) /
-        static_cast<float>(total_width);
-  }
-  if (max_height > containing_size.height()) {
-    *y_scale = static_cast<float>(containing_size.height()) /
-        static_cast<float>(max_height);
-  }
-  *x_scale = *y_scale = std::min(*x_scale, *y_scale);
-
-  int x = std::max(0, static_cast<int>(
-      (containing_size.width() * - total_width * *x_scale) / 2));
-  for (aura::Window::Windows::const_iterator i = windows.begin();
-       i != windows.end();
-       ++i) {
-    if ((*i)->IsVisible()) {
-      const gfx::Rect& current_bounds((*i)->bounds());
-      int y = (containing_size.height() -
-               current_bounds.height() * *y_scale) / 2;
-      bounds->push_back(std::make_pair(*i,
-          gfx::Rect(x, y, current_bounds.width(), current_bounds.height())));
-      x += static_cast<int>(
-          static_cast<float>(current_bounds.width() + kPadding) * *x_scale);
-    }
-  }
-}
-
 }  // namespace
 
 // static
@@ -119,49 +109,134 @@ Shell* Shell::instance_ = NULL;
 ////////////////////////////////////////////////////////////////////////////////
 // Shell, public:
 
-Shell::Shell()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
-  aura::Desktop::GetInstance()->SetDelegate(this);
+Shell::Shell(ShellDelegate* delegate)
+    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      accelerator_controller_(new ShellAcceleratorController),
+      delegate_(delegate) {
+  aura::Desktop::GetInstance()->SetEventFilter(
+      new internal::DesktopEventFilter);
+  aura::Desktop::GetInstance()->SetStackingClient(
+      new internal::StackingController);
 }
 
 Shell::~Shell() {
+  RemoveDesktopEventFilter(accelerator_filter_.get());
+
+  // ShellTooltipManager needs a valid shell instance. We delete it before
+  // deleting the shell |instance_|.
+  RemoveDesktopEventFilter(tooltip_manager_.get());
+  aura::Desktop::GetInstance()->SetProperty(aura::kDesktopTooltipClientKey,
+      NULL);
+
+  // Make sure we delete WorkspaceController before launcher is
+  // deleted as it has a reference to launcher model.
+  workspace_controller_.reset();
+  launcher_.reset();
+
+  // Delete containers now so that child windows does not access
+  // observers when they are destructed. This has to be after launcher
+  // is destructed because launcher closes the widget in its destructor.
+  aura::Desktop* desktop_window = aura::Desktop::GetInstance();
+  while (!desktop_window->children().empty()) {
+    aura::Window* child = desktop_window->children()[0];
+    delete child;
+  }
+
+  tooltip_manager_.reset();
+
+  // Drag drop controller needs a valid shell instance. We destroy it first.
+  drag_drop_controller_.reset();
+
+  DCHECK(instance_ == this);
+  instance_ = NULL;
+}
+
+// static
+Shell* Shell::CreateInstance(ShellDelegate* delegate) {
+  CHECK(!instance_);
+  instance_ = new Shell(delegate);
+  instance_->Init();
+  return instance_;
 }
 
 // static
 Shell* Shell::GetInstance() {
-  if (!instance_) {
-    instance_ = new Shell;
-    instance_->Init();
-  }
+  DCHECK(instance_);
   return instance_;
 }
 
+// static
+void Shell::DeleteInstance() {
+  delete instance_;
+  instance_ = NULL;
+}
+
 void Shell::Init() {
+  aura::Desktop* desktop_window = aura::Desktop::GetInstance();
+  desktop_window->SetCursor(aura::kCursorPointer);
+
   aura::Window::Windows containers;
   CreateSpecialContainers(&containers);
   aura::Window::Windows::const_iterator i;
   for (i = containers.begin(); i != containers.end(); ++i) {
-    (*i)->Init();
-    aura::Desktop::GetInstance()->window()->AddChild(*i);
+    (*i)->Init(ui::Layer::LAYER_HAS_NO_TEXTURE);
+    desktop_window->AddChild(*i);
     (*i)->Show();
   }
 
-  aura::Window* root_window = aura::Desktop::GetInstance()->window();
+  internal::StackingController* stacking_controller =
+      static_cast<internal::StackingController*>(
+          desktop_window->stacking_client());
+  stacking_controller->Init();
+
   internal::DesktopLayoutManager* desktop_layout =
-      new internal::DesktopLayoutManager(root_window);
-  root_window->SetLayoutManager(desktop_layout);
+      new internal::DesktopLayoutManager(desktop_window);
+  desktop_window->SetLayoutManager(desktop_layout);
 
   desktop_layout->set_background_widget(internal::CreateDesktopBackground());
-  aura::ToplevelWindowContainer* toplevel_container =
-      GetContainer(internal::kShellWindowId_DefaultContainer)->
-          AsToplevelWindowContainer();
-  launcher_.reset(new Launcher(toplevel_container));
-  desktop_layout->set_launcher_widget(launcher_->widget());
-  desktop_layout->set_status_area_widget(internal::CreateStatusArea());
-}
+  aura::Window* default_container =
+      GetContainer(internal::kShellWindowId_DefaultContainer);
+  launcher_.reset(new Launcher(default_container));
 
-void Shell::SetDelegate(ShellDelegate* delegate) {
-  delegate_.reset(delegate);
+  views::Widget* status_widget = NULL;
+  if (delegate_.get())
+    status_widget = delegate_->CreateStatusArea();
+  if (!status_widget)
+    status_widget = internal::CreateStatusArea();
+
+  shelf_layout_controller_.reset(new internal::ShelfLayoutController(
+      launcher_->widget(), status_widget));
+  desktop_layout->set_shelf(shelf_layout_controller_.get());
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kAuraNoShadows))
+    shadow_controller_.reset(new internal::ShadowController());
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAuraWindows)) {
+    EnableWorkspaceManager();
+  } else {
+    internal::ToplevelLayoutManager* toplevel_layout_manager =
+        new internal::ToplevelLayoutManager();
+    default_container->SetLayoutManager(toplevel_layout_manager);
+    toplevel_layout_manager->set_shelf(shelf_layout_controller_.get());
+  }
+
+  // Force a layout.
+  desktop_layout->OnWindowResized();
+
+  // Initialize ShellAcceleratorFilter
+  accelerator_filter_.reset(new internal::ShellAcceleratorFilter);
+  AddDesktopEventFilter(accelerator_filter_.get());
+
+  // Initialize ShellTooltipManager
+  tooltip_manager_.reset(new ShellTooltipManager);
+  aura::Desktop::GetInstance()->SetProperty(aura::kDesktopTooltipClientKey,
+      static_cast<aura::TooltipClient*>(tooltip_manager_.get()));
+  AddDesktopEventFilter(tooltip_manager_.get());
+
+  // Initialize drag drop controller.
+  drag_drop_controller_.reset(new internal::DragDropController);
+  aura::Desktop::GetInstance()->SetProperty(aura::kDesktopDragDropClientKey,
+      static_cast<aura::DragDropClient*>(drag_drop_controller_.get()));
 }
 
 aura::Window* Shell::GetContainer(int container_id) {
@@ -170,80 +245,45 @@ aura::Window* Shell::GetContainer(int container_id) {
 }
 
 const aura::Window* Shell::GetContainer(int container_id) const {
-  return aura::Desktop::GetInstance()->window()->GetChildById(container_id);
+  return aura::Desktop::GetInstance()->GetChildById(container_id);
 }
 
-void Shell::TileWindows() {
-  to_restore_.clear();
-  aura::Window* window_container =
-      aura::Desktop::GetInstance()->window()->GetChildById(
-          internal::kShellWindowId_DefaultContainer);
-  const aura::Window::Windows& windows = window_container->children();
-  if (windows.empty())
-    return;
-  float x_scale = 1.0f;
-  float y_scale = 1.0f;
-  std::vector<WindowAndBoundsPair> bounds;
-  CalculateWindowBoundsAndScaleForTiling(window_container->bounds().size(),
-                                         windows, &x_scale, &y_scale, &bounds);
-  if (bounds.empty())
-    return;
-  ui::Transform transform;
-  transform.SetScale(x_scale, y_scale);
-  for (size_t i = 0; i < bounds.size(); ++i) {
-    to_restore_.push_back(
-        std::make_pair(bounds[i].first, bounds[i].first->bounds()));
-    bounds[i].first->layer()->SetAnimation(
-        aura::Window::CreateDefaultAnimation());
-    bounds[i].first->SetBounds(bounds[i].second);
-    bounds[i].first->layer()->SetTransform(transform);
-    bounds[i].first->layer()->SetOpacity(0.5f);
-  }
-
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&Shell::RestoreTiledWindows, method_factory_.GetWeakPtr()),
-      2000);
+void Shell::AddDesktopEventFilter(aura::EventFilter* filter) {
+  static_cast<internal::DesktopEventFilter*>(
+      aura::Desktop::GetInstance()->event_filter())->AddFilter(filter);
 }
 
-void Shell::RestoreTiledWindows() {
-  ui::Transform identity_transform;
-  for (size_t i = 0; i < to_restore_.size(); ++i) {
-    to_restore_[i].first->layer()->SetAnimation(
-        aura::Window::CreateDefaultAnimation());
-    to_restore_[i].first->SetBounds(to_restore_[i].second);
-    to_restore_[i].first->layer()->SetTransform(identity_transform);
-    to_restore_[i].first->layer()->SetOpacity(1.0f);
-  }
-  to_restore_.clear();
+void Shell::RemoveDesktopEventFilter(aura::EventFilter* filter) {
+  static_cast<internal::DesktopEventFilter*>(
+      aura::Desktop::GetInstance()->event_filter())->RemoveFilter(filter);
+}
+
+void Shell::ToggleOverview() {
+  if (workspace_controller_.get())
+    workspace_controller_->ToggleOverview();
+}
+
+void Shell::ToggleAppList() {
+  if (!app_list_.get())
+    app_list_.reset(new internal::AppList);
+  app_list_->SetVisible(!app_list_->IsVisible());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Shell, aura::DesktopDelegate implementation:
+// Shell, private:
 
-void Shell::AddChildToDefaultParent(aura::Window* window) {
-  aura::Window* parent = NULL;
-  switch (window->type()) {
-    case aura::kWindowType_Toplevel:
-    case aura::kWindowType_Control:
-      parent = GetContainer(internal::kShellWindowId_DefaultContainer);
-      break;
-    case aura::kWindowType_Menu:
-    case aura::kWindowType_Tooltip:
-      parent = GetContainer(internal::kShellWindowId_MenusAndTooltipsContainer);
-      break;
-    default:
-      // This will crash for controls, since they can't be parented to anything.
-      break;
-  }
-  parent->AddChild(window);
-}
+void Shell::EnableWorkspaceManager() {
+  aura::Window* default_container =
+      GetContainer(internal::kShellWindowId_DefaultContainer);
 
-aura::Window* Shell::GetTopmostWindowToActivate(aura::Window* ignore) const {
-  const aura::ToplevelWindowContainer* container =
-      GetContainer(internal::kShellWindowId_DefaultContainer)->
-          AsToplevelWindowContainer();
-  return container->GetTopmostWindowToActivate(ignore);
+  workspace_controller_.reset(
+      new internal::WorkspaceController(default_container));
+  workspace_controller_->SetLauncherModel(launcher_->model());
+  default_container->SetEventFilter(
+      new internal::DefaultContainerEventFilter(default_container));
+  default_container->SetLayoutManager(
+      new internal::DefaultContainerLayoutManager(
+          workspace_controller_->workspace_manager()));
 }
 
 }  // namespace aura_shell

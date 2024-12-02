@@ -55,7 +55,7 @@ void MetricsLogManager::ResumePausedLog() {
 }
 
 void MetricsLogManager::StoreStagedLogAsUnsent(LogType log_type) {
-  DCHECK(staged_log_.get());
+  DCHECK(has_staged_log());
   // If compressing the log failed, there's nothing to store.
   if (compressed_staged_log_text_.empty())
     return;
@@ -105,16 +105,16 @@ void MetricsLogManager::LoadPersistedUnsentLogs() {
 void MetricsLogManager::CompressStagedLog() {
   int text_size = staged_log_->GetEncodedLogSize();
   std::string staged_log_text;
-  // Leave room for the NULL terminator.
+  DCHECK_GT(text_size, 0);
   staged_log_->GetEncodedLog(WriteInto(&staged_log_text, text_size + 1),
                              text_size);
 
   bool success = Bzip2Compress(staged_log_text, &compressed_staged_log_text_);
   if (success) {
     // Allow security-conscious users to see all metrics logs that we send.
-    VLOG(1) << "METRICS LOG: " << staged_log_text;
+    DVLOG(1) << "METRICS LOG: " << staged_log_text;
   } else {
-    LOG(DFATAL) << "Failed to compress log for transmission.";
+    NOTREACHED() << "Failed to compress log for transmission.";
   }
 }
 

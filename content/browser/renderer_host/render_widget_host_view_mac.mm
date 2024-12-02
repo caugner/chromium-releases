@@ -6,26 +6,24 @@
 
 #include <QuartzCore/QuartzCore.h>
 
+#include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
-#include "base/metrics/histogram.h"
 #import "base/memory/scoped_nsobject.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/gpu/gpu_process_host.h"
-#include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/mac/closure_blocks_leopard_compat.h"
 #include "content/browser/plugin_process_host.h"
 #import "content/browser/renderer_host/accelerated_plugin_view_mac.h"
 #include "content/browser/renderer_host/backing_store_mac.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_delegate.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_editcommand_helper.h"
@@ -34,20 +32,22 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "skia/ext/platform_canvas.h"
-#import "third_party/mozilla/ComplexTextInputPanel.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebScreenInfoFactory.h"
+#import "third_party/mozilla/ComplexTextInputPanel.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/surface/io_surface_support_mac.h"
 #include "webkit/glue/webaccessibility.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
+using content::BrowserThread;
 using WebKit::WebInputEvent;
 using WebKit::WebInputEventFactory;
 using WebKit::WebMouseEvent;
@@ -209,17 +209,28 @@ NSWindow* ApparentWindowForView(NSView* view) {
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostView, public:
+
+// static
+void RenderWidgetHostView::GetDefaultScreenInfo(
+    WebKit::WebScreenInfo* results) {
+  *results = WebKit::WebScreenInfoFactory::screenInfo(NULL);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewMac, public:
 
 RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
     : render_widget_host_(widget),
       about_to_validate_and_paint_(false),
       call_set_needs_display_in_rect_pending_(false),
+      last_frame_was_accelerated_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       is_loading_(false),
       is_hidden_(false),
       is_showing_context_menu_(false),
-      shutdown_factory_(this),
+      weak_factory_(this),
+      accelerated_compositing_active_(false),
       needs_gpu_visibility_update_after_repaint_(false),
       compositing_surface_(gfx::kNullPluginWindow) {
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_| goes away.
@@ -425,7 +436,7 @@ void RenderWidgetHostViewMac::Blur() {
   [[cocoa_view_ window] makeFirstResponder:nil];
 }
 
-bool RenderWidgetHostViewMac::HasFocus() {
+bool RenderWidgetHostViewMac::HasFocus() const {
   return [[cocoa_view_ window] firstResponder] == cocoa_view_;
 }
 
@@ -526,6 +537,8 @@ void RenderWidgetHostViewMac::ImeCompositionRangeChanged(
 void RenderWidgetHostViewMac::DidUpdateBackingStore(
     const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
     const std::vector<gfx::Rect>& copy_rects) {
+  last_frame_was_accelerated_ = false;
+
   if (!is_hidden_) {
     std::vector<gfx::Rect> rects(copy_rects);
 
@@ -577,7 +590,6 @@ void RenderWidgetHostViewMac::DidUpdateBackingStore(
 
 void RenderWidgetHostViewMac::RenderViewGone(base::TerminationStatus status,
                                              int error_code) {
-  // TODO(darin): keep this around, and draw sad-tab into it.
   Destroy();
 }
 
@@ -714,11 +726,11 @@ void RenderWidgetHostViewMac::SetTakesFocusOnlyOnMouseDown(bool flag) {
 }
 
 void RenderWidgetHostViewMac::KillSelf() {
-  if (shutdown_factory_.empty()) {
+  if (!weak_factory_.HasWeakPtrs()) {
     [cocoa_view_ setHidden:YES];
     MessageLoop::current()->PostTask(FROM_HERE,
-        shutdown_factory_.NewRunnableMethod(
-            &RenderWidgetHostViewMac::ShutdownHost));
+        base::Bind(&RenderWidgetHostViewMac::ShutdownHost,
+                   weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -854,30 +866,34 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceSetTransportDIB(
 }
 
 void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
-    gfx::PluginWindowHandle window,
-    uint64 surface_id,
-    int renderer_id,
-    int32 route_id,
+    const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
   TRACE_EVENT0("browser",
       "RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped");
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  AcceleratedPluginView* view = ViewForPluginWindowHandle(window);
+  AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
   DCHECK(view);
   if (view) {
-    plugin_container_manager_.SetSurfaceWasPaintedTo(window, surface_id);
+    last_frame_was_accelerated_ = (params.window ==
+        plugin_container_manager_.root_container_handle());
+    plugin_container_manager_.SetSurfaceWasPaintedTo(params.window,
+                                                     params.surface_id);
 
     // The surface is hidden until its first paint, to not show gargabe.
-    if (plugin_container_manager_.SurfaceShouldBeVisible(window))
+    if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
       [view setHidden:NO];
     [view drawView];
   }
 
-  if (renderer_id != 0 || route_id != 0) {
-    AcknowledgeSwapBuffers(renderer_id,
-                           route_id,
-                           gpu_host_id);
+  if (params.route_id != 0) {
+    RenderWidgetHost::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
   }
+}
+
+void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
+    const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
+    int gpu_host_id) {
+  NOTIMPLEMENTED();
 }
 
 void RenderWidgetHostViewMac::UpdateRootGpuViewVisibility(
@@ -909,48 +925,16 @@ void RenderWidgetHostViewMac::HandleDelayedGpuViewHiding() {
   }
 }
 
-void RenderWidgetHostViewMac::AcknowledgeSwapBuffers(
-    int renderer_id,
-    int32 route_id,
-    int gpu_host_id) {
-  TRACE_EVENT0("gpu", "RenderWidgetHostViewMac::AcknowledgeSwapBuffers");
-  // Called on the display link thread. Hand actual work off to the IO thread,
-  // because |GpuProcessHost::Get()| can only be called there.
-  // Currently, this is never called for plugins.
-  if (render_widget_host_) {
-    DCHECK_EQ(render_widget_host_->process()->id(), renderer_id);
-    // |render_widget_host_->routing_id()| and |route_id| are usually not
-    // equal: The former identifies the channel from the RWH in the browser
-    // process to the corresponding render widget in the renderer process, while
-    // the latter identifies the channel from the GpuCommandBufferStub in the
-    // GPU process to the corresponding command buffer client in the renderer.
-  }
-
-  // TODO(apatrick): Send the acknowledgement via the UI thread when running in
-  // single process or in process GPU mode for now. This is bad from a
-  // performance point of view but the plan is to not use AcceleratedSurface at
-  // all in these cases.
-  if (gpu_host_id == 0) {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        NewRunnableFunction(&GpuProcessHostUIShim::SendToGpuHost,
-                            gpu_host_id,
-                            new AcceleratedSurfaceMsg_BuffersSwappedACK(
-                                route_id)));
-  } else {
-    GpuProcessHost::SendOnIO(
-        gpu_host_id,
-        content::CAUSE_FOR_GPU_LAUNCH_NO_LAUNCH,
-        new AcceleratedSurfaceMsg_BuffersSwappedACK(route_id));
-  }
-}
-
-void RenderWidgetHostViewMac::GpuRenderingStateDidChange() {
+void RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (GetRenderWidgetHost()->is_accelerated_compositing_active()) {
-    UpdateRootGpuViewVisibility(
-        GetRenderWidgetHost()->is_accelerated_compositing_active());
+  bool activated = GetRenderWidgetHost()->is_accelerated_compositing_active();
+  bool changed = accelerated_compositing_active_ != activated;
+  accelerated_compositing_active_ = activated;
+  if (!changed)
+    return;
+
+  if (accelerated_compositing_active_) {
+    UpdateRootGpuViewVisibility(accelerated_compositing_active_);
   } else {
     needs_gpu_visibility_update_after_repaint_ = true;
   }
@@ -1003,11 +987,6 @@ void RenderWidgetHostViewMac::ForceTextureReload() {
   plugin_container_manager_.ForceTextureReload();
 }
 
-void RenderWidgetHostViewMac::SetVisuallyDeemphasized(const SkColor* color,
-                                                      bool animate) {
-  // This is not used on mac.
-}
-
 void RenderWidgetHostViewMac::UnhandledWheelEvent(
     const WebKit::WebMouseWheelEvent& event) {
   [cocoa_view_ gotUnhandledWheelEvent];
@@ -1054,7 +1033,7 @@ void RenderWidgetHostViewMac::UnlockMouse() {
 }
 
 void RenderWidgetHostViewMac::ShutdownHost() {
-  shutdown_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
   render_widget_host_->Shutdown();
   // Do not touch any members at this point, |this| has been deleted.
 }
@@ -1064,10 +1043,8 @@ gfx::Rect RenderWidgetHostViewMac::GetViewCocoaBounds() const {
 }
 
 void RenderWidgetHostViewMac::SetActive(bool active) {
-  if (render_widget_host_) {
-    render_widget_host_->Send(new ViewMsg_SetActive(
-        render_widget_host_->routing_id(), active));
-  }
+  if (render_widget_host_)
+    render_widget_host_->SetActive(active);
   if (HasFocus())
     SetTextInputActive(active);
   if (!active) {
@@ -1650,25 +1627,9 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (void)setFrameSize:(NSSize)newSize {
+  // NB: -[NSView setFrame:] calls through -setFrameSize:, so overriding
+  // -setFrame: isn't neccessary.
   [super setFrameSize:newSize];
-  if (renderWidgetHostView_->render_widget_host_)
-    renderWidgetHostView_->render_widget_host_->WasResized();
-}
-
-- (void)setFrame:(NSRect)frameRect {
-  [super setFrame:frameRect];
-  if (renderWidgetHostView_->render_widget_host_)
-    renderWidgetHostView_->render_widget_host_->WasResized();
-}
-
-- (void)setFrameWithDeferredUpdate:(NSRect)frameRect {
-  [super setFrame:frameRect];
-  [self performSelector:@selector(renderWidgetHostWasResized)
-             withObject:nil
-             afterDelay:0];
-}
-
-- (void)renderWidgetHostWasResized {
   if (renderWidgetHostView_->render_widget_host_)
     renderWidgetHostView_->render_widget_host_->WasResized();
 }
@@ -1741,8 +1702,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
   const gfx::Rect damagedRect([self flipNSRectToRect:dirtyRect]);
 
-  if (renderWidgetHostView_->render_widget_host_->
-      is_accelerated_compositing_active()) {
+  if (renderWidgetHostView_->last_frame_was_accelerated_) {
     gfx::Rect gpuRect;
 
     gfx::PluginWindowHandle root_handle =

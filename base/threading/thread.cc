@@ -4,11 +4,11 @@
 
 #include "base/threading/thread.h"
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/thread_local.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/tracked_objects.h"
 
 namespace base {
 
@@ -18,19 +18,16 @@ namespace {
 // because its Stop method was called.  This allows us to catch cases where
 // MessageLoop::Quit() is called directly, which is unexpected when using a
 // Thread to setup and run a MessageLoop.
-base::LazyInstance<base::ThreadLocalBoolean> lazy_tls_bool(
-    base::LINKER_INITIALIZED);
+base::LazyInstance<base::ThreadLocalBoolean> lazy_tls_bool =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
-// This task is used to trigger the message loop to exit.
-class ThreadQuitTask : public Task {
- public:
-  virtual void Run() {
-    MessageLoop::current()->Quit();
-    Thread::SetThreadWasQuitProperly(true);
-  }
-};
+// This is used to trigger the message loop to exit.
+void ThreadQuitHelper() {
+  MessageLoop::current()->Quit();
+  Thread::SetThreadWasQuitProperly(true);
+}
 
 // Used to pass data to ThreadMain.  This structure is allocated on the stack
 // from within StartWithOptions.
@@ -122,7 +119,7 @@ void Thread::StopSoon() {
     return;
 
   stopping_ = true;
-  message_loop_->PostTask(FROM_HERE, new ThreadQuitTask());
+  message_loop_->PostTask(FROM_HERE, base::Bind(&ThreadQuitHelper));
 }
 
 void Thread::Run(MessageLoop* message_loop) {
@@ -152,9 +149,6 @@ void Thread::ThreadMain() {
     ANNOTATE_THREAD_NAME(name_.c_str());  // Tell the name to race detector.
     message_loop.set_thread_name(name_);
     message_loop_ = &message_loop;
-#if defined(TRACK_ALL_TASK_OBJECTS)
-    tracked_objects::ThreadData::InitializeThreadContext(name_);
-#endif  // TRACK_ALL_TASK_OBJECTS
 
     // Let the thread do extra initialization.
     // Let's do this before signaling we are started.
@@ -169,7 +163,7 @@ void Thread::ThreadMain() {
     // Let the thread do extra cleanup.
     CleanUp();
 
-    // Assert that MessageLoop::Quit was called by ThreadQuitTask.
+    // Assert that MessageLoop::Quit was called by ThreadQuitHelper.
     DCHECK(GetThreadWasQuitProperly());
 
     // We can't receive messages anymore.

@@ -21,11 +21,11 @@ MappedHostResolver::~MappedHostResolver() {
 
 int MappedHostResolver::Resolve(const RequestInfo& info,
                                 AddressList* addresses,
-                                OldCompletionCallback* callback,
+                                const CompletionCallback& callback,
                                 RequestHandle* out_req,
                                 const BoundNetLog& net_log) {
   DCHECK(addresses);
-  DCHECK(callback);
+  DCHECK_EQ(false, callback.is_null());
   // Modify the request before forwarding it to |impl_|.
   RequestInfo modified_info = info;
   HostPortPair host_port(info.host_port_pair());
@@ -45,16 +45,8 @@ void MappedHostResolver::CancelRequest(RequestHandle req) {
   impl_->CancelRequest(req);
 }
 
-void MappedHostResolver::AddObserver(Observer* observer) {
-  impl_->AddObserver(observer);
-}
-
-void MappedHostResolver::RemoveObserver(Observer* observer) {
-  impl_->RemoveObserver(observer);
-}
-
-HostResolverImpl* MappedHostResolver::GetAsHostResolverImpl() {
-  return impl_->GetAsHostResolverImpl();
+void MappedHostResolver::ProbeIPv6Support() {
+  impl_->ProbeIPv6Support();
 }
 
 HostCache* MappedHostResolver::GetHostCache() {

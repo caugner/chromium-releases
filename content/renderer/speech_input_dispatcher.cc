@@ -12,10 +12,10 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSpeechInputListener.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using WebKit::WebDocument;
@@ -85,7 +85,7 @@ void SpeechInputDispatcher::stopRecording(int request_id) {
 
 void SpeechInputDispatcher::OnSpeechRecognitionResult(
     int request_id,
-    const speech_input::SpeechInputResult& result) {
+    const content::SpeechInputResult& result) {
   VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionResult enter";
   WebKit::WebSpeechInputResultArray webkit_result(result.hypotheses.size());
   for (size_t i = 0; i < result.hypotheses.size(); ++i) {

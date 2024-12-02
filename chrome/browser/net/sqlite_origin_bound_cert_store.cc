@@ -7,6 +7,7 @@
 #include <list>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -15,10 +16,13 @@
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "net/base/ssl_client_cert_type.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
+
+using content::BrowserThread;
 
 // This class is designed to be shared between any calling threads and the
 // database thread.  It batches operations and commits them on a timer.
@@ -45,7 +49,7 @@ class SQLiteOriginBoundCertStore::Backend
       const net::DefaultOriginBoundCertStore::OriginBoundCert& cert);
 
   // Commit pending operations as soon as possible.
-  void Flush(Task* completion_task);
+  void Flush(const base::Closure& completion_task);
 
   // Commit any pending operations and close the database.  This must be called
   // before the object is destructed.
@@ -113,7 +117,7 @@ class SQLiteOriginBoundCertStore::Backend
 };
 
 // Version number of the database.
-static const int kCurrentVersionNumber = 1;
+static const int kCurrentVersionNumber = 2;
 static const int kCompatibleVersionNumber = 1;
 
 namespace {
@@ -124,7 +128,8 @@ bool InitTable(sql::Connection* db) {
     if (!db->Execute("CREATE TABLE origin_bound_certs ("
                      "origin TEXT NOT NULL UNIQUE PRIMARY KEY,"
                      "private_key BLOB NOT NULL,"
-                     "cert BLOB NOT NULL)"))
+                     "cert BLOB NOT NULL,"
+                     "cert_type INTEGER)"))
       return false;
   }
 
@@ -166,7 +171,7 @@ bool SQLiteOriginBoundCertStore::Backend::Load(
 
   // Slurp all the certs into the out-vector.
   sql::Statement smt(db_->GetUniqueStatement(
-      "SELECT origin, private_key, cert FROM origin_bound_certs"));
+      "SELECT origin, private_key, cert, cert_type FROM origin_bound_certs"));
   if (!smt) {
     NOTREACHED() << "select statement prep failed";
     db_.reset();
@@ -180,6 +185,7 @@ bool SQLiteOriginBoundCertStore::Backend::Load(
     scoped_ptr<net::DefaultOriginBoundCertStore::OriginBoundCert> cert(
         new net::DefaultOriginBoundCertStore::OriginBoundCert(
             smt.ColumnString(0),  // origin
+            static_cast<net::SSLClientCertType>(smt.ColumnInt(3)),
             private_key_from_db,
             cert_from_db));
     certs->push_back(cert.release());
@@ -201,6 +207,28 @@ bool SQLiteOriginBoundCertStore::Backend::EnsureDatabaseVersion() {
   }
 
   int cur_version = meta_table_.GetVersionNumber();
+  if (cur_version == 1) {
+    sql::Transaction transaction(db_.get());
+    if (!transaction.Begin())
+      return false;
+    if (!db_->Execute("ALTER TABLE origin_bound_certs ADD COLUMN cert_type "
+                      "INTEGER")) {
+      LOG(WARNING) << "Unable to update origin bound cert database to "
+                   << "version 2.";
+      return false;
+    }
+    // All certs in version 1 database are rsa_sign, which has a value of 1.
+    if (!db_->Execute("UPDATE origin_bound_certs SET cert_type = 1")) {
+      LOG(WARNING) << "Unable to update origin bound cert database to "
+                   << "version 2.";
+      return false;
+    }
+    ++cur_version;
+    meta_table_.SetVersionNumber(cur_version);
+    meta_table_.SetCompatibleVersionNumber(
+        std::min(cur_version, kCompatibleVersionNumber));
+    transaction.Commit();
+  }
 
   // Put future migration cases here.
 
@@ -270,8 +298,8 @@ void SQLiteOriginBoundCertStore::Backend::Commit() {
     return;
 
   sql::Statement add_smt(db_->GetCachedStatement(SQL_FROM_HERE,
-      "INSERT INTO origin_bound_certs (origin, private_key, cert) "
-      "VALUES (?,?,?)"));
+      "INSERT INTO origin_bound_certs (origin, private_key, cert, cert_type) "
+      "VALUES (?,?,?,?)"));
   if (!add_smt) {
     NOTREACHED();
     return;
@@ -301,6 +329,7 @@ void SQLiteOriginBoundCertStore::Backend::Commit() {
         add_smt.BindBlob(1, private_key.data(), private_key.size());
         const std::string& cert = po->cert().cert();
         add_smt.BindBlob(2, cert.data(), cert.size());
+        add_smt.BindInt(3, po->cert().type());
         if (!add_smt.Run())
           NOTREACHED() << "Could not add an origin bound cert to the DB.";
         break;
@@ -320,11 +349,12 @@ void SQLiteOriginBoundCertStore::Backend::Commit() {
   transaction.Commit();
 }
 
-void SQLiteOriginBoundCertStore::Backend::Flush(Task* completion_task) {
+void SQLiteOriginBoundCertStore::Backend::Flush(
+    const base::Closure& completion_task) {
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::DB));
   BrowserThread::PostTask(
-      BrowserThread::DB, FROM_HERE, NewRunnableMethod(this, &Backend::Commit));
-  if (completion_task) {
+      BrowserThread::DB, FROM_HERE, base::Bind(&Backend::Commit, this));
+  if (!completion_task.is_null()) {
     // We want the completion task to run immediately after Commit() returns.
     // Posting it from here means there is less chance of another task getting
     // onto the message queue first, than if we posted it from Commit() itself.
@@ -396,9 +426,9 @@ void SQLiteOriginBoundCertStore::SetClearLocalStateOnExit(
     backend_->SetClearLocalStateOnExit(clear_local_state);
 }
 
-void SQLiteOriginBoundCertStore::Flush(Task* completion_task) {
+void SQLiteOriginBoundCertStore::Flush(const base::Closure& completion_task) {
   if (backend_.get())
     backend_->Flush(completion_task);
-  else if (completion_task)
+  else if (!completion_task.is_null())
     MessageLoop::current()->PostTask(FROM_HERE, completion_task);
 }

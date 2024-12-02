@@ -10,7 +10,7 @@
 #include "chrome/browser/ui/constrained_window.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 class TabContentsWrapper;
 
@@ -69,6 +69,7 @@ class ConstrainedWindowViews : public views::Widget,
   virtual void ShowConstrainedWindow() OVERRIDE;
   virtual void CloseConstrainedWindow() OVERRIDE;
   virtual void FocusConstrainedWindow() OVERRIDE;
+  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
 
  private:
   // Overridden from views::Widget:

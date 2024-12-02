@@ -42,6 +42,10 @@ namespace history {
 static const int kCurrentVersionNumber = 5;
 static const int kCompatibleVersionNumber = 5;
 
+// Use 90 quality (out of 100) which is pretty high, because we're very
+// sensitive to artifacts for these small sized, highly detailed images.
+static const int kImageQuality = 90;
+
 ThumbnailDatabase::ThumbnailDatabase()
     : history_publisher_(NULL),
       use_top_sites_(false) {
@@ -262,7 +266,8 @@ void ThumbnailDatabase::SetPageThumbnail(
         return;
 
       std::vector<unsigned char> jpeg_data;
-      bool encoded = gfx::JPEGEncodedDataFromImage(*thumbnail, &jpeg_data);
+      bool encoded = gfx::JPEGEncodedDataFromImage(*thumbnail, kImageQuality,
+                                                   &jpeg_data);
       if (encoded) {
         statement.BindInt64(0, id);
         statement.BindDouble(1, score.boring_score);
@@ -545,6 +550,32 @@ bool ThumbnailDatabase::HasMappingFor(FaviconID id) {
   return statement.Step();
 }
 
+bool ThumbnailDatabase::CloneIconMapping(const GURL& old_page_url,
+                                         const GURL& new_page_url) {
+  sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
+      "SELECT icon_id FROM icon_mapping "
+      "WHERE page_url=?"));
+  if (!statement)
+    return false;
+
+  // Do nothing if there are existing bindings
+  statement.BindString(0, URLDatabase::GURLToDatabaseURL(new_page_url));
+  if (statement.Step())
+    return true;
+
+  statement.Assign(db_.GetCachedStatement(SQL_FROM_HERE,
+      "INSERT INTO icon_mapping (page_url, icon_id) "
+        "SELECT ?, icon_id FROM icon_mapping "
+        "WHERE page_url = ?"));
+  if (!statement)
+    return false;
+
+  statement.BindString(0, URLDatabase::GURLToDatabaseURL(new_page_url));
+  statement.BindString(1, URLDatabase::GURLToDatabaseURL(old_page_url));
+  return statement.Run();
+}
+
+
 bool ThumbnailDatabase::MigrateIconMappingData(URLDatabase* url_db) {
   URLDatabase::IconMappingEnumerator e;
   if (!url_db->InitIconMappingEnumeratorForEverything(&e))
@@ -678,6 +709,10 @@ bool ThumbnailDatabase::RenameAndDropThumbnails(const FilePath& old_db_file,
 
   file_util::Delete(old_db_file, false);
 
+  meta_table_.Reset();
+  if (!meta_table_.Init(&db_, kCurrentVersionNumber, kCompatibleVersionNumber))
+    return false;
+
   InitFaviconsIndex();
 
   // Reopen the transaction.
@@ -735,6 +770,10 @@ IconMappingID ThumbnailDatabase::AddIconMapping(const GURL& page_url,
     return 0;
 
   return db_.GetLastInsertRowId();
+}
+
+bool ThumbnailDatabase::IsLatestVersion() {
+  return meta_table_.GetVersionNumber() == kCurrentVersionNumber;
 }
 
 bool ThumbnailDatabase::UpgradeToVersion4() {

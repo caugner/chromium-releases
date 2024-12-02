@@ -13,8 +13,6 @@
 #include "net/base/io_buffer.h"
 #include "net/socket/socket.h"
 
-class Task;
-
 namespace base {
 class MessageLoopProxy;
 }  // namespace base
@@ -108,13 +106,13 @@ class BufferedSocketWriterBase
 
 class BufferedSocketWriter : public BufferedSocketWriterBase {
  public:
-  BufferedSocketWriter(base::MessageLoopProxy* message_loop);
+  explicit BufferedSocketWriter(base::MessageLoopProxy* message_loop);
   virtual ~BufferedSocketWriter();
 
  protected:
-  virtual void GetNextPacket_Locked(net::IOBuffer** buffer, int* size);
-  virtual void AdvanceBufferPosition_Locked(int written);
-  virtual void OnError_Locked(int result);
+  virtual void GetNextPacket_Locked(net::IOBuffer** buffer, int* size) OVERRIDE;
+  virtual void AdvanceBufferPosition_Locked(int written) OVERRIDE;
+  virtual void OnError_Locked(int result) OVERRIDE;
 
  private:
   scoped_refptr<net::DrainableIOBuffer> current_buf_;
@@ -122,13 +120,13 @@ class BufferedSocketWriter : public BufferedSocketWriterBase {
 
 class BufferedDatagramWriter : public BufferedSocketWriterBase {
  public:
-  BufferedDatagramWriter(base::MessageLoopProxy* message_loop);
+  explicit BufferedDatagramWriter(base::MessageLoopProxy* message_loop);
   virtual ~BufferedDatagramWriter();
 
  protected:
-  virtual void GetNextPacket_Locked(net::IOBuffer** buffer, int* size);
-  virtual void AdvanceBufferPosition_Locked(int written);
-  virtual void OnError_Locked(int result);
+  virtual void GetNextPacket_Locked(net::IOBuffer** buffer, int* size) OVERRIDE;
+  virtual void AdvanceBufferPosition_Locked(int written) OVERRIDE;
+  virtual void OnError_Locked(int result) OVERRIDE;
 };
 
 }  // namespace protocol

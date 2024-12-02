@@ -35,7 +35,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_canon_ip.h"
 #include "googleurl/src/url_util.h"
@@ -359,8 +359,11 @@ AutocompleteInput::Type AutocompleteInput::Parse(
     return URL;
 
   // Trailing slashes force the input to be treated as a URL.
-  if (parts->path.len == 1)
-    return URL;
+  if (parts->path.is_nonempty()) {
+    char c = text[parts->path.end() - 1];
+    if ((c == '\\') || (c == '/'))
+      return URL;
+  }
 
   // If there is more than one recognized non-host component, this is likely to
   // be a URL, even if the TLD is unknown (in which case this is likely an
@@ -368,8 +371,8 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   if (NumNonHostComponents(*parts) > 1)
     return URL;
 
-  // If the host has a known TLD, it's probably a URL, with the following
-  // exceptions:
+  // If the host has a known TLD or a port, it's probably a URL, with the
+  // following exceptions:
   // * Any "IP addresses" that make it here are more likely searches
   //   (see above).
   // * If we reach here with a username, our input looks like "user@host[.tld]".
@@ -378,7 +381,8 @@ AutocompleteInput::Type AutocompleteInput::Parse(
   //   default and let users correct us on a case-by-case basis.
   // Note that we special-case "localhost" as a known hostname.
   if ((host_info.family != url_canon::CanonHostInfo::IPV4) &&
-      ((registry_length != 0) || (host == ASCIIToUTF16("localhost"))))
+      ((registry_length != 0) || (host == ASCIIToUTF16("localhost") ||
+       parts->port.is_nonempty())))
     return parts->username.is_nonempty() ? UNKNOWN : URL;
 
   // If we reach this point, we know there's no known TLD on the input, so if
@@ -531,6 +535,8 @@ void AutocompleteProvider::Stop() {
 }
 
 void AutocompleteProvider::DeleteMatch(const AutocompleteMatch& match) {
+  DLOG(WARNING) << "The AutocompleteProvider '" << name()
+                << "' has not implemented DeleteMatch.";
 }
 
 AutocompleteProvider::~AutocompleteProvider() {
@@ -570,7 +576,7 @@ string16 AutocompleteProvider::StringForURLDisplay(const GURL& url,
       url,
       languages,
       net::kFormatUrlOmitAll & ~(trim_http ? 0 : net::kFormatUrlOmitHTTP),
-      UnescapeRule::SPACES, NULL, NULL, NULL);
+      net::UnescapeRule::SPACES, NULL, NULL, NULL);
 }
 
 // AutocompleteResult ---------------------------------------------------------
@@ -650,6 +656,13 @@ void AutocompleteResult::CopyOldMatches(const AutocompleteInput& input,
 }
 
 void AutocompleteResult::AppendMatches(const ACMatches& matches) {
+#ifndef NDEBUG
+  for (ACMatches::const_iterator i = matches.begin(); i != matches.end(); ++i) {
+    DCHECK_EQ(AutocompleteMatch::SanitizeString(i->contents), i->contents);
+    DCHECK_EQ(AutocompleteMatch::SanitizeString(i->description),
+              i->description);
+  }
+#endif
   std::copy(matches.begin(), matches.end(), std::back_inserter(matches_));
   default_match_ = end();
   alternate_nav_url_ = GURL();
@@ -657,6 +670,9 @@ void AutocompleteResult::AppendMatches(const ACMatches& matches) {
 
 void AutocompleteResult::AddMatch(const AutocompleteMatch& match) {
   DCHECK(default_match_ != end());
+  DCHECK_EQ(AutocompleteMatch::SanitizeString(match.contents), match.contents);
+  DCHECK_EQ(AutocompleteMatch::SanitizeString(match.description),
+            match.description);
   ACMatches::iterator insertion_point =
       std::upper_bound(begin(), end(), match, &AutocompleteMatch::MoreRelevant);
   ACMatches::iterator::difference_type default_offset =
@@ -821,8 +837,8 @@ AutocompleteController::AutocompleteController(
                          switches::kDisableHistoryQuickProvider);
   if (hqp_enabled)
     providers_.push_back(new HistoryQuickProvider(this, profile));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableShortcutsProvider))
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableShortcutsProvider))
     providers_.push_back(new ShortcutsProvider(this, profile));
   if (!CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableHistoryURLProvider))
@@ -1024,10 +1040,10 @@ void AutocompleteController::NotifyChanged(bool notify_default_match) {
   if (delegate_)
     delegate_->OnResultChanged(notify_default_match);
   if (done_) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
-        Source<AutocompleteController>(this),
-        NotificationService::NoDetails());
+        content::Source<AutocompleteController>(this),
+        content::NotificationService::NoDetails());
   }
 }
 

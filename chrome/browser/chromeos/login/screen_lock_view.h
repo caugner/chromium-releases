@@ -6,16 +6,13 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREEN_LOCK_VIEW_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/user_view.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/view.h"
-
-namespace views {
-class ImageView;
-}  // namespace views
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/view.h"
 
 namespace chromeos {
 
@@ -30,7 +27,7 @@ class ScreenLockerTester;
 // a user to unlock the screen.
 class ScreenLockView : public ThrobberHostView,
                        public views::TextfieldController,
-                       public NotificationObserver,
+                       public content::NotificationObserver,
                        public UserView::Delegate {
  public:
   explicit ScreenLockView(ScreenLocker* screen_locker);
@@ -44,28 +41,27 @@ class ScreenLockView : public ThrobberHostView,
   // Enable/Disable signout button.
   void SetSignoutEnabled(bool enabled);
 
-  // Returns the bounds of the password field in ScreenLocker's coordinate.
-  gfx::Rect GetPasswordBoundsRelativeTo(const views::View* view);
-
   // views::View:
   virtual void SetEnabled(bool enabled);
-  virtual void Layout();
-  virtual gfx::Size GetPreferredSize();
+  virtual void Layout() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // views::TextfieldController:
   virtual void ContentsChanged(views::Textfield* sender,
-                               const string16& new_contents);
+                               const string16& new_contents) OVERRIDE;
   virtual bool HandleKeyEvent(views::Textfield* sender,
-                              const views::KeyEvent& keystroke);
+                              const views::KeyEvent& keystroke) OVERRIDE;
 
   // UserView::Delegate:
-  virtual void OnSignout();
-  virtual bool IsUserSelected() const;
+  virtual void OnSignout() OVERRIDE;
+  virtual bool IsUserSelected() const OVERRIDE;
+
+  views::Textfield* password_field() { return password_field_; }
 
  private:
   friend class test::ScreenLockerTester;
@@ -78,7 +74,7 @@ class ScreenLockView : public ThrobberHostView,
   // ScreenLocker is owned by itself.
   ScreenLocker* screen_locker_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // User's picture, signout button and password field.
   views::View* main_;

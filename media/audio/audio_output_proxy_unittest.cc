@@ -44,8 +44,8 @@ class MockAudioManager : public AudioManager {
       const AudioParameters& params));
   MOCK_METHOD1(MakeAudioOutputStreamProxy, AudioOutputStream*(
       const AudioParameters& params));
-  MOCK_METHOD1(MakeAudioInputStream, AudioInputStream*(
-      const AudioParameters& params));
+  MOCK_METHOD2(MakeAudioInputStream, AudioInputStream*(
+      const AudioParameters& params, const std::string& device_id));
   MOCK_METHOD0(MuteAll, void());
   MOCK_METHOD0(UnMuteAll, void());
   MOCK_METHOD0(CanShowAudioInputSettings, bool());
@@ -85,10 +85,15 @@ class AudioOutputProxyTest : public testing::Test {
     AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR,
                            CHANNEL_LAYOUT_STEREO, 44100, 16, 1024);
     dispatcher_ = new AudioOutputDispatcher(&manager_, params, close_delay_ms);
+
+    // Necessary to know how long the dispatcher will wait before posting
+    // StopStreamTask.
+    pause_delay_milliseconds_ = dispatcher_->pause_delay_milliseconds_;
   }
 
   MessageLoop message_loop_;
   scoped_refptr<AudioOutputDispatcher> dispatcher_;
+  int64 pause_delay_milliseconds_;
   MockAudioManager manager_;
   MockAudioSourceCallback callback_;
 };
@@ -187,9 +192,12 @@ TEST_F(AudioOutputProxyTest, CloseAfterStop) {
   proxy->Start(&callback_);
   proxy->Stop();
 
-  // Simulate a delay.
+  // Wait for StreamStopped() to post StopStreamTask().
+  base::PlatformThread::Sleep(pause_delay_milliseconds_ * 2);
   message_loop_.RunAllPending();
-  base::PlatformThread::Sleep(kTestCloseDelayMs * 10);
+
+  // Wait for the close timer to fire.
+  base::PlatformThread::Sleep(kTestCloseDelayMs * 2);
   message_loop_.RunAllPending();
 
   // Verify expectation before calling Close().
@@ -336,7 +344,7 @@ TEST_F(AudioOutputProxyTest, StartFailed) {
   EXPECT_TRUE(proxy->Open());
 
   // Simulate a delay.
-  base::PlatformThread::Sleep(kTestCloseDelayMs);
+  base::PlatformThread::Sleep(kTestCloseDelayMs * 2);
   message_loop_.RunAllPending();
 
   // Verify expectation before calling Close().

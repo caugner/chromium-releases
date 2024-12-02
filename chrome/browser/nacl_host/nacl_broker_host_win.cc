@@ -14,9 +14,10 @@
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/nacl_cmd_line.h"
 #include "chrome/common/nacl_messages.h"
+#include "content/public/common/child_process_host.h"
 
 NaClBrokerHost::NaClBrokerHost()
-    : BrowserChildProcessHost(NACL_BROKER_PROCESS),
+    : BrowserChildProcessHost(content::PROCESS_TYPE_NACL_BROKER),
       stopping_(false) {
 }
 
@@ -25,7 +26,8 @@ NaClBrokerHost::~NaClBrokerHost() {
 
 bool NaClBrokerHost::Init() {
   // Create the channel that will be used for communicating with the broker.
-  if (!CreateChannel())
+  std::string channel_id = child_process_host()->CreateChannel();
+  if (channel_id.empty())
     return false;
 
   // Create the path to the nacl broker/loader executable.
@@ -39,7 +41,7 @@ bool NaClBrokerHost::Init() {
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,
                               switches::kNaClBrokerProcess);
-  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
+  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
   if (logging::DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 

@@ -10,7 +10,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/data_type_manager_mock.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
@@ -19,11 +19,12 @@
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using browser_sync::DataTypeManager;
 using browser_sync::DataTypeManagerMock;
+using content::BrowserThread;
 using testing::_;
 using testing::AnyNumber;
 using testing::DoAll;
@@ -43,9 +44,7 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   }
 
   virtual void SetUp() {
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
+    io_thread_.StartIOThread();
     profile_->CreateRequestContext();
     CreateSyncService();
     service_->AddObserver(&observer_);
@@ -67,8 +66,8 @@ class ProfileSyncServiceStartupTest : public testing::Test {
  protected:
   // Overridden below by ProfileSyncServiceStartupCrosTest.
   virtual void CreateSyncService() {
-    service_.reset(new TestProfileSyncService(&factory_, profile_.get(),
-                                              "", true, NULL));
+    service_.reset(new TestProfileSyncService(
+        &factory_, profile_.get(), "", true, base::Closure()));
   }
 
   DataTypeManagerMock* SetUpDataTypeManager() {
@@ -79,10 +78,10 @@ class ProfileSyncServiceStartupTest : public testing::Test {
   }
 
   MessageLoop ui_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
   scoped_ptr<TestingProfile> profile_;
-  ProfileSyncFactoryMock factory_;
+  ProfileSyncComponentsFactoryMock factory_;
   scoped_ptr<TestProfileSyncService> service_;
   ProfileSyncServiceObserverMock observer_;
 };
@@ -90,8 +89,8 @@ class ProfileSyncServiceStartupTest : public testing::Test {
 class ProfileSyncServiceStartupCrosTest : public ProfileSyncServiceStartupTest {
  protected:
   virtual void CreateSyncService() {
-    service_.reset(new TestProfileSyncService(&factory_, profile_.get(),
-                                              "test_user", true, NULL));
+    service_.reset(new TestProfileSyncService(
+        &factory_, profile_.get(), "test_user", true, base::Closure()));
   }
 };
 
@@ -125,6 +124,8 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
   service_->OnUserSubmittedAuth("test_user", "", "", "");
   profile_->GetTokenService()->IssueAuthTokenForTest(
       GaiaConstants::kSyncService, "sync_token");
+  profile_->GetTokenService()->IssueAuthTokenForTest(
+      GaiaConstants::kGaiaOAuth2LoginRefreshToken, "oauth2_login_token");
 
   syncable::ModelTypeSet set;
   set.insert(syncable::BOOKMARKS);
@@ -135,10 +136,9 @@ TEST_F(ProfileSyncServiceStartupTest, StartFirstTime) {
 TEST_F(ProfileSyncServiceStartupCrosTest, StartFirstTime) {
   DataTypeManagerMock* data_type_manager = SetUpDataTypeManager();
   profile_->GetPrefs()->ClearPref(prefs::kSyncHasSetupCompleted);
-  EXPECT_CALL(*data_type_manager, Configure(_, _)).Times(2);
+  EXPECT_CALL(*data_type_manager, Configure(_, _));
   EXPECT_CALL(*data_type_manager, state()).
-      WillOnce(Return(DataTypeManager::CONFIGURED)).
-      WillOnce(Return(DataTypeManager::CONFIGURED));
+      WillRepeatedly(Return(DataTypeManager::CONFIGURED));
   EXPECT_CALL(*data_type_manager, Stop()).Times(1);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
 
@@ -150,9 +150,9 @@ TEST_F(ProfileSyncServiceStartupCrosTest, StartFirstTime) {
 
 TEST_F(ProfileSyncServiceStartupTest, StartNormal) {
   DataTypeManagerMock* data_type_manager = SetUpDataTypeManager();
-  EXPECT_CALL(*data_type_manager, Configure(_, _)).Times(2);
+  EXPECT_CALL(*data_type_manager, Configure(_, _));
   EXPECT_CALL(*data_type_manager, state()).
-      WillOnce(Return(DataTypeManager::CONFIGURED));
+      WillRepeatedly(Return(DataTypeManager::CONFIGURED));
   EXPECT_CALL(*data_type_manager, Stop()).Times(1);
 
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
@@ -180,7 +180,7 @@ TEST_F(ProfileSyncServiceStartupTest, ManagedStartup) {
 
 TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
   DataTypeManagerMock* data_type_manager = SetUpDataTypeManager();
-  EXPECT_CALL(*data_type_manager, Configure(_, _)).Times(2);
+  EXPECT_CALL(*data_type_manager, Configure(_, _));
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
 
   profile_->GetTokenService()->IssueAuthTokenForTest(
@@ -206,7 +206,7 @@ TEST_F(ProfileSyncServiceStartupTest, SwitchManaged) {
 
 TEST_F(ProfileSyncServiceStartupTest, ClearServerData) {
   DataTypeManagerMock* data_type_manager = SetUpDataTypeManager();
-  EXPECT_CALL(*data_type_manager, Configure(_, _)).Times(2);
+  EXPECT_CALL(*data_type_manager, Configure(_, _)).Times(1);
   EXPECT_CALL(observer_, OnStateChanged()).Times(AnyNumber());
 
   profile_->GetTokenService()->IssueAuthTokenForTest(

@@ -8,6 +8,7 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into gcl.
 """
 
+
 _EXCLUDED_PATHS = (
     r"^breakpad[\\\/].*",
     r"^net/tools/spdyshark/[\\\/].*",
@@ -15,6 +16,15 @@ _EXCLUDED_PATHS = (
     r"^v8[\\\/].*",
     r".*MakeFile$",
 )
+
+
+_TEST_ONLY_WARNING = (
+    'You might be calling functions intended only for testing from\n'
+    'production code.  It is OK to ignore this warning if you know what\n'
+    'you are doing, as the heuristics used to detect the situation are\n'
+    'not perfect.  The commit queue will not block on this warning.\n'
+    'Email joi@chromium.org if you have questions.')
+
 
 
 def _CheckNoInterfacesInBase(input_api, output_api):
@@ -48,10 +58,17 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   # calls to such functions without a proper C++ parser.
   source_extensions = r'\.(cc|cpp|cxx|mm)$'
   file_inclusion_pattern = r'.+%s' % source_extensions
-  file_exclusion_pattern = (
-    r'(.*/(test_|mock_).+|.+(_test_support|profile_sync_service_harness|'
-    r'_(api|browser|perf|unit|ui)?test))%s' % source_extensions)
-  path_exclusion_pattern = r'.*[/\\](test|tool(s)?)[/\\].*'
+  file_exclusion_patterns = (
+      r'.*/(test_|mock_).+%s' % source_extensions,
+      r'.+_test_(support|base)%s' % source_extensions,
+      r'.+_(api|browser|perf|unit|ui)?test%s' % source_extensions,
+      r'.+profile_sync_service_harness%s' % source_extensions,
+      )
+  path_exclusion_patterns = (
+      r'.*[/\\](test|tool(s)?)[/\\].*',
+      # At request of folks maintaining this folder.
+      r'chrome[/\\]browser[/\\]automation[/\\].*',
+      )
 
   base_function_pattern = r'ForTest(ing)?|for_test(ing)?'
   inclusion_pattern = input_api.re.compile(r'(%s)\s*\(' % base_function_pattern)
@@ -60,7 +77,7 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
       base_function_pattern, base_function_pattern))
 
   def FilterFile(affected_file):
-    black_list = ((file_exclusion_pattern, path_exclusion_pattern, ) +
+    black_list = (file_exclusion_patterns + path_exclusion_patterns +
                   _EXCLUDED_PATHS + input_api.DEFAULT_BLACK_LIST)
     return input_api.FilterSourceFile(
       affected_file,
@@ -80,11 +97,11 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
       line_number += 1
 
   if problems:
-    return [output_api.PresubmitPromptWarning(
-        'You might be calling functions intended only for testing from\n'
-        'production code. Please verify that the following usages are OK,\n'
-        'and email joi@chromium.org if you are seeing false positives:',
-        problems)]
+    if not input_api.is_committing:
+      return [output_api.PresubmitPromptWarning(_TEST_ONLY_WARNING, problems)]
+    else:
+      # We don't warn on commit, to avoid stopping commits going through CQ.
+      return [output_api.PresubmitNotifyResult(_TEST_ONLY_WARNING, problems)]
   else:
     return []
 
@@ -114,11 +131,11 @@ def _CheckNoNewWStrings(input_api, output_api):
   """Checks to make sure we don't introduce use of wstrings."""
   problems = []
   for f in input_api.AffectedFiles():
-    for line_num, line in f.ChangedContents():
-      if (not f.LocalPath().endswith(('.cc', '.h')) or
-          f.LocalPath().endswith('test.cc')):
-        continue
+    if (not f.LocalPath().endswith(('.cc', '.h')) or
+        f.LocalPath().endswith('test.cc')):
+      continue
 
+    for line_num, line in f.ChangedContents():
       if 'wstring' in line:
         problems.append('    %s:%d' % (f.LocalPath(), line_num))
 
@@ -126,6 +143,68 @@ def _CheckNoNewWStrings(input_api, output_api):
     return []
   return [output_api.PresubmitPromptWarning('New code should not use wstrings.'
       '  If you are calling an API that accepts a wstring, fix the API.\n' +
+      '\n'.join(problems))]
+
+
+def _CheckNoDEPSGIT(input_api, output_api):
+  """Make sure .DEPS.git is never modified manually."""
+  if any(f.LocalPath().endswith('.DEPS.git') for f in
+      input_api.AffectedFiles()):
+    return [output_api.PresubmitError(
+      'Never commit changes to .DEPS.git. This file is maintained by an\n'
+      'automated system based on what\'s in DEPS and your changes will be\n'
+      'overwritten.\n'
+      'See http://code.google.com/p/chromium/wiki/UsingNewGit#Rolling_DEPS\n'
+      'for more information')]
+  return []
+
+
+def _CheckNoFRIEND_TEST(input_api, output_api):
+  """Make sure that gtest's FRIEND_TEST() macro is not used, the
+  FRIEND_TEST_ALL_PREFIXES() macro from base/gtest_prod_util.h should be used
+  instead since that allows for FLAKY_, FAILS_ and DISABLED_ prefixes."""
+  problems = []
+
+  file_filter = lambda f: f.LocalPath().endswith(('.cc', '.h'))
+  for f in input_api.AffectedFiles(file_filter=file_filter):
+    for line_num, line in f.ChangedContents():
+      if 'FRIEND_TEST(' in line:
+        problems.append('    %s:%d' % (f.LocalPath(), line_num))
+
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning('Chromium code should not use '
+      'gtest\'s FRIEND_TEST() macro. Include base/gtest_prod_util.h and use '
+      'FRIEND_TEST_ALL_PREFIXES() instead.\n' + '\n'.join(problems))]
+
+
+def _CheckNoNewOldCallback(input_api, output_api):
+  """Checks to make sure we don't introduce new uses of old callbacks."""
+
+  def HasOldCallbackKeywords(line):
+    """Returns True if a line of text contains keywords that indicate the use
+    of the old callback system.
+    """
+    return ('NewRunnableMethod' in line or
+            'NewRunnableFunction' in line or
+            'NewCallback' in line or
+            input_api.re.search(r'\bCallback\d<', line) or
+            input_api.re.search(r'\bpublic Task\b', line) or
+            'public CancelableTask' in line)
+
+  problems = []
+  file_filter = lambda f: f.LocalPath().endswith(('.cc', '.h'))
+  for f in input_api.AffectedFiles(file_filter=file_filter):
+    if not any(HasOldCallbackKeywords(line) for line in f.NewContents()):
+      continue
+    for line_num, line in f.ChangedContents():
+      if HasOldCallbackKeywords(line):
+        problems.append('    %s:%d' % (f.LocalPath(), line_num))
+
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning('The old callback system is '
+      'deprecated. If possible, use base::Bind and base::Callback instead.\n' +
       '\n'.join(problems))]
 
 
@@ -140,6 +219,9 @@ def _CommonChecks(input_api, output_api):
     _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api))
   results.extend(_CheckNoIOStreamInHeaders(input_api, output_api))
   results.extend(_CheckNoNewWStrings(input_api, output_api))
+  results.extend(_CheckNoDEPSGIT(input_api, output_api))
+  results.extend(_CheckNoFRIEND_TEST(input_api, output_api))
+  results.extend(_CheckNoNewOldCallback(input_api, output_api))
   return results
 
 
@@ -241,6 +323,8 @@ def CheckChangeOnCommit(input_api, output_api):
   results.extend(input_api.canned_checks.CheckChangeHasBugField(
       input_api, output_api))
   results.extend(input_api.canned_checks.CheckChangeHasTestField(
+      input_api, output_api))
+  results.extend(input_api.canned_checks.CheckChangeHasDescription(
       input_api, output_api))
   results.extend(_CheckSubversionConfig(input_api, output_api))
   return results

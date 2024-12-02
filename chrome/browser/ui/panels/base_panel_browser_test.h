@@ -10,11 +10,10 @@
 #include "base/values.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/panels/auto_hiding_desktop_bar.h"
+#include "chrome/browser/ui/panels/panel.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "ui/gfx/rect.h"
-
-class Panel;
 
 class BasePanelBrowserTest : public InProcessBrowserTest {
  public:
@@ -58,20 +57,30 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
                                const gfx::Rect& bounds);
   Panel* CreatePanel(const std::string& panel_name);
 
+  void WaitForPanelAdded(Panel* panel);
+  void WaitForPanelRemoved(Panel* panel);
   void WaitForPanelActiveState(Panel* panel, ActiveState state);
   void WaitForWindowSizeAvailable(Panel* panel);
   void WaitForBoundsAnimationFinished(Panel* panel);
+  void WaitForExpansionStateChanged(Panel* panel,
+                                    Panel::ExpansionState expansion_state);
+
+  void CreateTestTabContents(Browser* browser);
 
   scoped_refptr<Extension> CreateExtension(const FilePath::StringType& path,
                                            Extension::Location location,
                                            const DictionaryValue& extra_value);
 
   gfx::Rect testing_work_area() const { return testing_work_area_; }
+  void set_testing_work_area(const gfx::Rect& work_area) {
+    testing_work_area_ = work_area;
+  }
 
   MockAutoHidingDesktopBar* mock_auto_hiding_desktop_bar() const {
     return mock_auto_hiding_desktop_bar_.get();
   }
 
+  static const FilePath::CharType* kTestDir;
  private:
   gfx::Rect testing_work_area_;
   scoped_refptr<MockAutoHidingDesktopBar> mock_auto_hiding_desktop_bar_;

@@ -16,6 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
+#include "chrome/browser/sync/test/engine/fake_model_worker.h"
 #include "chrome/browser/sync/test/engine/mock_connection_manager.h"
 #include "chrome/browser/sync/test/engine/test_directory_setter_upper.h"
 #include "chrome/browser/sync/test/engine/test_id_factory.h"
@@ -150,7 +152,7 @@ class SyncerTest : public testing::Test,
   }
 
   virtual void OnSyncEngineEvent(const SyncEngineEvent& event) OVERRIDE {
-    VLOG(1) << "HandleSyncEngineEvent in unittest " << event.what_happened;
+    DVLOG(1) << "HandleSyncEngineEvent in unittest " << event.what_happened;
     // we only test for entry-specific events, not status changed ones.
     switch (event.what_happened) {
       case SyncEngineEvent::STATUS_CHANGED:
@@ -196,7 +198,7 @@ class SyncerTest : public testing::Test,
     mock_server_.reset(
         new MockConnectionManager(syncdb_.manager(), syncdb_.name()));
     EnableDatatype(syncable::BOOKMARKS);
-    worker_ = new ModelSafeWorker();
+    worker_ = new FakeModelWorker(GROUP_PASSIVE);
     std::vector<SyncEngineEventListener*> listeners;
     listeners.push_back(this);
     context_.reset(new SyncSessionContext(mock_server_.get(),
@@ -211,7 +213,7 @@ class SyncerTest : public testing::Test,
     ReadTransaction trans(FROM_HERE, dir);
     syncable::Directory::ChildHandles children;
     dir->GetChildHandlesById(&trans, trans.root_id(), &children);
-    ASSERT_TRUE(0 == children.size());
+    ASSERT_EQ(0u, children.size());
     saw_syncer_event_ = false;
     root_id_ = TestIdFactory::root();
     parent_id_ = ids_.MakeServer("parent id");
@@ -349,7 +351,7 @@ class SyncerTest : public testing::Test,
                 mock_server_->committed_ids().size());
     // If this test starts failing, be aware other sort orders could be valid.
     for (size_t i = 0; i < expected_positions.size(); ++i) {
-      EXPECT_TRUE(1 == expected_positions.count(i));
+      EXPECT_EQ(1u, expected_positions.count(i));
       EXPECT_TRUE(expected_positions[i] == mock_server_->committed_ids()[i]);
     }
   }
@@ -359,7 +361,7 @@ class SyncerTest : public testing::Test,
                         const vector<syncable::Id>& expected_id_order) {
     // The expected order is "x", "b", "c", "e", truncated appropriately.
     for (size_t limit = expected_id_order.size() + 2; limit > 0; --limit) {
-      StatusController* status = session_->status_controller();
+      StatusController* status = session_->mutable_status_controller();
       WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
       ScopedSetSessionWriteTransaction set_trans(session_.get(), &wtrans);
       status->set_unsynced_handles(unsynced_handle_view);
@@ -367,8 +369,9 @@ class SyncerTest : public testing::Test,
       ModelSafeRoutingInfo routes;
       GetModelSafeRoutingInfo(&routes);
       GetCommitIdsCommand command(limit);
-      command.BuildCommitIds(session_->status_controller()->unsynced_handles(),
-          session_->write_transaction(), routes);
+      command.BuildCommitIds(
+          session_->status_controller().unsynced_handles(),
+          session_->write_transaction(), routes, syncable::ModelTypeSet());
       vector<syncable::Id> output =
           command.ordered_commit_set_->GetAllCommitIds();
       size_t truncated_size = std::min(limit, expected_id_order.size());
@@ -468,6 +471,8 @@ class SyncerTest : public testing::Test,
     return GetField(metahandle, field, false);
   }
 
+  MessageLoop message_loop_;
+
   // Some ids to aid tests. Only the root one's value is specific. The rest
   // are named for test clarity.
   // TODO(chron): Get rid of these inbuilt IDs. They only make it
@@ -505,7 +510,7 @@ TEST_F(SyncerTest, TestCallGatherUnsyncedEntries) {
       ReadTransaction trans(FROM_HERE, dir);
       SyncerUtil::GetUnsyncedEntries(&trans, &handles);
     }
-    ASSERT_TRUE(0 == handles.size());
+    ASSERT_EQ(0u, handles.size());
   }
   // TODO(sync): When we can dynamically connect and disconnect the mock
   // ServerConnectionManager test disconnected GetUnsyncedEntries here. It's a
@@ -551,54 +556,194 @@ TEST_F(SyncerTest, GetCommitIdsCommandTruncates) {
   DoTruncationTest(dir, unsynced_handle_view, expected_order);
 }
 
-TEST_F(SyncerTest, GetCommitIdsFilterEntriesNeedingEncryption) {
+TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
   ASSERT_TRUE(dir.good());
-  int64 handle_x = CreateUnsyncedDirectory("X", ids_.MakeLocal("x"));
-  int64 handle_b = CreateUnsyncedDirectory("B", ids_.MakeLocal("b"));
-  int64 handle_c = CreateUnsyncedDirectory("C", ids_.MakeLocal("c"));
-  int64 handle_e = CreateUnsyncedDirectory("E", ids_.MakeLocal("e"));
-  int64 handle_f = CreateUnsyncedDirectory("F", ids_.MakeLocal("f"));
+  syncable::ModelTypeSet throttled_types;
+  throttled_types.insert(syncable::BOOKMARKS);
+  KeyParams key_params = {"localhost", "dummy", "foobar"};
+  sync_pb::EntitySpecifics bookmark_data;
+  AddDefaultExtensionValue(syncable::BOOKMARKS, &bookmark_data);
+
+  mock_server_->AddUpdateDirectory(1, 0, "A", 10, 10);
+  SyncShareAsDelegate();
+
+  {
+    WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
+    MutableEntry A(&wtrans, GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(A.good());
+    A.Put(IS_UNSYNCED, true);
+    A.Put(SPECIFICS, bookmark_data);
+    A.Put(NON_UNIQUE_NAME, "bookmark");
+  }
+
+  // Now set the throttled types.
+  context_->SetUnthrottleTime(
+      throttled_types,
+      base::TimeTicks::Now() + base::TimeDelta::FromSeconds(1200));
+  SyncShareAsDelegate();
+
+  {
+    // Nothing should have been committed as bookmarks is throttled.
+    ReadTransaction rtrans(FROM_HERE, dir);
+    Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(entryA.good());
+    EXPECT_TRUE(entryA.Get(IS_UNSYNCED));
+  }
+
+  // Now unthrottle.
+  context_->SetUnthrottleTime(
+      throttled_types,
+      base::TimeTicks::Now() - base::TimeDelta::FromSeconds(1200));
+  SyncShareAsDelegate();
+  {
+    // It should have been committed.
+    ReadTransaction rtrans(FROM_HERE, dir);
+    Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(entryA.good());
+    EXPECT_FALSE(entryA.Get(IS_UNSYNCED));
+  }
+}
+
+TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
+  ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
+  ASSERT_TRUE(dir.good());
+  KeyParams key_params = {"localhost", "dummy", "foobar"};
   sync_pb::EncryptedData encrypted;
   sync_pb::EntitySpecifics encrypted_bookmark;
   encrypted_bookmark.mutable_encrypted();
   AddDefaultExtensionValue(syncable::BOOKMARKS, &encrypted_bookmark);
+  mock_server_->AddUpdateDirectory(1, 0, "A", 10, 10);
+  mock_server_->AddUpdateDirectory(2, 0, "B", 10, 10);
+  mock_server_->AddUpdateDirectory(3, 0, "C", 10, 10);
+  mock_server_->AddUpdateDirectory(4, 0, "D", 10, 10);
+  SyncShareAsDelegate();
+  // Server side change will put A in conflict.
+  mock_server_->AddUpdateDirectory(1, 0, "A", 20, 20);
   {
+    // Mark bookmarks as encrypted and set the cryptographer to have pending
+    // keys.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
-    MutableEntry entry_x(&wtrans, GET_BY_HANDLE, handle_x);
-    MutableEntry entry_b(&wtrans, GET_BY_HANDLE, handle_b);
-    MutableEntry entry_c(&wtrans, GET_BY_HANDLE, handle_c);
-    MutableEntry entry_e(&wtrans, GET_BY_HANDLE, handle_e);
-    MutableEntry entry_f(&wtrans, GET_BY_HANDLE, handle_f);
-    entry_x.Put(SPECIFICS, encrypted_bookmark);
-    entry_x.Put(NON_UNIQUE_NAME, kEncryptedString);
-    entry_b.Put(SPECIFICS, DefaultBookmarkSpecifics());
-    entry_c.Put(SPECIFICS, DefaultBookmarkSpecifics());
-    entry_e.Put(SPECIFICS, encrypted_bookmark);
-    entry_e.Put(NON_UNIQUE_NAME, kEncryptedString);
-    entry_f.Put(SPECIFICS, DefaultPreferencesSpecifics());
-  }
+    browser_sync::Cryptographer other_cryptographer;
+    other_cryptographer.AddKey(key_params);
+    sync_pb::EntitySpecifics specifics;
+    sync_pb::NigoriSpecifics* nigori =
+        specifics.MutableExtension(sync_pb::nigori);
+    other_cryptographer.GetKeys(nigori->mutable_encrypted());
+    nigori->set_encrypt_bookmarks(true);
+    syncdb_.manager()->GetCryptographer(&wtrans)->Update(*nigori);
 
-  syncable::ModelTypeSet encrypted_types;
-  encrypted_types.insert(syncable::BOOKMARKS);
-  syncable::Directory::UnsyncedMetaHandles unsynced_handles;
-  unsynced_handles.push_back(handle_x);
-  unsynced_handles.push_back(handle_b);
-  unsynced_handles.push_back(handle_c);
-  unsynced_handles.push_back(handle_e);
-  unsynced_handles.push_back(handle_f);
-  // The unencrypted bookmarks should be removed from the list.
-  syncable::Directory::UnsyncedMetaHandles expected_handles;
-  expected_handles.push_back(handle_x);  // Was encrypted.
-  expected_handles.push_back(handle_e);  // Was encrypted.
-  expected_handles.push_back(handle_f);  // Does not require encryption.
+    // In conflict but properly encrypted.
+    MutableEntry A(&wtrans, GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(A.good());
+    A.Put(IS_UNSYNCED, true);
+    A.Put(SPECIFICS, encrypted_bookmark);
+    A.Put(NON_UNIQUE_NAME, kEncryptedString);
+    // Not in conflict and properly encrypted.
+    MutableEntry B(&wtrans, GET_BY_ID, ids_.FromNumber(2));
+    ASSERT_TRUE(B.good());
+    B.Put(IS_UNSYNCED, true);
+    B.Put(SPECIFICS, encrypted_bookmark);
+    B.Put(NON_UNIQUE_NAME, kEncryptedString);
+    // Unencrypted specifics.
+    MutableEntry C(&wtrans, GET_BY_ID, ids_.FromNumber(3));
+    ASSERT_TRUE(C.good());
+    C.Put(IS_UNSYNCED, true);
+    C.Put(NON_UNIQUE_NAME, kEncryptedString);
+    // Unencrypted non_unique_name.
+    MutableEntry D(&wtrans, GET_BY_ID, ids_.FromNumber(4));
+    ASSERT_TRUE(D.good());
+    D.Put(IS_UNSYNCED, true);
+    D.Put(SPECIFICS, encrypted_bookmark);
+    D.Put(NON_UNIQUE_NAME, "not encrypted");
+  }
+  SyncShareAsDelegate();
   {
+    // We remove any unready entries from the status controller's unsynced
+    // handles, so this should remain 0 even though the entries didn't commit.
+    ASSERT_EQ(0U, session_->status_controller().unsynced_handles().size());
+    // Nothing should have commited due to bookmarks being encrypted and
+    // the cryptographer having pending keys. A would have been resolved
+    // as a simple conflict, but still be unsynced until the next sync cycle.
+    ReadTransaction rtrans(FROM_HERE, dir);
+    Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(entryA.good());
+    EXPECT_TRUE(entryA.Get(IS_UNSYNCED));
+    Entry entryB(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(2));
+    ASSERT_TRUE(entryB.good());
+    EXPECT_TRUE(entryB.Get(IS_UNSYNCED));
+    Entry entryC(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(3));
+    ASSERT_TRUE(entryC.good());
+    EXPECT_TRUE(entryC.Get(IS_UNSYNCED));
+    Entry entryD(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(4));
+    ASSERT_TRUE(entryD.good());
+    EXPECT_TRUE(entryD.Get(IS_UNSYNCED));
+
+    // Resolve the pending keys.
+    syncdb_.manager()->GetCryptographer(&rtrans)->DecryptPendingKeys(
+        key_params);
+  }
+  SyncShareAsDelegate();
+  {
+    ASSERT_EQ(0U, session_->status_controller().unsynced_handles().size());
+    // All properly encrypted and non-conflicting items should commit. "A" was
+    // conflicting, but last sync cycle resolved it as simple conflict, so on
+    // this sync cycle it committed succesfullly.
+    ReadTransaction rtrans(FROM_HERE, dir);
+    // Committed successfully.
+    Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(entryA.good());
+    EXPECT_FALSE(entryA.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryA.Get(IS_UNAPPLIED_UPDATE));
+    // Committed successfully.
+    Entry entryB(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(2));
+    ASSERT_TRUE(entryB.good());
+    EXPECT_FALSE(entryB.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryB.Get(IS_UNAPPLIED_UPDATE));
+    // Was not properly encrypted.
+    Entry entryC(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(3));
+    ASSERT_TRUE(entryC.good());
+    EXPECT_TRUE(entryC.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryC.Get(IS_UNAPPLIED_UPDATE));
+    // Was not properly encrypted.
+    Entry entryD(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(4));
+    ASSERT_TRUE(entryD.good());
+    EXPECT_TRUE(entryD.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryD.Get(IS_UNAPPLIED_UPDATE));
+  }
+  {
+    // Fix the remaining items.
     WriteTransaction wtrans(FROM_HERE, UNITTEST, dir);
-    GetCommitIdsCommand::FilterEntriesNeedingEncryption(
-        encrypted_types,
-        &wtrans,
-        &unsynced_handles);
-    EXPECT_EQ(expected_handles, unsynced_handles);
+    MutableEntry C(&wtrans, GET_BY_ID, ids_.FromNumber(3));
+    ASSERT_TRUE(C.good());
+    C.Put(SPECIFICS, encrypted_bookmark);
+    C.Put(NON_UNIQUE_NAME, kEncryptedString);
+    MutableEntry D(&wtrans, GET_BY_ID, ids_.FromNumber(4));
+    ASSERT_TRUE(D.good());
+    D.Put(SPECIFICS, encrypted_bookmark);
+    D.Put(NON_UNIQUE_NAME, kEncryptedString);
+  }
+  SyncShareAsDelegate();
+  {
+    ASSERT_EQ(0U, session_->status_controller().unsynced_handles().size());
+    // None should be unsynced anymore.
+    ReadTransaction rtrans(FROM_HERE, dir);
+    Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
+    ASSERT_TRUE(entryA.good());
+    EXPECT_FALSE(entryA.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryA.Get(IS_UNAPPLIED_UPDATE));
+    Entry entryB(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(2));
+    ASSERT_TRUE(entryB.good());
+    EXPECT_FALSE(entryB.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryB.Get(IS_UNAPPLIED_UPDATE));
+    Entry entryC(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(3));
+    ASSERT_TRUE(entryC.good());
+    EXPECT_FALSE(entryC.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryC.Get(IS_UNAPPLIED_UPDATE));
+    Entry entryD(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(4));
+    ASSERT_TRUE(entryD.good());
+    EXPECT_FALSE(entryD.Get(IS_UNSYNCED));
+    EXPECT_FALSE(entryD.Get(IS_UNAPPLIED_UPDATE));
   }
 }
 
@@ -606,7 +751,7 @@ TEST_F(SyncerTest, GetCommitIdsFilterEntriesNeedingEncryption) {
 TEST_F(SyncerTest, TestCommitMetahandleIterator) {
   ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
   ASSERT_TRUE(dir.good());
-  StatusController* status = session_->status_controller();
+  StatusController* status = session_->mutable_status_controller();
   const vector<int64>& unsynced(status->unsynced_handles());
 
   {
@@ -669,10 +814,10 @@ TEST_F(SyncerTest, TestGetUnsyncedAndSimpleCommit) {
     WriteTestDataToEntry(&wtrans, &child);
   }
 
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(2 == status->unsynced_handles().size());
-  ASSERT_TRUE(2 == mock_server_->committed_ids().size());
+  EXPECT_EQ(2u, status.unsynced_handles().size());
+  ASSERT_EQ(2u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(child_id_ == mock_server_->committed_ids()[1]);
@@ -717,9 +862,9 @@ TEST_F(SyncerTest, TestPurgeWhileUnsynced) {
   types_to_purge.insert(syncable::PREFERENCES);
   dir->PurgeEntriesWithTypeIn(types_to_purge);
 
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_EQ(2U, status->unsynced_handles().size());
+  EXPECT_EQ(2U, status.unsynced_handles().size());
   ASSERT_EQ(2U, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
@@ -963,8 +1108,8 @@ TEST_F(SyncerTest, TestCommitListOrderingWithNesting) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(6 == session_->status_controller()->unsynced_handles().size());
-  ASSERT_TRUE(6 == mock_server_->committed_ids().size());
+  EXPECT_EQ(6u, session_->status_controller().unsynced_handles().size());
+  ASSERT_EQ(6u, mock_server_->committed_ids().size());
   // This test will NOT unroll deletes because SERVER_PARENT_ID is not set.
   // It will treat these like moves.
   vector<syncable::Id> commit_ids(mock_server_->committed_ids());
@@ -1033,8 +1178,8 @@ TEST_F(SyncerTest, TestCommitListOrderingWithNewItems) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(6 == session_->status_controller()->unsynced_handles().size());
-  ASSERT_TRUE(6 == mock_server_->committed_ids().size());
+  EXPECT_EQ(6u, session_->status_controller().unsynced_handles().size());
+  ASSERT_EQ(6u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(child_id_ == mock_server_->committed_ids()[1]);
@@ -1075,8 +1220,8 @@ TEST_F(SyncerTest, TestCommitListOrderingCounterexample) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(3 == session_->status_controller()->unsynced_handles().size());
-  ASSERT_TRUE(3 == mock_server_->committed_ids().size());
+  EXPECT_EQ(3u, session_->status_controller().unsynced_handles().size());
+  ASSERT_EQ(3u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(child_id_ == mock_server_->committed_ids()[1]);
@@ -1124,8 +1269,8 @@ TEST_F(SyncerTest, TestCommitListOrderingAndNewParent) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(3 == session_->status_controller()->unsynced_handles().size());
-  ASSERT_TRUE(3 == mock_server_->committed_ids().size());
+  EXPECT_EQ(3u, session_->status_controller().unsynced_handles().size());
+  ASSERT_EQ(3u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(parent2_id == mock_server_->committed_ids()[1]);
@@ -1198,8 +1343,8 @@ TEST_F(SyncerTest, TestCommitListOrderingAndNewParentAndChild) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(3 == session_->status_controller()->unsynced_handles().size());
-  ASSERT_TRUE(3 == mock_server_->committed_ids().size());
+  EXPECT_EQ(3u, session_->status_controller().unsynced_handles().size());
+  ASSERT_EQ(3u, mock_server_->committed_ids().size());
   // If this test starts failing, be aware other sort orders could be valid.
   EXPECT_TRUE(parent_id_ == mock_server_->committed_ids()[0]);
   EXPECT_TRUE(parent2_local_id == mock_server_->committed_ids()[1]);
@@ -1252,7 +1397,7 @@ TEST_F(SyncerTest, DontGetStuckWithTwoSameNames) {
   SyncShareAsDelegate();
   mock_server_->AddUpdateDirectory(2, 0, "foo:", 1, 20);
   SyncRepeatedlyToTriggerStuckSignal(session_.get());
-  EXPECT_FALSE(session_->status_controller()->syncer_status().syncer_stuck);
+  EXPECT_FALSE(session_->status_controller().syncer_status().syncer_stuck);
   saw_syncer_event_ = false;
 }
 
@@ -1300,13 +1445,14 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
   mock_server_->AddUpdateDirectory(3, -80, "bad_parent", 10, 10);
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  StatusController* status = session_->status_controller();
+  StatusController* status = session_->mutable_status_controller();
 
   // Id 3 should be in conflict now.
   EXPECT_EQ(1, status->TotalNumConflictingItems());
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(1, status->conflict_progress().ConflictingItemsSize());
+    ASSERT_TRUE(status->conflict_progress());
+    EXPECT_EQ(1, status->conflict_progress()->ConflictingItemsSize());
   }
 
   // These entries will be used in the second set of updates.
@@ -1323,7 +1469,8 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
   EXPECT_EQ(3, status->TotalNumConflictingItems());
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(3, status->conflict_progress().ConflictingItemsSize());
+    ASSERT_TRUE(status->conflict_progress());
+    EXPECT_EQ(3, status->conflict_progress()->ConflictingItemsSize());
   }
 
   {
@@ -1369,8 +1516,8 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
     Entry still_a_dir(&trans, GET_BY_ID, ids_.FromNumber(10));
     ASSERT_TRUE(still_a_dir.good());
     EXPECT_FALSE(still_a_dir.Get(IS_UNAPPLIED_UPDATE));
-    EXPECT_TRUE(10 == still_a_dir.Get(BASE_VERSION));
-    EXPECT_TRUE(10 == still_a_dir.Get(SERVER_VERSION));
+    EXPECT_EQ(10u, still_a_dir.Get(BASE_VERSION));
+    EXPECT_EQ(10u, still_a_dir.Get(SERVER_VERSION));
     EXPECT_TRUE(still_a_dir.Get(IS_DIR));
 
     Entry rename(&trans, GET_BY_ID, ids_.FromNumber(1));
@@ -1379,13 +1526,13 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
     EXPECT_EQ("new_name", rename.Get(NON_UNIQUE_NAME));
     EXPECT_FALSE(rename.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_TRUE(ids_.FromNumber(1) == rename.Get(ID));
-    EXPECT_TRUE(20 == rename.Get(BASE_VERSION));
+    EXPECT_EQ(20u, rename.Get(BASE_VERSION));
 
     Entry name_clash(&trans, GET_BY_ID, ids_.FromNumber(2));
     ASSERT_TRUE(name_clash.good());
     EXPECT_EQ(root, name_clash.Get(PARENT_ID));
     EXPECT_TRUE(ids_.FromNumber(2) == name_clash.Get(ID));
-    EXPECT_TRUE(10 == name_clash.Get(BASE_VERSION));
+    EXPECT_EQ(10u, name_clash.Get(BASE_VERSION));
     EXPECT_EQ("in_root", name_clash.Get(NON_UNIQUE_NAME));
 
     Entry ignored_old_version(&trans, GET_BY_ID, ids_.FromNumber(4));
@@ -1393,7 +1540,7 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
     EXPECT_TRUE(
         ignored_old_version.Get(NON_UNIQUE_NAME) == "newer_version");
     EXPECT_FALSE(ignored_old_version.Get(IS_UNAPPLIED_UPDATE));
-    EXPECT_TRUE(20 == ignored_old_version.Get(BASE_VERSION));
+    EXPECT_EQ(20u, ignored_old_version.Get(BASE_VERSION));
 
     Entry circular_parent_issue(&trans, GET_BY_ID, ids_.FromNumber(5));
     ASSERT_TRUE(circular_parent_issue.good());
@@ -1402,21 +1549,22 @@ TEST_F(SyncerTest, IllegalAndLegalUpdates) {
     EXPECT_TRUE(circular_parent_issue.Get(PARENT_ID) == root_id_);
     EXPECT_TRUE(circular_parent_issue.Get(SERVER_PARENT_ID) ==
                 ids_.FromNumber(6));
-    EXPECT_TRUE(10 == circular_parent_issue.Get(BASE_VERSION));
+    EXPECT_EQ(10u, circular_parent_issue.Get(BASE_VERSION));
 
     Entry circular_parent_target(&trans, GET_BY_ID, ids_.FromNumber(6));
     ASSERT_TRUE(circular_parent_target.good());
     EXPECT_FALSE(circular_parent_target.Get(IS_UNAPPLIED_UPDATE));
     EXPECT_TRUE(circular_parent_issue.Get(ID) ==
         circular_parent_target.Get(PARENT_ID));
-    EXPECT_TRUE(10 == circular_parent_target.Get(BASE_VERSION));
+    EXPECT_EQ(10u, circular_parent_target.Get(BASE_VERSION));
   }
 
   EXPECT_FALSE(saw_syncer_event_);
   EXPECT_EQ(4, status->TotalNumConflictingItems());
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(4, status->conflict_progress().ConflictingItemsSize());
+    ASSERT_TRUE(status->conflict_progress());
+    EXPECT_EQ(4, status->conflict_progress()->ConflictingItemsSize());
   }
 }
 
@@ -1864,7 +2012,7 @@ TEST_F(EntryCreatedInNewFolderTest, EntryCreatedInNewFolderMidSync) {
       NewCallback<EntryCreatedInNewFolderTest>(this,
           &EntryCreatedInNewFolderTest::CreateFolderInBob));
   syncer_->SyncShare(session_.get(), BUILD_COMMIT_REQUEST, SYNCER_END);
-  EXPECT_TRUE(1 == mock_server_->committed_ids().size());
+  EXPECT_EQ(1u, mock_server_->committed_ids().size());
   {
     ReadTransaction trans(FROM_HERE, dir);
     Entry parent_entry(&trans, syncable::GET_BY_ID,
@@ -1903,7 +2051,7 @@ TEST_F(SyncerTest, UnappliedUpdateOnCreatedItemItemDoesNotCrash) {
   }
   // Commit it.
   SyncShareAsDelegate();
-  EXPECT_TRUE(1 == mock_server_->committed_ids().size());
+  EXPECT_EQ(1u, mock_server_->committed_ids().size());
   mock_server_->set_conflict_all_commits(true);
   syncable::Id fred_match_id;
   {
@@ -1963,7 +2111,7 @@ TEST_F(SyncerTest, DoublyChangedWithResolver) {
   }
 
   // Only one entry, since we just overwrite one.
-  EXPECT_TRUE(1 == children.size());
+  EXPECT_EQ(1u, children.size());
   saw_syncer_event_ = false;
 }
 
@@ -2014,6 +2162,8 @@ TEST_F(SyncerTest, CommitsUpdateDoesntAlterEntry) {
 }
 
 TEST_F(SyncerTest, ParentAndChildBothMatch) {
+  syncable::ModelTypeBitSet all_types;
+  all_types.set();
   ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
   CHECK(dir.good());
   syncable::Id parent_id = ids_.NewServerId();
@@ -2046,15 +2196,15 @@ TEST_F(SyncerTest, ParentAndChildBothMatch) {
     ReadTransaction trans(FROM_HERE, dir);
     Directory::ChildHandles children;
     dir->GetChildHandlesById(&trans, root_id_, &children);
-    EXPECT_TRUE(1 == children.size());
+    EXPECT_EQ(1u, children.size());
     dir->GetChildHandlesById(&trans, parent_id, &children);
-    EXPECT_TRUE(1 == children.size());
+    EXPECT_EQ(1u, children.size());
     Directory::UnappliedUpdateMetaHandles unapplied;
-    dir->GetUnappliedUpdateMetaHandles(&trans, &unapplied);
-    EXPECT_TRUE(0 == unapplied.size());
+    dir->GetUnappliedUpdateMetaHandles(&trans, all_types, &unapplied);
+    EXPECT_EQ(0u, unapplied.size());
     syncable::Directory::UnsyncedMetaHandles unsynced;
     dir->GetUnsyncedMetaHandles(&trans, &unsynced);
-    EXPECT_TRUE(0 == unsynced.size());
+    EXPECT_EQ(0u, unsynced.size());
     saw_syncer_event_ = false;
   }
 }
@@ -2069,7 +2219,7 @@ TEST_F(SyncerTest, CommittingNewDeleted) {
     entry.Put(IS_DEL, true);
   }
   SyncShareAsDelegate();
-  EXPECT_TRUE(0 == mock_server_->committed_ids().size());
+  EXPECT_EQ(0u, mock_server_->committed_ids().size());
 }
 
 // Original problem synopsis:
@@ -2100,7 +2250,7 @@ TEST_F(SyncerTest, UnappliedUpdateDuringCommit) {
   }
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_TRUE(0 == session_->status_controller()->TotalNumConflictingItems());
+  EXPECT_EQ(0, session_->status_controller().TotalNumConflictingItems());
   saw_syncer_event_ = false;
 }
 
@@ -2148,8 +2298,8 @@ TEST_F(SyncerTest, DeletingEntryInFolder) {
     existing.Put(IS_DEL, true);
   }
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  StatusController* status(session_->status_controller());
-  EXPECT_TRUE(0 == status->error().num_conflicting_commits);
+  const StatusController& status(session_->status_controller());
+  EXPECT_EQ(0, status.error().num_conflicting_commits);
 }
 
 TEST_F(SyncerTest, DeletingEntryWithLocalEdits) {
@@ -2814,52 +2964,13 @@ TEST_F(SyncerTest, WeMovedSomethingIntoAFolderServerHasDeleted) {
   saw_syncer_event_ = false;
 }
 
-class FolderMoveDeleteRenameTest : public SyncerTest {
- public:
-  FolderMoveDeleteRenameTest() : done_(false) {}
-
-  static const int64 bob_id_number = 1;
-  static const int64 fred_id_number = 2;
-
-  void MoveBobIntoID2Runner() {
-    if (!done_) {
-      MoveBobIntoID2();
-      done_ = true;
-    }
-  }
-
- protected:
-  void MoveBobIntoID2() {
-    ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
-    CHECK(dir.good());
-
-    WriteTransaction trans(FROM_HERE, UNITTEST, dir);
-    Entry alice(&trans, GET_BY_ID,
-                TestIdFactory::FromNumber(fred_id_number));
-    CHECK(alice.good());
-    EXPECT_TRUE(!alice.Get(IS_DEL));
-    EXPECT_TRUE(alice.Get(SYNCING)) << "Expected to be called mid-commit.";
-    MutableEntry bob(&trans, GET_BY_ID,
-                     TestIdFactory::FromNumber(bob_id_number));
-    CHECK(bob.good());
-    bob.Put(IS_UNSYNCED, true);
-
-    bob.Put(SYNCING, false);
-    bob.Put(PARENT_ID, alice.Get(ID));
-  }
-
-  bool done_;
-};
-
-TEST_F(FolderMoveDeleteRenameTest,
+TEST_F(SyncerTest,
        WeMovedSomethingIntoAFolderServerHasDeletedAndWeRenamed) {
   ScopedDirLookup dir(syncdb_.manager(), syncdb_.name());
   CHECK(dir.good());
 
-  const syncable::Id bob_id = TestIdFactory::FromNumber(
-      FolderMoveDeleteRenameTest::bob_id_number);
-  const syncable::Id fred_id = TestIdFactory::FromNumber(
-      FolderMoveDeleteRenameTest::fred_id_number);
+  const syncable::Id bob_id = TestIdFactory::FromNumber(1);
+  const syncable::Id fred_id = TestIdFactory::FromNumber(2);
 
   mock_server_->AddUpdateDirectory(bob_id, TestIdFactory::root(),
       "bob", 1, 10);
@@ -2873,18 +2984,18 @@ TEST_F(FolderMoveDeleteRenameTest,
     fred.Put(IS_UNSYNCED, true);
     fred.Put(SYNCING, false);
     fred.Put(NON_UNIQUE_NAME, "Alice");
+
+    // Move Bob within Fred (now Alice).
+    MutableEntry bob(&trans, GET_BY_ID, bob_id);
+    CHECK(bob.good());
+    bob.Put(IS_UNSYNCED, true);
+    bob.Put(SYNCING, false);
+    bob.Put(PARENT_ID, fred_id);
   }
   mock_server_->AddUpdateDirectory(fred_id, TestIdFactory::root(),
       "fred", 2, 20);
   mock_server_->SetLastUpdateDeleted();
   mock_server_->set_conflict_all_commits(true);
-  // This test is a little brittle. We want to move the item into the folder
-  // such that we think we're dealing with a simple conflict, but in reality
-  // it's actually a conflict set.
-  mock_server_->SetMidCommitCallback(
-      NewCallback<FolderMoveDeleteRenameTest>(this,
-          &FolderMoveDeleteRenameTest::MoveBobIntoID2Runner));
-  SyncShareAsDelegate();
   SyncShareAsDelegate();
   SyncShareAsDelegate();
   {
@@ -3182,7 +3293,7 @@ class SusanDeletingTest : public SyncerTest {
     MutableEntry susan(&trans, GET_BY_ID, susan_id);
   Directory::ChildHandles children;
   dir->GetChildHandlesById(&trans, susan.Get(ID), &children);
-  ASSERT_TRUE(0 == children.size());
+  ASSERT_EQ(0u, children.size());
   susan.Put(IS_DEL, true);
   susan.Put(IS_UNSYNCED, true);
 }
@@ -3247,7 +3358,7 @@ TEST_F(SusanDeletingTest,
     EXPECT_TRUE(bob.Get(IS_UNSYNCED));
     EXPECT_TRUE(joe.Get(IS_UNSYNCED));
   }
-  EXPECT_TRUE(0 == countdown_till_delete_);
+  EXPECT_EQ(0, countdown_till_delete_);
   delete syncer_->pre_conflict_resolution_closure_;
   syncer_->pre_conflict_resolution_closure_ = NULL;
   LoopSyncShare();
@@ -3447,12 +3558,12 @@ TEST_F(SyncerTest, DuplicateIDReturn) {
     folder2.Put(ID, syncable::Id::CreateFromServerId("mock_server:10000"));
   }
   mock_server_->set_next_new_id(10000);
-  EXPECT_TRUE(1 == dir->unsynced_entity_count());
+  EXPECT_EQ(1u, dir->unsynced_entity_count());
   // we get back a bad id in here (should never happen).
   SyncShareAsDelegate();
-  EXPECT_TRUE(1 == dir->unsynced_entity_count());
+  EXPECT_EQ(1u, dir->unsynced_entity_count());
   SyncShareAsDelegate();  // another bad id in here.
-  EXPECT_TRUE(0 == dir->unsynced_entity_count());
+  EXPECT_EQ(0u, dir->unsynced_entity_count());
   saw_syncer_event_ = false;
 }
 
@@ -3594,7 +3705,7 @@ TEST(SyncerSyncProcessState, MergeSetsTest) {
   c.MergeSets(id[2], id[3]);
   c.MergeSets(id[4], id[5]);
   c.MergeSets(id[5], id[6]);
-  EXPECT_TRUE(6 == c.IdToConflictSetSize());
+  EXPECT_EQ(6u, c.IdToConflictSetSize());
   EXPECT_FALSE(is_dirty);
   for (int i = 1; i < 7; i++) {
     EXPECT_TRUE(NULL != c.IdToConflictSetGet(id[i]));
@@ -3647,7 +3758,7 @@ TEST_F(SyncerTest, OneBajillionUpdates) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_FALSE(session_->status_controller()->syncer_status().syncer_stuck);
+  EXPECT_FALSE(session_->status_controller().syncer_status().syncer_stuck);
 }
 
 // In this test a long changelog contains a child at the start of the changelog
@@ -3677,7 +3788,7 @@ TEST_F(SyncerTest, LongChangelistWithApplicationConflict) {
   }
 
   syncer_->SyncShare(session_.get(), SYNCER_BEGIN, SYNCER_END);
-  EXPECT_FALSE(session_->status_controller()->syncer_status().syncer_stuck);
+  EXPECT_FALSE(session_->status_controller().syncer_status().syncer_stuck);
 
   // Ensure our folder hasn't somehow applied.
   {
@@ -3970,7 +4081,7 @@ TEST_F(SyncerTest, EnsureWeSendUpOldParent) {
   }
   SyncShareAsDelegate();
   const sync_pb::CommitMessage& commit = mock_server_->last_sent_commit();
-  ASSERT_TRUE(2 == commit.entries_size());
+  ASSERT_EQ(2, commit.entries_size());
   EXPECT_TRUE(commit.entries(0).parent_id_string() == "2");
   EXPECT_TRUE(commit.entries(0).old_parent_id() == "0");
   EXPECT_FALSE(commit.entries(1).has_old_parent_id());
@@ -4709,14 +4820,14 @@ class SyncerUndeletionTest : public SyncerTest {
 };
 
 TEST_F(SyncerUndeletionTest, UndeleteDuringCommit) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Delete, begin committing the delete, then undelete while committing.
@@ -4729,7 +4840,7 @@ TEST_F(SyncerUndeletionTest, UndeleteDuringCommit) {
 
   // The item ought to exist as an unsynced undeletion (meaning,
   // we think that the next commit ought to be a recreation commit).
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectUnsyncedUndeletion();
 
@@ -4740,20 +4851,20 @@ TEST_F(SyncerUndeletionTest, UndeleteDuringCommit) {
   mock_server_->SetMidCommitCallback(NULL);
   mock_server_->AddUpdateTombstone(Get(metahandle_, ID));
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 }
 
 TEST_F(SyncerUndeletionTest, UndeleteBeforeCommit) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Delete and undelete, then sync to pick up the result.
@@ -4764,7 +4875,7 @@ TEST_F(SyncerUndeletionTest, UndeleteBeforeCommit) {
   SyncShareAsDelegate();
 
   // The item ought to have committed successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
   EXPECT_EQ(2, Get(metahandle_, BASE_VERSION));
@@ -4773,20 +4884,20 @@ TEST_F(SyncerUndeletionTest, UndeleteBeforeCommit) {
   // update.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 }
 
 TEST_F(SyncerUndeletionTest, UndeleteAfterCommitButBeforeGetUpdates) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Delete and commit.
@@ -4795,7 +4906,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterCommitButBeforeGetUpdates) {
   SyncShareAsDelegate();
 
   // The item ought to have committed successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4807,26 +4918,26 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterCommitButBeforeGetUpdates) {
   // deletion update.  The undeletion should prevail.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 }
 
 TEST_F(SyncerUndeletionTest, UndeleteAfterDeleteAndGetUpdates) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Delete and commit.
@@ -4835,7 +4946,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterDeleteAndGetUpdates) {
   SyncShareAsDelegate();
 
   // The item ought to have committed successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4843,7 +4954,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterDeleteAndGetUpdates) {
   // deletion update.  Should be consistent.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4854,28 +4965,28 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterDeleteAndGetUpdates) {
   // Now, encounter a GetUpdates corresponding to the just-committed
   // deletion update.  The undeletion should prevail.
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 }
 
 // Test processing of undeletion GetUpdateses.
 TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletes) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Add a delete from the server.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Some other client deletes the item.
@@ -4883,7 +4994,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletes) {
   SyncShareAsDelegate();
 
   // The update ought to have applied successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4891,7 +5002,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletes) {
   Undelete();
   ExpectUnsyncedUndeletion();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 
@@ -4899,20 +5010,20 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletes) {
   // deletion update.  The undeletion should prevail.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 }
 
 TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletesImmediately) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Some other client deletes the item before we get a chance
@@ -4921,7 +5032,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletesImmediately) {
   SyncShareAsDelegate();
 
   // The update ought to have applied successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4929,7 +5040,7 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletesImmediately) {
   Undelete();
   ExpectUnsyncedUndeletion();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 
@@ -4937,27 +5048,27 @@ TEST_F(SyncerUndeletionTest, UndeleteAfterOtherClientDeletesImmediately) {
   // deletion update.  The undeletion should prevail.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
 }
 
 TEST_F(SyncerUndeletionTest, OtherClientUndeletes) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Get the updates of our just-committed entry.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // We delete the item.
@@ -4966,7 +5077,7 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletes) {
   SyncShareAsDelegate();
 
   // The update ought to have applied successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4974,7 +5085,7 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletes) {
   // deletion update.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -4984,28 +5095,28 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletes) {
                                   "Thadeusz", 100, 1000);
   mock_server_->SetLastUpdateClientTag(client_tag_);
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
   EXPECT_EQ("Thadeusz", Get(metahandle_, NON_UNIQUE_NAME));
 }
 
 TEST_F(SyncerUndeletionTest, OtherClientUndeletesImmediately) {
-  StatusController* status = session_->status_controller();
+  const StatusController& status = session_->status_controller();
 
   Create();
   ExpectUnsyncedCreation();
   SyncShareAsDelegate();
 
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // Get the updates of our just-committed entry.
   mock_server_->AddUpdateFromLastCommit();
   SyncShareAsDelegate();
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   ExpectSyncedAndCreated();
 
   // We delete the item.
@@ -5014,7 +5125,7 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletesImmediately) {
   SyncShareAsDelegate();
 
   // The update ought to have applied successfully.
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndDeleted();
 
@@ -5025,7 +5136,7 @@ TEST_F(SyncerUndeletionTest, OtherClientUndeletesImmediately) {
                                   "Thadeusz", 100, 1000);
   mock_server_->SetLastUpdateClientTag(client_tag_);
   SyncShareAsDelegate();
-  EXPECT_EQ(0, status->TotalNumConflictingItems());
+  EXPECT_EQ(0, status.TotalNumConflictingItems());
   EXPECT_EQ(1, mock_server_->GetAndClearNumGetUpdatesRequests());
   ExpectSyncedAndCreated();
   EXPECT_EQ("Thadeusz", Get(metahandle_, NON_UNIQUE_NAME));

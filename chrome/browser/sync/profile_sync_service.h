@@ -32,18 +32,15 @@
 #include "chrome/browser/sync/sync_setup_wizard.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 
-class NotificationDetails;
-class NotificationSource;
 class Profile;
-class ProfileSyncFactory;
+class ProfileSyncComponentsFactory;
 class SigninManager;
 class SyncGlobalError;
-struct ChromeCookieDetails;
 
 namespace browser_sync {
 class BackendMigrator;
@@ -105,7 +102,10 @@ struct UserShare;
 class ProfileSyncService : public browser_sync::SyncFrontend,
                            public browser_sync::SyncPrefObserver,
                            public browser_sync::UnrecoverableErrorHandler,
-                           public NotificationObserver {
+                           public content::NotificationObserver,
+                           // TODO(lipalani): crbug.com/100829. Instead of
+                           // doing this vend weak pointers from a factory.
+                           public base::SupportsWeakPtr<ProfileSyncService> {
  public:
   typedef ProfileSyncServiceObserver Observer;
   typedef browser_sync::SyncBackendHost::Status Status;
@@ -148,7 +148,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Sync server URL for dev channel users
   static const char* kDevServerUrl;
 
-  ProfileSyncService(ProfileSyncFactory* factory,
+  ProfileSyncService(ProfileSyncComponentsFactory* factory,
                      Profile* profile,
                      SigninManager* signin,  // Service takes ownership.
                      const std::string& cros_user);
@@ -160,9 +160,13 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   void RegisterAuthNotifications();
 
-  // Return whether all sync tokens are loaded and
-  // available for the backend to start up.
+  // Same as AreCredentialsAvailable(false).
   bool AreCredentialsAvailable();
+
+  // Return whether all sync tokens are loaded and available for the backend to
+  // start up. Also checks for OAuth login token if |check_oauth_login_token| is
+  // true.
+  bool AreCredentialsAvailable(bool check_oauth_login_token);
 
   // Registers a data type controller with the sync service.  This
   // makes the data type controller available for use, it does not
@@ -207,8 +211,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void OnPassphraseRequired(
       sync_api::PassphraseRequiredReason reason) OVERRIDE;
   virtual void OnPassphraseAccepted() OVERRIDE;
-  virtual void OnEncryptionComplete(
-      const syncable::ModelTypeSet& encrypted_types) OVERRIDE;
+  virtual void OnEncryptedTypesChanged(
+      const syncable::ModelTypeSet& enncrypted_types,
+      bool encrypt_everything) OVERRIDE;
+  virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnMigrationNeededForTypes(
       const syncable::ModelTypeSet& types) OVERRIDE;
   virtual void OnDataTypesChanged(
@@ -245,9 +251,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   browser_sync::SyncBackendHost::StatusSummary QuerySyncStatusSummary();
   virtual browser_sync::SyncBackendHost::Status QueryDetailedSyncStatus();
 
-  const GoogleServiceAuthError& GetAuthError() const {
-    return last_auth_error_;
-  }
+  virtual const GoogleServiceAuthError& GetAuthError() const;
 
   // Displays a dialog for the user to enter GAIA credentials and attempt
   // re-authentication, and returns true if it actually opened the dialog.
@@ -275,7 +279,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // types to sync.
   void ShowConfigure(bool sync_everything);
 
-  void ShowSyncSetup(const std::string& sub_page);
+  virtual void ShowSyncSetup(const std::string& sub_page);
   void ShowSyncSetupWithWizard(SyncSetupWizard::State state);
 
   // Pretty-printed strings for a given StatusSummary.
@@ -299,9 +303,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
     return unrecoverable_error_location_;
   }
 
-  bool UIShouldDepictAuthInProgress() const {
-    return is_auth_in_progress_;
-  }
+  virtual bool UIShouldDepictAuthInProgress() const;
 
   // Returns true if OnPassphraseRequired has been called for any reason.
   virtual bool IsPassphraseRequired() const;
@@ -316,11 +318,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   // Returns a user-friendly string form of last synced time (in minutes).
   virtual string16 GetLastSyncedTimeString() const;
-
-  // Returns the authenticated username of the sync user, or empty if none
-  // exists. It will only exist if the authentication service provider (e.g
-  // GAIA) has confirmed the username is authentic.
-  virtual string16 GetAuthenticatedUsername() const;
 
   const std::string& last_attempted_user_email() const {
     return last_attempted_user_email_;
@@ -403,10 +400,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // SyncPrefObserver implementation.
   virtual void OnSyncManagedPrefChange(bool is_sync_managed) OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Changes which data types we're going to be syncing to |preferred_types|.
   // If it is running, the DataTypeManager will be instructed to reconfigure
@@ -449,10 +446,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void SetPassphrase(const std::string& passphrase,
                              bool is_explicit);
 
-  // If |encrypt_all| is true, turns on encryption for all sync data. Else, only
-  // sensitive types are encrypted (see cryptographer.h for the list of
-  // sensitive types). Passwords is always considered a sensitive type.
-  virtual void SetEncryptEverything(bool encrypt_all);
+  // Turns on encryption for all data. Callers must call OnUserChoseDatatypes()
+  // after calling this to force the encryption to occur.
+  virtual void EnableEncryptEverything();
 
   // Returns true if we are currently set to encrypt all the sync data. Note:
   // this is based on the cryptographer's settings, so if the user has recently
@@ -475,6 +471,13 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   const GURL& sync_service_url() const { return sync_service_url_; }
   SigninManager* signin() { return signin_.get(); }
   const std::string& cros_user() const { return cros_user_; }
+  bool auto_start_enabled() const { return auto_start_enabled_; }
+
+  // Stops the sync backend and sets the flag for suppressing sync startup.
+  void StopAndSuppress();
+
+  // Resets the flag for suppressing sync startup and starts the sync backend.
+  void UnsuppressAndStart();
 
   // Marks all currently registered types as "acknowledged" so we won't prompt
   // the user about them any more.
@@ -537,6 +540,10 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   friend class ProfileSyncServiceForWizardTest;
   FRIEND_TEST_ALL_PREFIXES(ProfileSyncServiceTest, InitialState);
 
+  // Starts up sync if it is not suppressed and preconditions are met.
+  // Called from Initialize() and UnsuppressAndStart().
+  void TryStart();
+
   // Called when we've determined that we don't need a passphrase (either
   // because OnPassphraseAccepted() was called, or because we've gotten a
   // OnPassphraseRequired() but no data types are enabled).
@@ -555,6 +562,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void NotifyObservers();
 
   void ClearStaleErrors();
+
+  void ClearUnrecoverableError();
 
   // About-flags experiment names for datatypes that aren't enabled by default
   // yet.
@@ -585,7 +594,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   base::TimeTicks auth_error_time_;
 
   // Factory used to create various dependent objects.
-  ProfileSyncFactory* factory_;
+  ProfileSyncComponentsFactory* factory_;
 
   // The profile whose data we are synchronizing.
   Profile* profile_;
@@ -638,7 +647,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
 
   browser_sync::SyncJsController sync_js_controller_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   ScopedRunnableMethodFactory<ProfileSyncService>
       scoped_runnable_method_factory_;
@@ -667,6 +676,13 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // syncer paused, etc.).  It can only be removed correctly when the framework
   // is reworked to allow one-shot commands like clearing server data.
   base::OneShotTimer<ProfileSyncService> clear_server_data_timer_;
+
+  // The current set of encrypted types.  Always a superset of
+  // Cryptographer::SensitiveTypes().
+  syncable::ModelTypeSet encrypted_types_;
+
+  // Whether we want to encrypt everything.
+  bool encrypt_everything_;
 
   // Whether we're waiting for an attempt to encryption all sync data to
   // complete. We track this at this layer in order to allow the user to cancel

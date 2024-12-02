@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/bind.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history.h"
@@ -15,14 +16,16 @@
 #include "chrome/common/render_messages.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
+
+using content::BrowserThread;
 
 // PurgeMemoryHelper -----------------------------------------------------------
 
@@ -63,10 +66,10 @@ void PurgeMemoryIOHelper::PurgeMemoryOnIOThread() {
     (*i)->GetURLRequestContext()->proxy_service()->PurgeMemory();
 
   // The appcache and safe browsing services listen for this notification.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_PURGE_MEMORY,
-      Source<void>(NULL),
-      NotificationService::NoDetails());
+      content::Source<void>(NULL),
+      content::NotificationService::NoDetails());
 }
 
 // -----------------------------------------------------------------------------
@@ -118,9 +121,10 @@ void MemoryPurger::PurgeBrowser() {
     profiles[i]->GetWebKitContext()->PurgeMemory();
   }
 
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(purge_memory_io_helper.get(),
-                        &PurgeMemoryIOHelper::PurgeMemoryOnIOThread));
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&PurgeMemoryIOHelper::PurgeMemoryOnIOThread,
+                 purge_memory_io_helper.get()));
 
   // TODO(pkasting):
   // * Purge AppCache memory.  Not yet implemented sufficiently.
@@ -143,13 +147,14 @@ void MemoryPurger::PurgeRenderers() {
   // Concern: Telling a bunch of renderer processes to destroy their data may
   // cause them to page everything in to do it, which could take a lot of time/
   // cause jank.
-  for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+  for (content::RenderProcessHost::iterator i(
+          content::RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance())
     PurgeRendererForHost(i.GetCurrentValue());
 }
 
 // static
-void MemoryPurger::PurgeRendererForHost(RenderProcessHost* host) {
+void MemoryPurger::PurgeRendererForHost(content::RenderProcessHost* host) {
   // Direct the renderer to free everything it can.
   host->Send(new ChromeViewMsg_PurgeMemory());
 }

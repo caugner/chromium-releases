@@ -11,7 +11,6 @@
 #include "base/compiler_specific.h"
 #include "base/eintr_wrapper.h"
 #include "base/logging.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/time.h"
@@ -19,6 +18,10 @@
 #include <event.h>
 #else
 #include "third_party/libevent/event.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
 // Lifecycle of struct event
@@ -129,11 +132,11 @@ MessagePumpLibevent::~MessagePumpLibevent() {
   delete wakeup_event_;
   if (wakeup_pipe_in_ >= 0) {
     if (HANDLE_EINTR(close(wakeup_pipe_in_)) < 0)
-      PLOG(ERROR) << "close";
+      DPLOG(ERROR) << "close";
   }
   if (wakeup_pipe_out_ >= 0) {
     if (HANDLE_EINTR(close(wakeup_pipe_out_)) < 0)
-      PLOG(ERROR) << "close";
+      DPLOG(ERROR) << "close";
   }
   event_base_free(event_base_);
 }
@@ -228,7 +231,9 @@ void MessagePumpLibevent::Run(Delegate* delegate) {
   scoped_ptr<event> timer_event(new event);
 
   for (;;) {
+#if defined(OS_MACOSX)
     mac::ScopedNSAutoreleasePool autorelease_pool;
+#endif
 
     bool did_work = delegate->DoWork();
     if (!keep_running_)

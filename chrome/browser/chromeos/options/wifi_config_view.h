@@ -8,23 +8,23 @@
 
 #include <string>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "ui/base/models/combobox_model.h"
-#include "views/controls/button/button.h"
-#include "views/controls/combobox/combobox.h"
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/view.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/combobox/combobox_listener.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/view.h"
 
 namespace views {
 class Checkbox;
-class ToggleImageButton;
 class Label;
+class ToggleImageButton;
 }
-
-class FilePath;
 
 namespace chromeos {
 
@@ -32,7 +32,7 @@ namespace chromeos {
 class WifiConfigView : public ChildNetworkConfigView,
                        public views::TextfieldController,
                        public views::ButtonListener,
-                       public views::Combobox::Listener,
+                       public views::ComboboxListener,
                        public CertLibrary::Observer {
  public:
   // Wifi login dialog for wifi network |wifi|. |wifi| must be a non NULL
@@ -43,23 +43,24 @@ class WifiConfigView : public ChildNetworkConfigView,
   virtual ~WifiConfigView();
 
   // views::TextfieldController:
-  virtual void ContentsChanged(
-      views::Textfield* sender, const string16& new_contents) OVERRIDE;
-  virtual bool HandleKeyEvent(
-      views::Textfield* sender, const views::KeyEvent& key_event) OVERRIDE;
+  virtual void ContentsChanged(views::Textfield* sender,
+                               const string16& new_contents) OVERRIDE;
+  virtual bool HandleKeyEvent(views::Textfield* sender,
+                              const views::KeyEvent& key_event) OVERRIDE;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(
-      views::Button* sender, const views::Event& event) OVERRIDE;
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
-  // views::Combobox::Listener:
-  virtual void ItemChanged(
-      views::Combobox* combo_box, int prev_index, int new_index) OVERRIDE;
+  // views::ComboboxListener:
+  virtual void ItemChanged(views::Combobox* combo_box,
+                           int prev_index,
+                           int new_index) OVERRIDE;
 
   // CertLibrary::Observer:
   virtual void OnCertificatesLoaded(bool initial_load) OVERRIDE;
 
-  // ChildNetworkConfigView implementation.
+  // ChildNetworkConfigView:
   virtual string16 GetTitle() OVERRIDE;
   virtual bool CanLogin() OVERRIDE;
   virtual bool Login() OVERRIDE;
@@ -107,6 +108,15 @@ class WifiConfigView : public ChildNetworkConfigView,
   void UpdateErrorLabel();
 
   CertLibrary* cert_library_;
+
+  NetworkPropertyUIData eap_method_ui_data_;
+  NetworkPropertyUIData phase_2_auth_ui_data_;
+  NetworkPropertyUIData user_cert_ui_data_;
+  NetworkPropertyUIData server_ca_cert_ui_data_;
+  NetworkPropertyUIData identity_ui_data_;
+  NetworkPropertyUIData identity_anonymous_ui_data_;
+  NetworkPropertyUIData save_credentials_ui_data_;
+  NetworkPropertyUIData passphrase_ui_data_;
 
   views::Textfield* ssid_textfield_;
   views::Combobox* eap_method_combobox_;

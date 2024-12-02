@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/chromeos/cros/cros_mock.h"
 #include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
-#include "chrome/browser/chromeos/cros/mock_login_library.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
+#include "chrome/browser/chromeos/dbus/mock_dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/mock_session_manager_client.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/login_display.h"
@@ -38,8 +40,8 @@ class MockLoginDisplay : public LoginDisplay {
       : LoginDisplay(NULL, gfx::Rect()) {
   }
 
-  MOCK_METHOD3(Init, void(const UserVector&, bool, bool));
-  MOCK_METHOD1(OnUserImageChanged, void(UserManager::User*));
+  MOCK_METHOD3(Init, void(const UserList&, bool, bool));
+  MOCK_METHOD1(OnUserImageChanged, void(const User&));
   MOCK_METHOD0(OnFadeOut, void(void));
   MOCK_METHOD1(OnLoginSuccess, void(const std::string&));
   MOCK_METHOD1(SetUIEnabled, void(bool));
@@ -57,8 +59,7 @@ class MockLoginDisplayHost : public LoginDisplayHost {
   MockLoginDisplayHost() {
   }
 
-  MOCK_CONST_METHOD1(CreateLoginDisplay,
-                     LoginDisplay*(LoginDisplay::Delegate*));
+  MOCK_METHOD1(CreateLoginDisplay, LoginDisplay*(LoginDisplay::Delegate*));
   MOCK_CONST_METHOD0(GetNativeWindow, gfx::NativeWindow(void));
   MOCK_METHOD0(OnSessionStart, void(void));
   MOCK_METHOD1(SetOobeProgress, void(BackgroundView::LoginStep));
@@ -85,8 +86,7 @@ class MockLoginPerformerDelegate : public LoginPerformer::Delegate {
                       const std::string&,
                       const GaiaAuthConsumer::ClientLoginResult&,
                       bool, bool) {
-    LoginPerformer* login_performer = controller_->login_performer_.release();
-    login_performer = NULL;
+    ignore_result(controller_->login_performer_.release());
     controller_->ActivateWizard(WizardController::kUserImageScreenName);
   }
 
@@ -103,7 +103,6 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
  protected:
   ExistingUserControllerTest()
       : mock_cryptohome_library_(NULL),
-        mock_login_library_(NULL),
         mock_network_library_(NULL),
         mock_login_display_(NULL),
         mock_login_display_host_(NULL) {
@@ -114,17 +113,20 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
   }
 
   virtual void SetUpInProcessBrowserTestFixture() {
+    MockDBusThreadManager* mock_dbus_thread_manager =
+        new MockDBusThreadManager;
+    DBusThreadManager::InitializeForTesting(mock_dbus_thread_manager);
     CrosInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
     cros_mock_->InitStatusAreaMocks();
     cros_mock_->SetStatusAreaMocksExpectations();
 
     mock_network_library_ = cros_mock_->mock_network_library();
-    mock_login_library_ = new MockLoginLibrary();
-    EXPECT_CALL(*mock_login_library_, EmitLoginPromptReady())
+    MockSessionManagerClient* mock_session_manager_client =
+        mock_dbus_thread_manager->mock_session_manager_client();
+    EXPECT_CALL(*mock_session_manager_client, EmitLoginPromptReady())
         .Times(1);
-    EXPECT_CALL(*mock_login_library_, RequestRetrievePolicy(_, _))
+    EXPECT_CALL(*mock_session_manager_client, RetrievePolicy(_))
         .Times(AnyNumber());
-    cros_mock_->test_api()->SetLoginLibrary(mock_login_library_, true);
 
     cros_mock_->InitMockCryptohomeLibrary();
     mock_cryptohome_library_ = cros_mock_->mock_cryptohome_library();
@@ -149,7 +151,7 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
   virtual void SetUpOnMainThread() {
     ExistingUserController* controller =
         new ExistingUserController(mock_login_display_host_.get());
-    controller->Init(UserVector());
+    controller->Init(UserList());
     MockLoginPerformerDelegate* mock_delegate =
           new MockLoginPerformerDelegate(controller);
     existing_user_controller()->set_login_performer_delegate(mock_delegate);
@@ -157,12 +159,11 @@ class ExistingUserControllerTest : public CrosInProcessBrowserTest {
 
   virtual void TearDownInProcessBrowserTestFixture() {
     CrosInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
-    cros_mock_->test_api()->SetLoginLibrary(NULL, false);
+    DBusThreadManager::Shutdown();
   }
 
   // These mocks are owned by CrosLibrary class.
   MockCryptohomeLibrary* mock_cryptohome_library_;
-  MockLoginLibrary* mock_login_library_;
   MockNetworkLibrary* mock_network_library_;
 
   scoped_ptr<MockLoginDisplay> mock_login_display_;

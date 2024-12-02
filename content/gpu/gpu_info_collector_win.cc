@@ -8,6 +8,7 @@
 #include <d3d9.h>
 #include <setupapi.h>
 
+#include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/scoped_native_library.h"
@@ -60,8 +61,15 @@ typedef BOOL (WINAPI*SetupDiDestroyDeviceInfoListFunc)(
 
 namespace gpu_info_collector {
 
-bool CollectGraphicsInfo(GPUInfo* gpu_info) {
+bool CollectGraphicsInfo(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
+    std::string requested_implementation_name =
+        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(switches::kUseGL);
+    if (requested_implementation_name == "swiftshader")
+      return false;
+  }
 
   if (gfx::GetGLImplementation() != gfx::kGLImplementationEGLGLES2) {
     gpu_info->finalized = true;
@@ -98,7 +106,7 @@ bool CollectGraphicsInfo(GPUInfo* gpu_info) {
   return true;
 }
 
-bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
+bool CollectPreliminaryGraphicsInfo(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   bool rt = true;
@@ -108,7 +116,7 @@ bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
   return rt;
 }
 
-bool CollectGraphicsInfoD3D(IDirect3D9* d3d, GPUInfo* gpu_info) {
+bool CollectGraphicsInfoD3D(IDirect3D9* d3d, content::GPUInfo* gpu_info) {
   DCHECK(d3d);
   DCHECK(gpu_info);
 
@@ -143,7 +151,7 @@ bool CollectGraphicsInfoD3D(IDirect3D9* d3d, GPUInfo* gpu_info) {
   return true;
 }
 
-bool CollectVideoCardInfo(GPUInfo* gpu_info) {
+bool CollectVideoCardInfo(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   // Taken from http://developer.nvidia.com/object/device_ids.html
@@ -172,7 +180,8 @@ bool CollectVideoCardInfo(GPUInfo* gpu_info) {
   return false;
 }
 
-bool CollectDriverInfoD3D(const std::wstring& device_id, GPUInfo* gpu_info) {
+bool CollectDriverInfoD3D(const std::wstring& device_id,
+                          content::GPUInfo* gpu_info) {
   HMODULE lib_setupapi = LoadLibraryW(L"setupapi.dll");
   if (!lib_setupapi) {
     LOG(ERROR) << "Open setupapi.dll failed";
@@ -255,7 +264,7 @@ bool CollectDriverInfoD3D(const std::wstring& device_id, GPUInfo* gpu_info) {
   return found;
 }
 
-bool CollectDriverInfoGL(GPUInfo* gpu_info) {
+bool CollectDriverInfoGL(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   std::string gl_version_string = gpu_info->gl_version_string;

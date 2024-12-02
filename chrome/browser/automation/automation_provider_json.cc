@@ -10,7 +10,11 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/automation/automation_provider.h"
 #include "chrome/browser/automation/automation_util.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/common/automation_id.h"
 #include "chrome/common/automation_messages.h"
+#include "content/browser/tab_contents/tab_contents.h"
 
 namespace {
 
@@ -61,15 +65,32 @@ bool GetBrowserFromJSONArgs(
     DictionaryValue* args,
     Browser** browser,
     std::string* error) {
-  int browser_index;
-  if (!args->GetInteger("windex", &browser_index)) {
-    *error = "'windex' missing or invalid";
-    return false;
-  }
-  *browser = automation_util::GetBrowserAt(browser_index);
-  if (!*browser) {
-    *error = "Cannot locate browser from given index";
-    return false;
+  if (args->HasKey("auto_id")) {
+    AutomationId id;
+    if (!GetAutomationIdFromJSONArgs(args, "auto_id", &id, error))
+      return false;
+    TabContents* tab;
+    if (!automation_util::GetTabForId(id, &tab)) {
+      *error = "'auto_id' does not refer to an open tab";
+      return false;
+    }
+    Browser* container = automation_util::GetBrowserForTab(tab);
+    if (!container) {
+      *error = "tab does not belong to an open browser";
+      return false;
+    }
+    *browser = container;
+  } else {
+    int browser_index;
+    if (!args->GetInteger("windex", &browser_index)) {
+      *error = "'windex' missing or invalid";
+      return false;
+    }
+    *browser = automation_util::GetBrowserAt(browser_index);
+    if (!*browser) {
+      *error = "Cannot locate browser from given index";
+      return false;
+    }
   }
   return true;
 }
@@ -78,19 +99,29 @@ bool GetTabFromJSONArgs(
     DictionaryValue* args,
     TabContents** tab,
     std::string* error) {
-  int browser_index, tab_index;
-  if (!args->GetInteger("windex", &browser_index)) {
-    *error = "'windex' missing or invalid";
-    return false;
-  }
-  if (!args->GetInteger("tab_index", &tab_index)) {
-    *error = "'tab_index' missing or invalid";
-    return false;
-  }
-  *tab = automation_util::GetTabContentsAt(browser_index, tab_index);
-  if (!*tab) {
-    *error = "Cannot locate tab from given indices";
-    return false;
+  if (args->HasKey("auto_id")) {
+    AutomationId id;
+    if (!GetAutomationIdFromJSONArgs(args, "auto_id", &id, error))
+      return false;
+    if (!automation_util::GetTabForId(id, tab)) {
+      *error = "'auto_id' does not refer to an open tab";
+      return false;
+    }
+  } else {
+    int browser_index, tab_index;
+    if (!args->GetInteger("windex", &browser_index)) {
+      *error = "'windex' missing or invalid";
+      return false;
+    }
+    if (!args->GetInteger("tab_index", &tab_index)) {
+      *error = "'tab_index' missing or invalid";
+      return false;
+    }
+    *tab = automation_util::GetTabContentsAt(browser_index, tab_index);
+    if (!*tab) {
+      *error = "Cannot locate tab from given indices";
+      return false;
+    }
   }
   return true;
 }
@@ -102,4 +133,99 @@ bool GetBrowserAndTabFromJSONArgs(
     std::string* error) {
   return GetBrowserFromJSONArgs(args, browser, error) &&
          GetTabFromJSONArgs(args, tab, error);
+}
+
+bool GetAutomationIdFromJSONArgs(
+    DictionaryValue* args,
+    const std::string& key,
+    AutomationId* id,
+    std::string* error) {
+  Value* id_value;
+  if (!args->Get(key, &id_value)) {
+    *error = base::StringPrintf("Missing parameter '%s'", key.c_str());
+    return false;
+  }
+  return AutomationId::FromValue(id_value, id, error);
+}
+
+bool GetRenderViewFromJSONArgs(
+    DictionaryValue* args,
+    Profile* profile,
+    RenderViewHost** rvh,
+    std::string* error) {
+  Value* id_value;
+  if (args->Get("auto_id", &id_value)) {
+    AutomationId id;
+    if (!AutomationId::FromValue(id_value, &id, error))
+      return false;
+    if (!automation_util::GetRenderViewForId(id, profile, rvh)) {
+      *error = "ID does not correspond to an open view";
+      return false;
+    }
+  } else {
+    // If the render view id is not specified, check for browser/tab indices.
+    TabContents* tab = NULL;
+    if (!GetTabFromJSONArgs(args, &tab, error))
+      return false;
+    *rvh = tab->render_view_host();
+  }
+  return true;
+}
+
+namespace {
+
+bool GetExtensionFromJSONArgsHelper(
+    base::DictionaryValue* args,
+    const std::string& key,
+    Profile* profile,
+    bool include_disabled,
+    const Extension** extension,
+    std::string* error) {
+  std::string id;
+  if (!args->GetString(key, &id)) {
+    *error = base::StringPrintf("Missing or invalid key: %s", key.c_str());
+    return false;
+  }
+  ExtensionService* service = profile->GetExtensionService();
+  if (!service) {
+    *error = "No extensions service.";
+    return false;
+  }
+  if (!service->GetInstalledExtension(id)) {
+    // The extension ID does not correspond to any extension, whether crashed
+    // or not.
+    *error = base::StringPrintf("Extension %s is not installed.",
+                                id.c_str());
+    return false;
+  }
+  const Extension* installed_extension =
+      service->GetExtensionById(id, include_disabled);
+  if (!installed_extension) {
+    *error = "Extension is disabled or has crashed.";
+    return false;
+  }
+  *extension = installed_extension;
+  return true;
+}
+
+}  // namespace
+
+bool GetExtensionFromJSONArgs(
+    base::DictionaryValue* args,
+    const std::string& key,
+    Profile* profile,
+    const Extension** extension,
+    std::string* error) {
+  return GetExtensionFromJSONArgsHelper(
+      args, key, profile, true /* include_disabled */, extension, error);
+}
+
+bool GetEnabledExtensionFromJSONArgs(
+    base::DictionaryValue* args,
+    const std::string& key,
+    Profile* profile,
+    const Extension** extension,
+    std::string* error) {
+  return GetExtensionFromJSONArgsHelper(
+      args, key, profile, false /* include_disabled */, extension, error);
 }

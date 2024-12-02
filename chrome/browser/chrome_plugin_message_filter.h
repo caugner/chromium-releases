@@ -20,18 +20,18 @@ class URLRequestContextGetter;
 class ChromePluginMessageFilter : public IPC::ChannelProxy::MessageFilter,
                                   public IPC::Message::Sender {
  public:
-  ChromePluginMessageFilter(PluginProcessHost* process);
+  explicit ChromePluginMessageFilter(PluginProcessHost* process);
 
   // BrowserMessageFilter methods:
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // IPC::Message::Sender methods:
-  virtual bool Send(IPC::Message* message);
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
  private:
   virtual ~ChromePluginMessageFilter();
 
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
   void OnDownloadUrl(const std::string& url,
                      gfx::NativeWindow caller_window,
                      int render_process_id);
@@ -52,11 +52,12 @@ class ChromePluginMessageFilter : public IPC::ChannelProxy::MessageFilter,
                              int render_view_id,
                              gfx::NativeWindow window);
 
-  // static
   static void HandleMissingPluginStatus(int status,
                                         int render_process_id,
                                         int render_view_id,
                                         gfx::NativeWindow window);
+
+  static void InstallMissingPlugin(gfx::NativeWindow window);
 
   PluginProcessHost* process_;
 

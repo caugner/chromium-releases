@@ -14,8 +14,10 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -39,7 +41,7 @@ class ContentSettingBubbleControllerTest
   virtual ~ContentSettingBubbleControllerTest();
 
  private:
-  BrowserThread browser_thread_;
+  content::TestBrowserThread browser_thread_;
 
   base::mac::ScopedNSAutoreleasePool pool_;
 };
@@ -58,7 +60,8 @@ TEST_F(ContentSettingBubbleControllerTest, Init) {
     if (i == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
         i == CONTENT_SETTINGS_TYPE_INTENTS ||
         i == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
-        i == CONTENT_SETTINGS_TYPE_FULLSCREEN) {
+        i == CONTENT_SETTINGS_TYPE_FULLSCREEN ||
+        i == CONTENT_SETTINGS_TYPE_MOUSELOCK) {
       // Notifications, web intents and auto select certificate have no bubble.
       continue;
     }

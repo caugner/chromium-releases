@@ -69,7 +69,7 @@ class InputMethodEngineImpl
 
   virtual bool SetComposition(int context_id,
                               const char* text, int selection_start,
-                              int selection_end,
+                              int selection_end, int cursor,
                               const std::vector<SegmentInfo>& segments,
                               std::string* error);
   virtual bool ClearComposition(int context_id,
@@ -190,6 +190,7 @@ bool InputMethodEngineImpl::SetComposition(
     const char* text,
     int selection_start,
     int selection_end,
+    int cursor,
     const std::vector<SegmentInfo>& segments,
     std::string* error) {
   if (!active_) {
@@ -201,7 +202,7 @@ bool InputMethodEngineImpl::SetComposition(
     return false;
   }
 
-  connection_->SetPreeditText(text, selection_end);
+  connection_->SetPreeditText(text, cursor);
   // TODO: Add support for displaying selected text in the composition string.
   for (std::vector<SegmentInfo>::const_iterator segment = segments.begin();
        segment != segments.end(); ++segment) {
@@ -505,16 +506,20 @@ void InputMethodEngineImpl::OnCandidateClicked(unsigned int index,
     return;
   }
 
-  int pressed_button = 0;
+  MouseButtonEvent pressed_button;
   if (button & input_method::IBusEngineController::MOUSE_BUTTON_1_MASK) {
     pressed_button = MOUSE_BUTTON_LEFT;
   } else if (button & input_method::IBusEngineController::MOUSE_BUTTON_2_MASK) {
     pressed_button = MOUSE_BUTTON_MIDDLE;
   } else if (button & input_method::IBusEngineController::MOUSE_BUTTON_3_MASK) {
     pressed_button = MOUSE_BUTTON_RIGHT;
+  } else {
+    LOG(ERROR) << "Unknown button: " << button;
+    pressed_button = MOUSE_BUTTON_LEFT;
   }
 
-  observer_->OnCandidateClicked(engine_id_, candidate_ids_.at(index), button);
+  observer_->OnCandidateClicked(
+      engine_id_, candidate_ids_.at(index), pressed_button);
 }
 
 class InputMethodEngineStub : public InputMethodEngine {
@@ -541,7 +546,7 @@ class InputMethodEngineStub : public InputMethodEngine {
 
   virtual bool SetComposition(int context_id,
                               const char* text, int selection_start,
-                              int selection_end,
+                              int selection_end, int cursor,
                               const std::vector<SegmentInfo>& segments,
                               std::string* error) {
     VLOG(0) << "SetComposition";

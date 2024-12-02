@@ -8,6 +8,8 @@
 #define CHROME_BROWSER_PROFILES_PROFILE_IMPL_H_
 #pragma once
 
+#include <string>
+
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -15,17 +17,20 @@
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_impl_io_data.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class ExtensionNavigationObserver;
 class ExtensionPrefs;
 class ExtensionPrefValueMap;
-class ExtensionSettings;
 class NetPrefObserver;
 class PrefService;
+class ProfileSyncComponentsFactory;
+class PromoResourceService;
 class SpeechInputPreferences;
 class SpellCheckProfile;
+class SSLConfigServiceManager;
+class VisitedLinkEventListener;
 
 #if defined(OS_CHROMEOS)
 namespace chromeos {
@@ -37,7 +42,7 @@ class Preferences;
 
 // The default profile implementation.
 class ProfileImpl : public Profile,
-                    public NotificationObserver {
+                    public content::NotificationObserver {
  public:
   virtual ~ProfileImpl();
 
@@ -82,6 +87,7 @@ class ProfileImpl : public Profile,
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
   virtual FaviconService* GetFaviconService(ServiceAccessType sat) OVERRIDE;
+  virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual HistoryService* GetHistoryService(ServiceAccessType sat) OVERRIDE;
   virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
   virtual AutocompleteClassifier* GetAutocompleteClassifier() OVERRIDE;
@@ -129,6 +135,9 @@ class ProfileImpl : public Profile,
   virtual ChromeURLDataManager* GetChromeURLDataManager() OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
   virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
+  virtual GURL GetHomePage() OVERRIDE;
+  virtual NetworkActionPredictor* GetNetworkActionPredictor() OVERRIDE;
+  virtual void SaveSessionState() OVERRIDE;
 
 #if defined(OS_CHROMEOS)
   virtual void ChangeAppLocale(const std::string& locale,
@@ -140,10 +149,10 @@ class ProfileImpl : public Profile,
 
   virtual PrefProxyConfigTracker* GetProxyConfigTracker() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   friend class Profile;
@@ -174,19 +183,30 @@ class ProfileImpl : public Profile,
 
   void EnsureSessionServiceCreated();
 
-  void RegisterComponentExtensions();
-
   ExtensionPrefValueMap* GetExtensionPrefValueMap();
 
   void CreateQuotaManagerAndClients();
 
   SpellCheckProfile* GetSpellCheckProfile();
 
-  NotificationRegistrar registrar_;
+  void UpdateProfileUserNameCache();
+
+  void GetCacheParameters(bool is_media_context,
+                          FilePath* cache_path,
+                          int* max_size);
+
+  content::NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
 
   FilePath path_;
   FilePath base_cache_path_;
+
+  // !!! BIG HONKING WARNING !!!
+  //  The order of the members below is important. Do not change it unless
+  //  you know what you're doing. Also, if adding a new member here make sure
+  //  that the declaration occurs AFTER things it depends on as destruction
+  //  happens in reverse order of declaration.
+
   scoped_ptr<ExtensionPrefValueMap> extension_pref_value_map_;
   // Keep |prefs_| on top for destruction order because |extension_prefs_|,
   // |net_pref_observer_|, |web_resource_service_|, and |io_data_| store
@@ -200,7 +220,16 @@ class ProfileImpl : public Profile,
   scoped_ptr<ExtensionPrefs> extension_prefs_;
   scoped_ptr<ExtensionService> extension_service_;
   scoped_refptr<UserScriptMaster> user_script_master_;
+
+  ProfileImplIOData::Handle io_data_;
+
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
+  // extension_info_map_ needs to outlive extension_process_manager_.
+  scoped_refptr<ExtensionInfoMap> extension_info_map_;
+  // |extension_process_manager_| must be destroyed before |io_data_|.
+  // While |extension_process_manager_| still lives, we handle incoming
+  // resource requests from extension processes and those require access
+  // to the ResourceContext owned by |io_data_|.
   scoped_ptr<ExtensionProcessManager> extension_process_manager_;
   scoped_refptr<ExtensionMessageService> extension_message_service_;
   scoped_ptr<ExtensionEventRouter> extension_event_router_;
@@ -215,10 +244,8 @@ class ProfileImpl : public Profile,
   scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
   scoped_ptr<TokenService> token_service_;
-  scoped_ptr<ProfileSyncFactory> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactory> profile_sync_factory_;
   scoped_ptr<ProfileSyncService> sync_service_;
-
-  ProfileImplIOData::Handle io_data_;
 
   scoped_ptr<SSLConfigServiceManager> ssl_config_service_manager_;
 
@@ -229,6 +256,7 @@ class ProfileImpl : public Profile,
   scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
   scoped_refptr<UserStyleSheetWatcher> user_style_sheet_watcher_;
   scoped_ptr<FindBarState> find_bar_state_;
+  scoped_ptr<GAIAInfoUpdateService> gaia_info_update_service_;
   scoped_refptr<HistoryService> history_service_;
   scoped_ptr<FaviconService> favicon_service_;
   scoped_ptr<AutocompleteClassifier> autocomplete_classifier_;
@@ -238,6 +266,8 @@ class ProfileImpl : public Profile,
   scoped_refptr<WebKitContext> webkit_context_;
   scoped_refptr<fileapi::FileSystemContext> file_system_context_;
   scoped_refptr<quota::QuotaManager> quota_manager_;
+  scoped_ptr<NetworkActionPredictor> network_action_predictor_;
+  bool profile_sync_service_created_;
   bool history_service_created_;
   bool favicon_service_created_;
   bool created_web_data_service_;
@@ -272,8 +302,6 @@ class ProfileImpl : public Profile,
 
   scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
 
-  scoped_refptr<ExtensionInfoMap> extension_info_map_;
-
 #if defined(OS_CHROMEOS)
   scoped_ptr<chromeos::Preferences> chromeos_preferences_;
 
@@ -283,13 +311,15 @@ class ProfileImpl : public Profile,
   scoped_ptr<chromeos::LocaleChangeGuard> locale_change_guard_;
 #endif
 
-  scoped_refptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
+  scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
 
   Profile::Delegate* delegate_;
 
   chrome_browser_net::Predictor* predictor_;
+
+  bool session_restore_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImpl);
 };

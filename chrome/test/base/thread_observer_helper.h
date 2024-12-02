@@ -6,35 +6,37 @@
 #define CHROME_TEST_BASE_THREAD_OBSERVER_HELPER_H_
 #pragma once
 
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/waitable_event.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_observer_mock.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/test/notification_observer_mock.h"
 
 // Helper class to add and remove observers on a non-UI thread from
 // the UI thread.
 template <class T, typename Traits>
 class ThreadObserverHelper : public base::RefCountedThreadSafe<T, Traits> {
  public:
-  explicit ThreadObserverHelper(BrowserThread::ID id)
+  explicit ThreadObserverHelper(content::BrowserThread::ID id)
       : id_(id), done_event_(false, false) {}
 
   void Init() {
+    using content::BrowserThread;
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     BrowserThread::PostTask(
         id_,
         FROM_HERE,
-        NewRunnableMethod(this, &ThreadObserverHelper::RegisterObserversTask));
+        base::Bind(&ThreadObserverHelper::RegisterObserversTask, this));
     done_event_.Wait();
   }
 
   virtual ~ThreadObserverHelper() {
-    DCHECK(BrowserThread::CurrentlyOn(id_));
+    DCHECK(content::BrowserThread::CurrentlyOn(id_));
     registrar_.RemoveAll();
   }
 
-  NotificationObserverMock* observer() {
+  content::NotificationObserverMock* observer() {
     return &observer_;
   }
 
@@ -43,28 +45,29 @@ class ThreadObserverHelper : public base::RefCountedThreadSafe<T, Traits> {
 
   virtual void RegisterObservers() = 0;
 
-  NotificationRegistrar registrar_;
-  NotificationObserverMock observer_;
+  content::NotificationRegistrar registrar_;
+  content::NotificationObserverMock observer_;
 
  private:
   void RegisterObserversTask() {
-    DCHECK(BrowserThread::CurrentlyOn(id_));
+    DCHECK(content::BrowserThread::CurrentlyOn(id_));
     RegisterObservers();
     done_event_.Signal();
   }
 
-  BrowserThread::ID id_;
+  content::BrowserThread::ID id_;
   base::WaitableEvent done_event_;
 };
 
 class DBThreadObserverHelper;
 typedef ThreadObserverHelper<
     DBThreadObserverHelper,
-    BrowserThread::DeleteOnDBThread> DBThreadObserverHelperBase;
+    content::BrowserThread::DeleteOnDBThread> DBThreadObserverHelperBase;
 
 class DBThreadObserverHelper : public DBThreadObserverHelperBase {
  public:
-  DBThreadObserverHelper() : DBThreadObserverHelperBase(BrowserThread::DB) {}
+  DBThreadObserverHelper() :
+      DBThreadObserverHelperBase(content::BrowserThread::DB) {}
 };
 
 #endif  // CHROME_TEST_BASE_THREAD_OBSERVER_HELPER_H_

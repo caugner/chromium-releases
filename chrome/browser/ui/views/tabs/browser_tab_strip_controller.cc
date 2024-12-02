@@ -6,8 +6,6 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-// TODO(alicet): clean up dependencies on defaults.h and max tab count.
-#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,11 +21,11 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/widget/widget.h"
+#include "content/public/browser/notification_service.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/widget/widget.h"
 
 static TabRendererData::NetworkState TabContentsNetworkState(
     TabContents* contents) {
@@ -140,7 +138,7 @@ BrowserTabStripController::BrowserTabStripController(Browser* browser,
 
   notification_registrar_.Add(this,
       chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 }
 
 BrowserTabStripController::~BrowserTabStripController() {
@@ -179,6 +177,10 @@ void BrowserTabStripController::ExecuteCommandForTab(
 
 bool BrowserTabStripController::IsTabPinned(BaseTab* tab) const {
   return IsTabPinned(tabstrip_->GetModelIndexOfBaseTab(tab));
+}
+
+const TabStripSelectionModel& BrowserTabStripController::GetSelectionModel() {
+  return model_->selection_model();
 }
 
 int BrowserTabStripController::GetCount() const {
@@ -396,10 +398,11 @@ void BrowserTabStripController::TabBlockedStateChanged(
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// BrowserTabStripController, NotificationObserver implementation:
+// BrowserTabStripController, content::NotificationObserver implementation:
 
 void BrowserTabStripController::Observe(int type,
-    const NotificationSource& source, const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED);
   // Note that this notification may be fired during a model mutation and
   // possibly before the tabstrip has processed the change.

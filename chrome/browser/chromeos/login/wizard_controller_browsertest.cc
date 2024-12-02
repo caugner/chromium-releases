@@ -12,19 +12,17 @@
 #include "chrome/browser/chromeos/login/mock_network_screen.h"
 #include "chrome/browser/chromeos/login/mock_update_screen.h"
 #include "chrome/browser/chromeos/login/network_screen.h"
-#include "chrome/browser/chromeos/login/network_selection_view.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/view_screen.h"
-#include "chrome/browser/chromeos/login/views_oobe_display.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "unicode/locid.h"
-#include "views/accelerator.h"
 
 namespace chromeos {
 
@@ -241,63 +239,9 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
 }
 #endif
 
-#if defined(OFFICIAL_BUILD)
-// This test is supposed to fail on official build.
-#define MAYBE_Accelerators DISABLED_Accelerators
-#else
-#define MAYBE_Accelerators Accelerators
-#endif
+// TODO(nkostylev): Add test for WebUI accelerators http://crosbug.com/22571
 
-IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, MAYBE_Accelerators) {
-  //TODO(altimofeev): do not depend on the display realization.
-
-  ViewsOobeDisplay* display =
-      static_cast<ViewsOobeDisplay*>(controller()->oobe_display_);
-  views::View* contents = display->contents_;
-
-  EXPECT_EQ(controller()->GetNetworkScreen(), controller()->current_screen());
-
-  views::Accelerator accel_network_screen(ui::VKEY_N, false, true, true);
-  views::Accelerator accel_update_screen(ui::VKEY_U, false, true, true);
-  views::Accelerator accel_image_screen(ui::VKEY_I, false, true, true);
-  views::Accelerator accel_eula_screen(ui::VKEY_E, false, true, true);
-  views::Accelerator accel_enterprise_enrollment_screen(
-      ui::VKEY_P, false, true, true);
-
-  views::FocusManager* focus_manager = NULL;
-
-  focus_manager = contents->GetFocusManager();
-  EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
-  EXPECT_CALL(*mock_enterprise_enrollment_screen_, Show()).Times(1);
-  EXPECT_TRUE(
-      focus_manager->ProcessAccelerator(accel_enterprise_enrollment_screen));
-  EXPECT_EQ(controller()->GetEnterpriseEnrollmentScreen(),
-            controller()->current_screen());
-
-  focus_manager = contents->GetFocusManager();
-  EXPECT_CALL(*mock_enterprise_enrollment_screen_, Hide()).Times(1);
-  EXPECT_CALL(*mock_network_screen_, Show()).Times(1);
-  EXPECT_TRUE(focus_manager->ProcessAccelerator(accel_network_screen));
-  EXPECT_EQ(controller()->GetNetworkScreen(), controller()->current_screen());
-
-  focus_manager = contents->GetFocusManager();
-  EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
-  EXPECT_CALL(*mock_update_screen_, Show()).Times(1);
-  EXPECT_TRUE(focus_manager->ProcessAccelerator(accel_update_screen));
-  EXPECT_EQ(controller()->GetUpdateScreen(), controller()->current_screen());
-
-  focus_manager = contents->GetFocusManager();
-  EXPECT_CALL(*mock_update_screen_, Hide()).Times(1);
-  EXPECT_TRUE(focus_manager->ProcessAccelerator(accel_image_screen));
-  EXPECT_EQ(controller()->GetUserImageScreen(), controller()->current_screen());
-
-  focus_manager = contents->GetFocusManager();
-  EXPECT_CALL(*mock_eula_screen_, Show()).Times(1);
-  EXPECT_TRUE(focus_manager->ProcessAccelerator(accel_eula_screen));
-  EXPECT_EQ(controller()->GetEulaScreen(), controller()->current_screen());
-}
-
-COMPILE_ASSERT(ScreenObserver::EXIT_CODES_COUNT == 17,
+COMPILE_ASSERT(ScreenObserver::EXIT_CODES_COUNT == 15,
                add_tests_for_new_control_flow_you_just_introduced);
 
 }  // namespace chromeos

@@ -10,7 +10,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
 #include "ui/base/gtk/gtk_signal.h"
@@ -20,14 +20,14 @@ class TabContents;
 
 namespace content {
 
-class WebDragDestDelegateGtk;
+class WebDragDestDelegate;
 
 // A helper class that handles DnD for drops in the renderer. In GTK parlance,
 // this handles destination-side DnD, but not source-side DnD.
 class CONTENT_EXPORT WebDragDestGtk {
  public:
   WebDragDestGtk(TabContents* tab_contents, GtkWidget* widget);
-  virtual ~WebDragDestGtk();
+  ~WebDragDestGtk();
 
   // This is called when the renderer responds to a drag motion event. We must
   // update the system drag cursor.
@@ -37,8 +37,8 @@ class CONTENT_EXPORT WebDragDestGtk {
   // See OnDragLeave().
   void DragLeave();
 
-  WebDragDestDelegateGtk* delegate() const { return delegate_; }
-  void set_delegate(WebDragDestDelegateGtk* delegate) { delegate_ = delegate; }
+  WebDragDestDelegate* delegate() const { return delegate_; }
+  void set_delegate(WebDragDestDelegate* delegate) { delegate_ = delegate; }
 
  private:
   // Called when a system drag crosses over the render view. As there is no drag
@@ -94,9 +94,9 @@ class CONTENT_EXPORT WebDragDestGtk {
   int destroy_handler_;
 
   // A delegate that can receive drag information about drag events.
-  WebDragDestDelegateGtk* delegate_;
+  WebDragDestDelegate* delegate_;
 
-  ScopedRunnableMethodFactory<WebDragDestGtk> method_factory_;
+  base::WeakPtrFactory<WebDragDestGtk> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDragDestGtk);
 };

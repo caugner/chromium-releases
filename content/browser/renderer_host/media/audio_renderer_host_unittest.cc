@@ -8,7 +8,7 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/sync_socket.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/media/audio_renderer_host.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
@@ -27,6 +27,9 @@ using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 using ::testing::SaveArg;
 using ::testing::SetArgumentPointee;
+using content::BrowserThread;
+
+using content::BrowserThreadImpl;
 
 static const int kStreamId = 50;
 
@@ -175,8 +178,10 @@ class AudioRendererHostTest : public testing::Test {
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
 
     // Claim to be on both the UI and IO threads to pass all the DCHECKS.
-    io_thread_.reset(new BrowserThread(BrowserThread::IO, message_loop_.get()));
-    ui_thread_.reset(new BrowserThread(BrowserThread::UI, message_loop_.get()));
+    io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
+                                           message_loop_.get()));
+    ui_thread_.reset(new BrowserThreadImpl(BrowserThread::UI,
+                                           message_loop_.get()));
 
     observer_.reset(new MockMediaObserver());
     content::MockResourceContext* context =
@@ -357,8 +362,8 @@ class AudioRendererHostTest : public testing::Test {
   scoped_ptr<MockMediaObserver> observer_;
   scoped_refptr<MockAudioRendererHost> host_;
   scoped_ptr<MessageLoop> message_loop_;
-  scoped_ptr<BrowserThread> io_thread_;
-  scoped_ptr<BrowserThread> ui_thread_;
+  scoped_ptr<BrowserThreadImpl> io_thread_;
+  scoped_ptr<BrowserThreadImpl> ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererHostTest);
 };

@@ -6,7 +6,9 @@
 #define NET_CURVECP_CLIENT_PACKETIZER_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
@@ -33,10 +35,10 @@ class ClientPacketizer : public Packetizer {
   virtual int SendMessage(ConnectionKey key,
                           const char* data,
                           size_t length,
-                          OldCompletionCallback* callback);
-  virtual void Close(ConnectionKey key);
-  virtual int GetPeerAddress(IPEndPoint* endpoint) const;
-  virtual int max_message_payload() const;
+                          OldCompletionCallback* callback) OVERRIDE;
+  virtual void Close(ConnectionKey key) OVERRIDE;
+  virtual int GetPeerAddress(IPEndPoint* endpoint) const OVERRIDE;
+  virtual int max_message_payload() const OVERRIDE;
 
  private:
   enum StateType {
@@ -92,7 +94,7 @@ class ClientPacketizer : public Packetizer {
   uchar shortterm_public_key_[32];
 
   OldCompletionCallbackImpl<ClientPacketizer> io_callback_;
-  ScopedRunnableMethodFactory<ClientPacketizer> timers_factory_;
+  base::WeakPtrFactory<ClientPacketizer> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientPacketizer);
 };

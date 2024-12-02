@@ -26,7 +26,6 @@
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/test/mock_chrome_application_mac.h"
@@ -36,24 +35,21 @@
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
-#include "remoting/host/continue_window.h"
-#include "remoting/host/curtain.h"
 #include "remoting/host/desktop_environment.h"
-#include "remoting/host/disconnect_window.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/heartbeat_sender.h"
-#include "remoting/host/local_input_monitor.h"
+#include "remoting/host/host_secret.h"
+#include "remoting/host/it2me_host_user_interface.h"
+#include "remoting/host/log_to_server.h"
 #include "remoting/host/json_host_config.h"
 #include "remoting/host/register_support_host_request.h"
-#include "remoting/host/self_access_verifier.h"
-#include "remoting/host/support_access_verifier.h"
 #include "remoting/proto/video.pb.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/gfx/gtk_util.h"
-#endif
-
-#if defined(OS_WIN)
+#elif defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
+#elif defined(OS_WIN)
 // TODO(garykac) Make simple host into a proper GUI app on Windows so that we
 // have an hModule for the dialog resource.
 HMODULE g_hModule = NULL;
@@ -63,6 +59,7 @@ using remoting::ChromotingHost;
 using remoting::DesktopEnvironment;
 using remoting::kChromotingTokenDefaultServiceName;
 using remoting::kXmppAuthServiceConfigPath;
+using remoting::It2MeHostUserInterface;
 using remoting::protocol::CandidateSessionConfig;
 using remoting::protocol::ChannelConfig;
 using std::string;
@@ -133,27 +130,19 @@ class SimpleHost {
     // ChromotingHost could cause a crash condition if SetIT2MeAccessCode is
     // called after the ChromotingHost is destroyed (for example, at shutdown).
     // Fix this.
-    scoped_ptr<remoting::AccessVerifier> access_verifier;
     scoped_ptr<remoting::RegisterSupportHostRequest> register_request;
     scoped_ptr<remoting::HeartbeatSender> heartbeat_sender;
+    scoped_ptr<remoting::LogToServer> log_to_server;
     if (is_it2me_) {
-      scoped_ptr<remoting::SupportAccessVerifier> support_access_verifier(
-          new remoting::SupportAccessVerifier());
       register_request.reset(new remoting::RegisterSupportHostRequest());
       if (!register_request->Init(
               config, base::Bind(&SimpleHost::SetIT2MeAccessCode,
-                                 base::Unretained(this),
-                                 support_access_verifier.get()))) {
+                                 base::Unretained(this)))) {
         return 1;
       }
-      access_verifier.reset(support_access_verifier.release());
-    } else {
-      scoped_ptr<remoting::SelfAccessVerifier> self_access_verifier(
-          new remoting::SelfAccessVerifier());
-      if (!self_access_verifier->Init(config))
-        return 1;
-      access_verifier.reset(self_access_verifier.release());
     }
+    log_to_server.reset(new remoting::LogToServer(
+        context.network_message_loop()));
 
     // Construct a chromoting host.
     scoped_ptr<DesktopEnvironment> desktop_environment;
@@ -163,24 +152,23 @@ class SimpleHost {
       remoting::EventExecutor* event_executor =
           remoting::EventExecutor::Create(context.desktop_message_loop(),
                                           capturer);
-      remoting::Curtain* curtain = remoting::Curtain::Create();
-      remoting::DisconnectWindow* disconnect_window =
-          remoting::DisconnectWindow::Create();
-      remoting::ContinueWindow* continue_window =
-          remoting::ContinueWindow::Create();
-      remoting::LocalInputMonitor* local_input_monitor =
-          remoting::LocalInputMonitor::Create();
       desktop_environment.reset(
-          new DesktopEnvironment(&context, capturer, event_executor, curtain,
-                                 disconnect_window, continue_window,
-                                 local_input_monitor));
+          new DesktopEnvironment(&context, capturer, event_executor));
     } else {
       desktop_environment.reset(DesktopEnvironment::Create(&context));
     }
 
-    host_ = ChromotingHost::Create(&context, config, desktop_environment.get(),
-                                   access_verifier.release(), false);
+    host_ = ChromotingHost::Create(
+        &context, config, desktop_environment.get(), false);
     host_->set_it2me(is_it2me_);
+
+    scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface;
+    if (is_it2me_) {
+      it2me_host_user_interface.reset(new It2MeHostUserInterface(host_,
+                                                                 &context));
+      it2me_host_user_interface->Init();
+      host_->AddStatusObserver(it2me_host_user_interface.get());
+    }
 
     if (protocol_config_.get()) {
       host_->set_protocol_config(protocol_config_.release());
@@ -197,9 +185,20 @@ class SimpleHost {
         return 1;
       host_->AddStatusObserver(heartbeat_sender.get());
     }
+    host_->AddStatusObserver(log_to_server.get());
 
     // Let the chromoting host run until the shutdown task is executed.
     host_->Start();
+
+    // Set an empty shared-secret for Me2Me.
+    // TODO(lambroslambrou): This is a temporary fix, pending a Me2Me-specific
+    // AuthenticatorFactory - crbug.com/105214.
+    if (!is_it2me_) {
+      context.network_message_loop()->PostTask(
+          FROM_HERE, base::Bind(&ChromotingHost::SetSharedSecret, host_.get(),
+                                ""));
+    }
+
     message_loop.MessageLoop::Run();
 
     // And then stop the chromoting context.
@@ -223,16 +222,15 @@ class SimpleHost {
  private:
   // TODO(wez): This only needs to be a member because it needs access to the
   // ChromotingHost, which has to be created after the SupportAccessVerifier.
-  void SetIT2MeAccessCode(remoting::SupportAccessVerifier* access_verifier,
-                          bool successful, const std::string& support_id,
+  void SetIT2MeAccessCode(bool successful, const std::string& support_id,
                           const base::TimeDelta& lifetime) {
-    access_verifier->OnIT2MeHostRegistered(successful, support_id);
     if (successful) {
-      std::string access_code = support_id + access_verifier->host_secret();
+      std::string host_secret = remoting::GenerateSupportHostSecret();
+      std::string access_code = support_id + host_secret;
       std::cout << "Support id: " << access_code << std::endl;
 
       // Tell the ChromotingHost the access code, to use as shared-secret.
-      host_->set_access_code(access_code);
+      host_->SetSharedSecret(access_code);
     } else {
       LOG(ERROR) << "If you haven't done so recently, try running"
                  << " remoting/tools/register_host.py.";
@@ -261,8 +259,11 @@ class SimpleHost {
 };
 
 int main(int argc, char** argv) {
-  // Needed for the Mac, so we don't leak objects when threads are created.
+#if defined(OS_MACOSX)
+  // Needed so we don't leak objects when threads are created.
   base::mac::ScopedNSAutoreleasePool pool;
+  mock_cr_app::RegisterMockCrApp();
+#endif
 
   CommandLine::Init(argc, argv);
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
@@ -273,10 +274,6 @@ int main(int argc, char** argv) {
 #if defined(TOOLKIT_USES_GTK)
   gfx::GtkInitFromCommandLine(*cmd_line);
 #endif  // TOOLKIT_USES_GTK
-
-#if defined(OS_MACOSX)
-  mock_cr_app::RegisterMockCrApp();
-#endif  // OS_MACOSX
 
   SimpleHost simple_host;
 

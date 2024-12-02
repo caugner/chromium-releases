@@ -16,7 +16,7 @@
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/view_messages.h"
+#include "content/public/common/frame_navigate_params.h"
 #include "grit/generated_resources.h"
 
 using webkit_glue::PasswordForm;
@@ -157,9 +157,9 @@ void PasswordManager::DidStopLoading() {
   }
 }
 
-void PasswordManager::DidNavigateAnyFramePostCommit(
+void PasswordManager::DidNavigateAnyFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) {
+      const content::FrameNavigateParams& params) {
   if (params.password_form.origin.is_valid())
     ProvisionallySavePassword(params.password_form);
 }
@@ -236,9 +236,8 @@ void PasswordManager::Autofill(
     }
     default:
       if (observer_) {
-        observer_->OnAutofillDataAvailable(
-            UTF16ToWideHack(preferred_match->username_value),
-            UTF16ToWideHack(preferred_match->password_value));
+        observer_->OnAutofillDataAvailable(preferred_match->username_value,
+                                           preferred_match->password_value);
       }
   }
 }

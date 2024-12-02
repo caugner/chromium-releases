@@ -39,7 +39,6 @@
 #include "net/http/http_proxy_client_socket_pool.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_request_info.h"
-#include "net/http/http_response_body_drainer.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_server_properties.h"
@@ -109,9 +108,9 @@ HttpNetworkTransaction::HttpNetworkTransaction(HttpNetworkSession* session)
       next_state_(STATE_NONE),
       establishing_tunnel_(false) {
   session->ssl_config_service()->GetSSLConfig(&server_ssl_config_);
-  if (session->http_stream_factory()->next_protos()) {
+  if (session->http_stream_factory()->has_next_protos()) {
     server_ssl_config_.next_protos =
-        *session->http_stream_factory()->next_protos();
+        session->http_stream_factory()->next_protos();
   }
   proxy_ssl_config_ = server_ssl_config_;
 }
@@ -137,15 +136,8 @@ HttpNetworkTransaction::~HttpNetworkTransaction() {
         stream_->Close(true /* not reusable */);
       } else {
         // Otherwise, we try to drain the response body.
-        // TODO(willchan): Consider moving this response body draining to the
-        // stream implementation.  For SPDY, there's clearly no point.  For
-        // HTTP, it can vary depending on whether or not we're pipelining.  It's
-        // stream dependent, so the different subtypes should be implementing
-        // their solutions.
-        HttpResponseBodyDrainer* drainer =
-          new HttpResponseBodyDrainer(stream_.release());
-        drainer->Start(session_);
-        // |drainer| will delete itself.
+        HttpStream* stream = stream_.release();
+        stream->Drain(session_);
       }
     }
   }
@@ -211,10 +203,8 @@ int HttpNetworkTransaction::RestartWithCertificate(
   return rv;
 }
 
-int HttpNetworkTransaction::RestartWithAuth(
-    const string16& username,
-    const string16& password,
-    OldCompletionCallback* callback) {
+int HttpNetworkTransaction::RestartWithAuth(const AuthCredentials& credentials,
+                                            OldCompletionCallback* callback) {
   HttpAuth::Target target = pending_auth_target_;
   if (target == HttpAuth::AUTH_NONE) {
     NOTREACHED();
@@ -222,7 +212,7 @@ int HttpNetworkTransaction::RestartWithAuth(
   }
   pending_auth_target_ = HttpAuth::AUTH_NONE;
 
-  auth_controllers_[target]->ResetAuth(username, password);
+  auth_controllers_[target]->ResetAuth(credentials);
 
   DCHECK(user_callback_ == NULL);
 
@@ -234,7 +224,7 @@ int HttpNetworkTransaction::RestartWithAuth(
     DCHECK(stream_request_ != NULL);
     auth_controllers_[target] = NULL;
     ResetStateForRestart();
-    rv = stream_request_->RestartTunnelWithProxyAuth(username, password);
+    rv = stream_request_->RestartTunnelWithProxyAuth(credentials);
   } else {
     // In this case, we've gathered credentials for the server or the proxy
     // but it is not during the tunneling phase.
@@ -1198,12 +1188,19 @@ int HttpNetworkTransaction::HandleIOError(int error) {
     case ERR_CONNECTION_CLOSED:
     case ERR_CONNECTION_ABORTED:
       if (ShouldResendRequest(error)) {
+        net_log_.AddEvent(
+            NetLog::TYPE_HTTP_TRANSACTION_RESTART_AFTER_ERROR,
+            make_scoped_refptr(new NetLogIntegerParameter("net_error", error)));
         ResetConnectionAndRequestForResend();
         error = OK;
       }
       break;
+    case ERR_PIPELINE_EVICTION:
     case ERR_SPDY_PING_FAILED:
     case ERR_SPDY_SERVER_REFUSED_STREAM:
+      net_log_.AddEvent(
+          NetLog::TYPE_HTTP_TRANSACTION_RESTART_AFTER_ERROR,
+          make_scoped_refptr(new NetLogIntegerParameter("net_error", error)));
       ResetConnectionAndRequestForResend();
       error = OK;
       break;

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,6 +10,7 @@ import sys
 
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
+import test_utils
 
 
 class PrefsTest(pyauto.PyUITest):
@@ -26,22 +27,35 @@ class PrefsTest(pyauto.PyUITest):
 
   def testSessionRestore(self):
     """Test session restore preference."""
+
+    pref_url = 'chrome://settings/browser'
     url1 = 'http://www.google.com/'
     url2 = 'http://news.google.com/'
+
+    self.NavigateToURL(pref_url)
+    # Set pref to restore session on startup.
+    driver = self.NewWebDriver()
+    restore_elem = driver.find_element_by_xpath(
+        '//input[@metric="Options_Startup_LastSession"]')
+    restore_elem.click()
+    self.assertTrue(restore_elem.is_selected())
+    self.RestartBrowser(clear_profile=False)
     self.NavigateToURL(url1)
     self.AppendTab(pyauto.GURL(url2))
     num_tabs = self.GetTabCount()
-    # Set pref to restore session on startup
-    self.SetPrefs(pyauto.kRestoreOnStartup, 1)
-    logging.debug('Setting %s to 1' % pyauto.kRestoreOnStartup)
     self.RestartBrowser(clear_profile=False)
-    # Verify
+    # Verify tabs are properly restored.
     self.assertEqual(self.GetPrefsInfo().Prefs(pyauto.kRestoreOnStartup), 1)
     self.assertEqual(num_tabs, self.GetTabCount())
     self.ActivateTab(0)
     self.assertEqual(url1, self.GetActiveTabURL().spec())
     self.ActivateTab(1)
     self.assertEqual(url2, self.GetActiveTabURL().spec())
+    # Verify session restore option is still selected.
+    self.NavigateToURL(pref_url, 0, 0)
+    driver = self.NewWebDriver()
+    self.assertTrue(driver.find_element_by_xpath(
+        '//input[@metric="Options_Startup_LastSession"]').is_selected())
 
   def testNavigationStateOnSessionRestore(self):
     """Verify navigation state is preserved on session restore."""
@@ -177,18 +191,21 @@ class PrefsTest(pyauto.PyUITest):
     """Verify enabling disabling javascript prefs work """
 
     self.assertTrue(
-        self.GetPrefsInfo().Prefs('webkit.webprefs.javascript_enabled'))
+        self.GetPrefsInfo().Prefs(pyauto.kWebKitGlobalJavascriptEnabled))
     url = self.GetFileURLForDataPath(
               os.path.join('javaScriptTitle.html'))
     title1 = 'Title from script javascript enabled'
     self.NavigateToURL(url)
     self.assertEqual(title1, self.GetActiveTabTitle())
-    self.SetPrefs('webkit.webprefs.javascript_enabled', False)
+    self.SetPrefs(pyauto.kWebKitGlobalJavascriptEnabled, False)
     title = 'This is html title'
     self.NavigateToURL(url)
     self.assertEqual(title, self.GetActiveTabTitle())
 
+  def testHaveLocalStatePrefs(self):
+    """Verify that we have some Local State prefs."""
+    self.assertTrue(self.GetLocalStatePrefsInfo())
+
 
 if __name__ == '__main__':
   pyauto_functional.Main()
-

@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/speech/speech_recognition_request.h"
+#include "content/public/common/speech_input_result.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
@@ -21,14 +23,15 @@ class SpeechRecognitionRequestTest : public SpeechRecognitionRequestDelegate,
   void CreateAndTestRequest(bool success, const std::string& http_response);
 
   // SpeechRecognitionRequestDelegate methods.
-  virtual void SetRecognitionResult(const SpeechInputResult& result) OVERRIDE {
+  virtual void SetRecognitionResult(
+      const content::SpeechInputResult& result) OVERRIDE {
     result_ = result;
   }
 
  protected:
   MessageLoop message_loop_;
   TestURLFetcherFactory url_fetcher_factory_;
-  SpeechInputResult result_;
+  content::SpeechInputResult result_;
 };
 
 void SpeechRecognitionRequestTest::CreateAndTestRequest(
@@ -40,7 +43,7 @@ void SpeechRecognitionRequestTest::CreateAndTestRequest(
   TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
 
-  fetcher->set_url(fetcher->original_url());
+  fetcher->set_url(fetcher->GetOriginalURL());
   net::URLRequestStatus status;
   status.set_status(success ? net::URLRequestStatus::SUCCESS :
                               net::URLRequestStatus::FAILED);
@@ -57,7 +60,7 @@ TEST_F(SpeechRecognitionRequestTest, BasicTest) {
   CreateAndTestRequest(true,
       "{\"status\":0,\"hypotheses\":"
       "[{\"utterance\":\"123456\",\"confidence\":0.9}]}");
-  EXPECT_EQ(result_.error, kErrorNone);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NONE);
   EXPECT_EQ(1U, result_.hypotheses.size());
   EXPECT_EQ(ASCIIToUTF16("123456"), result_.hypotheses[0].utterance);
   EXPECT_EQ(0.9, result_.hypotheses[0].confidence);
@@ -67,7 +70,7 @@ TEST_F(SpeechRecognitionRequestTest, BasicTest) {
       "{\"status\":0,\"hypotheses\":["
       "{\"utterance\":\"hello\",\"confidence\":0.9},"
       "{\"utterance\":\"123456\",\"confidence\":0.5}]}");
-  EXPECT_EQ(result_.error, kErrorNone);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NONE);
   EXPECT_EQ(2u, result_.hypotheses.size());
   EXPECT_EQ(ASCIIToUTF16("hello"), result_.hypotheses[0].utterance);
   EXPECT_EQ(0.9, result_.hypotheses[0].confidence);
@@ -76,28 +79,28 @@ TEST_F(SpeechRecognitionRequestTest, BasicTest) {
 
   // Zero results.
   CreateAndTestRequest(true, "{\"status\":0,\"hypotheses\":[]}");
-  EXPECT_EQ(result_.error, kErrorNone);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NONE);
   EXPECT_EQ(0U, result_.hypotheses.size());
 
   // Http failure case.
   CreateAndTestRequest(false, "");
-  EXPECT_EQ(result_.error, kErrorNetwork);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NETWORK);
   EXPECT_EQ(0U, result_.hypotheses.size());
 
   // Invalid status case.
   CreateAndTestRequest(true, "{\"status\":\"invalid\",\"hypotheses\":[]}");
-  EXPECT_EQ(result_.error, kErrorNetwork);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NETWORK);
   EXPECT_EQ(0U, result_.hypotheses.size());
 
   // Server-side error case.
   CreateAndTestRequest(true, "{\"status\":1,\"hypotheses\":[]}");
-  EXPECT_EQ(result_.error, kErrorNetwork);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NETWORK);
   EXPECT_EQ(0U, result_.hypotheses.size());
 
   // Malformed JSON case.
   CreateAndTestRequest(true, "{\"status\":0,\"hypotheses\":"
       "[{\"unknownkey\":\"hello\"}]}");
-  EXPECT_EQ(result_.error, kErrorNetwork);
+  EXPECT_EQ(result_.error, content::SPEECH_INPUT_ERROR_NETWORK);
   EXPECT_EQ(0U, result_.hypotheses.size());
 }
 

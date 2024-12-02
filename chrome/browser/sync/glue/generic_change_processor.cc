@@ -6,9 +6,9 @@
 
 #include "base/location.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/sync_error.h"
+#include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/internal_api/base_node.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
@@ -16,7 +16,9 @@
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/unrecoverable_error_handler.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -241,7 +243,7 @@ bool GenericChangeProcessor::SyncModelHasUserCreatedNodes(
 
   // The sync model has user created nodes if the type's root node has any
   // children.
-  *has_nodes = sync_api::kInvalidId != type_root_node.GetFirstChildId();
+  *has_nodes = type_root_node.HasChildren();
   return true;
 }
 

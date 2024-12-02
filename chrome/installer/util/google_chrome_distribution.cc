@@ -17,6 +17,7 @@
 #include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -402,9 +403,10 @@ std::wstring GoogleChromeDistribution::GetAppGuid() {
 }
 
 std::wstring GoogleChromeDistribution::GetApplicationName() {
-  const std::wstring& product_name =
-      installer::GetLocalizedString(IDS_PRODUCT_NAME_BASE);
-  return product_name;
+  // I'd really like to return L ## PRODUCT_FULLNAME_STRING; but that's no good
+  // since it'd be "Chromium" in a non-Chrome build, which isn't at all what I
+  // want.  Sigh.
+  return L"Google Chrome";
 }
 
 std::wstring GoogleChromeDistribution::GetAlternateApplicationName() {

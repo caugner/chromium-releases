@@ -4,10 +4,13 @@
 
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 
+#include "base/bind.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "googleurl/src/gurl.h"
+
+using content::BrowserThread;
 
 ExtensionEventRouterForwarder::ExtensionEventRouterForwarder() {
 }
@@ -65,11 +68,9 @@ void ExtensionEventRouterForwarder::HandleEvent(
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &ExtensionEventRouterForwarder::HandleEvent,
-            extension_id, event_name, event_args, profile_ptr,
-            use_profile_to_restrict_events, event_url));
+        base::Bind(&ExtensionEventRouterForwarder::HandleEvent, this,
+                   extension_id, event_name, event_args, profile_ptr,
+                   use_profile_to_restrict_events, event_url));
     return;
   }
 

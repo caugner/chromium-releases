@@ -13,6 +13,7 @@
     "fileBrowserHandler",
     "fileBrowserPrivate",
     "mediaPlayerPrivate",
+    "metricsPrivate",
     "unlimitedStorage",
     "chrome://extension-icon/",
     "chrome://resources/",
@@ -24,19 +25,6 @@
     }
   },
   "file_browser_handlers": [
-    {
-      "id": "preview",
-      "default_title": "__MSG_PREVIEW_IMAGE__",
-      "default_icon": "images/icon_preview_16x16.png",
-      "file_filters": [
-        "filesystem:*.bmp",
-        "filesystem:*.gif",
-        "filesystem:*.jpg",
-        "filesystem:*.jpeg",
-        "filesystem:*.webp",
-        "filesystem:*.png"
-      ]
-    },
     {
       "id": "play",
       "default_title": "__MSG_PLAY_MEDIA__",

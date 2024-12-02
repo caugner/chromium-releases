@@ -4,13 +4,16 @@
 
 #include "content/browser/site_instance.h"
 
+#include "base/command_line.h"
 #include "content/browser/browsing_instance.h"
-#include "content/browser/content_browser_client.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
+#include "content/browser/child_process_security_policy.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/webui/web_ui_factory.h"
-#include "content/common/content_client.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host_factory.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/registry_controlled_domain.h"
 
@@ -39,14 +42,11 @@ SiteInstance::SiteInstance(BrowsingInstance* browsing_instance)
   DCHECK(browsing_instance);
 
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
 SiteInstance::~SiteInstance() {
-  NotificationService::current()->Notify(
-      content::NOTIFICATION_SITE_INSTANCE_DELETED,
-      Source<SiteInstance>(this),
-      NotificationService::NoDetails());
+  content::GetContentClient()->browser()->SiteInstanceDeleting(this);
 
   // Now that no one is referencing us, we can safely remove ourselves from
   // the BrowsingInstance.  Any future visits to a page from this site
@@ -59,7 +59,7 @@ bool SiteInstance::HasProcess() const {
   return (process_ != NULL);
 }
 
-RenderProcessHost* SiteInstance::GetProcess() {
+content::RenderProcessHost* SiteInstance::GetProcess() {
   // TODO(erikkay) It would be nice to ensure that the renderer type had been
   // properly set before we get here.  The default tab creation case winds up
   // with no site set at this point, so it will default to TYPE_NORMAL.  This
@@ -70,8 +70,8 @@ RenderProcessHost* SiteInstance::GetProcess() {
   // Create a new process if ours went away or was reused.
   if (!process_) {
     // See if we should reuse an old process
-    if (RenderProcessHost::ShouldTryToUseExistingProcessHost())
-      process_ = RenderProcessHost::GetExistingProcessHost(
+    if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost())
+      process_ = content::RenderProcessHost::GetExistingProcessHost(
           browsing_instance_->browser_context(), site_);
 
     // Otherwise (or if that fails), create a new one.
@@ -81,12 +81,18 @@ RenderProcessHost* SiteInstance::GetProcess() {
             browsing_instance_->browser_context());
       } else {
         process_ =
-            new BrowserRenderProcessHost(browsing_instance_->browser_context());
+            new RenderProcessHostImpl(browsing_instance_->browser_context());
       }
     }
 
-    // Make sure the process starts at the right max_page_id
-    process_->UpdateMaxPageID(max_page_id_);
+    content::GetContentClient()->browser()->SiteInstanceGotProcess(this);
+
+    // Make sure the process starts at the right max_page_id, and ensure that
+    // we send an update to the renderer process.
+    process_->UpdateAndSendMaxPageID(max_page_id_);
+
+    if (has_site_)
+      LockToOrigin();
   }
   DCHECK(process_);
 
@@ -111,6 +117,9 @@ void SiteInstance::SetSite(const GURL& url) {
   // the same BrowsingInstance, because all same-site pages within a
   // BrowsingInstance can script each other.
   browsing_instance_->RegisterSiteInstance(this);
+
+  if (process_)
+    LockToOrigin();
 }
 
 bool SiteInstance::HasRelatedSiteInstance(const GURL& url) {
@@ -222,10 +231,21 @@ GURL SiteInstance::GetEffectiveURL(content::BrowserContext* browser_context,
 }
 
 void SiteInstance::Observe(int type,
-                           const NotificationSource& source,
-                           const NotificationDetails& details) {
+                           const content::NotificationSource& source,
+                           const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
-  RenderProcessHost* rph = Source<RenderProcessHost>(source).ptr();
+  content::RenderProcessHost* rph =
+      content::Source<content::RenderProcessHost>(source).ptr();
   if (rph == process_)
     process_ = NULL;
 }
+
+void SiteInstance::LockToOrigin() {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kEnableStrictSiteIsolation)) {
+    ChildProcessSecurityPolicy* policy =
+        ChildProcessSecurityPolicy::GetInstance();
+    policy->LockToOrigin(process_->GetID(), site_);
+  }
+}
+

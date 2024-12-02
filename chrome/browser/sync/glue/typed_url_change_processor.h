@@ -9,17 +9,21 @@
 #include "chrome/browser/sync/glue/change_processor.h"
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/typed_url_model_associator.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 
 class MessageLoop;
-class NotificationService;
 class Profile;
+
+namespace content {
+class NotificationService;
+}
 
 namespace history {
 class HistoryBackend;
@@ -37,7 +41,7 @@ class UnrecoverableErrorHandler;
 // applying them to the sync_api 'syncable' model, and vice versa. All
 // operations and use of this class are from the UI thread.
 class TypedUrlChangeProcessor : public ChangeProcessor,
-                                public NotificationObserver {
+                                public content::NotificationObserver {
  public:
   TypedUrlChangeProcessor(Profile* profile,
                           TypedUrlModelAssociator* model_associator,
@@ -45,11 +49,11 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
                           UnrecoverableErrorHandler* error_handler);
   virtual ~TypedUrlChangeProcessor();
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   // History -> sync_api model change application.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // sync_api model -> WebDataService change application.
   virtual void ApplyChangesFromSyncModel(
@@ -61,10 +65,11 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   virtual void CommitChangesFromSyncModel() OVERRIDE;
 
  protected:
-  virtual void StartImpl(Profile* profile);
-  virtual void StopImpl();
+  virtual void StartImpl(Profile* profile) OVERRIDE;
+  virtual void StopImpl() OVERRIDE;
 
  private:
+  friend class ScopedStopObserving<TypedUrlChangeProcessor>;
   void StartObserving();
   void StopObserving();
 
@@ -95,17 +100,16 @@ class TypedUrlChangeProcessor : public ChangeProcessor,
   // holding a reference.
   history::HistoryBackend* history_backend_;
 
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   bool observing_;  // True when we should observe notifications.
 
   MessageLoop* expected_loop_;
 
-  scoped_ptr<NotificationService> notification_service_;
+  scoped_ptr<content::NotificationService> notification_service_;
 
   // The set of pending changes that will be written out on the next
   // CommitChangesFromSyncModel() call.
-  TypedUrlModelAssociator::TypedUrlTitleVector pending_titles_;
   TypedUrlModelAssociator::TypedUrlVector pending_new_urls_;
   TypedUrlModelAssociator::TypedUrlUpdateVector pending_updated_urls_;
   std::vector<GURL> pending_deleted_urls_;

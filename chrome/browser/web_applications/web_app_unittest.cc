@@ -11,8 +11,10 @@
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 class WebApplicationTest : public TabContentsWrapperTestHarness {
  public:
@@ -20,7 +22,7 @@ class WebApplicationTest : public TabContentsWrapperTestHarness {
   }
 
  private:
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(WebApplicationTest, GetShortcutInfoForTab) {

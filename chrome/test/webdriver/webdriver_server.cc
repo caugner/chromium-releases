@@ -31,6 +31,7 @@
 #include "chrome/test/webdriver/commands/alert_commands.h"
 #include "chrome/test/webdriver/commands/appcache_status_command.h"
 #include "chrome/test/webdriver/commands/browser_connection_commands.h"
+#include "chrome/test/webdriver/commands/chrome_commands.h"
 #include "chrome/test/webdriver/commands/cookie_commands.h"
 #include "chrome/test/webdriver/commands/create_session.h"
 #include "chrome/test/webdriver/commands/execute_async_script_command.h"
@@ -63,7 +64,7 @@
 
 namespace webdriver {
 
-void InitCallbacks(struct mg_context* ctx, Dispatcher* dispatcher,
+void InitCallbacks(Dispatcher* dispatcher,
                    base::WaitableEvent* shutdown_event,
                    bool forbid_other_requests) {
   dispatcher->AddShutdown("/shutdown", shutdown_event);
@@ -141,6 +142,9 @@ void InitCallbacks(struct mg_context* ctx, Dispatcher* dispatcher,
   dispatcher->Add<BrowserConnectionCommand>("/session/*/browser_connection");
   dispatcher->Add<AppCacheStatusCommand>("/session/*/application_cache/status");
 
+  // Chrome-specific command.
+  dispatcher->Add<ExtensionsCommand>("/session/*/chrome/extensions");
+
   // Since the /session/* is a wild card that would match the above URIs, this
   // line MUST be after all other webdriver command callbacks.
   dispatcher->Add<SessionWithID>("/session/*");
@@ -151,31 +155,44 @@ void InitCallbacks(struct mg_context* ctx, Dispatcher* dispatcher,
 
 }  // namespace webdriver
 
-// Configures mongoose according to the given command line flags.
-// Returns true on success.
-bool SetMongooseOptions(struct mg_context* ctx,
-                        const std::string& port,
-                        const std::string& root) {
-  if (!mg_set_option(ctx, "ports", port.c_str())) {
-    std::cout << "ChromeDriver cannot bind to port ("
-              << port.c_str() << ")" << std::endl;
-    return false;
+namespace {
+
+void* ProcessHttpRequest(mg_event event_raised,
+                         struct mg_connection* connection,
+                         const struct mg_request_info* request_info) {
+  bool handler_result_code = false;
+  if (event_raised == MG_NEW_REQUEST) {
+    handler_result_code =
+        reinterpret_cast<webdriver::Dispatcher*>(request_info->user_data)->
+            ProcessHttpRequest(connection, request_info);
   }
-  if (root.length())
-    mg_set_option(ctx, "root", root.c_str());
-  // Lower the default idle time to 1 second. Idle time refers to how long a
-  // worker thread will wait for new connections before exiting.
-  // This is so mongoose quits in a reasonable amount of time.
-  mg_set_option(ctx, "idle_time", "1");
-  return true;
+
+  return reinterpret_cast<void*>(handler_result_code);
 }
 
+void MakeMongooseOptions(const std::string& port,
+                         const std::string& root,
+                         int http_threads,
+                         bool enable_keep_alive,
+                         std::vector<std::string>* out_options) {
+  out_options->push_back("listening_ports");
+  out_options->push_back(port);
+  out_options->push_back("enable_keep_alive");
+  out_options->push_back(enable_keep_alive ? "yes" : "no");
+  out_options->push_back("num_threads");
+  out_options->push_back(base::IntToString(http_threads));
+  if (!root.empty()) {
+    out_options->push_back("document_root");
+    out_options->push_back(root);
+  }
+}
+
+}  // namespace
 
 // Sets up and runs the Mongoose HTTP server for the JSON over HTTP
 // protcol of webdriver.  The spec is located at:
 // http://code.google.com/p/selenium/wiki/JsonWireProtocol.
 int main(int argc, char *argv[]) {
-  struct mg_context *ctx;
   base::AtExitManager exit;
   base::WaitableEvent shutdown_event(false, false);
   CommandLine::Init(argc, argv);
@@ -196,6 +213,8 @@ int main(int argc, char *argv[]) {
   std::string root;
   std::string url_base;
   bool verbose = false;
+  int http_threads = 4;
+  bool enable_keep_alive = true;
   if (cmd_line->HasSwitch("port"))
     port = cmd_line->GetSwitchValueASCII("port");
   // The 'root' flag allows the user to specify a location to serve files from.
@@ -208,6 +227,15 @@ int main(int argc, char *argv[]) {
   // Whether or not to do verbose logging.
   if (cmd_line->HasSwitch("verbose"))
     verbose = true;
+  if (cmd_line->HasSwitch("http-threads")) {
+    if (!base::StringToInt(cmd_line->GetSwitchValueASCII("http-threads"),
+                           &http_threads)) {
+      std::cerr << "'http-threads' option must be an integer";
+      return 1;
+    }
+  }
+  if (cmd_line->HasSwitch("disable-keep-alive"))
+    enable_keep_alive = false;
 
   webdriver::InitWebDriverLogging(
       verbose ? logging::LOG_INFO : logging::LOG_WARNING);
@@ -216,21 +244,30 @@ int main(int argc, char *argv[]) {
   manager->set_port(port);
   manager->set_url_base(url_base);
 
+  webdriver::Dispatcher dispatcher(url_base);
+  webdriver::InitCallbacks(&dispatcher, &shutdown_event, root.empty());
+
+  std::vector<std::string> args;
+  MakeMongooseOptions(port, root, http_threads, enable_keep_alive, &args);
+  scoped_array<const char*> options(new const char*[args.size() + 1]);
+  for (size_t i = 0; i < args.size(); ++i) {
+    options[i] = args[i].c_str();
+  }
+  options[args.size()] = NULL;
+
   // Initialize SHTTPD context.
   // Listen on port 9515 or port specified on command line.
   // TODO(jmikhail) Maybe add port 9516 as a secure connection.
-  ctx = mg_start();
-  if (!SetMongooseOptions(ctx, port, root)) {
-    mg_stop(ctx);
+  struct mg_context* ctx = mg_start(&ProcessHttpRequest,
+                                    &dispatcher,
+                                    options.get());
+  if (ctx == NULL) {
 #if defined(OS_WIN)
     return WSAEADDRINUSE;
 #else
     return EADDRINUSE;
 #endif
   }
-
-  webdriver::Dispatcher dispatcher(ctx, url_base);
-  webdriver::InitCallbacks(ctx, &dispatcher, &shutdown_event, root.empty());
 
   // The tests depend on parsing the first line ChromeDriver outputs,
   // so all other logging should happen after this.
@@ -239,11 +276,9 @@ int main(int argc, char *argv[]) {
             << "version=" << chrome::kChromeVersion << std::endl;
 
   // Run until we receive command to shutdown.
+  // Don't call mg_stop because mongoose will hang if clients are still
+  // connected when keep-alive is enabled.
   shutdown_event.Wait();
 
-  // We should not reach here since the service should never quit.
-  // TODO(jmikhail): register a listener for SIGTERM and break the
-  // message loop gracefully.
-  mg_stop(ctx);
   return (EXIT_SUCCESS);
 }

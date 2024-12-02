@@ -30,16 +30,15 @@
 #include "crypto/nss_util.h"
 #include "content/common/chrome_descriptors.h"
 #include "content/common/font_config_ipc_linux.h"
-#include "content/common/main_function_params.h"
 #include "content/common/pepper_plugin_registry.h"
-#include "content/common/process_watcher.h"
-#include "content/common/result_codes.h"
 #include "content/common/sandbox_methods_linux.h"
 #include "content/common/seccomp_sandbox.h"
 #include "content/common/set_process_title.h"
 #include "content/common/unix_domain_socket_posix.h"
-#include "content/common/zygote_fork_delegate_linux.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/main_function_params.h"
+#include "content/public/common/result_codes.h"
+#include "content/public/common/zygote_fork_delegate_linux.h"
 #include "skia/ext/SkFontHost_fontconfig_control.h"
 #include "unicode/timezone.h"
 #include "ipc/ipc_channel.h"
@@ -94,8 +93,12 @@ static void SELinuxTransitionToTypeOrDie(const char* type) {
 // runs it.
 class Zygote {
  public:
-  Zygote(int sandbox_flags, ZygoteForkDelegate* helper)
+  Zygote(int sandbox_flags, content::ZygoteForkDelegate* helper)
       : sandbox_flags_(sandbox_flags), helper_(helper) {
+    if (helper_)
+      helper_->InitialUMA(&initial_uma_name_,
+                          &initial_uma_sample_,
+                          &initial_uma_boundary_value_);
   }
 
   bool ProcessRequests() {
@@ -216,7 +219,7 @@ class Zygote {
       actual_child = child;
     }
 
-    ProcessWatcher::EnsureProcessTerminated(actual_child);
+    base::EnsureProcessTerminated(actual_child);
   }
 
   void HandleGetTerminationStatus(int fd, const Pickle& pickle, void* iter) {
@@ -253,10 +256,16 @@ class Zygote {
   // This is equivalent to fork(), except that, when using the SUID
   // sandbox, it returns the real PID of the child process as it
   // appears outside the sandbox, rather than returning the PID inside
-  // the sandbox.
+  // the sandbox. Optionally, it fills in uma_name et al with a report
+  // the helper wants to make via UMA_HISTOGRAM_ENUMERATION.
   int ForkWithRealPid(const std::string& process_type, std::vector<int>& fds,
-                      const std::string& channel_switch) {
-    const bool use_helper = (helper_ && helper_->CanHelp(process_type));
+                      const std::string& channel_switch,
+                      std::string* uma_name,
+                      int* uma_sample, int* uma_boundary_value) {
+    const bool use_helper = (helper_ && helper_->CanHelp(process_type,
+                                                         uma_name,
+                                                         uma_sample,
+                                                         uma_boundary_value));
     if (!(use_helper || g_suid_sandbox_active)) {
       return fork();
     }
@@ -382,7 +391,10 @@ class Zygote {
   // process and the child process ID to the parent process, like fork().
   base::ProcessId ReadArgsAndFork(const Pickle& pickle,
                                   void* iter,
-                                  std::vector<int>& fds) {
+                                  std::vector<int>& fds,
+                                  std::string* uma_name,
+                                  int* uma_sample,
+                                  int* uma_boundary_value) {
     std::vector<std::string> args;
     int argc = 0;
     int numfds = 0;
@@ -422,7 +434,9 @@ class Zygote {
         static_cast<uint32_t>(kSandboxIPCChannel), kMagicSandboxIPCDescriptor));
 
     // Returns twice, once per process.
-    base::ProcessId child_pid = ForkWithRealPid(process_type, fds, channel_id);
+    base::ProcessId child_pid = ForkWithRealPid(process_type, fds, channel_id,
+                                                uma_name, uma_sample,
+                                                uma_boundary_value);
     if (!child_pid) {
       // This is the child process.
 #if defined(SECCOMP_SANDBOX)
@@ -470,14 +484,36 @@ class Zygote {
   // child_pid of -1 on error.
   bool HandleForkRequest(int fd, const Pickle& pickle,
                          void* iter, std::vector<int>& fds) {
-    base::ProcessId child_pid = ReadArgsAndFork(pickle, iter, fds);
+    std::string uma_name;
+    int uma_sample;
+    int uma_boundary_value;
+    base::ProcessId child_pid = ReadArgsAndFork(pickle, iter, fds,
+                                                &uma_name, &uma_sample,
+                                                &uma_boundary_value);
     if (child_pid == 0)
       return true;
     for (std::vector<int>::const_iterator
          i = fds.begin(); i != fds.end(); ++i)
       close(*i);
+    if (uma_name.empty()) {
+      // There is no UMA report from this particular fork.
+      // Use the initial UMA report if any, and clear that record for next time.
+      // Note the swap method here is the efficient way to do this, since
+      // we know uma_name is empty.
+      uma_name.swap(initial_uma_name_);
+      uma_sample = initial_uma_sample_;
+      uma_boundary_value = initial_uma_boundary_value_;
+    }
     // Must always send reply, as ZygoteHost blocks while waiting for it.
-    if (HANDLE_EINTR(write(fd, &child_pid, sizeof(child_pid))) < 0)
+    Pickle reply_pickle;
+    reply_pickle.WriteInt(child_pid);
+    reply_pickle.WriteString(uma_name);
+    if (!uma_name.empty()) {
+      reply_pickle.WriteInt(uma_sample);
+      reply_pickle.WriteInt(uma_boundary_value);
+    }
+    if (HANDLE_EINTR(write(fd, reply_pickle.data(), reply_pickle.size())) !=
+        static_cast<ssize_t> (reply_pickle.size()))
       PLOG(ERROR) << "write";
     return false;
   }
@@ -498,7 +534,13 @@ class Zygote {
   ProcessMap real_pids_to_sandbox_pids;
 
   const int sandbox_flags_;
-  ZygoteForkDelegate* helper_;
+  content::ZygoteForkDelegate* helper_;
+
+  // These might be set by helper_->InitialUMA.  They supply a UMA
+  // enumeration sample we should report on the first fork.
+  std::string initial_uma_name_;
+  int initial_uma_sample_;
+  int initial_uma_boundary_value_;
 };
 
 // With SELinux we can carve out a precise sandbox, so we don't have to play
@@ -715,6 +757,7 @@ static bool EnterSandbox() {
     SkiaFontConfigSetImplementation(
         new FontConfigIPC(kMagicSandboxIPCDescriptor));
 
+#if !defined(OS_OPENBSD)
     // Previously, we required that the binary be non-readable. This causes the
     // kernel to mark the process as non-dumpable at startup. The thinking was
     // that, although we were putting the renderers into a PID namespace (with
@@ -740,6 +783,7 @@ static bool EnterSandbox() {
         return false;
       }
     }
+#endif
 #if defined(SECCOMP_SANDBOX)
   } else if (SeccompSandboxEnabled()) {
     PreSandboxInit();
@@ -762,8 +806,8 @@ static bool EnterSandbox() {
 
 #endif  // CHROMIUM_SELINUX
 
-bool ZygoteMain(const MainFunctionParams& params,
-                ZygoteForkDelegate* forkdelegate) {
+bool ZygoteMain(const content::MainFunctionParams& params,
+                content::ZygoteForkDelegate* forkdelegate) {
 #if !defined(CHROMIUM_SELINUX)
   g_am_zygote_or_renderer = true;
 #endif

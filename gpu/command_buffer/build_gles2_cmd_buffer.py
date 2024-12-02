@@ -1,5 +1,4 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -224,6 +223,8 @@ GL_APICALL GLuint       GL_APIENTRY glCreateStreamTextureCHROMIUM (GLuint textur
 GL_APICALL void         GL_APIENTRY glDestroyStreamTextureCHROMIUM (GLuint texture);
 GL_APICALL void         GL_APIENTRY glPlaceholder453CHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glGetTranslatedShaderSourceANGLE (GLidShader shader, GLsizeiNotNegative bufsize, GLsizei* length, char* source);
+GL_APICALL void         GL_APIENTRY glPostSubBufferCHROMIUM (GLint x, GLint y, GLint width, GLint height);
+GL_APICALL void         GL_APIENTRY glTexImageIOSurface2DCHROMIUM (GLenumTextureBindTarget target, GLsizei width, GLsizei height, GLuint ioSurfaceId, GLuint plane);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -433,6 +434,8 @@ _CMD_ID_TABLE = {
   'GetMultipleIntegervCHROMIUM':                               454,
   'GetProgramInfoCHROMIUM':                                    455,
   'GetTranslatedShaderSourceANGLE':                            456,
+  'PostSubBufferCHROMIUM':                                     457,
+  'TexImageIOSurface2DCHROMIUM':                               458,
 }
 
 # This is a list of enum names and their valid values. It is used to map
@@ -1432,6 +1435,7 @@ _FUNCTION_INFO = {
     'get_len_func': 'DoGetShaderiv',
     'get_len_enum': 'GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE',
     'unit_test': False,
+    'extension': True,
     },
   'GetUniformfv': {
     'type': 'Custom',
@@ -1517,6 +1521,13 @@ _FUNCTION_INFO = {
     'chromium': True,
   },
   'PixelStorei': {'type': 'Manual'},
+  'PostSubBufferCHROMIUM': {
+      'type': 'Custom',
+      'impl_func': False,
+      'unit_test': False,
+      'extension': True,
+      'chromium': True,
+  },
   'RenderbufferStorage': {
     'decoder_func': 'DoRenderbufferStorage',
     'gl_test_func': 'glRenderbufferStorageEXT',
@@ -1781,6 +1792,12 @@ _FUNCTION_INFO = {
    },
   'Placeholder453CHROMIUM': {
     'type': 'UnknownCommand',
+    'extension': True,
+    'chromium': True,
+  },
+  'TexImageIOSurface2DCHROMIUM': {
+    'decoder_func': 'DoTexImageIOSurface2DCHROMIUM',
+    'unit_test': False,
     'extension': True,
     'chromium': True,
   },
@@ -2818,7 +2835,7 @@ class GENnHandler(TypeHandler):
         'name': func.original_name,
         'typed_args': func.MakeTypedOriginalArgString(""),
         'args': func.MakeOriginalArgString(""),
-        'resource_type': func.name[3:-1].lower(),
+        'resource_type': func.name[3:],
         'count_name': func.GetOriginalArgs()[0].name,
       }
     file.Write("%(return_type)s %(name)s(%(typed_args)s) {\n" % args)
@@ -2826,7 +2843,8 @@ class GENnHandler(TypeHandler):
     self.WriteClientGLCallLog(func, file)
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
-    code = """  %(resource_type)s_id_handler_->MakeIds(0, %(args)s);
+    code = """  id_handlers_[id_namespaces::k%(resource_type)s]->
+      MakeIds(0, %(args)s);
   helper_->%(name)sImmediate(%(args)s);
 %(log_code)s
 }
@@ -3045,7 +3063,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     for arg in func.GetOriginalArgs():
       arg.WriteClientSideValidationCode(file, func)
     file.Write("  GLuint client_id;\n")
-    file.Write("  program_and_shader_id_handler_->MakeIds(0, 1, &client_id);\n")
+    file.Write("  id_handlers_[id_namespaces::kProgramsAndShaders]->\n")
+    file.Write("      MakeIds(0, 1, &client_id);\n")
     file.Write("  helper_->%s(%s);\n" %
                (func.name, func.MakeCmdArgString("")))
     file.Write('  GPU_CLIENT_LOG("returned " << client_id);\n')
@@ -3371,7 +3390,7 @@ class GETnHandler(TypeHandler):
   Result* result = GetResultAs<Result*>();
   result->SetNumResults(0);
   helper_->%(func_name)s(%(arg_string)s,
-      result_shm_id(), result_shm_offset());
+      GetResultShmId(), GetResultShmOffset());
   WaitForCmd();
   result->CopyResult(params);
   GPU_CLIENT_LOG_CODE_BLOCK({
@@ -4166,7 +4185,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgsBadSharedMemoryId) {
       comma = ""
       if len(arg_string) > 0:
         comma = ", "
-      file.Write("  helper_->%s(%s%sresult_shm_id(), result_shm_offset());\n" %
+      file.Write(
+          "  helper_->%s(%s%sGetResultShmId(), GetResultShmOffset());\n" %
                  (func.name, arg_string, comma))
       file.Write("  WaitForCmd();\n")
       file.Write('  GPU_CLIENT_LOG("returned " << *result);\n')
@@ -5670,7 +5690,8 @@ class GLGenerator(object):
     """Writes the gles2 common utility header."""
     enum_re = re.compile(r'\#define\s+(GL_[a-zA-Z0-9_]+)\s+([0-9A-Fa-fx]+)')
     dict = {}
-    for fname in ['../GLES2/gl2.h', '../GLES2/gl2ext.h']:
+    for fname in ['../../third_party/khronos/GLES2/gl2.h',
+                  '../../third_party/khronos/GLES2/gl2ext.h']:
       lines = open(fname).readlines()
       for line in lines:
         m = enum_re.match(line)
@@ -5760,21 +5781,18 @@ const size_t GLES2Util::enum_to_string_table_len_ =
     file.Write("#include \"base/logging.h\"\n")
     file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"\n")
     file.Write("#include \"ppapi/shared_impl/graphics_3d_impl.h\"\n")
-    file.Write("#include \"ppapi/thunk/enter.h\"\n")
-    file.Write("#include \"ppapi/thunk/ppb_context_3d_api.h\"\n\n")
+    file.Write("#include \"ppapi/thunk/enter.h\"\n\n")
 
     file.Write("namespace ppapi {\n\n")
     file.Write("namespace {\n\n")
 
-    file.Write("gpu::gles2::GLES2Implementation* GetGLES(PP_Resource context) {\n")
-    file.Write("  thunk::EnterResource<thunk::PPB_Graphics3D_API> enter_g3d(context, false);\n")
-    file.Write("  if (enter_g3d.succeeded()) {\n")
-    file.Write("    return static_cast<Graphics3DImpl*>(enter_g3d.object())->gles2_impl();\n")
-    file.Write("  } else {\n")
-    file.Write("    thunk::EnterResource<thunk::PPB_Context3D_API> enter_c3d(context, true);\n")
-    file.Write("    DCHECK(enter_c3d.succeeded());\n")
-    file.Write("    return enter_c3d.object()->GetGLES2Impl();\n")
-    file.Write("  }\n")
+    file.Write("gpu::gles2::GLES2Implementation*"
+               " GetGLES(PP_Resource context) {\n")
+    file.Write("  thunk::EnterResource<thunk::PPB_Graphics3D_API>"
+               " enter_g3d(context, false);\n")
+    file.Write("  DCHECK(enter_g3d.succeeded());\n")
+    file.Write("  return static_cast<Graphics3DImpl*>"
+               "(enter_g3d.object())->gles2_impl();\n")
     file.Write("}\n\n")
 
     for func in self.original_functions:
@@ -5973,7 +5991,9 @@ def main(argv):
 
   if gen.errors > 0:
     print "%d errors" % gen.errors
-    sys.exit(1)
+    return 1
+  return 0
+
 
 if __name__ == '__main__':
-  main(sys.argv[1:])
+  sys.exit(main(sys.argv[1:]))

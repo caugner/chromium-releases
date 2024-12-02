@@ -9,6 +9,7 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/content_settings_rule.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
@@ -18,11 +19,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::_;
+using content::BrowserThread;
 
 namespace content_settings {
 
@@ -40,7 +42,7 @@ class PolicyProviderTest : public testing::Test {
   // BrowserThread IDs. Then we could get rid of the message_loop and ui_thread
   // fields.
   MessageLoop message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(PolicyProviderTest, DefaultGeolocationContentSetting) {
@@ -189,13 +191,16 @@ TEST_F(PolicyProviderTest, GettingManagedContentSettings) {
 
   // The PolicyProvider does not allow setting content settings as they are
   // enforced via policies and not set by the user or extension. So a call to
-  // SetContentSetting does nothing.
-  provider.SetContentSetting(
+  // SetWebsiteSetting does nothing.
+  scoped_ptr<base::Value> value_block(
+      Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+  bool owned = provider.SetWebsiteSetting(
       yt_url_pattern,
       yt_url_pattern,
       CONTENT_SETTINGS_TYPE_COOKIES,
       "",
-      CONTENT_SETTING_BLOCK);
+      value_block.get());
+  EXPECT_FALSE(owned);
   EXPECT_EQ(CONTENT_SETTING_DEFAULT,
             GetContentSetting(
                 &provider, youtube_url, youtube_url,

@@ -11,20 +11,22 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/about_ui.h"
 #include "chrome/browser/ui/webui/bookmarks_ui.h"
 #include "chrome/browser/ui/webui/bug_report_ui.h"
 #include "chrome/browser/ui/webui/constrained_html_ui.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
+#include "chrome/browser/ui/webui/edit_search_engine_dialog_ui_webui.h"
 #include "chrome/browser/ui/webui/task_manager_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/flash_ui.h"
 #include "chrome/browser/ui/webui/gpu_internals_ui.h"
-#include "chrome/browser/ui/webui/history2_ui.h"
 #include "chrome/browser/ui/webui/history_ui.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/browser/ui/webui/hung_renderer_dialog_ui.h"
+#include "chrome/browser/ui/webui/input_window_dialog_ui.h"
 #include "chrome/browser/ui/webui/media/media_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -32,6 +34,7 @@
 #include "chrome/browser/ui/webui/plugins_ui.h"
 #include "chrome/browser/ui/webui/policy_ui.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
+#include "chrome/browser/ui/webui/profiler_ui.h"
 #include "chrome/browser/ui/webui/quota_internals_ui.h"
 #include "chrome/browser/ui/webui/sessions_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
@@ -47,7 +50,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
-#include "chrome/browser/ui/webui/chromeos/enterprise_enrollment_ui.h"
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
 #include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -71,6 +73,10 @@
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "chrome/browser/ui/webui/certificate_viewer_ui.h"
+#endif
+
+#if defined(USE_AURA)
+#include "chrome/browser/ui/webui/aura/app_list_ui.h"
 #endif
 
 namespace {
@@ -98,12 +104,18 @@ ChromeWebUI* NewWebUI<ExtensionWebUI>(TabContents* contents, const GURL& url) {
   return NULL;
 }
 
+// Special case for older about: handlers.
+template<>
+ChromeWebUI* NewWebUI<AboutUI>(TabContents* contents, const GURL& url) {
+  return new AboutUI(contents, url.host());
+}
+
 // Returns a function that can be used to create the right type of WebUI for a
 // tab, based on its URL. Returns NULL if the URL doesn't have WebUI associated
 // with it. Even if the factory function is valid, it may yield a NULL WebUI
 // when invoked for a particular tab - see NewWebUI<ExtensionWebUI>.
-static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
-                                                    const GURL& url) {
+WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
+                                             const GURL& url) {
   if (url.host() == chrome::kChromeUIDialogHost)
     return &NewWebUI<ConstrainedHtmlUI>;
 
@@ -136,11 +148,6 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
       url.SchemeIs(chrome::kChromeInternalScheme))
     return &NewWebUI<NewTabUI>;
 
-  // Return a generic Web UI so chrome:chrome-urls can navigate to Web UI pages.
-  if (url.host() == chrome::kChromeUIAboutHost ||
-      url.host() == chrome::kChromeUIChromeURLsHost)
-    return &NewWebUI<ChromeWebUI>;
-
   // We must compare hosts only since some of the Web UIs append extra stuff
   // after the host name.
   if (url.host() == chrome::kChromeUIBookmarksHost)
@@ -151,63 +158,68 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
   if (url.host() == chrome::kChromeUICertificateViewerHost)
     return &NewWebUI<CertificateViewerUI>;
 #endif
-  if (url.host() == chrome::kChromeUIHungRendererDialogHost) {
-    return &NewWebUI<HungRendererDialogUI>;
-  }
-  if (url.host() == chrome::kChromeUICrashesHost)
-    return &NewWebUI<CrashesUI>;
-  if (url.host() == chrome::kChromeUIDevToolsHost)
-    return &NewWebUI<DevToolsUI>;
 #if defined(OS_WIN)
   if (url.host() == chrome::kChromeUIConflictsHost)
     return &NewWebUI<ConflictsUI>;
 #endif
+  if (url.host() == chrome::kChromeUICrashesHost)
+    return &NewWebUI<CrashesUI>;
+  if (url.host() == chrome::kChromeUIDevToolsHost)
+    return &NewWebUI<DevToolsUI>;
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewWebUI<DownloadsUI>;
-  if (url.host() == chrome::kChromeUITaskManagerHost)
-    return &NewWebUI<TaskManagerUI>;
-  if (url.host() == chrome::kChromeUIHistoryHost)
-    return &NewWebUI<HistoryUI>;
-  if (url.host() == chrome::kChromeUIHistory2Host)
-    return &NewWebUI<HistoryUI2>;
+  if (url.host() == chrome::kChromeUIEditSearchEngineDialogHost)
+    return &NewWebUI<EditSearchEngineDialogUI>;
   if (url.host() == chrome::kChromeUIFlagsHost)
     return &NewWebUI<FlagsUI>;
   if (url.host() == chrome::kChromeUIFlashHost)
     return &NewWebUI<FlashUI>;
+  if (url.host() == chrome::kChromeUIGpuInternalsHost)
+    return &NewWebUI<GpuInternalsUI>;
+  if (url.host() == chrome::kChromeUIHistoryHost)
+    return &NewWebUI<HistoryUI>;
+  if (url.host() == chrome::kChromeUIHungRendererDialogHost)
+    return &NewWebUI<HungRendererDialogUI>;
+  if (url.host() == chrome::kChromeUIInputWindowDialogHost)
+    return &NewWebUI<InputWindowDialogUI>;
 #if defined(USE_VIRTUAL_KEYBOARD)
   if (url.host() == chrome::kChromeUIKeyboardHost)
     return &NewWebUI<KeyboardUI>;
 #endif
-  if (url.host() == chrome::kChromeUIGpuInternalsHost)
-    return &NewWebUI<GpuInternalsUI>;
   if (url.host() == chrome::kChromeUIMediaInternalsHost)
     return &NewWebUI<MediaInternalsUI>;
   if (url.host() == chrome::kChromeUINetInternalsHost)
     return &NewWebUI<NetInternalsUI>;
-  if (url.host() == chrome::kChromeUIPluginsHost)
-    return &NewWebUI<PluginsUI>;
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (url.host() == chrome::kChromeUIPolicyHost)
     return &NewWebUI<PolicyUI>;
 #endif
-  if (url.host() == chrome::kChromeUISessionsHost)
-    return &NewWebUI<SessionsUI>;
-  if (url.host() == chrome::kChromeUISyncInternalsHost)
-    return &NewWebUI<SyncInternalsUI>;
-  if (url.host() == chrome::kChromeUISettingsHost)
-    return &NewWebUI<OptionsUI>;
-  if (url.host() == chrome::kChromeUITracingHost)
-    return &NewWebUI<TracingUI>;
+  if (url.host() == chrome::kChromeUIPluginsHost)
+    return &NewWebUI<PluginsUI>;
   if (url.host() == chrome::kChromeUIQuotaInternalsHost)
     return &NewWebUI<QuotaInternalsUI>;
+  if (url.host() == chrome::kChromeUISSLClientCertificateSelectorHost)
+    return &NewWebUI<ConstrainedHtmlUI>;
+  if (url.host() == chrome::kChromeUISessionsHost)
+    return &NewWebUI<SessionsUI>;
+  if (url.host() == chrome::kChromeUISettingsHost)
+    return &NewWebUI<OptionsUI>;
+  if (url.host() == chrome::kChromeUISyncInternalsHost)
+    return &NewWebUI<SyncInternalsUI>;
+  if (url.host() == chrome::kChromeUITaskManagerHost)
+    return &NewWebUI<TaskManagerUI>;
+  if (url.host() == chrome::kChromeUITracingHost)
+    return &NewWebUI<TracingUI>;
+  if (url.host() == chrome::kChromeUIProfilerHost)
+    return &NewWebUI<ProfilerUI>;
   if (url.host() == chrome::kChromeUIWorkersHost)
     return &NewWebUI<WorkersUI>;
 
 #if defined(OS_CHROMEOS)
-  if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
-    return &NewWebUI<chromeos::ChooseMobileNetworkUI>;
   if (url.host() == chrome::kChromeUIActiveDownloadsHost)
     return &NewWebUI<ActiveDownloadsUI>;
+  if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
+    return &NewWebUI<chromeos::ChooseMobileNetworkUI>;
   if (url.host() == chrome::kChromeUIImageBurnerHost)
     return &NewWebUI<ImageBurnUI>;
   if (url.host() == chrome::kChromeUIKeyboardOverlayHost)
@@ -215,7 +227,7 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
   if (url.host() == chrome::kChromeUIMobileSetupHost)
     return &NewWebUI<MobileSetupUI>;
   if (url.host() == chrome::kChromeUIOobeHost)
-      return &NewWebUI<chromeos::OobeUI>;
+    return &NewWebUI<chromeos::OobeUI>;
   if (url.host() == chrome::kChromeUIProxySettingsHost)
     return &NewWebUI<chromeos::ProxySettingsUI>;
   if (url.host() == chrome::kChromeUIRegisterPageHost)
@@ -224,8 +236,6 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<chromeos::SimUnlockUI>;
   if (url.host() == chrome::kChromeUISystemInfoHost)
     return &NewWebUI<SystemInfoUI>;
-  if (url.host() == chrome::kChromeUIEnterpriseEnrollmentHost)
-    return &NewWebUI<chromeos::EnterpriseEnrollmentUI>;
 #endif  // defined(OS_CHROMEOS)
 
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
@@ -234,6 +244,11 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
       url.host() == chrome::kChromeUIRepostFormWarningHost) {
     return &NewWebUI<ConstrainedHtmlUI>;
   }
+#endif
+
+#if defined(USE_AURA)
+  if (url.host() == chrome::kChromeUIAppListHost)
+    return &NewWebUI<AppListUI>;
 #endif
 
   if (url.host() == chrome::kChromeUIPrintHost &&
@@ -256,6 +271,34 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
       return &NewWebUI<NewTabUI>;
   }
 #endif
+
+  if (url.host() == chrome::kChromeUIChromeURLsHost ||
+      url.host() == chrome::kChromeUICreditsHost ||
+      url.host() == chrome::kChromeUIDNSHost ||
+      url.host() == chrome::kChromeUIHistogramsHost ||
+      url.host() == chrome::kChromeUIMemoryHost ||
+      url.host() == chrome::kChromeUIMemoryRedirectHost ||
+      url.host() == chrome::kChromeUIStatsHost ||
+      url.host() == chrome::kChromeUITaskManagerHost ||
+      url.host() == chrome::kChromeUITermsHost ||
+      url.host() == chrome::kChromeUIVersionHost
+#if defined(USE_TCMALLOC)
+      || url.host() == chrome::kChromeUITCMallocHost
+#endif
+#if defined(OS_LINUX) || defined(OS_OPENBSD)
+      || url.host() == chrome::kChromeUILinuxProxyConfigHost
+      || url.host() == chrome::kChromeUISandboxHost
+#endif
+#if defined(OS_CHROMEOS)
+      || url.host() == chrome::kChromeUICryptohomeHost
+      || url.host() == chrome::kChromeUIDiscardsHost
+      || url.host() == chrome::kChromeUINetworkHost
+      || url.host() == chrome::kChromeUIOSCreditsHost
+#endif
+      ) {
+    return &NewWebUI<AboutUI>;
+  }
+
   DLOG(WARNING) << "Unknown WebUI:" << url;
   return NULL;
 }
@@ -382,9 +425,6 @@ RefCountedMemory* ChromeWebUIFactory::GetFaviconResourceBytes(
 
   if (page_url.host() == chrome::kChromeUIHistoryHost)
     return HistoryUI::GetFaviconResourceBytes();
-
-  if (page_url.host() == chrome::kChromeUIHistory2Host)
-    return HistoryUI2::GetFaviconResourceBytes();
 
   if (page_url.host() == chrome::kChromeUIFlagsHost)
     return FlagsUI::GetFaviconResourceBytes();

@@ -8,6 +8,7 @@
 #include "base/memory/ref_counted.h"
 #include "ppapi/thunk/ppb_url_request_info_api.h"
 #include "ppapi/shared_impl/url_request_info_impl.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 
 namespace WebKit {
 class WebFrame;
@@ -18,7 +19,8 @@ class WebURLRequest;
 namespace webkit {
 namespace ppapi {
 
-class PPB_URLRequestInfo_Impl : public ::ppapi::URLRequestInfoImpl {
+class WEBKIT_PLUGINS_EXPORT PPB_URLRequestInfo_Impl :
+    public ::ppapi::URLRequestInfoImpl {
  public:
   explicit PPB_URLRequestInfo_Impl(
       PP_Instance instance,
@@ -37,8 +39,9 @@ class PPB_URLRequestInfo_Impl : public ::ppapi::URLRequestInfoImpl {
  private:
   friend class URLRequestInfoTest;
 
-  // Checks that the request data is valid and does some canonicalization of
-  // it. Returns false on failure
+  // Checks that the request data is valid. Returns false on failure. Note that
+  // method and header validation is done by the URL loader when the request is
+  // opened, and any access errors are returned asynchronously.
   bool ValidateData();
 
   // Appends the file ref given the Resource pointer associated with it to the

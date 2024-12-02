@@ -5,15 +5,14 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_win.h"
 
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "views/focus/focus_manager.h"
-#include "views/focus/widget_focus_manager.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/focus/widget_focus_manager.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsContainerWin, public:
@@ -60,6 +59,14 @@ void NativeTabContentsContainerWin::DetachContents(TabContents* contents) {
 
 void NativeTabContentsContainerWin::SetFastResize(bool fast_resize) {
   set_fast_resize(fast_resize);
+}
+
+bool NativeTabContentsContainerWin::GetFastResize() const {
+  return fast_resize();
+}
+
+bool NativeTabContentsContainerWin::FastResizeAtLastLayout() const {
+  return fast_resize_at_last_layout();
 }
 
 void NativeTabContentsContainerWin::RenderViewHostChanged(
@@ -157,7 +164,5 @@ gfx::NativeViewAccessible
 // static
 NativeTabContentsContainer* NativeTabContentsContainer::CreateNativeContainer(
     TabContentsContainer* container) {
-  if (views::Widget::IsPureViews())
-    return new NativeTabContentsContainerViews(container);
   return new NativeTabContentsContainerWin(container);
 }

@@ -6,23 +6,11 @@
     ['OS=="mac" or OS=="win"', {
       'targets': [
         {
-          'variables': {
-            'conditions' : [
-              ['OS=="win" and optimize_with_syzygy==1', {
-                # On Windows we use build chrome_dll as an intermediate target
-                # then have a subsequent step which either optimizes it to its
-                # final location, or copies it to its final location, depending
-                # on whether or not optimize_with_syzygy==1.  Please, refer to
-                # chrome_dll_syzygy.gypi for the subsequent defintion of the
-                # Windows chrome_dll target.
-                'dll_target_name': 'chrome_dll_initial',
-              }, {
-                'dll_target_name': 'chrome_dll',
-              }],
-            ],
-          },
-          'target_name': '<(dll_target_name)',
+          'target_name': 'chrome_dll',
           'type': 'shared_library',
+          'variables': {
+            'enable_wexit_time_destructors': 1,
+          },
           'dependencies': [
             '<@(chromium_dependencies)',
             'app/policy/cloud_policy_codegen.gyp:policy',
@@ -33,15 +21,15 @@
               'dependencies': [
                 # On Windows, link the dependencies (libraries) that make
                 # up actual Chromium functionality into this .dll.
+                'chrome_resources.gyp:chrome_resources',
                 'chrome_version_resources',
-                'chrome_resources',
                 'installer_util_strings',
                 '../content/content.gyp:content_worker',
                 '../crypto/crypto.gyp:crypto',
                 '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
                 '../third_party/cld/cld.gyp:cld',
-                '../views/views.gyp:views',
+                '../ui/views/views.gyp:views',
                 '../webkit/support/webkit_support.gyp:webkit_resources',
               ],
               'sources': [
@@ -53,6 +41,7 @@
                 'app/chrome_main_delegate.h',
 
                 '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_dll_version.rc',
+                '../base/win/dllmain.cc',
 
                 '../webkit/glue/resources/aliasb.cur',
                 '../webkit/glue/resources/cell.cur',
@@ -112,13 +101,7 @@
                   # Set /SUBSYSTEM:WINDOWS for chrome.dll (for consistency).
                   'SubSystem': '2',
                   'conditions': [
-                    ['optimize_with_syzygy==1', {
-                      # When syzygy is enabled we use build chrome_dll as an
-                      # intermediate target then have a subsequent step which
-                      # optimizes it to its final location
-                      'ProgramDatabaseFile': '$(OutDir)\\initial\\chrome_dll.pdb',
-                      'OutputFile': '$(OutDir)\\initial\\chrome.dll',
-                    }], ['incremental_chrome_dll==1', {
+                    ['incremental_chrome_dll==1', {
                       'OutputFile': '$(OutDir)\\initial\\chrome.dll',
                       'UseLibraryDependencyInputs': "true",
                     }],
@@ -145,7 +128,7 @@
                 },
               },
               'conditions': [
-                ['incremental_chrome_dll==1 and optimize_with_syzygy==0', {
+                ['incremental_chrome_dll==1', {
                   # Linking to a different directory and then hardlinking back
                   # to OutDir is a workaround to avoid having the .ilk for
                   # chrome.exe and chrome.dll conflicting. See crbug.com/92528
@@ -279,9 +262,6 @@
                 'app/theme/menu_overflow_down.pdf',
                 'app/theme/menu_overflow_up.pdf',
                 'app/theme/nav.pdf',
-                'app/theme/newtab.pdf',
-                'app/theme/newtab_h.pdf',
-                'app/theme/newtab_p.pdf',
                 'app/theme/omnibox_extension_app.pdf',
                 'app/theme/omnibox_history.pdf',
                 'app/theme/omnibox_http.pdf',
@@ -289,12 +269,16 @@
                 'app/theme/omnibox_https_valid.pdf',
                 'app/theme/omnibox_https_warning.pdf',
                 'app/theme/omnibox_search.pdf',
-                'app/theme/omnibox_star.pdf',
                 'app/theme/otr_icon.pdf',
-                'app/theme/popup_window_animation.pdf',
                 'app/theme/star.pdf',
                 'app/theme/star_lit.pdf',
                 'browser/mac/install.sh',
+                 '<(SHARED_INTERMEDIATE_DIR)/repack/chrome.pak',
+                 '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak',
+                '<!@pymod_do_main(repack_locales -o -g <(grit_out_dir) -s <(SHARED_INTERMEDIATE_DIR) -x <(SHARED_INTERMEDIATE_DIR) <(locales))',
+                # Note: pseudo_locales are generated via the packed_resources
+                # dependency but not copied to the final target.  See
+                # common.gypi for more info.
               ],
               'mac_bundle_resources!': [
                 'app/framework-Info.plist',
@@ -307,6 +291,8 @@
                 # dependency here. flash_player.gyp will copy the Flash bundle
                 # into PRODUCT_DIR.
                 '../third_party/adobe/flash/flash_player.gyp:flash_player',
+                'chrome_resources.gyp:packed_extra_resources',
+                'chrome_resources.gyp:packed_resources',
               ],
               'rules': [
                 {
@@ -334,150 +320,8 @@
                 'repack_path': '../tools/grit/grit/format/repack.py',
               },
               'actions': [
-                # TODO(mark): These actions are duplicated for Linux and
-                # FreeBSD in the chrome target.  Can they be unified?
                 {
-                  'action_name': 'repack_chrome',
-                  'variables': {
-                    'pak_inputs': [
-                      '<(grit_out_dir)/browser_resources.pak',
-                      '<(grit_out_dir)/common_resources.pak',
-                      '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
-                      '<(grit_out_dir)/renderer_resources.pak',
-                      '<(grit_out_dir)/theme_resources.pak',
-                      '<(grit_out_dir)/theme_resources_standard.pak',
-                      '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
-                      '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
-                      '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
-                      '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
-                      '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
-                    ],
-                  },
-                  'inputs': [
-                    '<(repack_path)',
-                    '<@(pak_inputs)',
-                  ],
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/chrome.pak',
-                  ],
-                  'action': ['python', '<(repack_path)', '<@(_outputs)',
-                             '<@(pak_inputs)'],
-                  'process_outputs_as_mac_bundle_resources': 1,
-                },
-                {
-                  'action_name': 'repack_theme_resources_large',
-                  'variables': {
-                    'pak_inputs': [
-                      '<(grit_out_dir)/theme_resources_large.pak',
-                    ],
-                  },
-                  'inputs': [
-                    '<(repack_path)',
-                    '<@(pak_inputs)',
-                  ],
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/theme_resources_large.pak',
-                  ],
-                  'action': ['python', '<(repack_path)', '<@(_outputs)',
-                             '<@(pak_inputs)'],
-                  'process_outputs_as_mac_bundle_resources': 1,
-                },
-                {
-                  'action_name': 'repack_locales',
-                  'process_outputs_as_mac_bundle_resources': 1,
-                  'variables': {
-                    'conditions': [
-                      ['branding=="Chrome"', {
-                        'branding_flag': ['-b', 'google_chrome',],
-                      }, {  # else: branding!="Chrome"
-                        'branding_flag': ['-b', 'chromium',],
-                      }],
-                    ],
-                  },
-                  'inputs': [
-                    'tools/build/repack_locales.py',
-                    # NOTE: Ideally the common command args would be shared
-                    # amongst inputs/outputs/action, but the args include shell
-                    # variables which need to be passed intact, and command
-                    # expansion wants to expand the shell variables. Adding the
-                    # explicit quoting here was the only way it seemed to work.
-                    '>!@(<(repack_locales_cmd) -i <(branding_flag) -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
-                  ],
-                  'outputs': [
-                    '>!@(<(repack_locales_cmd) -o -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(locales))',
-                  ],
-                  'action': [
-                    '<@(repack_locales_cmd)',
-                    '<@(branding_flag)',
-                    '-g', '<(grit_out_dir)',
-                    '-s', '<(SHARED_INTERMEDIATE_DIR)',
-                    '-x', '<(INTERMEDIATE_DIR)',
-                    '<@(locales)',
-                  ],
-                },
-                {
-                  # This is an exact copy of the above phase, except for two
-                  # changes:
-                  # 1. process_outputs_as_mac_bundle_resources is omitted.
-                  # 2. We pass 'pseudo_locales' instead of 'locales' wherever
-                  #    'locales' is used.
-                  # The result is a build phase that builds all pseudo locales
-                  # but doesn't copy them to the final dll/framework.
-                  'action_name': 'repack_pseudo_locales',
-                  'variables': {
-                    'conditions': [
-                      ['branding=="Chrome"', {
-                        'branding_flag': ['-b', 'google_chrome',],
-                      }, {  # else: branding!="Chrome"
-                        'branding_flag': ['-b', 'chromium',],
-                      }],
-                    ],
-                  },
-                  'inputs': [
-                    'tools/build/repack_locales.py',
-                    # NOTE: Ideally the common command args would be shared
-                    # amongst inputs/outputs/action, but the args include shell
-                    # variables which need to be passed intact, and command
-                    # expansion wants to expand the shell variables. Adding the
-                    # explicit quoting here was the only way it seemed to work.
-                    '>!@(<(repack_locales_cmd) -i <(branding_flag) -g \'<(grit_out_dir)\' -s \'<(SHARED_INTERMEDIATE_DIR)\' -x \'<(INTERMEDIATE_DIR)\' <(pseudo_locales))',
-                  ],
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/<(pseudo_locales).pak'
-                  ],
-                  'action': [
-                    '<@(repack_locales_cmd)',
-                    '<@(branding_flag)',
-                    '-g', '<(grit_out_dir)',
-                    '-s', '<(SHARED_INTERMEDIATE_DIR)',
-                    '-x', '<(INTERMEDIATE_DIR)',
-                    '<@(pseudo_locales)',
-                  ],
-                },
-                {
-                  'action_name': 'repack_resources',
-                  'variables': {
-                    'pak_inputs': [
-                      '<(grit_out_dir)/component_extension_resources.pak',
-                      '<(grit_out_dir)/devtools_frontend_resources.pak',
-                      '<(grit_out_dir)/devtools_resources.pak',
-                      '<(grit_out_dir)/net_internals_resources.pak',
-                      '<(grit_out_dir)/options_resources.pak',
-                      '<(grit_out_dir)/shared_resources.pak',
-                      '<(grit_out_dir)/sync_internals_resources.pak',
-                      '<(grit_out_dir)/workers_resources.pak',
-                    ],
-                  },
-                  'inputs': [
-                    '<(repack_path)',
-                    '<@(pak_inputs)',
-                  ],
-                  'outputs': [
-                    '<(INTERMEDIATE_DIR)/repack/resources.pak',
-                  ],
-                  'action': ['python', '<(repack_path)', '<@(_outputs)',
-                             '<@(pak_inputs)'],
-                  'process_outputs_as_mac_bundle_resources': 1,
+                  'includes': ['chrome_repack_theme_resources_large.gypi']
                 },
               ],
               'postbuilds': [
@@ -523,11 +367,9 @@
               ],
               'copies': [
                 {
-                  'destination':
-                      '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
+                  # Copy FFmpeg binaries for audio/video support.
+                  'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
                   'files': [
-                    # TODO(ajwong): Find a way to share this path with
-                    # ffmpeg.gyp so they don't diverge. (BUG=23602)
                     '<(PRODUCT_DIR)/ffmpegsumo.so',
                   ],
                 },
@@ -557,15 +399,17 @@
                   ],
                 },
                 {
+                  # Copy of resources used by tests.
                   'destination': '<(PRODUCT_DIR)',
                   'files': [
-                      '<(INTERMEDIATE_DIR)/repack/resources.pak'
+                      '<(SHARED_INTERMEDIATE_DIR)/repack/resources.pak'
                   ],
                 },
                 {
+                  # Copy of resources used by tests.
                   'destination': '<(PRODUCT_DIR)/pseudo_locales',
                   'files': [
-                      '<(INTERMEDIATE_DIR)/<(pseudo_locales).pak'
+                      '<(SHARED_INTERMEDIATE_DIR)/<(pseudo_locales).pak'
                   ],
                 },
                 {

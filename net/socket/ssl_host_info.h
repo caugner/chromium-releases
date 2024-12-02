@@ -21,6 +21,7 @@
 
 namespace net {
 
+class CRLSet;
 class X509Certificate;
 struct SSLConfig;
 
@@ -50,7 +51,7 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   //
   // |callback| may be NULL, in which case ERR_IO_PENDING may still be returned
   // but, obviously, a callback will never be made.
-  virtual int WaitForDataReady(OldCompletionCallback* callback) = 0;
+  virtual int WaitForDataReady(const CompletionCallback& callback) = 0;
 
   // Persist allows for the host information to be updated for future users.
   // This is a fire and forget operation: the caller may drop its reference
@@ -90,7 +91,7 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   // callback to be called when the verification completes. If the verification
   // has already finished then WaitForCertVerification returns the result of
   // that verification.
-  int WaitForCertVerification(OldCompletionCallback* callback);
+  int WaitForCertVerification(const CompletionCallback& callback);
 
   base::TimeTicks verification_start_time() const {
     return verification_start_time_;
@@ -120,10 +121,11 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   // This is the hostname that we'll validate the certificates against.
   const std::string hostname_;
   bool cert_parsing_failed_;
-  OldCompletionCallback* cert_verification_callback_;
-  // These two members are taken from the SSLConfig.
+  CompletionCallback cert_verification_callback_;
+  // These three members are taken from the SSLConfig.
   bool rev_checking_enabled_;
   bool verify_ev_cert_;
+  scoped_refptr<CRLSet> crl_set_;
   base::TimeTicks verification_start_time_;
   base::TimeTicks verification_end_time_;
   CertVerifyResult cert_verify_result_;

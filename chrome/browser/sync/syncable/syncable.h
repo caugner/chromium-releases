@@ -18,12 +18,12 @@
 
 #include "base/atomicops.h"
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/observer_list_threadsafe.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
@@ -32,11 +32,9 @@
 #include "chrome/browser/sync/syncable/directory_event.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "chrome/browser/sync/util/dbgq.h"
 #include "chrome/browser/sync/util/immutable.h"
 #include "chrome/browser/sync/util/time.h"
-
-struct PurgeInfo;
+#include "chrome/browser/sync/util/weak_handle.h"
 
 namespace base {
 class DictionaryValue;
@@ -373,6 +371,8 @@ struct EntryKernel {
     return id_fields[field - ID_FIELDS_BEGIN];
   }
 
+  syncable::ModelType GetServerModelType() const;
+
   // Does a case in-sensitive search for a given string, which must be
   // lower case.
   bool ContainsString(const std::string& lowercase_query) const;
@@ -484,15 +484,11 @@ class Entry {
         kernel_(NULL) { }
 
  protected:
-
   BaseTransaction* const basetrans_;
 
   EntryKernel* kernel_;
 
  private:
-  // Like GetServerModelType() but without the DCHECKs.
-  ModelType GetServerModelTypeHelper() const;
-
   DISALLOW_COPY_AND_ASSIGN(Entry);
 };
 
@@ -503,6 +499,7 @@ class MutableEntry : public Entry {
   friend class Directory;
   void Init(WriteTransaction* trans, const Id& parent_id,
       const std::string& name);
+
  public:
   MutableEntry(WriteTransaction* trans, Create, const Id& parent_id,
                const std::string& name);
@@ -823,11 +820,14 @@ class Directory {
   // Does not take ownership of |delegate|, which must not be NULL.
   // Starts sending events to |delegate| if the returned result is
   // OPENED.  Note that events to |delegate| may be sent from *any*
-  // thread.
+  // thread.  |transaction_observer| must be initialized.
   DirOpenResult Open(const FilePath& file_path, const std::string& name,
-                     DirectoryChangeDelegate* delegate);
+                     DirectoryChangeDelegate* delegate,
+                     const browser_sync::WeakHandle<TransactionObserver>&
+                         transaction_observer);
 
-  // Stops sending events to the delegate.
+  // Stops sending events to the delegate and the transaction
+  // observer.
   void Close();
 
   int64 NextMetahandle();
@@ -868,12 +868,6 @@ class Directory {
   // Unique to each account / client pair.
   std::string cache_guid() const;
 
-  // These are backed by a thread-safe observer list, and so can be
-  // called on any thread, and events will be sent to the observer on
-  // the same thread that it was added on.
-  void AddTransactionObserver(TransactionObserver* observer);
-  void RemoveTransactionObserver(TransactionObserver* observer);
-
  protected:  // for friends, mainly used by Entry constructors
   virtual EntryKernel* GetEntryByHandle(int64 handle);
   virtual EntryKernel* GetEntryByHandle(int64 metahandle,
@@ -902,28 +896,45 @@ class Directory {
   // before calling.
   EntryKernel* GetEntryById(const Id& id, ScopedKernelLock* const lock);
 
-  DirOpenResult OpenImpl(const FilePath& file_path, const std::string& name,
-                         DirectoryChangeDelegate* delegate);
+  DirOpenResult OpenImpl(
+      const FilePath& file_path, const std::string& name,
+      DirectoryChangeDelegate* delegate,
+      const browser_sync::WeakHandle<TransactionObserver>&
+          transaction_observer);
 
   template <class T> void TestAndSet(T* kernel_data, const T* data_to_set);
 
  public:
   typedef std::vector<int64> ChildHandles;
 
-  // Returns the child meta handles for given parent id.  Clears
-  // |result| if there are no children.
+  // Returns the child meta handles (even those for deleted/unlinked
+  // nodes) for given parent id.  Clears |result| if there are no
+  // children.
   void GetChildHandlesById(BaseTransaction*, const Id& parent_id,
       ChildHandles* result);
 
-  // Returns the child meta handles for given meta handle.  Clears
-  // |result| if there are no children.
+  // Returns the child meta handles (even those for deleted/unlinked
+  // nodes) for given meta handle.  Clears |result| if there are no
+  // children.
   void GetChildHandlesByHandle(BaseTransaction*, int64 handle,
       ChildHandles* result);
 
-  // Find the first or last child in the positional ordering under a parent,
-  // and return its id.  Returns a root Id if parent has no children.
-  virtual Id GetFirstChildId(BaseTransaction* trans, const Id& parent_id);
-  Id GetLastChildId(BaseTransaction* trans, const Id& parent_id);
+  // Returns true iff |id| has children.
+  bool HasChildren(BaseTransaction* trans, const Id& id);
+
+  // Find the first child in the positional ordering under a parent,
+  // and fill in |*first_child_id| with its id.  Fills in a root Id if
+  // parent has no children.  Returns true if the first child was
+  // successfully found, or false if an error was encountered.
+  bool GetFirstChildId(BaseTransaction* trans, const Id& parent_id,
+                       Id* first_child_id) WARN_UNUSED_RESULT;
+
+  // Find the last child in the positional ordering under a parent,
+  // and fill in |*first_child_id| with its id.  Fills in a root Id if
+  // parent has no children.  Returns true if the first child was
+  // successfully found, or false if an error was encountered.
+  bool GetLastChildIdForTest(BaseTransaction* trans, const Id& parent_id,
+                             Id* last_child_id) WARN_UNUSED_RESULT;
 
   // Compute a local predecessor position for |update_item|.  The position
   // is determined by the SERVER_POSITION_IN_PARENT value of |update_item|,
@@ -957,9 +968,17 @@ class Directory {
   void GetUnsyncedMetaHandles(BaseTransaction* trans,
                               UnsyncedMetaHandles* result);
 
-  // Get all the metahandles for unapplied updates
+  // Returns all server types with unapplied updates.  A subset of
+  // those types can then be passed into
+  // GetUnappliedUpdateMetaHandles() below.
+  syncable::ModelTypeBitSet GetServerTypesWithUnappliedUpdates(
+      BaseTransaction* trans) const;
+
+  // Get all the metahandles for unapplied updates for a given set of
+  // server types.
   typedef std::vector<int64> UnappliedUpdateMetaHandles;
   void GetUnappliedUpdateMetaHandles(BaseTransaction* trans,
+                                     syncable::ModelTypeBitSet server_types,
                                      UnappliedUpdateMetaHandles* result);
 
   // Checks tree metadata consistency.
@@ -1037,15 +1056,22 @@ class Directory {
   typedef Index<ClientTagIndexer>::Set ClientTagIndex;
 
  protected:
-  // Used by tests.
-  void InitKernel(const std::string& name, DirectoryChangeDelegate* delegate);
+  // Used by tests. |delegate| must not be NULL.
+  // |transaction_observer| must be initialized.
+  void InitKernelForTest(
+      const std::string& name,
+      DirectoryChangeDelegate* delegate,
+      const browser_sync::WeakHandle<TransactionObserver>&
+          transaction_observer);
 
  private:
-
   struct Kernel {
-    // |delegate| can be NULL.
+    // |delegate| must not be NULL.  |transaction_observer| must be
+    // initialized.
     Kernel(const FilePath& db_path, const std::string& name,
-           const KernelLoadInfo& info, DirectoryChangeDelegate* delegate);
+           const KernelLoadInfo& info, DirectoryChangeDelegate* delegate,
+           const browser_sync::WeakHandle<TransactionObserver>&
+               transaction_observer);
 
     ~Kernel();
 
@@ -1084,7 +1110,8 @@ class Directory {
     EntryKernel needle;
 
     // 3 in-memory indices on bits used extremely frequently by the syncer.
-    MetahandleSet* const unapplied_update_metahandles;
+    // |unapplied_update_metahandles| is keyed by the server model type.
+    MetahandleSet unapplied_update_metahandles[MODEL_TYPE_COUNT];
     MetahandleSet* const unsynced_metahandles;
     // Contains metahandles that are most likely dirty (though not
     // necessarily).  Dirtyness is confirmed in TakeSnapshotForSaveChanges().
@@ -1114,15 +1141,11 @@ class Directory {
     // The next metahandle is protected by kernel mutex.
     int64 next_metahandle;
 
-    // Keep a history of recently flushed metahandles for debugging
-    // purposes.  Protected by the save_changes_mutex.
-    DebugQueue<int64, 1000> flushed_metahandles;
-
-    // The delegate for directory change events.  Can be NULL.
+    // The delegate for directory change events.  Must not be NULL.
     DirectoryChangeDelegate* const delegate;
 
-    // The transaction observers.
-    scoped_refptr<ObserverListThreadSafe<TransactionObserver> > observers;
+    // The transaction observer.
+    const browser_sync::WeakHandle<TransactionObserver> transaction_observer;
   };
 
   // Helper method used to do searches on |parent_id_child_index|.
@@ -1148,6 +1171,18 @@ class Directory {
   void AppendChildHandles(
       const ScopedKernelLock& lock,
       const Id& parent_id, Directory::ChildHandles* result);
+
+  // Return a pointer to what is probably (but not certainly) the
+  // first child of |parent_id|, or NULL if |parent_id| definitely has
+  // no children.
+  EntryKernel* GetPossibleFirstChild(
+      const ScopedKernelLock& lock, const Id& parent_id);
+
+  // Return a pointer to what is probably (but not certainly) the last
+  // child of |parent_id|, or NULL if |parent_id| definitely has no
+  // children.
+  EntryKernel* GetPossibleLastChildForTest(
+      const ScopedKernelLock& lock, const Id& parent_id);
 
   Kernel* kernel_;
 
@@ -1187,7 +1222,6 @@ class BaseTransaction {
   WriterTag writer_;
   Directory* const directory_;
   Directory::Kernel* const dirkernel_;  // for brevity
-  base::TimeTicks time_acquired_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BaseTransaction);

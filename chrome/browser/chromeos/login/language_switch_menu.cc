@@ -22,11 +22,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/platform_font_pango.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -60,21 +60,19 @@ void LanguageSwitchMenu::InitLanguageMenu() {
 
   // Fill menu items with updated items.
   for (int line = 0; line != kLanguageMainMenuSize; line++) {
-    menu_->AppendMenuItemWithLabel(
-        line,
-        UTF16ToWide(language_list_->GetLanguageNameAt(line)));
+    menu_->AppendMenuItemWithLabel(line,
+                                   language_list_->GetLanguageNameAt(line));
   }
 
   menu_->AppendSeparator();
   views::MenuItemView* submenu = menu_->AppendSubMenu(
       kMoreLanguagesSubMenu,
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LANGUAGES_MORE)));
+      l10n_util::GetStringUTF16(IDS_LANGUAGES_MORE));
 
   for (int line = kLanguageMainMenuSize;
        line != language_list_->languages_count(); ++line) {
-    submenu->AppendMenuItemWithLabel(
-        line,
-        UTF16ToWide(language_list_->GetLanguageNameAt(line)));
+    submenu->AppendMenuItemWithLabel(line,
+                                     language_list_->GetLanguageNameAt(line));
   }
 
   menu_->ChildrenChanged();
@@ -124,7 +122,7 @@ bool LanguageSwitchMenu::SwitchLanguage(const std::string& locale) {
     // shutdown from login screen. http://crosbug.com/20747
     PrefService* prefs = g_browser_process->local_state();
     prefs->SetString(prefs::kApplicationLocale, locale);
-    prefs->SavePersistentPrefs();
+    prefs->ScheduleSavePersistentPrefs();
 
     return true;
   }

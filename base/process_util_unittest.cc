@@ -739,7 +739,7 @@ TEST_F(ProcessUtilTest, GetAppOutputRestricted) {
   EXPECT_STREQ("", output.c_str());
 }
 
-#if !(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_OPENBSD)
 // TODO(benwells): GetAppOutputRestricted should terminate applications
 // with SIGPIPE when we have enough output. http://crbug.com/88502
 TEST_F(ProcessUtilTest, GetAppOutputRestrictedSIGPIPE) {
@@ -833,6 +833,51 @@ TEST_F(ProcessUtilTest, ParseProcStatCPU) {
 }
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
+// TODO(port): port those unit tests.
+bool IsProcessDead(base::ProcessHandle child) {
+  // waitpid() will actually reap the process which is exactly NOT what we
+  // want to test for.  The good thing is that if it can't find the process
+  // we'll get a nice value for errno which we can test for.
+  const pid_t result = HANDLE_EINTR(waitpid(child, NULL, WNOHANG));
+  return result == -1 && errno == ECHILD;
+}
+
+TEST_F(ProcessUtilTest, DelayedTermination) {
+  base::ProcessHandle child_process =
+      SpawnChild("process_util_test_never_die", false);
+  ASSERT_TRUE(child_process);
+  base::EnsureProcessTerminated(child_process);
+  base::WaitForSingleProcess(child_process, 5000);
+
+  // Check that process was really killed.
+  EXPECT_TRUE(IsProcessDead(child_process));
+  base::CloseProcessHandle(child_process);
+}
+
+MULTIPROCESS_TEST_MAIN(process_util_test_never_die) {
+  while (1) {
+    sleep(500);
+  }
+  return 0;
+}
+
+TEST_F(ProcessUtilTest, ImmediateTermination) {
+  base::ProcessHandle child_process =
+      SpawnChild("process_util_test_die_immediately", false);
+  ASSERT_TRUE(child_process);
+  // Give it time to die.
+  sleep(2);
+  base::EnsureProcessTerminated(child_process);
+
+  // Check that process was really killed.
+  EXPECT_TRUE(IsProcessDead(child_process));
+  base::CloseProcessHandle(child_process);
+}
+
+MULTIPROCESS_TEST_MAIN(process_util_test_die_immediately) {
+  return 0;
+}
+
 #endif  // defined(OS_POSIX)
 
 // TODO(vandebo) make this work on Windows too.
@@ -846,7 +891,8 @@ int tc_set_new_mode(int mode);
 
 // Android doesn't implement set_new_handler, so we can't use the
 // OutOfMemoryTest cases.
-#if !defined(OS_ANDROID)
+// OpenBSD does not support these tests either.
+#if !defined(OS_ANDROID) && !defined(OS_OPENBSD)
 class OutOfMemoryDeathTest : public testing::Test {
  public:
   OutOfMemoryDeathTest()

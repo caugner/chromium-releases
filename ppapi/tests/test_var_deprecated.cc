@@ -8,7 +8,6 @@
 
 #include <limits>
 
-#include "base/basictypes.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
@@ -73,16 +72,16 @@ bool TestVarDeprecated::Init() {
   return var_interface_ && InitTestingInterface();
 }
 
-void TestVarDeprecated::RunTest() {
-  RUN_TEST(BasicString);
-  RUN_TEST(InvalidAndEmpty);
-  RUN_TEST(InvalidUtf8);
-  RUN_TEST(NullInputInUtf8Conversion);
-  RUN_TEST(ValidUtf8);
-  RUN_TEST(Utf8WithEmbeddedNulls);
-  RUN_TEST(VarToUtf8ForWrongType);
-  RUN_TEST(HasPropertyAndMethod);
-  RUN_TEST(PassReference);
+void TestVarDeprecated::RunTests(const std::string& filter) {
+  RUN_TEST(BasicString, filter);
+  RUN_TEST(InvalidAndEmpty, filter);
+  RUN_TEST(InvalidUtf8, filter);
+  RUN_TEST(NullInputInUtf8Conversion, filter);
+  RUN_TEST(ValidUtf8, filter);
+  RUN_TEST(Utf8WithEmbeddedNulls, filter);
+  RUN_TEST(VarToUtf8ForWrongType, filter);
+  RUN_TEST(HasPropertyAndMethod, filter);
+  RUN_TEST(PassReference, filter);
 }
 
 pp::deprecated::ScriptableObject* TestVarDeprecated::CreateTestObject() {
@@ -94,7 +93,7 @@ std::string TestVarDeprecated::TestBasicString() {
       instance_->pp_instance());
   {
     const char kStr[] = "Hello";
-    const uint32_t kStrLen(arraysize(kStr) - 1);
+    const uint32_t kStrLen(sizeof(kStr) - 1);
     PP_Var str = var_interface_->VarFromUtf8(pp::Module::Get()->pp_module(),
                                              kStr, kStrLen);
     ASSERT_EQ(PP_VARTYPE_STRING, str.type);

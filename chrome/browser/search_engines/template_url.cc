@@ -364,7 +364,7 @@ std::string TemplateURLRef::ReplaceSearchTermsUsingTermsData(
       input_encoding = "UTF-8";
     }
   } else {
-    encoded_terms = UTF8ToUTF16(EscapePath(UTF16ToUTF8(terms)));
+    encoded_terms = UTF8ToUTF16(net::EscapePath(UTF16ToUTF8(terms)));
     input_encoding = "UTF-8";
   }
 
@@ -528,7 +528,8 @@ string16 TemplateURLRef::SearchTermToString16(const TemplateURL& host,
 
   std::string unescaped = net::UnescapeURLComponent(
       term,
-      UnescapeRule::REPLACE_PLUS_WITH_SPACE | UnescapeRule::URL_SPECIAL_CHARS);
+      net::UnescapeRule::REPLACE_PLUS_WITH_SPACE |
+      net::UnescapeRule::URL_SPECIAL_CHARS);
   for (size_t i = 0; i < encodings.size(); ++i) {
     if (base::CodepageToUTF16(unescaped, encodings[i].c_str(),
                               base::OnStringConversionError::FAIL, &result))

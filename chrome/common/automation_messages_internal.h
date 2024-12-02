@@ -4,19 +4,6 @@
 
 // Defines the IPC messages used by the automation interface.
 
-#include <string>
-#include <vector>
-
-#include "base/string16.h"
-#include "chrome/common/content_settings.h"
-#include "content/public/browser/navigation_types.h"
-#include "googleurl/src/gurl.h"
-#include "ipc/ipc_message_macros.h"
-#include "net/base/cert_status_flags.h"
-#include "net/url_request/url_request_status.h"
-#include "ui/gfx/rect.h"
-#include "webkit/glue/window_open_disposition.h"
-
 // NOTE: All IPC messages have either a routing_id of 0 (for asynchronous
 //       messages), or one that's been assigned by the proxy (for calls
 //       which expect a response).  The routing_id shouldn't be used for
@@ -27,8 +14,21 @@
 //       define the IDs based on __LINE__, to allow these IPC messages to be
 //       used to control an old version of Chrome we need the message IDs to
 //       remain the same.  This means that you should not change the line number
-//       of any of the messages below.  This will be fixed once Xcode supports
-//       __COUNTER__, in which case we can get rid of the __LINE__.
+//       of any of the messages below.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 #define IPC_MESSAGE_START AutomationMsgStart
@@ -559,7 +559,7 @@ IPC_MESSAGE_ROUTED1(AutomationMsg_DidNavigate,
 IPC_SYNC_MESSAGE_CONTROL1_4(AutomationMsg_GetSecurityState,
                             int,
                             bool,
-                            SecurityStyle,
+                            content::SecurityStyle,
                             net::CertStatus,
                             int)
 
@@ -573,7 +573,7 @@ IPC_SYNC_MESSAGE_CONTROL1_4(AutomationMsg_GetSecurityState,
 IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_GetPageType,
                             int,
                             bool,
-                            PageType)
+                            content::PageType)
 
 // This message simulates the user action on the SSL blocking page showing in
 // the specified tab.  This message is only effective if an interstitial page
@@ -744,12 +744,12 @@ IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_FindWindowLocation,
                             int /* x */,
                             int /* y */)
 
-// Is the Bookmark bar visible? The return value will indicate whether it is
-// visible or not and whether it is being animated into (or out of its place).
-IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_BookmarkBarVisibility,
+// Gets the bookmark bar visibility, animating and detached states.
+// TODO(phajdan.jr): Adjust the last param when the reference build is updated.
+IPC_SYNC_MESSAGE_CONTROL1_3(AutomationMsg_BookmarkBarVisibility,
                             int /* browser_handle */,
                             bool, /* is_visible */
-                            bool  /* still_animating */)
+                            bool, /* still_animating */ bool /* is_detached */)
 
 // This message requests the number of related info bars opened.  It
 // returns -1 if an error occurred.
@@ -1476,7 +1476,38 @@ IPC_SYNC_MESSAGE_CONTROL1_2(AutomationMsg_IsBrowserInApplicationMode,
                             bool /* is_application */,
                             bool /* success */)
 
+// Call BeginTracing on the browser TraceController. This will tell all
+// processes to start collecting trace events via base/debug/trace_event.h.
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_BeginTracing,
+                            std::string /* categories */,
+                            bool /* success */)
+
+// End tracing (called after BeginTracing). This blocks until tracing has
+// stopped on all processes and all the events are ready to be retrieved.
+IPC_SYNC_MESSAGE_CONTROL0_2(AutomationMsg_EndTracing,
+                            size_t /* num_trace_chunks */,
+                            bool /* success */)
+
+// Retrieve trace event data (called after EndTracing). Must call exactly
+// |num_trace_chunks| times.
+// TODO(jbates): See bug 100255, IPC send fails if message is too big. This
+// code can be removed if that limitation is fixed.
+IPC_SYNC_MESSAGE_CONTROL0_2(AutomationMsg_GetTracingOutput,
+                            std::string /* trace_chunk */,
+                            bool /* success */)
+
+// Browser -> renderer messages.
+
+// Requests a snapshot.
+IPC_MESSAGE_ROUTED0(AutomationMsg_SnapshotEntirePage)
+
 // Renderer -> browser messages.
+
+// Sent as a response to |AutomationMsg_Snapshot|.
+IPC_MESSAGE_ROUTED3(AutomationMsg_SnapshotEntirePageACK,
+                    bool /* success */,
+                    std::vector<unsigned char> /* png bytes */,
+                    std::string /* error message */)
 
 // Sent when the renderer has scheduled a client redirect to occur.
 IPC_MESSAGE_ROUTED2(AutomationMsg_WillPerformClientRedirect,

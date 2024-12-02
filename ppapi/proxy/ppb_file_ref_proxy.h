@@ -11,9 +11,9 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_time.h"
+#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/proxy/interface_proxy.h"
-
-struct PPB_FileRef_Dev;
+#include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
 
 namespace ppapi {
 
@@ -22,9 +22,11 @@ struct PPB_FileRef_CreateInfo;
 
 namespace proxy {
 
+class SerializedVarReturnValue;
+
 class PPB_FileRef_Proxy : public InterfaceProxy {
  public:
-  PPB_FileRef_Proxy(Dispatcher* dispatcher);
+  explicit PPB_FileRef_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_FileRef_Proxy();
 
   static PP_Resource CreateProxyResource(PP_Resource file_system,
@@ -55,27 +57,41 @@ class PPB_FileRef_Proxy : public InterfaceProxy {
   static PP_Resource DeserializeFileRef(
       const PPB_FileRef_CreateInfo& serialized);
 
-  static const InterfaceID kInterfaceID = INTERFACE_ID_PPB_FILE_REF;
+  static const ApiID kApiID = API_ID_PPB_FILE_REF;
 
  private:
   // Message handlers.
-  void OnMsgCreate(const ppapi::HostResource& file_system,
+  void OnMsgCreate(const HostResource& file_system,
                    const std::string& path,
                    PPB_FileRef_CreateInfo* result);
-  void OnMsgGetParent(const ppapi::HostResource& host_resource,
+  void OnMsgGetParent(const HostResource& host_resource,
                       PPB_FileRef_CreateInfo* result);
-  void OnMsgMakeDirectory(const ppapi::HostResource& host_resource,
+  void OnMsgMakeDirectory(const HostResource& host_resource,
                           PP_Bool make_ancestors,
-                          uint32_t serialized_callback);
-  void OnMsgTouch(const ppapi::HostResource& host_resource,
+                          int callback_id);
+  void OnMsgTouch(const HostResource& host_resource,
                   PP_Time last_access,
                   PP_Time last_modified,
-                  uint32_t serialized_callback);
-  void OnMsgDelete(const ppapi::HostResource& host_resource,
-                   uint32_t serialized_callback);
-  void OnMsgRename(const ppapi::HostResource& file_ref,
-                   const ppapi::HostResource& new_file_ref,
-                   uint32_t serialized_callback);
+                  int callback_id);
+  void OnMsgDelete(const HostResource& host_resource,
+                   int callback_id);
+  void OnMsgRename(const HostResource& file_ref,
+                   const HostResource& new_file_ref,
+                   int callback_id);
+  void OnMsgGetAbsolutePath(const HostResource& host_resource,
+                            SerializedVarReturnValue result);
+
+  // Host -> Plugin message handlers.
+  void OnMsgCallbackComplete(const HostResource& host_resource,
+                             int callback_id,
+                             int32_t result);
+
+  void OnCallbackCompleteInHost(int32_t result,
+                                const HostResource& host_resource,
+                                int callback_id);
+
+  pp::CompletionCallbackFactory<PPB_FileRef_Proxy,
+                                ProxyNonThreadSafeRefCount> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_FileRef_Proxy);
 };

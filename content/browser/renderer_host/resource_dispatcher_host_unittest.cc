@@ -10,9 +10,10 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/download/download_id.h"
+#include "content/browser/download/download_id_factory.h"
 #include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/dummy_resource_handler.h"
 #include "content/browser/renderer_host/global_request_id.h"
@@ -20,9 +21,10 @@
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/renderer_host/resource_handler.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
+#include "content/common/child_process_host_impl.h"
 #include "content/common/resource_messages.h"
-#include "content/common/resource_response.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
 #include "net/base/upload_data.h"
 #include "net/http/http_util.h"
@@ -32,6 +34,10 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache_interfaces.h"
 
+using content::BrowserThread;
+using content::BrowserThreadImpl;
+using content::ChildProcessHostImpl;
+
 // TODO(eroman): Write unit tests for SafeBrowsing that exercise
 //               SafeBrowsingResourceHandler.
 
@@ -39,7 +45,7 @@ namespace {
 
 // Returns the resource response header structure for this request.
 void GetResponseHead(const std::vector<IPC::Message>& messages,
-                     ResourceResponseHead* response_head) {
+                     content::ResourceResponseHead* response_head) {
   ASSERT_GE(messages.size(), 2U);
 
   // The first messages should be received response.
@@ -75,6 +81,7 @@ static ResourceHostMsg_Request CreateResourceRequest(
   request.method = std::string(method);
   request.url = url;
   request.first_party_for_cookies = url;  // bypass third-party cookie blocking
+  request.referrer_policy = WebKit::WebReferrerPolicyDefault;
   request.load_flags = 0;
   request.origin_pid = 0;
   request.resource_type = type;
@@ -83,6 +90,8 @@ static ResourceHostMsg_Request CreateResourceRequest(
   request.download_to_file = false;
   request.is_main_frame = true;
   request.frame_id = 0;
+  request.parent_is_main_frame = false;
+  request.parent_frame_id = -1;
   request.transition_type = content::PAGE_TRANSITION_LINK;
   return request;
 }
@@ -155,8 +164,8 @@ class ForwardingFilter : public ResourceMessageFilter {
  public:
   explicit ForwardingFilter(IPC::Message::Sender* dest)
     : ResourceMessageFilter(
-        ChildProcessInfo::GenerateChildProcessUniqueId(),
-        ChildProcessInfo::RENDER_PROCESS,
+        ChildProcessHostImpl::GenerateChildProcessUniqueId(),
+        content::PROCESS_TYPE_RENDERER,
         content::MockResourceContext::GetInstance(),
         new MockURLRequestContextSelector(
             content::MockResourceContext::GetInstance()->request_context()),
@@ -385,8 +394,8 @@ class ResourceDispatcherHostTest : public testing::Test,
   }
 
   MessageLoopForIO message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  BrowserThreadImpl ui_thread_;
+  BrowserThreadImpl io_thread_;
   scoped_refptr<ForwardingFilter> filter_;
   ResourceDispatcherHost host_;
   ResourceIPCAccumulator accum_;
@@ -1001,7 +1010,7 @@ TEST_F(ResourceDispatcherHostTest, MimeSniffed) {
   accum_.GetClassifiedMessages(&msgs);
   ASSERT_EQ(1U, msgs.size());
 
-  ResourceResponseHead response_head;
+  content::ResourceResponseHead response_head;
   GetResponseHead(msgs[0], &response_head);
   ASSERT_EQ("text/html", response_head.mime_type);
 }
@@ -1030,7 +1039,7 @@ TEST_F(ResourceDispatcherHostTest, MimeNotSniffed) {
   accum_.GetClassifiedMessages(&msgs);
   ASSERT_EQ(1U, msgs.size());
 
-  ResourceResponseHead response_head;
+  content::ResourceResponseHead response_head;
   GetResponseHead(msgs[0], &response_head);
   ASSERT_EQ("image/jpeg", response_head.mime_type);
 }
@@ -1058,7 +1067,7 @@ TEST_F(ResourceDispatcherHostTest, MimeNotSniffed2) {
   accum_.GetClassifiedMessages(&msgs);
   ASSERT_EQ(1U, msgs.size());
 
-  ResourceResponseHead response_head;
+  content::ResourceResponseHead response_head;
   GetResponseHead(msgs[0], &response_head);
   ASSERT_EQ("", response_head.mime_type);
 }
@@ -1085,7 +1094,7 @@ TEST_F(ResourceDispatcherHostTest, MimeSniff204) {
   accum_.GetClassifiedMessages(&msgs);
   ASSERT_EQ(1U, msgs.size());
 
-  ResourceResponseHead response_head;
+  content::ResourceResponseHead response_head;
   GetResponseHead(msgs[0], &response_head);
   ASSERT_EQ("text/plain", response_head.mime_type);
 }
@@ -1161,8 +1170,10 @@ TEST_F(ResourceDispatcherHostTest, IgnoreCancelForDownloads) {
   HandleScheme("http");
 
   MakeTestRequest(render_view_id, request_id, GURL("http://example.com/blah"));
-  content::MockResourceContext::GetInstance()->set_next_download_id_thunk(
-      base::Bind(&MockNextDownloadId));
+  scoped_refptr<DownloadIdFactory> id_factory(
+      new DownloadIdFactory("valid DownloadId::Domain"));
+  content::MockResourceContext::GetInstance()->set_download_id_factory(
+      id_factory);
   // Return some data so that the request is identified as a download
   // and the proper resource handlers are created.
   EXPECT_TRUE(net::URLRequestTestJob::ProcessOnePendingMessage());
@@ -1198,8 +1209,10 @@ TEST_F(ResourceDispatcherHostTest, CancelRequestsForContext) {
   HandleScheme("http");
 
   MakeTestRequest(render_view_id, request_id, GURL("http://example.com/blah"));
-  content::MockResourceContext::GetInstance()->set_next_download_id_thunk(
-      base::Bind(&MockNextDownloadId));
+  scoped_refptr<DownloadIdFactory> id_factory(
+      new DownloadIdFactory("valid DownloadId::Domain"));
+  content::MockResourceContext::GetInstance()->set_download_id_factory(
+      id_factory);
   // Return some data so that the request is identified as a download
   // and the proper resource handlers are created.
   EXPECT_TRUE(net::URLRequestTestJob::ProcessOnePendingMessage());

@@ -7,12 +7,8 @@
 #include "base/logging.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/shared_impl/resource_tracker.h"
-#include "ppapi/thunk/ppb_context_3d_api.h"
 #include "ppapi/thunk/enter.h"
-
-using ppapi::thunk::PPB_Context3D_API;
 
 namespace ppapi {
 
@@ -32,14 +28,14 @@ void VideoDecoderImpl::InitCommon(
   DCHECK(graphics_context);
   DCHECK(!gles2_impl_ && !graphics_context_);
   gles2_impl_ = gles2_impl;
-  TrackerBase::Get()->GetResourceTracker()->AddRefResource(graphics_context);
+  PpapiGlobals::Get()->GetResourceTracker()->AddRefResource(graphics_context);
   graphics_context_ = graphics_context;
 }
 
 void VideoDecoderImpl::Destroy() {
   graphics_context_ = 0;
   gles2_impl_ = NULL;
-  TrackerBase::Get()->GetResourceTracker()->ReleaseResource(graphics_context_);
+  PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(graphics_context_);
 }
 
 bool VideoDecoderImpl::SetFlushCallback(PP_CompletionCallback callback) {

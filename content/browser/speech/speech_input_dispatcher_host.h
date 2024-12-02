@@ -29,14 +29,15 @@ class SpeechInputDispatcherHost : public BrowserMessageFilter,
       SpeechInputPreferences* speech_input_preferences);
 
   // SpeechInputManager::Delegate methods.
-  virtual void SetRecognitionResult(int caller_id,
-                                    const SpeechInputResult& result);
-  virtual void DidCompleteRecording(int caller_id);
-  virtual void DidCompleteRecognition(int caller_id);
+  virtual void SetRecognitionResult(
+      int caller_id,
+      const content::SpeechInputResult& result) OVERRIDE;
+  virtual void DidCompleteRecording(int caller_id) OVERRIDE;
+  virtual void DidCompleteRecognition(int caller_id) OVERRIDE;
 
   // BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   // Singleton manager setter useful for tests.
   CONTENT_EXPORT static void set_manager(SpeechInputManager* manager);

@@ -7,9 +7,15 @@
 #include "build/build_config.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#if !defined(OS_ANDROID)
 #include "third_party/angle/include/EGL/egl.h"
 #include "third_party/angle/include/EGL/eglext.h"
+#endif
 #include "ui/gfx/gl/egl_util.h"
+
+#if defined(OS_ANDROID)
+#include <EGL/egl.h>
+#endif
 
 // This header must come after the above third-party include, as
 // it brings in #defines that cause conflicts.
@@ -110,7 +116,7 @@ bool GLSurfaceEGL::InitializeOneOff() {
 
   initialized = true;
 
-#if defined(USE_X11)
+#if defined(USE_X11) || defined(OS_ANDROID)
   return true;
 #else
   g_software_native_display = EGL_SOFTWARE_DISPLAY_ANGLE;
@@ -173,7 +179,8 @@ EGLNativeDisplayType GLSurfaceEGL::GetNativeDisplay() {
 NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(bool software,
                                                gfx::PluginWindowHandle window)
     : window_(window),
-      surface_(NULL)
+      surface_(NULL),
+      supports_post_sub_buffer_(false)
 {
   software_ = software;
 }
@@ -183,6 +190,10 @@ NativeViewGLSurfaceEGL::~NativeViewGLSurfaceEGL() {
 }
 
 bool NativeViewGLSurfaceEGL::Initialize() {
+#if defined(OS_ANDROID)
+  NOTREACHED();
+  return false;
+#else
   DCHECK(!surface_);
 
   if (!GetDisplay()) {
@@ -190,11 +201,18 @@ bool NativeViewGLSurfaceEGL::Initialize() {
     return false;
   }
 
+  static const EGLint egl_window_attributes_sub_buffer[] = {
+    EGL_POST_SUB_BUFFER_SUPPORTED_NV, EGL_TRUE,
+    EGL_NONE
+  };
+
   // Create a surface for the native window.
   surface_ = eglCreateWindowSurface(GetDisplay(),
                                     GetConfig(),
                                     window_,
-                                    NULL);
+                                    gfx::g_EGL_NV_post_sub_buffer ?
+                                        egl_window_attributes_sub_buffer :
+                                        NULL);
 
   if (!surface_) {
     LOG(ERROR) << "eglCreateWindowSurface failed with error "
@@ -203,7 +221,15 @@ bool NativeViewGLSurfaceEGL::Initialize() {
     return false;
   }
 
+  EGLint surfaceVal;
+  EGLBoolean retVal = eglQuerySurface(GetDisplay(),
+                                      surface_,
+                                      EGL_POST_SUB_BUFFER_SUPPORTED_NV,
+                                      &surfaceVal);
+  supports_post_sub_buffer_ = (surfaceVal && retVal) == EGL_TRUE;
+
   return true;
+#endif
 }
 
 void NativeViewGLSurfaceEGL::Destroy() {
@@ -245,6 +271,26 @@ gfx::Size NativeViewGLSurfaceEGL::GetSize() {
 
 EGLSurface NativeViewGLSurfaceEGL::GetHandle() {
   return surface_;
+}
+
+std::string NativeViewGLSurfaceEGL::GetExtensions() {
+  std::string extensions = GLSurface::GetExtensions();
+  if (supports_post_sub_buffer_) {
+    extensions += extensions.empty() ? "" : " ";
+    extensions += "GL_CHROMIUM_post_sub_buffer";
+  }
+  return extensions;
+}
+
+bool NativeViewGLSurfaceEGL::PostSubBuffer(
+    int x, int y, int width, int height) {
+  DCHECK(supports_post_sub_buffer_);
+  if (!eglPostSubBufferNV(GetDisplay(), surface_, x, y, width, height)) {
+    VLOG(1) << "eglPostSubBufferNV failed with error "
+            << GetLastEGLErrorString();
+    return false;
+  }
+  return true;
 }
 
 PbufferGLSurfaceEGL::PbufferGLSurfaceEGL(bool software, const gfx::Size& size)
@@ -307,8 +353,38 @@ gfx::Size PbufferGLSurfaceEGL::GetSize() {
   return size_;
 }
 
+bool PbufferGLSurfaceEGL::Resize(const gfx::Size& size) {
+  if (size == size_)
+    return true;
+
+  Destroy();
+  size_ = size;
+  return Initialize();
+}
+
 EGLSurface PbufferGLSurfaceEGL::GetHandle() {
   return surface_;
+}
+
+void* PbufferGLSurfaceEGL::GetShareHandle() {
+#if defined(OS_ANDROID)
+  NOTREACHED();
+  return NULL;
+#else
+  const char* extensions = eglQueryString(g_display, EGL_EXTENSIONS);
+  if (!strstr(extensions, "EGL_ANGLE_query_surface_pointer"))
+    return NULL;
+
+  void* handle;
+  if (!eglQuerySurfacePointerANGLE(g_display,
+                                   GetHandle(),
+                                   EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE,
+                                   &handle)) {
+    return NULL;
+  }
+
+  return handle;
+#endif
 }
 
 }  // namespace gfx

@@ -44,7 +44,7 @@ SpdyProxyClientSocket::SpdyProxyClientSocket(
       user_buffer_(NULL),
       write_buffer_len_(0),
       write_bytes_outstanding_(0),
-      eof_has_been_read_(false),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       net_log_(spdy_stream->net_log()) {
   request_.method = "CONNECT";
   request_.url = url;
@@ -110,12 +110,11 @@ void SpdyProxyClientSocket::Disconnect() {
 }
 
 bool SpdyProxyClientSocket::IsConnected() const {
-  return next_state_ == STATE_OPEN || next_state_ == STATE_CLOSED;
+  return next_state_ == STATE_OPEN;
 }
 
 bool SpdyProxyClientSocket::IsConnectedAndIdle() const {
-  return IsConnected() && spdy_stream_.get() != NULL &&
-      !spdy_stream_->is_idle();
+  return IsConnected() && read_buffer_.empty() && spdy_stream_->is_idle();
 }
 
 const BoundNetLog& SpdyProxyClientSocket::NetLog() const {
@@ -154,10 +153,7 @@ int SpdyProxyClientSocket::Read(IOBuffer* buf, int buf_len,
   if (next_state_ == STATE_DISCONNECTED)
     return ERR_SOCKET_NOT_CONNECTED;
 
-  if (!spdy_stream_ && read_buffer_.empty()) {
-    if (eof_has_been_read_)
-      return ERR_CONNECTION_CLOSED;
-    eof_has_been_read_ = true;
+  if (next_state_ == STATE_CLOSED && read_buffer_.empty()) {
     return 0;
   }
 
@@ -198,12 +194,10 @@ int SpdyProxyClientSocket::PopulateUserReadBuffer() {
 int SpdyProxyClientSocket::Write(IOBuffer* buf, int buf_len,
                                  OldCompletionCallback* callback) {
   DCHECK(!write_callback_);
-  if (next_state_ == STATE_DISCONNECTED)
+  if (next_state_ != STATE_OPEN)
     return ERR_SOCKET_NOT_CONNECTED;
 
-  if (!spdy_stream_)
-    return ERR_CONNECTION_CLOSED;
-
+  DCHECK(spdy_stream_);
   write_bytes_outstanding_= buf_len;
   if (buf_len <= kMaxSpdyFrameChunkSize) {
     int rv = spdy_stream_->WriteStreamData(buf, buf_len, spdy::DATA_FLAG_NONE);
@@ -493,6 +487,7 @@ void SpdyProxyClientSocket::OnClose(int status)  {
   else
     next_state_ = STATE_DISCONNECTED;
 
+  base::WeakPtr<SpdyProxyClientSocket> weak_ptr = weak_factory_.GetWeakPtr();
   OldCompletionCallback* write_callback = write_callback_;
   write_callback_ = NULL;
   write_buffer_len_ = 0;
@@ -506,10 +501,11 @@ void SpdyProxyClientSocket::OnClose(int status)  {
     read_callback_ = NULL;
     read_callback->Run(status);
   } else if (read_callback_) {
-    // If we have a read_callback, the we need to make sure we call it back
+    // If we have a read_callback_, the we need to make sure we call it back.
     OnDataReceived(NULL, 0);
   }
-  if (write_callback)
+  // This may have been deleted by read_callback_, so check first.
+  if (weak_ptr && write_callback)
     write_callback->Run(ERR_CONNECTION_CLOSED);
 }
 

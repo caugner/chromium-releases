@@ -20,9 +20,11 @@
 #include "chrome/browser/sync/internal_api/write_node.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -90,7 +92,7 @@ void BookmarkChangeProcessor::RemoveOneSyncNode(
     return;
   }
   // This node should have no children.
-  DCHECK(sync_node.GetFirstChildId() == sync_api::kInvalidId);
+  DCHECK(!sync_node.HasChildren());
   // Remove association and delete the sync node.
   model_associator_->Disassociate(sync_node.GetId());
   sync_node.Remove();
@@ -448,6 +450,9 @@ void BookmarkChangeProcessor::ApplyChangesFromSyncModel(
                   foster_parent->parent()->GetIndexOf(foster_parent));
     foster_parent = NULL;
   }
+
+  // The visibility of the mobile node may need to change.
+  model_associator_->UpdateMobileNodeVisibility();
 
   // We are now ready to hear about bookmarks changes again.
   model->AddObserver(this);

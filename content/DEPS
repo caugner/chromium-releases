@@ -18,8 +18,12 @@ include_rules = [
   # TODO(ben): remove this
   "+content/public/browser/native_web_keyboard_event.h",
 
+  "+grit/content_resources.h",
+  "+grit/webkit_chromium_resources.h",
+  "+grit/webkit_resources.h",
+  "+grit/webkit_strings.h",
+
   "+dbus",
-  "+grit",
   "+gpu",
   "+net",
   "+ppapi",
@@ -37,6 +41,7 @@ include_rules = [
   "+third_party/npapi/bindings",
   "+third_party/sqlite",
   "+third_party/tcmalloc",
+  "+third_party/khronos",
   # Allow inclusion of WebKit API files.
   "+third_party/WebKit/Source/WebKit/chromium",
 

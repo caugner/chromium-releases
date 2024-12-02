@@ -4,6 +4,8 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
 #include "net/base/completion_callback.h"
@@ -33,7 +35,7 @@ class MockResponseReader : public AppCacheResponseReader {
   MockResponseReader(int64 response_id,
                      net::HttpResponseInfo* info, int info_size,
                      const char* data, int data_size)
-      : AppCacheResponseReader(response_id, NULL),
+      : AppCacheResponseReader(response_id, 0, NULL),
         info_(info), info_size_(info_size),
         data_(data), data_size_(data_size) {
   }
@@ -65,9 +67,10 @@ class MockResponseReader : public AppCacheResponseReader {
 
  private:
   void ScheduleUserCallback(int result) {
-    MessageLoop::current()->PostTask(FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &MockResponseReader::InvokeUserOldCompletionCallback, result));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&MockResponseReader::InvokeUserOldCompletionCallback,
+                   weak_factory_.GetWeakPtr(), result));
   }
 
   scoped_ptr<net::HttpResponseInfo> info_;
@@ -87,7 +90,8 @@ class AppCacheServiceTest : public testing::Test {
         service_(new AppCacheService(NULL)),
         delete_result_(net::OK), delete_completion_count_(0),
         ALLOW_THIS_IN_INITIALIZER_LIST(deletion_callback_(
-            this, &AppCacheServiceTest::OnDeleteAppCachesComplete)) {
+            base::Bind(&AppCacheServiceTest::OnDeleteAppCachesComplete,
+                       base::Unretained(this)))) {
     // Setup to use mock storage.
     service_->storage_.reset(new MockAppCacheStorage(service_.get()));
   }
@@ -170,12 +174,12 @@ class AppCacheServiceTest : public testing::Test {
   scoped_ptr<AppCacheService> service_;
   int delete_result_;
   int delete_completion_count_;
-  net::OldCompletionCallbackImpl<AppCacheServiceTest> deletion_callback_;
+  net::CompletionCallback deletion_callback_;
 };
 
 TEST_F(AppCacheServiceTest, DeleteAppCachesForOrigin) {
   // Without giving mock storage simiulated info, should fail.
-  service_->DeleteAppCachesForOrigin(kOrigin, &deletion_callback_);
+  service_->DeleteAppCachesForOrigin(kOrigin, deletion_callback_);
   EXPECT_EQ(0, delete_completion_count_);
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1, delete_completion_count_);
@@ -184,7 +188,7 @@ TEST_F(AppCacheServiceTest, DeleteAppCachesForOrigin) {
 
   // Should succeed given an empty info collection.
   mock_storage()->SimulateGetAllInfo(new AppCacheInfoCollection);
-  service_->DeleteAppCachesForOrigin(kOrigin, &deletion_callback_);
+  service_->DeleteAppCachesForOrigin(kOrigin, deletion_callback_);
   EXPECT_EQ(0, delete_completion_count_);
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1, delete_completion_count_);
@@ -206,7 +210,7 @@ TEST_F(AppCacheServiceTest, DeleteAppCachesForOrigin) {
   info_vector.push_back(mock_manifest_3);
   info->infos_by_origin[kOrigin] = info_vector;
   mock_storage()->SimulateGetAllInfo(info);
-  service_->DeleteAppCachesForOrigin(kOrigin, &deletion_callback_);
+  service_->DeleteAppCachesForOrigin(kOrigin, deletion_callback_);
   EXPECT_EQ(0, delete_completion_count_);
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1, delete_completion_count_);
@@ -217,7 +221,7 @@ TEST_F(AppCacheServiceTest, DeleteAppCachesForOrigin) {
   info->infos_by_origin[kOrigin] = info_vector;
   mock_storage()->SimulateGetAllInfo(info);
   mock_storage()->SimulateMakeGroupObsoleteFailure();
-  service_->DeleteAppCachesForOrigin(kOrigin, &deletion_callback_);
+  service_->DeleteAppCachesForOrigin(kOrigin, deletion_callback_);
   EXPECT_EQ(0, delete_completion_count_);
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(1, delete_completion_count_);
@@ -226,7 +230,7 @@ TEST_F(AppCacheServiceTest, DeleteAppCachesForOrigin) {
 
   // Should complete with abort error if the service is deleted
   // prior to a delete completion.
-  service_->DeleteAppCachesForOrigin(kOrigin, &deletion_callback_);
+  service_->DeleteAppCachesForOrigin(kOrigin, deletion_callback_);
   EXPECT_EQ(0, delete_completion_count_);
   service_.reset();  // kill it
   EXPECT_EQ(1, delete_completion_count_);

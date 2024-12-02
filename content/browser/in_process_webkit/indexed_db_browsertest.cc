@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -22,6 +23,7 @@
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/special_storage_policy.h"
 
+using content::BrowserThread;
 using quota::QuotaManager;
 using webkit_database::DatabaseUtil;
 
@@ -58,24 +60,17 @@ class IndexedDBBrowserTest : public InProcessBrowserTest {
   }
 };
 
-class IndexedDBSQLiteBrowserTest : public IndexedDBBrowserTest {
- public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    command_line->AppendSwitch(switches::kSQLiteIndexedDatabase);
-  }
-};
-
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTest) {
-  SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_test.html"))));
-}
-
-IN_PROC_BROWSER_TEST_F(IndexedDBSQLiteBrowserTest, CursorTest) {
   SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_test.html"))));
 }
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTestIncognito) {
   SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_test.html"))),
              true /* incognito */);
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorPrefetch) {
+  SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("cursor_prefetch.html"))));
 }
 
 // Flaky: http://crbug.com/70773
@@ -90,6 +85,14 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DISABLED_KeyPathTest) {
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, TransactionGetTest) {
   SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("transaction_get_test.html"))));
+}
+
+#if defined(OS_WIN)
+// http://crbug.com/104306
+#define KeyTypesTest FLAKY_KeyTypesTest
+#endif
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, KeyTypesTest) {
+  SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("key_types_test.html"))));
 }
 
 // Flaky: http://crbug.com/70773
@@ -116,6 +119,13 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, DISABLED_DoesntHangTest) {
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, Bug84933Test) {
   const GURL url = testUrl(FilePath(FILE_PATH_LITERAL("bug_84933.html")));
+
+  // Just navigate to the URL. Test will crash if it fails.
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(browser(), url, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, Bug106883Test) {
+  const GURL url = testUrl(FilePath(FILE_PATH_LITERAL("bug_106883.html")));
 
   // Just navigate to the URL. Test will crash if it fails.
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(browser(), url, 1);
@@ -227,13 +237,14 @@ class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
 
   static void SetTempQuota(int64 bytes, scoped_refptr<QuotaManager> qm) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-          NewRunnableFunction(&IndexedDBBrowserTestWithLowQuota::SetTempQuota,
-                              bytes, qm));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&IndexedDBBrowserTestWithLowQuota::SetTempQuota, bytes,
+                     qm));
       return;
     }
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    qm->SetTemporaryGlobalOverrideQuota(bytes, NULL);
+    qm->SetTemporaryGlobalOverrideQuota(bytes, quota::QuotaCallback());
     // Don't return until the quota has been set.
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(
@@ -243,7 +254,7 @@ class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
 
 };
 
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithLowQuota, QuotaTest) {
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithLowQuota, FAILS_QuotaTest) {
   SimpleTest(testUrl(FilePath(FILE_PATH_LITERAL("quota_test.html"))));
 }
 

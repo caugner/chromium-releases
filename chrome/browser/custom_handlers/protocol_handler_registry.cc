@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,11 +18,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/network_delegate.h"
 #include "net/url_request/url_request_redirect_job.h"
+
+using content::BrowserThread;
 
 // ProtocolHandlerRegistry -----------------------------------------------------
 
@@ -84,7 +87,7 @@ void ProtocolHandlerRegistry::RegisterProtocolHandler(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(CanSchemeBeOverridden(handler.protocol()));
   DCHECK(!handler.IsEmpty());
-  if (HasRegisteredEquivalent(handler)) {
+  if (IsRegistered(handler)) {
     return;
   }
   if (enabled_ && !delegate_->IsExternalHandlerRegistered(handler.protocol()))
@@ -122,7 +125,7 @@ void ProtocolHandlerRegistry::Enable() {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(this, &ProtocolHandlerRegistry::EnableIO));
+      base::Bind(&ProtocolHandlerRegistry::EnableIO, this));
   ProtocolHandlerMap::const_iterator p;
   for (p = default_handlers_.begin(); p != default_handlers_.end(); ++p) {
     delegate_->RegisterExternalHandler(p->first);
@@ -140,7 +143,7 @@ void ProtocolHandlerRegistry::Disable() {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(this, &ProtocolHandlerRegistry::DisableIO));
+      base::Bind(&ProtocolHandlerRegistry::DisableIO, this));
   ProtocolHandlerMap::const_iterator p;
   for (p = default_handlers_.begin(); p != default_handlers_.end(); ++p) {
     delegate_->DeregisterExternalHandler(p->first);
@@ -201,8 +204,8 @@ void ProtocolHandlerRegistry::Load() {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        NewRunnableMethod(this, enabled_ ? &ProtocolHandlerRegistry::EnableIO :
-                          &ProtocolHandlerRegistry::DisableIO));
+        base::Bind(enabled_ ? &ProtocolHandlerRegistry::EnableIO :
+                   &ProtocolHandlerRegistry::DisableIO, this));
   }
   std::vector<const DictionaryValue*> registered_handlers =
       GetHandlersFromPref(prefs::kRegisteredProtocolHandlers);
@@ -370,8 +373,8 @@ void ProtocolHandlerRegistry::RemoveHandler(
     } else {
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
-          NewRunnableMethod(this, &ProtocolHandlerRegistry::ClearDefaultIO,
-                            q->second.protocol()));
+          base::Bind(&ProtocolHandlerRegistry::ClearDefaultIO, this,
+                     q->second.protocol()));
       default_handlers_.erase(q);
     }
   }
@@ -426,6 +429,20 @@ Value* ProtocolHandlerRegistry::EncodeIgnoredHandlers() {
     handlers->Append(i->Encode());
   }
   return handlers;
+}
+
+bool ProtocolHandlerRegistry::SilentlyHandleRegisterHandlerRequest(
+    const ProtocolHandler& handler) {
+  if (handler.IsEmpty() || !CanSchemeBeOverridden(handler.protocol()))
+    return true;
+
+  if (!enabled() || IsRegistered(handler) || HasIgnoredEquivalent(handler))
+    return true;
+
+  if (AttemptReplace(handler))
+    return true;
+
+  return false;
 }
 
 void ProtocolHandlerRegistry::OnAcceptRegisterProtocolHandler(
@@ -514,7 +531,7 @@ void ProtocolHandlerRegistry::SetDefault(const ProtocolHandler& handler) {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(this, &ProtocolHandlerRegistry::SetDefaultIO, handler));
+      base::Bind(&ProtocolHandlerRegistry::SetDefaultIO, this, handler));
 }
 
 void ProtocolHandlerRegistry::ClearDefault(const std::string& scheme) {
@@ -523,8 +540,7 @@ void ProtocolHandlerRegistry::ClearDefault(const std::string& scheme) {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(this,
-                        &ProtocolHandlerRegistry::ClearDefaultIO, scheme));
+      base::Bind(&ProtocolHandlerRegistry::ClearDefaultIO, this, scheme));
   Save();
   NotifyChanged();
 }
@@ -571,10 +587,10 @@ void ProtocolHandlerRegistry::PromoteHandler(const ProtocolHandler& handler) {
 
 void ProtocolHandlerRegistry::NotifyChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-      Source<Profile>(profile_),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_),
+      content::NotificationService::NoDetails());
 }
 
 // IO thread methods -----------------------------------------------------------

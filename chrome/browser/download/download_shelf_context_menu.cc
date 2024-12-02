@@ -6,9 +6,13 @@
 
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/google/google_util.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_manager.h"
+#include "content/browser/tab_contents/page_navigator.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -21,8 +25,22 @@ DownloadShelfContextMenu::DownloadShelfContextMenu(
 }
 
 ui::SimpleMenuModel* DownloadShelfContextMenu::GetMenuModel() {
-  return download_item_->IsComplete() ? GetFinishedMenuModel()
-                                      : GetInProgressMenuModel();
+  ui::SimpleMenuModel* model = NULL;
+
+  if (download_item_->GetSafetyState() == DownloadItem::DANGEROUS) {
+    if (download_item_->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ||
+        download_item_->GetDangerType() ==
+            DownloadStateInfo::DANGEROUS_CONTENT) {
+      model = GetMaliciousMenuModel();
+    } else {
+      NOTREACHED();
+    }
+  } else if (download_item_->IsComplete()) {
+    model = GetFinishedMenuModel();
+  } else {
+    model = GetInProgressMenuModel();
+  }
+  return model;
 }
 
 bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
@@ -32,7 +50,7 @@ bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
       return download_item_->CanShowInFolder();
     case ALWAYS_OPEN_TYPE:
       return download_item_->CanOpenDownload() &&
-          !Extension::IsExtension(download_item_->state_info().target_name);
+          !Extension::IsExtension(download_item_->GetStateInfo().target_name);
     case CANCEL:
       return download_item_->IsPartialDownload();
     case TOGGLE_PAUSE:
@@ -45,11 +63,11 @@ bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
 bool DownloadShelfContextMenu::IsCommandIdChecked(int command_id) const {
   switch (command_id) {
     case OPEN_WHEN_COMPLETE:
-      return download_item_->open_when_complete();
+      return download_item_->GetOpenWhenComplete();
     case ALWAYS_OPEN_TYPE:
       return download_item_->ShouldOpenFileBasedOnExtension();
     case TOGGLE_PAUSE:
-      return download_item_->is_paused();
+      return download_item_->IsPaused();
   }
   return false;
 }
@@ -64,7 +82,7 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
       break;
     case ALWAYS_OPEN_TYPE: {
       DownloadPrefs* prefs = DownloadPrefs::FromDownloadManager(
-          download_item_->download_manager());
+          download_item_->GetDownloadManager());
       FilePath path = download_item_->GetUserVerifiedFilePath();
       if (!IsCommandIdChecked(ALWAYS_OPEN_TYPE))
         prefs->EnableAutoOpenBasedOnExtension(path);
@@ -82,6 +100,22 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
       if (download_item_->IsPartialDownload())
         download_item_->TogglePause();
       break;
+    case DISCARD:
+      download_item_->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
+      break;
+    case KEEP:
+      download_item_->DangerousDownloadValidated();
+      break;
+    case LEARN_MORE: {
+      Browser* browser = BrowserList::GetLastActive();
+      DCHECK(browser && browser->is_type_tabbed());
+      GURL learn_more_url(chrome::kDownloadScanningLearnMoreURL);
+      OpenURLParams params(google_util::AppendGoogleLocaleParam(learn_more_url),
+                           content::Referrer(), NEW_FOREGROUND_TAB,
+                           content::PAGE_TRANSITION_TYPED, false);
+      browser->OpenURL(params);
+      break;
+    }
     default:
       NOTREACHED();
   }
@@ -109,10 +143,16 @@ string16 DownloadShelfContextMenu::GetLabelForCommandId(int command_id) const {
     case CANCEL:
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_CANCEL);
     case TOGGLE_PAUSE: {
-      if (download_item_->is_paused())
+      if (download_item_->IsPaused())
         return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_RESUME_ITEM);
       return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_PAUSE_ITEM);
     }
+    case DISCARD:
+      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_DISCARD);
+    case KEEP:
+      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_KEEP);
+    case LEARN_MORE:
+      return l10n_util::GetStringUTF16(IDS_DOWNLOAD_MENU_LEARN_MORE);
     default:
       NOTREACHED();
       break;
@@ -160,4 +200,21 @@ ui::SimpleMenuModel* DownloadShelfContextMenu::GetFinishedMenuModel() {
       CANCEL, IDS_DOWNLOAD_MENU_CANCEL);
 
   return finished_download_menu_model_.get();
+}
+
+ui::SimpleMenuModel* DownloadShelfContextMenu::GetMaliciousMenuModel() {
+  if (malicious_download_menu_model_.get())
+    return malicious_download_menu_model_.get();
+
+  malicious_download_menu_model_.reset(new ui::SimpleMenuModel(this));
+
+  malicious_download_menu_model_->AddItemWithStringId(
+      DISCARD, IDS_DOWNLOAD_MENU_DISCARD);
+  malicious_download_menu_model_->AddItemWithStringId(
+      KEEP, IDS_DOWNLOAD_MENU_KEEP);
+  malicious_download_menu_model_->AddSeparator();
+  malicious_download_menu_model_->AddItemWithStringId(
+      LEARN_MORE, IDS_DOWNLOAD_MENU_LEARN_MORE);
+
+  return malicious_download_menu_model_.get();
 }

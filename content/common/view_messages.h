@@ -7,33 +7,36 @@
 
 #include "base/process.h"
 #include "base/shared_memory.h"
-#include "content/common/common_param_traits.h"
 #include "content/common/content_export.h"
 #include "content/common/css_colors.h"
 #include "content/common/edit_command.h"
 #include "content/common/navigation_gesture.h"
-#include "content/common/page_zoom.h"
-#include "content/common/renderer_preferences.h"
 #include "content/common/view_message_enums.h"
-#include "content/common/webkit_param_traits.h"
-#include "content/common/window_container_type.h"
+#include "content/public/common/common_param_traits.h"
+#include "content/public/common/file_chooser_params.h"
+#include "content/public/common/frame_navigate_params.h"
+#include "content/public/common/page_zoom.h"
+#include "content/public/common/referrer.h"
+#include "content/public/common/renderer_preferences.h"
+#include "content/public/common/stop_find_action.h"
+#include "content/public/common/webkit_param_traits.h"
+#include "content/public/common/window_container_type.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/base/media_log_event.h"
-#include "net/base/host_port_pair.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/context_menu.h"
-#include "webkit/glue/password_form.h"
 #include "webkit/glue/webcookie.h"
 #include "webkit/glue/webmenuitem.h"
 #include "webkit/glue/webpreferences.h"
@@ -51,27 +54,28 @@
 
 IPC_ENUM_TRAITS(CSSColors::CSSColorName)
 IPC_ENUM_TRAITS(NavigationGesture)
-IPC_ENUM_TRAITS(PageZoom::Function)
-IPC_ENUM_TRAITS(RendererPreferencesHintingEnum)
-IPC_ENUM_TRAITS(RendererPreferencesSubpixelRenderingEnum)
 IPC_ENUM_TRAITS(ViewHostMsg_AccEvent::Value)
-IPC_ENUM_TRAITS(ViewHostMsg_RunFileChooser_Mode::Value)
 IPC_ENUM_TRAITS(ViewMsg_Navigate_Type::Value)
-IPC_ENUM_TRAITS(ViewMsg_StopFinding_Params::Action)
 IPC_ENUM_TRAITS(WebKit::WebContextMenuData::MediaType)
 IPC_ENUM_TRAITS(WebKit::WebMediaPlayerAction::Type)
 IPC_ENUM_TRAITS(WebKit::WebPopupType)
+IPC_ENUM_TRAITS(WebKit::WebReferrerPolicy)
 IPC_ENUM_TRAITS(WebKit::WebTextDirection)
-IPC_ENUM_TRAITS(ui::TextInputType)
 IPC_ENUM_TRAITS(WebMenuItem::Type)
 IPC_ENUM_TRAITS(WindowContainerType)
+IPC_ENUM_TRAITS(content::FileChooserParams::Mode)
+IPC_ENUM_TRAITS(content::PageZoom)
+IPC_ENUM_TRAITS(content::RendererPreferencesHintingEnum)
+IPC_ENUM_TRAITS(content::RendererPreferencesSubpixelRenderingEnum)
+IPC_ENUM_TRAITS(content::StopFindAction)
+IPC_ENUM_TRAITS(media::MediaLogEvent::Type)
+IPC_ENUM_TRAITS(ui::TextInputType)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::BoolAttribute)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::FloatAttribute)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::IntAttribute)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::Role)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::State)
 IPC_ENUM_TRAITS(webkit_glue::WebAccessibility::StringAttribute)
-IPC_ENUM_TRAITS(media::MediaLogEvent::Type)
 
 IPC_STRUCT_TRAITS_BEGIN(ContextMenuParams)
   IPC_STRUCT_TRAITS_MEMBER(media_type)
@@ -115,28 +119,6 @@ IPC_STRUCT_TRAITS_BEGIN(FontDescriptor)
   IPC_STRUCT_TRAITS_MEMBER(font_point_size)
 IPC_STRUCT_TRAITS_END()
 #endif
-
-IPC_STRUCT_TRAITS_BEGIN(RendererPreferences)
-  IPC_STRUCT_TRAITS_MEMBER(can_accept_load_drops)
-  IPC_STRUCT_TRAITS_MEMBER(should_antialias_text)
-  IPC_STRUCT_TRAITS_MEMBER(hinting)
-  IPC_STRUCT_TRAITS_MEMBER(subpixel_rendering)
-  IPC_STRUCT_TRAITS_MEMBER(focus_ring_color)
-  IPC_STRUCT_TRAITS_MEMBER(thumb_active_color)
-  IPC_STRUCT_TRAITS_MEMBER(thumb_inactive_color)
-  IPC_STRUCT_TRAITS_MEMBER(track_color)
-  IPC_STRUCT_TRAITS_MEMBER(active_selection_bg_color)
-  IPC_STRUCT_TRAITS_MEMBER(active_selection_fg_color)
-  IPC_STRUCT_TRAITS_MEMBER(inactive_selection_bg_color)
-  IPC_STRUCT_TRAITS_MEMBER(inactive_selection_fg_color)
-  IPC_STRUCT_TRAITS_MEMBER(browser_handles_top_level_requests)
-  IPC_STRUCT_TRAITS_MEMBER(caret_blink_interval)
-  IPC_STRUCT_TRAITS_MEMBER(enable_referrers)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(ViewMsg_StopFinding_Params)
-  IPC_STRUCT_TRAITS_MEMBER(action)
-IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebKit::WebCompositionUnderline)
   IPC_STRUCT_TRAITS_MEMBER(startOffset)
@@ -223,6 +205,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(webaudio_enabled)
   IPC_STRUCT_TRAITS_MEMBER(experimental_webgl_enabled)
   IPC_STRUCT_TRAITS_MEMBER(gl_multisampling_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(privileged_webgl_extensions_enabled)
   IPC_STRUCT_TRAITS_MEMBER(show_composited_layer_borders)
   IPC_STRUCT_TRAITS_MEMBER(show_composited_layer_tree)
   IPC_STRUCT_TRAITS_MEMBER(show_fps_counter)
@@ -231,6 +214,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(force_compositing_mode)
   IPC_STRUCT_TRAITS_MEMBER(allow_webui_compositing)
   IPC_STRUCT_TRAITS_MEMBER(composite_to_texture_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(fixed_position_compositing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_2d_canvas_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_drawing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_plugins_enabled)
@@ -242,6 +226,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(allow_displaying_insecure_content)
   IPC_STRUCT_TRAITS_MEMBER(allow_running_insecure_content)
   IPC_STRUCT_TRAITS_MEMBER(enable_scroll_animator)
+  IPC_STRUCT_TRAITS_MEMBER(visual_word_movement_enabled)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebMenuItem)
@@ -254,6 +239,52 @@ IPC_STRUCT_TRAITS_BEGIN(WebMenuItem)
   IPC_STRUCT_TRAITS_MEMBER(enabled)
   IPC_STRUCT_TRAITS_MEMBER(checked)
   IPC_STRUCT_TRAITS_MEMBER(submenu)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::FileChooserParams)
+  IPC_STRUCT_TRAITS_MEMBER(mode)
+  IPC_STRUCT_TRAITS_MEMBER(title)
+  IPC_STRUCT_TRAITS_MEMBER(default_file_name)
+  IPC_STRUCT_TRAITS_MEMBER(accept_types)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::FrameNavigateParams)
+  IPC_STRUCT_TRAITS_MEMBER(page_id)
+  IPC_STRUCT_TRAITS_MEMBER(url)
+  IPC_STRUCT_TRAITS_MEMBER(base_url)
+  IPC_STRUCT_TRAITS_MEMBER(referrer)
+  IPC_STRUCT_TRAITS_MEMBER(transition)
+  IPC_STRUCT_TRAITS_MEMBER(redirects)
+  IPC_STRUCT_TRAITS_MEMBER(should_update_history)
+  IPC_STRUCT_TRAITS_MEMBER(searchable_form_url)
+  IPC_STRUCT_TRAITS_MEMBER(searchable_form_encoding)
+  IPC_STRUCT_TRAITS_MEMBER(password_form)
+  IPC_STRUCT_TRAITS_MEMBER(contents_mime_type)
+  IPC_STRUCT_TRAITS_MEMBER(socket_address)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::Referrer)
+  IPC_STRUCT_TRAITS_MEMBER(url)
+  IPC_STRUCT_TRAITS_MEMBER(policy)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
+  IPC_STRUCT_TRAITS_MEMBER(can_accept_load_drops)
+  IPC_STRUCT_TRAITS_MEMBER(should_antialias_text)
+  IPC_STRUCT_TRAITS_MEMBER(hinting)
+  IPC_STRUCT_TRAITS_MEMBER(subpixel_rendering)
+  IPC_STRUCT_TRAITS_MEMBER(focus_ring_color)
+  IPC_STRUCT_TRAITS_MEMBER(thumb_active_color)
+  IPC_STRUCT_TRAITS_MEMBER(thumb_inactive_color)
+  IPC_STRUCT_TRAITS_MEMBER(track_color)
+  IPC_STRUCT_TRAITS_MEMBER(active_selection_bg_color)
+  IPC_STRUCT_TRAITS_MEMBER(active_selection_fg_color)
+  IPC_STRUCT_TRAITS_MEMBER(inactive_selection_bg_color)
+  IPC_STRUCT_TRAITS_MEMBER(inactive_selection_fg_color)
+  IPC_STRUCT_TRAITS_MEMBER(browser_handles_top_level_requests)
+  IPC_STRUCT_TRAITS_MEMBER(caret_blink_interval)
+  IPC_STRUCT_TRAITS_MEMBER(enable_referrers)
+  IPC_STRUCT_TRAITS_MEMBER(default_zoom_level)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(webkit_glue::CustomContextMenuContext)
@@ -339,13 +370,9 @@ IPC_STRUCT_BEGIN(ViewHostMsg_CreateWindow_Params)
   IPC_STRUCT_MEMBER(GURL, target_url)
 IPC_STRUCT_END()
 
-
 IPC_STRUCT_BEGIN(ViewHostMsg_CreateWorker_Params)
   // URL for the worker script.
   IPC_STRUCT_MEMBER(GURL, url)
-
-  // True if this is a SharedWorker, false if it is a dedicated Worker.
-  IPC_STRUCT_MEMBER(bool, is_shared)
 
   // Name for a SharedWorker, otherwise empty string.
   IPC_STRUCT_MEMBER(string16, name)
@@ -360,84 +387,9 @@ IPC_STRUCT_BEGIN(ViewHostMsg_CreateWorker_Params)
   // a new unique ID is created and assigned to the worker.
   IPC_STRUCT_MEMBER(int, route_id)
 
-  // The ID of the parent's appcache host, only valid for dedicated workers.
-  IPC_STRUCT_MEMBER(int, parent_appcache_host_id)
-
   // The ID of the appcache the main shared worker script resource was loaded
   // from, only valid for shared workers.
   IPC_STRUCT_MEMBER(int64, script_resource_appcache_id)
-IPC_STRUCT_END()
-
-// Parameters structure for ViewHostMsg_FrameNavigate, which has too many data
-// parameters to be reasonably put in a predefined IPC message.
-IPC_STRUCT_BEGIN(ViewHostMsg_FrameNavigate_Params)
-  // Page ID of this navigation. The renderer creates a new unique page ID
-  // anytime a new session history entry is created. This means you'll get new
-  // page IDs for user actions, and the old page IDs will be reloaded when
-  // iframes are loaded automatically.
-  IPC_STRUCT_MEMBER(int32, page_id)
-
-  // The frame ID for this navigation. The frame ID uniquely identifies the
-  // frame the navigation happened in for a given renderer.
-  IPC_STRUCT_MEMBER(int64, frame_id)
-
-  // URL of the page being loaded.
-  IPC_STRUCT_MEMBER(GURL, url)
-
-  // URL of the referrer of this load. WebKit generates this based on the
-  // source of the event that caused the load.
-  IPC_STRUCT_MEMBER(GURL, referrer)
-
-  // The type of transition.
-  IPC_STRUCT_MEMBER(content::PageTransition, transition)
-
-  // Lists the redirects that occurred on the way to the current page. This
-  // vector has the same format as reported by the WebDataSource in the glue,
-  // with the current page being the last one in the list (so even when
-  // there's no redirect, there will be one entry in the list.
-  IPC_STRUCT_MEMBER(std::vector<GURL>, redirects)
-
-  // Set to false if we want to update the session history but not update
-  // the browser history.  E.g., on unreachable urls.
-  IPC_STRUCT_MEMBER(bool, should_update_history)
-
-  // See SearchableFormData for a description of these.
-  IPC_STRUCT_MEMBER(GURL, searchable_form_url)
-  IPC_STRUCT_MEMBER(std::string, searchable_form_encoding)
-
-  // See password_form.h.
-  IPC_STRUCT_MEMBER(webkit_glue::PasswordForm, password_form)
-
-  // Information regarding the security of the connection (empty if the
-  // connection was not secure).
-  IPC_STRUCT_MEMBER(std::string, security_info)
-
-  // The gesture that initiated this navigation.
-  IPC_STRUCT_MEMBER(NavigationGesture, gesture)
-
-  // Contents MIME type of main frame.
-  IPC_STRUCT_MEMBER(std::string, contents_mime_type)
-
-  // True if this was a post request.
-  IPC_STRUCT_MEMBER(bool, is_post)
-
-  // Whether the frame navigation resulted in no change to the documents within
-  // the page. For example, the navigation may have just resulted in scrolling
-  // to a named anchor.
-  IPC_STRUCT_MEMBER(bool, was_within_same_page)
-
-  // The status code of the HTTP request.
-  IPC_STRUCT_MEMBER(int, http_status_code)
-
-  // Remote address of the socket which fetched this resource.
-  IPC_STRUCT_MEMBER(net::HostPortPair, socket_address)
-
-  // True if the connection was proxied.  In this case, socket_address
-  // will represent the address of the proxy, rather than the remote host.
-  IPC_STRUCT_MEMBER(bool, was_fetched_via_proxy)
-
-  // Serialized history item state to store in the navigation entry.
-  IPC_STRUCT_MEMBER(std::string, content_state)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewHostMsg_AccessibilityNotification_Params)
@@ -455,20 +407,39 @@ IPC_STRUCT_BEGIN(ViewHostMsg_AccessibilityNotification_Params)
   IPC_STRUCT_MEMBER(bool, includes_children)
 IPC_STRUCT_END()
 
+// Parameters structure for ViewHostMsg_FrameNavigate, which has too many data
+// parameters to be reasonably put in a predefined IPC message.
+IPC_STRUCT_BEGIN_WITH_PARENT(ViewHostMsg_FrameNavigate_Params,
+                             content::FrameNavigateParams)
+  IPC_STRUCT_TRAITS_PARENT(content::FrameNavigateParams)
+  // The frame ID for this navigation. The frame ID uniquely identifies the
+  // frame the navigation happened in for a given renderer.
+  IPC_STRUCT_MEMBER(int64, frame_id)
 
-IPC_STRUCT_BEGIN(ViewHostMsg_RunFileChooser_Params)
-  IPC_STRUCT_MEMBER(ViewHostMsg_RunFileChooser_Mode::Value, mode)
+  // Information regarding the security of the connection (empty if the
+  // connection was not secure).
+  IPC_STRUCT_MEMBER(std::string, security_info)
 
-  // Title to be used for the dialog. This may be empty for the default title,
-  // which will be either "Open" or "Save" depending on the mode.
-  IPC_STRUCT_MEMBER(string16, title)
+  // The gesture that initiated this navigation.
+  IPC_STRUCT_MEMBER(NavigationGesture, gesture)
 
-  // Default file name to select in the dialog.
-  IPC_STRUCT_MEMBER(FilePath, default_file_name)
+  // True if this was a post request.
+  IPC_STRUCT_MEMBER(bool, is_post)
 
-  // A comma-separated MIME types such as "audio/*,text/plain", that is used
-  // to restrict selectable files to such types.
-  IPC_STRUCT_MEMBER(string16, accept_types)
+  // Whether the frame navigation resulted in no change to the documents within
+  // the page. For example, the navigation may have just resulted in scrolling
+  // to a named anchor.
+  IPC_STRUCT_MEMBER(bool, was_within_same_page)
+
+  // The status code of the HTTP request.
+  IPC_STRUCT_MEMBER(int, http_status_code)
+
+  // True if the connection was proxied.  In this case, socket_address
+  // will represent the address of the proxy, rather than the remote host.
+  IPC_STRUCT_MEMBER(bool, was_fetched_via_proxy)
+
+  // Serialized history item state to store in the navigation entry.
+  IPC_STRUCT_MEMBER(std::string, content_state)
 IPC_STRUCT_END()
 
 // This message is used for supporting popup menus on Mac OS X using native
@@ -612,8 +583,7 @@ IPC_STRUCT_BEGIN(ViewMsg_Navigate_Params)
 
   // The URL to send in the "Referer" header field. Can be empty if there is
   // no referrer.
-  // TODO: consider folding this into extra_headers.
-  IPC_STRUCT_MEMBER(GURL, referrer)
+  IPC_STRUCT_MEMBER(content::Referrer, referrer)
 
   // The type of transition.
   IPC_STRUCT_MEMBER(content::PageTransition, transition)
@@ -629,6 +599,13 @@ IPC_STRUCT_BEGIN(ViewMsg_Navigate_Params)
 
   // Extra headers (separated by \n) to send during the request.
   IPC_STRUCT_MEMBER(std::string, extra_headers)
+
+  // The following two members identify a previous request that has been
+  // created before this navigation is being transferred to a new render view.
+  // This serves the purpose of recycling the old request.
+  // Unless this refers to a transferred navigation, these values are -1 and -1.
+  IPC_STRUCT_MEMBER(int, transferred_request_child_id)
+  IPC_STRUCT_MEMBER(int, transferred_request_request_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewMsg_New_Params)
@@ -636,7 +613,7 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   IPC_STRUCT_MEMBER(gfx::NativeViewId, parent_window)
 
   // Renderer-wide preferences.
-  IPC_STRUCT_MEMBER(RendererPreferences, renderer_preferences)
+  IPC_STRUCT_MEMBER(content::RendererPreferences, renderer_preferences)
 
   // Preferences for this view.
   IPC_STRUCT_MEMBER(WebPreferences, web_preferences)
@@ -685,9 +662,21 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetCSSColors,
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GenerateRoutingID,
                             int /* routing_id */)
 
+// Asks the browser for the default audio hardware buffer-size.
+IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetHardwareBufferSize,
+                            uint32 /* buffer_size */)
+
+// Asks the browser for the default audio input hardware sample-rate.
+IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetHardwareInputSampleRate,
+                            double /* sample_rate */)
+
 // Asks the browser for the default audio hardware sample-rate.
 IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetHardwareSampleRate,
                             double /* sample_rate */)
+
+// Asks the browser for CPU usage of the renderer process in percents.
+IPC_SYNC_MESSAGE_CONTROL0_1(ViewHostMsg_GetCPUUsage,
+                            int /* CPU usage in percents */)
 
 // Tells the renderer to create a new view.
 // This message is slightly different, the view it takes (via
@@ -704,7 +693,7 @@ IPC_MESSAGE_ROUTED1(ViewMsg_CreatingNew_ACK,
 
 // Sends updated preferences to the renderer.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetRendererPrefs,
-                    RendererPreferences)
+                    content::RendererPreferences)
 
 // This passes a set of webkit preferences down to the renderer.
 IPC_MESSAGE_ROUTED1(ViewMsg_UpdateWebPreferences,
@@ -757,10 +746,7 @@ IPC_MESSAGE_ROUTED4(ViewMsg_PaintAtSize,
 // This signals the render view that it can send another UpdateRect message.
 IPC_MESSAGE_ROUTED0(ViewMsg_UpdateRect_ACK)
 
-// Message payload includes:
-// 1. A blob that should be cast to WebInputEvent
-// 2. An optional boolean value indicating if a RawKeyDown event is associated
-//    to a keyboard shortcut of the browser.
+// Message payload includes a blob that should be cast to WebInputEvent
 IPC_MESSAGE_ROUTED0(ViewMsg_HandleInputEvent)
 
 // This message notifies the renderer that the next key event is bound to one
@@ -826,7 +812,7 @@ IPC_MESSAGE_ROUTED3(ViewMsg_Find,
 // This message notifies the renderer that the user has closed the FindInPage
 // window (and what action to take regarding the selection).
 IPC_MESSAGE_ROUTED1(ViewMsg_StopFinding,
-                    ViewMsg_StopFinding_Params /* action */)
+                    content::StopFindAction /* action */)
 
 // Used to notify the render-view that the browser has received a reply for
 // the Find operation and is interested in receiving the next one. This is
@@ -913,13 +899,19 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SelectPopupMenuItem,
 // changes, a ViewHostMsg_DidZoomURL message will be sent back to the browser
 // telling it what url got zoomed and what its current zoom level is.
 IPC_MESSAGE_ROUTED1(ViewMsg_Zoom,
-                    PageZoom::Function /* function */)
+                    content::PageZoom /* function */)
 
 // Set the zoom level for the current main frame.  If the level actually
 // changes, a ViewHostMsg_DidZoomURL message will be sent back to the browser
 // telling it what url got zoomed and what its current zoom level is.
 IPC_MESSAGE_ROUTED1(ViewMsg_SetZoomLevel,
                     double /* zoom_level */)
+
+// Zooms the page by the factor defined in the renderer.
+IPC_MESSAGE_ROUTED3(ViewMsg_ZoomFactor,
+                    content::PageZoom,
+                    int /* zoom center_x */,
+                    int /* zoom center_y */)
 
 // Set the zoom level for a particular url that the renderer is in the
 // process of loading.  This will be stored, to be used if the load commits
@@ -1045,8 +1037,13 @@ IPC_MESSAGE_ROUTED0(ViewMsg_MoveOrResizeStarted)
 IPC_MESSAGE_ROUTED0(ViewMsg_Move_ACK)
 
 // Used to instruct the RenderView to send back updates to the preferred size.
-IPC_MESSAGE_ROUTED1(ViewMsg_EnablePreferredSizeChangedMode,
-                    int /*flags*/)
+IPC_MESSAGE_ROUTED0(ViewMsg_EnablePreferredSizeChangedMode)
+
+// Used to instruct the RenderView to automatically resize and send back
+// updates for the new size.
+IPC_MESSAGE_ROUTED2(ViewMsg_EnableAutoResize,
+                    gfx::Size /* min_size */,
+                    gfx::Size /* max_size */)
 
 // Changes the text direction of the currently selected input field (if any).
 IPC_MESSAGE_ROUTED1(ViewMsg_SetTextDirection,
@@ -1118,6 +1115,20 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetAccessibilityFocus,
 IPC_MESSAGE_ROUTED1(ViewMsg_AccessibilityDoDefaultAction,
                     int /* object id */)
 
+// Relay a request from assistive technology to change the scroll position
+// of a scrollable container (like the whole page, an iframe, etc.).
+IPC_MESSAGE_ROUTED3(ViewMsg_AccessibilityChangeScrollPosition,
+                    int /* object id */,
+                    int /* New x scroll position */,
+                    int /* New y scroll position */)
+
+// Relay a request from assistive technology to set the cursor or
+// selection within an editable text element.
+IPC_MESSAGE_ROUTED3(ViewMsg_AccessibilitySetTextSelection,
+                    int /* object id */,
+                    int /* New start offset */,
+                    int /* New end offset */)
+
 // Tells the render view that a ViewHostMsg_AccessibilityNotifications
 // message was processed and it can send addition notifications.
 IPC_MESSAGE_ROUTED0(ViewMsg_AccessibilityNotifications_ACK)
@@ -1149,6 +1160,11 @@ IPC_MESSAGE_ROUTED2(ViewMsg_SavePageAsMHTML,
 
 // Exit fullscreen.
 IPC_MESSAGE_ROUTED0(ViewMsg_ExitFullscreen)
+
+// Temporary message to diagnose an unexpected condition in TabContents.
+IPC_MESSAGE_CONTROL1(ViewMsg_TempCrashWithData,
+                     GURL /* data */)
+
 
 // Messages sent from the renderer to the browser.
 
@@ -1185,13 +1201,6 @@ IPC_MESSAGE_ROUTED3(ViewMsg_GetSerializedHtmlDataForCurrentPageWithLocalLinks,
                     std::vector<GURL> /* urls that have local copy */,
                     std::vector<FilePath> /* paths of local copy */,
                     FilePath /* local directory path */)
-
-// Sends updated information about the client firewall traversal policy.
-// |traversal_data| is a json string containing policy information.
-// Sent due to a policy change or in response to a
-// ViewHostMsg_RequestRemoteAccessClientFirewallTraversal message.
-IPC_MESSAGE_ROUTED1(ViewMsg_UpdateRemoteAccessClientFirewallTraversal,
-                    std::string /* traversal_data */)
 
 // Tells the render side that a ViewHostMsg_LockMouse message has been
 // processed. |succeeded| indicates whether the mouse has been successfully
@@ -1302,6 +1311,13 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_SwapOut_ACK,
 // message.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_ClosePage_ACK)
 
+// Notifies the browser that media has started/stopped playing.
+IPC_MESSAGE_ROUTED4(ViewHostMsg_MediaNotification,
+                    int64 /* player_cookie, distinguishes instances */,
+                    bool /* has_video */,
+                    bool /* has_audio */,
+                    bool /* is_playing */)
+
 // Notifies the browser that we have session history information.
 // page_id: unique ID that allows us to distinguish between history entries.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateState,
@@ -1313,8 +1329,10 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_DocumentLoadedInFrame,
                     int64 /* frame_id */)
 
 // Notifies the browser that a frame finished loading.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_DidFinishLoad,
-                    int64 /* frame_id */)
+IPC_MESSAGE_ROUTED3(ViewHostMsg_DidFinishLoad,
+                    int64 /* frame_id */,
+                    GURL /* validated_url */,
+                    bool /* is_main_frame */)
 
 // Changes the title for the page in the UI when the page is navigated or the
 // title changes.
@@ -1387,10 +1405,16 @@ IPC_MESSAGE_ROUTED4(ViewHostMsg_DidStartProvisionalLoadForFrame,
                     GURL /* opener url if present, else empty */,
                     GURL /* url */)
 
+IPC_MESSAGE_ROUTED5(ViewHostMsg_DidFailLoadWithError,
+                    int64 /* frame_id */,
+                    GURL /* validated_url */,
+                    bool /* is_main_frame */,
+                    int /* error_code */,
+                    string16 /* error_description */)
+
 // Sent when the renderer fails a provisional load with an error.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidFailProvisionalLoadWithError,
                     ViewHostMsg_DidFailProvisionalLoadWithError_Params)
-
 
 // Tells the render view that a ViewHostMsg_PaintAtSize message was
 // processed, and the DIB is ready for use. |tag| has the same value that
@@ -1538,13 +1562,6 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_DocumentDetached,
 IPC_MESSAGE_CONTROL1(ViewHostMsg_ForwardToWorker,
                      IPC::Message /* message */)
 
-// Sent if the worker object has sent a ViewHostMsg_CreateDedicatedWorker
-// message and not received a ViewMsg_WorkerCreated reply, but in the
-// mean time it's destroyed.  This tells the browser to not create the queued
-// worker.
-IPC_MESSAGE_CONTROL1(ViewHostMsg_CancelCreateDedicatedWorker,
-                     int /* route_id */)
-
 // Tells the browser that a specific Appcache manifest in the current page
 // was accessed.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_AppCacheAccessed,
@@ -1573,7 +1590,7 @@ IPC_SYNC_MESSAGE_ROUTED4_2(ViewHostMsg_RunJavaScriptMessage,
 // Requests that the given URL be opened in the specified manner.
 IPC_MESSAGE_ROUTED4(ViewHostMsg_OpenURL,
                     GURL /* url */,
-                    GURL /* referrer */,
+                    content::Referrer /* referrer */,
                     WindowOpenDisposition /* disposition */,
                     int64 /* frame id */)
 
@@ -1672,7 +1689,7 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_SelectionBoundsChanged,
 // Asks the browser to display the file chooser.  The result is returned in a
 // ViewHost_RunFileChooserResponse message.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_RunFileChooser,
-                    ViewHostMsg_RunFileChooser_Params)
+                    content::FileChooserParams)
 
 // Asks the browser to enumerate a directory.  This is equivalent to running
 // the file chooser in directory-enumeration mode and having the user select
@@ -1899,13 +1916,6 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_RegisterProtocolHandler,
                     GURL /* url */,
                     string16 /* title */)
 
-// Register a new handler for Intents with the given action and type filter.
-IPC_MESSAGE_ROUTED4(ViewHostMsg_RegisterIntentHandler,
-                    string16 /* action */,
-                    string16 /* type */,
-                    string16 /* href */,
-                    string16 /* title */)
-
 // Stores new inspector setting in the profile.
 // TODO(jam): this should be in the chrome module
 IPC_MESSAGE_ROUTED2(ViewHostMsg_UpdateInspectorSetting,
@@ -1935,11 +1945,6 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_SendSerializedHtmlData,
                     GURL /* frame's url */,
                     std::string /* data buffer */,
                     int32 /* complete status */)
-
-// Request updated information about the client firewall traversal policy.
-// Will result in a ViewMsg_UpdateRemoteAccessClientFirewallTraversal message
-// being sent back.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_RequestRemoteAccessClientFirewallTraversal)
 
 // Notifies the browser of an event occurring in the media pipeline.
 IPC_MESSAGE_CONTROL1(ViewHostMsg_MediaLogEvent,

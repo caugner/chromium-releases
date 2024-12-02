@@ -13,8 +13,6 @@
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/portability.h"
 #include "native_client/src/shared/platform/nacl_check.h"
-#include "native_client/src/untrusted/ppapi/nacl_file.h"
-#include "native_client/tests/ppapi_geturl/nacl_file_main.h"
 #include "native_client/tests/ppapi_geturl/url_load_request.h"
 
 #include "ppapi/c/pp_completion_callback.h"
@@ -22,11 +20,6 @@
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/ppp_messaging.h"
-
-#if !defined(__native_client__)
-int32_t LoadUrl(PP_Instance /*instance*/, const char* /*url*/,
-                PP_CompletionCallback /*callback*/) { return PP_OK; }
-#endif
 
 namespace {
 
@@ -49,50 +42,13 @@ PPP_Instance instance_interface;
 PPP_Messaging messaging_interface;
 Module* singleton_ = NULL;
 
-void RunTests(void* user_data) {
-  int* count = reinterpret_cast<int*>(user_data);
-  *count -= 1;
-  if (*count == 0)
-    test_nacl_file();
-}
 }  // namespace
 
-void HTMLLoaded(void* user_data, int32_t result) {
-  CHECK(PP_OK == result);
-  printf("--- HTMLLoaded() SUCCESS: completion callback got PP_OK\n");
-  RunTests(user_data);
-}
-
-void RobotLoaded(void* user_data, int32_t result) {
-  CHECK(PP_ERROR_NOACCESS == result);
-  printf("--- RobotLoaded() SUCCESS: unable to LoadUrl on cross-domain\n");
-  RunTests(user_data);
-}
-
-void NonExistLoaded(void* user_data, int32_t result) {
-  CHECK(PP_ERROR_FAILED == result);
-  printf("--- NonExistLoaded() SUCCESS: callback got PP_ERROR_FAILED\n");
-  RunTests(user_data);
-}
-
-PP_Bool Instance_DidCreate(PP_Instance pp_instance,
+PP_Bool Instance_DidCreate(PP_Instance /*pp_instance*/,
                            uint32_t /*argc*/,
                            const char* /*argn*/[],
                            const char* /*argv*/[]) {
   printf("--- Instance_DidCreate\n");
-  int* url_count = new int(3);
-  PP_CompletionCallback html_cb =
-      PP_MakeCompletionCallback(HTMLLoaded, url_count);
-  int32_t result = LoadUrl(pp_instance, "ppapi_geturl_success.html", html_cb);
-
-  PP_CompletionCallback robot_cb =
-      PP_MakeCompletionCallback(RobotLoaded, url_count);
-  result = LoadUrl(pp_instance, "http://www.google.com/robots.txt", robot_cb);
-
-  PP_CompletionCallback non_exist_cb =
-      PP_MakeCompletionCallback(NonExistLoaded, url_count);
-  result = LoadUrl(pp_instance, "ppapi_nonexistent_url.html", non_exist_cb);
-
   return PP_TRUE;
 }
 

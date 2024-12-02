@@ -17,13 +17,14 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/event_utils.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -35,11 +36,11 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/skbitmap_operations.h"
-#include "views/controls/button/button_dropdown.h"
-#include "views/controls/menu/menu_listener.h"
-#include "views/focus/view_storage.h"
-#include "views/widget/tooltip_manager.h"
-#include "views/window/non_client_view.h"
+#include "ui/views/controls/button/button_dropdown.h"
+#include "ui/views/controls/menu/menu_listener.h"
+#include "ui/views/focus/view_storage.h"
+#include "ui/views/widget/tooltip_manager.h"
+#include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
@@ -50,7 +51,7 @@
 #endif
 
 // static
-char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
+const char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
 // The space between items is 4 px in general.
 const int ToolbarView::kStandardSpacing = 4;
 // The top of the toolbar has an edge we have to skip over in addition to the 4
@@ -78,11 +79,6 @@ static const int kPopupBottomSpacingGlass = 1;
 // Top margin for the wrench menu badges (badge is placed in the upper right
 // corner of the wrench menu).
 static const int kBadgeTopMargin = 2;
-
-#if defined(TOUCH_UI)
-// Extra vertical padding above the location bar.
-static const int kExtraVerticalPadding = 3;
-#endif
 
 static SkBitmap* kPopupBackgroundEdge = NULL;
 
@@ -115,16 +111,16 @@ ToolbarView::ToolbarView(Browser* browser)
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
-                 NotificationService::AllSources());
-#if defined(OS_WIN) && !defined(USE_AURA)
+                 content::NotificationService::AllSources());
+#if defined(OS_WIN)
   registrar_.Add(this, chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 #endif
   registrar_.Add(this,
                  chrome::NOTIFICATION_MODULE_INCOMPATIBILITY_BADGE_CHANGE,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
-                 Source<Profile>(browser_->profile()));
+                 content::Source<Profile>(browser_->profile()));
 }
 
 ToolbarView::~ToolbarView() {
@@ -194,7 +190,7 @@ void ToolbarView::Init() {
 
   // Add any necessary badges to the menu item based on the system state.
   if (IsUpgradeRecommended() || ShouldShowIncompatibilityWarning()) {
-    UpdateAppMenuBadge();
+    UpdateAppMenuState();
   }
   LoadImages();
 
@@ -229,12 +225,12 @@ void ToolbarView::Update(TabContents* tab, bool should_restore_state) {
     browser_actions_->RefreshBrowserActionViews();
 }
 
-void ToolbarView::SetPaneFocusAndFocusLocationBar(int view_storage_id) {
-  SetPaneFocus(view_storage_id, location_bar_);
+void ToolbarView::SetPaneFocusAndFocusLocationBar() {
+  SetPaneFocus(location_bar_);
 }
 
-void ToolbarView::SetPaneFocusAndFocusAppMenu(int view_storage_id) {
-  SetPaneFocus(view_storage_id, app_menu_);
+void ToolbarView::SetPaneFocusAndFocusAppMenu() {
+  SetPaneFocus(app_menu_);
 }
 
 bool ToolbarView::IsAppMenuFocused() {
@@ -313,9 +309,8 @@ SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, AccessiblePaneView overrides:
 
-bool ToolbarView::SetPaneFocus(
-    int view_storage_id, views::View* initial_focus) {
-  if (!AccessiblePaneView::SetPaneFocus(view_storage_id, initial_focus))
+bool ToolbarView::SetPaneFocus(views::View* initial_focus) {
+  if (!AccessiblePaneView::SetPaneFocus(initial_focus))
     return false;
 
   location_bar_->SetShowFocusRect(true);
@@ -407,14 +402,14 @@ void ToolbarView::ButtonPressed(views::Button* sender,
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// ToolbarView, NotificationObserver implementation:
+// ToolbarView, content::NotificationObserver implementation:
 
 void ToolbarView::Observe(int type,
-                          const NotificationSource& source,
-                          const NotificationDetails& details) {
+                          const content::NotificationSource& source,
+                          const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_PREF_CHANGED: {
-      std::string* pref_name = Details<std::string>(details).ptr();
+      std::string* pref_name = content::Details<std::string>(details).ptr();
       if (*pref_name == prefs::kShowHomeButton) {
         Layout();
         SchedulePaint();
@@ -424,9 +419,9 @@ void ToolbarView::Observe(int type,
     case chrome::NOTIFICATION_UPGRADE_RECOMMENDED:
     case chrome::NOTIFICATION_MODULE_INCOMPATIBILITY_BADGE_CHANGE:
     case chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED:
-      UpdateAppMenuBadge();
+      UpdateAppMenuState();
       break;
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN)
     case chrome::NOTIFICATION_CRITICAL_UPGRADE_INSTALLED:
       ShowCriticalNotification();
       break;
@@ -446,13 +441,13 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
   // TODO(cpu) Bug 1109102. Query WebKit land for the actual bindings.
   switch (command_id) {
     case IDC_CUT:
-      *accelerator = views::Accelerator(ui::VKEY_X, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_X, false, true, false);
       return true;
     case IDC_COPY:
-      *accelerator = views::Accelerator(ui::VKEY_C, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_C, false, true, false);
       return true;
     case IDC_PASTE:
-      *accelerator = views::Accelerator(ui::VKEY_V, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_V, false, true, false);
       return true;
   }
   // Else, we retrieve the accelerator information from the frame.
@@ -474,7 +469,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
         browser_actions_->GetPreferredSize().width() +
         app_menu_->GetPreferredSize().width() + kEdgeSpacing;
 
-    static SkBitmap normal_background;
+    CR_DEFINE_STATIC_LOCAL(SkBitmap, normal_background, ());
     if (normal_background.isNull()) {
       ResourceBundle& rb = ResourceBundle::GetSharedInstance();
       normal_background = *rb.GetBitmapNamed(IDR_CONTENT_TOP_CENTER);
@@ -542,15 +537,8 @@ void ToolbarView::Layout() {
   int location_x = home_->x() + home_->width() + kStandardSpacing;
   int available_width = width() - kEdgeSpacing - app_menu_width -
       browser_actions_width - location_x;
-
-#if defined(TOUCH_UI)
-  // Center the location bar vertically.
-  int location_y = std::min(child_y + kExtraVerticalPadding, height());
-  int location_bar_height = std::max(height() - 2 * location_y, 0);
-#else
   int location_y = child_y;
   int location_bar_height = child_height;
-#endif
 
   location_bar_->SetBounds(location_x, location_y, std::max(available_width, 0),
                            location_bar_height);
@@ -594,7 +582,7 @@ void ToolbarView::OnPaint(gfx::Canvas* canvas) {
   // toolbar background below the location bar for us.
   // NOTE: Keep this in sync with BrowserView::GetInfoBarSeparatorColor()!
   if (GetWidget()->ShouldUseNativeFrame())
-    canvas->FillRectInt(SK_ColorBLACK, 0, height() - 1, width(), 1);
+    canvas->FillRect(SK_ColorBLACK, gfx::Rect(0, height() - 1, width(), 1));
 }
 
 // Note this method is ignored on Windows, but needs to be implemented for
@@ -631,6 +619,13 @@ void ToolbarView::OnThemeChanged() {
 
 std::string ToolbarView::GetClassName() const {
   return kViewClassName;
+}
+
+bool ToolbarView::AcceleratorPressed(const ui::Accelerator& accelerator) {
+  const views::View* focused_view = focus_manager_->GetFocusedView();
+  if (focused_view == location_bar_)
+    return false;  // Let location bar handle all accelerator events.
+  return AccessiblePaneView::AcceleratorPressed(accelerator);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -722,23 +717,22 @@ void ToolbarView::LoadImages() {
 }
 
 void ToolbarView::ShowCriticalNotification() {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  gfx::Point screen_loc;
-  views::View::ConvertPointToScreen(app_menu_, &screen_loc);
-
-  CriticalNotificationBubbleView* critical_notification_bubble =
-      new CriticalNotificationBubbleView();
-  Bubble* bubble = Bubble::Show(GetWidget(),
-                                gfx::Rect(screen_loc, app_menu_->size()),
-                                views::BubbleBorder::TOP_RIGHT,
-                                critical_notification_bubble,
-                                critical_notification_bubble);
-  bubble->set_close_on_deactivate(false);
-  critical_notification_bubble->set_bubble(bubble);
+#if defined(OS_WIN)
+  CriticalNotificationBubbleView* bubble_delegate =
+      new CriticalNotificationBubbleView(app_menu_);
+  browser::CreateViewsBubble(bubble_delegate);
+  bubble_delegate->StartFade(true);
 #endif
 }
 
-void ToolbarView::UpdateAppMenuBadge() {
+void ToolbarView::UpdateAppMenuState() {
+  string16 accname_app = l10n_util::GetStringUTF16(IDS_ACCNAME_APP);
+  if (IsUpgradeRecommended()) {
+    accname_app = l10n_util::GetStringFUTF16(
+        IDS_ACCNAME_APP_UPGRADE_RECOMMENDED, accname_app);
+  }
+  app_menu_->SetAccessibleName(accname_app);
+
   app_menu_->SetIcon(GetAppMenuIcon(views::CustomButton::BS_NORMAL));
   app_menu_->SetHoverIcon(GetAppMenuIcon(views::CustomButton::BS_HOT));
   app_menu_->SetPushedIcon(GetAppMenuIcon(views::CustomButton::BS_PUSHED));

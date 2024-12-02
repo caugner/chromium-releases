@@ -124,20 +124,27 @@ message ClientDownloadRequest {
   // triggered the download) as well as for the download URL itself.
   repeated Resource resources = 4;
 
+  // A trust chain of certificates.  Each chain begins with the signing
+  // certificate of the binary, and ends with a self-signed certificate,
+  // typically from a trusted root CA.  This structure is analogous to
+  // CERT_CHAIN_CONTEXT on Windows.
+  message CertificateChain {
+    // A single link in the chain.
+    message Element {
+      // DER-encoded X.509 representation of the certificate.
+      optional bytes certificate = 1;
+    }
+    repeated Element element = 1;
+  }
+
   message SignatureInfo {
-    // If the binary is signed this will contain the name of the certificate
-    // authority that signed the binary.  The format of that field is TBD.
-    optional bytes certificate_issuer = 1;
+    // All of the certificate chains for the binary's signing certificate.
+    // If no chains are present, the binary is not signed.  Multiple chains
+    // may be present if any certificate has multiple signers.
+    repeated CertificateChain certificate_chain = 1;
 
-    // Serial number of the certificate autority.  This value uniquely
-    // identifies the certificate authority.
-    optional bytes certificate_serial_number = 2;
-
-    // Name of the company / organization the ceritificate was issued to.
-    optional bytes certificate_subject = 3;
-
-    // The full DER-encoded X.509 certificate extracted from the binary.
-    optional bytes certificate_contents = 4;
+    // True if the signature was trusted on the client.
+    optional bool trusted = 2;
   }
 
   // This field will only be set if the binary is signed.
@@ -145,4 +152,15 @@ message ClientDownloadRequest {
 
   // True if the download was user initiated.
   optional bool user_initiated = 6;
+}
+
+message ClientDownloadResponse {
+  enum Verdict {
+    // Download is considered safe.
+    SAFE = 0;
+    // Download is considered dangerous.  Chrome should show a warning to the
+    // user.
+    DANGEROUS = 1;
+  }
+  required Verdict verdict = 1;
 }

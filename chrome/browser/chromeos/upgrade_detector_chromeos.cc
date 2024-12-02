@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 
 #include "base/memory/singleton.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 
 namespace {
 
@@ -15,19 +15,30 @@ const int kNotifyCycleTimeMs = 20 * 60 * 1000;  // 20 minutes.
 
 }  // namespace
 
-UpgradeDetectorChromeos::UpgradeDetectorChromeos() {
-  if (chromeos::CrosLibrary::Get())
-    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->AddObserver(this);
+using chromeos::DBusThreadManager;
+using chromeos::UpdateEngineClient;
+
+UpgradeDetectorChromeos::UpgradeDetectorChromeos() : initialized_(false) {
 }
 
 UpgradeDetectorChromeos::~UpgradeDetectorChromeos() {
-  if (chromeos::CrosLibrary::Get())
-    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->RemoveObserver(this);
+}
+
+void UpgradeDetectorChromeos::Init() {
+  DBusThreadManager::Get()->GetUpdateEngineClient()->AddObserver(this);
+  initialized_ = true;
+}
+
+void UpgradeDetectorChromeos::Shutdown() {
+  // Init() may not be called from tests.
+  if (!initialized_)
+    return;
+  DBusThreadManager::Get()->GetUpdateEngineClient()->RemoveObserver(this);
 }
 
 void UpgradeDetectorChromeos::UpdateStatusChanged(
-    chromeos::UpdateLibrary* library) {
-  if (library->status().status != chromeos::UPDATE_STATUS_UPDATED_NEED_REBOOT)
+    const UpdateEngineClient::Status& status) {
+  if (status.status != UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT)
     return;
 
   NotifyUpgradeDetected();

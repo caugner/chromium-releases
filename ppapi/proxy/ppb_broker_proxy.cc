@@ -10,46 +10,25 @@
 #include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/shared_impl/platform_file.h"
 #include "ppapi/thunk/ppb_broker_api.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
 
+using ppapi::IntToPlatformFile;
+using ppapi::PlatformFileToInt;
 using ppapi::thunk::PPB_Broker_API;
 
 namespace ppapi {
 namespace proxy {
-
-namespace {
-
-base::PlatformFile IntToPlatformFile(int32_t handle) {
-#if defined(OS_WIN)
-  return reinterpret_cast<HANDLE>(static_cast<intptr_t>(handle));
-#elif defined(OS_POSIX)
-  return handle;
-#else
-  #error Not implemented.
-#endif
-}
-
-int32_t PlatformFileToInt(base::PlatformFile handle) {
-#if defined(OS_WIN)
-  return static_cast<int32_t>(reinterpret_cast<intptr_t>(handle));
-#elif defined(OS_POSIX)
-  return handle;
-#else
-  #error Not implemented.
-#endif
-}
-
-}  // namespace
 
 class Broker : public PPB_Broker_API, public Resource {
  public:
   explicit Broker(const HostResource& resource);
   virtual ~Broker();
 
-  // Resource overries.
+  // Resource overrides.
   virtual PPB_Broker_API* AsPPB_Broker_API() OVERRIDE;
 
   // PPB_Broker_API implementation.
@@ -112,7 +91,7 @@ int32_t Broker::Connect(PP_CompletionCallback connect_callback) {
 
   bool success = PluginDispatcher::GetForResource(this)->Send(
       new PpapiHostMsg_PPBBroker_Connect(
-          INTERFACE_ID_PPB_BROKER, host_resource()));
+          API_ID_PPB_BROKER, host_resource()));
   return success ?  PP_OK_COMPLETIONPENDING : PP_ERROR_FAILED;
 }
 
@@ -160,7 +139,7 @@ PP_Resource PPB_Broker_Proxy::CreateProxyResource(PP_Instance instance) {
 
   HostResource result;
   dispatcher->Send(new PpapiHostMsg_PPBBroker_Create(
-      INTERFACE_ID_PPB_BROKER, instance, &result));
+      API_ID_PPB_BROKER, instance, &result));
   if (result.is_null())
     return 0;
   return (new Broker(result))->GetReference();
@@ -248,7 +227,7 @@ void PPB_Broker_Proxy::ConnectCompleteInHost(int32_t result,
          foreign_socket_handle == IPC::InvalidPlatformFileForTransit());
 
   bool success = dispatcher()->Send(new PpapiMsg_PPBBroker_ConnectComplete(
-      INTERFACE_ID_PPB_BROKER, broker, foreign_socket_handle, result));
+      API_ID_PPB_BROKER, broker, foreign_socket_handle, result));
 
   if (!success || result != PP_OK) {
       // The plugin did not receive the handle, so it must be closed.

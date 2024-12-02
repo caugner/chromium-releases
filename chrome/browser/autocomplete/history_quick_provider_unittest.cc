@@ -22,11 +22,13 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
 using base::TimeDelta;
+
+using content::BrowserThread;
 
 struct TestURLInfo {
   std::string url;
@@ -112,8 +114,8 @@ class HistoryQuickProviderTest : public testing::Test,
                std::string expected_top_result);
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   scoped_ptr<TestingProfile> profile_;
   HistoryService* history_service_;
@@ -142,6 +144,12 @@ void HistoryQuickProviderTest::OnProviderUpdate(bool updated_matches) {
 void HistoryQuickProviderTest::FillData() {
   history::URLDatabase* db = history_service_->InMemoryDatabase();
   ASSERT_TRUE(db != NULL);
+
+  history::InMemoryURLIndex* index =
+      new history::InMemoryURLIndex(FilePath());
+  PrefService* prefs = profile_->GetPrefs();
+  std::string languages(prefs->GetString(prefs::kAcceptLanguages));
+  index->Init(db, languages);
   for (size_t i = 0; i < arraysize(quick_test_db); ++i) {
     const TestURLInfo& cur = quick_test_db[i];
     const GURL current_url(cur.url);
@@ -153,20 +161,10 @@ void HistoryQuickProviderTest::FillData() {
     url_info.set_typed_count(cur.typed_count);
     url_info.set_last_visit(visit_time);
     url_info.set_hidden(false);
-    EXPECT_TRUE(db->AddURL(url_info));
-
-    history_service_->AddPageWithDetails(current_url, UTF8ToUTF16(cur.title),
-                                         cur.visit_count, cur.typed_count,
-                                         visit_time, false,
-                                         history::SOURCE_BROWSED);
+    index->UpdateURL(i, url_info);
   }
 
-  history::InMemoryURLIndex* index =
-      new history::InMemoryURLIndex(FilePath(FILE_PATH_LITERAL("/dummy")));
-  PrefService* prefs = profile_->GetPrefs();
-  std::string languages(prefs->GetString(prefs::kAcceptLanguages));
-  index->Init(db, languages);
-  provider_->SetIndexForTesting(index);
+  provider_->set_index(index);
 }
 
 HistoryQuickProviderTest::SetShouldContain::SetShouldContain(

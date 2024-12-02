@@ -8,6 +8,7 @@
 
 #include "chrome/browser/ui/browser_window.h"
 #include "content/browser/browsing_instance.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #if defined(OS_MACOSX)
 #include "chrome/browser/extensions/extension_host_mac.h"
 #endif
@@ -18,13 +19,16 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/chrome_view_types.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -43,14 +47,12 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
   virtual void CreateBackgroundHost(const Extension* extension,
                                     const GURL& url);
   virtual SiteInstance* GetSiteInstanceForURL(const GURL& url);
-  virtual RenderProcessHost* GetExtensionProcess(const GURL& url);
-  virtual const Extension* GetExtensionForSiteInstance(int site_instance_id);
 
  private:
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
 
   // Returns the extension for an URL, which can either be a chrome-extension
   // URL or a web app URL.
@@ -96,21 +98,17 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
     : browsing_instance_(new BrowsingInstance(profile)) {
   Profile* original_profile = profile->GetOriginalProfile();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-                 Source<Profile>(original_profile));
+                 content::Source<Profile>(original_profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 Source<Profile>(original_profile));
+                 content::Source<Profile>(original_profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 Source<Profile>(original_profile));
+                 content::Source<Profile>(original_profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-                 Source<Profile>(profile));
-  // We can listen to everything for SITE_INSTANCE_DELETED because we check the
-  // |site_instance_id| in UnregisterExtensionSiteInstance.
-  registrar_.Add(this, content::NOTIFICATION_SITE_INSTANCE_DELETED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::Source<Profile>(profile));
   registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 ExtensionProcessManager::~ExtensionProcessManager() {
@@ -190,7 +188,7 @@ void ExtensionProcessManager::CreateBackgroundHost(
     return;
 
   // Don't create multiple background hosts for an extension.
-  if (GetBackgroundHostForExtension(extension))
+  if (GetBackgroundHostForExtension(extension->id()))
     return;
 
   ExtensionHost* host =
@@ -202,7 +200,7 @@ void ExtensionProcessManager::CreateBackgroundHost(
                         chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
 #endif
 
-  host->CreateRenderViewSoon(NULL);  // create a RenderViewHost with no view
+  host->CreateRenderViewSoon();
   OnExtensionHostCreated(host, true);
 }
 
@@ -226,146 +224,46 @@ void ExtensionProcessManager::OpenOptionsPage(const Extension* extension,
 }
 
 ExtensionHost* ExtensionProcessManager::GetBackgroundHostForExtension(
-    const Extension* extension) {
+    const std::string& extension_id) {
   for (ExtensionHostSet::iterator iter = background_hosts_.begin();
        iter != background_hosts_.end(); ++iter) {
     ExtensionHost* host = *iter;
-    if (host->extension() == extension)
+    if (host->extension_id() == extension_id)
       return host;
   }
   return NULL;
+
 }
 
-void ExtensionProcessManager::RegisterExtensionSiteInstance(
-    SiteInstance* site_instance,
-    const Extension* extension) {
-  if (!site_instance->HasProcess()) {
-    NOTREACHED();
-    return;
-  }
+std::set<RenderViewHost*>
+    ExtensionProcessManager::GetRenderViewHostsForExtension(
+        const std::string& extension_id) {
+  std::set<RenderViewHost*> result;
 
-  int site_instance_id = site_instance->id();
-  int render_process_id = site_instance->GetProcess()->id();
-  process_ids_[render_process_id].insert(site_instance_id);
-
-  // Register process hosting extensions that have access to extension bindings
-  // with the ExtensionInfoMap on the IO thread.
-  Profile* profile =
-      Profile::FromBrowserContext(browsing_instance_->browser_context());
-  ExtensionService* service = profile->GetExtensionService();
-  if (service->ExtensionBindingsAllowed(extension->url())) {
-    Profile* profile = Profile::FromBrowserContext(
-        site_instance->GetProcess()->browser_context());
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&ExtensionInfoMap::BindingsEnabledForProcess,
-                   profile->GetExtensionInfoMap(),
-                   render_process_id));
-  }
-
-  if (extension->is_storage_isolated()) {
-    isolated_storage_process_ids_.insert(render_process_id);
-  }
-
-  SiteInstanceIDMap::const_iterator it = extension_ids_.find(site_instance_id);
-  if (it != extension_ids_.end() && (*it).second == extension->id())
-    return;
-
-  // SiteInstance ids should get removed from the map before the extension ids
-  // get used for a new SiteInstance.
-  DCHECK(it == extension_ids_.end());
-  extension_ids_[site_instance_id] = extension->id();
-}
-
-void ExtensionProcessManager::UnregisterExtensionSiteInstance(
-    SiteInstance* site_instance) {
-  int site_instance_id = site_instance->id();
-  SiteInstanceIDMap::iterator it = extension_ids_.find(site_instance_id);
-  if (it != extension_ids_.end()) {
-    extension_ids_.erase(it++);
-  }
-  if (site_instance->HasProcess()) {
-    int render_process_id = site_instance->GetProcess()->id();
-    ProcessIDMap::iterator host = process_ids_.find(render_process_id);
-    if (host != process_ids_.end()) {
-      host->second.erase(site_instance_id);
-      if (host->second.empty()) {
-        isolated_storage_process_ids_.erase(render_process_id);
-        process_ids_.erase(host);
-        Profile* profile = Profile::FromBrowserContext(
-            site_instance->GetProcess()->browser_context());
-        BrowserThread::PostTask(
-            BrowserThread::IO, FROM_HERE,
-            base::Bind(&ExtensionInfoMap::BindingsDisabledForProcess,
-                       profile->GetExtensionInfoMap(),
-                       render_process_id));
-      }
-    }
-  }
-}
-
-bool ExtensionProcessManager::IsExtensionProcess(int render_process_id) {
-  return process_ids_.find(render_process_id) != process_ids_.end();
-}
-
-bool ExtensionProcessManager::AreBindingsEnabledForProcess(
-    int render_process_id) {
-  // Must behave logically the same as AreBindingsEnabledForProcess() in
-  // extension_info_map.cc.
-  ProcessIDMap::iterator it = process_ids_.find(render_process_id);
-  if (it == process_ids_.end())
-    return false;
-
-  Profile* profile =
-      Profile::FromBrowserContext(browsing_instance_->browser_context());
-  ExtensionService* service = profile->GetExtensionService();
-  for (std::set<int>::iterator site_instance_id = it->second.begin();
-       site_instance_id != it->second.end(); ++site_instance_id) {
-    const Extension* extension =
-        GetExtensionForSiteInstance(*site_instance_id);
-    if (extension == NULL)
-      continue;
-    if (service->ExtensionBindingsAllowed(extension->url()))
-      return true;
-  }
-  return false;
-}
-
-bool ExtensionProcessManager::IsStorageIsolatedForProcess(int host_id) {
-  return isolated_storage_process_ids_.find(host_id) !=
-      isolated_storage_process_ids_.end();
-}
-
-RenderProcessHost* ExtensionProcessManager::GetExtensionProcess(
-    const GURL& url) {
-  if (!browsing_instance_->HasSiteInstance(url))
-    return NULL;
-  scoped_refptr<SiteInstance> site(
-      browsing_instance_->GetSiteInstanceForURL(url));
-  if (site->HasProcess())
-    return site->GetProcess();
-  return NULL;
-}
-
-RenderProcessHost* ExtensionProcessManager::GetExtensionProcess(
-    const std::string& extension_id) {
-  return GetExtensionProcess(
+  SiteInstance* site_instance = GetSiteInstanceForURL(
       Extension::GetBaseURLFromExtensionId(extension_id));
-}
+  if (!site_instance)
+    return result;
 
-const Extension* ExtensionProcessManager::GetExtensionForSiteInstance(
-    int site_instance_id) {
-  SiteInstanceIDMap::const_iterator it = extension_ids_.find(site_instance_id);
-  if (it != extension_ids_.end()) {
-    // Look up the extension by ID, including disabled extensions in case
-    // this gets called while an old process is still around.
-    Profile* profile =
-        Profile::FromBrowserContext(browsing_instance_->browser_context());
-    ExtensionService* service = profile->GetExtensionService();
-    return service->GetExtensionById(it->second, false);
+  // Gather up all the views for that site.
+  for (RenderViewHostSet::iterator view = all_extension_views_.begin();
+       view != all_extension_views_.end(); ++view) {
+    if ((*view)->site_instance() == site_instance)
+      result.insert(*view);
   }
 
-  return NULL;
+  return result;
+}
+
+void ExtensionProcessManager::RegisterRenderViewHost(
+    RenderViewHost* render_view_host,
+    const Extension* extension) {
+  all_extension_views_.insert(render_view_host);
+}
+
+void ExtensionProcessManager::UnregisterRenderViewHost(
+    RenderViewHost* render_view_host) {
+  all_extension_views_.erase(render_view_host);
 }
 
 SiteInstance* ExtensionProcessManager::GetSiteInstanceForURL(const GURL& url) {
@@ -376,21 +274,49 @@ bool ExtensionProcessManager::HasExtensionHost(ExtensionHost* host) const {
   return all_hosts_.find(host) != all_hosts_.end();
 }
 
-void ExtensionProcessManager::Observe(int type,
-                                      const NotificationSource& source,
-                                      const NotificationDetails& details) {
+void ExtensionProcessManager::OnExtensionIdle(const std::string& extension_id) {
+  ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
+  if (host && !HasVisibleViews(extension_id)) {
+    Profile* profile =
+        Profile::FromBrowserContext(browsing_instance_->browser_context());
+    if (!profile->GetExtensionEventRouter()->HasInFlightEvents(extension_id))
+      CloseBackgroundHost(host);
+  }
+}
+
+bool ExtensionProcessManager::HasVisibleViews(const std::string& extension_id) {
+  const std::set<RenderViewHost*>& views =
+      GetRenderViewHostsForExtension(extension_id);
+  for (std::set<RenderViewHost*>::const_iterator it = views.begin();
+       it != views.end(); ++it) {
+    const RenderViewHost* host = *it;
+    if (host->site_instance()->site().host() == extension_id &&
+        host->delegate()->GetRenderViewType() !=
+        chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ExtensionProcessManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSIONS_READY: {
       CreateBackgroundHostsForProfileStartup(this,
-          Source<Profile>(source).ptr()->GetExtensionService()->extensions());
+          content::Source<Profile>(source).ptr()->
+              GetExtensionService()->extensions());
       break;
     }
 
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       ExtensionService* service =
-          Source<Profile>(source).ptr()->GetExtensionService();
+          content::Source<Profile>(source).ptr()->GetExtensionService();
       if (service->is_ready()) {
-        const Extension* extension = Details<const Extension>(details).ptr();
+        const Extension* extension =
+            content::Details<const Extension>(details).ptr();
         ::CreateBackgroundHostForExtensionLoad(this, extension);
       }
       break;
@@ -398,14 +324,12 @@ void ExtensionProcessManager::Observe(int type,
 
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
       const Extension* extension =
-          Details<UnloadedExtensionInfo>(details)->extension;
+          content::Details<UnloadedExtensionInfo>(details)->extension;
       for (ExtensionHostSet::iterator iter = background_hosts_.begin();
            iter != background_hosts_.end(); ++iter) {
         ExtensionHost* host = *iter;
         if (host->extension_id() == extension->id()) {
-          delete host;
-          // |host| should deregister itself from our structures.
-          DCHECK(background_hosts_.find(host) == background_hosts_.end());
+          CloseBackgroundHost(host);
           break;
         }
       }
@@ -413,25 +337,17 @@ void ExtensionProcessManager::Observe(int type,
     }
 
     case chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED: {
-      ExtensionHost* host = Details<ExtensionHost>(details).ptr();
+      ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
       all_hosts_.erase(host);
       background_hosts_.erase(host);
       break;
     }
 
-    case content::NOTIFICATION_SITE_INSTANCE_DELETED: {
-      SiteInstance* site_instance = Source<SiteInstance>(source).ptr();
-      UnregisterExtensionSiteInstance(site_instance);
-      break;
-    }
-
     case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE: {
-      ExtensionHost* host = Details<ExtensionHost>(details).ptr();
+      ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
       if (host->extension_host_type() ==
           chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
-        delete host;
-        // |host| should deregister itself from our structures.
-        CHECK(background_hosts_.find(host) == background_hosts_.end());
+        CloseBackgroundHost(host);
       }
       break;
     }
@@ -456,10 +372,14 @@ void ExtensionProcessManager::OnExtensionHostCreated(ExtensionHost* host,
   all_hosts_.insert(host);
   if (is_background)
     background_hosts_.insert(host);
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_EXTENSION_HOST_CREATED,
-      Source<ExtensionProcessManager>(this),
-      Details<ExtensionHost>(host));
+}
+
+void ExtensionProcessManager::CloseBackgroundHost(ExtensionHost* host) {
+  CHECK(host->extension_host_type() ==
+        chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE);
+  delete host;
+  // |host| should deregister itself from our structures.
+  CHECK(background_hosts_.find(host) == background_hosts_.end());
 }
 
 void ExtensionProcessManager::CloseBackgroundHosts() {
@@ -482,7 +402,7 @@ IncognitoExtensionProcessManager::IncognitoExtensionProcessManager(
   DCHECK(profile->IsOffTheRecord());
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_WINDOW_READY,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 ExtensionHost* IncognitoExtensionProcessManager::CreateViewHost(
@@ -527,27 +447,6 @@ SiteInstance* IncognitoExtensionProcessManager::GetSiteInstanceForURL(
   }
 }
 
-RenderProcessHost* IncognitoExtensionProcessManager::GetExtensionProcess(
-    const GURL& url) {
-  const Extension* extension = GetExtensionOrAppByURL(url);
-  if (!extension || extension->incognito_split_mode()) {
-    return ExtensionProcessManager::GetExtensionProcess(url);
-  } else {
-    return original_manager_->GetExtensionProcess(url);
-  }
-}
-
-const Extension* IncognitoExtensionProcessManager::GetExtensionForSiteInstance(
-    int site_instance_id) {
-  const Extension* extension =
-      ExtensionProcessManager::GetExtensionForSiteInstance(site_instance_id);
-  if (extension && extension->incognito_split_mode()) {
-    return extension;
-  } else {
-    return original_manager_->GetExtensionForSiteInstance(site_instance_id);
-  }
-}
-
 const Extension* IncognitoExtensionProcessManager::GetExtensionOrAppByURL(
     const GURL& url) {
   Profile* profile =
@@ -570,8 +469,8 @@ bool IncognitoExtensionProcessManager::IsIncognitoEnabled(
 
 void IncognitoExtensionProcessManager::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_WINDOW_READY: {
       if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -580,7 +479,7 @@ void IncognitoExtensionProcessManager::Observe(
       // We want to spawn our background hosts as soon as the user opens an
       // incognito window. Watch for new browsers and create the hosts if
       // it matches our profile.
-      Browser* browser = Source<Browser>(source).ptr();
+      Browser* browser = content::Source<Browser>(source).ptr();
       if (browser->profile() == browsing_instance_->browser_context()) {
         // On Chrome OS, a login screen is implemented as a browser.
         // This browser has no extension service.  In this case,

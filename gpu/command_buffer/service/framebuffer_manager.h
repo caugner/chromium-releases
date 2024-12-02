@@ -35,9 +35,15 @@ class FramebufferManager {
       virtual GLenum internal_format() const = 0;
       virtual GLsizei samples() const = 0;
       virtual bool cleared() const = 0;
-      virtual void set_cleared() = 0;
+      virtual void SetCleared(
+          RenderbufferManager* renderbuffer_manager,
+          TextureManager* texture_manager) = 0;
       virtual bool IsTexture(TextureManager::TextureInfo* texture) const = 0;
+      virtual bool IsRenderbuffer(
+          RenderbufferManager::RenderbufferInfo* renderbuffer) const = 0;
       virtual bool CanRenderTo() const = 0;
+      virtual void DetachFromFramebuffer() = 0;
+      virtual bool ValidForAttachmentType(GLenum attachment_type) = 0;
     };
 
     explicit FramebufferInfo(GLuint service_id);
@@ -58,7 +64,17 @@ class FramebufferManager {
         GLenum attachment, TextureManager::TextureInfo* texture, GLenum target,
         GLint level);
 
-    void MarkAttachedRenderbuffersAsCleared();
+    // Unbinds the given renderbuffer if it is bound.
+    void UnbindRenderbuffer(
+        GLenum target, RenderbufferManager::RenderbufferInfo* renderbuffer);
+
+    // Unbinds the given texture if it is bound.
+    void UnbindTexture(
+        GLenum target, TextureManager::TextureInfo* texture);
+
+    void MarkAttachmentsAsCleared(
+      RenderbufferManager* renderbuffer_manager,
+      TextureManager* texture_manager);
 
     const Attachment* GetAttachment(GLenum attachment) const;
 
@@ -78,11 +94,17 @@ class FramebufferManager {
     bool HasStencilAttachment() const;
     GLenum GetColorAttachmentFormat() const;
 
-    // We can't know if the frame buffer is complete since that is
-    // implementation dependent and we'd have to check after every glTexImage
-    // call but we can know in certain cases that it's NOT complete which we
-    // need to enforce the OpenGL ES 2.0 spec on top of DesktopGL.
-    bool IsNotComplete() const;
+    // Verify all the rules in OpenGL ES 2.0.25 4.4.5 are followed.
+    // Returns GL_FRAMEBUFFER_COMPLETE if there are no reasons we know we can't
+    // use this combination of attachments. Otherwise returns the value
+    // that glCheckFramebufferStatus should return for this set of attachments.
+    // Note that receiving GL_FRAMEBUFFER_COMPLETE from this function does
+    // not mean the real OpenGL will consider it framebuffer complete. It just
+    // means it passed our tests.
+    GLenum IsPossiblyComplete() const;
+
+    // Check all attachments are cleared
+    bool IsCleared() const;
 
    private:
     friend class FramebufferManager;
@@ -90,10 +112,7 @@ class FramebufferManager {
 
     ~FramebufferInfo();
 
-    void MarkAsDeleted() {
-      service_id_ = 0;
-      attachments_.clear();
-    }
+    void MarkAsDeleted();
 
     // Service side framebuffer id.
     GLuint service_id_;

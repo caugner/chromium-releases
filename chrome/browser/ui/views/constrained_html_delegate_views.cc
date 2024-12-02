@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/gfx/rect.h"
-#include "views/view.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget_delegate.h"
 
 class ConstrainedHtmlDelegateViews : public TabContentsContainer,
                                      public ConstrainedHtmlUIDelegate,
@@ -35,13 +35,13 @@ class ConstrainedHtmlDelegateViews : public TabContentsContainer,
   }
 
   // views::WidgetDelegate interface.
-  virtual bool CanResize() const OVERRIDE { return true; }
-  virtual views::View* GetContentsView() OVERRIDE {
-    return this;
+  virtual views::View* GetInitiallyFocusedView() OVERRIDE {
+    return GetFocusView();
   }
+  virtual bool CanResize() const OVERRIDE { return true; }
   virtual void WindowClosing() OVERRIDE {
     if (!closed_via_webui_)
-      html_delegate_->OnDialogClosed("");
+      html_delegate_->OnDialogClosed(std::string());
   }
   virtual views::Widget* GetWidget() OVERRIDE {
     return View::GetWidget();
@@ -49,13 +49,18 @@ class ConstrainedHtmlDelegateViews : public TabContentsContainer,
   virtual const views::Widget* GetWidget() const OVERRIDE {
     return View::GetWidget();
   }
-
   virtual string16 GetWindowTitle() const OVERRIDE {
     return html_delegate_->GetDialogTitle();
+  }
+  virtual views::View* GetContentsView() OVERRIDE {
+    return this;
   }
 
   // HtmlDialogTabContentsDelegate interface.
   void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) OVERRIDE {}
+  virtual void CloseContents(TabContents* source) OVERRIDE {
+    window_->CloseConstrainedWindow();
+  }
 
   // Overridden from TabContentsContainer.
   virtual gfx::Size GetPreferredSize() OVERRIDE {
@@ -111,7 +116,7 @@ ConstrainedHtmlDelegateViews::ConstrainedHtmlDelegateViews(
   ConstrainedHtmlUI::GetPropertyAccessor().SetProperty(
       html_tab_contents_->tab_contents()->property_bag(), this);
   tab_contents->controller().LoadURL(delegate->GetDialogContentURL(),
-                                     GURL(),
+                                     content::Referrer(),
                                      content::PAGE_TRANSITION_START_PAGE,
                                      std::string());
 }

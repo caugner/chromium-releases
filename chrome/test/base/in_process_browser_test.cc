@@ -4,11 +4,11 @@
 
 #include "chrome/test/base/in_process_browser_test.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/stack_trace.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
@@ -29,20 +29,31 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/renderer/mock_content_renderer_client.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/audio_handler.h"
+#elif defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
+#if defined(USE_AURA)
+#include "ui/aura/desktop.h"
+#endif
+
+namespace {
+
 // Passed as value of kTestType.
-static const char kBrowserTestType[] = "browser";
+const char kBrowserTestType[] = "browser";
+
+}  // namespace
 
 InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
@@ -95,7 +106,7 @@ void InProcessBrowserTest::SetUp() {
   // Single-process mode is not set in BrowserMain, so process it explicitly,
   // and set up renderer.
   if (command_line->HasSwitch(switches::kSingleProcess)) {
-    RenderProcessHost::set_run_renderer_in_process(true);
+    content::RenderProcessHost::set_run_renderer_in_process(true);
     single_process_renderer_client_.reset(
         new content::MockContentRendererClient);
     content::GetContentClient()->set_renderer(
@@ -184,6 +195,10 @@ void InProcessBrowserTest::TearDown() {
   BrowserTestBase::TearDown();
 }
 
+const content::ResourceContext& InProcessBrowserTest::GetResourceContext() {
+  return browser_->profile()->GetResourceContext();
+}
+
 void InProcessBrowserTest::AddTabAtIndexToBrowser(
     Browser* browser,
     int index,
@@ -231,7 +246,7 @@ Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
 void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-      NotificationService::AllSources());
+       content::NotificationService::AllSources());
   browser->AddSelectedTabWithURL(
       GURL(chrome::kAboutBlankURL), content::PAGE_TRANSITION_START_PAGE);
   observer.Wait();
@@ -254,6 +269,7 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   signal(SIGTERM, DumpStackTraceSignalHandler);
 #endif  // defined(OS_POSIX)
 
+#if defined(OS_MACOSX)
   // On Mac, without the following autorelease pool, code which is directly
   // executed (as opposed to executed inside a message loop) would autorelease
   // objects into a higher-level pool. This pool is not recycled in-sync with
@@ -262,29 +278,46 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   // browser shutdown). To avoid this, the following pool is recycled after each
   // time code is directly executed.
   base::mac::ScopedNSAutoreleasePool pool;
+#endif
 
   // Pump startup related events.
-  MessageLoopForUI::current()->RunAllPending();
+  ui_test_utils::RunAllPendingInMessageLoop();
+
+#if defined(OS_MACOSX)
   pool.Recycle();
+#endif
 
   browser_ = CreateBrowser(ProfileManager::GetDefaultProfile());
+#if defined(OS_MACOSX)
   pool.Recycle();
+#endif
 
   // Pump any pending events that were created as a result of creating a
   // browser.
-  MessageLoopForUI::current()->RunAllPending();
+  ui_test_utils::RunAllPendingInMessageLoop();
 
   SetUpOnMainThread();
+#if defined(OS_MACOSX)
   pool.Recycle();
+#endif
 
-  RunTestOnMainThread();
+  if (!HasFatalFailure())
+    RunTestOnMainThread();
+#if defined(OS_MACOSX)
   pool.Recycle();
+#endif
 
+  // Invoke cleanup and quit even if there are failures. This is similar to
+  // gtest in that it invokes TearDown even if Setup fails.
   CleanUpOnMainThread();
+#if defined(OS_MACOSX)
   pool.Recycle();
+#endif
 
   QuitBrowsers();
+#if defined(OS_MACOSX)
   pool.Recycle();
+#endif
 }
 
 void InProcessBrowserTest::QuitBrowsers() {
@@ -294,8 +327,7 @@ void InProcessBrowserTest::QuitBrowsers() {
   // Invoke CloseAllBrowsersAndMayExit on a running message loop.
   // CloseAllBrowsersAndMayExit exits the message loop after everything has been
   // shut down properly.
-  MessageLoopForUI::current()->PostTask(
-      FROM_HERE,
-      NewRunnableFunction(&BrowserList::AttemptExit));
+  MessageLoopForUI::current()->PostTask(FROM_HERE,
+                                        base::Bind(&BrowserList::AttemptExit));
   ui_test_utils::RunMessageLoop();
 }

@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 
 #include "printing/backend/print_backend.h"
@@ -22,7 +22,6 @@ class DictionaryValue;
 }
 
 namespace printing {
-class PrintBackend;
 struct PrinterBasicInfo;
 struct PrinterCapsAndDefaults;
 }
@@ -148,11 +147,10 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
     PrintSystemResult() { }
   };
 
-  typedef Callback3<
-      bool,
-      const std::string&,
-      const printing::PrinterCapsAndDefaults&>::Type
-          PrinterCapsAndDefaultsCallback;
+  typedef base::Callback<void(bool,
+                              const std::string&,
+                              const printing::PrinterCapsAndDefaults&)>
+      PrinterCapsAndDefaultsCallback;
 
   virtual ~PrintSystem();
 
@@ -167,7 +165,7 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
   // Gets the capabilities and defaults for a specific printer asynchronously.
   virtual void GetPrinterCapsAndDefaults(
       const std::string& printer_name,
-      PrinterCapsAndDefaultsCallback* callback) = 0;
+      const PrinterCapsAndDefaultsCallback& callback) = 0;
 
   // Returns true if printer_name points to a valid printer.
   virtual bool IsValidPrinter(const std::string& printer_name) = 0;
@@ -179,7 +177,7 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
   // Get details for already spooled job.
   virtual bool GetJobDetails(const std::string& printer_name,
                              PlatformJobId job_id,
-                             PrintJobDetails *job_details) = 0;
+                             PrintJobDetails* job_details) = 0;
 
   // Factory methods to create corresponding watcher. Callee is responsible
   // for deleting objects. Return NULL if failed.

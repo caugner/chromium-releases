@@ -12,7 +12,7 @@
 #include "ui/aura_shell/shell_window_ids.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace aura_shell {
 namespace internal {
@@ -40,20 +40,22 @@ bool DesktopBackgroundView::OnMousePressed(const views::MouseEvent& event) {
 }
 
 void DesktopBackgroundView::OnMouseReleased(const views::MouseEvent& event) {
-  Shell::GetInstance()->TileWindows();
+  Shell::GetInstance()->ToggleOverview();
 }
 
 views::Widget* CreateDesktopBackground() {
   views::Widget* desktop_widget = new views::Widget;
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
-  params.parent = Shell::GetInstance()->GetContainer(
-      aura_shell::internal::kShellWindowId_DesktopBackgroundContainer);
+  views::Widget::InitParams params(
+      views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   DesktopBackgroundView* view = new DesktopBackgroundView;
   params.delegate = view;
   desktop_widget->Init(params);
+  Shell::GetInstance()->GetContainer(
+      aura_shell::internal::kShellWindowId_DesktopBackgroundContainer)->
+      AddChild(desktop_widget->GetNativeView());
   desktop_widget->SetContentsView(view);
   desktop_widget->Show();
-  desktop_widget->GetNativeView()->set_name("DesktopBackgroundView");
+  desktop_widget->GetNativeView()->SetName("DesktopBackgroundView");
   return desktop_widget;
 }
 

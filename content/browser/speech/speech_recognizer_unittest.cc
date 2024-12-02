@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/speech/speech_recognizer.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "media/audio/test_audio_input_controller_factory.h"
@@ -12,6 +12,8 @@
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 using media::AudioInputController;
 using media::TestAudioInputController;
 using media::TestAudioInputControllerFactory;
@@ -31,7 +33,7 @@ class SpeechRecognizerTest : public SpeechRecognizerDelegate,
         recognition_complete_(false),
         result_received_(false),
         audio_received_(false),
-        error_(kErrorNone),
+        error_(content::SPEECH_INPUT_ERROR_NONE),
         volume_(-1.0f) {
     int audio_packet_length_bytes =
         (SpeechRecognizer::kAudioSampleRate *
@@ -42,8 +44,9 @@ class SpeechRecognizerTest : public SpeechRecognizerDelegate,
   }
 
   // SpeechRecognizer::Delegate methods.
-  virtual void SetRecognitionResult(int caller_id,
-                                    const SpeechInputResult& result) OVERRIDE {
+  virtual void SetRecognitionResult(
+      int caller_id,
+      const content::SpeechInputResult& result) OVERRIDE {
     result_received_ = true;
   }
 
@@ -69,7 +72,7 @@ class SpeechRecognizerTest : public SpeechRecognizerDelegate,
   }
 
   virtual void OnRecognizerError(int caller_id,
-                                 SpeechInputError error) OVERRIDE {
+                                 content::SpeechInputError error) OVERRIDE {
     error_ = error;
   }
 
@@ -106,13 +109,13 @@ class SpeechRecognizerTest : public SpeechRecognizerDelegate,
 
  protected:
   MessageLoopForIO message_loop_;
-  BrowserThread io_thread_;
+  BrowserThreadImpl io_thread_;
   scoped_refptr<SpeechRecognizer> recognizer_;
   bool recording_complete_;
   bool recognition_complete_;
   bool result_received_;
   bool audio_received_;
-  SpeechInputError error_;
+  content::SpeechInputError error_;
   TestURLFetcherFactory url_fetcher_factory_;
   TestAudioInputControllerFactory audio_input_controller_factory_;
   std::vector<uint8> audio_packet_;
@@ -128,7 +131,7 @@ TEST_F(SpeechRecognizerTest, StopNoData) {
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
   EXPECT_FALSE(audio_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 }
 
 TEST_F(SpeechRecognizerTest, CancelNoData) {
@@ -140,7 +143,7 @@ TEST_F(SpeechRecognizerTest, CancelNoData) {
   EXPECT_TRUE(recognition_complete_);
   EXPECT_FALSE(result_received_);
   EXPECT_FALSE(audio_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 }
 
 TEST_F(SpeechRecognizerTest, StopWithData) {
@@ -170,13 +173,13 @@ TEST_F(SpeechRecognizerTest, StopWithData) {
   EXPECT_TRUE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 
   // Issue the network callback to complete the process.
   TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
 
-  fetcher->set_url(fetcher->original_url());
+  fetcher->set_url(fetcher->GetOriginalURL());
   net::URLRequestStatus status;
   status.set_status(net::URLRequestStatus::SUCCESS);
   fetcher->set_status(status);
@@ -187,7 +190,7 @@ TEST_F(SpeechRecognizerTest, StopWithData) {
 
   EXPECT_TRUE(recognition_complete_);
   EXPECT_TRUE(result_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 }
 
 TEST_F(SpeechRecognizerTest, CancelWithData) {
@@ -206,7 +209,7 @@ TEST_F(SpeechRecognizerTest, CancelWithData) {
   EXPECT_FALSE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 }
 
 TEST_F(SpeechRecognizerTest, ConnectionError) {
@@ -227,10 +230,10 @@ TEST_F(SpeechRecognizerTest, ConnectionError) {
   EXPECT_TRUE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 
   // Issue the network callback to complete the process.
-  fetcher->set_url(fetcher->original_url());
+  fetcher->set_url(fetcher->GetOriginalURL());
   net::URLRequestStatus status;
   status.set_status(net::URLRequestStatus::FAILED);
   status.set_error(net::ERR_CONNECTION_REFUSED);
@@ -241,7 +244,7 @@ TEST_F(SpeechRecognizerTest, ConnectionError) {
 
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNetwork, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NETWORK, error_);
 }
 
 TEST_F(SpeechRecognizerTest, ServerError) {
@@ -262,10 +265,10 @@ TEST_F(SpeechRecognizerTest, ServerError) {
   EXPECT_TRUE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
 
   // Issue the network callback to complete the process.
-  fetcher->set_url(fetcher->original_url());
+  fetcher->set_url(fetcher->GetOriginalURL());
   net::URLRequestStatus status;
   status.set_status(net::URLRequestStatus::SUCCESS);
   fetcher->set_status(status);
@@ -275,7 +278,7 @@ TEST_F(SpeechRecognizerTest, ServerError) {
 
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNetwork, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NETWORK, error_);
 }
 
 TEST_F(SpeechRecognizerTest, AudioControllerErrorNoData) {
@@ -290,7 +293,7 @@ TEST_F(SpeechRecognizerTest, AudioControllerErrorNoData) {
   EXPECT_FALSE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorAudio, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_AUDIO, error_);
 }
 
 TEST_F(SpeechRecognizerTest, AudioControllerErrorWithData) {
@@ -309,7 +312,7 @@ TEST_F(SpeechRecognizerTest, AudioControllerErrorWithData) {
   EXPECT_FALSE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorAudio, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_AUDIO, error_);
 }
 
 TEST_F(SpeechRecognizerTest, NoSpeechCallbackIssued) {
@@ -334,7 +337,7 @@ TEST_F(SpeechRecognizerTest, NoSpeechCallbackIssued) {
   EXPECT_FALSE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   EXPECT_FALSE(result_received_);
-  EXPECT_EQ(kErrorNoSpeech, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NO_SPEECH, error_);
 }
 
 TEST_F(SpeechRecognizerTest, NoSpeechCallbackNotIssued) {
@@ -365,7 +368,7 @@ TEST_F(SpeechRecognizerTest, NoSpeechCallbackNotIssued) {
   }
 
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
   EXPECT_TRUE(audio_received_);
   EXPECT_FALSE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
@@ -408,7 +411,7 @@ TEST_F(SpeechRecognizerTest, SetInputVolumeCallback) {
   EXPECT_FLOAT_EQ(0.89926866f, volume_);
   EXPECT_FLOAT_EQ(0.75071919f, noise_volume_);
 
-  EXPECT_EQ(kErrorNone, error_);
+  EXPECT_EQ(content::SPEECH_INPUT_ERROR_NONE, error_);
   EXPECT_FALSE(recording_complete_);
   EXPECT_FALSE(recognition_complete_);
   recognizer_->CancelRecognition();

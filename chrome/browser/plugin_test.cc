@@ -32,7 +32,6 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
-#include "chrome/browser/plugin_download_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -50,6 +49,7 @@
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
+#include "chrome/browser/plugin_download_helper.h"
 #endif
 
 class PluginTest : public UITest {
@@ -104,6 +104,8 @@ class PluginTest : public UITest {
 
     launch_arguments_.AppendSwitch(switches::kAllowOutdatedPlugins);
     launch_arguments_.AppendSwitch(switches::kAlwaysAuthorizePlugins);
+    // TODO(rsesek): Remove after done debugging.
+    launch_arguments_.AppendSwitch(switches::kDebugPluginLoading);
 
     UITest::SetUp();
   }

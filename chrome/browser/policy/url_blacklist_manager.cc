@@ -5,6 +5,7 @@
 #include "chrome/browser/policy/url_blacklist_manager.h"
 
 #include "base/bind.h"
+#include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
@@ -12,10 +13,12 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
+
+using content::BrowserThread;
 
 namespace policy {
 
@@ -29,7 +32,7 @@ typedef std::vector<std::string> StringVector;
 StringVector* ListValueToStringVector(const base::ListValue* list) {
   StringVector* vector = new StringVector;
 
-  if (!list)
+  if (list == NULL)
     return vector;
 
   vector->reserve(list->GetSize());
@@ -66,13 +69,29 @@ void BuildBlacklist(URLBlacklist* blacklist,
 void SetBlacklistOnIO(base::WeakPtr<URLBlacklistManager> blacklist_manager,
                       URLBlacklist* blacklist) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (blacklist_manager)
+  if (blacklist_manager) {
     blacklist_manager->SetBlacklist(blacklist);
-  else
+  } else {
     delete blacklist;
+  }
 }
 
 }  // namespace
+
+struct URLBlacklist::PathFilter {
+  explicit PathFilter(const std::string& path, uint16 port, bool match)
+      : path_prefix(path),
+        port(port),
+        blocked_schemes(0),
+        allowed_schemes(0),
+        match_subdomains(match) {}
+
+  std::string path_prefix;
+  uint16 port;
+  uint8 blocked_schemes;
+  uint8 allowed_schemes;
+  bool match_subdomains;
+};
 
 URLBlacklist::URLBlacklist() {
 }
@@ -106,7 +125,7 @@ bool URLBlacklist::IsURLBlocked(const GURL& url) const {
   // to those.
   bool is_matching_subdomains = false;
   const bool host_is_ip = url.HostIsIPAddress();
-  for (;;) {
+  while (1) {
     HostFilterTable::const_iterator host_filter = host_filters_.find(host);
     if (host_filter != host_filters_.end()) {
       const PathFilterList* list = host_filter->second;
@@ -179,16 +198,17 @@ bool URLBlacklist::IsURLBlocked(const GURL& url) const {
 
 // static
 bool URLBlacklist::SchemeToFlag(const std::string& scheme, SchemeFlag* flag) {
-  if (scheme.empty())
+  if (scheme.empty()) {
     *flag = SCHEME_ALL;
-  else if (scheme == "http")
+  } else if (scheme == "http") {
     *flag = SCHEME_HTTP;
-  else if (scheme == "https")
+  } else if (scheme == "https") {
     *flag = SCHEME_HTTPS;
-  else if (scheme == "ftp")
+  } else if (scheme == "ftp") {
     *flag = SCHEME_FTP;
-  else
+  } else {
     return false;
+  }
   return true;
 }
 
@@ -241,19 +261,18 @@ void URLBlacklist::AddFilter(const std::string& filter, bool block) {
   std::string host;
   uint16 port;
   std::string path;
-  SchemeFlag flag;
-  bool match_subdomains = true;
-
   if (!FilterToComponents(filter, &scheme, &host, &port, &path)) {
     LOG(WARNING) << "Invalid filter, ignoring: " << filter;
     return;
   }
 
+  SchemeFlag flag;
   if (!SchemeToFlag(scheme, &flag)) {
     LOG(WARNING) << "Unsupported scheme in filter, ignoring filter: " << filter;
     return;
   }
 
+  bool match_subdomains = true;
   // Special syntax to disable subdomain matching.
   if (!host.empty() && host[0] == '.') {
     host.erase(0, 1);
@@ -273,8 +292,9 @@ void URLBlacklist::AddFilter(const std::string& filter, bool block) {
   PathFilterList::iterator it;
   for (it = list->begin(); it != list->end(); ++it) {
     if (it->port == port && it->match_subdomains == match_subdomains &&
-        it->path_prefix == path)
+        it->path_prefix == path) {
       break;
+    }
   }
   PathFilter* path_filter;
   if (it == list->end()) {
@@ -284,10 +304,11 @@ void URLBlacklist::AddFilter(const std::string& filter, bool block) {
     path_filter = &(*it);
   }
 
-  if (block)
+  if (block) {
     path_filter->blocked_schemes |= flag;
-  else
+  } else {
     path_filter->allowed_schemes |= flag;
+  }
 }
 
 URLBlacklistManager::URLBlacklistManager(PrefService* pref_service)
@@ -318,13 +339,13 @@ URLBlacklistManager::~URLBlacklistManager() {
 }
 
 void URLBlacklistManager::Observe(int type,
-                                  const NotificationSource& source,
-                                  const NotificationDetails& details) {
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(type == chrome::NOTIFICATION_PREF_CHANGED);
-  PrefService* prefs = Source<PrefService>(source).ptr();
+  PrefService* prefs = content::Source<PrefService>(source).ptr();
   DCHECK(prefs == pref_service_);
-  std::string* pref_name = Details<std::string>(details).ptr();
+  std::string* pref_name = content::Details<std::string>(details).ptr();
   DCHECK(*pref_name == prefs::kUrlBlacklist ||
          *pref_name == prefs::kUrlWhitelist);
   ScheduleUpdate();

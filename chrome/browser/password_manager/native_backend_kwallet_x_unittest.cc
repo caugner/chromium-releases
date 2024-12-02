@@ -16,6 +16,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/test/test_browser_thread.h"
 #include "dbus/message.h"
 #include "dbus/mock_bus.h"
 #include "dbus/mock_object_proxy.h"
@@ -23,6 +24,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
 using testing::_;
 using testing::Invoke;
 using testing::Return;
@@ -165,8 +167,8 @@ class NativeBackendKWalletTest : public testing::Test {
                           const ExpectationArray& sorted_expected);
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   TestingProfile profile_;
 
   scoped_refptr<dbus::MockBus> mock_session_bus_;
@@ -496,9 +498,9 @@ TEST_F(NativeBackendKWalletTest, BasicAddLogin) {
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
 
   RunDBThread();
 
@@ -519,15 +521,15 @@ TEST_F(NativeBackendKWalletTest, BasicListLogins) {
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
 
   std::vector<PasswordForm*> form_list;
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                     base::Unretained(&backend), &form_list))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::GetAutofillableLogins,
+          base::Unretained(&backend), &form_list)));
 
   RunDBThread();
 
@@ -552,9 +554,9 @@ TEST_F(NativeBackendKWalletTest, BasicRemoveLogin) {
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
 
   RunDBThread();
 
@@ -567,9 +569,9 @@ TEST_F(NativeBackendKWalletTest, BasicRemoveLogin) {
   CheckPasswordForms("Chrome Form Data (42)", expected);
 
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::RemoveLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::RemoveLogin,
+          base::Unretained(&backend), form_google_)));
 
   RunDBThread();
 
@@ -586,9 +588,9 @@ TEST_F(NativeBackendKWalletTest, RemoveNonexistentLogin) {
 
   // First add an unrelated login.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
 
   RunDBThread();
 
@@ -602,16 +604,16 @@ TEST_F(NativeBackendKWalletTest, RemoveNonexistentLogin) {
 
   // Attempt to remove a login that doesn't exist.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::RemoveLogin,
-                     base::Unretained(&backend), form_isc_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::RemoveLogin,
+          base::Unretained(&backend), form_isc_)));
 
   // Make sure we can still get the first form back.
   std::vector<PasswordForm*> form_list;
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                     base::Unretained(&backend), &form_list))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::GetAutofillableLogins,
+          base::Unretained(&backend), &form_list)));
 
   RunDBThread();
 
@@ -630,13 +632,13 @@ TEST_F(NativeBackendKWalletTest, AddDuplicateLogin) {
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
 
   RunDBThread();
 
@@ -657,20 +659,20 @@ TEST_F(NativeBackendKWalletTest, ListLoginsAppends) {
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::AddLogin,
-                     base::Unretained(&backend), form_google_))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::AddLogin,
+          base::Unretained(&backend), form_google_)));
 
   // Send the same request twice with the same list both times.
   std::vector<PasswordForm*> form_list;
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                     base::Unretained(&backend), &form_list))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::GetAutofillableLogins,
+          base::Unretained(&backend), &form_list)));
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      base::IgnoreReturn(base::Callback<bool(void)>(
-          base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                     base::Unretained(&backend), &form_list))));
+      base::IgnoreReturn<bool>(base::Bind(
+          &NativeBackendKWalletStub::GetAutofillableLogins,
+          base::Unretained(&backend), &form_list)));
 
   RunDBThread();
 
@@ -699,16 +701,16 @@ TEST_F(NativeBackendKWalletTest, MigrateOneLogin) {
     EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::AddLogin,
-                       base::Unretained(&backend), form_google_))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::AddLogin,
+            base::Unretained(&backend), form_google_)));
 
     // Make sure we can get the form back even when migration is failing.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -735,9 +737,9 @@ TEST_F(NativeBackendKWalletTest, MigrateOneLogin) {
     // Trigger the migration by looking something up.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -763,9 +765,9 @@ TEST_F(NativeBackendKWalletTest, MigrateToMultipleProfiles) {
     EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::AddLogin,
-                       base::Unretained(&backend), form_google_))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::AddLogin,
+            base::Unretained(&backend), form_google_)));
 
     RunDBThread();
   }
@@ -788,9 +790,9 @@ TEST_F(NativeBackendKWalletTest, MigrateToMultipleProfiles) {
     // Trigger the migration by looking something up.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -817,9 +819,9 @@ TEST_F(NativeBackendKWalletTest, MigrateToMultipleProfiles) {
     // Trigger the migration by looking something up.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -842,9 +844,9 @@ TEST_F(NativeBackendKWalletTest, NoMigrationWithPrefSet) {
     EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::AddLogin,
-                       base::Unretained(&backend), form_google_))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::AddLogin,
+            base::Unretained(&backend), form_google_)));
 
     RunDBThread();
   }
@@ -867,16 +869,16 @@ TEST_F(NativeBackendKWalletTest, NoMigrationWithPrefSet) {
 
     // Trigger the migration by adding a new login.
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::AddLogin,
-                       base::Unretained(&backend), form_isc_))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::AddLogin,
+            base::Unretained(&backend), form_isc_)));
 
     // Look up all logins; we expect only the one we added.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -904,9 +906,9 @@ TEST_F(NativeBackendKWalletTest, DeleteMigratedPasswordIsIsolated) {
     EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
 
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::AddLogin,
-                       base::Unretained(&backend), form_google_))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::AddLogin,
+            base::Unretained(&backend), form_google_)));
 
     RunDBThread();
   }
@@ -929,9 +931,9 @@ TEST_F(NativeBackendKWalletTest, DeleteMigratedPasswordIsIsolated) {
     // Trigger the migration by looking something up.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -958,9 +960,9 @@ TEST_F(NativeBackendKWalletTest, DeleteMigratedPasswordIsIsolated) {
     // Trigger the migration by looking something up.
     std::vector<PasswordForm*> form_list;
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::GetAutofillableLogins,
-                       base::Unretained(&backend), &form_list))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::GetAutofillableLogins,
+            base::Unretained(&backend), &form_list)));
 
     RunDBThread();
 
@@ -975,9 +977,9 @@ TEST_F(NativeBackendKWalletTest, DeleteMigratedPasswordIsIsolated) {
 
     // Now delete the password from this second profile.
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-        base::IgnoreReturn(base::Callback<bool(void)>(
-            base::Bind(&NativeBackendKWalletStub::RemoveLogin,
-                       base::Unretained(&backend), form_google_))));
+        base::IgnoreReturn<bool>(base::Bind(
+            &NativeBackendKWalletStub::RemoveLogin,
+            base::Unretained(&backend), form_google_)));
 
     RunDBThread();
 

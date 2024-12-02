@@ -6,8 +6,8 @@
 
 #include <set>
 
-#include "base/bind.h"
 #include "base/base64.h"
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
 #include "base/json/json_value_serializer.h"
@@ -16,22 +16,23 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"  // TODO(viettrungluu): delete me.
-#include "crypto/signature_verifier.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_unpacker.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/public/browser/browser_thread.h"
+#include "crypto/signature_verifier.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/png_codec.h"
+
+using content::BrowserThread;
 
 // The following macro makes histograms that record the length of paths
 // in this file much easier to read.
@@ -112,10 +113,13 @@ void RecordSuccessfulUnpackTimeHistograms(
 SandboxedExtensionUnpacker::SandboxedExtensionUnpacker(
     const FilePath& crx_path,
     ResourceDispatcherHost* rdh,
+    Extension::Location location,
+    int creation_flags,
     SandboxedExtensionUnpackerClient* client)
     : crx_path_(crx_path),
       thread_identifier_(BrowserThread::ID_COUNT),
-      rdh_(rdh), client_(client), got_response_(false) {
+      rdh_(rdh), client_(client), got_response_(false),
+      location_(location), creation_flags_(creation_flags) {
 }
 
 bool SandboxedExtensionUnpacker::CreateTempDirectory() {
@@ -212,7 +216,7 @@ void SandboxedExtensionUnpacker::Start() {
             link_free_crx_path));
   } else {
     // Otherwise, unpack the extension in this process.
-    ExtensionUnpacker unpacker(temp_crx_path);
+    ExtensionUnpacker unpacker(temp_crx_path, location_, creation_flags_);
     if (unpacker.Run() && unpacker.DumpImagesToFile() &&
         unpacker.DumpMessageCatalogsToFile()) {
       OnUnpackExtensionSucceeded(*unpacker.parsed_manifest());
@@ -260,7 +264,9 @@ void SandboxedExtensionUnpacker::StartProcessOnIOThread(
   // Grant the subprocess access to the entire subdir the extension file is
   // in, so that it can unpack to that dir.
   host->set_exposed_dir(temp_crx_path.DirName());
-  host->Send(new ChromeUtilityMsg_UnpackExtension(temp_crx_path));
+  host->Send(
+      new ChromeUtilityMsg_UnpackExtension(
+          temp_crx_path, location_, creation_flags_));
 }
 
 void SandboxedExtensionUnpacker::OnUnpackExtensionSucceeded(
@@ -294,9 +300,9 @@ void SandboxedExtensionUnpacker::OnUnpackExtensionSucceeded(
 
   extension_ = Extension::Create(
       extension_root_,
-      Extension::INTERNAL,
+      location_,
       *final_manifest,
-      Extension::REQUIRE_KEY,
+      Extension::REQUIRE_KEY | creation_flags_,
       &error);
 
   if (!extension_.get()) {

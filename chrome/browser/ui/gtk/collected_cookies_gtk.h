@@ -10,12 +10,13 @@
 
 #include <gtk/gtk.h>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_tree.h"
 #include "chrome/common/content_settings.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 
 class CookiesTreeModel;
@@ -28,14 +29,14 @@ class TabContentsWrapper;
 
 class CollectedCookiesGtk : public ConstrainedWindowGtkDelegate,
                             public gtk_tree::TreeAdapter::Delegate,
-                            public NotificationObserver {
+                            public content::NotificationObserver {
  public:
   CollectedCookiesGtk(GtkWindow* parent, TabContentsWrapper* wrapper);
 
   // ConstrainedWindowGtkDelegate methods.
-  virtual GtkWidget* GetWidgetRoot();
-  virtual GtkWidget* GetFocusWidget();
-  virtual void DeleteDelegate();
+  virtual GtkWidget* GetWidgetRoot() OVERRIDE;
+  virtual GtkWidget* GetFocusWidget() OVERRIDE;
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
   virtual ~CollectedCookiesGtk();
@@ -57,8 +58,8 @@ class CollectedCookiesGtk : public ConstrainedWindowGtkDelegate,
 
   // Notification Observer implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Create the information panes for the allowed and blocked cookies.
   GtkWidget* CreateAllowedPane();
@@ -82,7 +83,7 @@ class CollectedCookiesGtk : public ConstrainedWindowGtkDelegate,
   CHROMEGTK_CALLBACK_2(CollectedCookiesGtk, void, OnSwitchPage,
                        gpointer, guint);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   ConstrainedWindow* window_;
 

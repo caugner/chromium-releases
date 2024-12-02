@@ -14,12 +14,12 @@
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "webkit/plugins/ppapi/common.h"
+#include "webkit/plugins/ppapi/host_globals.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/resource_helper.h"
-#include "webkit/plugins/ppapi/resource_tracker.h"
 
 using ppapi::PPTimeToTime;
 using ppapi::StringVar;
@@ -32,14 +32,14 @@ namespace ppapi {
 namespace {
 
 void SetInstanceAlwaysOnTop(PP_Instance pp_instance, PP_Bool on_top) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
+  PluginInstance* instance = HostGlobals::Get()->GetInstance(pp_instance);
   if (!instance)
     return;
   instance->set_always_on_top(PPBoolToBool(on_top));
 }
 
 PP_Var GetProxyForURL(PP_Instance pp_instance, const char* url) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
+  PluginInstance* instance = HostGlobals::Get()->GetInstance(pp_instance);
   if (!instance)
     return PP_MakeUndefined();
 
@@ -83,7 +83,7 @@ void QuitMessageLoop(PP_Instance instance) {
 }
 
 double GetLocalTimeZoneOffset(PP_Instance pp_instance, PP_Time t) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(pp_instance);
+  PluginInstance* instance = HostGlobals::Get()->GetInstance(pp_instance);
   if (!instance)
     return 0.0;
 
@@ -101,7 +101,7 @@ double GetLocalTimeZoneOffset(PP_Instance pp_instance, PP_Time t) {
 }
 
 PP_Var GetCommandLineArgs(PP_Module pp_module) {
-  PluginModule* module = ResourceTracker::Get()->GetModule(pp_module);
+  PluginModule* module = HostGlobals::Get()->GetModule(pp_module);
   if (!module)
     return PP_MakeUndefined();
 

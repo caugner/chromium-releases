@@ -18,6 +18,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -69,26 +70,26 @@ class MockBackgroundContents : public BackgroundContents {
 
   virtual void Navigate(GURL url) {
     url_ = url;
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-        Source<Profile>(profile_),
-        Details<BackgroundContents>(this));
+        content::Source<Profile>(profile_),
+        content::Details<BackgroundContents>(this));
   }
   virtual const GURL& GetURL() const { return url_; }
 
   void MockClose(Profile* profile) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED,
-        Source<Profile>(profile),
-        Details<BackgroundContents>(this));
+        content::Source<Profile>(profile),
+        content::Details<BackgroundContents>(this));
     delete this;
   }
 
   ~MockBackgroundContents() {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
-        Source<Profile>(profile_),
-        Details<BackgroundContents>(this));
+        content::Source<Profile>(profile_),
+        content::Details<BackgroundContents>(this));
   }
 
   const string16& appid() { return appid_; }

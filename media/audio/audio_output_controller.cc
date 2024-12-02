@@ -7,6 +7,10 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
+#include "base/threading/platform_thread.h"
+#include "base/time.h"
+
+using base::Time;
 
 namespace media {
 
@@ -33,6 +37,7 @@ AudioOutputController::AudioOutputController(EventHandler* handler,
 
 AudioOutputController::~AudioOutputController() {
   DCHECK_EQ(kClosed, state_);
+  StopCloseAndClearStream();
 }
 
 // static
@@ -138,6 +143,7 @@ void AudioOutputController::DoCreate(const AudioParameters& params) {
   if (!AudioManager::GetAudioManager())
     return;
 
+  StopCloseAndClearStream();
   stream_ = AudioManager::GetAudioManager()->MakeAudioOutputStreamProxy(params);
   if (!stream_) {
     // TODO(hclam): Define error types.
@@ -146,8 +152,7 @@ void AudioOutputController::DoCreate(const AudioParameters& params) {
   }
 
   if (!stream_->Open()) {
-    stream_->Close();
-    stream_ = NULL;
+    StopCloseAndClearStream();
 
     // TODO(hclam): Define error types.
     handler_->OnError(this, 0);
@@ -176,9 +181,10 @@ void AudioOutputController::DoPlay() {
   // We can start from created or paused state.
   if (state_ != kCreated && state_ != kPaused)
     return;
-  state_ = kPlaying;
 
   if (LowLatencyMode()) {
+    state_ = kStarting;
+
     // Ask for first packet.
     sync_reader_->UpdatePendingBytes(0);
 
@@ -197,13 +203,20 @@ void AudioOutputController::DoPlay() {
 void AudioOutputController::PollAndStartIfDataReady() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
-  // Being paranoic: do nothing if we were stopped/paused
-  // after DoPlay() but before DoStartStream().
-  if (state_ != kPlaying)
+  // Being paranoic: do nothing if state unexpectedly changed.
+  if ((state_ != kStarting) && (state_ != kPausedWhenStarting))
     return;
 
-  if (--number_polling_attempts_left_ == 0 || sync_reader_->DataReady()) {
+  bool pausing = (state_ == kPausedWhenStarting);
+  // If we are ready to start the stream, start it.
+  // Of course we may have to stop it immediately...
+  if (--number_polling_attempts_left_ == 0 ||
+      pausing ||
+      sync_reader_->DataReady()) {
     StartStream();
+    if (pausing) {
+      DoPause();
+    }
   } else {
     message_loop_->PostDelayedTask(
         FROM_HERE,
@@ -214,6 +227,7 @@ void AudioOutputController::PollAndStartIfDataReady() {
 
 void AudioOutputController::StartStream() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
+  state_ = kPlaying;
 
   // We start the AudioOutputStream lazily.
   stream_->Start(this);
@@ -225,22 +239,35 @@ void AudioOutputController::StartStream() {
 void AudioOutputController::DoPause() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
-  // We can pause from started state.
-  if (state_ != kPlaying)
-    return;
-  state_ = kPaused;
+  if (stream_)
+    stream_->Stop();
 
-  // Then we stop the audio device. This is not the perfect solution because
-  // it discards all the internal buffer in the audio device.
-  // TODO(hclam): Actually pause the audio device.
-  stream_->Stop();
+  switch (state_) {
+    case kStarting:
+      // We were asked to pause while starting. There is delayed task that will
+      // try starting playback, and there is no way to remove that task from the
+      // queue. If we stop now that task will be executed anyway.
+      // Delay pausing, let delayed task to do pause after it start playback.
+      state_ = kPausedWhenStarting;
+      break;
+    case kPlaying:
+      state_ = kPaused;
 
-  if (LowLatencyMode()) {
-    // Send a special pause mark to the low-latency audio thread.
-    sync_reader_->UpdatePendingBytes(kPauseMark);
+      // Then we stop the audio device. This is not the perfect solution
+      // because it discards all the internal buffer in the audio device.
+      // TODO(hclam): Actually pause the audio device.
+      stream_->Stop();
+
+      if (LowLatencyMode()) {
+        // Send a special pause mark to the low-latency audio thread.
+        sync_reader_->UpdatePendingBytes(kPauseMark);
+      }
+
+      handler_->OnPaused(this);
+      break;
+    default:
+      return;
   }
-
-  handler_->OnPaused(this);
 }
 
 void AudioOutputController::DoFlush() {
@@ -261,14 +288,7 @@ void AudioOutputController::DoClose(const base::Closure& closed_task) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
   if (state_ != kClosed) {
-    // |stream_| can be null if creating the device failed in DoCreate().
-    if (stream_) {
-      stream_->Stop();
-      stream_->Close();
-      // After stream is closed it is destroyed, so don't keep a reference to
-      // it.
-      stream_ = NULL;
-    }
+    StopCloseAndClearStream();
 
     if (LowLatencyMode()) {
       sync_reader_->Close();
@@ -287,10 +307,17 @@ void AudioOutputController::DoSetVolume(double volume) {
   // right away but when the stream is created we'll set the volume.
   volume_ = volume;
 
-  if (state_ != kPlaying && state_ != kPaused && state_ != kCreated)
-    return;
-
-  stream_->SetVolume(volume_);
+  switch (state_) {
+    case kCreated:
+    case kStarting:
+    case kPausedWhenStarting:
+    case kPlaying:
+    case kPaused:
+      stream_->SetVolume(volume_);
+      break;
+    default:
+      return;
+  }
 }
 
 void AudioOutputController::DoReportError(int code) {
@@ -323,9 +350,30 @@ uint32 AudioOutputController::OnMoreData(
   }
 
   // Low latency mode.
+  {
+    // Check state and do nothing if we are not playing.
+    // We are on the hardware audio thread, so lock is needed.
+    base::AutoLock auto_lock(lock_);
+    if (state_ != kPlaying) {
+      return 0;
+    }
+  }
   uint32 size =  sync_reader_->Read(dest, max_size);
   sync_reader_->UpdatePendingBytes(buffers_state.total_bytes() + size);
   return size;
+}
+
+void AudioOutputController::WaitTillDataReady() {
+  if (LowLatencyMode() && !sync_reader_->DataReady()) {
+    // In the different place we use different mechanism to poll, get max
+    // polling delay from constants used there.
+    const int kMaxPollingDelayMs = kPollNumAttempts * kPollPauseInMilliseconds;
+    Time start_time = Time::Now();
+    do {
+      base::PlatformThread::Sleep(1);
+    } while (!sync_reader_->DataReady() &&
+             (Time::Now() - start_time).InMilliseconds() < kMaxPollingDelayMs);
+  }
 }
 
 void AudioOutputController::OnError(AudioOutputStream* stream, int code) {
@@ -352,6 +400,15 @@ void AudioOutputController::SubmitOnMoreData_Locked() {
   // correct and in the worst case we are just asking more data than needed.
   base::AutoUnlock auto_unlock(lock_);
   handler_->OnMoreData(this, buffers_state);
+}
+
+void AudioOutputController::StopCloseAndClearStream() {
+  // Allow calling unconditionally and bail if we don't have a stream_ to close.
+  if (!stream_)
+    return;
+  stream_->Stop();
+  stream_->Close();
+  stream_ = NULL;
 }
 
 }  // namespace media

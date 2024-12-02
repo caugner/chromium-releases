@@ -11,6 +11,7 @@
 #include "base/memory/singleton.h"
 #include "base/memory/ref_counted.h"
 #include "ui/gfx/compositor/compositor.h"
+#include "ui/gfx/gl/scoped_make_current.h"
 #include "ui/gfx/size.h"
 
 namespace gfx {
@@ -26,14 +27,16 @@ class TextureProgramGL;
 
 // We share resources (such as shaders) between different Compositors via
 // GLContext sharing so that we only have to create/destroy them once.
-class COMPOSITOR_EXPORT SharedResources {
+class COMPOSITOR_EXPORT SharedResourcesGL : public SharedResources {
  public:
-  static SharedResources* GetInstance();
+  static SharedResourcesGL* GetInstance();
 
-  bool MakeSharedContextCurrent();
+  virtual gfx::ScopedMakeCurrent* GetScopedMakeCurrent() OVERRIDE;
 
   // Creates a context that shares the resources hosted by this singleton.
   scoped_refptr<gfx::GLContext> CreateContext(gfx::GLSurface* surface);
+
+  virtual void* GetDisplay() OVERRIDE;
 
   ui::TextureProgramGL* program_no_swizzle() {
     return program_no_swizzle_.get();
@@ -44,10 +47,10 @@ class COMPOSITOR_EXPORT SharedResources {
   }
 
  private:
-  friend struct DefaultSingletonTraits<SharedResources>;
+  friend struct DefaultSingletonTraits<SharedResourcesGL>;
 
-  SharedResources();
-  virtual ~SharedResources();
+  SharedResourcesGL();
+  virtual ~SharedResourcesGL();
 
   bool Initialize();
   void Destroy();
@@ -60,7 +63,7 @@ class COMPOSITOR_EXPORT SharedResources {
   scoped_ptr<ui::TextureProgramGL> program_swizzle_;
   scoped_ptr<ui::TextureProgramGL> program_no_swizzle_;
 
-  DISALLOW_COPY_AND_ASSIGN(SharedResources);
+  DISALLOW_COPY_AND_ASSIGN(SharedResourcesGL);
 };
 
 class COMPOSITOR_EXPORT TextureGL : public Texture {
@@ -97,6 +100,9 @@ class COMPOSITOR_EXPORT CompositorGL : public Compositor {
                gfx::AcceleratedWidget widget,
                const gfx::Size& size);
   virtual ~CompositorGL();
+
+  // Overridden from Compositor.
+  virtual bool ReadPixels(SkBitmap* bitmap, const gfx::Rect& bounds) OVERRIDE;
 
   void MakeCurrent();
   gfx::Size GetSize();

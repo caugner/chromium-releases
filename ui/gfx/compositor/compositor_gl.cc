@@ -5,16 +5,20 @@
 #include "ui/gfx/compositor/compositor_gl.h"
 
 #include "base/basictypes.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/threading/thread_restrictions.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkDevice.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "third_party/skia/include/core/SkScalar.h"
+#include "ui/gfx/compositor/compositor_switches.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/gl/gl_bindings.h"
@@ -114,23 +118,44 @@ GLuint CompileShader(GLenum type, const GLchar* source) {
 }
 
 bool TextureProgramNoSwizzleGL::Initialize() {
-  const GLchar* frag_shader_source =
-      "#ifdef GL_ES\n"
-      "precision mediump float;\n"
-      "#endif\n"
-      "uniform float u_alpha;"
-      "uniform sampler2D u_tex;"
-      "varying vec2 v_texCoord;"
-      "void main()"
-      "{"
-      "  gl_FragColor = texture2D(u_tex, v_texCoord);"
-      "  if (u_alpha > 0.0)"
-      "    gl_FragColor.a = u_alpha;"
-      "  else"
-      "    gl_FragColor.a = gl_FragColor.a * -u_alpha;"
-      "}";
+  const bool debug_overdraw = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableCompositorOverdrawDebugging);
 
-  frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  if (debug_overdraw) {
+    const GLchar* frag_shader_source =
+        "#ifdef GL_ES\n"
+        "precision mediump float;\n"
+        "#endif\n"
+        "uniform sampler2D u_tex;"
+        "varying vec2 v_texCoord;"
+        "void main()"
+        "{"
+        "  gl_FragColor = texture2D(u_tex, v_texCoord);"
+        "  gl_FragColor.a = 1.0;"
+        "  gl_FragColor = gl_FragColor * 0.25;"
+        "  gl_FragColor = gl_FragColor + vec4(0.75, 0.75, 0.75, 0.75);"
+        "  gl_FragColor = gl_FragColor * 0.3333333;"
+        "}";
+    frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  } else {
+    const GLchar* frag_shader_source =
+        "#ifdef GL_ES\n"
+        "precision mediump float;\n"
+        "#endif\n"
+        "uniform float u_alpha;"
+        "uniform sampler2D u_tex;"
+        "varying vec2 v_texCoord;"
+        "void main()"
+        "{"
+        "  gl_FragColor = texture2D(u_tex, v_texCoord);"
+        "  if (u_alpha > 0.0)"
+        "    gl_FragColor.a = u_alpha;"
+        "  else"
+        "    gl_FragColor.a = gl_FragColor.a * -u_alpha;"
+        "}";
+    frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  }
+
   if (!frag_shader_)
     return false;
 
@@ -138,23 +163,44 @@ bool TextureProgramNoSwizzleGL::Initialize() {
 }
 
 bool TextureProgramSwizzleGL::Initialize() {
-  const GLchar* frag_shader_source =
-      "#ifdef GL_ES\n"
-      "precision mediump float;\n"
-      "#endif\n"
-      "uniform float u_alpha;"
-      "uniform sampler2D u_tex;"
-      "varying vec2 v_texCoord;"
-      "void main()"
-      "{"
-      "  gl_FragColor = texture2D(u_tex, v_texCoord).zyxw;"
-      "  if (u_alpha > 0.0)"
-      "    gl_FragColor.a = u_alpha;"
-      "  else"
-      "    gl_FragColor.a = gl_FragColor.a * -u_alpha;"
-      "}";
+  const bool debug_overdraw = CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableCompositorOverdrawDebugging);
 
-  frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  if (debug_overdraw) {
+    const GLchar* frag_shader_source =
+        "#ifdef GL_ES\n"
+        "precision mediump float;\n"
+        "#endif\n"
+        "uniform sampler2D u_tex;"
+        "varying vec2 v_texCoord;"
+        "void main()"
+        "{"
+        "  gl_FragColor = texture2D(u_tex, v_texCoord).zyxw;"
+        "  gl_FragColor.a = 1.0;"
+        "  gl_FragColor = gl_FragColor * 0.25;"
+        "  gl_FragColor = gl_FragColor + vec4(0.75, 0.75, 0.75, 0.75);"
+        "  gl_FragColor = gl_FragColor * 0.3333333;"
+        "}";
+    frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  } else {
+    const GLchar* frag_shader_source =
+        "#ifdef GL_ES\n"
+        "precision mediump float;\n"
+        "#endif\n"
+        "uniform float u_alpha;"
+        "uniform sampler2D u_tex;"
+        "varying vec2 v_texCoord;"
+        "void main()"
+        "{"
+        "  gl_FragColor = texture2D(u_tex, v_texCoord).zyxw;"
+        "  if (u_alpha > 0.0)"
+        "    gl_FragColor.a = u_alpha;"
+        "  else"
+        "    gl_FragColor.a = gl_FragColor.a * -u_alpha;"
+        "}";
+    frag_shader_ = CompileShader(GL_FRAGMENT_SHADER, frag_shader_source);
+  }
+
   if (!frag_shader_)
     return false;
 
@@ -208,19 +254,19 @@ bool TextureProgramGL::InitializeCommon() {
   return true;
 }
 
-SharedResources::SharedResources() : initialized_(false) {
+SharedResourcesGL::SharedResourcesGL() : initialized_(false) {
 }
 
 
-SharedResources::~SharedResources() {
+SharedResourcesGL::~SharedResourcesGL() {
 }
 
 // static
-SharedResources* SharedResources::GetInstance() {
+SharedResourcesGL* SharedResourcesGL::GetInstance() {
   // We use LeakySingletonTraits so that we don't race with
   // the tear down of the gl_bindings.
-  SharedResources* instance = Singleton<SharedResources,
-      LeakySingletonTraits<SharedResources> >::get();
+  SharedResourcesGL* instance = Singleton<SharedResourcesGL,
+      LeakySingletonTraits<SharedResourcesGL> >::get();
   if (instance->Initialize()) {
     return instance;
   } else {
@@ -229,7 +275,7 @@ SharedResources* SharedResources::GetInstance() {
   }
 }
 
-bool SharedResources::Initialize() {
+bool SharedResourcesGL::Initialize() {
   if (initialized_)
     return true;
 
@@ -286,7 +332,7 @@ bool SharedResources::Initialize() {
   return true;
 }
 
-void SharedResources::Destroy() {
+void SharedResourcesGL::Destroy() {
   program_swizzle_.reset();
   program_no_swizzle_.reset();
 
@@ -296,14 +342,15 @@ void SharedResources::Destroy() {
   initialized_ = false;
 }
 
-bool SharedResources::MakeSharedContextCurrent() {
-  if (!initialized_)
-    return false;
+gfx::ScopedMakeCurrent* SharedResourcesGL::GetScopedMakeCurrent() {
+  DCHECK(initialized_);
+  if (initialized_)
+    return new gfx::ScopedMakeCurrent(context_.get(), surface_.get());
   else
-    return context_->MakeCurrent(surface_.get());
+    return NULL;
 }
 
-scoped_refptr<gfx::GLContext> SharedResources::CreateContext(
+scoped_refptr<gfx::GLContext> SharedResourcesGL::CreateContext(
     gfx::GLSurface* surface) {
   if (initialized_)
     return gfx::GLContext::CreateGLContext(
@@ -314,6 +361,10 @@ scoped_refptr<gfx::GLContext> SharedResources::CreateContext(
     return NULL;
 }
 
+void* SharedResourcesGL::GetDisplay() {
+  return surface_->GetDisplay();
+}
+
 TextureGL::TextureGL() : texture_id_(0) {
 }
 
@@ -322,9 +373,9 @@ TextureGL::TextureGL(const gfx::Size& size) : texture_id_(0), size_(size) {
 
 TextureGL::~TextureGL() {
   if (texture_id_) {
-    SharedResources* instance = SharedResources::GetInstance();
+    SharedResourcesGL* instance = SharedResourcesGL::GetInstance();
     DCHECK(instance);
-    instance->MakeSharedContextCurrent();
+    scoped_ptr<gfx::ScopedMakeCurrent> bind(instance->GetScopedMakeCurrent());
     glDeleteTextures(1, &texture_id_);
   }
 }
@@ -332,6 +383,7 @@ TextureGL::~TextureGL() {
 void TextureGL::SetCanvas(const SkCanvas& canvas,
                           const gfx::Point& origin,
                           const gfx::Size& overall_size) {
+  TRACE_EVENT0("ui", "TextureGL::SetCanvas");
   const SkBitmap& bitmap = canvas.getDevice()->accessBitmap(false);
   // Verify bitmap pixels are contiguous.
   DCHECK_EQ(bitmap.rowBytes(),
@@ -348,7 +400,7 @@ void TextureGL::SetCanvas(const SkCanvas& canvas,
     glBindTexture(GL_TEXTURE_2D, texture_id_);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
                  size_.width(), size_.height(), 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+                 GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -359,18 +411,19 @@ void TextureGL::SetCanvas(const SkCanvas& canvas,
     glBindTexture(GL_TEXTURE_2D, texture_id_);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
                  size_.width(), size_.height(), 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-  } else {  // Uploading partial texture.
+                 GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  } else {
     glBindTexture(GL_TEXTURE_2D, texture_id_);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, origin.x(), origin.y(),
-                    bitmap.width(), bitmap.height(),
-                    GL_RGBA, GL_UNSIGNED_BYTE, pixels);
   }
+  glTexSubImage2D(GL_TEXTURE_2D, 0, origin.x(), origin.y(),
+                  bitmap.width(), bitmap.height(),
+                  GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 }
 
 void TextureGL::Draw(const ui::TextureDrawParams& params,
                      const gfx::Rect& clip_bounds_in_texture) {
-  SharedResources* instance = SharedResources::GetInstance();
+  TRACE_EVENT0("ui", "TextureGL::Draw");
+  SharedResourcesGL* instance = SharedResourcesGL::GetInstance();
   DCHECK(instance);
   DrawInternal(*instance->program_swizzle(),
                params,
@@ -486,16 +539,63 @@ CompositorGL::CompositorGL(CompositorDelegate* delegate,
     : Compositor(delegate, size),
       started_(false) {
   gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, widget);
-  gl_context_ = SharedResources::GetInstance()->
+  gl_context_ = SharedResourcesGL::GetInstance()->
       CreateContext(gl_surface_.get());
   gl_context_->MakeCurrent(gl_surface_.get());
-  gl_context_->SetSwapInterval(1);
+
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+
+  if (!command_line->HasSwitch(switches::kDisableUIVsync))
+    gl_context_->SetSwapInterval(1);
+
   glColorMask(true, true, true, true);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  const bool debug_overdraw = command_line->HasSwitch(
+      switches::kEnableCompositorOverdrawDebugging);
+
+  if (debug_overdraw)
+    glBlendFunc(GL_ONE, GL_ONE);
+  else
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 CompositorGL::~CompositorGL() {
   gl_context_ = NULL;
+}
+
+bool CompositorGL::ReadPixels(SkBitmap* bitmap, const gfx::Rect& bounds) {
+  MakeCurrent();
+
+  if (bounds.right() > size().width() || bounds.bottom() > size().height())
+    return false;
+
+  bitmap->setConfig(SkBitmap::kARGB_8888_Config,
+                    bounds.width(),
+                    bounds.height());
+  bitmap->allocPixels();
+  SkAutoLockPixels lock(*bitmap);
+  unsigned char* pixels = static_cast<unsigned char*>(bitmap->getPixels());
+
+  // Check that it's a tight pixel packing
+  DCHECK_EQ(bitmap->rowBytes(),
+            SkBitmap::ComputeRowBytes(bitmap->config(), bitmap->width()));
+
+  GLint current_alignment = 0;
+  glGetIntegerv(GL_PACK_ALIGNMENT, &current_alignment);
+  glPixelStorei(GL_PACK_ALIGNMENT, 4);
+
+  // Flip vertically to convert to OpenGL coordinates.
+  glReadPixels(bounds.x(),
+               size().height() - bounds.y() - bounds.height(),
+               bounds.width(),
+               bounds.height(),
+               GL_RGBA,
+               GL_UNSIGNED_BYTE,
+               pixels);
+  glPixelStorei(GL_PACK_ALIGNMENT, current_alignment);
+
+  SwizzleRGBAToBGRAAndFlip(pixels, bounds.size());
+  return true;
 }
 
 void CompositorGL::MakeCurrent() {
@@ -511,6 +611,7 @@ Texture* CompositorGL::CreateTexture() {
 }
 
 void CompositorGL::OnNotifyStart(bool clear) {
+  TRACE_EVENT0("ui", "CompositorGL::OnNotifyStart");
   started_ = true;
   gl_context_->MakeCurrent(gl_surface_.get());
   glViewport(0, 0, size().width(), size().height());
@@ -531,6 +632,7 @@ void CompositorGL::OnNotifyStart(bool clear) {
 }
 
 void CompositorGL::OnNotifyEnd() {
+  TRACE_EVENT0("ui", "CompositorGL::OnNotifyEnd");
   DCHECK(started_);
   gl_surface_->SwapBuffers();
   started_ = false;
@@ -544,7 +646,7 @@ void CompositorGL::Blur(const gfx::Rect& bounds) {
 Compositor* Compositor::Create(CompositorDelegate* owner,
                                gfx::AcceleratedWidget widget,
                                const gfx::Size& size) {
-  if (SharedResources::GetInstance() == NULL)
+  if (SharedResourcesGL::GetInstance() == NULL)
     return NULL;
   else
     return new CompositorGL(owner, widget, size);

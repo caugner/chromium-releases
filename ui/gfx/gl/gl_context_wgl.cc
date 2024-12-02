@@ -23,43 +23,38 @@ GLContextWGL::~GLContextWGL() {
 }
 
 std::string GLContextWGL::GetExtensions() {
-  if (wglGetExtensionsStringARB) {
-    // TODO(apatrick): When contexts and surfaces are separated, we won't be
-    // able to use surface_ here. Either use a display device context or the
-    // surface that was passed to MakeCurrent.
-    const char* extensions = wglGetExtensionsStringARB(
-        GLSurfaceWGL::GetDisplay());
-    if (extensions) {
-      return GLContext::GetExtensions() + " " + extensions;
-    }
-  }
+  const char* extensions = NULL;
+  if (wglGetExtensionsStringARB)
+    extensions = wglGetExtensionsStringARB(GLSurfaceWGL::GetDisplayDC());
+  else if (wglGetExtensionsStringEXT)
+    extensions = wglGetExtensionsStringEXT();
+
+  if (extensions)
+    return GLContext::GetExtensions() + " " + extensions;
 
   return GLContext::GetExtensions();
 }
 
 bool GLContextWGL::Initialize(
     GLSurface* compatible_surface, GpuPreference gpu_preference) {
-  GLSurfaceWGL* surface_wgl = static_cast<GLSurfaceWGL*>(compatible_surface);
+  // Get the handle of another initialized context in the share group _before_
+  // setting context_. Otherwise this context will be considered initialized
+  // and could potentially be returned by GetHandle.
+  HGLRC share_handle = static_cast<HGLRC>(share_group()->GetHandle());
 
-  // TODO(apatrick): When contexts and surfaces are separated, we won't be
-  // able to use surface_ here. Either use a display device context or a
-  // surface that the context is compatible with not necessarily limited to
-  // rendering to.
-  context_ = wglCreateContext(static_cast<HDC>(surface_wgl->GetHandle()));
+  context_ = wglCreateContext(
+      static_cast<HDC>(compatible_surface->GetHandle()));
   if (!context_) {
     LOG(ERROR) << "Failed to create GL context.";
     Destroy();
     return false;
   }
 
-  if (share_group()) {
-    HGLRC share_handle = static_cast<HGLRC>(share_group()->GetHandle());
-    if (share_handle) {
-      if (!wglShareLists(share_handle, context_)) {
-        LOG(ERROR) << "Could not share GL contexts.";
-        Destroy();
-        return false;
-      }
+  if (share_handle) {
+    if (!wglShareLists(share_handle, context_)) {
+      LOG(ERROR) << "Could not share GL contexts.";
+      Destroy();
+      return false;
     }
   }
 
@@ -84,6 +79,11 @@ bool GLContextWGL::MakeCurrent(GLSurface* surface) {
   }
 
   SetCurrent(this, surface);
+  if (!InitializeExtensionBindings()) {
+    ReleaseCurrent(surface);
+    return false;
+  }
+
   if (!surface->OnMakeCurrent(this)) {
     LOG(ERROR) << "Could not make current.";
     return false;
@@ -126,7 +126,7 @@ void* GLContextWGL::GetHandle() {
 
 void GLContextWGL::SetSwapInterval(int interval) {
   DCHECK(IsCurrent(NULL));
-  if (HasExtension("WGL_EXT_swap_control") && wglSwapIntervalEXT) {
+  if (gfx::g_WGL_EXT_swap_control) {
     wglSwapIntervalEXT(interval);
   } else {
       LOG(WARNING) <<

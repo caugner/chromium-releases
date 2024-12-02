@@ -20,15 +20,19 @@ namespace prerender {
 
 namespace {
 
-int omnibox_original_group_id = 0;
-int omnibox_conservative_group_id = 0;
+int omnibox_exact_group_id = 0;
+int omnibox_exact_full_group_id = 0;
 
 const char* kOmniboxHeuristicNames[] = {
-  "Original",
-  "Conservative",
+  "Exact",
+  "Exact_Full"
 };
 COMPILE_ASSERT(arraysize(kOmniboxHeuristicNames) == OMNIBOX_HEURISTIC_MAX,
                OmniboxHeuristic_name_count_mismatch);
+
+const char kPrerenderFromOmniboxTrialName[] = "PrerenderFromOmnibox";
+const char kPrerenderFromOmniboxHeuristicTrialName[] =
+    "PrerenderFromOmniboxHeuristic";
 
 const char* NameFromOmniboxHeuristic(OmniboxHeuristic heuristic) {
   DCHECK_LT(static_cast<unsigned int>(heuristic),
@@ -76,20 +80,25 @@ void ConfigurePrefetchAndPrerender(const CommandLine& command_line) {
   switch (prerender_option) {
     case PRERENDER_OPTION_AUTO: {
       base::FieldTrial::Probability divisor = 1000;
-      base::FieldTrial::Probability exp1_probability = 250;
-      base::FieldTrial::Probability control1_probability = 250;
-      base::FieldTrial::Probability exp2_probability = 250;
-      base::FieldTrial::Probability control2_probability = 250;
+      base::FieldTrial::Probability exp1_probability = 200;
+      base::FieldTrial::Probability control1_probability = 200;
+      base::FieldTrial::Probability no_use1_probability = 100;
+      base::FieldTrial::Probability exp2_probability = 200;
+      base::FieldTrial::Probability control2_probability = 200;
+      base::FieldTrial::Probability no_use2_probability = 100;
       chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
       if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
           channel == chrome::VersionInfo::CHANNEL_BETA) {
         exp1_probability = 495;
         control1_probability = 5;
+        no_use1_probability = 0;
         exp2_probability = 495;
         control2_probability = 5;
+        no_use2_probability = 0;
       }
       CHECK_EQ(divisor, exp1_probability + control1_probability +
-               exp2_probability + control2_probability);
+               no_use1_probability + exp2_probability +
+               control2_probability + no_use2_probability);
       scoped_refptr<base::FieldTrial> trial(
           new base::FieldTrial("Prefetch", divisor,
                                "ContentPrefetchPrerender1", 2012, 6, 30));
@@ -98,12 +107,18 @@ void ConfigurePrefetchAndPrerender(const CommandLine& command_line) {
       const int kPrerenderControl1Group =
           trial->AppendGroup("ContentPrefetchPrerenderControl1",
                              control1_probability);
+      const int kPrerenderNoUse1Group =
+          trial->AppendGroup("ContentPrefetchPrerenderNoUse1",
+                             no_use1_probability);
       const int kPrerenderExperiment2Group =
           trial->AppendGroup("ContentPrefetchPrerender2",
                              exp2_probability);
       const int kPrerenderControl2Group =
           trial->AppendGroup("ContentPrefetchPrerenderControl2",
                              control2_probability);
+      const int kPrerenderNoUse2Group =
+          trial->AppendGroup("ContentPrefetchPrerenderNoUse2",
+                             no_use2_probability);
       const int trial_group = trial->group();
       if (trial_group == kPrerenderExperiment1Group ||
                  trial_group == kPrerenderExperiment2Group) {
@@ -115,6 +130,11 @@ void ConfigurePrefetchAndPrerender(const CommandLine& command_line) {
         ResourceDispatcherHost::set_is_prefetch_enabled(false);
         PrerenderManager::SetMode(
             PrerenderManager::PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP);
+      } else if (trial_group == kPrerenderNoUse1Group ||
+                 trial_group == kPrerenderNoUse2Group) {
+        ResourceDispatcherHost::set_is_prefetch_enabled(false);
+        PrerenderManager::SetMode(
+            PrerenderManager::PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP);
       } else {
         NOTREACHED();
       }
@@ -147,21 +167,20 @@ void ConfigurePrerenderFromOmnibox() {
   // Field trial to see if we're enabled.
   const base::FieldTrial::Probability kDivisor = 100;
 
-  const base::FieldTrial::Probability kEnabledProbability = 40;
+  const base::FieldTrial::Probability kEnabledProbability = 90;
   scoped_refptr<base::FieldTrial> enabled_trial(
-      new base::FieldTrial("PrerenderFromOmnibox", kDivisor,
+      new base::FieldTrial(kPrerenderFromOmniboxTrialName, kDivisor,
                            "OmniboxPrerenderDisabled", 2012, 8, 30));
   enabled_trial->AppendGroup("OmniboxPrerenderEnabled", kEnabledProbability);
 
   // Field trial to see which heuristic to use.
-  const base::FieldTrial::Probability kConservativeProbability = 50;
+  const base::FieldTrial::Probability kExactFullProbability = 90;
   scoped_refptr<base::FieldTrial> heuristic_trial(
-      new base::FieldTrial("PrerenderFromOmniboxHeuristic", kDivisor,
+      new base::FieldTrial(kPrerenderFromOmniboxHeuristicTrialName, kDivisor,
                            "OriginalAlgorithm", 2012, 8, 30));
-  omnibox_original_group_id = base::FieldTrial::kDefaultGroupNumber;
-  omnibox_conservative_group_id =
-      heuristic_trial->AppendGroup("ConservativeAlgorithm",
-                                   kConservativeProbability);
+  omnibox_exact_group_id = base::FieldTrial::kDefaultGroupNumber;
+  omnibox_exact_full_group_id =
+      heuristic_trial->AppendGroup("ExactFullAlgorithm", kExactFullProbability);
 }
 
 bool IsOmniboxEnabled(Profile* profile) {
@@ -190,21 +209,22 @@ bool IsOmniboxEnabled(Profile* profile) {
   if (!MetricsServiceHelper::IsMetricsReportingEnabled())
     return false;
 
-  const int group = base::FieldTrialList::FindValue("PrerenderFromOmnibox");
+  const int group =
+      base::FieldTrialList::FindValue(kPrerenderFromOmniboxTrialName);
   return group != base::FieldTrial::kNotFinalized &&
          group != base::FieldTrial::kDefaultGroupNumber;
 }
 
 OmniboxHeuristic GetOmniboxHeuristicToUse() {
   const int group =
-      base::FieldTrialList::FindValue("PrerenderFromOmniboxHeuristic");
-  if (group == omnibox_original_group_id)
-    return OMNIBOX_HEURISTIC_ORIGINAL;
-  if (group == omnibox_conservative_group_id)
-    return OMNIBOX_HEURISTIC_CONSERVATIVE;
+      base::FieldTrialList::FindValue(kPrerenderFromOmniboxHeuristicTrialName);
+  if (group == omnibox_exact_group_id)
+    return OMNIBOX_HEURISTIC_EXACT;
+  if (group == omnibox_exact_full_group_id)
+    return OMNIBOX_HEURISTIC_EXACT_FULL;
 
-  // If we don't have a group just return the original heuristic.
-  return OMNIBOX_HEURISTIC_ORIGINAL;
+  // If we don't have a group just return the exact heuristic.
+  return OMNIBOX_HEURISTIC_EXACT;
 }
 
 std::string GetOmniboxHistogramSuffix() {

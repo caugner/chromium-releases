@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 #pragma once
 
+#include "chrome/browser/ui/dialog_style.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -15,6 +16,7 @@ class HtmlDialogUIDelegate;
 class Profile;
 class SkBitmap;
 class TabContents;
+class TemplateURL;
 
 namespace browser {
 
@@ -34,7 +36,8 @@ void ShowAboutIPCDialog();
 // Make sure to use the returned window only when you know it is safe
 // to do so, i.e. before OnDialogClosed() is called on the delegate.
 gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent, Profile* profile,
-                                 HtmlDialogUIDelegate* delegate);
+                                 HtmlDialogUIDelegate* delegate,
+                                 DialogStyle style);
 
 // Creates the ExtensionInstalledBubble and schedules it to be shown once
 // the extension has loaded. |extension| is the installed extension. |browser|
@@ -55,6 +58,10 @@ void HideHungRendererDialog(TabContents* contents);
 void ShowNativeHungRendererDialog(TabContents* contents);
 void HideNativeHungRendererDialog(TabContents* contents);
 
-} // namespace browser
+// Show the edit search engine dialog.
+void ConfirmAddSearchProvider(const TemplateURL* template_url,
+                              Profile* profile);
+
+}  // namespace browser
 
 #endif  // CHROME_BROWSER_UI_BROWSER_DIALOGS_H_

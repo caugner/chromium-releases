@@ -9,6 +9,7 @@
 #include <sstream>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -242,7 +243,7 @@ TEST(StringUtilTest, TrimWhitespace) {
   // Once more, but with a string of whitespace
   output = ASCIIToUTF16("  \r\n");
   EXPECT_EQ(TRIM_ALL, TrimWhitespace(output, TRIM_ALL, &output));
-  EXPECT_EQ(ASCIIToUTF16(""), output);
+  EXPECT_EQ(string16(), output);
 
   std::string output_ascii;
   for (size_t i = 0; i < arraysize(trim_cases_ascii); ++i) {
@@ -327,7 +328,7 @@ TEST(StringUtilTest, ContainsOnlyWhitespaceASCII) {
 }
 
 TEST(StringUtilTest, ContainsOnlyWhitespace) {
-  EXPECT_TRUE(ContainsOnlyWhitespace(ASCIIToUTF16("")));
+  EXPECT_TRUE(ContainsOnlyWhitespace(string16()));
   EXPECT_TRUE(ContainsOnlyWhitespace(ASCIIToUTF16(" ")));
   EXPECT_TRUE(ContainsOnlyWhitespace(ASCIIToUTF16("\t")));
   EXPECT_TRUE(ContainsOnlyWhitespace(ASCIIToUTF16("\t \r \n  ")));
@@ -1066,6 +1067,39 @@ TEST(StringUtilTest, RemoveChars) {
   EXPECT_EQ(std::string(), input);
 }
 
+TEST(StringUtilTest, ReplaceChars) {
+  struct TestData {
+    const char* input;
+    const char* replace_chars;
+    const char* replace_with;
+    const char* output;
+    bool result;
+  } cases[] = {
+    { "", "", "", "", false },
+    { "test", "", "", "test", false },
+    { "test", "", "!", "test", false },
+    { "test", "z", "!", "test", false },
+    { "test", "e", "!", "t!st", true },
+    { "test", "e", "!?", "t!?st", true },
+    { "test", "ez", "!", "t!st", true },
+    { "test", "zed", "!?", "t!?st", true },
+    { "test", "t", "!?", "!?es!?", true },
+    { "test", "et", "!>", "!>!>s!>", true },
+    { "test", "zest", "!", "!!!!", true },
+    { "test", "szt", "!", "!e!!", true },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+    std::string output;
+    bool result = ReplaceChars(cases[i].input,
+                               cases[i].replace_chars,
+                               cases[i].replace_with,
+                               &output);
+    EXPECT_EQ(cases[i].result, result);
+    EXPECT_EQ(cases[i].output, output);
+  }
+}
+
 TEST(StringUtilTest, ContainsOnlyChars) {
   // Providing an empty list of characters should return false but for the empty
   // string.
@@ -1077,6 +1111,41 @@ TEST(StringUtilTest, ContainsOnlyChars) {
   EXPECT_TRUE(ContainsOnlyChars("1", "4321"));
   EXPECT_TRUE(ContainsOnlyChars("123", "4321"));
   EXPECT_FALSE(ContainsOnlyChars("123a", "4321"));
+}
+
+class WriteIntoTest : public testing::Test {
+ protected:
+  static void WritesCorrectly(size_t num_chars) {
+    std::string buffer;
+    char kOriginal[] = "supercali";
+    strncpy(WriteInto(&buffer, num_chars + 1), kOriginal, num_chars);
+    // Using std::string(buffer.c_str()) instead of |buffer| truncates the
+    // string at the first \0.
+    EXPECT_EQ(std::string(kOriginal,
+                          std::min(num_chars, arraysize(kOriginal) - 1)),
+              std::string(buffer.c_str()));
+    EXPECT_EQ(num_chars, buffer.size());
+  }
+};
+
+TEST_F(WriteIntoTest, WriteInto) {
+  // Validate that WriteInto reserves enough space and
+  // sizes a string correctly.
+  WritesCorrectly(1);
+  WritesCorrectly(2);
+  WritesCorrectly(5000);
+
+  // Validate that WriteInto doesn't modify other strings
+  // when using a Copy-on-Write implementation.
+  const char kLive[] = "live";
+  const char kDead[] = "dead";
+  const std::string live = kLive;
+  std::string dead = live;
+  strncpy(WriteInto(&dead, 5), kDead, 4);
+  EXPECT_EQ(kDead, dead);
+  EXPECT_EQ(4u, dead.size());
+  EXPECT_EQ(kLive, live);
+  EXPECT_EQ(4u, live.size());
 }
 
 }  // namespace base

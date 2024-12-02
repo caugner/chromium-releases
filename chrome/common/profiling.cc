@@ -17,7 +17,7 @@
 namespace {
 std::string GetProfileName() {
   static const char kDefaultProfileName[] = "chrome-profile-{type}-{pid}";
-  static std::string profile_name;
+  CR_DEFINE_STATIC_LOCAL(std::string, profile_name, ());
 
   if (profile_name.empty()) {
     const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -54,7 +54,7 @@ void FlushProfilingData(base::Thread* thread) {
     }
   }
   thread->message_loop()->PostDelayedTask(
-      FROM_HERE, base::Bind(FlushProfilingData, thread), flush_seconds * 1000);
+      FROM_HERE, base::Bind(&FlushProfilingData, thread), flush_seconds * 1000);
 }
 
 class ProfilingThreadControl {
@@ -69,7 +69,7 @@ class ProfilingThreadControl {
     thread_ = new base::Thread("Profiling_Flush");
     thread_->Start();
     thread_->message_loop()->PostTask(
-        FROM_HERE, base::Bind(FlushProfilingData, thread_));
+        FROM_HERE, base::Bind(&FlushProfilingData, thread_));
   }
 
   void Stop() {
@@ -91,7 +91,7 @@ class ProfilingThreadControl {
 
 base::LazyInstance<ProfilingThreadControl,
                    base::LeakyLazyInstanceTraits<ProfilingThreadControl> >
-    g_flush_thread_control(base::LINKER_INITIALIZED);
+    g_flush_thread_control = LAZY_INSTANCE_INITIALIZER;
 
 } // namespace
 

@@ -35,7 +35,6 @@
 #include "ppapi/cpp/var.h"
 
 struct NaClSrpcChannel;
-struct NaClDesc;
 
 namespace nacl {
 class DescWrapper;
@@ -168,15 +167,27 @@ class Plugin : public pp::InstancePrivate {
   void ReportLoadError(const ErrorInfo& error_info);
   // Report loading a module was aborted, typically due to user action.
   void ReportLoadAbort();
+
   // Dispatch a JavaScript event to indicate a key step in loading.
   // |event_type| is a character string indicating which type of progress
   // event (loadstart, progress, error, abort, load, loadend).  Events are
   // enqueued on the JavaScript event loop, which then calls back through
   // DispatchProgressEvent.
+  void EnqueueProgressEvent(const char* event_type);
   void EnqueueProgressEvent(const char* event_type,
+                            const nacl::string& url,
                             LengthComputable length_computable,
                             uint64_t loaded_bytes,
                             uint64_t total_bytes);
+
+  // Progress event types.
+  static const char* const kProgressEventLoadStart;
+  static const char* const kProgressEventProgress;
+  static const char* const kProgressEventError;
+  static const char* const kProgressEventAbort;
+  static const char* const kProgressEventLoad;
+  static const char* const kProgressEventLoadEnd;
+  static const char* const kProgressEventCrash;
 
   // Report the error code that sel_ldr produces when starting a nexe.
   void ReportSelLdrLoadStatus(int status);
@@ -431,13 +442,6 @@ class Plugin : public pp::InstancePrivate {
                                     ErrorInfo* error_info,
                                     bool* is_portable);
 
-  // TODO(jvoung): get rid of these once we find a better way to store / install
-  // the pnacl translator nexes.
-  bool SelectLLCURLFromManifest(nacl::string* result,
-                                ErrorInfo* error_info);
-  bool SelectLDURLFromManifest(nacl::string* result,
-                               ErrorInfo* error_info);
-
   // Logs timing information to a UMA histogram, and also logs the same timing
   // information divided by the size of the nexe to another histogram.
   void HistogramStartupTimeSmall(const std::string& name, float dt);
@@ -542,7 +546,8 @@ class Plugin : public pp::InstancePrivate {
   int64_t ready_time_;
   size_t nexe_size_;
 
-  static void UpdateNexeDownloadProgress(
+  // Callback to receive .nexe and .dso download progress notifications.
+  static void UpdateDownloadProgress(
       PP_Instance pp_instance,
       PP_Resource pp_resource,
       int64_t bytes_sent,
@@ -550,7 +555,12 @@ class Plugin : public pp::InstancePrivate {
       int64_t bytes_received,
       int64_t total_bytes_to_be_received);
 
-  int64_t last_event_bytes_received_;
+  // Finds the file downloader which owns the given URL loader. This is used
+  // in UpdateDownloadProgress to map a url loader back to the URL being
+  // downloaded.
+  const FileDownloader* FindFileDownloader(PP_Resource url_loader) const;
+
+  int64_t time_of_last_progress_event_;
 };
 
 }  // namespace plugin

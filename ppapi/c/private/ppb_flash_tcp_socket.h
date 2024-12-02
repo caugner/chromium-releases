@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-/* From private/ppb_flash_tcp_socket.idl modified Fri Sep 23 17:09:42 2011. */
+/* From private/ppb_flash_tcp_socket.idl modified Wed Nov  9 12:53:35 2011. */
 
 #ifndef PPAPI_C_PRIVATE_PPB_FLASH_TCP_SOCKET_H_
 #define PPAPI_C_PRIVATE_PPB_FLASH_TCP_SOCKET_H_
@@ -14,6 +14,7 @@
 #include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
+#include "ppapi/c/private/ppb_net_address_private.h"
 
 #define PPB_FLASH_TCPSOCKET_INTERFACE_0_2 "PPB_Flash_TCPSocket;0.2"
 #define PPB_FLASH_TCPSOCKET_INTERFACE PPB_FLASH_TCPSOCKET_INTERFACE_0_2
@@ -23,22 +24,6 @@
  * This file defines the <code>PPB_Flash_TCPSocket</code> interface.
  */
 
-
-/**
- * @addtogroup Structs
- * @{
- */
-/**
- * This is an opaque type holding a network address.
- */
-struct PP_Flash_NetAddress {
-  uint32_t size;
-  char data[128];
-};
-PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_Flash_NetAddress, 132);
-/**
- * @}
- */
 
 /**
  * @addtogroup Interfaces
@@ -71,20 +56,20 @@ struct PPB_Flash_TCPSocket {
    * use-case would be for reconnections.
    */
   int32_t (*ConnectWithNetAddress)(PP_Resource tcp_socket,
-                                   const struct PP_Flash_NetAddress* addr,
+                                   const struct PP_NetAddress_Private* addr,
                                    struct PP_CompletionCallback callback);
   /**
    * Gets the local address of the socket, if it has been connected.
    * Returns PP_TRUE on success.
    */
   PP_Bool (*GetLocalAddress)(PP_Resource tcp_socket,
-                             struct PP_Flash_NetAddress* local_addr);
+                             struct PP_NetAddress_Private* local_addr);
   /**
    * Gets the remote address of the socket, if it has been connected.
    * Returns PP_TRUE on success.
    */
   PP_Bool (*GetRemoteAddress)(PP_Resource tcp_socket,
-                              struct PP_Flash_NetAddress* remote_addr);
+                              struct PP_NetAddress_Private* remote_addr);
   /**
    * Does SSL handshake and moves to sending and receiving encrypted data. The
    * socket must have been successfully connected. |server_name| will be

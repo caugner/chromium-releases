@@ -7,12 +7,13 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "chrome/browser/ui/browser.h"
+#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
 // Base class which contains a valid Browser*.  Lots of boilerplate to
 // recycle between unit test classes.
@@ -37,9 +38,9 @@ class CocoaProfileTest : public CocoaTest {
   // succeed, else it will ASSERT and cause the test to fail. Subclasses that
   // do work in SetUp should ASSERT that either browser() or profile() are
   // non-NULL before proceeding after the call to super (this).
-  virtual void SetUp();
+  virtual void SetUp() OVERRIDE;
 
-  virtual void TearDown();
+  virtual void TearDown() OVERRIDE;
 
   TestingProfileManager* testing_profile_manager() {
     return &profile_manager_;
@@ -58,14 +59,14 @@ class CocoaProfileTest : public CocoaTest {
 
  private:
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 
   TestingProfileManager profile_manager_;
   TestingProfile* profile_;  // Weak; owned by profile_manager_.
   scoped_ptr<Browser> browser_;
 
-  scoped_ptr<BrowserThread> file_thread_;
-  scoped_ptr<BrowserThread> io_thread_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> io_thread_;
 };
 
 #endif  // CHROME_BROWSER_UI_COCOA_PROFILE_TEST_H_

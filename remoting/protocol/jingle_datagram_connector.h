@@ -5,17 +5,11 @@
 #ifndef REMOTING_PROTOCOL_JINGLE_DATAGRAM_CONNECTOR_H_
 #define REMOTING_PROTOCOL_JINGLE_DATAGRAM_CONNECTOR_H_
 
+#include <string>
+
 #include "net/base/completion_callback.h"
 #include "remoting/protocol/jingle_channel_connector.h"
 #include "remoting/protocol/session.h"
-
-namespace cricket {
-class TransportChannel;
-}  // namespace cricket
-
-namespace jingle_glue {
-class TransportChannelSocketAdapter;
-}  // namespace jingle_glue
 
 namespace remoting {
 namespace protocol {
@@ -29,19 +23,19 @@ class JingleDatagramConnector : public JingleChannelConnector {
                          const Session::DatagramChannelCallback& callback);
   virtual ~JingleDatagramConnector();
 
-  // Starts connection process for the channel. |local_private_key| is
-  // owned by the caller, and must exist until this object is
-  // destroyed.
-  virtual void Connect(bool initiator,
-                       const std::string& local_cert,
-                       const std::string& remote_cert,
-                       crypto::RSAPrivateKey* local_private_key,
+  // JingleChannelConnector implementation.
+  // TODO(sergeyu): In the current implementation ChannelAuthenticator
+  // cannot be used for datagram channels, so needs to be either
+  // extended or replaced with something else here.
+  virtual void Connect(ChannelAuthenticator* authenticator,
                        cricket::TransportChannel* raw_channel) OVERRIDE;
 
  private:
   JingleSession* session_;
   std::string name_;
   Session::DatagramChannelCallback callback_;
+
+  scoped_ptr<ChannelAuthenticator> authenticator_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleDatagramConnector);
 };

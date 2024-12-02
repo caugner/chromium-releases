@@ -7,8 +7,9 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/string_number_conversions.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/content_client.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
@@ -19,6 +20,8 @@
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -192,7 +195,7 @@ bool HttpBridge::MakeSynchronousPost(int* error_code, int* response_code) {
 
   if (!BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
-          NewRunnableMethod(this, &HttpBridge::CallMakeAsynchronousPost))) {
+          base::Bind(&HttpBridge::CallMakeAsynchronousPost, this))) {
     // This usually happens when we're in a unit test.
     LOG(WARNING) << "Could not post CallMakeAsynchronousPost task";
     return false;
@@ -216,12 +219,12 @@ void HttpBridge::MakeAsynchronousPost() {
   if (fetch_state_.aborted)
     return;
 
-  fetch_state_.url_poster = URLFetcher::Create(0, url_for_request_,
-                                               URLFetcher::POST, this);
-  fetch_state_.url_poster->set_request_context(context_getter_for_request_);
-  fetch_state_.url_poster->set_upload_data(content_type_, request_content_);
-  fetch_state_.url_poster->set_extra_request_headers(extra_headers_);
-  fetch_state_.url_poster->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES);
+  fetch_state_.url_poster = content::URLFetcher::Create(
+      url_for_request_, content::URLFetcher::POST, this);
+  fetch_state_.url_poster->SetRequestContext(context_getter_for_request_);
+  fetch_state_.url_poster->SetUploadData(content_type_, request_content_);
+  fetch_state_.url_poster->SetExtraRequestHeaders(extra_headers_);
+  fetch_state_.url_poster->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES);
   fetch_state_.url_poster->Start();
 }
 
@@ -265,12 +268,7 @@ void HttpBridge::Abort() {
   http_post_completed_.Signal();
 }
 
-void HttpBridge::OnURLFetchComplete(const URLFetcher *source,
-                                    const GURL &url,
-                                    const net::URLRequestStatus &status,
-                                    int response_code,
-                                    const net::ResponseCookies &cookies,
-                                    const std::string &data) {
+void HttpBridge::OnURLFetchComplete(const content::URLFetcher *source) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   base::AutoLock lock(fetch_state_lock_);
   if (fetch_state_.aborted)
@@ -278,12 +276,12 @@ void HttpBridge::OnURLFetchComplete(const URLFetcher *source,
 
   fetch_state_.request_completed = true;
   fetch_state_.request_succeeded =
-      (net::URLRequestStatus::SUCCESS == status.status());
-  fetch_state_.http_response_code = response_code;
-  fetch_state_.error_code = status.error();
+      (net::URLRequestStatus::SUCCESS == source->GetStatus().status());
+  fetch_state_.http_response_code = source->GetResponseCode();
+  fetch_state_.error_code = source->GetStatus().error();
 
-  fetch_state_.response_content = data;
-  fetch_state_.response_headers = source->response_headers();
+  source->GetResponseAsString(&fetch_state_.response_content);
+  fetch_state_.response_headers = source->GetResponseHeaders();
 
   // End of the line for url_poster_. It lives only on the IO loop.
   // We defer deletion because we're inside a callback from a component of the

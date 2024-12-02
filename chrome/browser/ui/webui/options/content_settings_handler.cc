@@ -24,12 +24,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/browser/user_metrics.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/content_switches.h"
 #include "grit/generated_resources.h"
@@ -64,6 +66,7 @@ const ContentSettingsTypeNameEntry kContentSettingsTypeGroupNames[] = {
   {CONTENT_SETTINGS_TYPE_INTENTS, "intents"},
   {CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE, "auto-select-certificate"},
   {CONTENT_SETTINGS_TYPE_FULLSCREEN, "fullscreen"},
+  {CONTENT_SETTINGS_TYPE_MOUSELOCK, "mouselock"},
 };
 COMPILE_ASSERT(arraysize(kContentSettingsTypeGroupNames) ==
                    CONTENT_SETTINGS_NUM_TYPES,
@@ -261,6 +264,15 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "intentsAsk", IDS_INTENTS_ASK_RADIO },
     { "intentsBlock", IDS_INTENTS_BLOCK_RADIO },
     { "intents_header", IDS_INTENTS_HEADER },
+    // Fullscreen filter.
+    { "fullscreen_tab_label", IDS_FULLSCREEN_TAB_LABEL },
+    { "fullscreen_header", IDS_FULLSCREEN_HEADER },
+    // Mouse Lock filter.
+    { "mouselock_tab_label", IDS_MOUSE_LOCK_TAB_LABEL },
+    { "mouselock_header", IDS_MOUSE_LOCK_HEADER },
+    { "mouselock_allow", IDS_MOUSE_LOCK_ALLOW_RADIO },
+    { "mouselock_ask", IDS_MOUSE_LOCK_ASK_RADIO },
+    { "mouselock_block", IDS_MOUSE_LOCK_BLOCK_RADIO },
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -277,35 +289,36 @@ void ContentSettingsHandler::GetLocalizedValues(
 void ContentSettingsHandler::Initialize() {
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROFILE_CREATED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 
   UpdateHandlersEnabledRadios();
   UpdateAllExceptionsViewsFromModel();
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   Profile* profile = Profile::FromWebUI(web_ui_);
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
-      Source<Profile>(profile));
+      content::Source<Profile>(profile));
 
   PrefService* prefs = profile->GetPrefs();
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(prefs::kGeolocationContentSettings, this);
 }
 
-void ContentSettingsHandler::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void ContentSettingsHandler::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
-      if (Source<Profile>(source).ptr()->IsOffTheRecord()) {
+      if (content::Source<Profile>(source).ptr()->IsOffTheRecord()) {
         web_ui_->CallJavascriptFunction(
             "ContentSettingsExceptionsArea.OTRProfileDestroyed");
       }
@@ -313,7 +326,7 @@ void ContentSettingsHandler::Observe(int type,
     }
 
     case chrome::NOTIFICATION_PROFILE_CREATED: {
-      if (Source<Profile>(source).ptr()->IsOffTheRecord())
+      if (content::Source<Profile>(source).ptr()->IsOffTheRecord())
         UpdateAllOTRExceptionsViewsFromModel();
       break;
     }
@@ -321,13 +334,13 @@ void ContentSettingsHandler::Observe(int type,
     case chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED: {
       // Filter out notifications from other profiles.
       HostContentSettingsMap* map =
-          Source<HostContentSettingsMap>(source).ptr();
+          content::Source<HostContentSettingsMap>(source).ptr();
       if (map != GetContentSettingsMap() &&
           map != GetOTRContentSettingsMap())
         break;
 
       const ContentSettingsDetails* settings_details =
-          Details<const ContentSettingsDetails>(details).ptr();
+          content::Details<const ContentSettingsDetails>(details).ptr();
 
       // TODO(estade): we pretend update_all() is always true.
       if (settings_details->update_all_types())
@@ -338,7 +351,8 @@ void ContentSettingsHandler::Observe(int type,
     }
 
     case chrome::NOTIFICATION_PREF_CHANGED: {
-      const std::string& pref_name = *Details<std::string>(details).ptr();
+      const std::string& pref_name =
+          *content::Details<std::string>(details).ptr();
       if (pref_name == prefs::kGeolocationContentSettings)
         UpdateGeolocationExceptionsView();
       break;
@@ -362,40 +376,32 @@ void ContentSettingsHandler::Observe(int type,
 void ContentSettingsHandler::UpdateSettingDefaultFromModel(
     ContentSettingsType type) {
   DictionaryValue filter_settings;
+  std::string provider_id;
   filter_settings.SetString(ContentSettingsTypeToGroupName(type) + ".value",
-      GetSettingDefaultFromModel(type));
-  filter_settings.SetBoolean(ContentSettingsTypeToGroupName(type) + ".managed",
-      GetDefaultSettingManagedFromModel(type));
+                            GetSettingDefaultFromModel(type, &provider_id));
+  filter_settings.SetString(
+      ContentSettingsTypeToGroupName(type) + ".managedBy",
+      provider_id);
 
   web_ui_->CallJavascriptFunction(
       "ContentSettings.setContentFilterSettingsValue", filter_settings);
 }
 
 std::string ContentSettingsHandler::GetSettingDefaultFromModel(
-    ContentSettingsType type) {
+    ContentSettingsType type, std::string* provider_id) {
   Profile* profile = Profile::FromWebUI(web_ui_);
   ContentSetting default_setting;
   if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
     default_setting =
         DesktopNotificationServiceFactory::GetForProfile(profile)->
-            GetDefaultContentSetting();
+            GetDefaultContentSetting(provider_id);
   } else {
     default_setting =
-        profile->GetHostContentSettingsMap()->GetDefaultContentSetting(type);
+        profile->GetHostContentSettingsMap()->
+            GetDefaultContentSetting(type, provider_id);
   }
 
   return ContentSettingToString(default_setting);
-}
-
-bool ContentSettingsHandler::GetDefaultSettingManagedFromModel(
-    ContentSettingsType type) {
-  if (type == CONTENT_SETTINGS_TYPE_NOTIFICATIONS) {
-    Profile* profile = Profile::FromWebUI(web_ui_);
-    return DesktopNotificationServiceFactory::GetForProfile(profile)->
-        IsDefaultContentSettingManaged();
-  } else {
-    return GetContentSettingsMap()->IsDefaultContentSettingManaged(type);
-  }
 }
 
 void ContentSettingsHandler::UpdateHandlersEnabledRadios() {
@@ -416,9 +422,6 @@ void ContentSettingsHandler::UpdateAllExceptionsViewsFromModel() {
     // is supposed to be set by policy only. Hence there is no user facing UI
     // for this content type and we skip it here.
     if (type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE)
-      continue;
-    // TODO(koz): Implement fullscreen content settings UI.
-    if (type == CONTENT_SETTINGS_TYPE_FULLSCREEN)
       continue;
     UpdateExceptionsViewFromModel(static_cast<ContentSettingsType>(type));
   }
@@ -470,7 +473,7 @@ void ContentSettingsHandler::UpdateGeolocationExceptionsView() {
   Profile* profile = Profile::FromWebUI(web_ui_);
   HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
 
-  HostContentSettingsMap::SettingsForOneType all_settings;
+  ContentSettingsForOneType all_settings;
   map->GetSettingsForOneType(
       CONTENT_SETTINGS_TYPE_GEOLOCATION,
       std::string(),
@@ -478,11 +481,18 @@ void ContentSettingsHandler::UpdateGeolocationExceptionsView() {
 
   // Group geolocation settings by primary_pattern.
   AllPatternsSettings all_patterns_settings;
-  for (HostContentSettingsMap::SettingsForOneType::iterator i =
+  for (ContentSettingsForOneType::iterator i =
            all_settings.begin();
        i != all_settings.end();
        ++i) {
-    all_patterns_settings[i->a][i->b] = i->c;
+    // Don't add default settings.
+    if (i->primary_pattern == ContentSettingsPattern::Wildcard() &&
+        i->secondary_pattern == ContentSettingsPattern::Wildcard() &&
+        i->source != "preferences") {
+      continue;
+    }
+    all_patterns_settings[i->primary_pattern][i->secondary_pattern] =
+        i->setting;
   }
 
   ListValue exceptions;
@@ -530,17 +540,24 @@ void ContentSettingsHandler::UpdateNotificationExceptionsView() {
   DesktopNotificationService* service =
       DesktopNotificationServiceFactory::GetForProfile(profile);
 
-  HostContentSettingsMap::SettingsForOneType settings;
+  ContentSettingsForOneType settings;
   service->GetNotificationsSettings(&settings);
 
   ListValue exceptions;
-  for (HostContentSettingsMap::SettingsForOneType::const_iterator i =
+  for (ContentSettingsForOneType::const_iterator i =
            settings.begin();
        i != settings.end();
        ++i) {
-    const HostContentSettingsMap::PatternSettingSourceTuple& tuple(*i);
+    // Don't add default settings.
+    if (i->primary_pattern == ContentSettingsPattern::Wildcard() &&
+        i->secondary_pattern == ContentSettingsPattern::Wildcard() &&
+        i->source != "preferences") {
+      continue;
+    }
+
     exceptions.Append(
-        GetNotificationExceptionForPage(tuple.a, tuple.c, tuple.d));
+        GetNotificationExceptionForPage(i->primary_pattern, i->setting,
+                                        i->source));
   }
 
   StringValue type_string(
@@ -555,20 +572,28 @@ void ContentSettingsHandler::UpdateNotificationExceptionsView() {
 
 void ContentSettingsHandler::UpdateExceptionsViewFromHostContentSettingsMap(
     ContentSettingsType type) {
-  HostContentSettingsMap::SettingsForOneType entries;
+  ContentSettingsForOneType entries;
   GetContentSettingsMap()->GetSettingsForOneType(type, "", &entries);
 
   ListValue exceptions;
   for (size_t i = 0; i < entries.size(); ++i) {
+    // Skip default settings from extensions and policy, and the default content
+    // settings; all of them will affect the default setting UI.
+    if (entries[i].primary_pattern == ContentSettingsPattern::Wildcard() &&
+        entries[i].secondary_pattern == ContentSettingsPattern::Wildcard() &&
+        entries[i].source != "preference") {
+      continue;
+    }
     // The content settings UI does not support secondary content settings
     // pattern yet. For content settings set through the content settings UI the
     // secondary pattern is by default a wildcard pattern. Hence users are not
     // able to modify content settings with a secondary pattern other than the
     // wildcard pattern. So only show settings that the user is able to modify.
     // TODO(bauerb): Support a read-only view for those patterns.
-    if (entries[i].b == ContentSettingsPattern::Wildcard()) {
+    if (entries[i].secondary_pattern == ContentSettingsPattern::Wildcard()) {
       exceptions.Append(
-          GetExceptionForPage(entries[i].a, entries[i].c, entries[i].d));
+          GetExceptionForPage(entries[i].primary_pattern, entries[i].setting,
+                              entries[i].source));
     } else {
       LOG(ERROR) << "Secondary content settings patterns are not "
                  << "supported by the content settings UI";
@@ -581,6 +606,11 @@ void ContentSettingsHandler::UpdateExceptionsViewFromHostContentSettingsMap(
 
   UpdateExceptionsViewFromOTRHostContentSettingsMap(type);
 
+  // TODO(koz): The default for fullscreen is always 'ask'.
+  // http://crbug.com/104683
+  if (type == CONTENT_SETTINGS_TYPE_FULLSCREEN)
+    return;
+
   // The default may also have changed (we won't get a separate notification).
   // If it hasn't changed, this call will be harmless.
   UpdateSettingDefaultFromModel(type);
@@ -592,7 +622,7 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
   if (!otr_settings_map)
     return;
 
-  HostContentSettingsMap::SettingsForOneType otr_entries;
+  ContentSettingsForOneType otr_entries;
   otr_settings_map->GetSettingsForOneType(type, "", &otr_entries);
 
   ListValue otr_exceptions;
@@ -600,7 +630,7 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
     // Off-the-record HostContentSettingsMap contains incognito content settings
     // as well as normal content settings. Here, we use the incongnito settings
     // only.
-    if (!otr_entries[i].e)
+    if (!otr_entries[i].incognito)
       continue;
     // The content settings UI does not support secondary content settings
     // pattern yet. For content settings set through the content settings UI the
@@ -608,11 +638,12 @@ void ContentSettingsHandler::UpdateExceptionsViewFromOTRHostContentSettingsMap(
     // able to modify content settings with a secondary pattern other than the
     // wildcard pattern. So only show settings that the user is able to modify.
     // TODO(bauerb): Support a read-only view for those patterns.
-    if (otr_entries[i].b == ContentSettingsPattern::Wildcard()) {
+    if (otr_entries[i].secondary_pattern ==
+        ContentSettingsPattern::Wildcard()) {
       otr_exceptions.Append(
-          GetExceptionForPage(otr_entries[i].a,
-                              otr_entries[i].c,
-                              otr_entries[i].d));
+          GetExceptionForPage(otr_entries[i].primary_pattern,
+                              otr_entries[i].setting,
+                              otr_entries[i].source));
     } else {
       LOG(ERROR) << "Secondary content settings patterns are not "
                  << "supported by the content settings UI";
@@ -657,6 +688,46 @@ void ContentSettingsHandler::SetContentFilter(const ListValue* args) {
   } else {
     GetContentSettingsMap()->
         SetDefaultContentSetting(content_type, default_setting);
+  }
+  switch (content_type) {
+    case CONTENT_SETTINGS_TYPE_COOKIES:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSetting_DefaultCookieSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_IMAGES:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSetting_DefaultImagesSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_JAVASCRIPT:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSetting_DefaultJavaScriptSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_PLUGINS:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSetting_DefaultPluginsSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_POPUPS:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSettings_DefaultPopupsSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSettings_DefaultNotificationsSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSetting_DefaultGeolocationSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_INTENTS:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSetting_DefaultHandlersSettingChanged"));
+      break;
+    case CONTENT_SETTINGS_TYPE_MOUSELOCK:
+      UserMetrics::RecordAction(UserMetricsAction(
+          "ContentSettings_DefaultMouseLockSettingChanged"));
+      break;
+    default:
+      break;
   }
 }
 

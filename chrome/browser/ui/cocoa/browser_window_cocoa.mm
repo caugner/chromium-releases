@@ -18,6 +18,7 @@
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -27,24 +28,24 @@
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #import "chrome/browser/ui/cocoa/html_dialog_window_controller.h"
+#import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
-#include "chrome/browser/ui/cocoa/page_info_window.h"
 #include "chrome/browser/ui/cocoa/repost_form_warning_mac.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
-#import "chrome/browser/ui/cocoa/theme_install_bubble_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#include "chrome/browser/ui/page_info_bubble.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/task_manager_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_details.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -75,8 +76,9 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
   : browser_(browser),
     controller_(controller),
     confirm_close_factory_(browser) {
-  registrar_.Add(this, chrome::NOTIFICATION_SIDEBAR_CHANGED,
-                 Source<SidebarManager>(SidebarManager::GetInstance()));
+  registrar_.Add(
+      this, chrome::NOTIFICATION_SIDEBAR_CHANGED,
+      content::Source<SidebarManager>(SidebarManager::GetInstance()));
 
   pref_change_registrar_.Init(browser_->profile()->GetPrefs());
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
@@ -255,6 +257,23 @@ bool BrowserWindowCocoa::IsMinimized() const {
   return [window() isMiniaturized];
 }
 
+void BrowserWindowCocoa::Maximize() {
+  // Zoom toggles so only call if not already maximized.
+  if (!IsMaximized())
+    [window() zoom:controller_];
+}
+
+void BrowserWindowCocoa::Minimize() {
+  [window() miniaturize:controller_];
+}
+
+void BrowserWindowCocoa::Restore() {
+  if (IsMaximized())
+    [window() zoom:controller_];  // Toggles zoom mode.
+  else if (IsMinimized())
+    [window() deminiaturize:controller_];
+}
+
 void BrowserWindowCocoa::EnterFullscreen(
       const GURL& url, FullscreenExitBubbleType bubble_type) {
   [controller_ enterFullscreenForURL:url
@@ -425,10 +444,6 @@ void BrowserWindowCocoa::ShowCollectedCookiesDialog(
   new CollectedCookiesMac(GetNativeHandle(), wrapper);
 }
 
-void BrowserWindowCocoa::ShowThemeInstallBubble() {
-  ThemeInstallBubbleView::Show(window());
-}
-
 // We allow closing the window here since the real quit decision on Mac is made
 // in [AppController quit:].
 void BrowserWindowCocoa::ConfirmBrowserCloseWithPendingDownloads() {
@@ -563,18 +578,19 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
 }
 
 void BrowserWindowCocoa::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_PREF_CHANGED: {
-      const std::string& pref_name = *Details<std::string>(details).ptr();
+      const std::string& pref_name =
+          *content::Details<std::string>(details).ptr();
       DCHECK(pref_name == prefs::kShowBookmarkBar);
       [controller_ updateBookmarkBarVisibilityWithAnimation:YES];
       break;
     }
     case chrome::NOTIFICATION_SIDEBAR_CHANGED:
       UpdateSidebarForContents(
-          Details<SidebarContainer>(details)->tab_contents());
+          content::Details<SidebarContainer>(details)->tab_contents());
       break;
     default:
       NOTREACHED();  // we don't ask for anything else!
@@ -614,5 +630,10 @@ void BrowserWindowCocoa::ShowAvatarBubble(TabContents* tab_contents,
   AvatarMenuBubbleController* menu =
       [[AvatarMenuBubbleController alloc] initWithBrowser:browser_
                                                anchoredAt:point];
+  [[menu bubble] setAlignment:info_bubble::kAlignEdgeToAnchorEdge];
   [menu showWindow:nil];
+}
+
+void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton() {
+  [[controller_ avatarButtonController] showAvatarBubble];
 }

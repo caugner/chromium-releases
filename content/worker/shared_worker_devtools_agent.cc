@@ -6,9 +6,9 @@
 
 #include "content/common/devtools_messages.h"
 #include "content/worker/worker_thread.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSharedWorker.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 using WebKit::WebSharedWorker;
 using WebKit::WebString;
@@ -43,10 +43,9 @@ bool SharedWorkerDevToolsAgent::OnMessageReceived(const IPC::Message& message) {
 
 void SharedWorkerDevToolsAgent::SendDevToolsMessage(
     const WebKit::WebString& message) {
-    IPC::Message m = DevToolsClientMsg_DispatchOnInspectorFrontend(
+    Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
         route_id_,
-        message.utf8());
-    Send(new DevToolsHostMsg_ForwardToClient(route_id_, m));
+        message.utf8()));
 }
 
 void SharedWorkerDevToolsAgent::SaveDevToolsAgentState(

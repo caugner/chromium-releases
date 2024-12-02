@@ -5,11 +5,13 @@
 #include "chrome/browser/extensions/extension_app_api.h"
 
 #include "base/values.h"
+#include "base/time.h"
 #include "chrome/browser/extensions/app_notification_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/notification_service.h"
 
 const char kBodyTextKey[] = "bodyText";
 const char kExtensionIdKey[] = "extensionId";
@@ -45,7 +47,8 @@ bool AppNotifyFunction::RunImpl() {
   if (details->HasKey(kBodyTextKey))
     EXTENSION_FUNCTION_VALIDATE(details->GetString(kBodyTextKey, &body));
 
-  scoped_ptr<AppNotification> item(new AppNotification(title, body));
+  scoped_ptr<AppNotification> item(new AppNotification(
+      true, base::Time::Now(), "", id, title, body));
 
   if (details->HasKey(kLinkUrlKey)) {
     std::string link_url;
@@ -68,12 +71,7 @@ bool AppNotifyFunction::RunImpl() {
   AppNotificationManager* manager =
       profile()->GetExtensionService()->app_notification_manager();
 
-  manager->Add(id, item.release());
-
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
-      Source<Profile>(profile_),
-      Details<const std::string>(&id));
+  manager->Add(item.release());
 
   return true;
 }
@@ -92,9 +90,5 @@ bool AppClearAllNotificationsFunction::RunImpl() {
   AppNotificationManager* manager =
       profile()->GetExtensionService()->app_notification_manager();
   manager->ClearAll(id);
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_APP_NOTIFICATION_STATE_CHANGED,
-      Source<Profile>(profile_),
-      Details<const std::string>(&id));
   return true;
 }

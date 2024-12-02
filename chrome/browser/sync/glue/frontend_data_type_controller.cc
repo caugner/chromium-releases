@@ -9,10 +9,12 @@
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/model_associator.h"
-#include "chrome/browser/sync/profile_sync_factory.h"
+#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -24,7 +26,7 @@ FrontendDataTypeController::FrontendDataTypeController()
 }
 
 FrontendDataTypeController::FrontendDataTypeController(
-    ProfileSyncFactory* profile_sync_factory,
+    ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* sync_service)
     : profile_sync_factory_(profile_sync_factory),
@@ -195,7 +197,14 @@ void FrontendDataTypeController::OnUnrecoverableError(
     const tracked_objects::Location& from_here, const std::string& message) {
   // The ProfileSyncService will invoke our Stop() method in response to this.
   RecordUnrecoverableError(from_here, message);
-  sync_service_->OnUnrecoverableError(from_here, message);
+
+  // We dont know the current state of the caller. Posting a task will allow
+  // the caller to unwind the stack before we process unrecoverable error.
+  MessageLoop::current()->PostTask(from_here,
+      base::Bind(&ProfileSyncService::OnUnrecoverableError,
+                 sync_service_->AsWeakPtr(),
+                 from_here,
+                 message));
 }
 
 AssociatorInterface* FrontendDataTypeController::model_associator() const {

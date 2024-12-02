@@ -35,8 +35,7 @@
         'emf_win.cc',
         'emf_win.h',
         'image.cc',
-        'image_aura.cc',
-        'image_cairo.cc',
+        'image_linux.cc',
         'image_mac.cc',
         'image_win.cc',
         'image.h',
@@ -50,13 +49,13 @@
         'page_range.h',
         'page_setup.cc',
         'page_setup.h',
+        'page_size_margins.cc',
         'page_size_margins.h',
         'pdf_metafile_cg_mac.cc',
         'pdf_metafile_cg_mac.h',
         'pdf_metafile_skia.h',
         'pdf_metafile_skia.cc',
-        'printed_document_aura.cc',
-        'printed_document_cairo.cc',
+        'printed_document_gtk.cc',
         'printed_document.cc',
         'printed_document.h',
         'printed_document_mac.cc',
@@ -66,13 +65,6 @@
         'printed_pages_source.h',
         'printing_context.cc',
         'printing_context.h',
-        'printing_context_aura.cc',
-        'printing_context_cairo.cc',
-        'printing_context_cairo.h',
-        'printing_context_mac.mm',
-        'printing_context_mac.h',
-        'printing_context_win.cc',
-        'printing_context_win.h',
         'print_dialog_gtk_interface.h',
         'print_job_constants.cc',
         'print_job_constants.h',
@@ -117,16 +109,28 @@
             ['exclude', 'metafile_skia_wrapper\\.(cc|h)$'],
           ],
         }],
+        # Mac-Aura does not support printing.
+        ['OS=="mac" and use_aura==1',{
+          'sources!': [
+            'printed_document_mac.cc',
+            'printing_context_mac.mm',
+            'printing_context_mac.h',
+          ],
+        }],
+        ['OS=="mac" and use_aura==0',{
+          'sources': [
+            'printing_context_mac.mm',
+            'printing_context_mac.h',
+          ],
+        }],
         ['OS=="win"', {
           'conditions': [
-            ['use_aura==1', {
-              'sources!': [
-                'image_aura.cc',
-                'printed_document_aura.cc',
-                'printing_context_aura.cc',
+            ['use_aura==0', {
+              'sources': [
+                'printing_context_win.cc',
+                'printing_context_win.h',
               ],
-            }],
-          ],
+          }]],
           'defines': [
             # PRINT_BACKEND_AVAILABLE disables the default dummy implementation
             # of the print backend and enables a custom implementation instead.
@@ -136,6 +140,12 @@
             'backend/win_helper.cc',
             'backend/win_helper.h',
             'backend/print_backend_win.cc',
+          ],
+        }],
+        ['chromeos==1 or use_aura==1',{
+          'sources': [
+            'printing_context_no_system_dialog.cc',
+            'printing_context_no_system_dialog.h',
           ],
         }],
         ['use_cups==1', {
@@ -170,6 +180,12 @@
             'backend/print_backend_chromeos.cc',
           ],
         }],
+        ['toolkit_uses_gtk==1 and chromeos==0', {
+          'sources': [
+            'printing_context_gtk.cc',
+            'printing_context_gtk.h',
+          ],
+        }],
       ],
     },
     {
@@ -189,18 +205,18 @@
         'page_setup_unittest.cc',
         'pdf_metafile_cg_mac_unittest.cc',
         'printed_page_unittest.cc',
-        'printing_context_win_unittest.cc',
         'run_all_unittests.cc',
         'units_unittest.cc',
       ],
       'conditions': [
-        ['toolkit_uses_gtk == 0', {'sources/': [['exclude', '_cairo_unittest\\.cc$']]}],
+        ['toolkit_uses_gtk == 0', {'sources/': [['exclude', '_gtk_unittest\\.cc$']]}],
         ['OS!="mac"', {'sources/': [['exclude', '_mac_unittest\\.(cc|mm?)$']]}],
-        ['OS!="win"', {'sources/': [['exclude', '_win_unittest\\.cc$']]
-          }, {  # else: OS=="win"
-            'sources/': [['exclude', '_cairo_unittest\\.cc$']]
-          }
-        ],
+        ['OS!="win"', {'sources/': [['exclude', '_win_unittest\\.cc$']]}],
+        ['OS=="win" and use_aura == 0', {
+          'sources': [
+            'printing_context_win_unittest.cc',
+          ]
+        }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
@@ -237,6 +253,11 @@
                     '<!@(python cups_config_helper.py --libs)',
                   ],
                 },
+              }],
+              [ 'os_bsd==1', {
+                'cflags': [
+                  '<!@(python cups_config_helper.py --cflags)',
+                ],
               }],
             ],
           },

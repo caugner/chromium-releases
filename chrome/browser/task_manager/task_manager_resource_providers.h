@@ -13,9 +13,10 @@
 #include "base/compiler_specific.h"
 #include "base/process_util.h"
 #include "chrome/browser/task_manager/task_manager.h"
-#include "content/common/child_process_info.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/child_process_data.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/common/process_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
 class BackgroundContents;
@@ -49,19 +50,23 @@ class TaskManagerRendererResource : public TaskManager::Resource {
   virtual size_t GetV8MemoryAllocated() const OVERRIDE;
   virtual size_t GetV8MemoryUsed() const OVERRIDE;
 
-  // RenderResources always provide the network usage.
-  virtual bool SupportNetworkUsage() const;
-  virtual void SetSupportNetworkUsage() { }
+  // RenderResources are always inspectable.
+  virtual bool CanInspect() const OVERRIDE;
+  virtual void Inspect() const OVERRIDE;
 
-  virtual void Refresh();
+  // RenderResources always provide the network usage.
+  virtual bool SupportNetworkUsage() const OVERRIDE;
+  virtual void SetSupportNetworkUsage() OVERRIDE { }
+
+  virtual void Refresh() OVERRIDE;
 
   virtual void NotifyResourceTypeStats(
-      const WebKit::WebCache::ResourceTypeStats& stats);
+      const WebKit::WebCache::ResourceTypeStats& stats) OVERRIDE;
 
-  virtual void NotifyFPS(float fps);
+  virtual void NotifyFPS(float fps) OVERRIDE;
 
   virtual void NotifyV8HeapStats(size_t v8_memory_allocated,
-                                 size_t v8_memory_used);
+                                 size_t v8_memory_used) OVERRIDE;
 
  private:
   base::ProcessHandle process_;
@@ -93,6 +98,10 @@ class TaskManagerTabContentsResource : public TaskManagerRendererResource {
   explicit TaskManagerTabContentsResource(TabContentsWrapper* tab_contents);
   virtual ~TaskManagerTabContentsResource();
 
+  // Called when the underlying tab_contents has been committed, and is thus no
+  // longer an Instant preview.
+  void InstantCommitted();
+
   // TaskManager::Resource methods:
   virtual Type GetType() const OVERRIDE;
   virtual string16 GetTitle() const OVERRIDE;
@@ -109,32 +118,34 @@ class TaskManagerTabContentsResource : public TaskManagerRendererResource {
 
   static SkBitmap* prerender_icon_;
   TabContentsWrapper* tab_contents_;
+  bool is_instant_preview_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResource);
 };
 
 class TaskManagerTabContentsResourceProvider
     : public TaskManager::ResourceProvider,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   explicit TaskManagerTabContentsResourceProvider(TaskManager* task_manager);
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
-                                             int routing_id);
-  virtual void StartUpdating();
-  virtual void StopUpdating();
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
 
-  // NotificationObserver method:
+  // content::NotificationObserver method:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   virtual ~TaskManagerTabContentsResourceProvider();
 
   void Add(TabContentsWrapper* tab_contents);
   void Remove(TabContentsWrapper* tab_contents);
+  void Update(TabContentsWrapper* tab_contents);
 
   void AddToTaskManager(TabContentsWrapper* tab_contents);
 
@@ -149,7 +160,7 @@ class TaskManagerTabContentsResourceProvider
   std::map<TabContentsWrapper*, TaskManagerTabContentsResource*> resources_;
 
   // A scoped container for notification registries.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResourceProvider);
 };
@@ -184,21 +195,21 @@ class TaskManagerBackgroundContentsResource
 
 class TaskManagerBackgroundContentsResourceProvider
     : public TaskManager::ResourceProvider,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   explicit TaskManagerBackgroundContentsResourceProvider(
       TaskManager* task_manager);
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
-                                             int routing_id);
-  virtual void StartUpdating();
-  virtual void StopUpdating();
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
 
-  // NotificationObserver method:
+  // content::NotificationObserver method:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   virtual ~TaskManagerBackgroundContentsResourceProvider();
@@ -217,18 +228,21 @@ class TaskManagerBackgroundContentsResourceProvider
 
   // Maps the actual resources (the BackgroundContents) to the Task Manager
   // resources.
-  std::map<BackgroundContents*, TaskManagerBackgroundContentsResource*>
-      resources_;
+  typedef std::map<BackgroundContents*, TaskManagerBackgroundContentsResource*>
+      Resources;
+  Resources resources_;
 
   // A scoped container for notification registries.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerBackgroundContentsResourceProvider);
 };
 
 class TaskManagerChildProcessResource : public TaskManager::Resource {
  public:
-  explicit TaskManagerChildProcessResource(const ChildProcessInfo& child_proc);
+  TaskManagerChildProcessResource(content::ProcessType type,
+                                  const string16& name,
+                                  base::ProcessHandle handle);
   virtual ~TaskManagerChildProcessResource();
 
   // TaskManager::Resource methods:
@@ -248,7 +262,9 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
   // process would be "Plug-in: Flash" when name is "Flash".
   string16 GetLocalizedTitle() const;
 
-  ChildProcessInfo child_process_;
+  content::ProcessType type_;
+  string16 name_;
+  base::ProcessHandle handle_;
   int pid_;
   mutable string16 title_;
   bool network_usage_support_;
@@ -263,54 +279,57 @@ class TaskManagerChildProcessResource : public TaskManager::Resource {
 
 class TaskManagerChildProcessResourceProvider
     : public TaskManager::ResourceProvider,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   explicit TaskManagerChildProcessResourceProvider(TaskManager* task_manager);
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
-                                             int routing_id);
-  virtual void StartUpdating();
-  virtual void StopUpdating();
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
 
-  // NotificationObserver method:
+  // content::NotificationObserver method:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  // Retrieves the current ChildProcessInfo (performed in the IO thread).
-  virtual void RetrieveChildProcessInfo();
+ private:
+  virtual ~TaskManagerChildProcessResourceProvider();
 
-  // Notifies the UI thread that the ChildProcessInfo have been retrieved.
-  virtual void ChildProcessInfoRetreived();
+  // Retrieves information about the running ChildProcessHosts (performed in the
+  // IO thread).
+  virtual void RetrieveChildProcessData();
+
+  // Notifies the UI thread that the ChildProcessHosts information have been
+  // retrieved.
+  virtual void ChildProcessDataRetreived(
+      const std::vector<content::ChildProcessData>& child_processes);
+
+  void Add(const content::ChildProcessData& child_process_data);
+  void Remove(const content::ChildProcessData& child_process_data);
+
+  void AddToTaskManager(const content::ChildProcessData& child_process_data);
+
+  TaskManager* task_manager_;
 
   // Whether we are currently reporting to the task manager. Used to ignore
   // notifications sent after StopUpdating().
   bool updating_;
 
-  // The list of ChildProcessInfo retrieved when starting the update.
-  std::vector<ChildProcessInfo> existing_child_process_info_;
-
- private:
-  virtual ~TaskManagerChildProcessResourceProvider();
-
-  void Add(const ChildProcessInfo& child_process_info);
-  void Remove(const ChildProcessInfo& child_process_info);
-
-  void AddToTaskManager(const ChildProcessInfo& child_process_info);
-
-  TaskManager* task_manager_;
-
-  // Maps the actual resources (the ChildProcessInfo) to the Task Manager
+  // Maps the actual resources (the ChildProcessData) to the Task Manager
   // resources.
-  std::map<ChildProcessInfo, TaskManagerChildProcessResource*> resources_;
+  typedef std::map<base::ProcessHandle, TaskManagerChildProcessResource*>
+      ChildProcessMap;
+  ChildProcessMap resources_;
 
   // Maps the pids to the resources (used for quick access to the resource on
   // byte read notifications).
-  std::map<int, TaskManagerChildProcessResource*> pid_to_resources_;
+  typedef std::map<int, TaskManagerChildProcessResource*> PidResourceMap;
+  PidResourceMap pid_to_resources_;
 
   // A scoped container for notification registries.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerChildProcessResourceProvider);
 };
@@ -326,6 +345,8 @@ class TaskManagerExtensionProcessResource : public TaskManager::Resource {
   virtual SkBitmap GetIcon() const OVERRIDE;
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
+  virtual bool CanInspect() const OVERRIDE;
+  virtual void Inspect() const OVERRIDE;
   virtual bool SupportNetworkUsage() const OVERRIDE;
   virtual void SetSupportNetworkUsage() OVERRIDE;
   virtual const Extension* GetExtension() const OVERRIDE;
@@ -334,7 +355,7 @@ class TaskManagerExtensionProcessResource : public TaskManager::Resource {
   int process_id() const { return pid_; }
 
   // Returns true if the associated extension has a background page.
-  virtual bool IsBackground() const;
+  virtual bool IsBackground() const OVERRIDE;
 
  private:
   // The icon painted for the extension process.
@@ -352,21 +373,21 @@ class TaskManagerExtensionProcessResource : public TaskManager::Resource {
 
 class TaskManagerExtensionProcessResourceProvider
     : public TaskManager::ResourceProvider,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   explicit TaskManagerExtensionProcessResourceProvider(
       TaskManager* task_manager);
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
-                                             int routing_id);
-  virtual void StartUpdating();
-  virtual void StopUpdating();
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
 
-  // NotificationObserver method:
+  // content::NotificationObserver method:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   virtual ~TaskManagerExtensionProcessResourceProvider();
@@ -384,7 +405,7 @@ class TaskManagerExtensionProcessResourceProvider
   std::map<int, TaskManagerExtensionProcessResource*> pid_to_resources_;
 
   // A scoped container for notification registries.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   bool updating_;
 
@@ -402,6 +423,8 @@ class TaskManagerNotificationResource : public TaskManager::Resource {
   virtual SkBitmap GetIcon() const OVERRIDE;
   virtual base::ProcessHandle GetProcess() const OVERRIDE;
   virtual Type GetType() const OVERRIDE;
+  virtual bool CanInspect() const OVERRIDE;
+  virtual void Inspect() const OVERRIDE;
   virtual bool SupportNetworkUsage() const OVERRIDE;
   virtual void SetSupportNetworkUsage() OVERRIDE { }
 
@@ -422,7 +445,7 @@ class TaskManagerNotificationResource : public TaskManager::Resource {
 
 class TaskManagerNotificationResourceProvider
     : public TaskManager::ResourceProvider,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   static TaskManagerNotificationResourceProvider* Create(
       TaskManager* task_manager);
@@ -430,14 +453,14 @@ class TaskManagerNotificationResourceProvider
   // TaskManager::ResourceProvider interface
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
-                                             int routing_id);
-  virtual void StartUpdating();
-  virtual void StopUpdating();
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
 
-  // NotificationObserver interface
+  // content::NotificationObserver interface
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   explicit TaskManagerNotificationResourceProvider(TaskManager* task_manager);
@@ -452,7 +475,7 @@ class TaskManagerNotificationResourceProvider
   std::map<BalloonHost*, TaskManagerNotificationResource*> resources_;
 
   // A scoped container for notification registries.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   bool updating_;
 
@@ -498,9 +521,9 @@ class TaskManagerBrowserProcessResourceProvider
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
-                                             int routing_id);
-  virtual void StartUpdating();
-  virtual void StopUpdating();
+                                             int routing_id) OVERRIDE;
+  virtual void StartUpdating() OVERRIDE;
+  virtual void StopUpdating() OVERRIDE;
 
   // Whether we are currently reporting to the task manager. Used to ignore
   // notifications sent after StopUpdating().
@@ -508,8 +531,6 @@ class TaskManagerBrowserProcessResourceProvider
 
  private:
   virtual ~TaskManagerBrowserProcessResourceProvider();
-
-  void AddToTaskManager(ChildProcessInfo child_process_info);
 
   TaskManager* task_manager_;
   TaskManagerBrowserProcessResource resource_;
