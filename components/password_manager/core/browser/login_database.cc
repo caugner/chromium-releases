@@ -238,7 +238,8 @@ void BindAddStatement(const PasswordForm& form, sql::Statement* s) {
   autofill::SerializeFormData(form.form_data, &form_data_pickle);
   s->BindBlob(COLUMN_FORM_DATA, PickleToSpan(form_data_pickle));
   s->BindString16(COLUMN_DISPLAY_NAME, form.display_name);
-  s->BindString(COLUMN_ICON_URL, form.icon_url.spec());
+  s->BindString(COLUMN_ICON_URL,
+                form.icon_url.is_valid() ? form.icon_url.spec() : "");
   // An empty Origin serializes as "null" which would be strange to store here.
   s->BindString(COLUMN_FEDERATION_URL,
                 form.federation_origin.opaque()
@@ -1282,7 +1283,8 @@ PasswordStoreChangeList LoginDatabase::UpdateLogin(
   autofill::SerializeFormData(form.form_data, &form_data_pickle);
   s.BindBlob(next_param++, PickleToSpan(form_data_pickle));
   s.BindString16(next_param++, form.display_name);
-  s.BindString(next_param++, form.icon_url.spec());
+  s.BindString(next_param++,
+               form.icon_url.is_valid() ? form.icon_url.spec() : "");
   // An empty Origin serializes as "null" which would be strange to store here.
   s.BindString(next_param++, form.federation_origin.opaque()
                                  ? std::string()
@@ -1541,12 +1543,7 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
   if (!form_data_blob.empty()) {
     base::Pickle form_data_pickle = PickleFromSpan(form_data_blob);
     base::PickleIterator form_data_iter(form_data_pickle);
-    bool success =
-        autofill::DeserializeFormData(&form_data_iter, &form->form_data);
-    metrics_util::FormDeserializationStatus status =
-        success ? metrics_util::LOGIN_DATABASE_SUCCESS
-                : metrics_util::LOGIN_DATABASE_FAILURE;
-    metrics_util::LogFormDataDeserializationStatus(status);
+    autofill::DeserializeFormData(&form_data_iter, &form->form_data);
   }
   form->display_name = s.ColumnString16(COLUMN_DISPLAY_NAME);
   form->icon_url = GURL(s.ColumnString(COLUMN_ICON_URL));

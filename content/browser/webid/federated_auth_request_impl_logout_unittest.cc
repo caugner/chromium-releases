@@ -138,7 +138,7 @@ class FederatedAuthRequestImplLogoutTest
     mock_permission_delegate_ =
         std::make_unique<NiceMock<MockPermissionDelegate>>();
     mock_identity_registry_ = std::make_unique<NiceMock<MockIdentityRegistry>>(
-        web_contents(), federated_auth_request_impl_,
+        web_contents(), /*delegate=*/nullptr,
         url::Origin::Create(GURL(kIdpUrl)));
 
     static_cast<TestWebContents*>(web_contents())
@@ -179,7 +179,8 @@ class FederatedAuthRequestImplLogoutTest
   base::test::ScopedFeatureList feature_list_;
 
   mojo::Remote<blink::mojom::FederatedAuthRequest> request_remote_;
-  raw_ptr<FederatedAuthRequestImpl> federated_auth_request_impl_;
+  raw_ptr<FederatedAuthRequestImpl, DanglingUntriaged>
+      federated_auth_request_impl_;
 
   std::unique_ptr<TestLogoutIdpNetworkRequestManager> network_request_manager_;
 

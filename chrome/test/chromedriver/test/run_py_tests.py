@@ -3498,6 +3498,12 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
           is_desktop,
           self._driver.capabilities['webauthn:extension:' + extension])
 
+  # Tests that the fedcm capability is true.
+  def testFedCmCapability(self):
+    self.assertEqual(
+        True,
+        self._driver.capabilities['fedcm:accounts'])
+
   def testCanClickInIframesInShadow(self):
     """Test that you can interact with a iframe within a shadow element.
        See https://bugs.chromium.org/p/chromedriver/issues/detail?id=3445
@@ -6409,7 +6415,7 @@ class FedCmSpecificTest(ChromeDriverBaseTestWithWebServer):
 
     self.assertRaises(chromedriver.NoSuchAlert, self._driver.GetAccounts)
     self._driver.ExecuteScript('callFedCm()')
-    self.WaitForCondition(self.FedCmDialogCondition)
+    self.assertTrue(self.WaitForCondition(self.FedCmDialogCondition))
     accounts = self._driver.GetAccounts()
     self.assertEqual(2, len(accounts))
     self.assertEqual({'title': 'Sign in to 127.0.0.1 with localhost'},
@@ -6429,7 +6435,7 @@ class FedCmSpecificTest(ChromeDriverBaseTestWithWebServer):
 
     self.assertRaises(chromedriver.NoSuchAlert, self._driver.GetAccounts)
     self._driver.ExecuteScript('callFedCm()')
-    self.WaitForCondition(self.FedCmDialogCondition)
+    self.assertTrue(self.WaitForCondition(self.FedCmDialogCondition))
 
     self._driver.CancelFedCmDialog()
     self.assertRaises(chromedriver.NoSuchAlert, self._driver.GetAccounts)

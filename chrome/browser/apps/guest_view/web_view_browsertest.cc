@@ -44,6 +44,8 @@
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/login/login_handler.h"
+#include "chrome/browser/ui/login/login_handler_test_utils.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -2111,27 +2113,14 @@ IN_PROC_BROWSER_TEST_F(WebViewSizeTest, Shim_TestResizeWebviewResizesContent) {
              NO_TEST_SERVER);
 }
 
-class WebViewSSLErrorTest : public WebViewTest,
-                            public testing::WithParamInterface<bool> {
+class WebViewSSLErrorTest : public WebViewTest {
  public:
-  WebViewSSLErrorTest() {
-    bool use_interstitials = GetParam();
-    scoped_feature_list_.InitWithFeatureState(
-        extensions_features::kWebviewTagMPArchBehavior,
-        /*enabled=*/!use_interstitials);
-  }
+  WebViewSSLErrorTest() = default;
   ~WebViewSSLErrorTest() override = default;
 
-  static std::string DescribeParams(
-      const testing::TestParamInfo<ParamType>& info) {
-    return info.param ? "UseInterstitial" : "UseErrorPage";
-  }
-
-  bool UseInterstitials() { return GetParam(); }
-
   // Loads the guest at "web_view/ssl/https_page.html" with an SSL error, and
-  // asserts the security interstitial is not displayed for guest through the
-  // embedder's WebContents.
+  // asserts the security interstitial is displayed within the guest instead of
+  // through the embedder's WebContents.
   void SSLTestHelper() {
     // Starts a HTTPS server so we can load a page with a SSL error inside
     // guest.
@@ -2155,9 +2144,7 @@ class WebViewSSLErrorTest : public WebViewTest,
 
     auto* guest = GetGuestViewManager()->GetLastGuestViewCreated();
     ASSERT_TRUE(guest->GetGuestMainFrame()->IsErrorDocument());
-    // TODO(1338009): We intend to limit SSL errors to a plain error page
-    // instead of an interstitial.
-    ASSERT_EQ(UseInterstitials(), IsShowingInterstitial(guest->web_contents()));
+    ASSERT_TRUE(IsShowingInterstitial(guest->web_contents()));
   }
 
   void LoadEmptyGuest() {
@@ -2205,25 +2192,17 @@ class WebViewSSLErrorTest : public WebViewTest,
       ASSERT_EQ(guest_navi_obs.last_committed_url(), GURL());
     }
   }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-INSTANTIATE_TEST_SUITE_P(WebViewSSLErrorTests,
-                         WebViewSSLErrorTest,
-                         testing::Bool(),
-                         WebViewSSLErrorTest::DescribeParams);
-
-// Test makes sure that an error document is shown in `<webview>` with an SSL
+// Test makes sure that an interstitial is shown in `<webview>` with an SSL
 // error.
 // Flaky on Win dbg: crbug.com/779973
 #if BUILDFLAG(IS_WIN) && !defined(NDEBUG)
-#define MAYBE_ShowErrorDocForSSLError DISABLED_ShowErrorDocForSSLError
+#define MAYBE_ShowInterstitialForSSLError DISABLED_ShowInterstitialForSSLError
 #else
-#define MAYBE_ShowErrorDocForSSLError ShowErrorDocForSSLError
+#define MAYBE_ShowInterstitialForSSLError ShowInterstitialForSSLError
 #endif
-IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ShowErrorDocForSSLError) {
+IN_PROC_BROWSER_TEST_F(WebViewSSLErrorTest, MAYBE_ShowInterstitialForSSLError) {
   SSLTestHelper();
 }
 
@@ -2232,11 +2211,7 @@ IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ShowErrorDocForSSLError) {
 // interstitial, the guest doesn't crash trying to load the NTP (the usual
 // known-safe page used to navigate back from such interstitials when there's
 // no other page in history to go to).  See https://crbug.com/1444221.
-IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, NavigateBackFromSSLError) {
-  if (!UseInterstitials()) {
-    GTEST_SKIP();
-  }
-
+IN_PROC_BROWSER_TEST_F(WebViewSSLErrorTest, NavigateBackFromSSLError) {
   // Starts a HTTPS server so we can load a page with a SSL error inside a
   // guest.
   net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
@@ -2280,15 +2255,15 @@ IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, NavigateBackFromSSLError) {
   ASSERT_FALSE(IsShowingInterstitial(guest->web_contents()));
 }
 
-// Test makes sure that the error document is registered in the
+// Test makes sure that the interstitial is registered in the
 // `RenderWidgetHostInputEventRouter` when inside a `<webview>`.
 // Flaky on Win dbg: crbug.com/779973
 #if BUILDFLAG(IS_WIN) && !defined(NDEBUG)
-#define MAYBE_ErrorPageRouteEvents DISABLED_ErrorPageRouteEvents
+#define MAYBE_InterstitialPageRouteEvents DISABLED_InterstitialPageRouteEvents
 #else
-#define MAYBE_ErrorPageRouteEvents ErrorPageRouteEvents
+#define MAYBE_InterstitialPageRouteEvents InterstitialPageRouteEvents
 #endif
-IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ErrorPageRouteEvents) {
+IN_PROC_BROWSER_TEST_F(WebViewSSLErrorTest, MAYBE_InterstitialPageRouteEvents) {
   SSLTestHelper();
 
   std::vector<content::RenderWidgetHostView*> hosts =
@@ -2305,14 +2280,14 @@ IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ErrorPageRouteEvents) {
 }
 
 // Test makes sure that the browser does not crash when a `<webview>` navigates
-// out of an error page caused by a SSL error.
+// out of an interstitial caused by a SSL error.
 // Flaky on Win dbg: crbug.com/779973
 #if BUILDFLAG(IS_WIN) && !defined(NDEBUG)
-#define MAYBE_ErrorPageDetach DISABLED_ErrorPageDetach
+#define MAYBE_InterstitialPageDetach DISABLED_InterstitialPageDetach
 #else
-#define MAYBE_ErrorPageDetach ErrorPageDetach
+#define MAYBE_InterstitialPageDetach InterstitialPageDetach
 #endif
-IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ErrorPageDetach) {
+IN_PROC_BROWSER_TEST_F(WebViewSSLErrorTest, MAYBE_InterstitialPageDetach) {
   SSLTestHelper();
 
   // Navigate to about:blank
@@ -2321,28 +2296,28 @@ IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ErrorPageDetach) {
 }
 
 // This test makes sure the browser process does not crash if app is closed
-// while an error page is being shown in guest.
+// while an interstitial is being shown in guest.
 // Flaky on Win dbg: crbug.com/779973
 #if BUILDFLAG(IS_WIN) && !defined(NDEBUG)
-#define MAYBE_ErrorPageTearDown DISABLED_ErrorPageTearDown
+#define MAYBE_InterstitialTearDown DISABLED_InterstitialTearDown
 #else
-#define MAYBE_ErrorPageTearDown ErrorPageTearDown
+#define MAYBE_InterstitialTearDown InterstitialTearDown
 #endif
-IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest, MAYBE_ErrorPageTearDown) {
+IN_PROC_BROWSER_TEST_F(WebViewSSLErrorTest, MAYBE_InterstitialTearDown) {
   SSLTestHelper();
 
-  // Now close the app while error page being shown in guest.
+  // Now close the app while the interstitial is being shown in the guest.
   extensions::AppWindow* window = GetFirstAppWindow();
   window->GetBaseWindow()->Close();
 }
 
 // This test makes sure the browser process does not crash if browser is shut
-// down while an error page is being shown in guest.
-IN_PROC_BROWSER_TEST_P(WebViewSSLErrorTest,
-                       ErrorPageTearDownOnBrowserShutdown) {
+// down while an interstitial is being shown in guest.
+IN_PROC_BROWSER_TEST_F(WebViewSSLErrorTest,
+                       InterstitialTearDownOnBrowserShutdown) {
   SSLTestHelper();
 
-  // Now close the app while error page being shown in guest.
+  // Now close the app while the interstitial is being shown in the guest.
   extensions::AppWindow* window = GetFirstAppWindow();
   window->GetBaseWindow()->Close();
 
@@ -2417,15 +2392,10 @@ class WebViewHttpsFirstModeTest : public WebViewSSLErrorTest {
   base::test::ScopedFeatureList feature_list_;
 };
 
-INSTANTIATE_TEST_SUITE_P(WebViewHttpsFirstModeTests,
-                         WebViewHttpsFirstModeTest,
-                         testing::Bool(),
-                         WebViewHttpsFirstModeTest::DescribeParams);
-
 // Tests that loading an HTTPS page in a guest <webview> with HTTPS-First Mode
 // enabled doesn't crash nor shows error page.
 // Regression test for crbug.com/1233889
-IN_PROC_BROWSER_TEST_P(WebViewHttpsFirstModeTest, GuestLoadsHttpsWithoutError) {
+IN_PROC_BROWSER_TEST_F(WebViewHttpsFirstModeTest, GuestLoadsHttpsWithoutError) {
   browser()->profile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
                                                true);
 
@@ -2450,7 +2420,7 @@ IN_PROC_BROWSER_TEST_P(WebViewHttpsFirstModeTest, GuestLoadsHttpsWithoutError) {
 
 // Tests that loading an HTTP page in a guest <webview> with HTTPS-First Mode
 // enabled doesn't crash and doesn't trigger the error page.
-IN_PROC_BROWSER_TEST_P(WebViewHttpsFirstModeTest, GuestLoadsHttpWithoutError) {
+IN_PROC_BROWSER_TEST_F(WebViewHttpsFirstModeTest, GuestLoadsHttpWithoutError) {
   browser()->profile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
                                                true);
 
@@ -4053,6 +4023,91 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestDisabledZoomMode) {
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestZoomBeforeNavigation) {
   TestHelper("testZoomBeforeNavigation", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, HttpAuth) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  LoadAppWithGuest("web_view/simple");
+
+  const GURL auth_url = embedded_test_server()->GetURL("/auth-basic");
+  content::NavigationController* guest_controller =
+      &GetGuestView()->GetController();
+  LoginPromptBrowserTestObserver login_observer;
+  login_observer.Register(
+      content::Source<content::NavigationController>(guest_controller));
+  WindowedAuthNeededObserver auth_needed(guest_controller);
+  WindowedAuthSuppliedObserver auth_supplied(guest_controller);
+  // There are two navigations occurring here. The first fails due to the need
+  // for auth. After it's supplied, a second navigation will succeed.
+  content::TestNavigationObserver nav_observer(GetGuestWebContents(), 2);
+  nav_observer.set_wait_event(
+      content::TestNavigationObserver::WaitEvent::kNavigationFinished);
+
+  EXPECT_TRUE(
+      content::ExecJs(GetGuestRenderFrameHost(),
+                      content::JsReplace("location.href = $1;", auth_url)));
+  auth_needed.Wait();
+
+  LoginHandler* login_handler = login_observer.handlers().front();
+  login_handler->SetAuth(u"basicuser", u"secret");
+  auth_supplied.Wait();
+  nav_observer.WaitForNavigationFinished();
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, HttpAuthIdentical) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  LoadAppWithGuest("web_view/simple");
+
+  const GURL auth_url = embedded_test_server()->GetURL("/auth-basic");
+  content::NavigationController* guest_controller =
+      &GetGuestView()->GetController();
+  content::NavigationController* tab_controller =
+      &browser()->tab_strip_model()->GetActiveWebContents()->GetController();
+  LoginPromptBrowserTestObserver login_observer;
+  login_observer.Register(
+      content::Source<content::NavigationController>(guest_controller));
+  login_observer.Register(
+      content::Source<content::NavigationController>(tab_controller));
+  WindowedAuthNeededObserver guest_auth_needed(guest_controller);
+  WindowedAuthNeededObserver tab_auth_needed(tab_controller);
+  WindowedAuthSuppliedObserver guest_auth_supplied(guest_controller);
+  // There are two navigations occurring here. The first fails due to the need
+  // for auth. After it's supplied, a second navigation will succeed.
+  content::TestNavigationObserver guest_nav_observer(GetGuestWebContents(), 2);
+  guest_nav_observer.set_wait_event(
+      content::TestNavigationObserver::WaitEvent::kNavigationFinished);
+
+  EXPECT_TRUE(
+      content::ExecJs(GetGuestRenderFrameHost(),
+                      content::JsReplace("location.href = $1;", auth_url)));
+  guest_auth_needed.Wait();
+
+  // While the login UI is showing for the app, navigate a tab to the same URL
+  // requiring auth.
+  tab_controller->LoadURL(auth_url, content::Referrer(),
+                          ui::PAGE_TRANSITION_TYPED, std::string());
+  tab_auth_needed.Wait();
+
+  // Both the guest and the tab should be prompting for credentials and the auth
+  // challenge should be the same. Normally, the login code de-duplicates
+  // identical challenges if multiple prompts are shown for them. However,
+  // credentials can't be shared across StoragePartitions. So providing
+  // credentials within the guest should not affect the tab.
+  ASSERT_EQ(2u, login_observer.handlers().size());
+  LoginHandler* guest_login_handler = login_observer.handlers().front();
+  LoginHandler* tab_login_handler = login_observer.handlers().back();
+  EXPECT_EQ(tab_controller,
+            &tab_login_handler->web_contents()->GetController());
+  EXPECT_TRUE(guest_login_handler->auth_info().MatchesExceptPath(
+      tab_login_handler->auth_info()));
+
+  guest_login_handler->SetAuth(u"basicuser", u"secret");
+  guest_auth_supplied.Wait();
+  guest_nav_observer.WaitForNavigationFinished();
+
+  // The tab should still be prompting for credentials.
+  ASSERT_EQ(1u, login_observer.handlers().size());
+  EXPECT_EQ(tab_login_handler, login_observer.handlers().front());
 }
 
 namespace {

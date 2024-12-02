@@ -469,13 +469,20 @@ void LayoutBoxModelObject::UpdateFromStyle() {
 PhysicalRect LayoutBoxModelObject::PhysicalVisualOverflowRectIncludingFilters()
     const {
   NOT_DESTROYED();
-  PhysicalRect bounds_rect = PhysicalVisualOverflowRect();
-  if (!StyleRef().HasFilter())
-    return bounds_rect;
-  gfx::RectF float_rect(bounds_rect);
+  return ApplyFiltersToRect(PhysicalVisualOverflowRect());
+}
+
+PhysicalRect LayoutBoxModelObject::ApplyFiltersToRect(
+    const PhysicalRect& rect) const {
+  NOT_DESTROYED();
+  if (!StyleRef().HasFilter()) {
+    return rect;
+  }
+  gfx::RectF float_rect(rect);
   gfx::RectF filter_reference_box = Layer()->FilterReferenceBox();
-  if (!filter_reference_box.size().IsZero())
+  if (!filter_reference_box.size().IsZero()) {
     float_rect.UnionEvenIfEmpty(filter_reference_box);
+  }
   float_rect = Layer()->MapRectForFilter(float_rect);
   return PhysicalRect::EnclosingRect(float_rect);
 }
@@ -539,10 +546,6 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight()
         return false;
     }
   }
-  if (this_box && this_box->IsCustomItem() &&
-      (this_box->HasOverrideContainingBlockContentLogicalHeight())) {
-    return false;
-  }
 
   if ((logical_height_length.IsAutoOrContentOrIntrinsic() ||
        logical_height_length.IsFillAvailable()) &&
@@ -554,12 +557,8 @@ bool LayoutBoxModelObject::HasAutoHeightOrContainingBlockWithAutoHeight()
     // resolve the block-size of the descendant, except when in quirks mode.
     // Flexboxes follow strict behavior even in quirks mode, though.
     if (!GetDocument().InQuirksMode() || cb->IsFlexibleBoxIncludingNG()) {
-      if (this_box &&
-          this_box->HasOverrideContainingBlockContentLogicalHeight()) {
-        return this_box->OverrideContainingBlockContentLogicalHeight() ==
-               LayoutUnit(-1);
-      } else if (this_box && this_box->GetSingleCachedLayoutResult() &&
-                 !this_box->GetBoxLayoutExtraInput()) {
+      if (this_box && this_box->GetSingleCachedLayoutResult() &&
+          !this_box->GetBoxLayoutExtraInput()) {
         return this_box->GetSingleCachedLayoutResult()
                    ->GetConstraintSpaceForCaching()
                    .AvailableSize()

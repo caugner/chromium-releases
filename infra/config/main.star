@@ -40,8 +40,7 @@ lucicfg.config(
         "outages.pyl",
         "sheriff-rotations/*.txt",
         "project.pyl",
-        "testing/gn_isolate_map.pyl",
-        "testing/mixins.pyl",
+        "testing/*.pyl",
     ],
     fail_on_warnings = True,
     lint_checks = [
@@ -114,6 +113,11 @@ luci.project(
         luci.binding(
             roles = "role/analysis.editor",
             groups = ["project-chromium-committers", "googlers"],
+        ),
+        # Role for builder health indicators
+        luci.binding(
+            roles = "role/buildbucket.healthUpdater",
+            users = ["guterman@google.com", "generate-builder@cr-builder-health-indicators.iam.gserviceaccount.com"],
         ),
     ],
 )
@@ -202,6 +206,7 @@ exec("//swarming.star")
 exec("//recipes.star")
 exec("//targets/mixins.star")
 exec("//targets/targets.star")
+exec("//targets/variants.star")
 
 exec("//notifiers.star")
 

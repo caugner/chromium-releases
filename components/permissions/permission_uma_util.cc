@@ -17,6 +17,8 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "components/content_settings/core/browser/content_settings_uma_util.h"
+#include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/permissions/constants.h"
 #include "components/permissions/permission_actions_history.h"
@@ -90,6 +92,8 @@ RequestTypeForUma GetUmaValueForRequestType(RequestType request_type) {
       return RequestTypeForUma::PERMISSION_IDLE_DETECTION;
     case RequestType::kMicStream:
       return RequestTypeForUma::PERMISSION_MEDIASTREAM_MIC;
+    case RequestType::kMidi:
+      return RequestTypeForUma::PERMISSION_MIDI;
     case RequestType::kMidiSysex:
       return RequestTypeForUma::PERMISSION_MIDI_SYSEX;
     case RequestType::kMultipleDownloads:
@@ -139,6 +143,8 @@ std::string GetPermissionRequestString(RequestTypeForUma type) {
       return "RegisterProtocolHandler";
     case RequestTypeForUma::PERMISSION_GEOLOCATION:
       return "Geolocation";
+    case RequestTypeForUma::PERMISSION_MIDI:
+      return "Midi";
     case RequestTypeForUma::PERMISSION_MIDI_SYSEX:
       return "MidiSysEx";
     case RequestTypeForUma::PERMISSION_NOTIFICATIONS:
@@ -274,7 +280,8 @@ void RecordPermissionUsageUkm(ContentSettingsType permission_type,
 
   ukm::builders::PermissionUsage builder(source_id.value());
   builder.SetPermissionType(static_cast<int64_t>(
-      ContentSettingTypeToHistogramValue(permission_type)));
+      content_settings_uma_util::ContentSettingTypeToHistogramValue(
+          permission_type)));
   builder.Record(ukm::UkmRecorder::Get());
 }
 
@@ -312,8 +319,9 @@ void RecordPermissionActionUkm(
   ukm::builders::Permission builder(source_id.value());
   builder.SetAction(static_cast<int64_t>(action))
       .SetGesture(static_cast<int64_t>(gesture_type))
-      .SetPermissionType(
-          static_cast<int64_t>(ContentSettingTypeToHistogramValue(permission)))
+      .SetPermissionType(static_cast<int64_t>(
+          content_settings_uma_util::ContentSettingTypeToHistogramValue(
+              permission)))
       .SetPriorDismissals(std::min(kPriorCountCap, dismiss_count))
       .SetPriorIgnores(std::min(kPriorCountCap, ignore_count))
       .SetSource(static_cast<int64_t>(source_ui))
@@ -948,7 +956,7 @@ PermissionUmaUtil::ScopedRevocationReporter::ScopedRevocationReporter(
   content_settings::SettingInfo setting_info;
   settings_map->GetWebsiteSetting(primary_url, secondary_url, content_type_,
                                   &setting_info);
-  last_modified_date_ = setting_info.metadata.last_modified;
+  last_modified_date_ = setting_info.metadata.last_modified();
 }
 
 PermissionUmaUtil::ScopedRevocationReporter::ScopedRevocationReporter(
@@ -1087,6 +1095,10 @@ void PermissionUmaUtil::RecordPermissionAction(
       break;
     case ContentSettingsType::NOTIFICATIONS:
       base::UmaHistogramEnumeration("Permissions.Action.Notifications", action,
+                                    PermissionAction::NUM);
+      break;
+    case ContentSettingsType::MIDI:
+      base::UmaHistogramEnumeration("Permissions.Action.Midi", action,
                                     PermissionAction::NUM);
       break;
     case ContentSettingsType::MIDI_SYSEX:

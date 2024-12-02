@@ -149,7 +149,7 @@ import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.share.ShareDelegateImpl;
 import org.chromium.chrome.browser.share.ShareDelegateSupplier;
 import org.chromium.chrome.browser.stylus_handwriting.StylusWritingCoordinator;
-import org.chromium.chrome.browser.sync.SyncService;
+import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.tab.RequestDesktopUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabHidingType;
@@ -212,6 +212,7 @@ import org.chromium.components.prefs.PrefService;
 import org.chromium.components.profile_metrics.BrowserProfileType;
 import org.chromium.components.sync.ModelType;
 import org.chromium.components.sync.PassphraseType;
+import org.chromium.components.sync.SyncService;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.components.webapk.lib.client.WebApkValidator;
 import org.chromium.components.webapps.AddToHomescreenCoordinator;
@@ -221,6 +222,7 @@ import org.chromium.components.webapps.bottomsheet.PwaBottomSheetControllerProvi
 import org.chromium.components.webxr.XrDelegate;
 import org.chromium.components.webxr.XrDelegateProvider;
 import org.chromium.content_public.browser.ContentFeatureList;
+import org.chromium.content_public.browser.ContentFeatureMap;
 import org.chromium.content_public.browser.DeviceUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.ScreenOrientationProvider;
@@ -530,7 +532,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                 /* statusBarColorProvider= */ this, getIntentRequestTracker(),
                 mTabReparentingControllerSupplier,
                 /*ephemeralTabCoordinatorSupplier=*/new ObservableSupplierImpl<>(),
-                false, mBackPressManager, ()->null);
+                false, mBackPressManager, null);
         // clang-format on
     }
 
@@ -883,8 +885,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
      * TODO(pnoland, https://crbug.com/865801): remove this in favor of having RootUICoordinator
      *         inject ToolbarManager directly to sub-components.
      */
-    @Nullable
-    public ToolbarManager getToolbarManager() {
+    public @Nullable ToolbarManager getToolbarManager() {
         return mRootUiCoordinator.getToolbarManager();
     }
 
@@ -1074,7 +1075,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         if (!mStarted) return; // Sync state reporting should work only in started state.
         if (mContextReporter != null || getActivityTab() == null) return;
 
-        final SyncService syncService = SyncService.get();
+        final SyncService syncService = getSyncServiceForOriginalProfile();
 
         if (syncService != null && syncService.isSyncingUnencryptedUrls()) {
             ContextReporter.SelectionReporter controller =
@@ -1241,7 +1242,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             if (mGSAAccountChangeListener != null) mGSAAccountChangeListener.disconnect();
         }
         if (mSyncStateChangedListener != null) {
-            SyncService syncService = SyncService.get();
+            SyncService syncService = getSyncServiceForOriginalProfile();
             if (syncService != null) {
                 syncService.removeSyncStateChangedListener(mSyncStateChangedListener);
             }
@@ -1270,8 +1271,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     /**
      * @return The type for this activity.
      */
-    @ActivityType
-    public abstract int getActivityType();
+    public abstract @ActivityType int getActivityType();
 
     /**
      * @return Whether the given activity contains a CustomTab.
@@ -1982,8 +1982,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     /**
      * @return Fullscreen manager object.
      */
-    @NonNull
-    public FullscreenManager getFullscreenManager() {
+    public @NonNull FullscreenManager getFullscreenManager() {
         return getBrowserControlsManager().getFullscreenManager();
     }
 
@@ -2221,6 +2220,12 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             return true;
         }
 
+        if (mRootUiCoordinator.getBottomSheetController() != null
+                && mRootUiCoordinator.getBottomSheetController().handleBackPress()) {
+            BackPressManager.record(BackPressHandler.Type.BOTTOM_SHEET);
+            return true;
+        }
+
         if (mCompositorViewHolderSupplier.hasValue()) {
             LayoutManagerImpl layoutManager =
                     mCompositorViewHolderSupplier.get().getLayoutManager();
@@ -2228,6 +2233,12 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
                 // Back press metrics recording is handled by LayoutManagerImpl internally.
                 return true;
             }
+        }
+
+        // Fullscreen must be before selection popup. crbug.com/1454817.
+        if (exitFullscreenIfShowing()) {
+            BackPressManager.record(Type.FULLSCREEN);
+            return true;
         }
 
         SelectionPopupController controller = getSelectionPopupController();
@@ -2239,17 +2250,6 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
 
         if (getManualFillingComponent().onBackPressed()) {
             BackPressManager.record(Type.MANUAL_FILLING);
-            return true;
-        }
-
-        if (exitFullscreenIfShowing()) {
-            BackPressManager.record(Type.FULLSCREEN);
-            return true;
-        }
-
-        if (mRootUiCoordinator.getBottomSheetController() != null
-                && mRootUiCoordinator.getBottomSheetController().handleBackPress()) {
-            BackPressManager.record(BackPressHandler.Type.BOTTOM_SHEET);
             return true;
         }
 
@@ -2463,7 +2463,8 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
         if (id == R.id.disable_price_tracking_menu_id) {
             PowerBookmarkUtils.setPriceTrackingEnabledWithSnackbars(mBookmarkModelSupplier.get(),
                     mBookmarkModelSupplier.get().getUserBookmarkIdForTab(currentTab),
-                    /*enabled=*/false, mSnackbarManager, getResources(), (success) -> {});
+                    /*enabled=*/false, mSnackbarManager, getResources(),
+                    Profile.getLastUsedRegularProfile(), (success) -> {});
             RecordUserAction.record("MobileMenuDisablePriceTracking");
             return true;
         }
@@ -2527,7 +2528,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             boolean usingDesktopUserAgent =
                     currentTab.getWebContents().getNavigationController().getUseDesktopUserAgent();
             usingDesktopUserAgent = !usingDesktopUserAgent;
-            if (ContentFeatureList.isEnabled(ContentFeatureList.REQUEST_DESKTOP_SITE_EXCEPTIONS)) {
+            if (ContentFeatureMap.isEnabled(ContentFeatureList.REQUEST_DESKTOP_SITE_EXCEPTIONS)) {
                 Profile profile = getCurrentTabModel().getProfile();
                 RequestDesktopUtils.setRequestDesktopSiteContentSettingsForUrl(
                         profile, currentTab.getUrl(), usingDesktopUserAgent);
@@ -2819,8 +2820,7 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
     }
 
     @VisibleForTesting
-    @Nullable
-    public BookmarkModel getBookmarkModelForTesting() {
+    public @Nullable BookmarkModel getBookmarkModelForTesting() {
         return mBookmarkModelSupplier.get();
     }
 
@@ -2922,5 +2922,16 @@ public abstract class ChromeActivity<C extends ChromeActivityComponent>
             this.isTablet = isTablet;
             this.changed = changed;
         }
+    }
+
+    @Override
+    protected int getAutomotiveToolbarImplementation() {
+        return AutomotiveToolbarImplementation.WITH_ACTION_BAR;
+    }
+
+    private @Nullable SyncService getSyncServiceForOriginalProfile() {
+        if (!mTabModelProfileSupplier.hasValue()) return null;
+        return SyncServiceFactory.getForProfile(
+                mTabModelProfileSupplier.get().getOriginalProfile());
     }
 }

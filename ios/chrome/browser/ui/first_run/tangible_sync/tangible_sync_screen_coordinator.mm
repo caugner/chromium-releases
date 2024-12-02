@@ -86,6 +86,7 @@
   _tangibleSyncCoordinator.coordinatorCompleted = nil;
   _tangibleSyncCoordinator = nil;
   _baseNavigationController = nil;
+  _delegate = nil;
 }
 
 #pragma mark - Private
