@@ -4,7 +4,6 @@
 
 #include "content/test/render_view_test.h"
 
-#include "content/common/dom_storage_common.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/common/renderer_preferences.h"
@@ -20,6 +19,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "webkit/dom_storage/dom_storage_types.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_LINUX) && !defined(USE_AURA)
@@ -46,7 +46,7 @@ using WebKit::WebString;
 using WebKit::WebURLRequest;
 
 namespace {
-const int32 kOpenerId = 7;
+const int32 kOpenerId = -2;
 const int32 kRouteId = 5;
 const int32 kNewWindowRouteId = 6;
 const int32 kSurfaceId = 42;
@@ -162,11 +162,14 @@ void RenderViewTest::SetUp() {
       new SharedRenderViewCounter(0),
       kRouteId,
       kSurfaceId,
-      kInvalidSessionStorageNamespaceId,
+      dom_storage::kInvalidSessionStorageNamespaceId,
       string16(),
+      false,
+      false,
       1,
       WebKit::WebScreenInfo(),
-      false);
+      false,
+      AccessibilityModeOff);
   view->AddRef();
   view_ = view;
 

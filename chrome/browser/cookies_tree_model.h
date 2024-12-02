@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
@@ -24,10 +25,12 @@
 #include "chrome/browser/browsing_data_local_storage_helper.h"
 #include "chrome/browser/browsing_data_quota_helper.h"
 #include "chrome/common/content_settings.h"
+#include "net/base/server_bound_cert_store.h"
 #include "net/cookies/cookie_monster.h"
 #include "ui/base/models/tree_node_model.h"
 
 class BrowsingDataCookieHelper;
+class BrowsingDataServerBoundCertHelper;
 class CookieSettings;
 class CookiesTreeModel;
 class CookieTreeAppCacheNode;
@@ -40,6 +43,8 @@ class CookieTreeFileSystemsNode;
 class CookieTreeFileSystemNode;
 class CookieTreeLocalStorageNode;
 class CookieTreeLocalStoragesNode;
+class CookieTreeServerBoundCertNode;
+class CookieTreeServerBoundCertsNode;
 class CookieTreeQuotaNode;
 class CookieTreeSessionStorageNode;
 class CookieTreeSessionStoragesNode;
@@ -59,6 +64,7 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
   struct DetailedInfo {
     // NodeType corresponds to the various CookieTreeNode types.
     enum NodeType {
+      TYPE_NONE,
       TYPE_ROOT,  // This is used for CookieTreeRootNode nodes.
       TYPE_ORIGIN,  // This is used for CookieTreeOriginNode nodes.
       TYPE_COOKIES,  // This is used for CookieTreeCookiesNode nodes.
@@ -76,73 +82,96 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
       TYPE_FILE_SYSTEMS,  // This is used for CookieTreeFileSystemsNode.
       TYPE_FILE_SYSTEM,  // This is used for CookieTreeFileSystemNode.
       TYPE_QUOTA,  // This is used for CookieTreeQuotaNode.
+      TYPE_SERVER_BOUND_CERTS, // Used for CookieTreeServerBoundCertsNode.
+      TYPE_SERVER_BOUND_CERT, // Used for CookieTreeServerBoundCertNode.
     };
 
     // TODO(viettrungluu): Figure out whether we want to store |origin| as a
-    // |string16| or a (UTF-8) |std::string|, and convert. Remove constructor
-    // taking an |std::wstring|.
-    DetailedInfo(const string16& origin, NodeType node_type,
-        const net::CookieMonster::CanonicalCookie* cookie,
-        const BrowsingDataDatabaseHelper::DatabaseInfo* database_info,
-        const BrowsingDataLocalStorageHelper::LocalStorageInfo*
-            local_storage_info,
-        const BrowsingDataLocalStorageHelper::LocalStorageInfo*
-            session_storage_info,
-        const appcache::AppCacheInfo* appcache_info,
-        const BrowsingDataIndexedDBHelper::IndexedDBInfo* indexed_db_info,
-        const BrowsingDataFileSystemHelper::FileSystemInfo* file_system_info,
-        const BrowsingDataQuotaHelper::QuotaInfo* quota_info)
-        : origin(UTF16ToWideHack(origin)),
-          node_type(node_type),
-          cookie(cookie),
-          database_info(database_info),
-          local_storage_info(local_storage_info),
-          session_storage_info(session_storage_info),
-          appcache_info(appcache_info),
-          indexed_db_info(indexed_db_info),
-          file_system_info(file_system_info),
-          quota_info(quota_info) {
-      DCHECK((node_type != TYPE_DATABASE) || database_info);
-      DCHECK((node_type != TYPE_LOCAL_STORAGE) || local_storage_info);
-      DCHECK((node_type != TYPE_SESSION_STORAGE) || session_storage_info);
-      DCHECK((node_type != TYPE_APPCACHE) || appcache_info);
-      DCHECK((node_type != TYPE_INDEXED_DB) || indexed_db_info);
-      DCHECK((node_type != TYPE_FILE_SYSTEM) || file_system_info);
-      DCHECK((node_type != TYPE_QUOTA) || quota_info);
-    }
-#if !defined(WCHAR_T_IS_UTF16)
-    DetailedInfo(const std::wstring& origin, NodeType node_type,
-        const net::CookieMonster::CanonicalCookie* cookie,
-        const BrowsingDataDatabaseHelper::DatabaseInfo* database_info,
-        const BrowsingDataLocalStorageHelper::LocalStorageInfo*
-            local_storage_info,
-        const BrowsingDataLocalStorageHelper::LocalStorageInfo*
-            session_storage_info,
-        const appcache::AppCacheInfo* appcache_info,
-        const BrowsingDataIndexedDBHelper::IndexedDBInfo* indexed_db_info,
-        const BrowsingDataFileSystemHelper::FileSystemInfo* file_system_info,
-        const BrowsingDataQuotaHelper::QuotaInfo* quota_info)
+    // |string16| or a (UTF-8) |std::string|, and convert.
+    explicit DetailedInfo(const string16& origin)
         : origin(origin),
-          node_type(node_type),
-          cookie(cookie),
-          database_info(database_info),
-          local_storage_info(local_storage_info),
-          session_storage_info(session_storage_info),
-          appcache_info(appcache_info),
-          indexed_db_info(indexed_db_info),
-          file_system_info(file_system_info),
-          quota_info(quota_info) {
-      DCHECK((node_type != TYPE_DATABASE) || database_info);
-      DCHECK((node_type != TYPE_LOCAL_STORAGE) || local_storage_info);
-      DCHECK((node_type != TYPE_SESSION_STORAGE) || session_storage_info);
-      DCHECK((node_type != TYPE_APPCACHE) || appcache_info);
-      DCHECK((node_type != TYPE_INDEXED_DB) || indexed_db_info);
-      DCHECK((node_type != TYPE_FILE_SYSTEM) || file_system_info);
-      DCHECK((node_type != TYPE_QUOTA) || quota_info);
-    }
-#endif
+          node_type(TYPE_NONE),
+          cookie(NULL),
+          database_info(NULL),
+          local_storage_info(NULL),
+          session_storage_info(NULL),
+          appcache_info(NULL),
+          indexed_db_info(NULL),
+          file_system_info(NULL),
+          quota_info(NULL),
+          server_bound_cert(NULL) {}
 
-    std::wstring origin;
+    DetailedInfo& Init(NodeType type) {
+      DCHECK_EQ(TYPE_NONE, node_type);
+      node_type = type;
+      return *this;
+    }
+
+    DetailedInfo& InitCookie(
+        const net::CookieMonster::CanonicalCookie* cookie) {
+      Init(TYPE_COOKIE);
+      this->cookie = cookie;
+      return *this;
+    }
+
+    DetailedInfo& InitDatabase(
+        const BrowsingDataDatabaseHelper::DatabaseInfo* database_info) {
+      Init(TYPE_DATABASE);
+      this->database_info = database_info;
+      return *this;
+    }
+
+    DetailedInfo& InitLocalStorage(
+        const BrowsingDataLocalStorageHelper::LocalStorageInfo*
+        local_storage_info) {
+      Init(TYPE_LOCAL_STORAGE);
+      this->local_storage_info = local_storage_info;
+      return *this;
+    }
+
+    DetailedInfo& InitSessionStorage(
+        const BrowsingDataLocalStorageHelper::LocalStorageInfo*
+        session_storage_info) {
+      Init(TYPE_SESSION_STORAGE);
+      this->session_storage_info = session_storage_info;
+      return *this;
+    }
+
+    DetailedInfo& InitAppCache(const appcache::AppCacheInfo* appcache_info) {
+      Init(TYPE_APPCACHE);
+      this->appcache_info = appcache_info;
+      return *this;
+    }
+
+    DetailedInfo& InitIndexedDB(
+        const BrowsingDataIndexedDBHelper::IndexedDBInfo* indexed_db_info) {
+      Init(TYPE_INDEXED_DB);
+      this->indexed_db_info = indexed_db_info;
+      return *this;
+    }
+
+    DetailedInfo& InitFileSystem(
+        const BrowsingDataFileSystemHelper::FileSystemInfo* file_system_info) {
+      Init(TYPE_FILE_SYSTEM);
+      this->file_system_info = file_system_info;
+      return *this;
+    }
+
+    DetailedInfo& InitQuota(
+        const BrowsingDataQuotaHelper::QuotaInfo* quota_info) {
+      Init(TYPE_QUOTA);
+      this->quota_info = quota_info;
+      return *this;
+    }
+
+    DetailedInfo& InitServerBoundCert(
+        const net::ServerBoundCertStore::ServerBoundCert* server_bound_cert) {
+      Init(TYPE_SERVER_BOUND_CERT);
+      this->server_bound_cert = server_bound_cert;
+      return *this;
+    }
+
+    string16 origin;
     NodeType node_type;
     const net::CookieMonster::CanonicalCookie* cookie;
     const BrowsingDataDatabaseHelper::DatabaseInfo* database_info;
@@ -153,6 +182,7 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
     const BrowsingDataIndexedDBHelper::IndexedDBInfo* indexed_db_info;
     const BrowsingDataFileSystemHelper::FileSystemInfo* file_system_info;
     const BrowsingDataQuotaHelper::QuotaInfo* quota_info;
+    const net::ServerBoundCertStore::ServerBoundCert* server_bound_cert;
   };
 
   CookieTreeNode() {}
@@ -223,6 +253,7 @@ class CookieTreeOriginNode : public CookieTreeNode {
   CookieTreeAppCachesNode* GetOrCreateAppCachesNode();
   CookieTreeIndexedDBsNode* GetOrCreateIndexedDBsNode();
   CookieTreeFileSystemsNode* GetOrCreateFileSystemsNode();
+  CookieTreeServerBoundCertsNode* GetOrCreateServerBoundCertsNode();
   CookieTreeQuotaNode* UpdateOrCreateQuotaNode(
       std::list<BrowsingDataQuotaHelper::QuotaInfo>::iterator quota_info);
 
@@ -248,6 +279,7 @@ class CookieTreeOriginNode : public CookieTreeNode {
   CookieTreeIndexedDBsNode* indexed_dbs_child_;
   CookieTreeFileSystemsNode* file_systems_child_;
   CookieTreeQuotaNode* quota_child_;
+  CookieTreeServerBoundCertsNode* server_bound_certs_child_;
 
   // The URL for which this node was initially created.
   GURL url_;
@@ -544,6 +576,44 @@ class CookieTreeQuotaNode : public CookieTreeNode {
   DISALLOW_COPY_AND_ASSIGN(CookieTreeQuotaNode);
 };
 
+// CookieTreeServerBoundCertNode ---------------------------------------------
+class CookieTreeServerBoundCertNode : public CookieTreeNode {
+ public:
+  friend class CookieTreeServerBoundCertsNode;
+
+  // The iterator should remain valid at least as long as the
+  // CookieTreeServerBoundCertNode is valid.
+  explicit CookieTreeServerBoundCertNode(
+      net::ServerBoundCertStore::ServerBoundCertList::iterator cert);
+  virtual ~CookieTreeServerBoundCertNode();
+
+  // CookieTreeNode methods:
+  virtual void DeleteStoredObjects() OVERRIDE;
+  virtual DetailedInfo GetDetailedInfo() const OVERRIDE;
+
+ private:
+  // server_bound_cert_ is expected to remain valid as long as the
+  // CookieTreeServerBoundCertNode is valid.
+  net::ServerBoundCertStore::ServerBoundCertList::iterator server_bound_cert_;
+
+  DISALLOW_COPY_AND_ASSIGN(CookieTreeServerBoundCertNode);
+};
+
+class CookieTreeServerBoundCertsNode : public CookieTreeNode {
+ public:
+  CookieTreeServerBoundCertsNode();
+  virtual ~CookieTreeServerBoundCertsNode();
+
+  virtual DetailedInfo GetDetailedInfo() const OVERRIDE;
+
+  void AddServerBoundCertNode(CookieTreeServerBoundCertNode* child) {
+    AddChildSortedByTitle(child);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CookieTreeServerBoundCertsNode);
+};
+
 // CookiesTreeModel -----------------------------------------------------------
 class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
  public:
@@ -567,6 +637,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
       BrowsingDataIndexedDBHelper* indexed_db_helper,
       BrowsingDataFileSystemHelper* file_system_helper,
       BrowsingDataQuotaHelper* quota_helper,
+      BrowsingDataServerBoundCertHelper* server_bound_cert_helper,
       bool use_cookie_source);
   virtual ~CookiesTreeModel();
 
@@ -612,6 +683,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   typedef std::list<BrowsingDataFileSystemHelper::FileSystemInfo>
       FileSystemInfoList;
   typedef std::list<BrowsingDataQuotaHelper::QuotaInfo> QuotaInfoArray;
+  typedef net::ServerBoundCertStore::ServerBoundCertList ServerBoundCertList;
 
   void OnAppCacheModelInfoLoaded();
   void OnCookiesModelInfoLoaded(const net::CookieList& cookie_list);
@@ -625,6 +697,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   void OnFileSystemModelInfoLoaded(
       const FileSystemInfoList& file_system_info);
   void OnQuotaModelInfoLoaded(const QuotaInfoArray& quota_info);
+  void OnServerBoundCertModelInfoLoaded(const ServerBoundCertList& cert_list);
 
   void PopulateAppCacheInfoWithFilter(const std::wstring& filter);
   void PopulateCookieInfoWithFilter(const std::wstring& filter);
@@ -634,6 +707,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   void PopulateIndexedDBInfoWithFilter(const std::wstring& filter);
   void PopulateFileSystemInfoWithFilter(const std::wstring& filter);
   void PopulateQuotaInfoWithFilter(const std::wstring& filter);
+  void PopulateServerBoundCertInfoWithFilter(const std::wstring& filter);
 
   void NotifyObserverBeginBatch();
   void NotifyObserverEndBatch();
@@ -646,6 +720,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   scoped_refptr<BrowsingDataIndexedDBHelper> indexed_db_helper_;
   scoped_refptr<BrowsingDataFileSystemHelper> file_system_helper_;
   scoped_refptr<BrowsingDataQuotaHelper> quota_helper_;
+  scoped_refptr<BrowsingDataServerBoundCertHelper> server_bound_cert_helper_;
 
   std::map<GURL, std::list<appcache::AppCacheInfo> > appcache_info_;
   CookieList cookie_list_;
@@ -655,6 +730,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   IndexedDBInfoList indexed_db_info_list_;
   FileSystemInfoList file_system_info_list_;
   QuotaInfoArray quota_info_list_;
+  ServerBoundCertList server_bound_cert_list_;
 
   // The CookiesTreeModel maintains a separate list of observers that are
   // specifically of the type CookiesTreeModel::Observer.
@@ -669,6 +745,8 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   // Otherwise, use the CanonicalCookie::Domain attribute.
   bool use_cookie_source_;
 
+  base::WeakPtrFactory<CookiesTreeModel> weak_ptr_factory_;
+
   friend class CookieTreeAppCacheNode;
   friend class CookieTreeCookieNode;
   friend class CookieTreeDatabaseNode;
@@ -677,6 +755,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   friend class CookieTreeIndexedDBNode;
   friend class CookieTreeFileSystemNode;
   friend class CookieTreeQuotaNode;
+  friend class CookieTreeServerBoundCertNode;
 
   DISALLOW_COPY_AND_ASSIGN(CookiesTreeModel);
 };

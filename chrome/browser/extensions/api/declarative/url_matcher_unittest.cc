@@ -30,6 +30,36 @@ TEST(URLMatcherConditionTest, Constructors) {
   EXPECT_EQ(&pattern, m3.substring_pattern());
 }
 
+TEST(URLMatcherSchemeFilter, TestMatching) {
+  URLMatcherSchemeFilter filter1("https");
+  std::vector<std::string> filter2_content;
+  filter2_content.push_back("http");
+  filter2_content.push_back("https");
+  URLMatcherSchemeFilter filter2(filter2_content);
+
+  GURL matching_url("https://www.foobar.com");
+  GURL non_matching_url("http://www.foobar.com");
+  EXPECT_TRUE(filter1.IsMatch(matching_url));
+  EXPECT_FALSE(filter1.IsMatch(non_matching_url));
+  EXPECT_TRUE(filter2.IsMatch(matching_url));
+  EXPECT_TRUE(filter2.IsMatch(non_matching_url));
+}
+
+TEST(URLMatcherPortFilter, TestMatching) {
+  std::vector<URLMatcherPortFilter::Range> ranges;
+  ranges.push_back(URLMatcherPortFilter::CreateRange(80, 90));
+  ranges.push_back(URLMatcherPortFilter::CreateRange(8080));
+  URLMatcherPortFilter filter(ranges);
+  EXPECT_TRUE(filter.IsMatch(GURL("http://www.example.com")));
+  EXPECT_TRUE(filter.IsMatch(GURL("http://www.example.com:80")));
+  EXPECT_TRUE(filter.IsMatch(GURL("http://www.example.com:81")));
+  EXPECT_TRUE(filter.IsMatch(GURL("http://www.example.com:90")));
+  EXPECT_TRUE(filter.IsMatch(GURL("http://www.example.com:8080")));
+  EXPECT_FALSE(filter.IsMatch(GURL("http://www.example.com:79")));
+  EXPECT_FALSE(filter.IsMatch(GURL("http://www.example.com:91")));
+  EXPECT_FALSE(filter.IsMatch(GURL("https://www.example.com")));
+}
+
 TEST(URLMatcherConditionTest, IsFullURLCondition) {
   SubstringPattern pattern("example.com", 1);
   EXPECT_FALSE(URLMatcherCondition(URLMatcherCondition::HOST_SUFFIX,
@@ -152,6 +182,7 @@ TEST(URLMatcherConditionFactoryTest, TestSingletonProperty) {
   // ForgetUnusedPatterns.
   SubstringPattern::ID old_id_1 = c1.substring_pattern()->id();
   factory.ForgetUnusedPatterns(std::set<SubstringPattern::ID>());
+  EXPECT_TRUE(factory.IsEmpty());
   URLMatcherCondition c4 = factory.CreateHostEqualsCondition("www.google.com");
   EXPECT_NE(old_id_1, c4.substring_pattern()->id());
 }
@@ -283,7 +314,7 @@ TEST(URLMatcherConditionFactoryTest, TestFullSearches) {
 // URLMatcherConditionSet
 //
 
-TEST(URLMatcherConditionSetTest, Constructors) {
+TEST(URLMatcherConditionSetTest, Constructor) {
   URLMatcherConditionFactory factory;
   URLMatcherCondition m1 = factory.CreateHostSuffixCondition("example.com");
   URLMatcherCondition m2 = factory.CreatePathContainsCondition("foo");
@@ -292,25 +323,17 @@ TEST(URLMatcherConditionSetTest, Constructors) {
   conditions.insert(m1);
   conditions.insert(m2);
 
-  URLMatcherConditionSet condition_set(1, conditions);
-  EXPECT_EQ(1, condition_set.id());
-  EXPECT_EQ(2u, condition_set.conditions().size());
-
-  std::set<URLMatcherCondition> other_conditions;
-  other_conditions.insert(m1);
-  URLMatcherConditionSet condition_set2(2, other_conditions);
-  condition_set2 = condition_set;
-  EXPECT_EQ(1, condition_set2.id());
-  EXPECT_EQ(2u, condition_set2.conditions().size());
-
-  URLMatcherConditionSet condition_set3(condition_set);
-  EXPECT_EQ(1, condition_set2.id());
-  EXPECT_EQ(2u, condition_set2.conditions().size());
+  scoped_refptr<URLMatcherConditionSet> condition_set(
+      new URLMatcherConditionSet(1, conditions));
+  EXPECT_EQ(1, condition_set->id());
+  EXPECT_EQ(2u, condition_set->conditions().size());
 }
 
 TEST(URLMatcherConditionSetTest, Matching) {
   GURL url1("http://www.example.com/foo?bar=1");
   GURL url2("http://foo.example.com/index.html");
+  GURL url3("http://www.example.com:80/foo?bar=1");
+  GURL url4("http://www.example.com:8080/foo?bar=1");
 
   URLMatcherConditionFactory factory;
   URLMatcherCondition m1 = factory.CreateHostSuffixCondition("example.com");
@@ -320,17 +343,43 @@ TEST(URLMatcherConditionSetTest, Matching) {
   conditions.insert(m1);
   conditions.insert(m2);
 
-  URLMatcherConditionSet condition_set(1, conditions);
-  EXPECT_EQ(1, condition_set.id());
-  EXPECT_EQ(2u, condition_set.conditions().size());
+  scoped_refptr<URLMatcherConditionSet> condition_set(
+      new URLMatcherConditionSet(1, conditions));
+  EXPECT_EQ(1, condition_set->id());
+  EXPECT_EQ(2u, condition_set->conditions().size());
 
   std::set<SubstringPattern::ID> matching_substring_patterns;
   matching_substring_patterns.insert(m1.substring_pattern()->id());
-  EXPECT_FALSE(condition_set.IsMatch(matching_substring_patterns, url1));
+  EXPECT_FALSE(condition_set->IsMatch(matching_substring_patterns, url1));
 
   matching_substring_patterns.insert(m2.substring_pattern()->id());
-  EXPECT_TRUE(condition_set.IsMatch(matching_substring_patterns, url1));
-  EXPECT_FALSE(condition_set.IsMatch(matching_substring_patterns, url2));
+  EXPECT_TRUE(condition_set->IsMatch(matching_substring_patterns, url1));
+  EXPECT_FALSE(condition_set->IsMatch(matching_substring_patterns, url2));
+
+  // Test scheme filters.
+  scoped_refptr<URLMatcherConditionSet> condition_set2(
+      new URLMatcherConditionSet(1, conditions,
+          scoped_ptr<URLMatcherSchemeFilter>(
+              new URLMatcherSchemeFilter("https")),
+          scoped_ptr<URLMatcherPortFilter>(NULL)));
+  EXPECT_FALSE(condition_set2->IsMatch(matching_substring_patterns, url1));
+  scoped_refptr<URLMatcherConditionSet> condition_set3(
+      new URLMatcherConditionSet(1, conditions,
+          scoped_ptr<URLMatcherSchemeFilter>(
+              new URLMatcherSchemeFilter("http")),
+          scoped_ptr<URLMatcherPortFilter>(NULL)));
+  EXPECT_TRUE(condition_set3->IsMatch(matching_substring_patterns, url1));
+
+  // Test port filters.
+  std::vector<URLMatcherPortFilter::Range> ranges;
+  ranges.push_back(URLMatcherPortFilter::CreateRange(80));
+  scoped_ptr<URLMatcherPortFilter> filter(new URLMatcherPortFilter(ranges));
+  scoped_refptr<URLMatcherConditionSet> condition_set4(
+      new URLMatcherConditionSet(1, conditions,
+          scoped_ptr<URLMatcherSchemeFilter>(NULL), filter.Pass()));
+  EXPECT_TRUE(condition_set4->IsMatch(matching_substring_patterns, url1));
+  EXPECT_TRUE(condition_set4->IsMatch(matching_substring_patterns, url3));
+  EXPECT_FALSE(condition_set4->IsMatch(matching_substring_patterns, url4));
 }
 
 
@@ -351,8 +400,9 @@ TEST(URLMatcherTest, FullTest) {
   conditions1.insert(factory->CreatePathContainsCondition("foo"));
 
   const int kConditionSetId1 = 1;
-  std::vector<URLMatcherConditionSet> insert1;
-  insert1.push_back(URLMatcherConditionSet(kConditionSetId1, conditions1));
+  URLMatcherConditionSet::Vector insert1;
+  insert1.push_back(make_scoped_refptr(
+      new URLMatcherConditionSet(kConditionSetId1, conditions1)));
   matcher.AddConditionSets(insert1);
   EXPECT_EQ(1u, matcher.MatchURL(url1).size());
   EXPECT_EQ(0u, matcher.MatchURL(url2).size());
@@ -362,8 +412,9 @@ TEST(URLMatcherTest, FullTest) {
   conditions2.insert(factory->CreateHostSuffixCondition("example.com"));
 
   const int kConditionSetId2 = 2;
-  std::vector<URLMatcherConditionSet> insert2;
-  insert2.push_back(URLMatcherConditionSet(kConditionSetId2, conditions2));
+  URLMatcherConditionSet::Vector insert2;
+  insert2.push_back(make_scoped_refptr(
+      new URLMatcherConditionSet(kConditionSetId2, conditions2)));
   matcher.AddConditionSets(insert2);
   EXPECT_EQ(2u, matcher.MatchURL(url1).size());
   EXPECT_EQ(1u, matcher.MatchURL(url2).size());
@@ -385,6 +436,8 @@ TEST(URLMatcherTest, FullTest) {
   matcher.RemoveConditionSets(remove1);
   EXPECT_EQ(0u, matcher.MatchURL(url1).size());
   EXPECT_EQ(0u, matcher.MatchURL(url2).size());
+
+  EXPECT_TRUE(matcher.IsEmpty());
 
   // The cached singleton in matcher.condition_factory_ should be destroyed to
   // free memory.

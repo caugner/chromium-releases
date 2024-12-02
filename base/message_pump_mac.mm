@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -192,28 +192,8 @@ void MessagePumpCFRunLoopBase::ScheduleWork() {
 // Must be called on the run loop thread.
 void MessagePumpCFRunLoopBase::ScheduleDelayedWork(
     const TimeTicks& delayed_work_time) {
-  // TODO(jar): We may need a more efficient way to go between these times, but
-  // the difference will change not only when we sleep/wake, it will also change
-  // when the user changes the wall clock time :-/.
-  Time absolute_work_time =
-      (delayed_work_time - TimeTicks::Now()) + Time::Now();
-
-  Time::Exploded exploded;
-  absolute_work_time.UTCExplode(&exploded);
-  double seconds = exploded.second +
-                   (static_cast<double>((absolute_work_time.ToInternalValue()) %
-                                        Time::kMicrosecondsPerSecond) /
-                    Time::kMicrosecondsPerSecond);
-  CFGregorianDate gregorian = {
-    exploded.year,
-    exploded.month,
-    exploded.day_of_month,
-    exploded.hour,
-    exploded.minute,
-    seconds
-  };
-  delayed_work_fire_time_ = CFGregorianDateGetAbsoluteTime(gregorian, NULL);
-
+  TimeDelta delta = delayed_work_time - TimeTicks::Now();
+  delayed_work_fire_time_ = CFAbsoluteTimeGetCurrent() + delta.InSecondsF();
   CFRunLoopTimerSetNextFireDate(delayed_work_timer_, delayed_work_fire_time_);
 }
 
@@ -460,6 +440,8 @@ MessagePumpCFRunLoop::MessagePumpCFRunLoop()
     : quit_pending_(false) {
 }
 
+MessagePumpCFRunLoop::~MessagePumpCFRunLoop() {}
+
 // Called by MessagePumpCFRunLoopBase::DoRun.  If other CFRunLoopRun loops were
 // running lower on the run loop thread's stack when this object was created,
 // the same number of CFRunLoopRun loops must be running for the outermost call
@@ -541,6 +523,8 @@ MessagePumpNSApplication::MessagePumpNSApplication()
     : keep_running_(true),
       running_own_loop_(false) {
 }
+
+MessagePumpNSApplication::~MessagePumpNSApplication() {}
 
 void MessagePumpNSApplication::DoRun(Delegate* delegate) {
   bool last_running_own_loop_ = running_own_loop_;

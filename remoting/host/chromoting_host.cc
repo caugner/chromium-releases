@@ -17,6 +17,7 @@
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/host_config.h"
+#include "remoting/host/host_port_allocator.h"
 #include "remoting/host/screen_recorder.h"
 #include "remoting/protocol/connection_to_client.h"
 #include "remoting/protocol/client_stub.h"
@@ -54,6 +55,9 @@ const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
   // Time to keep an entry from being discarded even when it
   // has no significant state, -1 to never discard.
   -1,
+
+  // Don't use initial delay unless the last request was an error.
+  false,
 };
 
 }  // namespace
@@ -62,7 +66,7 @@ ChromotingHost::ChromotingHost(
     ChromotingHostContext* context,
     SignalStrategy* signal_strategy,
     DesktopEnvironment* environment,
-    const protocol::NetworkSettings& network_settings)
+    const NetworkSettings& network_settings)
     : context_(context),
       desktop_environment_(environment),
       network_settings_(network_settings),
@@ -94,12 +98,25 @@ void ChromotingHost::Start() {
     return;
   state_ = kStarted;
 
-  // Create and start session manager.
+  // Create port allocator and transport factory.
+  scoped_ptr<HostPortAllocator> port_allocator(
+      HostPortAllocator::Create(context_->url_request_context_getter(),
+                                network_settings_));
+
+  bool incoming_only = network_settings_.nat_traversal_mode ==
+      NetworkSettings::NAT_TRAVERSAL_DISABLED;
+
   scoped_ptr<protocol::TransportFactory> transport_factory(
-      new protocol::LibjingleTransportFactory());
-  session_manager_.reset(
-      new protocol::JingleSessionManager(transport_factory.Pass()));
-  session_manager_->Init(signal_strategy_, this, network_settings_);
+      new protocol::LibjingleTransportFactory(
+          port_allocator.PassAs<cricket::HttpPortAllocatorBase>(),
+          incoming_only));
+
+  // Create and start session manager.
+  bool fetch_stun_relay_info = network_settings_.nat_traversal_mode ==
+      NetworkSettings::NAT_TRAVERSAL_ENABLED;
+  session_manager_.reset(new protocol::JingleSessionManager(
+      transport_factory.Pass(), fetch_stun_relay_info));
+  session_manager_->Init(signal_strategy_, this);
 }
 
 // This method is called when we need to destroy the host process.
@@ -343,7 +360,7 @@ void ChromotingHost::PauseSession(bool pause) {
 
   ClientList::iterator client;
   for (client = clients_.begin(); client != clients_.end(); ++client) {
-    (*client)->set_awaiting_continue_approval(pause);
+    (*client)->SetDisableInputs(pause);
   }
 }
 

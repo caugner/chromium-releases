@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
@@ -44,9 +45,9 @@ static void WindowOpenHelper(Browser* browser,
   // a popup window instead of a new tab in current window.
   // Now the active tab in last active window should be the new tab.
   Browser* last_active_browser = BrowserList::GetLastActive();
-  EXPECT_TRUE(last_active_browser);
+  ASSERT_TRUE(last_active_browser);
   WebContents* newtab = last_active_browser->GetSelectedWebContents();
-  EXPECT_TRUE(newtab);
+  ASSERT_TRUE(newtab);
   observer.Wait();
   EXPECT_EQ(url, newtab->GetController().GetLastCommittedEntry()->GetURL());
   if (newtab_process_should_equal_opener)
@@ -126,7 +127,7 @@ class AppApiTest : public ExtensionApiTest {
     EXPECT_FALSE(browser()->GetWebContentsAt(1)->GetWebUI());
 
     ui_test_utils::WindowedNotificationObserver tab_added_observer(
-        content::NOTIFICATION_TAB_ADDED,
+        chrome::NOTIFICATION_TAB_ADDED,
         content::NotificationService::AllSources());
     browser()->NewTab();
     tab_added_observer.Wait();
@@ -197,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
   LOG(INFO) << "Nav 2.";
 
   ui_test_utils::WindowedNotificationObserver tab_added_observer(
-      content::NOTIFICATION_TAB_ADDED,
+      chrome::NOTIFICATION_TAB_ADDED,
       content::NotificationService::AllSources());
   browser()->NewTab();
   tab_added_observer.Wait();
@@ -314,7 +315,7 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, BookmarkAppGetsNormalProcess) {
   EXPECT_FALSE(browser()->GetWebContentsAt(1)->GetWebUI());
 
   ui_test_utils::WindowedNotificationObserver tab_added_observer(
-      content::NOTIFICATION_TAB_ADDED,
+      chrome::NOTIFICATION_TAB_ADDED,
       content::NotificationService::AllSources());
   browser()->NewTab();
   tab_added_observer.Wait();
@@ -403,7 +404,14 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_AppProcessRedirectBack) {
 
 // Ensure that reloading a URL after installing or uninstalling it as an app
 // correctly swaps the process.  (http://crbug.com/80621)
-IN_PROC_BROWSER_TEST_F(AppApiTest, ReloadIntoAppProcess) {
+//
+// The test times out under AddressSanitizer, see http://crbug.com/103371
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_ReloadIntoAppProcess DISABLED_ReloadIntoAppProcess
+#else
+#define MAYBE_ReloadIntoAppProcess ReloadIntoAppProcess
+#endif
+IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_ReloadIntoAppProcess) {
   extensions::ProcessMap* process_map =
       browser()->profile()->GetExtensionService()->process_map();
 

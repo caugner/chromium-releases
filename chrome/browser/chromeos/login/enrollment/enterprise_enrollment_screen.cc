@@ -17,6 +17,8 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 
 namespace chromeos {
 
@@ -78,6 +80,17 @@ void EnterpriseEnrollmentScreen::OnOAuthTokenAvailable(
 }
 
 void EnterpriseEnrollmentScreen::OnConfirmationClosed(bool go_back_to_signin) {
+  // If the machine has been put in KIOSK mode we have to restart the session
+  // here to go in the proper KIOSK mode login screen.
+  policy::BrowserPolicyConnector* policy_connector =
+      g_browser_process->browser_policy_connector();
+  if (policy_connector && policy_connector->GetDeviceCloudPolicyDataStore() &&
+      policy_connector->GetDeviceCloudPolicyDataStore()->device_mode() ==
+          policy::DEVICE_MODE_KIOSK) {
+    DBusThreadManager::Get()->GetSessionManagerClient()->StopSession();
+    return;
+  }
+
   get_screen_observer()->OnExit(go_back_to_signin ?
       ScreenObserver::ENTERPRISE_ENROLLMENT_COMPLETED :
       ScreenObserver::ENTERPRISE_AUTO_MAGIC_ENROLLMENT_COMPLETED);
@@ -176,7 +189,7 @@ void EnterpriseEnrollmentScreen::WriteInstallAttributesData() {
           FROM_HERE,
           base::Bind(&EnterpriseEnrollmentScreen::WriteInstallAttributesData,
                      weak_ptr_factory_.GetWeakPtr()),
-          kLockRetryIntervalMs);
+          base::TimeDelta::FromMilliseconds(kLockRetryIntervalMs));
       return;
     }
     case policy::EnterpriseInstallAttributes::LOCK_BACKEND_ERROR: {

@@ -40,8 +40,12 @@ extern const bool kBrowserAliveWithNoWindows;
 // bookmarks?
 extern const bool kShowImportOnBookmarkBar;
 
-// Should the exit menu item be shown in the toolbar menu?
+// Whether various menu items are shown.
 extern const bool kShowExitMenuItem;
+extern const bool kShowFeedbackMenuItem;
+extern const bool kShowHelpMenuItemIcon;
+extern const bool kShowSyncSetupMenuItem;
+extern const bool kShowUpgradeMenuItem;
 
 // Does the OS support other browsers? If not, operations such as default
 // browser check are not done.
@@ -81,6 +85,11 @@ extern const int kInfoBarBorderPaddingVertical;
 
 // Last character display for passwords.
 extern const bool kPasswordEchoEnabled;
+
+// Changes how browser is initialized when executed in app mode.
+// If true after app window is opened continue with regular startup path
+// i.e. session restore, load URLs from cmd line plus focus app window.
+extern const bool kAppRestoreSession;
 
 //=============================================================================
 // Runtime "const" - set only once after parsing command line option and should

@@ -58,6 +58,7 @@
 #include "chrome/browser/protector/protected_prefs_watcher.h"
 #include "chrome/browser/protector/protector_service.h"
 #include "chrome/browser/protector/protector_service_factory.h"
+#include "chrome/browser/protector/protector_utils.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -105,7 +106,7 @@
 #include "chrome/browser/ui/cocoa/keystone_infobar_delegate.h"
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #endif
 
@@ -113,15 +114,12 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/enterprise_extension_observer.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
 #include "chrome/browser/chromeos/network_message_observer.h"
 #include "chrome/browser/chromeos/power/low_battery_observer.h"
 #include "chrome/browser/chromeos/sms_observer.h"
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/legacy_window_manager/wm_message_listener.h"
-#endif
+#include "chromeos/dbus/dbus_thread_manager.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
@@ -130,6 +128,7 @@
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
+#include "chrome/browser/ui/browser_init_win.h"
 #include "chrome/installer/util/auto_launch_util.h"
 #endif
 
@@ -253,14 +252,11 @@ bool AutolaunchInfoBarDelegate::Cancel() {
   auto_launch_trial::UpdateInfobarResponseMetric(
       auto_launch_trial::INFOBAR_CUT_IT_OUT);
   // Also make sure we keep track of how many disable and how many enable.
-  const bool auto_launch = false;
-  auto_launch_trial::UpdateToggleAutoLaunchMetric(auto_launch);
+  auto_launch_trial::UpdateToggleAutoLaunchMetric(false);
 
   content::BrowserThread::PostTask(
       content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&auto_launch_util::SetWillLaunchAtLogin,
-                 auto_launch,
-                 FilePath(),
+      base::Bind(&auto_launch_util::DisableForegroundStartAtLogin,
                  profile_->GetPath().BaseName().value()));
   return true;
 }
@@ -370,11 +366,13 @@ bool DefaultBrowserInfoBarDelegate::Cancel() {
 }
 
 #if defined(OS_WIN)
-void CheckAutoLaunchCallback() {
+void CheckAutoLaunchCallback(Profile* profile) {
   if (!auto_launch_trial::IsInAutoLaunchGroup())
     return;
 
-  Browser* browser = BrowserList::GetLastActive();
+  // We must not use GetLastActive here because this is at Chrome startup and
+  // no window might have been made active yet. We'll settle for any window.
+  Browser* browser = BrowserList::FindAnyBrowser(profile, true);
   TabContentsWrapper* tab = browser->GetSelectedTabContentsWrapper();
 
   // Don't show the info-bar if there are already info-bars showing.
@@ -900,9 +898,16 @@ bool BrowserInit::LaunchWithProfile::Launch(
   // opened an app shortcut.  Don't restore tabs or open initial
   // URLs in that case. The user should see the window as an app,
   // not as chrome.
-  if (OpenApplicationWindow(profile)) {
+  // Special case is when app switches are passed but we do want to restore
+  // session. In that case open app window + focus it after session is restored.
+  if (OpenApplicationWindow(profile) && !browser_defaults::kAppRestoreSession) {
     RecordLaunchModeHistogram(LM_AS_WEBAPP);
   } else {
+    Browser* browser_to_focus = NULL;
+    // In case of app mode + session restore we want to focus that app.
+    if (browser_defaults::kAppRestoreSession)
+      browser_to_focus = BrowserList::GetLastActive();
+
     RecordLaunchModeHistogram(urls_to_open.empty()?
                               LM_TO_BE_DECIDED : LM_WITH_URLS);
 
@@ -915,6 +920,9 @@ bool BrowserInit::LaunchWithProfile::Launch(
     // If this is an app launch, but we didn't open an app window, it may
     // be an app tab.
     OpenApplicationTab(profile);
+
+    if (browser_to_focus)
+      browser_to_focus->GetSelectedWebContents()->GetView()->SetInitialFocus();
 
     if (process_startup) {
       if (browser_defaults::kOSSupportsOtherBrowsers &&
@@ -1029,7 +1037,8 @@ bool BrowserInit::LaunchWithProfile::OpenApplicationWindow(Profile* profile) {
     RecordCmdLineAppHistogram();
     WebContents* tab_in_app_window = Browser::OpenApplication(
         profile, extension, launch_container, GURL(), NEW_WINDOW);
-    return (tab_in_app_window != NULL);
+    // Platform apps fire off a launch event which may or may not open a window.
+    return (tab_in_app_window != NULL || extension->is_platform_app());
   }
 
   if (url_string.empty())
@@ -1067,9 +1076,13 @@ void BrowserInit::LaunchWithProfile::ProcessLaunchURLs(
     bool process_startup,
     const std::vector<GURL>& urls_to_open) {
   // If we're starting up in "background mode" (no open browser window) then
-  // don't open any browser windows.
-  if (process_startup && command_line_.HasSwitch(switches::kNoStartupWindow))
+  // don't open any browser windows, unless kAutoLaunchAtStartup is also
+  // specified.
+  if (process_startup &&
+      command_line_.HasSwitch(switches::kNoStartupWindow) &&
+      !command_line_.HasSwitch(switches::kAutoLaunchAtStartup)) {
     return;
+  }
 
   if (process_startup && ProcessStartupURLs(urls_to_open)) {
     // ProcessStartupURLs processed the urls, nothing else to do.
@@ -1162,10 +1175,13 @@ Browser* BrowserInit::LaunchWithProfile::ProcessSpecifiedURLs(
     const std::vector<GURL>& urls_to_open) {
   SessionStartupPref pref = GetSessionStartupPref(command_line_, profile_);
   std::vector<Tab> tabs;
-  // Pinned tabs should not be displayed when chrome is launched
-  // in incognito mode.
+  // Pinned tabs should not be displayed when chrome is launched in incognito
+  // mode. Also, no pages should be opened automatically if the session
+  // crashed. Otherwise it might trigger another crash, locking the user out of
+  // chrome. The crash infobar is shown in this case.
   if (!IncognitoModePrefs::ShouldLaunchIncognito(command_line_,
-                                                 profile_->GetPrefs())) {
+                                                 profile_->GetPrefs()) &&
+      !HasPendingUncleanExit(profile_)) {
     tabs = PinnedTabCodec::ReadPinnedTabs(profile_);
   }
 
@@ -1174,7 +1190,8 @@ Browser* BrowserInit::LaunchWithProfile::ProcessSpecifiedURLs(
   if (!urls_to_open.empty()) {
     // If urls were specified on the command line, use them.
     UrlsToTabs(urls_to_open, &tabs);
-  } else if (pref.type == SessionStartupPref::URLS && !pref.urls.empty()) {
+  } else if (pref.type == SessionStartupPref::URLS && !pref.urls.empty() &&
+             !HasPendingUncleanExit(profile_)) {
     // Only use the set of urls specified in preferences if nothing was
     // specified on the command line. Filter out any urls that are to be
     // restored by virtue of having been previously pinned.
@@ -1185,10 +1202,9 @@ Browser* BrowserInit::LaunchWithProfile::ProcessSpecifiedURLs(
     UrlsToTabs(urls, &tabs);
 
   } else if (pref.type == SessionStartupPref::HOMEPAGE) {
-    // If the user had 'homepage' selected, we should have migrated them to
-    // 'URLs' instead.
-    DLOG(ERROR) << "pref.type == HOMEPAGE";
-    NOTREACHED();
+    // If 'homepage' selected, either by the user or by a policy, we should
+    // have migrated them to another value.
+    NOTREACHED() << "SessionStartupPref has deprecated type HOMEPAGE";
   }
 
   if (tabs.empty())
@@ -1345,10 +1361,6 @@ void BrowserInit::LaunchWithProfile::AddBadFlagsInfoBarIfNecessary(
     switches::kSingleProcess,
     switches::kNoSandbox,
     switches::kInProcessWebGL,
-    // This should only be used for tests and to disable Protector on ChromeOS.
-#if !defined(OS_CHROMEOS)
-    switches::kNoProtector,
-#endif
     NULL
   };
 
@@ -1421,7 +1433,7 @@ bool LearnMoreInfoBar::LinkClicked(WindowOpenDisposition disposition) {
 
 void BrowserInit::LaunchWithProfile::AddObsoleteSystemInfoBarIfNecessary(
     TabContentsWrapper* tab) {
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   // We've deprecated support for Ubuntu Hardy.  Rather than attempting to
   // determine whether you're using that, we instead key off the GTK version;
   // this will also deprecate other distributions (including variants of Ubuntu)
@@ -1564,7 +1576,7 @@ bool BrowserInit::LaunchWithProfile::CheckIfAutoLaunched(Profile* profile) {
   if (command_line.HasSwitch(switches::kAutoLaunchAtStartup) ||
       first_run::IsChromeFirstRun()) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(&CheckAutoLaunchCallback));
+                            base::Bind(&CheckAutoLaunchCallback, profile));
     return true;
   }
 #endif
@@ -1576,18 +1588,9 @@ void BrowserInit::LaunchWithProfile::CheckPreferencesBackup(Profile* profile) {
       ProtectorServiceFactory::GetForProfile(profile);
   ProtectedPrefsWatcher* prefs_watcher = protector_service->GetPrefsWatcher();
 
-  // BaseSettingChange instances are always created, even when Protector is
-  // disabled, to report corresponding histograms. With Protector disabled,
-  // the backup is updated to match the new setting value, otherwise histograms
-  // would be reported on each run.
-  // TODO(ivankr): move IsEnabled() check to ProtectorService::ShowChange().
-
   // Check if backup is valid.
   if (!prefs_watcher->is_backup_valid()) {
-    scoped_ptr<BaseSettingChange> change(
-        protector::CreatePrefsBackupInvalidChange());
-    if (protector::IsEnabled())
-      protector_service->ShowChange(change.release());
+    protector_service->ShowChange(protector::CreatePrefsBackupInvalidChange());
     // Further checks make no sense.
     return;
   }
@@ -1600,18 +1603,39 @@ void BrowserInit::LaunchWithProfile::CheckPreferencesBackup(Profile* profile) {
     PinnedTabCodec::Tabs new_tabs = PinnedTabCodec::ReadPinnedTabs(profile);
     const base::Value* tabs_backup =
         prefs_watcher->GetBackupForPref(prefs::kPinnedTabs);
-    scoped_ptr<BaseSettingChange> change(
-        protector::CreateSessionStartupChange(
-            new_pref,
-            new_tabs,
-            SessionStartupPref::GetStartupPrefBackup(profile),
-            PinnedTabCodec::ReadPinnedTabs(tabs_backup)));
-    if (protector::IsEnabled()) {
-      protector_service->ShowChange(change.release());
-    } else {
-      SessionStartupPref::SetStartupPref(profile, new_pref);
-      PinnedTabCodec::WritePinnedTabs(profile, new_tabs);
+    protector_service->ShowChange(protector::CreateSessionStartupChange(
+        new_pref,
+        new_tabs,
+        SessionStartupPref::GetStartupPrefBackup(profile),
+        PinnedTabCodec::ReadPinnedTabs(tabs_backup)));
+  }
+
+  // Check for homepage changes.
+  if (prefs_watcher->DidPrefChange(prefs::kHomePage) ||
+      prefs_watcher->DidPrefChange(prefs::kHomePageIsNewTabPage) ||
+      prefs_watcher->DidPrefChange(prefs::kShowHomeButton)) {
+    LOG(WARNING) << "Homepage has changed";
+    PrefService* prefs = profile->GetPrefs();
+    std::string backup_homepage;
+    bool backup_homepage_is_ntp;
+    bool backup_show_home_button;
+    if (!prefs_watcher->GetBackupForPref(prefs::kHomePage)->
+            GetAsString(&backup_homepage) ||
+        !prefs_watcher->GetBackupForPref(prefs::kHomePageIsNewTabPage)->
+            GetAsBoolean(&backup_homepage_is_ntp) ||
+        !prefs_watcher->GetBackupForPref(prefs::kShowHomeButton)->
+            GetAsBoolean(&backup_show_home_button)) {
+      NOTREACHED();
     }
+    protector_service->ShowChange(protector::CreateHomepageChange(
+        // New:
+        prefs->GetString(prefs::kHomePage),
+        prefs->GetBoolean(prefs::kHomePageIsNewTabPage),
+        prefs->GetBoolean(prefs::kShowHomeButton),
+        // Backup:
+        backup_homepage,
+        backup_homepage_is_ntp,
+        backup_show_home_button));
   }
 }
 
@@ -1630,12 +1654,11 @@ std::vector<GURL> BrowserInit::GetURLsFromCommandLine(
       const TemplateURL* default_provider =
           TemplateURLServiceFactory::GetForProfile(profile)->
           GetDefaultSearchProvider();
-      if (default_provider && default_provider->url()) {
-        const TemplateURLRef* search_url = default_provider->url();
-        DCHECK(search_url->SupportsReplacement());
+      if (default_provider) {
+        const TemplateURLRef& search_url = default_provider->url_ref();
+        DCHECK(search_url.SupportsReplacement());
         string16 search_term = param.LossyDisplayName().substr(2);
-        urls.push_back(GURL(search_url->ReplaceSearchTermsUsingProfile(
-            profile, *default_provider, search_term,
+        urls.push_back(GURL(search_url.ReplaceSearchTerms(search_term,
             TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())));
         continue;
       }
@@ -1668,6 +1691,16 @@ std::vector<GURL> BrowserInit::GetURLsFromCommandLine(
       }
     }
   }
+#if defined(OS_WIN)
+  if (urls.empty()) {
+    // If we are in Windows 8 metro mode and were launched as a result of the
+    // search charm or via a url navigation in metro, then fetch the
+    // corresponding url.
+    GURL url = browser::GetURLToOpen(profile);
+    if (url.is_valid())
+      urls.push_back(GURL(url));
+  }
+#endif  // OS_WIN
   return urls;
 }
 
@@ -1683,6 +1716,7 @@ bool BrowserInit::ProcessCmdLineImpl(
   if (process_startup) {
     if (command_line.HasSwitch(switches::kDisablePromptOnRepost))
       content::NavigationController::DisablePromptOnRepost();
+    if (!command_line.HasSwitch(switches::kDisableComponentUpdate))
     RegisterComponentsForUpdate(command_line);
   }
 
@@ -1699,7 +1733,8 @@ bool BrowserInit::ProcessCmdLineImpl(
     // If there are any extra parameters, we expect each one to generate a
     // new tab; if there are none then we get one homepage tab.
     int expected_tab_count = 1;
-    if (command_line.HasSwitch(switches::kNoStartupWindow)) {
+    if (command_line.HasSwitch(switches::kNoStartupWindow) &&
+        !command_line.HasSwitch(switches::kAutoLaunchAtStartup)) {
       expected_tab_count = 0;
 #if defined(OS_CHROMEOS)
     // kLoginManager will cause Chrome to start up with the ChromeOS login

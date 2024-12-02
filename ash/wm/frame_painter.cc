@@ -9,6 +9,7 @@
 #include "ash/wm/window_util.h"
 #include "base/logging.h"  // DCHECK
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
@@ -64,6 +65,9 @@ const SkColor kHeaderContentSeparatorColor = SkColorSetRGB(128, 128, 128);
 const int kCloseButtonOffsetX = 0;
 // Space between close button and top edge of window.
 const int kCloseButtonOffsetY = 0;
+// The size and close buttons are designed to slightly overlap in order
+// to do fancy hover highlighting.
+const int kButtonOverlap = 1;
 // In the pre-Ash era the web content area had a frame along the left edge, so
 // user-generated theme images for the new tab page assume they are shifted
 // right relative to the header.  Now that we have removed the left edge frame
@@ -73,6 +77,8 @@ const int kCloseButtonOffsetY = 0;
 const int kThemeFrameBitmapOffsetX = 5;
 // Duration of crossfade animation for activating and deactivating frame.
 const int kActivationCrossfadeDurationMs = 200;
+// Alpha/opacity value for fully-opaque headers.
+const int kFullyOpaque = 255;
 
 // Tiles an image into an area, rounding the top corners.  Samples the |bitmap|
 // starting |bitmap_offset_x| pixels from the left of the image.
@@ -106,15 +112,18 @@ void TileRoundRect(gfx::Canvas* canvas,
   // Adjust canvas to compensate for image sampling offset, draw, then adjust
   // back. This is cheaper than pushing/popping the entire canvas state.
   canvas->sk_canvas()->translate(SkIntToScalar(-bitmap_offset_x), 0);
-  canvas->sk_canvas()->drawPath(path, *paint);
+  canvas->DrawPath(path, *paint);
   canvas->sk_canvas()->translate(SkIntToScalar(bitmap_offset_x), 0);
 }
 
 // Returns true if |window| is a visible, normal window.
 bool IsVisibleNormalWindow(aura::Window* window) {
+  // We must use TargetVisibility() because windows animate in and out and
+  // IsVisible() also tracks the layer visibility state.
   return window &&
-    window->IsVisible() &&
-    window->type() == aura::client::WINDOW_TYPE_NORMAL;
+    window->TargetVisibility() &&
+    (window->type() == aura::client::WINDOW_TYPE_NORMAL ||
+     window->type() == aura::client::WINDOW_TYPE_PANEL);
 }
 
 }  // namespace
@@ -122,9 +131,9 @@ bool IsVisibleNormalWindow(aura::Window* window) {
 namespace ash {
 
 // static
-int FramePainter::kActiveWindowOpacity = 255;
-int FramePainter::kInactiveWindowOpacity = 166;
-int FramePainter::kSoloWindowOpacity = 230;
+int FramePainter::kActiveWindowOpacity = 230;  // "Linus-approved" values
+int FramePainter::kInactiveWindowOpacity = 204;
+int FramePainter::kSoloWindowOpacity = 51;
 std::set<FramePainter*>* FramePainter::instances_ = NULL;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -142,9 +151,9 @@ FramePainter::FramePainter()
       top_right_corner_(NULL),
       header_left_edge_(NULL),
       header_right_edge_(NULL),
-      previous_theme_frame_(NULL),
+      previous_theme_frame_id_(0),
       previous_opacity_(0),
-      crossfade_theme_frame_(NULL),
+      crossfade_theme_frame_id_(0),
       crossfade_opacity_(0),
       crossfade_animation_(NULL),
       size_button_behavior_(SIZE_BUTTON_MAXIMIZES) {
@@ -162,16 +171,16 @@ FramePainter::~FramePainter() {
 
 void FramePainter::Init(views::Widget* frame,
                         views::View* window_icon,
-                        views::ImageButton* maximize_button,
+                        views::ImageButton* size_button,
                         views::ImageButton* close_button,
                         SizeButtonBehavior behavior) {
   DCHECK(frame);
   // window_icon may be NULL.
-  DCHECK(maximize_button);
+  DCHECK(size_button);
   DCHECK(close_button);
   frame_ = frame;
   window_icon_ = window_icon;
-  size_button_ = maximize_button;
+  size_button_ = size_button;
   close_button_ = close_button;
   size_button_behavior_ = behavior;
 
@@ -277,8 +286,8 @@ gfx::Size FramePainter::GetMinimumSize(views::NonClientFrameView* view) {
   // Ensure we have enough space for the window icon and buttons.  We allow
   // the title string to collapse to zero width.
   int title_width = GetTitleOffsetX() +
-      size_button_->width() +
-      button_separator_->width() +
+      size_button_->width() -
+      kButtonOverlap +
       close_button_->width();
   if (title_width > min_size.width())
     min_size.set_width(title_width);
@@ -288,41 +297,49 @@ gfx::Size FramePainter::GetMinimumSize(views::NonClientFrameView* view) {
 void FramePainter::PaintHeader(views::NonClientFrameView* view,
                                gfx::Canvas* canvas,
                                HeaderMode header_mode,
-                               const SkBitmap* theme_frame,
+                               int theme_frame_id,
                                const SkBitmap* theme_frame_overlay) {
-  int opacity = UseSoloWindowHeader(NULL) ?
-      kSoloWindowOpacity :
-      (header_mode == ACTIVE ? kActiveWindowOpacity : kInactiveWindowOpacity);
-
-  if (previous_theme_frame_ && previous_theme_frame_ != theme_frame) {
+  if (previous_theme_frame_id_ != 0 &&
+      previous_theme_frame_id_ != theme_frame_id) {
     crossfade_animation_.reset(new ui::SlideAnimation(this));
-    crossfade_theme_frame_ = previous_theme_frame_;
+    crossfade_theme_frame_id_ = previous_theme_frame_id_;
     crossfade_opacity_ = previous_opacity_;
     crossfade_animation_->SetSlideDuration(kActivationCrossfadeDurationMs);
     crossfade_animation_->Show();
   }
 
+  int opacity =
+      GetHeaderOpacity(header_mode, theme_frame_id, theme_frame_overlay);
+  ui::ThemeProvider* theme_provider = frame_->GetThemeProvider();
+  SkBitmap* theme_frame = theme_provider->GetBitmapNamed(theme_frame_id);
   header_frame_bounds_ = gfx::Rect(0, 0, view->width(), theme_frame->height());
 
   const int kCornerRadius = 2;
   SkPaint paint;
 
   if (crossfade_animation_.get() && crossfade_animation_->is_animating()) {
-    double current_value = crossfade_animation_->GetCurrentValue();
-    int old_alpha = (1 - current_value) * crossfade_opacity_;
-    int new_alpha = current_value * opacity;
+    SkBitmap* crossfade_theme_frame =
+        theme_provider->GetBitmapNamed(crossfade_theme_frame_id_);
+    if (crossfade_theme_frame) {
+      double current_value = crossfade_animation_->GetCurrentValue();
+      int old_alpha = (1 - current_value) * crossfade_opacity_;
+      int new_alpha = current_value * opacity;
 
-    // Draw the old header background, clipping the corners to be rounded.
-    paint.setAlpha(old_alpha);
-    paint.setXfermodeMode(SkXfermode::kPlus_Mode);
-    TileRoundRect(canvas,
-                  0, 0, view->width(), theme_frame->height(),
-                  &paint,
-                  *crossfade_theme_frame_,
-                  kCornerRadius,
-                  kThemeFrameBitmapOffsetX);
+      // Draw the old header background, clipping the corners to be rounded.
+      paint.setAlpha(old_alpha);
+      paint.setXfermodeMode(SkXfermode::kPlus_Mode);
+      TileRoundRect(canvas,
+                    0, 0, view->width(), theme_frame->height(),
+                    &paint,
+                    *crossfade_theme_frame,
+                    kCornerRadius,
+                    kThemeFrameBitmapOffsetX);
 
-    paint.setAlpha(new_alpha);
+      paint.setAlpha(new_alpha);
+    } else {
+      crossfade_animation_.reset();
+      paint.setAlpha(opacity);
+    }
   } else {
     paint.setAlpha(opacity);
   }
@@ -335,16 +352,17 @@ void FramePainter::PaintHeader(views::NonClientFrameView* view,
                 kCornerRadius,
                 kThemeFrameBitmapOffsetX);
 
-  previous_theme_frame_ = theme_frame;
+  previous_theme_frame_id_ = theme_frame_id;
   previous_opacity_ = opacity;
 
   // Draw the theme frame overlay, if available.
   if (theme_frame_overlay)
     canvas->DrawBitmapInt(*theme_frame_overlay, 0, 0);
 
-  // Separator between the maximize and close buttons.
+  // Separator between the maximize and close buttons.  It overlaps the left
+  // edge of the close button.
   canvas->DrawBitmapInt(*button_separator_,
-                        close_button_->x() - button_separator_->width(),
+                        close_button_->x(),
                         close_button_->y());
 
   // We don't need the extra lightness in the edges when we're maximized.
@@ -434,17 +452,25 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE_H,
                     IDR_AURA_WINDOW_MAXIMIZED_CLOSE_P);
-    // TODO: need images for SIZE_BUTTON_MINIMIZES.
-    SetButtonImages(size_button_,
-                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE,
-                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE_H,
-                    IDR_AURA_WINDOW_MAXIMIZED_RESTORE_P);
+    if (size_button_behavior_ == SIZE_BUTTON_MINIMIZES) {
+      SetButtonImages(size_button_,
+                      IDR_AURA_WINDOW_MAXIMIZED_MINIMIZE,
+                      IDR_AURA_WINDOW_MAXIMIZED_MINIMIZE_H,
+                      IDR_AURA_WINDOW_MAXIMIZED_MINIMIZE_P);
+    } else {
+      SetButtonImages(size_button_,
+                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE,
+                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE_H,
+                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE_P);
+    }
   } else {
     SetButtonImages(close_button_,
                     IDR_AURA_WINDOW_CLOSE,
                     IDR_AURA_WINDOW_CLOSE_H,
                     IDR_AURA_WINDOW_CLOSE_P);
-    // TODO: need images for SIZE_BUTTON_MINIMIZES.
+    // TODO(jamescook): If we ever have normal-layout windows (with the
+    // standard 35 pixel tall headers) that can only minimize, we'll need art
+    // assets for SIZE_BUTTON_MINIMIZES.  As of R19 we don't use them.
     SetButtonImages(size_button_,
                     IDR_AURA_WINDOW_MAXIMIZE,
                     IDR_AURA_WINDOW_MAXIMIZE_H,
@@ -460,8 +486,7 @@ void FramePainter::LayoutHeader(views::NonClientFrameView* view,
 
   gfx::Size size_button_size = size_button_->GetPreferredSize();
   size_button_->SetBounds(
-      close_button_->x() - button_separator_->width() -
-          size_button_size.width(),
+      close_button_->x() - size_button_size.width() + kButtonOverlap,
       close_button_->y(),
       size_button_size.width(),
       size_button_size.height());
@@ -493,6 +518,14 @@ void FramePainter::OnWindowPropertyChanged(aura::Window* window,
   }
 }
 
+void FramePainter::OnWindowVisibilityChanged(aura::Window* window,
+                                             bool visible) {
+  // Hiding a window may trigger the solo window appearance in a different
+  // window.
+  if (!visible && UseSoloWindowHeader())
+    SchedulePaintForSoloWindow();
+}
+
 void FramePainter::OnWindowDestroying(aura::Window* destroying) {
   DCHECK_EQ(window_, destroying);
   // Must be removed here and not in the destructor, as the aura::Window is
@@ -504,17 +537,9 @@ void FramePainter::OnWindowDestroying(aura::Window* destroying) {
   instances_->erase(this);
 
   // If we have two or more windows open and we close this one, we might trigger
-  // the solo window appearance.  If so, find the window that is becoming solo
-  // and schedule it to paint.
-  if (UseSoloWindowHeader(destroying)) {
-    for (std::set<FramePainter*>::const_iterator it = instances_->begin();
-         it != instances_->end();
-         ++it) {
-      FramePainter* painter = *it;
-      if (IsVisibleNormalWindow(painter->window_) && painter->frame_)
-        painter->frame_->non_client_view()->SchedulePaint();
-    }
-  }
+  // the solo window appearance for another window.
+  if (UseSoloWindowHeader())
+    SchedulePaintForSoloWindow();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -546,26 +571,49 @@ int FramePainter::GetTitleOffsetX() const {
       kTitleNoIconOffsetX;
 }
 
-bool FramePainter::UseSoloWindowHeader(aura::Window* ignore) const {
-  // In unit tests this can be called after the shell is destroyed.
-  if (!Shell::HasInstance())
-    return false;
-  const aura::Window* default_container = Shell::GetInstance()->GetContainer(
-      internal::kShellWindowId_DefaultContainer);
-  if (!default_container)
-    return false;  // Shutting down. See crbug.com/120786.
-  int normal_window_count = 0;
-  const aura::Window::Windows& windows = default_container->children();
-  for (aura::Window::Windows::const_iterator it = windows.begin();
-       it != windows.end();
+int FramePainter::GetHeaderOpacity(HeaderMode header_mode,
+                                   int theme_frame_id,
+                                   const SkBitmap* theme_frame_overlay) {
+  // User-provided themes are painted fully opaque.
+  if (frame_->GetThemeProvider()->HasCustomImage(theme_frame_id))
+    return kFullyOpaque;
+  if (theme_frame_overlay)
+    return kFullyOpaque;
+
+  // Single browser window is very transparent.
+  if (UseSoloWindowHeader())
+    return kSoloWindowOpacity;
+
+  // Otherwise, change transparency based on window activation status.
+  if (header_mode == ACTIVE)
+    return kActiveWindowOpacity;
+  return kInactiveWindowOpacity;
+}
+
+// static
+bool FramePainter::UseSoloWindowHeader() {
+  int window_count = 0;
+  for (std::set<FramePainter*>::const_iterator it = instances_->begin();
+       it != instances_->end();
        ++it) {
-    if (*it != ignore && IsVisibleNormalWindow(*it)) {
-      normal_window_count++;
-      if (normal_window_count > 1)
+    if (IsVisibleNormalWindow((*it)->window_)) {
+      window_count++;
+      if (window_count > 1)
         return false;
     }
   }
-  return normal_window_count == 1;
+  return window_count == 1;
+}
+
+// static
+void FramePainter::SchedulePaintForSoloWindow() {
+  for (std::set<FramePainter*>::const_iterator it = instances_->begin();
+       it != instances_->end();
+       ++it) {
+    FramePainter* painter = *it;
+    if (IsVisibleNormalWindow(painter->window_))
+      painter->frame_->non_client_view()->SchedulePaint();
+  }
 }
 
 }  // namespace ash

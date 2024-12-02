@@ -25,7 +25,7 @@
 
 namespace {
 
-StringValue* SkColorToCss(const SkColor& color) {
+StringValue* SkColorToCss(SkColor color) {
   return new StringValue(base::StringPrintf("rgb(%d, %d, %d)",
                                             SkColorGetR(color),
                                             SkColorGetG(color),
@@ -33,7 +33,7 @@ StringValue* SkColorToCss(const SkColor& color) {
 }
 
 base::StringValue* GetDominantColorCssString(
-    scoped_refptr<RefCountedMemory> png) {
+    scoped_refptr<base::RefCountedMemory> png) {
   color_utils::GridSampler sampler;
   SkColor color = color_utils::CalculateKMeanColorOfPNG(png, 100, 665, sampler);
   return SkColorToCss(color);
@@ -155,8 +155,8 @@ void FaviconWebUIHandler::NotifyAppIconReady(const std::string& extension_id) {
   std::vector<unsigned char> bits;
   if (!gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &bits))
     return;
-  scoped_refptr<RefCountedStaticMemory> bits_mem(
-      new RefCountedStaticMemory(&bits.front(), bits.size()));
+  scoped_refptr<base::RefCountedStaticMemory> bits_mem(
+      new base::RefCountedStaticMemory(&bits.front(), bits.size()));
   scoped_ptr<StringValue> color_value(GetDominantColorCssString(bits_mem));
   StringValue id(extension_id);
   web_ui()->CallJavascriptFunction(

@@ -11,6 +11,8 @@
 
 #include "ash/ash_export.h"
 #include "ash/system/user/login_status.h"
+#include "ash/system/power/power_supply_status.h"
+#include "base/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string16.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -42,6 +44,37 @@ struct ASH_EXPORT BluetoothDeviceInfo {
 
 typedef std::vector<BluetoothDeviceInfo> BluetoothDeviceList;
 
+// Structure that packs progress information of each operation.
+struct ASH_EXPORT DriveOperationStatus {
+  enum OperationType {
+    OPERATION_UPLOAD,
+    OPERATION_DOWNLOAD,
+    OPERATION_OTHER,
+  };
+
+  enum OperationState {
+    OPERATION_NOT_STARTED,
+    OPERATION_STARTED,
+    OPERATION_IN_PROGRESS,
+    OPERATION_COMPLETED,
+    OPERATION_FAILED,
+    OPERATION_SUSPENDED,
+  };
+
+  DriveOperationStatus();
+  ~DriveOperationStatus();
+
+  // File path.
+  FilePath file_path;
+  // Current operation completion progress [0.0 - 1.0].
+  double progress;
+  OperationType type;
+  OperationState state;
+};
+
+typedef std::vector<DriveOperationStatus> DriveOperationStatusList;
+
+
 struct ASH_EXPORT IMEPropertyInfo {
   IMEPropertyInfo();
   ~IMEPropertyInfo();
@@ -64,8 +97,6 @@ struct ASH_EXPORT IMEInfo {
 };
 
 typedef std::vector<IMEInfo> IMEInfoList;
-
-struct PowerSupplyStatus;
 
 class SystemTrayDelegate {
  public:
@@ -92,6 +123,9 @@ class SystemTrayDelegate {
   // Gets the current power supply status.
   virtual PowerSupplyStatus GetPowerSupplyStatus() const = 0;
 
+  // Requests a status update.
+  virtual void RequestStatusUpdate() const = 0;
+
   // Shows settings.
   virtual void ShowSettings() = 0;
 
@@ -103,6 +137,9 @@ class SystemTrayDelegate {
 
   // Shows the settings related to bluetooth.
   virtual void ShowBluetoothSettings() = 0;
+
+  // Shows settings related to Google Drive.
+  virtual void ShowDriveSettings() = 0;
 
   // Shows settings related to input methods.
   virtual void ShowIMESettings() = 0;
@@ -124,6 +161,9 @@ class SystemTrayDelegate {
 
   // Gets whether the caps lock is on.
   virtual bool IsCapsLockOn() const = 0;
+
+  // Sets the caps lock status to |enabled|.
+  virtual void SetCapsLockEnabled(bool enabled) = 0;
 
   // Gets whether accessibility mode is turned on.
   virtual bool IsInAccessibilityMode() const = 0;
@@ -161,6 +201,13 @@ class SystemTrayDelegate {
   // Activates an IME property.
   virtual void ActivateIMEProperty(const std::string& key) = 0;
 
+  // Cancels ongoing drive operation.
+  virtual void CancelDriveOperation(const FilePath& file_path) = 0;
+
+  // Returns information about the ongoing drive operations.
+  virtual void GetDriveOperationStatusList(
+      DriveOperationStatusList* list) = 0;
+
   // Returns information about the most relevant network. Relevance is
   // determined by the implementor (e.g. a connecting network may be more
   // relevant over a connected network etc.)
@@ -178,6 +225,9 @@ class SystemTrayDelegate {
   virtual void GetNetworkAddresses(std::string* ip_address,
                                    std::string* ethernet_mac_address,
                                    std::string* wifi_mac_address) = 0;
+
+  // Requests network scan when list of networks is opened.
+  virtual void RequestNetworkScan() = 0;
 
   // Shous UI to add a new bluetooth device.
   virtual void AddBluetoothDevice() = 0;
@@ -221,13 +271,15 @@ class SystemTrayDelegate {
   // Returns whether cellular scanning is supported.
   virtual bool GetCellularScanSupported() = 0;
 
-  // Retrieves information about the carrier. If the information cannot be
-  // retrieved, returns false.
+  // Retrieves information about the carrier and locale specific |setup_url|.
+  // If none of the carrier info/setup URL cannot be retrieved, returns false.
+  // Note: |setup_url| is returned when carrier is not defined (no SIM card).
   virtual bool GetCellularCarrierInfo(std::string* carrier_id,
-                                      std::string* toup_url) = 0;
+                                      std::string* topup_url,
+                                      std::string* setup_url) = 0;
 
-  // Opens the top up url.
-  virtual void ShowCellularTopupURL(const std::string& topup_url) = 0;
+  // Opens the cellular network specific URL.
+  virtual void ShowCellularURL(const std::string& url) = 0;
 
   // Shows UI for changing proxy settings.
   virtual void ChangeProxySettings() = 0;

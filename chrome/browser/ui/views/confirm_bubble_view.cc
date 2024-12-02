@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/views/confirm_bubble_view.h"
 
 #include "chrome/browser/ui/confirm_bubble_model.h"
-#include "chrome/browser/ui/views/window.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -29,7 +28,7 @@ void ConfirmBubbleModel::Show(gfx::NativeView view,
                               const gfx::Point& origin,
                               ConfirmBubbleModel* model) {
   ConfirmBubbleView* bubble_view = new ConfirmBubbleView(origin, model);
-  browser::CreateViewsBubble(bubble_view);
+  views::BubbleDelegateView::CreateBubble(bubble_view);
   bubble_view->Show();
 }
 
@@ -87,7 +86,7 @@ void ConfirmBubbleView::Init() {
   const string16 title_text = model_->GetTitle();
   DCHECK(!title_text.empty());
   views::Label* title_label = new views::Label(title_text);
-  title_label->SetFont(bundle.GetFont(ResourceBundle::MediumFont));
+  title_label->SetFont(bundle.GetFont(ui::ResourceBundle::MediumFont));
   layout->AddView(title_label);
 
   views::ImageButton* close_button = new views::ImageButton(this);

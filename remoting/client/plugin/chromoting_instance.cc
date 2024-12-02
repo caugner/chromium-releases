@@ -25,11 +25,11 @@
 #include "ppapi/cpp/rect.h"
 // TODO(wez): Remove this when crbug.com/86353 is complete.
 #include "ppapi/cpp/private/var_private.h"
+#include "remoting/base/constants.h"
 #include "remoting/base/util.h"
 #include "remoting/client/client_config.h"
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/frame_consumer_proxy.h"
-#include "remoting/client/mouse_input_filter.h"
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
 #include "remoting/client/plugin/pepper_input_handler.h"
 #include "remoting/client/plugin/pepper_view.h"
@@ -37,7 +37,8 @@
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/host_stub.h"
-#include "remoting/protocol/key_event_tracker.h"
+#include "remoting/protocol/input_event_tracker.h"
+#include "remoting/protocol/mouse_input_filter.h"
 
 // Windows defines 'PostMessage', so we have to undef it.
 #if defined(PostMessage)
@@ -99,6 +100,11 @@ static logging::LogMessageHandlerFunction g_logging_old_handler = NULL;
 static base::LazyInstance<base::Lock>::Leaky
     g_logging_lock = LAZY_INSTANCE_INITIALIZER;
 
+// String sent in the "hello" message to the plugin to describe features.
+const char ChromotingInstance::kApiFeatures[] =
+    "highQualityScaling injectKeyEvent sendClipboardItem remapKey trapKey "
+    "notifyClientDimensions pauseVideo";
+
 bool ChromotingInstance::ParseAuthMethods(const std::string& auth_methods_str,
                                           ClientConfig* config) {
   if (auth_methods_str == "v1_token") {
@@ -140,6 +146,7 @@ ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
   // Send hello message.
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
   data->SetInteger("apiVersion", kApiVersion);
+  data->SetString("apiFeatures", kApiFeatures);
   data->SetInteger("apiMinVersion", kApiMinMessagingVersion);
   PostChromotingMessage("hello", data.Pass());
 }
@@ -210,7 +217,8 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
   }
 
   scoped_ptr<base::Value> json(
-      base::JSONReader::Read(message.AsString(), true));
+      base::JSONReader::Read(message.AsString(),
+                             base::JSON_ALLOW_TRAILING_COMMAS));
   base::DictionaryValue* message_dict = NULL;
   std::string method;
   base::DictionaryValue* data = NULL;
@@ -248,6 +256,66 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
     OnIncomingIq(iq);
   } else if (method == "releaseAllKeys") {
     ReleaseAllKeys();
+  } else if (method == "injectKeyEvent") {
+    int usb_keycode = 0;
+    bool is_pressed = false;
+    if (!data->GetInteger("usbKeycode", &usb_keycode) ||
+        !data->GetBoolean("pressed", &is_pressed)) {
+      LOG(ERROR) << "Invalid injectKeyEvent.";
+      return;
+    }
+
+    protocol::KeyEvent event;
+    event.set_usb_keycode(usb_keycode);
+    event.set_pressed(is_pressed);
+    // Even though new hosts will ignore keycode, it's a required field.
+    event.set_keycode(0);
+    InjectKeyEvent(event);
+  } else if (method == "remapKey") {
+    int from_keycode = 0;
+    int to_keycode = 0;
+    if (!data->GetInteger("fromKeycode", &from_keycode) ||
+        !data->GetInteger("toKeycode", &to_keycode)) {
+      LOG(ERROR) << "Invalid remapKey.";
+      return;
+    }
+
+    RemapKey(from_keycode, to_keycode);
+  } else if (method == "trapKey") {
+    int keycode = 0;
+    bool trap = false;
+    if (!data->GetInteger("keycode", &keycode) ||
+        !data->GetBoolean("trap", &trap)) {
+      LOG(ERROR) << "Invalid trapKey.";
+      return;
+    }
+
+    TrapKey(keycode, trap);
+  } else if (method == "sendClipboardItem") {
+    std::string mime_type;
+    std::string item;
+    if (!data->GetString("mimeType", &mime_type) ||
+        !data->GetString("item", &item)) {
+      LOG(ERROR) << "Invalid sendClipboardItem() data.";
+      return;
+    }
+    SendClipboardItem(mime_type, item);
+  } else if (method == "notifyClientDimensions") {
+    int width = 0;
+    int height = 0;
+    if (!data->GetInteger("width", &width) ||
+        !data->GetInteger("height", &height)) {
+      LOG(ERROR) << "Invalid notifyClientDimensions.";
+      return;
+    }
+    NotifyClientDimensions(width, height);
+  } else if (method == "pauseVideo") {
+    bool pause = false;
+    if (!data->GetBoolean("pause", &pause)) {
+      LOG(ERROR) << "Invalid pauseVideo.";
+      return;
+    }
+    PauseVideo(pause);
   }
 }
 
@@ -269,7 +337,7 @@ void ChromotingInstance::DidChangeView(const pp::Rect& position,
 bool ChromotingInstance::HandleInputEvent(const pp::InputEvent& event) {
   DCHECK(plugin_message_loop_->BelongsToCurrentThread());
 
-  if (!input_handler_.get())
+  if (!IsConnected())
     return false;
 
   // TODO(wez): When we have a good hook into Host dimensions changes, move
@@ -336,12 +404,13 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
 
   // Construct the input pipeline
   mouse_input_filter_.reset(
-      new MouseInputFilter(host_connection_->input_stub()));
+      new protocol::MouseInputFilter(host_connection_->input_stub()));
   mouse_input_filter_->set_input_size(view_->get_view_size());
-  key_event_tracker_.reset(
-      new protocol::KeyEventTracker(mouse_input_filter_.get()));
+  input_tracker_.reset(
+      new protocol::InputEventTracker(mouse_input_filter_.get()));
+  key_mapper_.set_input_stub(input_tracker_.get());
   input_handler_.reset(
-      new PepperInputHandler(key_event_tracker_.get()));
+      new PepperInputHandler(&key_mapper_));
 
   LOG(INFO) << "Connecting to " << config.host_jid
             << ". Local jid: " << config.local_jid << ".";
@@ -378,7 +447,7 @@ void ChromotingInstance::Disconnect() {
   }
 
   input_handler_.reset();
-  key_event_tracker_.reset();
+  input_tracker_.reset();
   mouse_input_filter_.reset();
   host_connection_.reset();
 
@@ -390,9 +459,53 @@ void ChromotingInstance::OnIncomingIq(const std::string& iq) {
 }
 
 void ChromotingInstance::ReleaseAllKeys() {
-  if (key_event_tracker_.get()) {
-    key_event_tracker_->ReleaseAllKeys();
+  if (IsConnected())
+    input_tracker_->ReleaseAll();
+}
+
+void ChromotingInstance::InjectKeyEvent(const protocol::KeyEvent& event) {
+  // Inject after the KeyEventMapper, so the event won't get mapped or trapped.
+  if (IsConnected())
+    input_tracker_->InjectKeyEvent(event);
+}
+
+void ChromotingInstance::RemapKey(uint32 in_usb_keycode,
+                                  uint32 out_usb_keycode) {
+  key_mapper_.RemapKey(in_usb_keycode, out_usb_keycode);
+}
+
+void ChromotingInstance::TrapKey(uint32 usb_keycode, bool trap) {
+  key_mapper_.TrapKey(usb_keycode, trap);
+}
+
+void ChromotingInstance::SendClipboardItem(const std::string& mime_type,
+                                           const std::string& item) {
+  if (!IsConnected()) {
+    return;
   }
+  protocol::ClipboardEvent event;
+  event.set_mime_type(mime_type);
+  event.set_data(item);
+  host_connection_->clipboard_stub()->InjectClipboardEvent(event);
+}
+
+void ChromotingInstance::NotifyClientDimensions(int width, int height) {
+  if (!IsConnected()) {
+    return;
+  }
+  protocol::ClientDimensions client_dimensions;
+  client_dimensions.set_width(width);
+  client_dimensions.set_height(height);
+  host_connection_->host_stub()->NotifyClientDimensions(client_dimensions);
+}
+
+void ChromotingInstance::PauseVideo(bool pause) {
+  if (!IsConnected()) {
+    return;
+  }
+  protocol::VideoControl video_control;
+  video_control.set_enable(!pause);
+  host_connection_->host_stub()->ControlVideo(video_control);
 }
 
 ChromotingStats* ChromotingInstance::GetStats() {
@@ -411,6 +524,13 @@ void ChromotingInstance::PostChromotingMessage(
   std::string message_json;
   base::JSONWriter::Write(message.get(), &message_json);
   PostMessage(pp::Var(message_json));
+}
+
+void ChromotingInstance::SendTrappedKey(uint32 usb_keycode, bool pressed) {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetInteger("usbKeycode", usb_keycode);
+  data->SetBoolean("pressed", pressed);
+  PostChromotingMessage("trappedKeyEvent", data.Pass());
 }
 
 void ChromotingInstance::SendOutgoingIq(const std::string& iq) {
@@ -440,6 +560,14 @@ void ChromotingInstance::SendPerfStats() {
   data->SetDouble("renderLatency", stats->video_paint_ms()->Average());
   data->SetDouble("roundtripLatency", stats->round_trip_ms()->Average());
   PostChromotingMessage("onPerfStats", data.Pass());
+}
+
+void ChromotingInstance::InjectClipboardEvent(
+    const protocol::ClipboardEvent& event) {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetString("mimeType", event.mime_type());
+  data->SetString("item", event.data());
+  PostChromotingMessage("injectClipboardItem", data.Pass());
 }
 
 // static
@@ -540,6 +668,11 @@ void ChromotingInstance::ProcessLogToUI(const std::string& message) {
     scriptable_object->LogDebugInfo(message);
   }
   g_logging_to_plugin = false;
+}
+
+bool ChromotingInstance::IsConnected() {
+  return host_connection_.get() &&
+    (host_connection_->state() == protocol::ConnectionToHost::CONNECTED);
 }
 
 }  // namespace remoting

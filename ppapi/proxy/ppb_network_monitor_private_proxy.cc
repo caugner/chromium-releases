@@ -82,7 +82,7 @@ PP_Resource PPB_NetworkMonitor_Private_Proxy::CreateProxyResource(
   if (!proxy)
     return 0;
 
-  scoped_ptr<NetworkMonitor> result(
+  scoped_refptr<NetworkMonitor> result(
       new NetworkMonitor(instance, proxy, callback, user_data));
   proxy->monitors_->AddObserver(result.get());
 
@@ -98,12 +98,12 @@ PP_Resource PPB_NetworkMonitor_Private_Proxy::CreateProxyResource(
     // here.
     proxy->current_list_ = NULL;
   } else if (proxy->current_list_.get()) {
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+    MessageLoop::current()->PostTask(FROM_HERE, RunWhileLocked(base::Bind(
         &NetworkMonitor::OnNetworkListReceived,
-        result->AsWeakPtr(), proxy->current_list_));
+        result->AsWeakPtr(), proxy->current_list_)));
   }
 
-  return result.release()->GetReference();
+  return result->GetReference();
 }
 
 bool PPB_NetworkMonitor_Private_Proxy::OnMessageReceived(

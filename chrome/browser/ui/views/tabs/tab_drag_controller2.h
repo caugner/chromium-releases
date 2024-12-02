@@ -14,18 +14,18 @@
 #include "chrome/browser/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
-#include "chrome/browser/ui/views/frame/browser_window_move_observer.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/rect.h"
+#include "ui/views/widget/widget.h"
 
 namespace views {
 class View;
-}
+}  // namespace views
+
 class BaseTab;
 class Browser;
-class BrowserView;
 class TabContentsWrapper;
 struct TabRendererData;
 class TabStripModel;
@@ -34,7 +34,7 @@ class TabStripModel;
 class TabDragController2 : public TabDragController,
                            public content::NotificationObserver,
                            public MessageLoopForUI::Observer,
-                           public BrowserWindowMoveObserver,
+                           public views::Widget::Observer,
                            public TabStripModelObserver {
  public:
   TabDragController2();
@@ -138,8 +138,8 @@ class TabDragController2 : public TabDragController,
   virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 #endif
 
-  // Overriden from BrowserWindowMoveObserver:
-  virtual void OnWidgetMoved() OVERRIDE;
+  // Overriden from views::Widget::Observer:
+  virtual void OnWidgetMoved(views::Widget* widget) OVERRIDE;
 
   // Overriden from TabStripModelObserver:
   virtual void TabStripEmpty() OVERRIDE;
@@ -205,7 +205,7 @@ class TabDragController2 : public TabDragController,
   // Runs a nested message loop that handles moving the current Browser.
   void RunMoveLoop();
 
-  // Returns the index where the dragged TabContents should be inserted into
+  // Returns the index where the dragged WebContents should be inserted into
   // |attached_tabstrip_| given the DraggedTabView's bounds |dragged_bounds| in
   // coordinates relative to |attached_tabstrip_| and has had the mirroring
   // transformation applied.
@@ -222,7 +222,7 @@ class TabDragController2 : public TabDragController,
   gfx::Point GetAttachedDragPoint(const gfx::Point& screen_point);
 
   // Finds the Tabs within the specified TabStrip that corresponds to the
-  // TabContents of the dragged tabs. Returns an empty vector if not attached.
+  // WebContents of the dragged tabs. Returns an empty vector if not attached.
   std::vector<BaseTab*> GetTabsMatchingDraggedContents(TabStrip* tabstrip);
 
   // Does the work for EndDrag. If we actually started a drag and |how_end| is
@@ -236,7 +236,7 @@ class TabDragController2 : public TabDragController,
   void RevertDragAt(size_t drag_index);
 
   // Selects the dragged tabs in |model|. Does nothing if there are no longer
-  // any dragged contents (as happens when a TabContents is deleted out from
+  // any dragged contents (as happens when a WebContents is deleted out from
   // under us).
   void ResetSelection(TabStripModel* model);
 
@@ -271,8 +271,8 @@ class TabDragController2 : public TabDragController,
   // Returns the TabStripModel for the specified tabstrip.
   static TabStripModel* GetModel(TabStrip* tabstrip);
 
-  // Returns the BrowserView of the currently attached TabStrip.
-  BrowserView* GetAttachedBrowserView();
+  // Returns the Widget of the currently attached TabStrip's BrowserView.
+  views::Widget* GetAttachedBrowserWidget();
 
   // Creates and returns a new Browser to handle the drag.
   Browser* CreateBrowserForDrag(TabStrip* source,
@@ -384,7 +384,7 @@ class TabDragController2 : public TabDragController,
   TabStrip* tab_strip_to_attach_to_after_exit_;
 
   // Non-null for the duration of RunMoveLoop.
-  BrowserView* move_loop_browser_view_;
+  views::Widget* move_loop_widget_;
 
   // If non-null set to true from destructor.
   bool* destroyed_;

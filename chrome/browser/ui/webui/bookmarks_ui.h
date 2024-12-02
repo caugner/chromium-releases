@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,9 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "content/public/browser/web_ui_controller.h"
 
+namespace base {
 class RefCountedMemory;
+}
 
 // This class provides the source for chrome://bookmarks/
 class BookmarksUIHTMLSource : public ChromeURLDataManager::DataSource {
@@ -26,6 +28,8 @@ class BookmarksUIHTMLSource : public ChromeURLDataManager::DataSource {
   virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
 
  private:
+  virtual ~BookmarksUIHTMLSource();
+
   DISALLOW_COPY_AND_ASSIGN(BookmarksUIHTMLSource);
 };
 
@@ -35,7 +39,7 @@ class BookmarksUI : public content::WebUIController {
  public:
   explicit BookmarksUI(content::WebUI* web_ui);
 
-  static RefCountedMemory* GetFaviconResourceBytes();
+  static base::RefCountedMemory* GetFaviconResourceBytes();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BookmarksUI);

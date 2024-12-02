@@ -16,7 +16,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/gfx/compositor/layer.h"
+#include "ui/compositor/layer.h"
 
 using std::make_pair;
 
@@ -68,23 +68,20 @@ Shadow::Style GetShadowStyleForWindowLosingActive(
 
 }  // namespace
 
-ShadowController::ShadowController() {
+ShadowController::ShadowController()
+    : ALLOW_THIS_IN_INITIALIZER_LIST(observer_manager_(this)) {
   aura::Env::GetInstance()->AddObserver(this);
   // Watch for window activation changes.
   Shell::GetRootWindow()->AddObserver(this);
 }
 
 ShadowController::~ShadowController() {
-  for (WindowShadowMap::const_iterator it = window_shadows_.begin();
-       it != window_shadows_.end(); ++it) {
-    it->first->RemoveObserver(this);
-  }
   Shell::GetRootWindow()->RemoveObserver(this);
   aura::Env::GetInstance()->RemoveObserver(this);
 }
 
 void ShadowController::OnWindowInitialized(aura::Window* window) {
-  window->AddObserver(this);
+  observer_manager_.Add(window);
   SetShadowType(window, GetShadowTypeFromWindow(window));
   HandlePossibleShadowVisibilityChange(window);
 }
@@ -113,6 +110,7 @@ void ShadowController::OnWindowBoundsChanged(aura::Window* window,
 
 void ShadowController::OnWindowDestroyed(aura::Window* window) {
   window_shadows_.erase(window);
+  observer_manager_.Remove(window);
 }
 
 bool ShadowController::ShouldShowShadowForWindow(aura::Window* window) const {
@@ -164,7 +162,8 @@ void ShadowController::CreateShadowForWindow(aura::Window* window) {
   linked_ptr<Shadow> shadow(new Shadow());
   window_shadows_.insert(make_pair(window, shadow));
 
-  shadow->Init(ShouldUseSmallShadowForWindow(window) ?
+  shadow->Init(window,
+               ShouldUseSmallShadowForWindow(window) ?
                Shadow::STYLE_SMALL : Shadow::STYLE_ACTIVE);
   shadow->SetContentBounds(gfx::Rect(window->bounds().size()));
   shadow->layer()->SetVisible(ShouldShowShadowForWindow(window));

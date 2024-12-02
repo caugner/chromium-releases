@@ -13,7 +13,7 @@
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/download/download_request_limiter_observer.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
-#include "chrome/browser/extensions/extension_webnavigation_api.h"
+#include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
@@ -35,6 +35,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
+#include "chrome/browser/ui/hung_plugin_tab_helper.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/pdf/pdf_tab_observer.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
@@ -92,6 +93,7 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
   favicon_tab_helper_.reset(new FaviconTabHelper(contents));
   find_tab_helper_.reset(new FindTabHelper(contents));
   history_tab_helper_.reset(new HistoryTabHelper(contents));
+  hung_plugin_tab_helper_.reset(new HungPluginTabHelper(contents));
   infobar_tab_helper_.reset(new InfoBarTabHelper(contents));
   password_manager_delegate_.reset(new PasswordManagerDelegateImpl(this));
   password_manager_.reset(
@@ -117,28 +119,28 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
 
   // Create the per-tab observers.
   alternate_error_page_tab_observer_.reset(
-      new AlternateErrorPageTabObserver(contents));
+      new AlternateErrorPageTabObserver(contents, profile()));
   download_request_limiter_observer_.reset(
       new DownloadRequestLimiterObserver(contents));
   webnavigation_observer_.reset(
-      new ExtensionWebNavigationTabObserver(contents));
+      new extensions::WebNavigationTabObserver(contents));
   external_protocol_observer_.reset(new ExternalProtocolObserver(contents));
-  if (OmniboxSearchHint::IsEnabled(profile()))
-    omnibox_search_hint_.reset(new OmniboxSearchHint(this));
   pdf_tab_observer_.reset(new PDFTabObserver(this));
   plugin_observer_.reset(new PluginObserver(this));
   safe_browsing_tab_observer_.reset(
       new safe_browsing::SafeBrowsingTabObserver(this));
 
 #if !defined(OS_ANDROID)
+  if (OmniboxSearchHint::IsEnabled(profile()))
+    omnibox_search_hint_.reset(new OmniboxSearchHint(this));
   print_preview_.reset(new printing::PrintPreviewMessageHandler(contents));
 #endif
 
   // Start the in-browser thumbnailing if the feature is enabled.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableInBrowserThumbnailing)) {
-    thumbnail_generation_observer_.reset(new ThumbnailGenerator);
-    thumbnail_generation_observer_->StartThumbnailing(web_contents_.get());
+    thumbnail_generator_.reset(new ThumbnailGenerator);
+    thumbnail_generator_->StartThumbnailing(web_contents_.get());
   }
 
   // If this is not an incognito window, setup to handle one-click login.
@@ -155,7 +157,7 @@ TabContentsWrapper::TabContentsWrapper(WebContents* contents)
 TabContentsWrapper::~TabContentsWrapper() {
   in_destructor_ = true;
 
-  // Need to tear down infobars before the TabContents goes away.
+  // Need to tear down infobars before the WebContents goes away.
   // TODO(avi): Can we get this handled by the tab helper itself?
   infobar_tab_helper_.reset();
 }
@@ -208,6 +210,6 @@ Profile* TabContentsWrapper::profile() const {
 void TabContentsWrapper::WebContentsDestroyed(WebContents* tab) {
   // Destruction of the WebContents should only be done by us from our
   // destructor. Otherwise it's very likely we (or one of the helpers we own)
-  // will attempt to access the TabContents and we'll crash.
+  // will attempt to access the WebContents and we'll crash.
   DCHECK(in_destructor_);
 }

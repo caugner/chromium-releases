@@ -18,6 +18,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/managed_mode.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -157,6 +158,7 @@ void OnOpenWindowForNewProfile(Profile* profile,
 
 } // namespace
 
+#if defined(ENABLE_SESSION_SERVICE)
 // static
 void ProfileManager::ShutdownSessionServices() {
   ProfileManager* pm = g_browser_process->profile_manager();
@@ -166,6 +168,7 @@ void ProfileManager::ShutdownSessionServices() {
   for (size_t i = 0; i < profiles.size(); ++i)
     SessionServiceFactory::ShutdownForProfile(profiles[i]);
 }
+#endif
 
 // static
 void ProfileManager::NukeDeletedProfilesFromDisk() {
@@ -217,8 +220,11 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
     : user_data_dir_(user_data_dir),
       logged_in_(false),
       will_import_(false),
+#if !defined(OS_ANDROID)
+      ALLOW_THIS_IN_INITIALIZER_LIST(
+          browser_list_observer_(this)),
+#endif
       shutdown_started_(false) {
-  BrowserList::AddObserver(this);
 #if defined(OS_CHROMEOS)
   registrar_.Add(
       this,
@@ -240,7 +246,6 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
 }
 
 ProfileManager::~ProfileManager() {
-  BrowserList::RemoveObserver(this);
 #if defined(OS_WIN)
   if (profile_shortcut_manager_.get())
     profile_info_cache_->RemoveObserver(profile_shortcut_manager_.get());
@@ -527,8 +532,6 @@ void ProfileManager::Observe(
       Profile* profile = browser->profile();
       DCHECK(profile);
       if (!profile->IsOffTheRecord() && ++browser_counts_[profile] == 1) {
-        CHECK(std::find(active_profiles_.begin(), active_profiles_.end(),
-                        profile) == active_profiles_.end());
         active_profiles_.push_back(profile);
         update_active_profiles = true;
       }
@@ -540,14 +543,8 @@ void ProfileManager::Observe(
       Profile* profile = browser->profile();
       DCHECK(profile);
       if (!profile->IsOffTheRecord() && --browser_counts_[profile] == 0) {
-        CHECK(std::find(active_profiles_.begin(), active_profiles_.end(),
-                        profile) != active_profiles_.end());
-        active_profiles_.erase(
-            std::remove(active_profiles_.begin(), active_profiles_.end(),
-                        profile),
-            active_profiles_.end());
-        CHECK(std::find(active_profiles_.begin(), active_profiles_.end(),
-                        profile) == active_profiles_.end());
+        active_profiles_.erase(std::find(active_profiles_.begin(),
+                                         active_profiles_.end(), profile));
         update_active_profiles = true;
       }
       break;
@@ -565,27 +562,18 @@ void ProfileManager::Observe(
 
     profile_list->Clear();
 
-    // Check that the same profile doesn't occur twice in last_opened_profiles.
-    {
-      std::set<Profile*> active_profiles_set;
-      for (std::vector<Profile*>::const_iterator it = active_profiles_.begin();
-           it != active_profiles_.end(); ++it) {
-        CHECK(active_profiles_set.find(*it) ==
-              active_profiles_set.end());
-        active_profiles_set.insert(*it);
-      }
-    }
-    // Used for checking that the string representations of the profiles differ.
+    // crbug.com/120112 -> several non-incognito profiles might have the same
+    // GetPath().BaseName(). In that case, we cannot restore both
+    // profiles. Include each base name only once in the last active profile
+    // list.
     std::set<std::string> profile_paths;
-
     std::vector<Profile*>::const_iterator it;
     for (it = active_profiles_.begin(); it != active_profiles_.end(); ++it) {
       std::string profile_path = (*it)->GetPath().BaseName().MaybeAsASCII();
-      CHECK(profile_paths.find(profile_path) ==
-            profile_paths.end());
-      profile_paths.insert(profile_path);
-      profile_list->Append(
-          new StringValue((*it)->GetPath().BaseName().MaybeAsASCII()));
+      if (profile_paths.find(profile_path) == profile_paths.end()) {
+        profile_paths.insert(profile_path);
+        profile_list->Append(new StringValue(profile_path));
+      }
     }
   }
 }
@@ -603,20 +591,36 @@ void ProfileManager::OnImportFinished(Profile* profile) {
       content::NotificationService::NoDetails());
 }
 
-void ProfileManager::OnBrowserAdded(const Browser* browser) {}
+#if !defined(OS_ANDROID)
+ProfileManager::BrowserListObserver::BrowserListObserver(
+    ProfileManager* manager)
+    : profile_manager_(manager) {
+  BrowserList::AddObserver(this);
+}
 
-void ProfileManager::OnBrowserRemoved(const Browser* browser) {}
+ProfileManager::BrowserListObserver::~BrowserListObserver() {
+  BrowserList::RemoveObserver(this);
+}
 
-void ProfileManager::OnBrowserSetLastActive(const Browser* browser) {
-  Profile* last_active = browser->GetProfile();
+void ProfileManager::BrowserListObserver::OnBrowserAdded(
+    const Browser* browser) {}
+
+void ProfileManager::BrowserListObserver::OnBrowserRemoved(
+    const Browser* browser) {}
+
+void ProfileManager::BrowserListObserver::OnBrowserSetLastActive(
+    const Browser* browser) {
+  Profile* last_active = browser->profile();
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
   // Only keep track of profiles that we are managing; tests may create others.
-  if (profiles_info_.find(last_active->GetPath()) != profiles_info_.end()) {
+  if (profile_manager_->profiles_info_.find(
+      last_active->GetPath()) != profile_manager_->profiles_info_.end()) {
     local_state->SetString(prefs::kProfileLastUsed,
                            last_active->GetPath().BaseName().MaybeAsASCII());
   }
 }
+#endif  // !defined(OS_ANDROID)
 
 void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
   DoFinalInitForServices(profile, go_off_the_record);
@@ -636,9 +640,9 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
 }
 
 void ProfileManager::DoFinalInitForServices(Profile* profile,
-                                         bool go_off_the_record) {
+                                            bool go_off_the_record) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  profile->InitExtensions(!go_off_the_record);
+  ExtensionSystem::Get(profile)->Init(!go_off_the_record);
   if (!command_line.HasSwitch(switches::kDisableWebResources))
     profile->InitPromoResources();
 }

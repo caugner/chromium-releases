@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_CHROMEOS_GDATA_GDATA_FILE_SYSTEM_PROXY_H_
 #define CHROME_BROWSER_CHROMEOS_GDATA_GDATA_FILE_SYSTEM_PROXY_H_
+#pragma once
 
 #include "webkit/chromeos/fileapi/remote_file_system_proxy.h"
 
@@ -11,7 +12,9 @@ class Profile;
 
 namespace gdata {
 
-class GDataFileBase;
+class GDataEntry;
+class GDataEntryProto;
+class GDataDirectoryProto;
 class GDataFileSystemInterface;
 
 // The interface class for remote file system proxy.
@@ -57,29 +60,23 @@ class GDataFileSystemProxy : public fileapi::RemoteFileSystemProxyInterface {
   static bool ValidateUrl(const GURL& url, FilePath* file_path);
 
   // Helper callback for relaying reply for metadata retrieval request to the
-  // calling thread. The callback is invoked while |file| is kept under lock
-  // so it is safe to retrieve data from it, but this pointer is not safe to
-  // be used outside of this method.
+  // calling thread.
   void OnGetMetadata(
       const FilePath& file_path,
-      scoped_refptr<base::MessageLoopProxy> proxy,
       const fileapi::FileSystemOperationInterface::GetMetadataCallback&
           callback,
       base::PlatformFileError error,
-      const FilePath& directory_path,
-      GDataFileBase* file);
+      const FilePath& entry_path,
+      scoped_ptr<gdata::GDataEntryProto> entry_proto);
 
   // Helper callback for relaying reply for ReadDirectory() to the calling
-  // thread. The callback is invoked while |file| is kept under lock
-  // so it is safe to retrieve data from it, but this pointer is not safe to
-  // be used outside of this method.
+  // thread.
   void OnReadDirectory(
-      scoped_refptr<base::MessageLoopProxy> proxy,
+      bool hide_hosted_documents,
       const fileapi::FileSystemOperationInterface::ReadDirectoryCallback&
           callback,
       base::PlatformFileError error,
-      const FilePath& directory_path,
-      GDataFileBase* file);
+      scoped_ptr<GDataDirectoryProto> directory_proto);
 
   // GDataFileSystemProxy is owned by Profile, which outlives
   // GDataFileSystemProxy, which is owned by CrosMountPointProvider (i.e. by

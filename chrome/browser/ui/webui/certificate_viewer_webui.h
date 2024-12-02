@@ -11,7 +11,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/values.h"
-#include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "chrome/browser/ui/webui/web_dialog_delegate.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "net/base/x509_certificate.h"
 #include "ui/gfx/native_widget_types.h"
@@ -25,7 +25,7 @@ void ShowCertificateViewer(gfx::NativeWindow parent,
 // and chromeos builds to display detailed information in a floating dialog when
 // the user clicks on "Certificate Information" from the lock icon of a web site
 // or "View" from the Certificate Manager.
-class CertificateViewerDialog : private HtmlDialogUIDelegate {
+class CertificateViewerDialog : private WebDialogDelegate {
  public:
   // Shows the certificate viewer dialog for the passed in certificate.
   static void ShowDialog(gfx::NativeWindow parent,
@@ -41,7 +41,7 @@ class CertificateViewerDialog : private HtmlDialogUIDelegate {
   // Show the dialog using the given parent window.
   void Show(gfx::NativeWindow parent);
 
-  // Overridden from HtmlDialogUI::Delegate:
+  // Overridden from WebDialogDelegate:
   virtual ui::ModalType GetDialogModalType() const OVERRIDE;
   virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
@@ -90,10 +90,6 @@ class CertificateViewerDialogHandler : public content::WebUIMessageHandler {
   //
   // The input is an integer index to the certificate in the chain to view.
   void RequestCertificateFields(const base::ListValue* args);
-
-  // Extracts the certificate details and returns them to the javascript
-  // function cert_viewer.getCertificateInfo in a dictionary structure.
-  void RequestCertificateInfo(const base::ListValue* args);
 
   // Helper function to get the certificate index from |args|. Returns -1 if
   // the index is out of range.

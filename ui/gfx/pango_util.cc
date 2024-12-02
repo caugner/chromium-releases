@@ -9,6 +9,10 @@
 #include <pango/pango.h>
 #include <pango/pangocairo.h>
 
+#include <algorithm>
+#include <map>
+#include <vector>
+
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "ui/gfx/canvas.h"
@@ -16,7 +20,7 @@
 #include "ui/gfx/platform_font_pango.h"
 #include "ui/gfx/rect.h"
 
-#if !defined(USE_WAYLAND) && defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 #include "ui/gfx/gtk_util.h"
@@ -46,7 +50,7 @@ cairo_font_options_t* GetCairoFontOptions() {
 
   cairo_font_options = cairo_font_options_create();
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   gint antialias = 0;
   gint hinting = 0;
   gchar* hint_style = NULL;
@@ -175,7 +179,7 @@ float GetPixelsInPoint() {
 namespace gfx {
 
 PangoContext* GetPangoContext() {
-#if defined(USE_WAYLAND) || defined(USE_AURA)
+#if defined(USE_AURA)
   PangoFontMap* font_map = pango_cairo_font_map_get_default();
   return pango_font_map_create_context(font_map);
 #else
@@ -456,6 +460,30 @@ size_t GetPangoFontSizeInPixels(PangoFontDescription* pango_font) {
     size_in_pixels = size_in_pixels * GetPixelsInPoint() / PANGO_SCALE;
   }
   return size_in_pixels;
+}
+
+PangoFontMetrics* GetPangoFontMetrics(PangoFontDescription* desc) {
+  static std::map<int, PangoFontMetrics*>* desc_to_metrics = NULL;
+  static PangoContext* context = NULL;
+
+  if (!context) {
+    context = GetPangoContext();
+    pango_context_set_language(context, pango_language_get_default());
+  }
+
+  if (!desc_to_metrics)
+    desc_to_metrics = new std::map<int, PangoFontMetrics*>();
+
+  const int desc_hash = pango_font_description_hash(desc);
+  std::map<int, PangoFontMetrics*>::iterator i =
+      desc_to_metrics->find(desc_hash);
+
+  if (i == desc_to_metrics->end()) {
+    PangoFontMetrics* metrics = pango_context_get_metrics(context, desc, NULL);
+    desc_to_metrics->insert(std::make_pair(desc_hash, metrics));
+    return metrics;
+  }
+  return i->second;
 }
 
 }  // namespace gfx

@@ -7,9 +7,6 @@
 #include <shlobj.h>
 #include <windows.h>
 
-#include <set>
-#include <sstream>
-
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -28,6 +25,7 @@
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_list.h"
 #include "chrome/browser/importer/importer_progress_dialog.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -53,8 +51,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_switches.h"
 
-using content::UserMetricsAction;
-
 namespace {
 
 // Helper class that performs delayed first-run tasks that need more of the
@@ -77,14 +73,13 @@ class FirstRunDelayedTasks : public content::NotificationObserver {
 
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) {
+                       const content::NotificationDetails& details) OVERRIDE {
     // After processing the notification we always delete ourselves.
     if (type == chrome::NOTIFICATION_EXTENSIONS_READY) {
       DoExtensionWork(
           content::Source<Profile>(source).ptr()->GetExtensionService());
     }
     delete this;
-    return;
   }
 
  private:
@@ -95,10 +90,8 @@ class FirstRunDelayedTasks : public content::NotificationObserver {
   // If the extension specified in the master pref is older than the live
   // extension it will get updated which is the same as get it installed.
   void DoExtensionWork(ExtensionService* service) {
-    if (!service)
-      return;
-    service->updater()->CheckNow();
-    return;
+    if (service)
+      service->updater()->CheckNow();
   }
 
   content::NotificationRegistrar registrar_;
@@ -122,8 +115,7 @@ bool CreateChromeDesktopShortcut() {
       chrome_exe.value(),
       dist->GetIconIndex(),
       ShellUtil::CURRENT_USER,
-      false,
-      true);  // create if doesn't exist.
+      ShellUtil::SHORTCUT_CREATE_ALWAYS);
 }
 
 // Creates the quick launch shortcut to chrome for the current user. Returns
@@ -137,7 +129,7 @@ bool CreateChromeQuickLaunchShortcut() {
       dist,
       chrome_exe.value(),
       ShellUtil::CURRENT_USER,  // create only for current user.
-      true);  // create if doesn't exist.
+      ShellUtil::SHORTCUT_CREATE_ALWAYS);
 }
 
 void PlatformSetup(Profile* profile) {
@@ -239,22 +231,6 @@ void DoDelayedInstallExtensionsIfNeeded(
   }
 }
 
-void SetRLZPref(first_run::MasterPrefs* out_prefs,
-                installer::MasterPreferences* install_prefs) {
-  // RLZ is currently a Windows-only phenomenon.  When it comes to the Mac/
-  // Linux, enable it here.
-  if (!install_prefs->GetInt(installer::master_preferences::kDistroPingDelay,
-                    &out_prefs->ping_delay)) {
-    // 90 seconds is the default that we want to use in case master
-    // preferences is missing, corrupt or ping_delay is missing.
-    out_prefs->ping_delay = 90;
-  }
-}
-
-}  // namespace
-
-namespace {
-
 // This class is used by first_run::ImportSettings to determine when the import
 // process has ended and what was the result of the operation as reported by
 // the process exit code. This class executes in the context of the main chrome
@@ -278,7 +254,7 @@ class ImportProcessRunner : public base::win::ObjectWatcher::Delegate {
   int exit_code() const { return exit_code_; }
 
   // The child process has terminated. Find the exit code and quit the loop.
-  virtual void OnObjectSignaled(HANDLE object) {
+  virtual void OnObjectSignaled(HANDLE object) OVERRIDE {
     DCHECK(object == import_process_);
     if (!::GetExitCodeProcess(import_process_, &exit_code_)) {
       NOTREACHED();
@@ -318,7 +294,7 @@ class HungImporterMonitor : public WorkerThreadTicker::Callback {
   }
 
  private:
-  virtual void OnTick() {
+  virtual void OnTick() OVERRIDE {
     if (!import_process_)
       return;
     // We find the top active popup that we own, this will be either the
@@ -455,7 +431,7 @@ bool ImportSettingsWin(Profile* profile,
 }  // namespace
 
 namespace first_run {
-namespace internal{
+namespace internal {
 
 bool ImportSettings(Profile* profile,
                     scoped_refptr<ImporterHost> importer_host,
@@ -587,7 +563,7 @@ bool ProcessMasterPreferences(const FilePath& user_data_dir,
 
   out_prefs->new_tabs = install_prefs->GetFirstRunTabs();
 
-  SetRLZPref(out_prefs, install_prefs.get());
+  internal::SetRLZPref(out_prefs, install_prefs.get());
   ShowPostInstallEULAIfNeeded(install_prefs.get());
 
   if (!internal::CopyPrefFile(user_data_dir, master_prefs_path))

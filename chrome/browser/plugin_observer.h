@@ -15,7 +15,7 @@
 
 class GURL;
 class InfoBarDelegate;
-class PluginInstaller;
+class PluginFinder;
 class TabContentsWrapper;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -29,6 +29,7 @@ class PluginObserver : public content::WebContentsObserver {
   virtual ~PluginObserver();
 
   // content::WebContentsObserver implementation.
+  virtual void PluginCrashed(const FilePath& plugin_path) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -46,11 +47,12 @@ class PluginObserver : public content::WebContentsObserver {
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   void OnFindMissingPlugin(int placeholder_id, const std::string& mime_type);
 
-  void FoundMissingPlugin(int placeholder_id,
-                          const std::string& mime_type,
-                          PluginInstaller* installer);
-  void FoundPluginToUpdate(int placeholder_id,
-                           PluginInstaller* installer);
+  void FindMissingPlugin(int placeholder_id,
+                         const std::string& mime_type,
+                         PluginFinder* plugin_finder);
+  void FindPluginToUpdate(int placeholder_id,
+                          const std::string& identifier,
+                          PluginFinder* plugin_finder);
   void OnRemovePluginPlaceholderHost(int placeholder_id);
 #endif
   void OnOpenAboutPlugins();

@@ -233,7 +233,7 @@
               </li><li>
                 <a href="#method-remove">remove</a>
               </li><li>
-                <a href="#method-sendRequest">sendRequest</a>
+                <a href="#method-sendMessage">sendMessage</a>
               </li><li>
                 <a href="#method-update">update</a>
               </li>
@@ -1138,6 +1138,32 @@ For other examples and for help in viewing the source code, see
           <!-- OBJECT EVENT FIELDS -->
           <!-- FUNCTION PARAMETERS -->
         </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>runAt</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                        <span>["document_start", "document_end", "document_idle"]</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The soonest that the script will be injected into the tab. Defaults to "document_idle".</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
               </div>
             </dl>
           </dd>
@@ -1670,6 +1696,32 @@ For other examples and for help in viewing the source code, see
               </em>
           </dt>
           <dd>If allFrames is true, this function injects CSS text into all frames of current page. By default, it's false and CSS is injected only into the top main frame.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>runAt</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                        <span>["document_start", "document_end", "document_idle"]</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The soonest that the CSS will be injected into the tab. Defaults to "document_idle".</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -2525,16 +2577,16 @@ For other examples and for help in viewing the source code, see
                 <!-- MIN_VERSION -->
               </div> <!-- /description -->
             </div><div class="apiItem">
-              <a name="method-sendRequest"></a> <!-- method-anchor -->
-              <h4>sendRequest</h4>
+              <a name="method-sendMessage"></a> <!-- method-anchor -->
+              <h4>sendMessage</h4>
               <div class="summary">
                   <!-- Note: intentionally longer 80 columns -->
-                  <span>chrome.tabs.sendRequest</span>(<span class="null"><span>integer</span>
+                  <span>chrome.tabs.sendMessage</span>(<span class="null"><span>integer</span>
                       <var><span>tabId</span></var></span><span class="null"><span>, </span><span>any</span>
-                      <var><span>request</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>message</span></var></span><span class="optional"><span>, </span><span>function</span>
                       <var><span>responseCallback</span></var></span>)</div>
               <div class="description">
-                <p>Sends a single request to the content script(s) in the specified tab, with an optional callback to run when a response is sent back.  The <a href="extension.html#event-onRequest">chrome.extension.onRequest</a> event is fired in each content script running in the specified tab for the current extension.</p>
+                <p>Sends a single message to the content script(s) in the specified tab, with an optional callback to run when a response is sent back.  The <a href="extension.html#event-onMessage">chrome.extension.onMessage</a> event is fired in each content script running in the specified tab for the current extension.</p>
                 <!-- PARAMETERS -->
                 <h4>Parameters</h4>
                 <dl>
@@ -2566,7 +2618,7 @@ For other examples and for help in viewing the source code, see
                   </div><div>
                     <div>
           <dt>
-            <var>request</var>
+            <var>message</var>
               <em>
                 <!-- TYPE -->
                 <div style="display:inline">
@@ -2634,7 +2686,7 @@ For other examples and for help in viewing the source code, see
                 </div>
               </em>
           </dt>
-          <dd>The JSON response object sent by the handler of the request. If an error occurs while connecting to the specified tab, the callback will be called with no arguments and <a href="extension.html#property-lastError">chrome.extension.lastError</a> will be set to the error message.</dd>
+          <dd>The JSON response object sent by the handler of the message. If an error occurs while connecting to the specified tab, the callback will be called with no arguments and <a href="extension.html#property-lastError">chrome.extension.lastError</a> will be set to the error message.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -2678,7 +2730,7 @@ For other examples and for help in viewing the source code, see
                 </div>
               </em>
           </dt>
-          <dd>The JSON response object sent by the handler of the request. If an error occurs while connecting to the specified tab, the callback will be called with no arguments and <a href="extension.html#property-lastError">chrome.extension.lastError</a> will be set to the error message.</dd>
+          <dd>The JSON response object sent by the handler of the message. If an error occurs while connecting to the specified tab, the callback will be called with no arguments and <a href="extension.html#property-lastError">chrome.extension.lastError</a> will be set to the error message.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->

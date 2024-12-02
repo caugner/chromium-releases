@@ -38,6 +38,9 @@ class OomPriorityManager : public content::NotificationObserver {
   OomPriorityManager();
   virtual ~OomPriorityManager();
 
+  // Number of discard events since Chrome started.
+  int discard_count() const { return discard_count_; }
+
   void Start();
   void Stop();
 
@@ -50,6 +53,11 @@ class OomPriorityManager : public content::NotificationObserver {
   // Returns true if it successfully found a tab and discarded it.
   bool DiscardTab();
 
+  // Log memory statistics for the running processes, then discards a tab.
+  // Tab discard happens sometime later, as collecting the statistics touches
+  // multiple threads and takes time.
+  void LogMemoryAndDiscardTab();
+
  private:
   FRIEND_TEST_ALL_PREFIXES(OomPriorityManagerTest, Comparator);
 
@@ -58,12 +66,25 @@ class OomPriorityManager : public content::NotificationObserver {
     ~TabStats();
     bool is_pinned;
     bool is_selected;
+    bool is_discarded;
+    bool sudden_termination_allowed;
     base::TimeTicks last_selected;
     base::ProcessHandle renderer_handle;
     string16 title;
-    int64 tab_contents_id;  // unique ID per TabContents
+    int64 tab_contents_id;  // unique ID per WebContents
   };
   typedef std::vector<TabStats> TabStatsList;
+
+  // Discards a tab with the given unique ID.  Returns true if discard occurred.
+  bool DiscardTabById(int64 target_web_contents_id);
+
+  // Records UMA histogram statistics for a tab discard. We record statistics
+  // for user triggered discards via chrome://discards/ because that allows us
+  // to manually test the system.
+  void RecordDiscardStatistics();
+
+  // Returns the number of tabs open in all browser instances.
+  int GetTabCount() const;
 
   TabStatsList GetTabStatsOnUIThread();
 
@@ -96,7 +117,23 @@ class OomPriorityManager : public content::NotificationObserver {
   ProcessScoreMap pid_to_oom_score_;
   base::ProcessHandle focused_tab_pid_;
 
+  // Observer for the kernel low memory signal.  NULL if tab discarding is
+  // disabled.
   scoped_ptr<LowMemoryObserver> low_memory_observer_;
+
+  // Wall-clock time when the priority manager started running.
+  base::TimeTicks start_time_;
+
+  // Wall-clock time of last tab discard during this browsing session, or 0 if
+  // no discard has happened yet.
+  base::TimeTicks last_discard_time_;
+
+  // Wall-clock time of last priority adjustment, used to correct the above
+  // times for discontinuities caused by suspend/resume.
+  base::TimeTicks last_adjust_time_;
+
+  // Number of times we have discarded a tab, for statistics.
+  int discard_count_;
 
   DISALLOW_COPY_AND_ASSIGN(OomPriorityManager);
 };

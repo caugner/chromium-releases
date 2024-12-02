@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #pragma once
 
+#include "base/callback_forward.h"
 #include "chrome/browser/ui/base_window.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
@@ -72,6 +73,9 @@ class BrowserWindow : public BaseWindow {
   // Browser::OnWindowDidShow should be called after showing the window.
   // virtual void Show() = 0;
 
+  // No BrowserWindow supports this BaseWindow function.
+  virtual void SetDraggableRegion(SkRegion* region) OVERRIDE {}
+
   //////////////////////////////////////////////////////////////////////////////
   // Browser specific methods:
 
@@ -123,7 +127,6 @@ class BrowserWindow : public BaseWindow {
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
       FullscreenExitBubbleType bubble_type) = 0;
-  virtual bool IsFullscreen() const = 0;
 
   // Returns true if the fullscreen bubble is visible.
   virtual bool IsFullscreenBubbleVisible() const = 0;
@@ -153,9 +156,6 @@ class BrowserWindow : public BaseWindow {
 
   // Focuses the bookmarks toolbar (for accessibility).
   virtual void FocusBookmarksToolbar() = 0;
-
-  // Focuses the Chrome OS status view (for accessibility).
-  virtual void FocusChromeOSStatus() = 0;
 
   // Moves keyboard focus to the next pane.
   virtual void RotatePaneFocus(bool forwards) = 0;
@@ -191,7 +191,7 @@ class BrowserWindow : public BaseWindow {
 
   // Shows a confirmation dialog box for adding a search engine described by
   // |template_url|. Takes ownership of |template_url|.
-  virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
+  virtual void ConfirmAddSearchProvider(TemplateURL* template_url,
                                         Profile* profile) = 0;
 
   // Shows or hides the bookmark bar depending on its current visibility.
@@ -217,8 +217,11 @@ class BrowserWindow : public BaseWindow {
   virtual void ShowChromeToMobileBubble() = 0;
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // Shows the one-click sign in bubble.
-  virtual void ShowOneClickSigninBubble() = 0;
+  // Shows the one-click sign in bubble.  The given closures are run
+  // when their corresponding links are clicked.
+  virtual void ShowOneClickSigninBubble(
+      const base::Closure& learn_more_callback,
+      const base::Closure& advanced_callback) = 0;
 #endif
 
   // Whether or not the shelf view is visible.
@@ -326,9 +329,6 @@ class BrowserWindow : public BaseWindow {
   virtual FindBar* CreateFindBar() = 0;
 
 #if defined(OS_CHROMEOS)
-  // Shows the mobile setup dialog.
-  virtual void ShowMobileSetup() = 0;
-
   // Shows the keyboard overlay dialog box.
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) = 0;
 #endif

@@ -5,14 +5,17 @@
 #include "ash/app_list/app_list.h"
 
 #include "ash/app_list/app_list_view.h"
-#include "ash/shell_delegate.h"
+#include "ash/app_list/icon_cache.h"
 #include "ash/shell.h"
+#include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
+#include "ash/wm/shelf_layout_manager.h"
+#include "ash/wm/window_util.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/transform_util.h"
 
@@ -33,7 +36,7 @@ const int kSecondAnimationStartDelay = kAnimationDurationMs - 20;
 gfx::Rect GetPreferredBounds() {
   gfx::Point cursor = gfx::Screen::GetCursorScreenPoint();
   // Use full monitor rect so that the app list shade goes behind the launcher.
-  return gfx::Screen::GetMonitorAreaNearestPoint(cursor);
+  return gfx::Screen::GetMonitorNearestPoint(cursor).bounds();
 }
 
 ui::Layer* GetLayer(views::Widget* widget) {
@@ -46,10 +49,12 @@ ui::Layer* GetLayer(views::Widget* widget) {
 // AppList, public:
 
 AppList::AppList() : is_visible_(false), view_(NULL) {
+  IconCache::CreateInstance();
 }
 
 AppList::~AppList() {
   ResetView();
+  IconCache::DeleteInstance();
 }
 
 void AppList::SetVisible(bool visible) {
@@ -57,6 +62,10 @@ void AppList::SetVisible(bool visible) {
     return;
 
   is_visible_ = visible;
+
+  // App list needs to know the new shelf layout in order to calculate its
+  // UI layout when AppListView visibility changes.
+  Shell::GetInstance()->shelf()->UpdateAutoHideState();
 
   if (view_) {
     ScheduleAnimation();
@@ -73,6 +82,10 @@ bool AppList::IsVisible() {
   return view_ && view_->GetWidget()->IsVisible();
 }
 
+aura::Window* AppList::GetWindow() {
+  return is_visible_ && view_ ? view_->GetWidget()->GetNativeWindow() : NULL;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // AppList, private:
 
@@ -80,6 +93,8 @@ void AppList::SetView(AppListView* view) {
   DCHECK(view_ == NULL);
 
   if (is_visible_) {
+    IconCache::GetInstance()->MarkAllEntryUnused();
+
     view_ = view;
     views::Widget* widget = view_->GetWidget();
     widget->AddObserver(this);
@@ -105,6 +120,8 @@ void AppList::ResetView() {
   Shell::GetInstance()->RemoveRootWindowEventFilter(this);
   widget->GetNativeView()->GetRootWindow()->RemoveRootWindowObserver(this);
   view_ = NULL;
+
+  IconCache::GetInstance()->PurgeAllUnused();
 }
 
 void AppList::ScheduleAnimation() {
@@ -223,6 +240,19 @@ void AppList::OnRootWindowResized(const aura::RootWindow* root,
     view_->GetWidget()->SetBounds(gfx::Rect(root->bounds().size()));
 }
 
+void AppList::OnWindowFocused(aura::Window* window) {
+  if (view_ && is_visible_) {
+    aura::Window* applist_container = Shell::GetInstance()->GetContainer(
+        internal::kShellWindowId_AppListContainer);
+    aura::Window* bubble_container = Shell::GetInstance()->GetContainer(
+        internal::kShellWindowId_SettingBubbleContainer);
+    if (window->parent() != applist_container &&
+        window->parent() != bubble_container) {
+      SetVisible(false);
+    }
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // AppList, ui::ImplicitAnimationObserver implementation:
 
@@ -241,12 +271,6 @@ void AppList::OnWidgetClosing(views::Widget* widget) {
   if (is_visible_)
     SetVisible(false);
   ResetView();
-}
-
-void AppList::OnWidgetActivationChanged(views::Widget* widget, bool active) {
-  DCHECK(view_->GetWidget() == widget);
-  if (view_ && is_visible_ && !active)
-    SetVisible(false);
 }
 
 }  // namespace internal

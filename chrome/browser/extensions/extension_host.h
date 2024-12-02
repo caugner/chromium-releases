@@ -32,6 +32,7 @@
 
 class Browser;
 class Extension;
+class ExtensionWindowController;
 class PrefsTabHelper;
 
 namespace content {
@@ -94,21 +95,6 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Helper variant of the above for cases where no Browser is present.
   void CreateViewWithoutBrowser();
 
-  // Send a message to the renderer to notify it we are about to close.
-  // This is a simple ping that the renderer will respond to. The purpose
-  // is to control sequencing: if the extension remains idle until the renderer
-  // responds with an ACK, then we know that the extension process is ready to
-  // shut down.
-  void SendShouldClose();
-
-  // Cancels the current close sequence. Any future Close ACKs will be ignored
-  // (unless SendShouldClose is called again).
-  void CancelShouldClose();
-
-  // Handles the close ACK. The sequence ID lets us identify whether we have
-  // cancelled this close sequence.
-  void OnShouldCloseAck(int sequence_id);
-
   const Extension* extension() const { return extension_; }
   const std::string& extension_id() const { return extension_id_; }
   content::WebContents* host_contents() const { return host_contents_.get(); }
@@ -126,9 +112,7 @@ class ExtensionHost : public content::WebContentsDelegate,
 
   // ExtensionFunctionDispatcher::Delegate
   virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
-  void set_associated_web_contents(content::WebContents* web_contents) {
-    associated_web_contents_ = web_contents;
-  }
+  void SetAssociatedWebContents(content::WebContents* web_contents);
 
   // Returns true if the render view is initialized and didn't crash.
   bool IsRenderViewLive() const;
@@ -141,6 +125,11 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Insert a default style sheet for Extension Infobars.
   void InsertInfobarCSS();
 
+  // Notifications from the JavaScriptDialogCreator when a dialog is being
+  // opened/closed.
+  void WillRunJavaScriptDialog();
+  void DidCloseJavaScriptDialog();
+
   // content::WebContentsObserver
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void RenderViewCreated(
@@ -150,7 +139,6 @@ class ExtensionHost : public content::WebContentsDelegate,
   virtual void RenderViewReady() OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual void DocumentAvailableInMainFrame() OVERRIDE;
-  virtual void DocumentLoadedInFrame(int64 frame_id) OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
 
   // content::WebContentsDelegate
@@ -193,14 +181,15 @@ class ExtensionHost : public content::WebContentsDelegate,
   // Closes this host (results in deletion).
   void Close();
 
-  // Const version of below function.
-  const Browser* GetBrowser() const;
-
   // ExtensionFunctionDispatcher::Delegate
-  virtual Browser* GetBrowser() OVERRIDE;
+  virtual ExtensionWindowController* GetExtensionWindowController()
+      const OVERRIDE;
 
   // Message handlers.
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
+  void OnEventAck();
+  void OnIncrementLazyKeepaliveCount();
+  void OnDecrementLazyKeepaliveCount();
 
   // Handles keyboard events that were not handled by HandleKeyboardEvent().
   // Platform specific implementation may override this method to handle the
@@ -260,10 +249,6 @@ class ExtensionHost : public content::WebContentsDelegate,
 
   // Used to measure how long it's been since the host was created.
   PerfTimer since_created_;
-
-  // A unique ID associated with each call to ShouldClose. This allows us
-  // to differentiate which ShouldClose message the renderer is responding to.
-  int close_sequence_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionHost);
 };

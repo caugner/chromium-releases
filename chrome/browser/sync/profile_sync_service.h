@@ -25,7 +25,6 @@
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_manager.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
@@ -36,6 +35,7 @@
 #include "sync/engine/model_safe_worker.h"
 #include "sync/js/sync_js_controller.h"
 #include "sync/syncable/model_type.h"
+#include "sync/util/experiments.h"
 #include "sync/util/unrecoverable_error_handler.h"
 
 class Profile;
@@ -49,7 +49,7 @@ class ChangeProcessor;
 class DataTypeManager;
 class JsController;
 class SessionModelAssociator;
-namespace sessions { struct SyncSessionSnapshot; }
+namespace sessions { class SyncSessionSnapshot; }
 }
 
 namespace sync_api {
@@ -236,8 +236,8 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnMigrationNeededForTypes(
       syncable::ModelTypeSet types) OVERRIDE;
-  virtual void OnDataTypesChanged(
-      syncable::ModelTypeSet to_add) OVERRIDE;
+  virtual void OnExperimentsChanged(
+      const browser_sync::Experiments& experiments) OVERRIDE;
   virtual void OnActionableError(
       const browser_sync::SyncProtocolError& error) OVERRIDE;
 
@@ -275,10 +275,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
       setup_in_progress_ = setup_in_progress;
   }
 
-  // This method handles clicks on "sync error" UI, showing the appropriate
-  // dialog for the error condition (relogin / enter passphrase).
-  virtual void ShowErrorUI();
-
   // Returns true if the SyncBackendHost has told us it's ready to accept
   // changes.
   // [REMARK] - it is safe to call this function only from the ui thread.
@@ -295,14 +291,6 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   tracked_objects::Location unrecoverable_error_location() {
     return unrecoverable_error_location_;
   }
-
-  // Reports whether the user is currently authenticating or not. This is used
-  // by the sync_ui_util helper routines to allow the UI to properly display
-  // an "authenticating..." status message instead of an auth error when we are
-  // in the process of trying to update credentials.
-  // TODO(atwilson): This state now resides in SigninManager - this method
-  // will be removed once we've cleaned up the callers. http://crbug.com/95269.
-  virtual bool UIShouldDepictAuthInProgress() const;
 
   // Returns true if OnPassphraseRequired has been called for any reason.
   virtual bool IsPassphraseRequired() const;
@@ -369,7 +357,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // ProfileSyncServiceHarness.  Figure out a different way to expose
   // this info to that class, and remove these functions.
 
-  virtual const browser_sync::sessions::SyncSessionSnapshot*
+  virtual browser_sync::sessions::SyncSessionSnapshot
       GetLastSessionSnapshot() const;
 
   // Returns whether or not the underlying sync engine has made any
@@ -539,6 +527,14 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Helper method for managing encryption UI.
   bool IsEncryptedDatatypeEnabled() const;
 
+  // Helper for OnUnrecoverableError.
+  // TODO(tim): Use an enum for |delete_sync_database| here, in ShutdownImpl,
+  // and in SyncBackendHost::Shutdown.
+  void OnUnrecoverableErrorImpl(
+      const tracked_objects::Location& from_here,
+      const std::string& message,
+      bool delete_sync_database);
+
   // This is a cache of the last authentication response we received from the
   // sync server. The UI queries this to display appropriate messaging to the
   // user.
@@ -563,10 +559,20 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // Called from Initialize() and UnsuppressAndStart().
   void TryStart();
 
+  // Puts the backend's sync scheduler into NORMAL mode.
+  // Called when configuration is complete.
+  void StartSyncingWithServer();
+
   // Called when we've determined that we don't need a passphrase (either
   // because OnPassphraseAccepted() was called, or because we've gotten a
   // OnPassphraseRequired() but no data types are enabled).
   void ResolvePassphraseRequired();
+
+  // During initial signin, ProfileSyncService caches the user's signin
+  // passphrase so it can be used to encrypt/decrypt data after sync starts up.
+  // This routine is invoked once the backend has started up to use the
+  // cached passphrase and clear it out when it is done.
+  void ConsumeCachedPassphraseIfPossible();
 
   // If |delete_sync_data_folder| is true, then this method will delete all
   // previous "Sync Data" folders. (useful if the folder is partial/corrupt).
@@ -610,6 +616,12 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   void UpdateSelectedTypesHistogram(
       bool sync_everything,
       const syncable::ModelTypeSet chosen_types) const;
+
+#if defined(OS_CHROMEOS)
+  // Refresh spare sync bootstrap token for re-enabling the sync service.
+  // Called on successful sign-in notifications.
+  void RefreshSpareBootstrapToken(const std::string& passphrase);
+#endif
 
   // Factory used to create various dependent objects.
   scoped_ptr<ProfileSyncComponentsFactory> factory_;
@@ -672,11 +684,7 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // yet have a backend to send it to.  This happens during initialization as
   // we don't StartUp until we have a valid token, which happens after valid
   // credentials were provided.
-  struct CachedPassphrases {
-    std::string explicit_passphrase;
-    std::string gaia_passphrase;
-  };
-  CachedPassphrases cached_passphrases_;
+  std::string cached_passphrase_;
 
   // Keep track of where we are in a server clear operation
   ClearServerDataState clear_server_data_state_;
@@ -733,6 +741,9 @@ class ProfileSyncService : public browser_sync::SyncFrontend,
   // If |true|, there is setup UI visible so we should not start downloading
   // data types.
   bool setup_in_progress_;
+
+  // The set of currently enabled sync experiments.
+  browser_sync::Experiments current_experiments;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncService);
 };

@@ -32,6 +32,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/resource/resource_handle.h"
 
 using content::NavigationController;
 using content::RenderViewHost;
@@ -253,6 +254,8 @@ class MockWebUIDataSource : public ChromeURLDataManager::DataSource {
       : ChromeURLDataManager::DataSource("dummyurl", MessageLoop::current()) {}
 
  private:
+  virtual ~MockWebUIDataSource() {}
+
   virtual void StartDataRequest(const std::string& path,
                                 bool is_incognito,
                                 int request_id) OVERRIDE {
@@ -280,8 +283,7 @@ class MockWebUIProvider
   WebUIController* NewWebUI(content::WebUI* web_ui, const GURL& url) OVERRIDE {
     WebUIController* controller = new content::WebUIController(web_ui);
     Profile* profile = Profile::FromWebUI(web_ui);
-    profile->GetChromeURLDataManager()->AddDataSource(
-        new MockWebUIDataSource());
+    ChromeURLDataManager::AddDataSource(profile, new MockWebUIDataSource());
     return controller;
   }
 
@@ -319,7 +321,8 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   // TODO(dtseng): should this be part of every BrowserTest or just WebUI test.
   FilePath resources_pack_path;
   PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-  ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
+  ResourceBundle::GetSharedInstance().AddDataPack(
+      resources_pack_path, ui::ResourceHandle::kScaleFactor100x);
 
   FilePath mockPath;
   ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &mockPath));

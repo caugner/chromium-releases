@@ -12,6 +12,7 @@
 #include "base/win/scoped_hdc.h"
 #include "base/win/scoped_select_object.h"
 #include "chrome/common/print_messages.h"
+#include "printing/custom_scaling.h"
 #include "printing/metafile.h"
 #include "printing/metafile_impl.h"
 #include "printing/metafile_skia_wrapper.h"
@@ -108,18 +109,49 @@ void PrintWebViewHelper::PrintPageInternal(
 
   int page_number = params.page_number;
 
-  // Calculate scaling.
-  double actual_shrink = gfx::CalculatePageScale(
-      metafile->context(),
-      params.params.content_size.width(),
-      params.params.content_size.height());
-
+  // Calculate the dpi adjustment.
+  // Browser will render context using desired_dpi, so we need to calculate
+  // adjustment factor to play content on the printer DC later during the
+  // actual printing.
+  double actual_shrink = static_cast<float>(params.params.desired_dpi /
+                                            params.params.dpi);
   gfx::Size page_size_in_dpi;
   gfx::Rect content_area_in_dpi;
+
+  // If we are printing PDF, it may not fit into metafile using 72dpi.
+  // (Metafile is based on screen resolution here.)
+  // (See http://code.google.com/p/chromium-os/issues/detail?id=16088)
+  // If PDF plugin encounter this issue it will save custom scale in TLS,
+  // so we can apply the same scaling factor here.
+  // If will do so ONLY if default scaling does not work.
+  // TODO(gene): We should revisit this solution for the next versions.
+  // Two possible solutions:
+  // We can create metafile of the right size (or resizable)
+  // https://code.google.com/p/chromium/issues/detail?id=126037
+  // or
+  // We should return scale factor all the way from the plugin:
+  //   webkit::ppapi::PluginInstance::PrintPDFOutput - scale calculated here
+  //   webkit::ppapi::PluginInstance::PrintPageHelper
+  //   webkit::ppapi::PluginInstance::PrintPage
+  //   webkit::ppapi::WebPluginImpl::printPage
+  //   WebKit::WebPluginContainerImpl::printPage
+  //   WebKit::ChromePluginPrintContext::spoolPage - always return 1.0 scale
+  //   WebKit::WebFrameImpl::printPage
+  //   PrintWebViewHelper::RenderPage
+  //   PrintWebViewHelper::PrintPageInternal
+
+  printing::ClearCustomPrintingPageScale();
+
   // Render page for printing.
   metafile.reset(RenderPage(params.params, page_number, frame, false,
                             metafile.get(), &actual_shrink, &page_size_in_dpi,
                             &content_area_in_dpi));
+
+  double custom_scale;
+  if (printing::GetCustomPrintingPageScale(&custom_scale)) {
+    actual_shrink = custom_scale;
+    printing::ClearCustomPrintingPageScale();
+  }
 
   // Close the device context to retrieve the compiled metafile.
   if (!metafile->FinishDocument())
@@ -187,8 +219,8 @@ Metafile* PrintWebViewHelper::RenderPage(
   printing::PageSizeMargins page_layout_in_points;
   double css_scale_factor = 1.0f;
   ComputePageLayoutInPointsForCss(frame, page_number, params,
-                                  ignore_css_margins_, fit_to_page_,
-                                  &css_scale_factor, &page_layout_in_points);
+                                  ignore_css_margins_, &css_scale_factor,
+                                  &page_layout_in_points);
   gfx::Size page_size;
   gfx::Rect content_area;
   GetPageSizeAndContentAreaFromPageLayout(page_layout_in_points, &page_size,

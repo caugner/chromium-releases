@@ -9,10 +9,10 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_param_traits.h"
 
-class IndexedDBKey;
-class IndexedDBKeyRange;
-
 namespace content {
+class IndexedDBKey;
+class IndexedDBKeyPath;
+class IndexedDBKeyRange;
 class SerializedScriptValue;
 }
 
@@ -32,16 +32,24 @@ struct ParamTraits<content::SerializedScriptValue> {
 };
 
 template <>
-struct ParamTraits<IndexedDBKey> {
-  typedef IndexedDBKey param_type;
+struct ParamTraits<content::IndexedDBKey> {
+  typedef content::IndexedDBKey param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
 };
 
 template <>
-struct ParamTraits<IndexedDBKeyRange> {
-  typedef IndexedDBKeyRange param_type;
+struct ParamTraits<content::IndexedDBKeyRange> {
+  typedef content::IndexedDBKeyRange param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, PickleIterator* iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<content::IndexedDBKeyPath> {
+  typedef content::IndexedDBKeyPath param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, PickleIterator* iter, param_type* r);
   static void Log(const param_type& p, std::string* l);

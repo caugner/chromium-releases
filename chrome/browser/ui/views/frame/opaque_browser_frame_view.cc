@@ -53,9 +53,9 @@ namespace {
 // The frame border is only visible in restored mode and is hardcoded to 4 px on
 // each side regardless of the system window border size.
 const int kFrameBorderThickness = 4;
-// Besides the frame border, there's another 11 px of empty space atop the
+// Besides the frame border, there's another 9 px of empty space atop the
 // window in restored mode, to use to drag the window around.
-const int kNonClientRestoredExtraThickness = 11;
+const int kNonClientRestoredExtraThickness = 9;
 // While resize areas on Windows are normally the same size as the window
 // borders, our top area is shrunk by 1 px to make it easier to move the window
 // around with our thinner top grabbable strip.  (Incidentally, our side and
@@ -84,12 +84,13 @@ const int kTitleLogoSpacing = 5;
 // way the tabstrip draws its bottom edge, will appear like a 1 px gap to the
 // user).
 const int kAvatarBottomSpacing = 2;
-// There are 2 px on each side of the avatar (between the frame border and
-// it on the left, and between it and the tabstrip on the right).
-const int kAvatarSideSpacing = 2;
-// The top 1 px of the tabstrip is shadow; in maximized mode we push this off
+// Space between the frame border and the left edge of the avatar.
+const int kAvatarLeftSpacing = 2;
+// Space between the right edge of the avatar and the tabstrip.
+const int kAvatarRightSpacing = -2;
+// The top 3 px of the tabstrip is shadow; in maximized mode we push this off
 // the top of the screen so the tabs appear flush against the screen edge.
-const int kTabstripTopShadowThickness = 1;
+const int kTabstripTopShadowThickness = 3;
 // In restored mode, the New Tab button isn't at the same height as the caption
 // buttons, but the space will look cluttered if it actually slides under them,
 // so we stop it when the gap between the two is down to 5 px.
@@ -100,7 +101,7 @@ const int kNewTabCaptionRestoredSpacing = 5;
 const int kNewTabCaptionMaximizedSpacing = 16;
 // How far to indent the tabstrip from the left side of the screen when there
 // is no avatar icon.
-const int kTabStripIndent = 1;
+const int kTabStripIndent = -6;
 
 // Converts |bounds| from |src|'s coordinate system to |dst|, and checks if
 // |pt| is contained within.
@@ -210,7 +211,7 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStrip(
     return gfx::Rect();
 
   int tabstrip_x = browser_view()->ShouldShowAvatar() ?
-      (avatar_bounds_.right() + kAvatarSideSpacing) :
+      (avatar_bounds_.right() + kAvatarRightSpacing) :
       NonClientBorderThickness() + kTabStripIndent;
 
   int maximized_spacing = kNewTabCaptionMaximizedSpacing;
@@ -957,7 +958,7 @@ void OpaqueBrowserFrameView::LayoutAvatar() {
   int avatar_y = frame()->IsMaximized() ?
       (NonClientTopBorderHeight(false) + kTabstripTopShadowThickness) :
       avatar_restored_y;
-  avatar_bounds_.SetRect(NonClientBorderThickness() + kAvatarSideSpacing,
+  avatar_bounds_.SetRect(NonClientBorderThickness() + kAvatarLeftSpacing,
       avatar_y, incognito_icon.width(),
       browser_view()->ShouldShowAvatar() ? (avatar_bottom - avatar_y) : 0);
 

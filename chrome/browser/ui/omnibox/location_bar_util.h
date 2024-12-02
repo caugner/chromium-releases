@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,18 +6,12 @@
 #define CHROME_BROWSER_UI_OMNIBOX_LOCATION_BAR_UTIL_H_
 #pragma once
 
-#include <string>
-
-class Profile;
+#include "base/string16.h"
 
 namespace location_bar_util {
 
-// Returns the short name for a keyword.
-std::wstring GetKeywordName(Profile* profile, const std::wstring& keyword);
-
-// Build a short string to use in keyword-search when the field isn't
-// very big.
-std::wstring CalculateMinString(const std::wstring& description);
+// Build a short string to use in keyword-search when the field isn't very big.
+string16 CalculateMinString(const string16& description);
 
 }  // namespace location_bar_util
 

@@ -26,7 +26,8 @@ Combobox::Combobox(ui::ComboboxModel* model)
     : native_wrapper_(NULL),
       model_(model),
       listener_(NULL),
-      selected_item_(0) {
+      selected_index_(0) {
+  DCHECK(model);
   set_focusable(true);
 }
 
@@ -40,23 +41,22 @@ const gfx::Font& Combobox::GetFont() {
 }
 
 void Combobox::ModelChanged() {
-  selected_item_ = std::min(0, model_->GetItemCount());
+  selected_index_ = std::min(0, model_->GetItemCount());
   if (native_wrapper_)
     native_wrapper_->UpdateFromModel();
   PreferredSizeChanged();
 }
 
-void Combobox::SetSelectedItem(int index) {
-  selected_item_ = index;
+void Combobox::SetSelectedIndex(int index) {
+  selected_index_ = index;
   if (native_wrapper_)
-    native_wrapper_->UpdateSelectedItem();
+    native_wrapper_->UpdateSelectedIndex();
 }
 
 void Combobox::SelectionChanged() {
-  int prev_selected_item = selected_item_;
-  selected_item_ = native_wrapper_->GetSelectedItem();
+  selected_index_ = native_wrapper_->GetSelectedIndex();
   if (listener_)
-    listener_->ItemChanged(this, prev_selected_item, selected_item_);
+    listener_->OnSelectedIndexChanged(this);
   if (GetWidget()) {
     GetWidget()->NotifyAccessibilityEvent(
         this, ui::AccessibilityTypes::EVENT_VALUE_CHANGED, false);
@@ -129,9 +129,9 @@ void Combobox::OnBlur() {
 void Combobox::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_COMBOBOX;
   state->name = accessible_name_;
-  state->value = model_->GetItemAt(selected_item_);
-  state->index = selected_item();
-  state->count = model()->GetItemCount();
+  state->value = model_->GetItemAt(selected_index_);
+  state->index = selected_index_;
+  state->count = model_->GetItemCount();
 }
 
 void Combobox::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
@@ -144,7 +144,7 @@ void Combobox::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     // parented. For this reason the wrapper is only updated after adding its
     // view.
     native_wrapper_->UpdateFromModel();
-    native_wrapper_->UpdateSelectedItem();
+    native_wrapper_->UpdateSelectedIndex();
     native_wrapper_->UpdateEnabled();
   }
 }

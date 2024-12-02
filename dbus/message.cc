@@ -199,6 +199,16 @@ std::string Message::ToStringInternal(const std::string& indent,
         output += ToStringInternal(indent + "  ", &sub_reader);
         break;
       }
+      case UNIX_FD: {
+        CHECK(kDBusTypeUnixFdIsSupported);
+
+        FileDescriptor file_descriptor;
+        if (!reader->PopFileDescriptor(&file_descriptor))
+          return kBrokenMessage;
+        output += indent + "fd#" +
+                  base::StringPrintf("%d", file_descriptor.value()) + "\n";
+        break;
+      }
       default:
         LOG(FATAL) << "Unknown type: " << type;
     }
@@ -677,6 +687,17 @@ void MessageWriter::AppendVariantOfBasic(int dbus_type, const void* value) {
   CloseContainer(&variant_writer);
 }
 
+void MessageWriter::AppendFileDescriptor(const FileDescriptor& value) {
+  CHECK(kDBusTypeUnixFdIsSupported);
+
+  if (!value.is_valid()) {
+    // NB: sending a directory potentially enables sandbox escape
+    LOG(FATAL) << "Attempt to pass invalid file descriptor";
+  }
+  int fd = value.value();
+  AppendBasic(DBUS_TYPE_UNIX_FD, &fd);
+}
+
 //
 // MessageReader implementation.
 //
@@ -934,6 +955,19 @@ bool MessageReader::PopVariantOfBasic(int dbus_type, void* value) {
   if (!PopVariant(&variant_reader))
     return false;
   return variant_reader.PopBasic(dbus_type, value);
+}
+
+bool MessageReader::PopFileDescriptor(FileDescriptor* value) {
+  CHECK(kDBusTypeUnixFdIsSupported);
+
+  int fd = -1;
+  const bool success = PopBasic(DBUS_TYPE_UNIX_FD, &fd);
+  if (!success)
+    return false;
+
+  value->PutValue(fd);
+  // NB: the caller must check validity before using the value
+  return true;
 }
 
 }  // namespace dbus

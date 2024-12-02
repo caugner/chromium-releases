@@ -21,11 +21,11 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/plugin_prefs.h"
@@ -34,7 +34,7 @@
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/transport_security_persister.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -85,8 +85,6 @@ OffTheRecordProfileImpl::OffTheRecordProfileImpl(Profile* real_profile)
 }
 
 void OffTheRecordProfileImpl::Init() {
-  extension_process_manager_.reset(ExtensionProcessManager::Create(this));
-
   ProfileDependencyManager::GetInstance()->CreateProfileServices(this, false);
 
   DCHECK_NE(IncognitoModePrefs::DISABLED,
@@ -104,7 +102,7 @@ void OffTheRecordProfileImpl::Init() {
 
   // Make the chrome//extension-icon/ resource available.
   ExtensionIconSource* icon_source = new ExtensionIconSource(profile_);
-  GetChromeURLDataManager()->AddDataSource(icon_source);
+  ChromeURLDataManager::AddDataSource(this, icon_source);
 
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
       PluginPrefs::GetForProfile(this), io_data_.GetResourceContextNoInit());
@@ -122,6 +120,13 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
   ChromePluginServiceFilter::GetInstance()->UnregisterResourceContext(
     io_data_.GetResourceContextNoInit());
 
+  ExtensionService* extension_service =
+      ExtensionSystem::Get(this)->extension_service();
+  if (extension_service && extension_service->extensions_enabled()) {
+    extension_service->extension_prefs()->
+        ClearIncognitoSessionOnlyContentSettings();
+  }
+
   ProfileDependencyManager::GetInstance()->DestroyProfileServices(this);
 
   BrowserThread::PostTask(
@@ -133,12 +138,6 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
-
-  ExtensionService* extension_service = GetExtensionService();
-  if (extension_service && extension_service->extensions_enabled()) {
-    ExtensionPrefs* extension_prefs = extension_service->extension_prefs();
-    extension_prefs->ClearIncognitoSessionOnlyContentSettings();
-  }
 
   // Clears any data the network stack contains that may be related to the
   // OTR session.
@@ -193,41 +192,25 @@ VisitedLinkMaster* OffTheRecordProfileImpl::GetVisitedLinkMaster() {
 }
 
 ExtensionService* OffTheRecordProfileImpl::GetExtensionService() {
-  return GetOriginalProfile()->GetExtensionService();
+  return ExtensionSystem::Get(this)->extension_service();
 }
 
 UserScriptMaster* OffTheRecordProfileImpl::GetUserScriptMaster() {
-  return GetOriginalProfile()->GetUserScriptMaster();
-}
-
-ExtensionDevToolsManager*
-    OffTheRecordProfileImpl::GetExtensionDevToolsManager() {
-  // TODO(mpcomplete): figure out whether we should return the original
-  // profile's version.
-  return NULL;
+  return ExtensionSystem::Get(this)->user_script_master();
 }
 
 ExtensionProcessManager*
     OffTheRecordProfileImpl::GetExtensionProcessManager() {
-  return extension_process_manager_.get();
-}
-
-ExtensionMessageService*
-    OffTheRecordProfileImpl::GetExtensionMessageService() {
-  return GetOriginalProfile()->GetExtensionMessageService();
+  return ExtensionSystem::Get(this)->process_manager();
 }
 
 ExtensionEventRouter* OffTheRecordProfileImpl::GetExtensionEventRouter() {
-  return GetOriginalProfile()->GetExtensionEventRouter();
+  return ExtensionSystem::Get(this)->event_router();
 }
 
 ExtensionSpecialStoragePolicy*
     OffTheRecordProfileImpl::GetExtensionSpecialStoragePolicy() {
   return GetOriginalProfile()->GetExtensionSpecialStoragePolicy();
-}
-
-LazyBackgroundTaskQueue* OffTheRecordProfileImpl::GetLazyBackgroundTaskQueue() {
-  return GetOriginalProfile()->GetLazyBackgroundTaskQueue();
 }
 
 GAIAInfoUpdateService* OffTheRecordProfileImpl::GetGAIAInfoUpdateService() {
@@ -285,10 +268,6 @@ PrefService* OffTheRecordProfileImpl::GetOffTheRecordPrefs() {
   return prefs_;
 }
 
-TemplateURLFetcher* OffTheRecordProfileImpl::GetTemplateURLFetcher() {
-  return profile_->GetTemplateURLFetcher();
-}
-
 DownloadManager* OffTheRecordProfileImpl::GetDownloadManager() {
   return DownloadServiceFactory::GetForProfile(this)->GetDownloadManager();
 }
@@ -303,9 +282,7 @@ net::URLRequestContextGetter*
   if (GetExtensionService()) {
     const Extension* installed_app = GetExtensionService()->
         GetInstalledAppForRenderer(renderer_child_id);
-    if (installed_app != NULL && installed_app->is_storage_isolated() &&
-        installed_app->HasAPIPermission(
-            ExtensionAPIPermission::kExperimental)) {
+    if (installed_app != NULL && installed_app->is_storage_isolated()) {
       return GetRequestContextForIsolatedApp(installed_app->id());
     }
   }
@@ -358,10 +335,6 @@ content::SpeechRecognitionPreferences*
   return profile_->GetSpeechRecognitionPreferences();
 }
 
-UserStyleSheetWatcher* OffTheRecordProfileImpl::GetUserStyleSheetWatcher() {
-  return profile_->GetUserStyleSheetWatcher();
-}
-
 bool OffTheRecordProfileImpl::DidLastSessionExitCleanly() {
   return profile_->DidLastSessionExitCleanly();
 }
@@ -396,10 +369,6 @@ history::TopSites* OffTheRecordProfileImpl::GetTopSites() {
 }
 
 void OffTheRecordProfileImpl::MarkAsCleanShutdown() {
-}
-
-void OffTheRecordProfileImpl::InitExtensions(bool extensions_enabled) {
-  NOTREACHED();
 }
 
 void OffTheRecordProfileImpl::InitPromoResources() {
@@ -438,21 +407,6 @@ void OffTheRecordProfileImpl::InitChromeOSPreferences() {
   // The preferences are associated with the regular user profile.
 }
 #endif  // defined(OS_CHROMEOS)
-
-ExtensionInfoMap* OffTheRecordProfileImpl::GetExtensionInfoMap() {
-  return profile_->GetExtensionInfoMap();
-}
-
-ChromeURLDataManager* OffTheRecordProfileImpl::GetChromeURLDataManager() {
-  if (!chrome_url_data_manager_.get())
-    chrome_url_data_manager_.reset(new ChromeURLDataManager(
-        io_data_.GetChromeURLDataManagerBackendGetter()));
-  return chrome_url_data_manager_.get();
-}
-
-PromoCounter* OffTheRecordProfileImpl::GetInstantPromoCounter() {
-  return NULL;
-}
 
 #if defined(OS_CHROMEOS)
 void OffTheRecordProfileImpl::ChangeAppLocale(const std::string& locale,
@@ -532,4 +486,9 @@ Profile* Profile::CreateOffTheRecordProfile() {
     profile = new OffTheRecordProfileImpl(this);
   profile->Init();
   return profile;
+}
+
+base::Callback<ChromeURLDataManagerBackend*(void)>
+    OffTheRecordProfileImpl::GetChromeURLDataManagerBackendGetter() const {
+  return io_data_.GetChromeURLDataManagerBackendGetter();
 }

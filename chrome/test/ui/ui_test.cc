@@ -57,7 +57,7 @@
 #endif
 
 #if defined(USE_AURA)
-#include "ui/gfx/compositor/compositor_switches.h"
+#include "ui/compositor/compositor_switches.h"
 #endif
 
 using base::Time;
@@ -250,42 +250,6 @@ void UITestBase::LaunchBrowser(const CommandLine& arguments,
   ASSERT_TRUE(launcher_->LaunchBrowser(state));
 }
 
-#if !defined(OS_MACOSX)
-bool UITestBase::LaunchAnotherBrowserBlockUntilClosed(
-    const CommandLine& cmdline) {
-  ProxyLauncher::LaunchState state = DefaultLaunchState();
-  state.command.AppendArguments(cmdline, false);
-  return launcher_->LaunchAnotherBrowserBlockUntilClosed(state);
-}
-
-bool UITestBase::LaunchAnotherBrowserNoUrlArg(const CommandLine& cmdline) {
-  // Clear the homepage temporarily, and reset the launch switches, so that the
-  // URL argument doesn't get added.
-
-  std::string homepage_original;
-  std::swap(homepage_original, homepage_);
-
-  CommandLine launch_arguments_original(launch_arguments_);
-  launch_arguments_ = CommandLine(launch_arguments_.GetProgram());
-
-  SetLaunchSwitches();
-
-  ProxyLauncher::LaunchState state = DefaultLaunchState();
-
-  // But do add the --homepage switch
-  state.command.AppendSwitchASCII(switches::kHomePage, homepage_original);
-
-  state.command.AppendArguments(cmdline, false);
-  bool result = launcher_->LaunchAnotherBrowserBlockUntilClosed(state);
-
-  // Reset launch_arguments_ and homepage_ to their original values.
-  std::swap(homepage_original, homepage_);
-  std::swap(launch_arguments_original, launch_arguments_);
-
-  return result;
-}
-#endif
-
 void UITestBase::QuitBrowser() {
   launcher_->QuitBrowser();
 }
@@ -447,17 +411,6 @@ void UITestBase::WaitUntilTabCount(int tab_count) {
   }
 
   ADD_FAILURE() << "Timeout reached in WaitUntilTabCount";
-}
-
-FilePath UITestBase::GetDownloadDirectory() {
-  scoped_refptr<TabProxy> tab_proxy(GetActiveTab());
-  EXPECT_TRUE(tab_proxy.get());
-  if (!tab_proxy.get())
-    return FilePath();
-
-  FilePath download_directory;
-  EXPECT_TRUE(tab_proxy->GetDownloadDirectory(&download_directory));
-  return download_directory;
 }
 
 const FilePath::CharType* UITestBase::GetExecutablePath() {
@@ -647,51 +600,6 @@ bool UITest::EvictFileFromSystemCacheWrapper(const FilePath& path) {
     base::PlatformThread::Sleep(kDelay);
   }
   return false;
-}
-
-void UITest::WaitForGeneratedFileAndCheck(
-    const FilePath& generated_file,
-    const FilePath& original_file,
-    bool compare_files,
-    bool need_equal,
-    bool delete_generated_file) {
-  // Check whether the target file has been generated.
-  base::PlatformFileInfo previous, current;
-  bool exist = false;
-  const int kCycles = 20;
-  const TimeDelta kDelay = TestTimeouts::action_timeout() / kCycles;
-  for (int i = 0; i < kCycles; ++i) {
-    if (exist) {
-      file_util::GetFileInfo(generated_file, &current);
-      if (current.size == previous.size)
-        break;
-      previous = current;
-    } else if (file_util::PathExists(generated_file)) {
-      file_util::GetFileInfo(generated_file, &previous);
-      exist = true;
-    }
-    base::PlatformThread::Sleep(kDelay);
-  }
-  EXPECT_TRUE(exist);
-
-  if (compare_files) {
-    // Check whether the generated file is equal with original file according to
-    // parameter: need_equal.
-    int64 generated_file_size = 0;
-    int64 original_file_size = 0;
-
-    EXPECT_TRUE(file_util::GetFileSize(generated_file, &generated_file_size));
-    EXPECT_TRUE(file_util::GetFileSize(original_file, &original_file_size));
-    if (need_equal) {
-      EXPECT_EQ(generated_file_size, original_file_size);
-      EXPECT_TRUE(file_util::ContentsEqual(generated_file, original_file));
-    } else {
-      EXPECT_NE(generated_file_size, original_file_size);
-      EXPECT_FALSE(file_util::ContentsEqual(generated_file, original_file));
-    }
-  }
-  if (delete_generated_file)
-    EXPECT_TRUE(file_util::DieFileDie(generated_file, false));
 }
 
 bool UITest::WaitUntilJavaScriptCondition(TabProxy* tab,

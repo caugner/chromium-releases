@@ -9,23 +9,27 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
-#include "chrome/browser/ui/views/html_dialog_view.h"
-#include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "chrome/browser/ui/views/web_dialog_view.h"
 #include "chrome/common/url_constants.h"
+#include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/screen.h"
+#include "ui/views/widget/widget.h"
 
 using content::WebContents;
 using content::WebUIMessageHandler;
 
-static const int kBaseWidth = 1252;
-static const int kBaseHeight = 516;
-static const int kHorizontalMargin = 28;
+namespace {
 
-KeyboardOverlayDelegate::KeyboardOverlayDelegate(
-    const std::wstring& title)
-    : title_(WideToUTF16Hack(title)),
+const int kBaseWidth = 1252;
+const int kBaseHeight = 516;
+const int kHorizontalMargin = 28;
+
+}  // namespace
+
+KeyboardOverlayDelegate::KeyboardOverlayDelegate(const string16& title)
+    : title_(title),
       view_(NULL) {
 }
 
@@ -53,8 +57,8 @@ void KeyboardOverlayDelegate::GetDialogSize(
     gfx::Size* size) const {
   using std::min;
   DCHECK(view_);
-  gfx::Rect rect = gfx::Screen::GetMonitorAreaNearestWindow(
-      view_->native_view());
+  gfx::Rect rect = gfx::Screen::GetMonitorNearestWindow(
+      view_->GetWidget()->GetNativeView()).bounds();
   const int width = min(kBaseWidth, rect.width() - kHorizontalMargin);
   const int height = width * kBaseHeight / kBaseWidth;
   size->SetSize(width, height);

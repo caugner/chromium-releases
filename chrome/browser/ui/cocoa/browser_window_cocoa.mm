@@ -25,7 +25,7 @@
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
-#import "chrome/browser/ui/cocoa/html_dialog_window_controller.h"
+#import "chrome/browser/ui/cocoa/web_dialog_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
@@ -46,6 +46,10 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/rect.h"
+
+#if defined(ENABLE_ONE_CLICK_SIGNIN)
+#import "chrome/browser/ui/cocoa/one_click_signin_bubble_controller.h"
+#endif
 
 using content::SSLStatus;
 using content::WebContents;
@@ -311,7 +315,7 @@ bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
 }
 
 void BrowserWindowCocoa::ConfirmAddSearchProvider(
-    const TemplateURL* template_url,
+    TemplateURL* template_url,
     Profile* profile) {
   // The controller will release itself when the window closes.
   EditSearchEngineCocoaController* editor =
@@ -359,9 +363,6 @@ void BrowserWindowCocoa::FocusBookmarksToolbar() {
   // Not needed on the Mac.
 }
 
-void BrowserWindowCocoa::FocusChromeOSStatus() {
-  // Not needed on the Mac.
-}
 
 bool BrowserWindowCocoa::IsBookmarkBarVisible() const {
   return browser_->profile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar);
@@ -450,8 +451,16 @@ void BrowserWindowCocoa::ShowChromeToMobileBubble() {
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-void BrowserWindowCocoa::ShowOneClickSigninBubble() {
-  NOTIMPLEMENTED();
+
+void BrowserWindowCocoa::ShowOneClickSigninBubble(
+      const base::Closure& learn_more_callback,
+      const base::Closure& advanced_callback) {
+  OneClickSigninBubbleController* bubble_controller =
+      [[OneClickSigninBubbleController alloc]
+        initWithBrowserWindowController:cocoa_controller()
+                      learnMoreCallback:learn_more_callback
+                       advancedCallback:advanced_callback];
+  [bubble_controller showWindow:nil];
 }
 #endif
 

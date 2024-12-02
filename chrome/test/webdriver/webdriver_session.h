@@ -308,9 +308,6 @@ class Session {
   // Waits for all views to stop loading. Returns true on success.
   Error* WaitForAllViewsToStopLoading();
 
-  // Install packed extension at |path|.
-  Error* InstallExtensionDeprecated(const FilePath& path);
-
   // Install extension at |path|.
   Error* InstallExtension(const FilePath& path, std::string* extension_id);
 
@@ -369,6 +366,12 @@ class Session {
   // Gets the keys of all items of the HTML5 localStorage object. If there are
   // no errors, the function sets |value| and the caller takes ownership.
   Error* GetStorageKeys(StorageType type, base::ListValue** keys);
+
+  // Gets the current geolocation.
+  Error* GetGeolocation(scoped_ptr<base::DictionaryValue>* geolocation);
+
+  // Overrides the current geolocation.
+  Error* OverrideGeolocation(base::DictionaryValue* geolocation);
 
   const std::string& id() const;
 

@@ -29,6 +29,10 @@ class Profile;
 class ProtocolHandlerRegistry;
 class TransportSecurityPersister;
 
+namespace chrome_browser_net {
+class HttpServerPropertiesManager;
+}
+
 namespace net {
 class CookieStore;
 class FraudulentCertificateReporter;
@@ -81,7 +85,6 @@ class ProfileIOData {
   // with a content::ResourceContext, and they want access to Chrome data for
   // that profile.
   ExtensionInfoMap* GetExtensionInfoMap() const;
-  HostContentSettingsMap* GetHostContentSettingsMap() const;
   CookieSettings* GetCookieSettings() const;
 
 #if defined(ENABLE_NOTIFICATIONS)
@@ -108,16 +111,33 @@ class ProfileIOData {
     return transport_security_state_.get();
   }
 
+  chrome_browser_net::HttpServerPropertiesManager*
+      http_server_properties_manager() const;
+
+  bool is_incognito() const {
+    return is_incognito_;
+  }
+
+  // Initialize the member needed to track the metrics enabled state. This is
+  // only to be called on the UI thread.
+  void InitializeMetricsEnabledStateOnUIThread();
+
+  // Returns whether or not metrics reporting is enabled in the browser instance
+  // on which this profile resides. This is safe for use from the IO thread, and
+  // should only be called from there.
+  bool GetMetricsEnabledStateOnIOThread() const;
+
  protected:
   class AppRequestContext : public ChromeURLRequestContext {
    public:
     AppRequestContext();
-    virtual ~AppRequestContext();
 
     void SetCookieStore(net::CookieStore* cookie_store);
     void SetHttpTransactionFactory(net::HttpTransactionFactory* http_factory);
 
    private:
+    virtual ~AppRequestContext();
+
     scoped_refptr<net::CookieStore> cookie_store_;
     scoped_ptr<net::HttpTransactionFactory> http_factory_;
   };
@@ -129,13 +149,11 @@ class ProfileIOData {
     ~ProfileParams();
 
     FilePath path;
-    bool is_incognito;
     bool clear_local_state_on_exit;
     std::string accept_language;
     std::string accept_charset;
     std::string referrer_charset;
     IOThread* io_thread;
-    scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<CookieSettings> cookie_settings;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
@@ -203,9 +221,17 @@ class ProfileIOData {
     return job_factory_.get();
   }
 
+  void set_http_server_properties_manager(
+      chrome_browser_net::HttpServerPropertiesManager* manager) const;
+
   ChromeURLRequestContext* main_request_context() const {
     return main_request_context_;
   }
+
+  // Destroys the ResourceContext first, to cancel any URLRequests that are
+  // using it still, before we destroy the member variables that those
+  // URLRequests may be accessing.
+  void DestroyResourceContext();
 
  private:
   class ResourceContext : public content::ResourceContext {
@@ -213,12 +239,13 @@ class ProfileIOData {
     explicit ResourceContext(ProfileIOData* io_data);
     virtual ~ResourceContext();
 
-   private:
-    friend class ProfileIOData;
-
     // ResourceContext implementation:
     virtual net::HostResolver* GetHostResolver() OVERRIDE;
     virtual net::URLRequestContext* GetRequestContext() OVERRIDE;
+
+   private:
+    friend class ProfileIOData;
+
     void EnsureInitialized();
 
     ProfileIOData* const io_data_;
@@ -253,6 +280,19 @@ class ProfileIOData {
           scoped_refptr<ChromeURLRequestContext> main_context,
           const std::string& app_id) const = 0;
 
+  // The order *DOES* matter for the majority of these member variables, so
+  // don't move them around unless you know what you're doing!
+  // General rules:
+  //   * ResourceContext references the URLRequestContexts, so
+  //   URLRequestContexts must outlive ResourceContext, hence ResourceContext
+  //   should be destroyed first.
+  //   * URLRequestContexts reference a whole bunch of members, so
+  //   URLRequestContext needs to be destroyed before them.
+  //   * Therefore, ResourceContext should be listed last, and then the
+  //   URLRequestContexts, and then the URLRequestContext members.
+  //   * Note that URLRequestContext members have a directed dependency graph
+  //   too, so they must themselves be ordered correctly.
+
   // Tracks whether or not we've been lazily initialized.
   mutable bool initialized_;
 
@@ -267,6 +307,15 @@ class ProfileIOData {
   // TODO(marja): Remove session_startup_pref_ if no longer needed.
   mutable IntegerPrefMember session_startup_pref_;
 
+  // The state of metrics reporting in the browser that this profile runs on.
+  // Unfortunately, since ChromeOS has a separate representation of this state,
+  // we need to make one available based on the platform.
+#if defined(OS_CHROMEOS)
+  bool enable_metrics_;
+#else
+  BooleanPrefMember enable_metrics_;
+#endif
+
   // Pointed to by NetworkDelegate.
   mutable scoped_ptr<policy::URLBlacklistManager> url_blacklist_manager_;
 
@@ -280,19 +329,12 @@ class ProfileIOData {
   mutable scoped_ptr<net::ProxyService> proxy_service_;
   mutable scoped_ptr<net::TransportSecurityState> transport_security_state_;
   mutable scoped_ptr<net::URLRequestJobFactory> job_factory_;
-
-  // Pointed to by ResourceContext.
-
-  // TODO(willchan): Remove from ResourceContext.
-  mutable scoped_refptr<ExtensionInfoMap> extension_info_map_;
-  mutable scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
-  mutable scoped_refptr<CookieSettings> cookie_settings_;
+  mutable scoped_ptr<chrome_browser_net::HttpServerPropertiesManager>
+      http_server_properties_manager_;
 
 #if defined(ENABLE_NOTIFICATIONS)
   mutable DesktopNotificationService* notification_service_;
 #endif
-
-  mutable ResourceContext resource_context_;
 
   mutable scoped_ptr<TransportSecurityPersister>
       transport_security_persister_;
@@ -304,8 +346,15 @@ class ProfileIOData {
   // One AppRequestContext per isolated app.
   mutable AppRequestContextMap app_request_context_map_;
 
+  mutable scoped_ptr<ResourceContext> resource_context_;
+
+  mutable scoped_refptr<ExtensionInfoMap> extension_info_map_;
+  mutable scoped_refptr<CookieSettings> cookie_settings_;
+
   // TODO(jhawkins): Remove once crbug.com/102004 is fixed.
   bool initialized_on_UI_thread_;
+
+  bool is_incognito_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileIOData);
 };

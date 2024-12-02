@@ -6,21 +6,20 @@
 
 #include "base/logging.h"
 #include "content/renderer/renderer_webstoragearea_impl.h"
+#include "webkit/dom_storage/dom_storage_types.h"
 
 using WebKit::WebStorageArea;
 using WebKit::WebStorageNamespace;
 using WebKit::WebString;
 
-RendererWebStorageNamespaceImpl::RendererWebStorageNamespaceImpl(
-    DOMStorageType storage_type)
-    : namespace_id_(kLocalStorageNamespaceId) {
-  DCHECK(storage_type == DOM_STORAGE_LOCAL);
+RendererWebStorageNamespaceImpl::RendererWebStorageNamespaceImpl()
+    : namespace_id_(dom_storage::kLocalStorageNamespaceId) {
 }
 
 RendererWebStorageNamespaceImpl::RendererWebStorageNamespaceImpl(
-    DOMStorageType storage_type, int64 namespace_id)
+    int64 namespace_id)
     : namespace_id_(namespace_id) {
-  DCHECK(storage_type == DOM_STORAGE_SESSION);
+  DCHECK_NE(dom_storage::kInvalidSessionStorageNamespaceId, namespace_id);
 }
 
 RendererWebStorageNamespaceImpl::~RendererWebStorageNamespaceImpl() {
@@ -28,10 +27,6 @@ RendererWebStorageNamespaceImpl::~RendererWebStorageNamespaceImpl() {
 
 WebStorageArea* RendererWebStorageNamespaceImpl::createStorageArea(
     const WebString& origin) {
-  // Ideally, we'd keep a hash map of origin to these objects.  Unfortunately
-  // this doesn't seem practical because there's no good way to ref-count these
-  // objects, and it'd be unclear who owned them.  So, instead, we'll pay the
-  // price in terms of wasted memory.
   return new RendererWebStorageAreaImpl(namespace_id_, origin);
 }
 
@@ -43,7 +38,9 @@ WebStorageNamespace* RendererWebStorageNamespaceImpl::copy() {
   return NULL;
 }
 
-void RendererWebStorageNamespaceImpl::close() {
-  // This is called only on LocalStorage namespaces when WebKit thinks its
-  // shutting down.  This has no impact on Chromium.
+bool RendererWebStorageNamespaceImpl::isSameNamespace(
+    const WebStorageNamespace& other) const {
+  const RendererWebStorageNamespaceImpl* other_impl =
+      static_cast<const RendererWebStorageNamespaceImpl*>(&other);
+  return namespace_id_ == other_impl->namespace_id_;
 }

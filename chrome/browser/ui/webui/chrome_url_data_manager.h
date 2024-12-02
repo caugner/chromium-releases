@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop_helpers.h"
 #include "base/synchronization/lock.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 
 class ChromeURLDataManagerBackend;
 class MessageLoop;
-class RefCountedMemory;
+class Profile;
 
 namespace base {
 class DictionaryValue;
+class RefCountedMemory;
 }
 
 // To serve dynamic data off of chrome: URLs, implement the
@@ -27,7 +29,7 @@ class DictionaryValue;
 // with AddDataSource. DataSources must be added on the UI thread (they are also
 // deleted on the UI thread). Internally the DataSources are maintained by
 // ChromeURLDataManagerBackend, see it for details.
-class ChromeURLDataManager {
+class ChromeURLDataManager : public ProfileKeyedService {
  public:
   class DataSource;
 
@@ -80,7 +82,7 @@ class ChromeURLDataManager {
     // Report that a request has resulted in the data |bytes|.
     // If the request can't be satisfied, pass NULL for |bytes| to indicate
     // the request is over.
-    virtual void SendResponse(int request_id, RefCountedMemory* bytes);
+    virtual void SendResponse(int request_id, base::RefCountedMemory* bytes);
 
     // Returns the MessageLoop on which the DataSource wishes to have
     // StartDataRequest called to handle the request for |path|.  If the
@@ -118,8 +120,9 @@ class ChromeURLDataManager {
 
     // SendResponse invokes this on the IO thread. Notifies the backend to
     // handle the actual work of sending the data.
-    virtual void SendResponseOnIOThread(int request_id,
-                                        scoped_refptr<RefCountedMemory> bytes);
+    virtual void SendResponseOnIOThread(
+        int request_id,
+        scoped_refptr<base::RefCountedMemory> bytes);
 
     // The name of this source.
     // E.g., for favicons, this could be "favicon", which results in paths for
@@ -142,7 +145,7 @@ class ChromeURLDataManager {
 
   explicit ChromeURLDataManager(
       const base::Callback<ChromeURLDataManagerBackend*(void)>& backend);
-  ~ChromeURLDataManager();
+  virtual ~ChromeURLDataManager();
 
   // Adds a DataSource to the collection of data sources. This *must* be invoked
   // on the UI thread.
@@ -159,6 +162,10 @@ class ChromeURLDataManager {
   // Deletes any data sources no longer referenced. This is normally invoked
   // for you, but can be invoked to force deletion (such as during shutdown).
   static void DeleteDataSources();
+
+  // Convenience wrapper function to add |source| to |profile|'s
+  // |ChromeURLDataManager|.
+  static void AddDataSource(Profile* profile, DataSource* source);
 
  private:
   typedef std::vector<const ChromeURLDataManager::DataSource*> DataSources;

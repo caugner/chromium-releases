@@ -19,8 +19,8 @@
 #include "grit/generated_resources.h"
 #include "net/base/x509_certificate.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/menu_label_accelerator_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/linux_util.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace {
@@ -58,7 +58,7 @@ void AddKeyValue(GtkTable* table, int row, const std::string& text,
 class CertificateViewer {
  public:
   CertificateViewer(gfx::NativeWindow parent,
-                    const net::X509Certificate::OSCertHandles& cert_chain_list);
+                    net::X509Certificate* certificate);
   ~CertificateViewer();
 
   void InitGeneralPage();
@@ -106,6 +106,7 @@ class CertificateViewer {
 
   // The certificate hierarchy (leaf cert first).
   net::X509Certificate::OSCertHandles cert_chain_list_;
+  scoped_refptr<net::X509Certificate> certificate_;
 
   GtkWidget* dialog_;
   GtkWidget* notebook_;
@@ -134,8 +135,14 @@ void OnDestroy(GtkDialog* dialog, CertificateViewer* cert_viewer) {
 
 CertificateViewer::CertificateViewer(
     gfx::NativeWindow parent,
-    const net::X509Certificate::OSCertHandles& cert_chain_list)
-    : cert_chain_list_(cert_chain_list) {
+    net::X509Certificate* certificate)
+    : certificate_(certificate) {
+  cert_chain_list_.insert(cert_chain_list_.begin(),
+                          certificate_->os_cert_handle());
+  const net::X509Certificate::OSCertHandles& certs =
+      certificate_->GetIntermediateCertificates();
+  cert_chain_list_.insert(cert_chain_list_.end(), certs.begin(), certs.end());
+
   dialog_ = gtk_dialog_new_with_buttons(
       l10n_util::GetStringFUTF8(
           IDS_CERT_INFO_DIALOG_TITLE,
@@ -163,7 +170,7 @@ CertificateViewer::CertificateViewer(
       GTK_NOTEBOOK(notebook_),
       general_page_vbox_,
       gtk_label_new_with_mnemonic(
-          gfx::ConvertAcceleratorsFromWindowsStyle(
+          ui::ConvertAcceleratorsFromWindowsStyle(
               l10n_util::GetStringUTF8(
                   IDS_CERT_INFO_GENERAL_TAB_LABEL)).c_str()));
 
@@ -171,7 +178,7 @@ CertificateViewer::CertificateViewer(
       GTK_NOTEBOOK(notebook_),
       details_page_vbox_,
       gtk_label_new_with_mnemonic(
-          gfx::ConvertAcceleratorsFromWindowsStyle(
+          ui::ConvertAcceleratorsFromWindowsStyle(
               l10n_util::GetStringUTF8(
                   IDS_CERT_INFO_DETAILS_TAB_LABEL)).c_str()));
 
@@ -180,7 +187,6 @@ CertificateViewer::CertificateViewer(
 }
 
 CertificateViewer::~CertificateViewer() {
-  x509_certificate_model::DestroyCertChain(&cert_chain_list_);
 }
 
 void CertificateViewer::InitGeneralPage() {
@@ -634,7 +640,7 @@ void CertificateViewer::InitDetailsPage() {
   gtk_box_pack_start(GTK_BOX(details_page_vbox_), export_hbox,
                      FALSE, FALSE, 0);
   export_button_ = gtk_button_new_with_mnemonic(
-      gfx::ConvertAcceleratorsFromWindowsStyle(
+      ui::ConvertAcceleratorsFromWindowsStyle(
           l10n_util::GetStringUTF8(
               IDS_CERT_DETAILS_EXPORT_CERTIFICATE)).c_str());
   g_signal_connect(export_button_, "clicked",
@@ -710,13 +716,6 @@ void CertificateViewer::Show() {
 } // namespace
 
 void ShowCertificateViewer(gfx::NativeWindow parent,
-                           net::X509Certificate::OSCertHandle cert) {
-  net::X509Certificate::OSCertHandles cert_chain;
-  x509_certificate_model::GetCertChainFromCert(cert, &cert_chain);
-  (new CertificateViewer(parent, cert_chain))->Show();
-}
-
-void ShowCertificateViewer(gfx::NativeWindow parent,
                            net::X509Certificate* cert) {
-  ShowCertificateViewer(parent, cert->os_cert_handle());
+  (new CertificateViewer(parent, cert))->Show();
 }

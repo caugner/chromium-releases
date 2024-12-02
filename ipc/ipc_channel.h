@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "base/process.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message.h"
 
@@ -149,13 +150,17 @@ class IPC_EXPORT Channel : public Message::Sender {
   // Modify the Channel's listener.
   void set_listener(Listener* listener);
 
+  // Get the process ID for the connected peer.
+  // Returns base::kNullProcessId if the peer is not connected yet.
+  base::ProcessId peer_pid() const;
+
   // Send a message over the Channel to the listener on the other end.
   //
   // |message| must be allocated using operator new.  This object will be
   // deleted once the contents of the Message have been sent.
   virtual bool Send(Message* message) OVERRIDE;
 
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#if defined(OS_POSIX)
   // On POSIX an IPC::Channel wraps a socketpair(), this method returns the
   // FD # for the client end of the socket.
   // This method may only be called on the server side of a channel.

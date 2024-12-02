@@ -18,6 +18,8 @@ enum {
 };
 #endif
 
+namespace media {
+
 PCMQueueInAudioInputStream::PCMQueueInAudioInputStream(
     AudioManagerMac* manager, const AudioParameters& params)
     : manager_(manager),
@@ -127,6 +129,15 @@ double PCMQueueInAudioInputStream::GetVolume() {
   return 0.0;
 }
 
+void PCMQueueInAudioInputStream::SetAutomaticGainControl(bool enabled) {
+  NOTREACHED() << "Only supported for low-latency mode.";
+}
+
+bool PCMQueueInAudioInputStream::GetAutomaticGainControl() {
+  NOTREACHED() << "Only supported for low-latency mode.";
+  return false;
+}
+
 void PCMQueueInAudioInputStream::HandleError(OSStatus err) {
   if (callback_)
     callback_->OnError(this, static_cast<int>(err));
@@ -189,7 +200,8 @@ void PCMQueueInAudioInputStream::HandleInputBuffer(
     callback_->OnData(this,
                       reinterpret_cast<const uint8*>(audio_buffer->mAudioData),
                       audio_buffer->mAudioDataByteSize,
-                      audio_buffer->mAudioDataByteSize);
+                      audio_buffer->mAudioDataByteSize,
+                      0.0);
   // Recycle the buffer.
   OSStatus err = QueueNextBuffer(audio_buffer);
   if (err != noErr) {
@@ -207,3 +219,5 @@ void PCMQueueInAudioInputStream::HandleInputBuffer(
     HandleError(err);
   }
 }
+
+}  // namespace media

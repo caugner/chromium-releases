@@ -16,8 +16,6 @@
 namespace net {
 
 // static
-bool SpdySM::disable_data_compression_ = true;
-// static
 std::string SpdySM::forward_ip_header_;
 
 class SpdyFrameDataFrame : public DataFrame {
@@ -293,9 +291,9 @@ void SpdySM::ResetForNewConnection() {
 
 // Send a settings frame
 int SpdySM::PostAcceptHook() {
-  SpdySettings settings;
-  SettingsFlagsAndId settings_id(0, SETTINGS_MAX_CONCURRENT_STREAMS);
-  settings.push_back(SpdySetting(settings_id, 100));
+  SettingsMap settings;
+  settings[SETTINGS_MAX_CONCURRENT_STREAMS] =
+      SettingsFlagsAndValue(SETTINGS_FLAG_NONE, 100);
   SpdySettingsControlFrame* settings_frame =
       buffered_spdy_framer_->CreateSettings(settings);
 
@@ -451,10 +449,6 @@ size_t SpdySM::SendSynReplyImpl(uint32 stream_id, const BalsaHeaders& headers) {
 
 void SpdySM::SendDataFrameImpl(uint32 stream_id, const char* data, int64 len,
                        SpdyDataFlags flags, bool compress) {
-  // Force compression off if disabled via command line.
-  if (disable_data_compression())
-    flags = static_cast<SpdyDataFlags>(flags & ~DATA_FLAG_COMPRESSED);
-
   // TODO(mbelshe):  We can't compress here - before going into the
   //                 priority queue.  Compression needs to be done
   //                 with late binding.

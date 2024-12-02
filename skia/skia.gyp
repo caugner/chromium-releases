@@ -255,6 +255,8 @@
         '../third_party/skia/src/core/SkMath.cpp',
         '../third_party/skia/src/core/SkMatrix.cpp',
         '../third_party/skia/src/core/SkMetaData.cpp',
+        '../third_party/skia/src/core/SkOrderedReadBuffer.cpp',
+        '../third_party/skia/src/core/SkOrderedWriteBuffer.cpp',
         '../third_party/skia/src/core/SkPackBits.cpp',
         '../third_party/skia/src/core/SkPaint.cpp',
         '../third_party/skia/src/core/SkPath.cpp',
@@ -361,7 +363,10 @@
         '../third_party/skia/src/gpu/GrBufferAllocPool.cpp',
         '../third_party/skia/src/gpu/GrBufferAllocPool.h',
         '../third_party/skia/src/gpu/GrClip.cpp',
+        '../third_party/skia/src/gpu/GrClipMaskManager.cpp',
+        '../third_party/skia/src/gpu/GrClipMaskManager.h',
         '../third_party/skia/src/gpu/GrContext.cpp',
+        '../third_party/skia/src/gpu/GrCustomStage.cpp',
         '../third_party/skia/src/gpu/GrDefaultPathRenderer.cpp',
         '../third_party/skia/src/gpu/GrDefaultPathRenderer.h',
         '../third_party/skia/src/gpu/GrDefaultTextContext.cpp',
@@ -381,6 +386,8 @@
         '../third_party/skia/src/gpu/GrPathRenderer.h',
         '../third_party/skia/src/gpu/GrPathRendererChain.cpp',
         '../third_party/skia/src/gpu/GrPathRendererChain.h',
+        '../third_party/skia/src/gpu/GrSoftwarePathRenderer.cpp',
+        '../third_party/skia/src/gpu/GrSoftwarePathRenderer.h',
         '../third_party/skia/src/gpu/GrPathUtils.cpp',
         '../third_party/skia/src/gpu/GrPlotMgr.h',
         '../third_party/skia/src/gpu/GrRandom.h',
@@ -423,6 +430,8 @@
         '../third_party/skia/src/gpu/gl/GrGLInterface.cpp',
         '../third_party/skia/src/gpu/gl/GrGLProgram.cpp',
         '../third_party/skia/src/gpu/gl/GrGLProgram.h',
+        '../third_party/skia/src/gpu/gl/GrGLProgramStage.cpp',
+        '../third_party/skia/src/gpu/gl/GrGLProgramStage.h',
         '../third_party/skia/src/gpu/gl/GrGLRenderTarget.cpp',
         '../third_party/skia/src/gpu/gl/GrGLRenderTarget.h',
         '../third_party/skia/src/gpu/gl/GrGLSL.cpp',
@@ -440,8 +449,6 @@
 
         '../third_party/skia/src/images/bmpdecoderhelper.cpp',
         '../third_party/skia/src/images/bmpdecoderhelper.h',
-        '../third_party/skia/src/images/SkBitmap_RLEPixels.h',
-        '../third_party/skia/src/images/SkCreateRLEPixelRef.cpp',
         #'../third_party/skia/src/images/SkFDStream.cpp',
         #'../third_party/skia/src/images/SkFlipPixelRef.cpp',
         '../third_party/skia/src/images/SkImageDecoder.cpp',
@@ -596,7 +603,6 @@
         '../third_party/skia/include/core/SkShader.h',
         '../third_party/skia/include/core/SkStream.h',
         '../third_party/skia/include/core/SkString.h',
-        '../third_party/skia/include/core/SkStroke.h',
         '../third_party/skia/include/core/SkTArray.h',
         '../third_party/skia/include/core/SkTDArray.h',
         '../third_party/skia/include/core/SkTDStack.h',
@@ -644,6 +650,7 @@
         '../third_party/skia/include/gpu/GrColor.h',
         '../third_party/skia/include/gpu/GrConfig.h',
         '../third_party/skia/include/gpu/GrContext.h',
+        '../third_party/skia/include/gpu/GrCustomStage.h',
         '../third_party/skia/include/gpu/GrFontScaler.h',
         '../third_party/skia/include/gpu/gl/GrGLConfig.h',
         '../third_party/skia/include/gpu/gl/GrGLConfig_chrome.h',
@@ -654,7 +661,6 @@
         '../third_party/skia/include/gpu/GrMatrix.h',
         '../third_party/skia/include/gpu/GrNoncopyable.h',
         '../third_party/skia/include/gpu/GrPaint.h',
-        '../third_party/skia/include/gpu/GrPath.h',
         '../third_party/skia/include/gpu/GrPoint.h',
         '../third_party/skia/include/gpu/GrRect.h',
         '../third_party/skia/include/gpu/GrRefCnt.h',
@@ -698,9 +704,7 @@
         'ext/canvas_paint_common.h',
         'ext/canvas_paint_gtk.h',
         'ext/canvas_paint_mac.h',
-        'ext/canvas_paint_wayland.h',
         'ext/canvas_paint_win.h',
-        'ext/canvas_paint_x.h',
         'ext/convolver.cc',
         'ext/convolver.h',
         'ext/google_logging.cc',
@@ -721,6 +725,7 @@
         'ext/SkMemory_new_handler.cpp',
         'ext/skia_sandbox_support_win.h',
         'ext/skia_sandbox_support_win.cc',
+        'ext/skia_trace_shim.h',
         'ext/skia_utils_mac.mm',
         'ext/skia_utils_mac.h',
         'ext/skia_utils_win.cc',
@@ -846,7 +851,6 @@
             '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
             '../third_party/skia/src/ports/SkFontHost_TryeType_Tables.cpp',
             '../third_party/skia/src/ports/SkFontHost_gamma_none.cpp',
-            '../third_party/skia/src/ports/SkFontHost_tables.cpp',
           ],
         }],
         [ 'OS == "android"', {
@@ -931,6 +935,11 @@
           },
           'sources': [
             '../third_party/skia/src/utils/mac/SkStream_mac.cpp',
+          ],
+          'sources!': [
+            # The mac's fonthost implements the table methods natively,
+            # so no need for these generic versions.
+            '../third_party/skia/src/ports/SkFontHost_tables.cpp',
           ],
           'conditions': [
              [ 'use_skia == 0', {
@@ -1089,8 +1098,13 @@
             '../third_party/skia/src/opts/SkBlitRow_opts_SSE2.cpp',
             '../third_party/skia/src/opts/SkUtils_opts_SSE2.cpp',
           ],
-          'dependencies': [
-            'skia_opts_ssse3',
+          'conditions': [
+            # x86 Android doesn't support SSSE3 instructions.
+            [ 'OS != "android"', {
+              'dependencies': [
+                'skia_opts_ssse3',
+              ],
+            }],
           ],
         },
         {  # arm
@@ -1173,12 +1187,9 @@
             '-mssse3',
           ],
         }],
-        # TODO: when ninja/make understand
-        # GCC_ENABLE_SUPPLEMENTAL_SSE3_INSTRUCTIONS, set that to YES here
-        # instead of stepping on OTHER_CFLAGS.
-        [ 'OS in ["mac"]', {
+        [ 'OS == "mac"', {
           'xcode_settings': {
-            'OTHER_CFLAGS': ['-mssse3',],
+            'GCC_ENABLE_SUPPLEMENTAL_SSE3_INSTRUCTIONS': 'YES',
           },
         }],
         [ 'OS == "win"', {

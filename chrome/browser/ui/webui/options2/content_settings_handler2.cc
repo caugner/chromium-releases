@@ -207,16 +207,11 @@ void ContentSettingsHandler::GetLocalizedValues(
   DCHECK(localized_strings);
 
   static OptionsStringResource resources[] = {
-    { "content_exceptions", IDS_COOKIES_EXCEPTIONS_BUTTON },
     { "allowException", IDS_EXCEPTIONS_ALLOW_BUTTON },
     { "blockException", IDS_EXCEPTIONS_BLOCK_BUTTON },
     { "sessionException", IDS_EXCEPTIONS_SESSION_ONLY_BUTTON },
     { "askException", IDS_EXCEPTIONS_ASK_BUTTON },
-    { "addExceptionRow", IDS_EXCEPTIONS_ADD_BUTTON },
-    { "removeExceptionRow", IDS_EXCEPTIONS_REMOVE_BUTTON },
-    { "editExceptionRow", IDS_EXCEPTIONS_EDIT_BUTTON },
     { "otr_exceptions_explanation", IDS_EXCEPTIONS_OTR_LABEL },
-    { "examplePattern", IDS_EXCEPTIONS_PATTERN_EXAMPLE },
     { "addNewExceptionInstructions", IDS_EXCEPTIONS_ADD_NEW_INSTRUCTIONS },
     { "manage_exceptions", IDS_EXCEPTIONS_MANAGE },
     { "manage_handlers", IDS_HANDLERS_MANAGE },
@@ -280,13 +275,42 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "mouselock_allow", IDS_MOUSE_LOCK_ALLOW_RADIO },
     { "mouselock_ask", IDS_MOUSE_LOCK_ASK_RADIO },
     { "mouselock_block", IDS_MOUSE_LOCK_BLOCK_RADIO },
+    // Protected Content filter
+#if defined(OS_CHROMEOS)
+    { "protected_content_tab_label", IDS_PROTECTED_CONTENT_TAB_LABEL },
+    { "protected_content_info", IDS_PROTECTED_CONTENT_INFO },
+    { "protected_content_enable", IDS_PROTECTED_CONTENT_ENABLE},
+#endif  // defined(OS_CHROMEOS)
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
   RegisterTitle(localized_strings, "contentSettingsPage",
                 IDS_CONTENT_SETTINGS_TITLE);
+
+  // Register titles for each of the individual settings whose exception
+  // dialogs will be processed by |ContentSettingsHandler|.
+  RegisterTitle(localized_strings, "cookies",
+                IDS_COOKIES_TAB_LABEL);
+  RegisterTitle(localized_strings, "images",
+                IDS_IMAGES_TAB_LABEL);
+  RegisterTitle(localized_strings, "javascript",
+                IDS_JAVASCRIPT_TAB_LABEL);
+  RegisterTitle(localized_strings, "plugins",
+                IDS_PLUGIN_TAB_LABEL);
+  RegisterTitle(localized_strings, "popups",
+                IDS_POPUP_TAB_LABEL);
+  RegisterTitle(localized_strings, "location",
+                IDS_GEOLOCATION_TAB_LABEL);
+  RegisterTitle(localized_strings, "notifications",
+                IDS_NOTIFICATIONS_TAB_LABEL);
+  RegisterTitle(localized_strings, "fullscreen",
+                IDS_FULLSCREEN_TAB_LABEL);
+  RegisterTitle(localized_strings, "mouselock",
+                IDS_MOUSE_LOCK_TAB_LABEL);
+
+  Profile* profile = Profile::FromWebUI(web_ui());
   localized_strings->SetBoolean("enable_web_intents",
-                                web_intents::IsWebIntentsEnabled());
+                                web_intents::IsWebIntentsEnabled(profile));
   // TODO(marja): clean up the options UI after the decision on the session
   // restore changes has stabilized.
   localized_strings->SetBoolean(
@@ -695,6 +719,8 @@ void ContentSettingsHandler::ApplyWhitelist(ContentSettingsType content_type,
     return;
   ContentSetting old_setting =
       map->GetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS, NULL);
+  // TODO(bauerb): Remove this once the Google Talk plug-in works nicely with
+  // click-to-play (b/6090625).
   if (old_setting == CONTENT_SETTING_ALLOW &&
       default_setting == CONTENT_SETTING_ASK) {
     map->SetWebsiteSetting(

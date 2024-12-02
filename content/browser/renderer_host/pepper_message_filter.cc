@@ -8,6 +8,8 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -15,6 +17,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/pepper_lookup_request.h"
 #include "content/browser/renderer_host/pepper_tcp_server_socket.h"
 #include "content/browser/renderer_host/pepper_tcp_socket.h"
@@ -22,6 +25,7 @@
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/pepper_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/font_list_async.h"
@@ -34,22 +38,16 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/sys_addrinfo.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/c/private/ppb_flash_net_connector.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/api_id.h"
 #include "ppapi/shared_impl/private/net_address_private_impl.h"
 #include "ppapi/shared_impl/private/ppb_host_resolver_shared.h"
-#include "webkit/plugins/ppapi/ppb_flash_net_connector_impl.h"
 
-#if defined(ENABLE_FLAPPER_HACKS)
-#include <sys/types.h>
-#include <unistd.h>
-
-#include "net/base/net_log.h"
-#include "net/base/sys_addrinfo.h"
-#endif  // ENABLE_FLAPPER_HACKS
+#ifdef OS_WIN
+#include <windows.h>
+#endif
 
 using content::BrowserThread;
 using content::RenderViewHostImpl;
@@ -60,18 +58,30 @@ namespace {
 const size_t kMaxSocketsAllowed = 1024;
 const uint32 kInvalidSocketID = 0;
 
+// The ID is a 256-bit hash digest hex-encoded.
+const int kDRMIdentifierSize = (256 / 8) * 2;
+// The path to the file containing the DRM ID.
+// It is mirrored from
+//   chrome/browser/chromeos/system/drm_settings.cc
+const char kDRMIdentifierFile[] = "Pepper DRM ID.0";
+
 }  // namespace
 
 PepperMessageFilter::PepperMessageFilter(
     ProcessType type,
     int process_id,
-    content::ResourceContext* resource_context)
+    content::BrowserContext* browser_context)
     : process_type_(type),
       process_id_(process_id),
-      resource_context_(resource_context),
+      resource_context_(browser_context ?
+          browser_context->GetResourceContext() : NULL),
       host_resolver_(NULL),
       next_socket_id_(1) {
   DCHECK(type == RENDERER);
+  DCHECK(browser_context);
+  // Keep BrowserContext data in FILE-thread friendly storage.
+  browser_path_ = browser_context->GetPath();
+  incognito_ = browser_context->IsOffTheRecord();
   DCHECK(resource_context_);
 }
 
@@ -86,11 +96,6 @@ PepperMessageFilter::PepperMessageFilter(ProcessType type,
   DCHECK(host_resolver);
 }
 
-PepperMessageFilter::~PepperMessageFilter() {
-  if (!network_monitor_ids_.empty())
-    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
-}
-
 void PepperMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message,
     BrowserThread::ID* thread) {
@@ -100,6 +105,8 @@ void PepperMessageFilter::OverrideThreadForMessage(
       message.type() == PpapiHostMsg_PPBTCPServerSocket_Listen::ID ||
       message.type() == PpapiHostMsg_PPBHostResolver_Resolve::ID) {
     *thread = BrowserThread::UI;
+  } else if (message.type() == PepperMsg_GetDeviceID::ID) {
+    *thread = BrowserThread::FILE;
   }
 }
 
@@ -107,10 +114,6 @@ bool PepperMessageFilter::OnMessageReceived(const IPC::Message& msg,
                                             bool* message_was_ok) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(PepperMessageFilter, msg, *message_was_ok)
-#if defined(ENABLE_FLAPPER_HACKS)
-    IPC_MESSAGE_HANDLER(PepperMsg_ConnectTcp, OnConnectTcp)
-    IPC_MESSAGE_HANDLER(PepperMsg_ConnectTcpAddress, OnConnectTcpAddress)
-#endif  // ENABLE_FLAPPER_HACKS
     IPC_MESSAGE_HANDLER(PepperMsg_GetLocalTimeZoneOffset,
                         OnGetLocalTimeZoneOffset)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(PpapiHostMsg_PPBInstance_GetFontFamilies,
@@ -151,7 +154,15 @@ bool PepperMessageFilter::OnMessageReceived(const IPC::Message& msg,
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBNetworkMonitor_Stop,
                         OnNetworkMonitorStop)
 
-    IPC_MESSAGE_UNHANDLED(handled = false)
+    // X509 certificate messages.
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBX509Certificate_ParseDER,
+                        OnX509CertificateParseDER);
+
+    // Flash messages.
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_UpdateActivity, OnUpdateActivity)
+    IPC_MESSAGE_HANDLER(PepperMsg_GetDeviceID, OnGetDeviceID)
+
+  IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   return handled;
 }
@@ -203,169 +214,10 @@ void PepperMessageFilter::RemoveTCPServerSocket(uint32 socket_id) {
   tcp_server_sockets_.erase(iter);
 }
 
-#if defined(ENABLE_FLAPPER_HACKS)
-
-namespace {
-
-int ConnectTcpSocket(const PP_NetAddress_Private& addr,
-                     PP_NetAddress_Private* local_addr_out,
-                     PP_NetAddress_Private* remote_addr_out) {
-  *local_addr_out = NetAddressPrivateImpl::kInvalidNetAddress;
-  *remote_addr_out = NetAddressPrivateImpl::kInvalidNetAddress;
-
-  const struct sockaddr* sa =
-      reinterpret_cast<const struct sockaddr*>(addr.data);
-  socklen_t sa_len = addr.size;
-  int fd = socket(sa->sa_family, SOCK_STREAM, IPPROTO_TCP);
-  if (fd == -1)
-    return -1;
-  if (connect(fd, sa, sa_len) != 0) {
-    close(fd);
-    return -1;
-  }
-
-  // Get the local address.
-  socklen_t local_length = sizeof(local_addr_out->data);
-  if (getsockname(fd, reinterpret_cast<struct sockaddr*>(local_addr_out->data),
-                  &local_length) == -1 ||
-      local_length > sizeof(local_addr_out->data)) {
-    close(fd);
-    return -1;
-  }
-
-  // The remote address is just the address we connected to.
-  *remote_addr_out = addr;
-
-  return fd;
+PepperMessageFilter::~PepperMessageFilter() {
+  if (!network_monitor_ids_.empty())
+    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
 }
-
-}  // namespace
-
-void PepperMessageFilter::OnConnectTcp(int routing_id,
-                                       int request_id,
-                                       const std::string& host,
-                                       uint16 port) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  net::HostResolver::RequestInfo request_info(net::HostPortPair(host, port));
-
-  scoped_ptr<OnConnectTcpBoundInfo> bound_info(new OnConnectTcpBoundInfo);
-  bound_info->routing_id = routing_id;
-  bound_info->request_id = request_id;
-
-  // The lookup request will delete itself on completion.
-  PepperLookupRequest<OnConnectTcpBoundInfo>* lookup_request =
-      new PepperLookupRequest<OnConnectTcpBoundInfo>(
-          GetHostResolver(),
-          request_info,
-          bound_info.release(),
-          base::Bind(&PepperMessageFilter::ConnectTcpLookupFinished,
-                     this));
-  lookup_request->Start();
-}
-
-void PepperMessageFilter::OnConnectTcpAddress(
-    int routing_id,
-    int request_id,
-    const PP_NetAddress_Private& addr) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  // Validate the address and then continue (doing |connect()|) on a worker
-  // thread.
-  if (!NetAddressPrivateImpl::ValidateNetAddress(addr) ||
-      !base::WorkerPool::PostTask(
-          FROM_HERE,
-          base::Bind(
-              &PepperMessageFilter::ConnectTcpAddressOnWorkerThread, this,
-              routing_id, request_id, addr),
-          true)) {
-    SendConnectTcpACKError(routing_id, request_id);
-  }
-}
-
-bool PepperMessageFilter::SendConnectTcpACKError(int routing_id,
-                                                 int request_id) {
-  return Send(new PepperMsg_ConnectTcpACK(
-      routing_id, request_id, IPC::InvalidPlatformFileForTransit(),
-      NetAddressPrivateImpl::kInvalidNetAddress,
-      NetAddressPrivateImpl::kInvalidNetAddress));
-}
-
-void PepperMessageFilter::ConnectTcpLookupFinished(
-    int result,
-    const net::AddressList& addresses,
-    const OnConnectTcpBoundInfo& bound_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  // If the lookup returned addresses, continue (doing |connect()|) on a worker
-  // thread.
-  if (!addresses.head() ||
-      !base::WorkerPool::PostTask(
-          FROM_HERE,
-          base::Bind(
-              &PepperMessageFilter::ConnectTcpOnWorkerThread, this,
-              bound_info.routing_id, bound_info.request_id, addresses),
-          true)) {
-    SendConnectTcpACKError(bound_info.routing_id, bound_info.request_id);
-  }
-}
-
-void PepperMessageFilter::ConnectTcpOnWorkerThread(int routing_id,
-                                                   int request_id,
-                                                   net::AddressList addresses) {
-  IPC::PlatformFileForTransit socket_for_transit =
-      IPC::InvalidPlatformFileForTransit();
-  PP_NetAddress_Private local_addr = NetAddressPrivateImpl::kInvalidNetAddress;
-  PP_NetAddress_Private remote_addr = NetAddressPrivateImpl::kInvalidNetAddress;
-  PP_NetAddress_Private addr = NetAddressPrivateImpl::kInvalidNetAddress;
-
-  for (const struct addrinfo* ai = addresses.head(); ai; ai = ai->ai_next) {
-    if (NetAddressPrivateImpl::SockaddrToNetAddress(ai->ai_addr, ai->ai_addrlen,
-                                                    &addr)) {
-      int fd = ConnectTcpSocket(addr, &local_addr, &remote_addr);
-      if (fd != -1) {
-        socket_for_transit = base::FileDescriptor(fd, true);
-        break;
-      }
-    }
-  }
-
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&PepperMessageFilter::Send), this,
-          new PepperMsg_ConnectTcpACK(
-              routing_id, request_id,
-              socket_for_transit, local_addr, remote_addr)));
-}
-
-// TODO(vluu): Eliminate duplication between this and
-// |ConnectTcpOnWorkerThread()|.
-void PepperMessageFilter::ConnectTcpAddressOnWorkerThread(
-    int routing_id,
-    int request_id,
-    PP_NetAddress_Private addr) {
-  IPC::PlatformFileForTransit socket_for_transit =
-      IPC::InvalidPlatformFileForTransit();
-  PP_NetAddress_Private local_addr = NetAddressPrivateImpl::kInvalidNetAddress;
-  PP_NetAddress_Private remote_addr = NetAddressPrivateImpl::kInvalidNetAddress;
-
-  int fd = ConnectTcpSocket(addr, &local_addr, &remote_addr);
-  if (fd != -1)
-    socket_for_transit = base::FileDescriptor(fd, true);
-
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&PepperMessageFilter::Send), this,
-          new PepperMsg_ConnectTcpACK(
-              routing_id, request_id,
-              socket_for_transit, local_addr, remote_addr)));
-}
-
-#endif  // ENABLE_FLAPPER_HACKS
 
 void PepperMessageFilter::OnGetLocalTimeZoneOffset(base::Time t,
                                                    double* result) {
@@ -462,16 +314,20 @@ void PepperMessageFilter::DoTCPConnectWithNetAddress(
     iter->second->SendConnectACKError();
 }
 
-void PepperMessageFilter::OnTCPSSLHandshake(uint32 socket_id,
-                                            const std::string& server_name,
-                                            uint16_t server_port) {
+void PepperMessageFilter::OnTCPSSLHandshake(
+    uint32 socket_id,
+    const std::string& server_name,
+    uint16_t server_port,
+    const std::vector<std::vector<char> >& trusted_certs,
+    const std::vector<std::vector<char> >& untrusted_certs) {
   TCPSocketMap::iterator iter = tcp_sockets_.find(socket_id);
   if (iter == tcp_sockets_.end()) {
     NOTREACHED();
     return;
   }
 
-  iter->second->SSLHandshake(server_name, server_port);
+  iter->second->SSLHandshake(server_name, server_port, trusted_certs,
+                             untrusted_certs);
 }
 
 void PepperMessageFilter::OnTCPRead(uint32 socket_id, int32_t bytes_to_read) {
@@ -765,6 +621,64 @@ void PepperMessageFilter::OnNetworkMonitorStop(uint32 plugin_dispatcher_id) {
   network_monitor_ids_.erase(plugin_dispatcher_id);
   if (network_monitor_ids_.empty())
     net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
+}
+
+void PepperMessageFilter::OnX509CertificateParseDER(
+    const std::vector<char>& der,
+    bool* succeeded,
+    ppapi::PPB_X509Certificate_Fields* result) {
+  if (der.size() == 0)
+    *succeeded = false;
+  *succeeded = PepperTCPSocket::GetCertificateFields(&der[0], der.size(),
+                                                     result);
+}
+
+void PepperMessageFilter::OnUpdateActivity() {
+#if defined(OS_WIN)
+  // Reading then writing back the same value to the screensaver timeout system
+  // setting resets the countdown which prevents the screensaver from turning
+  // on "for a while". As long as the plugin pings us with this message faster
+  // than the screensaver timeout, it won't go on.
+  int value = 0;
+  if (SystemParametersInfo(SPI_GETSCREENSAVETIMEOUT, 0, &value, 0))
+    SystemParametersInfo(SPI_SETSCREENSAVETIMEOUT, value, NULL, 0);
+#else
+  // TODO(brettw) implement this for other platforms.
+#endif
+}
+
+void PepperMessageFilter::OnGetDeviceID(std::string* id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  id->clear();
+
+  // Grab the contents of the DRM identifier file.
+  FilePath drm_id_file = browser_path_;
+  drm_id_file = drm_id_file.AppendASCII(kDRMIdentifierFile);
+
+  // This method should not be called with high frequency and its
+  // useful to be able to validate use with a VLOG.
+  VLOG(1) << "DRM ID requested @ " << drm_id_file.value();
+
+  if (browser_path_.empty()) {
+    LOG(ERROR) << "GetDeviceID requested from outside the RENDERER context.";
+    return;
+  }
+
+  // Return an empty value when off the record.
+  if (incognito_)
+    return;
+
+  // TODO(wad,brettw) Add OffTheRecord() enforcement here.
+  // Normally this is left for the plugin to do, but in the
+  // future we should check here as an added safeguard.
+
+  char id_buf[kDRMIdentifierSize];
+  if (file_util::ReadFile(drm_id_file, id_buf, kDRMIdentifierSize) !=
+      kDRMIdentifierSize) {
+    VLOG(1) << "file not readable: " << drm_id_file.value();
+    return;
+  }
+  id->assign(id_buf, kDRMIdentifierSize);
 }
 
 void PepperMessageFilter::GetFontFamiliesComplete(

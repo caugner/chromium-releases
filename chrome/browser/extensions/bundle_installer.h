@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/memory/linked_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/webstore_installer.h"
@@ -76,7 +77,6 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
   typedef std::vector<Item> ItemList;
 
   BundleInstaller(Profile* profile, const ItemList& items);
-  virtual ~BundleInstaller();
 
   // Returns true if the user has approved the bundle's permissions.
   bool approved() const { return approved_; }
@@ -114,6 +114,8 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
 
   typedef std::map<std::string, Item> ItemMap;
   typedef std::map<std::string, linked_ptr<base::DictionaryValue> > ManifestMap;
+
+  virtual ~BundleInstaller();
 
   // Displays the install bubble for |bundle| on |browser|.
   // Note: this is a platform specific implementation.
@@ -183,6 +185,9 @@ class BundleInstaller : public WebstoreInstallHelper::Delegate,
 
   // The profile that the bundle should be installed in.
   Profile* profile_;
+
+  // The UI that shows the confirmation prompt.
+  scoped_ptr<ExtensionInstallUI> install_ui_;
 
   Delegate* delegate_;
 

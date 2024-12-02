@@ -6,7 +6,9 @@
 #define CONTENT_COMMON_GPU_CLIENT_GL_HELPER_H_
 #pragma once
 
+#include "base/atomicops.h"
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 
@@ -20,13 +22,11 @@ namespace content {
 // interfaces.
 class GLHelper {
  public:
-  GLHelper(WebKit::WebGraphicsContext3D* context);
+  GLHelper(WebKit::WebGraphicsContext3D* context,
+           WebKit::WebGraphicsContext3D* context_for_thread);
   virtual ~GLHelper();
 
   WebKit::WebGraphicsContext3D* context() const;
-
-  // Detaches all the resources GLHelper manages.
-  void Detach();
 
   // Copies the contents of |src_texture| with the size of |src_size| into
   // |out|. The contents is transformed so that it fits in |dst_size|.
@@ -34,6 +34,14 @@ class GLHelper {
                      const gfx::Size& src_size,
                      const gfx::Size& dst_size,
                      unsigned char* out);
+
+  // Asynchronous version of CopyTextureTo. |callback| is invoked with the copy
+  // result when the copy operation has completed.
+  void AsyncCopyTextureTo(WebKit::WebGLId src_texture,
+                          const gfx::Size& src_size,
+                          const gfx::Size& dst_size,
+                          unsigned char* out,
+                          const base::Callback<void(bool)>& callback);
 
   // Returns the shader compiled from the source.
   WebKit::WebGLId CompileShaderFromSource(const WebKit::WGC3Dchar* source,
@@ -43,7 +51,11 @@ class GLHelper {
   class CopyTextureToImpl;
 
   WebKit::WebGraphicsContext3D* context_;
+  WebKit::WebGraphicsContext3D* context_for_thread_;
   scoped_ptr<CopyTextureToImpl> copy_texture_to_impl_;
+
+  // The number of all GLHelper instances.
+  static base::subtle::Atomic32 count_;
 
   DISALLOW_COPY_AND_ASSIGN(GLHelper);
 };

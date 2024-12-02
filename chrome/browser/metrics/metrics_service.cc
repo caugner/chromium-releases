@@ -152,17 +152,21 @@
 #include "base/string_number_conversions.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_restrictions.h"
+#include "base/tracked_objects.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/process_map.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_log_serializer.h"
 #include "chrome/browser/metrics/metrics_reporting_scheduler.h"
+#include "chrome/browser/metrics/tracking_synchronizer.h"
 #include "chrome/browser/net/http_pipelining_compatibility_client.h"
 #include "chrome/browser/net/network_stats.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -392,7 +396,6 @@ MetricsService::MetricsService()
     : recording_active_(false),
       reporting_active_(false),
       state_(INITIALIZED),
-      io_thread_(NULL),
       idle_since_last_transmission_(false),
       next_window_id_(0),
       ALLOW_THIS_IN_INITIALIZER_LIST(self_ptr_factory_(this)),
@@ -499,9 +502,9 @@ void MetricsService::SetUpNotifications(
                  content::NotificationService::AllSources());
   registrar->Add(observer, content::NOTIFICATION_USER_ACTION,
                  content::NotificationService::AllSources());
-  registrar->Add(observer, content::NOTIFICATION_TAB_PARENTED,
+  registrar->Add(observer, chrome::NOTIFICATION_TAB_PARENTED,
                  content::NotificationService::AllSources());
-  registrar->Add(observer, content::NOTIFICATION_TAB_CLOSING,
+  registrar->Add(observer, chrome::NOTIFICATION_TAB_CLOSING,
                  content::NotificationService::AllSources());
   registrar->Add(observer, content::NOTIFICATION_LOAD_START,
                  content::NotificationService::AllSources());
@@ -545,8 +548,8 @@ void MetricsService::Observe(int type,
       LogWindowChange(type, source, details);
       break;
 
-    case content::NOTIFICATION_TAB_PARENTED:
-    case content::NOTIFICATION_TAB_CLOSING:
+    case chrome::NOTIFICATION_TAB_PARENTED:
+    case chrome::NOTIFICATION_TAB_CLOSING:
       LogWindowChange(type, source, details);
       break;
 
@@ -773,7 +776,7 @@ void MetricsService::InitTaskGetHardwareClass(
 
 void MetricsService::OnInitTaskGotHardwareClass(
     const std::string& hardware_class) {
-  DCHECK_EQ(state_, INIT_TASK_SCHEDULED);
+  DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
   hardware_class_ = hardware_class;
 
   // Start the next part of the init task: loading plugin information.
@@ -784,11 +787,30 @@ void MetricsService::OnInitTaskGotHardwareClass(
 
 void MetricsService::OnInitTaskGotPluginInfo(
     const std::vector<webkit::WebPluginInfo>& plugins) {
-  DCHECK_EQ(state_, INIT_TASK_SCHEDULED);
+  DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
   plugins_ = plugins;
 
-  io_thread_ = g_browser_process->io_thread();
-  if (state_ == INIT_TASK_SCHEDULED)
+  // Start the next part of the init task: fetching performance data.  This will
+  // call into |FinishedReceivingProfilerData()| when the task completes.
+  chrome_browser_metrics::TrackingSynchronizer::FetchProfilerDataAsynchronously(
+      self_ptr_factory_.GetWeakPtr());
+}
+
+void MetricsService::ReceivedProfilerData(
+    const tracked_objects::ProcessDataSnapshot& process_data,
+    content::ProcessType process_type) {
+  DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
+
+  // Upon the first callback, create the initial log so that we can immediately
+  // save the profiler data.
+  if (!initial_log_.get())
+    initial_log_.reset(new MetricsLog(client_id_, session_id_));
+
+  initial_log_->RecordProfilerData(process_data, process_type);
+}
+
+void MetricsService::FinishedReceivingProfilerData() {
+  DCHECK_EQ(INIT_TASK_SCHEDULED, state_);
     state_ = INIT_TASK_DONE;
 }
 
@@ -887,7 +909,9 @@ void MetricsService::PushPendingLogsToPersistentStorage() {
     // We may race here, and send second copy of initial log later.
     if (state_ == INITIAL_LOG_READY)
       state_ = SENDING_OLD_LOGS;
-    log_manager_.StoreStagedLogAsUnsent();
+    MetricsLogManager::StoreType store_type = current_fetch_xml_.get() ?
+        MetricsLogManager::PROVISIONAL_STORE : MetricsLogManager::NORMAL_STORE;
+    log_manager_.StoreStagedLogAsUnsent(store_type);
   }
   DCHECK(!log_manager_.has_staged_log());
   StopRecording();
@@ -928,7 +952,7 @@ void MetricsService::StartFinalLogInfoCollection() {
 
   scoped_refptr<MetricsMemoryDetails> details(
       new MetricsMemoryDetails(callback));
-  details->StartFetch();
+  details->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
 
   // Collect WebCore cache information to put into a histogram.
   for (content::RenderProcessHost::iterator i(
@@ -1015,7 +1039,7 @@ void MetricsService::MakeStagedLog() {
       // anything, because the server will tell us whether it wants to hear
       // from us.
       PrepareInitialLog();
-      DCHECK(state_ == INIT_TASK_DONE);
+      DCHECK_EQ(INIT_TASK_DONE, state_);
       log_manager_.LoadPersistedUnsentLogs();
       state_ = INITIAL_LOG_READY;
       break;
@@ -1043,16 +1067,17 @@ void MetricsService::MakeStagedLog() {
 }
 
 void MetricsService::PrepareInitialLog() {
-  DCHECK(state_ == INIT_TASK_DONE);
+  DCHECK_EQ(INIT_TASK_DONE, state_);
 
-  MetricsLog* log = new MetricsLog(client_id_, session_id_);
-  log->set_hardware_class(hardware_class_);  // Adds to initial log.
-  log->RecordEnvironment(plugins_, profile_dictionary_.get());
+  DCHECK(initial_log_.get());
+  initial_log_->set_hardware_class(hardware_class_);
+  initial_log_->RecordEnvironment(plugins_, profile_dictionary_.get());
 
   // Histograms only get written to the current log, so make the new log current
   // before writing them.
   log_manager_.PauseCurrentLog();
-  log_manager_.BeginLoggingWithLog(log, MetricsLogManager::INITIAL_LOG);
+  log_manager_.BeginLoggingWithLog(initial_log_.release(),
+                                   MetricsLogManager::INITIAL_LOG);
   RecordCurrentHistograms();
   log_manager_.FinishCurrentLog();
   log_manager_.ResumePausedLog();
@@ -1207,6 +1232,9 @@ void MetricsService::OnURLFetchComplete(const content::URLFetcher* source) {
   DCHECK_NE(response_code_, kNoResponseCode);
   waiting_for_asynchronus_reporting_step_ = false;
 
+  // If the upload was provisionally stored, drop it now that the upload is
+  // known to have gone through.
+  log_manager_.DiscardLastProvisionalStore();
 
   // Confirm send so that we can move on.
   VLOG(1) << "METRICS RESPONSE CODE: " << response_code_
@@ -1257,7 +1285,7 @@ void MetricsService::OnURLFetchComplete(const content::URLFetcher* source) {
     log_manager_.DiscardStagedLog();
 
     if (log_manager_.has_unsent_logs())
-      DCHECK(state_ < SENDING_CURRENT_LOGS);
+      DCHECK_LT(state_, SENDING_CURRENT_LOGS);
   }
 
   // Error 400 indicates a problem with the log, not with the server, so
@@ -1268,10 +1296,11 @@ void MetricsService::OnURLFetchComplete(const content::URLFetcher* source) {
                              log_manager_.has_unsent_logs());
 
   // Collect network stats if UMA upload succeeded.
-  if (server_is_healthy && io_thread_) {
-    chrome_browser_net::CollectNetworkStats(network_stats_server_, io_thread_);
+  IOThread* io_thread = g_browser_process->io_thread();
+  if (server_is_healthy && io_thread) {
+    chrome_browser_net::CollectNetworkStats(network_stats_server_, io_thread);
     chrome_browser_net::CollectPipeliningCapabilityStatsOnUIThread(
-        http_pipelining_test_server_, io_thread_);
+        http_pipelining_test_server_, io_thread);
   }
 
   // Reset the cached response data.
@@ -1311,12 +1340,12 @@ void MetricsService::LogWindowChange(
   DCHECK_NE(controller_id, -1);
 
   switch (type) {
-    case content::NOTIFICATION_TAB_PARENTED:
+    case chrome::NOTIFICATION_TAB_PARENTED:
     case chrome::NOTIFICATION_BROWSER_OPENED:
       window_type = MetricsLog::WINDOW_CREATE;
       break;
 
-    case content::NOTIFICATION_TAB_CLOSING:
+    case chrome::NOTIFICATION_TAB_CLOSING:
     case chrome::NOTIFICATION_BROWSER_CLOSED:
       window_map_.erase(window_map_.find(window_or_tab));
       window_type = MetricsLog::WINDOW_DESTROY;
@@ -1438,6 +1467,8 @@ void MetricsService::LogCleanShutdown() {
   base::WaitableEvent done_writing(false, false);
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
                           base::Bind(Signal, &done_writing));
+  // http://crbug.com/124954
+  base::ThreadRestrictions::ScopedAllowWait allow_wait;
   done_writing.TimedWait(base::TimeDelta::FromHours(1));
 
   // Redundant setting to assure that we always reset this value at shutdown

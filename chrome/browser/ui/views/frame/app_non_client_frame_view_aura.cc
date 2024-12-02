@@ -9,18 +9,19 @@
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "grit/generated_resources.h"  // Accessibility names
-#include "grit/ui_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/aura/window.h"
 #include "ui/base/animation/slide_animation.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
@@ -35,12 +36,13 @@ const int kTopMargin = 1;
 // How long the hover animation takes if uninterrupted.
 const int kHoverFadeDurationMs = 130;
 // The number of pixels within the shadow to draw the buttons.
-const int kShadowStart = 28;
+const int kShadowStart = 16;
+// The size and close buttons are designed to overlap.
+const int kButtonOverlap = 1;
 
 // TODO(pkotwicz): Remove these constants once the IDR_AURA_FULLSCREEN_SHADOW
 // resource is updated.
-const int kShadowWidthStretch = 6;
-const int kShadowHeightStretch = -2;
+const int kShadowHeightStretch = -1;
 }
 
 class AppNonClientFrameViewAura::ControlView
@@ -73,28 +75,28 @@ class AppNonClientFrameViewAura::ControlView
   virtual void Layout() OVERRIDE {
     restore_button_->SetPosition(gfx::Point(kShadowStart, 0));
     close_button_->SetPosition(gfx::Point(kShadowStart +
-        restore_button_->width() + separator_->width(), 0));
+        restore_button_->width() - kButtonOverlap, 0));
   }
 
   virtual void ViewHierarchyChanged(bool is_add, View* parent,
                                     View* child) OVERRIDE {
     if (is_add && child == this) {
       SetButtonImages(restore_button_,
-                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE,
-                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE_H,
-                      IDR_AURA_WINDOW_MAXIMIZED_RESTORE_P);
+                      IDR_AURA_WINDOW_FULLSCREEN_RESTORE,
+                      IDR_AURA_WINDOW_FULLSCREEN_RESTORE_H,
+                      IDR_AURA_WINDOW_FULLSCREEN_RESTORE_P);
       restore_button_->SizeToPreferredSize();
 
       SetButtonImages(close_button_,
-                      IDR_AURA_WINDOW_MAXIMIZED_CLOSE,
-                      IDR_AURA_WINDOW_MAXIMIZED_CLOSE_H,
-                      IDR_AURA_WINDOW_MAXIMIZED_CLOSE_P);
+                      IDR_AURA_WINDOW_FULLSCREEN_CLOSE,
+                      IDR_AURA_WINDOW_FULLSCREEN_CLOSE_H,
+                      IDR_AURA_WINDOW_FULLSCREEN_CLOSE_P);
       close_button_->SizeToPreferredSize();
     }
   }
 
   virtual gfx::Size GetPreferredSize() OVERRIDE {
-    return gfx::Size(shadow_->width() + kShadowWidthStretch,
+    return gfx::Size(shadow_->width(),
                      shadow_->height() + kShadowHeightStretch);
   }
 
@@ -102,22 +104,22 @@ class AppNonClientFrameViewAura::ControlView
     canvas->TileImageInt(*control_base_,
         restore_button_->x(),
         restore_button_->y(),
-        restore_button_->width() + close_button_->width(),
+        restore_button_->width() - kButtonOverlap + close_button_->width(),
         restore_button_->height());
 
     views::View::OnPaint(canvas);
 
+    // Separator overlaps the left edge of the close button.
     canvas->DrawBitmapInt(*separator_,
-                          restore_button_->x() + restore_button_->width(), 0);
+                          close_button_->x(), 0);
     canvas->DrawBitmapInt(*shadow_, 0, kShadowHeightStretch);
   }
 
-  void ButtonPressed(
-      views::Button* sender,
-      const views::Event& event) OVERRIDE {
-    if (sender == close_button_)
+  void ButtonPressed(views::Button* sender,
+                     const views::Event& event) OVERRIDE {
+    if (sender == close_button_) {
       owner_->Close();
-    else if (sender == restore_button_) {
+    } else if (sender == restore_button_) {
       restore_button_->SetState(views::CustomButton::BS_NORMAL);
       owner_->Restore();
     }
@@ -174,13 +176,19 @@ AppNonClientFrameViewAura::AppNonClientFrameViewAura(
       control_view_(new ControlView(this)),
       control_widget_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          mouse_watcher_(new Host(this), this)) {
+          mouse_watcher_(new Host(this), this)),
+     animate_controls_(true) {
+  // This FrameView is always maximized so we don't want the window to have
+  // resize borders.
+  frame->GetNativeView()->set_hit_test_bounds_override_inner(gfx::Insets());
   set_background(views::Background::CreateSolidBackground(SK_ColorBLACK));
 }
 
 AppNonClientFrameViewAura::~AppNonClientFrameViewAura() {
-  if (control_widget_)
+  if (control_widget_) {
+    control_widget_->RemoveObserver(this);
     control_widget_->Close();
+  }
   mouse_watcher_.Stop();
 }
 
@@ -236,32 +244,40 @@ void AppNonClientFrameViewAura::OnMouseEntered(
     control_widget_->Init(params);
     control_widget_->SetContentsView(control_view_);
     aura::Window* window = control_widget_->GetNativeView();
+    window->SetName("AppNonClientFrameViewAuraControls");
     gfx::Rect control_bounds = GetControlBounds();
-    control_bounds.set_y(control_bounds.y() - control_bounds.height());
+    if (animate_controls_)
+      control_bounds.set_y(control_bounds.y() - control_bounds.height());
     window->SetBounds(control_bounds);
     control_widget_->Show();
   }
 
-  ui::Layer* layer = control_widget_->GetNativeView()->layer();
-  ui::ScopedLayerAnimationSettings scoped_setter(layer->GetAnimator());
-  scoped_setter.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kHoverFadeDurationMs));
-  layer->SetBounds(GetControlBounds());
-  layer->SetOpacity(1);
+  if (animate_controls_) {
+    ui::Layer* layer = control_widget_->GetNativeView()->layer();
+    ui::ScopedLayerAnimationSettings scoped_setter(layer->GetAnimator());
+    scoped_setter.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(kHoverFadeDurationMs));
+    layer->SetBounds(GetControlBounds());
+    layer->SetOpacity(1);
+  }
 
   mouse_watcher_.Start();
 }
 
 void AppNonClientFrameViewAura::MouseMovedOutOfHost() {
-  ui::Layer* layer = control_widget_->GetNativeView()->layer();
-
-  ui::ScopedLayerAnimationSettings scoped_setter(layer->GetAnimator());
-  scoped_setter.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(kHoverFadeDurationMs));
   gfx::Rect control_bounds = GetControlBounds();
   control_bounds.set_y(control_bounds.y() - control_bounds.height());
-  layer->SetBounds(control_bounds);
-  layer->SetOpacity(0);
+
+  if (animate_controls_) {
+    ui::Layer* layer = control_widget_->GetNativeView()->layer();
+    ui::ScopedLayerAnimationSettings scoped_setter(layer->GetAnimator());
+    scoped_setter.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(kHoverFadeDurationMs));
+    layer->SetBounds(control_bounds);
+    layer->SetOpacity(0);
+  } else {
+    control_widget_->SetBounds(control_bounds);
+  }
 }
 
 void AppNonClientFrameViewAura::OnWidgetClosing(views::Widget* widget) {
@@ -283,6 +299,10 @@ void AppNonClientFrameViewAura::Close() {
     control_widget_->Close();
   mouse_watcher_.Stop();
   frame()->Close();
+}
+
+bool AppNonClientFrameViewAura::IsShowingControls() const {
+  return control_widget_ && control_widget_->IsVisible();
 }
 
 void AppNonClientFrameViewAura::Restore() {

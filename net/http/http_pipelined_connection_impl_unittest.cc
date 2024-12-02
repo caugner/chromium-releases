@@ -27,6 +27,7 @@ namespace net {
 class DummySocketParams : public base::RefCounted<DummySocketParams> {
  private:
   friend class base::RefCounted<DummySocketParams>;
+  ~DummySocketParams() {}
 };
 
 REGISTER_SOCKET_PARAMS_FOR_POOL(MockTransportClientSocketPool,
@@ -92,7 +93,7 @@ class HttpPipelinedConnectionImplTest : public testing::Test {
                      BoundNetLog());
     pipeline_.reset(new HttpPipelinedConnectionImpl(
         connection, &delegate_, origin_, ssl_config_, proxy_info_,
-        BoundNetLog(), false, SSLClientSocket::kProtoUnknown));
+        BoundNetLog(), false, kProtoUnknown));
   }
 
   HttpRequestInfo* GetRequestInfo(const std::string& filename) {

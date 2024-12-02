@@ -166,6 +166,10 @@ class CancellableQuitMsgLoop : public base::RefCounted<CancellableQuitMsgLoop> {
       MessageLoop::current()->Quit();
   }
   bool cancelled_;
+
+ private:
+  friend class base::RefCounted<CancellableQuitMsgLoop>;
+  ~CancellableQuitMsgLoop() {}
 };
 
 // Spin until either a client response arrives or a timeout occurs.
@@ -182,7 +186,7 @@ bool FFUnitTestDecryptorProxy::WaitForClientResponse() {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&CancellableQuitMsgLoop::QuitNow, quit_task.get()),
-      TestTimeouts::action_max_timeout_ms());
+      TestTimeouts::action_max_timeout());
 
   message_loop_->Run();
   bool ret = !quit_task->cancelled_;

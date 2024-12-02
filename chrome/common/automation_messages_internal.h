@@ -159,7 +159,7 @@ IPC_MESSAGE_CONTROL1(AutomationMsg_HandleUnused,
 // This message tells the AutomationProvider to provide the given
 // authentication data to the specified tab, in response to an HTTP/FTP
 // authentication challenge.
-IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_SetAuth,
+IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_DEPRECATED_SetAuth,
                             int /* tab handle */,
                             std::wstring /* username */,
                             std::wstring /* password */,
@@ -167,7 +167,7 @@ IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_SetAuth,
 
 // This message tells the AutomationProvider to cancel the login in the
 // specified tab.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_CancelAuth,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_CancelAuth,
                             int /* tab handle */,
                             AutomationMsg_NavigationResponseValues /* status */)
 
@@ -176,7 +176,7 @@ IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_CancelAuth,
 // decoded by the caller manually; it contains an integer indicating the
 // number of URLs, followed by that many wstrings indicating a chain of
 // redirects. On failure, the count will be negative.
-IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_RedirectsFrom,
+IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_DEPRECATED_RedirectsFrom,
                             int /* tab handle */,
                             GURL /* source URL */,
                             bool /* succeeded */,
@@ -184,7 +184,7 @@ IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_RedirectsFrom,
 
 // This message asks the AutomationProvider whether a tab is waiting for
 // login info.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_NeedsAuth,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_NeedsAuth,
                             int /* tab handle */,
                             bool /* status */)
 
@@ -399,11 +399,11 @@ IPC_SYNC_MESSAGE_CONTROL3_1(AutomationMsg_NavigateInExternalTab,
 // It is a notification that the NavigationState was changed
 // Request:
 //   -int: The flags specifying what changed
-//         (see TabContents::InvalidateTypes)
+//         (see content::InvalidateTypes)
 // Response:
 //   None expected
 IPC_MESSAGE_ROUTED2(AutomationMsg_NavigationStateChanged,
-                    int,  // TabContents::InvalidateTypes
+                    int,  // content::InvalidateTypes
                     NavigationInfo)  // title, url etc.
 
 // This message is an outgoing message from Chrome to an external host.
@@ -614,7 +614,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_IsMenuCommandEnabled,
 // This message notifies the AutomationProvider to print the tab with given
 // handle. The first parameter is the handle to the tab resource.  The
 // return value contains a bool which is true on success.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_PrintNow,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_PrintNow,
                             int,
                             bool)
 
@@ -838,7 +838,7 @@ IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_OverrideEncoding,
 
 // Used to disable the dialog box that prompts the user for a path when
 // saving a web page.
-IPC_SYNC_MESSAGE_CONTROL1_0(AutomationMsg_SavePackageShouldPromptUser,
+IPC_SYNC_MESSAGE_CONTROL1_0(AutomationMsg_DEPRECATED_SavePackageShouldPromptUser,
                             bool /* false if we want to not show the dialog */)
 
 // This message is an outgoing message from Chrome to an external host.
@@ -1302,7 +1302,7 @@ IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_SendJSONRequest,
 
 // Installs an extension from a crx file or unpacked extension folder
 // and returns its id. On error, |extension handle| will be 0.
-IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_InstallExtension,
+IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_DEPRECATED2_InstallExtension,
                             FilePath /* full path to crx or unpacked dir */,
                             bool     /* with UI */,
                             int      /* extension handle */)
@@ -1310,22 +1310,22 @@ IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_InstallExtension,
 // Waits for the next extension test result. Sets |test result| as the
 // received result and |message| as any accompanying message with the
 // result, which could be the empty string.
-IPC_SYNC_MESSAGE_CONTROL0_2(AutomationMsg_WaitForExtensionTestResult,
+IPC_SYNC_MESSAGE_CONTROL0_2(AutomationMsg_DEPRECATED_WaitForExtensionTestResult,
                             bool         /* test result */,
                             std::string  /* message */)
 
 // Uninstalls an extension. On success |success| is true.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_UninstallExtension,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_UninstallExtension,
                             int   /* extension handle */,
                             bool  /* success */)
 
 // Enables an extension. On success |success| is true.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_EnableExtension,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_EnableExtension,
                            int   /* extension handle */,
                            bool  /* success */)
 
 // Disables an extension. On success |success| is true.
-IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DisableExtension,
+IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DEPRECATED_DisableExtension,
                             int   /* extension handle */,
                             bool  /* success */)
 
@@ -1333,23 +1333,23 @@ IPC_SYNC_MESSAGE_CONTROL1_1(AutomationMsg_DisableExtension,
 // the extension's page or browser action in the given browser, but does
 // not open popups. On success |success| is true.
 IPC_SYNC_MESSAGE_CONTROL2_1(
-    AutomationMsg_ExecuteExtensionActionInActiveTabAsync,
+    AutomationMsg_DEPRECATED_ExecuteExtensionActionInActiveTabAsync,
     int   /* extension handle */,
     int   /* browser handle */,
     bool  /* success */)
 
 // Moves the browser action to the given index in the browser action toolbar.
 // On success |success| is true.
-IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_MoveExtensionBrowserAction,
+IPC_SYNC_MESSAGE_CONTROL2_1(AutomationMsg_DEPRECATED_MoveExtensionBrowserAction,
                             int   /* extension handle */,
                             int   /* index */,
                             bool  /* success */)
 
 // Gets an extension property |property type|. On success |success| is true,
 // and |property value| is set.
-IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_GetExtensionProperty,
+IPC_SYNC_MESSAGE_CONTROL2_2(AutomationMsg_DEPRECATED_GetExtensionProperty,
     int                              /* extension handle */,
-    AutomationMsg_ExtensionProperty  /* property type */,
+    AutomationMsg_DEPRECATED_ExtensionProperty  /* property type */,
     bool                             /* success */,
     std::string                      /* property value */)
 
@@ -1515,6 +1515,12 @@ IPC_SYNC_MESSAGE_CONTROL0_1(AutomationMsg_GetMachPortCount,
 
 // Requests a snapshot.
 IPC_MESSAGE_ROUTED0(AutomationMsg_SnapshotEntirePage)
+
+#if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+// Requests to dump a heap profile.
+IPC_MESSAGE_ROUTED1(AutomationMsg_HeapProfilerDump,
+                    std::string /* reason */)
+#endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
 
 // Renderer -> browser messages.
 

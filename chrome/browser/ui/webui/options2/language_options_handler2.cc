@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,11 +77,9 @@ ListValue* LanguageOptionsHandler::GetLanguageList() {
     string16 display_name =
         l10n_util::GetDisplayNameForLocale(language_codes[i], app_locale,
                                            false);
-    base::i18n::AdjustStringForLocaleDirection(&display_name);
     string16 native_display_name =
         l10n_util::GetDisplayNameForLocale(language_codes[i], language_codes[i],
                                            false);
-    base::i18n::AdjustStringForLocaleDirection(&native_display_name);
     display_names.push_back(display_name);
     language_map[display_name] =
         std::make_pair(language_codes[i], native_display_name);
@@ -94,11 +92,22 @@ ListValue* LanguageOptionsHandler::GetLanguageList() {
   // Build the language list from the language map.
   ListValue* language_list = new ListValue();
   for (size_t i = 0; i < display_names.size(); ++i) {
-    const LanguagePair& pair = language_map[display_names[i]];
+    string16& display_name = display_names[i];
+    string16 adjusted_display_name(display_name);
+    base::i18n::AdjustStringForLocaleDirection(&adjusted_display_name);
+
+    const LanguagePair& pair = language_map[display_name];
+    string16 adjusted_native_display_name(pair.second);
+    base::i18n::AdjustStringForLocaleDirection(&adjusted_native_display_name);
+
+    bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(display_name);
+    std::string directionality = has_rtl_chars ? "rtl" : "ltr";
+
     DictionaryValue* dictionary = new DictionaryValue();
     dictionary->SetString("code",  pair.first);
-    dictionary->SetString("displayName", display_names[i]);
-    dictionary->SetString("nativeDisplayName", pair.second);
+    dictionary->SetString("displayName", adjusted_display_name);
+    dictionary->SetString("textDirection", directionality);
+    dictionary->SetString("nativeDisplayName", adjusted_native_display_name);
     language_list->Append(dictionary);
   }
 

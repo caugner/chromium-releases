@@ -14,7 +14,7 @@
         '../gpu/gpu.gyp:gpu_ipc',
         '../ipc/ipc.gyp:ipc',
         '../skia/skia.gyp:skia',
-        '../ui/gfx/surface/surface.gyp:surface',
+        '../ui/surface/surface.gyp:surface',
         'ppapi.gyp:ppapi_c',
         'ppapi_shared',
       ],
@@ -25,7 +25,6 @@
       },
       'include_dirs': [
         '..',
-        '../..',  # For nacl includes to work.
       ],
       'sources': [
         # Take some standalong files from the C++ wrapper allowing us to more
@@ -33,7 +32,6 @@
         # full C++ wrappers at this layer since the C++ wrappers expect
         # symbols defining the globals for "being a plugin" which we are not.
         # These callback files are standalone.
-        'cpp/completion_callback.cc',
         'cpp/completion_callback.h',
         'utility/completion_callback_factory.h',
 
@@ -80,8 +78,6 @@
         'proxy/ppb_buffer_proxy.h',
         'proxy/ppb_core_proxy.cc',
         'proxy/ppb_core_proxy.h',
-        'proxy/ppb_cursor_control_proxy.cc',
-        'proxy/ppb_cursor_control_proxy.h',
         'proxy/ppb_file_chooser_proxy.cc',
         'proxy/ppb_file_chooser_proxy.h',
         'proxy/ppb_file_io_proxy.cc',
@@ -90,18 +86,12 @@
         'proxy/ppb_file_ref_proxy.h',
         'proxy/ppb_file_system_proxy.cc',
         'proxy/ppb_file_system_proxy.h',
-        'proxy/ppb_flash_clipboard_proxy.cc',
-        'proxy/ppb_flash_clipboard_proxy.h',
-        'proxy/ppb_flash_file_proxy.cc',
-        'proxy/ppb_flash_file_proxy.h',
         'proxy/ppb_flash_proxy.cc',
         'proxy/ppb_flash_proxy.h',
         'proxy/ppb_flash_menu_proxy.cc',
         'proxy/ppb_flash_menu_proxy.h',
         'proxy/ppb_flash_message_loop_proxy.cc',
         'proxy/ppb_flash_message_loop_proxy.h',
-        'proxy/ppb_flash_net_connector_proxy.cc',
-        'proxy/ppb_flash_net_connector_proxy.h',
         'proxy/ppb_graphics_2d_proxy.cc',
         'proxy/ppb_graphics_2d_proxy.h',
         'proxy/ppb_graphics_3d_proxy.cc',
@@ -126,8 +116,6 @@
         'proxy/ppb_tcp_socket_private_proxy.h',
         'proxy/ppb_testing_proxy.cc',
         'proxy/ppb_testing_proxy.h',
-        'proxy/ppb_text_input_proxy.cc',
-        'proxy/ppb_text_input_proxy.h',
         'proxy/ppb_udp_socket_private_proxy.cc',
         'proxy/ppb_udp_socket_private_proxy.h',
         'proxy/ppb_url_loader_proxy.cc',
@@ -140,6 +128,8 @@
         'proxy/ppb_video_capture_proxy.h',
         'proxy/ppb_video_decoder_proxy.cc',
         'proxy/ppb_video_decoder_proxy.h',
+        'proxy/ppb_x509_certificate_private_proxy.cc',
+        'proxy/ppb_x509_certificate_private_proxy.h',
         'proxy/ppp_class_proxy.cc',
         'proxy/ppp_class_proxy.h',
         'proxy/ppp_graphics_3d_proxy.cc',

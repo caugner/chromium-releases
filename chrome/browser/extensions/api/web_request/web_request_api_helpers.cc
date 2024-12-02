@@ -5,12 +5,50 @@
 #include "chrome/browser/extensions/api/web_request/web_request_api_helpers.h"
 
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/common/url_constants.h"
 #include "net/http/http_util.h"
 
 namespace extension_web_request_api_helpers {
+
+namespace {
+
+static const char* kResourceTypeStrings[] = {
+  "main_frame",
+  "sub_frame",
+  "stylesheet",
+  "script",
+  "image",
+  "object",
+  "xmlhttprequest",
+  "other",
+  "other",
+};
+
+static ResourceType::Type kResourceTypeValues[] = {
+  ResourceType::MAIN_FRAME,
+  ResourceType::SUB_FRAME,
+  ResourceType::STYLESHEET,
+  ResourceType::SCRIPT,
+  ResourceType::IMAGE,
+  ResourceType::OBJECT,
+  ResourceType::XHR,
+  ResourceType::LAST_TYPE,  // represents "other"
+  // TODO(jochen): We duplicate the last entry, so the array's size is not a
+  // power of two. If it is, this triggers a bug in gcc 4.4 in Release builds
+  // (http://gcc.gnu.org/bugzilla/show_bug.cgi?id=43949). Once we use a version
+  // of gcc with this bug fixed, or the array is changed so this duplicate
+  // entry is no longer required, this should be removed.
+  ResourceType::LAST_TYPE,
+};
+
+COMPILE_ASSERT(
+    arraysize(kResourceTypeStrings) == arraysize(kResourceTypeValues),
+    keep_resource_types_in_sync);
+
+}  // namespace
 
 
 EventResponseDelta::EventResponseDelta(
@@ -40,13 +78,15 @@ class NetLogExtensionIdParameter : public net::NetLog::EventParameters {
  public:
   explicit NetLogExtensionIdParameter(const std::string& extension_id)
       : extension_id_(extension_id) {}
-  virtual ~NetLogExtensionIdParameter() {}
 
   virtual base::Value* ToValue() const OVERRIDE {
     DictionaryValue* dict = new DictionaryValue();
     dict->SetString("extension_id", extension_id_);
     return dict;
   }
+
+ protected:
+  virtual ~NetLogExtensionIdParameter() {}
 
  private:
   const std::string extension_id_;
@@ -60,7 +100,6 @@ class NetLogModificationParameter : public NetLogExtensionIdParameter {
  public:
   explicit NetLogModificationParameter(const std::string& extension_id)
       : NetLogExtensionIdParameter(extension_id) {}
-  virtual ~NetLogModificationParameter() {}
 
   virtual base::Value* ToValue() const OVERRIDE {
     Value* parent = NetLogExtensionIdParameter::ToValue();
@@ -80,6 +119,8 @@ class NetLogModificationParameter : public NetLogExtensionIdParameter {
   }
 
  private:
+  virtual ~NetLogModificationParameter() {}
+
   ListValue modified_headers_;
   ListValue deleted_headers_;
 
@@ -544,6 +585,81 @@ bool MergeOnAuthRequiredResponses(
     }
   }
   return credentials_set;
+}
+
+namespace {
+
+// Returns true if the URL is sensitive and requests to this URL must not be
+// modified/canceled by extensions, e.g. because it is targeted to the webstore
+// to check for updates, extension blacklisting, etc.
+bool IsSensitiveURL(const GURL& url) {
+  bool is_webstore_gallery_url =
+      StartsWithASCII(url.spec(), extension_urls::kGalleryBrowsePrefix, true);
+  bool sensitive_chrome_url = false;
+  if (EndsWith(url.host(), "google.com", true)) {
+    sensitive_chrome_url |= (url.host() == "www.google.com") &&
+                            StartsWithASCII(url.path(), "/chrome", true);
+    sensitive_chrome_url |= (url.host() == "chrome.google.com");
+    if (StartsWithASCII(url.host(), "client", true)) {
+      for (int i = 0; i < 10; ++i) {
+        sensitive_chrome_url |=
+            (StringPrintf("client%d.google.com", i) == url.host());
+      }
+    }
+  }
+  GURL::Replacements replacements;
+  replacements.ClearQuery();
+  replacements.ClearRef();
+  GURL url_without_query = url.ReplaceComponents(replacements);
+  return is_webstore_gallery_url || sensitive_chrome_url ||
+      extension_urls::IsWebstoreUpdateUrl(url_without_query) ||
+      extension_urls::IsBlacklistUpdateUrl(url);
+}
+
+// Returns true if the scheme is one we want to allow extensions to have access
+// to. Extensions still need specific permissions for a given URL, which is
+// covered by CanExtensionAccessURL.
+bool HasWebRequestScheme(const GURL& url) {
+  return (url.SchemeIs(chrome::kAboutScheme) ||
+          url.SchemeIs(chrome::kFileScheme) ||
+          url.SchemeIs(chrome::kFileSystemScheme) ||
+          url.SchemeIs(chrome::kFtpScheme) ||
+          url.SchemeIs(chrome::kHttpScheme) ||
+          url.SchemeIs(chrome::kHttpsScheme) ||
+          url.SchemeIs(chrome::kExtensionScheme));
+}
+
+}  // namespace
+
+bool HideRequestForURL(const GURL& url) {
+  return IsSensitiveURL(url) || !HasWebRequestScheme(url);
+}
+
+#define ARRAYEND(array) (array + arraysize(array))
+
+bool IsRelevantResourceType(ResourceType::Type type) {
+  ResourceType::Type* iter =
+      std::find(kResourceTypeValues, ARRAYEND(kResourceTypeValues), type);
+  return iter != ARRAYEND(kResourceTypeValues);
+}
+
+const char* ResourceTypeToString(ResourceType::Type type) {
+  ResourceType::Type* iter =
+      std::find(kResourceTypeValues, ARRAYEND(kResourceTypeValues), type);
+  if (iter == ARRAYEND(kResourceTypeValues))
+    return "other";
+
+  return kResourceTypeStrings[iter - kResourceTypeValues];
+}
+
+bool ParseResourceType(const std::string& type_str,
+                       ResourceType::Type* type) {
+  const char** iter =
+      std::find(kResourceTypeStrings, ARRAYEND(kResourceTypeStrings), type_str);
+  if (iter == ARRAYEND(kResourceTypeStrings))
+    return false;
+  *type = kResourceTypeValues[iter - kResourceTypeStrings];
+  return true;
 }
 
 }  // namespace extension_web_request_api_helpers

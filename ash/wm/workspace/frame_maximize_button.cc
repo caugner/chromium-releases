@@ -12,6 +12,7 @@
 #include "ash/wm/workspace/snap_sizer.h"
 #include "grit/ash_strings.h"
 #include "grit/ui_resources.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/aura/event.h"
 #include "ui/aura/event_filter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -180,25 +181,6 @@ SkBitmap FrameMaximizeButton::GetImageToPaint() {
     if (frame_->GetWidget()->IsMaximized()) {
       switch (snap_type_) {
         case SNAP_LEFT:
-          id = IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_LEFT_P;
-          break;
-        case SNAP_RIGHT:
-          id = IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_RIGHT_P;
-          break;
-        case SNAP_MAXIMIZE:
-        case SNAP_RESTORE:
-        case SNAP_NONE:
-          id = IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_P;
-          break;
-        case SNAP_MINIMIZE:
-          id = IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_MINIMIZE_P;
-          break;
-        default:
-          NOTREACHED();
-      }
-    } else {
-      switch (snap_type_) {
-        case SNAP_LEFT:
           id = IDR_AURA_WINDOW_MAXIMIZED_SNAP_LEFT_P;
           break;
         case SNAP_RIGHT:
@@ -215,12 +197,29 @@ SkBitmap FrameMaximizeButton::GetImageToPaint() {
         default:
           NOTREACHED();
       }
+    } else {
+      switch (snap_type_) {
+        case SNAP_LEFT:
+          id = IDR_AURA_WINDOW_SNAP_LEFT_P;
+          break;
+        case SNAP_RIGHT:
+          id = IDR_AURA_WINDOW_SNAP_RIGHT_P;
+          break;
+        case SNAP_MAXIMIZE:
+        case SNAP_RESTORE:
+        case SNAP_NONE:
+          id = IDR_AURA_WINDOW_SNAP_P;
+          break;
+        case SNAP_MINIMIZE:
+          id = IDR_AURA_WINDOW_SNAP_MINIMIZE_P;
+          break;
+        default:
+          NOTREACHED();
+      }
     }
     return *ResourceBundle::GetSharedInstance().GetImageNamed(id).ToSkBitmap();
-  } else if (state() == BS_HOT) {
-    return *ResourceBundle::GetSharedInstance().GetImageNamed(
-        IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_P).ToSkBitmap();
   }
+  // Hot and pressed states handled by regular ImageButton.
   return ImageButton::GetImageToPaint();
 }
 

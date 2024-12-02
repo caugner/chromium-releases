@@ -7,20 +7,22 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sync/notifier/sync_notifier.h"
+#include "sync/notifier/sync_notifier.h"
 
 namespace browser_sync {
 
 class ChromeSyncNotificationBridge;
 
 // A SyncNotifier implementation that wraps a ChromeSyncNotificationBridge
-// and a SyncNotifier delegate (which it takes ownership of). All SyncNotifier
-// calls are passed straight through to the delegate, with the exception of
-// AddObserver/RemoveObserver, which also result in the observer being
-// registered/deregistered with the ChromeSyncNotificationBridge.
+// and optionally a SyncNotifier delegate (which it takes ownership of).
+// All SyncNotifier calls are passed straight through to the delegate,
+// with the exception of AddObserver/RemoveObserver, which also result in
+// the observer being registered/deregistered with the
+// ChromeSyncNotificationBridge.
 class BridgedSyncNotifier : public sync_notifier::SyncNotifier {
  public:
   // Does not take ownership of |bridge|. Takes ownership of |delegate|.
+  // |delegate| may be NULL.
   BridgedSyncNotifier(ChromeSyncNotificationBridge* bridge,
                       sync_notifier::SyncNotifier* delegate);
   virtual ~BridgedSyncNotifier();

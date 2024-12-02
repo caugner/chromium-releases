@@ -65,11 +65,11 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
     if (option == kOff) {
       HttpStreamFactory::set_spdy_enabled(false);
     } else if (option == kDisableSSL) {
-      SpdySession::set_default_protocol(SSLClientSocket::kProtoSPDY2);
+      SpdySession::set_default_protocol(kProtoSPDY2);
       HttpStreamFactory::set_force_spdy_over_ssl(false);
       HttpStreamFactory::set_force_spdy_always(true);
     } else if (option == kSSL) {
-      SpdySession::set_default_protocol(SSLClientSocket::kProtoSPDY2);
+      SpdySession::set_default_protocol(kProtoSPDY2);
       HttpStreamFactory::set_force_spdy_over_ssl(true);
       HttpStreamFactory::set_force_spdy_always(true);
     } else if (option == kDisablePing) {
@@ -77,7 +77,7 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
     } else if (option == kExclude) {
       HttpStreamFactory::add_forced_spdy_exclusion(value);
     } else if (option == kDisableCompression) {
-      SpdyFramer::set_enable_compression_default(false);
+      BufferedSpdyFramer::set_enable_compression_default(false);
     } else if (option == kDisableAltProtocols) {
       HttpStreamFactory::set_use_alternate_protocols(false);
     } else if (option == kForceAltProtocols) {

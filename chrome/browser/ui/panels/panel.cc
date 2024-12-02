@@ -5,8 +5,7 @@
 #include "chrome/browser/ui/panels/panel.h"
 
 #include "base/logging.h"
-#include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/extension_service.h"
+#include "base/message_loop.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
@@ -15,9 +14,7 @@
 #include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/window_sizer.h"
-#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
@@ -33,22 +30,12 @@ using content::RenderViewHost;
 using content::SSLStatus;
 using content::WebContents;
 
-// static
-const Extension* Panel::GetExtensionFromBrowser(Browser* browser) {
-  // Find the extension. When we create a panel from an extension, the extension
-  // ID is passed as the app name to the Browser.
-  ExtensionService* extension_service =
-      browser->GetProfile()->GetExtensionService();
-  return extension_service->GetExtensionById(
-      web_app::GetExtensionIdFromApplicationName(browser->app_name()), false);
-}
-
 Panel::Panel(Browser* browser, const gfx::Size& requested_size)
     : browser_(browser),
       panel_strip_(NULL),
       initialized_(false),
-      has_temporary_layout_(false),
-      restored_size_(requested_size),
+      full_size_(requested_size),
+      max_size_policy_(DEFAULT_MAX_SIZE),
       auto_resizable_(false),
       always_on_top_(false),
       in_preview_mode_(false),
@@ -81,27 +68,22 @@ PanelManager* Panel::manager() const {
   return PanelManager::GetInstance();
 }
 
-bool Panel::draggable() const {
-  return panel_strip_ && panel_strip_->CanDragPanel(this);
+bool Panel::CanMinimize() const {
+  return panel_strip_ && panel_strip_->CanMinimizePanel(this) && !IsMinimized();
 }
 
-bool Panel::CanResizeByMouse() const {
-  return panel_strip_ && panel_strip_->CanResizePanel(this);
+bool Panel::CanRestore() const {
+  return panel_strip_ && panel_strip_->CanMinimizePanel(this) && IsMinimized();
 }
 
-const Extension* Panel::GetExtension() const {
-  return GetExtensionFromBrowser(browser());
+panel::Resizability Panel::CanResizeByMouse() const {
+  if (!panel_strip_)
+    return panel::NOT_RESIZABLE;
+
+  return panel_strip_->GetPanelResizability(this);
 }
 
-// TODO(jennb): do not update restored_size here as there's no knowledge
-// at this point whether the bounds change is due to the content window
-// being resized vs a change in current display bounds, e.g. from overflow
-// size change. Change this when refactoring panel resize logic.
 void Panel::SetPanelBounds(const gfx::Rect& bounds) {
-  if (panel_strip_ && panel_strip_->type() == PanelStrip::DOCKED &&
-      expansion_state_ == Panel::EXPANDED)
-    restored_size_ = bounds.size();
-
   native_panel_->SetPanelBounds(bounds);
 
   content::NotificationService::current()->Notify(
@@ -111,16 +93,33 @@ void Panel::SetPanelBounds(const gfx::Rect& bounds) {
 }
 
 void Panel::SetPanelBoundsInstantly(const gfx::Rect& bounds) {
-  if (panel_strip_ && panel_strip_->type() == PanelStrip::DOCKED &&
-      expansion_state_ == Panel::EXPANDED)
-    restored_size_ = bounds.size();
-
   native_panel_->SetPanelBoundsInstantly(bounds);
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_BOUNDS,
       content::Source<Panel>(this),
       content::NotificationService::NoDetails());
+}
+
+void Panel::LimitSizeToDisplayArea(const gfx::Rect& display_area) {
+  int max_width = manager()->GetMaxPanelWidth();
+  int max_height = manager()->GetMaxPanelHeight();
+
+  // If the custom max size is used, ensure that it does not exceed the display
+  // area.
+  if (max_size_policy_ == CUSTOM_MAX_SIZE) {
+    int current_max_width = max_size_.width();
+    if (current_max_width > max_width)
+      max_width = std::min(current_max_width, display_area.width());
+    int current_max_height = max_size_.height();
+    if (current_max_height > max_height)
+      max_height = std::min(current_max_height, display_area.height());
+  }
+
+  SetSizeRange(min_size_, gfx::Size(max_width, max_height));
+
+  // Ensure that full size does not exceed max size.
+  full_size_ = ClampSize(full_size_);
 }
 
 void Panel::SetAutoResizable(bool resizable) {
@@ -141,7 +140,7 @@ void Panel::SetAutoResizable(bool resizable) {
       // NULL might be returned if the tab has not been added.
       RenderViewHost* render_view_host = web_contents->GetRenderViewHost();
       if (render_view_host)
-        render_view_host->DisableAutoResize(restored_size_);
+        render_view_host->DisableAutoResize(full_size_);
     }
   }
 }
@@ -158,11 +157,20 @@ void Panel::SetSizeRange(const gfx::Size& min_size, const gfx::Size& max_size) {
   ConfigureAutoResize(browser()->GetSelectedWebContents());
 }
 
-void Panel::ClampSize(gfx::Size* size) const {
+void Panel::IncreaseMaxSize(const gfx::Size& desired_panel_size) {
+  gfx::Size new_max_size = max_size_;
+  if (new_max_size.width() < desired_panel_size.width())
+    new_max_size.set_width(desired_panel_size.width());
+  if (new_max_size.height() < desired_panel_size.height())
+    new_max_size.set_height(desired_panel_size.height());
 
+  SetSizeRange(min_size_, new_max_size);
+}
+
+gfx::Size Panel::ClampSize(const gfx::Size& size) const {
   // The panel width:
   // * cannot grow or shrink to go beyond [min_width, max_width]
-  int new_width = size->width();
+  int new_width = size.width();
   if (new_width > max_size_.width())
     new_width = max_size_.width();
   if (new_width < min_size_.width())
@@ -170,18 +178,13 @@ void Panel::ClampSize(gfx::Size* size) const {
 
   // The panel height:
   // * cannot grow or shrink to go beyond [min_height, max_height]
-  int new_height = size->height();
+  int new_height = size.height();
   if (new_height > max_size_.height())
     new_height = max_size_.height();
   if (new_height < min_size_.height())
     new_height = min_size_.height();
 
-  size->SetSize(new_width, new_height);
-}
-
-
-void Panel::SetAppIconVisibility(bool visible) {
-  native_panel_->SetPanelAppIconVisibility(visible);
+  return gfx::Size(new_width, new_height);
 }
 
 void Panel::SetAlwaysOnTop(bool on_top) {
@@ -196,15 +199,13 @@ void Panel::EnableResizeByMouse(bool enable) {
   native_panel_->EnableResizeByMouse(enable);
 }
 
+void Panel::UpdateMinimizeRestoreButtonVisibility() {
+  native_panel_->UpdatePanelMinimizeRestoreButtonVisibility();
+}
+
 void Panel::SetPreviewMode(bool in_preview) {
   DCHECK_NE(in_preview_mode_, in_preview);
   in_preview_mode_ = in_preview;
-}
-
-void  Panel::SetPanelStrip(PanelStrip* new_strip) {
-  panel_strip_ = new_strip;
-  if (panel_strip_ != NULL && initialized_)
-    native_panel_->PreventActivationByOS(panel_strip_->IsPanelMinimized(this));
 }
 
 void Panel::SetExpansionState(ExpansionState new_state) {
@@ -216,6 +217,7 @@ void Panel::SetExpansionState(ExpansionState new_state) {
 
   DCHECK(initialized_ && panel_strip_ != NULL);
   native_panel_->PreventActivationByOS(panel_strip_->IsPanelMinimized(this));
+  UpdateMinimizeRestoreButtonVisibility();
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
@@ -232,17 +234,14 @@ void Panel::FullScreenModeChanged(bool is_full_screen) {
 }
 
 void Panel::Show() {
-  if (manager()->is_full_screen() || !panel_strip_)
+  if (manager()->display_settings_provider()->is_full_screen() || !panel_strip_)
     return;
 
-  if (panel_strip_->CanShowPanelAsActive(this))
     native_panel_->ShowPanel();
-  else
-    ShowInactive();
 }
 
 void Panel::ShowInactive() {
-  if (manager()->is_full_screen() || !panel_strip_)
+  if (manager()->display_settings_provider()->is_full_screen() || !panel_strip_)
     return;
 
   native_panel_->ShowPanelInactive();
@@ -340,9 +339,9 @@ void Panel::SetStarredState(bool is_starred) {
 
 gfx::Rect Panel::GetRestoredBounds() const {
   gfx::Rect bounds = native_panel_->GetPanelBounds();
-  bounds.set_y(bounds.bottom() - restored_size_.height());
-  bounds.set_x(bounds.right() - restored_size_.width());
-  bounds.set_size(restored_size_);
+  bounds.set_y(bounds.bottom() - full_size_.height());
+  bounds.set_x(bounds.right() - full_size_.width());
+  bounds.set_size(full_size_);
   return bounds;
 }
 
@@ -352,10 +351,6 @@ gfx::Rect Panel::GetBounds() const {
 
 int Panel::TitleOnlyHeight() const {
   return native_panel_->TitleOnlyHeight();
-}
-
-gfx::Size Panel::IconOnlySize() const {
-  return native_panel_->IconOnlySize();
 }
 
 void Panel::EnsureFullyVisible() {
@@ -451,10 +446,6 @@ void Panel::FocusBookmarksToolbar() {
   NOTIMPLEMENTED();
 }
 
-void Panel::FocusChromeOSStatus() {
-  NOTIMPLEMENTED();
-}
-
 void Panel::RotatePaneFocus(bool forwards) {
   NOTIMPLEMENTED();
 }
@@ -491,7 +482,7 @@ void Panel::DisableInactiveFrame() {
   NOTIMPLEMENTED();
 }
 
-void Panel::ConfirmAddSearchProvider(const TemplateURL* template_url,
+void Panel::ConfirmAddSearchProvider(TemplateURL* template_url,
                                      Profile* profile) {
   NOTIMPLEMENTED();
 }
@@ -525,7 +516,9 @@ void Panel::ShowChromeToMobileBubble() {
 }
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
-void Panel::ShowOneClickSigninBubble() {
+void Panel::ShowOneClickSigninBubble(
+      const base::Closure& learn_more_callback,
+      const base::Closure& advanced_callback) {
   NOTIMPLEMENTED();
 }
 #endif
@@ -536,7 +529,7 @@ bool Panel::IsDownloadShelfVisible() const {
 
 DownloadShelf* Panel::GetDownloadShelf() {
   Browser* panel_browser = native_panel_->GetPanelBrowser();
-  Profile* profile = panel_browser->GetProfile();
+  Profile* profile = panel_browser->profile();
   Browser* tabbed_browser = Browser::GetTabbedBrowser(profile, true);
 
   if (!tabbed_browser) {
@@ -673,10 +666,6 @@ FindBar* Panel::CreateFindBar() {
 }
 
 #if defined(OS_CHROMEOS)
-void Panel::ShowMobileSetup() {
-  NOTIMPLEMENTED();
-}
-
 void Panel::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
   NOTIMPLEMENTED();
 }
@@ -725,8 +714,27 @@ void Panel::EnableWebContentsAutoResize(WebContents* web_contents) {
 void Panel::Observe(int type,
                     const content::NotificationSource& source,
                     const content::NotificationDetails& details) {
-  DCHECK_EQ(type, content::NOTIFICATION_WEB_CONTENTS_SWAPPED);
+  DCHECK_EQ(content::NOTIFICATION_WEB_CONTENTS_SWAPPED, type);
   ConfigureAutoResize(content::Source<WebContents>(source).ptr());
+}
+
+void Panel::OnActiveStateChanged(bool active) {
+  // Clear attention state when an expanded panel becomes active.
+  // On some systems (e.g. Win), mouse-down activates a panel regardless of
+  // its expansion state. However, we don't want to clear draw attention if
+  // contents are not visible. In that scenario, if the mouse-down results
+  // in a mouse-click, draw attention will be cleared then.
+  // See Panel::OnTitlebarClicked().
+  if (active && IsDrawingAttention() && !IsMinimized())
+    FlashFrame(false);
+
+  if (panel_strip_)
+    panel_strip_->OnPanelActiveStateChanged(this);
+
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
+      content::Source<Panel>(this),
+      content::NotificationService::NoDetails());
 }
 
 void Panel::ConfigureAutoResize(WebContents* web_contents) {
@@ -750,6 +758,47 @@ void Panel::OnWindowSizeAvailable() {
 void Panel::OnTitlebarClicked(panel::ClickModifier modifier) {
   if (panel_strip_)
     panel_strip_->OnPanelTitlebarClicked(this, modifier);
+
+  // Normally the system activates a window when the titlebar is clicked.
+  // However, we prevent system activation of minimized panels, thus the
+  // activation may not have occurred. Also, some OSes (Windows) will
+  // activate a minimized panel on mouse-down regardless of our attempts to
+  // prevent system activation. Attention state is not cleared in that case.
+  // See Panel::OnActiveStateChanged().
+  // Therefore, we ensure activation and clearing of attention state here.
+  // These are no-ops if no changes are needed.
+  Activate();
+  FlashFrame(false);
+}
+
+void Panel::OnMinimizeButtonClicked(panel::ClickModifier modifier) {
+  if (!panel_strip_)
+    return;
+
+  if (modifier == panel::APPLY_TO_ALL)
+    panel_strip_->MinimizeAll();
+  else
+    Minimize();
+}
+
+void Panel::OnRestoreButtonClicked(panel::ClickModifier modifier) {
+  if (!panel_strip_)
+    return;
+
+  if (modifier == panel::APPLY_TO_ALL)
+    panel_strip_->RestoreAll();
+  else
+    Restore();
+}
+
+void Panel::OnPanelStartUserResizing() {
+  SetAutoResizable(false);
+  SetPreviewMode(true);
+  max_size_policy_ = CUSTOM_MAX_SIZE;
+}
+
+void Panel::OnPanelEndUserResizing() {
+  SetPreviewMode(false);
 }
 
 void Panel::DestroyBrowser() {

@@ -14,6 +14,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/process.h"
 #include "base/threading/non_thread_safe.h"
+#include "base/time.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/public/browser/browser_child_process_host_delegate.h"
@@ -25,6 +26,7 @@ class GpuMainThread;
 struct GPUCreateCommandBufferConfig;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
 struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
+struct GpuHostMsg_AcceleratedSurfaceRelease_Params;
 
 class BrowserChildProcessHostImpl;
 
@@ -34,11 +36,11 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
  public:
   enum GpuProcessKind {
     GPU_PROCESS_KIND_UNSANDBOXED,
-    GPU_PROCESS_KIND_SANDBOXED
+    GPU_PROCESS_KIND_SANDBOXED,
+    GPU_PROCESS_KIND_COUNT
   };
 
   typedef base::Callback<void(const IPC::ChannelHandle&,
-                              base::ProcessHandle,
                               const content::GPUInfo&)>
       EstablishChannelCallback;
 
@@ -115,12 +117,18 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   void OnCommandBufferCreated(const int32 route_id);
   void OnDestroyCommandBuffer(int32 surface_id);
 
+#if defined(OS_MACOSX)
+  void OnAcceleratedSurfaceBuffersSwapped(
+      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
+#endif
 #if defined(OS_WIN) && !defined(USE_AURA)
   void OnAcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params);
   void OnAcceleratedSurfacePostSubBuffer(
       const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params);
   void OnAcceleratedSurfaceSuspend(int32 surface_id);
+  void OnAcceleratedSurfaceRelease(
+    const GpuHostMsg_AcceleratedSurfaceRelease_Params& params);
 #endif
 
   bool LaunchGpuProcess(const std::string& channel_id);
@@ -144,7 +152,7 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   // The pending create command buffer requests we need to reply to.
   std::queue<CreateCommandBufferCallback> create_command_buffer_requests_;
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   // Encapsulates surfaces that we lock when creating view command buffers.
   // We release this lock once the command buffer (or associated GPU process)
   // is destroyed. This prevents the browser from destroying the surface
@@ -160,9 +168,6 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
   // Qeueud messages to send when the process launches.
   std::queue<IPC::Message*> queued_messages_;
 
-  // The handle for the GPU process or null if it is not known to be launched.
-  base::ProcessHandle gpu_process_;
-
   // Whether we are running a GPU thread inside the browser process instead
   // of a separate GPU process.
   bool in_process_;
@@ -174,6 +179,9 @@ class GpuProcessHost : public content::BrowserChildProcessHostDelegate,
 
   // Whether we actually launched a GPU process.
   bool process_launched_;
+
+  // Time Init started.  Used to log total GPU process startup time to UMA.
+  base::TimeTicks init_start_time_;
 
   // Master switch for enabling/disabling GPU acceleration for the current
   // browser session. It does not change the acceleration settings for

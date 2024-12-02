@@ -9,7 +9,6 @@ namespace extension_manifest_keys {
 const char kAllFrames[] = "all_frames";
 const char kAltKey[] = "altKey";
 const char kApp[] = "app";
-const char kBackground[] = "background";
 const char kBackgroundAllowJsAccess[] = "background.allow_js_access";
 const char kBackgroundPage[] = "background.page";
 const char kBackgroundPageLegacy[] = "background_page";
@@ -96,6 +95,7 @@ const char kRunAt[] = "run_at";
 const char kShiftKey[] = "shiftKey";
 const char kShortcutKey[] = "shortcutKey";
 const char kSignature[] = "signature";
+const char kSuggestedKey[] = "suggested_key";
 const char kTheme[] = "theme";
 const char kThemeColors[] = "colors";
 const char kThemeDisplayProperties[] = "properties";
@@ -123,20 +123,24 @@ const char kWebURLs[] = "app.urls";
 }  // namespace extension_manifest_keys
 
 namespace extension_manifest_values {
-const char kBrowserActionKeybindingEvent[] = "browserAction";
+const char kBrowserActionKeybindingEvent[] = "_execute_browser_action";
 const char kIncognitoSplit[] = "split";
 const char kIncognitoSpanning[] = "spanning";
 const char kIntentDispositionWindow[] = "window";
 const char kIntentDispositionInline[] = "inline";
 const char kIsolatedStorage[] = "storage";
+const char kKeybindingPlatformChromeOs[] = "chromeos";
+const char kKeybindingPlatformDefault[] = "default";
+const char kKeybindingPlatformLinux[] = "linux";
+const char kKeybindingPlatformMac[] = "mac";
+const char kKeybindingPlatformWin[] = "windows";
 const char kRunAtDocumentStart[] = "document_start";
 const char kRunAtDocumentEnd[] = "document_end";
 const char kRunAtDocumentIdle[] = "document_idle";
-const char kPageActionKeybindingEvent[] = "pageAction";
+const char kPageActionKeybindingEvent[] = "_execute_page_action";
 const char kPageActionTypeTab[] = "tab";
 const char kPageActionTypePermanent[] = "permanent";
 const char kLaunchContainerPanel[] = "panel";
-const char kLaunchContainerShell[] = "shell";
 const char kLaunchContainerTab[] = "tab";
 const char kLaunchContainerWindow[] = "window";
 }  // namespace extension_manifest_values
@@ -151,6 +155,8 @@ const char kAppsNotEnabled[] =
 const char kBackgroundPermissionNeeded[] =
     "Hosted apps that use 'background_page' must have the 'background' "
     "permission.";
+const char kBackgroundRequiredForPlatformApps[] =
+    "Platform apps must have a background page or background scripts.";
 const char kCannotAccessPage[] =
     "Cannot access contents of url \"*\". "
     "Extension manifest must request permission to access this host.";
@@ -173,17 +179,12 @@ const char kExperimentalFlagRequired[] =
     "Loading extensions with 'experimental' permission is turned off by "
     "default. You can enable 'Experimental Extension APIs' "
     "by visiting chrome://flags.";
-const char kFeatureNotAllowed[] =
-    "Feature '*' is not accessible. *";
 const char kInvalidAllFrames[] =
     "Invalid value for 'content_scripts[*].all_frames'.";
 const char kInvalidBackground[] =
     "Invalid value for 'background_page'.";
 const char kInvalidBackgroundAllowJsAccess[] =
     "Invalid value for 'background.allow_js_access'.";
-const char kInvalidBackgroundAllowJsAccessNoPage[] =
-    "Must specify one of background.page or background.scripts to use"
-    " background.allow_js_access.";
 const char kInvalidBackgroundCombination[] =
     "The background.page and background.scripts properties cannot be used at "
     "the same time.";
@@ -296,17 +297,19 @@ const char kInvalidJsList[] =
 const char kInvalidKey[] =
     "Value 'key' is missing or invalid.";
 const char kInvalidKeyBinding[] =
-    "Invalid value for 'commands[*].key':";
+     "Invalid value for 'commands[*].*': *.";
 const char kInvalidKeyBindingDescription[] =
     "Invalid value for 'commands[*].description'.";
 const char kInvalidKeyBindingDictionary[] =
     "Contents of 'commands[*]' invalid.";
+const char kInvalidKeyBindingMissingPlatform[] =
+    "Could not find key specification for 'command[*].*': Either specify a key "
+    "for '*', or specify a default key.";
+const char kInvalidKeyBindingUnknownPlatform[] =
+    "Unknown platform for 'command[*]': *. Valid values are: 'windows', 'mac'"
+    " 'chromeos', 'linux' and 'default'.";
 const char kInvalidLaunchContainer[] =
     "Invalid value for 'app.launch.container'.";
-const char kInvalidLaunchContainerForNonPlatform[] =
-    "'app.launch.container' = 'shell' can only be used with platform_app.";
-const char kInvalidLaunchContainerForPlatform[] =
-    "platform_app requires 'app.launch.container' == 'shell'.";
 const char kInvalidLaunchValue[] =
     "Invalid value for '*'.";
 const char kInvalidLaunchValueContainer[] =
@@ -464,6 +467,8 @@ const char kPlatformAppFlagRequired[] =
     "Loading platform_app extension type is turned off by default. "
     "You can enable this type with the --enable-platform-apps "
     "command-line flag.";
+const char kPlatformAppNeedsManifestVersion2[] =
+    "Platform apps need manifest_version set to >= 2";
 const char kReservedMessageFound[] =
     "Reserved key * found in message catalog.";
 #if defined(OS_CHROMEOS)

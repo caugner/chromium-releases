@@ -12,6 +12,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_property.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/monitor.h"
 #include "ui/gfx/screen.h"
 
 DECLARE_WINDOW_PROPERTY_TYPE(bool);
@@ -53,6 +54,15 @@ aura::Window* GetActivatableWindow(aura::Window* window) {
   return internal::ActivationController::GetActivatableWindow(window, NULL);
 }
 
+bool CanActivateWindow(aura::Window* window) {
+  DCHECK(window);
+  if (!window->GetRootWindow())
+    return false;
+  aura::client::ActivationClient* client =
+      aura::client::GetActivationClient(window->GetRootWindow());
+  return client && client->CanActivateWindow(window);
+}
+
 bool IsWindowNormal(aura::Window* window) {
   return window->GetProperty(aura::client::kShowStateKey) ==
           ui::SHOW_STATE_NORMAL ||
@@ -87,12 +97,10 @@ void RestoreWindow(aura::Window* window) {
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
 }
 
-void SetOpenWindowSplit(aura::Window* window, bool value) {
-  window->SetProperty(kOpenWindowSplitKey, value);
-}
-
-bool GetOpenWindowSplit(aura::Window* window) {
-  return window->GetProperty(kOpenWindowSplitKey);
+void CenterWindow(aura::Window* window) {
+  const gfx::Monitor monitor = gfx::Screen::GetMonitorNearestWindow(window);
+  gfx::Rect center = monitor.work_area().Center(window->bounds().size());
+  window->SetBounds(center);
 }
 
 }  // namespace wm

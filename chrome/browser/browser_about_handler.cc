@@ -14,11 +14,6 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/sensors_provider.h"
-
-#if defined(USE_TCMALLOC)
-#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
-#endif
 
 namespace {
 
@@ -45,12 +40,12 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIMediaInternalsHost,
   chrome::kChromeUIMemoryHost,
   chrome::kChromeUINetInternalsHost,
-  chrome::kChromeUINetworkActionPredictorHost,
   chrome::kChromeUINetworkViewCacheHost,
   chrome::kChromeUINewTabHost,
   chrome::kChromeUIOmniboxHost,
   chrome::kChromeUIPluginsHost,
   chrome::kChromeUIPolicyHost,
+  chrome::kChromeUIPredictorsHost,
   chrome::kChromeUIPrintHost,
   chrome::kChromeUIProfilerHost,
   chrome::kChromeUIQuotaInternalsHost,
@@ -59,7 +54,6 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIStatsHost,
   chrome::kChromeUISyncInternalsHost,
   chrome::kChromeUITaskManagerHost,
-  chrome::kChromeUITCMallocHost,
   chrome::kChromeUITermsHost,
   chrome::kChromeUITracingHost,
   chrome::kChromeUIVersionHost,
@@ -71,7 +65,6 @@ const char* const kChromePaths[] = {
   chrome::kChromeUISandboxHost,
 #endif
 #if defined(OS_CHROMEOS)
-  chrome::kChromeUIActiveDownloadsHost,
   chrome::kChromeUIChooseMobileNetworkHost,
   chrome::kChromeUICryptohomeHost,
   chrome::kChromeUIDiscardsHost,
@@ -99,7 +92,6 @@ bool WillHandleBrowserAboutURL(GURL* url,
          !url->SchemeIs(chrome::kAboutScheme));
 
   // Only handle chrome://foo/, URLFixerUpper::FixupURL translates about:foo.
-  // TAB_CONTENTS_WEB handles about:blank, which frames are allowed to access.
   if (!url->SchemeIs(chrome::kChromeUIScheme))
     return false;
 
@@ -121,16 +113,16 @@ bool WillHandleBrowserAboutURL(GURL* url,
   } else if (host == chrome::kChromeUIExtensionsHost) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUIExtensionsHost + url->path();
-  } else if (host == chrome::kChromeUIHistoryHost) {
-    host = chrome::kChromeUIUberHost;
-    path = chrome::kChromeUIHistoryHost + url->path();
   // Redirect chrome://settings/extensions.
-  // TODO(csilv): Fix all code paths for this page once Uber page is enabled
-  // permanently.
+  // TODO(csilv): Remove this URL after M22 (legacy URL).
   } else if (host == chrome::kChromeUISettingsHost &&
       url->path() == std::string("/") + chrome::kExtensionsSubPage) {
     host = chrome::kChromeUIUberHost;
     path = chrome::kChromeUIExtensionsHost;
+  // Redirect chrome://history.
+  } else if (host == chrome::kChromeUIHistoryHost) {
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIHistoryHost + url->path();
   // Redirect chrome://settings
   } else if (host == chrome::kChromeUISettingsHost) {
     host = chrome::kChromeUIUberHost;
@@ -162,26 +154,6 @@ bool HandleNonNavigationAboutURL(const GURL& url) {
 
 #endif  // OFFICIAL_BUILD
 
-#if defined(OS_CHROMEOS)
-  if (host == chrome::kChromeUIRotateHost) {
-    content::ScreenOrientation change = content::SCREEN_ORIENTATION_TOP;
-    std::string query(url.query());
-    if (query == "left") {
-      change = content::SCREEN_ORIENTATION_LEFT;
-    } else if (query == "right") {
-      change = content::SCREEN_ORIENTATION_RIGHT;
-    } else if (query == "top") {
-      change = content::SCREEN_ORIENTATION_TOP;
-    } else if (query == "bottom") {
-      change = content::SCREEN_ORIENTATION_BOTTOM;
-    } else {
-      NOTREACHED() << "Unknown orientation";
-    }
-    content::SensorsProvider::GetInstance()->ScreenOrientationChanged(change);
-    return true;
-  }
-#endif
-
   return false;
 }
 
@@ -193,19 +165,3 @@ std::vector<std::string> ChromePaths() {
   return paths;
 }
 
-#if defined(USE_TCMALLOC)
-// static
-AboutTcmallocOutputs* AboutTcmallocOutputs::GetInstance() {
-  return Singleton<AboutTcmallocOutputs>::get();
-}
-
-AboutTcmallocOutputs::AboutTcmallocOutputs() {}
-
-AboutTcmallocOutputs::~AboutTcmallocOutputs() {}
-
-// Glue between the callback task and the method in the singleton.
-void AboutTcmallocRendererCallback(base::ProcessId pid,
-                                   const std::string& output) {
-  AboutTcmallocOutputs::GetInstance()->RendererCallback(pid, output);
-}
-#endif

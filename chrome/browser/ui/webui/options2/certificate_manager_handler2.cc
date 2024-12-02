@@ -26,8 +26,8 @@
 #include "ui/base/l10n/l10n_util_collator.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/dbus/cryptohome_client.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #endif
 
 using content::BrowserThread;
@@ -284,16 +284,6 @@ void CertificateManagerHandler::GetLocalizedValues(
   localized_strings->SetString("unknownCertsTabDescription",
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_UNKNOWN_TREE_DESCRIPTION));
 
-  // Tree columns.
-  localized_strings->SetString("certNameColumn",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_NAME_COLUMN_LABEL));
-  localized_strings->SetString("certDeviceColumn",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_DEVICE_COLUMN_LABEL));
-  localized_strings->SetString("certSerialColumn",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_SERIAL_NUMBER_COLUMN_LABEL));
-  localized_strings->SetString("certExpiresColumn",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_EXPIRES_COLUMN_LABEL));
-
   // Buttons.
   localized_strings->SetString("view_certificate",
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_VIEW_CERT_BUTTON));
@@ -301,8 +291,6 @@ void CertificateManagerHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_IMPORT_BUTTON));
   localized_strings->SetString("export_certificate",
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_EXPORT_BUTTON));
-  localized_strings->SetString("export_all_certificates",
-      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_EXPORT_ALL_BUTTON));
   localized_strings->SetString("edit_certificate",
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_EDIT_BUTTON));
   localized_strings->SetString("delete_certificate",
@@ -340,6 +328,8 @@ void CertificateManagerHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_CONFIRM_PASSWORD_LABEL));
 
   // Edit CA Trust & Import CA overlay strings.
+  localized_strings->SetString("certificateEditCaTitle",
+      l10n_util::GetStringUTF16(IDS_CERT_MANAGER_EDIT_CA_TITLE));
   localized_strings->SetString("certificateEditTrustLabel",
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_EDIT_TRUST_LABEL));
   localized_strings->SetString("certificateEditCaTrustDescriptionFormat",
@@ -1050,10 +1040,10 @@ void CertificateManagerHandler::CheckTpmTokenReady(const ListValue* args) {
 }
 
 void CertificateManagerHandler::CheckTpmTokenReadyInternal(
-    chromeos::CryptohomeClient::CallStatus call_status,
+    chromeos::DBusMethodCallStatus call_status,
     bool is_tpm_token_ready) {
   base::FundamentalValue ready(
-      call_status == chromeos::CryptohomeClient::SUCCESS && is_tpm_token_ready);
+      call_status == chromeos::DBUS_METHOD_CALL_SUCCESS && is_tpm_token_ready);
   web_ui()->CallJavascriptFunction("CertificateManager.onCheckTpmTokenReady",
                                    ready);
 }

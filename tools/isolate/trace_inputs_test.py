@@ -3,114 +3,91 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import logging
-import os
-import shutil
-import subprocess
-import sys
-import tempfile
+import cStringIO
 import unittest
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-VERBOSE = False
-
-
-class CalledProcessError(subprocess.CalledProcessError):
-  """Makes 2.6 version act like 2.7"""
-  def __init__(self, returncode, cmd, output):
-    super(CalledProcessError, self).__init__(returncode, cmd)
-    self.output = output
+import trace_inputs
 
 
 class TraceInputs(unittest.TestCase):
-  def setUp(self):
-    self.tempdir = tempfile.mkdtemp()
-    self.log = os.path.join(self.tempdir, 'log')
+  def _test(self, value, expected):
+    actual = cStringIO.StringIO()
+    trace_inputs.pretty_print(value, actual)
+    self.assertEquals(expected, actual.getvalue())
 
-  def tearDown(self):
-    shutil.rmtree(self.tempdir)
+  def test_pretty_print_empty(self):
+    self._test({}, '{\n}\n')
 
-  def _execute(self, args):
-    cmd = [
-        sys.executable, os.path.join(ROOT_DIR, 'trace_inputs.py'),
-        '--log', self.log,
-        '--gyp', os.path.join('data', 'trace_inputs'),
-        '--product', '.',  # Not tested.
-        '--root-dir', ROOT_DIR,
-    ] + args
-    p = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=ROOT_DIR)
-    out = p.communicate()[0]
-    if p.returncode:
-      raise CalledProcessError(p.returncode, cmd, out)
-    return out
-
-  def test_trace(self):
-    if sys.platform == 'linux2':
-      return self._test_trace_linux()
-    if sys.platform == 'darwin':
-      return self._test_trace_mac()
-    print 'Unsupported: %s' % sys.platform
-
-  def _test_trace_linux(self):
-    # TODO(maruel): BUG: Note that child.py is missing.
+  def test_pretty_print_mid_size(self):
+    value = {
+      'variables': {
+        'bar': [
+          'file1',
+          'file2',
+        ],
+      },
+      'conditions': [
+        ['OS=\"foo\"', {
+          'variables': {
+            trace_inputs.KEY_UNTRACKED: [
+              'dir1',
+              'dir2',
+            ],
+            trace_inputs.KEY_TRACKED: [
+              'file4',
+              'file3',
+            ],
+            'command': ['python', '-c', 'print "H\\i\'"'],
+            'read_only': True,
+            'relative_cwd': 'isol\'at\\e',
+          },
+        }],
+        ['OS=\"bar\"', {
+          'variables': {},
+        }, {
+          'variables': {},
+        }],
+      ],
+    }
     expected = (
         "{\n"
         "  'variables': {\n"
-        "    'isolate_files': [\n"
-        "      '<(DEPTH)/trace_inputs.py',\n"
-        "      '<(DEPTH)/trace_inputs_test.py',\n"
-        "    ],\n"
-        "    'isolate_dirs': [\n"
+        "    'bar': [\n"
+        "      'file1',\n"
+        "      'file2',\n"
         "    ],\n"
         "  },\n"
-        "},\n")
-    gyp = self._execute(['trace_inputs_test.py', '--child1'])
-    self.assertEquals(expected, gyp)
-
-  def _test_trace_mac(self):
-    # It is annoying in the case of dtrace because it requires root access.
-    # TODO(maruel): BUG: Note that child.py is missing.
-    expected = (
-        "{\n"
-        "  'variables': {\n"
-        "    'isolate_files': [\n"
-        "      '<(DEPTH)/trace_inputs.py',\n"
-        "      '<(DEPTH)/trace_inputs_test.py',\n"
-        "    ],\n"
-        "    'isolate_dirs': [\n"
-        "    ],\n"
-        "  },\n"
-        "},\n")
-    gyp = self._execute(['trace_inputs_test.py', '--child1'])
-    self.assertEquals(expected, gyp)
-
-
-def child1():
-  print 'child1'
-  # Implicitly force file opening.
-  import trace_inputs  # pylint: disable=W0612
-  # Do not wait for the child to exit.
-  # Use relative directory.
-  subprocess.Popen(
-      ['python', 'child2.py'], cwd=os.path.join('data', 'trace_inputs'))
-  return 0
-
-
-def main():
-  global VERBOSE
-  VERBOSE = '-v' in sys.argv
-  level = logging.DEBUG if VERBOSE else logging.ERROR
-  logging.basicConfig(level=level)
-  if len(sys.argv) == 1:
-    unittest.main()
-
-  if sys.argv[1] == '--child1':
-    return child1()
-
-  unittest.main()
+        "  'conditions': [\n"
+        "    ['OS=\"foo\"', {\n"
+        "      'variables': {\n"
+        "        'command': [\n"
+        "          'python',\n"
+        "          '-c',\n"
+        "          'print \"H\\i\'\"',\n"
+        "        ],\n"
+        "        'relative_cwd': 'isol\\'at\\\\e',\n"
+        "        'read_only': True\n"
+        "        'isolate_dependency_tracked': [\n"
+        "          'file4',\n"
+        "          'file3',\n"
+        "        ],\n"
+        "        'isolate_dependency_untracked': [\n"
+        "          'dir1',\n"
+        "          'dir2',\n"
+        "        ],\n"
+        "      },\n"
+        "    }],\n"
+        "    ['OS=\"bar\"', {\n"
+        "      'variables': {\n"
+        "      },\n"
+        "    }, {\n"
+        "      'variables': {\n"
+        "      },\n"
+        "    }],\n"
+        "  ],\n"
+        "}\n")
+    self._test(value, expected)
 
 
 if __name__ == '__main__':
-  sys.exit(main())
+  unittest.main()

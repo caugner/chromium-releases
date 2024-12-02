@@ -47,6 +47,7 @@ class LoginDisplayWebUIHandler {
   // Show siginin screen for the given credentials.
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) = 0;
+  virtual void ResetSigninScreenHandlerDelegate() = 0;
  protected:
   virtual ~LoginDisplayWebUIHandler() {}
 };
@@ -72,9 +73,6 @@ class SigninScreenHandlerDelegate {
 
   // Signs out if the screen is currently locked.
   virtual void Signout() = 0;
-
-  // Sign in into Guest session for fixing captive portal issues.
-  virtual void FixCaptivePortal() = 0;
 
   // Create a new Google account.
   virtual void CreateAccount() = 0;
@@ -154,6 +152,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) OVERRIDE;
   virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
+  virtual void ResetSigninScreenHandlerDelegate() OVERRIDE;
 
   // BrowsingDataRemover::Observer overrides.
   virtual void OnBrowsingDataRemoverDone() OVERRIDE;
@@ -204,6 +203,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   void HandleSignOutUser(const base::ListValue* args);
   void HandleUserImagesLoaded(const base::ListValue* args);
   void HandleNetworkErrorShown(const base::ListValue* args);
+  void HandleOpenProxySettings(const base::ListValue* args);
 
   // Sends user list to account picker.
   void SendUserList(bool animated);
@@ -270,9 +270,6 @@ class SigninScreenHandler : public BaseScreenHandler,
   BrowsingDataRemover* cookie_remover_;
 
   base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
-
-  // CapsLock state change notifier instance;
-  SystemKeyEventListener* key_event_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

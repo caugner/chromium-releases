@@ -7,31 +7,37 @@
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
+#include "ash/wm/key_rewriter_event_filter.h"
+#include "ash/wm/property_util.h"
 #include "base/command_line.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/ash/caps_lock_handler.h"
 #include "chrome/browser/ui/views/ash/chrome_shell_delegate.h"
-#include "chrome/browser/ui/views/ash/screen_orientation_listener.h"
+#include "chrome/browser/ui/views/ash/key_rewriter.h"
 #include "chrome/browser/ui/views/ash/screenshot_taker.h"
-#include "chrome/browser/ui/views/ash/status_area_host_aura.h"
-#include "ui/aura/env.h"
+#include "chrome/browser/ui/views/ash/user_gesture_handler.h"
+#include "chrome/common/chrome_switches.h"
 #include "ui/aura/aura_switches.h"
+#include "ui/aura/client/user_gesture_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/gfx/compositor/compositor_setup.h"
+#include "ui/compositor/compositor_setup.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/chromeos/chromeos_version.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/ui/views/ash/brightness_controller_chromeos.h"
 #include "chrome/browser/ui/views/ash/ime_controller_chromeos.h"
 #include "chrome/browser/ui/views/ash/volume_controller_chromeos.h"
-#include "chrome/browser/chromeos/input_method/input_method_manager.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
 #endif
 
 ChromeBrowserMainExtraPartsAsh::ChromeBrowserMainExtraPartsAsh()
     : ChromeBrowserMainExtraParts() {
+}
+
+ChromeBrowserMainExtraPartsAsh::~ChromeBrowserMainExtraPartsAsh() {
 }
 
 void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
@@ -47,8 +53,14 @@ void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
   }
 #endif
 
+  // Its easier to mark all windows as persisting and exclude the ones we care
+  // about (browser windows), rather than explicitly excluding certain windows.
+  ash::SetDefaultPersistsAcrossAllWorkspaces(true);
+
   // Shell takes ownership of ChromeShellDelegate.
   ash::Shell* shell = ash::Shell::CreateInstance(new ChromeShellDelegate);
+  shell->key_rewriter_filter()->SetKeyRewriterDelegate(
+      scoped_ptr<ash::KeyRewriterDelegate>(new KeyRewriter).Pass());
   shell->accelerator_controller()->SetScreenshotDelegate(
       scoped_ptr<ash::ScreenshotDelegate>(new ScreenshotTaker).Pass());
 #if defined(OS_CHROMEOS)
@@ -68,17 +80,13 @@ void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
       switches::kDisableZeroBrowsersOpenForTests))
     BrowserList::StartKeepAlive();
 #endif
-
-  // Make sure the singleton ScreenOrientationListener object is created.
-  ScreenOrientationListener::GetInstance();
+  gesture_handler_.reset(new UserGestureHandler);
+  aura::client::SetUserGestureClient(
+      ash::Shell::GetRootWindow(), gesture_handler_.get());
+  ash::Shell::GetRootWindow()->ShowRootWindow();
 }
 
 void ChromeBrowserMainExtraPartsAsh::PostProfileInit() {
-  // Add the status area buttons after Profile has been initialized.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-        ash::switches::kDisableAshUberTray)) {
-    ChromeShellDelegate::instance()->status_area_host()->AddButtons();
-  }
 }
 
 void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {

@@ -30,6 +30,8 @@ bool WebContentsDelegate::IsPopupOrPanel(const WebContents* source) const {
 
 bool WebContentsDelegate::IsApplication() const { return false; }
 
+bool WebContentsDelegate::CanLoadDataURLsInWebUI() const { return false; }
+
 bool WebContentsDelegate::CanReloadContents(WebContents* source) const {
   return true;
 }
@@ -42,7 +44,7 @@ bool WebContentsDelegate::ShouldSuppressDialogs() {
   return false;
 }
 
-void WebContentsDelegate::BeforeUnloadFired(WebContents* tab,
+void WebContentsDelegate::BeforeUnloadFired(WebContents* web_contents,
                                             bool proceed,
                                             bool* proceed_to_fire_unload) {
   *proceed_to_fire_unload = true;
@@ -122,7 +124,8 @@ bool WebContentsDelegate::ShouldCreateWebContents(
     WebContents* web_contents,
     int route_id,
     WindowContainerType window_container_type,
-    const string16& frame_name) {
+    const string16& frame_name,
+    const GURL& target_url) {
   return true;
 }
 
@@ -130,18 +133,20 @@ JavaScriptDialogCreator* WebContentsDelegate::GetJavaScriptDialogCreator() {
   return NULL;
 }
 
-bool WebContentsDelegate::IsFullscreenForTab(const WebContents* tab) const {
+bool WebContentsDelegate::IsFullscreenForTabOrPending(
+    const WebContents* web_contents) const {
   return false;
 }
 
-content::ColorChooser* WebContentsDelegate::OpenColorChooser(WebContents* tab,
+content::ColorChooser* WebContentsDelegate::OpenColorChooser(
+    WebContents* web_contents,
     int color_chooser_id,
-    const SkColor& color) {
+    SkColor color) {
   return NULL;
 }
 
 void WebContentsDelegate::WebIntentDispatch(
-    WebContents* tab,
+    WebContents* web_contents,
     WebIntentsDispatcher* intents_dispatcher) {
   // The caller passes this method ownership of the |intents_dispatcher|, but
   // this empty implementation will not use it, so we delete it immediately.

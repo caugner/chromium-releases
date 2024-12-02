@@ -24,7 +24,7 @@
 
 class GURL;
 class SkBitmap;
-class TabContents;
+class WebContentsImpl;
 class WebKeyboardEvent;
 struct NativeWebKeyboardEvent;
 struct ViewHostMsg_CreateWindow_Params;
@@ -62,7 +62,7 @@ struct RendererPreferences;
 //  of the RenderViewHost.
 //
 //  This interface currently encompasses every type of message that was
-//  previously being sent by TabContents itself. Some of these notifications
+//  previously being sent by WebContents itself. Some of these notifications
 //  may not be relevant to all users of RenderViewHost and we should consider
 //  exposing a more generic Send function on RenderViewHost and a response
 //  listener here to serve that need.
@@ -158,8 +158,8 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
   };
 
   // RendererManagerment -------------------------------------------------------
-  // Functions for managing switching of Renderers. For TabContents, this is
-  // implemented by the RenderViewHostManager
+  // Functions for managing switching of Renderers. For WebContents, this is
+  // implemented by the RenderViewHostManager.
 
   class CONTENT_EXPORT RendererManagement {
    public:
@@ -198,8 +198,8 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
   // Gets the URL that is currently being displayed, if there is one.
   virtual const GURL& GetURL() const;
 
-  // Return this object cast to a TabContents, if it is one. If the object is
-  // not a TabContents, returns NULL. DEPRECATED: Be sure to include brettw or
+  // Return this object cast to a WebContents, if it is one. If the object is
+  // not a WebContents, returns NULL. DEPRECATED: Be sure to include brettw or
   // jam as reviewers before you use this method. http://crbug.com/82582
   virtual content::WebContents* GetAsWebContents();
 
@@ -284,7 +284,8 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
       int32 page_id) {}
 
   // The page wants to open a URL with the specified disposition.
-  virtual void RequestOpenURL(const GURL& url,
+  virtual void RequestOpenURL(RenderViewHost* rvh,
+                              const GURL& url,
                               const content::Referrer& referrer,
                               WindowOpenDisposition disposition,
                               int64 source_frame_id) {}
@@ -296,6 +297,9 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
       WindowOpenDisposition disposition,
       int64 source_frame_id,
       const content::GlobalRequestID& old_request_id) {}
+
+  // The page wants to close the active view in this tab.
+  virtual void RouteCloseEvent(RenderViewHost* rvh) {}
 
   // A javascript message, confirmation or prompt should be shown.
   virtual void RunJavaScriptMessage(RenderViewHost* rvh,
@@ -394,15 +398,10 @@ class CONTENT_EXPORT RenderViewHostDelegate : public IPC::Channel::Listener {
   // The contents auto-resized and the container should match it.
   virtual void ResizeDueToAutoResize(const gfx::Size& new_size) {}
 
-  // Notification message from HTML UI.
-  virtual void WebUISend(RenderViewHost* render_view_host,
-                         const GURL& source_url,
-                         const std::string& name,
-                         const base::ListValue& args) {}
   // Requests to lock the mouse. Once the request is approved or rejected,
   // GotResponseToLockMouseRequest() will be called on the requesting render
   // view host.
-  virtual void RequestToLockMouse() {}
+  virtual void RequestToLockMouse(bool user_gesture) {}
 
   // Notification that the view has lost the mouse lock.
   virtual void LostMouseLock() {}

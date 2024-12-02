@@ -70,7 +70,7 @@
         <include name="IDR_RESTORE_H" file="linux_restore_h.png" type="BINDATA" />
         <include name="IDR_RESTORE_P" file="linux_restore_p.png" type="BINDATA" />
       </if>
-      <if expr="pp_ifdef('use_aura')">
+      <if expr="pp_ifdef('toolkit_views')">
         <!-- TODO(jamescook): Rename the IDR constants to put hot/pressed state before position. -->
         <include name="IDR_TEXTBUTTON_BOTTOM_H" file="aura/textbutton_hot_bottom.png" type="BINDATA" />
         <include name="IDR_TEXTBUTTON_BOTTOM_LEFT_H" file="aura/textbutton_hot_bottom_left.png" type="BINDATA" />
@@ -91,7 +91,7 @@
         <include name="IDR_TEXTBUTTON_TOP_RIGHT_H" file="aura/textbutton_hot_top_right.png" type="BINDATA" />
         <include name="IDR_TEXTBUTTON_TOP_RIGHT_P" file="aura/textbutton_pressed_top_right.png" type="BINDATA" />
       </if>
-      <if expr="not pp_ifdef('use_aura')">
+      <if expr="not pp_ifdef('toolkit_views')">
         <include name="IDR_TEXTBUTTON_BOTTOM_H" file="textbutton_b_h.png" type="BINDATA" />
         <include name="IDR_TEXTBUTTON_BOTTOM_LEFT_H" file="textbutton_bl_h.png" type="BINDATA" />
         <include name="IDR_TEXTBUTTON_BOTTOM_LEFT_P" file="textbutton_bl_p.png" type="BINDATA" />
@@ -263,14 +263,7 @@
 
       <!-- Remaining images only used by Aura. -->
       <if expr="pp_ifdef('use_aura')">
-        <include name="IDR_AURA_WINDOW_BUTTON_SEPARATOR" file="aura/window_button_separator.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_CLOSE_ICON" file="aura/slab_close.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_CLOSE" file="aura/window_close_normal.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_CLOSE_H" file="aura/window_close_hot.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_CLOSE_P" file="aura/window_close_pressed.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_FULLSCREEN_CLOSE" file="aura/window_fullscreen_close.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_FULLSCREEN_RESTORE" file="aura/window_fullscreen_restore.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_FULLSCREEN_SEPARATOR" file="aura/window_fullscreen_separator.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_FULLSCREEN_SHADOW" file="aura/window_fullscreen_shadow.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_HEADER_BASE_ACTIVE" file="aura/window_header_base_active.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_HEADER_BASE_INACTIVE" file="aura/window_header_base_inactive.png" type="BINDATA" />
@@ -286,23 +279,6 @@
         <include name="IDR_AURA_WINDOW_HEADER_SHADE_TOP" file="aura/window_header_shade_top.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_HEADER_SHADE_TOP_LEFT" file="aura/window_header_shade_top_left.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_HEADER_SHADE_TOP_RIGHT" file="aura/window_header_shade_top_right.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZE" file="aura/window_maximize_normal.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZE_H" file="aura/window_maximize_hot.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZE_P" file="aura/window_maximize_pressed.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_CLOSE" file="aura/window_maximized_close_normal.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_CLOSE_H" file="aura/window_maximized_close_hot.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_CLOSE_P" file="aura/window_maximized_close_pressed.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_SNAP_LEFT_P" file="aura/window_maximized_snap_left_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_SNAP_MINIMIZE_P" file="aura/window_maximized_snap_minimize_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_SNAP_P" file="aura/window_maximized_snap_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_SNAP_RIGHT_P" file="aura/window_maximized_snap_right_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE" file="aura/window_maximized_restore_normal.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE_H" file="aura/window_maximized_restore_hot.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE_P" file="aura/window_maximized_restore_pressed.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_LEFT_P" file="aura/window_maximized_restore_snap_left_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_MINIMIZE_P" file="aura/window_maximized_restore_snap_minimize_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_P" file="aura/window_maximized_restore_snap_p.png" type="BINDATA" />
-        <include name="IDR_AURA_WINDOW_MAXIMIZED_RESTORE_SNAP_RIGHT_P" file="aura/window_maximized_restore_snap_right_p.png" type="BINDATA" />
         <include name="IDR_AURA_WINDOW_ZOOM_ICON" file="aura/slab_zoom.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_VOLUME_LEVELS" file="aura/status_volume_all.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_VOLUME_MUTE" file="aura/status_volume_mute.png" type="BINDATA" />
@@ -317,9 +293,21 @@
         <include name="IDR_AURA_UBER_TRAY_CAPS_LOCK" file="aura/status_capslock.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_CAPS_LOCK_DARK" file="aura/status_capslock_dark.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_BLUETOOTH" file="aura/status_bluetooth.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_DRIVE" file="aura/status_drive.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_DRIVE_FAILED" file="aura/status_drive_item_failed.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_DRIVE_DONE" file="aura/status_drive_item_done.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_DRIVE_CANCEL" file="aura/status_drive_item_cancel.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_DRIVE_CANCEL_HOVER" file="aura/status_drive_item_cancel_hover.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_DRIVE_LIGHT" file="aura/status_drive_light.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_IME" file="aura/status_ime.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_UPDATE" file="aura/status_update.png" type="BINDATA" />
         <include name="IDR_AURA_UBER_TRAY_UPDATE_DARK" file="aura/status_update_dark.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_WIFI_ENABLED" file="aura/status_wifi_enabled.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_WIFI_DISABLED" file="aura/status_wifi_disabled.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_CELLULAR_ENABLED" file="aura/status_cellular_enabled.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_CELLULAR_DISABLED" file="aura/status_cellular_disabled.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_BLUETOOTH_ENABLED" file="aura/status_bluetooth_enabled.png" type="BINDATA" />
+        <include name="IDR_AURA_UBER_TRAY_BLUETOOTH_DISABLED" file="aura/status_bluetooth_disabled.png" type="BINDATA" />
 
         <include name="IDR_AURA_SWITCH_MONITOR" file="aura/switch_monitor.png" type="BINDATA" />
         <include name="IDR_OAK" file="oak.png" type="BINDATA"/>

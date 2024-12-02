@@ -112,9 +112,10 @@ bool AdjustNavigateParamsForURL(browser::NavigateParams* params) {
 // |params|. This might just return the same Browser specified in |params|, or
 // some other if that Browser is deemed incompatible.
 Browser* GetBrowserForDisposition(browser::NavigateParams* params) {
-  // If no source TabContents was specified, we use the selected one from the
-  // target browser. This must happen first, before GetBrowserForDisposition()
-  // has a chance to replace |params->browser| with another one.
+  // If no source TabContentsWrapper was specified, we use the selected one from
+  // the target browser. This must happen first, before
+  // GetBrowserForDisposition() has a chance to replace |params->browser| with
+  // another one.
   if (!params->source_contents && params->browser)
     params->source_contents =
         params->browser->GetSelectedTabContentsWrapper();
@@ -161,8 +162,10 @@ Browser* GetBrowserForDisposition(browser::NavigateParams* params) {
           browser_params.initial_bounds = params->window_bounds;
           return Browser::CreateWithParams(browser_params);
         } else {
-          return Browser::CreateForApp(Browser::TYPE_POPUP, app_name,
-                                       params->window_bounds, profile);
+          return Browser::CreateWithParams(
+              Browser::CreateParams::CreateForApp(
+                  Browser::TYPE_POPUP, app_name, params->window_bounds,
+                  profile));
         }
       }
       return NULL;
@@ -295,13 +298,13 @@ class ScopedBrowserDisplayer {
   DISALLOW_COPY_AND_ASSIGN(ScopedBrowserDisplayer);
 };
 
-// This class manages the lifetime of a TabContents created by the Navigate()
-// function. When Navigate() creates a TabContents for a URL, an instance of
-// this class takes ownership of it via TakeOwnership() until the TabContents
-// is added to a tab strip at which time ownership is relinquished via
-// ReleaseOwnership(). If this object goes out of scope without being added
-// to a tab strip, the created TabContents is deleted to avoid a leak and the
-// params->target_contents field is set to NULL.
+// This class manages the lifetime of a TabContentsWrapper created by the
+// Navigate() function. When Navigate() creates a TabContentsWrapper for a URL,
+// an instance of this class takes ownership of it via TakeOwnership() until the
+// TabContentsWrapper is added to a tab strip at which time ownership is
+// relinquished via ReleaseOwnership(). If this object goes out of scope without
+// being added to a tab strip, the created TabContentsWrapper is deleted to
+// avoid a leak and the params->target_contents field is set to NULL.
 class ScopedTargetContentsOwner {
  public:
   explicit ScopedTargetContentsOwner(browser::NavigateParams* params)
@@ -369,10 +372,9 @@ bool SwapInPrerender(TabContentsWrapper* target_contents, const GURL& url) {
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(
           target_contents->profile());
-  if (!prerender_manager)
-    return false;
-  return prerender_manager->MaybeUsePrerenderedPage(
-      target_contents->web_contents(), url);
+  WebContents* web_contents = target_contents->web_contents();
+  return prerender_manager &&
+      prerender_manager->MaybeUsePrerenderedPage(web_contents, url);
 }
 
 }  // namespace
@@ -425,7 +427,7 @@ void Navigate(NavigateParams* params) {
   if (!AdjustNavigateParamsForURL(params))
     return;
 
-  // Adjust disposition based on size of popup window.
+  // The browser window may want to adjust the disposition.
   if (params->disposition == NEW_POPUP &&
       (source_browser && source_browser->window())) {
     params->disposition =
@@ -459,7 +461,7 @@ void Navigate(NavigateParams* params) {
   // Make sure the Browser is shown if params call for it.
   ScopedBrowserDisplayer displayer(params);
 
-  // Makes sure any TabContents created by this function is destroyed if
+  // Makes sure any TabContentsWrapper created by this function is destroyed if
   // not properly added to a tab strip.
   ScopedTargetContentsOwner target_contents_owner(params);
 
@@ -481,7 +483,7 @@ void Navigate(NavigateParams* params) {
   }
 
   // Determine if the navigation was user initiated. If it was, we need to
-  // inform the target TabContents, and we may need to update the UI.
+  // inform the target TabContentsWrapper, and we may need to update the UI.
   content::PageTransition base_transition =
       content::PageTransitionStripQualifier(params->transition);
   bool user_initiated =
@@ -498,8 +500,9 @@ void Navigate(NavigateParams* params) {
   // Check if this is a singleton tab that already exists
   int singleton_index = GetIndexOfSingletonTab(params);
 
-  // If no target TabContents was specified, we need to construct one if we are
-  // supposed to target a new tab; unless it's a singleton that already exists.
+  // If no target TabContentsWrapper was specified, we need to construct one if
+  // we are supposed to target a new tab; unless it's a singleton that already
+  // exists.
   if (!params->target_contents && singleton_index < 0) {
     GURL url;
     if (params->url.is_empty()) {
@@ -517,7 +520,7 @@ void Navigate(NavigateParams* params) {
           Browser::TabContentsFactory(
               params->browser->profile(),
               tab_util::GetSiteInstanceForNewTab(
-                  source_contents, params->browser->profile(), url),
+                  params->browser->profile(), url),
               MSG_ROUTING_NONE,
               source_contents,
               NULL);
@@ -617,7 +620,7 @@ void Navigate(NavigateParams* params) {
 
   if (params->disposition != CURRENT_TAB) {
     content::NotificationService::current()->Notify(
-        content::NOTIFICATION_TAB_ADDED,
+        chrome::NOTIFICATION_TAB_ADDED,
         content::Source<content::WebContentsDelegate>(params->browser),
         content::Details<WebContents>(params->target_contents->web_contents()));
   }
@@ -681,27 +684,5 @@ bool IsURLAllowedInIncognito(const GURL& url) {
        url.host() == chrome::kChromeUISyncPromoHost ||
        url.host() == chrome::kChromeUIUberHost));
 }
-
-#if defined(OS_CHROMEOS) || defined(USE_AURA)
-// On Chrome desktop platforms (Aura, ChromeOS), if a popup window is larger
-// than this fraction of the screen, create a foreground tab instead.
-const float kPopupMaxWidthFactor = 0.5f;
-const float kPopupMaxHeightFactor = 0.6f;
-
-WindowOpenDisposition DispositionForPopupBounds(
-    const gfx::Rect& popup_bounds, int window_width, int window_height) {
-  // Check against scaled window bounds. Also check for width or height == 0,
-  // which would indicate a tab sized popup window.
-  int max_width = window_width * kPopupMaxWidthFactor;
-  int max_height = window_height * kPopupMaxHeightFactor;
-  if (popup_bounds.width() > max_width ||
-      popup_bounds.height() > max_height ||
-      popup_bounds.width() == 0 ||
-      popup_bounds.height() == 0) {
-    return NEW_FOREGROUND_TAB;
-  }
-  return NEW_POPUP;
-}
-#endif
 
 }  // namespace browser

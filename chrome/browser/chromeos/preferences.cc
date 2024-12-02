@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/preferences.h"
 
-#include "ash/ash_switches.h"
 #include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
@@ -17,6 +16,7 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/system/drm_settings.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/screen_locker_settings.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
@@ -47,19 +47,36 @@ bool IsLumpy() {
 
 static const char kFallbackInputMethodLocale[] = "en-US";
 
-Preferences::Preferences() {}
+Preferences::Preferences()
+    : input_method_manager_(input_method::InputMethodManager::GetInstance()) {
+}
+
+Preferences::Preferences(input_method::InputMethodManager* input_method_manager)
+    : input_method_manager_(input_method_manager) {
+}
 
 Preferences::~Preferences() {}
 
 // static
 void Preferences::RegisterUserPrefs(PrefService* prefs) {
-  input_method::InputMethodManager* manager =
-      input_method::InputMethodManager::GetInstance();
+  std::string hardware_keyboard_id;
+  // TODO(yusukes): Remove the runtime hack.
+  if (base::chromeos::IsRunningOnChromeOS()) {
+    input_method::InputMethodManager* manager =
+        input_method::InputMethodManager::GetInstance();
+    hardware_keyboard_id =
+        manager->GetInputMethodUtil()->GetHardwareInputMethodId();
+  } else {
+    hardware_keyboard_id = "xkb:us::eng";  // only for testing.
+  }
 
   const bool enable_tap_to_click_default = IsLumpy();
   prefs->RegisterBooleanPref(prefs::kTapToClickEnabled,
                              enable_tap_to_click_default,
                              PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kEnableTouchpadThreeFingerClick,
+                             false,
+                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kNaturalScroll,
                              false,
                              PrefService::SYNCABLE_PREF);
@@ -95,6 +112,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                                false,
                                PrefService::UNSYNCABLE_PREF);
   }
+  prefs->RegisterIntegerPref(prefs::kMouseSensitivity,
+                             3,
+                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterIntegerPref(prefs::kTouchpadSensitivity,
                              3,
                              PrefService::UNSYNCABLE_PREF);
@@ -118,45 +138,37 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kLanguagePreviousInputMethod,
                             "",
                             PrefService::UNSYNCABLE_PREF);
-  // We don't sync input method hotkeys since they're not configurable.
-  prefs->RegisterStringPref(prefs::kLanguageHotkeyNextEngineInMenu,
-                            language_prefs::kHotkeyNextEngineInMenu,
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kLanguageHotkeyPreviousEngine,
-                            language_prefs::kHotkeyPreviousEngine,
-                            PrefService::UNSYNCABLE_PREF);
   // We don't sync the list of input methods and preferred languages since a
   // user might use two or more devices with different hardware keyboards.
   // crosbug.com/15181
   prefs->RegisterStringPref(prefs::kLanguagePreferredLanguages,
                             kFallbackInputMethodLocale,
                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(
-      prefs::kLanguagePreloadEngines,
-      manager->GetInputMethodUtil()->GetHardwareInputMethodId(),
-      PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kLanguagePreloadEngines,
+                            hardware_keyboard_id,
+                            PrefService::UNSYNCABLE_PREF);
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
     prefs->RegisterBooleanPref(
         language_prefs::kChewingBooleanPrefs[i].pref_name,
         language_prefs::kChewingBooleanPrefs[i].default_pref_value,
-        PrefService::UNSYNCABLE_PREF);
+        language_prefs::kChewingBooleanPrefs[i].sync_status);
   }
   for (size_t i = 0; i < language_prefs::kNumChewingMultipleChoicePrefs; ++i) {
     prefs->RegisterStringPref(
         language_prefs::kChewingMultipleChoicePrefs[i].pref_name,
         language_prefs::kChewingMultipleChoicePrefs[i].default_pref_value,
-        PrefService::UNSYNCABLE_PREF);
+        language_prefs::kChewingMultipleChoicePrefs[i].sync_status);
   }
   prefs->RegisterIntegerPref(
       language_prefs::kChewingHsuSelKeyType.pref_name,
       language_prefs::kChewingHsuSelKeyType.default_pref_value,
-      PrefService::UNSYNCABLE_PREF);
+      language_prefs::kChewingHsuSelKeyType.sync_status);
 
   for (size_t i = 0; i < language_prefs::kNumChewingIntegerPrefs; ++i) {
     prefs->RegisterIntegerPref(
         language_prefs::kChewingIntegerPrefs[i].pref_name,
         language_prefs::kChewingIntegerPrefs[i].default_pref_value,
-        PrefService::UNSYNCABLE_PREF);
+        language_prefs::kChewingIntegerPrefs[i].sync_status);
   }
   prefs->RegisterStringPref(
       prefs::kLanguageHangulKeyboard,
@@ -240,6 +252,12 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                              true,
                              PrefService::UNSYNCABLE_PREF);
 
+  // Initially all existing users would see "What's new"
+  // for current version after update.
+  prefs->RegisterStringPref(prefs::kChromeOSReleaseNotesVersion,
+                            "0.0.0.0",
+                            PrefService::SYNCABLE_PREF);
+
   // OAuth1 all access token and secret pair.
   prefs->RegisterStringPref(prefs::kOAuth1Token,
                             "",
@@ -247,13 +265,22 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kOAuth1Secret,
                             "",
                             PrefService::UNSYNCABLE_PREF);
+
+  // TODO(wad): Once UI is connected, a final default can be set. At that point
+  // change this pref from UNSYNCABLE to SYNCABLE.
+  prefs->RegisterBooleanPref(prefs::kEnableCrosDRM,
+                             true,
+                             PrefService::UNSYNCABLE_PREF);
 }
 
-void Preferences::Init(PrefService* prefs) {
+void Preferences::InitUserPrefs(PrefService* prefs) {
   tap_to_click_enabled_.Init(prefs::kTapToClickEnabled, prefs, this);
+  three_finger_click_enabled_.Init(prefs::kEnableTouchpadThreeFingerClick,
+      prefs, this);
   natural_scroll_.Init(prefs::kNaturalScroll, prefs, this);
   accessibility_enabled_.Init(prefs::kSpokenFeedbackEnabled, prefs, this);
-  sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
+  mouse_sensitivity_.Init(prefs::kMouseSensitivity, prefs, this);
+  touchpad_sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
   use_24hour_clock_.Init(prefs::kUse24HourClock, prefs, this);
   disable_gdata_.Init(prefs::kDisableGData, prefs, this);
   disable_gdata_over_cellular_.Init(prefs::kDisableGDataOverCellular,
@@ -262,10 +289,6 @@ void Preferences::Init(PrefService* prefs) {
                                    prefs, this);
   primary_mouse_button_right_.Init(prefs::kPrimaryMouseButtonRight,
                                    prefs, this);
-  hotkey_next_engine_in_menu_.Init(
-      prefs::kLanguageHotkeyNextEngineInMenu, prefs, this);
-  hotkey_previous_engine_.Init(
-      prefs::kLanguageHotkeyPreviousEngine, prefs, this);
   preferred_languages_.Init(prefs::kLanguagePreferredLanguages,
                             prefs, this);
   preload_engines_.Init(prefs::kLanguagePreloadEngines, prefs, this);
@@ -326,6 +349,12 @@ void Preferences::Init(PrefService* prefs) {
 
   enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
 
+  enable_drm_.Init(prefs::kEnableCrosDRM, prefs, this);
+}
+
+void Preferences::Init(PrefService* prefs) {
+  InitUserPrefs(prefs);
+
   // Initialize preferences to currently saved state.
   NotifyPrefChanged(NULL);
 
@@ -337,6 +366,14 @@ void Preferences::Init(PrefService* prefs) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession)) {
     LoginUtils::Get()->SetFirstLoginPrefs(prefs);
   }
+}
+
+void Preferences::InitUserPrefsForTesting(PrefService* prefs) {
+  InitUserPrefs(prefs);
+}
+
+void Preferences::SetInputMethodListForTesting() {
+  SetInputMethodList();
 }
 
 void Preferences::Observe(int type,
@@ -355,6 +392,14 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     else
       UMA_HISTOGRAM_BOOLEAN("Touchpad.TapToClick.Started", enabled);
   }
+  if (!pref_name || *pref_name == prefs::kEnableTouchpadThreeFingerClick) {
+    const bool enabled = three_finger_click_enabled_.GetValue();
+    system::touchpad_settings::SetThreeFingerClick(enabled);
+    if (pref_name)
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerClick.Changed", enabled);
+    else
+      UMA_HISTOGRAM_BOOLEAN("Touchpad.ThreeFingerClick.Started", enabled);
+  }
   if (!pref_name || *pref_name == prefs::kNaturalScroll) {
     const bool enabled = natural_scroll_.GetValue();
     ui::SetNaturalScroll(enabled);
@@ -363,9 +408,20 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     else
       UMA_HISTOGRAM_BOOLEAN("Touchpad.NaturalScroll.Started", enabled);
   }
+  if (!pref_name || *pref_name == prefs::kMouseSensitivity) {
+    const int sensitivity = mouse_sensitivity_.GetValue();
+    system::mouse_settings::SetSensitivity(sensitivity);
+    if (pref_name) {
+      UMA_HISTOGRAM_CUSTOM_COUNTS(
+          "Mouse.Sensitivity.Changed", sensitivity, 1, 5, 5);
+    } else {
+      UMA_HISTOGRAM_CUSTOM_COUNTS(
+          "Mouse.Sensitivity.Started", sensitivity, 1, 5, 5);
+    }
+  }
   if (!pref_name || *pref_name == prefs::kTouchpadSensitivity) {
-    const int sensitivity = sensitivity_.GetValue();
-    system::pointer_settings::SetSensitivity(sensitivity);
+    const int sensitivity = touchpad_sensitivity_.GetValue();
+    system::touchpad_settings::SetSensitivity(sensitivity);
     if (pref_name) {
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Touchpad.Sensitivity.Changed", sensitivity, 1, 5, 5);
@@ -383,21 +439,6 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       UMA_HISTOGRAM_BOOLEAN("Mouse.PrimaryButtonRight.Started", right);
   }
 
-  // We don't handle prefs::kLanguageCurrentInputMethod and PreviousInputMethod
-  // here.
-
-  if (!pref_name || *pref_name == prefs::kLanguageHotkeyNextEngineInMenu) {
-    SetLanguageConfigStringListAsCSV(
-        language_prefs::kHotKeySectionName,
-        language_prefs::kNextEngineInMenuConfigName,
-        hotkey_next_engine_in_menu_.GetValue());
-  }
-  if (!pref_name || *pref_name == prefs::kLanguageHotkeyPreviousEngine) {
-    SetLanguageConfigStringListAsCSV(
-        language_prefs::kHotKeySectionName,
-        language_prefs::kPreviousEngineConfigName,
-        hotkey_previous_engine_.GetValue());
-  }
   if (!pref_name || *pref_name == prefs::kLanguagePreferredLanguages) {
     // Unlike kLanguagePreloadEngines and some other input method
     // preferencs, we don't need to send this to ibus-daemon.
@@ -422,31 +463,16 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     UpdateAutoRepeatRate();
   }
 
-  if (!pref_name || *pref_name == prefs::kLanguagePreloadEngines) {
+  if (!pref_name) {
+    SetInputMethodList();
+  } else if (*pref_name == prefs::kLanguagePreloadEngines) {
     SetLanguageConfigStringListAsCSV(language_prefs::kGeneralSectionName,
                                      language_prefs::kPreloadEnginesConfigName,
                                      preload_engines_.GetValue());
   }
 
-  // Do not check |*pref_name| for the two prefs. We're only interested in
-  // initial values of the prefs.
-  // TODO(yusukes): Remove the second condition on R20.
-  if (!pref_name && !CommandLine::ForCurrentProcess()->HasSwitch(
-          ash::switches::kDisableAshUberTray)) {
-    const std::string previous_input_method_id =
-        previous_input_method_.GetValue();
-    const std::string current_input_method_id =
-        current_input_method_.GetValue();
-    // NOTICE: ChangeInputMethod() has to be called AFTER the value of
-    // |preload_engines_| is sent to the InputMethodManager. Otherwise, the
-    // ChangeInputMethod request might be ignored as an invalid input method ID.
-    input_method::InputMethodManager* manager =
-        input_method::InputMethodManager::GetInstance();
-    if (!previous_input_method_id.empty())
-      manager->ChangeInputMethod(previous_input_method_id);
-    if (!current_input_method_id.empty())
-      manager->ChangeInputMethod(current_input_method_id);
-  }
+  // Do not check |*pref_name| of the prefs for remembering current/previous
+  // input methods here. We're only interested in initial values of the prefs.
 
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
     if (!pref_name ||
@@ -552,6 +578,11 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     system::screen_locker_settings::EnableScreenLock(
         enable_screen_lock_.GetValue());
   }
+
+  // Init or update protected content (DRM) support.
+  if (!pref_name || *pref_name == prefs::kEnableCrosDRM) {
+    system::ToggleDrm(enable_drm_.GetValue());
+  }
 }
 
 void Preferences::SetLanguageConfigBoolean(const char* section,
@@ -560,8 +591,7 @@ void Preferences::SetLanguageConfigBoolean(const char* section,
   input_method::InputMethodConfigValue config;
   config.type = input_method::InputMethodConfigValue::kValueTypeBool;
   config.bool_value = value;
-  input_method::InputMethodManager::GetInstance()->
-      SetInputMethodConfig(section, name, config);
+  input_method_manager_->SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigInteger(const char* section,
@@ -570,8 +600,7 @@ void Preferences::SetLanguageConfigInteger(const char* section,
   input_method::InputMethodConfigValue config;
   config.type = input_method::InputMethodConfigValue::kValueTypeInt;
   config.int_value = value;
-  input_method::InputMethodManager::GetInstance()->
-      SetInputMethodConfig(section, name, config);
+  input_method_manager_->SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigString(const char* section,
@@ -580,8 +609,7 @@ void Preferences::SetLanguageConfigString(const char* section,
   input_method::InputMethodConfigValue config;
   config.type = input_method::InputMethodConfigValue::kValueTypeString;
   config.string_value = value;
-  input_method::InputMethodManager::GetInstance()->
-      SetInputMethodConfig(section, name, config);
+  input_method_manager_->SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigStringList(
@@ -593,8 +621,7 @@ void Preferences::SetLanguageConfigStringList(
   for (size_t i = 0; i < values.size(); ++i)
     config.string_list_value.push_back(values[i]);
 
-  input_method::InputMethodManager::GetInstance()->
-      SetInputMethodConfig(section, name, config);
+  input_method_manager_->SetInputMethodConfig(section, name, config);
 }
 
 void Preferences::SetLanguageConfigStringListAsCSV(const char* section,
@@ -606,9 +633,40 @@ void Preferences::SetLanguageConfigStringListAsCSV(const char* section,
   if (!value.empty())
     base::SplitString(value, ',', &split_values);
 
+  if (section == std::string(language_prefs::kGeneralSectionName) &&
+      name == std::string(language_prefs::kPreloadEnginesConfigName)) {
+    input_method_manager_->EnableInputMethods(split_values);
+    return;
+  }
+
   // We should call the cros API even when |value| is empty, to disable default
   // config.
   SetLanguageConfigStringList(section, name, split_values);
+}
+
+void Preferences::SetInputMethodList() {
+  // When |preload_engines_| are set, InputMethodManager::ChangeInputMethod()
+  // might be called to change the current input method to the first one in the
+  // |preload_engines_| list. This also updates previous/current input method
+  // prefs. That's why GetValue() calls are placed before the
+  // SetLanguageConfigStringListAsCSV() call below.
+  const std::string previous_input_method_id =
+      previous_input_method_.GetValue();
+  const std::string current_input_method_id = current_input_method_.GetValue();
+  SetLanguageConfigStringListAsCSV(language_prefs::kGeneralSectionName,
+                                   language_prefs::kPreloadEnginesConfigName,
+                                   preload_engines_.GetValue());
+
+  // ChangeInputMethod() has to be called AFTER the value of |preload_engines_|
+  // is sent to the InputMethodManager. Otherwise, the ChangeInputMethod request
+  // might be ignored as an invalid input method ID. The ChangeInputMethod()
+  // calls are also necessary to restore the previous/current input method prefs
+  // which could have been modified by the SetLanguageConfigStringListAsCSV call
+  // above to the original state.
+  if (!previous_input_method_id.empty())
+    input_method_manager_->ChangeInputMethod(previous_input_method_id);
+  if (!current_input_method_id.empty())
+    input_method_manager_->ChangeInputMethod(current_input_method_id);
 }
 
 void Preferences::UpdateModifierKeyMapping() {
@@ -632,8 +690,7 @@ void Preferences::UpdateModifierKeyMapping() {
         input_method::ModifierKeyPair(
             input_method::kLeftAltKey,
             input_method::ModifierKey(alt_remap)));
-    input_method::InputMethodManager::GetInstance()->GetXKeyboard()->
-        RemapModifierKeys(modifier_map);
+    input_method_manager_->GetXKeyboard()->RemapModifierKeys(modifier_map);
   } else {
     LOG(ERROR) << "Failed to remap modifier keys. Unexpected value(s): "
                << search_remap << ", " << control_remap << ", " << alt_remap;
@@ -653,15 +710,13 @@ void Preferences::UpdateAutoRepeatRate() {
   input_method::XKeyboard::SetAutoRepeatRate(rate);
 }
 
+// static
 void Preferences::UpdateVirturalKeyboardPreference(PrefService* prefs) {
   const DictionaryValue* virtual_keyboard_pref =
       prefs->GetDictionary(prefs::kLanguagePreferredVirtualKeyboard);
   DCHECK(virtual_keyboard_pref);
 
-  input_method::InputMethodManager* input_method_manager =
-      input_method::InputMethodManager::GetInstance();
-  input_method_manager->ClearAllVirtualKeyboardPreferences();
-
+  // TODO(yusukes): Clear all virtual keyboard preferences here.
   std::string url;
   std::vector<std::string> layouts_to_remove;
   for (DictionaryValue::key_iterator iter = virtual_keyboard_pref->begin_keys();
@@ -670,14 +725,7 @@ void Preferences::UpdateVirturalKeyboardPreference(PrefService* prefs) {
     const std::string& layout_id = *iter;  // e.g. "us", "handwriting-vk"
     if (!virtual_keyboard_pref->GetString(layout_id, &url))
       continue;
-    if (!input_method_manager->SetVirtualKeyboardPreference(
-            layout_id, GURL(url))) {
-      // Either |layout_id| or |url| is invalid. Remove the key from |prefs|
-      // later.
-      layouts_to_remove.push_back(layout_id);
-      LOG(ERROR) << "Removing invalid virtual keyboard pref: layout="
-                 << layout_id;
-    }
+    // TODO(yusukes): add the virtual keyboard preferences here.
   }
 
   // Remove invalid prefs.

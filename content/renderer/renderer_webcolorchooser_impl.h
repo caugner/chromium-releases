@@ -35,10 +35,8 @@ class RendererWebColorChooserImpl : public WebKit::WebColorChooser,
  private:
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void FrameWillClose(WebKit::WebFrame* frame) OVERRIDE;
 
-  void OnDidChooseColorResponse(int color_chooser_id,
-                                const SkColor& color);
+  void OnDidChooseColorResponse(int color_chooser_id, SkColor color);
   void OnDidEndColorChooser(int color_chooser_id);
 
   int identifier_;

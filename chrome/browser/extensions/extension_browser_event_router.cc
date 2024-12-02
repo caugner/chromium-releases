@@ -6,9 +6,10 @@
 
 #include "base/json/json_writer.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
-#include "chrome/browser/extensions/api/extension_action/extension_page_actions_api_constants.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extension_window_controller.h"
@@ -71,9 +72,10 @@ DictionaryValue* ExtensionBrowserEventRouter::TabEntry::DidNavigate(
   return changed_properties;
 }
 
-void ExtensionBrowserEventRouter::Init() {
+void ExtensionBrowserEventRouter::Init(ExtensionToolbarModel* model) {
   if (initialized_)
     return;
+  model->AddObserver(this);
   BrowserList::AddObserver(this);
 #if defined(TOOLKIT_VIEWS)
   views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);
@@ -153,10 +155,10 @@ void ExtensionBrowserEventRouter::RegisterForTabNotifications(
       this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(&contents->GetController()));
 
-  // Observing TAB_CONTENTS_DESTROYED is necessary because it's
+  // Observing NOTIFICATION_WEB_CONTENTS_DESTROYED is necessary because it's
   // possible for tabs to be created, detached and then destroyed without
   // ever having been re-attached and closed. This happens in the case of
-  // a devtools TabContents that is opened in window, docked, then closed.
+  // a devtools WebContents that is opened in window, docked, then closed.
   registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::Source<WebContents>(contents));
 }
@@ -628,6 +630,16 @@ void ExtensionBrowserEventRouter::DispatchOldPageActionEvent(
   DispatchEventToExtension(profile, extension_id, "pageActions", json_args);
 }
 
+void ExtensionBrowserEventRouter::BrowserActionExecuted(
+    const std::string& extension_id, Browser* browser) {
+  Profile* profile = browser->profile();
+  TabContentsWrapper* tab_contents = NULL;
+  int tab_id = 0;
+  if (!ExtensionTabUtil::GetDefaultTab(browser, &tab_contents, &tab_id))
+    return;
+  ExtensionActionExecuted(profile, extension_id, tab_contents);
+}
+
 void ExtensionBrowserEventRouter::PageActionExecuted(
     Profile* profile,
     const std::string& extension_id,
@@ -642,18 +654,7 @@ void ExtensionBrowserEventRouter::PageActionExecuted(
                                     NULL, NULL, &tab_contents, NULL)) {
     return;
   }
-  DispatchEventWithTab(profile, extension_id, "pageAction.onClicked",
-                       tab_contents->web_contents(), true);
-}
-
-void ExtensionBrowserEventRouter::BrowserActionExecuted(
-    Profile* profile, const std::string& extension_id, Browser* browser) {
-  TabContentsWrapper* tab_contents = NULL;
-  int tab_id = 0;
-  if (!ExtensionTabUtil::GetDefaultTab(browser, &tab_contents, &tab_id))
-    return;
-  DispatchEventWithTab(profile, extension_id, "browserAction.onClicked",
-                       tab_contents->web_contents(), true);
+  ExtensionActionExecuted(profile, extension_id, tab_contents);
 }
 
 void ExtensionBrowserEventRouter::CommandExecuted(
@@ -669,4 +670,34 @@ void ExtensionBrowserEventRouter::CommandExecuted(
                            extension_id,
                            "experimental.keybinding.onCommand",
                            json_args);
+}
+
+void ExtensionBrowserEventRouter::ExtensionActionExecuted(
+    Profile* profile,
+    const std::string& extension_id,
+    TabContentsWrapper* tab_contents) {
+  const Extension* extension =
+      profile->GetExtensionService()->GetExtensionById(extension_id, false);
+  if (!extension)
+    return;
+
+  const char* event_name = NULL;
+  switch (extension->declared_action_type()) {
+    case ExtensionAction::TYPE_NONE:
+      break;
+    case ExtensionAction::TYPE_BROWSER:
+      event_name = "browserAction.onClicked";
+      break;
+    case ExtensionAction::TYPE_PAGE:
+      event_name = "pageAction.onClicked";
+      break;
+  }
+
+  if (event_name) {
+    DispatchEventWithTab(profile,
+                         extension_id,
+                         event_name,
+                         tab_contents->web_contents(),
+                         true);
+  }
 }

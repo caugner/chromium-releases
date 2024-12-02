@@ -9,6 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/signin/signin_tracker.h"
 #include "chrome/browser/ui/webui/options2/options_ui2.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
 
 class LoginUIService;
 class ProfileManager;
@@ -16,7 +17,8 @@ class ProfileSyncService;
 class SigninManager;
 
 class SyncSetupHandler : public options2::OptionsPageUIHandler,
-                         public SigninTracker::Observer {
+                         public SigninTracker::Observer,
+                         public LoginUIService::LoginUI {
  public:
   // Constructs a new SyncSetupHandler. |profile_manager| may be NULL.
   explicit SyncSetupHandler(ProfileManager* profile_manager);
@@ -27,10 +29,14 @@ class SyncSetupHandler : public options2::OptionsPageUIHandler,
       OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
-  // SigninTracker::Observer implementation
+  // SigninTracker::Observer implementation.
   virtual void GaiaCredentialsValid() OVERRIDE;
   virtual void SigninFailed(const GoogleServiceAuthError& error) OVERRIDE;
   virtual void SigninSuccess() OVERRIDE;
+
+  // LoginUIService::LoginUI implementation.
+  virtual void FocusUI() OVERRIDE;
+  virtual void CloseUI() OVERRIDE;
 
   static void GetStaticLocalizedValues(
       base::DictionaryValue* localized_strings,
@@ -58,7 +64,7 @@ class SyncSetupHandler : public options2::OptionsPageUIHandler,
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, TestSyncEverything);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, TestSyncAllManually);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, TestPassphraseStillRequired);
-  FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, TestSyncOnlyBookmarks);
+  FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, TestSyncIndividualTypes);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, TurnOnEncryptAll);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest,
                            UnrecoverableErrorInitializingSync);
@@ -77,7 +83,9 @@ class SyncSetupHandler : public options2::OptionsPageUIHandler,
   // to the "advanced settings" dialog, otherwise we give the user the simpler
   // "Sync Everything" dialog. Overridden by subclasses to allow them to skip
   // the sync setup dialog if desired.
-  virtual void DisplayConfigureSync(bool show_advanced);
+  // If |passphrase_failed| is true, then the user previously tried to enter an
+  // invalid passphrase.
+  virtual void DisplayConfigureSync(bool show_advanced, bool passphrase_failed);
 
   // Called when we are done configuring sync (so we want to close the dialog
   // and start syncing).
@@ -97,6 +105,7 @@ class SyncSetupHandler : public options2::OptionsPageUIHandler,
   void HandleAttachHandler(const base::ListValue* args);
   void HandleShowErrorUI(const base::ListValue* args);
   void HandleShowSetupUI(const base::ListValue* args);
+  void HandleStopSyncing(const base::ListValue* args);
 
   // Helper routine that gets the Profile associated with this object (virtual
   // so tests can override).
@@ -118,6 +127,16 @@ class SyncSetupHandler : public options2::OptionsPageUIHandler,
   // |fatal_error| = true.
   void DisplayGaiaLoginWithErrorMessage(const string16& error_message,
                                         bool fatal_error);
+
+  // Instead of signing in, prepare requirements for showing the advanced
+  // configuration dialog.
+  void PrepareConfigDialog();
+
+  // Displays spinner-only UI indicating that something is going on in the
+  // background.
+  // TODO(kochi): better to show some message that the user can understand what
+  // is running in the background.
+  void DisplaySpinner();
 
   // Returns true if we're the active login object.
   bool IsActiveLogin() const;

@@ -37,6 +37,10 @@ class UserWallpaperDelegate: public ash::UserWallpaperDelegate {
     browser->ShowOptionsTab("setWallpaper");
   }
 
+  virtual bool CanOpenSetWallpaperPage() OVERRIDE {
+    return !chromeos::UserManager::Get()->IsLoggedInAsGuest();
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(UserWallpaperDelegate);
 };
@@ -63,7 +67,7 @@ void DesktopBackgroundObserver::Observe(int type,
   switch (type) {
     case chrome::NOTIFICATION_LOGIN_USER_CHANGED: {
       ash::Shell::GetInstance()->desktop_background_controller()->
-          OnDesktopBackgroundChanged();
+          SetDesktopBackgroundImageMode();
       break;
     }
     default:

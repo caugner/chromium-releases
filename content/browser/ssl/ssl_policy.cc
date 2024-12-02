@@ -15,8 +15,8 @@
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_request_info.h"
-#include "content/browser/tab_contents/navigation_entry_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/navigation_entry_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/ssl_status.h"
 #include "content/public/common/url_constants.h"
@@ -111,7 +111,7 @@ void SSLPolicy::OnRequestStarted(SSLRequestInfo* info) {
 }
 
 void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
-                            TabContents* tab_contents) {
+                            WebContentsImpl* web_contents) {
   DCHECK(entry);
 
   InitializeEntryIfNeeded(entry);
@@ -158,7 +158,7 @@ void SSLPolicy::UpdateEntry(NavigationEntryImpl* entry,
     return;
   }
 
-  if (tab_contents->DisplayedInsecureContent())
+  if (web_contents->DisplayedInsecureContent())
     entry->GetSSL().content_status |= SSLStatus::DISPLAYED_INSECURE_CONTENT;
 }
 

@@ -10,14 +10,11 @@
 #include <string.h>
 
 #include "base/logging.h"
+#include "base/message_pump_x.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/point.h"
-
-#if !defined(TOOLKIT_USES_GTK)
-#include "base/message_pump_x.h"
-#endif
 
 // Copied from xserver-properties.h
 #define AXIS_LABEL_PROP_REL_HWHEEL "Rel Horiz Wheel"
@@ -38,17 +35,7 @@ namespace {
 const int kWheelScrollAmount = 53;
 
 const int kMinWheelButton = 4;
-#if defined(OS_CHROMEOS)
-// TODO(davemoore) For now use the button to decide how much to scroll by.
-// When we go to XI2 scroll events this won't be necessary. If this doesn't
-// happen for some reason we can better detect which devices are touchpads.
-const int kTouchpadScrollAmount = 3;
-
-// Chrome OS also uses buttons 8 and 9 for scrolling.
-const int kMaxWheelButton = 9;
-#else
 const int kMaxWheelButton = 7;
-#endif
 
 // A class to support the detection of scroll events, using X11 valuators.
 class UI_EXPORT CMTEventData {
@@ -136,8 +123,18 @@ class UI_EXPORT CMTEventData {
     XIFreeDeviceInfo(info_list);
   }
 
+  bool natural_scroll_enabled() const { return natural_scroll_enabled_; }
   void set_natural_scroll_enabled(bool enabled) {
     natural_scroll_enabled_ = enabled;
+  }
+
+  bool IsTouchpadXInputEvent(const base::NativeEvent& native_event) {
+    if (native_event->type != GenericEvent)
+      return false;
+
+    XIDeviceEvent* xievent =
+        static_cast<XIDeviceEvent*>(native_event->xcookie.data);
+    return touchpads_[xievent->sourceid];
   }
 
   float GetNaturalScrollFactor(int deviceid) {
@@ -406,23 +403,6 @@ int GetEventFlagsForButton(int button) {
   }
 }
 
-void DetectAltClick(XIDeviceEvent* xievent) {
-  if ((xievent->evtype == XI_ButtonPress ||
-      xievent->evtype == XI_ButtonRelease) &&
-        (xievent->mods.effective & Mod1Mask) &&
-        xievent->detail == 1) {
-    xievent->mods.effective &= ~Mod1Mask;
-    xievent->detail = 3;
-    if (xievent->evtype == XI_ButtonRelease) {
-      // On the release clear the left button from the existing state and the
-      // mods, and set the right button.
-      XISetMask(xievent->buttons.mask, 3);
-      XIClearMask(xievent->buttons.mask, 1);
-      xievent->mods.effective &= ~Button1Mask;
-    }
-  }
-}
-
 int GetButtonMaskForX2Event(XIDeviceEvent* xievent) {
   int buttonflags = 0;
   for (int i = 0; i < 8 * xievent->buttons.mask_len; i++) {
@@ -508,17 +488,21 @@ float GetTouchParamFromXEvent(XEvent* xev,
   return default_value;
 }
 
-#if !defined(TOOLKIT_USES_GTK)
 Atom GetNoopEventAtom() {
   return XInternAtom(
       base::MessagePumpX::GetDefaultXDisplay(),
       "noop", False);
 }
-#endif
 
 }  // namespace
 
 namespace ui {
+
+void UpdateDeviceList() {
+  Display* display = GetXDisplay();
+  CMTEventData::GetInstance()->UpdateDeviceList(display);
+  TouchFactory::GetInstance()->UpdateDeviceList(display);
+}
 
 EventType EventTypeFromNative(const base::NativeEvent& native_event) {
   switch (native_event->type) {
@@ -553,9 +537,6 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
 
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-
-      // Map Alt+Button1 to Button3
-      DetectAltClick(xievent);
 
       if (factory->IsTouchDevice(xievent->sourceid))
         return GetTouchEventType(native_event);
@@ -614,9 +595,6 @@ int EventFlagsFromNative(const base::NativeEvent& native_event) {
     case GenericEvent: {
       XIDeviceEvent* xievent =
           static_cast<XIDeviceEvent*>(native_event->xcookie.data);
-
-      // Map Alt+Button1 to Button3.
-      DetectAltClick(xievent);
 
       const bool touch =
           TouchFactory::GetInstance()->IsTouchDevice(xievent->sourceid);
@@ -753,19 +731,9 @@ int GetMouseWheelOffset(const base::NativeEvent& native_event) {
 
   switch (button) {
     case 4:
-#if defined(OS_CHROMEOS)
-      return kTouchpadScrollAmount;
-    case 8:
-#endif
       return kWheelScrollAmount;
-
     case 5:
-#if defined(OS_CHROMEOS)
-      return -kTouchpadScrollAmount;
-    case 9:
-#endif
       return -kWheelScrollAmount;
-
     default:
       // TODO(derat): Do something for horizontal scrolls (buttons 6 and 7)?
       return 0;
@@ -857,20 +825,17 @@ void SetNaturalScroll(bool enabled) {
   CMTEventData::GetInstance()->set_natural_scroll_enabled(enabled);
 }
 
-void UpdateDeviceList() {
-  Display* display = GetXDisplay();
-  CMTEventData::GetInstance()->UpdateDeviceList(display);
-  TouchFactory::GetInstance()->UpdateDeviceList(display);
+bool IsNaturalScrollEnabled() {
+  return CMTEventData::GetInstance()->natural_scroll_enabled();
+}
+
+bool IsTouchpadEvent(const base::NativeEvent& event) {
+  return CMTEventData::GetInstance()->IsTouchpadXInputEvent(event);
 }
 
 bool IsNoopEvent(const base::NativeEvent& event) {
-#if defined(TOOLKIT_USES_GTK)
-  NOTREACHED();
-  return false;
-#else
   return (event->type == ClientMessage &&
       event->xclient.message_type == GetNoopEventAtom());
-#endif
 }
 
 base::NativeEvent CreateNoopEvent() {
@@ -883,14 +848,9 @@ base::NativeEvent CreateNoopEvent() {
     noop->xclient.format = 8;
     DCHECK(!noop->xclient.display);
   }
-  // TODO(oshima): Remove ifdef once gtk is removed from views.
-#if defined(TOOLKIT_USES_GTK)
-  NOTREACHED();
-#else
   // Make sure we use atom from current xdisplay, which may
   // change during the test.
   noop->xclient.message_type = GetNoopEventAtom();
-#endif
   return noop;
 }
 

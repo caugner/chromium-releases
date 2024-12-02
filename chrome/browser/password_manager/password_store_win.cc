@@ -39,6 +39,9 @@ class FormGetLoginsRequest : public PasswordStore::GetLoginsRequest {
   }
   bool IsLoginsRequest() const { return !!form_.get(); }
 
+ protected:
+  virtual ~FormGetLoginsRequest() {}
+
  private:
   scoped_ptr<PasswordForm> form_;
 };
@@ -168,7 +171,7 @@ void PasswordStoreWin::DBHandler::OnWebDataServiceRequestDone(
 PasswordStoreWin::PasswordStoreWin(LoginDatabase* login_database,
                                    Profile* profile,
                                    WebDataService* web_data_service)
-    : PasswordStoreDefault(login_database, profile, web_data_service) {
+    : PasswordStoreDefault(login_database, profile) {
   db_handler_.reset(new DBHandler(web_data_service, this));
 }
 

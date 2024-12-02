@@ -24,7 +24,7 @@ std::string BrowserListTabContentsProvider::GetDiscoveryPageHTML() {
   std::set<Profile*> profiles;
   for (BrowserList::const_iterator it = BrowserList::begin(),
        end = BrowserList::end(); it != end; ++it) {
-    profiles.insert((*it)->GetProfile());
+    profiles.insert((*it)->profile());
   }
   for (std::set<Profile*>::iterator it = profiles.begin();
        it != profiles.end(); ++it) {
@@ -41,13 +41,6 @@ std::string BrowserListTabContentsProvider::GetDiscoveryPageHTML() {
   }
   return ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_DEVTOOLS_DISCOVERY_PAGE_HTML).as_string();
-}
-
-net::URLRequestContext*
-BrowserListTabContentsProvider::GetURLRequestContext() {
-  net::URLRequestContextGetter* getter =
-      Profile::Deprecated::GetDefaultRequestContext();
-  return getter ? getter->GetURLRequestContext() : NULL;
 }
 
 bool BrowserListTabContentsProvider::BundlesFrontendResources() {

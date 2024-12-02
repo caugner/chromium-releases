@@ -31,10 +31,10 @@
 //
 // The DownloadFileManager tracks download requests, mapping from a download
 // ID (unique integer created in the IO thread) to the DownloadManager for the
-// tab (profile) where the download was initiated. In the event of a tab closure
-// during a download, the DownloadFileManager will continue to route data to the
-// appropriate DownloadManager. In progress downloads are cancelled for a
-// DownloadManager that exits (such as when closing a profile).
+// contents (profile) where the download was initiated. In the event of a
+// contents closure during a download, the DownloadFileManager will continue to
+// route data to the appropriate DownloadManager. In progress downloads are
+// cancelled for a DownloadManager that exits (such as when closing a profile).
 
 #ifndef CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_MANAGER_H_
 #define CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_MANAGER_H_
@@ -192,10 +192,6 @@ class CONTENT_EXPORT DownloadFileManager
 
   // A map of all in progress downloads.  It owns the download files.
   DownloadFileMap downloads_;
-
-  // Schedule periodic updates of the download progress. This timer
-  // is controlled from the FILE thread, and posts updates to the UI thread.
-  base::RepeatingTimer<DownloadFileManager> update_timer_;
 
   scoped_ptr<DownloadFileFactory> download_file_factory_;
 

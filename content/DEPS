@@ -36,19 +36,25 @@ include_rules = [
   "-tools",
 
   # Allow inclusion of third-party code:
+  "+third_party/angle",
+  "+third_party/flac",
   "+third_party/gpsd",
   "+third_party/mozilla",
   "+third_party/npapi/bindings",
+  "+third_party/skia",
   "+third_party/sqlite",
   "+third_party/tcmalloc",
   "+third_party/khronos",
-  # Allow inclusion of WebKit API files.
+  "+third_party/webrtc",
+  "+third_party/WebKit/Source/Platform/chromium",
   "+third_party/WebKit/Source/WebKit/chromium",
 
   # Aura is analogous to Win32 or a Gtk, so it is allowed.
   "+ui/aura",
   "+ui/base",
+  "+ui/compositor",
   "+ui/gfx",
+  "+ui/surface",
   # Content knows about grd files, but the specifics of how to get a resource
   # given its id is left to the embedder.
   "-ui/base/l10n",
@@ -58,9 +64,9 @@ include_rules = [
 
   # Content shouldn't depend on views. While we technically don't need this
   # line, since the top level DEPS doesn't allow it, we add it to make this
-  # explicit. 
+  # explicit.
   "-views",
-  
+
   # Aura Shell consumes views, so it too is banned.
   "-ui/aura_shell",
 

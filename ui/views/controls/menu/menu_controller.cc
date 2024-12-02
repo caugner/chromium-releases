@@ -16,6 +16,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_controller_delegate.h"
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 #include "ui/views/controls/menu/submenu_view.h"
@@ -26,6 +27,7 @@
 
 #if defined(USE_AURA)
 #include "ui/aura/client/dispatcher_client.h"
+#include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
 #endif
@@ -306,9 +308,10 @@ MenuItemView* MenuController::Run(Widget* parent,
     // notification when the drag has finished.
     StartCancelAllTimer();
     return NULL;
-  } else if (button) {
-    menu_button_ = button;
   }
+
+  if (button)
+    menu_button_ = button;
 
   // Make sure Chrome doesn't attempt to shut down while the menu is showing.
   if (ViewsDelegate::views_delegate)
@@ -318,10 +321,12 @@ MenuItemView* MenuController::Run(Widget* parent,
   // one) the menus are run from a task. If we don't do this and are invoked
   // from a task none of the tasks we schedule are processed and the menu
   // appears totally broken.
+  message_loop_depth_++;
+  DCHECK_LE(message_loop_depth_, 2);
 #if defined(USE_AURA)
-  aura::client::GetDispatcherClient(
-      parent->GetNativeWindow()->GetRootWindow())->
-          RunWithDispatcher(this, parent->GetNativeWindow(), true);
+  root_window_ = parent->GetNativeWindow()->GetRootWindow();
+  aura::client::GetDispatcherClient(root_window_)->
+      RunWithDispatcher(this, parent->GetNativeWindow(), true);
 #else
   {
     MessageLoopForUI* loop = MessageLoopForUI::current();
@@ -329,6 +334,7 @@ MenuItemView* MenuController::Run(Widget* parent,
     loop->RunWithDispatcher(this);
   }
 #endif
+  message_loop_depth_--;
 
   if (ViewsDelegate::views_delegate)
     ViewsDelegate::views_delegate->ReleaseRef();
@@ -890,7 +896,6 @@ bool MenuController::Dispatch(const MSG& msg) {
     }
     case WM_CHAR:
       return !SelectByChar(static_cast<char16>(msg.wParam));
-
     case WM_KEYUP:
       return true;
 
@@ -913,43 +918,26 @@ bool MenuController::Dispatch(const MSG& msg) {
   DispatchMessage(&msg);
   return exit_type_ == EXIT_NONE;
 }
-#elif defined(USE_WAYLAND)
-base::MessagePumpDispatcher::DispatchStatus
-    MenuController::Dispatch(base::wayland::WaylandEvent* ev) {
-  return exit_type_ != EXIT_NONE ?
-      base::MessagePumpDispatcher::EVENT_QUIT :
-      base::MessagePumpDispatcher::EVENT_PROCESSED;
-}
-
 #elif defined(USE_AURA)
-base::MessagePumpDispatcher::DispatchStatus
-    MenuController::Dispatch(XEvent* xev) {
+bool MenuController::Dispatch(const base::NativeEvent& event) {
   if (exit_type_ == EXIT_ALL || exit_type_ == EXIT_DESTROYED) {
-    aura::Env::GetInstance()->GetDispatcher()->Dispatch(xev);
-    return base::MessagePumpDispatcher::EVENT_QUIT;
+    aura::Env::GetInstance()->GetDispatcher()->Dispatch(event);
+    return false;
   }
-  switch (ui::EventTypeFromNative(xev)) {
+  switch (ui::EventTypeFromNative(event)) {
     case ui::ET_KEY_PRESSED:
-      if (!OnKeyDown(ui::KeyboardCodeFromNative(xev)))
-        return base::MessagePumpDispatcher::EVENT_QUIT;
+      if (!OnKeyDown(ui::KeyboardCodeFromNative(event)))
+        return false;
 
-      return SelectByChar(ui::KeyboardCodeFromNative(xev)) ?
-          base::MessagePumpDispatcher::EVENT_QUIT :
-          base::MessagePumpDispatcher::EVENT_PROCESSED;
+      return !SelectByChar(ui::KeyboardCodeFromNative(event));
     case ui::ET_KEY_RELEASED:
-      return base::MessagePumpDispatcher::EVENT_PROCESSED;
+      return true;
     default:
       break;
   }
 
-  // TODO(oshima): Update Windows' Dispatcher to return DispatchStatus
-  // instead of bool.
-  if (aura::Env::GetInstance()->GetDispatcher()->Dispatch(xev) ==
-      base::MessagePumpDispatcher::EVENT_IGNORED)
-    return EVENT_IGNORED;
-  return exit_type_ != EXIT_NONE ?
-      base::MessagePumpDispatcher::EVENT_QUIT :
-      base::MessagePumpDispatcher::EVENT_PROCESSED;
+  aura::Env::GetInstance()->GetDispatcher()->Dispatch(event);
+  return exit_type_ == EXIT_NONE;
 }
 #endif
 
@@ -1038,6 +1026,9 @@ MenuController::MenuController(bool blocking,
       drop_target_(NULL),
       drop_position_(MenuDelegate::DROP_UNKNOWN),
       owner_(NULL),
+#if defined(USE_AURA)
+      root_window_(NULL),
+#endif
       possible_drag_(false),
       drag_in_progress_(false),
       valid_drop_coordinates_(false),
@@ -1045,7 +1036,8 @@ MenuController::MenuController(bool blocking,
       showing_submenu_(false),
       menu_button_(NULL),
       active_mouse_view_(NULL),
-      delegate_(delegate) {
+      delegate_(delegate),
+      message_loop_depth_(0) {
   active_instance_ = this;
 }
 
@@ -1090,8 +1082,18 @@ void MenuController::UpdateInitialLocation(
 
   // Calculate the bounds of the monitor we'll show menus on. Do this once to
   // avoid repeated system queries for the info.
-  pending_state_.monitor_bounds = gfx::Screen::GetMonitorWorkAreaNearestPoint(
-      bounds.origin());
+  pending_state_.monitor_bounds = gfx::Screen::GetMonitorNearestPoint(
+      bounds.origin()).work_area();
+#if defined(USE_ASH)
+  if (!pending_state_.monitor_bounds.Contains(bounds)) {
+    // Use the monitor area if the work area doesn't contain the bounds. This
+    // handles showing a menu from the launcher.
+    gfx::Rect monitor_area =
+        gfx::Screen::GetMonitorNearestPoint(bounds.origin()).bounds();
+    if (monitor_area.Contains(bounds))
+      pending_state_.monitor_bounds = monitor_area;
+  }
+#endif
 }
 
 void MenuController::Accept(MenuItemView* item, int mouse_event_flags) {
@@ -1599,7 +1601,7 @@ gfx::Rect MenuController::CalculateMenuBounds(MenuItemView* item,
         x = item_loc.x() + item->width() - kSubmenuHorizontalInset;
       }
     }
-    y = item_loc.y() - SubmenuView::kSubmenuBorderSize;
+    y = item_loc.y() - MenuConfig::instance().submenu_vertical_margin_size;
     if (state_.monitor_bounds.width() != 0) {
       pref.set_height(std::min(pref.height(), state_.monitor_bounds.height()));
       if (y + pref.height() > state_.monitor_bounds.bottom())
@@ -1980,16 +1982,29 @@ void MenuController::SendMouseCaptureLostToActiveView() {
 
 void MenuController::SetExitType(ExitType type) {
   exit_type_ = type;
+  // Exit nested message loops as soon as possible. We do this as
+  // MessageLoop::Dispatcher is only invoked before native events, which means
+  // its entirely possible for a Widget::CloseNow() task to be processed before
+  // the next native message. By using QuitNow() we ensures the nested message
+  // loop returns as soon as possible and avoids having deleted views classes
+  // (such as widgets and rootviews) on the stack when the nested message loop
+  // stops.
+  //
+  // It's safe to invoke QuitNow multiple times, it only effects the current
+  // loop.
+  bool quit_now = exit_type_ != EXIT_NONE && message_loop_depth_;
+
 #if defined(USE_AURA)
-  // On aura, closing menu may not trigger next native event, which
-  // is necessary to exit from nested loop (See Dispatch methods).
-  // Send non-op event so that Dispatch method will always be called.
-  // crbug.com/104684.
-  if (exit_type_ == EXIT_ALL || exit_type_ == EXIT_DESTROYED) {
-    owner_->GetNativeView()->GetRootWindow()->PostNativeEvent(
-        ui::CreateNoopEvent());
-  }
+  // On aura drag and drop runs a nested messgae loop too. If drag and drop is
+  // active and we quit we would prematurely cancel drag and drop, which we
+  // don't want.
+  if (aura::client::GetDragDropClient(root_window_) &&
+      aura::client::GetDragDropClient(root_window_)->IsDragDropInProgress())
+    quit_now = false;
 #endif
+
+  if (quit_now)
+    MessageLoop::current()->QuitNow();
 }
 
 void MenuController::HandleMouseLocation(SubmenuView* source,

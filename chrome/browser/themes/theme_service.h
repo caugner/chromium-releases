@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
@@ -35,7 +36,6 @@ class Image;
 namespace ui {
 class ResourceBundle;
 }
-using ui::ResourceBundle;
 
 #ifdef __OBJC__
 @class NSString;
@@ -160,7 +160,7 @@ class ThemeService : public base::NonThreadSafe,
   virtual bool GetDisplayProperty(int id, int* result) const OVERRIDE;
   virtual bool ShouldUseNativeFrame() const OVERRIDE;
   virtual bool HasCustomImage(int id) const OVERRIDE;
-  virtual RefCountedMemory* GetRawData(int id) const OVERRIDE;
+  virtual base::RefCountedMemory* GetRawData(int id) const OVERRIDE;
 #if defined(OS_MACOSX)
   virtual NSImage* GetNSImageNamed(int id, bool allow_default) const OVERRIDE;
   virtual NSColor* GetNSImageColorNamed(int id,
@@ -282,12 +282,12 @@ class ThemeService : public base::NonThreadSafe,
   // case we don't have a theme pack).
   void BuildFromExtension(const Extension* extension);
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   // Loads an image and flips it horizontally if |rtl_enabled| is true.
   GdkPixbuf* GetPixbufImpl(int id, bool rtl_enabled) const;
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   typedef std::map<int, GdkPixbuf*> GdkPixbufMap;
   mutable GdkPixbufMap gdk_pixbufs_;
 #elif defined(OS_MACOSX)
@@ -302,7 +302,7 @@ class ThemeService : public base::NonThreadSafe,
   mutable NSGradientMap nsgradient_cache_;
 #endif
 
-  ResourceBundle& rb_;
+  ui::ResourceBundle& rb_;
   Profile* profile_;
 
   scoped_refptr<BrowserThemePack> theme_pack_;

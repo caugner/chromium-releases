@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/common/content_settings.h"
@@ -35,6 +36,28 @@ class CookieOptions;
 class TabSpecificContentSettings : public content::WebContentsObserver,
                                    public content::NotificationObserver {
  public:
+  // Classes that want to be notified about site data events must implement
+  // this abstract class and add themselves as observer to the
+  // |TabSpecificContentSettings|.
+  class SiteDataObserver {
+   public:
+    explicit SiteDataObserver(
+        TabSpecificContentSettings* tab_specific_content_settings);
+    virtual ~SiteDataObserver();
+
+    // Called whenever site data is accessed.
+    virtual void OnSiteDataAccessed() = 0;
+
+    TabSpecificContentSettings* tab_specific_content_settings() {
+      return tab_specific_content_settings_;
+    }
+
+   private:
+    TabSpecificContentSettings* tab_specific_content_settings_;
+
+    DISALLOW_COPY_AND_ASSIGN(SiteDataObserver);
+  };
+
   explicit TabSpecificContentSettings(content::WebContents* tab);
 
   virtual ~TabSpecificContentSettings();
@@ -51,6 +74,7 @@ class TabSpecificContentSettings : public content::WebContentsObserver,
   static void CookiesRead(int render_process_id,
                           int render_view_id,
                           const GURL& url,
+                          const GURL& first_party_url,
                           const net::CookieList& cookie_list,
                           bool blocked_by_policy);
 
@@ -61,6 +85,7 @@ class TabSpecificContentSettings : public content::WebContentsObserver,
   static void CookieChanged(int render_process_id,
                             int render_view_id,
                             const GURL& url,
+                            const GURL& first_party_url,
                             const std::string& cookie_line,
                             const net::CookieOptions& options,
                             bool blocked_by_policy);
@@ -182,9 +207,11 @@ class TabSpecificContentSettings : public content::WebContentsObserver,
   // These methods are invoked on the UI thread by the static functions above.
   // Public for testing.
   void OnCookiesRead(const GURL& url,
+                     const GURL& first_party_url,
                      const net::CookieList& cookie_list,
                      bool blocked_by_policy);
   void OnCookieChanged(const GURL& url,
+                       const GURL& first_party_url,
                        const std::string& cookie_line,
                        const net::CookieOptions& options,
                        bool blocked_by_policy);
@@ -203,6 +230,13 @@ class TabSpecificContentSettings : public content::WebContentsObserver,
   void OnGeolocationPermissionSet(const GURL& requesting_frame,
                                   bool allowed);
 
+  // Adds the given |SiteDataObserver|. The |observer| is notified when a
+  // locale shared object, like for example a cookie, is accessed.
+  void AddSiteDataObserver(SiteDataObserver* observer);
+
+  // Removes the given |SiteDataObserver|.
+  void RemoveSiteDataObserver(SiteDataObserver* observer);
+
  private:
   void AddBlockedResource(ContentSettingsType content_type,
                           const std::string& resource_identifier);
@@ -213,6 +247,12 @@ class TabSpecificContentSettings : public content::WebContentsObserver,
   virtual void Observe(int type,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
+
+  // Notifies all registered |SiteDataObserver|s.
+  void NotifySiteDataObservers();
+
+  // All currently registered |SiteDataObserver|.
+  ObserverList<SiteDataObserver, true> observer_list_;
 
   // Stores which content setting types actually have blocked content.
   bool content_blocked_[CONTENT_SETTINGS_NUM_TYPES];

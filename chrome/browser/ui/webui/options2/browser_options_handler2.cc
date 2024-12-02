@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/options2/browser_options_handler2.h"
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/bind.h"
@@ -15,14 +16,13 @@
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "base/value_conversions.h"
 #include "base/values.h"
+#include "base/value_conversions.h"
 #include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/instant/instant_field_trial.h"
 #include "chrome/browser/net/url_fixer_upper.h"
@@ -40,12 +40,15 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/service/service_process_control.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/options/options_util.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_constants.h"
@@ -84,7 +87,6 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/options/take_photo_dialog.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/webui/options2/chromeos/system_settings_provider2.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #endif  // defined(OS_CHROMEOS)
@@ -94,7 +96,7 @@
 #endif  // defined(OS_WIN)
 
 #if defined(TOOLKIT_GTK)
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #endif  // defined(TOOLKIT_GTK)
 
 using content::BrowserThread;
@@ -163,27 +165,26 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "autoOpenFileTypesInfo", IDS_OPTIONS_OPEN_FILE_TYPES_AUTOMATICALLY },
     { "autoOpenFileTypesResetToDefault",
       IDS_OPTIONS_AUTOOPENFILETYPES_RESETTODEFAULT },
-    { "browsingData", IDS_OPTIONS_BROWSING_DATA_GROUP_NAME },  // needed?
     { "changeHomePage", IDS_OPTIONS_CHANGE_HOME_PAGE },
     { "certificatesManageButton", IDS_OPTIONS_CERTIFICATES_MANAGE_BUTTON },
     { "customizeSync", IDS_OPTIONS2_CUSTOMIZE_SYNC_BUTTON_LABEL },
     { "defaultFontSizeLabel", IDS_OPTIONS_DEFAULT_FONT_SIZE_LABEL },
     { "defaultSearchManageEngines", IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES },
     { "defaultZoomFactorLabel", IDS_OPTIONS_DEFAULT_ZOOM_LEVEL_LABEL },
+#if defined(OS_CHROMEOS)
+    { "disableGData", IDS_OPTIONS_DISABLE_GDATA },
+#endif
     { "disableWebServices", IDS_OPTIONS_DISABLE_WEB_SERVICES },
     { "downloadLocationAskForSaveLocation",
       IDS_OPTIONS_DOWNLOADLOCATION_ASKFORSAVELOCATION },
     { "downloadLocationBrowseTitle",
       IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_TITLE },
-    { "downloadLocationBrowseWindowTitle",
-      IDS_OPTIONS_DOWNLOADLOCATION_BROWSE_WINDOW_TITLE },
     { "downloadLocationChangeButton",
       IDS_OPTIONS_DOWNLOADLOCATION_CHANGE_BUTTON },
     { "downloadLocationGroupName", IDS_OPTIONS_DOWNLOADLOCATION_GROUP_NAME },
     { "enableLogging", IDS_OPTIONS_ENABLE_LOGGING },
     { "fontSettingsCustomizeFontsButton",
       IDS_OPTIONS_FONTSETTINGS_CUSTOMIZE_FONTS_BUTTON },
-    { "fontSettingsInfo", IDS_OPTIONS_FONTSETTINGS_INFO },
     { "fontSizeLabelCustom", IDS_OPTIONS_FONT_SIZE_LABEL_CUSTOM },
     { "fontSizeLabelLarge", IDS_OPTIONS_FONT_SIZE_LABEL_LARGE },
     { "fontSizeLabelMedium", IDS_OPTIONS_FONT_SIZE_LABEL_MEDIUM },
@@ -207,7 +208,6 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #endif
     { "linkDoctorPref", IDS_OPTIONS_LINKDOCTOR_PREF },
     { "manageAutofillSettings", IDS_OPTIONS_MANAGE_AUTOFILL_SETTINGS_LINK },
-    { "manageDataDescription", IDS_OPTIONS_MANAGE_DATA_DESCRIPTION },
     { "managePasswords", IDS_OPTIONS_PASSWORDS_MANAGE_PASSWORDS_LINK },
     { "networkPredictionEnabledDescription",
       IDS_NETWORK_PREDICTION_ENABLED_DESCRIPTION },
@@ -233,15 +233,17 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "sectionTitleSync", IDS_SYNC_OPTIONS_GROUP_NAME },
     { "sessionRestoreOverlayMessage", IDS_SESSION_RESTORE_OVERLAY_MESSAGE },
     { "sessionRestoreOverlayTitle", IDS_SESSION_RESTORE_OVERLAY_TITLE },
+    { "spellingConfirmMessage", IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_TEXT },
+    { "spellingConfirmTitle", IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE },
+    { "spellingConfirmEnable", IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_ENABLE },
+    { "spellingConfirmDisable", IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_DISABLE },
+    { "spellingPref", IDS_OPTIONS_SPELLING_PREF },
     { "startupRestoreLastSession", IDS_OPTIONS_STARTUP_RESTORE_LAST_SESSION },
     { "settingsTitle", IDS_SETTINGS_TITLE },
     { "showAdvancedSettings", IDS_SETTINGS_SHOW_ADVANCED_SETTINGS },
-    { "spellingPref", IDS_OPTIONS_SPELLING_PREF },
     { "sslCheckRevocation", IDS_OPTIONS_SSL_CHECKREVOCATION },
-    { "sslGroupDescription", IDS_OPTIONS_SSL_GROUP_DESCRIPTION },
     { "startupSetPages", IDS_OPTIONS2_STARTUP_SET_PAGES },
     { "startupShowNewTab", IDS_OPTIONS2_STARTUP_SHOW_NEWTAB },
-    { "startupShowLastSession", IDS_OPTIONS_STARTUP_SHOW_LAST_SESSION },
     { "startupShowPages", IDS_OPTIONS2_STARTUP_SHOW_PAGES },
     { "suggestPref", IDS_OPTIONS_SUGGEST_PREF },
     { "syncButtonTextInProgress", IDS_SYNC_NTP_SETUP_IN_PROGRESS },
@@ -249,7 +251,6 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "themesGallery", IDS_THEMES_GALLERY_BUTTON },
     { "themesGalleryURL", IDS_THEMES_GALLERY_URL },
     { "tabsToLinksPref", IDS_OPTIONS_TABS_TO_LINKS_PREF },
-    { "toolbarGroupName", IDS_OPTIONS2_TOOLBAR_GROUP_NAME },
     { "toolbarShowBookmarksBar", IDS_OPTIONS_TOOLBAR_SHOW_BOOKMARKS_BAR },
     { "toolbarShowHomeButton", IDS_OPTIONS_TOOLBAR_SHOW_HOME_BUTTON },
     { "translateEnableTranslate",
@@ -277,13 +278,20 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "datetimeTitle", IDS_OPTIONS_SETTINGS_SECTION_TITLE_DATETIME },
     { "deviceGroupDescription", IDS_OPTIONS_DEVICE_GROUP_DESCRIPTION },
     { "deviceGroupPointer", IDS_OPTIONS2_DEVICE_GROUP_POINTER_SECTION },
+    { "mouseSpeed", IDS_OPTIONS2_SETTINGS_MOUSE_SPEED_DESCRIPTION },
+    { "touchpadSpeed", IDS_OPTIONS2_SETTINGS_TOUCHPAD_SPEED_DESCRIPTION },
     { "enableScreenlock", IDS_OPTIONS_ENABLE_SCREENLOCKER_CHECKBOX },
     { "internetOptionsButtonTitle", IDS_OPTIONS_INTERNET_OPTIONS_BUTTON_TITLE },
     { "keyboardSettingsButtonTitle",
       IDS_OPTIONS2_DEVICE_GROUP_KEYBOARD_SETTINGS_BUTTON_TITLE },
     { "manageAccountsButtonTitle", IDS_OPTIONS_ACCOUNTS_BUTTON_TITLE },
-    { "pointerSettingsButtonTitle",
-      IDS_OPTIONS2_DEVICE_GROUP_POINTER_SETTINGS_BUTTON_TITLE },
+    { "noPointingDevices", IDS_OPTIONS_NO_POINTING_DEVICES },
+    { "touchpadSettingsButtonTitle",
+        IDS_OPTIONS_POINTER_TOUCHPAD_OVERLAY_TITLE },
+    { "mouseSettingsButtonTitle",
+        IDS_OPTIONS_POINTER_MOUSE_OVERLAY_TITLE },
+    { "touchpadMouseSettingsButtonTitle",
+        IDS_OPTIONS_POINTER_TOUCHPAD_MOUSE_OVERLAY_TITLE },
     { "sectionTitleDevice", IDS_OPTIONS_DEVICE_GROUP_NAME },
     { "sectionTitleInternet", IDS_OPTIONS_INTERNET_OPTIONS_GROUP_LABEL },
     { "syncOverview", IDS_SYNC_OVERVIEW },
@@ -360,7 +368,7 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #endif
 
   // Pass along sync status early so it will be available during page init.
-  values->Set("syncData", GetSyncStateDictionary());
+  values->Set("syncData", GetSyncStateDictionary().release());
 
   values->SetString("privacyLearnMoreURL", chrome::kPrivacyLearnMoreURL);
 
@@ -386,6 +394,9 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
   values->SetBoolean("multiple_profiles",
       g_browser_process->profile_manager()->GetNumberOfProfiles() > 1);
 #endif
+
+  if (multiprofile_)
+    values->Set("profilesInfo", GetProfilesInfoList().release());
 }
 
 void BrowserOptionsHandler::RegisterCloudPrintValues(DictionaryValue* values) {
@@ -404,13 +415,11 @@ void BrowserOptionsHandler::RegisterCloudPrintValues(DictionaryValue* values) {
       IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_LABEL,
       l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
   values->SetString("cloudPrintConnectorDisabledButton",
-      l10n_util::GetStringFUTF16(
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_BUTTON,
-      l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
+      l10n_util::GetStringUTF16(
+      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_DISABLED_BUTTON));
   values->SetString("cloudPrintConnectorEnabledButton",
-      l10n_util::GetStringFUTF16(
-      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLED_BUTTON,
-      l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT)));
+      l10n_util::GetStringUTF16(
+      IDS_OPTIONS_CLOUD_PRINT_CONNECTOR_ENABLED_BUTTON));
 #endif
 }
 
@@ -528,8 +537,8 @@ void BrowserOptionsHandler::RegisterMessages() {
 }
 
 void BrowserOptionsHandler::OnStateChanged() {
-  scoped_ptr<DictionaryValue> value(GetSyncStateDictionary());
-  web_ui()->CallJavascriptFunction("BrowserOptions.updateSyncState", *value);
+  web_ui()->CallJavascriptFunction("BrowserOptions.updateSyncState",
+                                   *GetSyncStateDictionary());
 
   SendProfilesInfo();
 }
@@ -545,7 +554,7 @@ void BrowserOptionsHandler::InitializeHandler() {
   OnStateChanged();
 
   // Create our favicon data source.
-  profile->GetChromeURLDataManager()->AddDataSource(
+  ChromeURLDataManager::AddDataSource(profile,
       new FaviconSource(profile, FaviconSource::FAVICON));
 
   default_browser_policy_.Init(prefs::kDefaultBrowserSettingEnabled,
@@ -607,9 +616,6 @@ void BrowserOptionsHandler::InitializePage() {
   OnTemplateURLServiceChanged();
   ObserveThemeChanged();
 
-  if (multiprofile_)
-    SendProfilesInfo();
-
   SetupMetricsReportingCheckbox();
   SetupMetricsReportingSettingVisibility();
   SetupFontSizeSelector();
@@ -649,9 +655,10 @@ void BrowserOptionsHandler::CheckAutoLaunch(
       base::Bind(&BrowserOptionsHandler::CheckAutoLaunchCallback,
                  weak_this,
                  auto_launch_trial::IsInAutoLaunchGroup(),
-                 auto_launch_util::WillLaunchAtLogin(
-                     FilePath(),
-                     profile_path.BaseName().value())));
+                 auto_launch_util::AutoStartRequested(
+                     profile_path.BaseName().value(),
+                     true,  // Window requested.
+                     FilePath())));
 #endif
 }
 
@@ -884,34 +891,29 @@ void BrowserOptionsHandler::ToggleAutoLaunch(const ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   content::BrowserThread::PostTask(
       content::BrowserThread::FILE, FROM_HERE,
-      base::Bind(&auto_launch_util::SetWillLaunchAtLogin, enable,
-                 FilePath(), profile->GetPath().BaseName().value()));
+      enable ? base::Bind(&auto_launch_util::EnableForegroundStartAtLogin,
+                          profile->GetPath().BaseName().value(), FilePath()) :
+               base::Bind(&auto_launch_util::DisableForegroundStartAtLogin,
+                          profile->GetPath().BaseName().value()));
 #endif  // OS_WIN
 }
 
 void BrowserOptionsHandler::GetInstantFieldTrialStatus(const ListValue* args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   base::FundamentalValue enabled(
-      InstantFieldTrial::IsInstantExperiment(profile) &&
-      !InstantFieldTrial::IsHiddenExperiment(profile));
+      !profile->GetPrefs()->GetBoolean(prefs::kInstantEnabled) &&
+      InstantFieldTrial::GetMode(profile) == InstantFieldTrial::INSTANT);
   web_ui()->CallJavascriptFunction("BrowserOptions.setInstantFieldTrialStatus",
                                    enabled);
 }
 
-void BrowserOptionsHandler::SendProfilesInfo() {
-  // Set profile creation text and button if multi-profiles switch is on.
-  scoped_ptr<Value> visible(Value::CreateBooleanValue(multiprofile_));
-  web_ui()->CallJavascriptFunction("BrowserOptions.setProfilesSectionVisible",
-                                   *visible);
-
-  if (!multiprofile_)
-    return;
-
+scoped_ptr<ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
-  ListValue profile_info_list;
+  scoped_ptr<ListValue> profile_info_list(new ListValue);
   FilePath current_profile_path =
       web_ui()->GetWebContents()->GetBrowserContext()->GetPath();
+
   for (size_t i = 0, e = cache.GetNumberOfProfiles(); i < e; ++i) {
     DictionaryValue* profile_value = new DictionaryValue();
     FilePath profile_path = cache.GetPathOfProfileAtIndex(i);
@@ -934,11 +936,15 @@ void BrowserOptionsHandler::SendProfilesInfo() {
                                cache.GetDefaultAvatarIconUrl(icon_index));
     }
 
-    profile_info_list.Append(profile_value);
+    profile_info_list->Append(profile_value);
   }
 
+  return profile_info_list.Pass();
+}
+
+void BrowserOptionsHandler::SendProfilesInfo() {
   web_ui()->CallJavascriptFunction("BrowserOptions.setProfilesInfo",
-                                   profile_info_list);
+                                   *GetProfilesInfoList());
 }
 
 void BrowserOptionsHandler::CreateProfile(const ListValue* args) {
@@ -952,7 +958,7 @@ void BrowserOptionsHandler::CreateProfile(const ListValue* args) {
 void BrowserOptionsHandler::ObserveThemeChanged() {
   Profile* profile = Profile::FromWebUI(web_ui());
 #if defined(TOOLKIT_GTK)
-  ThemeServiceGtk* theme_service = ThemeServiceGtk::GetFrom(profile);
+  GtkThemeService* theme_service = GtkThemeService::GetFrom(profile);
   bool is_gtk_theme = theme_service->UsingNativeTheme();
   base::FundamentalValue gtk_enabled(!is_gtk_theme);
   web_ui()->CallJavascriptFunction("BrowserOptions.setGtkThemeButtonEnabled",
@@ -994,13 +1000,13 @@ void BrowserOptionsHandler::UpdateAccountPicture() {
 }
 #endif
 
-DictionaryValue* BrowserOptionsHandler::GetSyncStateDictionary() {
-  DictionaryValue* sync_status = new DictionaryValue;
+scoped_ptr<DictionaryValue> BrowserOptionsHandler::GetSyncStateDictionary() {
+  scoped_ptr<DictionaryValue> sync_status(new DictionaryValue);
   ProfileSyncService* service(ProfileSyncServiceFactory::
       GetInstance()->GetForProfile(Profile::FromWebUI(web_ui())));
   sync_status->SetBoolean("syncSystemEnabled", !!service);
   if (!service)
-    return sync_status;
+    return sync_status.Pass();
 
   sync_status->SetBoolean("setupCompleted",
                           service->HasSyncSetupCompleted());
@@ -1008,8 +1014,11 @@ DictionaryValue* BrowserOptionsHandler::GetSyncStateDictionary() {
 
   string16 status_label;
   string16 link_label;
+  SigninManager* signin = SigninManagerFactory::GetForProfile(
+      Profile::FromWebUI(web_ui()));
+
   bool status_has_error = sync_ui_util::GetStatusLabels(
-      service, sync_ui_util::WITH_HTML, &status_label, &link_label) ==
+      service, *signin, sync_ui_util::WITH_HTML, &status_label, &link_label) ==
           sync_ui_util::SYNC_ERROR;
   sync_status->SetString("statusText", status_label);
   sync_status->SetString("actionLinkText", link_label);
@@ -1022,7 +1031,7 @@ DictionaryValue* BrowserOptionsHandler::GetSyncStateDictionary() {
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAutologin) &&
       service->AreCredentialsAvailable());
 
-  return sync_status;
+  return sync_status.Pass();
 }
 
 void BrowserOptionsHandler::HandleSelectDownloadLocation(
@@ -1050,6 +1059,18 @@ void BrowserOptionsHandler::OnCloudPrintSetupClosed() {
     SetupCloudPrintConnectorSection();
 #endif
 }
+
+#if defined(OS_CHROMEOS)
+void BrowserOptionsHandler::TouchpadExists(bool exists) {
+  base::FundamentalValue val(exists);
+  web_ui()->CallJavascriptFunction("BrowserOptions.showTouchpadControls", val);
+}
+
+void BrowserOptionsHandler::MouseExists(bool exists) {
+  base::FundamentalValue val(exists);
+  web_ui()->CallJavascriptFunction("BrowserOptions.showMouseControls", val);
+}
+#endif
 
 void BrowserOptionsHandler::HandleAutoOpenButton(const ListValue* args) {
   content::RecordAction(UserMetricsAction("Options_ResetAutoOpenFiles"));

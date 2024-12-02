@@ -14,6 +14,7 @@
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -48,6 +49,7 @@ static const int kHorizontalTextPadding = 2;  // Pixels
 static const int kVerticalPadding = 3;        // Pixels
 static const int kVerticalTextSpacer = 2;     // Pixels
 static const int kVerticalTextPadding = 2;    // Pixels
+static const int kTooltipMaxWidth = 800;      // Pixels
 
 // We add some padding before the left image so that the progress animation icon
 // hides the corners of the left image.
@@ -104,7 +106,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   DCHECK(download_);
   download_->AddObserver(this);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   BodyImageSet normal_body_image_set = {
     rb.GetBitmapNamed(IDR_DOWNLOAD_BUTTON_LEFT_TOP),
@@ -182,9 +184,8 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   malicious_mode_body_image_set_ = normal_body_image_set;
 
   LoadIcon();
-  tooltip_text_ = download_->GetFileNameToReportUser().LossyDisplayName();
 
-  font_ = ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
+  font_ = rb.GetFont(ui::ResourceBundle::BaseFont);
   box_height_ = std::max<int>(2 * kVerticalPadding + font_.GetHeight() +
                                   kVerticalTextPadding + font_.GetHeight(),
                               2 * kVerticalPadding +
@@ -200,6 +201,8 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   drop_hover_animation_.reset(new ui::SlideAnimation(this));
 
   UpdateDropDownButtonPosition();
+
+  tooltip_text_ = model_->GetTooltipText(font_, kTooltipMaxWidth);
 
   if (model_->IsDangerous())
     ShowWarningDialog();
@@ -301,6 +304,13 @@ void DownloadItemView::OnDownloadUpdated(DownloadItem* download) {
     }
     status_text_ = status_text;
   }
+
+  string16 new_tip = model_->GetTooltipText(font_, kTooltipMaxWidth);
+  if (new_tip != tooltip_text_) {
+    tooltip_text_ = new_tip;
+    TooltipTextChanged();
+  }
+
   UpdateAccessibleName();
 
   // We use the parent's (DownloadShelfView's) SchedulePaint, since there
@@ -517,10 +527,13 @@ bool DownloadItemView::OnKeyPressed(const views::KeyEvent& event) {
 
 bool DownloadItemView::GetTooltipText(const gfx::Point& p,
                                       string16* tooltip) const {
-  if (tooltip_text_.empty())
+  if (IsShowingWarningDialog()) {
+    tooltip->clear();
     return false;
+  }
 
   tooltip->assign(tooltip_text_);
+
   return true;
 }
 
@@ -988,11 +1001,12 @@ void DownloadItemView::ClearWarningDialog() {
 
   // We need to load the icon now that the download_ has the real path.
   LoadIcon();
-  tooltip_text_ = download_->GetFileNameToReportUser().LossyDisplayName();
 
   // Force the shelf to layout again as our size has changed.
   parent_->Layout();
   parent_->SchedulePaint();
+
+  TooltipTextChanged();
 }
 
 void DownloadItemView::ShowWarningDialog() {
@@ -1001,7 +1015,6 @@ void DownloadItemView::ShowWarningDialog() {
 
   body_state_ = NORMAL;
   drop_down_state_ = NORMAL;
-  tooltip_text_.clear();
   if (mode_ == DANGEROUS_MODE) {
     save_button_ = new views::NativeTextButton(
         this, model_->GetWarningConfirmButtonText());
@@ -1013,7 +1026,7 @@ void DownloadItemView::ShowWarningDialog() {
   discard_button_->set_ignore_minimum_size(true);
   AddChildView(discard_button_);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   // The dangerous download label text and icon are different under
   // different cases.
   if (mode_ == MALICIOUS_MODE) {
@@ -1030,6 +1043,7 @@ void DownloadItemView::ShowWarningDialog() {
   AddChildView(dangerous_download_label_);
   SizeLabelToMinWidth();
   UpdateDropDownButtonPosition();
+  TooltipTextChanged();
 }
 
 gfx::Size DownloadItemView::GetButtonSize() {

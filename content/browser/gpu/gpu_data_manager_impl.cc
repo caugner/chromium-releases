@@ -4,15 +4,10 @@
 
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 
-#if defined(OS_MACOSX)
-#include <CoreGraphics/CGDisplayConfiguration.h>
-#endif
-
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
-#include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
@@ -31,26 +26,6 @@
 using content::BrowserThread;
 using content::GpuDataManagerObserver;
 using content::GpuFeatureType;
-
-namespace {
-
-#if defined(OS_MACOSX)
-void DisplayReconfigCallback(CGDirectDisplayID display,
-                             CGDisplayChangeSummaryFlags flags,
-                             void* gpu_data_manager) {
-  // TODO(zmo): this logging is temporary for crbug 88008 and will be removed.
-  LOG(INFO) << "Display re-configuration: flags = 0x"
-            << base::StringPrintf("%04x", flags);
-  if (flags & kCGDisplayAddFlag) {
-    GpuDataManagerImpl* manager =
-        reinterpret_cast<GpuDataManagerImpl*>(gpu_data_manager);
-    DCHECK(manager);
-    manager->HandleGpuSwitch();
-  }
-}
-#endif
-
-}  // namespace anonymous
 
 // static
 content::GpuDataManager* content::GpuDataManager::GetInstance() {
@@ -88,16 +63,9 @@ void GpuDataManagerImpl::Initialize() {
       gpu_info_ = gpu_info;
     }
   }
-
-#if defined(OS_MACOSX)
-  CGDisplayRegisterReconfigurationCallback(DisplayReconfigCallback, this);
-#endif
 }
 
 GpuDataManagerImpl::~GpuDataManagerImpl() {
-#if defined(OS_MACOSX)
-  CGDisplayRemoveReconfigurationCallback(DisplayReconfigCallback, this);
-#endif
 }
 
 void GpuDataManagerImpl::RequestCompleteGpuInfoIfNeeded() {
@@ -239,6 +207,12 @@ void GpuDataManagerImpl::AppendGpuCommandLine(
     base::AutoLock auto_lock(gpu_info_lock_);
     if (gpu_info_.optimus)
       command_line->AppendSwitch(switches::kReduceGpuSandbox);
+    if (gpu_info_.amd_switchable) {
+      // The image transport surface currently doesn't work with AMD Dynamic
+      // Switchable graphics.
+      command_line->AppendSwitch(switches::kReduceGpuSandbox);
+      command_line->AppendSwitch(switches::kDisableImageTransportSurface);
+    }
   }
 }
 
@@ -246,18 +220,6 @@ void GpuDataManagerImpl::SetGpuFeatureType(GpuFeatureType feature_type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   UpdateGpuFeatureType(feature_type);
   preliminary_gpu_feature_type_ = gpu_feature_type_;
-}
-
-void GpuDataManagerImpl::HandleGpuSwitch() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  content::GPUInfo gpu_info;
-  gpu_info_collector::CollectVideoCardInfo(&gpu_info);
-  LOG(INFO) << "Switching to use GPU: vendor_id = 0x"
-            << base::StringPrintf("%04x", gpu_info.vendor_id)
-            << ", device_id = 0x"
-            << base::StringPrintf("%04x", gpu_info.device_id);
-  // TODO(zmo): update gpu_info_, re-run blacklist logic, maybe close and
-  // relaunch GPU process.
 }
 
 void GpuDataManagerImpl::NotifyGpuInfoUpdate() {
@@ -340,6 +302,7 @@ bool GpuDataManagerImpl::Merge(content::GPUInfo* object,
     object->finalized = other.finalized;
     object->initialization_time = other.initialization_time;
     object->optimus |= other.optimus;
+    object->amd_switchable |= other.amd_switchable;
 
     if (object->driver_vendor.empty()) {
       changed |= object->driver_vendor != other.driver_vendor;

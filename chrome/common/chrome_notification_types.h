@@ -42,6 +42,14 @@ enum NotificationType {
   // valid for the duration of this call.
   NOTIFICATION_BROWSER_CLOSED,
 
+  // This message is sent when closing a browser has been cancelled, either by
+  // the user cancelling a beforeunload dialog, or IsClosingPermitted()
+  // disallowing closing. This notification implies that no BROWSER_CLOSING or
+  // BROWSER_CLOSED notification will be sent.
+  // The source is a Source<Browser> containing the affected browser. No details
+  // are expected.
+  NOTIFICATION_BROWSER_CLOSE_CANCELLED,
+
   // Indicates that a top window has been closed.  The source is the HWND
   // that was closed, no details are expected.
   NOTIFICATION_WINDOW_CLOSED,
@@ -71,10 +79,10 @@ enum NotificationType {
   // traversal. The source is the browser, there are no details.
   NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
 
-  // Sent after an HtmlDialog dialog has been shown. The source is the
+  // Sent after an WebDialog dialog has been shown. The source is the
   // dialog. The details is a Details<RenderViewHost> with a pointer to the RVH
   // for the shown dialog.
-  NOTIFICATION_HTML_DIALOG_SHOWN,
+  NOTIFICATION_WEB_DIALOG_SHOWN,
 
   // A new tab is created from an existing tab to serve as a target of a
   // navigation that is about to happen. The source will be a Source<Profile>
@@ -126,14 +134,34 @@ enum NotificationType {
   // MetricEventDurationDetails.
   NOTIFICATION_METRIC_EVENT_DURATION,
 
-  // This notification is sent when TabContents::SetAppExtension is invoked.
-  // The source is the ExtensionTabHelper SetAppExtension was invoked on.
+  // This notification is sent when ExtensionTabHelper::SetExtensionApp is
+  // invoked. The source is the ExtensionTabHelper SetExtensionApp was invoked
+  // on.
   NOTIFICATION_TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
 
   // Notification posted when the element that is focused and currently accepts
   // keyboard input inside the webpage has been touched.  The source is the
   // RenderViewHost and the details are not used.
   NOTIFICATION_FOCUSED_EDITABLE_NODE_TOUCHED,
+
+  // Tabs --------------------------------------------------------------------
+
+  // Sent when a tab is added to a WebContentsDelegate. The source is the
+  // WebContentsDelegate and the details is the added WebContents.
+  NOTIFICATION_TAB_ADDED,
+
+  // This notification is sent after a tab has been appended to the tab_strip.
+  // The source is a Source<TabContentsWrapper> of the tab being added. There
+  // are no details.
+  NOTIFICATION_TAB_PARENTED,
+
+  // This message is sent before a tab has been closed.  The source is a
+  // Source<NavigationController> with a pointer to the controller for the
+  // closed tab.  No details are expected.
+  //
+  // See also content::NOTIFICATION_WEB_CONTENTS_DESTROYED, which is sent when
+  // the WebContents containing the NavigationController is destroyed.
+  NOTIFICATION_TAB_CLOSING,
 
   // Stuff inside the tabs ---------------------------------------------------
 
@@ -142,15 +170,10 @@ enum NotificationType {
   NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN,
 
   // This notification is sent when the result of a find-in-page search is
-  // available with the browser process. The source is a Source<TabContents>
-  // with a pointer to the TabContents. Details encompass a
-  // FindNotificationDetail object that tells whether the match was found or
-  // not found.
+  // available with the browser process. The source is a Source<WebContents>.
+  // Details encompass a FindNotificationDetail object that tells whether the
+  // match was found or not found.
   NOTIFICATION_FIND_RESULT_AVAILABLE,
-
-  // Sent just before the installation confirm dialog is shown. The source
-  // is the ExtensionInstallUI, the details are NoDetails.
-  NOTIFICATION_EXTENSION_WILL_SHOW_CONFIRM_DIALOG,
 
   // BackgroundContents ------------------------------------------------------
 
@@ -176,6 +199,17 @@ enum NotificationType {
   // The background contents has crashed. The source is the parent Profile,
   // and the details are the BackgroundContents.
   NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED,
+
+  // The background contents associated with a hosted app has changed (either
+  // a new background contents has been created, or an existing background
+  // contents has closed). The source is the parent Profile, and the details
+  // are the BackgroundContentsService.
+  NOTIFICATION_BACKGROUND_CONTENTS_SERVICE_CHANGED,
+
+  // Chrome has entered/exited background mode. The source is the
+  // BackgroundModeManager and the details are a boolean value which is set to
+  // true if Chrome is now in background mode.
+  NOTIFICATION_BACKGROUND_MODE_CHANGED,
 
   // This is sent when a login prompt is shown.  The source is the
   // Source<NavigationController> for the tab in which the prompt is shown.
@@ -206,14 +240,14 @@ enum NotificationType {
   // HistoryService.
   NOTIFICATION_HISTORY_LOADED,
 
-  // Sent when a URL that has been typed has been added or modified. This is
-  // used by the in-memory URL database (used by autocomplete) to track
+  // Sent when a URL has been added or modified. This is used by the in-memory
+  // URL database and the InMemoryURLIndex (both used by autocomplete) to track
   // changes to the main history system.
   //
   // The source is the profile owning the history service that changed, and
   // the details is history::URLsModifiedDetails that lists the modified or
   // added URLs.
-  NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
+  NOTIFICATION_HISTORY_URLS_MODIFIED,
 
   // Sent when the user visits a URL.
   //
@@ -314,6 +348,10 @@ enum NotificationType {
   // Profile, and the details the id of the TemplateURL being removed.
   NOTIFICATION_TEMPLATE_URL_REMOVED,
 
+  // Sent when the prefs relating to the default search engine have changed due
+  // to policy.  Source and details are unused.
+  NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
+
   // This is sent to a pref observer when a pref is changed. The source is the
   // PrefService and the details a std::string of the changed path.
   NOTIFICATION_PREF_CHANGED,
@@ -341,9 +379,15 @@ enum NotificationType {
   // is the profile.
   NOTIFICATION_OMNIBOX_OPENED_URL,
 
-  // Sent when the main Google URL has been updated.  Some services cache
-  // this value and need to update themselves when it changes.  See
-  // google_util::GetGoogleURLAndUpdateIfNecessary().
+  // Sent when the Google URL for a profile has been updated.  Some services
+  // cache this value and need to update themselves when it changes.  See
+  // google_util::GetGoogleURLAndUpdateIfNecessary().  The source is the
+  // Profile, the details the new (const) GURL.
+  //
+  // Note that because incognito mode requests for the GoogleURLTracker are
+  // redirected to the non-incognito profile's copy, this notification will only
+  // ever fire on non-incognito profiles; thus listeners should use
+  // GetOriginalProfile() when constructing a Source to filter against.
   NOTIFICATION_GOOGLE_URL_UPDATED,
 
   // Printing ----------------------------------------------------------------
@@ -442,11 +486,6 @@ enum NotificationType {
   // Sent before an ExtensionHost is destroyed. The details are
   // an ExtensionHost* and the source is a Profile*.
   NOTIFICATION_EXTENSION_HOST_DESTROYED,
-
-  // Sent by an ExtensionHost when it has finished loading its initial DOM
-  // content, not (necessarily) including any external resources.
-  // The details are an ExtensionHost* and the source is a Profile*.
-  NOTIFICATION_EXTENSION_HOST_DOM_CONTENT_LOADED,
 
   // Sent by an ExtensionHost when it has finished its initial page load,
   // including any external resources.
@@ -709,8 +748,16 @@ enum NotificationType {
   NOTIFICATION_SYNC_CONFIGURE_DONE,
 
   // A service is requesting a sync datatype refresh for the current profile.
-  // The details value is a const syncable::ModelType.
-  NOTIFICATION_SYNC_REFRESH,
+  // The details value is a const syncable::ModelTypePayloadMap.
+  // If the payload map is empty, it should be treated as an invalidation for
+  // all enabled types. This is used by session sync.
+  NOTIFICATION_SYNC_REFRESH_LOCAL,
+
+  // External notification requesting a sync datatype refresh for the current
+  // profile. The details value is a const syncable::ModelTypePayloadMap.
+  // If the payload map is empty, it should be treated as an invalidation for
+  // all enabled types. This is used for notifications on Android.
+  NOTIFICATION_SYNC_REFRESH_REMOTE,
 
   // The session service has been saved.  This notification type is only sent
   // if there were new SessionService commands to save, and not for no-op save
@@ -837,10 +884,6 @@ enum NotificationType {
   // may not be fully rendered at this point.
   NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
 
-  // Sent when the wizard's content view is destroyed. The source and details
-  // are not used.
-  NOTIFICATION_WIZARD_CONTENT_VIEW_DESTROYED,
-
   // Sent when the screen lock state has changed. The source is
   // ScreenLocker and the details is a bool specifing that the
   // screen is locked. When details is a false, the source object
@@ -887,6 +930,10 @@ enum NotificationType {
   // Used for testing.
   NOTIFICATION_TAB_DRAG_LOOP_DONE,
 #endif
+
+  // Send when a context menu is shown. Used to notify tests that the context
+  // menu has been created and shown.
+  NOTIFICATION_CONTEXT_MENU_SHOWN,
 
   // Sent when the tab's closeable state has changed due to increase/decrease
   // in number of tabs in browser or increase/decrease in number of browsers.
@@ -993,12 +1040,6 @@ enum NotificationType {
   // The source is the Panel, no details.
   // Used only in unit testing.
   NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
-
-  // Sent when panel is switched between different layout modes, such
-  // as docked vs overflow, etc.
-  // The source is the Panel, no details.
-  // Used only in unit testing.
-  NOTIFICATION_PANEL_CHANGED_LAYOUT_MODE,
 
   // Sent when panel is minimized/restored/shows title only etc.
   // The source is the Panel, no details.

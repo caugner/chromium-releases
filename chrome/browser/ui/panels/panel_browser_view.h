@@ -8,7 +8,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/time.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/public/browser/notification_observer.h"
@@ -41,7 +40,7 @@ class PanelBrowserView : public BrowserView,
   // |mouse_location| is in screen coordinates.
   bool OnTitlebarMousePressed(const gfx::Point& mouse_location);
   bool OnTitlebarMouseDragged(const gfx::Point& mouse_location);
-  bool OnTitlebarMouseReleased();
+  bool OnTitlebarMouseReleased(panel::ClickModifier modifier);
   bool OnTitlebarMouseCaptureLost();
 
  private:
@@ -122,11 +121,10 @@ class PanelBrowserView : public BrowserView,
   virtual int TitleOnlyHeight() const OVERRIDE;
   virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
-  virtual gfx::Size IconOnlySize() const OVERRIDE;
   virtual void EnsurePanelFullyVisible() OVERRIDE;
-  virtual void SetPanelAppIconVisibility(bool visible) OVERRIDE;
   virtual void SetPanelAlwaysOnTop(bool on_top) OVERRIDE;
   virtual void EnableResizeByMouse(bool enable) OVERRIDE;
+  virtual void UpdatePanelMinimizeRestoreButtonVisibility() OVERRIDE;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -139,6 +137,15 @@ class PanelBrowserView : public BrowserView,
   void ShowOrHidePanelAppIcon(bool show);
 
   bool IsAnimatingBounds() const;
+
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // Sets or clears the bitwise |attribute_value| for the attibute denoted by
+  // |attribute_index|. This is used to update the style or extended style
+  // for the native window.
+  void UpdateWindowAttribute(int attribute_index,
+                             int attribute_value,
+                             bool to_set);
+#endif
 
   scoped_ptr<Panel> panel_;
   gfx::Rect bounds_;
@@ -157,9 +164,6 @@ class PanelBrowserView : public BrowserView,
   // This point is represented in the screen coordinate system.
   gfx::Point last_mouse_location_;
 
-  // Timestamp when the mouse was pressed. Used to detect long click.
-  base::TimeTicks mouse_pressed_time_;
-
   // Is the titlebar currently being dragged?  That is, has the cursor
   // moved more than kDragThreshold away from its starting position?
   MouseDraggingState mouse_dragging_state_;
@@ -170,10 +174,6 @@ class PanelBrowserView : public BrowserView,
 
   // Is the panel in highlighted state to draw people's attention?
   bool is_drawing_attention_;
-
-  // Timestamp to prevent minimizing the panel when the user clicks the titlebar
-  // to clear the attension state.
-  base::TimeTicks attention_cleared_time_;
 
   // The last view that had focus in the panel. This is saved so that focus can
   // be restored properly when a drag ends.

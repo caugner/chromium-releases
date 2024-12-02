@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,8 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
-#include "base/string16.h"
 #include "content/common/content_export.h"
 
-class IndexedDBKey;
 class KeyUtilityClientImpl;
 
 namespace base {
@@ -21,6 +19,8 @@ struct DefaultLazyInstanceTraits;
 }  // namespace base
 
 namespace content {
+class IndexedDBKey;
+class IndexedDBKeyPath;
 class SerializedScriptValue;
 }
 
@@ -32,15 +32,15 @@ class IndexedDBKeyUtilityClient {
   // Synchronously obtain the |keys| from |values| for the given |key_path|.
   static void CreateIDBKeysFromSerializedValuesAndKeyPath(
       const std::vector<content::SerializedScriptValue>& values,
-      const string16& key_path,
-      std::vector<IndexedDBKey>* keys);
+      const content::IndexedDBKeyPath& key_path,
+      std::vector<content::IndexedDBKey>* keys);
 
   // Synchronously inject |key| into |value| using |key_path|. Returns the new
   // value.
   static content::SerializedScriptValue InjectIDBKeyIntoSerializedValue(
-      const IndexedDBKey& key,
+      const content::IndexedDBKey& key,
       const content::SerializedScriptValue& value,
-      const string16& key_path);
+      const content::IndexedDBKeyPath& key_path);
 
   // Shut down the underlying implementation. Must be called on the IO thread.
   static void Shutdown();

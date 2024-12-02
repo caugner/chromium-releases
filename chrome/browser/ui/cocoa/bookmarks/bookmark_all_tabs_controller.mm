@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,13 +44,10 @@ using content::WebContents;
 - (void)UpdateActiveTabPairs {
   activeTabPairsVector_.clear();
   Browser* browser = BrowserList::GetLastActive();
-  TabStripModel* tabstrip_model = browser->tabstrip_model();
-  const int tabCount = tabstrip_model->count();
+  const int tabCount = browser->tab_count();
   for (int i = 0; i < tabCount; ++i) {
-    WebContents* wc = tabstrip_model->GetTabContentsAt(i)->web_contents();
-    const string16 tabTitle = wc->GetTitle();
-    const GURL& tabURL(wc->GetURL());
-    ActiveTabNameURLPair tabPair(tabTitle, tabURL);
+    WebContents* contents = browser->GetWebContentsAt(i);
+    ActiveTabNameURLPair tabPair(contents->GetTitle(), contents->GetURL());
     activeTabPairsVector_.push_back(tabPair);
   }
 }
@@ -59,9 +56,6 @@ using content::WebContents;
 // folder for the tabs and then the bookmarks in that new folder.
 // Returns a BOOL as an NSNumber indicating that the commit may proceed.
 - (NSNumber*)didCommit {
-  NSString* name = [[self displayName] stringByTrimmingCharactersInSet:
-                    [NSCharacterSet newlineCharacterSet]];
-  std::wstring newTitle = base::SysNSStringToWide(name);
   const BookmarkNode* newParentNode = [self selectedNode];
   if (!newParentNode)
     return [NSNumber numberWithBool:NO];

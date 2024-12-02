@@ -26,14 +26,13 @@ class GpuVideoDecodeAcceleratorHost
   GpuVideoDecodeAcceleratorHost(GpuChannelHost* channel,
                                 int32 decoder_route_id,
                                 media::VideoDecodeAccelerator::Client* client);
-  virtual ~GpuVideoDecodeAcceleratorHost();
 
   // IPC::Channel::Listener implementation.
   virtual void OnChannelError() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // media::VideoDecodeAccelerator implementation.
-  virtual bool Initialize(Profile profile) OVERRIDE;
+  virtual bool Initialize(media::VideoCodecProfile profile) OVERRIDE;
   virtual void Decode(const media::BitstreamBuffer& bitstream_buffer) OVERRIDE;
   virtual void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) OVERRIDE;
@@ -41,6 +40,9 @@ class GpuVideoDecodeAcceleratorHost
   virtual void Flush() OVERRIDE;
   virtual void Reset() OVERRIDE;
   virtual void Destroy() OVERRIDE;
+
+ protected:
+  virtual ~GpuVideoDecodeAcceleratorHost();
 
  private:
   void Send(IPC::Message* message);

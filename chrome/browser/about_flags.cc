@@ -22,6 +22,7 @@
 #include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/gl/gl_switches.h"
 
 #if defined(USE_ASH)
@@ -70,16 +71,6 @@ void AddOsStrings(unsigned bitmask, ListValue* list) {
 const char kMediaPlayerExperimentName[] = "media-player";
 const char kAdvancedFileSystemExperimentName[] = "advanced-file-system";
 const char kVerticalTabsExperimentName[] = "vertical-tabs";
-
-const Experiment::Choice kOmniboxAggressiveHistoryURLChoices[] = {
-  { IDS_FLAGS_OMNIBOX_AGGRESSIVE_HISTORY_URL_SCORING_AUTOMATIC, "", "" },
-  { IDS_FLAGS_OMNIBOX_AGGRESSIVE_HISTORY_URL_SCORING_ENABLED,
-    switches::kOmniboxAggressiveHistoryURL,
-    switches::kOmniboxAggressiveHistoryURLEnabled },
-  { IDS_FLAGS_OMNIBOX_AGGRESSIVE_HISTORY_URL_SCORING_DISABLED,
-    switches::kOmniboxAggressiveHistoryURL,
-    switches::kOmniboxAggressiveHistoryURLDisabled }
-};
 
 const Experiment::Choice kOmniboxInlineHistoryQuickProviderChoices[] = {
   { IDS_FLAGS_OMNIBOX_INLINE_HISTORY_QUICK_PROVIDER_AUTOMATIC, "", "" },
@@ -236,27 +227,6 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kDisableExperimentalWebGL)
   },
-
-#if defined(GOOGLE_CHROME_BUILD)
-  // TODO(thestig) Remove this for bug 107600.
-  {
-    "disable-print-preview",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_DISABLE_PRINT_PREVIEW_NAME,
-    IDS_FLAGS_DISABLE_PRINT_PREVIEW_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kDisablePrintPreview)
-  },
-#else
-  // For Chromium builds where users may not have the PDF plugin.
-  {
-    "print-preview",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_PRINT_PREVIEW_NAME,
-    IDS_FLAGS_PRINT_PREVIEW_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnablePrintPreview)
-  },
-#endif
-
   // TODO(dspringer): When NaCl is on by default, remove this flag entry.
   {
     "enable-nacl",  // FLAGS:RECORD_UMA
@@ -287,6 +257,20 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_EXPERIMENTAL_EXTENSION_APIS_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableExperimentalExtensionApis)
+  },
+  {
+    "browser-actions-for-all",
+    IDS_FLAGS_BROWSER_ACTIONS_FOR_ALL_NAME,
+    IDS_FLAGS_BROWSER_ACTIONS_FOR_ALL_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableBrowserActionsForAll),
+  },
+  {
+    "action-box",
+    IDS_FLAGS_ACTION_BOX_NAME,
+    IDS_FLAGS_ACTION_BOX_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableActionBox),
   },
   {
     "apps-new-install-bubble",
@@ -331,13 +315,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableTabGroupsContextMenu)
   },
   {
-    "preload-instant-search",
-    IDS_FLAGS_PRELOAD_INSTANT_SEARCH_NAME,
-    IDS_FLAGS_PRELOAD_INSTANT_SEARCH_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kPreloadInstantSearch)
-  },
-  {
     "static-ip-config",
     IDS_FLAGS_STATIC_IP_CONFIG_NAME,
     IDS_FLAGS_STATIC_IP_CONFIG_DESCRIPTION,
@@ -364,6 +341,13 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableSyncTabs)
   },
   {
+    "sync-tab-favicons",
+    IDS_FLAGS_SYNC_TAB_FAVICONS_NAME,
+    IDS_FLAGS_SYNC_TAB_FAVICONS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kSyncTabFavicons)
+  },
+  {
     "sync-app-notifications",
     IDS_FLAGS_SYNC_APP_NOTIFICATIONS_NAME,
     IDS_FLAGS_SYNC_APP_NOTIFICATIONS_DESCRIPTION,
@@ -378,13 +362,6 @@ const Experiment kExperiments[] = {
     // On by default for the Mac (different implementation in WebKit).
     kOsWin | kOsLinux | kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableSmoothScrolling)
-  },
-  {
-    "omnibox-aggressive-with-history-url",
-    IDS_FLAGS_OMNIBOX_AGGRESSIVE_HISTORY_URL_SCORING_NAME,
-    IDS_FLAGS_OMNIBOX_AGGRESSIVE_HISTORY_URL_SCORING_DESCRIPTION,
-    kOsAll,
-    MULTI_VALUE_TYPE(kOmniboxAggressiveHistoryURLChoices)
   },
   {
     "omnibox-inline-history-quick-provider",
@@ -408,23 +385,18 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kDisableShortcutsProvider)
   },
   {
-    "memory-widget",
-    IDS_FLAGS_MEMORY_WIDGET_NAME,
-    IDS_FLAGS_MEMORY_WIDGET_DESCRIPTION,
-    kOsCrOS,
-#if defined(OS_CHROMEOS)
-    // This switch exists only on Chrome OS.
-    SINGLE_VALUE_TYPE(switches::kMemoryWidget)
-#else
-    SINGLE_VALUE_TYPE("")
-#endif
-  },
-  {
     "downloads-new-ui",  // FLAGS:RECORD_UMA
     IDS_FLAGS_DOWNLOADS_NEW_UI_NAME,
     IDS_FLAGS_DOWNLOADS_NEW_UI_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kDownloadsNewUI)
+  },
+  {
+    "save-page-as-mhtml",  // FLAGS:RECORD_UMA
+    IDS_FLAGS_SAVE_PAGE_AS_MHTML_NAME,
+    IDS_FLAGS_SAVE_PAGE_AS_MHTML_DESCRIPTION,
+    kOsMac | kOsWin | kOsLinux,
+    SINGLE_VALUE_TYPE(switches::kSavePageAsMHTML)
   },
   {
     "enable-autologin",
@@ -448,13 +420,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableSpdy3)
   },
   {
-    "enable-spdy-flow-control",
-    IDS_FLAGS_ENABLE_SPDY_FLOW_CONTROL_NAME,
-    IDS_FLAGS_ENABLE_SPDY_FLOW_CONTROL_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSpdyFlowControl)
-  },
-  {
     "enable-async-dns",
     IDS_FLAGS_ENABLE_ASYNC_DNS_NAME,
     IDS_FLAGS_ENABLE_ASYNC_DNS_DESCRIPTION,
@@ -474,6 +439,13 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_MEDIA_SOURCE_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableMediaSource)
+  },
+  {
+    "enable-encrypted-media",
+    IDS_FLAGS_ENABLE_ENCRYPTED_MEDIA_NAME,
+    IDS_FLAGS_ENABLE_ENCRYPTED_MEDIA_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableEncryptedMedia)
   },
   {
     "enable-pointer-lock",
@@ -558,6 +530,13 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kEnableMediaStream)
   },
   {
+    "enable-peer-connection",
+    IDS_FLAGS_PEER_CONNECTION_NAME,
+    IDS_FLAGS_PEER_CONNECTION_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnablePeerConnection)
+  },
+  {
     "enable-shadow-dom",
     IDS_FLAGS_SHADOW_DOM_NAME,
     IDS_FLAGS_SHADOW_DOM_DESCRIPTION,
@@ -608,13 +587,6 @@ const Experiment kExperiments[] = {
   },
 #if defined(USE_ASH)
   {
-    "disable-ash-uber-tray",
-    IDS_FLAGS_DISABLE_ASH_UBER_TRAY_NAME,
-    IDS_FLAGS_DISABLE_ASH_UBER_TRAY_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(ash::switches::kDisableAshUberTray),
-  },
-  {
     "enable-ash-oak",
     IDS_FLAGS_ENABLE_ASH_OAK_NAME,
     IDS_FLAGS_ENABLE_ASH_OAK_DESCRIPTION,
@@ -642,6 +614,89 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_CHROME_TO_MOBILE_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnableChromeToMobile)
+  },
+#if defined(GOOGLE_CHROME_BUILD)
+  {
+    "enable-asynchronous-spellchecking",
+    IDS_FLAGS_ENABLE_ASYNCHRONOUS_SPELLCHECKING,
+    IDS_FLAGS_ENABLE_ASYNCHRONOUS_SPELLCHECKING_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableAsynchronousSpellChecking)
+  },
+#endif
+  {
+    "touch-optimized-ui",
+    IDS_TOUCH_OPTIMIZED_UI_NAME,
+    IDS_TOUCH_OPTIMIZED_UI_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kTouchOptimizedUI)
+  },
+  {
+    "enable-touch-events",
+    IDS_ENABLE_TOUCH_EVENTS_NAME,
+    IDS_ENABLE_TOUCH_EVENTS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableTouchEvents)
+  },
+#if defined(OS_CHROMEOS)
+  {
+    "no-discard-tabs",
+    IDS_FLAGS_NO_DISCARD_TABS_NAME,
+    IDS_FLAGS_NO_DISCARD_TABS_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kNoDiscardTabs)
+  },
+#endif
+  {
+    "enable-sync-signin",
+    IDS_ENABLE_SYNC_SIGNIN_NAME,
+    IDS_ENABLE_SYNC_SIGNIN_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableSyncSignin)
+  },
+  {
+    "enable-platform-apps",
+    IDS_FLAGS_ENABLE_PLATFORM_APPS_NAME,
+    IDS_FLAGS_ENABLE_PLATFORM_APPS_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnablePlatformApps)
+  },
+  {
+    "allow-nacl-socket-api",
+    IDS_FLAGS_ALLOW_NACL_SOCKET_API_NAME,
+    IDS_FLAGS_ALLOW_NACL_SOCKET_API_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE_AND_VALUE(switches::kAllowNaClSocketAPI, "*")
+  },
+  {
+    "stacked-tab-strip",
+    IDS_FLAGS_STACKED_TAB_STRIP_NAME,
+    IDS_FLAGS_STACKED_TAB_STRIP_DESCRIPTION,
+    kOsWin,
+    SINGLE_VALUE_TYPE(switches::kEnableStackedTabStrip)
+  },
+  {
+    "default-device-scale-factor",
+    IDS_FLAGS_FORCE_HIGH_DPI_NAME,
+    IDS_FLAGS_FORCE_HIGH_DPI_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE_AND_VALUE(switches::kDefaultDeviceScaleFactor, "2")
+  },
+#if defined(OS_CHROMEOS)
+  {
+    "allow-touchpad-three-finger-click",
+    IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_CLICK_NAME,
+    IDS_FLAGS_ALLOW_TOUCHPAD_THREE_FINGER_CLICK_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableTouchpadThreeFingerClick)
+  },
+#endif
+  {
+    "enable-client-oauth-signin",
+    IDS_FLAGS_ENABLE_CLIENT_OAUTH_SIGNIN_NAME,
+    IDS_FLAGS_ENABLE_CLIENT_OAUTH_SIGNIN_DESCRIPTION,
+    kOsMac | kOsWin | kOsLinux,
+    SINGLE_VALUE_TYPE(switches::kEnableClientOAuthSignin)
   },
 };
 

@@ -4,11 +4,16 @@
 
 #include "content/browser/accessibility/browser_accessibility_win.h"
 
+#include <UIAutomationClient.h>
+#include <UIAutomationCoreApi.h>
+
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "base/win/accessibility_misc_utils.h"
 #include "base/win/enum_variant.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/windows_version.h"
 #include "content/browser/accessibility/browser_accessibility_manager_win.h"
 #include "content/common/accessibility_messages.h"
 #include "net/base/escape.h"
@@ -2530,8 +2535,52 @@ STDMETHODIMP BrowserAccessibilityWin::QueryService(
     return QueryInterface(riid, object);
   }
 
+  // We only support the IAccessibleEx interface on Windows 8 and above. This
+  // is needed for the on-screen Keyboard to show up in metro mode, when the
+  // user taps an editable portion on the page.
+  // All methods in the IAccessibleEx interface are unimplemented.
+  if (riid == IID_IAccessibleEx &&
+      base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    return QueryInterface(riid, object);
+  }
+
   *object = NULL;
   return E_FAIL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::GetPatternProvider(
+    PATTERNID id, IUnknown** provider) {
+  DVLOG(1) << "In Function: "
+           << __FUNCTION__
+           << " for pattern id: "
+           << id;
+  if (id == UIA_ValuePatternId || id == UIA_TextPatternId) {
+    if (IsEditableText()) {
+      DVLOG(1) << "Returning UIA text provider";
+      base::win::UIATextProvider::CreateTextProvider(true, provider);
+      return S_OK;
+    }
+  }
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::GetPropertyValue(PROPERTYID id,
+                                                       VARIANT* ret) {
+  DVLOG(1) << "In Function: "
+           << __FUNCTION__
+           << " for property id: "
+           << id;
+  V_VT(ret) = VT_EMPTY;
+  if (id == UIA_ControlTypePropertyId) {
+    if (IsEditableText()) {
+      V_VT(ret) = VT_I4;
+      ret->lVal = UIA_EditControlTypeId;
+      DVLOG(1) << "Returning Edit control type";
+    } else {
+      DVLOG(1) << "Returning empty control type";
+    }
+  }
+  return S_OK;
 }
 
 //
@@ -2664,7 +2713,8 @@ void BrowserAccessibilityWin::PreInitialize() {
 
   if (name_.empty() &&
       (role_ == WebAccessibility::ROLE_LISTBOX_OPTION ||
-       role_ == WebAccessibility::ROLE_STATIC_TEXT)) {
+       role_ == WebAccessibility::ROLE_STATIC_TEXT ||
+       role_ == WebAccessibility::ROLE_LIST_MARKER)) {
     name_.swap(value_);
   }
 
@@ -3059,6 +3109,10 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_state_ |= IA2_STATE_SINGLE_LINE;
       ia2_state_ |= IA2_STATE_EDITABLE;
       break;
+    case WebAccessibility::ROLE_FOOTER:
+      ia_role_ = IA2_ROLE_FOOTER;
+      ia_state_|= STATE_SYSTEM_READONLY;
+      break;
     case WebAccessibility::ROLE_GRID:
       ia_role_ = ROLE_SYSTEM_TABLE;
       ia_state_|= STATE_SYSTEM_READONLY;
@@ -3160,11 +3214,18 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_MENUBAR;
       break;
     case WebAccessibility::ROLE_MENU_ITEM:
-    case WebAccessibility::ROLE_MENU_LIST_OPTION:
       ia_role_ = ROLE_SYSTEM_MENUITEM;
       break;
     case WebAccessibility::ROLE_MENU_LIST_POPUP:
-      ia_role_ = ROLE_SYSTEM_MENUPOPUP;
+      ia_role_ = ROLE_SYSTEM_CLIENT;
+      break;
+    case WebAccessibility::ROLE_MENU_LIST_OPTION:
+      ia_role_ = ROLE_SYSTEM_LISTITEM;
+      if (ia_state_ & STATE_SYSTEM_SELECTABLE) {
+        ia_state_ |= STATE_SYSTEM_FOCUSABLE;
+        if (HasState(WebAccessibility::STATE_FOCUSED))
+          ia_state_|= STATE_SYSTEM_FOCUSED;
+      }
       break;
     case WebAccessibility::ROLE_NOTE:
       ia_role_ = ROLE_SYSTEM_GROUPING;

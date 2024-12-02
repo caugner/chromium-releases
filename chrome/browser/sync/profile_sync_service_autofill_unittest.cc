@@ -32,10 +32,6 @@
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/generic_change_processor.h"
 #include "chrome/browser/sync/glue/shared_change_processor.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -51,6 +47,10 @@
 #include "content/public/browser/notification_source.h"
 #include "content/test/test_browser_thread.h"
 #include "sync/engine/model_changing_syncer_command.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/read_transaction.h"
+#include "sync/internal_api/write_node.h"
+#include "sync/internal_api/write_transaction.h"
 #include "sync/protocol/autofill_specifics.pb.h"
 #include "sync/syncable/model_type.h"
 #include "sync/syncable/syncable.h"
@@ -58,6 +58,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::Time;
+using base::TimeDelta;
 using base::WaitableEvent;
 using browser_sync::AutofillDataTypeController;
 using browser_sync::AutofillProfileDataTypeController;
@@ -81,6 +82,7 @@ using syncable::SPECIFICS;
 using syncable::UNITTEST;
 using syncable::WriterTag;
 using syncable::WriteTransaction;
+using sync_api::BaseNode;
 using testing::_;
 using testing::DoAll;
 using testing::DoDefault;
@@ -218,6 +220,8 @@ class WebDataServiceFake : public WebDataService {
   }
 
  private:
+  virtual ~WebDataServiceFake() {}
+
   void CreateSyncableService() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
     // These services are deleted in DestroySyncableService().
@@ -435,9 +439,11 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
   bool AddAutofillSyncNode(const AutofillEntry& entry) {
     sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
-    if (!autofill_root.InitByTagLookup(
-            syncable::ModelTypeToRootTag(syncable::AUTOFILL)))
+    if (autofill_root.InitByTagLookup(
+            syncable::ModelTypeToRootTag(syncable::AUTOFILL)) !=
+                BaseNode::INIT_OK) {
       return false;
+    }
 
     sync_api::WriteNode node(&trans);
     std::string tag = AutocompleteSyncableService::KeyToTag(
@@ -456,8 +462,10 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
   bool AddAutofillSyncNode(const AutofillProfile& profile) {
     sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
-    if (!autofill_root.InitByTagLookup(kAutofillProfileTag))
+    if (autofill_root.InitByTagLookup(kAutofillProfileTag) !=
+            BaseNode::INIT_OK) {
       return false;
+    }
     sync_api::WriteNode node(&trans);
     std::string tag = profile.guid();
     if (!node.InitUniqueByCreation(syncable::AUTOFILL_PROFILE,
@@ -475,14 +483,16 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
                                     std::vector<AutofillProfile>* profiles) {
     sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
-    if (!autofill_root.InitByTagLookup(
-            syncable::ModelTypeToRootTag(syncable::AUTOFILL)))
+    if (autofill_root.InitByTagLookup(
+            syncable::ModelTypeToRootTag(syncable::AUTOFILL)) !=
+                BaseNode::INIT_OK) {
       return false;
+    }
 
     int64 child_id = autofill_root.GetFirstChildId();
     while (child_id != sync_api::kInvalidId) {
       sync_api::ReadNode child_node(&trans);
-      if (!child_node.InitByIdLookup(child_id))
+      if (child_node.InitByIdLookup(child_id) != BaseNode::INIT_OK)
         return false;
 
       const sync_pb::AutofillSpecifics& autofill(
@@ -513,13 +523,15 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
       std::vector<AutofillProfile>* profiles) {
     sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode autofill_root(&trans);
-    if (!autofill_root.InitByTagLookup(kAutofillProfileTag))
+    if (autofill_root.InitByTagLookup(kAutofillProfileTag) !=
+            BaseNode::INIT_OK) {
       return false;
+    }
 
     int64 child_id = autofill_root.GetFirstChildId();
     while (child_id != sync_api::kInvalidId) {
       sync_api::ReadNode child_node(&trans);
-      if (!child_node.InitByIdLookup(child_id))
+      if (child_node.InitByIdLookup(child_id) != BaseNode::INIT_OK)
         return false;
 
       const sync_pb::AutofillProfileSpecifics& autofill(
@@ -542,21 +554,25 @@ class ProfileSyncServiceAutofillTest : public AbstractProfileSyncServiceTest {
 
   static AutofillEntry MakeAutofillEntry(const char* name,
                                          const char* value,
-                                         time_t timestamp0,
-                                         time_t timestamp1) {
+                                         int time_shift0,
+                                         int time_shift1) {
+    // Time deep in the past would cause Autocomplete sync to discard the
+    // entries.
+    static Time base_time = Time::Now().LocalMidnight();
+
     std::vector<Time> timestamps;
-    if (timestamp0 > 0)
-      timestamps.push_back(Time::FromTimeT(timestamp0));
-    if (timestamp1 > 0)
-      timestamps.push_back(Time::FromTimeT(timestamp1));
+    if (time_shift0 > 0)
+      timestamps.push_back(base_time + TimeDelta::FromSeconds(time_shift0));
+    if (time_shift1 > 0)
+      timestamps.push_back(base_time + TimeDelta::FromSeconds(time_shift1));
     return AutofillEntry(
         AutofillKey(ASCIIToUTF16(name), ASCIIToUTF16(value)), timestamps);
   }
 
   static AutofillEntry MakeAutofillEntry(const char* name,
                                          const char* value,
-                                         time_t timestamp) {
-    return MakeAutofillEntry(name, value, timestamp, -1);
+                                         int time_shift) {
+    return MakeAutofillEntry(name, value, time_shift, -1);
   }
 
   friend class AddAutofillHelper<AutofillEntry>;

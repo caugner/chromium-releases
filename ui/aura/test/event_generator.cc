@@ -28,7 +28,8 @@ class TestTouchEvent : public aura::TouchEvent {
   TestTouchEvent(ui::EventType type,
                  const gfx::Point& root_location,
                  int flags)
-      : TouchEvent(type, root_location, 0) {
+      : TouchEvent(type, root_location, 0,
+                   base::Time::NowFromSystemTime() - base::Time()) {
     set_flags(flags);
   }
 
@@ -80,10 +81,10 @@ void EventGenerator::PressLeftButton() {
 
 void EventGenerator::ReleaseLeftButton() {
   if (flags_ & ui::EF_LEFT_MOUSE_BUTTON) {
-    flags_ ^= ui::EF_LEFT_MOUSE_BUTTON;
     MouseEvent mouseev(
-        ui::ET_MOUSE_RELEASED, current_location_, current_location_, 0);
+        ui::ET_MOUSE_RELEASED, current_location_, current_location_, flags_);
     Dispatch(mouseev);
+    flags_ ^= ui::EF_LEFT_MOUSE_BUTTON;
   }
 }
 

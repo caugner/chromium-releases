@@ -35,10 +35,12 @@
 #include "content/common/media/media_stream_options.h"
 #include "content/common/content_export.h"
 
-class AudioManager;
-
 namespace content {
 class ResourceContext;
+}
+
+namespace media {
+class AudioManager;
 }
 
 namespace media_stream {
@@ -61,9 +63,9 @@ class CONTENT_EXPORT MediaStreamManager
   // been created yet, it will be constructed with the given AudioManager.
   static MediaStreamManager* GetForResourceContext(
       content::ResourceContext* resource_context,
-      AudioManager* audio_manager);
+      media::AudioManager* audio_manager);
 
-  explicit MediaStreamManager(AudioManager* audio_manager);
+  explicit MediaStreamManager(media::AudioManager* audio_manager);
   virtual ~MediaStreamManager();
 
   // Used to access VideoCaptureManager.
@@ -131,13 +133,17 @@ class CONTENT_EXPORT MediaStreamManager
   // Contains all data needed to keep track of requests.
   struct DeviceRequest;
 
+  // Helpers for signaling the media observer that new capture devices are
+  // opened/closed.
+  void NotifyObserverDevicesOpened(DeviceRequest* request);
+  void NotifyObserverDevicesClosed(DeviceRequest* request);
+  void DevicesFromRequest(DeviceRequest* request,
+                          content::MediaStreamDevices* devices);
+
   // Helpers.
   bool RequestDone(const MediaStreamManager::DeviceRequest& request) const;
   MediaStreamProvider* GetDeviceManager(MediaStreamType stream_type);
   void StartEnumeration(DeviceRequest* new_request,
-                        int render_process_id,
-                        int render_view_id,
-                        const std::string& security_origin,
                         std::string* label);
 
   scoped_ptr<MediaStreamDeviceSettings> device_settings_;
@@ -151,7 +157,7 @@ class CONTENT_EXPORT MediaStreamManager
   // All non-closed request.
   typedef std::map<std::string, DeviceRequest> DeviceRequests;
   DeviceRequests requests_;
-  AudioManager* audio_manager_;
+  media::AudioManager* audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamManager);
 };

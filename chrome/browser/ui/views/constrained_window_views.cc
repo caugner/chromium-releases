@@ -50,6 +50,7 @@
 #include "ash/ash_switches.h"
 #include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
+#include "ash/wm/visibility_controller.h"
 #include "base/command_line.h"
 #include "ui/aura/window.h"
 #endif
@@ -107,7 +108,7 @@ class XPWindowResources : public views::WindowResources {
   static void InitClass() {
     static bool initialized = false;
     if (!initialized) {
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+      ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
       for (int i = 0; i < FRAME_PART_BITMAP_COUNT; ++i) {
         int id = kXPFramePartIDs[i];
         if (id != 0)
@@ -137,7 +138,7 @@ class VistaWindowResources : public views::WindowResources {
   static void InitClass() {
     static bool initialized = false;
     if (!initialized) {
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+      ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
       for (int i = 0; i < FRAME_PART_BITMAP_COUNT; ++i) {
         int id = kVistaFramePartIDs[i];
         if (id != 0)
@@ -293,7 +294,7 @@ ConstrainedWindowFrameView::ConstrainedWindowFrameView(
   // different set of bitmaps.
   container->set_frame_type(views::Widget::FRAME_TYPE_FORCE_CUSTOM);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
                           rb.GetBitmapNamed(IDR_CLOSE_SA));
   close_button_->SetImage(views::CustomButton::BS_HOT,
@@ -529,8 +530,8 @@ void ConstrainedWindowFrameView::InitClass() {
 #if defined(OS_WIN) && !defined(USE_AURA)
     title_font_ = new gfx::Font(views::NativeWidgetWin::GetWindowTitleFont());
 #else
-    ResourceBundle& resources = ResourceBundle::GetSharedInstance();
-    title_font_ = &resources.GetFont(ResourceBundle::MediumFont);
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    title_font_ = &rb.GetFont(ui::ResourceBundle::MediumFont);
 #endif
     initialized = true;
   }
@@ -583,6 +584,7 @@ ConstrainedWindowViews::ConstrainedWindowViews(
 #if defined(USE_ASH)
   // Ash window headers can be transparent.
   params.transparent = true;
+  ash::SetChildWindowVisibilityChangesAnimated(params.parent);
 #endif
   Init(params);
 

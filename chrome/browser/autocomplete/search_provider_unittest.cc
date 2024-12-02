@@ -121,10 +121,11 @@ void SearchProviderTest::SetUp() {
   turl_model->Load();
 
   // Reset the default TemplateURL.
-  default_t_url_ = new TemplateURL();
-  default_t_url_->SetURL("http://defaultturl/{searchTerms}", 0, 0);
-  default_t_url_->SetSuggestionsURL("http://defaultturl2/{searchTerms}", 0, 0);
-  default_t_url_->set_short_name(ASCIIToUTF16("t"));
+  TemplateURLData data;
+  data.short_name = ASCIIToUTF16("t");
+  data.SetURL("http://defaultturl/{searchTerms}");
+  data.suggestions_url = "http://defaultturl2/{searchTerms}";
+  default_t_url_ = new TemplateURL(&profile_, data);
   turl_model->Add(default_t_url_);
   turl_model->SetDefaultSearchProvider(default_t_url_);
   TemplateURLID default_provider_id = default_t_url_->id();
@@ -134,12 +135,11 @@ void SearchProviderTest::SetUp() {
   term1_url_ = AddSearchToHistory(default_t_url_, term1_, 1);
 
   // Create another TemplateURL.
-  keyword_t_url_ = new TemplateURL();
-  keyword_t_url_->set_keyword(ASCIIToUTF16("k"));
-  keyword_t_url_->set_short_name(ASCIIToUTF16("k"));
-  keyword_t_url_->SetURL("http://keyword/{searchTerms}", 0, 0);
-  keyword_t_url_->SetSuggestionsURL("http://suggest_keyword/{searchTerms}", 0,
-                                    0);
+  data.short_name = ASCIIToUTF16("k");
+  data.SetKeyword(ASCIIToUTF16("k"));
+  data.SetURL("http://keyword/{searchTerms}");
+  data.suggestions_url = "http://suggest_keyword/{searchTerms}";
+  keyword_t_url_ = new TemplateURL(&profile_, data);
   turl_model->Add(keyword_t_url_);
   ASSERT_NE(0, keyword_t_url_->id());
 
@@ -200,8 +200,8 @@ void SearchProviderTest::QueryForInputAndSetWYTMatch(
     return;
   ASSERT_GE(provider_->matches().size(), 1u);
   EXPECT_TRUE(FindMatchWithDestination(GURL(
-    default_t_url_->url()->ReplaceSearchTerms(*default_t_url_, text,
-        TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), wyt_match));
+      default_t_url_->url_ref().ReplaceSearchTerms(text,
+          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), wyt_match));
 }
 
 void SearchProviderTest::TearDown() {
@@ -216,7 +216,7 @@ GURL SearchProviderTest::AddSearchToHistory(TemplateURL* t_url,
                                             int visit_count) {
   HistoryService* history =
       profile_.GetHistoryService(Profile::EXPLICIT_ACCESS);
-  GURL search(t_url->url()->ReplaceSearchTerms(*t_url, term,
+  GURL search(t_url->url_ref().ReplaceSearchTerms(term,
       TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
   static base::Time last_added_time;
   last_added_time = std::max(base::Time::Now(),
@@ -263,9 +263,8 @@ TEST_F(SearchProviderTest, QueryDefaultProvider) {
   ASSERT_TRUE(fetcher);
 
   // And the URL matches what we expected.
-  GURL expected_url(default_t_url_->suggestions_url()->ReplaceSearchTerms(
-      *default_t_url_, term, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      string16()));
+  GURL expected_url(default_t_url_->suggestions_url_ref().ReplaceSearchTerms(
+      term, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
   ASSERT_TRUE(fetcher->GetOriginalURL() == expected_url);
 
   // Tell the SearchProvider the suggest query is done.
@@ -285,7 +284,7 @@ TEST_F(SearchProviderTest, QueryDefaultProvider) {
 
   AutocompleteMatch wyt_match;
   EXPECT_TRUE(FindMatchWithDestination(
-      GURL(default_t_url_->url()->ReplaceSearchTerms(*default_t_url_, term,
+      GURL(default_t_url_->url_ref().ReplaceSearchTerms(term,
           TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), &wyt_match));
   EXPECT_TRUE(wyt_match.description.empty());
 
@@ -324,9 +323,8 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
   ASSERT_TRUE(keyword_fetcher);
 
   // And the URL matches what we expected.
-  GURL expected_url(keyword_t_url_->suggestions_url()->ReplaceSearchTerms(
-      *keyword_t_url_, term, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-      string16()));
+  GURL expected_url(keyword_t_url_->suggestions_url_ref().ReplaceSearchTerms(
+      term, TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
   ASSERT_TRUE(keyword_fetcher->GetOriginalURL() == expected_url);
 
   // Tell the SearchProvider the keyword suggest query is done.
@@ -342,8 +340,8 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
   AutocompleteMatch match;
   EXPECT_TRUE(FindMatchWithDestination(keyword_url_, &match));
 
-  // The match should have a TemplateURL.
-  EXPECT_TRUE(match.template_url);
+  // The match should have an associated keyword.
+  EXPECT_FALSE(match.keyword.empty());
 
   // The fill into edit should contain the keyword.
   EXPECT_EQ(keyword_t_url_->keyword() + char16(' ') + keyword_term_,
@@ -394,7 +392,7 @@ TEST_F(SearchProviderTest, FinalizeInstantQuery) {
   // There should be two matches, one for what you typed, the other for
   // 'foobar'.
   EXPECT_EQ(2u, provider_->matches().size());
-  GURL instant_url(default_t_url_->url()->ReplaceSearchTerms(*default_t_url_,
+  GURL instant_url(default_t_url_->url_ref().ReplaceSearchTerms(
       ASCIIToUTF16("foobar"), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
       string16()));
   AutocompleteMatch instant_match;
@@ -406,9 +404,8 @@ TEST_F(SearchProviderTest, FinalizeInstantQuery) {
   // Make sure the what you typed match has no description.
   AutocompleteMatch wyt_match;
   EXPECT_TRUE(FindMatchWithDestination(
-      GURL(default_t_url_->url()->ReplaceSearchTerms(*default_t_url_,
-          ASCIIToUTF16("foo"), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
-          string16())), &wyt_match));
+      GURL(default_t_url_->url_ref().ReplaceSearchTerms(ASCIIToUTF16("foo"),
+          TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())), &wyt_match));
   EXPECT_TRUE(wyt_match.description.empty());
 
   // The instant search should be more relevant.
@@ -429,7 +426,7 @@ TEST_F(SearchProviderTest, RememberInstantQuery) {
   // There should be two matches, one for what you typed, the other for
   // 'foobar'.
   EXPECT_EQ(2u, provider_->matches().size());
-  GURL instant_url(default_t_url_->url()->ReplaceSearchTerms(*default_t_url_,
+  GURL instant_url(default_t_url_->url_ref().ReplaceSearchTerms(
       ASCIIToUTF16("foobar"), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE,
       string16()));
   AutocompleteMatch instant_match;
@@ -635,10 +632,9 @@ TEST_F(SearchProviderTest, UpdateKeywordDescriptions) {
   // There should be two matches, one for the keyword one for what you typed.
   ASSERT_EQ(2u, result.size());
 
-  EXPECT_TRUE(result.match_at(0).template_url != NULL);
-  EXPECT_TRUE(result.match_at(1).template_url != NULL);
-  EXPECT_NE(result.match_at(0).template_url,
-            result.match_at(1).template_url);
+  EXPECT_FALSE(result.match_at(0).keyword.empty());
+  EXPECT_FALSE(result.match_at(1).keyword.empty());
+  EXPECT_NE(result.match_at(0).keyword, result.match_at(1).keyword);
 
   EXPECT_FALSE(result.match_at(0).description.empty());
   EXPECT_FALSE(result.match_at(1).description.empty());
@@ -669,5 +665,5 @@ TEST_F(SearchProviderTest, NoTemplateURLForNavsuggest) {
   // Make sure there is a match for 'a.com' and it doesn't have a template_url.
   AutocompleteMatch nav_match;
   EXPECT_TRUE(FindMatchWithDestination(GURL("http://a.com"), &nav_match));
-  EXPECT_FALSE(nav_match.template_url);
+  EXPECT_TRUE(nav_match.keyword.empty());
 }

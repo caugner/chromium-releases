@@ -54,6 +54,7 @@
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/views/button_drag_utils.h"
+#include "ui/views/controls/menu/menu_2.h"
 #include "ui/views/controls/textfield/native_textfield_win.h"
 #include "ui/views/widget/widget.h"
 
@@ -369,7 +370,7 @@ BOOL WINAPI EndPaintIntercept(HWND hWnd, const PAINTSTRUCT* lpPaint) {
 }
 
 // Returns a lazily initialized property bag accessor for saving our state in a
-// TabContents.
+// WebContents.
 base::PropertyAccessor<AutocompleteEditState>* GetStateAccessor() {
   static base::PropertyAccessor<AutocompleteEditState> state;
   return &state;
@@ -2711,16 +2712,6 @@ OmniboxView* OmniboxView::CreateOmniboxView(
     CommandUpdater* command_updater,
     bool popup_window_mode,
     LocationBarView* location_bar) {
-  if (views::Widget::IsPureViews()) {
-    OmniboxViewViews* omnibox_view = new OmniboxViewViews(controller,
-                                                          toolbar_model,
-                                                          profile,
-                                                          command_updater,
-                                                          popup_window_mode,
-                                                          location_bar);
-    omnibox_view->Init();
-    return omnibox_view;
-  }
   return new OmniboxViewWin(controller,
                             toolbar_model,
                             location_bar,

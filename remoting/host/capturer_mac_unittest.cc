@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,6 +87,7 @@ void CapturerCallback2::CaptureDoneCallback(
 
 TEST_F(CapturerMacTest, Capture) {
   SCOPED_TRACE("");
+  capturer_->Start();
   // Check that we get an initial full-screen updated.
   CapturerCallback1 callback1;
   capturer_->CaptureInvalidRegion(base::Bind(
@@ -97,6 +98,7 @@ TEST_F(CapturerMacTest, Capture) {
   capturer_->InvalidateRegion(region_);
   capturer_->CaptureInvalidRegion(base::Bind(
       &CapturerCallback2::CaptureDoneCallback, base::Unretained(&callback2)));
+  capturer_->Stop();
 }
 
 }  // namespace remoting

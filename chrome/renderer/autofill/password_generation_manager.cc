@@ -19,10 +19,16 @@ namespace autofill {
 
 PasswordGenerationManager::PasswordGenerationManager(
     content::RenderView* render_view)
-    : content::RenderViewObserver(render_view) {}
+    : content::RenderViewObserver(render_view),
+      enabled_(false) {}
 PasswordGenerationManager::~PasswordGenerationManager() {}
 
 void PasswordGenerationManager::DidFinishDocumentLoad(WebKit::WebFrame* frame) {
+  // We don't want to generate passwords if the browser won't store or sync
+  // them.
+  if (!enabled_)
+    return;
+
   if (!ShouldAnalyzeFrame(*frame))
     return;
 
@@ -63,7 +69,7 @@ bool PasswordGenerationManager::ShouldAnalyzeFrame(
     DVLOG(1) << "No PasswordManager access";
     return false;
   }
-  // TODO(gcasto): Query the browser to see if password sync is enabled.
+
   return true;
 }
 
@@ -71,7 +77,8 @@ void PasswordGenerationManager::FocusedNodeChanged(
     const WebKit::WebNode& node) {
   WebKit::WebInputElement input_element =
       node.toConst<WebKit::WebInputElement>();
-  if (account_creation_elements_.first == input_element) {
+  if (!input_element.isNull() &&
+      account_creation_elements_.first == input_element) {
     gfx::Rect rect(input_element.boundsInViewportSpace());
     Send(new AutofillHostMsg_ShowPasswordGenerationPopup(routing_id(),
                                                          rect));
@@ -83,6 +90,8 @@ bool PasswordGenerationManager::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(PasswordGenerationManager, message)
     IPC_MESSAGE_HANDLER(AutofillMsg_GeneratedPasswordAccepted,
                         OnPasswordAccepted)
+    IPC_MESSAGE_HANDLER(AutofillMsg_PasswordGenerationEnabled,
+                        OnPasswordSyncEnabled)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -95,6 +104,10 @@ void PasswordGenerationManager::OnPasswordAccepted(const string16& password) {
     it->setValue(password);
     it->setAutofilled(true);
   }
+}
+
+void PasswordGenerationManager::OnPasswordSyncEnabled(bool enabled) {
+  enabled_ = enabled;
 }
 
 }  // namespace autofill

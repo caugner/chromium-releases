@@ -13,6 +13,8 @@
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "content/test/test_browser_thread.h"
@@ -157,7 +159,7 @@ void TemplateURLServiceTestUtil::TearDown() {
     profile_->TearDown();
     profile_.reset();
   }
-  UIThreadSearchTermsData::SetGoogleBaseURL(NULL);
+  UIThreadSearchTermsData::SetGoogleBaseURL(std::string());
 
   // Flush the message loop to make application verifiers happy.
   message_loop_.RunAllPending();
@@ -217,17 +219,61 @@ string16 TemplateURLServiceTestUtil::GetAndClearSearchTerm() {
       static_cast<TestingTemplateURLService*>(model())->GetAndClearSearchTerm();
 }
 
-void TemplateURLServiceTestUtil::SetGoogleBaseURL(
-    const std::string& base_url) const {
-  UIThreadSearchTermsData::SetGoogleBaseURL(new std::string(base_url));
+void TemplateURLServiceTestUtil::SetGoogleBaseURL(const GURL& base_url) const {
+  DCHECK(base_url.is_valid());
+  UIThreadSearchTermsData::SetGoogleBaseURL(base_url.spec());
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
+      content::Source<Profile>(profile_.get()),
+      content::Details<const GURL>(&base_url));
+}
+
+void TemplateURLServiceTestUtil::SetManagedDefaultSearchPreferences(
+    bool enabled,
+    const std::string& name,
+    const std::string& keyword,
+    const std::string& search_url,
+    const std::string& suggest_url,
+    const std::string& icon_url,
+    const std::string& encodings) {
+  TestingPrefService* pref_service = profile_->GetTestingPrefService();
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderEnabled,
+                               Value::CreateBooleanValue(enabled));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderName,
+                               Value::CreateStringValue(name));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderKeyword,
+                               Value::CreateStringValue(keyword));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderSearchURL,
+                               Value::CreateStringValue(search_url));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderSuggestURL,
+                               Value::CreateStringValue(suggest_url));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderIconURL,
+                               Value::CreateStringValue(icon_url));
+  pref_service->SetManagedPref(prefs::kDefaultSearchProviderEncodings,
+                               Value::CreateStringValue(encodings));
+  model()->Observe(chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
+                   content::NotificationService::AllSources(),
+                   content::NotificationService::NoDetails());
+}
+
+void TemplateURLServiceTestUtil::RemoveManagedDefaultSearchPreferences() {
+  TestingPrefService* pref_service = profile_->GetTestingPrefService();
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderEnabled);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderName);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderKeyword);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderSearchURL);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderSuggestURL);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderIconURL);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderEncodings);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderID);
+  pref_service->RemoveManagedPref(prefs::kDefaultSearchProviderPrepopulateID);
+  model()->Observe(chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
+                   content::NotificationService::AllSources(),
+                   content::NotificationService::NoDetails());
 }
 
 TemplateURLService* TemplateURLServiceTestUtil::model() const {
-  return TemplateURLServiceFactory::GetForProfile(profile());
+  return TemplateURLServiceFactory::GetForProfile(profile_.get());
 }
 
 TestingProfile* TemplateURLServiceTestUtil::profile() const {

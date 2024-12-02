@@ -11,6 +11,8 @@
 #include "base/stringprintf.h"
 #include "chrome/common/chrome_switches.h"
 
+using chrome::VersionInfo;
+
 namespace {
 
 struct Mappings {
@@ -31,16 +33,41 @@ struct Mappings {
     locations["component"] = extensions::Feature::COMPONENT_LOCATION;
 
     platforms["chromeos"] = extensions::Feature::CHROMEOS_PLATFORM;
+
+    channels["trunk"] = VersionInfo::CHANNEL_UNKNOWN;
+    channels["canary"] = VersionInfo::CHANNEL_CANARY;
+    channels["dev"] = VersionInfo::CHANNEL_DEV;
+    channels["beta"] = VersionInfo::CHANNEL_BETA;
+    channels["stable"] = VersionInfo::CHANNEL_STABLE;
   }
 
   std::map<std::string, Extension::Type> extension_types;
   std::map<std::string, extensions::Feature::Context> contexts;
   std::map<std::string, extensions::Feature::Location> locations;
   std::map<std::string, extensions::Feature::Platform> platforms;
+  std::map<std::string, VersionInfo::Channel> channels;
 };
 
-static base::LazyInstance<Mappings> g_mappings =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<Mappings> g_mappings = LAZY_INSTANCE_INITIALIZER;
+
+std::string GetChannelName(VersionInfo::Channel channel) {
+  typedef std::map<std::string, VersionInfo::Channel> ChannelsMap;
+  ChannelsMap channels = g_mappings.Get().channels;
+  for (ChannelsMap::iterator i = channels.begin(); i != channels.end(); ++i) {
+    if (i->second == channel)
+      return i->first;
+  }
+  NOTREACHED();
+  return "unknown";
+}
+
+struct Channel {
+  Channel() : channel(VersionInfo::GetChannel()) {}
+
+  chrome::VersionInfo::Channel channel;
+};
+
+static base::LazyInstance<Channel> g_channel = LAZY_INSTANCE_INITIALIZER;
 
 // TODO(aa): Can we replace all this manual parsing with JSON schema stuff?
 
@@ -51,6 +78,7 @@ void ParseSet(const DictionaryValue* value,
   if (!value->GetList(property, &list_value))
     return;
 
+  set->clear();
   for (size_t i = 0; i < list_value->GetSize(); ++i) {
     std::string str_val;
     CHECK(list_value->GetString(i, &str_val)) << property << " " << i;
@@ -76,6 +104,7 @@ void ParseEnum(const DictionaryValue* value,
   std::string string_value;
   if (!value->GetString(property, &string_value))
     return;
+
   ParseEnum(string_value, enum_value, mapping);
 }
 
@@ -84,6 +113,11 @@ void ParseEnumSet(const DictionaryValue* value,
                   const std::string& property,
                   std::set<T>* enum_set,
                   const std::map<std::string, T>& mapping) {
+  if (!value->HasKey(property))
+    return;
+
+  enum_set->clear();
+
   std::string property_string;
   if (value->GetString(property, &property_string)) {
     if (property_string == "all") {
@@ -113,31 +147,33 @@ Feature::Feature()
   : location_(UNSPECIFIED_LOCATION),
     platform_(UNSPECIFIED_PLATFORM),
     min_manifest_version_(0),
-    max_manifest_version_(0) {
+    max_manifest_version_(0),
+    channel_(VersionInfo::CHANNEL_UNKNOWN) {
+}
+
+Feature::Feature(const Feature& other)
+    : whitelist_(other.whitelist_),
+      extension_types_(other.extension_types_),
+      contexts_(other.contexts_),
+      location_(other.location_),
+      platform_(other.platform_),
+      min_manifest_version_(other.min_manifest_version_),
+      max_manifest_version_(other.max_manifest_version_),
+      channel_(other.channel_) {
 }
 
 Feature::~Feature() {
 }
 
-// static
-scoped_ptr<Feature> Feature::Parse(const DictionaryValue* value) {
-  scoped_ptr<Feature> feature(new Feature());
-
-  ParseSet(value, "whitelist", feature->whitelist());
-  ParseEnumSet<Extension::Type>(value, "extension_types",
-                                feature->extension_types(),
-                                g_mappings.Get().extension_types);
-  ParseEnumSet<Context>(value, "contexts", feature->contexts(),
-                        g_mappings.Get().contexts);
-  ParseEnum<Location>(value, "location", &feature->location_,
-                      g_mappings.Get().locations);
-  ParseEnum<Platform>(value, "platform", &feature->platform_,
-                      g_mappings.Get().platforms);
-
-  value->GetInteger("min_manifest_version", &feature->min_manifest_version_);
-  value->GetInteger("max_manifest_version", &feature->max_manifest_version_);
-
-  return feature.Pass();
+bool Feature::Equals(const Feature& other) const {
+  return whitelist_ == other.whitelist_ &&
+      extension_types_ == other.extension_types_ &&
+      contexts_ == other.contexts_ &&
+      location_ == other.location_ &&
+      platform_ == other.platform_ &&
+      min_manifest_version_ == other.min_manifest_version_ &&
+      max_manifest_version_ == other.max_manifest_version_ &&
+      channel_ == other.channel_;
 }
 
 // static
@@ -157,39 +193,79 @@ Feature::Location Feature::ConvertLocation(Extension::Location location) {
     return UNSPECIFIED_LOCATION;
 }
 
+void Feature::Parse(const DictionaryValue* value) {
+  ParseSet(value, "whitelist", &whitelist_);
+  ParseEnumSet<Extension::Type>(value, "extension_types", &extension_types_,
+                                g_mappings.Get().extension_types);
+  ParseEnumSet<Context>(value, "contexts", &contexts_,
+                        g_mappings.Get().contexts);
+  ParseEnum<Location>(value, "location", &location_,
+                      g_mappings.Get().locations);
+  ParseEnum<Platform>(value, "platform", &platform_,
+                      g_mappings.Get().platforms);
+  value->GetInteger("min_manifest_version", &min_manifest_version_);
+  value->GetInteger("max_manifest_version", &max_manifest_version_);
+  ParseEnum<VersionInfo::Channel>(
+      value, "channel", &channel_,
+      g_mappings.Get().channels);
+}
+
 std::string Feature::GetErrorMessage(Feature::Availability result) {
   switch (result) {
     case IS_AVAILABLE:
       return "";
     case NOT_FOUND_IN_WHITELIST:
-      return "Not allowed for specified extension ID.";
+      return base::StringPrintf(
+          "'%s' is not allowed for specified extension ID.",
+          name().c_str());
     case INVALID_TYPE:
-      return "Not allowed for specified package type (theme, app, etc.).";
+      return base::StringPrintf(
+          "'%s' is not allowed for specified package type (theme, app, etc.).",
+          name().c_str());
     case INVALID_CONTEXT:
-      return "Not allowed for specified context type content script, extension "
-          "page, web page, etc.).";
+      return base::StringPrintf(
+          "'%s' is not allowed for specified context type content script, "
+          " extension page, web page, etc.).",
+          name().c_str());
     case INVALID_LOCATION:
-      return "Not allowed for specified install location.";
+      return base::StringPrintf(
+          "'%s' is not allowed for specified install location.",
+          name().c_str());
     case INVALID_PLATFORM:
-      return "Not allowed for specified platform.";
+      return base::StringPrintf(
+          "'%s' is not allowed for specified platform.",
+          name().c_str());
     case INVALID_MIN_MANIFEST_VERSION:
-      return base::StringPrintf("Requires manifest version of at least %d.",
-                                min_manifest_version_);
+      return base::StringPrintf(
+          "'%s' requires manifest version of at least %d.",
+          name().c_str(),
+          min_manifest_version_);
     case INVALID_MAX_MANIFEST_VERSION:
-      return base::StringPrintf("Requires manifest version of %d or lower.",
-                                max_manifest_version_);
-    default:
-      CHECK(false);
-      return "";
+      return base::StringPrintf(
+          "'%s' requires manifest version of %d or lower.",
+          name().c_str(),
+          max_manifest_version_);
+    case NOT_PRESENT:
+      return base::StringPrintf(
+          "'%s' requires a different Feature that is not present.",
+          name().c_str());
+    case UNSUPPORTED_CHANNEL:
+      return base::StringPrintf(
+          "'%s' requires Google Chrome %s channel or newer but current is %s.",
+          name().c_str(),
+          GetChannelName(channel_).c_str(),
+          GetChannelName(g_channel.Get().channel).c_str());
   }
+
+  return "";
 }
 
-Feature::Availability Feature::IsAvailable(const std::string& extension_id,
-                                           Extension::Type type,
-                                           Location location,
-                                           Context context,
-                                           Platform platform,
-                                           int manifest_version) {
+Feature::Availability Feature::IsAvailableToManifest(
+    const std::string& extension_id,
+    Extension::Type type,
+    Location location,
+    int manifest_version,
+    Platform platform) const {
   // Component extensions can access any feature.
   if (location == COMPONENT_LOCATION)
     return IS_AVAILABLE;
@@ -215,11 +291,6 @@ Feature::Availability Feature::IsAvailable(const std::string& extension_id,
     return INVALID_TYPE;
   }
 
-  if (!contexts_.empty() &&
-      contexts_.find(context) == contexts_.end()) {
-    return INVALID_CONTEXT;
-  }
-
   if (location_ != UNSPECIFIED_LOCATION && location_ != location)
     return INVALID_LOCATION;
 
@@ -232,7 +303,36 @@ Feature::Availability Feature::IsAvailable(const std::string& extension_id,
   if (max_manifest_version_ != 0 && manifest_version > max_manifest_version_)
     return INVALID_MAX_MANIFEST_VERSION;
 
+  if (channel_ < g_channel.Get().channel)
+    return UNSUPPORTED_CHANNEL;
+
   return IS_AVAILABLE;
+}
+
+Feature::Availability Feature::IsAvailableToContext(
+    const Extension* extension,
+    Feature::Context context,
+    Feature::Platform platform) const {
+  Availability result = IsAvailableToManifest(
+      extension->id(),
+      extension->GetType(),
+      ConvertLocation(extension->location()),
+      extension->manifest_version(),
+      platform);
+  if (result != IS_AVAILABLE)
+    return result;
+
+  if (!contexts_.empty() &&
+      contexts_.find(context) == contexts_.end()) {
+    return INVALID_CONTEXT;
+  }
+
+  return IS_AVAILABLE;
+}
+
+// static
+void Feature::SetChannelForTesting(VersionInfo::Channel channel) {
+  g_channel.Get().channel = channel;
 }
 
 }  // namespace

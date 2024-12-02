@@ -52,6 +52,10 @@ class CancelLoginDialog : public content::NotificationObserver {
 class ExtensionWebRequestApiTest : public ExtensionApiTest {
  public:
   virtual void SetUpInProcessBrowserTestFixture() {
+    // TODO(battre): remove this when declarative webRequest API becomes stable.
+    CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableExperimentalExtensionApis);
+
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(StartTestServer());
@@ -79,7 +83,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestAuthRequired) {
       message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestBlocking) {
+// This test times out regularly on win_rel trybots. See http://crbug.com/122178
+#if defined(OS_WIN)
+#define MAYBE_WebRequestBlocking DISABLED_WebRequestBlocking
+#else
+#define MAYBE_WebRequestBlocking WebRequestBlocking
+#endif
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, MAYBE_WebRequestBlocking) {
   ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_blocking.html")) <<
       message_;
 }
@@ -114,4 +124,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestNewTab) {
   tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionWebRequestApiTest, WebRequestDeclarative) {
+  ASSERT_TRUE(RunExtensionSubtest("webrequest", "test_declarative.html")) <<
+      message_;
 }

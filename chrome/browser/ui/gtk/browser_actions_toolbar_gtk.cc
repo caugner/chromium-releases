@@ -4,14 +4,17 @@
 
 #include "chrome/browser/ui/gtk/browser_actions_toolbar_gtk.h"
 
-#include <algorithm>
 #include <gtk/gtk.h>
+
+#include <algorithm>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service.h"
+#include "chrome/browser/extensions/api/commands/extension_command_service_factory.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -23,16 +26,16 @@
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_shrinkable_hbox.h"
+#include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/hover_controller_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
-#include "chrome/browser/ui/gtk/theme_service_gtk.h"
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_action.h"
+#include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -88,12 +91,11 @@ using ui::SimpleMenuModel;
 
 class BrowserActionButton : public content::NotificationObserver,
                             public ImageLoadingTracker::Observer,
-                            public ExtensionContextMenuModel::PopupDelegate,
                             public MenuGtk::Delegate {
  public:
   BrowserActionButton(BrowserActionsToolbarGtk* toolbar,
                       const Extension* extension,
-                      ThemeServiceGtk* theme_provider)
+                      GtkThemeService* theme_provider)
       : toolbar_(toolbar),
         extension_(extension),
         image_(NULL),
@@ -141,8 +143,16 @@ class BrowserActionButton : public content::NotificationObserver,
                      G_CALLBACK(&OnDragBegin), this);
     signals_.ConnectAfter(widget(), "expose-event",
                      G_CALLBACK(OnExposeEvent), this);
-    signals_.Connect(toolbar->widget(), "realize",
-                     G_CALLBACK(OnRealize), this);
+    if (toolbar_->browser()->window()) {
+      // If the window exists already, then the browser action button has been
+      // recreated after the window was created, for example when the extension
+      // is reloaded.
+      ConnectBrowserActionPopupAccelerator();
+    } else {
+      // Window doesn't exist yet, wait for it.
+      signals_.Connect(toolbar->widget(), "realize",
+                       G_CALLBACK(OnRealize), this);
+    }
 
     registrar_.Add(
         this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
@@ -154,6 +164,8 @@ class BrowserActionButton : public content::NotificationObserver,
   }
 
   ~BrowserActionButton() {
+    DisconnectBrowserActionPopupAccelerator();
+
     if (tab_specific_icon_)
       g_object_unref(tab_specific_icon_);
 
@@ -240,7 +252,7 @@ class BrowserActionButton : public content::NotificationObserver,
       return NULL;
 
     context_menu_model_ =
-        new ExtensionContextMenuModel(extension_, toolbar_->browser(), this);
+        new ExtensionContextMenuModel(extension_, toolbar_->browser());
     context_menu_.reset(
         new MenuGtk(this, context_menu_model_.get()));
     return context_menu_.get();
@@ -266,7 +278,7 @@ class BrowserActionButton : public content::NotificationObserver,
 
   // Returns true to prevent further processing of the event that caused us to
   // show the popup, or false to continue processing.
-  bool ShowPopup(bool devtools) {
+  bool ShowPopup() {
     ExtensionAction* browser_action = extension_->browser_action();
 
     int tab_id = toolbar_->GetCurrentTabId();
@@ -277,17 +289,11 @@ class BrowserActionButton : public content::NotificationObserver,
 
     if (browser_action->HasPopup(tab_id)) {
       ExtensionPopupGtk::Show(
-          browser_action->GetPopupUrl(tab_id), toolbar_->browser(),
-          widget(), devtools);
+          browser_action->GetPopupUrl(tab_id), toolbar_->browser(), widget());
       return true;
     }
 
     return false;
-  }
-
-  // ExtensionContextMenuModel::PopupDelegate implementation.
-  virtual void InspectPopup(ExtensionAction* action) {
-    ShowPopup(true);
   }
 
   void SetImage(GdkPixbuf* image) {
@@ -316,14 +322,11 @@ class BrowserActionButton : public content::NotificationObserver,
   }
 
   static void OnClicked(GtkWidget* widget, BrowserActionButton* action) {
-    if (action->ShowPopup(false))
+    if (action->ShowPopup())
       return;
 
-    ExtensionService* service =
-        action->toolbar_->browser()->profile()->GetExtensionService();
-    service->browser_event_router()->BrowserActionExecuted(
-        action->toolbar_->browser()->profile(), action->extension_->id(),
-        action->toolbar_->browser());
+    action->toolbar_->model()->ExecuteBrowserAction(
+        action->extension_->id(), action->toolbar_->browser());
   }
 
   static gboolean OnExposeEvent(GtkWidget* widget,
@@ -374,21 +377,18 @@ class BrowserActionButton : public content::NotificationObserver,
 
   // Connect the accelerator for the browser action popup.
   void ConnectBrowserActionPopupAccelerator() {
-    // Iterate through all the keybindings and see if one is assigned to the
-    // browserAction.
-    const std::vector<Extension::ExtensionKeybinding>& commands =
-        extension_->keybindings();
-    for (size_t i = 0; i < commands.size(); ++i) {
-      if (commands[i].command_name() !=
-              extension_manifest_values::kBrowserActionKeybindingEvent)
-        continue;
-
+    ExtensionCommandService* command_service =
+        ExtensionCommandServiceFactory::GetForProfile(
+            toolbar_->browser()->profile());
+    const extensions::Command* command =
+        command_service->GetActiveBrowserActionCommand(extension_->id());
+    if (command) {
       // Found the browser action shortcut command, register it.
       keybinding_.reset(new ui::AcceleratorGtk(
-          commands[i].accelerator().key_code(),
-          commands[i].accelerator().IsShiftDown(),
-          commands[i].accelerator().IsCtrlDown(),
-          commands[i].accelerator().IsAltDown()));
+          command->accelerator().key_code(),
+          command->accelerator().IsShiftDown(),
+          command->accelerator().IsCtrlDown(),
+          command->accelerator().IsAltDown()));
 
       gfx::NativeWindow window =
           toolbar_->browser()->window()->GetNativeHandle();
@@ -407,7 +407,6 @@ class BrowserActionButton : public content::NotificationObserver,
       registrar_.Add(this,
                      chrome::NOTIFICATION_WINDOW_CLOSED,
                      content::Source<GtkWindow>(window));
-      break;
     }
   }
 
@@ -479,7 +478,7 @@ class BrowserActionButton : public content::NotificationObserver,
 BrowserActionsToolbarGtk::BrowserActionsToolbarGtk(Browser* browser)
     : browser_(browser),
       profile_(browser->profile()),
-      theme_service_(ThemeServiceGtk::GetFrom(browser->profile())),
+      theme_service_(GtkThemeService::GetFrom(browser->profile())),
       model_(NULL),
       hbox_(gtk_hbox_new(FALSE, 0)),
       button_hbox_(gtk_chrome_shrinkable_hbox_new(TRUE, FALSE, kButtonPadding)),
@@ -802,13 +801,9 @@ void BrowserActionsToolbarGtk::ExecuteCommand(int command_id) {
 
   if (browser_action->HasPopup(tab_id)) {
     ExtensionPopupGtk::Show(
-        browser_action->GetPopupUrl(tab_id), browser(),
-        chevron(),
-        false);
+        browser_action->GetPopupUrl(tab_id), browser(), chevron());
   } else {
-    ExtensionService* service = browser()->profile()->GetExtensionService();
-    service->browser_event_router()->BrowserActionExecuted(
-        browser()->profile(), extension->id(), browser());
+    model_->ExecuteBrowserAction(extension->id(), browser());
   }
 }
 

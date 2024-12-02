@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
@@ -22,7 +23,6 @@
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -46,9 +46,13 @@ class PurgeMemoryIOHelper
   void PurgeMemoryOnIOThread();
 
  private:
-  typedef scoped_refptr<net::URLRequestContextGetter> RequestContextGetter;
+  friend class base::RefCountedThreadSafe<PurgeMemoryIOHelper>;
 
+  virtual ~PurgeMemoryIOHelper() {}
+
+  typedef scoped_refptr<net::URLRequestContextGetter> RequestContextGetter;
   std::vector<RequestContextGetter> request_context_getters_;
+
   scoped_refptr<SafeBrowsingService> safe_browsing_service_;
 
   DISALLOW_COPY_AND_ASSIGN(PurgeMemoryIOHelper);
@@ -67,7 +71,9 @@ void PurgeMemoryIOHelper::PurgeMemoryOnIOThread() {
         PurgeMemory();
   }
 
+#if defined(ENABLE_SAFE_BROWSING)
   safe_browsing_service_->PurgeMemory();
+#endif
 }
 
 // -----------------------------------------------------------------------------
@@ -125,14 +131,12 @@ void MemoryPurger::PurgeBrowser() {
   // * Purge AppCache memory.  Not yet implemented sufficiently.
   // * Browser-side DatabaseTracker.  Not implemented sufficiently.
 
-#if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
-  // Tell tcmalloc to release any free pages it's still holding.
+  // Tell our allocator to release any free pages it's still holding.
   //
   // TODO(pkasting): A lot of the above calls kick off actions on other threads.
   // Maybe we should find a way to avoid calling this until those actions
   // complete?
-  MallocExtension::instance()->ReleaseFreeMemory();
-#endif
+  base::allocator::ReleaseFreeMemory();
 }
 
 // static

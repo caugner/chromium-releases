@@ -72,14 +72,10 @@ class DumpVideo {
 class MockVideoCaptureHost : public VideoCaptureHost {
  public:
   MockVideoCaptureHost(content::ResourceContext* resource_context,
-                       AudioManager* audio_manager)
+                       media::AudioManager* audio_manager)
       : VideoCaptureHost(resource_context, audio_manager),
         return_buffers_(false),
         dump_video_(false) {}
-  virtual ~MockVideoCaptureHost() {
-    STLDeleteContainerPairSecondPointers(filled_dib_.begin(),
-                                         filled_dib_.end());
-  }
 
   // A list of mock methods.
   MOCK_METHOD4(OnNewBufferCreated,
@@ -95,6 +91,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
   void SetDumpVideo(bool enable) {
     dump_video_ = enable;
   }
+
   void SetReturnReceviedDibs(bool enable) {
     return_buffers_ = enable;
   }
@@ -107,6 +104,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
       handle = GetReceivedDib();
     }
   }
+
   int GetReceivedDib() {
     if (filled_dib_.empty())
       return 0;
@@ -119,6 +117,11 @@ class MockVideoCaptureHost : public VideoCaptureHost {
   }
 
  private:
+  virtual ~MockVideoCaptureHost() {
+    STLDeleteContainerPairSecondPointers(filled_dib_.begin(),
+                                         filled_dib_.end());
+  }
+
   // This method is used to dispatch IPC messages to the renderer. We intercept
   // these messages here and dispatch to our mock methods to verify the
   // conversation between this object and the renderer.
@@ -205,7 +208,7 @@ class VideoCaptureHostTest : public testing::Test {
     io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
                                            message_loop_.get()));
 
-    audio_manager_.reset(AudioManager::Create());
+    audio_manager_.reset(media::AudioManager::Create());
 
 #ifndef TEST_REAL_CAPTURE_DEVICE
     media_stream::MediaStreamManager::GetForResourceContext(
@@ -246,7 +249,7 @@ class VideoCaptureHostTest : public testing::Test {
   // Called on the main thread.
   static void PostQuitOnVideoCaptureManagerThread(
       MessageLoop* message_loop, content::ResourceContext* resource_context,
-      AudioManager* audio_manager) {
+      media:: AudioManager* audio_manager) {
     media_stream::MediaStreamManager* manager =
         media_stream::MediaStreamManager::GetForResourceContext(
             resource_context, audio_manager);
@@ -362,7 +365,7 @@ class VideoCaptureHostTest : public testing::Test {
   scoped_ptr<MessageLoop> message_loop_;
   scoped_ptr<BrowserThreadImpl> ui_thread_;
   scoped_ptr<BrowserThreadImpl> io_thread_;
-  scoped_ptr<AudioManager> audio_manager_;
+  scoped_ptr<media::AudioManager> audio_manager_;
   content::MockResourceContext resource_context_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHostTest);

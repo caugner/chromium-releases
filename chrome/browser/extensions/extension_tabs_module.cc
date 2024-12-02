@@ -48,6 +48,7 @@
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/user_script.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_controller.h"
@@ -56,11 +57,14 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
+#include "content/public/common/url_constants.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/codec/jpeg_codec.h"
 #include "ui/gfx/codec/png_codec.h"
 
@@ -144,10 +148,11 @@ bool GetWindowFromWindowID(UIThreadExtensionFunction* function,
                            int window_id,
                            ExtensionWindowController** controller) {
   if (window_id == extension_misc::kCurrentWindowId) {
-    Browser* browser = function->dispatcher()->delegate()->GetBrowser();
-    // If there is a windowed browser associated with this extension, use that.
-    if (browser && browser->extension_window_controller()) {
-      *controller = browser->extension_window_controller();
+    ExtensionWindowController* extension_window_controller =
+        function->dispatcher()->delegate()->GetExtensionWindowController();
+    // If there is a window controller associated with this extension, use that.
+    if (extension_window_controller) {
+      *controller = extension_window_controller;
     } else {
       // Otherwise get the focused or most recently added window.
       *controller = ExtensionWindowList::GetInstance()->CurrentWindow(
@@ -459,7 +464,7 @@ bool CreateWindowFunction::RunImpl() {
   }
 
   // Try to position the new browser relative its originating browser window.
-  gfx::Rect  window_bounds;
+  gfx::Rect window_bounds;
   // The call offsets the bounds by kWindowTilePixels (defined in WindowSizer to
   // be 10)
   //
@@ -564,10 +569,12 @@ bool CreateWindowFunction::RunImpl() {
           window_type = Browser::TYPE_POPUP;
       } else if (type_str == keys::kWindowTypeValueShell &&
           GetExtension()->is_platform_app()) {
-        GURL window_url =
-            urls.empty() ? GetExtension()->GetFullLaunchURL() : urls[0];
+        GURL window_url = urls.empty() ? GURL(chrome::kAboutBlankURL) : urls[0];
         ShellWindow* shell_window =
             ShellWindow::Create(window_profile, GetExtension(), window_url);
+        // TODO(mihaip): It might be less janky to pass in the desired bounds
+        // into ShellWindow::Create directly.
+        shell_window->SetBounds(window_bounds);
         result_.reset(shell_window->extension_window_controller()->
             CreateWindowValueWithTabs());
         return true;
@@ -595,17 +602,20 @@ bool CreateWindowFunction::RunImpl() {
 #endif
 
   // Create a new BrowserWindow.
-  Browser* new_window;
+  Browser::CreateParams create_params;
   if (extension_id.empty()) {
-    new_window = Browser::CreateForType(window_type, window_profile);
-    new_window->window()->SetBounds(window_bounds);
+    create_params = Browser::CreateParams(window_type, window_profile);
+    create_params.initial_bounds = window_bounds;
   } else {
-    new_window = Browser::CreateForApp(
+    create_params = Browser::CreateParams::CreateForApp(
         window_type,
         web_app::GenerateApplicationNameFromExtensionId(extension_id),
         (window_type == Browser::TYPE_PANEL ? panel_bounds : popup_bounds),
         window_profile);
   }
+  create_params.initial_show_state = ui::SHOW_STATE_NORMAL;
+  Browser* new_window = Browser::CreateWithParams(create_params);
+
   for (std::vector<GURL>::iterator i = urls.begin(); i != urls.end(); ++i) {
     TabContentsWrapper* tab = new_window->AddSelectedTabWithURL(
         *i, content::PAGE_TRANSITION_LINK);
@@ -787,7 +797,7 @@ bool RemoveWindowFunction::RunImpl() {
 
   ExtensionWindowController::Reason reason;
   if (!controller->CanClose(&reason)) {
-    if (reason == ExtensionWindowController::REASON_TAB_STRIP_NOT_EDITABLE)
+    if (reason == ExtensionWindowController::REASON_NOT_EDITABLE)
       error_ = keys::kTabStripNotEditableError;
     return false;
   }
@@ -910,7 +920,8 @@ bool QueryTabsFunction::RunImpl() {
       continue;
 
     if (!window_type.empty() &&
-        window_type != ExtensionTabUtil::GetWindowTypeText(*browser))
+        window_type !=
+        (*browser)->extension_window_controller()->GetWindowTypeText())
       continue;
 
     TabStripModel* tab_strip = (*browser)->tabstrip_model();
@@ -1309,6 +1320,7 @@ bool UpdateTabFunction::UpdateURLIfPresent(DictionaryValue* update_props,
     params.extension_id = extension_id();
     params.is_javascript = true;
     params.code = url.path();
+    params.run_at = UserScript::DOCUMENT_IDLE;
     params.all_frames = false;
     params.in_main_world = true;
 
@@ -1652,28 +1664,45 @@ bool CaptureVisibleTabFunction::RunImpl() {
     return false;
 
   RenderViewHost* render_view_host = web_contents->GetRenderViewHost();
+  content::RenderWidgetHostView* view = render_view_host->GetView();
+  if (!view) {
+    error_ = keys::kInternalVisibleTabCaptureError;
+    return false;
+  }
+  skia::PlatformCanvas* temp_canvas = new skia::PlatformCanvas;
+  render_view_host->AsyncCopyFromBackingStore(
+      gfx::Rect(),
+      view->GetViewBounds().size(),
+      temp_canvas,
+      base::Bind(&CaptureVisibleTabFunction::CopyFromBackingStoreComplete,
+                 this,
+                 base::Owned(temp_canvas)));
+  return true;
+}
 
-  // If a backing store is cached for the tab we want to capture,
-  // and it can be copied into a bitmap, then use it to generate the image.
-  // For example, some uncommon X11 visual modes are not supported by
-  // CopyFromBackingStore().
-  skia::PlatformCanvas temp_canvas;
-  if (render_view_host->CopyFromBackingStore(
-          gfx::Rect(), gfx::Size(), &temp_canvas)) {
+void CaptureVisibleTabFunction::CopyFromBackingStoreComplete(
+    skia::PlatformCanvas* canvas,
+    bool succeeded) {
+  if (succeeded) {
     VLOG(1) << "captureVisibleTab() got image from backing store.";
-    SendResultFromBitmap(skia::GetTopDevice(temp_canvas)->accessBitmap(false));
-    return true;
+    SendResultFromBitmap(skia::GetTopDevice(*canvas)->accessBitmap(false));
+    return;
+  }
+
+  WebContents* web_contents = NULL;
+  TabContentsWrapper* wrapper = NULL;
+  if (!GetTabToCapture(&web_contents, &wrapper)) {
+    error_ = keys::kInternalVisibleTabCaptureError;
+    SendResponse(false);
+    return;
   }
 
   // Ask the renderer for a snapshot of the tab.
-  wrapper->snapshot_tab_helper()->CaptureSnapshot();
   registrar_.Add(this,
                  chrome::NOTIFICATION_TAB_SNAPSHOT_TAKEN,
-                 content::Source<WebContents>(wrapper->web_contents()));
+                 content::Source<WebContents>(web_contents));
   AddRef();  // Balanced in CaptureVisibleTabFunction::Observe().
   wrapper->snapshot_tab_helper()->CaptureSnapshot();
-
-  return true;
 }
 
 // If a backing store was not available in CaptureVisibleTabFunction::RunImpl,
@@ -1794,7 +1823,7 @@ bool DetectTabLanguageFunction::RunImpl() {
   registrar_.Add(this, chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                  content::Source<WebContents>(contents->web_contents()));
   registrar_.Add(
-      this, content::NOTIFICATION_TAB_CLOSING,
+      this, chrome::NOTIFICATION_TAB_CLOSING,
       content::Source<NavigationController>(
           &(contents->web_contents()->GetController())));
   registrar_.Add(

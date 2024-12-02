@@ -13,7 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/string_util.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -58,6 +58,8 @@ class DiskMountManagerImpl : public DiskMountManager {
 
   // DiskMountManager override.
   virtual void MountPath(const std::string& source_path,
+                         const std::string& source_format,
+                         const std::string& mount_label,
                          MountType type) OVERRIDE {
     // Hidden and non-existent devices should not be mounted.
     if (type == MOUNT_TYPE_DEVICE) {
@@ -70,6 +72,8 @@ class DiskMountManagerImpl : public DiskMountManager {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     cros_disks_client_->Mount(
         source_path,
+        source_format,
+        mount_label,
         type,
         // When succeeds, OnMountCompleted will be called by
         // "MountCompleted" signal instead.

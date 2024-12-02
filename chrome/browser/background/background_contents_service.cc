@@ -61,9 +61,6 @@ class CrashNotificationDelegate : public NotificationDelegate {
         extension_id_(extension->id()) {
   }
 
-  ~CrashNotificationDelegate() {
-  }
-
   void Display() {}
 
   void Error() {}
@@ -93,6 +90,8 @@ class CrashNotificationDelegate : public NotificationDelegate {
   }
 
  private:
+  virtual ~CrashNotificationDelegate() {}
+
   Profile* profile_;
   bool is_hosted_app_;
   std::string extension_id_;
@@ -216,19 +215,24 @@ void BackgroundContentsService::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSIONS_READY:
-      LoadBackgroundContentsFromManifests(
-          content::Source<Profile>(source).ptr());
-      LoadBackgroundContentsFromPrefs(content::Source<Profile>(source).ptr());
+    case chrome::NOTIFICATION_EXTENSIONS_READY: {
+      Profile* profile = content::Source<Profile>(source).ptr();
+      LoadBackgroundContentsFromManifests(profile);
+      LoadBackgroundContentsFromPrefs(profile);
+      SendChangeNotification(profile);
       break;
+    }
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED:
       BackgroundContentsShutdown(
           content::Details<BackgroundContents>(details).ptr());
+      SendChangeNotification(content::Source<Profile>(source).ptr());
       break;
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED:
       DCHECK(IsTracked(content::Details<BackgroundContents>(details).ptr()));
       UnregisterBackgroundContents(
           content::Details<BackgroundContents>(details).ptr());
+      // CLOSED is always followed by a DELETED notification so we'll send our
+      // change notification there.
       break;
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED: {
       DCHECK(IsTracked(content::Details<BackgroundContents>(details).ptr()));
@@ -272,6 +276,7 @@ void BackgroundContentsService::Observe(
 
       // Remove any "This extension has crashed" balloons.
       ScheduleCloseBalloon(extension->id());
+      SendChangeNotification(profile);
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
@@ -311,12 +316,15 @@ void BackgroundContentsService::Observe(
           ShutdownAssociatedBackgroundContents(
               ASCIIToUTF16(content::Details<UnloadedExtensionInfo>(details)->
                   extension->id()));
+          SendChangeNotification(content::Source<Profile>(source).ptr());
           break;
         case extension_misc::UNLOAD_REASON_UPDATE: {
           // If there is a manifest specified background page, then shut it down
           // here, since if the updated extension still has the background page,
           // then it will be loaded from LOADED callback. Otherwise, leave
           // BackgroundContents in place.
+          // We don't call SendChangeNotification here - it will be generated
+          // from the LOADED callback.
           const Extension* extension =
               content::Details<UnloadedExtensionInfo>(details)->extension;
           if (extension->has_background_page())
@@ -374,6 +382,13 @@ void BackgroundContentsService::LoadBackgroundContentsFromPrefs(
     }
     LoadBackgroundContentsFromDictionary(profile, *it, contents);
   }
+}
+
+void BackgroundContentsService::SendChangeNotification(Profile* profile) {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_BACKGROUND_CONTENTS_SERVICE_CHANGED,
+      content::Source<Profile>(profile),
+      content::Details<BackgroundContentsService>(this));
 }
 
 void BackgroundContentsService::LoadBackgroundContentsForExtension(
@@ -483,6 +498,9 @@ BackgroundContents* BackgroundContentsService::CreateBackgroundContents(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED,
       content::Source<Profile>(profile),
       content::Details<BackgroundContentsOpenedDetails>(&details));
+
+  // A new background contents has been created - notify our listeners.
+  SendChangeNotification(profile);
   return contents;
 }
 
@@ -508,6 +526,16 @@ void BackgroundContentsService::RegisterBackgroundContents(
   dict->SetString(kUrlKey, background_contents->GetURL().spec());
   dict->SetString(kFrameNameKey, contents_map_[appid].frame_name);
   pref->SetWithoutPathExpansion(UTF16ToUTF8(appid), dict);
+}
+
+bool BackgroundContentsService::HasRegisteredBackgroundContents(
+    const string16& app_id) {
+  if (!prefs_)
+    return false;
+  std::string app = UTF16ToUTF8(app_id);
+  const DictionaryValue* contents =
+      prefs_->GetDictionary(prefs::kRegisteredBackgroundContents);
+  return contents->HasKey(app);
 }
 
 void BackgroundContentsService::UnregisterBackgroundContents(

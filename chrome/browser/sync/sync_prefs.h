@@ -13,8 +13,8 @@
 #include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/sync/notifier/invalidation_version_tracker.h"
 #include "content/public/browser/notification_observer.h"
+#include "sync/notifier/invalidation_version_tracker.h"
 #include "sync/syncable/model_type.h"
 
 class PrefService;
@@ -95,8 +95,16 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   // This pref is set outside of sync.
   bool IsManaged() const;
 
+  // Use this encryption bootstrap token once already syncing.
   std::string GetEncryptionBootstrapToken() const;
   void SetEncryptionBootstrapToken(const std::string& token);
+
+#if defined(OS_CHROMEOS)
+  // Use this spare bootstrap token only when setting up sync for the first
+  // time.
+  std::string GetSpareBootstrapToken() const;
+  void SetSpareBootstrapToken(const std::string& token);
+#endif
 
   // InvalidationVersionTracker implementation.
   virtual sync_notifier::InvalidationVersionMap

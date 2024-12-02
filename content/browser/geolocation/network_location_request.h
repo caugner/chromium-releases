@@ -1,12 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_REQUEST_H_
 #define CONTENT_BROWSER_GEOLOCATION_NETWORK_LOCATION_REQUEST_H_
 #pragma once
-
-#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -16,8 +14,11 @@
 #include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 
-struct Geoposition;
 class URLFetcher;
+
+namespace content {
+struct Geoposition;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -35,7 +36,7 @@ class NetworkLocationRequest : private content::URLFetcherDelegate {
     // Updates the listener with a new position. server_error indicates whether
     // was a server or network error - either no response or a 500 error code.
     virtual void LocationResponseAvailable(
-        const Geoposition& position,
+        const content::Geoposition& position,
         bool server_error,
         const string16& access_token,
         const RadioData& radio_data,
@@ -53,8 +54,7 @@ class NetworkLocationRequest : private content::URLFetcherDelegate {
 
   // Makes a new request. Returns true if the new request was successfully
   // started. In all cases, any currently pending request will be canceled.
-  bool MakeRequest(const std::string& host,
-                   const string16& access_token,
+  bool MakeRequest(const string16& access_token,
                    const RadioData& radio_data,
                    const WifiData& wifi_data,
                    const base::Time& timestamp);

@@ -12,17 +12,22 @@
 
 #include "base/memory/linked_ptr.h"
 #include "base/time.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_content_settings_store.h"
 #include "chrome/browser/extensions/extension_prefs_scope.h"
 #include "chrome/browser/extensions/extension_scoped_prefs.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/string_ordinal.h"
-#include "googleurl/src/gurl.h"
 
 class ExtensionPrefValueMap;
 class ExtensionSorting;
+class PrefService;
 class URLPatternSet;
+
+namespace extensions {
+struct AlarmPref;
+struct ExtensionOmniboxSuggestion;
+}
 
 // Class for managing global and per-extension preferences.
 //
@@ -139,6 +144,12 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer,
   void SetDidExtensionEscalatePermissions(const Extension* extension,
                                           bool did_escalate);
 
+  // Getter and setters for disabled reason.
+  Extension::DisableReason GetDisableReason(const std::string& extension_id);
+  void SetDisableReason(const std::string& extension_id,
+                        Extension::DisableReason disable_reason);
+  void RemoveDisableReason(const std::string& extension_id);
+
   // Returns the version string for the currently installed extension, or
   // the empty string if not found.
   std::string GetVersionString(const std::string& extension_id);
@@ -194,7 +205,14 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer,
   // Is the extension with |extension_id| allowed by policy (checking both
   // whitelist and blacklist).
   bool IsExtensionAllowedByPolicy(const std::string& extension_id,
-                                  Extension::Location location);
+                                  Extension::Location location) const;
+
+  // Checks if extensions are blacklisted by default, by policy. When true, this
+  // means that even extensions without an ID should be blacklisted (e.g.
+  // from the command line, or when loaded as an unpacked extension).
+  // IsExtensionAllowedByPolicy() also takes this into account, and should be
+  // used instead when the extension ID is known.
+  bool ExtensionsBlacklistedByDefault() const;
 
   // Returns the last value set via SetLastPingDay. If there isn't such a
   // pref, the returned Time will return true for is_null().
@@ -246,6 +264,20 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer,
   std::set<std::string> GetRegisteredEvents(const std::string& extension_id);
   void SetRegisteredEvents(const std::string& extension_id,
                            const std::set<std::string>& events);
+
+  // Controls a list of alarms for this extension, including the next time they
+  // should run.
+  std::vector<extensions::AlarmPref> GetRegisteredAlarms(
+      const std::string& extension_id);
+  void SetRegisteredAlarms(const std::string& extension_id,
+                           const std::vector<extensions::AlarmPref>& alarms);
+
+  // Controls the omnibox default suggestion as set by the extension.
+  extensions::ExtensionOmniboxSuggestion GetOmniboxDefaultSuggestion(
+      const std::string& extension_id);
+  void SetOmniboxDefaultSuggestion(
+      const std::string& extension_id,
+      const extensions::ExtensionOmniboxSuggestion& suggestion);
 
   // Returns true if the user enabled this extension to be loaded in incognito
   // mode.

@@ -40,7 +40,7 @@ struct WebIntentServiceData;
 }
 
 // Controls the creation of the WebIntentPicker UI and forwards the user's
-// intent handler choice back to the TabContents object.
+// intent handler choice back to the WebContents object.
 class WebIntentPickerController : public content::NotificationObserver,
                                   public WebIntentPickerDelegate,
                                   public WebstoreInstaller::Delegate {
@@ -54,10 +54,8 @@ class WebIntentPickerController : public content::NotificationObserver,
   // |intents_dispatcher|. |intents_dispatcher| must not be NULL.
   void SetIntentsDispatcher(content::WebIntentsDispatcher* intents_dispatcher);
 
-  // Shows the web intent picker for |browser|, given the intent
-  // |action| and MIME-type |type|.
-  void ShowDialog(Browser* browser,
-                  const string16& action,
+  // Shows the web intent picker given the intent |action| and MIME-type |type|.
+  void ShowDialog(const string16& action,
                   const string16& type);
 
  protected:
@@ -72,7 +70,10 @@ class WebIntentPickerController : public content::NotificationObserver,
   virtual void OnInlineDispositionWebContentsCreated(
       content::WebContents* web_contents) OVERRIDE;
   virtual void OnExtensionInstallRequested(const std::string& id) OVERRIDE;
-  virtual void OnCancelled() OVERRIDE;
+  virtual void OnExtensionLinkClicked(const std::string& id) OVERRIDE;
+  virtual void OnSuggestionsLinkClicked() OVERRIDE;
+  virtual void OnPickerClosed() OVERRIDE;
+  virtual void OnChooseAnotherService() OVERRIDE;
   virtual void OnClosing() OVERRIDE;
 
   // WebstoreInstaller::Delegate implementation.
@@ -98,8 +99,27 @@ class WebIntentPickerController : public content::NotificationObserver,
     picker_model_->set_observer(observer);
   }
 
-  // Called when WebIntentServiceData is returned from the WebIntentsRegistry.
+  // Called by the WebIntentsRegistry, returning |services|, which is
+  // a list of WebIntentServiceData matching the query.
   void OnWebIntentServicesAvailable(
+      const std::vector<webkit_glue::WebIntentServiceData>& services);
+
+  // Called when a default service is returned from the WebIntentsRegistry.
+  // (Still called with default_service.service_url empty if there are no
+  // defaults.)
+  void OnWebIntentDefaultsAvailable(
+      const DefaultWebIntentService& default_service);
+
+  // Coordination method which is delegated to by the registry calls to get
+  // services and defaults. Checks whether the picker should be shown or if
+  // default choices allow it to be skipped.
+  void RegistryCallsCompleted();
+
+  // Called when WebIntentServiceData is ready for checking extensions
+  // when dispatching explicit intents. Gets |services|
+  // from the WebIntentsRegistry to check for known urls/extensions and find
+  // disposition data.
+  void WebIntentServicesForExplicitIntent(
       const std::vector<webkit_glue::WebIntentServiceData>& services);
 
   // Called when FaviconData is returned from the FaviconService.
@@ -139,6 +159,9 @@ class WebIntentPickerController : public content::NotificationObserver,
   // reaches zero.
   void AsyncOperationFinished();
 
+  // Helper to create picker dialog UI.
+  void CreatePicker();
+
   // Closes the currently active picker.
   void ClosePicker();
 
@@ -158,6 +181,9 @@ class WebIntentPickerController : public content::NotificationObserver,
 
   // A count of the outstanding asynchronous calls.
   int pending_async_count_;
+
+  // A count of outstanding WebIntentsRegistry calls.
+  int pending_registry_calls_count_;
 
   // Is true if the picker is currently visible.
   // This bool is not equivalent to picker != NULL in a unit test. In that

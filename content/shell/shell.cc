@@ -4,6 +4,7 @@
 
 #include "content/shell/shell.h"
 
+#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -11,6 +12,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/shell/shell_javascript_dialog_creator.h"
 #include "content/shell/shell_messages.h"
 #include "content/shell/shell_switches.h"
 #include "ui/gfx/size.h"
@@ -23,12 +25,14 @@ namespace content {
 
 std::vector<Shell*> Shell::windows_;
 
+bool Shell::quit_message_loop_ = true;
+
 Shell::Shell(WebContents* web_contents)
     : WebContentsObserver(web_contents),
       wait_until_done_(false),
       window_(NULL),
       url_edit_view_(NULL)
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
       , default_edit_wnd_proc_(0)
 #endif
   {
@@ -44,6 +48,9 @@ Shell::~Shell() {
       break;
     }
   }
+
+  if (windows_.empty() && quit_message_loop_)
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 Shell* Shell::CreateShell(WebContents* web_contents) {
@@ -57,6 +64,14 @@ Shell* Shell::CreateShell(WebContents* web_contents) {
 
   shell->PlatformResizeSubViews();
   return shell;
+}
+
+void Shell::CloseAllWindows() {
+  AutoReset<bool> auto_reset(&quit_message_loop_, false);
+  std::vector<Shell*> open_windows(windows_);
+  for (size_t i = 0; i < open_windows.size(); ++i)
+    open_windows[i]->Close();
+  MessageLoop::current()->RunAllPending();
 }
 
 Shell* Shell::FromRenderViewHost(RenderViewHost* rvh) {
@@ -137,8 +152,17 @@ void Shell::WebContentsCreated(WebContents* source_contents,
   CreateShell(new_contents);
 }
 
-void Shell::DidNavigateMainFramePostCommit(WebContents* tab) {
-  PlatformSetAddressBarURL(tab->GetURL());
+void Shell::DidNavigateMainFramePostCommit(WebContents* web_contents) {
+  PlatformSetAddressBarURL(web_contents->GetURL());
+}
+
+JavaScriptDialogCreator* Shell::GetJavaScriptDialogCreator() {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+    return NULL;
+
+  if (!dialog_creator_.get())
+    dialog_creator_.reset(new ShellJavaScriptDialogCreator());
+  return dialog_creator_.get();
 }
 
 void Shell::DidFinishLoad(int64 frame_id,

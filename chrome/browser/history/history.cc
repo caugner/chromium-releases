@@ -40,6 +40,7 @@
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/in_memory_url_index.h"
 #include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/visit_database.h"
 #include "chrome/browser/history/visit_filter.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -127,6 +128,13 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
                    history_service_.get(), backend_id));
   }
 
+  virtual void NotifyVisitDBObserversOnAddVisit(
+      const history::BriefVisitInfo& info) OVERRIDE {
+    // Since the notification method can be run on any thread, we can
+    // call it right away.
+    history_service_->NotifyVisitDBObserversOnAddVisit(info);
+  }
+
  private:
   scoped_refptr<HistoryService> history_service_;
   MessageLoop* message_loop_;
@@ -143,7 +151,9 @@ HistoryService::HistoryService()
       current_backend_id_(-1),
       bookmark_service_(NULL),
       no_db_(false),
-      needs_top_sites_migration_(false) {
+      needs_top_sites_migration_(false),
+      visit_database_observers_(
+          new ObserverListThreadSafe<history::VisitDatabaseObserver>()) {
 }
 
 HistoryService::HistoryService(Profile* profile)
@@ -153,7 +163,9 @@ HistoryService::HistoryService(Profile* profile)
       current_backend_id_(-1),
       bookmark_service_(NULL),
       no_db_(false),
-      needs_top_sites_migration_(false) {
+      needs_top_sites_migration_(false),
+      visit_database_observers_(
+          new ObserverListThreadSafe<history::VisitDatabaseObserver>()) {
   DCHECK(profile_);
   registrar_.Add(this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
                  content::Source<Profile>(profile_));
@@ -385,6 +397,14 @@ void HistoryService::SetPageTitle(const GURL& url,
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetPageTitle, url, title);
 }
 
+void HistoryService::UpdateWithPageEndTime(const void* host,
+                                           int32 page_id,
+                                           const GURL& url,
+                                           Time end_ts) {
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::UpdateWithPageEndTime,
+                    host, page_id, url, end_ts);
+}
+
 void HistoryService::AddPageWithDetails(const GURL& url,
                                         const string16& title,
                                         int visit_count,
@@ -475,6 +495,12 @@ void HistoryService::GetFaviconForURL(
            page_url, icon_types);
 }
 
+void HistoryService::GetFaviconForID(FaviconService::GetFaviconRequest* request,
+                                     history::FaviconID id) {
+  Schedule(PRIORITY_NORMAL, &HistoryBackend::GetFaviconForID, NULL, request,
+           id);
+}
+
 void HistoryService::SetFavicon(const GURL& page_url,
                                 const GURL& icon_url,
                                 const std::vector<unsigned char>& image_data,
@@ -484,7 +510,8 @@ void HistoryService::SetFavicon(const GURL& page_url,
 
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetFavicon,
       page_url, icon_url,
-      scoped_refptr<RefCountedMemory>(new RefCountedBytes(image_data)),
+      scoped_refptr<base::RefCountedMemory>(
+          new base::RefCountedBytes(image_data)),
       icon_type);
 }
 
@@ -639,11 +666,11 @@ HistoryService::Handle HistoryService::QueryFilteredURLs(
     int result_count,
     const history::VisitFilter& filter,
     CancelableRequestConsumerBase* consumer,
-    const QueryMostVisitedURLsCallback& callback) {
+    const QueryFilteredURLsCallback& callback) {
   return Schedule(PRIORITY_NORMAL,
                   &HistoryBackend::QueryFilteredURLs,
                   consumer,
-                  new history::QueryMostVisitedURLsRequest(callback),
+                  new history::QueryFilteredURLsRequest(callback),
                   result_count, filter);
 }
 
@@ -673,7 +700,7 @@ void HistoryService::Observe(int type,
       if (deleted_details->all_history)
         visited_links->DeleteAllURLs();
       else  // Delete individual ones.
-        visited_links->DeleteURLs(deleted_details->urls);
+        visited_links->DeleteURLs(deleted_details->rows);
       break;
     }
 
@@ -877,4 +904,20 @@ void HistoryService::StartTopSitesMigration(int backend_id) {
 void HistoryService::OnTopSitesReady() {
   ScheduleAndForget(PRIORITY_NORMAL,
                     &HistoryBackend::MigrateThumbnailsDatabase);
+}
+
+void HistoryService::AddVisitDatabaseObserver(
+    history::VisitDatabaseObserver* observer) {
+  visit_database_observers_->AddObserver(observer);
+}
+
+void HistoryService::RemoveVisitDatabaseObserver(
+    history::VisitDatabaseObserver* observer) {
+  visit_database_observers_->RemoveObserver(observer);
+}
+
+void HistoryService::NotifyVisitDBObserversOnAddVisit(
+    const history::BriefVisitInfo& info) {
+  visit_database_observers_->Notify(
+      &history::VisitDatabaseObserver::OnAddVisit, info);
 }

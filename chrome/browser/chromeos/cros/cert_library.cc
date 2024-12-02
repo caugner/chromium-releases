@@ -14,10 +14,10 @@
 #include "chrome/browser/browser_process.h"  // g_browser_process
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/cryptohome_client.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/common/net/x509_certificate_model.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/encryptor.h"
 #include "crypto/nss_util.h"
@@ -395,11 +395,11 @@ class CertLibraryImpl
   }
 
   // This method is used to implement RequestCertificates.
-  void RequestCertificatesInternal(CryptohomeClient::CallStatus call_status,
+  void RequestCertificatesInternal(DBusMethodCallStatus call_status,
                                    bool tpm_is_enabled) {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI))
         << __FUNCTION__ << " should be called on UI thread.";
-    if (call_status != CryptohomeClient::SUCCESS || !tpm_is_enabled) {
+    if (call_status != DBUS_METHOD_CALL_SUCCESS || !tpm_is_enabled) {
       // TPM is not enabled, so proceed with empty tpm token name.
       VLOG(1) << "TPM not available.";
       BrowserThread::PostTask(
@@ -432,7 +432,8 @@ class CertLibraryImpl
         request_task_ = base::Bind(&CertLibraryImpl::RequestCertificatesTask,
                                    weak_ptr_factory_.GetWeakPtr());
         BrowserThread::PostDelayedTask(
-            BrowserThread::UI, FROM_HERE, request_task_, kRequestDelayMs);
+            BrowserThread::UI, FROM_HERE, request_task_,
+            base::TimeDelta::FromMilliseconds(kRequestDelayMs));
       }
       return;
     }

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+'use strict';
 
 /**
  * @fileoverview TimelineModel is a parsed representation of the
@@ -212,7 +213,6 @@ cr.define('tracing', function() {
           ', tid: ' + this.tid +
           (this.name ? ', name: ' + this.name : '');
     }
-
   };
 
   /**
@@ -546,9 +546,11 @@ cr.define('tracing', function() {
         }
         if (!found) {
           var subRow = [];
-          for (var k = 0; k < slice.subSlices.length; k++)
-            subRow.push(slice.subSlices[k]);
-          subRows.push(subRow);
+          if (slice.subSlices !== undefined) {
+            for (var k = 0; k < slice.subSlices.length; k++)
+              subRow.push(slice.subSlices[k]);
+            subRows.push(subRow);
+          }
         }
       }
       this.subRows_ = subRows;
@@ -577,7 +579,6 @@ cr.define('tracing', function() {
       }
       return groups;
     }
-
   };
 
   /**
@@ -605,7 +606,7 @@ cr.define('tracing', function() {
   // which can be used for random color selection, and
   // reserved colors, which are used when specific colors
   // need to be used, e.g. where red is desired.
-  const palletteBase = [
+  var palletteBase = [
     {r: 138, g: 113, b: 152},
     {r: 175, g: 112, b: 133},
     {r: 127, g: 135, b: 225},
@@ -644,7 +645,7 @@ cr.define('tracing', function() {
 
   // Make sure this number tracks the number of reserved entries in the
   // pallette.
-  const numReservedColorIds = 4;
+  var numReservedColorIds = 4;
 
   function brighten(c) {
     var k;
@@ -664,10 +665,10 @@ cr.define('tracing', function() {
   /**
    * The number of color IDs that getStringColorId can choose from.
    */
-  const numRegularColorIds = palletteBase.length - numReservedColorIds;
-  const highlightIdBoost = palletteBase.length;
+  var numRegularColorIds = palletteBase.length - numReservedColorIds;
+  var highlightIdBoost = palletteBase.length;
 
-  const pallette = palletteBase.concat(palletteBase.map(brighten)).
+  var pallette = palletteBase.concat(palletteBase.map(brighten)).
       map(colorToString);
   /**
    * Computes a simplistic hashcode of the provide name. Used to chose colors
@@ -961,8 +962,8 @@ cr.define('tracing', function() {
      * for canImport(events) will be used to import the events.
      *
      * @param {Object} events Events to import.
-     * @param {boolean} isChildImport True the eventData being imported is an
-     *     additional trace after the primary eventData.
+     * @param {boolean} isAdditionalImport True the eventData being imported is
+     *     an additional trace after the primary eventData.
      * @return {TimelineModelImporter} The importer used for the eventData.
      */
     importOneTrace_: function(eventData, isAdditionalImport) {
@@ -1004,7 +1005,7 @@ cr.define('tracing', function() {
       if (opt_zeroAndBoost === undefined)
         opt_zeroAndBoost = true;
 
-      activeImporters = [];
+      var activeImporters = [];
       var importer = this.importOneTrace_(eventData, false);
       activeImporters.push(importer);
       if (opt_additionalEventData) {
@@ -1034,6 +1035,24 @@ cr.define('tracing', function() {
     }
   };
 
+  /**
+   * @constructor A filter that can be passed into
+   * Timeline.findAllObjectsMatchingFilter
+   */
+  function TimelineFilter(text) {
+    this.text_ = text;
+  }
+  TimelineFilter.prototype = {
+    __proto__: Object.prototype,
+
+    matchSlice: function(slice) {
+      if (this.text_.length == 0)
+        return false;
+      return slice.title.indexOf(this.text_) != -1;
+    }
+
+  };
+
   return {
     getPallette: getPallette,
     getPalletteHighlightIdBoost: getPalletteHighlightIdBoost,
@@ -1049,7 +1068,8 @@ cr.define('tracing', function() {
     TimelineProcess: TimelineProcess,
     TimelineCpu: TimelineCpu,
     TimelineAsyncSliceGroup: TimelineAsyncSliceGroup,
-    TimelineModel: TimelineModel
+    TimelineModel: TimelineModel,
+    TimelineFilter: TimelineFilter
   };
 
 });

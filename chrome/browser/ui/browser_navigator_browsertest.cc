@@ -63,15 +63,17 @@ browser::NavigateParams BrowserNavigatorTest::MakeNavigateParams(
 
 Browser* BrowserNavigatorTest::CreateEmptyBrowserForType(Browser::Type type,
                                                          Profile* profile) {
-  Browser* browser = Browser::CreateForType(type, profile);
+  Browser* browser = Browser::CreateWithParams(
+      Browser::CreateParams(type, profile));
   browser->AddBlankTab(true);
   return browser;
 }
 
 Browser* BrowserNavigatorTest::CreateEmptyBrowserForApp(Browser::Type type,
                                                         Profile* profile) {
-  Browser* browser = Browser::CreateForApp(Browser::TYPE_POPUP, "Test",
-                                           gfx::Rect(), profile);
+  Browser* browser = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForApp(
+          Browser::TYPE_POPUP, "Test", gfx::Rect(), profile));
   browser->AddBlankTab(true);
   return browser;
 }
@@ -178,7 +180,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_SingletonTabExisting) {
 
   // Register for a notification if an additional tab_contents was instantiated.
   // Opening a Singleton tab that is already opened should not be opening a new
-  // tab nor be creating a new TabContents object
+  // tab nor be creating a new TabContentsWrapper object.
   content::NotificationRegistrar registrar;
 
   // As the registrar object goes out of scope, this will get unregistered
@@ -611,7 +613,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_IgnoreAction) {
   RunSuppressTest(IGNORE_ACTION);
 }
 
-// This tests adding a foreground tab with a predefined TabContents.
+// This tests adding a foreground tab with a predefined TabContentsWrapper.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, TargetContents_ForegroundTab) {
   browser::NavigateParams p(MakeNavigateParams());
   p.disposition = NEW_FOREGROUND_TAB;
@@ -629,7 +631,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, TargetContents_ForegroundTab) {
 }
 
 #if defined(OS_WIN)
-// This tests adding a popup with a predefined TabContents.
+// This tests adding a popup with a predefined TabContentsWrapper.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_TargetContents_Popup) {
   browser::NavigateParams p(MakeNavigateParams());
   p.disposition = NEW_POPUP;
@@ -645,7 +647,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_TargetContents_Popup) {
   // The web platform is weird. The window bounds specified in
   // |p.window_bounds| are used as follows:
   // - the origin is used to position the window
-  // - the size is used to size the TabContents of the window.
+  // - the size is used to size the TabContentsWrapper of the window.
   // As such the position of the resulting window will always match
   // p.window_bounds.origin(), but its size will not. We need to match
   // the size against the selected tab's view's container size.
@@ -1218,8 +1220,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(1, browser()->active_index());
 
   // The tab contents should have the focus in the second tab.
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
-                                           VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_TAB_CONTAINER));
 
   // Go back to the first tab. The focus should not be in the omnibox.
   browser()->SelectPreviousTab();
@@ -1285,8 +1286,10 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserNavigatorTest, NavigateFromCrashedPanel) {
   GURL url2("http://maps.google.com/#b");
 
   // Create a panel.
-  Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
-      "Test", gfx::Rect(100, 100), browser()->profile());
+  Browser* panel_browser = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForApp(
+          Browser::TYPE_PANEL, "Test", gfx::Rect(100, 100),
+          browser()->profile()));
 
   // Navigate to the page.
   browser::NavigateParams p(MakeNavigateParams(panel_browser));

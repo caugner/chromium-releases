@@ -45,7 +45,6 @@ class GpuChannel : public IPC::Channel::Listener,
              gfx::GLShareGroup* share_group,
              int client_id,
              bool software);
-  virtual ~GpuChannel();
 
   bool Init(base::MessageLoopProxy* io_message_loop,
             base::WaitableEvent* shutdown_event);
@@ -62,14 +61,11 @@ class GpuChannel : public IPC::Channel::Listener,
   int TakeRendererFileDescriptor();
 #endif  // defined(OS_POSIX)
 
-  base::ProcessHandle renderer_process() const {
-    return renderer_process_;
-  }
+  base::ProcessId renderer_pid() const { return channel_->peer_pid(); }
 
   // IPC::Channel::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -109,7 +105,12 @@ class GpuChannel : public IPC::Channel::Listener,
   // discrete GPU even if they would otherwise use the integrated GPU.
   bool ShouldPreferDiscreteGpu() const;
 
+ protected:
+  virtual ~GpuChannel();
+
  private:
+  friend class base::RefCountedThreadSafe<GpuChannel>;
+
   void OnDestroy();
 
   bool OnControlMessageReceived(const IPC::Message& msg);
@@ -119,7 +120,6 @@ class GpuChannel : public IPC::Channel::Listener,
   void ScheduleDelayedWork(GpuCommandBufferStub *stub, int64 delay);
 
   // Message handlers.
-  void OnInitialize(base::ProcessHandle renderer_process);
   void OnCreateOffscreenCommandBuffer(
       const gfx::Size& size,
       const GPUCreateCommandBufferConfig& init_params,
@@ -149,18 +149,14 @@ class GpuChannel : public IPC::Channel::Listener,
   // Uniquely identifies the channel within this GPU process.
   std::string channel_id_;
 
-  // Handle to the renderer process that is on the other side of the channel.
-  base::ProcessHandle renderer_process_;
-
-  // The process id of the renderer process.
-  base::ProcessId renderer_pid_;
-
   // Used to implement message routing functionality to CommandBuffer objects
   MessageRouter router_;
 
   // The share group that all contexts associated with a particular renderer
   // process use.
   scoped_refptr<gfx::GLShareGroup> share_group_;
+
+  scoped_refptr<gpu::gles2::MailboxManager> mailbox_manager_;
 
 #if defined(ENABLE_GPU)
   typedef IDMap<GpuCommandBufferStub, IDMapOwnPointer> StubMap;

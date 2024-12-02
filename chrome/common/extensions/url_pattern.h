@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #ifndef CHROME_COMMON_EXTENSIONS_URL_PATTERN_H_
@@ -138,6 +138,9 @@ class URLPattern {
   bool MatchesSecurityOrigin(const GURL& test) const;
 
   // Returns true if |test| matches our scheme.
+  // Note that if test is "filesystem", this may fail whereas MatchesURL
+  // may succeed.  MatchesURL is smart enough to look at the inner_url instead
+  // of the outer "filesystem:" part.
   bool MatchesScheme(const std::string& test) const;
 
   // Returns true if |test| matches our host.

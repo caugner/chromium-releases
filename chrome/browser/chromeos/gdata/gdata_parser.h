@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string_piece.h"
 #include "base/time.h"
@@ -59,6 +60,7 @@ class Link {
     WORKSHEET_FEED,
     THUMBNAIL,
     EMBED,
+    PRODUCT,
     ICON,
   };
   Link();
@@ -266,10 +268,10 @@ class Content {
 };
 
 // Base class for feed entries.
-class GDataEntry {
+class FeedEntry {
  public:
-  GDataEntry();
-  virtual ~GDataEntry();
+  FeedEntry();
+  virtual ~FeedEntry();
 
   // Returns a link of a given |type| for this entry. If not found, it returns
   // NULL.
@@ -298,7 +300,7 @@ class GDataEntry {
   // Registers the mapping between JSON field names and the members in
   // this class.
   static void RegisterJSONConverter(
-      base::JSONValueConverter<GDataEntry>* converter);
+      base::JSONValueConverter<FeedEntry>* converter);
 
  protected:
   std::string etag_;
@@ -314,11 +316,11 @@ class GDataEntry {
   static const char kUpdatedField[];
   static const char kETagField[];
 
-  DISALLOW_COPY_AND_ASSIGN(GDataEntry);
+  DISALLOW_COPY_AND_ASSIGN(FeedEntry);
 };
 
 // Document feed entry.
-class DocumentEntry : public GDataEntry {
+class DocumentEntry : public FeedEntry {
  public:
   enum EntryKind {
     UNKNOWN       = 0x000000,
@@ -352,6 +354,10 @@ class DocumentEntry : public GDataEntry {
   // this class.
   static void RegisterJSONConverter(
       base::JSONValueConverter<DocumentEntry>* converter);
+
+  // Helper function for parsing bool fields based on presence of
+  // their value nodes.
+  static bool HasFieldPresent(const base::Value* value, bool* result);
 
   // Returns true if |file| has one of the hosted document extensions.
   static bool HasHostedDocumentExtension(const FilePath& file);
@@ -395,7 +401,10 @@ class DocumentEntry : public GDataEntry {
   // Document feed file size (exists only for kinds FILE and PDF).
   int64 file_size() const { return file_size_; }
 
-  // Text version of document entry kind. Returns an empty string for
+  // True if the file or directory is deleted (applicable to change feeds only).
+  bool deleted() const { return deleted_ || removed_; }
+
+// Text version of document entry kind. Returns an empty string for
   // unknown entry kind.
   std::string GetEntryKindText() const;
 
@@ -442,6 +451,8 @@ class DocumentEntry : public GDataEntry {
   string16 suggested_filename_;
   std::string file_md5_;
   int64 file_size_;
+  bool deleted_;
+  bool removed_;
 
   static const char kFeedLinkField[];
   static const char kContentField[];
@@ -453,6 +464,8 @@ class DocumentEntry : public GDataEntry {
   static const char kIDField[];
   static const char kTitleField[];
   static const char kPublishedField[];
+  static const char kDeletedField[];
+  static const char kRemovedField[];
 
   static const char kEntryNode[];
   static const char kETagAttr[];
@@ -484,16 +497,27 @@ class DocumentEntry : public GDataEntry {
 // Document feed represents a list of entries. The feed is paginated and
 // the rest of the feed can be fetched by retrieving the remaining parts of the
 // feed from URLs provided by GetNextFeedURL() method.
-class DocumentFeed : public GDataEntry {
+class DocumentFeed : public FeedEntry {
  public:
   virtual ~DocumentFeed();
+
+  // Extracts "feed" dictionary from the JSON value, and parse the contents,
+  // using CreateFrom(). Returns NULL on failure. The input JSON data, coming
+  // from the gdata server, looks like:
+  //
+  // {
+  //   "encoding": "UTF-8",
+  //   "feed": { ... },   // This function will extract this and parse.
+  //   "version": "1.0"
+  // }
+  static scoped_ptr<DocumentFeed> ExtractAndParse(const base::Value& value);
 
   // Creates feed from parsed JSON Value.  You should call this
   // instead of instantiating JSONValueConverter by yourself because
   // this method does some post-process for some fields.  See
   // FillRemainingFields comment and implementation in DocumentEntry
   // class for the details.
-  static DocumentFeed* CreateFrom(base::Value* value);
+  static scoped_ptr<DocumentFeed> CreateFrom(const base::Value& value);
 
   // Registers the mapping between JSON field names and the members in
   // this class.
@@ -513,6 +537,10 @@ class DocumentFeed : public GDataEntry {
   // Number of items per feed of the document entry list.
   int items_per_page() const { return items_per_page_; }
 
+  // The largest changestamp. Next time the documents should be fetched
+  // from this changestamp.
+  int largest_changestamp() const { return largest_changestamp_; }
+
   // Document entry list title.
   const std::string& title() { return title_; }
 
@@ -521,19 +549,101 @@ class DocumentFeed : public GDataEntry {
 
   // Parses and initializes data members from content of |value|.
   // Return false if parsing fails.
-  bool Parse(base::Value* value);
+  bool Parse(const base::Value& value);
 
   ScopedVector<DocumentEntry> entries_;
   int start_index_;
   int items_per_page_;
   std::string title_;
+  int largest_changestamp_;
 
   static const char kStartIndexField[];
   static const char kItemsPerPageField[];
   static const char kTitleField[];
   static const char kEntryField[];
+  static const char kLargestChangestamp[];
 
   DISALLOW_COPY_AND_ASSIGN(DocumentFeed);
+};
+
+// Metadata representing installed Google Drive application.
+class InstalledApp {
+ public:
+  InstalledApp();
+  virtual ~InstalledApp();
+
+  // WebApp name.
+  const string16& app_name() const { return app_name_; }
+
+  // Object (file) type name that is generated by this WebApp.
+  const string16& object_type() const { return object_type_; }
+
+  // True if WebApp supports creation of new file instances.
+  bool supports_create() const { return supports_create_; }
+
+  // List of primary mime types supported by this WebApp. Primary status should
+  // trigger this WebApp becoming the default handler of file instances that
+  // have these mime types.
+  const ScopedVector<std::string>& primary_mimetypes() const {
+    return primary_mimetypes_;
+  }
+
+  // List of secondary mime types supported by this WebApp. Secondary status
+  // should make this WebApp show up in "Open with..." pop-up menu of the
+  // default action menu for file with matching mime types.
+  const ScopedVector<std::string>& secondary_mimetypes() const {
+    return secondary_mimetypes_;
+  }
+
+  // List of primary file extensions supported by this WebApp. Primary status
+  // should trigger this WebApp becoming the default handler of file instances
+  // that match these extensions.
+  const ScopedVector<std::string>& primary_extensions() const {
+    return primary_extensions_;
+  }
+
+  // List of secondary file extensions supported by this WebApp. Secondary
+  // status should make this WebApp show up in "Open with..." pop-up menu of the
+  // default action menu for file with matching extensions.
+  const ScopedVector<std::string>& secondary_extensions() const {
+    return secondary_extensions_;
+  }
+
+  // List of entry links.
+  const ScopedVector<Link>& links() const { return links_; }
+
+  // Retrieves product URL from the link collection.
+  GURL GetProductUrl() const;
+
+  // Registers the mapping between JSON field names and the members in
+  // this class.
+  static void RegisterJSONConverter(
+      base::JSONValueConverter<InstalledApp>* converter);
+
+ private:
+  // Extracts "$t" value from the dictionary |value| and returns it in |result|.
+  // If the string value can't be found, it returns false.
+  static bool GetValueString(const base::Value* value,
+                             std::string* result);
+
+  string16 app_name_;
+  string16 object_type_;
+  bool supports_create_;
+  ScopedVector<std::string> primary_mimetypes_;
+  ScopedVector<std::string> secondary_mimetypes_;
+  ScopedVector<std::string> primary_extensions_;
+  ScopedVector<std::string> secondary_extensions_;
+  ScopedVector<Link> links_;
+
+  static const char kInstalledAppNameField[];
+  static const char kInstalledAppObjectType[];
+  static const char kInstalledAppSupportsCreate[];
+  static const char kInstalledAppPrimaryMimeType[];
+  static const char kInstalledAppSecondaryMimeType[];
+  static const char kInstalledAppPrimaryFileExtension[];
+  static const char kInstalledAppSecondaryFileExtension[];
+  static const char kTField[];
+  static const char kLinkField[];
 };
 
 // Account metadata feed represents the metadata object attached to the user's
@@ -547,14 +657,22 @@ class AccountMetadataFeed {
   // this method does some post-process for some fields.  See
   // FillRemainingFields comment and implementation in DocumentEntry
   // class for the details.
-  static AccountMetadataFeed* CreateFrom(base::Value* value);
+  static scoped_ptr<AccountMetadataFeed> CreateFrom(const base::Value& value);
 
-  int quota_bytes_total() const {
+  int64 quota_bytes_total() const {
     return quota_bytes_total_;
   }
 
-  int quota_bytes_used() const {
+  int64 quota_bytes_used() const {
     return quota_bytes_used_;
+  }
+
+  int largest_changestamp() const {
+    return largest_changestamp_;
+  }
+
+  const ScopedVector<InstalledApp>& installed_apps() const {
+    return installed_apps_;
   }
 
   // Registers the mapping between JSON field names and the members in
@@ -567,13 +685,18 @@ class AccountMetadataFeed {
 
   // Parses and initializes data members from content of |value|.
   // Return false if parsing fails.
-  bool Parse(base::Value* value);
+  bool Parse(const base::Value& value);
 
-  int quota_bytes_total_;
-  int quota_bytes_used_;
+  int64 quota_bytes_total_;
+  int64 quota_bytes_used_;
+  int largest_changestamp_;
+  ScopedVector<InstalledApp> installed_apps_;
 
   static const char kQuotaBytesTotalField[];
   static const char kQuotaBytesUsedField[];
+  static const char kLargestChangestampField[];
+  static const char kInstalledAppField[];
+  static const char kInstalledAppNameField[];
 
   DISALLOW_COPY_AND_ASSIGN(AccountMetadataFeed);
 };

@@ -6,18 +6,17 @@
 #define CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 #pragma once
 
-#include "chrome/browser/ui/dialog_style.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
 class Extension;
-class HtmlDialogUIDelegate;
 class Profile;
 class SkBitmap;
 class TabContentsWrapper;
 class TabModalConfirmDialogDelegate;
 class TemplateURL;
+class WebDialogDelegate;
 
 namespace content {
 class WebContents;
@@ -42,14 +41,10 @@ void ShowAboutIPCDialog();
 //
 // Make sure to use the returned window only when you know it is safe
 // to do so, i.e. before OnDialogClosed() is called on the delegate.
-gfx::NativeWindow ShowHtmlDialog(gfx::NativeWindow parent,
-                                 Profile* profile,
-                                 Browser* browser,
-                                 HtmlDialogUIDelegate* delegate,
-                                 DialogStyle style);
-
-// Closes the given dialog.
-void CloseHtmlDialog(gfx::NativeWindow window);
+gfx::NativeWindow ShowWebDialog(gfx::NativeWindow parent,
+                                Profile* profile,
+                                Browser* browser,
+                                WebDialogDelegate* delegate);
 
 // Shows the collected cookies dialog box.
 void ShowCollectedCookiesDialog(gfx::NativeWindow parent_window,

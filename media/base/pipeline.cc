@@ -21,6 +21,7 @@
 #include "media/base/filter_collection.h"
 #include "media/base/filters.h"
 #include "media/base/media_log.h"
+#include "media/base/video_decoder.h"
 
 namespace media {
 
@@ -64,7 +65,7 @@ struct Pipeline::PipelineInitState {
 };
 
 Pipeline::Pipeline(MessageLoop* message_loop, MediaLog* media_log)
-    : message_loop_(message_loop),
+    : message_loop_(message_loop->message_loop_proxy()),
       media_log_(media_log),
       clock_(new Clock(&base::Time::Now)),
       waiting_for_clock_update_(false),
@@ -89,7 +90,6 @@ Pipeline::~Pipeline() {
 }
 
 void Pipeline::Start(scoped_ptr<FilterCollection> collection,
-                     const std::string& url,
                      const PipelineStatusCB& ended_cb,
                      const PipelineStatusCB& error_cb,
                      const NetworkEventCB& network_cb,
@@ -100,7 +100,7 @@ void Pipeline::Start(scoped_ptr<FilterCollection> collection,
   running_ = true;
   message_loop_->PostTask(FROM_HERE, base::Bind(
       &Pipeline::StartTask, this, base::Passed(&collection),
-      url, ended_cb, error_cb, network_cb, start_cb));
+      ended_cb, error_cb, network_cb, start_cb));
 }
 
 void Pipeline::Stop(const base::Closure& stop_cb) {
@@ -187,20 +187,6 @@ void Pipeline::SetVolume(float volume) {
   if (running_ && !tearing_down_) {
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &Pipeline::VolumeChangedTask, this, volume));
-  }
-}
-
-Preload Pipeline::GetPreload() const {
-  base::AutoLock auto_lock(lock_);
-  return preload_;
-}
-
-void Pipeline::SetPreload(Preload preload) {
-  base::AutoLock auto_lock(lock_);
-  preload_ = preload;
-  if (running_ && !tearing_down_) {
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &Pipeline::PreloadChangedTask, this, preload));
   }
 }
 
@@ -324,7 +310,6 @@ void Pipeline::ResetState() {
   total_bytes_      = 0;
   natural_size_.SetSize(0, 0);
   volume_           = 1.0f;
-  preload_          = AUTO;
   playback_rate_    = 0.0f;
   pending_playback_rate_ = 0.0f;
   status_           = PIPELINE_OK;
@@ -353,22 +338,22 @@ bool Pipeline::IsPipelineOk() {
 }
 
 bool Pipeline::IsPipelineStopped() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   return state_ == kStopped || state_ == kError;
 }
 
 bool Pipeline::IsPipelineTearingDown() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   return tearing_down_;
 }
 
 bool Pipeline::IsPipelineStopPending() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   return stop_pending_;
 }
 
 bool Pipeline::IsPipelineSeeking() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   if (!seek_pending_)
     return false;
   DCHECK(kSeeking == state_ || kPausing == state_ ||
@@ -387,7 +372,7 @@ void Pipeline::ReportStatus(const PipelineStatusCB& cb, PipelineStatus status) {
 }
 
 void Pipeline::FinishInitialization() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   // Execute the seek callback, if present.  Note that this might be the
   // initial callback passed into Start().
   ReportStatus(seek_cb_, status_);
@@ -452,7 +437,7 @@ base::TimeDelta Pipeline::GetDuration() const {
 }
 
 void Pipeline::OnAudioTimeUpdate(base::TimeDelta time,
-                                     base::TimeDelta max_time) {
+                                 base::TimeDelta max_time) {
   DCHECK(time <= max_time);
   DCHECK(IsRunning());
   base::AutoLock auto_lock(lock_);
@@ -608,15 +593,13 @@ void Pipeline::OnUpdateStatistics(const PipelineStatistics& stats) {
 }
 
 void Pipeline::StartTask(scoped_ptr<FilterCollection> filter_collection,
-                         const std::string& url,
                          const PipelineStatusCB& ended_cb,
                          const PipelineStatusCB& error_cb,
                          const NetworkEventCB& network_cb,
                          const PipelineStatusCB& start_cb) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_EQ(kCreated, state_);
   filter_collection_ = filter_collection.Pass();
-  url_ = url;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
   network_cb_ = network_cb;
@@ -649,7 +632,7 @@ void Pipeline::StartTask(scoped_ptr<FilterCollection> filter_collection,
 // works like a big state change table. If we no longer need to start filters
 // in order, we need to get rid of all the state change.
 void Pipeline::InitializeTask(PipelineStatus last_stage_status) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   if (last_stage_status != PIPELINE_OK) {
     // Currently only VideoDecoders have a recoverable error code.
@@ -732,15 +715,15 @@ void Pipeline::InitializeTask(PipelineStatus last_stage_status) {
 
     // Initialization was successful, we are now considered paused, so it's safe
     // to set the initial playback rate and volume.
-    PreloadChangedTask(GetPreload());
     PlaybackRateChangedTask(GetPlaybackRate());
     VolumeChangedTask(GetVolume());
 
-    // Fire the seek request to get the filters to preroll.
+    // Fire a seek request to get the renderers to preroll. We don't need to
+    // tell the demuxer to seek since it should already be at the start.
     seek_pending_ = true;
     SetState(kSeeking);
     seek_timestamp_ = demuxer_->GetStartTime();
-    DoSeek(seek_timestamp_);
+    OnDemuxerSeekDone(seek_timestamp_, PIPELINE_OK);
   }
 }
 
@@ -752,7 +735,7 @@ void Pipeline::InitializeTask(PipelineStatus last_stage_status) {
 // Stop() tasks even if we've already stopped.  Perhaps this should no-op for
 // additional calls, however most of this logic will be changing.
 void Pipeline::StopTask(const base::Closure& stop_cb) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!IsPipelineStopPending());
   DCHECK_NE(state_, kStopped);
 
@@ -783,7 +766,7 @@ void Pipeline::StopTask(const base::Closure& stop_cb) {
 }
 
 void Pipeline::ErrorChangedTask(PipelineStatus error) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_NE(PIPELINE_OK, error) << "PIPELINE_OK isn't an error!";
 
   // Suppress executing additional error logic. Note that if we are currently
@@ -808,7 +791,7 @@ void Pipeline::ErrorChangedTask(PipelineStatus error) {
 }
 
 void Pipeline::PlaybackRateChangedTask(float playback_rate) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   if (!running_ || tearing_down_)
     return;
@@ -836,7 +819,7 @@ void Pipeline::PlaybackRateChangedTask(float playback_rate) {
 }
 
 void Pipeline::VolumeChangedTask(float volume) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   if (!running_ || tearing_down_)
     return;
 
@@ -844,26 +827,17 @@ void Pipeline::VolumeChangedTask(float volume) {
     audio_renderer_->SetVolume(volume);
 }
 
-void Pipeline::PreloadChangedTask(Preload preload) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
-  if (!running_ || tearing_down_)
-    return;
-
-  if (demuxer_)
-    demuxer_->SetPreload(preload);
-}
-
 void Pipeline::SeekTask(base::TimeDelta time,
                         const PipelineStatusCB& seek_cb) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(!IsPipelineStopPending());
 
   // Suppress seeking if we're not fully started.
   if (state_ != kStarted && state_ != kEnded) {
     // TODO(scherkus): should we run the callback?  I'm tempted to say the API
     // will only execute the first Seek() request.
-    VLOG(1) << "Media pipeline has not started, ignoring seek to "
-            << time.InMicroseconds();
+    DVLOG(1) << "Media pipeline has not started, ignoring seek to "
+             << time.InMicroseconds() << " (current state: " << state_ << ")";
     return;
   }
 
@@ -892,7 +866,7 @@ void Pipeline::SeekTask(base::TimeDelta time,
 }
 
 void Pipeline::NotifyEndedTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // We can only end if we were actually playing.
   if (state_ != kStarted) {
@@ -929,13 +903,13 @@ void Pipeline::NotifyEndedTask() {
 }
 
 void Pipeline::NotifyNetworkEventTask(NetworkEvent type) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   if (!network_cb_.is_null())
     network_cb_.Run(type);
 }
 
 void Pipeline::DisableAudioRendererTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   base::AutoLock auto_lock(lock_);
   has_audio_ = false;
@@ -957,7 +931,7 @@ void Pipeline::DisableAudioRendererTask() {
 }
 
 void Pipeline::FilterStateTransitionTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
 
   // No reason transitioning if we've errored or have stopped.
   if (IsPipelineStopped()) {
@@ -1085,7 +1059,7 @@ void Pipeline::TeardownStateTransitionTask() {
 }
 
 void Pipeline::FinishDestroyingFiltersTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(IsPipelineStopped());
 
   // Clear filter references.
@@ -1110,28 +1084,29 @@ void Pipeline::FinishDestroyingFiltersTask() {
 }
 
 void Pipeline::InitializeDemuxer() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(IsPipelineOk());
 
-  filter_collection_->GetDemuxerFactory()->Build(
-      url_, base::Bind(&Pipeline::OnDemuxerBuilt, this));
-}
-
-void Pipeline::OnDemuxerBuilt(PipelineStatus status, Demuxer* demuxer) {
-  if (MessageLoop::current() != message_loop_) {
-    message_loop_->PostTask(FROM_HERE, base::Bind(
-        &Pipeline::OnDemuxerBuilt, this, status, make_scoped_refptr(demuxer)));
+  demuxer_ = filter_collection_->GetDemuxer();
+  if (!demuxer_) {
+    SetError(PIPELINE_ERROR_REQUIRED_FILTER_MISSING);
     return;
   }
 
-  demuxer_ = demuxer;
+  demuxer_->Initialize(this, base::Bind(&Pipeline::OnDemuxerInitialized, this));
+}
+
+void Pipeline::OnDemuxerInitialized(PipelineStatus status) {
+  if (!message_loop_->BelongsToCurrentThread()) {
+    message_loop_->PostTask(FROM_HERE, base::Bind(
+        &Pipeline::OnDemuxerInitialized, this, status));
+    return;
+  }
+
   if (status != PIPELINE_OK) {
     SetError(status);
     return;
   }
-
-  CHECK(demuxer_) << "Null demuxer encountered despite PIPELINE_OK.";
-  demuxer_->set_host(this);
 
   {
     base::AutoLock auto_lock(lock_);
@@ -1145,7 +1120,7 @@ void Pipeline::OnDemuxerBuilt(PipelineStatus status, Demuxer* demuxer) {
 
 bool Pipeline::InitializeAudioDecoder(
     const scoped_refptr<Demuxer>& demuxer) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(IsPipelineOk());
   DCHECK(demuxer);
 
@@ -1171,7 +1146,7 @@ bool Pipeline::InitializeAudioDecoder(
 
 bool Pipeline::InitializeVideoDecoder(
     const scoped_refptr<Demuxer>& demuxer) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(IsPipelineOk());
   DCHECK(demuxer);
 
@@ -1199,7 +1174,7 @@ bool Pipeline::InitializeVideoDecoder(
 
 bool Pipeline::InitializeAudioRenderer(
     const scoped_refptr<AudioDecoder>& decoder) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(IsPipelineOk());
 
   if (!decoder)
@@ -1224,7 +1199,7 @@ bool Pipeline::InitializeAudioRenderer(
 
 bool Pipeline::InitializeVideoRenderer(
     const scoped_refptr<VideoDecoder>& decoder) {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK(IsPipelineOk());
 
   if (!decoder)
@@ -1247,7 +1222,7 @@ bool Pipeline::InitializeVideoRenderer(
 }
 
 void Pipeline::TearDownPipeline() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   DCHECK_NE(kStopped, state_);
 
   DCHECK(!tearing_down_ ||  // Teardown on Stop().
@@ -1324,7 +1299,7 @@ void Pipeline::DoStop(const base::Closure& callback) {
 }
 
 void Pipeline::OnDemuxerStopDone(const base::Closure& callback) {
-  if (MessageLoop::current() != message_loop_) {
+  if (!message_loop_->BelongsToCurrentThread()) {
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &Pipeline::OnDemuxerStopDone, this, callback));
     return;
@@ -1339,7 +1314,7 @@ void Pipeline::OnDemuxerStopDone(const base::Closure& callback) {
 }
 
 void Pipeline::DoSeek(base::TimeDelta seek_timestamp) {
-  // TODO(acolwell) : We might be able to convert this if (demuxer_) into a
+  // TODO(acolwell): We might be able to convert this if (demuxer_) into a
   // DCHECK(). Further investigation is needed to make sure this won't introduce
   // a bug.
   if (demuxer_) {
@@ -1353,7 +1328,7 @@ void Pipeline::DoSeek(base::TimeDelta seek_timestamp) {
 
 void Pipeline::OnDemuxerSeekDone(base::TimeDelta seek_timestamp,
                                  PipelineStatus status) {
-  if (MessageLoop::current() != message_loop_) {
+  if (!message_loop_->BelongsToCurrentThread()) {
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &Pipeline::OnDemuxerSeekDone, this, seek_timestamp, status));
     return;
@@ -1371,7 +1346,7 @@ void Pipeline::OnDemuxerSeekDone(base::TimeDelta seek_timestamp,
 }
 
 void Pipeline::OnAudioUnderflow() {
-  if (MessageLoop::current() != message_loop_) {
+  if (!message_loop_->BelongsToCurrentThread()) {
     message_loop_->PostTask(FROM_HERE, base::Bind(
         &Pipeline::OnAudioUnderflow, this));
     return;
@@ -1390,7 +1365,7 @@ void Pipeline::OnCanPlayThrough() {
 }
 
 void Pipeline::NotifyCanPlayThrough() {
-  DCHECK_EQ(MessageLoop::current(), message_loop_);
+  DCHECK(message_loop_->BelongsToCurrentThread());
   NotifyNetworkEventTask(CAN_PLAY_THROUGH);
 }
 

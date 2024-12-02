@@ -17,16 +17,17 @@
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
-#include "chrome/browser/autocomplete/network_action_predictor.h"
-#include "chrome/browser/autocomplete/network_action_predictor_factory.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/extensions/extension_omnibox_api.h"
+#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/predictors/autocomplete_action_predictor.h"
+#include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -41,6 +42,8 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/metrics/proto/omnibox_event.pb.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
@@ -224,39 +227,38 @@ void AutocompleteEditModel::OnChanged() {
   const AutocompleteMatch& current_match = user_input_in_progress_ ?
       CurrentMatch() : AutocompleteMatch();
 
-  NetworkActionPredictor::Action recommended_action =
-      NetworkActionPredictor::ACTION_NONE;
-  NetworkActionPredictor* network_action_predictor =
+  AutocompleteActionPredictor::Action recommended_action =
+      AutocompleteActionPredictor::ACTION_NONE;
+  AutocompleteActionPredictor* action_predictor =
       user_input_in_progress_ ?
-      NetworkActionPredictorFactory::GetForProfile(profile_) : NULL;
-  if (network_action_predictor) {
-    network_action_predictor->RegisterTransitionalMatches(user_text_,
-                                                          result());
-    // Confer with the NetworkActionPredictor to determine what action, if any,
-    // we should take. Get the recommended action here even if we don't need it
-    // so we can get stats for anyone who is opted in to UMA, but only get it if
-    // the user has actually typed something to avoid constructing it before
-    // it's needed. Note: This event is triggered as part of startup when the
-    // initial tab transitions to the start page.
+      AutocompleteActionPredictorFactory::GetForProfile(profile_) : NULL;
+  if (action_predictor) {
+    action_predictor->RegisterTransitionalMatches(user_text_, result());
+    // Confer with the AutocompleteActionPredictor to determine what action, if
+    // any, we should take. Get the recommended action here even if we don't
+    // need it so we can get stats for anyone who is opted in to UMA, but only
+    // get it if the user has actually typed something to avoid constructing it
+    // before it's needed. Note: This event is triggered as part of startup when
+    // the initial tab transitions to the start page.
     recommended_action =
-        network_action_predictor->RecommendAction(user_text_, current_match);
+        action_predictor->RecommendAction(user_text_, current_match);
   }
 
   UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.Action", recommended_action,
-                            NetworkActionPredictor::LAST_PREDICT_ACTION);
+                            AutocompleteActionPredictor::LAST_PREDICT_ACTION);
   string16 suggested_text;
 
   if (DoInstant(current_match, &suggested_text)) {
     SetSuggestedText(suggested_text, instant_complete_behavior_);
   } else {
     switch (recommended_action) {
-      case NetworkActionPredictor::ACTION_PRERENDER:
+      case AutocompleteActionPredictor::ACTION_PRERENDER:
         DoPrerender(current_match);
         break;
-      case NetworkActionPredictor::ACTION_PRECONNECT:
+      case AutocompleteActionPredictor::ACTION_PRECONNECT:
         DoPreconnect(current_match);
         break;
-      case NetworkActionPredictor::ACTION_NONE:
+      case AutocompleteActionPredictor::ACTION_NONE:
         break;
       default:
         NOTREACHED() << "Unexpected recommended action: " << recommended_action;
@@ -387,7 +389,7 @@ void AutocompleteEditModel::AdjustTextForCopy(int sel_min,
       url->SchemeIs(chrome::kHttpScheme) && perm_url.host() == url->host()) {
     *write_url = true;
     string16 http = ASCIIToUTF16(chrome::kHttpScheme) +
-        ASCIIToUTF16(chrome::kStandardSchemeSeparator);
+        ASCIIToUTF16(content::kStandardSchemeSeparator);
     if (text->compare(0, http.length(), http) != 0)
       *text = http + *text;
   }
@@ -413,10 +415,10 @@ void AutocompleteEditModel::Revert() {
   view_->SetWindowTextAndCaretPos(permanent_text_,
                                   has_focus_ ? permanent_text_.length() : 0,
                                   false, true);
-  NetworkActionPredictor* network_action_predictor =
-      NetworkActionPredictorFactory::GetForProfile(profile_);
-  if (network_action_predictor)
-    network_action_predictor->ClearTransitionalMatches();
+  AutocompleteActionPredictor* action_predictor =
+      AutocompleteActionPredictorFactory::GetForProfile(profile_);
+  if (action_predictor)
+    action_predictor->ClearTransitionalMatches();
 }
 
 void AutocompleteEditModel::StartAutocomplete(
@@ -494,16 +496,9 @@ void AutocompleteEditModel::AcceptInput(WindowOpenDisposition disposition,
     match.transition = content::PAGE_TRANSITION_LINK;
   }
 
-  const TemplateURL* template_url = match.GetTemplateURL();
-  if (template_url && template_url->url() &&
-      template_url->url()->HasGoogleBaseURLs()) {
-    GoogleURLTracker::GoogleURLSearchCommitted();
-#if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
-    // TODO(pastarmovj): Remove these metrics once we have proven that (close
-    // to) none searches that should have RLZ are sent out without one.
-    template_url->url()->CollectRLZMetrics();
-#endif
-  }
+  const TemplateURL* template_url = match.GetTemplateURL(profile_);
+  if (template_url && template_url->url_ref().HasGoogleBaseURLs())
+    GoogleURLTracker::GoogleURLSearchCommitted(profile_);
 
   view_->OpenMatch(match, disposition, alternate_nav_url,
                    AutocompletePopupModel::kNoMatch);
@@ -518,9 +513,12 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
   if (popup_->IsOpen()) {
     AutocompleteLog log(
         autocomplete_controller_->input().text(),
+        just_deleted_text_,
         autocomplete_controller_->input().type(),
         popup_->selected_line(),
         -1,  // don't yet know tab ID; set later if appropriate
+        ClassifyPage(controller_->GetTabContentsWrapper()->
+                     web_contents()->GetURL()),
         base::TimeTicks::Now() - time_user_first_modified_omnibox_,
         0,  // inline autocomplete length; possibly set later
         result());
@@ -544,7 +542,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
         content::Details<AutocompleteLog>(&log));
   }
 
-  const TemplateURL* template_url = match.GetTemplateURL();
+  TemplateURL* template_url = match.GetTemplateURL(profile_);
   if (template_url) {
     if (match.transition == content::PAGE_TRANSITION_KEYWORD) {
       // The user is using a non-substituting keyword or is explicitly in
@@ -561,8 +559,8 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
                 current_match : result().match_at(index);
 
         // Strip the keyword + leading space off the input.
-        size_t prefix_length = match.template_url->keyword().length() + 1;
-        ExtensionOmniboxEventRouter::OnInputEntered(profile_,
+        size_t prefix_length = match.keyword.length() + 1;
+        extensions::ExtensionOmniboxEventRouter::OnInputEntered(profile_,
             template_url->GetExtensionId(),
             UTF16ToUTF8(match.fill_into_edit.substr(prefix_length)));
         view_->RevertAll();
@@ -594,7 +592,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
   }
 
   if (match.type == AutocompleteMatch::EXTENSION_APP) {
-    LaunchAppFromOmnibox(match, profile_, disposition);
+    extensions::LaunchAppFromOmnibox(match, profile_, disposition);
   } else {
     controller_->OnAutocompleteAccept(match.destination_url, disposition,
                                       match.transition, alternate_nav_url);
@@ -925,7 +923,7 @@ void AutocompleteEditModel::OnResultChanged(bool default_match_changed) {
       // can be many of these as a user types an initial series of characters,
       // the OS DNS cache could suffer eviction problems for minimal gain.
 
-      match->GetKeywordUIState(&keyword, &is_keyword_hint);
+      match->GetKeywordUIState(profile_, &keyword, &is_keyword_hint);
     }
 
     popup_->OnResultChanged();
@@ -1123,7 +1121,7 @@ void AutocompleteEditModel::DoPreconnect(const AutocompleteMatch& match) {
     if (profile_->GetNetworkPredictor()) {
       profile_->GetNetworkPredictor()->AnticipateOmniboxUrl(
           match.destination_url,
-          NetworkActionPredictor::IsPreconnectable(match));
+          AutocompleteActionPredictor::IsPreconnectable(match));
     }
     // We could prefetch the alternate nav URL, if any, but because there
     // can be many of these as a user types an initial series of characters,
@@ -1140,4 +1138,18 @@ bool AutocompleteEditModel::IsSpaceCharForAcceptingKeyword(wchar_t c) {
     default:
       return false;
   }
+}
+
+metrics::OmniboxEventProto::PageClassification
+    AutocompleteEditModel::ClassifyPage(const GURL& gurl) const {
+  if (!gurl.is_valid())
+    return metrics::OmniboxEventProto_PageClassification_INVALID_SPEC;
+  const std::string& url = gurl.spec();
+  if (url == chrome::kChromeUINewTabURL)
+    return metrics::OmniboxEventProto_PageClassification_NEW_TAB_PAGE;
+  if (url == chrome::kAboutBlankURL)
+    return metrics::OmniboxEventProto_PageClassification_BLANK;
+  if (url == profile()->GetPrefs()->GetString(prefs::kHomePage))
+    return metrics::OmniboxEventProto_PageClassification_HOMEPAGE;
+  return metrics::OmniboxEventProto_PageClassification_OTHER;
 }

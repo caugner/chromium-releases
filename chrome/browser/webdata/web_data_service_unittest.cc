@@ -57,6 +57,8 @@ ACTION_P(SignalEvent, event) {
 
 class AutofillDBThreadObserverHelper : public DBThreadObserverHelper {
  protected:
+  virtual ~AutofillDBThreadObserverHelper() {}
+
   virtual void RegisterObservers() {
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_AUTOFILL_ENTRIES_CHANGED,
@@ -795,5 +797,5 @@ TEST_F(WebDataServiceTest, DidDefaultSearchProviderChangeOnNewProfile) {
   WaitUntilCalled();
   ASSERT_TRUE(consumer.load_succeeded);
   EXPECT_FALSE(consumer.keywords_result.did_default_search_provider_change);
-  EXPECT_EQ(NULL, consumer.keywords_result.default_search_provider_backup);
+  EXPECT_FALSE(consumer.keywords_result.backup_valid);
 }

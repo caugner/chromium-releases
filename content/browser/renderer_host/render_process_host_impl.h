@@ -18,7 +18,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/render_process_host.h"
 #include "ipc/ipc_channel_proxy.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
 
 class CommandLine;
 class GpuMessageFilter;
@@ -45,7 +45,7 @@ class RenderWidgetHostImpl;
 //
 // This object communicates back and forth with the RenderProcess object
 // running in the renderer process. Each RenderProcessHost and RenderProcess
-// keeps a list of RenderView (renderer) and TabContents (browser) which
+// keeps a list of RenderView (renderer) and WebContentsImpl (browser) which
 // are correlated with IDs. This way, the Views and the corresponding ViewHosts
 // communicate through the two process objects.
 class CONTENT_EXPORT RenderProcessHostImpl
@@ -58,14 +58,14 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // RenderProcessHost implementation (public portion).
   virtual void EnableSendQueue() OVERRIDE;
-  virtual bool Init(bool is_accessibility_enabled) OVERRIDE;
+  virtual bool Init() OVERRIDE;
   virtual int GetNextRoutingID() OVERRIDE;
   virtual void CancelResourceRequests(int render_widget_id) OVERRIDE;
   virtual void CrossSiteSwapOutACK(const ViewMsg_SwapOut_Params& params)
       OVERRIDE;
-  virtual bool WaitForUpdateMsg(int render_widget_id,
-                                const base::TimeDelta& max_delay,
-                                IPC::Message* msg) OVERRIDE;
+  virtual bool WaitForBackingStoreMsg(int render_widget_id,
+                                      const base::TimeDelta& max_delay,
+                                      IPC::Message* msg) OVERRIDE;
   virtual void ReceivedBadMessage() OVERRIDE;
   virtual void WidgetRestored() OVERRIDE;
   virtual void WidgetHidden() OVERRIDE;
@@ -162,6 +162,12 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void OnRevealFolderInOS(const FilePath& path);
   void OnSavedPageAsMHTML(int job_id, int64 mhtml_file_size);
 
+  // CompositorSurfaceBuffersSwapped handler when there's no RWH.
+  void OnCompositorSurfaceBuffersSwappedNoHost(int32 surface_id,
+                                               uint64 surface_handle,
+                                               int32 route_id,
+                                               int32 gpu_process_host_id);
+
   // Generates a command line to be used to spawn a renderer and appends the
   // results to |*command_line|.
   void AppendRendererCommandLine(CommandLine* command_line) const;
@@ -220,9 +226,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // Used in single-process mode.
   scoped_ptr<RendererMainThread> in_process_renderer_;
 
-  // True if this prcoess should have accessibility enabled;
-  bool accessibility_enabled_;
-
   // True after Init() has been called. We can't just check channel_ because we
   // also reset that in the case of process termination.
   bool is_initialized_;
@@ -250,8 +253,8 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // sure that all the RenderViews in the process can be shutdown suddenly.  If
   // it's false, then specific RenderViews might still be allowed to be shutdown
   // suddenly by checking their SuddenTerminationAllowed() flag.  This can occur
-  // if one tab has an unload event listener but another tab in the same process
-  // doesn't.
+  // if one WebContents has an unload event listener but another WebContents in
+  // the same process doesn't.
   bool sudden_termination_allowed_;
 
   // Set to true if we shouldn't send input events.  We actually do the

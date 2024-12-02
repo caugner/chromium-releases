@@ -24,6 +24,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
@@ -44,14 +45,14 @@
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/device_orientation/message_filter.h"
+#include "content/browser/dom_storage/dom_storage_context_impl.h"
+#include "content/browser/dom_storage/dom_storage_message_filter.h"
 #include "content/browser/download/mhtml_generation_manager.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
 #include "content/browser/fileapi/fileapi_message_filter.h"
 #include "content/browser/geolocation/geolocation_dispatcher_host.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
-#include "content/browser/in_process_webkit/dom_storage_context_impl.h"
-#include "content/browser/in_process_webkit/dom_storage_message_filter.h"
 #include "content/browser/in_process_webkit/indexed_db_context_impl.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "content/browser/mime_registry_message_filter.h"
@@ -127,6 +128,8 @@ using content::ChildProcessHost;
 using content::ChildProcessHostImpl;
 using content::RenderWidgetHost;
 using content::RenderWidgetHostImpl;
+using content::RenderViewHost;
+using content::RenderViewHostImpl;
 using content::UserMetricsAction;
 using content::WebUIControllerFactory;
 
@@ -230,7 +233,7 @@ size_t content::RenderProcessHost::GetMaxRendererProcessCount() {
   // Defines the maximum number of renderer processes according to the
   // amount of installed memory as reported by the OS. The calculation
   // assumes that you want the renderers to use half of the installed
-  // RAM and assuming that each tab uses ~40MB.
+  // RAM and assuming that each WebContents uses ~40MB.
   // If you modify this assumption, you need to adjust the
   // ThirtyFourTabs test to match the expected number of processes.
   //
@@ -245,14 +248,14 @@ size_t content::RenderProcessHost::GetMaxRendererProcessCount() {
 
   static size_t max_count = 0;
   if (!max_count) {
-    const size_t kEstimatedTabMemoryUsage =
+    const size_t kEstimatedWebContentsMemoryUsage =
 #if defined(ARCH_CPU_64_BITS)
         60;  // In MB
 #else
         40;  // In MB
 #endif
     max_count = base::SysInfo::AmountOfPhysicalMemoryMB() / 2;
-    max_count /= kEstimatedTabMemoryUsage;
+    max_count /= kEstimatedWebContentsMemoryUsage;
 
     const size_t kMinRendererProcessCount = 3;
     max_count = std::max(max_count, kMinRendererProcessCount);
@@ -279,7 +282,6 @@ RenderProcessHostImpl::RenderProcessHostImpl(
           ALLOW_THIS_IN_INITIALIZER_LIST(cached_dibs_cleaner_(
                 FROM_HERE, base::TimeDelta::FromSeconds(5),
                 this, &RenderProcessHostImpl::ClearTransportDIBCache)),
-          accessibility_enabled_(false),
           is_initialized_(false),
           id_(ChildProcessHostImpl::GenerateChildProcessUniqueId()),
           browser_context_(browser_context),
@@ -353,13 +355,11 @@ void RenderProcessHostImpl::EnableSendQueue() {
   is_initialized_ = false;
 }
 
-bool RenderProcessHostImpl::Init(bool is_accessibility_enabled) {
+bool RenderProcessHostImpl::Init() {
   // calling Init() more than once does nothing, this makes it more convenient
   // for the view host which may not be sure in some cases
   if (channel_.get())
     return true;
-
-  accessibility_enabled_ = is_accessibility_enabled;
 
   CommandLine::StringType renderer_prefix;
 #if defined(OS_POSIX)
@@ -406,7 +406,7 @@ bool RenderProcessHostImpl::Init(bool is_accessibility_enabled) {
     in_process_renderer_.reset(new RendererMainThread(channel_id));
 
     base::Thread::Options options;
-#if !defined(TOOLKIT_USES_GTK)
+#if !defined(TOOLKIT_GTK)
     // In-process plugins require this to be a UI message loop.
     options.message_loop_type = MessageLoop::TYPE_UI;
 #else
@@ -471,7 +471,8 @@ void RenderProcessHostImpl::CreateMessageFilters() {
 #if !defined(OS_ANDROID)
   // TODO(dtrainor, klobag): Enable this when content::BrowserMainLoop gets
   // included in Android builds.  Tracked via 115941.
-  AudioManager* audio_manager = content::BrowserMainLoop::GetAudioManager();
+  media::AudioManager* audio_manager =
+      content::BrowserMainLoop::GetAudioManager();
   channel_->AddFilter(new AudioInputRendererHost(
       resource_context, audio_manager));
   channel_->AddFilter(new AudioRendererHost(audio_manager, media_observer));
@@ -498,12 +499,11 @@ void RenderProcessHostImpl::CreateMessageFilters() {
 #endif
   channel_->AddFilter(new PepperFileMessageFilter(GetID(), browser_context));
   channel_->AddFilter(new PepperMessageFilter(PepperMessageFilter::RENDERER,
-                                              GetID(), resource_context));
+                                              GetID(), browser_context));
 #if defined(ENABLE_INPUT_SPEECH)
   channel_->AddFilter(new speech::InputTagSpeechDispatcherHost(
       GetID(), browser_context->GetRequestContext(),
-      browser_context->GetSpeechRecognitionPreferences(),
-      content::BrowserMainLoop::GetAudioManager()));
+      browser_context->GetSpeechRecognitionPreferences()));
 #endif
   channel_->AddFilter(new FileAPIMessageFilter(
       GetID(),
@@ -543,7 +543,8 @@ void RenderProcessHostImpl::CreateMessageFilters() {
       content::BrowserContext::GetQuotaManager(browser_context),
       content::GetContentClient()->browser()->CreateQuotaPermissionContext()));
   channel_->AddFilter(new content::GamepadBrowserMessageFilter(this));
-  channel_->AddFilter(new ProfilerMessageFilter());
+  channel_->AddFilter(new content::ProfilerMessageFilter(
+      content::PROCESS_TYPE_RENDERER));
 }
 
 int RenderProcessHostImpl::GetNextRoutingID() {
@@ -559,7 +560,7 @@ void RenderProcessHostImpl::CrossSiteSwapOutACK(
   widget_helper_->CrossSiteSwapOutACK(params);
 }
 
-bool RenderProcessHostImpl::WaitForUpdateMsg(
+bool RenderProcessHostImpl::WaitForBackingStoreMsg(
     int render_widget_id,
     const base::TimeDelta& max_delay,
     IPC::Message* msg) {
@@ -568,7 +569,8 @@ bool RenderProcessHostImpl::WaitForUpdateMsg(
   if (child_process_launcher_.get() && child_process_launcher_->IsStarting())
     return false;
 
-  return widget_helper_->WaitForUpdateMsg(render_widget_id, max_delay, msg);
+  return widget_helper_->WaitForBackingStoreMsg(render_widget_id,
+                                                max_delay, msg);
 }
 
 void RenderProcessHostImpl::ReceivedBadMessage() {
@@ -613,9 +615,6 @@ void RenderProcessHostImpl::AppendRendererCommandLine(
   command_line->AppendSwitchASCII(switches::kProcessType,
                                   switches::kRendererProcess);
 
-  if (accessibility_enabled_)
-    command_line->AppendSwitch(switches::kEnableAccessibility);
-
   // Now send any options from our own command line we want to propagate.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   PropagateBrowserCommandLineToRenderer(browser_command_line, command_line);
@@ -631,7 +630,7 @@ void RenderProcessHostImpl::AppendRendererCommandLine(
   std::string field_trial_states;
   base::FieldTrialList::StatesToString(&field_trial_states);
   if (!field_trial_states.empty()) {
-    command_line->AppendSwitchASCII(switches::kForceFieldTestNameAndValue,
+    command_line->AppendSwitchASCII(switches::kForceFieldTrials,
                                     field_trial_states);
   }
 
@@ -686,6 +685,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableAccessibilityLogging,
     switches::kEnableBrowserPlugin,
     switches::kEnableDCHECK,
+    switches::kEnableEncryptedMedia,
     switches::kEnableFixedLayout,
     switches::kEnableGamepad,
     switches::kEnableGPUServiceLogging,
@@ -693,6 +693,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableLogging,
     switches::kEnableMediaSource,
     switches::kEnableMediaStream,
+    switches::kEnablePeerConnection,
     switches::kEnableShadowDOM,
     switches::kEnableStrictSiteIsolation,
     switches::kEnableStyleScoped,
@@ -721,18 +722,14 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kInProcessWebGL,
     switches::kJavaScriptFlags,
     switches::kLoggingLevel,
-    switches::kNoJsRandomness,
     switches::kNoReferrers,
     switches::kNoSandbox,
-    switches::kPlaybackMode,
     switches::kPpapiOutOfProcess,
-    switches::kRecordMode,
     switches::kRegisterPepperPlugins,
     switches::kRendererAssertTest,
-#if !defined(OFFICIAL_BUILD)
-    switches::kRendererCheckFalseTest,
-#endif  // !defined(OFFICIAL_BUILD)
-    switches::kRendererCrashTest,
+#if defined(OS_POSIX)
+    switches::kRendererCleanExit,
+#endif
     switches::kRendererStartupDialog,
     switches::kShowPaintRects,
     switches::kTestSandbox,
@@ -931,6 +928,14 @@ bool RenderProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
       reply->set_reply_error();
       Send(reply);
     }
+
+    // If this is a SwapBuffers, we need to ack it if we're not going to handle
+    // it so that the GPU process doesn't get stuck in unscheduled state.
+    bool msg_is_ok = true;
+    IPC_BEGIN_MESSAGE_MAP_EX(RenderProcessHostImpl, msg, msg_is_ok)
+      IPC_MESSAGE_HANDLER(ViewHostMsg_CompositorSurfaceBuffersSwapped,
+                          OnCompositorSurfaceBuffersSwappedNoHost)
+    IPC_END_MESSAGE_MAP_EX()
     return true;
   }
   return RenderWidgetHostImpl::From(rwh)->OnMessageReceived(msg);
@@ -1254,13 +1259,34 @@ void RenderProcessHostImpl::ProcessDied(base::ProcessHandle handle,
 }
 
 void RenderProcessHostImpl::OnShutdownRequest() {
-  // Don't shut down if there are more RenderViews than the one asking to
-  // close, or if there are pending RenderViews being swapped back in.
-  if (pending_views_ || render_widget_hosts_.size() > 1)
+  // Don't shut down if there are more active RenderViews than the one asking
+  // to close, or if there are pending RenderViews being swapped back in.
+  int num_active_views = 0;
+  for (RenderWidgetHostsIterator iter = GetRenderWidgetHostsIterator();
+       iter.IsAtEnd();
+       iter.Advance()) {
+    const RenderWidgetHost* widget = iter.GetCurrentValue();
+    DCHECK(widget);
+    if (!widget)
+      continue;
+
+    // All RenderWidgetHosts are swapped in.
+    if (!widget->IsRenderView()) {
+      num_active_views++;
+      continue;
+    }
+
+    // Don't count swapped out views.
+    RenderViewHost* rvh =
+        RenderViewHost::From(const_cast<RenderWidgetHost*>(widget));
+    if (!static_cast<RenderViewHostImpl*>(rvh)->is_swapped_out())
+      num_active_views++;
+  }
+  if (pending_views_ || num_active_views > 1)
     return;
 
-  // Notify any tabs that might have swapped out renderers from this process.
-  // They should not attempt to swap them back in.
+  // Notify any contents that might have swapped out renderers from this
+  // process. They should not attempt to swap them back in.
   content::NotificationService::current()->Notify(
       content::NOTIFICATION_RENDERER_PROCESS_CLOSING,
       content::Source<RenderProcessHost>(this),
@@ -1348,4 +1374,15 @@ void RenderProcessHostImpl::OnRevealFolderInOS(const FilePath& path) {
 
 void RenderProcessHostImpl::OnSavedPageAsMHTML(int job_id, int64 data_size) {
   MHTMLGenerationManager::GetInstance()->MHTMLGenerated(job_id, data_size);
+}
+
+void RenderProcessHostImpl::OnCompositorSurfaceBuffersSwappedNoHost(
+      int32 surface_id,
+      uint64 surface_handle,
+      int32 route_id,
+      int32 gpu_process_host_id) {
+  TRACE_EVENT0("renderer_host",
+               "RenderWidgetHostImpl::OnCompositorSurfaceBuffersSwappedNoHost");
+  RenderWidgetHostImpl::AcknowledgeSwapBuffers(route_id,
+                                               gpu_process_host_id);
 }

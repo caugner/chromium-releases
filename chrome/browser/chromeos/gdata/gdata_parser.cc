@@ -13,7 +13,7 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/common/libxml_utils.h"
+#include "third_party/libxml/chromium/libxml_utils.h"
 
 using base::Value;
 using base::DictionaryValue;
@@ -35,6 +35,8 @@ const char kSpreadSheetTerm[] = "spreadsheet";
 const char kPresentationTerm[] = "presentation";
 
 const char kSchemeLabels[] = "http://schemas.google.com/g/2005/labels";
+
+const char kFeedField[] = "feed";
 
 struct EntryKindMap {
   DocumentEntry::EntryKind kind;
@@ -95,6 +97,8 @@ const LinkTypeMap kLinkTypeMap[] = {
       "http://schemas.google.com/spreadsheets/2006#worksheetsfeed"},
     { Link::EMBED,
       "http://schemas.google.com/docs/2007#embed"},
+    { Link::PRODUCT,
+      "http://schemas.google.com/docs/2007#product"},
     { Link::ICON,
       "http://schemas.google.com/docs/2007#icon"},
 };
@@ -128,6 +132,12 @@ const CategoryTypeMap kCategoryTypeMap[] = {
 // TODO(mukai): make it return false in case of invalid |url_string|.
 bool GetGURLFromString(const base::StringPiece& url_string, GURL* result) {
   *result = GURL(url_string.as_string());
+  return true;
+}
+
+// Converts boolean string values like "true" into bool.
+bool GetBoolFromString(const base::StringPiece& value, bool* result) {
+  *result = (value == "true");
   return true;
 }
 
@@ -347,7 +357,7 @@ Category* Category::CreateFromXml(XmlReader* xml_reader) {
   return category;
 }
 
-const Link* GDataEntry::GetLinkByType(Link::LinkType type) const {
+const Link* FeedEntry::GetLinkByType(Link::LinkType type) const {
   for (size_t i = 0; i < links_.size(); ++i) {
     if (links_[i]->type() == type)
       return links_[i];
@@ -389,36 +399,36 @@ Content* Content::CreateFromXml(XmlReader* xml_reader) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// GDataEntry implementation
+// FeedEntry implementation
 
-const char GDataEntry::kTimeParsingDelimiters[] = "-:.TZ";
-const char GDataEntry::kAuthorField[] = "author";
-const char GDataEntry::kLinkField[] = "link";
-const char GDataEntry::kCategoryField[] = "category";
-const char GDataEntry::kETagField[] = "gd$etag";
-const char GDataEntry::kUpdatedField[] = "updated.$t";
+const char FeedEntry::kTimeParsingDelimiters[] = "-:.TZ";
+const char FeedEntry::kAuthorField[] = "author";
+const char FeedEntry::kLinkField[] = "link";
+const char FeedEntry::kCategoryField[] = "category";
+const char FeedEntry::kETagField[] = "gd$etag";
+const char FeedEntry::kUpdatedField[] = "updated.$t";
 
-GDataEntry::GDataEntry() {
+FeedEntry::FeedEntry() {
 }
 
-GDataEntry::~GDataEntry() {
+FeedEntry::~FeedEntry() {
 }
 
 // static
-void GDataEntry::RegisterJSONConverter(
-    base::JSONValueConverter<GDataEntry>* converter) {
-  converter->RegisterStringField(kETagField, &GDataEntry::etag_);
-  converter->RegisterRepeatedMessage(kAuthorField, &GDataEntry::authors_);
-  converter->RegisterRepeatedMessage(kLinkField, &GDataEntry::links_);
-  converter->RegisterRepeatedMessage(kCategoryField, &GDataEntry::categories_);
+void FeedEntry::RegisterJSONConverter(
+    base::JSONValueConverter<FeedEntry>* converter) {
+  converter->RegisterStringField(kETagField, &FeedEntry::etag_);
+  converter->RegisterRepeatedMessage(kAuthorField, &FeedEntry::authors_);
+  converter->RegisterRepeatedMessage(kLinkField, &FeedEntry::links_);
+  converter->RegisterRepeatedMessage(kCategoryField, &FeedEntry::categories_);
   converter->RegisterCustomField<base::Time>(
       kUpdatedField,
-      &GDataEntry::updated_time_,
-      &GDataEntry::GetTimeFromString);
+      &FeedEntry::updated_time_,
+      &FeedEntry::GetTimeFromString);
 }
 
 // static
-bool GDataEntry::GetTimeFromString(const base::StringPiece& raw_value,
+bool FeedEntry::GetTimeFromString(const base::StringPiece& raw_value,
                                    base::Time* time) {
   std::vector<base::StringPiece> parts;
   if (Tokenize(raw_value, kTimeParsingDelimiters, &parts) != 7)
@@ -457,6 +467,8 @@ const char DocumentEntry::kResourceIdField[] = "gd$resourceId.$t";
 const char DocumentEntry::kIDField[] = "id.$t";
 const char DocumentEntry::kTitleField[] = "title.$t";
 const char DocumentEntry::kPublishedField[] = "published.$t";
+const char DocumentEntry::kDeletedField[] = "gd$deleted";
+const char DocumentEntry::kRemovedField[] = "gd$removed";
 
 const char DocumentEntry::kEntryNode[] = "entry";
 // Attributes are not namespace-blind as node names in XmlReader.
@@ -489,25 +501,35 @@ const char DocumentEntry::kFilenameNode[] = "filename";
 const char DocumentEntry::kSuggestedFilenameNode[] = "suggestedFilename";
 const char DocumentEntry::kSizeNode[] = "size";
 
-DocumentEntry::DocumentEntry() : kind_(DocumentEntry::UNKNOWN), file_size_(0) {
+DocumentEntry::DocumentEntry()
+    : kind_(DocumentEntry::UNKNOWN),
+      file_size_(0),
+      deleted_(false),
+      removed_(false) {
 }
 
 DocumentEntry::~DocumentEntry() {
+}
+
+bool DocumentEntry::HasFieldPresent(const base::Value* value,
+                                    bool* result) {
+  *result = (value != NULL);
+  return true;
 }
 
 // static
 void DocumentEntry::RegisterJSONConverter(
     base::JSONValueConverter<DocumentEntry>* converter) {
   // inheritant the parent registrations.
-  GDataEntry::RegisterJSONConverter(
-      reinterpret_cast<base::JSONValueConverter<GDataEntry>*>(converter));
+  FeedEntry::RegisterJSONConverter(
+      reinterpret_cast<base::JSONValueConverter<FeedEntry>*>(converter));
   converter->RegisterStringField(
       kResourceIdField, &DocumentEntry::resource_id_);
   converter->RegisterStringField(kIDField, &DocumentEntry::id_);
   converter->RegisterStringField(kTitleField, &DocumentEntry::title_);
   converter->RegisterCustomField<base::Time>(
       kPublishedField, &DocumentEntry::published_time_,
-      &GDataEntry::GetTimeFromString);
+      &FeedEntry::GetTimeFromString);
   converter->RegisterRepeatedMessage(
       kFeedLinkField, &DocumentEntry::feed_links_);
   converter->RegisterNestedField(kContentField, &DocumentEntry::content_);
@@ -521,6 +543,12 @@ void DocumentEntry::RegisterJSONConverter(
       kSizeField, &DocumentEntry::file_size_, &base::StringToInt64);
   converter->RegisterStringField(
       kSuggestedFileNameField, &DocumentEntry::suggested_filename_);
+  // Deleted are treated as 'trashed' items on web client side. Removed files
+  // are gone for good. We treat both cases as 'deleted' for this client.
+  converter->RegisterCustomValueField<bool>(
+      kDeletedField, &DocumentEntry::deleted_, &DocumentEntry::HasFieldPresent);
+  converter->RegisterCustomValueField<bool>(
+      kRemovedField, &DocumentEntry::removed_, &DocumentEntry::HasFieldPresent);
 }
 
 std::string DocumentEntry::GetHostedDocumentExtension() const {
@@ -682,10 +710,15 @@ DocumentEntry* DocumentEntry::CreateFromXml(XmlReader* xml_reader) {
 const char DocumentFeed::kStartIndexField[] = "openSearch$startIndex.$t";
 const char DocumentFeed::kItemsPerPageField[] =
     "openSearch$itemsPerPage.$t";
+const char DocumentFeed::kLargestChangestamp[] =
+    "docs$largestChangestamp.value";
 const char DocumentFeed::kTitleField[] = "title.$t";
 const char DocumentFeed::kEntryField[] = "entry";
 
-DocumentFeed::DocumentFeed() : start_index_(0), items_per_page_(0) {
+DocumentFeed::DocumentFeed()
+    : start_index_(0),
+      items_per_page_(0),
+      largest_changestamp_(0) {
 }
 
 DocumentFeed::~DocumentFeed() {
@@ -695,8 +728,8 @@ DocumentFeed::~DocumentFeed() {
 void DocumentFeed::RegisterJSONConverter(
     base::JSONValueConverter<DocumentFeed>* converter) {
   // inheritance
-  GDataEntry::RegisterJSONConverter(
-      reinterpret_cast<base::JSONValueConverter<GDataEntry>*>(converter));
+  FeedEntry::RegisterJSONConverter(
+      reinterpret_cast<base::JSONValueConverter<FeedEntry>*>(converter));
   // TODO(zelidrag): Once we figure out where these will be used, we should
   // check for valid start_index_ and items_per_page_ values.
   converter->RegisterCustomField<int>(
@@ -705,30 +738,48 @@ void DocumentFeed::RegisterJSONConverter(
       kItemsPerPageField, &DocumentFeed::items_per_page_, &base::StringToInt);
   converter->RegisterStringField(kTitleField, &DocumentFeed::title_);
   converter->RegisterRepeatedMessage(kEntryField, &DocumentFeed::entries_);
+  converter->RegisterCustomField<int>(
+     kLargestChangestamp, &DocumentFeed::largest_changestamp_,
+     &base::StringToInt);
 }
 
-bool DocumentFeed::Parse(base::Value* value) {
+bool DocumentFeed::Parse(const base::Value& value) {
   base::JSONValueConverter<DocumentFeed> converter;
-  if (!converter.Convert(*value, this)) {
+  if (!converter.Convert(value, this)) {
     DVLOG(1) << "Invalid document feed!";
     return false;
   }
 
-  for (size_t i = 0; i < entries_.size(); ++i) {
-    entries_[i]->FillRemainingFields();
+  ScopedVector<DocumentEntry>::iterator iter = entries_.begin();
+  while (iter != entries_.end()) {
+    DocumentEntry* entry = (*iter);
+    entry->FillRemainingFields();
+    ++iter;
   }
   return true;
 }
 
 // static
-DocumentFeed* DocumentFeed::CreateFrom(base::Value* value) {
+scoped_ptr<DocumentFeed> DocumentFeed::ExtractAndParse(
+    const base::Value& value) {
+  const base::DictionaryValue* as_dict = NULL;
+  base::DictionaryValue* feed_dict = NULL;
+  if (value.GetAsDictionary(&as_dict) &&
+      as_dict->GetDictionary(kFeedField, &feed_dict)) {
+    return DocumentFeed::CreateFrom(*feed_dict);
+  }
+  return scoped_ptr<DocumentFeed>(NULL);
+}
+
+// static
+scoped_ptr<DocumentFeed> DocumentFeed::CreateFrom(const base::Value& value) {
   scoped_ptr<DocumentFeed> feed(new DocumentFeed());
   if (!feed->Parse(value)) {
     DVLOG(1) << "Invalid document feed!";
-    return NULL;
+    return scoped_ptr<DocumentFeed>(NULL);
   }
 
-  return feed.release();
+  return feed.Pass();
 }
 
 bool DocumentFeed::GetNextFeedURL(GURL* url) {
@@ -743,16 +794,96 @@ bool DocumentFeed::GetNextFeedURL(GURL* url) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// InstalledApp implementation
+
+const char InstalledApp::kInstalledAppNameField[] =
+    "docs$installedAppName";
+const char InstalledApp::kInstalledAppObjectType[] =
+    "docs$installedAppObjectType";
+const char InstalledApp::kInstalledAppSupportsCreate[] =
+    "docs$installedAppSupportsCreate";
+const char InstalledApp::kInstalledAppPrimaryMimeType[] =
+    "docs$installedAppPrimaryMimeType";
+const char InstalledApp::kInstalledAppPrimaryFileExtension[] =
+    "docs$installedAppPrimaryFileExtension";
+const char InstalledApp::kInstalledAppSecondaryMimeType[] =
+    "docs$installedAppSecondaryMimeType";
+const char InstalledApp::kInstalledAppSecondaryFileExtension[] =
+    "docs$installedAppSecondaryFileExtension";
+const char InstalledApp::kLinkField[] = "link";
+const char InstalledApp::kTField[] = "$t";
+
+InstalledApp::InstalledApp() : supports_create_(false) {
+}
+
+InstalledApp::~InstalledApp() {
+}
+
+GURL InstalledApp::GetProductUrl() const {
+  for (ScopedVector<Link>::const_iterator it = links_->begin();
+       it != links_.end(); ++it) {
+    const Link* link = *it;
+    if (link->type() == Link::PRODUCT)
+      return link->href();
+  }
+  return GURL();
+}
+
+// static
+bool InstalledApp::GetValueString(const base::Value* value,
+                                  std::string* result) {
+  const base::DictionaryValue* dict = NULL;
+  if (!value->GetAsDictionary(&dict))
+    return false;
+
+  if (!dict->GetString(kTField, result))
+    return false;
+
+  return true;
+}
+
+// static
+void InstalledApp::RegisterJSONConverter(
+    base::JSONValueConverter<InstalledApp>* converter) {
+  converter->RegisterStringField(kInstalledAppNameField,
+                                 &InstalledApp::app_name_);
+  converter->RegisterStringField(kInstalledAppObjectType,
+                                 &InstalledApp::object_type_);
+  converter->RegisterCustomField<bool>(kInstalledAppSupportsCreate,
+                                       &InstalledApp::supports_create_,
+                                       &GetBoolFromString);
+  converter->RegisterRepeatedCustomValue(kInstalledAppPrimaryMimeType,
+                                         &InstalledApp::primary_mimetypes_,
+                                         &GetValueString);
+  converter->RegisterRepeatedCustomValue(kInstalledAppSecondaryMimeType,
+                                         &InstalledApp::secondary_mimetypes_,
+                                         &GetValueString);
+  converter->RegisterRepeatedCustomValue(kInstalledAppPrimaryFileExtension,
+                                         &InstalledApp::primary_extensions_,
+                                         &GetValueString);
+  converter->RegisterRepeatedCustomValue(kInstalledAppSecondaryFileExtension,
+                                         &InstalledApp::secondary_extensions_,
+                                         &GetValueString);
+  converter->RegisterRepeatedMessage(kLinkField, &InstalledApp::links_);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // AccountMetadataFeed implementation
 
 const char AccountMetadataFeed::kQuotaBytesTotalField[] =
     "entry.gd$quotaBytesTotal.$t";
 const char AccountMetadataFeed::kQuotaBytesUsedField[] =
     "entry.gd$quotaBytesUsed.$t";
+const char AccountMetadataFeed::kLargestChangestampField[] =
+    "entry.docs$largestChangestamp.value";
+const char AccountMetadataFeed::kInstalledAppField[] =
+    "entry.docs$installedApp";
+
 
 AccountMetadataFeed::AccountMetadataFeed()
     : quota_bytes_total_(0),
-      quota_bytes_used_(0) {
+      quota_bytes_used_(0),
+      largest_changestamp_(0) {
 }
 
 AccountMetadataFeed::~AccountMetadataFeed() {
@@ -761,28 +892,37 @@ AccountMetadataFeed::~AccountMetadataFeed() {
 // static
 void AccountMetadataFeed::RegisterJSONConverter(
     base::JSONValueConverter<AccountMetadataFeed>* converter) {
-  converter->RegisterCustomField<int>(kQuotaBytesTotalField,
-                                      &AccountMetadataFeed::quota_bytes_total_,
-                                      &base::StringToInt);
-  converter->RegisterCustomField<int>(kQuotaBytesUsedField,
-                                      &AccountMetadataFeed::quota_bytes_used_,
-                                      &base::StringToInt);
+  converter->RegisterCustomField<int64>(
+      kQuotaBytesTotalField,
+      &AccountMetadataFeed::quota_bytes_total_,
+      &base::StringToInt64);
+  converter->RegisterCustomField<int64>(
+      kQuotaBytesUsedField,
+      &AccountMetadataFeed::quota_bytes_used_,
+      &base::StringToInt64);
+  converter->RegisterCustomField<int>(
+      kLargestChangestampField,
+      &AccountMetadataFeed::largest_changestamp_,
+      &base::StringToInt);
+  converter->RegisterRepeatedMessage(kInstalledAppField,
+                                     &AccountMetadataFeed::installed_apps_);
 }
 
 // static
-AccountMetadataFeed* AccountMetadataFeed::CreateFrom(base::Value* value) {
+scoped_ptr<AccountMetadataFeed> AccountMetadataFeed::CreateFrom(
+    const base::Value& value) {
   scoped_ptr<AccountMetadataFeed> feed(new AccountMetadataFeed());
   if (!feed->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid account metadata feed!";
-    return NULL;
+    return scoped_ptr<AccountMetadataFeed>(NULL);
   }
 
-  return feed.release();
+  return feed.Pass();
 }
 
-bool AccountMetadataFeed::Parse(base::Value* value) {
+bool AccountMetadataFeed::Parse(const base::Value& value) {
   base::JSONValueConverter<AccountMetadataFeed> converter;
-  if (!converter.Convert(*value, this)) {
+  if (!converter.Convert(value, this)) {
     LOG(ERROR) << "Unable to parse: Invalid account metadata feed!";
     return false;
   }

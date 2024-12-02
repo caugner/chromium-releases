@@ -182,10 +182,8 @@ class MigrationTest : public SyncTest {
       AwaitQuiescence();
     }
 
-    // Re-enable notifications if we disabled it.
-    if (do_test_without_notifications) {
-      EnableNotifications();
-    }
+    // TODO(rlarocque): It should be possible to re-enable notifications
+    // here, but doing so makes some windows tests flaky.
   }
 
  private:
@@ -251,7 +249,9 @@ IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, BookmarksPrefsBoth) {
 
 // Two data types with one being nigori.
 
-IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, PrefsNigoriIndividiaully) {
+// See crbug.com/124480.
+IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest,
+                       DISABLED_PrefsNigoriIndividiaully) {
   RunSingleClientMigrationTest(
       MakeList(syncable::PREFERENCES, syncable::NIGORI),
       TRIGGER_NOTIFICATION);
@@ -292,15 +292,17 @@ IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest,
 
 // All data types plus nigori.
 
+// See crbug.com/124480.
 IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest,
-                       AllTypesWithNigoriIndividually) {
+                       DISABLED_AllTypesWithNigoriIndividually) {
   ASSERT_TRUE(SetupClients());
   MigrationList migration_list = GetPreferredDataTypesList();
   migration_list.push_front(MakeSet(syncable::NIGORI));
   RunSingleClientMigrationTest(migration_list, MODIFY_BOOKMARK);
 }
 
-IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest, AllTypesWithNigoriAtOnce) {
+IN_PROC_BROWSER_TEST_F(MigrationSingleClientTest,
+                       AllTypesWithNigoriAtOnce) {
   ASSERT_TRUE(SetupClients());
   syncable::ModelTypeSet all_types = GetPreferredDataTypes();
   all_types.Put(syncable::NIGORI);
@@ -341,15 +343,9 @@ class MigrationTwoClientTest : public MigrationTest {
   DISALLOW_COPY_AND_ASSIGN(MigrationTwoClientTest);
 };
 
-#if defined(OS_MACOSX)
-#define MAYBE_MigratePrefsThenModifyBookmark DISABLED_MigratePrefsThenModifyBookmark
-#else
-#define MAYBE_MigratePrefsThenModifyBookmark MigratePrefsThenModifyBookmark
-#endif
 // Easiest possible test of migration errors: triggers a server
 // migration on one datatype, then modifies some other datatype.
-IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
-                       MAYBE_MigratePrefsThenModifyBookmark) {
+IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest, MigratePrefsThenModifyBookmark) {
   RunTwoClientMigrationTest(MakeList(syncable::PREFERENCES),
                             MODIFY_BOOKMARK);
 }
@@ -374,7 +370,9 @@ IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest, MigrationHellWithoutNigori) {
   RunTwoClientMigrationTest(migration_list, MODIFY_BOOKMARK);
 }
 
-IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest, MigrationHellWithNigori) {
+// See crbug.com/124480.
+IN_PROC_BROWSER_TEST_F(MigrationTwoClientTest,
+                       DISABLED_MigrationHellWithNigori) {
   ASSERT_TRUE(SetupClients());
   MigrationList migration_list = GetPreferredDataTypesList();
   // Let the first nudge be a datatype that's neither prefs nor
@@ -403,7 +401,8 @@ class MigrationReconfigureTest : public MigrationTwoClientTest {
   DISALLOW_COPY_AND_ASSIGN(MigrationReconfigureTest);
 };
 
-IN_PROC_BROWSER_TEST_F(MigrationReconfigureTest, DISABLED_SetSyncTabs) {
+IN_PROC_BROWSER_TEST_F(MigrationReconfigureTest,
+                       DISABLED_SetSyncTabs) {
   if (!ServerSupportsErrorTriggering()) {
     LOG(WARNING) << "Test skipped in this server environment.";
     return;

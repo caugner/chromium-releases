@@ -16,13 +16,6 @@
 #include "base/string_util.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/power_manager_client.h"
-#include "chrome/browser/chromeos/dbus/session_manager_client.h"
-#include "chrome/browser/chromeos/input_method/input_method_manager.h"
-#include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/chromeos/input_method/xkeyboard.h"
-#include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -39,6 +32,9 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power_manager_client.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/user_metrics.h"
@@ -72,8 +68,6 @@ class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
     switch (type) {
       case chrome::NOTIFICATION_LOGIN_USER_CHANGED: {
         // Register Screen Lock only after a user has logged in.
-        // TODO(flackr): Observe PowerManagerClient on desktop build.
-        // crbug.com/119798
         chromeos::PowerManagerClient* power_manager =
             chromeos::DBusThreadManager::Get()->GetPowerManagerClient();
         if (!power_manager->HasObserver(this))
@@ -94,7 +88,6 @@ class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
   virtual void LockScreen() OVERRIDE {
     VLOG(1) << "In: ScreenLockObserver::LockScreen";
     if (session_started_) {
-      SetupInputMethodsForScreenLocker();
       chromeos::ScreenLocker::Show();
     } else {
       // If the user has not completed the sign in we will log them out. This
@@ -107,7 +100,6 @@ class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
   }
 
   virtual void UnlockScreen() OVERRIDE {
-    RestoreInputMethods();
     chromeos::ScreenLocker::Hide();
   }
 
@@ -116,86 +108,6 @@ class ScreenLockObserver : public chromeos::PowerManagerClient::Observer,
   }
 
  private:
-  // Temporarily deactivates all input methods (e.g. Chinese, Japanese, Arabic)
-  // since they are not necessary to input a login password. Users are still
-  // able to use/switch active keyboard layouts (e.g. US qwerty, US dvorak,
-  // French).
-  void SetupInputMethodsForScreenLocker() {
-    if (// The LockScreen function is also called when the OS is suspended, and
-        // in that case |saved_active_input_method_list_| might be non-empty.
-        saved_active_input_method_list_.empty()) {
-      chromeos::input_method::InputMethodManager* manager =
-          chromeos::input_method::InputMethodManager::GetInstance();
-
-      saved_previous_input_method_id_ = manager->GetPreviousInputMethod().id();
-      saved_current_input_method_id_ = manager->GetCurrentInputMethod().id();
-      scoped_ptr<chromeos::input_method::InputMethodDescriptors>
-          active_input_method_list(manager->GetActiveInputMethods());
-
-      const std::string hardware_keyboard_id =
-          manager->GetInputMethodUtil()->GetHardwareInputMethodId();
-      // We'll add the hardware keyboard if it's not included in
-      // |active_input_method_list| so that the user can always use the hardware
-      // keyboard on the screen locker.
-      bool should_add_hardware_keyboard = true;
-
-      chromeos::input_method::InputMethodConfigValue value;
-      value.type =
-          chromeos::input_method::InputMethodConfigValue::kValueTypeStringList;
-      for (size_t i = 0; i < active_input_method_list->size(); ++i) {
-        const std::string& input_method_id =
-            active_input_method_list->at(i).id();
-        saved_active_input_method_list_.push_back(input_method_id);
-        // Skip if it's not a keyboard layout.
-        if (!chromeos::input_method::InputMethodUtil::IsKeyboardLayout(
-                input_method_id))
-          continue;
-        value.string_list_value.push_back(input_method_id);
-        if (input_method_id == hardware_keyboard_id) {
-          should_add_hardware_keyboard = false;
-        }
-      }
-      if (should_add_hardware_keyboard) {
-        value.string_list_value.push_back(hardware_keyboard_id);
-      }
-      // We don't want to shut down the IME, even if the hardware layout is the
-      // only IME left.
-      manager->SetEnableAutoImeShutdown(false);
-      manager->SetEnableExtensionIMEs(false);
-      manager->SetInputMethodConfig(
-          chromeos::language_prefs::kGeneralSectionName,
-          chromeos::language_prefs::kPreloadEnginesConfigName,
-          value);
-    }
-  }
-
-  void RestoreInputMethods() {
-    if (!saved_active_input_method_list_.empty()) {
-      chromeos::input_method::InputMethodManager* manager =
-          chromeos::input_method::InputMethodManager::GetInstance();
-
-      chromeos::input_method::InputMethodConfigValue value;
-      value.type =
-          chromeos::input_method::InputMethodConfigValue::kValueTypeStringList;
-      value.string_list_value = saved_active_input_method_list_;
-      manager->SetEnableAutoImeShutdown(true);
-      manager->SetEnableExtensionIMEs(true);
-      manager->SetInputMethodConfig(
-          chromeos::language_prefs::kGeneralSectionName,
-          chromeos::language_prefs::kPreloadEnginesConfigName,
-          value);
-      // Send previous input method id first so Ctrl+space would work fine.
-      if (!saved_previous_input_method_id_.empty())
-        manager->ChangeInputMethod(saved_previous_input_method_id_);
-      if (!saved_current_input_method_id_.empty())
-        manager->ChangeInputMethod(saved_current_input_method_id_);
-
-      saved_previous_input_method_id_.clear();
-      saved_current_input_method_id_.clear();
-      saved_active_input_method_list_.clear();
-    }
-  }
-
   bool session_started_;
   content::NotificationRegistrar registrar_;
   std::string saved_previous_input_method_id_;

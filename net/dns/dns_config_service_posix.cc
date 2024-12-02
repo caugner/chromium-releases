@@ -16,6 +16,10 @@
 #include "net/dns/file_path_watcher_wrapper.h"
 #include "net/dns/serial_worker.h"
 
+#if defined(OS_MACOSX)
+#include "net/dns/notify_watcher_mac.h"
+#endif
+
 #ifndef _PATH_RESCONF  // Normally defined in <resolv.h>
 #define _PATH_RESCONF "/etc/resolv.conf"
 #endif
@@ -24,7 +28,6 @@ namespace net {
 
 namespace {
 
-const FilePath::CharType* kFilePathConfig = FILE_PATH_LITERAL(_PATH_RESCONF);
 const FilePath::CharType* kFilePathHosts = FILE_PATH_LITERAL("/etc/hosts");
 
 // A SerialWorker that uses libresolv to initialize res_state and converts
@@ -54,7 +57,7 @@ class ConfigReader : public SerialWorker {
       success_ = internal::ConvertResStateToDnsConfig(res, &dns_config_);
     }
     // Prefer res_ndestroy where available.
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_FREEBSD)
     res_ndestroy(&res);
 #else
     res_nclose(&res);
@@ -82,8 +85,31 @@ class ConfigReader : public SerialWorker {
 
 namespace internal {
 
+#if defined(OS_MACOSX)
+// From 10.7.3 configd-395.10/dnsinfo/dnsinfo.h
+static const char* kDnsNotifyKey =
+    "com.apple.system.SystemConfiguration.dns_configuration";
+
+class DnsConfigServicePosix::ConfigWatcher : public NotifyWatcherMac {
+ public:
+  bool Watch(const base::Callback<void(bool succeeded)>& callback) {
+    return NotifyWatcherMac::Watch(kDnsNotifyKey, callback);
+  }
+};
+#else
+static const FilePath::CharType* kFilePathConfig =
+    FILE_PATH_LITERAL(_PATH_RESCONF);
+
+class DnsConfigServicePosix::ConfigWatcher : public FilePathWatcherWrapper {
+ public:
+  bool Watch(const base::Callback<void(bool succeeded)>& callback) {
+    return FilePathWatcherWrapper::Watch(FilePath(kFilePathConfig), callback);
+  }
+};
+#endif
+
 DnsConfigServicePosix::DnsConfigServicePosix()
-    : config_watcher_(new FilePathWatcherWrapper()),
+    : config_watcher_(new ConfigWatcher()),
       hosts_watcher_(new FilePathWatcherWrapper()) {
   config_reader_ = new ConfigReader(
       base::Bind(&DnsConfigServicePosix::OnConfigRead,
@@ -106,18 +132,17 @@ void DnsConfigServicePosix::Watch(const CallbackType& callback) {
 
   // Even if watchers fail, we keep the other one as it provides useful signals.
   if (config_watcher_->Watch(
-         FilePath(kFilePathConfig),
-         base::Bind(&DnsConfigServicePosix::OnConfigChanged,
-                    base::Unretained(this)))) {
+          base::Bind(&DnsConfigServicePosix::OnConfigChanged,
+                     base::Unretained(this)))) {
     OnConfigChanged(true);
   } else {
     OnConfigChanged(false);
   }
 
   if (hosts_watcher_->Watch(
-         FilePath(kFilePathHosts),
-         base::Bind(&DnsConfigServicePosix::OnHostsChanged,
-                    base::Unretained(this)))) {
+          FilePath(kFilePathHosts),
+          base::Bind(&DnsConfigServicePosix::OnHostsChanged,
+                     base::Unretained(this)))) {
     OnHostsChanged(true);
   } else {
     OnHostsChanged(false);
@@ -150,6 +175,22 @@ bool ConvertResStateToDnsConfig(const struct __res_state& res,
 
   dns_config->nameservers.clear();
 
+#if defined(OS_MACOSX) || defined(OS_FREEBSD)
+  union res_sockaddr_union addresses[MAXNS];
+  int nscount = res_getservers(const_cast<res_state>(&res), addresses, MAXNS);
+  DCHECK_GE(nscount, 0);
+  DCHECK_LE(nscount, MAXNS);
+  for (int i = 0; i < nscount; ++i) {
+    IPEndPoint ipe;
+    if (ipe.FromSockAddr(
+            reinterpret_cast<const struct sockaddr*>(&addresses[i]),
+            sizeof addresses[i])) {
+      dns_config->nameservers.push_back(ipe);
+    } else {
+      return false;
+    }
+  }
+#else  // !(defined(OS_MACOSX) || defined(OS_FREEBSD))
 #if defined(OS_LINUX)
   // Initially, glibc stores IPv6 in _ext.nsaddrs and IPv4 in nsaddr_list.
   // Next (res_send.c::__libc_res_nsend), it copies nsaddr_list after nsaddrs.
@@ -168,7 +209,7 @@ bool ConvertResStateToDnsConfig(const struct __res_state& res,
       return false;
     }
   }
-#endif
+#endif  // defined(OS_LINUX)
 
   for (int i = 0; i < res.nscount; ++i) {
     IPEndPoint ipe;
@@ -180,6 +221,7 @@ bool ConvertResStateToDnsConfig(const struct __res_state& res,
       return false;
     }
   }
+#endif
 
   dns_config->search.clear();
   for (int i = 0; (i < MAXDNSRCH) && res.dnsrch[i]; ++i) {

@@ -5,10 +5,12 @@
 #include "chrome/browser/themes/theme_service.h"
 
 #include "base/bind.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/browser_theme_pack.h"
 #include "chrome/common/chrome_constants.h"
@@ -27,6 +29,7 @@
 
 using content::BrowserThread;
 using content::UserMetricsAction;
+using ui::ResourceBundle;
 
 // Strings used in alignment properties.
 const char* ThemeService::kAlignmentCenter = "center";
@@ -67,7 +70,7 @@ SkColor IncreaseLightness(SkColor color, double percent) {
 // Default colors.
 #if defined(USE_AURA)
 // TODO(jamescook): Revert this when Aura is using its own window frame
-// implementation by default, specifically BrowserNonClientFrameViewAura.
+// implementation by default, specifically BrowserNonClientFrameViewAsh.
 const SkColor kDefaultColorFrame = SkColorSetRGB(109, 109, 109);
 const SkColor kDefaultColorFrameInactive = SkColorSetRGB(176, 176, 176);
 #else
@@ -306,14 +309,14 @@ bool ThemeService::HasCustomImage(int id) const {
   return false;
 }
 
-RefCountedMemory* ThemeService::GetRawData(int id) const {
+base::RefCountedMemory* ThemeService::GetRawData(int id) const {
   // Check to see whether we should substitute some images.
   int ntp_alternate;
   GetDisplayProperty(NTP_LOGO_ALTERNATE, &ntp_alternate);
   if (id == IDR_PRODUCT_LOGO && ntp_alternate != 0)
     id = IDR_PRODUCT_LOGO_WHITE;
 
-  RefCountedMemory* data = NULL;
+  base::RefCountedMemory* data = NULL;
   if (theme_pack_.get())
     data = theme_pack_->GetRawData(id);
   if (!data)

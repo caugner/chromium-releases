@@ -26,8 +26,6 @@ JobStatusUpdater::JobStatusUpdater(const std::string& printer_name,
   DCHECK(delegate_);
 }
 
-JobStatusUpdater::~JobStatusUpdater() {}
-
 // Start checking the status of the local print job.
 void JobStatusUpdater::UpdateStatus() {
   // It does not matter if we had already sent out an update and are waiting for
@@ -100,6 +98,7 @@ CloudPrintURLFetcher::ResponseAction JobStatusUpdater::OnRequestAuthError() {
 }
 
 std::string JobStatusUpdater::GetAuthHeader() {
-  return CloudPrintHelpers::GetCloudPrintAuthHeader();
+  return CloudPrintHelpers::GetCloudPrintAuthHeaderFromStore();
 }
 
+JobStatusUpdater::~JobStatusUpdater() {}

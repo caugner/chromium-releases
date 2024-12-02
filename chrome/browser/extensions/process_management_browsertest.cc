@@ -131,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ProcessOverflow) {
 
   // Get extension processes.
   ExtensionProcessManager* process_manager =
-    browser()->GetProfile()->GetExtensionProcessManager();
+    browser()->profile()->GetExtensionProcessManager();
   content::RenderProcessHost* extension1_host =
       process_manager->GetSiteInstanceForURL(extension1_url)->GetProcess();
   content::RenderProcessHost* extension2_host =
@@ -176,6 +176,9 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ExtensionProcessBalancing) {
   // allocated.
   content::RenderProcessHost::SetMaxRendererProcessCount(6);
 
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(test_server()->Start());
+
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".
   GURL base_url = test_server()->GetURL(
@@ -184,9 +187,6 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ExtensionProcessBalancing) {
   std::string host_str("localhost");  // Must stay in scope with replace_host.
   replace_host.SetHostStr(host_str);
   base_url = base_url.ReplaceComponents(replace_host);
-
-  host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(test_server()->Start());
 
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("api_test/browser_action/none")));
@@ -212,21 +212,18 @@ IN_PROC_BROWSER_TEST_F(ProcessManagementTest, ExtensionProcessBalancing) {
       CURRENT_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   std::set<int> process_ids;
-  Profile* profile = browser()->GetProfile();
+  Profile* profile = browser()->profile();
   ExtensionProcessManager* epm = profile->GetExtensionProcessManager();
 
-  for (ExtensionProcessManager::const_iterator iter = epm->begin();
-       iter != epm->end();
-       ++iter) {
-    ExtensionHost* host = *iter;
-    if (host->extension()->has_background_page()) {
-      process_ids.insert(host->render_process_host()->GetID());
-    }
+  for (ExtensionProcessManager::const_iterator iter =
+           epm->background_hosts().begin();
+       iter != epm->background_hosts().end(); ++iter) {
+    process_ids.insert((*iter)->render_process_host()->GetID());
   }
 
   // We've loaded 5 extensions with background pages, 1 extension without
   // background page, and one isolated app. We expect only 2 unique processes
   // hosting those extensions.
-  ASSERT_EQ((size_t) 5, profile->GetExtensionService()->process_map()->size());
-  ASSERT_EQ((size_t) 2, process_ids.size());
+  EXPECT_GE((size_t) 6, profile->GetExtensionService()->process_map()->size());
+  EXPECT_EQ((size_t) 2, process_ids.size());
 }

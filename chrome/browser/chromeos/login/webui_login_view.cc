@@ -13,23 +13,23 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
-#include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/views/ash/chrome_shell_delegate.h"
-#include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+#include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_VIRTUAL_KEYBOARD)
@@ -108,18 +108,12 @@ void RightAlignedView::ChildPreferredSizeChanged(View* child) {
 
 namespace chromeos {
 
-// static
-const int WebUILoginView::kStatusAreaCornerPadding = 5;
-
 // WebUILoginView public: ------------------------------------------------------
 
 WebUILoginView::WebUILoginView()
-    : status_area_(NULL),
-      webui_login_(NULL),
+    : webui_login_(NULL),
       login_window_(NULL),
-      status_window_(NULL),
       host_window_frozen_(false),
-      status_area_visibility_on_init_(true),
       login_page_is_loaded_(false),
       should_emit_login_prompt_visible_(true) {
 
@@ -160,21 +154,18 @@ WebUILoginView::~WebUILoginView() {
   ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
   if (tray)
     tray->SetNextFocusableView(NULL);
-
-  if (status_window_)
-    status_window_->CloseNow();
-  status_window_ = NULL;
 }
 
 void WebUILoginView::Init(views::Widget* login_window) {
   login_window_ = login_window;
-  webui_login_ = new DOMView();
+  webui_login_ = new views::WebView(ProfileManager::GetDefaultProfile());
   AddChildView(webui_login_);
-  webui_login_->Init(ProfileManager::GetDefaultProfile(), NULL);
-  webui_login_->SetVisible(true);
 
-  WebContents* web_contents = webui_login_->dom_contents()->web_contents();
+  WebContents* web_contents = webui_login_->GetWebContents();
   web_contents->SetDelegate(this);
+  renderer_preferences_util::UpdateFromSystemSettings(
+      web_contents->GetMutableRendererPrefs(),
+      ProfileManager::GetDefaultProfile());
 
   tab_watcher_.reset(new TabRenderWatcher(web_contents, this));
 }
@@ -213,12 +204,12 @@ void WebUILoginView::UpdateWindowType() {
 }
 
 void WebUILoginView::LoadURL(const GURL & url) {
-  webui_login_->LoadURL(url);
+  webui_login_->LoadInitialURL(url);
   webui_login_->RequestFocus();
 }
 
 content::WebUI* WebUILoginView::GetWebUI() {
-  return webui_login_->dom_contents()->web_contents()->GetWebUI();
+  return webui_login_->web_contents()->GetWebUI();
 }
 
 void WebUILoginView::OpenProxySettings() {
@@ -227,19 +218,14 @@ void WebUILoginView::OpenProxySettings() {
   dialog->Show();
 }
 
-void WebUILoginView::SetStatusAreaEnabled(bool enable) {
-  if (status_area_)
-    status_area_->MakeButtonsActive(enable);
-}
-
 void WebUILoginView::SetStatusAreaVisible(bool visible) {
   ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
-  if (tray)
-    tray->SetVisible(visible);
-  if (status_area_)
-    status_area_->SetVisible(visible);
-  else
-    status_area_visibility_on_init_ = visible;
+  if (tray) {
+    if (visible)
+      tray->GetWidget()->Show();
+    else
+      tray->GetWidget()->Hide();
+  }
 }
 
 // WebUILoginView protected: ---------------------------------------------------
@@ -257,28 +243,10 @@ void WebUILoginView::ChildPreferredSizeChanged(View* child) {
   SchedulePaint();
 }
 
-// Overridden from StatusAreaButton::Delegate:
-
-bool WebUILoginView::ShouldExecuteStatusAreaCommand(
-    const views::View* button_view, int command_id) const {
-  if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS)
-    return true;
-  return false;
-}
-
-void WebUILoginView::ExecuteStatusAreaCommand(
-    const views::View* button_view, int command_id) {
-  if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS)
-    OpenProxySettings();
-}
-
-StatusAreaButton::TextStyle WebUILoginView::GetStatusAreaTextStyle() const {
-  return StatusAreaButton::GRAY_PLAIN_LIGHT;
-}
-
-void WebUILoginView::ButtonVisibilityChanged(views::View* button_view) {
-  if (status_area_)
-    status_area_->UpdateButtonVisibility();
+void WebUILoginView::AboutToRequestFocusFromTabTraversal(bool reverse) {
+  // Return the focus to the web contents.
+  webui_login_->web_contents()->FocusThroughTabTraversal(reverse);
+  GetWidget()->Activate();
 }
 
 void WebUILoginView::OnRenderHostCreated(RenderViewHost* host) {
@@ -296,11 +264,6 @@ void WebUILoginView::OnTabMainFrameRender() {
   VLOG(1) << "WebUI login main frame rendered.";
   tab_watcher_.reset();
 
-  StatusAreaViewChromeos::SetScreenMode(GetScreenMode());
-  // In aura there's a global status area shown already.
-  status_area_ = ChromeShellDelegate::instance()->GetStatusArea();
-  status_area_->SetVisible(status_area_visibility_on_init_);
-
   if (should_emit_login_prompt_visible_) {
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
         EmitLoginPromptVisible();
@@ -310,50 +273,6 @@ void WebUILoginView::OnTabMainFrameRender() {
   // Notify OOBE that the login frame has been rendered. Currently
   // this is used to start camera presence check.
   oobe_ui->OnLoginPromptVisible();
-}
-
-void WebUILoginView::InitStatusArea() {
-  DCHECK(status_area_ == NULL);
-  DCHECK(status_window_ == NULL);
-  StatusAreaViewChromeos* status_area_chromeos = new StatusAreaViewChromeos();
-  status_area_chromeos->Init(this);
-  status_area_ = status_area_chromeos;
-  status_area_->SetVisible(status_area_visibility_on_init_);
-
-  // Width of |status_window| is meant to be large enough.
-  // The current value of status_area_->GetPreferredSize().width()
-  // will be too small when button status is changed.
-  // (e.g. when CapsLock indicator appears)
-  gfx::Size widget_size(width()/2,
-                        status_area_->GetPreferredSize().height());
-  const int widget_x = base::i18n::IsRTL() ?
-      kStatusAreaCornerPadding :
-      width() - widget_size.width() - kStatusAreaCornerPadding;
-  gfx::Rect widget_bounds(widget_x, kStatusAreaCornerPadding,
-                          widget_size.width(), widget_size.height());
-  // TODO(nkostylev|oshima): Make status area in the same window as
-  // |webui_login_| once RenderWidgetHostViewViews and compositor are
-  // ready. This will also avoid having to override the status area
-  // widget type for the lock screen.
-  views::Widget::InitParams widget_params(GetStatusAreaWidgetType());
-  widget_params.bounds = widget_bounds;
-  widget_params.transparent = true;
-  widget_params.parent_widget = login_window_;
-  status_window_ = new views::Widget;
-  status_window_->Init(widget_params);
-
-  views::View* contents_view = new RightAlignedView;
-  contents_view->AddChildView(status_area_);
-  status_window_->SetContentsView(contents_view);
-  status_window_->Show();
-}
-
-StatusAreaViewChromeos::ScreenMode WebUILoginView::GetScreenMode() {
-  return StatusAreaViewChromeos::LOGIN_MODE_WEBUI;
-}
-
-views::Widget::InitParams::Type WebUILoginView::GetStatusAreaWidgetType() {
-  return views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
 }
 
 void WebUILoginView::Observe(int type,
@@ -402,24 +321,19 @@ bool WebUILoginView::IsPopupOrPanel(const WebContents* source) const {
 }
 
 bool WebUILoginView::TakeFocus(bool reverse) {
-  if (status_area_ && status_area_->visible()) {
-    // Forward the focus to the status area.
-    base::Callback<void(bool)> return_focus_cb =
-        base::Bind(&WebUILoginView::ReturnFocus, base::Unretained(this));
-    status_area_->TakeFocus(reverse, return_focus_cb);
-    status_area_->GetWidget()->Activate();
-
-    ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
-    if (tray)
-      tray->SetNextFocusableView(this);
+  ash::SystemTray* tray = ash::Shell::GetInstance()->tray();
+  if (tray && tray->GetWidget()->IsVisible()) {
+    tray->SetNextFocusableView(this);
+    ash::Shell::GetInstance()->RotateFocus(reverse ? ash::Shell::BACKWARD :
+                                                     ash::Shell::FORWARD);
   }
+
   return true;
 }
 
 void WebUILoginView::ReturnFocus(bool reverse) {
   // Return the focus to the web contents.
-  webui_login_->dom_contents()->web_contents()->
-      FocusThroughTabTraversal(reverse);
+  webui_login_->web_contents()->FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
 }
 

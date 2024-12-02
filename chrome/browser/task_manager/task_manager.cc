@@ -365,7 +365,7 @@ int TaskManagerModel::GetResourceIndexForGroup(int group_index,
 
 int TaskManagerModel::CompareValues(int row1, int row2, int col_id) const {
   CHECK(row1 < ResourceCount() && row2 < ResourceCount());
-  if (col_id == IDS_TASK_MANAGER_PAGE_COLUMN) {
+  if (col_id == IDS_TASK_MANAGER_TASK_COLUMN) {
     // Let's do the default, string compare on the resource title.
     static icu::Collator* collator = NULL;
     if (!collator) {
@@ -462,6 +462,11 @@ base::ProcessHandle TaskManagerModel::GetResourceProcessHandle(int index)
     const {
   CHECK_LT(index, ResourceCount());
   return resources_[index]->GetProcess();
+}
+
+int TaskManagerModel::GetUniqueChildProcessId(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return resources_[index]->GetUniqueChildProcessId();
 }
 
 TaskManager::Resource::Type TaskManagerModel::GetResourceType(int index) const {
@@ -1095,7 +1100,7 @@ void TaskManager::OpenAboutMemory() {
 
     // In case the browser window is minimized, show it. If |browser| is a
     // non-tabbed window, the call to OpenURL above will have opened a
-    // TabContents in a tabbed browser, so we need to grab it with
+    // TabContentsWrapper in a tabbed browser, so we need to grab it with
     // GetLastActive before the call to show().
     if (!browser->is_type_tabbed()) {
       browser = BrowserList::GetLastActive();
@@ -1126,13 +1131,12 @@ int CountExtensionBackgroundPagesForProfile(Profile* profile) {
   ExtensionProcessManager* manager = profile->GetExtensionProcessManager();
   if (!manager)
     return count;
-  for (ExtensionProcessManager::const_iterator iter = manager->begin();
-       iter != manager->end();
-       ++iter) {
-    if ((*iter)->extension_host_type() ==
-        chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
-      count++;
-    }
+
+  const ExtensionProcessManager::ExtensionHostSet& background_hosts =
+      manager->background_hosts();
+  for (ExtensionProcessManager::const_iterator iter = background_hosts.begin();
+       iter != background_hosts.end(); ++iter) {
+    ++count;
   }
   return count;
 }

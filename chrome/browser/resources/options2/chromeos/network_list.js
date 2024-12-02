@@ -305,12 +305,21 @@ cr.define('options.network', function() {
      */
     showMenu: function() {
       var rebuild = false;
+      // Force a rescan if opening the menu for WiFi networks to ensure the
+      // list is up to date. Networks are periodically rescanned, but depending
+      // on timing, there could be an excessive delay before the first rescan
+      // unless forced.
+      var rescan = !activeMenu_ && this.data_.key == 'wifi';
       if (!this.menu_) {
         rebuild = true;
         var existing = $(this.getMenuName_());
         if (existing)
           closeMenu_();
         this.menu_ = this.createMenu();
+        this.menu_.addEventListener('mousedown', function(e) {
+          // Prevent blurring of list, which would close the menu.
+          e.preventDefault();
+        }, true);
         var parent = $('network-menus');
         if (existing)
           parent.replaceChild(this.menu_, existing);
@@ -324,12 +333,10 @@ cr.define('options.network', function() {
         activeMenu_ = menuId;
         this.menu_.style.setProperty('top', top + 'px');
         this.menu_.hidden = false;
-        setTimeout(function() {
-          $('settings').addEventListener('click', closeMenu_);
-        }, 0);
       }
+      if (rescan)
+        chrome.send('refreshNetworks');
     },
-
   };
 
   /**
@@ -418,7 +425,7 @@ cr.define('options.network', function() {
       } else if (this.data_.key == 'cellular') {
         var label = enableDataRoaming_ ? 'disableDataRoaming' :
             'enableDataRoaming';
-        var disabled = !AccountsOptions.currentUserIsOwner();
+        var disabled = !UIAccountTweaks.currentUserIsOwner();
         var entry = {label: localStrings.getString(label),
                      data: {}};
         if (disabled) {
@@ -511,10 +518,11 @@ cr.define('options.network', function() {
                        data: {}});
         }
       }
+      if (!empty)
+        menu.appendChild(networkGroup);
       if (addendum.length > 0) {
         var separator = false;
         if (!empty) {
-          menu.appendChild(networkGroup);
           menu.appendChild(MenuItem.createSeparator());
           separator = true;
         }
@@ -543,7 +551,7 @@ cr.define('options.network', function() {
      * @param {Object} data Description of the network.
      * @param {string} label Display name for the menu item.
      * @param {string|function} command Callback function or name
-     *     of the command for |buttonClickCallback|.
+     *     of the command for |networkCommand|.
      * @return {!Element} The created menu item.
      * @private
      */
@@ -559,13 +567,14 @@ cr.define('options.network', function() {
         var type = String(data.networkType);
         var path = data.servicePath;
         callback = function() {
-          chrome.send('buttonClickCallback',
+          chrome.send('networkCommand',
                       [type, path, command]);
           closeMenu_();
         };
       } else if (command != null) {
         callback = function() {
           command(data);
+          closeMenu_();
         };
       }
       if (callback != null)
@@ -606,7 +615,7 @@ cr.define('options.network', function() {
       var path = data.servicePath;
       optionsButton.addEventListener('click', function(event) {
         event.stopPropagation();
-        chrome.send('buttonClickCallback',
+        chrome.send('networkCommand',
                     [type, path, 'options']);
         closeMenu_();
       });
@@ -675,7 +684,7 @@ cr.define('options.network', function() {
       // Add connection control.
       var addConnection = function(type) {
         var callback = function() {
-          chrome.send('buttonClickCallback',
+          chrome.send('networkCommand',
                       [String(type), '?', 'connect']);
         }
         return callback;
@@ -697,11 +706,13 @@ cr.define('options.network', function() {
     },
 
     /**
-     * When the list loses focus, unselect all items in the list.
+     * When the list loses focus, unselect all items in the list and close the
+     * active menu.
      * @private
      */
     onBlur_: function() {
       this.selectionModel.unselectAll();
+      closeMenu_();
     },
 
     /**
@@ -823,7 +834,7 @@ cr.define('options.network', function() {
       var type = String(Constants.TYPE_ETHERNET);
       var path = ethernetConnection.servicePath;
       var ethernetOptions = function() {
-        chrome.send('buttonClickCallback',
+        chrome.send('networkCommand',
                     [type, path, 'options']);
       };
       networkList.update({key: 'ethernet',
@@ -945,7 +956,6 @@ cr.define('options.network', function() {
     if (activeMenu_) {
       $(activeMenu_).hidden = true;
       activeMenu_ = null;
-      $('settings').removeEventListener('click', closeMenu_);
     }
   }
 

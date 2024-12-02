@@ -105,6 +105,7 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
                    const GURL& url,
                    bool is_otr,
                    content::DownloadId download_id,
+                   const std::string& mime_type,
                    const net::BoundNetLog& bound_net_log);
 
   virtual ~DownloadItemImpl();
@@ -326,7 +327,7 @@ class CONTENT_EXPORT DownloadItemImpl : public content::DownloadItem {
   // The current state of this download.
   DownloadState state_;
 
-  // The views of this item in the download shelf and download tab.
+  // The views of this item in the download shelf and download contents.
   ObserverList<Observer> observers_;
 
   // Time the download was started.

@@ -42,13 +42,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 #endif
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
+#include "webkit/fileapi/isolated_context.h"
 #include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
@@ -89,14 +90,11 @@ void UnitTestAssertHandler(const std::string& str) {
   FAIL() << str;
 }
 
-void InitLogging(bool enable_gp_fault_error_box) {
-  logging::SetLogAssertHandler(UnitTestAssertHandler);
-
+void InitLogging() {
 #if defined(OS_WIN)
   if (!::IsDebuggerPresent()) {
-    UINT new_flags = SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX;
-    if (!enable_gp_fault_error_box)
-      new_flags |= SEM_NOGPFAULTERRORBOX;
+    UINT new_flags = SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX
+        | SEM_NOGPFAULTERRORBOX;
 
     // Preserve existing error mode, as discussed at
     // http://blogs.msdn.com/oldnewthing/archive/2004/07/27/198410.aspx
@@ -137,10 +135,12 @@ class TestEnvironment {
 
   TestEnvironment(bool unit_test_mode,
                   base::AtExitManager* existing_at_exit_manager) {
-    if (!unit_test_mode) {
+    if (unit_test_mode) {
+      logging::SetLogAssertHandler(UnitTestAssertHandler);
+    } else {
       // The existing_at_exit_manager must be not NULL.
       at_exit_manager_.reset(existing_at_exit_manager);
-      InitLogging(false);
+      InitLogging();
     }
     main_message_loop_.reset(new MessageLoopType);
     // TestWebKitPlatformSupport must be instantiated after MessageLoopType.
@@ -357,11 +357,7 @@ WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
 }
 
 WebKit::WebStorageNamespace* CreateSessionStorageNamespace(unsigned quota) {
-#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
   return SimpleDomStorageSystem::instance().CreateSessionStorageNamespace();
-#else
-  return WebKit::WebStorageNamespace::createSessionStorageNamespace(quota);
-#endif
 }
 
 WebKit::WebString GetWebKitRootDir() {
@@ -450,6 +446,10 @@ void RunMessageLoop() {
 
 void QuitMessageLoop() {
   MessageLoop::current()->Quit();
+}
+
+void QuitMessageLoopNow() {
+  MessageLoop::current()->QuitNow();
 }
 
 void RunAllPendingMessages() {
@@ -681,8 +681,19 @@ void OpenFileSystem(WebFrame* frame, WebFileSystem::Type type,
   fileSystem->OpenFileSystem(frame, type, size, create, callbacks);
 }
 
+WebKit::WebString RegisterIsolatedFileSystem(
+    const WebKit::WebVector<WebKit::WebString>& filenames) {
+  std::set<FilePath> files;
+  for (size_t i = 0; i < filenames.size(); ++i)
+    files.insert(webkit_glue::WebStringToFilePath(filenames[i]));
+  std::string filesystemId =
+      fileapi::IsolatedContext::GetInstance()->RegisterIsolatedFileSystem(
+          files);
+  return UTF8ToUTF16(filesystemId);
+}
+
 // Keyboard code
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 int NativeKeyCodeForWindowsKeyCode(int keycode, bool shift) {
   ui::KeyboardCode code = static_cast<ui::KeyboardCode>(keycode);
   return ui::GdkNativeKeyCodeForWindowsKeyCode(code, shift);

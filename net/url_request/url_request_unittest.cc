@@ -411,10 +411,6 @@ class URLRequestTest : public PlatformTest {
     default_context_->Init();
   }
 
-  static void SetUpTestCase() {
-    URLRequest::AllowFileAccess();
-  }
-
   // Adds the TestJobInterceptor to the default context.
   TestJobInterceptor* AddTestInterceptor() {
     TestJobInterceptor* interceptor = new TestJobInterceptor();
@@ -479,8 +475,8 @@ class URLRequestTestHTTP : public URLRequestTest {
   void HTTPUploadDataOperationTest(const std::string& method) {
     const int kMsgSize = 20000;  // multiple of 10
     const int kIterations = 50;
-    char *uploadBytes = new char[kMsgSize+1];
-    char *ptr = uploadBytes;
+    char* uploadBytes = new char[kMsgSize+1];
+    char* ptr = uploadBytes;
     char marker = 'a';
     for (int idx = 0; idx < kMsgSize/10; idx++) {
       memcpy(ptr, "----------", 10);
@@ -549,7 +545,8 @@ class URLRequestTestHTTP : public URLRequestTest {
 // issuing a CONNECT request with the magic host name "www.redirect.com".
 // The HTTPTestServer will return a 302 response, which we should not
 // follow.
-TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
+// flaky: crbug.com/96594
+TEST_F(URLRequestTestHTTP, FLAKY_ProxyTunnelRedirectTest) {
   ASSERT_TRUE(test_server_.Start());
 
   TestNetworkDelegate network_delegate;  // must outlive URLRequest
@@ -673,6 +670,41 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateRedirectRequest) {
   BlockingNetworkDelegate network_delegate;
   GURL redirect_url(test_server_.GetURL("simple.html"));
   network_delegate.set_redirect_url(redirect_url);
+
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
+  context->SetProxyFromString(test_server_.host_port_pair().ToString());
+  context->set_network_delegate(&network_delegate);
+  context->Init();
+
+  {
+    GURL original_url(test_server_.GetURL("empty.html"));
+    TestURLRequest r(original_url, &d);
+    r.set_context(context);
+
+    r.Start();
+    MessageLoop::current()->Run();
+
+    EXPECT_EQ(URLRequestStatus::SUCCESS, r.status().status());
+    EXPECT_EQ(0, r.status().error());
+    EXPECT_EQ(redirect_url, r.url());
+    EXPECT_EQ(original_url, r.original_url());
+    EXPECT_EQ(2U, r.url_chain().size());
+    EXPECT_EQ(1, network_delegate.created_requests());
+    EXPECT_EQ(0, network_delegate.destroyed_requests());
+  }
+  EXPECT_EQ(1, network_delegate.destroyed_requests());
+}
+
+// Tests that the network delegate can block and redirect a request to a new
+// URL by setting a redirect_url and returning in OnBeforeURLRequest directly.
+TEST_F(URLRequestTestHTTP, NetworkDelegateRedirectRequestSynchronously) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  BlockingNetworkDelegate network_delegate;
+  GURL redirect_url(test_server_.GetURL("simple.html"));
+  network_delegate.set_redirect_url(redirect_url);
+  network_delegate.set_retval(OK);
 
   scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
   context->SetProxyFromString(test_server_.host_port_pair().ToString());
@@ -1207,7 +1239,7 @@ TEST_F(URLRequestTestHTTP, GetZippedTest) {
             << " Parameter = \"" << test_file << "\"";
       } else {
         EXPECT_EQ(URLRequestStatus::FAILED, r.status().status());
-        EXPECT_EQ(-100, r.status().error())
+        EXPECT_EQ(ERR_CONTENT_LENGTH_MISMATCH, r.status().error())
             << " Parameter = \"" << test_file << "\"";
       }
     }
@@ -1375,10 +1407,6 @@ TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
   }
 }
 
-// Disabled on Android - http://crbug.com/119642 - The Android test server
-// does not support generating OCSP responses on the fly.
-#if !defined(OS_ANDROID)
-
 class TestSSLConfigService : public SSLConfigService {
  public:
   TestSSLConfigService(bool ev_enabled, bool online_rev_checking)
@@ -1386,11 +1414,15 @@ class TestSSLConfigService : public SSLConfigService {
         online_rev_checking_(online_rev_checking) {
   }
 
-  virtual void GetSSLConfig(SSLConfig* config) {
+  // SSLConfigService:
+  virtual void GetSSLConfig(SSLConfig* config) OVERRIDE {
     *config = SSLConfig();
     config->rev_checking_enabled = online_rev_checking_;
     config->verify_ev_cert = ev_enabled_;
   }
+
+ protected:
+  virtual ~TestSSLConfigService() {}
 
  private:
   const bool ev_enabled_;
@@ -1694,7 +1726,28 @@ TEST_F(HTTPSCRLSetTest, ExpiredCRLSet) {
   EXPECT_FALSE(cert_status & CERT_STATUS_REV_CHECKING_ENABLED);
 }
 
-#endif  // !defined(OS_ANDROID)
+TEST_F(HTTPSRequestTest, SSLv3Fallback) {
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_OK);
+  https_options.tls_intolerant = true;
+  TestServer test_server(https_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  TestDelegate d;
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
+  context->Init();
+  d.set_allow_certificate_errors(true);
+  URLRequest r(test_server.GetURL(""), &d);
+  r.set_context(context.get());
+  r.Start();
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_NE(0, d.bytes_received());
+  EXPECT_TRUE(r.ssl_info().connection_status & SSL_CONNECTION_SSL3_FALLBACK);
+}
 
 // This tests that a load of www.google.com with a certificate error sets
 // the |certificate_errors_are_fatal| flag correctly. This flag will cause
@@ -1717,7 +1770,7 @@ TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
   scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
   context->set_network_delegate(&network_delegate);
   context->set_host_resolver(&host_resolver);
-  TransportSecurityState transport_security_state("");
+  TransportSecurityState transport_security_state;
   context->set_transport_security_state(&transport_security_state);
   context->Init();
 
@@ -1760,10 +1813,10 @@ TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
   scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
   context->set_network_delegate(&network_delegate);
   context->set_host_resolver(&host_resolver);
-  TransportSecurityState transport_security_state("");
+  TransportSecurityState transport_security_state;
   TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(transport_security_state.HasMetadata(&domain_state,
-                                                   "www.google.com", true));
+  EXPECT_TRUE(transport_security_state.GetDomainState("www.google.com", true,
+                                                      &domain_state));
   context->set_transport_security_state(&transport_security_state);
   context->Init();
 
@@ -1785,17 +1838,17 @@ TEST_F(HTTPSRequestTest, HTTPSErrorsNoClobberTSSTest) {
 
   // Get a fresh copy of the state, and check that it hasn't been updated.
   TransportSecurityState::DomainState new_domain_state;
-  EXPECT_TRUE(transport_security_state.HasMetadata(&new_domain_state,
-                                                   "www.google.com", true));
-  EXPECT_EQ(new_domain_state.mode, domain_state.mode);
+  EXPECT_TRUE(transport_security_state.GetDomainState("www.google.com", true,
+                                                      &new_domain_state));
+  EXPECT_EQ(new_domain_state.upgrade_mode, domain_state.upgrade_mode);
   EXPECT_EQ(new_domain_state.include_subdomains,
             domain_state.include_subdomains);
-  EXPECT_TRUE(FingerprintsEqual(new_domain_state.preloaded_spki_hashes,
-                                domain_state.preloaded_spki_hashes));
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.static_spki_hashes,
+                                domain_state.static_spki_hashes));
   EXPECT_TRUE(FingerprintsEqual(new_domain_state.dynamic_spki_hashes,
                                 domain_state.dynamic_spki_hashes));
-  EXPECT_TRUE(FingerprintsEqual(new_domain_state.bad_preloaded_spki_hashes,
-                                domain_state.bad_preloaded_spki_hashes));
+  EXPECT_TRUE(FingerprintsEqual(new_domain_state.bad_static_spki_hashes,
+                                domain_state.bad_static_spki_hashes));
 }
 
 namespace {
@@ -2514,8 +2567,8 @@ TEST_F(URLRequestTest, ResolveShortcutTest) {
   std::wstring lnk_path = app_path.value() + L".lnk";
 
   HRESULT result;
-  IShellLink *shell = NULL;
-  IPersistFile *persist = NULL;
+  IShellLink* shell = NULL;
+  IPersistFile* persist = NULL;
 
   CoInitialize(NULL);
   // Temporarily create a shortcut for test

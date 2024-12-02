@@ -8,11 +8,10 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/dialog_style.h"
-#include "chrome/browser/ui/views/window.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -27,22 +26,17 @@ NetworkLoginObserver::~NetworkLoginObserver() {
 }
 
 void NetworkLoginObserver::CreateModalPopup(views::WidgetDelegate* view) {
-  Browser* browser = BrowserList::GetLastActive();
-  if (browser && !browser->is_type_tabbed()) {
-    browser = BrowserList::FindTabbedBrowser(browser->profile(), true);
-  }
-  if (browser) {
-    views::Widget* window = views::Widget::CreateWindowWithParent(
-        view, browser->window()->GetNativeHandle());
-    window->SetAlwaysOnTop(true);
-    window->Show();
+  gfx::NativeWindow parent = NULL;
+  if (BaseLoginDisplayHost::default_host()) {
+    parent = BaseLoginDisplayHost::default_host()->GetNativeWindow();
   } else {
-    // Browser not found, so we should be in login/oobe screen.
-    views::Widget* window = views::Widget::CreateWindowWithParent(
-        view, BaseLoginDisplayHost::default_host()->GetNativeWindow());
-    window->SetAlwaysOnTop(true);
-    window->Show();
+    Browser* browser = BrowserList::FindTabbedBrowser(
+        ProfileManager::GetDefaultProfileOrOffTheRecord(), true);
+    parent = browser ? browser->window()->GetNativeHandle() : NULL;
   }
+  views::Widget* window = views::Widget::CreateWindowWithParent(view, parent);
+  window->SetAlwaysOnTop(true);
+  window->Show();
 }
 
 void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
@@ -58,6 +52,9 @@ void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
       // Always re-display for user initiated connections that fail.
       // Always re-display the login dialog for encrypted networks that were
       // added and failed to connect for any reason.
+      VLOG(1) << "NotifyFailure: " << wifi->name()
+              << ", error: " << wifi->error()
+              << ", added: " << wifi->added();
       if (wifi->error() == ERROR_BAD_PASSPHRASE ||
           wifi->error() == ERROR_BAD_WEPKEY ||
           wifi->connection_started() ||
@@ -72,6 +69,9 @@ void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {
        it != virtual_networks.end(); it++) {
     VirtualNetwork* vpn = *it;
     if (vpn->notify_failure()) {
+      VLOG(1) << "NotifyFailure: " << vpn->name()
+              << ", error: " << vpn->error()
+              << ", added: " << vpn->added();
       // Display login dialog for any error or newly added network.
       if (vpn->error() != ERROR_NO_ERROR || vpn->added()) {
         CreateModalPopup(new NetworkConfigView(vpn));

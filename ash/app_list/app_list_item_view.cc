@@ -7,15 +7,18 @@
 #include "ash/app_list/app_list_item_model.h"
 #include "ash/app_list/app_list_model_view.h"
 #include "ash/app_list/drop_shadow_label.h"
+#include "ash/app_list/icon_cache.h"
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/threading/worker_pool.h"
 #include "base/utf_string_conversions.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/animation/throb_animation.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
+#include "ui/gfx/shadow_value.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/menu/menu_item_view.h"
@@ -183,7 +186,14 @@ AppListItemView::AppListItemView(AppListModelView* list_model_view,
       ALLOW_THIS_IN_INITIALIZER_LIST(apply_shadow_factory_(this)) {
   title_->SetBackgroundColor(0);
   title_->SetEnabledColor(kTitleColor);
-  title_->SetDropShadowSize(3);
+
+  const gfx::ShadowValue kTitleShadows[] = {
+    gfx::ShadowValue(gfx::Point(0, 0), 1, SkColorSetARGB(0x66, 0, 0, 0)),
+    gfx::ShadowValue(gfx::Point(0, 0), 10, SkColorSetARGB(0x66, 0, 0, 0)),
+    gfx::ShadowValue(gfx::Point(0, 2), 2, SkColorSetARGB(0x66, 0, 0, 0)),
+    gfx::ShadowValue(gfx::Point(0, 2), 4, SkColorSetARGB(0x66, 0, 0, 0)),
+  };
+  title_->SetTextShadows(arraysize(kTitleShadows), kTitleShadows);
 
   AddChildView(icon_);
   AddChildView(title_);
@@ -194,6 +204,7 @@ AppListItemView::AppListItemView(AppListModelView* list_model_view,
 
   set_context_menu_controller(this);
   set_request_focus_on_press(false);
+  set_focusable(true);
 }
 
 AppListItemView::~AppListItemView() {
@@ -242,6 +253,7 @@ void AppListItemView::SetSelected(bool selected) {
   if (selected == selected_)
     return;
 
+  RequestFocus();
   selected_ = selected;
   SchedulePaint();
 }
@@ -260,15 +272,20 @@ void AppListItemView::UpdateIcon() {
 
   CancelPendingIconOperation();
 
-  // Schedule resize and shadow generation.
-  icon_op_ = new IconOperation(icon, icon_size_);
-  base::WorkerPool::PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(&IconOperation::Run, icon_op_),
-      base::Bind(&AppListItemView::ApplyShadow,
-                 apply_shadow_factory_.GetWeakPtr(),
-                 icon_op_),
-      true /* task_is_slow */);
+  SkBitmap shadow;
+  if (IconCache::GetInstance()->Get(icon, icon_size_, &shadow)) {
+    icon_->SetImage(shadow);
+  } else {
+    // Schedule resize and shadow generation.
+    icon_op_ = new IconOperation(icon, icon_size_);
+    base::WorkerPool::PostTaskAndReply(
+        FROM_HERE,
+        base::Bind(&IconOperation::Run, icon_op_),
+        base::Bind(&AppListItemView::ApplyShadow,
+                   apply_shadow_factory_.GetWeakPtr(),
+                   icon_op_),
+        true /* task_is_slow */);
+  }
 }
 
 void AppListItemView::CancelPendingIconOperation() {
@@ -282,6 +299,7 @@ void AppListItemView::CancelPendingIconOperation() {
 
 void AppListItemView::ApplyShadow(scoped_refptr<IconOperation> op) {
   icon_->SetImage(op->bitmap());
+  IconCache::GetInstance()->Put(model_->icon(), icon_size_, op->bitmap());
 
   DCHECK(op.get() == icon_op_.get());
   icon_op_ = NULL;
@@ -343,6 +361,11 @@ void AppListItemView::OnPaint(gfx::Canvas* canvas) {
   } else if (selected_) {
     canvas->FillRect(rect, kSelectedColor);
   }
+}
+
+void AppListItemView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
+  state->name = UTF8ToUTF16(model_->title());
 }
 
 void AppListItemView::ShowContextMenuForView(views::View* source,

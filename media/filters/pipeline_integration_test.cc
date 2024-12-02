@@ -10,6 +10,13 @@
 
 namespace media {
 
+// Key ID of the video track in test file "bear-320x240-encrypted.webm".
+static const unsigned char kKeyId[] =
+    "\x11\xa5\x18\x37\xc4\x73\x84\x03\xe5\xe6\x57\xed\x8e\x06\xd9\x7c";
+
+static const char* kSourceId = "SourceId";
+static const char* kDefaultSourceType = "video/webm; codecs=\"vp8, vorbis\"";
+
 // Helper class that emulates calls made on the ChunkDemuxer by the
 // Media Source API.
 class MockMediaSource : public ChunkDemuxerClient {
@@ -26,7 +33,14 @@ class MockMediaSource : public ChunkDemuxerClient {
 
   virtual ~MockMediaSource() {}
 
-  const std::string& url() { return url_; }
+  void set_decryptor(AesDecryptor* decryptor) {
+    decryptor_ = decryptor;
+  }
+  AesDecryptor* decryptor() const {
+    return decryptor_;
+  }
+
+  const std::string& url() const { return url_; }
 
   void Seek(int new_position, int seek_append_size) {
     chunk_demuxer_->FlushData();
@@ -42,7 +56,9 @@ class MockMediaSource : public ChunkDemuxerClient {
     DCHECK(chunk_demuxer_.get());
     DCHECK_LT(current_position_, file_data_size_);
     DCHECK_LE(current_position_ + size, file_data_size_);
-    chunk_demuxer_->AppendData(file_data_.get() + current_position_, size);
+    CHECK(chunk_demuxer_->AppendData(kSourceId,
+                                     file_data_.get() + current_position_,
+                                     size));
     current_position_ += size;
   }
 
@@ -59,11 +75,22 @@ class MockMediaSource : public ChunkDemuxerClient {
   // ChunkDemuxerClient methods.
   virtual void DemuxerOpened(ChunkDemuxer* demuxer) {
     chunk_demuxer_ = demuxer;
+    chunk_demuxer_->AddId(kSourceId, kDefaultSourceType);
     AppendData(initial_append_size_);
   }
 
   virtual void DemuxerClosed() {
     chunk_demuxer_ = NULL;
+  }
+
+  virtual void KeyNeeded(scoped_array<uint8> init_data, int init_data_size) {
+    DCHECK(init_data.get());
+    DCHECK_EQ(init_data_size, 16);
+    DCHECK(decryptor());
+    // In test file bear-320x240-encrypted.webm, the decryption key is equal to
+    // |init_data|.
+    decryptor()->AddKey(init_data.get(), init_data_size,
+                        init_data.get(), init_data_size);
   }
 
  private:
@@ -73,6 +100,7 @@ class MockMediaSource : public ChunkDemuxerClient {
   int current_position_;
   int initial_append_size_;
   scoped_refptr<ChunkDemuxer> chunk_demuxer_;
+  AesDecryptor* decryptor_;
 };
 
 class PipelineIntegrationTest
@@ -81,10 +109,13 @@ class PipelineIntegrationTest
  public:
   void StartPipelineWithMediaSource(MockMediaSource& source) {
     pipeline_->Start(
-        CreateFilterCollection(&source), source.url(),
+        CreateFilterCollection(&source),
         base::Bind(&PipelineIntegrationTest::OnEnded, base::Unretained(this)),
         base::Bind(&PipelineIntegrationTest::OnError, base::Unretained(this)),
         NetworkEventCB(), QuitOnStatusCB(PIPELINE_OK));
+
+    ASSERT_TRUE(decoder_.get());
+    source.set_decryptor(decoder_->decryptor());
 
     message_loop_.Run();
   }
@@ -131,8 +162,7 @@ TEST_F(PipelineIntegrationTest, BasicPlayback) {
   ASSERT_EQ(GetVideoHash(), "f0be120a90a811506777c99a2cdf7cc1");
 }
 
-// TODO(xhwang): Enable this test when AddKey is integrated into pipeline.
-TEST_F(PipelineIntegrationTest, DISABLED_EncryptedPlayback) {
+TEST_F(PipelineIntegrationTest, EncryptedPlayback) {
   MockMediaSource source("bear-320x240-encrypted.webm", 219726);
   StartPipelineWithMediaSource(source);
 

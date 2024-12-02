@@ -10,6 +10,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/time.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -145,7 +146,8 @@ BASE_EXPORT ProcessId GetCurrentProcId();
 BASE_EXPORT ProcessHandle GetCurrentProcessHandle();
 
 #if defined(OS_WIN)
-// Returns the module handle to which an address belongs.
+// Returns the module handle to which an address belongs. The reference counter
+// of the module is not incremented.
 BASE_EXPORT HMODULE GetModuleFromAddress(void* address);
 #endif
 
@@ -420,6 +422,12 @@ BASE_EXPORT bool SetJobObjectAsKillOnJobClose(HANDLE job_object);
 BASE_EXPORT bool GetAppOutput(const CommandLine& cl, std::string* output);
 
 #if defined(OS_POSIX)
+// A POSIX-specific version of GetAppOutput that takes an argv array
+// instead of a CommandLine.  Useful for situations where you need to
+// control the command line arguments directly.
+BASE_EXPORT bool GetAppOutput(const std::vector<std::string>& argv,
+                              std::string* output);
+
 // A restricted version of |GetAppOutput()| which (a) clears the environment,
 // and (b) stores at most |max_output| bytes; also, it doesn't search the path
 // for the command.
@@ -517,6 +525,8 @@ BASE_EXPORT bool WaitForProcessesToExit(
 // on Mac and Windows it can be any process.
 BASE_EXPORT bool WaitForSingleProcess(ProcessHandle handle,
                                       int64 wait_milliseconds);
+BASE_EXPORT bool WaitForSingleProcess(ProcessHandle handle,
+                                      base::TimeDelta wait);
 
 // Waits a certain amount of time (can be 0) for all the processes with a given
 // executable name to exit, then kills off any of them that are still around.
@@ -778,15 +788,17 @@ class BASE_EXPORT ProcessMetrics {
 #if defined(OS_LINUX) || defined(OS_ANDROID)
 // Data from /proc/meminfo about system-wide memory consumption.
 // Values are in KB.
-struct SystemMemoryInfoKB {
-  SystemMemoryInfoKB() : total(0), free(0), buffers(0), cached(0),
-      active_anon(0), inactive_anon(0), shmem(0) {}
+struct BASE_EXPORT SystemMemoryInfoKB {
+  SystemMemoryInfoKB();
+
   int total;
   int free;
   int buffers;
   int cached;
   int active_anon;
   int inactive_anon;
+  int active_file;
+  int inactive_file;
   int shmem;
 };
 // Retrieves data from /proc/meminfo about system-wide memory consumption.

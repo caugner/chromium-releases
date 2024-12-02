@@ -23,17 +23,17 @@
 #include "chrome/browser/sync/glue/generic_change_processor.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/ui_data_type_controller.h"
-#include "chrome/browser/sync/internal_api/change_record.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "sync/internal_api/change_record.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/read_transaction.h"
+#include "sync/internal_api/write_node.h"
+#include "sync/internal_api/write_transaction.h"
 #include "sync/protocol/preference_specifics.pb.h"
 #include "sync/syncable/model_type.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -63,16 +63,18 @@ class ProfileSyncServicePreferenceTest
   int64 SetSyncedValue(const std::string& name, const Value& value) {
     sync_api::WriteTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode root(&trans);
-    if (!root.InitByTagLookup(
-        syncable::ModelTypeToRootTag(syncable::PREFERENCES))) {
+    if (root.InitByTagLookup(syncable::ModelTypeToRootTag(
+            syncable::PREFERENCES)) != sync_api::BaseNode::INIT_OK) {
       return sync_api::kInvalidId;
     }
 
     sync_api::WriteNode tag_node(&trans);
     sync_api::WriteNode node(&trans);
 
-    if (tag_node.InitByClientTagLookup(syncable::PREFERENCES, name))
+    if (tag_node.InitByClientTagLookup(syncable::PREFERENCES, name) ==
+            sync_api::BaseNode::INIT_OK) {
       return WriteSyncedValue(name, value, &tag_node);
+    }
     if (node.InitUniqueByCreation(syncable::PREFERENCES, root, name))
       return WriteSyncedValue(name, value, &node);
 
@@ -158,14 +160,15 @@ class ProfileSyncServicePreferenceTest
     sync_api::ReadTransaction trans(FROM_HERE, service_->GetUserShare());
     sync_api::ReadNode node(&trans);
 
-    if (!node.InitByClientTagLookup(syncable::PREFERENCES, name))
+    if (node.InitByClientTagLookup(syncable::PREFERENCES, name) !=
+            sync_api::BaseNode::INIT_OK) {
       return NULL;
+    }
 
     const sync_pb::PreferenceSpecifics& specifics(
         node.GetEntitySpecifics().preference());
 
-    JSONReader reader;
-    return reader.JsonToValue(specifics.value(), false, false);
+    return base::JSONReader::Read(specifics.value());
   }
 
   int64 WriteSyncedValue(const std::string& name,
@@ -255,8 +258,7 @@ TEST_F(ProfileSyncServicePreferenceTest, CreatePrefSyncData) {
       preference());
   EXPECT_EQ(std::string(prefs::kHomePage), specifics.name());
 
-  base::JSONReader reader;
-  scoped_ptr<Value> value(reader.JsonToValue(specifics.value(), false, false));
+  scoped_ptr<Value> value(base::JSONReader::Read(specifics.value()));
   EXPECT_TRUE(pref->GetValue()->Equals(value.get()));
 }
 

@@ -29,10 +29,10 @@ namespace chromeos {
 // invalid values.
 class KioskModeSettings {
  public:
+  static KioskModeSettings* Get();
+
   // This method checks if Kiosk Mode is enabled or not.
   virtual bool IsKioskModeEnabled();
-
-  static KioskModeSettings* Get();
 
   // Initialize the settings; this will call the callback once trust is
   // established with the policy settings provider.
@@ -72,7 +72,12 @@ class KioskModeSettings {
   friend struct base::DefaultLazyInstanceTraits<KioskModeSettings>;
   friend class KioskModeSettingsTest;
 
+  // Makes sure the browser will switch to kiosk mode if cryptohome was not
+  // ready when the browser was starting after a machine reboot.
+  void VerifyModeIsKnown();
+
   bool is_initialized_;
+  bool is_kiosk_mode_;
 
   // Used for testing.
   void set_initialized(bool value) { is_initialized_ = value; }

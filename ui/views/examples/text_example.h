@@ -35,7 +35,7 @@ class TextExample : public ExampleBase,
   // Creates and adds a check box to the layout.
   Checkbox* AddCheckbox(GridLayout* layout, const char* name);
 
-  // Creates and adds a combo box to the layout.
+  // Creates and adds a combobox to the layout.
   Combobox* AddCombobox(GridLayout* layout,
                         const char* name,
                         const char** strings,
@@ -45,9 +45,7 @@ class TextExample : public ExampleBase,
   virtual void ButtonPressed(Button* button, const Event& event) OVERRIDE;
 
   // Overridden from ComboboxListener:
-  virtual void ItemChanged(Combobox* combo_box,
-                           int prev_index,
-                           int new_index) OVERRIDE;
+  virtual void OnSelectedIndexChanged(Combobox* combobox) OVERRIDE;
 
   class TextExampleView;
   // The content of the scroll view.

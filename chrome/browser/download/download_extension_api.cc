@@ -37,7 +37,6 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
-#include "content/browser/download/download_state_info.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_save_info.h"
@@ -173,12 +172,11 @@ DownloadItem::DownloadState StateEnumFromString(const std::string& state) {
 
 bool ValidateFilename(const string16& filename) {
   // TODO(benjhayden): More robust validation of filename.
+  if ((filename.find('/') != string16::npos) ||
+      (filename.find('\\') != string16::npos))
+    return false;
   if (filename.size() >= 2u && filename[0] == L'.' && filename[1] == L'.')
     return false;
-
-  if (filename.size() >= 1u && filename[0] == L'/')
-    return false;
-
   return true;
 }
 

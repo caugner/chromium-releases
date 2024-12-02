@@ -9,6 +9,7 @@
 #include <map>
 #include <vector>
 
+#include "base/allocator/allocator_extension.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
@@ -32,7 +33,6 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/indexed_db/indexed_db_dispatcher.h"
 #include "content/common/indexed_db/indexed_db_message_filter.h"
-#include "content/common/indexed_db/proxy_webidbfactory_impl.h"
 #include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/resource_dispatcher.h"
@@ -57,13 +57,14 @@
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
+#include "content/renderer/renderer_webstoragearea_impl.h"
+#include "content/renderer/renderer_webstoragenamespace_impl.h"
 #include "grit/content_resources.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "media/base/media.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
-#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebColorName.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
@@ -80,7 +81,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/ui_base_switches.h"
 #include "v8/include/v8.h"
-#include "webkit/extensions/v8/playback_extension.h"
 #include "webkit/glue/webkit_glue.h"
 
 // TODO(port)
@@ -210,8 +210,7 @@ void RenderThreadImpl::Init() {
   compositor_initialized_ = false;
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
-  main_thread_indexed_db_dispatcher_.reset(
-      IndexedDBDispatcher::ThreadSpecificInstance());
+  main_thread_indexed_db_dispatcher_.reset(new IndexedDBDispatcher());
 
   media_stream_center_ = NULL;
 
@@ -485,12 +484,6 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   webkit_glue::EnableWebCoreLogChannels(
       command_line.GetSwitchValueASCII(switches::kWebCoreLogChannels));
 
-  if (command_line.HasSwitch(switches::kPlaybackMode) ||
-      command_line.HasSwitch(switches::kRecordMode) ||
-      command_line.HasSwitch(switches::kNoJsRandomness)) {
-    RegisterExtension(extensions_v8::PlaybackExtension::Get());
-  }
-
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDomAutomationController)) {
     base::StringPiece extension = content::GetContentClient()->GetDataResource(
@@ -537,6 +530,9 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebKit::WebRuntimeFeatures::enableMediaStream(
       command_line.HasSwitch(switches::kEnableMediaStream));
 
+  WebKit::WebRuntimeFeatures::enablePeerConnection(
+      command_line.HasSwitch(switches::kEnablePeerConnection));
+
   WebKit::WebRuntimeFeatures::enableFullScreenAPI(
       !command_line.HasSwitch(switches::kDisableFullScreen));
 
@@ -546,13 +542,11 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebKit::WebRuntimeFeatures::enableVideoTrack(
       command_line.HasSwitch(switches::kEnableVideoTrack));
 
-#if defined(OS_CHROMEOS)
-  // TODO(crogers): enable once Web Audio has been tested and optimized.
-  WebRuntimeFeatures::enableWebAudio(false);
-#else
+  WebKit::WebRuntimeFeatures::enableEncryptedMedia(
+      command_line.HasSwitch(switches::kEnableEncryptedMedia));
+
   WebRuntimeFeatures::enableWebAudio(
       !command_line.HasSwitch(switches::kDisableWebAudio));
-#endif
 
   WebRuntimeFeatures::enablePushState(true);
 
@@ -642,9 +636,8 @@ void RenderThreadImpl::IdleHandler() {
     IdleHandlerInForegroundTab();
     return;
   }
-#if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
-  MallocExtension::instance()->ReleaseFreeMemory();
-#endif
+
+  base::allocator::ReleaseFreeMemory();
 
   v8::V8::IdleNotification();
 
@@ -682,9 +675,7 @@ void RenderThreadImpl::IdleHandlerInForegroundTab() {
     // idle pause. We set it proportional to the idle timer delay.
     int idle_hint = static_cast<int>(new_delay_ms / 10);
     if (cpu_usage < kIdleCPUUsageThresholdInPercents) {
-#if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
-      MallocExtension::instance()->ReleaseFreeMemory();
-#endif
+      base::allocator::ReleaseFreeMemory();
       if (v8::V8::IdleNotification(idle_hint)) {
         // V8 finished collecting garbage.
         new_delay_ms = kLongIdleHandlerDelayMs;
@@ -818,13 +809,40 @@ void RenderThreadImpl::OnSetZoomLevelForCurrentURL(const std::string& host,
 
 void RenderThreadImpl::OnDOMStorageEvent(
     const DOMStorageMsg_Event_Params& params) {
-  if (!dom_storage_event_dispatcher_.get()) {
-    EnsureWebKitInitialized();
-    dom_storage_event_dispatcher_.reset(WebStorageEventDispatcher::create());
+  EnsureWebKitInitialized();
+
+  bool originated_in_process = params.connection_id != 0;
+  RendererWebStorageAreaImpl* originating_area = NULL;
+  if (originated_in_process) {
+    originating_area = RendererWebStorageAreaImpl::FromConnectionId(
+        params.connection_id);
   }
-  dom_storage_event_dispatcher_->dispatchStorageEvent(params.key,
-      params.old_value, params.new_value, params.origin, params.url,
-      params.storage_type == DOM_STORAGE_LOCAL);
+
+  if (params.namespace_id == dom_storage::kLocalStorageNamespaceId) {
+    WebStorageEventDispatcher::dispatchLocalStorageEvent(
+        params.key,
+        params.old_value,
+        params.new_value,
+        params.origin,
+        params.page_url,
+        originating_area,
+        originated_in_process);
+  } else if (originated_in_process) {
+    // TODO(michaeln): For now, we only raise session storage events into the
+    // process which caused the event to occur. However there are cases where
+    // sessions can span process boundaries, so there are correctness issues.
+    RendererWebStorageNamespaceImpl
+        session_namespace_for_event_dispatch(params.namespace_id);
+    WebStorageEventDispatcher::dispatchSessionStorageEvent(
+        params.key,
+        params.old_value,
+        params.new_value,
+        params.origin,
+        params.page_url,
+        session_namespace_for_event_dispatch,
+        originating_area,
+        originated_in_process);
+  }
 }
 
 bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
@@ -882,7 +900,7 @@ void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
   // When bringing in render_view, also bring in webkit's glue and jsbindings.
   RenderViewImpl::Create(
       params.parent_window,
-      MSG_ROUTING_NONE,
+      params.opener_route_id,
       params.renderer_preferences,
       params.web_preferences,
       new SharedRenderViewCounter(0),
@@ -890,9 +908,12 @@ void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
       params.surface_id,
       params.session_storage_namespace_id,
       params.frame_name,
+      false,
+      params.swapped_out,
       params.next_page_id,
       params.screen_info,
-      params.guest);
+      params.guest,
+      params.accessibility_mode);
 }
 
 GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
@@ -911,18 +932,15 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
   // Ask the browser for the channel name.
   int client_id = 0;
   IPC::ChannelHandle channel_handle;
-  base::ProcessHandle renderer_process_for_gpu;
   content::GPUInfo gpu_info;
   if (!Send(new GpuHostMsg_EstablishGpuChannel(cause_for_gpu_launch,
                                                &client_id,
                                                &channel_handle,
-                                               &renderer_process_for_gpu,
                                                &gpu_info)) ||
-      channel_handle.name.empty() ||
 #if defined(OS_POSIX)
       channel_handle.socket.fd == -1 ||
 #endif
-      renderer_process_for_gpu == base::kNullProcessHandle) {
+      channel_handle.name.empty()) {
     // Otherwise cancel the connection.
     gpu_channel_ = NULL;
     return NULL;
@@ -933,7 +951,7 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
   content::GetContentClient()->SetGpuInfo(gpu_info);
 
   // Connect to the GPU process if a channel name was received.
-  gpu_channel_->Connect(channel_handle, renderer_process_for_gpu);
+  gpu_channel_->Connect(channel_handle);
 
   return GetGpuChannel();
 }

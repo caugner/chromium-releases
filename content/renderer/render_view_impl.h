@@ -24,30 +24,31 @@
 #include "content/common/edit_command.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/navigation_gesture.h"
+#include "content/common/view_message_enums.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/referrer.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/stop_find_action.h"
 #include "content/public/renderer/render_view.h"
 #include "content/renderer/pepper/pepper_plugin_delegate_impl.h"
-#include "content/renderer/renderer_webcookiejar_impl.h"
 #include "content/renderer/render_view_selection.h"
 #include "content/renderer/render_widget.h"
+#include "content/renderer/renderer_webcookiejar_impl.h"
 #include "ipc/ipc_platform_file.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIconURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNavigationType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageVisibilityState.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebNavigationType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "ui/base/javascript_message_type.h"
-#include "ui/gfx/surface/transport_dib.h"
+#include "ui/surface/transport_dib.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/media/webmediaplayer_delegate.h"
 #include "webkit/plugins/npapi/webplugin_page_delegate.h"
@@ -89,6 +90,7 @@ class WebUIBindings;
 
 namespace content {
 class DocumentState;
+class NavigationState;
 class P2PSocketDispatcher;
 class RenderViewObserver;
 class RenderViewTest;
@@ -123,6 +125,8 @@ class WebDragData;
 class WebGeolocationClient;
 class WebIconURL;
 class WebImage;
+class WebPeerConnection00Handler;
+class WebPeerConnection00HandlerClient;
 class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMouseEvent;
@@ -189,9 +193,12 @@ class RenderViewImpl : public RenderWidget,
       int32 surface_id,
       int64 session_storage_namespace_id,
       const string16& frame_name,
+      bool is_renderer_created,
+      bool swapped_out,
       int32 next_page_id,
       const WebKit::WebScreenInfo& screen_info,
-      bool guest);
+      bool guest,
+      AccessibilityMode accessibility_mode);
 
   // Returns the RenderViewImpl containing the given WebView.
   CONTENT_EXPORT static RenderViewImpl* FromWebView(WebKit::WebView* webview);
@@ -232,6 +239,8 @@ class RenderViewImpl : public RenderWidget,
 
   WebKit::WebPeerConnectionHandler* CreatePeerConnectionHandler(
       WebKit::WebPeerConnectionHandlerClient* client);
+  WebKit::WebPeerConnection00Handler* CreatePeerConnectionHandlerJsep(
+      WebKit::WebPeerConnection00HandlerClient* client);
 
   // Functions to add and remove observers for this object.
   void AddObserver(content::RenderViewObserver* observer);
@@ -438,6 +447,9 @@ class RenderViewImpl : public RenderWidget,
   virtual WebKit::WebPlugin* createPlugin(
       WebKit::WebFrame* frame,
       const WebKit::WebPluginParams& params);
+  virtual WebKit::WebPlugin* createPluginReplacement(
+      WebKit::WebFrame* frame,
+      const WebKit::WebPluginParams& params);
   virtual WebKit::WebSharedWorker* createSharedWorker(
       WebKit::WebFrame* frame, const WebKit::WebURL& url,
       const WebKit::WebString& name, unsigned long long documentId);
@@ -630,6 +642,8 @@ class RenderViewImpl : public RenderWidget,
   virtual webkit::npapi::WebPluginDelegate* CreatePluginDelegate(
       const FilePath& file_path,
       const std::string& mime_type) OVERRIDE;
+  virtual WebKit::WebPlugin* CreatePluginReplacement(
+      const FilePath& file_path) OVERRIDE;
   virtual void CreatedPluginWindow(gfx::PluginWindowHandle handle) OVERRIDE;
   virtual void WillDestroyPluginWindow(gfx::PluginWindowHandle handle) OVERRIDE;
   virtual void DidMovePlugin(
@@ -735,9 +749,12 @@ class RenderViewImpl : public RenderWidget,
                  int32 surface_id,
                  int64 session_storage_namespace_id,
                  const string16& frame_name,
+                 bool is_renderer_created,
+                 bool swapped_out,
                  int32 next_page_id,
                  const WebKit::WebScreenInfo& screen_info,
-                 bool guest);
+                 bool guest,
+                 AccessibilityMode accessibility_mode);
 
   // Do not delete directly.  This class is reference counted.
   virtual ~RenderViewImpl();
@@ -797,12 +814,6 @@ class RenderViewImpl : public RenderWidget,
   void OnCancelDownload(int32 download_id);
   void OnClearFocusedNode();
   void OnClosePage();
-#if defined(ENABLE_FLAPPER_HACKS)
-  void OnConnectTcpACK(int request_id,
-                       IPC::PlatformFileForTransit socket_for_transit,
-                       const PP_NetAddress_Private& local_addr,
-                       const PP_NetAddress_Private& remote_addr);
-#endif
   void OnContextMenuClosed(
       const content::CustomContextMenuContext& custom_context);
   void OnCopy();
@@ -977,10 +988,16 @@ class RenderViewImpl : public RenderWidget,
                                    const WebKit::WebURLError& error,
                                    bool replace);
 
+  // Make this RenderView show an empty, unscriptable page.
+  void NavigateToSwappedOutURL();
+
   // If we initiated a navigation, this function will populate |document_state|
   // with the navigation information saved in OnNavigate().
-  void PopulateStateFromPendingNavigationParams(
-      content::DocumentState* document_state);
+  void PopulateDocumentStateFromPending(content::DocumentState* document_state);
+
+  // Returns a new NavigationState populated with the navigation information
+  // saved in OnNavigate().
+  content::NavigationState* CreateNavigationStateFromPending();
 
   // Processes the command-line flags --enable-viewport and
   // --enable-fixed-layout[=w,h].
@@ -1218,7 +1235,7 @@ class RenderViewImpl : public RenderWidget,
   MediaStreamDispatcher* media_stream_dispatcher_;
 
   // MediaStreamImpl attached to this view; lazily initialized.
-  scoped_refptr<MediaStreamImpl> media_stream_impl_;
+  MediaStreamImpl* media_stream_impl_;
 
   // Dispatches all P2P socket used by the renderer.
   content::P2PSocketDispatcher* p2p_socket_dispatcher_;
@@ -1313,9 +1330,12 @@ class RenderViewImpl : public RenderWidget,
   // Indicates whether this RenderView is a guest of another RenderView.
   bool guest_;
 
+  // The accessibility mode.
+  AccessibilityMode accessibility_mode_;
+
   // NOTE: pepper_delegate_ should be last member because its constructor calls
   // AddObservers method of RenderViewImpl from c-tor.
-  PepperPluginDelegateImpl pepper_delegate_;
+  content::PepperPluginDelegateImpl pepper_delegate_;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW DATA? Please see if it fits appropriately in one of the above

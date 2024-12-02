@@ -46,7 +46,8 @@ bool SendAutomationJSONRequest(AutomationMessageSender* sender,
     LOG(INFO) << error->message();
     return false;
   }
-  scoped_ptr<Value> value(base::JSONReader::Read(reply, true));
+  scoped_ptr<Value> value(
+      base::JSONReader::Read(reply, base::JSON_ALLOW_TRAILING_COMMAS));
   if (!value.get() || !value->IsType(Value::TYPE_DICTIONARY)) {
     *error = Error("JSON request did not return a dictionary");
     LOG(ERROR) << "JSON request did not return dict: " << command << "\n";
@@ -760,6 +761,8 @@ bool SendInstallExtensionJSONRequest(
   dict.SetString("command", "InstallExtension");
   dict.SetString("path", path.value());
   dict.SetBoolean("with_ui", with_ui);
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
+  dict.SetInteger("windex", 0);
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error))
     return false;
@@ -776,6 +779,8 @@ bool SendGetExtensionsInfoJSONRequest(
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "GetExtensionsInfo");
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
+  dict.SetInteger("windex", 0);
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error))
     return false;
@@ -798,6 +803,8 @@ bool SendIsPageActionVisibleJSONRequest(
   dict.SetString("command", "IsPageActionVisible");
   tab_id.UpdateDictionary(&dict, "auto_id");
   dict.SetString("extension_id", extension_id);
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
+  dict.SetInteger("windex", 0);
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error))
     return false;
@@ -819,6 +826,8 @@ bool SendSetExtensionStateJSONRequest(
   dict.SetString("id", extension_id);
   dict.SetBoolean("enable", enable);
   dict.SetBoolean("allow_in_incognito", allow_in_incognito);
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
+  dict.SetInteger("windex", 0);
   DictionaryValue reply_dict;
   return SendAutomationJSONRequest(sender, dict, &reply_dict, error);
 }
@@ -834,6 +843,7 @@ bool SendClickExtensionButtonJSONRequest(
   else
     dict.SetString("command", "TriggerPageActionById");
   dict.SetString("id", extension_id);
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
   dict.SetInteger("windex", 0);
   dict.SetInteger("tab_index", 0);
   DictionaryValue reply_dict;
@@ -847,6 +857,8 @@ bool SendUninstallExtensionJSONRequest(
   DictionaryValue dict;
   dict.SetString("command", "UninstallExtensionById");
   dict.SetString("id", extension_id);
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
+  dict.SetInteger("windex", 0);
   DictionaryValue reply_dict;
   if (!SendAutomationJSONRequest(sender, dict, &reply_dict, error))
     return false;
@@ -882,9 +894,20 @@ bool SendSetPreferenceJSONRequest(
     Error* error) {
   DictionaryValue dict;
   dict.SetString("command", "SetPrefs");
+  // TODO(kkania): Set correct auto_id instead of hardcoding windex.
   dict.SetInteger("windex", 0);
   dict.SetString("path", pref);
   dict.Set("value", value);
   DictionaryValue reply_dict;
   return SendAutomationJSONRequest(sender, dict, &reply_dict, error);
+}
+
+bool SendOverrideGeolocationJSONRequest(
+    AutomationMessageSender* sender,
+    base::DictionaryValue* geolocation,
+    Error* error) {
+  scoped_ptr<DictionaryValue> dict(geolocation->DeepCopy());
+  dict->SetString("command", "OverrideGeoposition");
+  DictionaryValue reply_dict;
+  return SendAutomationJSONRequest(sender, *dict.get(), &reply_dict, error);
 }

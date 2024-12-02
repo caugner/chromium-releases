@@ -6,6 +6,7 @@
 
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
+#include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager.h"
@@ -55,8 +56,7 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
 
-  virtual SavePasswordInfoBarDelegate*
-      AsSavePasswordInfoBarDelegate() OVERRIDE;
+  virtual InfoBarAutomationType GetInfoBarAutomationType() const OVERRIDE;
 
   // The PasswordFormManager managing the form we're asking the user about,
   // and should update as per her decision.
@@ -114,19 +114,22 @@ bool SavePasswordInfoBarDelegate::Cancel() {
   return true;
 }
 
-SavePasswordInfoBarDelegate*
-SavePasswordInfoBarDelegate::AsSavePasswordInfoBarDelegate() {
-  return this;
+InfoBarDelegate::InfoBarAutomationType
+    SavePasswordInfoBarDelegate::GetInfoBarAutomationType() const {
+  return PASSWORD_INFOBAR;
 }
 
 // PasswordManagerDelegateImpl ------------------------------------------------
 
 void PasswordManagerDelegateImpl::FillPasswordForm(
     const webkit::forms::PasswordFormFillData& form_data) {
+  bool disable_popup = tab_contents_->autofill_manager()->HasExternalDelegate();
+
   tab_contents_->web_contents()->GetRenderViewHost()->Send(
       new AutofillMsg_FillPasswordForm(
           tab_contents_->web_contents()->GetRenderViewHost()->GetRoutingID(),
-          form_data));
+          form_data,
+          disable_popup));
 }
 
 void PasswordManagerDelegateImpl::AddSavePasswordInfoBarIfPermitted(
@@ -147,7 +150,7 @@ void PasswordManagerDelegateImpl::AddSavePasswordInfoBarIfPermitted(
           tab_contents_->infobar_tab_helper(), form_to_save));
 }
 
-Profile* PasswordManagerDelegateImpl::GetProfileForPasswordManager() {
+Profile* PasswordManagerDelegateImpl::GetProfile() {
   return tab_contents_->profile();
 }
 

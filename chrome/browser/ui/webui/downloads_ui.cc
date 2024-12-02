@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/downloads_ui.h"
 
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/singleton.h"
 #include "base/string_piece.h"
 #include "base/threading/thread.h"
@@ -46,8 +47,6 @@ ChromeWebUIDataSource* CreateDownloadsUIHTMLSource() {
   source->AddLocalizedString("status_cancelled", IDS_DOWNLOAD_TAB_CANCELED);
   source->AddLocalizedString("status_removed", IDS_DOWNLOAD_FILE_REMOVED);
   source->AddLocalizedString("status_paused", IDS_DOWNLOAD_PROGRESS_PAUSED);
-  source->AddLocalizedString("status_interrupted",
-                             IDS_DOWNLOAD_PROGRESS_INTERRUPTED);
 
   // Dangerous file.
   source->AddLocalizedString("danger_file_desc", IDS_PROMPT_DANGEROUS_DOWNLOAD);
@@ -96,12 +95,13 @@ DownloadsUI::DownloadsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   web_ui->AddMessageHandler(handler);
 
   // Set up the chrome://downloads/ source.
-  profile->GetChromeURLDataManager()->AddDataSource(
-      CreateDownloadsUIHTMLSource());
+  ChromeWebUIDataSource* source = CreateDownloadsUIHTMLSource();
+  source->set_use_json_js_format_v2();
+  ChromeURLDataManager::AddDataSource(profile, source);
 }
 
 // static
-RefCountedMemory* DownloadsUI::GetFaviconResourceBytes() {
+base::RefCountedMemory* DownloadsUI::GetFaviconResourceBytes() {
   return ResourceBundle::GetSharedInstance().
       LoadDataResourceBytes(IDR_DOWNLOADS_FAVICON);
 }

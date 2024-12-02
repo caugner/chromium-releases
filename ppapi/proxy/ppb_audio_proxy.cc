@@ -171,8 +171,7 @@ void PPB_Audio_Proxy::OnMsgCreate(PP_Instance instance_id,
                                   int32_t sample_rate,
                                   uint32_t sample_frame_count,
                                   HostResource* result) {
-  thunk::EnterFunction<thunk::ResourceCreationAPI> resource_creation(
-      instance_id, true);
+  thunk::EnterResourceCreation resource_creation(instance_id);
   if (resource_creation.failed())
     return;
 
@@ -246,7 +245,7 @@ void PPB_Audio_Proxy::OnMsgNotifyAudioStreamCreated(
     base::SharedMemory temp_mem(handle, false);
   } else {
     static_cast<Audio*>(enter.object())->SetStreamInfo(
-        handle, length,
+        enter.resource()->pp_instance(), handle, length,
         IPC::PlatformFileForTransitToPlatformFile(socket_handle));
   }
 }

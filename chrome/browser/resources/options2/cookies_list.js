@@ -37,6 +37,10 @@ cr.define('options', function() {
     'file_system': [['origin', 'label_file_system_origin'],
                     ['persistent', 'label_file_system_persistent_usage'],
                     ['temporary', 'label_file_system_temporary_usage']],
+    'server_bound_cert': [['serverId', 'label_server_bound_cert_server_id'],
+                          ['certType', 'label_server_bound_cert_type'],
+                          ['created', 'label_server_bound_cert_created'],
+                          ['expires', 'label_server_bound_cert_expires']],
   };
 
   /** @const */ var localStrings = new LocalStrings();
@@ -227,6 +231,7 @@ cr.define('options', function() {
         appCache: false,
         indexedDb: false,
         fileSystem: false,
+        serverBoundCerts: 0,
       };
       if (this.origin)
         this.origin.collectSummaryInfo(info);
@@ -243,6 +248,8 @@ cr.define('options', function() {
         list.push(localStrings.getString('cookie_app_cache'));
       if (info.fileSystem)
         list.push(localStrings.getString('cookie_file_system'));
+      if (info.serverBoundCerts)
+        list.push(localStrings.getString('cookie_server_bound_cert'));
       var text = '';
       for (var i = 0; i < list.length; ++i)
         if (text.length > 0)
@@ -448,6 +455,8 @@ cr.define('options', function() {
           info.fileSystem = true;
         } else if (this.data.type == 'quota') {
           info.quota = this.data;
+        } else if (this.data.type == 'server_bound_cert') {
+          info.serverBoundCerts++;
         }
       }
     },
@@ -479,6 +488,9 @@ cr.define('options', function() {
             break;
           case 'file_system':
             text = localStrings.getString('cookie_file_system');
+            break;
+          case 'server_bound_cert':
+            text = localStrings.getString('cookie_server_bound_cert');
             break;
         }
         if (!text)
@@ -614,8 +626,7 @@ cr.define('options', function() {
     decorate: function() {
       DeletableItemList.prototype.decorate.call(this);
       this.classList.add('cookie-list');
-      this.data_ = [];
-      this.dataModel = new ArrayDataModel(this.data_);
+      this.dataModel = new ArrayDataModel([]);
       this.addEventListener('keydown', this.handleKeyLeftRight_.bind(this));
       var sm = new ListSingleSelectionModel();
       sm.addEventListener('change', this.cookieSelectionChange_.bind(this));
@@ -739,7 +750,7 @@ cr.define('options', function() {
     // from options.DeletableItemList
     /** @inheritDoc */
     deleteItemAtIndex: function(index) {
-      var item = this.data_[index];
+      var item = this.dataModel.item(index);
       if (item) {
         var pathId = item.pathId;
         if (pathId)
@@ -763,7 +774,7 @@ cr.define('options', function() {
      * @param {number} index The index of the tree node to remove.
      */
     remove: function(index) {
-      if (index < this.data_.length)
+      if (index < this.dataModel.length)
         this.dataModel.splice(index, 1);
     },
 
@@ -774,8 +785,7 @@ cr.define('options', function() {
      */
     clear: function() {
       parentLookup = {};
-      this.data_ = [];
-      this.dataModel = new ArrayDataModel(this.data_);
+      this.dataModel.splice(0, this.dataModel.length);
       this.redraw();
     },
 

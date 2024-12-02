@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
@@ -16,7 +17,7 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/connect_interceptor.h"
+#include "chrome/browser/net/http_pipelining_compatibility_client.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
@@ -51,6 +53,7 @@
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
+#include "net/url_request/url_request_throttler_manager.h"
 
 #if defined(USE_NSS)
 #include "net/ocsp/nss_ocsp.h"
@@ -78,6 +81,9 @@ class URLRequestContextWithUserAgent : public net::URLRequestContext {
       const GURL& url) const OVERRIDE {
     return content::GetUserAgent(url);
   }
+
+ protected:
+  virtual ~URLRequestContextWithUserAgent() {}
 };
 
 // Used for the "system" URLRequestContext. If this grows more complicated, then
@@ -240,6 +246,7 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
   context->set_cookie_store(globals->system_cookie_store.get());
   context->set_server_bound_cert_service(
       globals->system_server_bound_cert_service.get());
+  context->set_throttler_manager(globals->throttler_manager.get());
   return context;
 }
 
@@ -248,11 +255,13 @@ ConstructSystemRequestContext(IOThread::Globals* globals,
 class SystemURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
   explicit SystemURLRequestContextGetter(IOThread* io_thread);
-  virtual ~SystemURLRequestContextGetter();
 
   // Implementation for net::UrlRequestContextGetter.
   virtual net::URLRequestContext* GetURLRequestContext();
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const;
+
+ protected:
+  virtual ~SystemURLRequestContextGetter();
 
  private:
   IOThread* const io_thread_;  // Weak pointer, owned by BrowserProcess.
@@ -282,8 +291,22 @@ SystemURLRequestContextGetter::GetIOMessageLoopProxy() const {
   return io_message_loop_proxy_;
 }
 
-IOThread::Globals::Globals() {}
+IOThread::Globals::
+SystemRequestContextLeakChecker::SystemRequestContextLeakChecker(
+    Globals* globals)
+    : globals_(globals) {
+  DCHECK(globals_);
+}
 
+IOThread::Globals::
+SystemRequestContextLeakChecker::~SystemRequestContextLeakChecker() {
+  if (globals_->system_request_context.get())
+    globals_->system_request_context->AssertNoURLRequests();
+}
+
+IOThread::Globals::Globals()
+    : ALLOW_THIS_IN_INITIALIZER_LIST(
+        system_request_context_leak_checker(this)) {}
 IOThread::Globals::~Globals() {}
 
 // |local_state| is passed in explicitly in order to (1) reduce implicit
@@ -356,10 +379,6 @@ net::URLRequestContextGetter* IOThread::system_url_request_context_getter() {
 }
 
 void IOThread::Init() {
-  // Though this thread is called the "IO" thread, it actually just routes
-  // messages around; it shouldn't be allowed to perform any blocking disk I/O.
-  base::ThreadRestrictions::SetIOAllowed(false);
-
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
 #if defined(USE_NSS)
@@ -387,7 +406,7 @@ void IOThread::Init() {
   globals_->host_resolver.reset(
       CreateGlobalHostResolver(net_log_));
   globals_->cert_verifier.reset(net::CertVerifier::CreateDefault());
-  globals_->transport_security_state.reset(new net::TransportSecurityState(""));
+  globals_->transport_security_state.reset(new net::TransportSecurityState());
   globals_->ssl_config_service = GetSSLConfigService();
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
@@ -400,7 +419,8 @@ void IOThread::Init() {
   // In-memory server bound cert store.
   globals_->system_server_bound_cert_service.reset(
       new net::ServerBoundCertService(
-          new net::DefaultServerBoundCertStore(NULL)));
+          new net::DefaultServerBoundCertStore(NULL),
+          base::WorkerPool::GetTaskRunner(true)));
   net::HttpNetworkSession::Params session_params;
   session_params.host_resolver = globals_->host_resolver.get();
   session_params.cert_verifier = globals_->cert_verifier.get();
@@ -426,6 +446,15 @@ void IOThread::Init() {
       new net::HttpNetworkLayer(network_session));
   globals_->proxy_script_fetcher_ftp_transaction_factory.reset(
       new net::FtpNetworkLayer(globals_->host_resolver.get()));
+
+  globals_->throttler_manager.reset(new net::URLRequestThrottlerManager());
+  // Always done in production, disabled only for unit tests.
+  globals_->throttler_manager->set_enable_thread_checks(true);
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableExtensionsHttpThrottling)) {
+    globals_->throttler_manager->set_enforce_throttling(false);
+  }
+  globals_->throttler_manager->set_net_log(net_log_);
 
   globals_->proxy_script_fetcher_context =
       ConstructProxyScriptFetcherContext(globals_, net_log_);

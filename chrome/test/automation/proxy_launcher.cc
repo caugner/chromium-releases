@@ -214,13 +214,6 @@ bool ProxyLauncher::LaunchBrowser(const LaunchState& state) {
   return true;
 }
 
-#if !defined(OS_MACOSX)
-bool ProxyLauncher::LaunchAnotherBrowserBlockUntilClosed(
-    const LaunchState& state) {
-  return LaunchBrowserHelper(state, false, true, NULL);
-}
-#endif
-
 void ProxyLauncher::QuitBrowser() {
   // If we have already finished waiting for the browser to exit
   // (or it hasn't launched at all), there's nothing to do here.
@@ -433,9 +426,6 @@ void ProxyLauncher::PrepareTestCommandline(CommandLine* command_line,
 #ifdef WAIT_FOR_DEBUGGER_ON_OPEN
   command_line->AppendSwitch(switches::kDebugOnStart);
 #endif
-
-  // Disable TabCloseableStateWatcher for tests.
-  command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
 
   // Force the app to always exit when the last browser window is closed.
   command_line->AppendSwitch(switches::kDisableZeroBrowsersOpenForTests);

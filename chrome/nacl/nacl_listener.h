@@ -32,15 +32,14 @@ class NaClListener : public IPC::Channel::Listener {
   bool Send(IPC::Message* msg);
 
  private:
-  void OnStartSelLdr(std::vector<nacl::FileDescriptor> handles,
-                     bool enable_exception_handling);
+  void OnMsgStart(const nacl::NaClStartParams& params);
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // A channel back to the browser.
   scoped_ptr<IPC::SyncChannel> channel_;
 
   // A filter that allows other threads to use the channel.
-  scoped_ptr<IPC::SyncMessageFilter> filter_;
+  scoped_refptr<IPC::SyncMessageFilter> filter_;
 
   base::WaitableEvent shutdown_event_;
   base::Thread io_thread_;

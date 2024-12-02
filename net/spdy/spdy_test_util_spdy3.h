@@ -159,8 +159,7 @@ int ConstructSpdyReplyString(const char* const extra_headers[],
 // Construct an expected SPDY SETTINGS frame.
 // |settings| are the settings to set.
 // Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdySettings(
-    const SpdySettings& settings);
+SpdyFrame* ConstructSpdySettings(const SettingsMap& settings);
 
 // Construct an expected SPDY CREDENTIAL frame.
 // |credential| is the credential to send.
@@ -370,6 +369,7 @@ class SpdySessionDependencies {
   scoped_ptr<DeterministicMockClientSocketFactory> deterministic_socket_factory;
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
   HttpServerPropertiesImpl http_server_properties;
+  std::string trusted_spdy_proxy;
 };
 
 class SpdyURLRequestContext : public URLRequestContext {

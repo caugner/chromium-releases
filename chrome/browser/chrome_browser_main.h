@@ -64,7 +64,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   virtual void PostEarlyInitialization() OVERRIDE;
   virtual void ToolkitInitialized() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
-  virtual MessageLoop* GetMainMessageLoop() OVERRIDE;
   virtual void PostMainMessageLoopStart() OVERRIDE;
   virtual int PreCreateThreads() OVERRIDE;
   virtual void PreMainMessageLoopRun() OVERRIDE;
@@ -90,6 +89,8 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   }
 
   Profile* profile() { return profile_; }
+
+  const PrefService* local_state() const { return local_state_; }
 
  private:
   // Methods for |EarlyInitialization()| ---------------------------------------
@@ -125,9 +126,12 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // computer startup has on retention and usage of Chrome.
   void AutoLaunchChromeFieldTrial();
 
-  // A field trial to test the viability of a DNS based, certificate revocation
-  // system.
-  void ComodoDNSExperimentFieldTrial();
+  // Field trial for testing domain bound certs.
+  void DomainBoundCertsFieldTrial();
+
+  // A collection of field trials intended to test the uniformity and
+  // correctness of the field trial control, bucketing and reporting systems.
+  void SetupUniformityFieldTrials();
 
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
@@ -207,6 +211,11 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Members needed across shutdown methods.
   bool restart_last_session_;
 
+  // Tests can set this to true to disable restricting cookie access in the
+  // network stack, as this can only be done once.
+  static bool disable_enforcing_cookie_policies_for_tests_;
+
+  friend class BrowserMainTest;
   FRIEND_TEST_ALL_PREFIXES(BrowserMainTest,
                            WarmConnectionFieldTrial_WarmestSocket);
   FRIEND_TEST_ALL_PREFIXES(BrowserMainTest, WarmConnectionFieldTrial_Random);

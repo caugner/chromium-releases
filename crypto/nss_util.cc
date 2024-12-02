@@ -538,25 +538,26 @@ class NSSInitSingleton {
         chaps_module_ = LoadModule(
             kChapsModuleName,
             kChapsPath,
-            // trustOrder=100 -- means it'll select this as the most
-            //   trusted slot for the mechanisms it provides.
-            // slotParams=... -- selects RSA as the only mechanism, and only
-            //   asks for the password when necessary (instead of every
-            //   time, or after a timeout).
-            "trustOrder=100 slotParams=(1={slotFlags=[RSA] askpw=only})");
+            // For more details on these parameters, see:
+            // https://developer.mozilla.org/en/PKCS11_Module_Specs
+            // slotFlags=[PublicCerts] -- Certificates and public keys can be
+            //   read from this slot without requiring a call to C_Login.
+            // askpw=only -- Only authenticate to the token when necessary.
+            "NSS=\"slotParams=(0={slotFlags=[PublicCerts] askpw=only})\"");
       }
       if (chaps_module_) {
         // If this gets set, then we'll use the TPM for certs with
         // private keys, otherwise we'll fall back to the software
         // implementation.
         tpm_slot_ = GetTPMSlot();
+
         callback.Run(tpm_slot_ != NULL);
         return;
       }
     }
     callback.Run(false);
   }
-#endif
+#endif  // defined(OS_CHROMEOS)
 
 #if defined(USE_NSS)
   // Load nss's built-in root certs.
@@ -637,7 +638,6 @@ bool NSSInitSingleton::force_nodb_init_ = false;
 
 base::LazyInstance<NSSInitSingleton>::Leaky
     g_nss_singleton = LAZY_INSTANCE_INITIALIZER;
-
 }  // namespace
 
 #if defined(USE_NSS)

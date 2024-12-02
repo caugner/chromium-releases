@@ -34,7 +34,7 @@ NTPResourceCache::NTPResourceCache(Profile* profile) : profile_(profile) {}
 
 NTPResourceCache::~NTPResourceCache() {}
 
-RefCountedMemory* NTPResourceCache::GetNewTabHTML(bool is_incognito) {
+base::RefCountedMemory* NTPResourceCache::GetNewTabHTML(bool is_incognito) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Android uses same html/css for incognito NTP and normal NTP
   if (!new_tab_html_.get())
@@ -42,7 +42,7 @@ RefCountedMemory* NTPResourceCache::GetNewTabHTML(bool is_incognito) {
   return new_tab_html_.get();
 }
 
-RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
+base::RefCountedMemory* NTPResourceCache::GetNewTabCSS(bool is_incognito) {
   // This is used for themes, which are not currently supported on Android.
   NOTIMPLEMENTED();
   return NULL;
@@ -60,7 +60,7 @@ void NTPResourceCache::CreateNewTabHTML() {
   // Show the profile name in the title and most visited labels if the current
   // profile is not the default.
   DictionaryValue localized_strings;
-  localized_strings.SetString("hasattribution", "false");
+  localized_strings.SetBoolean("hasattribution", false);
   localized_strings.SetString("title",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
   localized_strings.SetString("mostvisited",

@@ -58,10 +58,47 @@ remoting.ClientSession = function(hostJid, hostPublicKey, sharedSecret,
   this.scaleToFit = false;
   this.logToServer = new remoting.LogToServer();
   this.onStateChange = onStateChange;
+
+  /** @type {number?} */
+  this.notifyClientDimensionsTimer_ = null;
+
   /** @type {remoting.ClientSession} */
   var that = this;
   /** @type {function():void} @private */
-  this.refocusPlugin_ = function() { that.plugin.element().focus(); };
+  this.callPluginLostFocus_ = function() { that.pluginLostFocus_(); };
+  /** @type {function():void} @private */
+  this.callPluginGotFocus_ = function() { that.pluginGotFocus_(); };
+  /** @type {function():void} @private */
+  this.callEnableShrink_ = function() {
+    that.setScaleToFit(true);
+    that.scroll_(0, 0);  // Reset bump-scroll offsets.
+  };
+  /** @type {function():void} @private */
+  this.callDisableShrink_ = function() { that.setScaleToFit(false); };
+  /** @type {function():void} @private */
+  this.callToggleFullScreen_ = function() { that.toggleFullScreen_(); };
+  /** @type {remoting.MenuButton} @private */
+  this.screenOptionsMenu_ = new remoting.MenuButton(
+      document.getElementById('screen-options-menu'),
+      function() { that.onShowOptionsMenu_(); }
+  );
+  /** @type {remoting.MenuButton} @private */
+  this.sendKeysMenu_ = new remoting.MenuButton(
+      document.getElementById('send-keys-menu')
+  );
+
+  /** @type {HTMLElement} @private */
+  this.shrinkToFit_ = document.getElementById('enable-shrink-to-fit');
+  /** @type {HTMLElement} @private */
+  this.originalSize_ = document.getElementById('disable-shrink-to-fit');
+  /** @type {HTMLElement} @private */
+  this.fullScreen_ = document.getElementById('toggle-full-screen');
+
+  this.shrinkToFit_.addEventListener('click', this.callEnableShrink_, false);
+  this.originalSize_.addEventListener('click', this.callDisableShrink_, false);
+  this.fullScreen_.addEventListener('click', this.callToggleFullScreen_, false);
+  /** @type {number?} @private */
+  this.bumpScrollTimer_ = null;
 };
 
 // Note that the positive values in both of these enums are copied directly
@@ -189,12 +226,22 @@ remoting.ClientSession.prototype.createClientPlugin_ = function(container, id) {
  * Callback function called when the plugin element gets focus.
  */
 remoting.ClientSession.prototype.pluginGotFocus_ = function() {
-  // It would be cleaner to send a paste command to the plugin element,
-  // but that's not supported.
-  /** @type {function(string): void } */
-  document.execCommand;
-  document.execCommand("paste");
-}
+  remoting.clipboard.initiateToHost();
+};
+
+/**
+ * Callback function called when the plugin element loses focus.
+ */
+remoting.ClientSession.prototype.pluginLostFocus_ = function() {
+  if (this.plugin) {
+    // Release all keys to prevent them becoming 'stuck down' on the host.
+    this.plugin.releaseAllKeys();
+    if (this.plugin.element()) {
+      // Focus should stay on the element, not (for example) the toolbar.
+      this.plugin.element().focus();
+    }
+  }
+};
 
 /**
  * Adds <embed> element to |container| and readies the sesion object.
@@ -207,7 +254,6 @@ remoting.ClientSession.prototype.createPluginAndConnect =
   this.plugin = this.createClientPlugin_(container, this.PLUGIN_ID);
 
   this.plugin.element().focus();
-  this.plugin.element().addEventListener('blur', this.refocusPlugin_, false);
 
   /** @type {remoting.ClientSession} */
   var that = this;
@@ -216,7 +262,9 @@ remoting.ClientSession.prototype.createPluginAndConnect =
       that.onPluginInitialized_(oauth2AccessToken, result);
     });
   this.plugin.element().addEventListener(
-      'focus', function() { that.pluginGotFocus_() }, false);
+      'focus', this.callPluginGotFocus_, false);
+  this.plugin.element().addEventListener(
+      'blur', this.callPluginLostFocus_, false);
 };
 
 /**
@@ -240,9 +288,27 @@ remoting.ClientSession.prototype.onPluginInitialized_ =
     return;
   }
 
+  // Show the Send Keys menu and Ctrl-Alt-Del button only in Me2Me mode, and
+  // only if the plugin has the injectKeyEvent feature.
+  if (!this.plugin.hasFeature(remoting.ClientPlugin.Feature.INJECT_KEY_EVENT) ||
+      this.mode != remoting.ClientSession.Mode.ME2ME) {
+    var sendCadElement = document.getElementById('send-ctrl-alt-del');
+    sendCadElement.hidden = true;
+    var sendKeysElement = document.getElementById('send-keys-menu');
+    sendKeysElement.hidden = true;
+  }
+
+  // Remap the right Control key to the right Win / Cmd key on ChromeOS
+  // platforms, if the plugin has the remapKey feature.
+  if (this.plugin.hasFeature(remoting.ClientPlugin.Feature.REMAP_KEY) &&
+      remoting.runningOnChromeOS()) {
+    this.plugin.remapKey(0x0700e4, 0x0700e7);
+  }
+
   // Enable scale-to-fit if and only if the plugin is new enough for
   // high-quality scaling.
-  this.setScaleToFit(this.plugin.isHiQualityScalingSupported());
+  this.setScaleToFit(this.plugin.hasFeature(
+      remoting.ClientPlugin.Feature.HIGH_QUALITY_SCALING));
 
   /** @type {remoting.ClientSession} */ var that = this;
   /** @param {string} msg The IQ stanza to send. */
@@ -276,10 +342,17 @@ remoting.ClientSession.prototype.onPluginInitialized_ =
 remoting.ClientSession.prototype.removePlugin = function() {
   if (this.plugin) {
     this.plugin.element().removeEventListener(
-        'blur', this.refocusPlugin_, false);
+        'focus', this.callPluginGotFocus_, false);
+    this.plugin.element().removeEventListener(
+        'blur', this.callPluginLostFocus_, false);
     this.plugin.cleanup();
     this.plugin = null;
   }
+  this.shrinkToFit_.removeEventListener('click', this.callEnableShrink_, false);
+  this.originalSize_.removeEventListener('click', this.callDisableShrink_,
+                                         false);
+  this.fullScreen_.removeEventListener('click', this.callToggleFullScreen_,
+                                       false);
 };
 
 /**
@@ -314,6 +387,20 @@ remoting.ClientSession.prototype.disconnect = function() {
 };
 
 /**
+ * Sends a Ctrl-Alt-Del sequence to the remoting client.
+ *
+ * @return {void} Nothing.
+ */
+remoting.ClientSession.prototype.sendCtrlAltDel = function() {
+  this.plugin.injectKeyEvent(0x0700e0, true);
+  this.plugin.injectKeyEvent(0x0700e2, true);
+  this.plugin.injectKeyEvent(0x07004c, true);
+  this.plugin.injectKeyEvent(0x07004c, false);
+  this.plugin.injectKeyEvent(0x0700e2, false);
+  this.plugin.injectKeyEvent(0x0700e0, false);
+}
+
+/**
  * Enables or disables the client's scale-to-fit feature.
  *
  * @param {boolean} scaleToFit True to enable scale-to-fit, false otherwise.
@@ -322,12 +409,6 @@ remoting.ClientSession.prototype.disconnect = function() {
 remoting.ClientSession.prototype.setScaleToFit = function(scaleToFit) {
   this.scaleToFit = scaleToFit;
   this.updateDimensions();
-  var button = document.getElementById('toggle-scaling');
-  if (scaleToFit) {
-    button.classList.add('toggle-button-active');
-  } else {
-    button.classList.remove('toggle-button-active');
-  }
 }
 
 /**
@@ -434,7 +515,38 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
  */
 remoting.ClientSession.prototype.onResize = function() {
   this.updateDimensions();
+
+  if (this.notifyClientDimensionsTimer_) {
+    window.clearTimeout(this.notifyClientDimensionsTimer_);
+    this.notifyClientDimensionsTimer_ = null;
+  }
+
+  // Defer notifying the host of the change until the window stops resizing, to
+  // avoid overloading the control channel with notifications.
+  /** @type {remoting.ClientSession} */
+  var that = this;
+  var notifyClientDimensions = function() {
+    that.plugin.notifyClientDimensions(window.innerWidth, window.innerHeight);
+  }
+  this.notifyClientDimensionsTimer_ =
+      window.setTimeout(notifyClientDimensions, 1000);
+
+  // If bump-scrolling is enabled, adjust the plugin margins to fully utilize
+  // the new window area.
+  this.scroll_(0, 0);
 };
+
+/**
+ * Requests that the host pause or resume video updates.
+ *
+ * @param {boolean} pause True to pause video, false to resume.
+ * @return {void} Nothing.
+ */
+remoting.ClientSession.prototype.pauseVideo = function(pause) {
+  if (this.plugin) {
+    this.plugin.pauseVideo(pause)
+  }
+}
 
 /**
  * This is a callback that gets called when the plugin notifies us of a change
@@ -518,4 +630,155 @@ remoting.ClientSession.prototype.getPerfStats = function() {
  */
 remoting.ClientSession.prototype.logStatistics = function(stats) {
   this.logToServer.logStatistics(stats, this.mode);
+};
+
+/**
+ * Toggles between full-screen and windowed mode.
+ * @return {void} Nothing.
+ * @private
+ */
+remoting.ClientSession.prototype.toggleFullScreen_ = function() {
+  if (document.webkitIsFullScreen) {
+    document.webkitCancelFullScreen();
+    this.enableBumpScroll_(false);
+  } else {
+    document.body.webkitRequestFullScreen(Element.ALLOW_KEYBOARD_INPUT);
+    this.enableBumpScroll_(true);
+  }
+};
+
+/**
+ * Updates the options menu to reflect the current scale-to-fit and full-screen
+ * settings.
+ * @return {void} Nothing.
+ * @private
+ */
+remoting.ClientSession.prototype.onShowOptionsMenu_ = function() {
+  remoting.MenuButton.select(this.shrinkToFit_, this.scaleToFit);
+  remoting.MenuButton.select(this.originalSize_, !this.scaleToFit);
+  remoting.MenuButton.select(this.fullScreen_, document.webkitIsFullScreen);
+};
+
+/**
+ * Scroll the client plugin by the specified amount, keeping it visible.
+ * Note that this is only used in content full-screen mode (not windowed or
+ * browser full-screen modes), where window.scrollBy and the scrollTop and
+ * scrollLeft properties don't work.
+ * @param {number} dx The amount by which to scroll horizontally. Positive to
+ *     scroll right; negative to scroll left.
+ * @param {number} dy The amount by which to scroll vertically. Positive to
+ *     scroll down; negative to scroll up.
+ * @return {boolean} True if the requested scroll had no effect because both
+ *     vertical and horizontal edges of the screen have been reached.
+ * @private
+ */
+remoting.ClientSession.prototype.scroll_ = function(dx, dy) {
+  var plugin = this.plugin.element();
+  var style = plugin.style;
+
+  /**
+   * Helper function for x- and y-scrolling
+   * @param {number|string} curr The current margin, eg. "10px".
+   * @param {number} delta The requested scroll amount.
+   * @param {number} windowBound The size of the window, in pixels.
+   * @param {number} pluginBound The size of the plugin, in pixels.
+   * @param {{stop: boolean}} stop Reference parameter used to indicate when
+   *     the scroll has reached one of the edges and can be stopped in that
+   *     direction.
+   * @return {string} The new margin value.
+   */
+  var adjustMargin = function(curr, delta, windowBound, pluginBound, stop) {
+    var minMargin = Math.min(0, windowBound - pluginBound);
+    var result = (curr ? parseFloat(curr) : 0) - delta;
+    result = Math.min(0, Math.max(minMargin, result));
+    stop.stop = (result == 0 || result == minMargin);
+    return result + "px";
+  };
+
+  var stopX = { stop: false };
+  style.marginLeft = adjustMargin(style.marginLeft, dx,
+                                  window.innerWidth, plugin.width, stopX);
+  var stopY = { stop: false };
+  style.marginTop = adjustMargin(style.marginTop, dy,
+                                 window.innerHeight, plugin.height, stopY);
+  return stopX.stop && stopY.stop;
+}
+
+/**
+ * Enable or disable bump-scrolling.
+ * @param {boolean} enable True to enable bump-scrolling, false to disable it.
+ */
+remoting.ClientSession.prototype.enableBumpScroll_ = function(enable) {
+  if (enable) {
+    /** @type {remoting.ClientSession} */
+    var that = this;
+    /** @param {Event} event */
+    this.onMouseMoveRef_ = function(event) {
+      that.onMouseMove_(event);
+    }
+    this.plugin.element().addEventListener('mousemove', this.onMouseMoveRef_,
+                                           false);
+  } else {
+    this.plugin.element().removeEventListener('mousemove', this.onMouseMoveRef_,
+                                              false);
+    this.onMouseMoveRef_ = null;
+  }
+};
+
+/**
+ * @param {Event} event The mouse event.
+ * @private
+ */
+remoting.ClientSession.prototype.onMouseMove_ = function(event) {
+  if (this.bumpScrollTimer_) {
+    window.clearTimeout(this.bumpScrollTimer_);
+    this.bumpScrollTimer_ = null;
+  }
+  // It's possible to leave content full-screen mode without using the Screen
+  // Options menu, so we disable bump scrolling as soon as we detect this.
+  if (!document.webkitIsFullScreen) {
+    this.enableBumpScroll_(false);
+  }
+
+  /**
+   * Compute the scroll speed based on how close the mouse is to the edge.
+   * @param {number} mousePos The mouse x- or y-coordinate
+   * @param {number} size The width or height of the content area.
+   * @return {number} The scroll delta, in pixels.
+   */
+  var computeDelta = function(mousePos, size) {
+    var threshold = 10;
+    if (mousePos >= size - threshold) {
+      return 1 + 5 * (mousePos - (size - threshold)) / threshold;
+    } else if (mousePos <= threshold) {
+      return -1 - 5 * (threshold - mousePos) / threshold;
+    }
+    return 0;
+  };
+
+  var dx = computeDelta(event.x, window.innerWidth);
+  var dy = computeDelta(event.y, window.innerHeight);
+
+  if (dx != 0 || dy != 0) {
+    /** @type {remoting.ClientSession} */
+    var that = this;
+    /**
+     * Scroll the view, and schedule a timer to do so again unless we've hit
+     * the edges of the screen. This timer is cancelled when the mouse moves.
+     * @param {number} expected The time at which we expect to be called.
+     */
+    var repeatScroll = function(expected) {
+      /** @type {number} */
+      var now = new Date().getTime();
+      /** @type {number} */
+      var timeout = 10;
+      var lateAdjustment = 1 + (now - expected) / timeout;
+      if (!that.scroll_(lateAdjustment * dx, lateAdjustment * dy)) {
+        that.bumpScrollTimer_ = window.setTimeout(
+            function() { repeatScroll(now + timeout); },
+            timeout);
+      }
+    };
+    repeatScroll(new Date().getTime());
+  }
 };

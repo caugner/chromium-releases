@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,8 +39,8 @@ TEST(ResourceBundle, LoadDataResourceBytes) {
   EXPECT_EQ(NULL, resource_bundle.LoadDataResourceBytes(kUnfoundResourceId));
 
   // Give a .pak file that doesn't exist so we will fail to load it.
-  resource_bundle.AddDataPackToSharedInstance(FilePath(
-      FILE_PATH_LITERAL("non-existant-file.pak")));
+  resource_bundle.AddDataPack(FilePath(
+      FILE_PATH_LITERAL("non-existant-file.pak")), 1.0);
   EXPECT_EQ(NULL, resource_bundle.LoadDataResourceBytes(kUnfoundResourceId));
 }
 

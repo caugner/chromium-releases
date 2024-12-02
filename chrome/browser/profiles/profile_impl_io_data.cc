@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
+#include "base/threading/worker_pool.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
@@ -31,17 +32,6 @@
 #include "net/url_request/url_request_job_factory.h"
 
 using content::BrowserThread;
-
-namespace {
-
-void ClearNetworkingHistorySinceOnIOThread(
-    ProfileImplIOData* io_data, base::Time time) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  io_data->transport_security_state()->DeleteSince(time);
-  io_data->http_server_properties()->Clear();
-}
-
-}  // namespace
 
 ProfileImplIOData::Handle::Handle(Profile* profile)
     : io_data_(new ProfileImplIOData),
@@ -75,8 +65,8 @@ ProfileImplIOData::Handle::~Handle() {
     iter->second->CleanupOnUIThread();
   }
 
-  if (io_data_->http_server_properties_manager_.get())
-    io_data_->http_server_properties_manager_->ShutdownOnUIThread();
+  if (io_data_->http_server_properties_manager())
+    io_data_->http_server_properties_manager()->ShutdownOnUIThread();
   io_data_->ShutdownOnUIThread();
 }
 
@@ -124,6 +114,8 @@ void ProfileImplIOData::Handle::Init(
                                              local_state,
                                              io_thread,
                                              main_request_context_getter_);
+
+  io_data_->InitializeMetricsEnabledStateOnUIThread();
 }
 
 base::Callback<ChromeURLDataManagerBackend*(void)>
@@ -216,8 +208,8 @@ void ProfileImplIOData::Handle::ClearNetworkingHistorySince(
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(
-          &ClearNetworkingHistorySinceOnIOThread,
-          io_data_,
+          &ProfileImplIOData::ClearNetworkingHistorySinceOnIOThread,
+          base::Unretained(io_data_),
           time));
 }
 
@@ -229,7 +221,7 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
   // below try to get the ResourceContext pointer.
   initialized_ = true;
   PrefService* pref_service = profile_->GetPrefs();
-  io_data_->http_server_properties_manager_.reset(
+  io_data_->set_http_server_properties_manager(
       new chrome_browser_net::HttpServerPropertiesManager(pref_service));
   ChromeNetworkDelegate::InitializeReferrersEnabled(
       io_data_->enable_referrers(), pref_service);
@@ -249,13 +241,20 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
 
 ProfileImplIOData::LazyParams::LazyParams()
     : cache_max_size(0),
-      media_cache_max_size(0) {}
+      media_cache_max_size(0),
+      restore_old_session_cookies(false) {}
+
 ProfileImplIOData::LazyParams::~LazyParams() {}
 
 ProfileImplIOData::ProfileImplIOData()
     : ProfileIOData(false),
       clear_local_state_on_exit_(false) {}
-ProfileImplIOData::~ProfileImplIOData() {}
+ProfileImplIOData::~ProfileImplIOData() {
+  DestroyResourceContext();
+
+  if (media_request_context_)
+    media_request_context_->AssertNoURLRequests();
+}
 
 void ProfileImplIOData::LazyInitializeInternal(
     ProfileParams* profile_params) const {
@@ -279,8 +278,8 @@ void ProfileImplIOData::LazyInitializeInternal(
   ApplyProfileParamsToContext(media_request_context_);
   ApplyProfileParamsToContext(extensions_context);
 
-  if (http_server_properties_manager_.get())
-    http_server_properties_manager_->InitializeOnIOThread();
+  if (http_server_properties_manager())
+    http_server_properties_manager()->InitializeOnIOThread();
 
   main_context->set_transport_security_state(transport_security_state());
   media_request_context_->set_transport_security_state(
@@ -294,8 +293,9 @@ void ProfileImplIOData::LazyInitializeInternal(
   main_context->set_network_delegate(network_delegate());
   media_request_context_->set_network_delegate(network_delegate());
 
-  main_context->set_http_server_properties(http_server_properties());
-  media_request_context_->set_http_server_properties(http_server_properties());
+  main_context->set_http_server_properties(http_server_properties_manager());
+  media_request_context_->set_http_server_properties(
+      http_server_properties_manager());
 
   main_context->set_host_resolver(
       io_thread_globals->host_resolver.get());
@@ -315,6 +315,13 @@ void ProfileImplIOData::LazyInitializeInternal(
   media_request_context_->set_fraudulent_certificate_reporter(
       fraudulent_certificate_reporter());
 
+  main_context->set_throttler_manager(
+      io_thread_globals->throttler_manager.get());
+  media_request_context_->set_throttler_manager(
+      io_thread_globals->throttler_manager.get());
+  extensions_context->set_throttler_manager(
+      io_thread_globals->throttler_manager.get());
+
   main_context->set_proxy_service(proxy_service());
   media_request_context_->set_proxy_service(proxy_service());
 
@@ -326,7 +333,8 @@ void ProfileImplIOData::LazyInitializeInternal(
         NULL, profile_params->cookie_monster_delegate);
     // Don't use existing server-bound certs and use an in-memory store.
     server_bound_cert_service = new net::ServerBoundCertService(
-        new net::DefaultServerBoundCertStore(NULL));
+        new net::DefaultServerBoundCertStore(NULL),
+        base::WorkerPool::GetTaskRunner(true));
   }
 
   // setup cookie store
@@ -369,7 +377,8 @@ void ProfileImplIOData::LazyInitializeInternal(
     server_bound_cert_db->SetClearLocalStateOnExit(
         profile_params->clear_local_state_on_exit);
     server_bound_cert_service = new net::ServerBoundCertService(
-        new net::DefaultServerBoundCertStore(server_bound_cert_db.get()));
+        new net::DefaultServerBoundCertStore(server_bound_cert_db.get()),
+        base::WorkerPool::GetTaskRunner(true));
   }
 
   set_server_bound_cert_service(server_bound_cert_service);
@@ -377,6 +386,11 @@ void ProfileImplIOData::LazyInitializeInternal(
   media_request_context_->set_server_bound_cert_service(
       server_bound_cert_service);
 
+  std::string trusted_spdy_proxy;
+  if (command_line.HasSwitch(switches::kTrustedSpdyProxy)) {
+    trusted_spdy_proxy = command_line.GetSwitchValueASCII(
+        switches::kTrustedSpdyProxy);
+  }
   net::HttpCache::DefaultBackend* main_backend =
       new net::HttpCache::DefaultBackend(
           net::DISK_CACHE,
@@ -395,7 +409,8 @@ void ProfileImplIOData::LazyInitializeInternal(
       main_context->network_delegate(),
       main_context->http_server_properties(),
       main_context->net_log(),
-      main_backend);
+      main_backend,
+      trusted_spdy_proxy);
 
   net::HttpCache::DefaultBackend* media_backend =
       new net::HttpCache::DefaultBackend(
@@ -432,10 +447,6 @@ void ProfileImplIOData::LazyInitializeInternal(
       new chrome_browser_net::ConnectInterceptor(predictor_.get()));
 
   lazy_params_.reset();
-}
-
-net::HttpServerProperties* ProfileImplIOData::http_server_properties() const {
-  return http_server_properties_manager_.get();
 }
 
 scoped_refptr<ChromeURLRequestContext>
@@ -515,4 +526,15 @@ ProfileImplIOData::AcquireIsolatedAppRequestContext(
       InitializeAppRequestContext(main_context, app_id);
   DCHECK(app_request_context);
   return app_request_context;
+}
+
+void ProfileImplIOData::ClearNetworkingHistorySinceOnIOThread(
+    base::Time time) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  LazyInitialize();
+
+  DCHECK(transport_security_state());
+  transport_security_state()->DeleteSince(time);
+  DCHECK(http_server_properties_manager());
+  http_server_properties_manager()->Clear();
 }

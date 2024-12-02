@@ -542,10 +542,10 @@
 {
   bug_93932_f
   ThreadSanitizer:Race
-  fun:update_context_from_thread
+  ...
   fun:ff_thread_flush
   ...
-  fun:media::FFmpegVideoDecoder::Flush
+  fun:media::FFmpegVideoDecoder::Reset
 }
 {
   bug_93932_g
@@ -592,7 +592,23 @@
 {
   bug_102327_c
   ThreadSanitizer:Race
-  fun:tracked_objects::ThreadData::tracking_status
+  fun:tracked_objects::ThreadData::TrackingStatus
+}
+{
+  bug_102327_d
+  ThreadSanitizer:Race
+  fun:tracked_objects::ThreadData::SnapshotMaps
+}
+{
+  bug_102327_e
+  ThreadSanitizer:Race
+  fun:tracked_objects::Births::birth_count
+  fun:tracked_objects::ThreadData::SnapshotExecutedTasks
+}
+{
+  bug_102327_f
+  ThreadSanitizer:Race
+  fun:tracked_objects::DeathData::RecordDeath
 }
 {
   bug_103711a
@@ -774,18 +790,6 @@
   fun:pa_rtpoll_run
 }
 {
-  bug_112200
-  ThreadSanitizer:Race
-  ...
-  fun:ff_thread_flush
-  fun:avcodec_flush_buffers
-  fun:avcodec_flush_buffers
-  ...
-  fun:media::FFmpegVideoDecoder::Flush
-  fun:base::internal::RunnableAdapter::Run
-}
-
-{
   bug_112419
   ThreadSanitizer:Race
   ...
@@ -818,30 +822,6 @@
   fun:base::internal::RunnableAdapter::Run
 }
 {
-  bug_113771_a
-  ThreadSanitizer:Race
-  fun:tracked_objects::ThreadData::TrackingStatus
-  fun:tracked_objects::ThreadData::TallyABirthIfActive
-  fun:base::TrackingInfo::TrackingInfo
-  fun:base::PendingTask::PendingTask
-}
-{
-  bug_113771_b
-  ThreadSanitizer:Race
-  fun:tracked_objects::ThreadData::TrackingStatus
-  fun:tracked_objects::ThreadData::Now
-  fun:tracked_objects::ThreadData::NowForEndOfRun
-  fun:MessageLoop::RunTask
-}
-{
-  bug_113771_c
-  ThreadSanitizer:Race
-  fun:tracked_objects::ThreadData::TrackingStatus
-  fun:tracked_objects::ThreadData::Now
-  fun:tracked_objects::ThreadData::NowForStartOfRun
-  fun:MessageLoop::RunTask
-}
-{
   bug_115540
   ThreadSanitizer:Race
   fun:base::Thread::message_loop
@@ -849,11 +829,6 @@
   fun:content::BrowserThread::PostTask
   fun:AudioRendererHost::OnCreated
   fun:media::AudioOutputController::DoCreate
-}
-{
-  bug_116421
-  ThreadSanitizer:Race
-  fun:talk_base::Event::EnsureInitialized
 }
 {
   bug_116559
@@ -890,4 +865,60 @@
   ThreadSanitizer:Race
   fun:base::Thread::ThreadMain
   fun:base::::ThreadFunc
+}
+{
+  bug_125928_a
+  ThreadSanitizer:Race
+  fun:__alloc_dir
+  fun:opendir
+  fun:g_dir_open
+  fun:pango_find_map
+  fun:itemize_state_process_run
+  fun:pango_itemize_with_base_dir
+  fun:pango_layout_check_lines
+  fun:pango_layout_get_unknown_glyphs_count
+  fun:find_invisible_char
+  fun:gtk_entry_init
+  fun:g_type_create_instance
+  fun:g_object_constructor
+  fun:g_object_newv
+  fun:g_object_new
+  ...
+  fun:ThemeServiceFactory::BuildServiceInstanceFor
+  fun:ProfileKeyedServiceFactory::GetServiceForProfile
+  fun:ThemeServiceFactory::GetForProfile
+  fun:ExtensionService::GarbageCollectExtensions
+  fun:ExtensionService::InitAfterImport
+  fun:ExtensionService::Observe
+  fun:NotificationServiceImpl::Notify
+  fun:ProfileManager::OnImportFinished
+  fun:ChromeBrowserMainParts::PreMainMessageLoopRunImpl
+  fun:ChromeBrowserMainParts::PreMainMessageLoopRun
+  fun:content::BrowserMainLoop::CreateThreads
+  fun:::BrowserMainRunnerImpl::Initialize
+  fun:BrowserMain
+  fun:::RunNamedProcessTypeMain
+  fun:::ContentMainRunnerImpl::Run
+}
+{
+  bug_125928_b
+  ThreadSanitizer:Race
+  fun:__alloc_dir
+  fun:opendir
+  fun:file_util::FileEnumerator::ReadDirectory
+  fun:file_util::FileEnumerator::Next
+  fun:::GetPrefsCandidateFilesFromFolder
+  fun:ExternalPrefExtensionLoader::ReadStandaloneExtensionPrefFiles
+  fun:ExternalPrefExtensionLoader::LoadOnFileThread
+  fun:base::internal::RunnableAdapter::Run
+}
+{
+  bug_121574
+  ThreadSanitizer:Race
+  fun:base::Thread::message_loop
+  fun:content::BrowserThreadImpl::PostTaskHelper
+  fun:content::BrowserThread::PostTask
+  fun:ProcessSingleton::LinuxWatcher::SocketReader::FinishWithACK
+  fun:ProcessSingleton::LinuxWatcher::HandleMessage
+  fun:base::internal::RunnableAdapter::Run
 }

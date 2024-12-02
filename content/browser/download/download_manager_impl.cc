@@ -23,28 +23,20 @@
 #include "content/browser/download/download_stats.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_manager_delegate.h"
 #include "content/public/browser/download_persistent_store_info.h"
+#include "content/public/browser/download_url_parameters.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "net/base/load_flags.h"
 #include "net/base/upload_data.h"
-
-// TODO(benjhayden): Change this to DCHECK when we have more debugging
-// information from the next dev cycle, before the next stable/beta branch is
-// cut, in order to prevent unnecessary crashes on those channels. If we still
-// don't have root cause before the dev cycle after the next stable/beta
-// releases, uncomment it out to re-enable debugging checks. Whenever this macro
-// is toggled, the corresponding macro in download_database.cc should also
-// be toggled. When 96627 is fixed, this macro and all its usages can be
-// deleted or permanently changed to DCHECK as appropriate.
-#define CHECK_96627 CHECK
 
 using content::BrowserThread;
 using content::DownloadId;
@@ -55,52 +47,48 @@ using content::WebContents;
 
 namespace {
 
-// Param structs exist because base::Bind can only handle 6 args.
-struct URLParams {
-  URLParams(const GURL& url, const GURL& referrer, int64 post_id, bool cache)
-    : url_(url), referrer_(referrer), post_id_(post_id), prefer_cache_(cache) {}
-  GURL url_;
-  GURL referrer_;
-  int64 post_id_;
-  bool prefer_cache_;
-};
-
-struct RenderParams {
-  RenderParams(int rpi, int rvi)
-    : render_process_id_(rpi), render_view_id_(rvi) {}
-  int render_process_id_;
-  int render_view_id_;
-};
-
-void BeginDownload(
-    const URLParams& url_params,
-    const content::DownloadSaveInfo& save_info,
-    ResourceDispatcherHostImpl* resource_dispatcher_host,
-    const RenderParams& render_params,
-    content::ResourceContext* context,
-    const content::DownloadManager::OnStartedCallback& callback) {
-  scoped_ptr<net::URLRequest> request(
-      new net::URLRequest(url_params.url_, resource_dispatcher_host));
-  request->set_referrer(url_params.referrer_.spec());
-  if (url_params.post_id_ >= 0) {
+void BeginDownload(content::DownloadUrlParameters* params) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  // ResourceDispatcherHost{Base} is-not-a URLRequest::Delegate, and
+  // DownloadUrlParameters can-not include resource_dispatcher_host_impl.h, so
+  // we must down cast. RDHI is the only subclass of RDH as of 2012 May 4.
+  content::ResourceDispatcherHostImpl* resource_dispatcher_host =
+    static_cast<content::ResourceDispatcherHostImpl*>(
+        params->resource_dispatcher_host());
+  scoped_ptr<net::URLRequest> request(new net::URLRequest(
+      params->url(), resource_dispatcher_host));
+  request->set_referrer(params->referrer().spec());
+  request->set_load_flags(request->load_flags() | params->load_flags());
+  request->set_method(params->method());
+  if (!params->post_body().empty())
+    request->AppendBytesToUpload(params->post_body().data(),
+                                 params->post_body().size());
+  if (params->post_id() >= 0) {
     // The POST in this case does not have an actual body, and only works
     // when retrieving data from cache. This is done because we don't want
     // to do a re-POST without user consent, and currently don't have a good
     // plan on how to display the UI for that.
-    DCHECK(url_params.prefer_cache_);
-    request->set_method("POST");
+    DCHECK(params->prefer_cache());
+    DCHECK(params->method() == "POST");
     scoped_refptr<net::UploadData> upload_data = new net::UploadData();
-    upload_data->set_identifier(url_params.post_id_);
+    upload_data->set_identifier(params->post_id());
     request->set_upload(upload_data);
+  }
+  for (content::DownloadUrlParameters::RequestHeadersType::const_iterator iter
+           = params->request_headers_begin();
+       iter != params->request_headers_end();
+       ++iter) {
+    request->SetExtraRequestHeaderByName(
+        iter->first, iter->second, false/*overwrite*/);
   }
   resource_dispatcher_host->BeginDownload(
       request.Pass(),
-      context,
-      render_params.render_process_id_,
-      render_params.render_view_id_,
-      url_params.prefer_cache_,
-      save_info,
-      callback);
+      params->resource_context(),
+      params->render_process_host_id(),
+      params->render_view_host_routing_id(),
+      params->prefer_cache(),
+      params->save_info(),
+      params->callback());
 }
 
 class MapValueIteratorAdapter {
@@ -174,7 +162,6 @@ DownloadManagerImpl::DownloadManagerImpl(
           browser_context_(NULL),
           file_manager_(NULL),
           delegate_(delegate),
-          largest_db_handle_in_history_(DownloadItem::kUninitializedHandle),
           net_log_(net_log) {
 }
 
@@ -433,7 +420,7 @@ net::BoundNetLog DownloadManagerImpl::CreateDownloadItem(
   int32 download_id = info->download_id.local();
   DCHECK(!ContainsKey(in_progress_, download_id));
 
-  CHECK_96627(!ContainsKey(active_downloads_, download_id));
+  DCHECK(!ContainsKey(active_downloads_, download_id));
   downloads_.insert(download);
   active_downloads_[download_id] = download;
 
@@ -444,11 +431,18 @@ DownloadItem* DownloadManagerImpl::CreateSavePackageDownloadItem(
     const FilePath& main_file_path,
     const GURL& page_url,
     bool is_otr,
+    const std::string& mime_type,
     DownloadItem::Observer* observer) {
   net::BoundNetLog bound_net_log =
       net::BoundNetLog::Make(net_log_, net::NetLog::SOURCE_DOWNLOAD);
   DownloadItem* download = new DownloadItemImpl(
-      this, main_file_path, page_url, is_otr, GetNextId(), bound_net_log);
+      this,
+      main_file_path,
+      page_url,
+      is_otr,
+      GetNextId(),
+      mime_type,
+      bound_net_log);
 
   download->AddObserver(observer);
 
@@ -559,12 +553,11 @@ void DownloadManagerImpl::OnResponseCompleted(int32 download_id,
 }
 
 void DownloadManagerImpl::AssertStateConsistent(DownloadItem* download) const {
-  // TODO(rdsmith): Change to DCHECK after http://crbug.com/96627 resolved.
   if (download->GetState() == DownloadItem::REMOVING) {
-    CHECK(!ContainsKey(downloads_, download));
-    CHECK(!ContainsKey(active_downloads_, download->GetId()));
-    CHECK(!ContainsKey(in_progress_, download->GetId()));
-    CHECK(!ContainsKey(history_downloads_, download->GetDbHandle()));
+    DCHECK(!ContainsKey(downloads_, download));
+    DCHECK(!ContainsKey(active_downloads_, download->GetId()));
+    DCHECK(!ContainsKey(in_progress_, download->GetId()));
+    DCHECK(!ContainsKey(history_downloads_, download->GetDbHandle()));
     return;
   }
 
@@ -577,7 +570,7 @@ void DownloadManagerImpl::AssertStateConsistent(DownloadItem* download) const {
   } else {
     for (DownloadMap::const_iterator it = history_downloads_.begin();
          it != history_downloads_.end(); ++it) {
-      CHECK_96627(it->second != download);
+      DCHECK(it->second != download);
     }
   }
 
@@ -617,6 +610,16 @@ bool DownloadManagerImpl::IsDownloadReadyForCompletion(DownloadItem* download) {
 
   return true;
 }
+
+// When SavePackage downloads MHTML to GData (see
+// SavePackageFilePickerChromeOS), GData calls MaybeCompleteDownload() like it
+// does for non-SavePackage downloads, but SavePackage downloads never satisfy
+// IsDownloadReadyForCompletion(). GDataDownloadObserver manually calls
+// DownloadItem::UpdateObservers() when the upload completes so that SavePackage
+// notices that the upload has completed and runs its normal Finish() pathway.
+// MaybeCompleteDownload() is never the mechanism by which SavePackage completes
+// downloads. SavePackage always uses its own Finish() to mark downloads
+// complete.
 
 void DownloadManagerImpl::MaybeCompleteDownload(DownloadItem* download) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -850,36 +853,15 @@ int DownloadManagerImpl::RemoveAllDownloads() {
   return RemoveDownloadsBetween(base::Time(), base::Time());
 }
 
-// Initiate a download of a specific URL. We send the request to the
-// ResourceDispatcherHost, and let it send us responses like a regular
-// download.
 void DownloadManagerImpl::DownloadUrl(
-    const GURL& url,
-    const GURL& referrer,
-    const std::string& referrer_charset,
-    bool prefer_cache,
-    int64 post_id,
-    const content::DownloadSaveInfo& save_info,
-    WebContents* web_contents,
-    const OnStartedCallback& callback) {
-  ResourceDispatcherHostImpl* resource_dispatcher_host =
-      ResourceDispatcherHostImpl::Get();
-  DCHECK(resource_dispatcher_host);
-
-  // We send a pointer to content::ResourceContext, instead of the usual
-  // reference, so that a copy of the object isn't made.
-  // base::Bind can't handle 7 args, so we use URLParams and RenderParams.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(
-          &BeginDownload,
-          URLParams(url, referrer, post_id, prefer_cache),
-          save_info,
-          resource_dispatcher_host,
-          RenderParams(web_contents->GetRenderProcessHost()->GetID(),
-                       web_contents->GetRenderViewHost()->GetRoutingID()),
-          web_contents->GetBrowserContext()->GetResourceContext(),
-          callback));
+    scoped_ptr<content::DownloadUrlParameters> params) {
+  if (params->post_id() >= 0) {
+    // Check this here so that the traceback is more useful.
+    DCHECK(params->prefer_cache());
+    DCHECK(params->method() == "POST");
+  }
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, base::Bind(
+      &BeginDownload, base::Owned(params.release())));
 }
 
 void DownloadManagerImpl::AddObserver(Observer* observer) {
@@ -934,14 +916,10 @@ void DownloadManagerImpl::FileSelectionCanceled(int32 download_id) {
 // 'DownloadPersistentStoreInfo's in sorted order (by ascending start_time).
 void DownloadManagerImpl::OnPersistentStoreQueryComplete(
     std::vector<DownloadPersistentStoreInfo>* entries) {
-  // TODO(rdsmith): Remove this and related logic when
-  // http://crbug.com/96627 is fixed.
-  largest_db_handle_in_history_ = 0;
-
   for (size_t i = 0; i < entries->size(); ++i) {
     int64 db_handle = entries->at(i).db_handle;
     base::debug::Alias(&db_handle);
-    CHECK_96627(!ContainsKey(history_downloads_, db_handle));
+    DCHECK(!ContainsKey(history_downloads_, db_handle));
 
     net::BoundNetLog bound_net_log =
         net::BoundNetLog::Make(net_log_, net::NetLog::SOURCE_DOWNLOAD);
@@ -951,9 +929,6 @@ void DownloadManagerImpl::OnPersistentStoreQueryComplete(
     history_downloads_[download->GetDbHandle()] = download;
     VLOG(20) << __FUNCTION__ << "()" << i << ">"
              << " download = " << download->DebugString(true);
-
-    if (download->GetDbHandle() > largest_db_handle_in_history_)
-      largest_db_handle_in_history_ = download->GetDbHandle();
   }
   NotifyModelChanged();
   CheckForHistoryFilesRemoval();
@@ -962,10 +937,7 @@ void DownloadManagerImpl::OnPersistentStoreQueryComplete(
 void DownloadManagerImpl::AddDownloadItemToHistory(DownloadItem* download,
                                                    int64 db_handle) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // TODO(rdsmith): Convert to DCHECK() when http://crbug.com/96627
-  // is fixed.
-  CHECK_NE(DownloadItem::kUninitializedHandle, db_handle);
+  DCHECK_NE(DownloadItem::kUninitializedHandle, db_handle);
 
   download_stats::RecordHistorySize(history_downloads_.size());
 
@@ -973,9 +945,7 @@ void DownloadManagerImpl::AddDownloadItemToHistory(DownloadItem* download,
   download->SetDbHandle(db_handle);
   download->SetIsPersisted();
 
-  // TODO(rdsmith): Convert to DCHECK() when http://crbug.com/96627
-  // is fixed.
-  CHECK_96627(!ContainsKey(history_downloads_, download->GetDbHandle()));
+  DCHECK(!ContainsKey(history_downloads_, download->GetDbHandle()));
   history_downloads_[download->GetDbHandle()] = download;
 
   // Show in the appropriate browser UI.
@@ -1011,15 +981,12 @@ void DownloadManagerImpl::OnDownloadItemAddedToPersistentStore(
            << " download_id = " << download_id
            << " download = " << download->DebugString(true);
 
-  // TODO(rdsmith): Remove after http://crbug.com/96627 resolved.
-  int64 largest_handle = largest_db_handle_in_history_;
-  base::debug::Alias(&largest_handle);
   int32 matching_item_download_id
       = (ContainsKey(history_downloads_, db_handle) ?
          history_downloads_[db_handle]->GetId() : 0);
   base::debug::Alias(&matching_item_download_id);
 
-  CHECK_96627(!ContainsKey(history_downloads_, db_handle));
+  DCHECK(!ContainsKey(history_downloads_, db_handle));
 
   AddDownloadItemToHistory(download, db_handle);
 
@@ -1033,10 +1000,7 @@ void DownloadManagerImpl::OnDownloadItemAddedToPersistentStore(
   if (download->IsInProgress()) {
     MaybeCompleteDownload(download);
   } else {
-    // TODO(rdsmith): Convert to DCHECK() when http://crbug.com/96627
-    // is fixed.
-    CHECK(download->IsCancelled())
-        << " download = " << download->DebugString(true);
+    DCHECK(download->IsCancelled());
     in_progress_.erase(download_id);
     active_downloads_.erase(download_id);
     delegate_->UpdateItemInPersistentStore(download);
@@ -1045,12 +1009,12 @@ void DownloadManagerImpl::OnDownloadItemAddedToPersistentStore(
 }
 
 void DownloadManagerImpl::ShowDownloadInBrowser(DownloadItem* download) {
-  // The 'contents' may no longer exist if the user closed the tab before we
-  // get this start completion event.
+  // The 'contents' may no longer exist if the user closed the contents before
+  // we get this start completion event.
   WebContents* content = download->GetWebContents();
 
   // If the contents no longer exists, we ask the embedder to suggest another
-  // tab.
+  // contents.
   if (!content)
     content = delegate_->GetAlternativeWebContentsToNotifyForDownload();
 
@@ -1174,10 +1138,7 @@ void DownloadManagerImpl::OnSavePageItemAddedToPersistentStore(
     return;
   }
 
-  // TODO(rdsmith): Remove after http://crbug.com/96627 resolved.
-  int64 largest_handle = largest_db_handle_in_history_;
-  base::debug::Alias(&largest_handle);
-  CHECK_96627(!ContainsKey(history_downloads_, db_handle));
+  DCHECK(!ContainsKey(history_downloads_, db_handle));
 
   AddDownloadItemToHistory(download, db_handle);
 

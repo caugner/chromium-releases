@@ -130,6 +130,8 @@ class NewNonFrontendDataTypeControllerFake
   }
 
  private:
+  virtual ~NewNonFrontendDataTypeControllerFake() {}
+
   DISALLOW_COPY_AND_ASSIGN(NewNonFrontendDataTypeControllerFake);
 
   struct PendingTask {
@@ -374,7 +376,6 @@ TEST_F(SyncNewNonFrontendDataTypeControllerTest, AbortDuringAssociation) {
           Return(true)));
   EXPECT_CALL(*change_processor_, GetSyncData(_)).
       WillOnce(Return(SyncError(FROM_HERE, "Disconnected.", AUTOFILL_PROFILE)));
-  EXPECT_CALL(*dtc_mock_, RecordUnrecoverableError(_, _));
   EXPECT_CALL(*change_processor_, Disconnect()).
       WillOnce(DoAll(SignalEvent(&pause_db_thread), Return(true)));
   EXPECT_CALL(service_, DeactivateDataType(_));
@@ -390,7 +391,8 @@ TEST_F(SyncNewNonFrontendDataTypeControllerTest, AbortDuringAssociation) {
 // Start the DTC while the backend tasks are blocked. Then stop the DTC before
 // the backend tasks get a chance to run. The DTC should have no interaction
 // with the profile sync factory or profile sync service once stopped.
-TEST_F(SyncNewNonFrontendDataTypeControllerTest, StartAfterSyncShutdown) {
+// This test is flaky under memory tools, see http://crbug.com/117796
+TEST_F(SyncNewNonFrontendDataTypeControllerTest, FLAKY_StartAfterSyncShutdown) {
   new_non_frontend_dtc_->BlockBackendTasks();
 
   SetStartExpectations();

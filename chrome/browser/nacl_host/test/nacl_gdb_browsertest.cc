@@ -32,7 +32,13 @@ class NaClGdbTest : public PPAPINaClTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(NaClGdbTest, Empty) {
+// Fails on the ASAN test bot. See http://crbug.com/122219
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_Empty DISABLED_Empty
+#else
+#define MAYBE_Empty Empty
+#endif
+IN_PROC_BROWSER_TEST_F(NaClGdbTest, MAYBE_Empty) {
   FilePath mock_nacl_gdb_file;
   scoped_ptr<base::Environment> env(base::Environment::Create());
   std::string content;
@@ -42,10 +48,12 @@ IN_PROC_BROWSER_TEST_F(NaClGdbTest, Empty) {
   // base::LaunchProcess doesn't support creating suspended processes. We need
   // to either add suspended process support to base::LaunchProcess or use
   // Win API.
+#if defined(OS_WIN)
   if (base::win::OSInfo::GetInstance()->wow64_status() ==
       base::win::OSInfo::WOW64_DISABLED) {
     return;
   }
+#endif
   EXPECT_TRUE(file_util::CreateTemporaryFile(&mock_nacl_gdb_file));
   env->SetVar("MOCK_NACL_GDB", mock_nacl_gdb_file.AsUTF8Unsafe());
   RunTestViaHTTP("Empty");

@@ -43,17 +43,24 @@ class SessionStartupChange : public BasePrefsChange {
   virtual string16 GetBubbleMessage() const OVERRIDE;
   virtual string16 GetApplyButtonText() const OVERRIDE;
   virtual string16 GetDiscardButtonText() const OVERRIDE;
+  virtual DisplayName GetApplyDisplayName() const OVERRIDE;
+  virtual GURL GetNewSettingURL() const OVERRIDE;
 
  private:
   virtual ~SessionStartupChange();
 
+  // Returns the first URL that was added to the startup pages. Returns the
+  // first startup URL if they haven't changed. Returns an empty URL if there
+  // are no startup URLs.
+  GURL GetFirstNewURL() const;
+
   // Opens all tabs in |tabs| and makes them pinned.
   void OpenPinnedTabs(Browser* browser, const PinnedTabCodec::Tabs& tabs);
 
-  SessionStartupPref new_startup_pref_;
-  SessionStartupPref backup_startup_pref_;
-  PinnedTabCodec::Tabs new_pinned_tabs_;
-  PinnedTabCodec::Tabs backup_pinned_tabs_;
+  const SessionStartupPref new_startup_pref_;
+  const SessionStartupPref backup_startup_pref_;
+  const PinnedTabCodec::Tabs new_pinned_tabs_;
+  const PinnedTabCodec::Tabs backup_pinned_tabs_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionStartupChange);
 };
@@ -139,24 +146,62 @@ string16 SessionStartupChange::GetApplyButtonText() const {
   if (new_startup_pref_.type == SessionStartupPref::LAST)
       return l10n_util::GetStringUTF16(IDS_CHANGE_STARTUP_SETTINGS_RESTORE);
 
-  string16 first_url;
-  if (new_startup_pref_.type == SessionStartupPref::URLS &&
-      !new_startup_pref_.urls.empty()) {
-    // Display the domain name of the first statrup URL.
-    first_url = UTF8ToUTF16(new_startup_pref_.urls[0].host());
-  } else if (!new_pinned_tabs_.empty()) {
-    // Start with NTP or no URLs (basically the same): display the domain name
-    // of the first pinned tab, if any.
-    first_url = UTF8ToUTF16(new_pinned_tabs_[0].url.host());
-  }
-  return first_url.empty() ?
+  // Display the domain name of the first startup/pinned URL.
+  string16 first_domain = UTF8ToUTF16(GetFirstNewURL().host());
+  return first_domain.empty() ?
       l10n_util::GetStringUTF16(IDS_CHANGE_STARTUP_SETTINGS_NTP) :
       l10n_util::GetStringFUTF16(IDS_CHANGE_STARTUP_SETTINGS_URLS,
-                                 first_url);
+                                 first_domain);
 }
 
 string16 SessionStartupChange::GetDiscardButtonText() const {
   return l10n_util::GetStringUTF16(IDS_KEEP_SETTING);
+}
+
+BaseSettingChange::DisplayName
+SessionStartupChange::GetApplyDisplayName() const {
+  string16 first_domain = UTF8ToUTF16(GetFirstNewURL().host());
+  return first_domain.empty() ?
+      BaseSettingChange::GetApplyDisplayName() :
+      DisplayName(kSessionStartupChangeNamePriority, first_domain);
+}
+
+GURL SessionStartupChange::GetNewSettingURL() const {
+  VLOG(1) << "HP URL: " << GetFirstNewURL().spec();
+  return GetFirstNewURL();
+}
+
+GURL SessionStartupChange::GetFirstNewURL() const {
+  if (new_startup_pref_.type == SessionStartupPref::LAST)
+    return GURL();
+
+  std::set<GURL> old_urls;
+  if (backup_startup_pref_.type == SessionStartupPref::URLS) {
+    old_urls.insert(backup_startup_pref_.urls.begin(),
+                    backup_startup_pref_.urls.end());
+  }
+  for (size_t i = 0; i < backup_pinned_tabs_.size(); ++i)
+    old_urls.insert(backup_pinned_tabs_[i].url);
+
+  std::vector<GURL> new_urls;
+  if (new_startup_pref_.type == SessionStartupPref::URLS) {
+    new_urls.insert(new_urls.end(), new_startup_pref_.urls.begin(),
+                    new_startup_pref_.urls.end());
+  }
+  for (size_t i = 0; i < new_pinned_tabs_.size(); ++i)
+    new_urls.push_back(new_pinned_tabs_[i].url);
+
+  if (new_urls.empty())
+    return GURL();
+
+  // First try to find a URL in new settings that is not present in backup.
+  for (size_t i = 0; i < new_urls.size(); ++i) {
+    if (!old_urls.count(new_urls[i]))
+      return new_urls[i];
+  }
+  // Then fallback to the first of the current startup URLs - this means that
+  // URLs themselves haven't changed.
+  return new_urls[0];
 }
 
 void SessionStartupChange::OpenPinnedTabs(

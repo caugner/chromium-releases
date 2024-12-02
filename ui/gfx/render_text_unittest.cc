@@ -911,24 +911,74 @@ TEST_F(RenderTextTest, MoveLeftRightByWordInChineseText) {
   render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, false);
   EXPECT_EQ(6U, render_text->cursor_position());
 }
+#endif
 
-TEST_F(RenderTextTest, StringWidthTest) {
+TEST_F(RenderTextTest, StringSizeSanity) {
+  scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
+  render_text->SetText(UTF8ToUTF16("Hello World"));
+  const Size string_size = render_text->GetStringSize();
+  EXPECT_GT(string_size.width(), 0);
+  EXPECT_GT(string_size.height(), 0);
+}
+
+TEST_F(RenderTextTest, StringSizeEmptyString) {
+  const Font font;
+  scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
+  render_text->SetFontList(FontList(font));
+
+  render_text->SetText(string16());
+  EXPECT_EQ(font.GetHeight(), render_text->GetStringSize().height());
+  EXPECT_EQ(0, render_text->GetStringSize().width());
+
+  render_text->SetText(UTF8ToUTF16(" "));
+  EXPECT_EQ(font.GetHeight(), render_text->GetStringSize().height());
+}
+
+TEST_F(RenderTextTest, StringSizeBoldWidth) {
   scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
   render_text->SetText(UTF8ToUTF16("Hello World"));
 
-  // Check that width is valid
-  int width = render_text->GetStringSize().width();
-  EXPECT_GT(width, 0);
+  const int plain_width = render_text->GetStringSize().width();
+  EXPECT_GT(plain_width, 0);
 
   // Apply a bold style and check that the new width is greater.
   StyleRange bold;
   bold.font_style |= gfx::Font::BOLD;
   render_text->set_default_style(bold);
   render_text->ApplyDefaultStyle();
-  EXPECT_GT(render_text->GetStringSize().width(), width);
+
+  const int bold_width = render_text->GetStringSize().width();
+  EXPECT_GT(bold_width, plain_width);
 }
 
-#endif
+TEST_F(RenderTextTest, StringSizeHeight) {
+  struct {
+    string16 text;
+  } cases[] = {
+    { WideToUTF16(L"Hello World!") },  // English
+    { WideToUTF16(L"\x6328\x62f6") },  // Japanese
+    { WideToUTF16(L"\x0915\x093f") },  // Hindi
+    { WideToUTF16(L"\x05e0\x05b8") },  // Hebrew
+  };
+
+  Font default_font;
+  Font larger_font = default_font.DeriveFont(24, default_font.GetStyle());
+  EXPECT_GT(larger_font.GetHeight(), default_font.GetHeight());
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+    scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
+    render_text->SetFontList(FontList(default_font));
+    render_text->SetText(cases[i].text);
+
+    const int height1 = render_text->GetStringSize().height();
+    EXPECT_GT(height1, 0);
+
+    // Check that setting the larger font increases the height.
+    render_text->SetFontList(FontList(larger_font));
+    const int height2 = render_text->GetStringSize().height();
+    EXPECT_GT(height2, height1);
+  }
+}
 
 TEST_F(RenderTextTest, CursorBoundsInReplacementMode) {
   scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
@@ -943,27 +993,27 @@ TEST_F(RenderTextTest, CursorBoundsInReplacementMode) {
   EXPECT_EQ(cursor_around_b.right(), cursor_before_c.x());
 }
 
-TEST_F(RenderTextTest, OriginForSkiaDrawing) {
+TEST_F(RenderTextTest, OriginForDrawing) {
   scoped_ptr<RenderText> render_text(RenderText::CreateRenderText());
   render_text->SetText(ASCIIToUTF16("abcdefg"));
   render_text->SetFontList(FontList("Arial, 13px"));
 
   // Set display area's height equals to font height.
-  int font_height = render_text->GetFont().GetHeight();
+  const int font_height = render_text->GetStringSize().height();
   Rect display_rect(0, 0, 100, font_height);
   render_text->SetDisplayRect(display_rect);
 
-  Point origin = render_text->GetOriginForSkiaDrawing();
+  Point origin = render_text->GetOriginForDrawing();
   EXPECT_EQ(origin.x(), 0);
-  EXPECT_EQ(origin.y(), render_text->GetFont().GetBaseline());
+  EXPECT_EQ(origin.y(), 0);
 
   // Set display area's height greater than font height.
   display_rect = Rect(0, 0, 100, font_height + 2);
   render_text->SetDisplayRect(display_rect);
 
-  origin = render_text->GetOriginForSkiaDrawing();
+  origin = render_text->GetOriginForDrawing();
   EXPECT_EQ(origin.x(), 0);
-  EXPECT_EQ(origin.y(), render_text->GetFont().GetBaseline() + 1);
+  EXPECT_EQ(origin.y(), 1);
 }
 
 TEST_F(RenderTextTest, DisplayRectShowsCursorLTR) {

@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -16,7 +17,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/window.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/layout/fill_layout.h"
@@ -82,7 +82,7 @@ gfx::Rect SettingLevelBubbleDelegateView::GetAnchorRect() {
   // Calculate the position in screen coordinates that the bubble should
   // "point" at (since we use BubbleBorder::FLOAT, this position actually
   // specifies the center of the bubble).
-  gfx::Rect monitor_area = gfx::Screen::GetMonitorAreaNearestWindow(NULL);
+  gfx::Rect monitor_area = gfx::Screen::GetPrimaryMonitor().bounds();
   return (gfx::Rect(
       monitor_area.x() + kBubbleXRatio * monitor_area.width(),
       monitor_area.bottom() - view_size.height() / 2 - kBubbleBottomGap, 0, 0));
@@ -188,7 +188,9 @@ void SettingLevelBubble::OnWidgetClosing(views::Widget* widget) {
 
 SettingLevelBubbleView* SettingLevelBubble::CreateView() {
   SettingLevelBubbleDelegateView* delegate = new SettingLevelBubbleDelegateView;
-  views::Widget* widget = browser::CreateViewsBubbleAboveLockScreen(delegate);
+  delegate->set_parent_window(ash::Shell::GetInstance()->GetContainer(
+      ash::internal::kShellWindowId_SettingBubbleContainer));
+  views::Widget* widget = views::BubbleDelegateView::CreateBubble(delegate);
   widget->AddObserver(this);
   // Hold on to the content view.
   return delegate->view();

@@ -121,7 +121,7 @@ cr.define('options', function() {
       }
 
       // The 'Options' checkbox.
-      if (extension.options_url) {
+      if (extension.enabled && extension.optionsUrl) {
         var options = node.querySelector('.options-link');
         options.addEventListener('click', function(e) {
           chrome.send('extensionSettingsOptions', [extension.id]);
@@ -137,11 +137,14 @@ cr.define('options', function() {
         activity.hidden = false;
       }
 
-      // The 'View in Web Store' checkbox.
+      // The 'View in Web Store/View Web Site' link.
       if (extension.homepageUrl) {
-        var store = node.querySelector('.store-link');
-        store.href = extension.homepageUrl;
-        store.hidden = false;
+        var siteLink = node.querySelector('.site-link');
+        siteLink.href = extension.homepageUrl;
+        siteLink.textContent = loadTimeData.getString(
+                extension.homepageProvided ? 'extensionSettingsVisitWebsite' :
+                                             'extensionSettingsVisitWebStore');
+        siteLink.hidden = false;
       }
 
       // The 'Reload' checkbox.
@@ -165,13 +168,8 @@ cr.define('options', function() {
                         [extension.id, e.target.checked ? 'true' : 'false']);
           });
         }
-        enable.querySelector('input').checked = extension.enabled;
 
-        // Make sure the checkbox doesn't move around when its value changes.
-        var enableText = node.querySelector('.enable-checkbox-text');
-        enableText.style.minWidth = 0.8 * Math.max(
-            localStrings.getString('extensionSettingsEnabled').length,
-            localStrings.getString('extensionSettingsEnable').length) + 'em';
+        enable.querySelector('input').checked = extension.enabled;
       } else {
         var terminated_reload = node.querySelector('.terminated-reload-link');
         terminated_reload.hidden = false;
@@ -183,7 +181,7 @@ cr.define('options', function() {
       // 'Remove' button.
       var trashTemplate = $('template-collection').querySelector('.trash');
       var trash = trashTemplate.cloneNode(true);
-      trash.title = templateData.extensionUninstall;
+      trash.title = loadTimeData.getString('extensionUninstall');
       trash.addEventListener('click', function(e) {
         chrome.send('extensionSettingsUninstall', [extension.id]);
       });
@@ -214,14 +212,19 @@ cr.define('options', function() {
         var link = activeViews.querySelector('a');
 
         extension.views.forEach(function(view, i) {
-          var label = view.path + (view.incognito ?
-              ' ' + localStrings.getString('viewIncognito') : '');
+          var label = view.path +
+              (view.incognito ?
+                  ' ' + loadTimeData.getString('viewIncognito') : '') +
+              (view.renderProcessId == -1 ?
+                  ' ' + loadTimeData.getString('viewInactive') : '');
           link.textContent = label;
           link.addEventListener('click', function(e) {
             // TODO(estade): remove conversion to string?
             chrome.send('extensionSettingsInspect', [
+              String(extension.id),
               String(view.renderProcessId),
-              String(view.renderViewId)
+              String(view.renderViewId),
+              view.incognito
             ]);
           });
 
@@ -229,6 +232,16 @@ cr.define('options', function() {
             link = link.cloneNode(true);
             activeViews.appendChild(link);
           }
+        });
+      }
+
+      // The install warnings.
+      if (extension.installWarnings) {
+        var panel = node.querySelector('.install-warnings');
+        panel.hidden = false;
+        var list = panel.querySelector('ul');
+        extension.installWarnings.forEach(function(warning) {
+          list.appendChild(document.createElement('li')).innerText = warning;
         });
       }
 
