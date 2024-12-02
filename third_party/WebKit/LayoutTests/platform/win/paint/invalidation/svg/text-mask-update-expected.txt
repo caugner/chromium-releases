@@ -12,11 +12,6 @@
           "reason": "style change"
         },
         {
-          "object": "LayoutSVGInlineText #text",
-          "rect": [10, 33, 41, 22],
-          "reason": "layoutObject removal"
-        },
-        {
           "object": "LayoutSVGRect rect",
           "rect": [10, 33, 41, 17],
           "reason": "full"
@@ -27,27 +22,7 @@
   "objectPaintInvalidations": [
     {
       "object": "LayoutSVGInlineText #text",
-      "reason": "layoutObject removal"
-    },
-    {
-      "object": "LayoutSVGText text id='text1'",
-      "reason": "style change"
-    },
-    {
-      "object": "RootInlineBox",
-      "reason": "style change"
-    },
-    {
-      "object": "LayoutSVGInlineText #text",
-      "reason": "layoutObject insertion"
-    },
-    {
-      "object": "InlineTextBox 'PASS'",
-      "reason": "layoutObject insertion"
-    },
-    {
-      "object": "LayoutSVGText text id='text2'",
-      "reason": "full"
+      "reason": "disappeared"
     },
     {
       "object": "LayoutSVGRect rect",
