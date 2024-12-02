@@ -30,6 +30,11 @@ class BrowserContext;
 namespace features {
 // Enables persistent permissions for the File System Access API.
 BASE_DECLARE_FEATURE(kFileSystemAccessPersistentPermissions);
+
+#if BUILDFLAG(IS_WIN)
+// Enables blocking local UNC path on Windows for the File System Access API.
+BASE_DECLARE_FEATURE(kFileSystemAccessLocalUNCPathBlock);
+#endif
 }  // namespace features
 
 // Chrome implementation of FileSystemAccessPermissionContext. This class
@@ -157,6 +162,14 @@ class ChromeFileSystemAccessPermissionContext
   // Return all persisted objects, including those which have expired.
   std::vector<std::unique_ptr<ObjectPermissionContextBase::Object>>
   GetAllGrantedOrExpiredObjects();
+  scoped_refptr<content::FileSystemAccessPermissionGrant>
+  GetPersistedReadPermissionGrantForTesting(const url::Origin& origin,
+                                            const base::FilePath& path,
+                                            HandleType handle_type);
+  scoped_refptr<content::FileSystemAccessPermissionGrant>
+  GetPersistedWritePermissionGrantForTesting(const url::Origin& origin,
+                                             const base::FilePath& path,
+                                             HandleType handle_type);
   void UpdatePersistedPermissionsForTesting();
   bool HasPersistedPermissionForTesting(const url::Origin& origin,
                                         const base::FilePath& path,
