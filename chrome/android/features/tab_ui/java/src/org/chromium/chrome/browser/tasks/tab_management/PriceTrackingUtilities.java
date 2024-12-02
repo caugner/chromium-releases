@@ -15,6 +15,8 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.UnifiedConsentServiceBridge;
 import org.chromium.chrome.browser.sync.SyncService;
+import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.components.signin.identitymanager.ConsentLevel;
 import org.chromium.components.sync.ModelType;
 
 /**
@@ -182,7 +184,7 @@ public class PriceTrackingUtilities {
     private static boolean isSignedIn() {
         return IdentityServicesProvider.get()
                 .getIdentityManager(Profile.getLastUsedRegularProfile())
-                .hasPrimaryAccount();
+                .hasPrimaryAccount(ConsentLevel.SYNC);
     }
 
     private static boolean isOpenTabsSyncEnabled() {
@@ -199,5 +201,14 @@ public class PriceTrackingUtilities {
     @VisibleForTesting
     public static void setIsSignedInAndSyncEnabledForTesting(Boolean isSignedInAndSyncEnabled) {
         sIsSignedInAndSyncEnabledForTesting = isSignedInAndSyncEnabled;
+    }
+
+    /**
+     * @return if the {@link TabModel} is eligible for price tracking. Not all tab models are - for
+     *         example incognito tabs are not eligible for price tracking.
+     */
+    public static boolean isTabModelPriceTrackingEligible(TabModel tabModel) {
+        // Incognito Tabs are not eligible for price tracking.
+        return !tabModel.getProfile().isOffTheRecord();
     }
 }

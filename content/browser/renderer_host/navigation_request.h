@@ -270,8 +270,8 @@ class CONTENT_EXPORT NavigationRequest
   const GURL& GetURL() override;
   SiteInstanceImpl* GetStartingSiteInstance() override;
   SiteInstanceImpl* GetSourceSiteInstance() override;
-  bool IsInMainFrame() override;
-  bool IsInPrimaryMainFrame() override;
+  bool IsInMainFrame() const override;
+  bool IsInPrimaryMainFrame() const override;
   bool IsInPrerenderedMainFrame() override;
   bool IsPrerenderedPageActivation() override;
   bool IsRendererInitiated() override;
@@ -315,6 +315,7 @@ class CONTENT_EXPORT NavigationRequest
   void RegisterThrottleForTesting(
       std::unique_ptr<NavigationThrottle> navigation_throttle) override;
   bool IsDeferredForTesting() override;
+  bool IsCommitDeferringConditionDeferredForTesting() override;
   bool WasStartedFromContextMenu() override;
   const GURL& GetSearchableFormURL() override;
   const std::string& GetSearchableFormEncoding() override;
@@ -352,7 +353,6 @@ class CONTENT_EXPORT NavigationRequest
 
   void RegisterCommitDeferringConditionForTesting(
       std::unique_ptr<CommitDeferringCondition> condition);
-  bool IsCommitDeferringConditionDeferredForTesting();
 
   // Called on the UI thread by the Navigator to start the navigation.
   // The NavigationRequest can be deleted while BeginNavigation() is called.
@@ -616,23 +616,15 @@ class CONTENT_EXPORT NavigationRequest
   static void SetCommitTimeoutForTesting(const base::TimeDelta& timeout);
 
   RenderFrameHostImpl* rfh_restored_from_back_forward_cache() {
-    return rfh_restored_from_back_forward_cache_;
+    return rfh_restored_from_back_forward_cache_.get();
   }
 
   const WebBundleNavigationInfo* web_bundle_navigation_info() const {
     return web_bundle_navigation_info_.get();
   }
 
-  // The NavigatorDelegate to notify/query for various navigation events.
-  // Normally this is the WebContents, except if this NavigationHandle was
-  // created during a navigation to an interstitial page. In this case it will
-  // be the InterstitialPage itself.
-  //
-  // Note: due to the interstitial navigation case, all calls that can possibly
-  // expose the NavigationHandle to code outside of content/ MUST go though the
-  // NavigatorDelegate. In particular, the ContentBrowserClient should not be
-  // called directly from the NavigationHandle code. Thus, these calls will not
-  // expose the NavigationHandle when navigating to an InterstitialPage.
+  // The NavigatorDelegate to notify/query for various navigation events. This
+  // is always the WebContents.
   NavigatorDelegate* GetDelegate() const;
 
   blink::mojom::RequestContextType request_context_type() const {
@@ -872,15 +864,21 @@ class CONTENT_EXPORT NavigationRequest
 
   // Whether this navigation is activating an existing page (e.g. served from
   // the BackForwardCache or Prerender)
-  bool IsPageActivation() const;
+  bool IsPageActivation() const override;
 
-  // See comments for |prerender_navigation_entry_|.
-  void SetPrerenderNavigationEntry(
-      std::unique_ptr<NavigationEntryImpl> prerender_navigation_entry) {
-    prerender_navigation_entry_ = std::move(prerender_navigation_entry);
-  }
+  // Sets state pertaining to prerender activations. This is only called if
+  // this navigation is a prerender activation.
+  void SetPrerenderActivationNavigationState(
+      std::unique_ptr<NavigationEntryImpl> prerender_navigation_entry,
+      const blink::mojom::FrameReplicationState& replication_state);
 
   std::unique_ptr<NavigationEntryImpl> TakePrerenderNavigationEntry();
+
+  // Returns value that is only valid for prerender activation navigations.
+  const blink::mojom::FrameReplicationState&
+  prerender_main_frame_replication_state() {
+    return prerender_navigation_state_->prerender_main_frame_replication_state;
+  }
 
   // Store a console message, which will be sent to the final RenderFrameHost
   // immediately after requesting the navigation to commit.
@@ -952,7 +950,7 @@ class CONTENT_EXPORT NavigationRequest
       scoped_refptr<PrefetchedSignedExchangeCache>
           prefetched_signed_exchange_cache,
       std::unique_ptr<WebBundleHandleTracker> web_bundle_handle_tracker,
-      RenderFrameHostImpl* rfh_restored_from_back_forward_cache,
+      base::WeakPtr<RenderFrameHostImpl> rfh_restored_from_back_forward_cache,
       int initiator_process_id,
       bool was_opener_suppressed);
 
@@ -1009,6 +1007,9 @@ class CONTENT_EXPORT NavigationRequest
       EarlyHints early_hints) override;
   void OnRequestFailed(
       const network::URLLoaderCompletionStatus& status) override;
+  absl::optional<url::Origin> CreateURLLoaderFactoryForEarlyHintsPreload(
+      mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver,
+      const network::mojom::EarlyHints& early_hints) override;
 
   // To be called whenever a navigation request fails. If |skip_throttles| is
   // true, the registered NavigationThrottle(s) won't get a chance to intercept
@@ -1419,14 +1420,25 @@ class CONTENT_EXPORT NavigationRequest
   bool ShouldRenderFallbackContentForResponse(
       const net::HttpResponseHeaders& response_head) const;
 
+  // Whether this is a same-URL navigation that should replace the current entry
+  // or not. Called when the navigation just started.
   bool ShouldReplaceCurrentEntryForSameUrlNavigation() const;
+
+  // Whether this navigation happens on the initial empty document, and thus
+  // should replace the current entry.  Called when the navigation just started.
+  bool ShouldReplaceCurrentEntryForNavigationFromInitialEmptyDocument() const;
+
+  // Whether a failed navigation should replace the current entry or not. Called
+  // when an error page is about to be committed.
+  bool ShouldReplaceCurrentEntryForFailedNavigation() const;
 
   // Calculates the origin that this NavigationRequest may commit. See also the
   // comment of GetOriginToCommit(). Performs calculation without information
   // from RenderFrameHostImpl (e.g. CSPs are ignored). Should be used only in
   // situations where the final frame host hasn't been determined but the origin
   // is needed to create URLLoaderFactory.
-  url::Origin GetOriginForURLLoaderFactoryWithoutFinalFrameHost();
+  url::Origin GetOriginForURLLoaderFactoryWithoutFinalFrameHost(
+      network::mojom::WebSandboxFlags sandbox_flags);
 
   // Superset of GetOriginForURLLoaderFactoryWithoutFinalFrameHost(). Calculates
   // the origin with information from the final frame host. Can be called only
@@ -1728,10 +1740,17 @@ class CONTENT_EXPORT NavigationRequest
   // modified during the redirect phase.
   std::vector<std::string> removed_request_headers_;
 
-  // The RenderFrameHost that was restored from the back-forward cache. This
-  // will be null except for navigations that are restoring a page from the
-  // back-forward cache.
-  RenderFrameHostImpl* const rfh_restored_from_back_forward_cache_;
+  // A WeakPtr for the RenderFrameHost that is being restored from the
+  // back/forward cache. This can be null if this navigation is not restoring a
+  // page from the back/forward cache, or if the RenderFrameHost to restore was
+  // evicted and destroyed after the NavigationRequest was created.
+  base::WeakPtr<RenderFrameHostImpl> rfh_restored_from_back_forward_cache_;
+
+  // Whether the navigation is for restoring a page from the back/forward cache
+  // or not. Note that this can be true even when
+  // `rfh_restored_from_back_forward_cache_` is null, if the RenderFrameHost to
+  // restore was evicted and destroyed after the NavigationRequest was created.
+  const bool is_back_forward_cache_restore_;
 
   // These are set to the values from the FrameNavigationEntry this
   // NavigationRequest is associated with (if any).
@@ -1773,9 +1792,8 @@ class CONTENT_EXPORT NavigationRequest
   // be cancelled for deferring.
   bool processing_navigation_throttle_ = false;
 
-  // Used only by (D)CHECK.
-  // True if we are restarting this navigation request as RenderFrameHost was
-  // evicted.
+  // True if we are restarting this navigation request as the RenderFrameHost
+  // was evicted.
   bool restarting_back_forward_cached_navigation_ = false;
 
   // Holds the required CSP for this navigation. This will be moved into
@@ -1855,11 +1873,27 @@ class CONTENT_EXPORT NavigationRequest
   // and callers must not query its value before it's been computed.
   absl::optional<int> prerender_frame_tree_node_id_;
 
-  // Used to store a cloned NavigationEntry for activating a prerendered page.
-  // |prerender_navigation_entry_| is cloned and stored in NavigationRequest
-  // when the prerendered page is transferred to the target FrameTree and is
-  // consumed when NavigationController needs a new entry to commit.
-  std::unique_ptr<NavigationEntryImpl> prerender_navigation_entry_;
+  // Contains state pertaining to a prerender activation. This is only used if
+  // this navigation is a prerender activation.
+  struct PrerenderActivationNavigationState {
+    PrerenderActivationNavigationState();
+    ~PrerenderActivationNavigationState();
+
+    // Used to store a cloned NavigationEntry for activating a prerendered page.
+    // |prerender_navigation_entry| is cloned and stored in NavigationRequest
+    // when the prerendered page is transferred to the target FrameTree and is
+    // consumed when NavigationController needs a new entry to commit.
+    std::unique_ptr<NavigationEntryImpl> prerender_navigation_entry;
+
+    // Used to store the FrameReplicationState for the prerendered page prior to
+    // activation. Value is to be used to populate
+    // DidCommitProvisionalLoadParams values and to verify the replication state
+    // after activation.
+    blink::mojom::FrameReplicationState prerender_main_frame_replication_state;
+  };
+
+  absl::optional<PrerenderActivationNavigationState>
+      prerender_navigation_state_;
 
   // The following fields that constitute the ClientSecurityState. This
   // state is used to take security decisions about the request, and later on
