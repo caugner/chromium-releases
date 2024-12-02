@@ -687,7 +687,20 @@ bool IsNonModalDefaultBrowserPromoCooldownRefactorEnabled() {
       kNonModalDefaultBrowserPromoCooldownRefactor);
 }
 
+bool IsDefaultBrowserVideoInSettingsEnabled() {
+  return base::FeatureList::IsEnabled(kDefaultBrowserVideoInSettings);
+}
+
 bool HasUserInteractedWithFullscreenPromoBefore() {
+  if (base::FeatureList::IsEnabled(
+          feature_engagement::kDefaultBrowserEligibilitySlidingWindow)) {
+    return HasRecordedEventForKeyLessThanDelay(
+        kLastTimeUserInteractedWithFullscreenPromo,
+        base::Days(
+            feature_engagement::kDefaultBrowserEligibilitySlidingWindowParam
+                .Get()));
+  }
+
   NSNumber* number = GetObjectFromStorageForKey<NSNumber>(
       kUserHasInteractedWithFullscreenPromo);
   return number.boolValue;

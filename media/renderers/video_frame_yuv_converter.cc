@@ -23,6 +23,7 @@
 #include "third_party/skia/include/core/SkYUVAInfo.h"
 #include "third_party/skia/include/core/SkYUVAPixmaps.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
+#include "third_party/skia/include/gpu/GrTypes.h"
 #include "third_party/skia/include/gpu/GrYUVABackendTextures.h"
 #include "third_party/skia/include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "third_party/skia/include/gpu/ganesh/gl/GrGLBackendSurface.h"
@@ -90,7 +91,7 @@ void DrawYUVImageToSkSurface(const VideoFrame* video_frame,
                                         SkCanvas::kStrict_SrcRectConstraint);
   }
 
-  gr_context->flushAndSubmit(surface);
+  gr_context->flushAndSubmit(surface.get(), GrSyncCpu::kNo);
 }
 
 }  // namespace
@@ -180,9 +181,11 @@ bool VideoFrameYUVConverter::ConvertYUVVideoFrame(
                                    mailboxes,
                                    /*allow_multiplanar_for_upload=*/false);
     ri->ConvertYUVAMailboxesToRGB(
-        dest_mailbox_holder.mailbox, holder_->yuva_info().yuvColorSpace(),
-        nullptr, holder_->yuva_info().planeConfig(),
-        holder_->yuva_info().subsampling(), mailboxes);
+        dest_mailbox_holder.mailbox, 0, 0, video_frame->coded_size().width(),
+        video_frame->coded_size().height(),
+        holder_->yuva_info().yuvColorSpace(), nullptr,
+        holder_->yuva_info().planeConfig(), holder_->yuva_info().subsampling(),
+        mailboxes);
   }
   return true;
 }

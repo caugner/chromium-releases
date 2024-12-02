@@ -1217,6 +1217,9 @@ GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
       if (base::FeatureList::IsEnabled(::features::kDevToolsTabTarget)) {
         url += "&targetType=tab";
       }
+      if (base::FeatureList::IsEnabled(::features::kDevToolsVeLogging)) {
+        url += "&veLogging=true";
+      }
 #if defined(AIDA_SCOPE)
         url += "&enableAida=true";
 #endif
@@ -1250,6 +1253,11 @@ GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
     url += "&hasOtherClients=true";
   if (browser_connection)
     url += "&browserConnection=true";
+
+#if BUILDFLAG(GOOGLE_CHROME_FOR_TESTING_BRANDING)
+  url += "&isChromeForTesting=true";
+#endif
+
   return DevToolsUIBindings::SanitizeFrontendURL(GURL(url));
 }
 
@@ -1330,6 +1338,7 @@ void DevToolsWindow::AddNewContents(
     bool* was_blocked) {
   if (new_contents.get() == toolbox_web_contents_) {
     owned_toolbox_web_contents_ = std::move(new_contents);
+    owned_toolbox_web_contents_->SetOwnerLocationForDebug(FROM_HERE);
 
     toolbox_web_contents_->SetDelegate(new DevToolsToolboxDelegate(
         toolbox_web_contents_, inspected_web_contents_));

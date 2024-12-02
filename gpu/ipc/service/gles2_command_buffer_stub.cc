@@ -50,7 +50,6 @@
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gl_utils.h"
-#include "ui/gl/gl_workarounds.h"
 #include "ui/gl/init/gl_factory.h"
 
 #if BUILDFLAG(IS_WIN)
@@ -229,6 +228,8 @@ gpu::ContextResult GLES2CommandBufferStub::Initialize(
     }
     display = keyed_display;
   }
+
+  manager->delegate()->UpdateGPUInfoGL(display);
 
   if (offscreen) {
     if (!surface_format.IsCompatible(default_surface->GetFormat())) {
