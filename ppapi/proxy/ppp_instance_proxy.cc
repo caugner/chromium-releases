@@ -7,9 +7,11 @@
 #include <algorithm>
 
 #include "ppapi/c/pp_var.h"
+#include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
 
@@ -73,12 +75,32 @@ PP_Bool HandleInputEvent(PP_Instance instance,
 PP_Bool HandleDocumentLoad(PP_Instance instance,
                            PP_Resource url_loader) {
   PP_Bool result = PP_FALSE;
+  HostDispatcher* dispatcher = HostDispatcher::GetForInstance(instance);
+
+  // Set up the URLLoader for proxying.
+
+  PPB_URLLoader_Proxy* url_loader_proxy = static_cast<PPB_URLLoader_Proxy*>(
+      dispatcher->GetOrCreatePPBInterfaceProxy(INTERFACE_ID_PPB_URL_LOADER));
+  url_loader_proxy->PrepareURLLoaderForSendingToPlugin(url_loader);
+
+  // PluginResourceTracker in the plugin process assumes that resources that it
+  // tracks have been addrefed on behalf of the plugin at the renderer side. So
+  // we explicitly do it for |url_loader| here.
+  //
+  // Please also see comments in PPP_Instance_Proxy::OnMsgHandleDocumentLoad()
+  // about releasing of this extra reference.
+  const PPB_Core* core = reinterpret_cast<const PPB_Core*>(
+      dispatcher->GetLocalInterface(PPB_CORE_INTERFACE));
+  if (!core) {
+    NOTREACHED();
+    return PP_FALSE;
+  }
+  core->AddRefResource(url_loader);
+
   HostResource serialized_loader;
   serialized_loader.SetHostResource(instance, url_loader);
-  HostDispatcher::GetForInstance(instance)->Send(
-      new PpapiMsg_PPPInstance_HandleDocumentLoad(INTERFACE_ID_PPP_INSTANCE,
-                                                  instance, serialized_loader,
-                                                  &result));
+  dispatcher->Send(new PpapiMsg_PPPInstance_HandleDocumentLoad(
+      INTERFACE_ID_PPP_INSTANCE, instance, serialized_loader, &result));
   return result;
 }
 
@@ -180,11 +202,6 @@ void PPP_Instance_Proxy::OnMsgDidCreate(
   *result = ppp_instance_target()->DidCreate(instance,
                                              static_cast<uint32_t>(argn.size()),
                                              &argn_array[0], &argv_array[0]);
-  if (!*result) {
-    // In the failure to create case, this plugin instance will be torn down
-    // without further notification, so we also need to undo the routing.
-    plugin_dispatcher->DidDestroyInstance(instance);
-  }
 }
 
 void PPP_Instance_Proxy::OnMsgDidDestroy(PP_Instance instance) {
@@ -223,6 +240,14 @@ void PPP_Instance_Proxy::OnMsgHandleDocumentLoad(PP_Instance instance,
       PPB_URLLoader_Proxy::TrackPluginResource(url_loader);
   *result = ppp_instance_target()->HandleDocumentLoad(
       instance, plugin_loader);
+
+  // This balances the one reference that TrackPluginResource() initialized it
+  // with. The plugin will normally take an additional reference which will keep
+  // the resource alive in the plugin (and the one reference in the renderer
+  // representing all plugin references).
+  // Once all references at the plugin side are released, the renderer side will
+  // be notified and release the reference added in HandleDocumentLoad() above.
+  PluginResourceTracker::GetInstance()->ReleaseResource(plugin_loader);
 }
 
 void PPP_Instance_Proxy::OnMsgGetInstanceObject(

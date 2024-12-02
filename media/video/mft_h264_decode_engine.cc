@@ -31,7 +31,7 @@ namespace media {
 // Creates an empty Media Foundation sample with no buffers.
 static IMFSample* CreateEmptySample() {
   HRESULT hr;
-  ScopedComPtr<IMFSample> sample;
+  base::win::ScopedComPtr<IMFSample> sample;
   hr = MFCreateSample(sample.Receive());
   if (FAILED(hr)) {
     LOG(ERROR) << "Unable to create an empty sample";
@@ -45,11 +45,11 @@ static IMFSample* CreateEmptySample() {
 // If |align| is 0, then no alignment is specified.
 static IMFSample* CreateEmptySampleWithBuffer(int buffer_length, int align) {
   CHECK_GT(buffer_length, 0);
-  ScopedComPtr<IMFSample> sample;
+  base::win::ScopedComPtr<IMFSample> sample;
   sample.Attach(CreateEmptySample());
   if (!sample.get())
     return NULL;
-  ScopedComPtr<IMFMediaBuffer> buffer;
+  base::win::ScopedComPtr<IMFMediaBuffer> buffer;
   HRESULT hr;
   if (align == 0) {
     // Note that MFCreateMemoryBuffer is same as MFCreateAlignedMemoryBuffer
@@ -84,7 +84,7 @@ static IMFSample* CreateInputSample(const uint8* stream, int size,
                                     int min_size, int alignment) {
   CHECK(stream);
   CHECK_GT(size, 0);
-  ScopedComPtr<IMFSample> sample;
+  base::win::ScopedComPtr<IMFSample> sample;
   sample.Attach(CreateEmptySampleWithBuffer(std::max(min_size, size),
                                             alignment));
   if (!sample.get()) {
@@ -106,7 +106,7 @@ static IMFSample* CreateInputSample(const uint8* stream, int size,
       return NULL;
     }
   }
-  ScopedComPtr<IMFMediaBuffer> buffer;
+  base::win::ScopedComPtr<IMFMediaBuffer> buffer;
   hr = sample->GetBufferByIndex(0, buffer.Receive());
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get buffer in sample";
@@ -151,11 +151,12 @@ const GUID ConvertVideoFrameFormatToGuid(VideoFrame::Format format) {
 MftH264DecodeEngine::MftH264DecodeEngine(bool use_dxva)
     : use_dxva_(use_dxva),
       state_(kUninitialized),
+      width_(0),
+      height_(0),
       event_handler_(NULL),
       context_(NULL) {
   memset(&input_stream_info_, 0, sizeof(input_stream_info_));
   memset(&output_stream_info_, 0, sizeof(output_stream_info_));
-  memset(&config_, 0, sizeof(config_));
   memset(&info_, 0, sizeof(info_));
 }
 
@@ -177,7 +178,6 @@ void MftH264DecodeEngine::Initialize(
     return;
   }
   context_ = context;
-  config_ = config;
   event_handler_ = event_handler;
   info_.provides_buffers = true;
 
@@ -250,7 +250,7 @@ void MftH264DecodeEngine::ConsumeVideoSample(scoped_refptr<Buffer> buffer) {
   if (state_ == kUninitialized) {
     LOG(ERROR) << "ConsumeVideoSample: invalid state";
   }
-  ScopedComPtr<IMFSample> sample;
+  base::win::ScopedComPtr<IMFSample> sample;
   PipelineStatistics statistics;
   if (!buffer->IsEndOfStream()) {
     sample.Attach(
@@ -326,7 +326,7 @@ void MftH264DecodeEngine::ShutdownComLibraries() {
 bool MftH264DecodeEngine::EnableDxva() {
   IDirect3DDevice9* device = static_cast<IDirect3DDevice9*>(
       context_->GetDevice());
-  ScopedComPtr<IDirect3DDeviceManager9> device_manager;
+  base::win::ScopedComPtr<IDirect3DDeviceManager9> device_manager;
   UINT dev_manager_reset_token = 0;
   HRESULT hr = DXVA2CreateDirect3DDeviceManager9(&dev_manager_reset_token,
                                                  device_manager.Receive());
@@ -400,7 +400,7 @@ void MftH264DecodeEngine::OnAllocFramesDone() {
 }
 
 bool MftH264DecodeEngine::CheckDecodeEngineDxvaSupport() {
-  ScopedComPtr<IMFAttributes> attributes;
+  base::win::ScopedComPtr<IMFAttributes> attributes;
   HRESULT hr = decode_engine_->GetAttributes(attributes.Receive());
   if (FAILED(hr)) {
     LOG(ERROR) << "Unlock: Failed to get attributes, hr = "
@@ -427,7 +427,7 @@ bool MftH264DecodeEngine::SetDecodeEngineMediaTypes() {
 }
 
 bool MftH264DecodeEngine::SetDecodeEngineInputMediaType() {
-  ScopedComPtr<IMFMediaType> media_type;
+  base::win::ScopedComPtr<IMFMediaType> media_type;
   HRESULT hr = MFCreateMediaType(media_type.Receive());
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to create empty media type object";
@@ -473,8 +473,8 @@ bool MftH264DecodeEngine::SetDecodeEngineOutputMediaType(const GUID subtype) {
       hr = MFGetAttributeSize(out_media_type, MF_MT_FRAME_SIZE,
           reinterpret_cast<UINT32*>(&info_.stream_info.surface_width),
           reinterpret_cast<UINT32*>(&info_.stream_info.surface_height));
-      config_.width = info_.stream_info.surface_width;
-      config_.height = info_.stream_info.surface_height;
+      width_ = info_.stream_info.surface_width;
+      height_ = info_.stream_info.surface_height;
       if (FAILED(hr)) {
         LOG(ERROR) << "Failed to SetOutputType to |subtype| or obtain "
                    << "width/height " << std::hex << hr;
@@ -541,7 +541,7 @@ bool MftH264DecodeEngine::DoDecode(const PipelineStatistics& statistics) {
     return false;
   }
   scoped_refptr<VideoFrame> frame;
-  ScopedComPtr<IMFSample> output_sample;
+  base::win::ScopedComPtr<IMFSample> output_sample;
   if (!use_dxva_) {
     output_sample.Attach(
         CreateEmptySampleWithBuffer(output_stream_info_.cbSize,
@@ -633,14 +633,14 @@ bool MftH264DecodeEngine::DoDecode(const PipelineStatistics& statistics) {
     return true;
   }
 
-  ScopedComPtr<IMFMediaBuffer> output_buffer;
+  base::win::ScopedComPtr<IMFMediaBuffer> output_buffer;
   hr = output_sample->GetBufferByIndex(0, output_buffer.Receive());
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to get buffer from sample";
     return true;
   }
   if (use_dxva_) {
-    ScopedComPtr<IDirect3DSurface9, &IID_IDirect3DSurface9> surface;
+    base::win::ScopedComPtr<IDirect3DSurface9, &IID_IDirect3DSurface9> surface;
     hr = MFGetService(output_buffer, MR_BUFFER_SERVICE,
                       IID_PPV_ARGS(surface.Receive()));
     if (FAILED(hr)) {
@@ -684,7 +684,7 @@ bool MftH264DecodeEngine::DoDecode(const PipelineStatistics& statistics) {
 }
 
 void MftH264DecodeEngine::OnUploadVideoFrameDone(
-    ScopedComPtr<IDirect3DSurface9, &IID_IDirect3DSurface9> surface,
+    base::win::ScopedComPtr<IDirect3DSurface9, &IID_IDirect3DSurface9> surface,
     scoped_refptr<VideoFrame> frame,
     PipelineStatistics statistics) {
   // After this method is exited the reference to surface is released.

@@ -1,17 +1,16 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/devtools_client.h"
 
-#include "app/app_switches.h"
 #include "base/command_line.h"
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/devtools_messages.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/renderer/render_thread.h"
-#include "chrome/renderer/render_view.h"
+#include "content/renderer/render_thread.h"
+#include "content/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsFrontend.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "ui/base/ui_base_switches.h"
@@ -33,8 +32,7 @@ DevToolsClient::~DevToolsClient() {
 }
 
 void DevToolsClient::SendToAgent(const IPC::Message& tools_agent_message) {
-  Send(new ViewHostMsg_ForwardToDevToolsAgent(
-      routing_id(), tools_agent_message));
+  Send(new DevToolsHostMsg_ForwardToAgent(routing_id(), tools_agent_message));
 }
 
 bool DevToolsClient::OnMessageReceived(const IPC::Message& message) {
@@ -63,19 +61,19 @@ void DevToolsClient::sendDebuggerCommandToAgent(const WebString& command) {
 }
 
 void DevToolsClient::activateWindow() {
-  Send(new ViewHostMsg_ActivateDevToolsWindow(routing_id()));
+  Send(new DevToolsHostMsg_ActivateWindow(routing_id()));
 }
 
 void DevToolsClient::closeWindow() {
-  Send(new ViewHostMsg_CloseDevToolsWindow(routing_id()));
+  Send(new DevToolsHostMsg_CloseWindow(routing_id()));
 }
 
 void DevToolsClient::requestDockWindow() {
-  Send(new ViewHostMsg_RequestDockDevToolsWindow(routing_id()));
+  Send(new DevToolsHostMsg_RequestDockWindow(routing_id()));
 }
 
 void DevToolsClient::requestUndockWindow() {
-  Send(new ViewHostMsg_RequestUndockDevToolsWindow(routing_id()));
+  Send(new DevToolsHostMsg_RequestUndockWindow(routing_id()));
 }
 
 void DevToolsClient::OnDispatchOnInspectorFrontend(const std::string& message) {

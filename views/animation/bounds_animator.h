@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include <map>
 
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "ui/base/animation/animation_container_observer.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/gfx/rect.h"
@@ -56,6 +56,11 @@ class BoundsAnimator : public ui::AnimationDelegate,
   // started. If an AnimationDelegate has been set for |view| it is removed
   // (after being notified that the animation was canceled).
   void AnimateViewTo(View* view, const gfx::Rect& target);
+
+  // Similar to |AnimateViewTo|, but does not reset the animation, only the
+  // target bounds. If |view| is not being animated this is the same as
+  // invoking |AnimateViewTo|.
+  void SetTargetBounds(View* view, const gfx::Rect& target);
 
   // Sets the animation for the specified view. BoundsAnimator takes ownership
   // of the specified animation.

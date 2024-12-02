@@ -1,10 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/controls/button/checkbox.h"
 
 #include "base/logging.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/gfx/canvas.h"
 #include "views/controls/label.h"
 
@@ -20,17 +21,22 @@ static const int kLabelFocusPaddingVertical = 1;
 ////////////////////////////////////////////////////////////////////////////////
 // Checkbox, public:
 
-Checkbox::Checkbox() : NativeButton(NULL), checked_(false) {
+Checkbox::Checkbox() : NativeButtonBase(NULL), checked_(false) {
   Init(std::wstring());
 }
 
 Checkbox::Checkbox(const std::wstring& label)
-    : NativeButton(NULL, label),
+    : NativeButtonBase(NULL, label),
       checked_(false) {
   Init(label);
 }
 
 Checkbox::~Checkbox() {
+}
+
+// static
+int Checkbox::GetTextIndent() {
+  return NativeButtonWrapper::GetFixedWidth() + kCheckboxLabelSpacing;
 }
 
 void Checkbox::SetMultiLine(bool multiline) {
@@ -44,11 +50,6 @@ void Checkbox::SetChecked(bool checked) {
   checked_ = checked;
   if (native_wrapper_)
     native_wrapper_->UpdateChecked();
-}
-
-// static
-int Checkbox::GetTextIndent() {
-  return NativeButtonWrapper::GetFixedWidth() + kCheckboxLabelSpacing;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -86,6 +87,12 @@ int Checkbox::GetHeightForWidth(int w) {
   return label_->GetHeightForWidth(std::max(prefsize.height(), w - width));
 }
 
+void Checkbox::SetEnabled(bool enabled) {
+  NativeButtonBase::SetEnabled(enabled);
+  if (label_)
+    label_->SetEnabled(enabled);
+}
+
 void Checkbox::Layout() {
   if (!native_wrapper_)
     return;
@@ -111,46 +118,75 @@ void Checkbox::Layout() {
   native_wrapper_->GetView()->Layout();
 }
 
-void Checkbox::SetEnabled(bool enabled) {
-  NativeButton::SetEnabled(enabled);
-  if (label_)
-    label_->SetEnabled(enabled);
+std::string Checkbox::GetClassName() const {
+  return kViewClassName;
 }
 
-void Checkbox::OnPaintFocusBorder(gfx::Canvas* canvas) {
-  // Our focus border is rendered by the label, so we don't do anything here.
-}
-
-void Checkbox::OnMouseEntered(const MouseEvent& e) {
-  native_wrapper_->SetPushed(HitTestLabel(e));
-}
-
-void Checkbox::OnMouseMoved(const MouseEvent& e) {
-  native_wrapper_->SetPushed(HitTestLabel(e));
-}
-
-void Checkbox::OnMouseExited(const MouseEvent& e) {
-  native_wrapper_->SetPushed(false);
-}
-
-bool Checkbox::OnMousePressed(const MouseEvent& e) {
-  native_wrapper_->SetPushed(HitTestLabel(e));
+bool Checkbox::OnMousePressed(const MouseEvent& event) {
+  native_wrapper_->SetPushed(HitTestLabel(event));
   return true;
 }
 
-void Checkbox::OnMouseReleased(const MouseEvent& e, bool canceled) {
-  native_wrapper_->SetPushed(false);
-  if (!canceled && HitTestLabel(e)) {
+bool Checkbox::OnMouseDragged(const MouseEvent& event) {
+  return false;
+}
+
+void Checkbox::OnMouseReleased(const MouseEvent& event) {
+  OnMouseCaptureLost();
+  if (HitTestLabel(event)) {
     SetChecked(!checked());
     ButtonPressed();
   }
 }
 
-bool Checkbox::OnMouseDragged(const MouseEvent& e) {
-  return false;
+void Checkbox::OnMouseCaptureLost() {
+  native_wrapper_->SetPushed(false);
 }
 
+void Checkbox::OnMouseMoved(const MouseEvent& event) {
+  native_wrapper_->SetPushed(HitTestLabel(event));
+}
+
+void Checkbox::OnMouseEntered(const MouseEvent& event) {
+  native_wrapper_->SetPushed(HitTestLabel(event));
+}
+
+void Checkbox::OnMouseExited(const MouseEvent& event) {
+  native_wrapper_->SetPushed(false);
+}
+
+void Checkbox::GetAccessibleState(ui::AccessibleViewState* state) {
+  Button::GetAccessibleState(state);
+  state->role = ui::AccessibilityTypes::ROLE_CHECKBUTTON;
+  state->state = checked() ? ui::AccessibilityTypes::STATE_CHECKED : 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Checkbox, NativeButton overrides:
+
+void Checkbox::SetLabel(const std::wstring& label) {
+  NativeButtonBase::SetLabel(label);
+  if (!native_wrapper_->UsesNativeLabel())
+    label_->SetText(label);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Checkbox, protected:
+
+bool Checkbox::HitTestLabel(const MouseEvent& event) {
+  gfx::Point tmp(event.location());
+  ConvertPointToView(this, label_, &tmp);
+  return label_->HitTest(tmp);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Checkbox, View overrides, protected:
+
+void Checkbox::OnPaintFocusBorder(gfx::Canvas* canvas) {
+  // Our focus border is rendered by the label, so we don't do anything here.
+}
 void Checkbox::OnFocus() {
+  NativeButtonBase::OnFocus();
   label_->set_paint_as_focused(true);
 }
 
@@ -158,20 +194,9 @@ void Checkbox::OnBlur() {
   label_->set_paint_as_focused(false);
 }
 
-AccessibilityTypes::Role Checkbox::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_CHECKBUTTON;
-}
-
-AccessibilityTypes::State Checkbox::GetAccessibleState() {
-  return checked() ? AccessibilityTypes::STATE_CHECKED : 0;
-}
-
-std::string Checkbox::GetClassName() const {
-  return kViewClassName;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
-// Checkbox, NativeButton overrides:
+// Checkbox, NativeButton overrides, protected:
 
 NativeButtonWrapper* Checkbox::CreateWrapper() {
   NativeButtonWrapper* native_wrapper =
@@ -183,21 +208,6 @@ NativeButtonWrapper* Checkbox::CreateWrapper() {
 
 void Checkbox::InitBorder() {
   // No border, so we do nothing.
-}
-
-void Checkbox::SetLabel(const std::wstring& label) {
-  NativeButton::SetLabel(label);
-  if (!native_wrapper_->UsesNativeLabel())
-    label_->SetText(label);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Checkbox, protected:
-
-bool Checkbox::HitTestLabel(const MouseEvent& e) {
-  gfx::Point tmp(e.location());
-  ConvertPointToView(this, label_, &tmp);
-  return label_->HitTest(tmp);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

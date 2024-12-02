@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,8 @@
 
 #include <map>
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/texture_manager.h"
@@ -71,6 +71,12 @@ class FramebufferManager {
     bool IsValid() const {
       return has_been_bound_ && !IsDeleted();
     }
+
+    // We can't know if the frame buffer is complete since that is
+    // implementation  dependent and we'd have to check after every glTexImage
+    // call but we can know in certain cases that it's NOT complete which we
+    // need to enforce the OpenGL ES 2.0 spec on top of DesktopGL.
+    bool IsNotComplete() const;
 
    private:
     friend class FramebufferManager;

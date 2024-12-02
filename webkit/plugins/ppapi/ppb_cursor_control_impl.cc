@@ -5,7 +5,7 @@
 #include "webkit/plugins/ppapi/ppb_cursor_control_impl.h"
 
 #include "base/logging.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/pp_point.h"
@@ -28,16 +28,7 @@ PP_Bool SetCursor(PP_Instance instance_id,
   if (!instance)
     return PP_FALSE;
 
-  scoped_refptr<PPB_ImageData_Impl> custom_image(
-      Resource::GetAs<PPB_ImageData_Impl>(custom_image_id));
-  if (custom_image.get()) {
-    // TODO(neb): implement custom cursors.
-    // (Remember that PP_CURSORTYPE_CUSTOM != WebCursorInfo::TypeCustom.)
-    NOTIMPLEMENTED();
-    return PP_FALSE;
-  }
-
-  return BoolToPPBool(instance->SetCursor(type));
+  return BoolToPPBool(instance->SetCursor(type, custom_image_id, hot_spot));
 }
 
 PP_Bool LockCursor(PP_Instance instance_id) {
@@ -92,4 +83,3 @@ const PPB_CursorControl_Dev* GetCursorControlInterface() {
 
 }  // namespace ppapi
 }  // namespace webkit
-

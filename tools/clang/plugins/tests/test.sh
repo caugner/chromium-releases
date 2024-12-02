@@ -10,20 +10,21 @@
 E_BADARGS=65
 
 # Prints usage information.
-function usage() {
-  echo "Usage: `basename $0` <Path to the llvm build dir, usually Release+Asserts>"
+usage() {
+  echo "Usage: $(basename "${0}")" \
+    "<Path to the llvm build dir, usually Release+Asserts>"
   echo ""
   echo "  Runs all the libFindBadConstructs unit tests"
   echo ""
 }
 
 # Runs a single test case.
-function do_testcase {
-  local output=`${CLANG_DIR}/bin/clang -cc1 \
-      -load ${CLANG_DIR}/lib/libFindBadConstructs.so \
-      -plugin find-bad-constructs ${1} 2>&1`
-  local diffout=`echo "${output}" | diff - ${2}`
-  if [[ ${diffout} == "" ]]; then
+do_testcase() {
+  local output="$("${CLANG_DIR}"/bin/clang -cc1 \
+      -load "${CLANG_DIR}"/lib/libFindBadConstructs.${LIB} \
+      -plugin find-bad-constructs ${1} 2>&1)"
+  local diffout="$(echo "${output}" | diff - "${2}")"
+  if [ "${diffout}" = "" ]; then
     echo "PASS: ${1}"
   else
     echo "FAIL: ${1}"
@@ -43,8 +44,13 @@ elif [[ ! -d "${1}" ]]; then
 else
   echo "Using clang directory ${1}..."
   export CLANG_DIR="${1}"
+  if [ "$(uname -s)" = "Linux" ]; then
+    export LIB=so
+  elif [ "$(uname -s)" = "Darwin" ]; then
+    export LIB=dylib
+  fi
 fi
 
 for input in *.cpp; do
-  do_testcase $input ${input%cpp}txt
+  do_testcase "${input}" "${input%cpp}txt"
 done

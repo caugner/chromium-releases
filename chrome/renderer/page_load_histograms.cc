@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,22 @@
 #include "base/metrics/histogram.h"
 #include "base/time.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/renderer/navigation_state.h"
-#include "chrome/renderer/render_thread.h"
+#include "chrome/common/extensions/url_pattern.h"
+#include "chrome/renderer/renderer_histogram_snapshots.h"
+#include "content/common/view_messages.h"
+#include "content/renderer/navigation_state.h"
+#include "content/renderer/render_view.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPerformance.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 using base::Time;
 using base::TimeDelta;
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
 using WebKit::WebPerformance;
+using WebKit::WebString;
 
 static const TimeDelta kPLTMin(TimeDelta::FromMilliseconds(10));
 static const TimeDelta kPLTMax(TimeDelta::FromMinutes(10));
@@ -32,20 +37,24 @@ namespace {
 
 // Histograms to determine prerendering's impact on perceived PLT.
 void UpdatePrerenderHistograms(NavigationState* navigation_state,
-                               const Time& begin, const Time& finish_all_loads,
+                               const Time& finish_all_loads,
                                const TimeDelta& begin_to_finish_all_loads) {
   // Load time for non-prerendered pages.
   static bool use_prerender_histogram =
-      base::FieldTrialList::Find("Prerender") &&
-      !base::FieldTrialList::Find("Prerender")->group_name().empty();
+      base::FieldTrialList::Find("Prefetch") &&
+      !base::FieldTrialList::Find("Prefetch")->group_name().empty();
   if (!navigation_state->was_started_as_prerender()) {
     if (use_prerender_histogram) {
       PLT_HISTOGRAM(base::FieldTrial::MakeName(
-          "PLT.PerceivedLoadTime", "Prerender"),
+          "PLT.PerceivedLoadTime", "Prefetch"),
           begin_to_finish_all_loads);
     }
     return;
   }
+
+  // Do not record stats for redirected prerendered pages.
+  if (navigation_state->was_prerender_redirected())
+    return;
 
   // Histogram for usage rate of prerendered pages.
   Time prerendered_page_display =
@@ -56,8 +65,10 @@ void UpdatePrerenderHistograms(NavigationState* navigation_state,
     return;
 
   // Histograms for perceived load time of prerendered pages.
+  Time prerendered_page_start =
+      navigation_state->prerendered_page_start_time();
   PLT_HISTOGRAM("PLT.TimeUntilDisplay_PrerenderLoad",
-                prerendered_page_display - begin);
+                prerendered_page_display - prerendered_page_start);
   TimeDelta perceived_load_time = finish_all_loads - prerendered_page_display;
   if (perceived_load_time < TimeDelta::FromSeconds(0)) {
     PLT_HISTOGRAM("PLT.PrerenderIdleTime_PrerenderLoad", -perceived_load_time);
@@ -66,10 +77,10 @@ void UpdatePrerenderHistograms(NavigationState* navigation_state,
   PLT_HISTOGRAM("PLT.PerceivedLoadTime_PrerenderLoad", perceived_load_time);
   if (use_prerender_histogram) {
     PLT_HISTOGRAM(base::FieldTrial::MakeName(
-                  "PLT.PerceivedLoadTime_PrerenderLoad", "Prerender"),
+                  "PLT.PerceivedLoadTime_PrerenderLoad", "Prefetch"),
                   perceived_load_time);
     PLT_HISTOGRAM(base::FieldTrial::MakeName(
-                  "PLT.PerceivedLoadTime", "Prerender"),
+                  "PLT.PerceivedLoadTime", "Prefetch"),
                   perceived_load_time);
   }
 }
@@ -122,9 +133,12 @@ enum AbandonType {
   ABANDON_TYPE_MAX = 0x10
 };
 
-PageLoadHistograms::PageLoadHistograms()
-    : cross_origin_access_count_(0),
-      same_origin_access_count_(0) {
+PageLoadHistograms::PageLoadHistograms(
+    RenderView* render_view, RendererHistogramSnapshots* histogram_snapshots)
+    : RenderViewObserver(render_view),
+      cross_origin_access_count_(0),
+      same_origin_access_count_(0),
+      histogram_snapshots_(histogram_snapshots) {
 }
 
 void PageLoadHistograms::Dump(WebFrame* frame) {
@@ -313,7 +327,7 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
       break;
   }
 
-  UpdatePrerenderHistograms(navigation_state, begin, finish_all_loads,
+  UpdatePrerenderHistograms(navigation_state, finish_all_loads,
                             begin_to_finish_all_loads);
 
   // Histograms to determine if DNS prefetching has an impact on PLT.
@@ -672,13 +686,13 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
             break;
           case NavigationState::NORMAL_LOAD:
             PLT_HISTOGRAM(base::FieldTrial::MakeName(
-                "PLT.BeginToFinish_NormalLoad_SpdyTrial", "SpdyImpact"),
+                "PLT.BeginToFinish_NormalLoad", "SpdyImpact"),
                 begin_to_finish_all_loads);
             PLT_HISTOGRAM(base::FieldTrial::MakeName(
-                "PLT.StartToFinish_NormalLoad_SpdyTrial", "SpdyImpact"),
+                "PLT.StartToFinish_NormalLoad", "SpdyImpact"),
                 start_to_finish_all_loads);
             PLT_HISTOGRAM(base::FieldTrial::MakeName(
-                "PLT.StartToCommit_NormalLoad_SpdyTrial", "SpdyImpact"),
+                "PLT.StartToCommit_NormalLoad", "SpdyImpact"),
                 start_to_commit);
             break;
           default:
@@ -834,22 +848,41 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
   // TODO(jar) BUG=33233: This needs to be moved to a PostDelayedTask, and it
   // should post when the onload is complete, so that it doesn't interfere with
   // the next load.
-  if (RenderThread::current()) {
-    RenderThread::current()->SendHistograms(
-        chrome::kHistogramSynchronizerReservedSequenceNumber);
-  }
+  histogram_snapshots_->SendHistograms(
+      chrome::kHistogramSynchronizerReservedSequenceNumber);
 }
 
-void PageLoadHistograms::IncrementCrossFramePropertyAccess(bool cross_origin) {
+void PageLoadHistograms::ResetCrossFramePropertyAccess() {
+  cross_origin_access_count_ = 0;
+  same_origin_access_count_ = 0;
+}
+
+void PageLoadHistograms::FrameWillClose(WebFrame* frame) {
+  Dump(frame);
+}
+
+void PageLoadHistograms::LogCrossFramePropertyAccess(
+      WebFrame* frame,
+      WebFrame* target,
+      bool cross_origin,
+      const WebString& property_name,
+      unsigned long long event_id) {
+  // TODO(johnnyg): track the individual properties and repeat event_ids.
   if (cross_origin)
     cross_origin_access_count_++;
   else
     same_origin_access_count_++;
 }
 
-void PageLoadHistograms::ResetCrossFramePropertyAccess() {
-  cross_origin_access_count_ = 0;
-  same_origin_access_count_ = 0;
+bool PageLoadHistograms::OnMessageReceived(const IPC::Message& message) {
+  if (message.type() == ViewMsg_ClosePage::ID) {
+    // TODO(davemoore) This code should be removed once willClose() gets
+    // called when a page is destroyed. page_load_histograms_.Dump() is safe
+    // to call multiple times for the same frame, but it will simplify things.
+    Dump(render_view()->webview()->mainFrame());
+    ResetCrossFramePropertyAccess();
+  }
+  return false;
 }
 
 void PageLoadHistograms::LogPageLoadTime(const NavigationState* state,

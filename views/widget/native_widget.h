@@ -8,14 +8,21 @@
 
 #include <set>
 
+#include "ui/gfx/native_widget_types.h"
+#include "views/widget/widget.h"
+
 namespace gfx {
 class Rect;
 }
 
+namespace ui {
+class OSExchangeData;
+}
+
 namespace views {
 
+class InputMethod;
 class TooltipManager;
-class Widget;
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidget interface
@@ -46,6 +53,14 @@ class NativeWidget {
   static void GetAllNativeWidgets(gfx::NativeView native_view,
                                   NativeWidgets* children);
 
+  // Reparent a NativeView and notify all NativeWidgets in
+  // |native_view|'s hierarchy of the change.
+  static void ReparentNativeView(gfx::NativeView native_view,
+                                 gfx::NativeView new_parent);
+
+  // Sets the create params for the NativeWidget.
+  virtual void SetCreateParams(const Widget::CreateParams& params) = 0;
+
   // Returns the Widget associated with this NativeWidget. This function is
   // guaranteed to return non-NULL for the lifetime of the NativeWidget.
   virtual Widget* GetWidget() = 0;
@@ -60,15 +75,41 @@ class NativeWidget {
   // to update tooltips.
   virtual TooltipManager* GetTooltipManager() const = 0;
 
-  // Widget pass-thrus ---------------------------------------------------------
-  // TODO(beng): Investigate if we can move these to a NativeWidgetPrivate
-  //             interface.
+  // Returns true if a system screen reader is active for the NativeWidget.
+  virtual bool IsScreenReaderActive() const = 0;
 
-  // See method documentation in Widget:
+  // Sets or releases event capturing for this native widget.
+  virtual void SetMouseCapture() = 0;
+  virtual void ReleaseMouseCapture() = 0;
+
+  // Returns true if this native widget is capturing all events.
+  virtual bool HasMouseCapture() const = 0;
+
+  // Returns the InputMethod for this native widget.
+  // Note that all widgets in a widget hierarchy share the same input method.
+  // TODO(suzhe): rename to GetInputMethod() when NativeWidget implementation
+  // class doesn't inherit Widget anymore.
+  virtual InputMethod* GetInputMethodNative() = 0;
+
+  // Sets a different InputMethod instance to this native widget. The instance
+  // must not be initialized, the ownership will be assumed by the native
+  // widget. It's only for testing purpose.
+  virtual void ReplaceInputMethod(InputMethod* input_method) = 0;
+
+ protected:
+  friend class Widget;
+
+  // Returns a handle for the underlying native widget that can be used for
+  // accelerated drawing.
+  virtual gfx::AcceleratedWidget GetAcceleratedWidget() = 0;
+
+  // Widget pass-thrus, private to Views. --------------------------------------
+  // See method documentation in Widget.
   virtual gfx::Rect GetWindowScreenBounds() const = 0;
   virtual gfx::Rect GetClientAreaScreenBounds() const = 0;
   virtual void SetBounds(const gfx::Rect& bounds) = 0;
-  virtual void MoveAbove(Widget* widget) = 0;
+  virtual void SetSize(const gfx::Size& size) = 0;
+  virtual void MoveAbove(gfx::NativeView native_view) = 0;
   virtual void SetShape(gfx::NativeRegion shape) = 0;
   virtual void Close() = 0;
   virtual void CloseNow() = 0;

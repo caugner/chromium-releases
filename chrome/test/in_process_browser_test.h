@@ -7,10 +7,10 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
-#include "chrome/common/page_transition_types.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_temp_dir.h"
+#include "content/common/page_transition_types.h"
 #include "net/test/test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 

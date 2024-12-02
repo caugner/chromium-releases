@@ -10,11 +10,13 @@
 
 #include "base/basictypes.h"
 #include "base/process.h"
+#include "base/time.h"
 #include "content/browser/browser_message_filter.h"
 #include "ppapi/c/private/ppb_flash_net_connector.h"
 
-class Profile;
-class URLRequestContextGetter;
+namespace content {
+class ResourceContext;
+}
 
 namespace net {
 class AddressList;
@@ -22,7 +24,8 @@ class AddressList;
 
 class PepperMessageFilter : public BrowserMessageFilter {
  public:
-  explicit PepperMessageFilter(Profile* profile);
+  explicit PepperMessageFilter(
+      const content::ResourceContext* resource_context);
   virtual ~PepperMessageFilter();
 
  private:
@@ -62,8 +65,9 @@ class PepperMessageFilter : public BrowserMessageFilter {
                                        PP_Flash_NetAddress addr);
 #endif  // ENABLE_FLAPPER_HACKS
 
-  Profile* profile_;
-  scoped_refptr<URLRequestContextGetter> request_context_;
+  void OnGetLocalTimeZoneOffset(base::Time t, double* result);
+
+  const content::ResourceContext* const resource_context_;
 };
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_PEPPER_MESSAGE_FILTER_H_

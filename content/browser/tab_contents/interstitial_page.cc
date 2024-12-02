@@ -11,16 +11,11 @@
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/common/bindings_policy.h"
-#include "chrome/common/dom_storage_common.h"
-#include "chrome/common/net/url_request_context_getter.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/notification_source.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -31,11 +26,14 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/common/bindings_policy.h"
+#include "content/common/dom_storage_common.h"
+#include "content/common/notification_service.h"
+#include "content/common/notification_source.h"
+#include "content/common/page_transition_types.h"
+#include "content/common/view_messages.h"
 #include "net/base/escape.h"
-
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/ui/gtk/gtk_theme_provider.h"
-#endif
+#include "net/url_request/url_request_context_getter.h"
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
@@ -249,7 +247,7 @@ void InterstitialPage::Show() {
 
 void InterstitialPage::Hide() {
   RenderWidgetHostView* old_view = tab_->render_view_host()->view();
-  if (old_view && !old_view->IsShowing()) {
+  if (tab_->interstitial_page() == this && old_view && !old_view->IsShowing()) {
     // Show the original RVH since we're going away.  Note it might not exist if
     // the renderer crashed while the interstitial was showing.
     // Note that it is important that we don't call Show() if the view is
@@ -349,6 +347,10 @@ void InterstitialPage::DidNavigate(
   // us. In that case we can dismiss ourselves.
   if (!enabled_) {
     DontProceed();
+    return;
+  }
+  if (params.transition == PageTransition::AUTO_SUBFRAME) {
+    // No need to handle navigate message from iframe in the interstitial page.
     return;
   }
 

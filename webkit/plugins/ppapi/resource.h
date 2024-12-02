@@ -6,7 +6,7 @@
 #define WEBKIT_PLUGINS_PPAPI_RESOURCE_H_
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "ppapi/c/pp_resource.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
 
@@ -18,6 +18,7 @@ namespace ppapi {
   F(MockResource) \
   F(PPB_AudioConfig_Impl) \
   F(PPB_Audio_Impl) \
+  F(PPB_Broker_Impl) \
   F(PPB_Buffer_Impl) \
   F(PPB_Context3D_Impl) \
   F(PPB_DirectoryReader_Impl) \

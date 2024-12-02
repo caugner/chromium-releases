@@ -4,27 +4,74 @@
 
 #include "base/stl_util-inl.h"
 #include "base/string16.h"
-#include "chrome/browser/renderer_host/browser_render_process_host.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/testing_profile.h"
-#include "content/browser/browsing_instance.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "content/browser/browser_thread.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/content_browser_client.h"
+#include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
+#include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
-
-class SiteInstanceTest : public testing::Test {
- private:
-  MessageLoopForUI message_loop_;
-};
+#include "content/browser/webui/empty_web_ui_factory.h"
+#include "content/common/content_client.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
+
+// TODO(estade): this shouldn't need to be chrome:, but it does (or else GURL
+// doesn't think that the webui URLs have a host). Figure out where this is
+// coming from and fix it.
+const char kWebUIScheme[] = "chrome";
+
+class SiteInstanceTestWebUIFactory : public content::EmptyWebUIFactory {
+ public:
+  virtual bool UseWebUIForURL(Profile* profile, const GURL& url) const {
+    return HasWebUIScheme(url);
+  }
+  virtual bool HasWebUIScheme(const GURL& url) const {
+    return url.SchemeIs(kWebUIScheme);
+  }
+};
+
+class SiteInstanceTestBrowserClient : public content::ContentBrowserClient {
+ public:
+  virtual content::WebUIFactory* GetWebUIFactory() {
+    return &factory_;
+  }
+
+ private:
+  SiteInstanceTestWebUIFactory factory_;
+};
+
+class SiteInstanceTest : public testing::Test {
+ public:
+  SiteInstanceTest()
+      : ui_thread_(BrowserThread::UI, &message_loop_),
+        old_browser_client_(NULL) {
+  }
+
+  virtual void SetUp() {
+    old_browser_client_ = content::GetContentClient()->browser();
+    content::GetContentClient()->set_browser(&browser_client_);
+  }
+
+  virtual void TearDown() {
+    content::GetContentClient()->set_browser(old_browser_client_);
+  }
+
+ private:
+  MessageLoopForUI message_loop_;
+  BrowserThread ui_thread_;
+
+  SiteInstanceTestBrowserClient browser_client_;
+  content::ContentBrowserClient* old_browser_client_;
+};
 
 class TestBrowsingInstance : public BrowsingInstance {
  public:
@@ -51,14 +98,13 @@ class TestBrowsingInstance : public BrowsingInstance {
   int* deleteCounter_;
 };
 
-
 class TestSiteInstance : public SiteInstance {
  public:
   static TestSiteInstance* CreateTestSiteInstance(Profile* profile,
                                                   int* siteDeleteCounter,
                                                   int* browsingDeleteCounter) {
     TestBrowsingInstance* browsing_instance =
-      new TestBrowsingInstance(profile, browsingDeleteCounter);
+        new TestBrowsingInstance(profile, browsingDeleteCounter);
     return new TestSiteInstance(browsing_instance, siteDeleteCounter);
   }
 
@@ -441,22 +487,24 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
             extension2_instance->GetProcess());
 
   // Create some WebUI instances and make sure they share a process.
-  scoped_refptr<SiteInstance> dom1_instance(
-      CreateSiteInstance(&rph_factory, GURL("chrome://newtab")));
-  policy->GrantWebUIBindings(dom1_instance->GetProcess()->id());
+  scoped_refptr<SiteInstance> webui1_instance(
+      CreateSiteInstance(&rph_factory,
+                         GURL(kWebUIScheme + std::string("://newtab"))));
+  policy->GrantWebUIBindings(webui1_instance->GetProcess()->id());
 
-  scoped_refptr<SiteInstance> dom2_instance(
-      CreateSiteInstance(&rph_factory, GURL("chrome://history")));
+  scoped_refptr<SiteInstance> webui2_instance(
+      CreateSiteInstance(&rph_factory,
+                         GURL(kWebUIScheme + std::string("://history"))));
 
-  scoped_ptr<RenderProcessHost> dom_host(dom1_instance->GetProcess());
-  EXPECT_EQ(dom1_instance->GetProcess(), dom2_instance->GetProcess());
+  scoped_ptr<RenderProcessHost> dom_host(webui1_instance->GetProcess());
+  EXPECT_EQ(webui1_instance->GetProcess(), webui2_instance->GetProcess());
 
   // Make sure none of differing privilege processes are mixed.
-  EXPECT_NE(extension1_instance->GetProcess(), dom1_instance->GetProcess());
+  EXPECT_NE(extension1_instance->GetProcess(), webui1_instance->GetProcess());
 
   for (size_t i = 0; i < chrome::kMaxRendererProcessCount; ++i) {
     EXPECT_NE(extension1_instance->GetProcess(), hosts[i]);
-    EXPECT_NE(dom1_instance->GetProcess(), hosts[i]);
+    EXPECT_NE(webui1_instance->GetProcess(), hosts[i]);
   }
 
   STLDeleteContainerPointers(hosts.begin(), hosts.end());

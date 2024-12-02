@@ -11,10 +11,8 @@
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
-#include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -22,13 +20,13 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/main_function_params.h"
-#include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/test_launcher_utils.h"
 #include "chrome/test/testing_browser_process.h"
@@ -36,6 +34,8 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/main_function_params.h"
+#include "content/common/notification_type.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
 #include "sandbox/src/dep.h"
@@ -45,7 +45,11 @@
 #endif
 
 #if defined(OS_WIN)
-#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_frame_win.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/audio_handler.h"
 #endif
 
 namespace {
@@ -131,6 +135,14 @@ void InProcessBrowserTest::SetUp() {
   // Make sure that the log directory exists.
   FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
   file_util::CreateDirectory(log_dir);
+
+  // Disable audio mixer as it can cause hang.
+  // see http://crosbug.com/17058.
+  chromeos::AudioHandler::Disable();
+
+  // Prevent loading ChromeOS component extension to prevent their interference
+  // with other browser tests.
+  command_line->AppendSwitch(switches::kSkipChromeOSComponents);
 #endif  // defined(OS_CHROMEOS)
 
   SandboxInitWrapper sandbox_wrapper;
@@ -165,7 +177,7 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
 #if defined(OS_WIN)
   // Hide windows on show.
   if (!command_line->HasSwitch(kUnitTestShowWindows) && !show_window_)
-    BrowserView::SetShowState(SW_HIDE);
+    BrowserFrameWin::SetShowState(SW_HIDE);
 #endif
 
   if (dom_automation_enabled_)
@@ -227,7 +239,7 @@ void InProcessBrowserTest::TearDown() {
   browser_shutdown::delete_resources_on_shutdown = true;
 
 #if defined(OS_WIN)
-  BrowserView::SetShowState(-1);
+  BrowserFrameWin::SetShowState(-1);
 #endif
 }
 

@@ -8,9 +8,11 @@
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/point.h"
+#include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/size.h"
 #include "remoting/base/tracer.h"
 #include "remoting/base/util.h"
+#include "remoting/client/chromoting_stats.h"
 #include "remoting/client/client_context.h"
 #include "remoting/client/plugin/chromoting_instance.h"
 #include "remoting/client/plugin/pepper_util.h"
@@ -67,7 +69,8 @@ void PepperView::Paint() {
     // size!  Otherwise, this will just silently do nothing.
     graphics2d_.ReplaceContents(&image);
     graphics2d_.Flush(TaskToCompletionCallback(
-        task_factory_.NewRunnableMethod(&PepperView::OnPaintDone)));
+        task_factory_.NewRunnableMethod(&PepperView::OnPaintDone,
+                                        base::Time::Now())));
   } else {
     // TODO(ajwong): We need to keep a backing store image of the viewport that
     // has the data here which can be redrawn.
@@ -87,6 +90,12 @@ void PepperView::PaintFrame(media::VideoFrame* frame, UpdatedRects* rects) {
   const int kFrameStride = frame->stride(media::VideoFrame::kRGBPlane);
   const int kBytesPerPixel = GetBytesPerPixel(media::VideoFrame::RGB32);
 
+  if (!backing_store_.get() || backing_store_->is_null()) {
+    LOG(ERROR) << "Backing store is not available.";
+    return;
+  }
+
+  // Copy updated regions to the backing store and then paint the regions.
   for (size_t i = 0; i < rects->size(); ++i) {
     // TODO(ajwong): We're assuming the native format is BGRA_PREMUL below. This
     // is wrong.
@@ -96,29 +105,26 @@ void PepperView::PaintFrame(media::VideoFrame* frame, UpdatedRects* rects) {
     if (r.width() <= 0 || r.height() <= 0)
       continue;
 
-    pp::ImageData image(instance_, pp::ImageData::GetNativeImageDataFormat(),
-                        pp::Size(r.width(), r.height()),
-                        false);
-    if (image.is_null()) {
-      LOG(ERROR) << "Unable to allocate image of size: "
-                 << r.width() << "x" << r.height();
-      return;
-    }
-
-    // Copy pixel data into |image|.
     uint8* in = frame_data + kFrameStride * r.y() + kBytesPerPixel * r.x();
-    uint8* out = reinterpret_cast<uint8*>(image.data());
+    uint8* out = reinterpret_cast<uint8*>(backing_store_->data()) +
+        backing_store_->stride() * r.y() + kBytesPerPixel * r.x();
+
+    // TODO(hclam): We really should eliminate this memory copy.
     for (int j = 0; j < r.height(); ++j) {
       memcpy(out, in, r.width() * kBytesPerPixel);
       in += kFrameStride;
-      out += image.stride();
+      out += backing_store_->stride();
     }
 
-    graphics2d_.PaintImageData(image, pp::Point(r.x(), r.y()));
+    // Pepper Graphics 2D has a strange and badly documented API that the
+    // point here is the offset from the source rect. Why?
+    graphics2d_.PaintImageData(*backing_store_.get(), pp::Point(0, 0),
+                               pp::Rect(r.x(), r.y(), r.width(), r.height()));
   }
 
   graphics2d_.Flush(TaskToCompletionCallback(
-      task_factory_.NewRunnableMethod(&PepperView::OnPaintDone)));
+      task_factory_.NewRunnableMethod(&PepperView::OnPaintDone,
+                                      base::Time::Now())));
 
   TraceContext::tracer()->PrintString("End Paint Frame.");
 }
@@ -192,6 +198,13 @@ void PepperView::SetViewport(int x, int y, int width, int height) {
     return;
   }
 
+  // Allocate the backing store to save the desktop image.
+  backing_store_.reset(
+      new pp::ImageData(instance_, pp::ImageData::GetNativeImageDataFormat(),
+                        pp::Size(viewport_width_, viewport_height_), false));
+  DCHECK(backing_store_.get() && !backing_store_->is_null())
+      << "Not enough memory for backing store.";
+
   instance_->GetScriptableObject()->SetDesktopSize(width, height);
 }
 
@@ -204,8 +217,6 @@ void PepperView::AllocateFrame(media::VideoFrame::Format format,
                                Task* done) {
   DCHECK(CurrentlyOnPluginThread());
 
-  // TODO(ajwong): Implement this to be backed by an pp::ImageData rather than
-  // generic memory.
   media::VideoFrame::CreateFrame(media::VideoFrame::RGB32,
                                  width, height,
                                  base::TimeDelta(), base::TimeDelta(),
@@ -239,12 +250,11 @@ void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
   delete done;
 }
 
-void PepperView::OnPaintDone() {
+void PepperView::OnPaintDone(base::Time paint_start) {
   DCHECK(CurrentlyOnPluginThread());
-
-  // TODO(ajwong):Probably should set some variable to allow repaints to
-  // actually paint.
   TraceContext::tracer()->PrintString("Paint flushed");
+  instance_->GetStats()->video_paint_ms()->Record(
+      (base::Time::Now() - paint_start).InMilliseconds());
   return;
 }
 

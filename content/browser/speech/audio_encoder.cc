@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_number_conversions.h"
 #include "third_party/flac/flac.h"
@@ -85,7 +85,7 @@ void FLACEncoder::Encode(const short* samples, int num_samples) {
   }
 
   // FLAC encoder wants samples as int32s.
-  scoped_ptr<FLAC__int32> flac_samples(new FLAC__int32[num_samples]);
+  scoped_array<FLAC__int32> flac_samples(new FLAC__int32[num_samples]);
   FLAC__int32* flac_samples_ptr = flac_samples.get();
   for (int i = 0; i < num_samples; ++i)
     flac_samples_ptr[i] = samples[i];

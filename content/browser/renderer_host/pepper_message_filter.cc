@@ -8,10 +8,10 @@
 #include "base/process_util.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/browser_render_process_host.h"
-#include "chrome/common/pepper_messages.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/renderer_host/browser_render_process_host.h"
+#include "content/browser/resource_context.h"
+#include "content/common/pepper_messages.h"
 #include "net/base/address_list.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/host_resolver.h"
@@ -34,26 +34,27 @@ COMPILE_ASSERT(sizeof(reinterpret_cast<PP_Flash_NetAddress*>(0)->data) >=
 
 const PP_Flash_NetAddress kInvalidNetAddress = { 0 };
 
-PepperMessageFilter::PepperMessageFilter(Profile* profile)
-    : profile_(profile),
-      request_context_(profile_->GetRequestContext()) {
+PepperMessageFilter::PepperMessageFilter(
+    const content::ResourceContext* resource_context)
+    : resource_context_(resource_context) {
+  DCHECK(resource_context_);
 }
 
 PepperMessageFilter::~PepperMessageFilter() {}
 
 bool PepperMessageFilter::OnMessageReceived(const IPC::Message& msg,
                                             bool* message_was_ok) {
-#if defined(ENABLE_FLAPPER_HACKS)
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(PepperMessageFilter, msg, *message_was_ok)
+#if defined(ENABLE_FLAPPER_HACKS)
     IPC_MESSAGE_HANDLER(PepperMsg_ConnectTcp, OnConnectTcp)
     IPC_MESSAGE_HANDLER(PepperMsg_ConnectTcpAddress, OnConnectTcpAddress)
+#endif  // ENABLE_FLAPPER_HACKS
+    IPC_MESSAGE_HANDLER(PepperMsg_GetLocalTimeZoneOffset,
+                        OnGetLocalTimeZoneOffset)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   return handled;
-#else
-  return false;
-#endif  // ENABLE_FLAPPER_HACKS
 }
 
 #if defined(ENABLE_FLAPPER_HACKS)
@@ -173,13 +174,11 @@ void PepperMessageFilter::OnConnectTcp(int routing_id,
                                        uint16 port) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  net::URLRequestContext* req_context =
-      request_context_->GetURLRequestContext();
   net::HostResolver::RequestInfo request_info(net::HostPortPair(host, port));
 
   // The lookup request will delete itself on completion.
   LookupRequest* lookup_request =
-      new LookupRequest(this, req_context->host_resolver(),
+      new LookupRequest(this, resource_context_->host_resolver(),
                         routing_id, request_id, request_info);
   lookup_request->Start();
 }
@@ -279,3 +278,20 @@ void PepperMessageFilter::ConnectTcpAddressOnWorkerThread(
 }
 
 #endif  // ENABLE_FLAPPER_HACKS
+
+void PepperMessageFilter::OnGetLocalTimeZoneOffset(base::Time t,
+                                                   double* result) {
+  // Explode it to local time and then unexplode it as if it were UTC. Also
+  // explode it to UTC and unexplode it (this avoids mismatching rounding or
+  // lack thereof). The time zone offset is their difference.
+  //
+  // The reason for this processing being in the browser process is that on
+  // Linux, the localtime calls require filesystem access prohibited by the
+  // sandbox.
+  base::Time::Exploded exploded;
+  t.LocalExplode(&exploded);
+  base::Time adj_time = base::Time::FromUTCExploded(exploded);
+  t.UTCExplode(&exploded);
+  base::Time cur = base::Time::FromUTCExploded(exploded);
+  *result = (adj_time - cur).InSecondsF();
+}

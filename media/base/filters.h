@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,11 +27,13 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time.h"
-#include "base/scoped_ptr.h"
 #include "media/base/media_format.h"
 #include "media/base/video_frame.h"
+
+struct AVStream;
 
 namespace media {
 
@@ -43,6 +45,19 @@ class FilterHost;
 
 struct PipelineStatistics;
 
+// Used to specify video preload states. They are "hints" to the browser about
+// how aggressively the browser should load and buffer data.
+// Please see the HTML5 spec for the descriptions of these values:
+// http://www.w3.org/TR/html5/video.html#attr-media-preload
+//
+// Enum values must match the values in WebCore::MediaPlayer::Preload and
+// there will be assertions at compile time if they do not match.
+enum Preload {
+  NONE,
+  METADATA,
+  AUTO,
+};
+
 // Used for completing asynchronous methods.
 typedef Callback0::Type FilterCallback;
 
@@ -52,9 +67,6 @@ typedef Callback1<const PipelineStatistics&>::Type StatisticsCallback;
 class Filter : public base::RefCountedThreadSafe<Filter> {
  public:
   Filter();
-
-  // Return the major mime type for this filter.
-  virtual const char* major_mime_type() const;
 
   // Sets the private member |host_|. This is the first method called by
   // the FilterHost after a filter is created.  The host holds a strong
@@ -115,12 +127,6 @@ class DataSource : public Filter {
   typedef Callback1<size_t>::Type ReadCallback;
   static const size_t kReadError = static_cast<size_t>(-1);
 
-  virtual bool IsUrlSupported(const std::string& url);
-
-  // Initialize a DataSource for the given URL, executing the callback upon
-  // completion.
-  virtual void Initialize(const std::string& url, FilterCallback* callback) = 0;
-
   // Reads |size| bytes from |position| into |data|. And when the read is done
   // or failed, |read_callback| is called with the number of bytes read or
   // kReadError in case of error.
@@ -136,42 +142,31 @@ class DataSource : public Filter {
   // Returns true if we are performing streaming. In this case seeking is
   // not possible.
   virtual bool IsStreaming() = 0;
+
+  // Alert the DataSource that the video preload value has been changed.
+  virtual void SetPreload(Preload preload) = 0;
 };
-
-
-class Demuxer : public Filter {
- public:
-  // Initialize a Demuxer with the given DataSource, executing the callback upon
-  // completion.
-  virtual void Initialize(DataSource* data_source,
-                          FilterCallback* callback) = 0;
-
-  // Returns the number of streams available
-  virtual size_t GetNumberOfStreams() = 0;
-
-  // Returns the stream for the given index, NULL otherwise
-  virtual scoped_refptr<DemuxerStream> GetStream(int stream_id) = 0;
-};
-
 
 class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
  public:
+  enum Type {
+    UNKNOWN,
+    AUDIO,
+    VIDEO,
+    NUM_TYPES,  // Always keep this entry as the last one!
+  };
+
   // Schedules a read.  When the |read_callback| is called, the downstream
   // filter takes ownership of the buffer by AddRef()'ing the buffer.
   //
   // TODO(scherkus): switch Read() callback to scoped_refptr<>.
   virtual void Read(Callback1<Buffer*>::Type* read_callback) = 0;
 
-  // Given a class that supports the |Interface| and a related static method
-  // interface_id(), which returns a const char*, this method returns true if
-  // the class returns an interface pointer and assigns the pointer to
-  // |interface_out|.  Otherwise this method returns false.
-  template <class Interface>
-  bool QueryInterface(Interface** interface_out) {
-    void* i = QueryInterface(Interface::interface_id());
-    *interface_out = reinterpret_cast<Interface*>(i);
-    return (NULL != i);
-  };
+  // Returns an |AVStream*| if supported, or NULL.
+  virtual AVStream* GetAVStream();
+
+  // Returns the type of stream.
+  virtual Type type() = 0;
 
   // Returns the media format of this stream.
   virtual const MediaFormat& media_format() = 0;
@@ -179,23 +174,22 @@ class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
   virtual void EnableBitstreamConverter() = 0;
 
  protected:
-  // Optional method that is implemented by filters that support extended
-  // interfaces.  The filter should return a pointer to the interface
-  // associated with the |interface_id| string if they support it, otherwise
-  // return NULL to indicate the interface is unknown.  The derived filter
-  // should NOT AddRef() the interface.  The DemuxerStream::QueryInterface()
-  // public template function will assign the interface to a scoped_refptr<>.
-  virtual void* QueryInterface(const char* interface_id);
-
   friend class base::RefCountedThreadSafe<DemuxerStream>;
   virtual ~DemuxerStream();
+};
+
+class Demuxer : public Filter {
+ public:
+  // Returns the given stream type, or NULL if that type is not present.
+  virtual scoped_refptr<DemuxerStream> GetStream(DemuxerStream::Type type) = 0;
+
+  // Alert the Demuxer that the video preload value has been changed.
+  virtual void SetPreload(Preload preload) = 0;
 };
 
 
 class VideoDecoder : public Filter {
  public:
-  virtual const char* major_mime_type() const;
-
   // Initialize a VideoDecoder with the given DemuxerStream, executing the
   // callback upon completion.
   // stats_callback is used to update global pipeline statistics.
@@ -238,8 +232,6 @@ class VideoDecoder : public Filter {
 
 class AudioDecoder : public Filter {
  public:
-  virtual const char* major_mime_type() const;
-
   // Initialize a AudioDecoder with the given DemuxerStream, executing the
   // callback upon completion.
   // stats_callback is used to update global pipeline statistics.
@@ -277,8 +269,6 @@ class AudioDecoder : public Filter {
 
 class VideoRenderer : public Filter {
  public:
-  virtual const char* major_mime_type() const;
-
   // Initialize a VideoRenderer with the given VideoDecoder, executing the
   // callback upon completion.
   virtual void Initialize(VideoDecoder* decoder, FilterCallback* callback,
@@ -292,8 +282,6 @@ class VideoRenderer : public Filter {
 
 class AudioRenderer : public Filter {
  public:
-  virtual const char* major_mime_type() const;
-
   // Initialize a AudioRenderer with the given AudioDecoder, executing the
   // callback upon completion.
   virtual void Initialize(AudioDecoder* decoder, FilterCallback* callback) = 0;

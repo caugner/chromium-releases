@@ -4,23 +4,29 @@
 
 #include "chrome/utility/utility_thread.h"
 
+#include <stddef.h>
 #include <vector>
 
-#include "base/file_util.h"
-#include "base/path_service.h"
+#include "base/base64.h"
+#include "base/file_path.h"
+#include "base/json/json_reader.h"
+#include "base/logging.h"
+#include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_unpacker.h"
 #include "chrome/common/extensions/update_manifest.h"
-#include "chrome/common/indexed_db_key.h"
-#include "chrome/common/serialized_script_value.h"
 #include "chrome/common/utility_messages.h"
 #include "chrome/common/web_resource/web_resource_unpacker.h"
 #include "content/common/child_process.h"
+#include "content/common/indexed_db_key.h"
+#include "content/common/serialized_script_value.h"
+#include "ipc/ipc_message_macros.h"
+#include "printing/backend/print_backend.h"
 #include "printing/page_range.h"
-#include "printing/units.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/idb_bindings.h"
@@ -28,10 +34,10 @@
 
 #if defined(OS_WIN)
 #include "app/win/iat_patch_function.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/path_service.h"
 #include "base/win/scoped_handle.h"
-#include "printing/native_metafile_factory.h"
-#include "printing/native_metafile.h"
+#include "printing/emf_win.h"
 #endif
 
 namespace {
@@ -61,12 +67,14 @@ bool UtilityThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(UtilityMsg_UnpackWebResource, OnUnpackWebResource)
     IPC_MESSAGE_HANDLER(UtilityMsg_ParseUpdateManifest, OnParseUpdateManifest)
     IPC_MESSAGE_HANDLER(UtilityMsg_DecodeImage, OnDecodeImage)
+    IPC_MESSAGE_HANDLER(UtilityMsg_DecodeImageBase64, OnDecodeImageBase64)
     IPC_MESSAGE_HANDLER(UtilityMsg_RenderPDFPagesToMetafile,
                         OnRenderPDFPagesToMetafile)
     IPC_MESSAGE_HANDLER(UtilityMsg_IDBKeysFromValuesAndKeyPath,
                         OnIDBKeysFromValuesAndKeyPath)
     IPC_MESSAGE_HANDLER(UtilityMsg_InjectIDBKey,
                         OnInjectIDBKey)
+    IPC_MESSAGE_HANDLER(UtilityMsg_ParseJSON, OnParseJSON)
     IPC_MESSAGE_HANDLER(UtilityMsg_BatchMode_Started, OnBatchModeStarted)
     IPC_MESSAGE_HANDLER(UtilityMsg_BatchMode_Finished, OnBatchModeFinished)
     IPC_MESSAGE_HANDLER(UtilityMsg_GetPrinterCapsAndDefaults,
@@ -128,6 +136,22 @@ void UtilityThread::OnDecodeImage(
   ReleaseProcessIfNeeded();
 }
 
+void UtilityThread::OnDecodeImageBase64(
+    const std::string& encoded_string) {
+  std::string decoded_string;
+
+  if (!base::Base64Decode(encoded_string, &decoded_string)) {
+    Send(new UtilityHostMsg_DecodeImage_Failed());
+    return;
+  }
+
+  std::vector<unsigned char> decoded_vector(decoded_string.size());
+  for (size_t i = 0; i < decoded_string.size(); ++i) {
+    decoded_vector[i] = static_cast<unsigned char>(decoded_string[i]);
+  }
+
+  OnDecodeImage(decoded_vector);
+}
 
 void UtilityThread::OnRenderPDFPagesToMetafile(
     base::PlatformFile pdf_file,
@@ -137,15 +161,12 @@ void UtilityThread::OnRenderPDFPagesToMetafile(
     const std::vector<printing::PageRange>& page_ranges) {
   bool succeeded = false;
 #if defined(OS_WIN)
-  scoped_ptr<printing::NativeMetafile> metafile(
-      printing::NativeMetafileFactory::CreateMetafile());
   int highest_rendered_page_number = 0;
   succeeded = RenderPDFToWinMetafile(pdf_file,
                                      metafile_path,
                                      render_area,
                                      render_dpi,
                                      page_ranges,
-                                     metafile.get(),
                                      &highest_rendered_page_number);
   if (succeeded) {
     Send(new UtilityHostMsg_RenderPDFPagesToMetafile_Succeeded(
@@ -211,7 +232,6 @@ bool UtilityThread::RenderPDFToWinMetafile(
     const gfx::Rect& render_area,
     int render_dpi,
     const std::vector<printing::PageRange>& page_ranges,
-    printing::NativeMetafile* metafile,
     int* highest_rendered_page_number) {
   *highest_rendered_page_number = -1;
   base::win::ScopedHandle file(pdf_file);
@@ -261,16 +281,17 @@ bool UtilityThread::RenderPDFToWinMetafile(
   if (!get_info_proc(&buffer.front(), buffer.size(), &total_page_count, NULL))
     return false;
 
-  metafile->CreateFileBackedDc(NULL, NULL, metafile_path);
+  printing::Emf metafile;
+  metafile.InitToFile(metafile_path);
   // Since we created the metafile using the screen DPI (but we actually want
   // the PDF DLL to print using the passed in render_dpi, we apply the following
   // transformation.
-  SetGraphicsMode(metafile->hdc(), GM_ADVANCED);
+  SetGraphicsMode(metafile.context(), GM_ADVANCED);
   XFORM xform = {0};
   int screen_dpi = GetDeviceCaps(GetDC(NULL), LOGPIXELSX);
   xform.eM11 = xform.eM22 =
       static_cast<float>(screen_dpi) / static_cast<float>(render_dpi);
-  ModifyWorldTransform(metafile->hdc(), &xform, MWT_LEFTMULTIPLY);
+  ModifyWorldTransform(metafile.context(), &xform, MWT_LEFTMULTIPLY);
 
   bool ret = false;
   std::vector<printing::PageRange>::const_iterator iter;
@@ -278,18 +299,20 @@ bool UtilityThread::RenderPDFToWinMetafile(
     for (int page_number = iter->from; page_number <= iter->to; ++page_number) {
       if (page_number >= total_page_count)
         break;
-      metafile->StartPage();
+      // The underlying metafile is of type Emf and ignores the arguments passed
+      // to StartPage.
+      metafile.StartPage(gfx::Size(), gfx::Point(), 1);
       if (render_proc(&buffer.front(), buffer.size(), page_number,
-                      metafile->hdc(), render_dpi, render_dpi,
+                      metafile.context(), render_dpi, render_dpi,
                       render_area.x(), render_area.y(), render_area.width(),
                       render_area.height(), true, false, true, true))
         if (*highest_rendered_page_number < page_number)
           *highest_rendered_page_number = page_number;
         ret = true;
-      metafile->EndPage();
+      metafile.FinishPage();
     }
   }
-  metafile->CloseDc();
+  metafile.FinishDocument();
   return ret;
 }
 #endif  // defined(OS_WIN)
@@ -319,6 +342,21 @@ void UtilityThread::OnInjectIDBKey(const IndexedDBKey& key,
   SerializedScriptValue new_value(webkit_glue::InjectIDBKey(key, value,
                                                               key_path));
   Send(new UtilityHostMsg_InjectIDBKey_Finished(new_value));
+  ReleaseProcessIfNeeded();
+}
+
+void UtilityThread::OnParseJSON(const std::string& json) {
+  int error_code;
+  std::string error;
+  Value* value =
+      base::JSONReader::ReadAndReturnError(json, false, &error_code, &error);
+  if (value) {
+    ListValue wrapper;
+    wrapper.Append(value);
+    Send(new UtilityHostMsg_ParseJSON_Succeeded(wrapper));
+  } else {
+    Send(new UtilityHostMsg_ParseJSON_Failed(error));
+  }
   ReleaseProcessIfNeeded();
 }
 

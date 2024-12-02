@@ -6,15 +6,15 @@
   'variables': {
     'test_shell_windows_resource_files': [
       'resources/test_shell.rc',
-      'resources/pan_east.cur',
-      'resources/pan_middle.cur',
-      'resources/pan_north.cur',
-      'resources/pan_north_east.cur',
-      'resources/pan_north_west.cur',
-      'resources/pan_south.cur',
-      'resources/pan_south_east.cur',
-      'resources/pan_south_west.cur',
-      'resources/pan_west.cur',
+      '../../glue/resources/pan_east.cur',
+      '../../glue/resources/pan_middle.cur',
+      '../../glue/resources/pan_north.cur',
+      '../../glue/resources/pan_north_east.cur',
+      '../../glue/resources/pan_north_west.cur',
+      '../../glue/resources/pan_south.cur',
+      '../../glue/resources/pan_south_east.cur',
+      '../../glue/resources/pan_south_west.cur',
+      '../../glue/resources/pan_west.cur',
       'resources/small.ico',
       'resources/test_shell.ico',
       'resource.h',
@@ -323,7 +323,7 @@
           ],
         }, { # OS != "mac"
           'dependencies': [
-            '<(DEPTH)/ui/gfx/gfx.gyp:gfx_resources',
+            '<(DEPTH)/ui/ui.gyp:gfx_resources',
             '<(DEPTH)/net/net.gyp:net_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
@@ -370,6 +370,7 @@
         '../../blob/blob_storage_controller_unittest.cc',
         '../../blob/blob_url_request_job_unittest.cc',
         '../../blob/deletable_file_reference_unittest.cc',
+        '../../database/database_connections_unittest.cc',
         '../../database/databases_table_unittest.cc',
         '../../database/database_tracker_unittest.cc',
         '../../database/database_util_unittest.cc',
@@ -380,6 +381,7 @@
         '../../fileapi/file_system_usage_cache_unittest.cc',
         '../../fileapi/file_system_usage_tracker_unittest.cc',
         '../../fileapi/file_system_util_unittest.cc',
+        '../../fileapi/sandbox_mount_point_provider_unittest.cc',
         '../../fileapi/webfilewriter_base_unittest.cc',
         '../../glue/bookmarklet_unittest.cc',
         '../../glue/context_menu_unittest.cc',
@@ -400,7 +402,6 @@
         '../../glue/webcursor_unittest.cc',
         '../../glue/webframe_unittest.cc',
         '../../glue/webkit_glue_unittest.cc',
-        '../../glue/webpasswordautocompletelistener_unittest.cc',
         '../../glue/webview_unittest.cc',
         '../../mocks/mock_resource_loader_bridge.h',
         '../../mocks/mock_webframe.cc',
@@ -420,6 +421,7 @@
         '../../plugins/ppapi/ppapi_unittest.h',
         '../../plugins/ppapi/resource_tracker_unittest.cc',
         '../../plugins/ppapi/url_request_info_unittest.cc',
+        '../../quota/quota_database_unittest.cc',
         '../webcore_unit_tests/BMPImageDecoder_unittest.cpp',
         '../webcore_unit_tests/ICOImageDecoder_unittest.cpp',
         'event_listener_unittest.cc',
@@ -458,6 +460,11 @@
           'sources!': [
              # TODO(port)
             '../../../skia/ext/platform_canvas_unittest.cc',
+          ],
+        }],
+        ['chromeos==1', {
+          'sources': [
+            '../../chromeos/fileapi/file_access_permissions_unittest.cc',
           ],
         }],
         ['OS=="mac"', {

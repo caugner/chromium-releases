@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_CONTEXT_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_CONTEXT_H_
 
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "webkit/quota/special_storage_policy.h"
 
 class FilePath;
@@ -16,15 +16,12 @@ namespace base {
 class MessageLoopProxy;
 }
 
-namespace quota {
-class SpecialStoragePolicy;
-}
-
 namespace fileapi {
 
 class FileSystemContext;
 class FileSystemPathManager;
 class FileSystemUsageTracker;
+class SandboxMountPointProvider;
 
 struct DefaultContextDeleter;
 
@@ -40,7 +37,8 @@ class FileSystemContext
       const FilePath& profile_path,
       bool is_incognito,
       bool allow_file_access_from_files,
-      bool unlimited_quota);
+      bool unlimited_quota,
+      FileSystemPathManager* path_manager);
   ~FileSystemContext();
 
   // This method can be called on any thread.
@@ -54,6 +52,7 @@ class FileSystemContext
  private:
   friend struct DefaultContextDeleter;
   void DeleteOnCorrectThread() const;
+  SandboxMountPointProvider* sandbox_provider() const;
 
   scoped_refptr<base::MessageLoopProxy> file_message_loop_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;

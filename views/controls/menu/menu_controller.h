@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 #include <set>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "views/controls/menu/menu_delegate.h"
 #include "views/controls/menu/menu_item_view.h"
@@ -93,6 +93,10 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   void OnMouseReleased(SubmenuView* source, const MouseEvent& event);
   void OnMouseMoved(SubmenuView* source, const MouseEvent& event);
   void OnMouseEntered(SubmenuView* source, const MouseEvent& event);
+#if defined(OS_LINUX)
+  bool OnMouseWheel(SubmenuView* source, const MouseWheelEvent& event);
+#endif
+
   bool GetDropFormats(
       SubmenuView* source,
       int* formats,
@@ -153,8 +157,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
     gfx::Rect monitor_bounds;
   };
 
-  // Used by GetMenuPartByScreenCoordinate to indicate the menu part at a
-  // particular location.
+  // Used by GetMenuPart to indicate the menu part at a particular location.
   struct MenuPart {
     // Type of part.
     enum Type {
@@ -184,7 +187,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
     // parent of the menu item the user clicked on. Otherwise this is NULL.
     MenuItemView* parent;
 
-    // If type is SCROLL_*, this is the submenu the mouse is over.
+    // This is the submenu the mouse is over.
     SubmenuView* submenu;
   };
 
@@ -238,7 +241,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // when blocking. This schedules the loop to quit.
   void Accept(MenuItemView* item, int mouse_event_flags);
 
-  bool ShowSiblingMenu(SubmenuView* source, const MouseEvent& e);
+  bool ShowSiblingMenu(SubmenuView* source, const MouseEvent& event);
 
   // Closes all menus, including any menus of nested invocations of Run.
   void CloseAllNestedMenus();
@@ -260,10 +263,14 @@ class MenuController : public MessageLoopForUI::Dispatcher {
                         int y,
                         MenuPart::Type* part);
 
-  // Returns the target for the mouse event.
-  MenuPart GetMenuPartByScreenCoordinate(SubmenuView* source,
-                                         int source_x,
-                                         int source_y);
+  // Returns the target for the mouse event. The coordinates are in terms of
+  // source's scroll view container.
+  MenuPart GetMenuPart(SubmenuView* source, const gfx::Point& source_loc);
+
+  // Returns the target for mouse events. The search is done through |item| and
+  // all its parents.
+  MenuPart GetMenuPartByScreenCoordinateUsingMenu(MenuItemView* item,
+                                                  const gfx::Point& screen_loc);
 
   // Implementation of GetMenuPartByScreenCoordinate for a single menu. Returns
   // true if the supplied SubmenuView contains the location in terms of the
@@ -390,11 +397,11 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // Sends a mouse release event to the current |active_mouse_view_| and sets
   // it to null.
   void SendMouseReleaseToActiveView(SubmenuView* event_source,
-                                    const MouseEvent& event,
-                                    bool cancel);
+                                    const MouseEvent& event);
 
-  // Variant of above that sends a cancel mouse release.
-  void SendMouseReleaseToActiveView();
+  // Sends a mouse capture lost event to the current |active_mouse_view_| and
+  // sets it to null.
+  void SendMouseCaptureLostToActiveView();
 
   // The active instance.
   static MenuController* active_instance_;

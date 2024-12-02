@@ -12,19 +12,22 @@
 #include "base/win/windows_version.h"
 #include "grit/app_strings.h"
 #include "skia/ext/skia_utils_win.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
-#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/range/range.h"
 #include "ui/gfx/native_theme_win.h"
 #include "views/controls/label.h"
-#include "views/controls/menu/menu_win.h"
 #include "views/controls/menu/menu_2.h"
+#include "views/controls/menu/menu_win.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/controls/textfield/textfield.h"
+#include "views/controls/textfield/textfield_controller.h"
 #include "views/focus/focus_manager.h"
 #include "views/focus/focus_util_win.h"
 #include "views/metrics.h"
@@ -336,11 +339,11 @@ bool NativeTextfieldWin::IsIMEComposing() const {
   return composition_size > 0;
 }
 
-void NativeTextfieldWin::GetSelectedRange(TextRange* range) const {
+void NativeTextfieldWin::GetSelectedRange(ui::Range* range) const {
   NOTREACHED();
 }
 
-void NativeTextfieldWin::SelectRange(const TextRange& range) {
+void NativeTextfieldWin::SelectRange(const ui::Range& range) {
   NOTREACHED();
 }
 
@@ -349,11 +352,11 @@ size_t NativeTextfieldWin::GetCursorPosition() const {
   return 0U;
 }
 
-bool NativeTextfieldWin::HandleKeyPressed(const views::KeyEvent& e) {
+bool NativeTextfieldWin::HandleKeyPressed(const views::KeyEvent& event) {
   return false;
 }
 
-bool NativeTextfieldWin::HandleKeyReleased(const views::KeyEvent& e) {
+bool NativeTextfieldWin::HandleKeyReleased(const views::KeyEvent& event) {
   return false;
 }
 
@@ -361,6 +364,10 @@ void NativeTextfieldWin::HandleFocus() {
 }
 
 void NativeTextfieldWin::HandleBlur() {
+}
+
+TextInputClient* NativeTextfieldWin::GetTextInputClient() {
+  return NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -441,10 +448,11 @@ void NativeTextfieldWin::InitializeAccessibilityInfo() {
     // We expect it to be a Label preceeding this view (if it exists).
     string16 name;
     View* label_view = parent->GetChildViewAt(label_index);
-    if (label_view->GetClassName() == Label::kViewClassName &&
-        label_view->GetAccessibleName(&name)) {
+    if (label_view->GetClassName() == Label::kViewClassName) {
+      ui::AccessibleViewState state;
+      label_view->GetAccessibleState(&state);
       hr = pAccPropServices->SetHwndPropStr(m_hWnd, OBJID_CLIENT,
-          CHILDID_SELF, PROPID_ACC_NAME, name.c_str());
+          CHILDID_SELF, PROPID_ACC_NAME, state.name.c_str());
     }
   }
 }
@@ -598,8 +606,6 @@ LRESULT NativeTextfieldWin::OnImeEndComposition(UINT message,
   // this case, we need to update the find results when a composition is
   // finished or canceled.
   textfield_->SyncText();
-  if (textfield_->GetController())
-    textfield_->GetController()->ContentsChanged(textfield_, GetText());
   return DefWindowProc(message, wparam, lparam);
 }
 
@@ -659,6 +665,7 @@ void NativeTextfieldWin::OnKeyDown(TCHAR key, UINT repeat_count, UINT flags) {
       if (!(flags & KF_ALTDOWN) && (GetKeyState(VK_SHIFT) >= 0) &&
           (GetKeyState(VK_CONTROL) >= 0))
         return;
+      // Fall through to the next case (ie. Shift-Insert == Ctrl-V).
     case 'V':
       if ((flags & KF_ALTDOWN) ||
           (GetKeyState((key == 'V') ? VK_CONTROL : VK_SHIFT) >= 0))
@@ -867,9 +874,9 @@ void NativeTextfieldWin::OnNCPaint(HRGN region) {
   int classic_state =
       (!textfield_->IsEnabled() || textfield_->read_only()) ? DFCS_INACTIVE : 0;
 
-  gfx::NativeTheme::instance()->PaintTextField(hdc, part, state, classic_state,
-                                               &window_rect, bg_color_, false,
-                                               true);
+  gfx::NativeThemeWin::instance()->PaintTextField(hdc, part, state,
+                                                  classic_state, &window_rect,
+                                                  bg_color_, false, true);
 
   // NOTE: I tried checking the transparent property of the theme and invoking
   // drawParentBackground, but it didn't seem to make a difference.
@@ -934,7 +941,7 @@ void NativeTextfieldWin::HandleKeystroke() {
   const MSG* msg = GetCurrentMessage();
   ScopedFreeze freeze(this, GetTextObjectModel());
 
-  Textfield::Controller* controller = textfield_->GetController();
+  TextfieldController* controller = textfield_->GetController();
   bool handled = false;
   if (controller) {
     KeyEvent event(*msg);
@@ -1011,8 +1018,6 @@ void NativeTextfieldWin::OnAfterPossibleChange(bool should_redraw_text) {
     }
     textfield_->SyncText();
     UpdateAccessibleValue(textfield_->text());
-    if (textfield_->GetController())
-      textfield_->GetController()->ContentsChanged(textfield_, new_text);
 
     if (should_redraw_text) {
       CHARRANGE original_sel;

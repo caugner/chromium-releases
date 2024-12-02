@@ -6,11 +6,15 @@
 #define CHROME_TEST_TESTING_PROFILE_H_
 #pragma once
 
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
-#include "base/scoped_temp_dir.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/timer.h"
 #include "chrome/browser/profiles/profile.h"
+
+namespace content {
+class ResourceContextGetter;
+}
 
 namespace history {
 class TopSites;
@@ -20,11 +24,13 @@ namespace net {
 class CookieMonster;
 }
 
+namespace quota {
+class SpecialStoragePolicy;
+}
+
 class AutocompleteClassifier;
 class BookmarkModel;
-class BrowserThemeProvider;
 class CommandLine;
-class DesktopNotificationService;
 class ExtensionPrefs;
 class ExtensionPrefStore;
 class ExtensionPrefValueMap;
@@ -36,12 +42,17 @@ class GeolocationPermissionContext;
 class HistoryService;
 class HostContentSettingsMap;
 class PrefService;
+class ProfileDependencyManager;
 class ProfileSyncService;
 class SessionService;
 class TemplateURLModel;
 class TestingPrefService;
-class URLRequestContextGetter;
+class ThemeService;
 class WebKitContext;
+
+namespace net {
+class URLRequestContextGetter;
+}
 
 class TestingProfile : public Profile {
  public:
@@ -113,16 +124,13 @@ class TestingProfile : public Profile {
   // Sets the TemplateURLModel. Takes ownership of it.
   void SetTemplateURLModel(TemplateURLModel* model);
 
-  // Uses a specific theme provider for this profile. TestingProfile takes
-  // ownership of |theme_provider|.
-  void UseThemeProvider(BrowserThemeProvider* theme_provider);
-
   // Creates an ExtensionService initialized with the testing profile and
   // returns it. The profile keeps its own copy of a scoped_refptr to the
   // ExtensionService to make sure that is still alive to be notified when the
   // profile is destroyed.
   ExtensionService* CreateExtensionService(const CommandLine* command_line,
-                                           const FilePath& install_directory);
+                                           const FilePath& install_directory,
+                                           bool autoupdate_enabled);
 
   TestingPrefService* GetTestingPrefService();
 
@@ -130,9 +138,9 @@ class TestingProfile : public Profile {
 
   virtual FilePath GetPath();
 
-  // Sets whether we're off the record. Default is false.
-  void set_off_the_record(bool off_the_record) {
-    off_the_record_ = off_the_record;
+  // Sets whether we're incognito. Default is false.
+  void set_incognito(bool incognito) {
+    incognito_ = incognito;
   }
   virtual bool IsOffTheRecord();
   // Assumes ownership.
@@ -159,9 +167,6 @@ class TestingProfile : public Profile {
   virtual FaviconService* GetFaviconService(ServiceAccessType access);
   virtual HistoryService* GetHistoryService(ServiceAccessType access);
   virtual HistoryService* GetHistoryServiceWithoutCreating();
-  void set_has_history_service(bool has_history_service) {
-    has_history_service_ = has_history_service;
-  }
   // The CookieMonster will only be returned if a Context has been created. Do
   // this by calling CreateRequestContext(). See the note at GetRequestContext
   // for more information.
@@ -185,12 +190,6 @@ class TestingProfile : public Profile {
   virtual fileapi::FileSystemContext* GetFileSystemContext();
   virtual BrowserSignin* GetBrowserSignin();
   virtual bool HasCreatedDownloadManager() const;
-  virtual void InitThemes();
-  virtual void SetTheme(const Extension* extension) {}
-  virtual void SetNativeTheme() {}
-  virtual void ClearTheme() {}
-  virtual const Extension* GetTheme();
-  virtual BrowserThemeProvider* GetThemeProvider();
 
   // Returns a testing ContextGetter (if one has been created via
   // CreateRequestContext) or NULL. This is not done on-demand for two reasons:
@@ -200,14 +199,20 @@ class TestingProfile : public Profile {
   // leaking if they called this method without the necessary IO thread. This
   // getter is currently only capable of returning a Context that helps test
   // the CookieMonster. See implementation comments for more details.
-  virtual URLRequestContextGetter* GetRequestContext();
+  virtual net::URLRequestContextGetter* GetRequestContext();
+  virtual net::URLRequestContextGetter* GetRequestContextForPossibleApp(
+      const Extension* installed_app);
   void CreateRequestContext();
   // Clears out the created request context (which must be done before shutting
   // down the IO thread to avoid leaks).
   void ResetRequestContext();
 
-  virtual URLRequestContextGetter* GetRequestContextForMedia();
-  virtual URLRequestContextGetter* GetRequestContextForExtensions();
+  virtual net::URLRequestContextGetter* GetRequestContextForMedia();
+  virtual net::URLRequestContextGetter* GetRequestContextForExtensions();
+  virtual net::URLRequestContextGetter* GetRequestContextForIsolatedApp(
+      const std::string& app_id);
+
+  virtual const content::ResourceContext& GetResourceContext();
 
   virtual net::SSLConfigService* GetSSLConfigService();
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher();
@@ -244,21 +249,15 @@ class TestingProfile : public Profile {
   virtual WebKitContext* GetWebKitContext();
   virtual WebKitContext* GetOffTheRecordWebKitContext();
   virtual void MarkAsCleanShutdown() {}
-  virtual void InitExtensions() {}
+  virtual void InitExtensions(bool extensions_enabled) {}
   virtual void InitPromoResources() {}
   virtual void InitRegisteredProtocolHandlers() {}
   virtual NTPResourceCache* GetNTPResourceCache();
 
-  virtual DesktopNotificationService* GetDesktopNotificationService();
-  virtual BackgroundContentsService* GetBackgroundContentsService() const;
   virtual StatusTray* GetStatusTray();
   virtual FilePath last_selected_directory();
   virtual void set_last_selected_directory(const FilePath& path);
 #if defined(OS_CHROMEOS)
-  virtual chromeos::ProxyConfigServiceImpl*
-      GetChromeOSProxyConfigServiceImpl() {
-    return NULL;
-  }
   virtual void SetupChromeOSEnterpriseExtensionObserver() {
   }
   virtual void InitChromeOSPreferences() {
@@ -289,6 +288,11 @@ class TestingProfile : public Profile {
   virtual ChromeURLDataManager* GetChromeURLDataManager();
   virtual prerender::PrerenderManager* GetPrerenderManager();
   virtual PrefService* GetOffTheRecordPrefs();
+
+  // TODO(jam): remove me once webkit_context_unittest.cc doesn't use Profile
+  // and gets the quota::SpecialStoragePolicy* from whatever ends up replacing
+  // it in the content module.
+  quota::SpecialStoragePolicy* GetSpecialStoragePolicy();
 
  protected:
   base::Time start_time_;
@@ -345,23 +349,15 @@ class TestingProfile : public Profile {
   // The SessionService. Defaults to NULL, but can be set using the setter.
   scoped_refptr<SessionService> session_service_;
 
-  // The theme provider. Created lazily by GetThemeProvider()/InitThemes().
-  scoped_ptr<BrowserThemeProvider> theme_provider_;
-  bool created_theme_provider_;
-
   // Internally, this is a TestURLRequestContextGetter that creates a dummy
   // request context. Currently, only the CookieMonster is hooked up.
-  scoped_refptr<URLRequestContextGetter> request_context_;
-  scoped_refptr<URLRequestContextGetter> extensions_request_context_;
-
-  // Do we have a history service? This defaults to the value of
-  // history_service, but can be explicitly set.
-  bool has_history_service_;
+  scoped_refptr<net::URLRequestContextGetter> request_context_;
+  scoped_refptr<net::URLRequestContextGetter> extensions_request_context_;
 
   std::wstring id_;
 
-  bool off_the_record_;
-  scoped_ptr<Profile> off_the_record_profile_;
+  bool incognito_;
+  scoped_ptr<Profile> incognito_profile_;
 
   // Did the last session exit cleanly? Default is true.
   bool last_session_exited_cleanly_;
@@ -377,7 +373,6 @@ class TestingProfile : public Profile {
   scoped_refptr<GeolocationContentSettingsMap>
       geolocation_content_settings_map_;
   scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
-  scoped_ptr<DesktopNotificationService> desktop_notification_service_;
 
   // Find bar state.  Created lazily by GetFindBarState().
   scoped_ptr<FindBarState> find_bar_state_;
@@ -405,6 +400,13 @@ class TestingProfile : public Profile {
   ScopedTempDir temp_dir_;
 
   scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
+
+  scoped_refptr<prerender::PrerenderManager> prerender_manager_;
+
+  // We keep a weak pointer to the dependency manager we want to notify on our
+  // death. Defaults to the Singleton implementation but overridable for
+  // testing.
+  ProfileDependencyManager* profile_dependency_manager_;
 };
 
 // A profile that derives from another profile.  This does not actually

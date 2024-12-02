@@ -8,12 +8,9 @@
 
 #include <list>
 
-#include "chrome/common/child_process_host.h"
-#include "chrome/common/child_process_info.h"
 #include "content/browser/child_process_launcher.h"
-#include "content/browser/renderer_host/resource_message_filter.h"
-
-class ResourceDispatcherHost;
+#include "content/common/child_process_host.h"
+#include "content/common/child_process_info.h"
 
 // Plugins/workers and other child processes that live on the IO thread should
 // derive from this class.
@@ -57,21 +54,7 @@ class BrowserChildProcessHost : public ChildProcessHost,
   };
 
  protected:
-  // |resource_dispatcher_host| may be NULL to indicate none is needed for
-  // this process type.
-  // |url_request_context_getter| allows derived classes to override the
-  // net::URLRequestContext.
-  BrowserChildProcessHost(
-      ChildProcessInfo::ProcessType type,
-      ResourceDispatcherHost* resource_dispatcher_host,
-      ResourceMessageFilter::URLRequestContextOverride*
-          url_request_context_override);
-
-  // A convenient constructor for those classes that want to use the default
-  // net::URLRequestContext.
-  BrowserChildProcessHost(
-      ChildProcessInfo::ProcessType type,
-      ResourceDispatcherHost* resource_dispatcher_host);
+  explicit BrowserChildProcessHost(ChildProcessInfo::ProcessType type);
 
   // Derived classes call this to launch the child process asynchronously.
   void Launch(
@@ -116,14 +99,7 @@ class BrowserChildProcessHost : public ChildProcessHost,
   // the host list. Calls ChildProcessHost::ForceShutdown
   virtual void ForceShutdown();
 
-  ResourceDispatcherHost* resource_dispatcher_host() {
-    return resource_dispatcher_host_;
-  }
-
  private:
-  void Initialize(ResourceMessageFilter::URLRequestContextOverride*
-      url_request_context_override);
-
   // By using an internal class as the ChildProcessLauncher::Client, we can
   // intercept OnProcessLaunched and do our own processing before
   // calling the subclass' implementation.
@@ -135,8 +111,6 @@ class BrowserChildProcessHost : public ChildProcessHost,
     BrowserChildProcessHost* host_;
   };
   ClientHook client_;
-  // May be NULL if this current process has no resource dispatcher host.
-  ResourceDispatcherHost* resource_dispatcher_host_;
   scoped_ptr<ChildProcessLauncher> child_process_;
 };
 

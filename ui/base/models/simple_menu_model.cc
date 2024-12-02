@@ -46,6 +46,9 @@ bool SimpleMenuModel::Delegate::GetIconForCommandId(
 void SimpleMenuModel::Delegate::CommandIdHighlighted(int command_id) {
 }
 
+void SimpleMenuModel::Delegate::MenuWillShow() {
+}
+
 void SimpleMenuModel::Delegate::MenuClosed() {
 }
 
@@ -54,6 +57,7 @@ void SimpleMenuModel::Delegate::MenuClosed() {
 
 SimpleMenuModel::SimpleMenuModel(Delegate* delegate)
     : delegate_(delegate),
+      menu_model_delegate_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
 }
 
@@ -245,7 +249,7 @@ int SimpleMenuModel::GetGroupIdAt(int index) const {
   return items_.at(FlipIndex(index)).group_id;
 }
 
-bool SimpleMenuModel::GetIconAt(int index, SkBitmap* icon) const {
+bool SimpleMenuModel::GetIconAt(int index, SkBitmap* icon) {
   if (IsItemDynamicAt(index))
     return delegate_->GetIconForCommandId(GetCommandIdAt(index), icon);
 
@@ -290,6 +294,11 @@ MenuModel* SimpleMenuModel::GetSubmenuModelAt(int index) const {
   return items_.at(FlipIndex(index)).submenu;
 }
 
+void SimpleMenuModel::MenuWillShow() {
+  if (delegate_)
+    delegate_->MenuWillShow();
+}
+
 void SimpleMenuModel::MenuClosed() {
   // Due to how menus work on the different platforms, ActivatedAt will be
   // called after this.  It's more convenient for the delegate to be called
@@ -297,6 +306,11 @@ void SimpleMenuModel::MenuClosed() {
   MessageLoop::current()->PostTask(
       FROM_HERE,
       method_factory_.NewRunnableMethod(&SimpleMenuModel::OnMenuClosed));
+}
+
+void SimpleMenuModel::SetMenuModelDelegate(
+      ui::MenuModelDelegate* menu_model_delegate) {
+  menu_model_delegate_ = menu_model_delegate;
 }
 
 void SimpleMenuModel::OnMenuClosed() {

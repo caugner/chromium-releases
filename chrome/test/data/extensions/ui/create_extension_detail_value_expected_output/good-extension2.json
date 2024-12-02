@@ -2,17 +2,16 @@
   "id": "hpiknbiabeeppbpihjehijgoemciehgk",
   "version": "2",
   "name": "My extension 2",
+  "mayDisable": true,
   "enabled": true,
   "terminated": false,
   "description": "",
-  "permissions": [],
   "allow_reload": false,
   "is_hosted_app": false,
   "order": 2,
   "enabledIncognito": false,
   "wantsFileAccess": false,
   "allowFileAccess": false,
-  "content_scripts": [],
   "views": [
     {
       "path": "bar.html",

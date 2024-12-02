@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,12 @@ namespace gles2 {
 
 class ContextGroup;
 class GLES2Util;
+
+struct DisallowedExtensions {
+  DisallowedExtensions() : multisampling(false) {}
+
+  bool multisampling;
+};
 
 // This class implements the AsyncAPIInterface interface, decoding GLES2
 // commands and calling GL.
@@ -61,6 +67,7 @@ class GLES2Decoder : public CommonDecoder {
   //   true if successful.
   virtual bool Initialize(gfx::GLContext* context,
                           const gfx::Size& size,
+                          const DisallowedExtensions& disallowed_extensions,
                           const char* allowed_extensions,
                           const std::vector<int32>& attribs,
                           GLES2Decoder* parent,
@@ -95,6 +102,11 @@ class GLES2Decoder : public CommonDecoder {
 
   // Sets a callback which is called when a SwapBuffers command is processed.
   virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
+
+  // Sets a callback which is called after a Set/WaitLatch command is processed.
+  // The bool parameter will be true for SetLatch, and false for a WaitLatch
+  // that is blocked. An unblocked WaitLatch will not trigger a callback.
+  virtual void SetLatchCallback(const base::Callback<void(bool)>& callback) = 0;
 
   // Get the service texture ID corresponding to a client texture ID.
   // If no such record is found then return false.

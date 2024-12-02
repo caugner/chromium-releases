@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/ppb_instance.h"
+#include "ppapi/c/ppb_messaging.h"
 #include "ppapi/cpp/common.h"
 #include "ppapi/cpp/dev/surface_3d_dev.h"
 #include "ppapi/cpp/graphics_2d.h"
@@ -23,6 +24,10 @@ namespace {
 
 template <> const char* interface_name<PPB_Instance>() {
   return PPB_INSTANCE_INTERFACE;
+}
+
+template <> const char* interface_name<PPB_Messaging>() {
+  return PPB_MESSAGING_INTERFACE;
 }
 
 }  // namespace
@@ -59,6 +64,10 @@ bool Instance::HandleDocumentLoad(const URLLoader& /*url_loader*/) {
 
 bool Instance::HandleInputEvent(const PP_InputEvent& /*event*/) {
   return false;
+}
+
+void Instance::HandleMessage(const Var& /*message*/) {
+  return;
 }
 
 Var Instance::GetInstanceObject() {
@@ -113,6 +122,13 @@ Var Instance::ExecuteScript(const Var& script, Var* exception) {
                  pp_instance(),
                  script.pp_var(),
                  Var::OutException(exception).get()));
+}
+
+void Instance::PostMessage(const Var& message) {
+  if (!has_interface<PPB_Messaging>())
+    return;
+  get_interface<PPB_Messaging>()->PostMessage(pp_instance(),
+                                              message.pp_var());
 }
 
 void Instance::AddPerInstanceObject(const std::string& interface_name,

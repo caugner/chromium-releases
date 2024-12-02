@@ -6,9 +6,12 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/time.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
+#include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -86,16 +89,24 @@ PP_Var GetProxyForURL(PP_Instance instance, const char* url) {
   return result.Return(dispatcher);
 }
 
-PP_Bool NavigateToURL(PP_Instance instance,
-                      const char* url,
-                      const char* target) {
-  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
-  if (!dispatcher)
-    return PP_FALSE;
+int32_t Navigate(PP_Resource request_id,
+                 const char* target,
+                 bool from_user_action) {
+  PluginResource* request_object =
+      PluginResourceTracker::GetInstance()->GetResourceObject(request_id);
+  if (!request_object)
+    return PP_ERROR_BADRESOURCE;
 
-  PP_Bool result = PP_FALSE;
-  dispatcher->Send(new PpapiHostMsg_PPBFlash_NavigateToURL(
-      INTERFACE_ID_PPB_FLASH, instance, url, target, &result));
+  PluginDispatcher* dispatcher =
+      PluginDispatcher::GetForInstance(request_object->instance());
+  if (!dispatcher)
+    return PP_ERROR_FAILED;
+
+  int32_t result = PP_ERROR_FAILED;
+  dispatcher->Send(new PpapiHostMsg_PPBFlash_Navigate(
+      INTERFACE_ID_PPB_FLASH,
+      request_object->host_resource(), target, from_user_action,
+      &result));
   return result;
 }
 
@@ -104,7 +115,7 @@ void RunMessageLoop(PP_Instance instance) {
   if (!dispatcher)
     return;
   IPC::SyncMessage* msg = new PpapiHostMsg_PPBFlash_RunMessageLoop(
-        INTERFACE_ID_PPB_FLASH, instance);
+      INTERFACE_ID_PPB_FLASH, instance);
   msg->EnableMessagePumping();
   dispatcher->Send(msg);
 }
@@ -114,16 +125,34 @@ void QuitMessageLoop(PP_Instance instance) {
   if (!dispatcher)
     return;
   dispatcher->Send(new PpapiHostMsg_PPBFlash_QuitMessageLoop(
-        INTERFACE_ID_PPB_FLASH, instance));
+      INTERFACE_ID_PPB_FLASH, instance));
+}
+
+double GetLocalTimeZoneOffset(PP_Instance instance, PP_Time t) {
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return 0.0;
+
+  // TODO(brettw) on Windows it should be possible to do the time calculation
+  // in-process since it doesn't need to read files on disk. This will improve
+  // performance.
+  //
+  // On Linux, it would be better to go directly to the browser process for
+  // this message rather than proxy it through some instance in a renderer.
+  double result = 0;
+  dispatcher->Send(new PpapiHostMsg_PPBFlash_GetLocalTimeZoneOffset(
+      INTERFACE_ID_PPB_FLASH, instance, t, &result));
+  return result;
 }
 
 const PPB_Flash flash_interface = {
   &SetInstanceAlwaysOnTop,
   &DrawGlyphs,
   &GetProxyForURL,
-  &NavigateToURL,
+  &Navigate,
   &RunMessageLoop,
   &QuitMessageLoop,
+  &GetLocalTimeZoneOffset
 };
 
 InterfaceProxy* CreateFlashProxy(Dispatcher* dispatcher,
@@ -154,6 +183,11 @@ const InterfaceProxy::Info* PPB_Flash_Proxy::GetInfo() {
 }
 
 bool PPB_Flash_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  // Prevent the dispatcher from going away during a call to Navigate.
+  // This must happen OUTSIDE of OnMsgNavigate since the handling code use
+  // the dispatcher upon return of the function (sending the reply message).
+  ScopedModuleReference death_grip(dispatcher());
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Flash_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_SetInstanceAlwaysOnTop,
@@ -162,11 +196,13 @@ bool PPB_Flash_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgDrawGlyphs)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_GetProxyForURL,
                         OnMsgGetProxyForURL)
-    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_NavigateToURL, OnMsgNavigateToURL)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_Navigate, OnMsgNavigate)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_RunMessageLoop,
                         OnMsgRunMessageLoop)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_QuitMessageLoop,
                         OnMsgQuitMessageLoop)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBFlash_GetLocalTimeZoneOffset,
+                        OnMsgGetLocalTimeZoneOffset)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   // TODO(brettw) handle bad messages!
@@ -208,12 +244,20 @@ void PPB_Flash_Proxy::OnMsgGetProxyForURL(PP_Instance instance,
       instance, url.c_str()));
 }
 
-void PPB_Flash_Proxy::OnMsgNavigateToURL(PP_Instance instance,
-                                         const std::string& url,
-                                         const std::string& target,
-                                         PP_Bool* result) {
-  *result = ppb_flash_target()->NavigateToURL(instance, url.c_str(),
-                                              target.c_str());
+void PPB_Flash_Proxy::OnMsgNavigate(const HostResource& request_info,
+                                    const std::string& target,
+                                    bool from_user_action,
+                                    int32_t* result) {
+  DCHECK(!dispatcher()->IsPlugin());
+  // We need to allow re-entrancy here, because this may call into Javascript
+  // (e.g. with a "javascript:" URL), or do things like navigate away from the
+  // page, either one of which will need to re-enter into the plugin.
+  // It is safe, because it is essentially equivalent to NPN_GetURL, where Flash
+  // would expect re-entrancy. When running in-process, it does re-enter here.
+  static_cast<HostDispatcher*>(dispatcher())->set_allow_plugin_reentrancy();
+  *result = ppb_flash_target()->Navigate(request_info.host_resource(),
+                                         target.c_str(),
+                                         from_user_action);
 }
 
 void PPB_Flash_Proxy::OnMsgRunMessageLoop(PP_Instance instance) {
@@ -222,6 +266,12 @@ void PPB_Flash_Proxy::OnMsgRunMessageLoop(PP_Instance instance) {
 
 void PPB_Flash_Proxy::OnMsgQuitMessageLoop(PP_Instance instance) {
   ppb_flash_target()->QuitMessageLoop(instance);
+}
+
+void PPB_Flash_Proxy::OnMsgGetLocalTimeZoneOffset(PP_Instance instance,
+                                                  PP_Time t,
+                                                  double* result) {
+  *result = ppb_flash_target()->GetLocalTimeZoneOffset(instance, t);
 }
 
 }  // namespace proxy

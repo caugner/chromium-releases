@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/common/net/url_fetcher.h"
 
 class DictionaryValue;
@@ -102,7 +102,7 @@ class CloudPrintURLFetcher
   virtual ~CloudPrintURLFetcher();
 
   // Virtual for testing.
-  virtual URLRequestContextGetter* GetRequestContextGetter();
+  virtual net::URLRequestContextGetter* GetRequestContextGetter();
 
  private:
   void StartRequestHelper(const GURL& url,

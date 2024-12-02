@@ -12,7 +12,7 @@
 #include <string>
 
 #include "base/hash_tables.h"
-#include "base/linked_ptr.h"
+#include "base/memory/linked_ptr.h"
 #include "base/shared_memory.h"
 #include "base/task.h"
 #include "ipc/ipc_channel.h"
@@ -53,9 +53,7 @@ class ResourceDispatcher : public IPC::Channel::Listener {
   // this can be tested regardless of the ResourceLoaderBridge::Create
   // implementation.
   webkit_glue::ResourceLoaderBridge* CreateBridge(
-      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
-      int host_renderer_id,
-      int host_render_view_id);
+      const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info);
 
   // Adds a request from the pending_requests_ list, returning the new
   // requests' ID
@@ -128,7 +126,8 @@ class ResourceDispatcher : public IPC::Channel::Listener {
       const IPC::Message& message,
       int request_id,
       base::SharedMemoryHandle data,
-      int data_len);
+      int data_len,
+      int encoded_data_length);
   void OnDownloadedData(
       const IPC::Message& message,
       int request_id,

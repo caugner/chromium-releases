@@ -10,13 +10,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
-#include "base/singleton.h"
-#include "ipc/ipc_message.h"
-#include "ipc/ipc_sync_channel.h"
-#include "ipc/ipc_test_sink.h"
+#include "base/memory/singleton.h"
 #include "ppapi/c/dev/ppb_buffer_dev.h"
 #include "ppapi/c/dev/ppb_char_set_dev.h"
 #include "ppapi/c/dev/ppb_context_3d_dev.h"
+#include "ppapi/c/dev/ppb_crypto_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
@@ -24,6 +22,7 @@
 #include "ppapi/c/dev/ppb_opengles_dev.h"
 #include "ppapi/c/dev/ppb_surface_3d_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
+#include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_audio.h"
@@ -37,24 +36,31 @@
 #include "ppapi/c/ppb_url_response_info.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/private/ppb_flash.h"
+#include "ppapi/c/private/ppb_flash_clipboard.h"
 #include "ppapi/c/private/ppb_flash_file.h"
 #include "ppapi/c/private/ppb_flash_menu.h"
+#include "ppapi/c/private/ppb_flash_net_connector.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_audio_config_proxy.h"
 #include "ppapi/proxy/ppb_audio_proxy.h"
+#include "ppapi/proxy/ppb_broker_proxy.h"
 #include "ppapi/proxy/ppb_buffer_proxy.h"
 #include "ppapi/proxy/ppb_char_set_proxy.h"
+#include "ppapi/proxy/ppb_console_proxy.h"
 #include "ppapi/proxy/ppb_context_3d_proxy.h"
 #include "ppapi/proxy/ppb_core_proxy.h"
+#include "ppapi/proxy/ppb_crypto_proxy.h"
 #include "ppapi/proxy/ppb_cursor_control_proxy.h"
 #include "ppapi/proxy/ppb_file_chooser_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
+#include "ppapi/proxy/ppb_flash_clipboard_proxy.h"
 #include "ppapi/proxy/ppb_flash_file_proxy.h"
 #include "ppapi/proxy/ppb_flash_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
+#include "ppapi/proxy/ppb_flash_net_connector_proxy.h"
 #include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_fullscreen_proxy.h"
 #include "ppapi/proxy/ppb_gles_chromium_texture_mapping_proxy.h"
@@ -68,8 +74,10 @@
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
 #include "ppapi/proxy/ppb_url_request_info_proxy.h"
 #include "ppapi/proxy/ppb_url_response_info_proxy.h"
+#include "ppapi/proxy/ppb_url_util_proxy.h"
 #include "ppapi/proxy/ppb_var_deprecated_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
+#include "ppapi/proxy/ppp_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppp_instance_proxy.h"
 #include "ppapi/proxy/var_serialization_rules.h"
 
@@ -101,14 +109,18 @@ InterfaceList::InterfaceList() {
   // PPB (browser) interfaces.
   AddPPB(PPB_AudioConfig_Proxy::GetInfo());
   AddPPB(PPB_Audio_Proxy::GetInfo());
+  AddPPB(PPB_Broker_Proxy::GetInfo());
   AddPPB(PPB_Buffer_Proxy::GetInfo());
   AddPPB(PPB_CharSet_Proxy::GetInfo());
+  AddPPB(PPB_Console_Proxy::GetInfo());
   AddPPB(PPB_Context3D_Proxy::GetInfo());
   AddPPB(PPB_Core_Proxy::GetInfo());
+  AddPPB(PPB_Crypto_Proxy::GetInfo());
   AddPPB(PPB_CursorControl_Proxy::GetInfo());
   AddPPB(PPB_FileChooser_Proxy::GetInfo());
   AddPPB(PPB_FileRef_Proxy::GetInfo());
   AddPPB(PPB_FileSystem_Proxy::GetInfo());
+  AddPPB(PPB_Flash_Clipboard_Proxy::GetInfo());
   AddPPB(PPB_Flash_File_FileRef_Proxy::GetInfo());
   AddPPB(PPB_Flash_File_ModuleLocal_Proxy::GetInfo());
   AddPPB(PPB_Flash_Proxy::GetInfo());
@@ -127,9 +139,15 @@ InterfaceList::InterfaceList() {
   AddPPB(PPB_URLLoaderTrusted_Proxy::GetInfo());
   AddPPB(PPB_URLRequestInfo_Proxy::GetInfo());
   AddPPB(PPB_URLResponseInfo_Proxy::GetInfo());
+  AddPPB(PPB_URLUtil_Proxy::GetInfo());
   AddPPB(PPB_Var_Deprecated_Proxy::GetInfo());
 
+#ifdef ENABLE_FLAPPER_HACKS
+  AddPPB(PPB_Flash_NetConnector_Proxy::GetInfo());
+#endif
+
   // PPP (plugin) interfaces.
+  AddPPP(PPP_Graphics3D_Proxy::GetInfo());
   AddPPP(PPP_Instance_Proxy::GetInfo());
 }
 
@@ -162,30 +180,13 @@ InterfaceList* InterfaceList::GetInstance() {
 
 Dispatcher::Dispatcher(base::ProcessHandle remote_process_handle,
                        GetInterfaceFunc local_get_interface)
-    : remote_process_handle_(remote_process_handle),
-      test_sink_(NULL),
+    : ProxyChannel(remote_process_handle),
       disallow_trusted_interfaces_(false),  // TODO(brettw) make this settable.
       local_get_interface_(local_get_interface),
       callback_tracker_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 Dispatcher::~Dispatcher() {
-}
-
-bool Dispatcher::InitWithChannel(MessageLoop* ipc_message_loop,
-                                 const IPC::ChannelHandle& channel_handle,
-                                 bool is_client,
-                                 base::WaitableEvent* shutdown_event) {
-  IPC::Channel::Mode mode = is_client ? IPC::Channel::MODE_CLIENT
-                                      : IPC::Channel::MODE_SERVER;
-  channel_.reset(new IPC::SyncChannel(channel_handle, mode, this,
-                                      ipc_message_loop, false, shutdown_event));
-  return true;
-}
-
-void Dispatcher::InitWithTestSink(IPC::TestSink* test_sink) {
-  DCHECK(!test_sink_);
-  test_sink_ = test_sink;
 }
 
 bool Dispatcher::OnMessageReceived(const IPC::Message& msg) {
@@ -200,10 +201,6 @@ bool Dispatcher::OnMessageReceived(const IPC::Message& msg) {
     return handled;
   }
   return false;
-}
-
-void Dispatcher::OnChannelError() {
-  channel_.reset();
 }
 
 // static
@@ -249,48 +246,18 @@ void Dispatcher::SetSerializationRules(
   serialization_rules_.reset(var_serialization_rules);
 }
 
-const void* Dispatcher::GetLocalInterface(const char* interface) {
-  return local_get_interface_(interface);
+const void* Dispatcher::GetLocalInterface(const char* interface_name) {
+  return local_get_interface_(interface_name);
 }
 
-IPC::PlatformFileForTransit Dispatcher::ShareHandleWithRemote(
-      base::PlatformFile handle,
-      bool should_close_source) {
-  IPC::PlatformFileForTransit out_handle;
-#if defined(OS_WIN)
-  DWORD options = DUPLICATE_SAME_ACCESS;
-  if (should_close_source)
-    options |= DUPLICATE_CLOSE_SOURCE;
-  if (!::DuplicateHandle(::GetCurrentProcess(),
-                         handle,
-                         remote_process_handle_,
-                         &out_handle,
-                         0,
-                         FALSE,
-                         options))
-    out_handle = IPC::InvalidPlatformFileForTransit();
-#elif defined(OS_POSIX)
-  // If asked to close the source, we can simply re-use the source fd instead of
-  // dup()ing and close()ing.
-  int fd = should_close_source ? handle : ::dup(handle);
-  out_handle = base::FileDescriptor(fd, true);
-#else
-  #error Not implemented.
-#endif
-  return out_handle;
+MessageLoop* Dispatcher::GetIPCMessageLoop() {
+  return delegate()->GetIPCMessageLoop();
 }
 
-bool Dispatcher::Send(IPC::Message* msg) {
-  if (test_sink_)
-    return test_sink_->Send(msg);
-  if (channel_.get())
-    return channel_->Send(msg);
-
-  // Remote side crashed, drop this message.
-  delete msg;
-  return false;
+void Dispatcher::AddIOThreadMessageFilter(
+    IPC::ChannelProxy::MessageFilter* filter) {
+  channel()->AddFilter(filter);
 }
 
 }  // namespace proxy
 }  // namespace pp
-

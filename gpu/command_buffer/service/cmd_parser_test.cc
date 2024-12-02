@@ -1,11 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // Tests for the command parser.
 
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/cmd_parser.h"
 #include "gpu/command_buffer/service/mocks.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -283,6 +283,30 @@ TEST_F(CommandParserTest, TestError) {
   Mock::VerifyAndClearExpectations(api_mock());
   // make the second one succeed, and check that the parser recovered fine.
   AddDoCommandExpect(error::kNoError, 4, 0, NULL);
+  EXPECT_EQ(error::kNoError, parser->ProcessAllCommands());
+  EXPECT_EQ(put, parser->get());
+  Mock::VerifyAndClearExpectations(api_mock());
+}
+
+TEST_F(CommandParserTest, TestWaiting) {
+  const unsigned int kNumEntries = 5;
+  scoped_ptr<CommandParser> parser(MakeParser(kNumEntries));
+  CommandBufferOffset put = parser->put();
+  CommandHeader header;
+
+  // Generate a command with size 1.
+  header.size = 1;
+  header.command = 3;
+  buffer()[put++].value_header = header;
+
+  parser->set_put(put);
+  // A command that returns kWaiting should not advance the get pointer.
+  AddDoCommandExpect(error::kWaiting, 3, 0, NULL);
+  EXPECT_EQ(error::kWaiting, parser->ProcessAllCommands());
+  EXPECT_EQ(0, parser->get());
+  Mock::VerifyAndClearExpectations(api_mock());
+  // Not waiting should advance the get pointer.
+  AddDoCommandExpect(error::kNoError, 3, 0, NULL);
   EXPECT_EQ(error::kNoError, parser->ProcessAllCommands());
   EXPECT_EQ(put, parser->get());
   Mock::VerifyAndClearExpectations(api_mock());

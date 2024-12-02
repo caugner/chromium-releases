@@ -24,15 +24,16 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/nss_util.h"
 #include "base/path_service.h"
 #include "base/test/mock_chrome_application_mac.h"
 #include "base/threading/thread.h"
+#include "crypto/nss_util.h"
 #include "media/base/media.h"
 #include "remoting/base/tracer.h"
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/curtain.h"
 #include "remoting/host/desktop_environment.h"
 #include "remoting/host/event_executor.h"
 #include "remoting/host/json_host_config.h"
@@ -82,7 +83,7 @@ int main(int argc, char** argv) {
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
 
   base::AtExitManager exit_manager;
-  base::EnsureNSPRInit();
+  crypto::EnsureNSPRInit();
 
   // Allocate a chromoting context and starts it.
 #if defined(TOOLKIT_USES_GTK)
@@ -129,11 +130,13 @@ int main(int argc, char** argv) {
   bool fake = cmd_line->HasSwitch(kFakeSwitchName);
   if (fake) {
     remoting::Capturer* capturer =
-        new remoting::CapturerFake(context.main_message_loop());
-    remoting::protocol::InputStub* input_stub =
-        CreateEventExecutor(context.ui_message_loop(), capturer);
+        new remoting::CapturerFake();
+    remoting::EventExecutor* event_executor =
+        remoting::EventExecutor::Create(context.ui_message_loop(), capturer);
+    remoting::Curtain* curtain = remoting::Curtain::Create();
     host = ChromotingHost::Create(
-        &context, config, new DesktopEnvironment(capturer, input_stub));
+        &context, config,
+        new DesktopEnvironment(capturer, event_executor, curtain));
   } else {
     host = ChromotingHost::Create(&context, config);
   }

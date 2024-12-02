@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,13 @@
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
-#include "gpu/command_buffer/service/gpu_processor.h"
+#include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/demos/framework/demo.h"
 #include "gpu/demos/framework/demo_factory.h"
 
 using gpu::Buffer;
 using gpu::CommandBufferService;
-using gpu::GPUProcessor;
+using gpu::GpuScheduler;
 using gpu::gles2::GLES2CmdHelper;
 using gpu::gles2::GLES2Implementation;
 
@@ -59,15 +59,17 @@ bool Window::CreateRenderContext(gfx::PluginWindowHandle hwnd) {
     return false;
   }
 
-  GPUProcessor* gpu_processor(
-      new GPUProcessor(command_buffer.get(), NULL));
-  if (!gpu_processor->Initialize(hwnd, gfx::Size(), NULL, std::vector<int32>(),
+  GpuScheduler* gpu_scheduler(
+      new GpuScheduler(command_buffer.get(), NULL));
+  if (!gpu_scheduler->Initialize(hwnd, gfx::Size(),
+                                 gpu::gles2::DisallowedExtensions(),
+                                 NULL, std::vector<int32>(),
                                  NULL, 0)) {
     return false;
   }
 
   command_buffer->SetPutOffsetChangeCallback(
-      NewCallback(gpu_processor, &GPUProcessor::ProcessCommands));
+      NewCallback(gpu_scheduler, &GpuScheduler::ProcessCommands));
 
   GLES2CmdHelper* helper = new GLES2CmdHelper(command_buffer.get());
   if (!helper->Initialize(kCommandBufferSize)) {
@@ -76,7 +78,7 @@ bool Window::CreateRenderContext(gfx::PluginWindowHandle hwnd) {
   }
 
   int32 transfer_buffer_id =
-      command_buffer->CreateTransferBuffer(kTransferBufferSize);
+      command_buffer->CreateTransferBuffer(kTransferBufferSize, -1);
   Buffer transfer_buffer =
       command_buffer->GetTransferBuffer(transfer_buffer_id);
   if (transfer_buffer.ptr == NULL) return false;

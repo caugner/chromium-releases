@@ -9,11 +9,11 @@
 #include <set>
 #include <vector>
 
-#include "base/logging.h"
 #include "base/command_line.h"
+#include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/stl_util-inl.h"
 #include "base/time.h"
@@ -22,7 +22,6 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/download/save_file_manager.h"
-#include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/url_request_tracking.h"
@@ -37,9 +36,6 @@
 #include "chrome/browser/ssl/ssl_manager.h"
 #include "chrome/browser/ui/login/login_prompt.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/cert_store.h"
 #include "content/browser/child_process_security_policy.h"
@@ -47,6 +43,7 @@
 #include "content/browser/cross_site_request_manager.h"
 #include "content/browser/in_process_webkit/webkit_thread.h"
 #include "content/browser/plugin_service.h"
+#include "content/browser/resource_context.h"
 #include "content/browser/renderer_host/async_resource_handler.h"
 #include "content/browser/renderer_host/buffered_resource_handler.h"
 #include "content/browser/renderer_host/cross_site_resource_handler.h"
@@ -61,7 +58,9 @@
 #include "content/browser/renderer_host/resource_request_details.h"
 #include "content/browser/renderer_host/sync_resource_handler.h"
 #include "content/browser/worker_host/worker_service.h"
+#include "content/common/notification_service.h"
 #include "content/common/resource_messages.h"
+#include "content/common/view_messages.h"
 #include "net/base/auth.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cookie_monster.h"
@@ -177,8 +176,6 @@ void PopulateResourceResponse(net::URLRequest* request,
   response->response_head.was_fetched_via_spdy =
       request->was_fetched_via_spdy();
   response->response_head.was_npn_negotiated = request->was_npn_negotiated();
-  response->response_head.was_alternate_protocol_available =
-      request->was_alternate_protocol_available();
   response->response_head.was_fetched_via_proxy =
       request->was_fetched_via_proxy();
   response->response_head.socket_address = request->GetSocketAddress();
@@ -211,13 +208,13 @@ std::vector<int> GetAllNetErrorCodes() {
 
 }  // namespace
 
-ResourceDispatcherHost::ResourceDispatcherHost()
+ResourceDispatcherHost::ResourceDispatcherHost(
+    const ResourceQueue::DelegateSet& resource_queue_delegates)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
           download_file_manager_(new DownloadFileManager(this))),
       download_request_limiter_(new DownloadRequestLimiter()),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           save_file_manager_(new SaveFileManager(this))),
-      user_script_listener_(new UserScriptListener(&resource_queue_)),
       safe_browsing_(SafeBrowsingService::CreateSafeBrowsingService()),
       webkit_thread_(new WebKitThread),
       request_id_(-1),
@@ -226,16 +223,12 @@ ResourceDispatcherHost::ResourceDispatcherHost()
       max_outstanding_requests_cost_per_process_(
           kMaxOutstandingRequestsCostPerProcess),
       filter_(NULL) {
-  ResourceQueue::DelegateSet resource_queue_delegates;
-  resource_queue_delegates.insert(user_script_listener_.get());
   resource_queue_.Initialize(resource_queue_delegates);
 }
 
 ResourceDispatcherHost::~ResourceDispatcherHost() {
   AsyncResourceHandler::GlobalCleanup();
   STLDeleteValues(&pending_requests_);
-
-  user_script_listener_->ShutdownMainThread();
 }
 
 void ResourceDispatcherHost::Initialize() {
@@ -362,11 +355,13 @@ void ResourceDispatcherHost::BeginRequest(
   int child_id = filter_->child_id();
 
   ChromeURLRequestContext* context = filter_->GetURLRequestContext(
-      request_data);
+      request_data.resource_type);
+  const content::ResourceContext& resource_context =
+      filter_->resource_context();
 
   // Might need to resolve the blob references in the upload data.
-  if (request_data.upload_data && context) {
-    context->blob_storage_context()->controller()->
+  if (request_data.upload_data) {
+    resource_context.blob_storage_context()->controller()->
         ResolveBlobReferencesInUploadData(request_data.upload_data.get());
   }
 
@@ -390,12 +385,6 @@ void ResourceDispatcherHost::BeginRequest(
     }
     return;
   }
-
-  // Ensure the Chrome plugins are loaded, as they may intercept network
-  // requests.  Does nothing if they are already loaded.
-  // TODO(mpcomplete): This takes 200 ms!  Investigate parallelizing this by
-  // starting the load earlier in a BG thread.
-  PluginService::GetInstance()->LoadChromePlugins(this);
 
   // Construct the event handler.
   scoped_refptr<ResourceHandler> handler;
@@ -438,11 +427,16 @@ void ResourceDispatcherHost::BeginRequest(
   } else if (request_data.resource_type == ResourceType::SUB_FRAME) {
     load_flags |= net::LOAD_SUB_FRAME;
   } else if (request_data.resource_type == ResourceType::PREFETCH) {
-    load_flags |= net::LOAD_PREFETCH;
+    load_flags |= (net::LOAD_PREFETCH | net::LOAD_DO_NOT_PROMPT_FOR_LOGIN);
+  } else if (request_data.resource_type == ResourceType::FAVICON) {
+    load_flags |= net::LOAD_DO_NOT_PROMPT_FOR_LOGIN;
   }
 
   if (IsPrerenderingChildRoutePair(child_id, route_id))
     load_flags |= net::LOAD_PRERENDER;
+
+  if (sync_result)
+    load_flags |= net::LOAD_IGNORE_LIMITS;
 
   // Raw headers are sensitive, as they inclide Cookie/Set-Cookie, so only
   // allow requesting them if requestor has ReadRawCookies permission.
@@ -469,9 +463,12 @@ void ResourceDispatcherHost::BeginRequest(
   // but after the BufferedResourceHandler since it depends on the MIME
   // sniffing capabilities in the BufferedResourceHandler.
   prerender::PrerenderResourceHandler* pre_handler =
-      prerender::PrerenderResourceHandler::MaybeCreate(*request,
-                                                       context,
-                                                       handler);
+      prerender::PrerenderResourceHandler::MaybeCreate(
+          *request,
+          context,
+          handler,
+          ((load_flags & net::LOAD_PRERENDER) != 0),
+          child_id, route_id);
   if (pre_handler)
     handler = pre_handler;
 
@@ -520,25 +517,23 @@ void ResourceDispatcherHost::BeginRequest(
           upload_size,
           false,  // is download
           ResourceType::IsFrame(request_data.resource_type),  // allow_download
-          request_data.has_user_gesture,
-          request_data.host_renderer_id,
-          request_data.host_render_view_id);
+          request_data.has_user_gesture);
   SetRequestInfo(request, extra_info);  // Request takes ownership.
   chrome_browser_net::SetOriginPIDForRequest(
       request_data.origin_pid, request);
 
-  if (request->url().SchemeIs(chrome::kBlobScheme) && context) {
+  if (request->url().SchemeIs(chrome::kBlobScheme)) {
     // Hang on to a reference to ensure the blob is not released prior
     // to the job being started.
     webkit_blob::BlobStorageController* controller =
-        context->blob_storage_context()->controller();
+        resource_context.blob_storage_context()->controller();
     extra_info->set_requested_blob_data(
         controller->GetBlobDataFromUrl(request->url()));
   }
 
   // Have the appcache associate its extra info with the request.
   appcache::AppCacheInterceptor::SetExtraRequestInfo(
-      request, context ? context->appcache_service() : NULL, child_id,
+      request, resource_context.appcache_service(), child_id,
       request_data.appcache_host_id, request_data.resource_type);
 
   BeginRequestInternal(request);
@@ -649,9 +644,7 @@ ResourceDispatcherHost::CreateRequestInfoForBrowserRequest(
                                                0,         // upload_size
                                                download,  // is_download
                                                download,  // allow_download
-                                               false,     // has_user_gesture
-                                               -1,        // host renderer id
-                                               -1);       // host render view id
+                                               false);    // has_user_gesture
 }
 
 void ResourceDispatcherHost::OnClosePageACK(
@@ -669,13 +662,15 @@ void ResourceDispatcherHost::OnClosePageACK(
         info->cross_site_handler()->ResumeResponse();
     }
   } else {
-    // This is a tab close, so just forward the message to close it.
+    // This is a tab close, so we will close the tab in OnClosePageACK.
     DCHECK(params.new_render_process_host_id == -1);
     DCHECK(params.new_request_id == -1);
-    CallRenderViewHost(params.closing_process_id,
-                       params.closing_route_id,
-                       &RenderViewHost::ClosePageIgnoringUnloadEvents);
   }
+  // Update the RenderViewHost's internal state after the ACK.
+  CallRenderViewHost(params.closing_process_id,
+                     params.closing_route_id,
+                     &RenderViewHost::OnClosePageACK,
+                     params.for_cross_site_transition);
 }
 
 // We are explicitly forcing the download of 'url'.
@@ -703,9 +698,6 @@ void ResourceDispatcherHost::BeginDownload(
       NewRunnableFunction(&download_util::NotifyDownloadInitiated,
                           child_id, route_id));
 
-  // Ensure the Chrome plugins are loaded, as they may intercept network
-  // requests.  Does nothing if they are already loaded.
-  PluginService::GetInstance()->LoadChromePlugins(this);
   net::URLRequest* request = new net::URLRequest(url, this);
 
   request_id_--;
@@ -755,10 +747,6 @@ void ResourceDispatcherHost::BeginSaveFile(
     net::URLRequestContext* request_context) {
   if (is_shutdown_)
     return;
-
-  // Ensure the Chrome plugins are loaded, as they may intercept network
-  // requests.  Does nothing if they are already loaded.
-  PluginService::GetInstance()->LoadChromePlugins(this);
 
   scoped_refptr<ResourceHandler> handler(
       new SaveFileResourceHandler(child_id,
@@ -1036,7 +1024,7 @@ void ResourceDispatcherHost::OnReceivedRedirect(net::URLRequest* request,
 void ResourceDispatcherHost::OnAuthRequired(
     net::URLRequest* request,
     net::AuthChallengeInfo* auth_info) {
-  if (request->load_flags() & net::LOAD_PREFETCH) {
+  if (request->load_flags() & net::LOAD_DO_NOT_PROMPT_FOR_LOGIN) {
     request->CancelAuth();
     return;
   }
@@ -1187,10 +1175,19 @@ void ResourceDispatcherHost::CancelRequest(int child_id,
     DLOG(WARNING) << "Canceling a request that wasn't found";
     return;
   }
-  CancelRequestInternal(i->second, from_renderer);
+  net::URLRequest* request = i->second;
+  const bool started_before_cancel = request->is_pending();
+
+  if (CancelRequestInternal(request, from_renderer) &&
+      !started_before_cancel) {
+    // If the request isn't in flight, then we won't get asyncronous
+    // notification, so we have to signal ourselves to finish this
+    // request.
+    OnResponseCompleted(request);
+  }
 }
 
-void ResourceDispatcherHost::CancelRequestInternal(net::URLRequest* request,
+bool ResourceDispatcherHost::CancelRequestInternal(net::URLRequest* request,
                                                    bool from_renderer) {
   VLOG(1) << "CancelRequest: " << request->url().spec();
 
@@ -1209,11 +1206,13 @@ void ResourceDispatcherHost::CancelRequestInternal(net::URLRequest* request,
     request->Cancel();
     // Our callers assume |request| is valid after we return.
     DCHECK(IsValidRequest(request));
+    return true;
   }
 
   // Do not remove from the pending requests, as the request will still
   // call AllDataReceived, and may even have more data before it does
   // that.
+  return false;
 }
 
 int ResourceDispatcherHost::IncrementOutstandingRequestsMemoryCost(
@@ -1593,6 +1592,7 @@ static int GetCertID(net::URLRequest* request, int child_id) {
 
 void ResourceDispatcherHost::NotifyResponseStarted(net::URLRequest* request,
                                                    int child_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // Notify the observers on the IO thread.
   FOR_EACH_OBSERVER(Observer, observer_list_, OnRequestStarted(this, request));
 
@@ -1912,6 +1912,9 @@ net::RequestPriority ResourceDispatcherHost::DetermineRequestPriority(
     // downloads or rendering and most pages have some useful content without
     // them.
     case ResourceType::IMAGE:
+    // Favicons aren't required for rendering the current page, but
+    // are user visible.
+    case ResourceType::FAVICON:
       return net::LOWEST;
 
     // Prefetches are at a lower priority than even LOWEST, since they

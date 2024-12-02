@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #define COURGETTE_WIN32_X86_GENERATOR_H_
 
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 
 #include "courgette/ensemble.h"
 
@@ -27,8 +27,11 @@ class CourgetteWin32X86PatchGenerator : public TransformationPatchGenerator {
   }
 
   Status WriteInitialParameters(SinkStream* parameter_stream) {
-    parameter_stream->WriteSizeVarint32(old_element_->offset_in_ensemble());
-    parameter_stream->WriteSizeVarint32(old_element_->region().length());
+    if (!parameter_stream->WriteSizeVarint32(
+            old_element_->offset_in_ensemble()) ||
+        !parameter_stream->WriteSizeVarint32(old_element_->region().length())) {
+      return C_STREAM_ERROR;
+    }
     return C_OK;
     // TODO(sra): Initialize |patcher_| with these parameters.
   }

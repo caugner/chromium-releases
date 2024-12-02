@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "webkit/plugins/npapi/webplugininfo.h"
 
@@ -87,6 +87,8 @@ class PluginGroup {
   static const char* kJavaGroupName;
   static const char* kQuickTimeGroupName;
   static const char* kShockwaveGroupName;
+  static const char* kRealPlayerGroupName;
+  static const char* kSilverlightGroupName;
 
   PluginGroup(const PluginGroup& other);
 

@@ -25,6 +25,7 @@
 #include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/proxy_launcher.h"
+#include "chrome/test/webdriver/frame_path.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/point.h"
 
@@ -82,8 +83,7 @@ bool GetDefaultChromeExeDir(FilePath* browser_directory) {
         .Append(app_from_google));
   }
 #elif defined(OS_MACOSX)
-  locations.push_back(FilePath(
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"));
+  locations.push_back(FilePath("/Applications"));
 #elif defined(OS_LINUX)
   // Proxy launcher doesn't check for google-chrome, only chrome.
   FilePath chrome_sym_link("/usr/bin/google-chrome");
@@ -119,11 +119,10 @@ Automation::Automation() {}
 
 Automation::~Automation() {}
 
-void Automation::Init(const FilePath& user_browser_dir, bool* success) {
+void Automation::Init(const FilePath& user_browser_dir, ErrorCode* code) {
   FilePath browser_dir = user_browser_dir;
   if (browser_dir.empty() && !GetDefaultChromeExeDir(&browser_dir)) {
-    LOG(ERROR) << "Could not locate Chrome application directory";
-    *success = false;
+    *code = kBrowserCouldNotBeFound;
     return;
   }
 
@@ -148,7 +147,17 @@ void Automation::Init(const FilePath& user_browser_dir, bool* success) {
       true   // show_window
   };
   launcher_->LaunchBrowserAndServer(launch_props, true);
-  *success = launcher_->IsBrowserRunning();
+  if (!launcher_->IsBrowserRunning()) {
+    *code = kBrowserFailedToStart;
+    return;
+  }
+  int version = 0;
+  if (!SendGetChromeDriverAutomationVersion(automation(), &version) ||
+      version > automation::kChromeDriverAutomationVersion) {
+    *code = kIncompatibleBrowserVersion;
+    return;
+  }
+  *code = kSuccess;
 }
 
 void Automation::Terminate() {
@@ -156,7 +165,7 @@ void Automation::Terminate() {
 }
 
 void Automation::ExecuteScript(int tab_id,
-                               const std::string& frame_xpath,
+                               const FramePath& frame_path,
                                const std::string& script,
                                std::string* result,
                                bool* success) {
@@ -167,8 +176,9 @@ void Automation::ExecuteScript(int tab_id,
   }
 
   Value* unscoped_value;
-  if (!SendExecuteJavascriptJSONRequest(
-      automation(), windex, tab_index, frame_xpath, script, &unscoped_value)) {
+  if (!SendExecuteJavascriptJSONRequest(automation(), windex, tab_index,
+                                        frame_path.value(), script,
+                                        &unscoped_value)) {
     *success = false;
     return;
   }
@@ -225,9 +235,34 @@ void Automation::SendWebKeyEvent(int tab_id,
     *success = false;
     return;
   }
-
   *success = SendWebKeyEventJSONRequest(
       automation(), windex, tab_index, key_event);
+}
+
+void Automation::SendNativeKeyEvent(int tab_id,
+                                    ui::KeyboardCode key_code,
+                                    int modifiers,
+                                    bool* success) {
+  int windex = 0, tab_index = 0;
+  if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
+    *success = false;
+    return;
+  }
+  *success = SendNativeKeyEventJSONRequest(
+      automation(), windex, tab_index, key_code, modifiers);
+}
+
+void Automation::CaptureEntirePageAsPNG(int tab_id,
+                                        const FilePath& path,
+                                        bool* success) {
+  int windex = 0, tab_index = 0;
+  if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
+    *success = false;
+    return;
+  }
+
+  *success = SendCaptureEntirePageJSONRequest(
+      automation(), windex, tab_index, path);
 }
 
 void Automation::NavigateToURL(int tab_id,
@@ -278,82 +313,66 @@ void Automation::Reload(int tab_id, bool* success) {
   *success = SendReloadJSONRequest(automation(), windex, tab_index);
 }
 
-void Automation::GetURL(int tab_id,
-                        std::string* url,
-                        bool* success) {
-  int windex = 0, tab_index = 0;
-  if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
-    *success = false;
-    return;
-  }
-
-  *success = SendGetTabURLJSONRequest(automation(), windex, tab_index, url);
-}
-
-void Automation::GetGURL(int tab_id,
-                         GURL* gurl,
-                         bool* success) {
-  std::string url;
-  GetURL(tab_id, &url, success);
-  if (*success)
-    *gurl = GURL(url);
-}
-
-void Automation::GetTabTitle(int tab_id,
-                             std::string* tab_title,
-                             bool* success) {
-  int windex = 0, tab_index = 0;
-  if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
-    *success = false;
-    return;
-  }
-
-  *success = SendGetTabTitleJSONRequest(
-      automation(), windex, tab_index, tab_title);
-}
-
-void Automation::GetCookies(int tab_id,
-                            const GURL& gurl,
-                            std::string* cookies,
+void Automation::GetCookies(const std::string& url,
+                            ListValue** cookies,
                             bool* success) {
+  *success = SendGetCookiesJSONRequest(automation(), url, cookies);
+}
+
+void Automation::GetCookiesDeprecated(int tab_id,
+                                      const GURL& gurl,
+                                      std::string* cookies,
+                                      bool* success) {
   int windex = 0, tab_index = 0;
   if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
     *success = false;
     return;
   }
 
-  *success = SendGetCookiesJSONRequest(
+  *success = SendGetCookiesJSONRequestDeprecated(
       automation(), windex, gurl.possibly_invalid_spec(), cookies);
 }
 
-void Automation::DeleteCookie(int tab_id,
-                              const GURL& gurl,
+void Automation::DeleteCookie(const std::string& url,
                               const std::string& cookie_name,
                               bool* success) {
+  *success = SendDeleteCookieJSONRequest(automation(), url, cookie_name);
+}
+
+void Automation::DeleteCookieDeprecated(int tab_id,
+                                        const GURL& gurl,
+                                        const std::string& cookie_name,
+                                        bool* success) {
   int windex = 0, tab_index = 0;
   if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
     *success = false;
     return;
   }
 
-  *success = SendDeleteCookieJSONRequest(
+  *success = SendDeleteCookieJSONRequestDeprecated(
       automation(),
       windex,
       gurl.possibly_invalid_spec(),
       cookie_name);
 }
 
-void Automation::SetCookie(int tab_id,
-                           const GURL& gurl,
-                           const std::string& cookie,
+void Automation::SetCookie(const std::string& url,
+                           DictionaryValue* cookie_dict,
                            bool* success) {
+  *success = SendSetCookieJSONRequest(automation(), url, cookie_dict);
+}
+
+void Automation::SetCookieDeprecated(int tab_id,
+                                     const GURL& gurl,
+                                     const std::string& cookie,
+                                     bool* success) {
   int windex = 0, tab_index = 0;
   if (!GetIndicesForTab(tab_id, &windex, &tab_index)) {
     *success = false;
     return;
   }
 
-  *success = SendSetCookieJSONRequest(
+  *success = SendSetCookieJSONRequestDeprecated(
       automation(),
       windex,
       gurl.possibly_invalid_spec(),
@@ -379,8 +398,12 @@ void Automation::CloseTab(int tab_id, bool* success) {
   *success = SendCloseTabJSONRequest(automation(), windex, tab_index);
 }
 
-void Automation::GetVersion(std::string* version) {
+void Automation::GetBrowserVersion(std::string* version) {
   *version = automation()->server_version();
+}
+
+void Automation::GetChromeDriverAutomationVersion(int* version, bool* success) {
+  *success = SendGetChromeDriverAutomationVersion(automation(), version);
 }
 
 void Automation::WaitForAllTabsToStopLoading(bool* success) {

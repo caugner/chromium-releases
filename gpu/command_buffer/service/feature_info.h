@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define GPU_COMMAND_BUFFER_SERVICE_FEATURE_INFO_H_
 
 #include <string>
+#include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gles2_cmd_validation.h"
 
 namespace gpu {
@@ -33,10 +34,13 @@ class FeatureInfo {
   };
 
   FeatureInfo();
+  ~FeatureInfo();
 
   // If allowed features = NULL or "*", all features are allowed. Otherwise
   // only features that match the strings in allowed_features are allowed.
   bool Initialize(const char* allowed_features);
+  bool Initialize(const DisallowedExtensions& disallowed_extensions,
+                  const char* allowed_features);
 
   // Turns on certain features if they can be turned on. NULL turns on
   // all available features.
@@ -58,6 +62,8 @@ class FeatureInfo {
   void AddExtensionString(const std::string& str);
 
   Validators validators_;
+
+  DisallowedExtensions disallowed_extensions_;
 
   // The extensions string returned by glGetString(GL_EXTENSIONS);
   std::string extensions_;

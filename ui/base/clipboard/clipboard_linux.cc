@@ -12,8 +12,10 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/size.h"
 
@@ -21,11 +23,9 @@ namespace ui {
 
 namespace {
 
-const char kMimeBmp[] = "image/bmp";
-const char kMimeHtml[] = "text/html";
-const char kMimeText[] = "text/plain";
-const char kMimeMozillaUrl[] = "text/x-moz-url";
-const char kMimeWebkitSmartPaste[] = "chromium/x-webkit-paste";
+const char kMimeTypeBitmap[] = "image/bmp";
+const char kMimeTypeMozillaURL[] = "text/x-moz-url";
+const char kMimeTypeWebkitSmartPaste[] = "chromium/x-webkit-paste";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
   gchar* name = gdk_atom_name(atom);
@@ -53,7 +53,7 @@ void GetData(GtkClipboard* clipboard,
   if (iter == data_map->end())
     return;
 
-  if (target_string == kMimeBmp) {
+  if (target_string == kMimeTypeBitmap) {
     gtk_selection_data_set_pixbuf(selection_data,
         reinterpret_cast<GdkPixbuf*>(iter->second.first));
   } else {
@@ -76,7 +76,7 @@ void ClearData(GtkClipboard* clipboard,
 
   for (Clipboard::TargetMap::iterator iter = map->begin();
        iter != map->end(); ++iter) {
-    if (iter->first == kMimeBmp)
+    if (iter->first == kMimeTypeBitmap)
       g_object_unref(reinterpret_cast<GdkPixbuf*>(iter->second.first));
     else
       ptrs.insert(iter->second.first);
@@ -155,7 +155,7 @@ void Clipboard::WriteText(const char* text_data, size_t text_len) {
   char* data = new char[text_len];
   memcpy(data, text_data, text_len);
 
-  InsertMapping(kMimeText, data, text_len);
+  InsertMapping(kMimeTypeText, data, text_len);
   InsertMapping("TEXT", data, text_len);
   InsertMapping("STRING", data, text_len);
   InsertMapping("UTF8_STRING", data, text_len);
@@ -178,13 +178,13 @@ void Clipboard::WriteHTML(const char* markup_data,
   // Some programs expect NULL-terminated data. See http://crbug.com/42624
   data[total_len - 1] = '\0';
 
-  InsertMapping(kMimeHtml, data, total_len);
+  InsertMapping(kMimeTypeHTML, data, total_len);
 }
 
 // Write an extra flavor that signifies WebKit was the last to modify the
 // pasteboard. This flavor has no data.
 void Clipboard::WriteWebSmartPaste() {
-  InsertMapping(kMimeWebkitSmartPaste, NULL, 0);
+  InsertMapping(kMimeTypeWebkitSmartPaste, NULL, 0);
 }
 
 void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
@@ -201,7 +201,7 @@ void Clipboard::WriteBitmap(const char* pixel_data, const char* size_data) {
   // We store the GdkPixbuf*, and the size_t half of the pair is meaningless.
   // Note that this contrasts with the vast majority of entries in our target
   // map, which directly store the data and its length.
-  InsertMapping(kMimeBmp, reinterpret_cast<char*>(pixbuf), 0);
+  InsertMapping(kMimeTypeBitmap, reinterpret_cast<char*>(pixbuf), 0);
 }
 
 void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
@@ -214,7 +214,7 @@ void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
   char* data = new char[data_len];
   memcpy(data, url.data(), 2 * url.length());
   memcpy(data + 2 * url.length(), title.data(), 2 * title.length());
-  InsertMapping(kMimeMozillaUrl, data, data_len);
+  InsertMapping(kMimeTypeMozillaURL, data, data_len);
 }
 
 void Clipboard::WriteData(const char* format_name, size_t format_len,
@@ -222,7 +222,7 @@ void Clipboard::WriteData(const char* format_name, size_t format_len,
   std::string format(format_name, format_len);
   // We assume that certain mapping types are only written by trusted code.
   // Therefore we must upkeep their integrity.
-  if (format == kMimeBmp)
+  if (format == kMimeTypeBitmap)
     return;
   char* data = new char[data_len];
   memcpy(data, data_data, data_len);
@@ -292,6 +292,25 @@ bool Clipboard::IsFormatAvailableByString(const std::string& format,
   return IsFormatAvailable(format, buffer);
 }
 
+void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
+                                   std::vector<string16>* types,
+                                   bool* contains_filenames) const {
+  if (!types || !contains_filenames) {
+    NOTREACHED();
+    return;
+  }
+
+  types->clear();
+  if (IsFormatAvailable(GetPlainTextFormatType(), buffer))
+    types->push_back(UTF8ToUTF16(kMimeTypeText));
+  if (IsFormatAvailable(GetHtmlFormatType(), buffer))
+    types->push_back(UTF8ToUTF16(kMimeTypeHTML));
+  if (IsFormatAvailable(GetBitmapFormatType(), buffer))
+    types->push_back(UTF8ToUTF16(kMimeTypePNG));
+  *contains_filenames = false;
+}
+
+
 void Clipboard::ReadText(Clipboard::Buffer buffer, string16* result) const {
   GtkClipboard* clipboard = LookupBackingClipboard(buffer);
   if (clipboard == NULL)
@@ -360,6 +379,22 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
   gtk_selection_data_free(data);
 }
 
+SkBitmap Clipboard::ReadImage(Buffer buffer) const {
+  ScopedGObject<GdkPixbuf>::Type pixbuf(
+      gtk_clipboard_wait_for_image(clipboard_));
+  if (!pixbuf.get())
+    return SkBitmap();
+
+  gfx::CanvasSkia canvas(gdk_pixbuf_get_width(pixbuf.get()),
+                         gdk_pixbuf_get_height(pixbuf.get()),
+                         false);
+  cairo_t* context = canvas.beginPlatformPaint();
+  gdk_cairo_set_source_pixbuf(context, pixbuf.get(), 0.0, 0.0);
+  cairo_paint(context);
+  canvas.endPlatformPaint();
+  return canvas.ExtractBitmap();
+}
+
 void Clipboard::ReadBookmark(string16* title, std::string* url) const {
   // TODO(estade): implement this.
   NOTIMPLEMENTED();
@@ -386,17 +421,17 @@ Clipboard::FormatType Clipboard::GetPlainTextWFormatType() {
 
 // static
 Clipboard::FormatType Clipboard::GetHtmlFormatType() {
-  return std::string(kMimeHtml);
+  return std::string(kMimeTypeHTML);
 }
 
 // static
 Clipboard::FormatType Clipboard::GetBitmapFormatType() {
-  return std::string(kMimeBmp);
+  return std::string(kMimeTypeBitmap);
 }
 
 // static
 Clipboard::FormatType Clipboard::GetWebKitSmartPasteFormatType() {
-  return std::string(kMimeWebkitSmartPaste);
+  return std::string(kMimeTypeWebkitSmartPaste);
 }
 
 void Clipboard::InsertMapping(const char* key,

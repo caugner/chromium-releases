@@ -7,9 +7,8 @@ chrome.dll
 nacl64.dll
 crash_service.exe
 First Run
-gears.dll
 ppGoogleNaClPluginChrome.dll
-icudt46.dll
+icudt.dll
 locales/ar.dll
 locales/bg.dll
 locales/bn.dll
@@ -59,13 +58,13 @@ locales/uk.dll
 locales/vi.dll
 locales/zh-CN.dll
 locales/zh-TW.dll
-resources
 resources.pak
 wow_helper.exe
 gcswf32.dll
 plugin.vch
+FlashPlayerCPLApp.cpl
 pdf.dll
-d3dx9_42.dll
-D3DCompiler_42.dll
+d3dx9_43.dll
+D3DCompiler_43.dll
 libEGL.dll
 libGLESv2.dll

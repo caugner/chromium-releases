@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
+#include "base/atomicops.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/common/gl_mock.h"
@@ -14,6 +15,7 @@
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/gl/gl_implementation.h"
 
 using ::gfx::MockGLInterface;
 using ::testing::_;
@@ -40,6 +42,15 @@ class GLES2DecoderTest : public GLES2DecoderTestBase {
       GLint in_read_x, GLint in_read_y,
       GLsizei in_read_width, GLsizei in_read_height,
       bool init);
+};
+
+class GLES2DecoderRGBBackbufferTest : public GLES2DecoderTest {
+ public:
+  GLES2DecoderRGBBackbufferTest() { }
+
+  virtual void SetUp() {
+    InitDecoder("", false);
+  }
 };
 
 class GLES2DecoderWithShaderTest : public GLES2DecoderWithShaderTestBase {
@@ -1128,7 +1139,6 @@ TEST_F(GLES2DecoderTest, GenerateMipmapWrongFormatsFails) {
 
 TEST_F(GLES2DecoderWithShaderTest, Uniform1iValidArgs) {
   EXPECT_CALL(*gl_, Uniform1i(kUniform1Location, 2));
-  SpecializedSetup<Uniform1i, 0>(true);
   Uniform1i cmd;
   cmd.Init(kUniform1Location, 2);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -1137,27 +1147,24 @@ TEST_F(GLES2DecoderWithShaderTest, Uniform1iValidArgs) {
 TEST_F(GLES2DecoderWithShaderTest, Uniform1ivValidArgs) {
   EXPECT_CALL(
       *gl_, Uniform1iv(
-          kUniform1Location, 2,
+          kUniform1Location, 1,
           reinterpret_cast<const GLint*>(shared_memory_address_)));
-  SpecializedSetup<Uniform1iv, 0>(true);
   Uniform1iv cmd;
-  cmd.Init(kUniform1Location, 2, shared_memory_id_, shared_memory_offset_);
+  cmd.Init(kUniform1Location, 1, shared_memory_id_, shared_memory_offset_);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 }
 
 TEST_F(GLES2DecoderWithShaderTest, Uniform1ivInvalidArgs2_0) {
   EXPECT_CALL(*gl_, Uniform1iv(_, _, _)).Times(0);
-  SpecializedSetup<Uniform1iv, 0>(false);
   Uniform1iv cmd;
-  cmd.Init(kUniform1Location, 2, kInvalidSharedMemoryId, 0);
+  cmd.Init(kUniform1Location, 1, kInvalidSharedMemoryId, 0);
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
 }
 
 TEST_F(GLES2DecoderWithShaderTest, Uniform1ivInvalidArgs2_1) {
   EXPECT_CALL(*gl_, Uniform1iv(_, _, _)).Times(0);
-  SpecializedSetup<Uniform1iv, 0>(false);
   Uniform1iv cmd;
-  cmd.Init(kUniform1Location, 2, shared_memory_id_, kInvalidSharedMemoryOffset);
+  cmd.Init(kUniform1Location, 1, shared_memory_id_, kInvalidSharedMemoryOffset);
   EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
 }
 
@@ -1165,14 +1172,30 @@ TEST_F(GLES2DecoderWithShaderTest, Uniform1ivImmediateValidArgs) {
   Uniform1ivImmediate& cmd = *GetImmediateAs<Uniform1ivImmediate>();
   EXPECT_CALL(
       *gl_,
-      Uniform1iv(kUniform1Location, 2,
+      Uniform1iv(kUniform1Location, 1,
           reinterpret_cast<GLint*>(ImmediateDataAddress(&cmd))));
-  SpecializedSetup<Uniform1ivImmediate, 0>(true);
   GLint temp[1 * 2] = { 0, };
-  cmd.Init(kUniform1Location, 2, &temp[0]);
+  cmd.Init(kUniform1Location, 1, &temp[0]);
   EXPECT_EQ(error::kNoError,
             ExecuteImmediateCmd(cmd, sizeof(temp)));
 }
+
+TEST_F(GLES2DecoderWithShaderTest, Uniform1ivInvalidValidArgs) {
+  EXPECT_CALL(*gl_, Uniform1iv(_, _, _)).Times(0);
+  Uniform1iv cmd;
+  cmd.Init(kUniform1Location, 2, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_F(GLES2DecoderWithShaderTest, Uniform1ivZeroCount) {
+  EXPECT_CALL(*gl_, Uniform1iv(_, _, _)).Times(0);
+  Uniform1iv cmd;
+  cmd.Init(kUniform1Location, 0, shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
 
 TEST_F(GLES2DecoderWithShaderTest, BindBufferToDifferentTargetFails) {
   // Bind the buffer to GL_ARRAY_BUFFER
@@ -1411,12 +1434,14 @@ class ReadPixelsEmulator {
   // pack_alignment is the alignment you want ReadPixels to use
   // when copying. The actual data passed in pixels should be contiguous.
   ReadPixelsEmulator(GLsizei width, GLsizei height, GLint bytes_per_pixel,
-                     const void* pixels, GLint pack_alignment)
+                     const void* src_pixels, const void* expected_pixels,
+                     GLint pack_alignment)
       : width_(width),
         height_(height),
         pack_alignment_(pack_alignment),
         bytes_per_pixel_(bytes_per_pixel),
-        pixels_(reinterpret_cast<const int8*>(pixels)) {
+        src_pixels_(reinterpret_cast<const int8*>(src_pixels)),
+        expected_pixels_(reinterpret_cast<const int8*>(expected_pixels)) {
   }
 
   void ReadPixels(
@@ -1427,7 +1452,7 @@ class ReadPixelsEmulator {
     DCHECK_LE(x + width, width_);
     DCHECK_LE(y + height, height_);
     for (GLint yy = 0; yy < height; ++yy) {
-      const int8* src = GetPixelAddress(x, y + yy);
+      const int8* src = GetPixelAddress(src_pixels_, x, y + yy);
       const void* dst = ComputePackAlignmentAddress(0, yy, width, pixels);
       memcpy(const_cast<void*>(dst), src, width * bytes_per_pixel_);
     }
@@ -1436,7 +1461,8 @@ class ReadPixelsEmulator {
   bool CompareRowSegment(
       GLint x, GLint y, GLsizei width, const void* data) const {
     DCHECK(x + width <= width_ || width == 0);
-    return memcmp(data, GetPixelAddress(x, y), width * bytes_per_pixel_) == 0;
+    return memcmp(data, GetPixelAddress(expected_pixels_, x, y),
+                  width * bytes_per_pixel_) == 0;
   }
 
   // Helper to compute address of pixel in pack aligned data.
@@ -1452,7 +1478,7 @@ class ReadPixelsEmulator {
   GLint ComputeImageDataSize(GLint width, GLint height) const {
     GLint row_size = width * bytes_per_pixel_;
     if (height > 1) {
-      GLint temp = row_size + pack_alignment_;
+      GLint temp = row_size + pack_alignment_ - 1;
       GLint padded_row_size = (temp / pack_alignment_) * pack_alignment_;
       GLint size_of_all_but_last_row = (height - 1) * padded_row_size;
       return size_of_all_but_last_row + row_size;
@@ -1462,15 +1488,16 @@ class ReadPixelsEmulator {
   }
 
  private:
-  const int8* GetPixelAddress(GLint x, GLint y) const {
-    return pixels_ + (width_ * y + x) * bytes_per_pixel_;
+  const int8* GetPixelAddress(const int8* base, GLint x, GLint y) const {
+    return base + (width_ * y + x) * bytes_per_pixel_;
   }
 
   GLsizei width_;
   GLsizei height_;
   GLint pack_alignment_;
   GLint bytes_per_pixel_;
-  const int8* pixels_;
+  const int8* src_pixels_;
+  const int8* expected_pixels_;
 };
 
 }  // anonymous namespace
@@ -1529,7 +1556,7 @@ void GLES2DecoderTest::CheckReadPixelsOutOfRange(
   }
 
   ReadPixelsEmulator emu(
-      kWidth, kHeight, kBytesPerPixel, kSrcPixels, kPackAlignment);
+      kWidth, kHeight, kBytesPerPixel, kSrcPixels, kSrcPixels, kPackAlignment);
   typedef ReadPixels::Result Result;
   Result* result = GetSharedMemoryAs<Result*>();
   uint32 result_shm_id = kSharedMemoryId;
@@ -1621,7 +1648,7 @@ TEST_F(GLES2DecoderTest, ReadPixels) {
   context_->SetSize(gfx::Size(INT_MAX, INT_MAX));
 
   ReadPixelsEmulator emu(
-      kWidth, kHeight, kBytesPerPixel, kSrcPixels, kPackAlignment);
+      kWidth, kHeight, kBytesPerPixel, kSrcPixels, kSrcPixels, kPackAlignment);
   typedef ReadPixels::Result Result;
   Result* result = GetSharedMemoryAs<Result*>();
   uint32 result_shm_id = kSharedMemoryId;
@@ -1638,6 +1665,53 @@ TEST_F(GLES2DecoderTest, ReadPixels) {
       .WillOnce(Invoke(&emu, &ReadPixelsEmulator::ReadPixels));
   ReadPixels cmd;
   cmd.Init(0, 0, kWidth, kHeight, GL_RGB, GL_UNSIGNED_BYTE,
+           pixels_shm_id, pixels_shm_offset,
+           result_shm_id, result_shm_offset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  for (GLint yy = 0; yy < kHeight; ++yy) {
+    EXPECT_TRUE(emu.CompareRowSegment(
+        0, yy, kWidth,
+        emu.ComputePackAlignmentAddress(0, yy, kWidth, dest)));
+  }
+}
+
+TEST_F(GLES2DecoderRGBBackbufferTest, ReadPixelsNoAlphaBackbuffer) {
+  const GLsizei kWidth = 3;
+  const GLsizei kHeight = 3;
+  const GLint kBytesPerPixel = 4;
+  const GLint kPackAlignment = 4;
+  static const uint8 kExpectedPixels[kWidth * kHeight * kBytesPerPixel] = {
+    12, 13, 14, 255, 19, 18, 19, 255, 13, 14, 18, 255,
+    29, 28, 23, 255, 21, 22, 21, 255, 28, 23, 22, 255,
+    31, 34, 39, 255, 32, 37, 32, 255, 34, 39, 37, 255,
+  };
+  static const uint8 kSrcPixels[kWidth * kHeight * kBytesPerPixel] = {
+    12, 13, 14, 18, 19, 18, 19, 12, 13, 14, 18, 19,
+    29, 28, 23, 22, 21, 22, 21, 29, 28, 23, 22, 21,
+    31, 34, 39, 37, 32, 37, 32, 31, 34, 39, 37, 32,
+  };
+
+  context_->SetSize(gfx::Size(INT_MAX, INT_MAX));
+
+  ReadPixelsEmulator emu(
+      kWidth, kHeight, kBytesPerPixel, kSrcPixels, kExpectedPixels,
+      kPackAlignment);
+  typedef ReadPixels::Result Result;
+  Result* result = GetSharedMemoryAs<Result*>();
+  uint32 result_shm_id = kSharedMemoryId;
+  uint32 result_shm_offset = kSharedMemoryOffset;
+  uint32 pixels_shm_id = kSharedMemoryId;
+  uint32 pixels_shm_offset = kSharedMemoryOffset + sizeof(*result);
+  void* dest = &result[1];
+  EXPECT_CALL(*gl_, GetError())
+     .WillOnce(Return(GL_NO_ERROR))
+     .WillOnce(Return(GL_NO_ERROR))
+     .RetiresOnSaturation();
+  EXPECT_CALL(
+      *gl_, ReadPixels(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE, _))
+      .WillOnce(Invoke(&emu, &ReadPixelsEmulator::ReadPixels));
+  ReadPixels cmd;
+  cmd.Init(0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
            pixels_shm_id, pixels_shm_offset,
            result_shm_id, result_shm_offset);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -2320,7 +2394,7 @@ TEST_F(GLES2DecoderTest, TexSubImage2DValidArgs) {
       .RetiresOnSaturation();
   TexSubImage2D cmd;
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
@@ -2334,54 +2408,55 @@ TEST_F(GLES2DecoderTest, TexSubImage2DBadArgs) {
       0, 0);
   TexSubImage2D cmd;
   cmd.Init(GL_TEXTURE0, 1, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_TRUE, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_INT,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, -1, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 1, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, -1, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 1, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth + 1, kHeight, GL_RGBA,
-           GL_UNSIGNED_BYTE, kSharedMemoryId, kSharedMemoryOffset);
+           GL_UNSIGNED_BYTE, kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight + 1, GL_RGBA,
-           GL_UNSIGNED_BYTE, kSharedMemoryId, kSharedMemoryOffset);
+           GL_UNSIGNED_BYTE, kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGB, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kSharedMemoryOffset);
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA,
-           GL_UNSIGNED_SHORT_4_4_4_4, kSharedMemoryId, kSharedMemoryOffset);
+           GL_UNSIGNED_SHORT_4_4_4_4, kSharedMemoryId, kSharedMemoryOffset,
+           GL_FALSE);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kInvalidSharedMemoryId, kSharedMemoryOffset);
+           kInvalidSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
   cmd.Init(GL_TEXTURE_2D, 1, 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE,
-           kSharedMemoryId, kInvalidSharedMemoryOffset);
+           kSharedMemoryId, kInvalidSharedMemoryOffset, GL_FALSE);
   EXPECT_NE(error::kNoError, ExecuteCmd(cmd));
 }
 
@@ -2797,6 +2872,65 @@ TEST_F(GLES2DecoderWithShaderTest, VertexAttribPointer) {
       }
     }
   }
+}
+
+TEST_F(GLES2DecoderTest, SetLatch) {
+  bool isAngle = false;
+#if defined(OS_WIN)
+  isAngle = (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2);
+#endif
+  if (!isAngle) {
+    EXPECT_CALL(*gl_, Flush()).Times(3);
+  }
+  const uint32 kLatchId = 1;
+  base::subtle::Atomic32* latches = static_cast<base::subtle::Atomic32*>(
+      shared_memory_base_);
+  const uint32 kInvalidLatchId = kSharedBufferSize / sizeof(*latches);
+  const uint32 kLastValidLatchId = kInvalidLatchId - 1;
+  latches[kLatchId] = 0;
+  latches[kLastValidLatchId] = 0;
+  SetLatchCHROMIUM cmd;
+  // Check out of range latch id.
+  cmd.Init(kInvalidLatchId);
+  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+  cmd.Init(kLatchId);
+  // Check valid latch.
+  EXPECT_EQ(0, latches[kLatchId]);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(1, latches[kLatchId]);
+  // Check last valid latch.
+  EXPECT_EQ(0, latches[kLastValidLatchId]);
+  cmd.Init(kLastValidLatchId);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(1, latches[kLastValidLatchId]);
+}
+
+TEST_F(GLES2DecoderTest, WaitLatch) {
+  const uint32 kLatchId = 1;
+  base::subtle::Atomic32* latches = static_cast<base::subtle::Atomic32*>(
+      shared_memory_base_);
+  const uint32 kInvalidLatchId =  kSharedBufferSize / sizeof(*latches);
+  const uint32 kLastValidLatchId = kInvalidLatchId - 1;
+  latches[kLatchId] = 0;
+  latches[kLastValidLatchId] = 0;
+  WaitLatchCHROMIUM cmd;
+  // Check out of range latch id.
+  cmd.Init(kInvalidLatchId);
+  EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+  // Check valid latch.
+  cmd.Init(kLatchId);
+  EXPECT_EQ(0, latches[kLatchId]);
+  EXPECT_EQ(error::kWaiting, ExecuteCmd(cmd));
+  latches[kLatchId] = 1;
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(0, latches[kLatchId]);
+  // Check last valid latch.
+  cmd.Init(kLastValidLatchId);
+  EXPECT_EQ(0, latches[kLastValidLatchId]);
+  EXPECT_EQ(error::kWaiting, ExecuteCmd(cmd));
+  latches[kLastValidLatchId] = 1;
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(0, latches[kLastValidLatchId]);
 }
 
 // TODO(gman): BufferData

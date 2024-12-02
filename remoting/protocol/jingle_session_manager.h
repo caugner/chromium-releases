@@ -8,7 +8,7 @@
 #include <list>
 #include <string>
 
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "net/base/x509_certificate.h"
 #include "remoting/protocol/jingle_session.h"
 #include "remoting/protocol/session_manager.h"
@@ -18,7 +18,7 @@
 
 class MessageLoop;
 
-namespace base {
+namespace crypto {
 class RSAPrivateKey;
 }  // namespace base
 
@@ -84,7 +84,7 @@ class JingleSessionManager
   virtual void Init(const std::string& local_jid,
                     cricket::SessionManager* cricket_session_manager,
                     IncomingSessionCallback* incoming_session_callback,
-                    base::RSAPrivateKey* private_key,
+                    crypto::RSAPrivateKey* private_key,
                     scoped_refptr<net::X509Certificate> certificate);
 
   // SessionManager interface.
@@ -149,7 +149,7 @@ class JingleSessionManager
   std::list<scoped_refptr<JingleSession> > sessions_;
 
   scoped_refptr<net::X509Certificate> certificate_;
-  scoped_ptr<base::RSAPrivateKey> private_key_;
+  scoped_ptr<crypto::RSAPrivateKey> private_key_;
 
   DISALLOW_COPY_AND_ASSIGN(JingleSessionManager);
 };

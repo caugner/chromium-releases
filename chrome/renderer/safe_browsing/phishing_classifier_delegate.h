@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,37 +8,53 @@
 #define CHROME_RENDERER_SAFE_BROWSING_PHISHING_CLASSIFIER_DELEGATE_H_
 #pragma once
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "chrome/renderer/render_view_observer.h"
+#include "content/common/page_transition_types.h"
+#include "content/renderer/render_view_observer.h"
+#include "content/renderer/render_process_observer.h"
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_platform_file.h"
 
 namespace safe_browsing {
+class ClientPhishingRequest;
 class PhishingClassifier;
 class Scorer;
 
+class PhishingClassifierFilter : public RenderProcessObserver {
+ public:
+  PhishingClassifierFilter();
+  virtual ~PhishingClassifierFilter();
+
+  virtual bool OnControlMessageReceived(const IPC::Message& message);
+
+ private:
+  void OnSetPhishingModel(IPC::PlatformFileForTransit model_file);
+
+  DISALLOW_COPY_AND_ASSIGN(PhishingClassifierFilter);
+};
+
 class PhishingClassifierDelegate : public RenderViewObserver {
  public:
-  static void SetPhishingModel(IPC::PlatformFileForTransit model_file);
-
   // The RenderView owns us.  This object takes ownership of the classifier.
   // Note that if classifier is null, a default instance of PhishingClassifier
   // will be used.
   PhishingClassifierDelegate(RenderView* render_view,
                              PhishingClassifier* classifier);
-  ~PhishingClassifierDelegate();
+  virtual ~PhishingClassifierDelegate();
 
   // Called by the RenderView once there is a phishing scorer available.
   // The scorer is passed on to the classifier.
   void SetPhishingScorer(const safe_browsing::Scorer* scorer);
 
-  // RenderViewObserver implementation, public for testing.
-
   // Called by the RenderView once a page has finished loading.  Updates the
-  // last-loaded URL and page id, then starts classification if all other
+  // last-loaded URL and page text, then starts classification if all other
   // conditions are met (see MaybeStartClassification for details).
-  virtual void PageCaptured(const string16& page_text);
+  // We ignore preliminary captures, since these happen before the page has
+  // finished loading.
+  void PageCaptured(string16* page_text, bool preliminary_capture);
+
+  // RenderViewObserver implementation, public for testing.
 
   // Called by the RenderView when a page has started loading in the given
   // WebFrame.  Typically, this will cause any pending classification to be
@@ -47,12 +63,19 @@ class PhishingClassifierDelegate : public RenderViewObserver {
   virtual void DidCommitProvisionalLoad(WebKit::WebFrame* frame,
                                         bool is_new_navigation);
 
-  // Cancels any pending classification and frees the page text.  Called by
-  // the RenderView when the RenderView is going away.
-  void CancelPendingClassification();
-
  private:
   friend class PhishingClassifierDelegateTest;
+
+  enum CancelClassificationReason {
+    NAVIGATE_AWAY,
+    NAVIGATE_WITHIN_PAGE,
+    PAGE_RECAPTURED,
+    SHUTDOWN,
+    CANCEL_CLASSIFICATION_MAX  // Always add new values before this one.
+  };
+
+  // Cancels any pending classification and frees the page text.
+  void CancelPendingClassification(CancelClassificationReason reason);
 
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message);
@@ -65,10 +88,10 @@ class PhishingClassifierDelegate : public RenderViewObserver {
   void OnStartPhishingDetection(const GURL& url);
 
   // Called when classification for the current page finishes.
-  void ClassificationDone(bool is_phishy, double phishy_score);
+  void ClassificationDone(const ClientPhishingRequest& verdict);
 
-  // Returns the RenderView's toplevel URL, with the ref stripped.
-  GURL StripToplevelUrl();
+  // Returns the RenderView's toplevel URL.
+  GURL GetToplevelUrl();
 
   // Shared code to begin classification if all conditions are met.
   void MaybeStartClassification();
@@ -77,19 +100,24 @@ class PhishingClassifierDelegate : public RenderViewObserver {
   // a scorer is made available via SetPhishingScorer().
   scoped_ptr<PhishingClassifier> classifier_;
 
-  // The last URL that the browser instructed us to classify.
+  // The last URL that the browser instructed us to classify,
+  // with the ref stripped.
   GURL last_url_received_from_browser_;
 
-  // The last URL and page id that have finished loading in the RenderView.
-  // These correspond to the text in classifier_page_text_.
+  // The last top-level URL that has finished loading in the RenderView.
+  // This corresponds to the text in classifier_page_text_.
   GURL last_finished_load_url_;
-  int32 last_finished_load_id_;
 
-  // The URL and page id of the last load that we actually started
-  // classification on.  This is used to suppress phishing classification on
-  // subframe navigation and back and forward navigations in history.
+  // The transition type for the last load in the main frame.  We use this
+  // to exclude back/forward loads from classification.  Note that this is
+  // set in DidCommitProvisionalLoad(); the transition is reset after this
+  // call in the RenderView, so we need to save off the value.
+  PageTransition::Type last_main_frame_transition_;
+
+  // The URL of the last load that we actually started classification on.
+  // This is used to suppress phishing classification on subframe navigation
+  // and back and forward navigations in history.
   GURL last_url_sent_to_classifier_;
-  int32 last_page_id_sent_to_classifier_;
 
   // The page text that will be analyzed by the phishing classifier.  This is
   // set by OnNavigate and cleared when the classifier finishes.  Note that if
@@ -97,6 +125,14 @@ class PhishingClassifierDelegate : public RenderViewObserver {
   // instructed us to classify the page, the page text will be cached until
   // these conditions are met.
   string16 classifier_page_text_;
+
+  // Tracks whether we have stored anything in classifier_page_text_ for the
+  // most recent load.  We use this to distinguish empty text from cases where
+  // PageCaptured has not been called.
+  bool have_page_text_;
+
+  // Set to true if the classifier is currently running.
+  bool is_classifying_;
 
   DISALLOW_COPY_AND_ASSIGN(PhishingClassifierDelegate);
 };

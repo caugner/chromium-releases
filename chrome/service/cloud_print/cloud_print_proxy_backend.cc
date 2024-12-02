@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,11 +20,12 @@
 #include "chrome/service/cloud_print/cloud_print_url_fetcher.h"
 #include "chrome/service/cloud_print/printer_job_handler.h"
 #include "chrome/service/gaia/service_gaia_authenticator.h"
+#include "chrome/service/net/service_url_request_context.h"
 #include "chrome/service/service_process.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "jingle/notifier/base/notifier_options.h"
-#include "jingle/notifier/listener/push_notifications_thread.h"
+#include "jingle/notifier/listener/mediator_thread_impl.h"
 #include "jingle/notifier/listener/talk_mediator_impl.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -41,7 +42,8 @@ class CloudPrintProxyBackend::Core
   // use system default (local) print server.
   explicit Core(CloudPrintProxyBackend* backend,
                 const GURL& cloud_print_server_url,
-                const DictionaryValue* print_system_settings);
+                const DictionaryValue* print_system_settings,
+                bool enable_job_poll);
 
   // Note:
   //
@@ -87,7 +89,7 @@ class CloudPrintProxyBackend::Core
   virtual void OnNotificationStateChange(
       bool notifications_enabled);
   virtual void OnIncomingNotification(
-      const IncomingNotificationData& notification_data);
+      const notifier::Notification& notification);
   virtual void OnOutgoingNotification();
 
  private:
@@ -224,6 +226,8 @@ class CloudPrintProxyBackend::Core
   base::TimeTicks notifications_enabled_since_;
   // Indicates whether a task to poll for jobs has been scheduled.
   bool job_poll_scheduled_;
+  // Indicates whether we should poll for jobs when we lose XMPP connection.
+  bool enable_job_poll_;
   // The channel we are interested in receiving push notifications for.
   // This is "cloudprint.google.com/proxy/<proxy_id>"
   std::string push_notifications_channel_;
@@ -234,12 +238,16 @@ class CloudPrintProxyBackend::Core
 CloudPrintProxyBackend::CloudPrintProxyBackend(
     CloudPrintProxyFrontend* frontend,
     const GURL& cloud_print_server_url,
-    const DictionaryValue* print_system_settings)
+    const DictionaryValue* print_system_settings,
+    bool enable_job_poll)
       : core_thread_("Chrome_CloudPrintProxyCoreThread"),
         frontend_loop_(MessageLoop::current()),
         frontend_(frontend) {
   DCHECK(frontend_);
-  core_ = new Core(this, cloud_print_server_url, print_system_settings);
+  core_ = new Core(this,
+                   cloud_print_server_url,
+                   print_system_settings,
+                   enable_job_poll);
 }
 
 CloudPrintProxyBackend::~CloudPrintProxyBackend() {
@@ -258,9 +266,9 @@ bool CloudPrintProxyBackend::InitializeWithLsid(const std::string& lsid,
 }
 
 bool CloudPrintProxyBackend::InitializeWithToken(
-    const std::string cloud_print_token,
-    const std::string cloud_print_xmpp_token,
-    const std::string email,
+    const std::string& cloud_print_token,
+    const std::string& cloud_print_xmpp_token,
+    const std::string& email,
     const std::string& proxy_id) {
   if (!core_thread_.Start())
     return false;
@@ -290,7 +298,8 @@ void CloudPrintProxyBackend::RegisterPrinters(
 
 CloudPrintProxyBackend::Core::Core(CloudPrintProxyBackend* backend,
                                    const GURL& cloud_print_server_url,
-                                   const DictionaryValue* print_system_settings)
+                                   const DictionaryValue* print_system_settings,
+                                   bool enable_job_poll)
     : backend_(backend),
       cloud_print_server_url_(cloud_print_server_url),
       complete_list_available_(false),
@@ -299,7 +308,8 @@ CloudPrintProxyBackend::Core::Core(CloudPrintProxyBackend* backend,
       new_printers_available_(false),
       registration_in_progress_(false),
       notifications_enabled_(false),
-      job_poll_scheduled_(false) {
+      job_poll_scheduled_(false),
+      enable_job_poll_(enable_job_poll) {
   if (print_system_settings) {
     // It is possible to have no print settings specified.
     print_system_settings_.reset(print_system_settings->DeepCopy());
@@ -371,19 +381,19 @@ void CloudPrintProxyBackend::Core::DoInitializeWithToken(
   auth_token_ = cloud_print_token;
 
   if (result.succeeded()) {
-    const notifier::NotifierOptions kNotifierOptions;
-    const bool kInvalidateXmppAuthToken = false;
-    const bool kAllowInsecureXmppConnection = false;
+    notifier::NotifierOptions notifier_options;
+    notifier_options.request_context_getter =
+        g_service_process->GetServiceURLRequestContextGetter();
     talk_mediator_.reset(new notifier::TalkMediatorImpl(
-        new notifier::PushNotificationsThread(
-            kNotifierOptions,
-            kCloudPrintPushNotificationsSource),
-        kInvalidateXmppAuthToken,
-        kAllowInsecureXmppConnection));
-    push_notifications_channel_ = kCloudPrintPushNotificationsSource;
-    push_notifications_channel_.append("/proxy/");
-    push_notifications_channel_.append(proxy_id);
-    talk_mediator_->AddSubscribedServiceUrl(push_notifications_channel_);
+        new notifier::MediatorThreadImpl(notifier_options),
+        notifier_options));
+    notifier::Subscription subscription;
+    subscription.channel = kCloudPrintPushNotificationsSource;
+    subscription.channel.append("/proxy/");
+    subscription.channel.append(proxy_id);
+    subscription.from = kCloudPrintPushNotificationsSource;
+    push_notifications_channel_ = subscription.channel;
+    talk_mediator_->AddSubscription(subscription);
     talk_mediator_->SetDelegate(this);
     talk_mediator_->SetAuthToken(email, cloud_print_xmpp_token,
                                  kSyncGaiaServiceId);
@@ -451,6 +461,7 @@ void CloudPrintProxyBackend::Core::DoShutdown() {
     index->second->Shutdown();
   }
   // Important to delete the TalkMediator on this thread.
+  talk_mediator_->Logout();
   talk_mediator_.reset();
   notifications_enabled_ = false;
   notifications_enabled_since_ = base::TimeTicks();
@@ -613,8 +624,9 @@ void CloudPrintProxyBackend::Core::PollForJobs() {
       index->second->CheckForJobs(kJobFetchReasonPoll);
   }
   job_poll_scheduled_ = false;
-  // If we don't have notifications, poll again after a while.
-  if (!notifications_enabled_)
+  // If we don't have notifications and job polling is enabled, poll again
+  // after a while.
+  if (!notifications_enabled_ && enable_job_poll_)
     ScheduleJobPoll();
 }
 
@@ -876,38 +888,34 @@ bool CloudPrintProxyBackend::Core::RemovePrinterFromList(
 void CloudPrintProxyBackend::Core::OnNotificationStateChange(
     bool notification_enabled) {
   DCHECK(MessageLoop::current() == backend_->core_thread_.message_loop());
-  bool state_changed = (notification_enabled != notifications_enabled_);
   notifications_enabled_ = notification_enabled;
   if (notifications_enabled_) {
     notifications_enabled_since_ = base::TimeTicks::Now();
     VLOG(1) << "Notifications for proxy " << proxy_id_ << " were enabled at "
             << notifications_enabled_since_.ToInternalValue();
   } else {
-    VLOG(1) << "Notifications for proxy " << proxy_id_ << " disabled.";
+    LOG(ERROR) << "Notifications for proxy " << proxy_id_ << " disabled.";
     notifications_enabled_since_ = base::TimeTicks();
   }
   // A state change means one of two cases.
   // Case 1: We just lost notifications. This this case we want to schedule a
-  // job poll.
+  // job poll if enable_job_poll_ is true.
   // Case 2: Notifications just got re-enabled. In this case we want to schedule
-  // a poll once for jobs we might have missed when we were dark. In reality
-  // this is only needed when notifications get enabled for the first time. In
-  // all other cases there would already be a scheduled task to poll in the
-  // queue.
+  // a poll once for jobs we might have missed when we were dark.
   // Note that ScheduleJobPoll will not schedule again if a job poll task is
   // already scheduled.
-  if (state_changed)
+  if (enable_job_poll_ || notifications_enabled_)
     ScheduleJobPoll();
 }
 
 
 void CloudPrintProxyBackend::Core::OnIncomingNotification(
-    const IncomingNotificationData& notification_data) {
+    const notifier::Notification& notification) {
   DCHECK(MessageLoop::current() == backend_->core_thread_.message_loop());
   VLOG(1) << "CP_PROXY: Incoming notification.";
   if (0 == base::strcasecmp(push_notifications_channel_.c_str(),
-                            notification_data.service_url.c_str()))
-    HandlePrinterNotification(notification_data.service_specific_data);
+                            notification.channel.c_str()))
+    HandlePrinterNotification(notification.data);
 }
 
 void CloudPrintProxyBackend::Core::OnOutgoingNotification() {}

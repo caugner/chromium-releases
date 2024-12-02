@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,41 @@ namespace {
 typedef std::map<PP_Instance, HostDispatcher*> InstanceToDispatcherMap;
 InstanceToDispatcherMap* g_instance_to_dispatcher = NULL;
 
+typedef std::map<PP_Module, HostDispatcher*> ModuleToDispatcherMap;
+ModuleToDispatcherMap* g_module_to_dispatcher = NULL;
+
+PP_Bool ReserveInstanceID(PP_Module module, PP_Instance instance) {
+  // Default to returning true (usable) failure. Otherwise, if there's some
+  // kind of communication error or the plugin just crashed, we'll get into an
+  // infinite loop generating new instnace IDs since we think they're all in
+  // use.
+  ModuleToDispatcherMap::const_iterator found =
+      g_module_to_dispatcher->find(module);
+  if (found == g_module_to_dispatcher->end()) {
+    NOTREACHED();
+    return PP_TRUE;
+  }
+
+  bool usable = true;
+  if (!found->second->Send(new PpapiMsg_ReserveInstanceId(instance, &usable)))
+    return PP_TRUE;
+  return BoolToPPBool(usable);
+}
+
+// Saves the state of the given bool and puts it back when it goes out of
+// scope.
+class BoolRestorer {
+ public:
+  BoolRestorer(bool* var) : var_(var), old_value_(*var) {
+  }
+  ~BoolRestorer() {
+    *var_ = old_value_;
+  }
+ private:
+  bool* var_;
+  bool old_value_;
+};
+
 }  // namespace
 
 HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
@@ -27,7 +62,12 @@ HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
                                GetInterfaceFunc local_get_interface)
     : Dispatcher(remote_process_handle, local_get_interface),
       pp_module_(module),
-      ppb_proxy_(NULL) {
+      ppb_proxy_(NULL),
+      allow_plugin_reentrancy_(false) {
+  if (!g_module_to_dispatcher)
+    g_module_to_dispatcher = new ModuleToDispatcherMap;
+  (*g_module_to_dispatcher)[pp_module_] = this;
+
   const PPB_Var_Deprecated* var_interface =
       static_cast<const PPB_Var_Deprecated*>(
           local_get_interface(PPB_VAR_DEPRECATED_INTERFACE));
@@ -35,9 +75,23 @@ HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
 
   memset(plugin_interface_support_, 0,
          sizeof(PluginInterfaceSupport) * INTERFACE_ID_COUNT);
+
+  ppb_proxy_ = reinterpret_cast<const PPB_Proxy_Private*>(
+      GetLocalInterface(PPB_PROXY_PRIVATE_INTERFACE));
+  DCHECK(ppb_proxy_) << "The proxy interface should always be supported.";
+
+  ppb_proxy_->SetReserveInstanceIDCallback(pp_module_, &ReserveInstanceID);
 }
 
 HostDispatcher::~HostDispatcher() {
+  g_module_to_dispatcher->erase(pp_module_);
+}
+
+bool HostDispatcher::InitHostWithChannel(
+    ProxyChannel::Delegate* delegate,
+    const IPC::ChannelHandle& channel_handle,
+    bool is_client) {
+  return Dispatcher::InitWithChannel(delegate, channel_handle, is_client);
 }
 
 // static
@@ -73,12 +127,32 @@ bool HostDispatcher::IsPlugin() const {
   return false;
 }
 
+bool HostDispatcher::Send(IPC::Message* msg) {
+  // Normal sync messages are set to unblock, which would normally cause the
+  // plugin to be reentered to process them. We only want to do this when we
+  // know the plugin is in a state to accept reentrancy. Since the plugin side
+  // never clears this flag on messages it sends, we can't get deadlock, but we
+  // may still get reentrancy in the host as a result.
+  if (!allow_plugin_reentrancy_)
+    msg->set_unblock(false);
+  return Dispatcher::Send(msg);
+}
+
 bool HostDispatcher::OnMessageReceived(const IPC::Message& msg) {
+  // We only want to allow reentrancy when the most recent message from the
+  // plugin was a scripting message. We save the old state of the flag on the
+  // stack in case we're (we are the host) being reentered ourselves. The flag
+  // is set to false here for all messages, and then the scripting API will
+  // explicitly set it to true during processing of those messages that can be
+  // reentered.
+  BoolRestorer restorer(&allow_plugin_reentrancy_);
+  allow_plugin_reentrancy_ = false;
+
   // Handle common control messages.
   if (Dispatcher::OnMessageReceived(msg))
     return true;
 
-  if (msg.routing_id() <= 0 && msg.routing_id() >= INTERFACE_ID_COUNT) {
+  if (msg.routing_id() <= 0 || msg.routing_id() >= INTERFACE_ID_COUNT) {
     NOTREACHED();
     // TODO(brettw): kill the plugin if it starts sending invalid messages?
     return true;
@@ -103,8 +177,8 @@ bool HostDispatcher::OnMessageReceived(const IPC::Message& msg) {
 void HostDispatcher::OnChannelError() {
   Dispatcher::OnChannelError();  // Stop using the channel.
 
-  // Tell the host about the crash so it can clean up.
-  GetPPBProxy()->PluginCrashed(pp_module());
+  // Tell the host about the crash so it can clean up and display notification.
+  ppb_proxy_->PluginCrashed(pp_module());
 }
 
 const void* HostDispatcher::GetProxiedInterface(const std::string& interface) {
@@ -117,7 +191,7 @@ const void* HostDispatcher::GetProxiedInterface(const std::string& interface) {
       INTERFACE_UNQUERIED) {
     // Already queried the plugin if it supports this interface.
     if (plugin_interface_support_[info->id] == INTERFACE_SUPPORTED)
-      return info->interface;
+      return info->interface_ptr;
     return NULL;
   }
 
@@ -128,7 +202,7 @@ const void* HostDispatcher::GetProxiedInterface(const std::string& interface) {
       supported ? INTERFACE_SUPPORTED : INTERFACE_UNSUPPORTED;
 
   if (supported)
-    return info->interface;
+    return info->interface_ptr;
   return NULL;
 }
 
@@ -152,14 +226,6 @@ InterfaceProxy* HostDispatcher::GetOrCreatePPBInterfaceProxy(
   return proxy;
 }
 
-const PPB_Proxy_Private* HostDispatcher::GetPPBProxy() {
-  if (!ppb_proxy_) {
-    ppb_proxy_ = reinterpret_cast<const PPB_Proxy_Private*>(
-        GetLocalInterface(PPB_PROXY_PRIVATE_INTERFACE));
-  }
-  return ppb_proxy_;
-}
-
 InterfaceProxy* HostDispatcher::CreatePPBInterfaceProxy(
     const InterfaceProxy::Info* info) {
   const void* local_interface = GetLocalInterface(info->name);
@@ -173,6 +239,18 @@ InterfaceProxy* HostDispatcher::CreatePPBInterfaceProxy(
   InterfaceProxy* proxy = info->create_proxy(this, local_interface);
   target_proxies_[info->id].reset(proxy);
   return proxy;
+}
+
+// ScopedModuleReference -------------------------------------------------------
+
+ScopedModuleReference::ScopedModuleReference(Dispatcher* dispatcher) {
+  DCHECK(!dispatcher->IsPlugin());
+  dispatcher_ = static_cast<HostDispatcher*>(dispatcher);
+  dispatcher_->ppb_proxy()->AddRefModule(dispatcher_->pp_module());
+}
+
+ScopedModuleReference::~ScopedModuleReference() {
+  dispatcher_->ppb_proxy()->ReleaseModule(dispatcher_->pp_module());
 }
 
 }  // namespace proxy

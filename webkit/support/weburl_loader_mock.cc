@@ -29,7 +29,7 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
     return;
 
   client_->didReceiveResponse(this, response);
-  client_->didReceiveData(this, data.data(), data.size());
+  client_->didReceiveData(this, data.data(), data.size(), data.size());
   client_->didFinishLoading(this, 0);
 }
 

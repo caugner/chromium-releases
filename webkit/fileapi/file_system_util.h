@@ -13,8 +13,19 @@ class GURL;
 
 namespace fileapi {
 
+extern const char kPersistentDir[];
+extern const char kTemporaryDir[];
+extern const char kExternalDir[];
+extern const char kPersistentName[];
+extern const char kTemporaryName[];
+extern const char kExternalName[];
+
+// The file_path this returns will be using '/' as a path separator, no matter
+// what platform you're on.
 bool CrackFileSystemURL(const GURL& url, GURL* origin_url, FileSystemType* type,
                         FilePath* file_path);
+
+GURL GetFileSystemRootURI(const GURL& origin_url, fileapi::FileSystemType type);
 
 }  // namespace fileapi
 

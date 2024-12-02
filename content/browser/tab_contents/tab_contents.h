@@ -13,27 +13,24 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "chrome/browser/download/save_package.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
-#include "chrome/browser/fav_icon_helper.h"
+#include "chrome/browser/favicon_helper.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/tab_contents/tab_specific_content_settings.h"
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
-#include "chrome/common/notification_registrar.h"
-#include "chrome/common/property_bag.h"
-#include "chrome/common/renderer_preferences.h"
-#include "chrome/common/translate_errors.h"
-#include "chrome/common/web_apps.h"
+#include "chrome/common/instant_types.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/tab_contents/constrained_window.h"
-#include "content/browser/tab_contents/language_state.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/tab_contents/render_view_host_manager.h"
-#include "content/browser/webui/web_ui_factory.h"
+#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/browser/webui/web_ui.h"
+#include "content/common/notification_registrar.h"
+#include "content/common/property_bag.h"
+#include "content/common/renderer_preferences.h"
 #include "net/base/load_states.h"
 #include "net/base/network_change_notifier.h"
 #include "ui/gfx/native_widget_types.h"
@@ -52,26 +49,16 @@ class HistoryAddPageArgs;
 
 namespace prerender {
 class PrerenderManager;
-class PrerenderPLTRecorder;
-}
-
-namespace printing {
-class PrintPreviewMessageHandler;
-class PrintViewManager;
 }
 
 namespace safe_browsing {
 class ClientSideDetectionHost;
 }
 
-class AutocompleteHistoryManager;
-class AutofillManager;
 class BlockedContentContainer;
 class WebUI;
-class DesktopNotificationHandlerForTC;
 class DownloadItem;
 class Extension;
-class FileSelectHelper;
 class InfoBarDelegate;
 class LoadNotificationDetails;
 class OmniboxSearchHint;
@@ -87,11 +74,10 @@ class TabContentsObserver;
 class TabContentsSSLHelper;
 class TabContentsView;
 class URLPattern;
+struct ExtensionHostMsg_DomMessage_Params;
 struct RendererPreferences;
 struct ThumbnailScore;
-struct ViewHostMsg_DomMessage_Params;
 struct ViewHostMsg_FrameNavigate_Params;
-struct ViewHostMsg_RunFileChooser_Params;
 struct WebPreferences;
 
 // Describes what goes in the main content area of a tab. TabContents is
@@ -101,7 +87,6 @@ class TabContents : public PageNavigator,
                     public RenderViewHostDelegate,
                     public RenderViewHostManager::Delegate,
                     public JavaScriptAppModalDialogDelegate,
-                    public ImageLoadingTracker::Observer,
                     public TabSpecificContentSettings::Delegate,
                     public net::NetworkChangeNotifier::OnlineStateObserver {
  public:
@@ -157,9 +142,6 @@ class TabContents : public PageNavigator,
   // Returns the TabContentsSSLHelper, creating it if necessary.
   TabContentsSSLHelper* GetSSLHelper();
 
-  // Returns the SavePackage which manages the page saving job. May be NULL.
-  SavePackage* save_package() const { return save_package_.get(); }
-
   // Return the currently active RenderProcessHost and RenderViewHost. Each of
   // these may change over time.
   RenderProcessHost* GetRenderProcessHost() const;
@@ -183,36 +165,10 @@ class TabContents : public PageNavigator,
     return view_.get();
   }
 
-  // Returns the FavIconHelper of this TabContents.
-  FavIconHelper& fav_icon_helper() {
-    return *fav_icon_helper_.get();
+  // Returns the FaviconHelper of this TabContents.
+  FaviconHelper& favicon_helper() {
+    return *favicon_helper_.get();
   }
-
-  // App extensions ------------------------------------------------------------
-
-  // Sets the extension denoting this as an app. If |extension| is non-null this
-  // tab becomes an app-tab. TabContents does not listen for unload events for
-  // the extension. It's up to consumers of TabContents to do that.
-  //
-  // NOTE: this should only be manipulated before the tab is added to a browser.
-  // TODO(sky): resolve if this is the right way to identify an app tab. If it
-  // is, than this should be passed in the constructor.
-  void SetExtensionApp(const Extension* extension);
-
-  // Convenience for setting the app extension by id. This does nothing if
-  // |extension_app_id| is empty, or an extension can't be found given the
-  // specified id.
-  void SetExtensionAppById(const std::string& extension_app_id);
-
-  const Extension* extension_app() const { return extension_app_; }
-  bool is_app() const { return extension_app_ != NULL; }
-
-  // If an app extension has been explicitly set for this TabContents its icon
-  // is returned.
-  //
-  // NOTE: the returned icon is larger than 16x16 (its size is
-  // Extension::EXTENSION_ICON_SMALLISH).
-  SkBitmap* GetExtensionAppIcon();
 
   // Tab navigation state ------------------------------------------------------
 
@@ -242,24 +198,18 @@ class TabContents : public PageNavigator,
   // the user is invited to type into it.
   virtual bool ShouldDisplayURL();
 
-  // Returns the favicon for this tab, or an isNull() bitmap if the tab does not
-  // have a favicon. The default implementation uses the current navigation
-  // entry.
-  SkBitmap GetFavIcon() const;
+  // Returns the favicon for this tab, or IDR_DEFAULT_FAVICON if the tab does
+  // not have a favicon. The default implementation uses the current navigation
+  // entry. This will return an isNull bitmap if there are no navigation
+  // entries, which should rarely happen.
+  SkBitmap GetFavicon() const;
 
   // Returns true if we are not using the default favicon.
-  bool FavIconIsValid() const;
+  bool FaviconIsValid() const;
 
   // Returns whether the favicon should be displayed. If this returns false, no
   // space is provided for the favicon, and the favicon is never displayed.
-  virtual bool ShouldDisplayFavIcon();
-
-  // Add and remove observers for page navigation notifications. Adding or
-  // removing multiple times has no effect. The order in which notifications
-  // are sent to observers is undefined. Clients must be sure to remove the
-  // observer before they go away.
-  void AddObserver(TabContentsObserver* observer);
-  void RemoveObserver(TabContentsObserver* observer);
+  virtual bool ShouldDisplayFavicon();
 
   // Return whether this tab contents is loading a resource.
   bool is_loading() const { return is_loading_; }
@@ -279,16 +229,6 @@ class TabContents : public PageNavigator,
   void reset_encoding() {
     encoding_.clear();
   }
-
-  const WebApplicationInfo& web_app_info() const {
-    return web_app_info_;
-  }
-
-  const SkBitmap& app_icon() const { return app_icon_; }
-
-  // Sets an app icon associated with TabContents and fires an INVALIDATE_TITLE
-  // navigation state change to trigger repaint of title.
-  void SetAppIcon(const SkBitmap& app_icon);
 
   bool displayed_insecure_content() const {
     return displayed_insecure_content_;
@@ -311,9 +251,6 @@ class TabContents : public PageNavigator,
   base::TerminationStatus crashed_status() const { return crashed_status_; }
   int crashed_error_code() const { return crashed_error_code_; }
   void SetIsCrashed(base::TerminationStatus status, int error_code);
-
-  // Call this after updating a page action to notify clients about the changes.
-  void PageActionStateChanged();
 
   // Whether the tab is in the process of being destroyed.
   // Added as a tentative work-around for focus related bug #4633.  This allows
@@ -410,17 +347,13 @@ class TabContents : public PageNavigator,
   ConstrainedWindow* CreateConstrainedDialog(
       ConstrainedWindowDelegate* delegate);
 
-  // Adds a new tab or window with the given already-created contents
-  void AddNewContents(TabContents* new_contents,
-                      WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
-                      bool user_gesture);
-
-  // Execute code in this tab. Returns true if the message was successfully
-  // sent.
-  bool ExecuteCode(int request_id, const std::string& extension_id,
-                   bool is_js_code, const std::string& code_string,
-                   bool all_frames);
+  // Adds a new tab or window with the given already-created contents.
+  // If disposition is NEW_POPUP and user_gesture is false, contents may
+  // be blocked.
+  void AddOrBlockNewContents(TabContents* new_contents,
+                             WindowOpenDisposition disposition,
+                             const gfx::Rect& initial_pos,
+                             bool user_gesture);
 
   // Called when the blocked popup notification is shown or hidden.
   virtual void PopupNotificationVisibilityChanged(bool visible);
@@ -505,17 +438,11 @@ class TabContents : public PageNavigator,
   // Notifies the delegate that a download started.
   void OnStartDownload(DownloadItem* download);
 
-  // Notify our delegate that some of our content has animated.
-  void ToolbarSizeChanged(bool is_animating);
-
   // Called when a ConstrainedWindow we own is about to be closed.
   void WillClose(ConstrainedWindow* window);
 
   // Called when a BlockedContentContainer we own is about to be closed.
   void WillCloseBlockedContentContainer(BlockedContentContainer* container);
-
-  // Called when a ConstrainedWindow we own is moved or resized.
-  void DidMoveOrResize(ConstrainedWindow* window);
 
   // Interstitials -------------------------------------------------------------
 
@@ -551,33 +478,9 @@ class TabContents : public PageNavigator,
     suppress_javascript_messages_ = suppress_javascript_messages;
   }
 
-  // Prepare for saving the current web page to disk.
-  void OnSavePage();
-
-  // Save page with the main HTML file path, the directory for saving resources,
-  // and the save type: HTML only or complete web page. Returns true if the
-  // saving process has been initiated successfully.
-  bool SavePage(const FilePath& main_file, const FilePath& dir_path,
-                SavePackage::SavePackageType save_type);
-
   // Tells the user's email client to open a compose window containing the
   // current page's URL.
   void EmailPageLocation();
-
-  // Displays asynchronously a print preview (generated by the renderer) if not
-  // already displayed and ask the user for its preferred print settings with
-  // the "Print..." dialog box. (managed by the print worker thread).
-  // TODO(maruel):  Creates a snapshot of the renderer to be used for the new
-  // tab for the printing facility.
-  void PrintPreview();
-
-  // Prints the current document immediately. Since the rendering is
-  // asynchronous, the actual printing will not be completed on the return of
-  // this function. Returns false if printing is impossible at the moment.
-  bool PrintNow();
-
-  // Notify the completion of a printing job.
-  void PrintingDone(int document_cookie, bool success);
 
   // Returns true if the active NavigationEntry's page_id equals page_id.
   bool IsActiveEntry(int32 page_id);
@@ -616,7 +519,7 @@ class TabContents : public PageNavigator,
     return &renderer_preferences_;
   }
 
-  void set_opener_web_ui_type(WebUITypeID opener_web_ui_type) {
+  void set_opener_web_ui_type(WebUI::TypeID opener_web_ui_type) {
     opener_web_ui_type_ = opener_web_ui_type;
   }
 
@@ -633,10 +536,6 @@ class TabContents : public PageNavigator,
   // Notification that tab closing has started.  This can be called multiple
   // times, subsequent calls are ignored.
   void OnCloseStarted();
-
-  LanguageState& language_state() {
-    return language_state_;
-  }
 
   // Returns true if underlying TabContentsView should accept drag-n-drop.
   bool ShouldAcceptDragAndDrop() const;
@@ -692,35 +591,37 @@ class TabContents : public PageNavigator,
   // Gets the zoom percent for this tab.
   int GetZoomPercent(bool* enable_increment, bool* enable_decrement);
 
-  // Shows a fade effect over this tab contents. Repeated calls will be ignored
-  // until the fade is canceled. If |animate| is true the fade should animate.
-  void FadeForInstant(bool animate);
-
-  // Immediately removes the fade.
-  void CancelInstantFade();
-
   // Opens view-source tab for this contents.
   void ViewSource();
+
+  void ViewFrameSource(const GURL& url,
+                       const std::string& content_state);
 
   // Gets the minimum/maximum zoom percent.
   int minimum_zoom_percent() const { return minimum_zoom_percent_; }
   int maximum_zoom_percent() const { return maximum_zoom_percent_; }
 
   int content_restrictions() const { return content_restrictions_; }
-
-  AutocompleteHistoryManager* autocomplete_history_manager() {
-    return autocomplete_history_manager_.get();
-  }
-  AutofillManager* autofill_manager() { return autofill_manager_.get(); }
+  void SetContentRestrictions(int restrictions);
 
   safe_browsing::ClientSideDetectionHost* safebrowsing_detection_host() {
     return safebrowsing_detection_host_.get();
   }
 
-  bool was_prerendered() const { return was_prerendered_; }
-  void set_was_prerendered(bool prerendered) { was_prerendered_ = prerendered; }
+  // Query the WebUIFactory for the TypeID for the current URL.
+  WebUI::TypeID GetWebUITypeForCurrentState();
 
  protected:
+  friend class TabContentsObserver;
+  friend class TabContentsObserver::Registrar;
+
+  // Add and remove observers for page navigation notifications. Adding or
+  // removing multiple times has no effect. The order in which notifications
+  // are sent to observers is undefined. Clients must be sure to remove the
+  // observer before they go away.
+  void AddObserver(TabContentsObserver* observer);
+  void RemoveObserver(TabContentsObserver* observer);
+
   // from RenderViewHostDelegate.
   virtual bool OnMessageReceived(const IPC::Message& message);
 
@@ -741,7 +642,7 @@ class TabContents : public PageNavigator,
   // Temporary until the view/contents separation is complete.
   friend class TabContentsView;
 #if defined(OS_WIN)
-  friend class TabContentsViewWin;
+  friend class TabContentsViewViews;
 #elif defined(OS_MACOSX)
   friend class TabContentsViewMac;
 #elif defined(TOOLKIT_USES_GTK)
@@ -786,21 +687,6 @@ class TabContents : public PageNavigator,
   void OnPDFHasUnsupportedFeature();
 
   void OnGoToEntryAtOffset(int offset);
-  void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);
-  void OnInstallApplication(const WebApplicationInfo& info);
-  void OnPageContents(const GURL& url,
-                      int32 page_id,
-                      const string16& contents,
-                      const std::string& language,
-                      bool page_translatable);
-  void OnPageTranslated(int32 page_id,
-                        const std::string& original_lang,
-                        const std::string& translated_lang,
-                        TranslateErrors::Type error_type);
-  void OnSetSuggestions(int32 page_id,
-                        const std::vector<std::string>& suggestions);
-  void OnInstantSupportDetermined(int32 page_id, bool result);
-  void OnRunFileChooser(const ViewHostMsg_RunFileChooser_Params& params);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -808,9 +694,17 @@ class TabContents : public PageNavigator,
   void SetIsLoading(bool is_loading,
                     LoadNotificationDetails* details);
 
+  // Adds a new tab or window with the given already-created contents.
+  // Called from AddOrBlockNewContents or AddPopup.
+  void AddNewContents(TabContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture);
+
   // Adds the incoming |new_contents| to the |blocked_contents_| container.
   void AddPopup(TabContents* new_contents,
-                const gfx::Rect& initial_pos);
+                const gfx::Rect& initial_pos,
+                bool user_gesture);
 
   // Called by derived classes to indicate that we're no longer waiting for a
   // response. This won't actually update the throbber, but it will get picked
@@ -927,9 +821,6 @@ class TabContents : public PageNavigator,
   virtual void UpdateEncoding(RenderViewHost* render_view_host,
                               const std::string& encoding);
   virtual void UpdateTargetURL(int32 page_id, const GURL& url);
-  virtual void UpdateThumbnail(const GURL& url,
-                               const SkBitmap& bitmap,
-                               const ThumbnailScore& score);
   virtual void UpdateInspectorSetting(const std::string& key,
                                       const std::string& value);
   virtual void ClearInspectorSettings();
@@ -945,7 +836,8 @@ class TabContents : public PageNavigator,
                               WindowOpenDisposition disposition);
   virtual void DomOperationResponse(const std::string& json_string,
                                     int automation_id);
-  virtual void ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params);
+  virtual void ProcessWebUIMessage(
+      const ExtensionHostMsg_DomMessage_Params& params);
   virtual void ProcessExternalHostMessage(const std::string& message,
                                           const std::string& origin,
                                           const std::string& target);
@@ -957,9 +849,6 @@ class TabContents : public PageNavigator,
                                     bool* did_suppress_message);
   virtual void RunBeforeUnloadConfirm(const std::wstring& message,
                                       IPC::Message* reply_msg);
-  virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
-                                   const std::string& json_arguments,
-                                   IPC::Message* reply_msg);
   virtual GURL GetAlternateErrorPageURL() const;
   virtual RendererPreferences GetRendererPrefs(Profile* profile) const;
   virtual WebPreferences GetWebkitPrefs();
@@ -979,7 +868,11 @@ class TabContents : public PageNavigator,
                                 int maximum_percent,
                                 bool remember);
   virtual void WorkerCrashed();
+  virtual void RequestDesktopNotificationPermission(const GURL& source_origin,
+                                                    int callback_context);
 
+  void OnUpdateFaviconURL(int32 page_id,
+                          const std::vector<FaviconURL>& candidates);
   // RenderViewHostManager::Delegate -------------------------------------------
 
   // Blocks/unblocks interaction with renderer process.
@@ -1015,26 +908,8 @@ class TabContents : public PageNavigator,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  // App extensions related methods:
-
-  // Returns the first extension whose extent contains |url|.
-  const Extension* GetExtensionContaining(const GURL& url);
-
-  // Resets app_icon_ and if |extension| is non-null creates a new
-  // ImageLoadingTracker to load the extension's image.
-  void UpdateExtensionAppIcon(const Extension* extension);
-
-  // ImageLoadingTracker::Observer.
-  virtual void OnImageLoaded(SkBitmap* image, ExtensionResource resource,
-                             int index);
-
   // NetworkChangeNotifier::OnlineStateObserver:
   virtual void OnOnlineStateChanged(bool online);
-
-  // Checks with the PrerenderManager if the specified URL has been preloaded,
-  // and if so, swap the RenderViewHost with the preload into this TabContents
-  // object.
-  bool MaybeUsePreloadedPage(const GURL& url);
 
   // Adds the given window to the list of child windows. The window will notify
   // via WillClose() when it is being destroyed.
@@ -1065,50 +940,24 @@ class TabContents : public PageNavigator,
   // Registers and unregisters for pref notifications.
   PrefChangeRegistrar pref_change_registrar_;
 
-  // Handles print job for this contents.
-  scoped_ptr<printing::PrintViewManager> printing_;
-
-  // Handles print preview for this contents.
-  scoped_ptr<printing::PrintPreviewMessageHandler> print_preview_;
-
-  // SavePackage, lazily created.
-  scoped_refptr<SavePackage> save_package_;
-
-  // AutocompleteHistoryManager.
-  scoped_ptr<AutocompleteHistoryManager> autocomplete_history_manager_;
-
-  // AutofillManager.
-  scoped_ptr<AutofillManager> autofill_manager_;
-
   // Handles plugin messages.
   scoped_ptr<PluginObserver> plugin_observer_;
 
-  // Prerender PageLoadTime Recorder.
-  scoped_ptr<prerender::PrerenderPLTRecorder> prerender_plt_recorder_;
-
   // TabContentsSSLHelper, lazily created.
   scoped_ptr<TabContentsSSLHelper> ssl_helper_;
-
-  // FileSelectHelper, lazily created.
-  scoped_ptr<FileSelectHelper> file_select_helper_;
 
   // Handles drag and drop event forwarding to extensions.
   BookmarkDrag* bookmark_drag_;
 
   // Handles downloading favicons.
-  scoped_ptr<FavIconHelper> fav_icon_helper_;
+  scoped_ptr<FaviconHelper> favicon_helper_;
 
-  // Cached web app info data.
-  WebApplicationInfo web_app_info_;
-
-  // Cached web app icon.
-  SkBitmap app_icon_;
+  // Handles downloading touchicons. It is NULL if
+  // browser_defaults::kEnableTouchIcon is false.
+  scoped_ptr<FaviconHelper> touch_icon_helper_;
 
   // RenderViewHost::ContentSettingsDelegate.
   scoped_ptr<TabSpecificContentSettings> content_settings_delegate_;
-
-  // Handles desktop notification IPCs.
-  scoped_ptr<DesktopNotificationHandlerForTC> desktop_notification_handler_;
 
   // Handles IPCs related to SafeBrowsing client-side phishing detection.
   scoped_ptr<safe_browsing::ClientSideDetectionHost>
@@ -1164,9 +1013,6 @@ class TabContents : public PageNavigator,
   // Should we block all child TabContents this attempts to spawn.
   bool all_contents_blocked_;
 
-  // TODO(pkasting): Hack to try and fix Linux browser tests.
-  bool dont_notify_render_view_;
-
   // True if this is a secure page which displayed insecure content.
   bool displayed_insecure_content_;
 
@@ -1174,18 +1020,6 @@ class TabContents : public PageNavigator,
 
   // Delegates for InfoBars associated with this TabContents.
   std::vector<InfoBarDelegate*> infobar_delegates_;
-
-  // Data for app extensions ---------------------------------------------------
-
-  // If non-null this tab is an app tab and this is the extension the tab was
-  // created for.
-  const Extension* extension_app_;
-
-  // Icon for extension_app_ (if non-null) or extension_for_current_page_.
-  SkBitmap extension_app_icon_;
-
-  // Used for loading extension_app_icon_.
-  scoped_ptr<ImageLoadingTracker> extension_app_image_loader_;
 
   // Data for misc internal state ----------------------------------------------
 
@@ -1233,7 +1067,7 @@ class TabContents : public PageNavigator,
 
   // If this tab was created from a renderer using window.open, this will be
   // non-NULL and represent the WebUI of the opening renderer.
-  WebUITypeID opener_web_ui_type_;
+  WebUI::TypeID opener_web_ui_type_;
 
   // The time that we started to create the new tab page.
   base::TimeTicks new_tab_start_time_;
@@ -1243,9 +1077,6 @@ class TabContents : public PageNavigator,
 
   // The time that this tab was last selected.
   base::TimeTicks last_selected_time_;
-
-  // Information about the language the page is in and has been translated to.
-  LanguageState language_state_;
 
   // See description above setter.
   bool closed_by_user_gesture_;
@@ -1264,9 +1095,6 @@ class TabContents : public PageNavigator,
   // Content restrictions, used to disable print/copy etc based on content's
   // (full-page plugins for now only) permissions.
   int content_restrictions_;
-
-  // Were the contents of this tab previously prerendered?
-  bool was_prerendered_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContents);
 };

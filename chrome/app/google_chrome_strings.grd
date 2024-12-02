@@ -254,7 +254,7 @@ Chrome supports. -->
       </message>
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_ABOUT_CROS_VERSION_LICENSE" desc="Additional text displayed beneath the Chromium open source URLs for Chrome OS.">
-          Google Chrome OS is made possible by additional <ph name="BEGIN_LINK_CROS_OSS">BEGIN_LINK_CROS_OSS</ph>open source software<ph name="END_LINK_CROS_OSS">END_LINK_CROS_OSS</ph>.
+          Chrome OS is made possible by additional <ph name="BEGIN_LINK_CROS_OSS">BEGIN_LINK_CROS_OSS</ph>open source software<ph name="END_LINK_CROS_OSS">END_LINK_CROS_OSS</ph>.
         </message>
       </if>
       <message name="IDS_ABOUT_TERMS_OF_SERVICE" desc="The terms of service label in the About box.">
@@ -332,12 +332,6 @@ Chrome supports. -->
       <message name="IDS_UNSUPPORTED_OS" desc="The text used to warn the user that current OS is not supported">
         Google Chrome does not support <ph name="OS_NAME">$1<ex>Windows 2000</ex></ph>.
       </message>
-      <message name="IDS_OPTIONS_CHROME_LANGUAGE_INFO" desc="Information text about the language of various Chrome features">
-        Change the language used in Google Chrome menus, dialog boxes, and tooltips.
-      </message>
-      <message name="IDS_OPTIONS_CHROME_UI_LANGUAGE" desc="The documentation string of the 'Chrome UI language' preference">
-        Google Chrome language:
-      </message>
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_OPTIONS_RELAUNCH_REQUIRED" desc="The message displayed for an option that requires a relaunch to take effect. This appears in a message box if an option is changed that requires a relaunch.">
           Please close all Google Chrome windows and relaunch it for this change to take effect.
@@ -345,13 +339,9 @@ Chrome supports. -->
       </if>
       <if expr="pp_ifdef('chromeos')">
         <message name="IDS_OPTIONS_RELAUNCH_REQUIRED" desc="The message displayed for an option that requires a relaunch to take effect. This appears in a message box if an option is changed that requires a relaunch.">
-          Please sign out of Google Chrome OS and sign in again for this change to take effect.
+          Please sign out of Chrome OS and sign in again for this change to take effect.
         </message>
       </if>
-      <!--TODO(kmadhusu): Remove "IDS_OPTIONS_RESET_MESSAGE" after platform-specific dialogs are removed.-->
-      <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
-        When you reset Google Chrome options any changes you've made will be reverted to the default settings. Do you want to reset Chrome options?
-      </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
         Google Chrome cannot read and write to its data directory:\n\n<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
       </message>
@@ -391,9 +381,6 @@ Chrome supports. -->
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version of Chrome Frame already exists">
         This computer already has a more recent version of Google Chrome Frame. If the software is not working, please uninstall Google Chrome Frame and download it again.
-      </message>
-      <message name="IDS_INSTALL_USER_LEVEL_EXISTS" desc="Error displayed during system level install if user level Chromium is already installed.">
-        Google Chrome has already been installed for this user. If the software is not working, please uninstall Google Chrome and download it again.
       </message>
       <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chromium is already installed.">
         Google Chrome is already installed and available to all users of this computer. If you want to install Google Chrome at the user level, you must first uninstall the system-level version installed by an administrator.
@@ -453,10 +440,6 @@ Chrome supports. -->
         Invalid arguments. Google Chrome Frame cannot be installed in ready mode without also installing Google Chrome.
       </message>
       <!-- Options Dialog -->
-      <!-- TODO(kmadhusu): Remove "IDS_OPTIONS_DISABLE_SERVICES" after platform-specific dialogs are removed.-->
-      <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
-        Google Chrome may use web services to improve your browsing experience. You may optionally disable these services.
-      </message>
       <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
         Google Chrome may use web services to improve your browsing experience.
       </message>
@@ -494,6 +477,9 @@ Chrome supports. -->
       <message name="IDS_TRY_TOAST_HEADING4" desc="Top line of the try-chrome-again dialog">
         Google Chrome has been updated, but you haven't used it for at least 30 days.
       </message>
+      <message name="IDS_TRY_TOAST_HEADING_SKYPE" desc="Top line of the try-chrome-again dialog">
+        Google Chrome lets you click a phone number on the web and call it with Skype!
+      </message>
       <message name="IDS_TRY_TOAST_TRY_OPT" desc="First option radio button on the dialog to try chrome">
         Try it out (already installed)
       </message>
@@ -515,7 +501,7 @@ Chrome supports. -->
       </message>
       <!-- chrome://crashes strings -->
       <message name="IDS_CRASHES_DISABLED_MESSAGE" desc="The explanatory message for chrome://crashes when crash reporting is disabled">
-        This page only shows information on your recent crashes if you <ph name="BEGIN_LINK">&lt;a href="http://google.com/support/chrome/bin/answer.py?answer=96817"&gt;</ph>enable crash reporting<ph name="END_LINK">&lt;/a&gt;</ph>.
+        This page only shows information on your recent crashes if you <ph name="BEGIN_LINK">&lt;a href="https://google.com/support/chrome/bin/answer.py?answer=96817"&gt;</ph>enable crash reporting<ph name="END_LINK">&lt;/a&gt;</ph>.
       </message>
 
       <if expr="os == 'darwin'">

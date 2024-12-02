@@ -11,12 +11,20 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPerformance.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRange.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "v8/include/v8.h"
+
+// TODO(bbudge) remove once this is declared in WebFrame.h
+namespace WebKit {
+
+  struct WebURLLoaderOptions;
+
+};
 
 using WebKit::WebAnimationController;
 using WebKit::WebCanvas;
@@ -32,6 +40,7 @@ using WebKit::WebInputElement;
 using WebKit::WebNode;
 using WebKit::WebPasswordAutocompleteListener;
 using WebKit::WebPerformance;
+using WebKit::WebPoint;
 using WebKit::WebRange;
 using WebKit::WebRect;
 using WebKit::WebURLRequest;
@@ -41,6 +50,7 @@ using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebURL;
 using WebKit::WebURLLoader;
+using WebKit::WebURLLoaderOptions;
 using WebKit::WebVector;
 using WebKit::WebView;
 
@@ -107,8 +117,23 @@ class MockWebFrame : public WebKit::WebFrame {
   virtual v8::Handle<v8::Value> executeScriptAndReturnValue(
       const WebScriptSource&);
   virtual v8::Local<v8::Context> mainWorldScriptContext() const;
+#ifdef WEB_FILE_SYSTEM_TYPE_EXTERNAL
   virtual v8::Handle<v8::Value> createFileSystem(
-      int type, const WebString& name, const WebString& path);
+      WebKit::WebFileSystem::Type type, const WebString& name,
+      const WebString& path);
+  virtual v8::Handle<v8::Value> createFileEntry(
+      WebKit::WebFileSystem::Type type, const WebString& fileSystemName,
+      const WebString& fileSystemPath, const WebString& filePath,
+      bool isDirectory);
+#else
+  virtual v8::Handle<v8::Value> createFileSystem(
+      int type, const WebString& name,
+      const WebString& path);
+  virtual v8::Handle<v8::Value> createFileEntry(
+      int type, const WebString& fileSystemName,
+      const WebString& fileSystemPath, const WebString& filePath,
+      bool isDirectory);
+#endif
 #endif
   virtual bool insertStyleText(const WebString& styleText,
                                const WebString& elementId);
@@ -136,12 +161,14 @@ class MockWebFrame : public WebKit::WebFrame {
   // The next two methods were mocked above.
   // virtual void setReferrerForRequest(WebURLRequest&, const WebURL&) {}
   // virtual void dispatchWillSendRequest(WebURLRequest&) {}
+  // TODO(bbudge) remove once WebKit change lands.
   virtual WebURLLoader* createAssociatedURLLoader();
+  virtual WebURLLoader* createAssociatedURLLoader(
+      const WebURLLoaderOptions& options);
   virtual void commitDocumentData(const char* data, size_t length);
   virtual unsigned unloadListenerCount() const;
   virtual bool isProcessingUserGesture() const;
   virtual bool willSuppressOpenerInNewFrame() const;
-  virtual bool pageDismissalEventBeingDispatched() const;
   virtual void replaceSelection(const WebString& text);
   virtual void insertText(const WebString& text);
   virtual void setMarkedText(const WebString& text,
@@ -163,6 +190,7 @@ class MockWebFrame : public WebKit::WebFrame {
   virtual WebString selectionAsText() const;
   virtual WebString selectionAsMarkup() const;
   virtual bool selectWordAroundCaret();
+  virtual void selectRange(const WebPoint& start, const WebPoint& end);
   virtual int printBegin(const WebSize& pageSize,
                          const WebNode& constrainToNode,
                          int printerDPI = 72,
@@ -197,6 +225,7 @@ class MockWebFrame : public WebKit::WebFrame {
       const WebInputElement&);
   virtual WebString contentAsText(size_t maxChars) const;
   virtual WebString contentAsMarkup() const;
+  virtual WebString renderTreeAsText(bool showDebugInfo) const;
   virtual WebString renderTreeAsText() const;
   virtual WebString counterValueForElementById(const WebString& id) const;
   virtual WebString markerTextForListItem(const WebElement&) const;
@@ -208,6 +237,7 @@ class MockWebFrame : public WebKit::WebFrame {
   virtual bool pauseSVGAnimation(const WebString& animationId,
                                  double time,
                                  const WebString& elementId);
+  virtual WebString layerTreeAsText(bool showDebugInfo) const;
   virtual WebString layerTreeAsText() const;
 
  private:

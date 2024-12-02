@@ -7,9 +7,12 @@
 #include <stdlib.h>  // For malloc
 
 #include "base/logging.h"
+#include "base/message_loop.h"
+#include "base/task.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_core.h"
+#include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -58,7 +61,7 @@ void ReleaseVar(PP_Var var) {
 }
 
 PP_Var VarFromUtf8(PP_Module module, const char* data, uint32_t len) {
-  PP_Var ret;
+  PP_Var ret = {};
   ret.type = PP_VARTYPE_STRING;
   ret.value.as_id = PluginVarTracker::GetInstance()->MakeString(
       data, len);
@@ -295,7 +298,8 @@ InterfaceProxy* CreateVarDeprecatedProxy(Dispatcher* dispatcher,
 PPB_Var_Deprecated_Proxy::PPB_Var_Deprecated_Proxy(
     Dispatcher* dispatcher,
     const void* target_interface)
-    : InterfaceProxy(dispatcher, target_interface) {
+    : InterfaceProxy(dispatcher, target_interface),
+      task_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 PPB_Var_Deprecated_Proxy::~PPB_Var_Deprecated_Proxy() {
@@ -314,8 +318,17 @@ const InterfaceProxy::Info* PPB_Var_Deprecated_Proxy::GetInfo() {
 }
 
 bool PPB_Var_Deprecated_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  // Prevent the dispatcher from going away during a call to Call or other
+  // function that could mutate the DOM. This must happen OUTSIDE of
+  // the message handlers since the SerializedVars use the dispatcher upon
+  // return of the function (converting the SerializedVarReturnValue/OutParam
+  // to a SerializedVar in the destructor).
+  ScopedModuleReference death_grip(dispatcher());
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Var_Deprecated_Proxy, msg)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBVar_AddRefObject, OnMsgAddRefObject)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBVar_ReleaseObject, OnMsgReleaseObject)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBVar_HasProperty,
                         OnMsgHasProperty)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBVar_HasMethodDeprecated,
@@ -342,11 +355,44 @@ bool PPB_Var_Deprecated_Proxy::OnMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
+void PPB_Var_Deprecated_Proxy::OnMsgAddRefObject(int64 object_id,
+                                                 int* /* unused */) {
+  PP_Var var;
+  var.type = PP_VARTYPE_OBJECT;
+  var.value.as_id = object_id;
+  ppb_var_target()->AddRef(var);
+}
+
+void PPB_Var_Deprecated_Proxy::OnMsgReleaseObject(int64 object_id) {
+  // Ok, so this is super subtle.
+  // When the browser side sends a sync IPC message that returns a var, and the
+  // plugin wants to give ownership of that var to the browser, dropping all
+  // references, it may call ReleaseObject right after returning the result.
+  // However, the IPC system doesn't enforce strict ordering of messages in that
+  // case, where a message that is set to unblock (e.g. a sync message, or in
+  // our case all messages coming from the plugin) that is sent *after* the
+  // result may be dispatched on the browser side *before* the sync send
+  // returned (see ipc_sync_channel.cc). In this case, that means it could
+  // release the object before it is AddRef'ed on the browser side.
+  // To work around this, we post a task here, that will not execute before
+  // control goes back to the main message loop, that will ensure the sync send
+  // has returned and the browser side can take its reference before we Release.
+  // Note: if the instance is gone by the time the task is executed, then it
+  // will Release the objects itself and this Release will be a NOOP (aside of a
+  // spurious warning).
+  // TODO(piman): See if we can fix the IPC code to enforce strict ordering, and
+  // then remove this.
+  MessageLoop::current()->PostNonNestableTask(FROM_HERE,
+      task_factory_.NewRunnableMethod(
+          &PPB_Var_Deprecated_Proxy::DoReleaseObject, object_id));
+}
+
 void PPB_Var_Deprecated_Proxy::OnMsgHasProperty(
     SerializedVarReceiveInput var,
     SerializedVarReceiveInput name,
     SerializedVarOutParam exception,
     PP_Bool* result) {
+  SetAllowPluginReentrancy();
   *result = BoolToPPBool(ppb_var_target()->HasProperty(
       var.Get(dispatcher()),
       name.Get(dispatcher()),
@@ -358,6 +404,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgHasMethodDeprecated(
     SerializedVarReceiveInput name,
     SerializedVarOutParam exception,
     PP_Bool* result) {
+  SetAllowPluginReentrancy();
   *result = BoolToPPBool(ppb_var_target()->HasMethod(
       var.Get(dispatcher()),
       name.Get(dispatcher()),
@@ -369,6 +416,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgGetProperty(
     SerializedVarReceiveInput name,
     SerializedVarOutParam exception,
     SerializedVarReturnValue result) {
+  SetAllowPluginReentrancy();
   result.Return(dispatcher(), ppb_var_target()->GetProperty(
       var.Get(dispatcher()), name.Get(dispatcher()),
       exception.OutParam(dispatcher())));
@@ -378,6 +426,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgEnumerateProperties(
     SerializedVarReceiveInput var,
     SerializedVarVectorOutParam props,
     SerializedVarOutParam exception) {
+  SetAllowPluginReentrancy();
   ppb_var_target()->GetAllPropertyNames(var.Get(dispatcher()),
       props.CountOutParam(), props.ArrayOutParam(dispatcher()),
       exception.OutParam(dispatcher()));
@@ -388,6 +437,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgSetPropertyDeprecated(
     SerializedVarReceiveInput name,
     SerializedVarReceiveInput value,
     SerializedVarOutParam exception) {
+  SetAllowPluginReentrancy();
   ppb_var_target()->SetProperty(var.Get(dispatcher()),
                                 name.Get(dispatcher()),
                                 value.Get(dispatcher()),
@@ -399,6 +449,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgDeleteProperty(
     SerializedVarReceiveInput name,
     SerializedVarOutParam exception,
     PP_Bool* result) {
+  SetAllowPluginReentrancy();
   ppb_var_target()->RemoveProperty(var.Get(dispatcher()),
                                    name.Get(dispatcher()),
                                    exception.OutParam(dispatcher()));
@@ -413,6 +464,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgCallDeprecated(
     SerializedVarVectorReceiveInput arg_vector,
     SerializedVarOutParam exception,
     SerializedVarReturnValue result) {
+  SetAllowPluginReentrancy();
   uint32_t arg_count = 0;
   PP_Var* args = arg_vector.Get(dispatcher(), &arg_count);
   result.Return(dispatcher(), ppb_var_target()->Call(
@@ -427,6 +479,7 @@ void PPB_Var_Deprecated_Proxy::OnMsgConstruct(
     SerializedVarVectorReceiveInput arg_vector,
     SerializedVarOutParam exception,
     SerializedVarReturnValue result) {
+  SetAllowPluginReentrancy();
   uint32_t arg_count = 0;
   PP_Var* args = arg_vector.Get(dispatcher(), &arg_count);
   result.Return(dispatcher(), ppb_var_target()->Construct(
@@ -447,8 +500,23 @@ void PPB_Var_Deprecated_Proxy::OnMsgCreateObjectDeprecated(
     int64 ppp_class,
     int64 class_data,
     SerializedVarReturnValue result) {
+  SetAllowPluginReentrancy();
   result.Return(dispatcher(), PPP_Class_Proxy::CreateProxiedObject(
       ppb_var_target(), dispatcher(), instance, ppp_class, class_data));
+}
+
+void PPB_Var_Deprecated_Proxy::SetAllowPluginReentrancy() {
+  if (dispatcher()->IsPlugin())
+    NOTREACHED();
+  else
+    static_cast<HostDispatcher*>(dispatcher())->set_allow_plugin_reentrancy();
+}
+
+void PPB_Var_Deprecated_Proxy::DoReleaseObject(int64 object_id) {
+  PP_Var var;
+  var.type = PP_VARTYPE_OBJECT;
+  var.value.as_id = object_id;
+  ppb_var_target()->Release(var);
 }
 
 }  // namespace proxy

@@ -31,36 +31,13 @@ void PureCall() {
   __debugbreak();
 }
 
-// This class implements the Run method and registers an exception handler to
-// ensure that any ChromeFrame processes like IE, Firefox, etc are terminated
-// if there is a crash in the chrome frame test suite.
-class ChromeFrameTestSuite : public base::TestSuite {
- public:
-  ChromeFrameTestSuite(int argc, char** argv)
-      : base::TestSuite(argc, argv) {}
-
-  int Run() {
-    // Register a stack based exception handler to catch any exceptions which
-    // occur in the course of the test.
-    int ret = -1;
-    __try {
-      ret = base::TestSuite::Run();
-    }
-
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-      ret = -1;
-    }
-    return ret;
-  }
-};
-
 int main(int argc, char **argv) {
   base::EnableTerminationOnHeapCorruption();
   base::PlatformThread::SetName("ChromeFrame tests");
 
   _set_purecall_handler(PureCall);
 
-  ChromeFrameTestSuite test_suite(argc, argv);
+  base::TestSuite test_suite(argc, argv);
 
   SetConfigBool(kChromeFrameHeadlessMode, true);
   SetConfigBool(kChromeFrameAccessibleMode, true);
@@ -72,9 +49,6 @@ int main(int argc, char **argv) {
   if (CommandLine::ForCurrentProcess()->HasSwitch(kNoRegistrationSwitch)) {
     ret = test_suite.Run();
   } else {
-    // Register paths needed by the ScopedChromeFrameRegistrar.
-    chrome::RegisterPathProvider();
-
     // This will register the chrome frame in the build directory. It currently
     // leaves that chrome frame registered once the tests are done. It must be
     // constructed AFTER the TestSuite is created since TestSuites create THE
@@ -87,13 +61,7 @@ int main(int argc, char **argv) {
     ScopedChromeFrameRegistrar ia2_registrar(
         chrome_frame_test::GetIAccessible2ProxyStubPath().value(),
         ScopedChromeFrameRegistrar::SYSTEM_LEVEL);
-    ret = test_suite.Run();
-  }
-
-  if (ret == -1) {
-    LOG(ERROR) << "ChromeFrame tests crashed";
-    chrome_frame_test::KillProcesses(L"iexplore.exe", 0, false);
-    chrome_frame_test::KillProcesses(L"firefox.exe", 0, false);
+    test_suite.Run();
   }
 
   DeleteConfigValue(kChromeFrameHeadlessMode);

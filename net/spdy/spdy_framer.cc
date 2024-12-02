@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,8 @@
 
 #include "net/spdy/spdy_framer.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/stats_counters.h"
-#include "base/scoped_ptr.h"
 #include "base/third_party/valgrind/memcheck.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_bitmasks.h"
@@ -927,9 +927,9 @@ SpdyFrame* SpdyFramer::CompressFrameWithZStream(const SpdyFrame& frame,
   int header_length;
   const char* payload;
 
-  static base::StatsCounter compressed_frames("spdy.CompressedFrames");
-  static base::StatsCounter pre_compress_bytes("spdy.PreCompressSize");
-  static base::StatsCounter post_compress_bytes("spdy.PostCompressSize");
+  base::StatsCounter compressed_frames("spdy.CompressedFrames");
+  base::StatsCounter pre_compress_bytes("spdy.PreCompressSize");
+  base::StatsCounter post_compress_bytes("spdy.PostCompressSize");
 
   if (!enable_compression_)
     return DuplicateFrame(frame);
@@ -991,9 +991,9 @@ SpdyFrame* SpdyFramer::DecompressFrameWithZStream(const SpdyFrame& frame,
   int header_length;
   const char* payload;
 
-  static base::StatsCounter decompressed_frames("spdy.DecompressedFrames");
-  static base::StatsCounter pre_decompress_bytes("spdy.PreDeCompressSize");
-  static base::StatsCounter post_decompress_bytes("spdy.PostDeCompressSize");
+  base::StatsCounter decompressed_frames("spdy.DecompressedFrames");
+  base::StatsCounter pre_decompress_bytes("spdy.PreDeCompressSize");
+  base::StatsCounter post_decompress_bytes("spdy.PostDeCompressSize");
 
   if (!enable_compression_)
     return DuplicateFrame(frame);
@@ -1048,9 +1048,10 @@ SpdyFrame* SpdyFramer::DecompressFrameWithZStream(const SpdyFrame& frame,
   int decompressed_size = decompressed_max_size - decompressor->avail_out;
   new_frame->set_length(header_length + decompressed_size - SpdyFrame::size());
 
-  // If there is data left, then we're in trouble.  This API assumes everything
-  // was consumed.
-  CHECK_EQ(decompressor->avail_in, 0u);
+  // If there is data left, then the frame didn't fully decompress.  This
+  // means that there is stranded data at the end of this frame buffer which
+  // will be ignored.
+  DCHECK_EQ(decompressor->avail_in, 0u);
 
   pre_decompress_bytes.Add(frame.length());
   post_decompress_bytes.Add(new_frame->length());

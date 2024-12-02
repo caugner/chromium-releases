@@ -25,12 +25,16 @@
         ],
         'sources': [
           'mini_installer/appid.h',
+          'mini_installer/decompress.cc',
+          'mini_installer/decompress.h',
           'mini_installer/mini_installer.cc',
           'mini_installer/mini_installer.h',
           'mini_installer/mini_installer.ico',
           'mini_installer/mini_installer.rc',
           'mini_installer/mini_installer_exe_version.rc.version',
           'mini_installer/mini_installer_resource.h',
+          'mini_installer/mini_string.cc',
+          'mini_installer/mini_string.h',
           'mini_installer/pe_resource.cc',
           'mini_installer/pe_resource.h',
         ],
@@ -54,26 +58,15 @@
             'IgnoreAllDefaultLibraries': 'true',
             'OptimizeForWindows98': '1',
             'SubSystem': '2',     # Set /SUBSYSTEM:WINDOWS
+            'AdditionalDependencies': [
+              'shlwapi.lib',
+              'setupapi.lib',
+            ],
             'conditions': [
-              ['MSVS_VERSION=="2010"', {
-                'AdditionalDependencies': [
-                  # These two object files are included in Visual Studio 2008
-                  # but not 2010.
-                  # TODO(bradnelson):
-                  # http://code.google.com/p/chromium/issues/detail?id=72885
-                  '"$(VCInstallDir)..\\..\\Microsoft Visual Studio 9.0\\VC\\'
-                      'crt\\src\\intel\\mt_lib\\memset.obj"',
-                  '"$(VCInstallDir)..\\..\\Microsoft Visual Studio 9.0\\VC\\'
-                      'crt\\src\\intel\\mt_lib\\P4_memset.obj"',
-                  'shlwapi.lib',
-                  'setupapi.lib',
-                ],
-              },{
-                'AdditionalDependencies': [
-                  '"$(VCInstallDir)crt\\src\\intel\\mt_lib\\memset.obj"',
-                  '"$(VCInstallDir)crt\\src\\intel\\mt_lib\\P4_memset.obj"',
-                  'shlwapi.lib',
-                  'setupapi.lib',
+              ['MSVS_VERSION=="2005e"', {
+                'AdditionalDependencies': [ # Must explicitly link in VC2005E
+                  'advapi32.lib',
+                  'shell32.lib',
                 ],
               }],
             ],
@@ -197,7 +190,7 @@
                 '<(PRODUCT_DIR)/nacl64.dll',
                 '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.dll',
                 '<(PRODUCT_DIR)/locales/en-US.dll',
-                '<(PRODUCT_DIR)/icudt46.dll',
+                '<(PRODUCT_DIR)/icudt.dll',
               ],
               'outputs': [
                 'xxx.out',

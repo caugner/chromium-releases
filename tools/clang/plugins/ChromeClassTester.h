@@ -11,6 +11,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Frontend/CompilerInstance.h"
 
+#include <set>
 #include <vector>
 
 // A class on top of ASTConsumer that forwards classes defined in Chromium
@@ -40,7 +41,7 @@ class ChromeClassTester : public clang::ASTConsumer {
   bool InTestingNamespace(clang::Decl* record);
 
  private:
-  // Template method which is called with only classes that are defined in
+  // Filtered versions of tags that are only called with things defined in
   // chrome header files.
   virtual void CheckChromeClass(const clang::SourceLocation& record_location,
                                 clang::CXXRecordDecl* record) = 0;
@@ -51,7 +52,7 @@ class ChromeClassTester : public clang::ASTConsumer {
   std::string GetNamespace(clang::Decl* record);
   std::string GetNamespaceImpl(const clang::DeclContext* context,
                                std::string candidate);
-  bool InBannedDirectory(const clang::SourceLocation& loc);
+  bool InBannedDirectory(clang::SourceLocation loc);
   bool IsIgnoredType(const std::string& base_name);
 
   clang::CompilerInstance& instance_;
@@ -66,7 +67,7 @@ class ChromeClassTester : public clang::ASTConsumer {
   std::vector<std::string> banned_directories_;
 
   // List of types that we don't check.
-  std::vector<std::string> ignored_record_names_;
+  std::set<std::string> ignored_record_names_;
 };
 
 #endif  // TOOLS_CLANG_PLUGINS_CHROMECLASSTESTER_H_

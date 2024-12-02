@@ -140,11 +140,11 @@ be available for now. -->
   <translations>
     <if expr="pp_ifdef('use_third_party_translations')">
       <file path="../../third_party/launchpad_translations/chromium_strings_ast.xtb" lang="ast" />
-      <file path="../../third_party/launchpad_translations/chromium_strings_ca.xtb" lang="ca" />
       <file path="../../third_party/launchpad_translations/chromium_strings_cs.xtb" lang="cs" />
       <file path="../../third_party/launchpad_translations/chromium_strings_da.xtb" lang="da" />
       <file path="../../third_party/launchpad_translations/chromium_strings_de.xtb" lang="de" />
       <file path="../../third_party/launchpad_translations/chromium_strings_es.xtb" lang="es" />
+      <file path="../../third_party/launchpad_translations/chromium_strings_et.xtb" lang="et" />
       <file path="../../third_party/launchpad_translations/chromium_strings_eu.xtb" lang="eu" />
       <file path="../../third_party/launchpad_translations/chromium_strings_fi.xtb" lang="fi" />
       <file path="../../third_party/launchpad_translations/chromium_strings_fr.xtb" lang="fr" />
@@ -325,12 +325,6 @@ be available for now. -->
       <message name="IDS_UNSUPPORTED_OS" desc="The text used to warn the user that current OS is not supported">
         Chromium does not support <ph name="OS_NAME">$1<ex>Windows 2000</ex></ph>.
       </message>
-      <message name="IDS_OPTIONS_CHROME_LANGUAGE_INFO" desc="Information text about the language of various Chrome features">
-        Change the language used in Chromium menus, dialog boxes, and tooltips.
-      </message>
-      <message name="IDS_OPTIONS_CHROME_UI_LANGUAGE" desc="The documentation string of the 'Chrome UI language' preference">
-        Chromium language:
-      </message>
       <if expr="not pp_ifdef('chromeos')">
         <message name="IDS_OPTIONS_RELAUNCH_REQUIRED" desc="The message displayed for an option that requires a relaunch to take effect. This appears in a message box if an option is changed that requires a relaunch.">
           Please close all Chromium windows and relaunch Chromium for this change to take effect.
@@ -341,16 +335,11 @@ be available for now. -->
           Please sign out of Chromium OS and sign in again for this change to take effect.
         </message>
       </if>
-      <!--TODO(kmadhusu): Remove "IDS_OPTIONS_RESET_MESSAGE" after platform-specific dialogs are removed.-->
-      <message name="IDS_OPTIONS_RESET_MESSAGE" desc="The message shown when the user presses the 'Reset Chrome options' button">
-        When you reset Chromium options any changes you've made will be reverted to the default settings. Do you want to reset Chromium options?
-      </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
         Chromium cannot read and write to its data directory:\n\n<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
       </message>
       <message name="IDS_EULA_CHECKBOX_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging">
-	<!--We use /n here to separate lines manually because NativeCheckboxGtk currently does not support multi-line. -->
-        Optional: Help make Chromium better by automatically sending usage statistics and crash\nreports to Google
+        Optional: Help make Chromium better by automatically sending usage statistics and crash reports to Google.
       </message>
       <message name="IDS_PROFILE_TOO_NEW_ERROR" desc="Error displayed on startup when the profile is from a newer version of the product and can not be read">
         Your profile can not be used because it is from a newer version of Chromium.\n\nSome features may be unavailable. Please specify a different profile directory or use a newer version of Chromium.
@@ -385,9 +374,6 @@ be available for now. -->
       </message>
       <message name="IDS_INSTALL_HIGHER_VERSION_CF" desc="Error displayed when higher version already exists.">
         This computer already has a more recent version of Chromium Frame. If the software is not working, please uninstall Chromium Frame and download it again.
-      </message>
-      <message name="IDS_INSTALL_USER_LEVEL_EXISTS" desc="Error displayed during system level install if user level Chromium is already installed.">
-        Chromium has already been installed for this user. If the software is not working, please uninstall Chromium and download it again.
       </message>
       <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chromium is already installed.">
         Chromium is already installed and available to all users of this computer. If you want to install Chromium at the user level, you must first uninstall the system-level version installed by an administrator.
@@ -447,10 +433,6 @@ be available for now. -->
         Invalid arguments. Chromium Frame cannot be installed in ready mode without also installing Chromium.
       </message>
       <!-- Options Dialog -->
-      <!--TODO(kmadhusu): Remove "IDS_OPTIONS_DISABLE_SERVICES" after platform-specific dialogs are removed.-->
-      <message name="IDS_OPTIONS_DISABLE_SERVICES" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
-        Chromium may use web services to improve your browsing experience. You may optionally disable these services.
-      </message>
       <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">
         Chromium may use web services to improve your browsing experience.
       </message>
@@ -487,6 +469,9 @@ be available for now. -->
       </message>
       <message name="IDS_TRY_TOAST_HEADING4" desc="Top line of the try-chrome-again dialog">
         Chromium has been updated, but you haven't used it for at least 30 days.
+      </message>
+      <message name="IDS_TRY_TOAST_HEADING_SKYPE" desc="Top line of the try-chrome-again dialog">
+        Chromium lets you click a phone number on the web and call it with Skype!
       </message>
       <message name="IDS_TRY_TOAST_TRY_OPT" desc="First option radio button on the dialog to try chrome">
         Try it out (already installed)

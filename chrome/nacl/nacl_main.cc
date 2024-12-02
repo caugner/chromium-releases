@@ -11,26 +11,20 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
-
-#if defined(USE_LINUX_BREAKPAD)
-#include "chrome/app/breakpad_linux.h"
-#endif
-
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/hi_res_timer_manager.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/main_function_params.h"
-#include "chrome/common/result_codes.h"
 #include "chrome/common/sandbox_policy.h"
 #include "chrome/nacl/nacl_main_platform_delegate.h"
 #include "chrome/nacl/nacl_thread.h"
 #include "content/common/child_process.h"
+#include "content/common/hi_res_timer_manager.h"
+#include "content/common/main_function_params.h"
+#include "content/common/result_codes.h"
 #include "ui/base/system_monitor/system_monitor.h"
 
 #if defined(OS_WIN)
 #include "chrome/nacl/broker_thread.h"
-#include "chrome/test/injection_test_dll.h"
 #include "sandbox/src/sandbox.h"
 #endif
 
@@ -89,16 +83,12 @@ int NaClBrokerMain(const MainFunctionParams& parameters) {
 // behavior of the renderer.
 static void HandleNaClTestParameters(const CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kNaClStartupDialog)) {
-    ChildProcess::WaitForDebugger(L"NativeClient");
+    ChildProcess::WaitForDebugger("NativeClient");
   }
 }
 
 // main() routine for the NaCl loader process.
 int NaClMain(const MainFunctionParams& parameters) {
-#if defined(USE_LINUX_BREAKPAD)
-  // Needs to be called after we have chrome::DIR_USER_DATA.
-  InitCrashReporter();
-#endif
   const CommandLine& parsed_command_line = parameters.command_line_;
 
   // This function allows pausing execution using the --nacl-startup-dialog

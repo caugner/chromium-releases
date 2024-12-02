@@ -1,10 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/webdriver/commands/webelement_commands.h"
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/stringprintf.h"
 #include "base/third_party/icu/icu_utf.h"
 #include "base/values.h"
@@ -12,6 +12,8 @@
 #include "chrome/test/webdriver/error_codes.h"
 #include "chrome/test/webdriver/session.h"
 #include "third_party/webdriver/atoms.h"
+#include "ui/gfx/point.h"
+#include "ui/gfx/size.h"
 
 namespace webdriver {
 
@@ -41,31 +43,6 @@ bool WebElementCommand::Init(Response* const response) {
   // inject the ID into the in-page cache.
   element = WebElementId(path_segments_.at(4));
   return true;
-}
-
-bool WebElementCommand::GetElementSize(int* width, int* height) {
-  scoped_ptr<ListValue> args(new ListValue());
-  Value* result = NULL;
-
-  std::string jscript = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::GET_SIZE);
-  args->Append(element.ToValue());
-
-  ErrorCode error = session_->ExecuteScript(jscript, args.get(), &result);
-  if (error != kSuccess) {
-    LOG(ERROR) << "Javascript failed to execute" << std::endl;
-    return false;
-  }
-
-  if (result == NULL || result->GetType() != Value::TYPE_DICTIONARY) {
-    LOG(ERROR) << "Expected JavaScript atom to return "
-               << "{width:number, height:number} dictionary." << std::endl;
-    return false;
-  }
-
-  DictionaryValue* dict = static_cast<DictionaryValue*>(result);
-  return dict->GetInteger("width", width) &&
-         dict->GetInteger("height", height);
 }
 
 ///////////////////// ElementAttributeCommand ////////////////////
@@ -178,16 +155,12 @@ bool ElementDisplayedCommand::DoesGet() {
 }
 
 void ElementDisplayedCommand::ExecuteGet(Response* const response) {
-  scoped_ptr<ListValue> args(new ListValue);
-  args->Append(element.ToValue());
-
-  std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::IS_DISPLAYED);
-
-  Value* result = NULL;
-  ErrorCode status = session_->ExecuteScript(script, args.get(), &result);
+  bool is_displayed;
+  ErrorCode status = session_->IsElementDisplayed(
+      session_->current_target(), element, &is_displayed);
+  if (status == kSuccess)
+    response->SetValue(Value::CreateBooleanValue(is_displayed));
   response->SetStatus(status);
-  response->SetValue(result);
 }
 
 ///////////////////// ElementEnabledCommand ////////////////////
@@ -242,7 +215,9 @@ void ElementEqualsCommand::ExecuteGet(Response* const response) {
 
   scoped_ptr<ListValue> args(new ListValue);
   args->Append(element.ToValue());
-  args->Append(Value::CreateStringValue(path_segments_.at(6)));
+
+  WebElementId other_element(path_segments_.at(6));
+  args->Append(other_element.ToValue());
 
   Value* result = NULL;
   ErrorCode status = session_->ExecuteScript(script, args.get(), &result);
@@ -290,13 +265,13 @@ bool ElementLocationInViewCommand::DoesGet() {
 }
 
 void ElementLocationInViewCommand::ExecuteGet(Response* const response) {
-  int x, y;
-  ErrorCode code = session_->GetElementLocationInView(element, &x, &y);
+  gfx::Point location;
+  ErrorCode code = session_->GetElementLocationInView(element, &location);
   response->SetStatus(code);
   if (code == kSuccess) {
     DictionaryValue* coord_dict = new DictionaryValue();
-    coord_dict->SetInteger("x", x);
-    coord_dict->SetInteger("y", y);
+    coord_dict->SetInteger("x", location.x());
+    coord_dict->SetInteger("y", location.y());
     response->SetValue(coord_dict);
   }
 }
@@ -384,16 +359,16 @@ bool ElementSizeCommand::DoesGet() {
 }
 
 void ElementSizeCommand::ExecuteGet(Response* const response) {
-  std::string script = base::StringPrintf(
-      "return (%s).apply(null, arguments);", atoms::GET_SIZE);
-
-  ListValue args;
-  args.Append(element.ToValue());
-
-  Value* result = NULL;
-  ErrorCode status = session_->ExecuteScript(script, &args, &result);
+  gfx::Size size;
+  ErrorCode status = session_->GetElementSize(
+      session_->current_target(), element, &size);
+  if (status == kSuccess) {
+    DictionaryValue* dict = new DictionaryValue();
+    dict->SetInteger("width", size.width());
+    dict->SetInteger("height", size.height());
+    response->SetValue(dict);
+  }
   response->SetStatus(status);
-  response->SetValue(result);
 }
 
 ///////////////////// ElementSubmitCommand ////////////////////

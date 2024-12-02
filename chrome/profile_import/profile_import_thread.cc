@@ -4,16 +4,20 @@
 
 #include "chrome/profile_import/profile_import_thread.h"
 
+#include <stddef.h>
 #include <algorithm>
 
+#include "base/message_loop.h"
+#include "base/threading/thread.h"
 #include "base/values.h"
+#include "chrome/browser/importer/external_process_importer_bridge.h"
 #include "chrome/browser/importer/importer.h"
-#include "chrome/browser/importer/importer_bridge.h"
-#include "chrome/browser/importer/importer_data_types.h"
-#include "chrome/browser/importer/importer_list.h"
-#include "chrome/browser/importer/importer_messages.h"
+#include "chrome/browser/importer/importer_type.h"
+#include "chrome/browser/importer/profile_import_process_messages.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "content/common/child_process.h"
+#include "googleurl/src/gurl.h"
+#include "ipc/ipc_message_macros.h"
 
 namespace {
 // Rather than sending all import items over IPC at once we chunk them into
@@ -21,12 +25,11 @@ namespace {
 // oversized IPC messages.
 const int kNumBookmarksToSend = 100;
 const int kNumHistoryRowsToSend = 100;
-const int kNumFavIconsToSend = 100;
+const int kNumFaviconsToSend = 100;
 }
 
 ProfileImportThread::ProfileImportThread()
     : bridge_(NULL),
-      browser_type_(0),
       items_to_import_(0),
       importer_(NULL) {
   ChildProcess::current()->AddRefProcess();  // Balanced in Cleanup().
@@ -49,14 +52,12 @@ bool ProfileImportThread::OnControlMessageReceived(const IPC::Message& msg) {
 }
 
 void ProfileImportThread::OnImportStart(
-    const importer::ProfileInfo& profile_info,
-    int items,
+    const importer::SourceProfile& source_profile,
+    uint16 items,
     const DictionaryValue& localized_strings,
     bool import_to_bookmark_bar) {
   bridge_ = new ExternalProcessImporterBridge(this, localized_strings);
-
-  scoped_refptr<ImporterList> importer_list(new ImporterList);
-  importer_ = importer_list->CreateImporterByType(profile_info.browser_type);
+  importer_ = importer::CreateImporterByType(source_profile.importer_type);
   if (!importer_) {
     Send(new ProfileImportProcessHostMsg_Import_Finished(false,
         "Importer could not be created."));
@@ -75,13 +76,11 @@ void ProfileImportThread::OnImportStart(
     Cleanup();
   }
   import_thread_->message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          importer_.get(),
-          &Importer::StartImport,
-          profile_info,
-          items,
-          bridge_));
+      FROM_HERE, NewRunnableMethod(importer_.get(),
+                                   &Importer::StartImport,
+                                   source_profile,
+                                   items,
+                                   bridge_));
 }
 
 void ProfileImportThread::OnImportCancel() {
@@ -95,16 +94,16 @@ void ProfileImportThread::OnImportItemFinished(uint16 item) {
     NotifyEnded();
 }
 
+void ProfileImportThread::NotifyStarted() {
+  Send(new ProfileImportProcessHostMsg_Import_Started());
+}
+
 void ProfileImportThread::NotifyItemStarted(importer::ImportItem item) {
   Send(new ProfileImportProcessHostMsg_ImportItem_Started(item));
 }
 
 void ProfileImportThread::NotifyItemEnded(importer::ImportItem item) {
   Send(new ProfileImportProcessHostMsg_ImportItem_Finished(item));
-}
-
-void ProfileImportThread::NotifyStarted() {
-  Send(new ProfileImportProcessHostMsg_Import_Started());
 }
 
 void ProfileImportThread::NotifyEnded() {
@@ -138,7 +137,8 @@ void ProfileImportThread::NotifyHomePageImportReady(
 
 void ProfileImportThread::NotifyBookmarksImportReady(
     const std::vector<ProfileWriter::BookmarkEntry>& bookmarks,
-    const std::wstring& first_folder_name, int options) {
+    const string16& first_folder_name,
+    int options) {
   Send(new ProfileImportProcessHostMsg_NotifyBookmarksImportStart(
       first_folder_name, options, bookmarks.size()));
 
@@ -156,21 +156,21 @@ void ProfileImportThread::NotifyBookmarksImportReady(
   }
 }
 
-void ProfileImportThread::NotifyFavIconsImportReady(
-    const std::vector<history::ImportedFavIconUsage>& fav_icons) {
-  Send(new ProfileImportProcessHostMsg_NotifyFavIconsImportStart(
-    fav_icons.size()));
+void ProfileImportThread::NotifyFaviconsImportReady(
+    const std::vector<history::ImportedFaviconUsage>& favicons) {
+  Send(new ProfileImportProcessHostMsg_NotifyFaviconsImportStart(
+    favicons.size()));
 
-  std::vector<history::ImportedFavIconUsage>::const_iterator it;
-  for (it = fav_icons.begin(); it < fav_icons.end();
-       it = it + kNumFavIconsToSend) {
-    std::vector<history::ImportedFavIconUsage> fav_icons_group;
-    std::vector<history::ImportedFavIconUsage>::const_iterator end_group =
-        std::min(it + kNumFavIconsToSend, fav_icons.end());
-    fav_icons_group.assign(it, end_group);
+  std::vector<history::ImportedFaviconUsage>::const_iterator it;
+  for (it = favicons.begin(); it < favicons.end();
+       it = it + kNumFaviconsToSend) {
+    std::vector<history::ImportedFaviconUsage> favicons_group;
+    std::vector<history::ImportedFaviconUsage>::const_iterator end_group =
+        std::min(it + kNumFaviconsToSend, favicons.end());
+    favicons_group.assign(it, end_group);
 
-  Send(new ProfileImportProcessHostMsg_NotifyFavIconsImportGroup(
-      fav_icons_group));
+  Send(new ProfileImportProcessHostMsg_NotifyFaviconsImportGroup(
+      favicons_group));
   }
 }
 

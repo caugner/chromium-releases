@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/sandbox_mac.h"
+#include "content/common/sandbox_mac.h"
 
 NaClMainPlatformDelegate::NaClMainPlatformDelegate(
     const MainFunctionParams& parameters)
@@ -47,7 +47,7 @@ void NaClMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
     FilePath test_dll_name =
       command_line.GetSwitchValuePath(switches::kTestNaClSandbox);
     if (!test_dll_name.empty()) {
-      sandbox_test_module_ = base::LoadNativeLibrary(test_dll_name);
+      sandbox_test_module_ = base::LoadNativeLibrary(test_dll_name, NULL);
       CHECK(sandbox_test_module_);
     }
   }

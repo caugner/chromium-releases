@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,8 @@
 #include "base/logging.h"
 #include "grit/gfx_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
-#include "ui/gfx/codec/png_codec.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/gfx_module.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
@@ -19,9 +18,6 @@ namespace gfx {
 
 unsigned int NativeThemeLinux::button_length_ = 14;
 unsigned int NativeThemeLinux::scrollbar_width_ = 15;
-unsigned int NativeThemeLinux::thumb_inactive_color_ = 0xeaeaea;
-unsigned int NativeThemeLinux::thumb_active_color_ = 0xf4f4f4;
-unsigned int NativeThemeLinux::track_color_ = 0xd3d3d3;
 
 // These are the default dimensions of radio buttons and checkboxes.
 static const int kCheckboxAndRadioWidth = 13;
@@ -38,10 +34,15 @@ static const SkColor kSliderThumbDarkGrey = SkColorSetRGB(0xea, 0xe5, 0xe0);
 static const SkColor kSliderThumbBorderDarkGrey =
     SkColorSetRGB(0x9d, 0x96, 0x8e);
 
+// static
+const NativeTheme* NativeTheme::instance() {
+  return NativeThemeLinux::instance();
+}
+
 #if !defined(OS_CHROMEOS)
 // Chromeos has a different look.
 // static
-NativeThemeLinux* NativeThemeLinux::instance() {
+const NativeThemeLinux* NativeThemeLinux::instance() {
   // The global NativeThemeLinux instance.
   static NativeThemeLinux s_native_theme;
   return &s_native_theme;
@@ -59,24 +60,6 @@ static SkColor BrightenColor(const color_utils::HSL& hsl, SkAlpha alpha,
     adjusted.l = 0.0;
 
   return color_utils::HSLToSkColor(adjusted, alpha);
-}
-
-static SkBitmap* GfxGetBitmapNamed(int key) {
-  base::StringPiece data = GfxModule::GetResource(key);
-  if (!data.size()) {
-    NOTREACHED() << "Unable to load image resource " << key;
-    return NULL;
-  }
-
-  SkBitmap bitmap;
-  if (!gfx::PNGCodec::Decode(
-      reinterpret_cast<const unsigned char*>(data.data()),
-      data.size(), &bitmap)) {
-    NOTREACHED() << "Unable to decode image resource " << key;
-    return NULL;
-  }
-
-  return new SkBitmap(bitmap);
 }
 
 NativeThemeLinux::NativeThemeLinux() {
@@ -118,13 +101,16 @@ gfx::Size NativeThemeLinux::GetPartSize(Part part) const {
     case kSliderTrack:
     case kProgressBar:
       return gfx::Size();  // No default size.
+    default:
+      NOTREACHED() << "Unknown theme part: " << part;
+      break;
   }
   return gfx::Size();
 }
 
 void NativeThemeLinux::PaintArrowButton(
-    skia::PlatformCanvas* canvas,
-    const gfx::Rect& rect, Part direction, State state) {
+    SkCanvas* canvas,
+    const gfx::Rect& rect, Part direction, State state) const {
   int widthMiddle, lengthMiddle;
   SkPaint paint;
   if (direction == kScrollbarUpArrow || direction == kScrollbarDownArrow) {
@@ -248,11 +234,11 @@ void NativeThemeLinux::PaintArrowButton(
   canvas->drawPath(path, paint);
 }
 
-void NativeThemeLinux::Paint(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::Paint(SkCanvas* canvas,
                              Part part,
                              State state,
                              const gfx::Rect& rect,
-                             const ExtraParams& extra) {
+                             const ExtraParams& extra) const {
   switch (part) {
     case kScrollbarDownArrow:
     case kScrollbarUpArrow:
@@ -295,14 +281,17 @@ void NativeThemeLinux::Paint(skia::PlatformCanvas* canvas,
     case kProgressBar:
       PaintProgressBar(canvas, state, rect, extra.progress_bar);
       break;
+    default:
+      NOTREACHED() << "Unknown theme part: " << part;
+      break;
   }
 }
 
-void NativeThemeLinux::PaintScrollbarTrack(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintScrollbarTrack(SkCanvas* canvas,
     Part part,
     State state,
     const ScrollbarTrackExtraParams& extra_params,
-    const gfx::Rect& rect) {
+    const gfx::Rect& rect) const {
   SkPaint paint;
   SkIRect skrect;
 
@@ -319,10 +308,10 @@ void NativeThemeLinux::PaintScrollbarTrack(skia::PlatformCanvas* canvas,
   DrawBox(canvas, rect, paint);
 }
 
-void NativeThemeLinux::PaintScrollbarThumb(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintScrollbarThumb(SkCanvas* canvas,
                                            Part part,
                                            State state,
-                                           const gfx::Rect& rect) {
+                                           const gfx::Rect& rect) const {
   const bool hovered = state == kHovered;
   const int midx = rect.x() + rect.width() / 2;
   const int midy = rect.y() + rect.height() / 2;
@@ -398,29 +387,24 @@ void NativeThemeLinux::PaintScrollbarThumb(skia::PlatformCanvas* canvas,
   }
 }
 
-void NativeThemeLinux::PaintCheckbox(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintCheckbox(SkCanvas* canvas,
                                      State state,
                                      const gfx::Rect& rect,
-                                     const ButtonExtraParams& button) {
-  static SkBitmap* image_disabled_indeterminate = GfxGetBitmapNamed(
-      IDR_LINUX_CHECKBOX_DISABLED_INDETERMINATE);
-  static SkBitmap* image_indeterminate = GfxGetBitmapNamed(
-      IDR_LINUX_CHECKBOX_INDETERMINATE);
-  static SkBitmap* image_disabled_on = GfxGetBitmapNamed(
-      IDR_LINUX_CHECKBOX_DISABLED_ON);
-  static SkBitmap* image_on = GfxGetBitmapNamed(IDR_LINUX_CHECKBOX_ON);
-  static SkBitmap* image_disabled_off = GfxGetBitmapNamed(
-      IDR_LINUX_CHECKBOX_DISABLED_OFF);
-  static SkBitmap* image_off = GfxGetBitmapNamed(IDR_LINUX_CHECKBOX_OFF);
-
+                                     const ButtonExtraParams& button) const {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SkBitmap* image = NULL;
   if (button.indeterminate) {
-    image = state == kDisabled ? image_disabled_indeterminate
-                               : image_indeterminate;
+    image = state == kDisabled ?
+        rb.GetBitmapNamed(IDR_LINUX_CHECKBOX_DISABLED_INDETERMINATE) :
+        rb.GetBitmapNamed(IDR_LINUX_CHECKBOX_INDETERMINATE);
   } else if (button.checked) {
-    image = state == kDisabled ? image_disabled_on : image_on;
+    image = state == kDisabled ?
+        rb.GetBitmapNamed(IDR_LINUX_CHECKBOX_DISABLED_ON) :
+        rb.GetBitmapNamed(IDR_LINUX_CHECKBOX_ON);
   } else {
-    image = state == kDisabled ? image_disabled_off : image_off;
+    image = state == kDisabled ?
+        rb.GetBitmapNamed(IDR_LINUX_CHECKBOX_DISABLED_OFF) :
+        rb.GetBitmapNamed(IDR_LINUX_CHECKBOX_OFF);
   }
 
   gfx::Rect bounds = rect.Center(gfx::Size(image->width(), image->height()));
@@ -428,32 +412,31 @@ void NativeThemeLinux::PaintCheckbox(skia::PlatformCanvas* canvas,
       bounds.x(), bounds.y(), bounds.width(), bounds.height());
 }
 
-void NativeThemeLinux::PaintRadio(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintRadio(SkCanvas* canvas,
                                   State state,
                                   const gfx::Rect& rect,
-                                  const ButtonExtraParams& button) {
-  static SkBitmap* image_disabled_on = GfxGetBitmapNamed(
-      IDR_LINUX_RADIO_DISABLED_ON);
-  static SkBitmap* image_on = GfxGetBitmapNamed(IDR_LINUX_RADIO_ON);
-  static SkBitmap* image_disabled_off = GfxGetBitmapNamed(
-      IDR_LINUX_RADIO_DISABLED_OFF);
-  static SkBitmap* image_off = GfxGetBitmapNamed(IDR_LINUX_RADIO_OFF);
-
+                                  const ButtonExtraParams& button) const {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SkBitmap* image = NULL;
-  if (state == kDisabled)
-    image = button.checked ? image_disabled_on : image_disabled_off;
-  else
-    image = button.checked ? image_on : image_off;
+  if (state == kDisabled) {
+    image = button.checked ?
+        rb.GetBitmapNamed(IDR_LINUX_RADIO_DISABLED_ON) :
+        rb.GetBitmapNamed(IDR_LINUX_RADIO_DISABLED_OFF);
+  } else {
+    image = button.checked ?
+        rb.GetBitmapNamed(IDR_LINUX_RADIO_ON) :
+        rb.GetBitmapNamed(IDR_LINUX_RADIO_OFF);
+  }
 
   gfx::Rect bounds = rect.Center(gfx::Size(image->width(), image->height()));
   DrawBitmapInt(canvas, *image, 0, 0, image->width(), image->height(),
       bounds.x(), bounds.y(), bounds.width(), bounds.height());
 }
 
-void NativeThemeLinux::PaintButton(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintButton(SkCanvas* canvas,
                                    State state,
                                    const gfx::Rect& rect,
-                                   const ButtonExtraParams& button) {
+                                   const ButtonExtraParams& button) const {
   SkPaint paint;
   SkRect skrect;
   const int kRight = rect.right();
@@ -519,10 +502,10 @@ void NativeThemeLinux::PaintButton(skia::PlatformCanvas* canvas,
   }
 }
 
-void NativeThemeLinux::PaintTextField(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintTextField(SkCanvas* canvas,
                                       State state,
                                       const gfx::Rect& rect,
-                                      const TextFieldExtraParams& text) {
+                                      const TextFieldExtraParams& text) const {
   // The following drawing code simulates the user-agent css border for
   // text area and text input so that we do not break layout tests. Once we
   // have decided the desired looks, we should update the code here and
@@ -609,10 +592,11 @@ void NativeThemeLinux::PaintTextField(skia::PlatformCanvas* canvas,
   }
 }
 
-void NativeThemeLinux::PaintMenuList(skia::PlatformCanvas* canvas,
-                                     State state,
-                                     const gfx::Rect& rect,
-                                     const MenuListExtraParams& menu_list) {
+void NativeThemeLinux::PaintMenuList(
+    SkCanvas* canvas,
+    State state,
+    const gfx::Rect& rect,
+    const MenuListExtraParams& menu_list) const {
   // If a border radius is specified, we let the WebCore paint the background
   // and the border of the control.
   if (!menu_list.has_border_radius) {
@@ -635,10 +619,10 @@ void NativeThemeLinux::PaintMenuList(skia::PlatformCanvas* canvas,
   canvas->drawPath(path, paint);
 }
 
-void NativeThemeLinux::PaintSliderTrack(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintSliderTrack(SkCanvas* canvas,
                                         State state,
                                         const gfx::Rect& rect,
-                                        const SliderExtraParams& slider) {
+                                        const SliderExtraParams& slider) const {
   const int kMidX = rect.x() + rect.width() / 2;
   const int kMidY = rect.y() + rect.height() / 2;
 
@@ -660,10 +644,10 @@ void NativeThemeLinux::PaintSliderTrack(skia::PlatformCanvas* canvas,
   canvas->drawRect(skrect, paint);
 }
 
-void NativeThemeLinux::PaintSliderThumb(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintSliderThumb(SkCanvas* canvas,
                                         State state,
                                         const gfx::Rect& rect,
-                                        const SliderExtraParams& slider) {
+                                        const SliderExtraParams& slider) const {
   const bool hovered = (state == kHovered) || slider.in_drag;
   const int kMidX = rect.x() + rect.width() / 2;
   const int kMidY = rect.y() + rect.height() / 2;
@@ -698,10 +682,10 @@ void NativeThemeLinux::PaintSliderThumb(skia::PlatformCanvas* canvas,
   }
 }
 
-void NativeThemeLinux::PaintInnerSpinButton(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintInnerSpinButton(SkCanvas* canvas,
     State state,
     const gfx::Rect& rect,
-    const InnerSpinButtonExtraParams& spin_button) {
+    const InnerSpinButtonExtraParams& spin_button) const {
   if (spin_button.read_only)
     state = kDisabled;
 
@@ -720,16 +704,14 @@ void NativeThemeLinux::PaintInnerSpinButton(skia::PlatformCanvas* canvas,
   PaintArrowButton(canvas, half, kScrollbarDownArrow, south_state);
 }
 
-void NativeThemeLinux::PaintProgressBar(skia::PlatformCanvas* canvas,
+void NativeThemeLinux::PaintProgressBar(SkCanvas* canvas,
     State state,
     const gfx::Rect& rect,
-    const ProgressBarExtraParams& progress_bar) {
-  static SkBitmap* bar_image = GfxGetBitmapNamed(IDR_PROGRESS_BAR);
-  static SkBitmap* value_image = GfxGetBitmapNamed(IDR_PROGRESS_VALUE);
-  static SkBitmap* left_border_image = GfxGetBitmapNamed(
-      IDR_PROGRESS_BORDER_LEFT);
-  static SkBitmap* right_border_image = GfxGetBitmapNamed(
-      IDR_PROGRESS_BORDER_RIGHT);
+    const ProgressBarExtraParams& progress_bar) const {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  SkBitmap* bar_image = rb.GetBitmapNamed(IDR_PROGRESS_BAR);
+  SkBitmap* left_border_image = rb.GetBitmapNamed(IDR_PROGRESS_BORDER_LEFT);
+  SkBitmap* right_border_image = rb.GetBitmapNamed(IDR_PROGRESS_BORDER_RIGHT);
 
   double tile_scale = static_cast<double>(rect.height()) /
       bar_image->height();
@@ -742,6 +724,7 @@ void NativeThemeLinux::PaintProgressBar(skia::PlatformCanvas* canvas,
       rect.x(), rect.y(), rect.width(), rect.height());
 
   if (progress_bar.value_rect_width) {
+    SkBitmap* value_image = rb.GetBitmapNamed(IDR_PROGRESS_VALUE);
 
     new_tile_width = static_cast<int>(value_image->width() * tile_scale);
     tile_scale_x = static_cast<double>(new_tile_width) /
@@ -774,7 +757,7 @@ void NativeThemeLinux::PaintProgressBar(skia::PlatformCanvas* canvas,
 }
 
 bool NativeThemeLinux::IntersectsClipRectInt(
-    skia::PlatformCanvas* canvas, int x, int y, int w, int h) {
+    SkCanvas* canvas, int x, int y, int w, int h) const {
   SkRect clip;
   return canvas->getClipBounds(&clip) &&
       clip.intersect(SkIntToScalar(x), SkIntToScalar(y), SkIntToScalar(x + w),
@@ -813,9 +796,9 @@ void NativeThemeLinux::DrawBox(SkCanvas* canvas,
 }
 
 void NativeThemeLinux::DrawBitmapInt(
-    skia::PlatformCanvas* canvas, const SkBitmap& bitmap,
+    SkCanvas* canvas, const SkBitmap& bitmap,
     int src_x, int src_y, int src_w, int src_h,
-    int dest_x, int dest_y, int dest_w, int dest_h) {
+    int dest_x, int dest_y, int dest_w, int dest_h) const {
   DLOG_ASSERT(src_x + src_w < std::numeric_limits<int16_t>::max() &&
               src_y + src_h < std::numeric_limits<int16_t>::max());
   if (src_w <= 0 || src_h <= 0 || dest_w <= 0 || dest_h <= 0) {
@@ -941,14 +924,6 @@ SkColor NativeThemeLinux::OutlineColor(SkScalar* hsv1, SkScalar* hsv2) const {
     diff = -diff;
 
   return SaturateAndBrighten(hsv2, -0.2, diff);
-}
-
-void NativeThemeLinux::SetScrollbarColors(unsigned inactive_color,
-                                          unsigned active_color,
-                                          unsigned track_color) const {
-  thumb_inactive_color_ = inactive_color;
-  thumb_active_color_ = active_color;
-  track_color_ = track_color;
 }
 
 }  // namespace gfx

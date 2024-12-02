@@ -1,13 +1,16 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <math.h>
+#include <algorithm>
+#include <cmath>
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkUnPreMultiply.h"
+#include "third_party/zlib/zlib.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/size.h"
 
 namespace gfx {
 
@@ -79,8 +82,10 @@ TEST(PNGCodec, EncodeDecodeRGB) {
 
   // encode
   std::vector<unsigned char> encoded;
-  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGB, w, h,
-                               w * 3, false, &encoded));
+  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGB,
+                               Size(w, h), w * 3, false,
+                               std::vector<PNGCodec::Comment>(),
+                               &encoded));
 
   // decode, it should have the same size as the original
   std::vector<unsigned char> decoded;
@@ -106,8 +111,10 @@ TEST(PNGCodec, EncodeDecodeRGBA) {
 
   // encode
   std::vector<unsigned char> encoded;
-  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGBA, w, h,
-                               w * 4, false, &encoded));
+  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGBA,
+                               Size(w, h), w * 4, false,
+                               std::vector<PNGCodec::Comment>(),
+                               &encoded));
 
   // decode, it should have the same size as the original
   std::vector<unsigned char> decoded;
@@ -140,8 +147,10 @@ TEST(PNGCodec, DecodeCorrupted) {
 
   // Make some compressed data.
   std::vector<unsigned char> compressed;
-  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGB, w, h,
-                               w * 3, false, &compressed));
+  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGB,
+                               Size(w, h), w * 3, false,
+                               std::vector<PNGCodec::Comment>(),
+                               &compressed));
 
   // Try decompressing a truncated version.
   EXPECT_FALSE(PNGCodec::Decode(&compressed[0], compressed.size() / 2,
@@ -166,8 +175,10 @@ TEST(PNGCodec, EncodeDecodeBGRA) {
 
   // Encode.
   std::vector<unsigned char> encoded;
-  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_BGRA, w, h,
-                               w * 4, false, &encoded));
+  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_BGRA,
+                               Size(w, h), w * 4, false,
+                               std::vector<PNGCodec::Comment>(),
+                               &encoded));
 
   // Decode, it should have the same size as the original.
   std::vector<unsigned char> decoded;
@@ -194,10 +205,10 @@ TEST(PNGCodec, StripAddAlpha) {
 
   // Encode RGBA data as RGB.
   std::vector<unsigned char> encoded;
-  EXPECT_TRUE(PNGCodec::Encode(&original_rgba[0],
-                               PNGCodec::FORMAT_RGBA,
-                               w, h,
-                               w * 4, true, &encoded));
+  EXPECT_TRUE(PNGCodec::Encode(&original_rgba[0], PNGCodec::FORMAT_RGBA,
+                               Size(w, h), w * 4, true,
+                               std::vector<PNGCodec::Comment>(),
+                               &encoded));
 
   // Decode the RGB to RGBA.
   std::vector<unsigned char> decoded;
@@ -213,10 +224,10 @@ TEST(PNGCodec, StripAddAlpha) {
   ASSERT_TRUE(original_rgba == decoded);
 
   // Encode RGBA to RGBA.
-  EXPECT_TRUE(PNGCodec::Encode(&original_rgba[0],
-                               PNGCodec::FORMAT_RGBA,
-                               w, h,
-                               w * 4, false, &encoded));
+  EXPECT_TRUE(PNGCodec::Encode(&original_rgba[0], PNGCodec::FORMAT_RGBA,
+                               Size(w, h), w * 4, false,
+                               std::vector<PNGCodec::Comment>(),
+                               &encoded));
 
   // Decode the RGBA to RGB.
   EXPECT_TRUE(PNGCodec::Decode(&encoded[0], encoded.size(),
@@ -293,5 +304,85 @@ TEST(PNGCodec, EncodeBGRASkBitmapDiscardTransparency) {
     }
   }
 }
+
+TEST(PNGCodec, EncodeWithComment) {
+  const int w = 10, h = 10;
+
+  std::vector<unsigned char> original;
+  MakeRGBImage(w, h, &original);
+
+  std::vector<unsigned char> encoded;
+  std::vector<PNGCodec::Comment> comments;
+  comments.push_back(PNGCodec::Comment("key", "text"));
+  comments.push_back(PNGCodec::Comment("test", "something"));
+  comments.push_back(PNGCodec::Comment("have some", "spaces in both"));
+  EXPECT_TRUE(PNGCodec::Encode(&original[0], PNGCodec::FORMAT_RGB,
+                               Size(w, h), w * 3, false, comments, &encoded));
+
+  // Each chunk is of the form length (4 bytes), chunk type (tEXt), data,
+  // checksum (4 bytes).  Make sure we find all of them in the encoded
+  // results.
+  const unsigned char kExpected1[] =
+      "\x00\x00\x00\x08tEXtkey\x00text\x9e\xe7\x66\x51";
+  const unsigned char kExpected2[] =
+      "\x00\x00\x00\x0etEXttest\x00something\x29\xba\xef\xac";
+  const unsigned char kExpected3[] =
+      "\x00\x00\x00\x18tEXthave some\x00spaces in both\x8d\x69\x34\x2d";
+
+  EXPECT_NE(search(encoded.begin(), encoded.end(), kExpected1,
+                   kExpected1 + arraysize(kExpected1)),
+            encoded.end());
+  EXPECT_NE(search(encoded.begin(), encoded.end(), kExpected2,
+                   kExpected2 + arraysize(kExpected2)),
+            encoded.end());
+  EXPECT_NE(search(encoded.begin(), encoded.end(), kExpected3,
+                   kExpected3 + arraysize(kExpected3)),
+            encoded.end());
+}
+
+TEST(PNGCodec, EncodeDecodeWithVaryingCompressionLevels) {
+  const int w = 20, h = 20;
+
+  // create an image with known values, a must be opaque because it will be
+  // lost during encoding
+  std::vector<unsigned char> original;
+  MakeRGBAImage(w, h, true, &original);
+
+  // encode
+  std::vector<unsigned char> encoded_fast;
+  EXPECT_TRUE(PNGCodec::EncodeWithCompressionLevel(
+        &original[0], PNGCodec::FORMAT_RGBA, Size(w, h), w * 4, false,
+        std::vector<PNGCodec::Comment>(), Z_BEST_SPEED, &encoded_fast));
+
+  std::vector<unsigned char> encoded_best;
+  EXPECT_TRUE(PNGCodec::EncodeWithCompressionLevel(
+        &original[0], PNGCodec::FORMAT_RGBA, Size(w, h), w * 4, false,
+        std::vector<PNGCodec::Comment>(), Z_BEST_COMPRESSION, &encoded_best));
+
+  // Make sure the different compression settings actually do something; the
+  // sizes should be different.
+  EXPECT_NE(encoded_fast.size(), encoded_best.size());
+
+  // decode, it should have the same size as the original
+  std::vector<unsigned char> decoded;
+  int outw, outh;
+  EXPECT_TRUE(PNGCodec::Decode(&encoded_fast[0], encoded_fast.size(),
+                               PNGCodec::FORMAT_RGBA, &decoded,
+                               &outw, &outh));
+  ASSERT_EQ(w, outw);
+  ASSERT_EQ(h, outh);
+  ASSERT_EQ(original.size(), decoded.size());
+
+  EXPECT_TRUE(PNGCodec::Decode(&encoded_best[0], encoded_best.size(),
+                               PNGCodec::FORMAT_RGBA, &decoded,
+                               &outw, &outh));
+  ASSERT_EQ(w, outw);
+  ASSERT_EQ(h, outh);
+  ASSERT_EQ(original.size(), decoded.size());
+
+  // Images must be exactly equal
+  ASSERT_TRUE(original == decoded);
+}
+
 
 }  // namespace gfx

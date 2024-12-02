@@ -135,6 +135,19 @@ void TabContentsDelegate::ViewSourceForTab(TabContents* source,
                  PageTransition::LINK);
 }
 
+void TabContentsDelegate::ViewSourceForFrame(TabContents* source,
+                                             const GURL& frame_url,
+                                             const std::string& content_state) {
+  // Same as ViewSourceForTab, but for given subframe.
+  GURL url = GURL(chrome::kViewSourceScheme + std::string(":") +
+                      frame_url.spec());
+  OpenURLFromTab(source,
+                 url,
+                 GURL(),
+                 NEW_FOREGROUND_TAB,
+                 PageTransition::LINK);
+}
+
 bool TabContentsDelegate::PreHandleKeyboardEvent(
     const NativeWebKeyboardEvent& event,
     bool* is_keyboard_shortcut) {
@@ -158,7 +171,7 @@ void TabContentsDelegate::ShowRepostFormWarningDialog(
     TabContents* tab_contents) {
 }
 
-void TabContentsDelegate::ShowContentSettingsWindow(
+void TabContentsDelegate::ShowContentSettingsPage(
     ContentSettingsType content_type) {
 }
 
@@ -174,16 +187,6 @@ bool TabContentsDelegate::ShouldAddNavigationToHistory(
     const history::HistoryAddPageArgs& add_page_args,
     NavigationType::Type navigation_type) {
   return true;
-}
-
-void TabContentsDelegate::OnDidGetApplicationInfo(TabContents* tab_contents,
-                                                  int32 page_id) {
-}
-
-// Notification when an application programmatically requests installation.
-void TabContentsDelegate::OnInstallApplication(
-    TabContents* tab_contents,
-    const WebApplicationInfo& app_info) {
 }
 
 gfx::NativeWindow TabContentsDelegate::GetFrameNativeWindow() {
@@ -202,15 +205,6 @@ bool TabContentsDelegate::ShouldEnablePreferredSizeNotifications() {
 }
 
 void TabContentsDelegate::UpdatePreferredSize(const gfx::Size& pref_size) {
-}
-
-void TabContentsDelegate::OnSetSuggestions(
-    int32 page_id,
-    const std::vector<std::string>& suggestions) {
-}
-
-void TabContentsDelegate::OnInstantSupportDetermined(int32 page_id,
-                                                     bool result) {
 }
 
 void TabContentsDelegate::ContentRestrictionsChanged(TabContents* source) {

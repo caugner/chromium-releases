@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,8 +11,8 @@
 #include <vector>
 
 #include "base/file_path.h"
-#include "base/ref_counted.h"
-#include "base/scoped_comptr_win.h"
+#include "base/memory/ref_counted.h"
+#include "base/win/scoped_comptr.h"
 #include "base/win/scoped_variant.h"
 #include "chrome_frame/test/win_event_receiver.h"
 
@@ -173,7 +173,7 @@ class AccObject : public base::RefCounted<AccObject> {
   // Helper method for posting mouse button messages.
   bool PostMouseButtonMessages(int button_up, int button_down, int x, int y);
 
-  ScopedComPtr<IAccessible> accessible_;
+  base::win::ScopedComPtr<IAccessible> accessible_;
   base::win::ScopedVariant child_id_;
 
   DISALLOW_COPY_AND_ASSIGN(AccObject);

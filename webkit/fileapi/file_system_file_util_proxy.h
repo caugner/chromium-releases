@@ -10,8 +10,8 @@
 #include "base/callback.h"
 #include "base/file_path.h"
 #include "base/file_util_proxy.h"
+#include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
-#include "base/ref_counted.h"
 #include "base/tracked_objects.h"
 
 namespace base {
@@ -25,6 +25,8 @@ class FileSystemOperationContext;
 
 using base::MessageLoopProxy;
 using base::PlatformFile;
+using base::PlatformFileError;
+using base::PlatformFileInfo;
 
 // This class provides asynchronous access to common file routines for the
 // FileSystem API.
@@ -34,7 +36,13 @@ class FileSystemFileUtilProxy {
   typedef base::FileUtilProxy::CreateOrOpenCallback CreateOrOpenCallback;
   typedef base::FileUtilProxy::EnsureFileExistsCallback
     EnsureFileExistsCallback;
-  typedef base::FileUtilProxy::GetFileInfoCallback GetFileInfoCallback;
+  typedef Callback3<PlatformFileError /* error code */,
+                    const PlatformFileInfo& /* file_info */,
+                    const FilePath& /* platform_path, where possible */
+                    >::Type GetFileInfoCallback;
+  typedef Callback2<PlatformFileError /* error code */,
+                    const FilePath& /* local_path, where possible */
+                    >::Type GetLocalPathCallback;
   typedef base::FileUtilProxy::ReadDirectoryCallback ReadDirectoryCallback;
 
   // Creates or opens a file with the given flags.  It is invalid to pass NULL
@@ -68,6 +76,13 @@ class FileSystemFileUtilProxy {
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
       const FilePath& file_path,
       EnsureFileExistsCallback* callback);
+
+  // Maps virtual file patch to its local physical location.
+  static bool GetLocalPath(
+      const FileSystemOperationContext& context,
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      const FilePath& virtual_path,
+      GetLocalPathCallback* callback);
 
   // Retrieves the information about a file. It is invalid to pass NULL for the
   // callback.

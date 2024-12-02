@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  *
@@ -13,19 +13,15 @@
 
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(GLintptr, 4);
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(GLsizeiptr, 4);
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_ClassDestructor, 4);
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_ClassFunction, 4);
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_CompletionCallback_Func, 4);
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_URLLoaderTrusted_StatusCallback, 4);
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoConfig_Dev, 4);
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoDecodeEventHandler_Func_Dev, 4);
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoDecodeInputCallback_Func_Dev, 4);
-PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoDecodeOutputCallback_Func_Dev, 4);
-PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_ClassProperty, 20);
 PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_CompletionCallback, 8);
 PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_FileChooserOptions_Dev, 8);
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_Picture_Dev, 12);
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_PictureBufferProperties_Dev, 16);
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_VideoBitstreamBuffer_Dev, 12);
 PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_VideoDecoderConfig_Dev, 20);
-PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_VideoFrameBuffer_Dev, 80);
-PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_VideoUncompressedDataBuffer_Dev, 104);
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PPB_VideoDecoder_Dev, 32);
+PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PPP_VideoDecoder_Dev, 20);
 
 #endif  /* PPAPI_TESTS_ARCH_DEPENDENT_SIZES_32_H_ */

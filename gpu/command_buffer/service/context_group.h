@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,9 @@
 #include <map>
 #include <string>
 #include "base/basictypes.h"
-#include "base/linked_ptr.h"
-#include "base/scoped_ptr.h"
-#include "base/ref_counted.h"
+#include "base/memory/linked_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gles2_cmd_validation.h"
 #include "gpu/command_buffer/service/feature_info.h"
 
@@ -27,6 +27,7 @@ class RenderbufferManager;
 class ProgramManager;
 class ShaderManager;
 class TextureManager;
+struct DisallowedExtensions;
 
 // A Context Group helps manage multiple GLES2Decoders that share
 // resources.
@@ -38,7 +39,8 @@ class ContextGroup : public base::RefCounted<ContextGroup> {
   ~ContextGroup();
 
   // This should only be called by GLES2Decoder.
-  bool Initialize(const char* allowed_features);
+  bool Initialize(const DisallowedExtensions& disallowed_extensions,
+                  const char* allowed_features);
 
   // Sets the ContextGroup has having a lost context.
   void set_have_context(bool have_context) {

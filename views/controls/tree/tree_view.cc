@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/stl_util-inl.h"
 #include "base/win/win_util.h"
 #include "grit/app_resources.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -45,27 +46,18 @@ TreeView::TreeView()
       ALLOW_THIS_IN_INITIALIZER_LIST(wrapper_(this)),
       original_handler_(NULL),
       drag_enabled_(false),
+      observer_added_(false),
       has_custom_icons_(false),
       image_list_(NULL) {
 }
 
 TreeView::~TreeView() {
-  if (model_)
-    model_->RemoveObserver(this);
-  // Both param_to_details_map_ and node_to_details_map_ have the same value,
-  // as such only need to delete from one.
-  STLDeleteContainerPairSecondPointers(id_to_details_map_.begin(),
-                                       id_to_details_map_.end());
-  if (image_list_)
-    ImageList_Destroy(image_list_);
+  Cleanup();
 }
 
-AccessibilityTypes::Role TreeView::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_OUTLINE;
-}
-
-AccessibilityTypes::State TreeView::GetAccessibleState() {
-  return AccessibilityTypes::STATE_READONLY;
+void TreeView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_OUTLINE;
+  state->state = ui::AccessibilityTypes::STATE_READONLY;
 }
 
 void TreeView::SetModel(TreeModel* model) {
@@ -73,12 +65,13 @@ void TreeView::SetModel(TreeModel* model) {
     return;
   if (model_ && tree_view_)
     DeleteRootItems();
-  if (model_)
-    model_->RemoveObserver(this);
+
+  RemoveObserverFromModel();
+
   model_ = model;
   if (tree_view_ && model_) {
     CreateRootItems();
-    model_->AddObserver(this);
+    AddObserverToModel();
     HIMAGELIST last_image_list = image_list_;
     image_list_ = CreateImageList();
     TreeView_SetImageList(tree_view_, image_list_, TVSIL_NORMAL);
@@ -338,6 +331,7 @@ HWND TreeView::CreateNativeControl(HWND parent_container) {
                                 style,
                                 0, 0, width(), height(),
                                 parent_container, NULL, NULL, NULL);
+  ui::CheckWindowCreated(tree_view_);
   SetWindowLongPtr(tree_view_, GWLP_USERDATA,
                    reinterpret_cast<LONG_PTR>(&wrapper_));
   original_handler_ = ui::SetWindowProc(tree_view_, &TreeWndProc);
@@ -345,7 +339,7 @@ HWND TreeView::CreateNativeControl(HWND parent_container) {
 
   if (model_) {
     CreateRootItems();
-    model_->AddObserver(this);
+    AddObserverToModel();
     image_list_ = CreateImageList();
     TreeView_SetImageList(tree_view_, image_list_, TVSIL_NORMAL);
   }
@@ -364,22 +358,36 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
       // in the maps is NULL.
       DCHECK(model_);
       NMTVDISPINFO* info = reinterpret_cast<NMTVDISPINFO*>(l_param);
-      const NodeDetails* details =
-          GetNodeDetailsByID(static_cast<int>(info->item.lParam));
-      if (info->item.mask & TVIF_CHILDREN)
-        info->item.cChildren = model_->GetChildCount(details->node);
-      if (info->item.mask & TVIF_TEXT) {
-        std::wstring text = details->node->GetTitle();
-        DCHECK(info->item.cchTextMax);
 
-        // Adjust the string direction if such adjustment is required.
-        base::i18n::AdjustStringForLocaleDirection(&text);
+      // WARNING: its possible for Windows to send a TVN_GETDISPINFO message
+      // after the WM_DESTROY time of the native control.  Since the details
+      // map will be cleaned up on OnDestroy(), don't try to access it in
+      // this case.
+      if (!id_to_details_map_.empty()) {
+        const NodeDetails* details =
+            GetNodeDetailsByID(static_cast<int>(info->item.lParam));
+        if (info->item.mask & TVIF_CHILDREN)
+          info->item.cChildren = model_->GetChildCount(details->node);
+        if (info->item.mask & TVIF_TEXT) {
+          std::wstring text = details->node->GetTitle();
+          DCHECK(info->item.cchTextMax);
 
-        wcsncpy_s(info->item.pszText, info->item.cchTextMax, text.c_str(),
-                  _TRUNCATE);
+          // Adjust the string direction if such adjustment is required.
+          base::i18n::AdjustStringForLocaleDirection(&text);
+
+          wcsncpy_s(info->item.pszText, info->item.cchTextMax, text.c_str(),
+                    _TRUNCATE);
+        }
+        // Instructs windows to cache the values for this node.
+        info->item.mask |= TVIF_DI_SETITEM;
+      } else {
+        if (info->item.mask & TVIF_CHILDREN)
+          info->item.cChildren = 0;
+
+        if (info->item.mask & TVIF_TEXT)
+          wcsncpy_s(info->item.pszText, info->item.cchTextMax, L"", _TRUNCATE);
       }
-      // Instructs windows to cache the values for this node.
-      info->item.mask |= TVIF_DI_SETITEM;
+
       // Return value ignored.
       return 0;
     }
@@ -454,6 +462,10 @@ LRESULT TreeView::OnNotify(int w_param, LPNMHDR l_param) {
   return 0;
 }
 
+void TreeView::OnDestroy() {
+  Cleanup();
+}
+
 bool TreeView::OnKeyDown(ui::KeyboardCode virtual_key_code) {
   if (virtual_key_code == VK_F2) {
     if (!GetEditingNode()) {
@@ -513,6 +525,36 @@ TreeModelNode* TreeView::GetNodeForTreeItem(HTREEITEM tree_item) {
 HTREEITEM TreeView::GetTreeItemForNode(TreeModelNode* node) {
   NodeDetails* details = GetNodeDetails(node);
   return details ? details->tree_item : NULL;
+}
+
+void TreeView::Cleanup() {
+  RemoveObserverFromModel();
+
+  // Both node_to_details_map_ and node_to_details_map_ have the same value,
+  // as such only need to delete from one.
+  STLDeleteContainerPairSecondPointers(id_to_details_map_.begin(),
+                                       id_to_details_map_.end());
+  id_to_details_map_.clear();
+  node_to_details_map_.clear();
+
+  if (image_list_) {
+    ImageList_Destroy(image_list_);
+    image_list_ = NULL;
+  }
+}
+
+void TreeView::AddObserverToModel() {
+  if (model_ && !observer_added_) {
+    model_->AddObserver(this);
+    observer_added_ = true;
+  }
+}
+
+void TreeView::RemoveObserverFromModel() {
+  if (model_ && observer_added_) {
+    model_->RemoveObserver(this);
+    observer_added_ = false;
+  }
 }
 
 void TreeView::DeleteRootItems() {

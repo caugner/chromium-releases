@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -74,7 +74,22 @@ def BuildVersion(output_dir):
 
 def CompressUsingLZMA(output_dir, compressed_file, input_file):
   lzma_exec = GetLZMAExec(output_dir)
-  cmd = '%s a -t7z "%s" "%s" -mx9' % (lzma_exec, compressed_file, input_file)
+  cmd = ('%s a -t7z '
+          # Flags equivalent to -mx9 (ultra) but with the bcj2 turned on (exe
+          # pre-filter). This results in a ~2.3MB decrease in installer size on
+          # a 24MB installer.
+          # Additionally, these settings reflect a 7zip 4.42 and up change in
+          # the definition of -mx9, increasting the dicionary size moving to
+          # 26bit = 64MB. This results in an additional ~3.5MB decrease.
+          # Older 7zip versions can support these settings, as these changes
+          # rely on existing functionality in the lzma format.
+          '-m0=BCJ2 '
+          '-m1=LZMA:d26:fb64 '
+          '-m2=LZMA:d20:fb64:mf=bt2 '
+          '-m3=LZMA:d20:fb64:mf=bt2 '
+          '-mb0:1 -mb0s1:2 '
+          '-mb0s2:3 '
+          '"%s" "%s"') % (lzma_exec, compressed_file, input_file)
   if os.path.exists(compressed_file):
     os.remove(compressed_file)
   RunSystemCommand(cmd)
@@ -142,10 +157,10 @@ def GetPrevVersion(output_dir, temp_dir, last_chrome_installer):
   lzma_exec = GetLZMAExec(options.output_dir)
   prev_archive_file = os.path.join(options.last_chrome_installer,
                                    options.output_name + ARCHIVE_SUFFIX)
-  cmd = '%s x -o"%s" "%s" Chrome-bin/*/gears.dll' % (lzma_exec, temp_dir,
-                                                       prev_archive_file)
+  cmd = '%s x -o"%s" "%s" Chrome-bin/*/chrome.dll' % (lzma_exec, temp_dir,
+                                                      prev_archive_file)
   RunSystemCommand(cmd)
-  dll_path = glob.glob(os.path.join(temp_dir, 'Chrome-bin', '*', 'gears.dll'))
+  dll_path = glob.glob(os.path.join(temp_dir, 'Chrome-bin', '*', 'chrome.dll'))
   return os.path.split(os.path.split(dll_path[0])[0])[1]
 
 def MakeStagingDirectories(output_dir):
@@ -179,8 +194,10 @@ def Readconfig(output_dir, input_file, current_version):
 
 def RunSystemCommand(cmd):
   print 'Running [' + cmd + ']'
-  if (os.system(cmd) != 0):
-    raise "Error while running cmd: %s" % cmd
+  exit_code = os.system(cmd)
+  if (exit_code != 0):
+    raise Exception("Error while running cmd: %s, exit_code: %s" %
+                    (cmd, exit_code))
 
 def CreateArchiveFile(options, staging_dir, current_version, prev_version):
   """Creates a new installer archive file after deleting any existing old file.
@@ -230,7 +247,8 @@ def PrepareSetupExec(options, staging_dir, current_version, prev_version):
     setup_file = SETUP_EXEC
   elif options.setup_exe_format == "DIFF":
     if not options.last_chrome_installer:
-      raise "To use DIFF for setup.exe, --last_chrome_installer is needed."
+      raise Exception(
+          "To use DIFF for setup.exe, --last_chrome_installer is needed.")
     prev_setup_file = os.path.join(options.last_chrome_installer, SETUP_EXEC)
     new_setup_file = os.path.join(options.output_dir, SETUP_EXEC)
     patch_file = os.path.join(options.output_dir, SETUP_PATCH_FILE_PREFIX +

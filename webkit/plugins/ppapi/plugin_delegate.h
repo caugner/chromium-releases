@@ -8,11 +8,14 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/message_loop_proxy.h"
+#include "base/memory/ref_counted.h"
 #include "base/platform_file.h"
-#include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
+#include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "media/video/video_decode_accelerator.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/pp_instance.h"
@@ -24,6 +27,7 @@
 class AudioMessageFilter;
 class GURL;
 class P2PSocketDispatcher;
+class SkBitmap;
 
 namespace base {
 class MessageLoopProxy;
@@ -52,10 +56,12 @@ class WebFileChooserCompletion;
 struct WebFileChooserParams;
 }
 
+namespace webkit_glue {
+class P2PTransport;
+}  // namespace webkit_glue
+
 struct PP_Flash_NetAddress;
-struct PP_VideoCompressedDataBuffer_Dev;
 struct PP_VideoDecoderConfig_Dev;
-struct PP_VideoUncompressedDataBuffer_Dev;
 
 class TransportDIB;
 
@@ -67,6 +73,7 @@ class FullscreenContainer;
 class PepperFilePath;
 class PluginInstance;
 class PluginModule;
+class PPB_Broker_Impl;
 class PPB_Flash_Menu_Impl;
 class PPB_Flash_NetConnector_Impl;
 
@@ -95,7 +102,7 @@ class PluginDelegate {
   };
 
   // This class is implemented by the PluginDelegate implementation and is
-  // designed to manage the lifetime and communicatin with the proxy's
+  // designed to manage the lifetime and communication with the proxy's
   // HostDispatcher for out-of-process PPAPI plugins.
   //
   // The point of this is to avoid having a relationship from the PPAPI plugin
@@ -197,16 +204,32 @@ class PluginDelegate {
     virtual ~PlatformAudio() {}
   };
 
-  class PlatformVideoDecoder {
+  // Interface for PlatformVideoDecoder is directly inherited from general media
+  // VideoDecodeAccelerator interface.
+  class PlatformVideoDecoder : public media::VideoDecodeAccelerator {
    public:
     virtual ~PlatformVideoDecoder() {}
-
-    // Returns false on failure.
-    virtual bool Decode(PP_VideoCompressedDataBuffer_Dev& input_buffer) = 0;
-    virtual int32_t Flush(PP_CompletionCallback& callback) = 0;
-    virtual bool ReturnUncompressedDataBuffer(
-        PP_VideoUncompressedDataBuffer_Dev& buffer) = 0;
   };
+
+  // Provides access to the ppapi broker.
+  class PpapiBroker {
+   public:
+    virtual void Connect(webkit::ppapi::PPB_Broker_Impl* client) = 0;
+
+    // Decrements the references to the broker.
+    // When there are no more references, this renderer's dispatcher is
+    // destroyed, allowing the broker to shutdown if appropriate.
+    // Callers should not reference this object after calling Disconnect.
+    virtual void Disconnect(webkit::ppapi::PPB_Broker_Impl* client) = 0;
+
+   protected:
+    virtual ~PpapiBroker() {}
+  };
+
+  // Notification that the given plugin has crashed. When a plugin crashes, all
+  // instances associated with that plugin will notify that they've crashed via
+  // this function.
+  virtual void PluginCrashed(PluginInstance* instance) = 0;
 
   // Indicates that the given instance has been created.
   virtual void InstanceCreated(PluginInstance* instance) = 0;
@@ -216,6 +239,10 @@ class PluginDelegate {
   // from this call.
   virtual void InstanceDeleted(PluginInstance* instance) = 0;
 
+  // Returns a pointer (ownership not transferred) to the bitmap to paint the
+  // sad plugin screen with. Returns NULL on failure.
+  virtual SkBitmap* GetSadPluginBitmap() = 0;
+
   // The caller will own the pointer returned from this.
   virtual PlatformImage2D* CreateImage2D(int width, int height) = 0;
 
@@ -224,12 +251,20 @@ class PluginDelegate {
 
   // The caller will own the pointer returned from this.
   virtual PlatformVideoDecoder* CreateVideoDecoder(
-      const PP_VideoDecoderConfig_Dev& decoder_config) = 0;
+      PP_VideoDecoderConfig_Dev* decoder_config) = 0;
 
-  // The caller will own the pointer returned from this.
+  // The caller is responsible for calling Shutdown() on the returned pointer
+  // to clean up the corresponding resources allocated during this call.
   virtual PlatformAudio* CreateAudio(uint32_t sample_rate,
                                      uint32_t sample_count,
                                      PlatformAudio::Client* client) = 0;
+
+  // A pointer is returned immediately, but it is not ready to be used until
+  // BrokerConnected has been called.
+  // The caller is responsible for calling Release() on the returned pointer
+  // to clean up the corresponding resources allocated during this call.
+  virtual PpapiBroker* ConnectToPpapiBroker(
+      webkit::ppapi::PPB_Broker_Impl* client) = 0;
 
   // Notifies that the number of find results has changed.
   virtual void NumberOfFindResultsChanged(int identifier,
@@ -250,6 +285,9 @@ class PluginDelegate {
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
                              AsyncOpenFileCallback* callback) = 0;
+  virtual bool AsyncOpenFileSystemURL(const GURL& path,
+                                      int flags,
+                                      AsyncOpenFileCallback* callback) = 0;
 
   virtual bool OpenFileSystem(
       const GURL& url,
@@ -257,22 +295,22 @@ class PluginDelegate {
       long long size,
       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
   virtual bool MakeDirectory(
-      const FilePath& path,
+      const GURL& path,
       bool recursive,
       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
-  virtual bool Query(const FilePath& path,
+  virtual bool Query(const GURL& path,
                      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
-  virtual bool Touch(const FilePath& path,
+  virtual bool Touch(const GURL& path,
                      const base::Time& last_access_time,
                      const base::Time& last_modified_time,
                      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
-  virtual bool Delete(const FilePath& path,
+  virtual bool Delete(const GURL& path,
                       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
-  virtual bool Rename(const FilePath& file_path,
-                      const FilePath& new_file_path,
+  virtual bool Rename(const GURL& file_path,
+                      const GURL& new_file_path,
                       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
   virtual bool ReadDirectory(
-      const FilePath& directory_path,
+      const GURL& directory_path,
       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
 
   virtual base::PlatformFileError OpenFile(const PepperFilePath& path,
@@ -301,9 +339,10 @@ class PluginDelegate {
       webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
       const struct PP_Flash_NetAddress* addr) = 0;
 
-  // Show the given context menu at the given position (in the render view's
+  // Show the given context menu at the given position (in the plugin's
   // coordinates).
   virtual int32_t ShowContextMenu(
+      PluginInstance* instance,
       webkit::ppapi::PPB_Flash_Menu_Impl* menu,
       const gfx::Point& position) = 0;
 
@@ -337,12 +376,20 @@ class PluginDelegate {
   // Tells the browser that the PDF has an unsupported feature.
   virtual void HasUnsupportedFeature() = 0;
 
+  // Tells the browser to bring up SaveAs dialog to save specified URL.
+  virtual void SaveURLAs(const GURL& url) = 0;
+
   // Socket dispatcher for P2P connections. Returns to NULL if P2P API
   // is disabled.
   //
-  // TODO(sergeyu): Replace this with a higher-level P2P API
-  // implementation.
+  // TODO(sergeyu): Stop using GetP2PSocketDispatcher() in remoting
+  // client and remove it from here.
   virtual P2PSocketDispatcher* GetP2PSocketDispatcher() = 0;
+
+  // Creates P2PTransport object.
+  virtual webkit_glue::P2PTransport* CreateP2PTransport() = 0;
+
+  virtual double GetLocalTimeZoneOffset(base::Time t) = 0;
 };
 
 }  // namespace ppapi

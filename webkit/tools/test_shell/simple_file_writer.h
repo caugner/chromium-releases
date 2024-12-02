@@ -5,20 +5,26 @@
 #ifndef WEBKIT_TOOLS_TEST_SHELL_SIMPLE_FILE_WRITER_H_
 #define WEBKIT_TOOLS_TEST_SHELL_SIMPLE_FILE_WRITER_H_
 
-#include "base/ref_counted.h"
-#include "base/weak_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "webkit/fileapi/webfilewriter_base.h"
 
 namespace net {
 class URLRequestContext;
 }  // namespace net
 
+namespace fileapi {
+class FileSystemContext;
+}
+
 // An implementation of WebFileWriter for use in test_shell and DRT.
 class SimpleFileWriter : public fileapi::WebFileWriterBase,
                          public base::SupportsWeakPtr<SimpleFileWriter> {
  public:
   SimpleFileWriter(
-      const WebKit::WebString& path, WebKit::WebFileWriterClient* client);
+      const GURL& path,
+      WebKit::WebFileWriterClient* client,
+      fileapi::FileSystemContext* file_system_context);
   virtual ~SimpleFileWriter();
 
   // Called by SimpleResourceLoaderBridge when the context is
@@ -32,8 +38,8 @@ class SimpleFileWriter : public fileapi::WebFileWriterBase,
 
  protected:
   // WebFileWriterBase overrides
-  virtual void DoTruncate(const FilePath& path, int64 offset);
-  virtual void DoWrite(const FilePath& path, const GURL& blob_url,
+  virtual void DoTruncate(const GURL& path, int64 offset);
+  virtual void DoWrite(const GURL& path, const GURL& blob_url,
                        int64 offset);
   virtual void DoCancel();
 

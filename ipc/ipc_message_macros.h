@@ -29,9 +29,9 @@
 // A message generator .h header file pulls in all other message-declaring
 // headers for a given component.  It is included by a message generator
 // .cc file, which is where all the generated code will wind up.  Typically,
-// you will use an existing generator (e.g. common_message_generator.cc and
-// common_message_generator.h in /chrome/common), but there are circumstances
-// where you may add a new one.
+// you will use an existing generator (e.g. common_message_generator.cc
+// in /chrome/common), but there are circumstances where you may add a
+// new one.
 //
 // In the rare cicrucmstances where you can't re-use an existing file,
 // your YYY_message_generator.cc file for a component YYY would contain
@@ -45,15 +45,19 @@
 //     // Generate destructors.
 //     #include "ipc/struct_destructor_macros.h"
 //     #include "path/to/YYY_message_generator.h"
-//     namespace IPC {
 //     // Generate param traits write methods.
 //     #include "ipc/param_traits_write_macros.h"
+//     namespace IPC {
 //     #include "path/to/YYY_message_generator.h"
+//     }  // namespace IPC
 //     // Generate param traits read methods.
 //     #include "ipc/param_traits_read_macros.h"
+//     namespace IPC {
 //     #include "path/to/YYY_message_generator.h"
+//     }  // namespace IPC
 //     // Generate param traits log methods.
 //     #include "ipc/param_traits_log_macros.h"
+//     namespace IPC {
 //     #include "path/to/YYY_message_generator.h"
 //     }  // namespace IPC
 //
@@ -134,10 +138,15 @@
 // There's also IPC_STRUCT_TRAITS_PARENT, which is used to register a parent
 // class (whose own traits are already defined). Note that
 // IPC_STRUCT_TRAITS_MEMBER() and IPC_STRUCT_TRAITS_PARENT are only permitted
-// inside matching calls to IPC_STRUCT_TRAITS_BEGIN() / IPC_STRUCT_TRAITS_END().
+// inside matching calls to IPC_STRUCT_TRAITS_BEGIN() /
+// IPC_STRUCT_TRAITS_END().
 //
 // Enum types are registered with a single IPC_ENUM_TRAITS() macro.  There
 // is no need to enumerate each value to the IPC mechanism.
+//
+// Do not place semicolons following these IPC_ macro invocations.  There
+// is no reason to expect that their expansion corresponds one-to-one with
+// C++ statements.
 //
 // Once the types have been declared / registered, message definitions follow.
 // "Sync" messages are just synchronous calls, the Send() call doesn't return
@@ -186,7 +195,7 @@
 #define IPC_STRUCT_END() };
 
 // Message macros collect specific numbers of arguments and funnel them into
-// the common message generation macro.
+// the common message generation macro.  These should never be redefined.
 #define IPC_MESSAGE_CONTROL0(msg_class) \
   IPC_MESSAGE_DECL(EMPTY, CONTROL, msg_class, 0, 0, (), ())
 
@@ -299,7 +308,7 @@
   IPC_MESSAGE_DECL(SYNC, CONTROL, msg_class, 4, 4, (type1_in, type2_in, type3_in, type4_in), (type1_out, type2_out, type3_out, type4_out))
 
 #define IPC_SYNC_MESSAGE_CONTROL5_0(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in) \
-  IPC_MESSAGE_DECL(SYNC, CONTROL, msg_class, 5, 0, (type1_in, type2_in, type3_in, type4_in, type5_in), ()))
+  IPC_MESSAGE_DECL(SYNC, CONTROL, msg_class, 5, 0, (type1_in, type2_in, type3_in, type4_in, type5_in), ())
 
 #define IPC_SYNC_MESSAGE_CONTROL5_1(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out) \
   IPC_MESSAGE_DECL(SYNC, CONTROL, msg_class, 5, 1, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out))
@@ -389,7 +398,7 @@
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 4, 4, (type1_in, type2_in, type3_in, type4_in), (type1_out, type2_out, type3_out, type4_out))
 
 #define IPC_SYNC_MESSAGE_ROUTED5_0(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in) \
-  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 1, (type1_in, type2_in, type3_in, type4_in, type5_in), ()))
+  IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 1, (type1_in, type2_in, type3_in, type4_in, type5_in), ())
 
 #define IPC_SYNC_MESSAGE_ROUTED5_1(msg_class, type1_in, type2_in, type3_in, type4_in, type5_in, type1_out) \
   IPC_MESSAGE_DECL(SYNC, ROUTED, msg_class, 5, 1, (type1_in, type2_in, type3_in, type4_in, type5_in), (type1_out))
@@ -406,11 +415,7 @@
 // Common message macro which dispatches into one of the 6 (sync x kind)
 // routines.  There is a way that these 6 cases can be lumped together,
 // but the  macros get very complicated in that case.
-// Note: we currently use __LINE__ to give unique IDs to messages within
-// a file.  They're globally unique since each file defines its own
-// IPC_MESSAGE_START.  Ideally, we wouldn't use line numbers (a possibility
-// is to instead use the __COUNTER__ macro, but it needs gcc 4.3 and xcode
-// doesn't use it yet).
+// Note: intended be redefined to generate other information.
 #define IPC_MESSAGE_DECL(sync, kind, msg_class,                               \
                          in_cnt, out_cnt, in_list, out_list)                  \
   IPC_##sync##_##kind##_DECL(msg_class, in_cnt, out_cnt, in_list, out_list)   \
@@ -419,14 +424,14 @@
 #define IPC_EMPTY_CONTROL_DECL(msg_class, in_cnt, out_cnt, in_list, out_list) \
   class msg_class : public IPC::Message {                                     \
    public:                                                                    \
-    enum { ID = (IPC_MESSAGE_START << 16) + __LINE__ };                       \
+    enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class() : IPC::Message(MSG_ROUTING_CONTROL, ID, PRIORITY_NORMAL) {}   \
   };
 
 #define IPC_EMPTY_ROUTED_DECL(msg_class, in_cnt, out_cnt, in_list, out_list)  \
   class msg_class : public IPC::Message {                                     \
    public:                                                                    \
-    enum { ID = (IPC_MESSAGE_START << 16) + __LINE__ };                       \
+    enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(int32 routing_id)                                               \
         : IPC::Message(routing_id, ID, PRIORITY_NORMAL) {}                    \
   };
@@ -435,7 +440,7 @@
   class msg_class :                                                           \
       public IPC::MessageWithTuple<IPC_TUPLE_IN_##in_cnt in_list> {           \
    public:                                                                    \
-    enum { ID = (IPC_MESSAGE_START << 16) + __LINE__ };                       \
+    enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(IPC_TYPE_IN_##in_cnt in_list);                                  \
     ~msg_class();                                                             \
     static void Log(std::string* name, const Message* msg, std::string* l);   \
@@ -445,7 +450,7 @@
   class msg_class :                                                           \
       public IPC::MessageWithTuple<IPC_TUPLE_IN_##in_cnt in_list> {           \
    public:                                                                    \
-    enum { ID = (IPC_MESSAGE_START << 16) + __LINE__ };                       \
+    enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(int32 routing_id IPC_COMMA_##in_cnt                             \
               IPC_TYPE_IN_##in_cnt in_list);                                  \
     ~msg_class();                                                             \
@@ -457,7 +462,7 @@
       public IPC::MessageWithReply<IPC_TUPLE_IN_##in_cnt in_list,             \
                                    IPC_TUPLE_OUT_##out_cnt out_list> {        \
    public:                                                                    \
-    enum { ID = (IPC_MESSAGE_START << 16) + __LINE__ };                       \
+    enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(IPC_TYPE_IN_##in_cnt in_list                                    \
               IPC_COMMA_AND_##in_cnt(IPC_COMMA_##out_cnt)                     \
               IPC_TYPE_OUT_##out_cnt out_list);                               \
@@ -470,7 +475,7 @@
       public IPC::MessageWithReply<IPC_TUPLE_IN_##in_cnt in_list,             \
                                    IPC_TUPLE_OUT_##out_cnt out_list> {        \
    public:                                                                    \
-    enum { ID = (IPC_MESSAGE_START << 16) + __LINE__ };                       \
+    enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(int32 routing_id                                                \
               IPC_COMMA_OR_##in_cnt(IPC_COMMA_##out_cnt)                      \
               IPC_TYPE_IN_##in_cnt in_list                                    \
@@ -671,6 +676,16 @@ LogFunctionMap g_log_function_mapping;
 #define IPC_COMMA_OR_4(x) ,
 #define IPC_COMMA_OR_5(x) ,
 
+// Message IDs
+// Note: we currently use __LINE__ to give unique IDs to messages within
+// a file.  They're globally unique since each file defines its own
+// IPC_MESSAGE_START.  Ideally, we wouldn't use line numbers (a possibility
+// is to instead use the __COUNTER__ macro, but it needs gcc 4.3 and xcode
+// doesn't use it yet).
+#define IPC_MESSAGE_ID() ((IPC_MESSAGE_START << 16) + __LINE__)
+#define IPC_MESSAGE_ID_CLASS(id) ((id) >> 16)
+#define IPC_MESSAGE_ID_LINE(id) ((id) & 0xffff)
+
 // Message crackers and handlers.
 // Prefer to use the IPC_BEGIN_MESSAGE_MAP_EX to the older macros since they
 // allow you to detect when a message could not be de-serialized. Usage:
@@ -715,7 +730,7 @@ LogFunctionMap g_log_function_mapping;
 
 #define IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, obj, member_func) \
     case msg_class::ID: \
-    msg_class::DispatchDelayReply(&ipc_message__, obj, &member_func); \
+    msg_is_ok__ = msg_class::DispatchDelayReply(&ipc_message__, obj, &member_func); \
     break;
 
 #define IPC_MESSAGE_HANDLER_DELAY_REPLY(msg_class, member_func) \
@@ -754,7 +769,7 @@ LogFunctionMap g_log_function_mapping;
 
 // This corresponds to an enum value from IPCMessageStart.
 #define IPC_MESSAGE_CLASS(message) \
-  message.type() >> 16
+  IPC_MESSAGE_ID_CLASS(message.type())
 
 #endif  // IPC_IPC_MESSAGE_MACROS_H_
 

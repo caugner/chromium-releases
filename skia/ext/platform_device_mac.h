@@ -6,8 +6,10 @@
 #define SKIA_EXT_PLATFORM_DEVICE_MAC_H_
 #pragma once
 
-#import <ApplicationServices/ApplicationServices.h>
 #include "third_party/skia/include/core/SkDevice.h"
+
+typedef struct CGContext* CGContextRef;
+typedef struct CGRect CGRect;
 
 class SkMatrix;
 class SkPath;
@@ -40,6 +42,12 @@ class PlatformDevice : public SkDevice {
 
   // Returns if the preferred rendering engine is vectorial or bitmap based.
   virtual bool IsVectorial() = 0;
+
+  // Returns if native platform APIs are allowed to render text to this device.
+  virtual bool IsNativeFontRenderingAllowed();
+
+  virtual PlatformSurface BeginPlatformPaint();
+  virtual void EndPlatformPaint();
 
   // Initializes the default settings and colors in a device context.
   static void InitializeCGContext(CGContextRef context);

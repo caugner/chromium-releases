@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,6 @@
 #include "media/base/media_format.h"
 #include "media/base/video_frame.h"
 #include "media/ffmpeg/ffmpeg_common.h"
-#include "media/ffmpeg/ffmpeg_util.h"
-#include "media/filters/ffmpeg_interfaces.h"
 #include "media/video/ffmpeg_video_decode_engine.h"
 #include "media/video/video_decode_context.h"
 
@@ -24,8 +22,6 @@ namespace media {
 FFmpegVideoDecoder::FFmpegVideoDecoder(MessageLoop* message_loop,
                                        VideoDecodeContext* decode_context)
     : message_loop_(message_loop),
-      width_(0),
-      height_(0),
       time_base_(new AVRational()),
       state_(kUnInitialized),
       decode_engine_(new FFmpegVideoDecodeEngine()),
@@ -57,65 +53,49 @@ void FFmpegVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
   initialize_callback_.reset(callback);
   statistics_callback_.reset(stats_callback);
 
-  // Get the AVStream by querying for the provider interface.
-  AVStreamProvider* av_stream_provider;
-  if (!demuxer_stream->QueryInterface(&av_stream_provider)) {
+  AVStream* av_stream = demuxer_stream->GetAVStream();
+  if (!av_stream) {
     VideoCodecInfo info = {0};
-    FFmpegVideoDecoder::OnInitializeComplete(info);
+    OnInitializeComplete(info);
     return;
   }
-  AVStream* av_stream = av_stream_provider->GetAVStream();
 
   time_base_->den = av_stream->r_frame_rate.num;
   time_base_->num = av_stream->r_frame_rate.den;
 
-  // TODO(ajwong): We don't need these extra variables if |media_format_| has
-  // them.  Remove.
-  width_ = av_stream->codec->width;
-  height_ = av_stream->codec->height;
-  if (width_ > Limits::kMaxDimension ||
-      height_ > Limits::kMaxDimension ||
-      (width_ * height_) > Limits::kMaxCanvas) {
+  int width = av_stream->codec->coded_width;
+  int height = av_stream->codec->coded_height;
+  if (width > Limits::kMaxDimension ||
+      height > Limits::kMaxDimension ||
+      (width * height) > Limits::kMaxCanvas) {
     VideoCodecInfo info = {0};
-    FFmpegVideoDecoder::OnInitializeComplete(info);
+    OnInitializeComplete(info);
     return;
   }
 
-  VideoCodecConfig config;
-  switch (av_stream->codec->codec_id) {
-    case CODEC_ID_VC1:
-      config.codec = kCodecVC1; break;
-    case CODEC_ID_H264:
-      config.codec = kCodecH264; break;
-    case CODEC_ID_THEORA:
-      config.codec = kCodecTheora; break;
-    case CODEC_ID_MPEG2VIDEO:
-      config.codec = kCodecMPEG2; break;
-    case CODEC_ID_MPEG4:
-      config.codec = kCodecMPEG4; break;
-    case CODEC_ID_VP8:
-      config.codec = kCodecVP8; break;
-    default:
-      NOTREACHED();
-  }
-  config.opaque_context = av_stream;
-  config.width = width_;
-  config.height = height_;
+  VideoCodecConfig config(CodecIDToVideoCodec(av_stream->codec->codec_id),
+                          width, height,
+                          av_stream->r_frame_rate.num,
+                          av_stream->r_frame_rate.den,
+                          av_stream->codec->extradata,
+                          av_stream->codec->extradata_size);
   state_ = kInitializing;
   decode_engine_->Initialize(message_loop_, this, NULL, config);
 }
 
 void FFmpegVideoDecoder::OnInitializeComplete(const VideoCodecInfo& info) {
+  // TODO(scherkus): Dedup this from OmxVideoDecoder::OnInitializeComplete.
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   DCHECK(initialize_callback_.get());
 
-  info_ = info;  // Save a copy.
+  info_ = info;
+  AutoCallbackRunner done_runner(initialize_callback_.release());
 
   if (info.success) {
-    media_format_.SetAsString(MediaFormat::kMimeType,
-                              mime_type::kUncompressedVideo);
-    media_format_.SetAsInteger(MediaFormat::kWidth, width_);
-    media_format_.SetAsInteger(MediaFormat::kHeight, height_);
+    media_format_.SetAsInteger(MediaFormat::kWidth,
+                               info.stream_info.surface_width);
+    media_format_.SetAsInteger(MediaFormat::kHeight,
+                               info.stream_info.surface_height);
     media_format_.SetAsInteger(
         MediaFormat::kSurfaceType,
         static_cast<int>(info.stream_info.surface_type));
@@ -126,9 +106,6 @@ void FFmpegVideoDecoder::OnInitializeComplete(const VideoCodecInfo& info) {
   } else {
     host()->SetError(PIPELINE_ERROR_DECODE);
   }
-
-  initialize_callback_->Run();
-  initialize_callback_.reset();
 }
 
 void FFmpegVideoDecoder::Stop(FilterCallback* callback) {
@@ -422,7 +399,7 @@ FFmpegVideoDecoder::TimeTuple FFmpegVideoDecoder::FindPtsAndDuration(
     pts.duration = duration;
   } else {
     // Otherwise assume a normal frame duration.
-    pts.duration = ConvertTimestamp(time_base, 1);
+    pts.duration = ConvertFromTimeBase(time_base, 1);
   }
 
   return pts;

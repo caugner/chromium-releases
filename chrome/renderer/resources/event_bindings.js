@@ -7,6 +7,7 @@ var chrome = chrome || {};
   native function GetChromeHidden();
   native function AttachEvent(eventName);
   native function DetachEvent(eventName);
+  native function GetExternalFileEntry(fileDefinition);
 
   var chromeHidden = GetChromeHidden();
 
@@ -69,7 +70,7 @@ var chrome = chrome || {};
           return "Event validation error during " + opt_eventName + " -- " +
                  exception;
         }
-      }
+      };
     }
   };
 
@@ -88,6 +89,20 @@ var chrome = chrome || {};
     if (attachedNamedEvents[name]) {
       if (args) {
         args = chromeHidden.JSON.parse(args);
+        // TODO(zelidrag|aa): Remove this hack from here once we enable event
+        // JSON payload unpacking on C++ side.
+        if (name == "fileBrowserHandler.onExecute") {
+          if (args.length < 2)
+            return;
+          var fileList = args[1].entries;
+          if (!fileList)
+            return;
+          // The second parameter for this event's payload is file definition
+          // dictionary that we used to reconstruct File API's Entry instance
+          // here.
+          for (var i = 0; i < fileList.length; i++)
+            fileList[i] = GetExternalFileEntry(fileList[i]);
+        }
       }
       return attachedNamedEvents[name].dispatch.apply(
           attachedNamedEvents[name], args);
@@ -106,7 +121,7 @@ var chrome = chrome || {};
   chromeHidden.Event.hasListener = function(name) {
     return (attachedNamedEvents[name] &&
             attachedNamedEvents[name].listeners_.length > 0);
-  }
+  };
 
   // Registers a callback to be called when this event is dispatched.
   chrome.Event.prototype.addListener = function(cb) {
@@ -165,7 +180,8 @@ var chrome = chrome || {};
       try {
         this.listeners_[i].apply(null, args);
       } catch (e) {
-        console.error(e);
+        console.error("Error in event handler for '" + this.eventName_ +
+                      "': " + e);
       }
     }
   };
@@ -203,6 +219,12 @@ var chrome = chrome || {};
     delete attachedNamedEvents[this.eventName_];
   };
 
+  chrome.Event.prototype.destroy_ = function() {
+    this.listeners_ = [];
+    this.validate_ = [];
+    this.detach_();
+  };
+
   // Special load events: we don't use the DOM unload because that slows
   // down tab shutdown.  On the other hand, onUnload might not always fire,
   // since Chrome will terminate renderers on shutdown (SuddenTermination).
@@ -211,7 +233,7 @@ var chrome = chrome || {};
 
   chromeHidden.dispatchOnLoad = function(extensionId) {
     chromeHidden.onLoad.dispatch(extensionId);
-  }
+  };
 
   chromeHidden.dispatchOnUnload = function() {
     chromeHidden.onUnload.dispatch();
@@ -220,9 +242,9 @@ var chrome = chrome || {};
       if (event)
         event.detach_();
     }
-  }
+  };
 
   chromeHidden.dispatchError = function(msg) {
     console.error(msg);
-  }
+  };
 })();

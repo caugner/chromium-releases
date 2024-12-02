@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/window/non_client_view.h"
 
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
@@ -107,6 +108,10 @@ void NonClientView::ResetWindowControls() {
   frame_view_->ResetWindowControls();
 }
 
+void NonClientView::UpdateWindowIcon() {
+  frame_view_->UpdateWindowIcon();
+}
+
 void NonClientView::LayoutFrameView() {
   // First layout the NonClientFrameView, which determines the size of the
   // ClientView...
@@ -120,6 +125,10 @@ void NonClientView::LayoutFrameView() {
   // to do nothing so that SetBounds above doesn't cause Layout to be called
   // twice.
   frame_view_->Layout();
+}
+
+void NonClientView::SetAccessibleName(const string16& name) {
+  accessible_name_ = name;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -159,6 +168,11 @@ void NonClientView::ViewHierarchyChanged(bool is_add, View* parent,
   }
 }
 
+void NonClientView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_WINDOW;
+  state->name = accessible_name_;
+}
+
 views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
   // Because of the z-ordering of our child views (the client view is positioned
   // over the non-client frame view, if the client view ever overlaps the frame
@@ -173,10 +187,6 @@ views::View* NonClientView::GetEventHandlerForPoint(const gfx::Point& point) {
     return frame_view_->GetEventHandlerForPoint(point_in_child_coords);
 
   return View::GetEventHandlerForPoint(point);
-}
-
-AccessibilityTypes::Role NonClientView::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_WINDOW;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -194,11 +204,6 @@ bool NonClientFrameView::HitTest(const gfx::Point& l) const {
   // For the default case, we assume the non-client frame view never overlaps
   // the client view.
   return !GetWindow()->client_view()->bounds().Contains(l);
-}
-
-void NonClientFrameView::OnBoundsChanged() {
-  // Overridden to do nothing. The NonClientView manually calls Layout on the
-  // FrameView when it is itself laid out, see comment in NonClientView::Layout.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -257,8 +262,13 @@ bool NonClientFrameView::ShouldPaintAsActive() const {
   return GetWindow()->IsActive() || paint_as_active_;
 }
 
-AccessibilityTypes::Role NonClientFrameView::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_WINDOW;
+void NonClientFrameView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_WINDOW;
+}
+
+void NonClientFrameView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  // Overridden to do nothing. The NonClientView manually calls Layout on the
+  // FrameView when it is itself laid out, see comment in NonClientView::Layout.
 }
 
 }  // namespace views

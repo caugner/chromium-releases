@@ -10,14 +10,14 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/process_util.h"
-#include "base/ref_counted.h"
 #include "base/string16.h"
 #include "chrome/common/content_settings_types.h"
-#include "chrome/common/dom_storage_common.h"
 #include "chrome/common/translate_errors.h"
 #include "chrome/common/view_types.h"
-#include "chrome/common/window_container_type.h"
+#include "content/common/dom_storage_common.h"
+#include "content/common/window_container_type.h"
 #include "ipc/ipc_channel.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
@@ -45,9 +45,8 @@ class SkBitmap;
 class SSLClientAuthHandler;
 class SSLAddCertHandler;
 class TabContents;
-struct ThumbnailScore;
+struct ExtensionHostMsg_DomMessage_Params;
 struct ViewHostMsg_CreateWindow_Params;
-struct ViewHostMsg_DomMessage_Params;
 struct ViewHostMsg_FrameNavigate_Params;
 struct WebApplicationInfo;
 struct WebDropData;
@@ -76,7 +75,7 @@ class CookieOptions;
 
 namespace webkit_glue {
 struct FormData;
-class FormField;
+struct FormField;
 struct PasswordForm;
 }
 
@@ -446,11 +445,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   // The destination URL has changed should be updated
   virtual void UpdateTargetURL(int32 page_id, const GURL& url) {}
 
-  // The thumbnail representation of the page changed and should be updated.
-  virtual void UpdateThumbnail(const GURL& url,
-                               const SkBitmap& bitmap,
-                               const ThumbnailScore& score) {}
-
   // Inspector setting was changed and should be persisted.
   virtual void UpdateInspectorSetting(const std::string& key,
                                       const std::string& value) = 0;
@@ -498,7 +492,7 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
   // A message was sent from HTML-based UI.
   // By default we ignore such messages.
   virtual void ProcessWebUIMessage(
-      const ViewHostMsg_DomMessage_Params& params) {}
+      const ExtensionHostMsg_DomMessage_Params& params) {}
 
   // A message for external host. By default we ignore such messages.
   // |receiver| can be a receiving script and |message| is any
@@ -517,10 +511,6 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
 
   virtual void RunBeforeUnloadConfirm(const std::wstring& message,
                                       IPC::Message* reply_msg) {}
-
-  virtual void ShowModalHTMLDialog(const GURL& url, int width, int height,
-                                   const std::string& json_arguments,
-                                   IPC::Message* reply_msg) {}
 
   // |url| is assigned to a server that can provide alternate error pages.  If
   // the returned URL is empty, the default error page built into WebKit will
@@ -576,6 +566,12 @@ class RenderViewHostDelegate : public IPC::Channel::Listener {
 
   // Notification that a worker process has crashed.
   void WorkerCrashed() {}
+
+  // Ask the user if they want to allow the view to show desktop notifications.
+  // Returns true if the delegate will take care of asking the user, otherwise
+  // the caller will do the default behavior.
+  bool RequestDesktopNotificationPermission(const GURL& source_origin,
+                                            int callback_context);
 
  protected:
   virtual ~RenderViewHostDelegate() {}

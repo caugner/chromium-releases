@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,9 @@
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/memory/singleton.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/singleton.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -27,8 +27,8 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
-#include "googleurl/src/gurl.h"
 #include "chrome_frame/utils.h"
+#include "googleurl/src/gurl.h"
 
 namespace {
 
@@ -198,7 +198,7 @@ LRESULT ChromeFrameActivex::OnHostMoved(UINT message, WPARAM wparam,
 }
 
 HRESULT ChromeFrameActivex::GetContainingDocument(IHTMLDocument2** doc) {
-  ScopedComPtr<IOleContainer> container;
+  base::win::ScopedComPtr<IOleContainer> container;
   HRESULT hr = m_spClientSite->GetContainer(container.Receive());
   if (container)
     hr = container.QueryInterface(doc);
@@ -206,7 +206,7 @@ HRESULT ChromeFrameActivex::GetContainingDocument(IHTMLDocument2** doc) {
 }
 
 HRESULT ChromeFrameActivex::GetDocumentWindow(IHTMLWindow2** window) {
-  ScopedComPtr<IHTMLDocument2> document;
+  base::win::ScopedComPtr<IHTMLDocument2> document;
   HRESULT hr = GetContainingDocument(document.Receive());
   if (document)
     hr = document->get_parentWindow(window);
@@ -214,7 +214,7 @@ HRESULT ChromeFrameActivex::GetDocumentWindow(IHTMLWindow2** window) {
 }
 
 void ChromeFrameActivex::OnLoad(const GURL& gurl) {
-  ScopedComPtr<IDispatch> event;
+  base::win::ScopedComPtr<IDispatch> event;
   std::string url = gurl.spec();
   if (SUCCEEDED(CreateDomEvent("event", url, "", event.Receive())))
     Fire_onload(event);
@@ -224,7 +224,7 @@ void ChromeFrameActivex::OnLoad(const GURL& gurl) {
 }
 
 void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
-  ScopedComPtr<IDispatch> event;
+  base::win::ScopedComPtr<IDispatch> event;
   if (SUCCEEDED(CreateDomEvent("event", url, "", event.Receive())))
     Fire_onloaderror(event);
 
@@ -242,7 +242,7 @@ void ChromeFrameActivex::OnMessageFromChromeFrame(const std::string& message,
 
     if (is_privileged()) {
       // Forward messages if the control is in privileged mode.
-      ScopedComPtr<IDispatch> message_event;
+      base::win::ScopedComPtr<IDispatch> message_event;
       if (SUCCEEDED(CreateDomEvent("message", message, origin,
                                    message_event.Receive()))) {
         base::win::ScopedBstr target_bstr(UTF8ToWide(target).c_str());
@@ -263,7 +263,7 @@ void ChromeFrameActivex::OnMessageFromChromeFrame(const std::string& message,
       return;
   }
 
-  ScopedComPtr<IDispatch> message_event;
+  base::win::ScopedComPtr<IDispatch> message_event;
   if (SUCCEEDED(CreateDomEvent("message", message, origin,
                                message_event.Receive()))) {
     Fire_onmessage(message_event);
@@ -284,7 +284,7 @@ bool ChromeFrameActivex::ShouldShowVersionMismatchDialog(
   }
 
   if (client_site) {
-    ScopedComPtr<IChromeFramePrivileged> service;
+    base::win::ScopedComPtr<IChromeFramePrivileged> service;
     HRESULT hr = DoQueryService(SID_ChromeFramePrivileged,
                                 client_site,
                                 service.Receive());
@@ -303,37 +303,9 @@ void ChromeFrameActivex::OnAutomationServerLaunchFailed(
 
   if (reason == AUTOMATION_VERSION_MISMATCH &&
       ShouldShowVersionMismatchDialog(is_privileged(), m_spClientSite)) {
-    THREAD_SAFE_UMA_HISTOGRAM_COUNTS(
-        "ChromeFrame.VersionMismatchDisplayed", 1);
+    UMA_HISTOGRAM_COUNTS("ChromeFrame.VersionMismatchDisplayed", 1);
     DisplayVersionMismatchWarning(m_hWnd, server_version);
   }
-}
-
-void ChromeFrameActivex::OnExtensionInstalled(
-    const FilePath& path,
-    void* user_data,
-    AutomationMsg_ExtensionResponseValues response) {
-  base::win::ScopedBstr path_str(path.value().c_str());
-  Fire_onextensionready(path_str, response);
-}
-
-void ChromeFrameActivex::OnGetEnabledExtensionsComplete(
-    void* user_data,
-    const std::vector<FilePath>& extension_directories) {
-  SAFEARRAY* sa = ::SafeArrayCreateVector(VT_BSTR, 0,
-                                          extension_directories.size());
-  sa->fFeatures = sa->fFeatures | FADF_BSTR;
-  ::SafeArrayLock(sa);
-
-  for (size_t i = 0; i < extension_directories.size(); ++i) {
-    LONG index = static_cast<LONG>(i);
-    ::SafeArrayPutElement(sa, &index, reinterpret_cast<void*>(
-        CComBSTR(extension_directories[i].value().c_str()).Detach()));
-  }
-
-  Fire_ongetenabledextensionscomplete(sa);
-  ::SafeArrayUnlock(sa);
-  ::SafeArrayDestroy(sa);
 }
 
 void ChromeFrameActivex::OnChannelError() {
@@ -374,7 +346,7 @@ STDMETHODIMP ChromeFrameActivex::Load(IPropertyBag* bag, IErrorLog* error_log) {
   base::win::ScopedBstr object_id;
   GetObjectScriptId(obj_element, object_id.Receive());
 
-  ScopedComPtr<IHTMLElement2> element;
+  base::win::ScopedComPtr<IHTMLElement2> element;
   element.QueryFrom(obj_element);
   HRESULT hr = S_OK;
 
@@ -459,7 +431,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     // Drop privileged mode on uninitialization.
     set_is_privileged(false);
   } else {
-    ScopedComPtr<IHTMLDocument2> document;
+    base::win::ScopedComPtr<IHTMLDocument2> document;
     GetContainingDocument(document.Receive());
     if (document) {
       base::win::ScopedBstr url;
@@ -468,7 +440,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     }
 
     // Probe to see whether the host implements the privileged service.
-    ScopedComPtr<IChromeFramePrivileged> service;
+    base::win::ScopedComPtr<IChromeFramePrivileged> service;
     HRESULT service_hr = DoQueryService(SID_ChromeFramePrivileged,
                                         m_spClientSite,
                                         service.Receive());
@@ -485,20 +457,6 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
 
     std::wstring profile_name(GetHostProcessName(false));
     if (is_privileged()) {
-
-      base::win::ScopedBstr automated_functions_arg;
-      service_hr = service->GetExtensionApisToAutomate(
-          automated_functions_arg.Receive());
-      if (S_OK == service_hr && automated_functions_arg) {
-        std::string automated_functions(
-            WideToASCII(static_cast<BSTR>(automated_functions_arg)));
-        functions_enabled_.clear();
-        // base::SplitString writes one empty entry for blank strings, so we
-        // need this to allow specifying zero automation of API functions.
-        if (!automated_functions.empty())
-          base::SplitString(automated_functions, ',', &functions_enabled_);
-      }
-
       base::win::ScopedBstr profile_name_arg;
       service_hr = service->GetChromeProfileName(profile_name_arg.Receive());
       if (S_OK == service_hr && profile_name_arg)
@@ -531,7 +489,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
     }
 
     // Log a metric that Chrome Frame is being used in Widget mode
-    THREAD_SAFE_UMA_LAUNCH_TYPE_COUNT(RENDERER_TYPE_CHROME_WIDGET);
+    UMA_LAUNCH_TYPE_COUNT(RENDERER_TYPE_CHROME_WIDGET);
   }
 
   return hr;
@@ -544,7 +502,7 @@ HRESULT ChromeFrameActivex::GetObjectScriptId(IHTMLObjectElement* object_elem,
 
   HRESULT hr = E_FAIL;
   if (object_elem) {
-    ScopedComPtr<IHTMLElement> elem;
+    base::win::ScopedComPtr<IHTMLElement> elem;
     hr = elem.QueryFrom(object_elem);
     if (elem) {
       hr = elem->get_id(id);
@@ -559,10 +517,10 @@ HRESULT ChromeFrameActivex::GetObjectElement(IHTMLObjectElement** element) {
   if (!m_spClientSite)
     return E_UNEXPECTED;
 
-  ScopedComPtr<IOleControlSite> site;
+  base::win::ScopedComPtr<IOleControlSite> site;
   HRESULT hr = site.QueryFrom(m_spClientSite);
   if (site) {
-    ScopedComPtr<IDispatch> disp;
+    base::win::ScopedComPtr<IDispatch> disp;
     hr = site->GetExtendedControl(disp.Receive());
     if (disp) {
       hr = disp.QueryInterface(element);
@@ -587,14 +545,14 @@ HRESULT ChromeFrameActivex::CreateScriptBlockForEvent(
     return E_INVALIDARG;
   }
 
-  ScopedComPtr<IHTMLDocument2> document;
+  base::win::ScopedComPtr<IHTMLDocument2> document;
   HRESULT hr = GetContainingDocument(document.Receive());
   if (SUCCEEDED(hr)) {
-    ScopedComPtr<IHTMLElement> element, new_element;
+    base::win::ScopedComPtr<IHTMLElement> element, new_element;
     document->createElement(base::win::ScopedBstr(L"script"),
                             element.Receive());
     if (element) {
-      ScopedComPtr<IHTMLScriptElement> script_element;
+      base::win::ScopedComPtr<IHTMLScriptElement> script_element;
       if (SUCCEEDED(hr = script_element.QueryFrom(element))) {
         script_element->put_htmlFor(instance_id);
         script_element->put_event(event_name);
@@ -614,7 +572,7 @@ HRESULT ChromeFrameActivex::CreateScriptBlockForEvent(
 void ChromeFrameActivex::FireEvent(const EventHandlers& handlers,
                                    const std::string& arg) {
   if (handlers.size()) {
-    ScopedComPtr<IDispatch> event;
+    base::win::ScopedComPtr<IDispatch> event;
     if (SUCCEEDED(CreateDomEvent("event", arg, "", event.Receive()))) {
       FireEvent(handlers, event);
     }
@@ -663,7 +621,7 @@ void ChromeFrameActivex::FireEvent(const EventHandlers& handlers,
 HRESULT ChromeFrameActivex::InstallTopLevelHook(IOleClientSite* client_site) {
   // Get the parent window of the site, and install our hook on the topmost
   // window of the parent.
-  ScopedComPtr<IOleWindow> ole_window;
+  base::win::ScopedComPtr<IOleWindow> ole_window;
   HRESULT hr = ole_window.QueryFrom(client_site);
   if (FAILED(hr))
     return hr;
@@ -692,7 +650,7 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
     return S_OK;
   }
 
-  ScopedComPtr<IWebBrowser2> web_browser2;
+  base::win::ScopedComPtr<IWebBrowser2> web_browser2;
   HRESULT hr = DoQueryService(SID_SWebBrowserApp, m_spUnkSite,
                               web_browser2.Receive());
   if (FAILED(hr) || web_browser2.get() == NULL) {
@@ -705,7 +663,7 @@ HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
   StringFromGUID2(CLSID_ChromeFrameBHO, bho_class_id_as_string,
                   arraysize(bho_class_id_as_string));
 
-  ScopedComPtr<IObjectWithSite> bho;
+  base::win::ScopedComPtr<IObjectWithSite> bho;
   hr = bho.CreateInstance(CLSID_ChromeFrameBHO, NULL, CLSCTX_INPROC_SERVER);
   if (FAILED(hr)) {
     NOTREACHED() << "Failed to register ChromeFrame BHO. Error:"

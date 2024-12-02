@@ -5,22 +5,48 @@
 // Only add expectations here to temporarily suppress messages on the bots
 // until the changes can be landed upstream.
 
-// Skip an overly restrictive cross-origin HTTPS test
-BUGCR69594 SKIP : http/tests/appcache/different-https-origin-resource-main.html = FAIL
+// Temporary suppressed pending rebaseline upstream (skia shadow code change in r83936)
+BUGCASEQ WIN : fast/multicol/shadow-breaking.html = IMAGE
+BUGCASEQ WIN : fast/repaint/shadow-multiple-horizontal.html = IMAGE
+BUGCASEQ WIN : fast/repaint/shadow-multiple-strict-horizontal.html = IMAGE
+BUGCASEQ WIN : fast/repaint/shadow-multiple-strict-vertical.html = IMAGE
+BUGCASEQ WIN : fast/repaint/shadow-multiple-vertical.html = IMAGE
+BUGCASEQ WIN : fast/text/shadow-translucent-fill.html = IMAGE
+BUGCASEQ WIN : fast/transforms/shadows.html = IMAGE
+BUGCASEQ WIN : svg/css/group-with-shadow.svg = IMAGE
+BUGCASEQ WIN : svg/css/shadow-changes.svg = IMAGE
+BUGCASEQ WIN : svg/css/text-shadow-multiple.xhtml = IMAGE
+BUGCASEQ WIN : transitions/svg-text-shadow-transition.html = IMAGE
+BUGCASEQ : svg/css/composite-shadow-text.svg = IMAGE
 
-BUGV8_1203 DEBUG : fast/canvas/webgl/gl-get-calls.html = PASS CRASH
+BUGCASEQ MAC : svg/dynamic-updates/SVGFEDiffuseLightingElement-inherit-lighting-color-css-prop.html = IMAGE
+BUGCASEQ MAC : svg/dynamic-updates/SVGFEFloodElement-inherit-flood-color.html = IMAGE
+BUGCASEQ MAC : svg/dynamic-updates/SVGFESpecularLightingElement-inherit-lighting-color-css-prop.html = IMAGE
+BUGCASEQ MAC : svg/dynamic-updates/SVGFESpecularLightingElement-lighting-color-css-prop.html = IMAGE
+BUGCASEQ WIN LINUX : editing/selection/select-from-textfield-outwards.html = IMAGE+TEXT
+BUGCASEQ WIN LINUX : fast/forms/input-text-drag-down.html = IMAGE+TEXT
+BUGCASEQ MAC : fast/canvas/image-object-in-canvas.html = IMAGE
 
-// WebKit fix is at r79797, but since we had to revert the WebKit roll adding the failing expectation back.
-BUGJAMESR : fast/filesystem/op-get-entry.html = PASS TEXT
+BUGDPRANKE : fast/backgrounds/background-leakage.html = IMAGE+TEXT IMAGE
+BUGDPRANKE : media/video-layer-crash.html = IMAGE
+BUGDPRANKE : media/video-transformed.html = IMAGE
+BUGDPRANKE : plugins/embed-attributes-style.html = IMAGE
+BUGDPRANKE : transforms/2d/hindi-rotated.html = IMAGE IMAGE+TEXT
+BUGDPRANKE : fast/borders/borderRadiusDotted06.html = IMAGE
+BUGDPRANKE : fast/multicol/client-rects.html = IMAGE
+BUGDPRANKE : fast/text/justification-padding-mid-word.html = TEXT
 
-// Need a rebaseline.
-BUG_ANTONM MAC : http/tests/security/xss-DENIED-xml-external-entity.xhtml = TEXT
-BUG_ANTONM MAC : http/tests/security/xss-DENIED-xsl-external-entity.xml = TEXT
+BUGDPRANKE WIN DEBUG : fast/forms/implicit-submission.html = TEXT PASS
+BUGDPRANKE WIN DEBUG : fast/css/text-overflow-ellipsis.html = CRASH
+BUGDPRANKE MAC DEBUG : transitions/cancel-transition.html = TEXT PASS
+BUGDPRANKE LINUX DEBUG : fast/css/getComputedStyle/getComputedStyle-relayout.html = CRASH
+BUGDPRANKE LINUX DEBUG : fast/dom/HTMLFormElement/invalid-form-field.html = CRASH
 
-BUG_TONYG MAC : svg/text/font-size-below-point-five.svg = TEXT
+BUGDPRANKE LINUX DEBUG : perf/array-nested-loop.html = TEXT TIMEOUT PASS
+BUGDPRANKE LINUX DEBUG : fast/dom/Node/mutation-blur.html = CRASH
+BUGDPRANKE MAC : svg/dom/SVGScriptElement/script-set-href.svg = TEXT PASS
+BUGDPRANKE WIN : media/video-zoom.html = IMAGE
+BUGDPRANKE WIN DEBUG : svg/custom/font-platformDestroy-crash.svg = CRASH
+BUGDPRANKE WIN DEBUG : http/tests/navigation/forward-to-fragment-fires-onload.html = TIMEOUT PASS
+BUGDPRANKE WIN DEBUG : perf/mouse-event.html = TEXT TIMEOUT PASS
 
-// Skip these tests until the test_expecitations can be updated after this Chromium patch lands.
-BUGWK44797 SKIP : fullscreen = PASS FAIL TIMEOUT
-
-// Until new baselines land in WebKit.
-BUG_MMALY : fast/js/mozilla/strict/15.5.5.1.html = PASS TEXT

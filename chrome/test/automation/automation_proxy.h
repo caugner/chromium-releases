@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,9 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/platform_thread.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
@@ -49,6 +49,7 @@ class AutomationMessageSender : public IPC::Message::Sender {
   //       and the proxy provider might be still working on the previous
   //       request.
   virtual bool Send(IPC::Message* message) = 0;
+  virtual bool Send(IPC::Message* message, int timeout_ms) = 0;
 };
 
 // This is the interface that external processes can use to interact with
@@ -56,7 +57,7 @@ class AutomationMessageSender : public IPC::Message::Sender {
 class AutomationProxy : public IPC::Channel::Listener,
                         public AutomationMessageSender {
  public:
-  AutomationProxy(int command_execution_timeout_ms, bool disconnect_on_failure);
+  AutomationProxy(int action_timeout_ms, bool disconnect_on_failure);
   virtual ~AutomationProxy();
 
   // Creates a previously unused channel id.
@@ -80,7 +81,7 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Waits for the app to launch and the automation provider to say hello
   // (the app isn't fully done loading by this point).
   // Returns SUCCESS if the launch is successful.
-  // Returns TIMEOUT if there was no response by command_execution_timeout_
+  // Returns TIMEOUT if there was no response by action_timeout_
   // Returns VERSION_MISMATCH if the automation protocol version of the
   // automation provider does not match and if perform_version_check_ is set
   // to true. Note that perform_version_check_ defaults to false, call
@@ -206,15 +207,12 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Asserts that the next extension test result is true.
   void EnsureExtensionTestResult();
 
-  // Gets a list of all enabled extensions' base directories.
-  // Returns true on success.
-  bool GetEnabledExtensions(std::vector<FilePath>* extension_directories);
-
   // Resets to the default theme. Returns true on success.
   bool ResetToDefaultTheme();
 
   // Generic pattern for sending automation requests.
   bool SendJSONRequest(const std::string& request,
+                       int timeout_ms,
                        std::string* response) WARN_UNUSED_RESULT;
 
 #if defined(OS_CHROMEOS)
@@ -230,6 +228,7 @@ class AutomationProxy : public IPC::Channel::Listener,
 
   // AutomationMessageSender implementation.
   virtual bool Send(IPC::Message* message) WARN_UNUSED_RESULT;
+  virtual bool Send(IPC::Message* message, int timeout_ms) WARN_UNUSED_RESULT;
 
   // Wrapper over AutomationHandleTracker::InvalidateHandle. Receives the
   // message from AutomationProxy, unpacks the messages and routes that call to
@@ -244,15 +243,15 @@ class AutomationProxy : public IPC::Channel::Listener,
       gfx::NativeWindow* external_tab_container,
       gfx::NativeWindow* tab);
 
-  int command_execution_timeout_ms() const {
-    return static_cast<int>(command_execution_timeout_.InMilliseconds());
+  int action_timeout_ms() const {
+    return static_cast<int>(action_timeout_.InMilliseconds());
   }
 
   // Sets the timeout for subsequent automation calls.
-  void set_command_execution_timeout_ms(int timeout_ms) {
+  void set_action_timeout_ms(int timeout_ms) {
     DCHECK(timeout_ms <= 10 * 60 * 1000 ) << "10+ min of automation timeout "
         "can make the test hang and be killed by buildbot";
-    command_execution_timeout_ = base::TimeDelta::FromMilliseconds(timeout_ms);
+    action_timeout_ = base::TimeDelta::FromMilliseconds(timeout_ms);
   }
 
   // Returns the server version of the server connected. You may only call this
@@ -307,7 +306,7 @@ class AutomationProxy : public IPC::Channel::Listener,
   bool disconnect_on_failure_;
 
   // Delay to let the browser execute the command.
-  base::TimeDelta command_execution_timeout_;
+  base::TimeDelta action_timeout_;
 
   base::PlatformThreadId listener_thread_id_;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,7 +36,7 @@ class ContentSettingsPrefService : public PrefService {
       : PrefService(
           managed_platform_prefs, managed_cloud_prefs, extension_prefs,
           command_line_prefs, user_prefs, recommended_platform_prefs,
-          recommended_cloud_prefs, default_store) {}
+          recommended_cloud_prefs, default_store, NULL) {}
   virtual ~ContentSettingsPrefService() {}
 };
 }
@@ -120,9 +120,9 @@ TEST_F(PrefDefaultProviderTest, OffTheRecord) {
   TestingProfile profile;
   PrefDefaultProvider provider(&profile);
 
-  profile.set_off_the_record(true);
+  profile.set_incognito(true);
   PrefDefaultProvider otr_provider(&profile);
-  profile.set_off_the_record(false);
+  profile.set_incognito(false);
 
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_COOKIES));
@@ -130,7 +130,7 @@ TEST_F(PrefDefaultProviderTest, OffTheRecord) {
             otr_provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_COOKIES));
 
   // Changing content settings on the main provider should also affect the
-  // off-the-record map.
+  // incognito map.
   provider.UpdateDefaultSetting(CONTENT_SETTINGS_TYPE_COOKIES,
                                 CONTENT_SETTING_BLOCK);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
@@ -138,7 +138,7 @@ TEST_F(PrefDefaultProviderTest, OffTheRecord) {
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             otr_provider.ProvideDefaultSetting(CONTENT_SETTINGS_TYPE_COOKIES));
 
-  // Changing content settings on the off-the-record provider should be ignored.
+  // Changing content settings on the incognito provider should be ignored.
   otr_provider.UpdateDefaultSetting(CONTENT_SETTINGS_TYPE_COOKIES,
                                    CONTENT_SETTING_ALLOW);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
@@ -173,6 +173,7 @@ class PrefProviderTest : public TestingBrowserProcessTest {
 
 TEST_F(PrefProviderTest, Observer) {
   TestingProfile profile;
+  profile.GetHostContentSettingsMap();
   Profile* p = &profile;
   PrefProvider pref_content_settings_provider(p);
   StubSettingsObserver observer;
@@ -188,7 +189,8 @@ TEST_F(PrefProviderTest, Observer) {
   EXPECT_EQ(pattern, observer.last_pattern);
   EXPECT_FALSE(observer.last_update_all);
   EXPECT_FALSE(observer.last_update_all_types);
-  EXPECT_EQ(1, observer.counter);
+  // Expect 2 calls: One from the update and one from canonicalization.
+  EXPECT_EQ(2, observer.counter);
 }
 
 // Test for regression in which the PrefProvider modified the user pref store
@@ -226,8 +228,9 @@ TEST_F(PrefProviderTest, Incognito) {
   TestingProfile* otr_profile = new TestingProfile;
   profile.SetOffTheRecordProfile(otr_profile);
   profile.SetPrefService(regular_prefs);
-  otr_profile->set_off_the_record(true);
+  otr_profile->set_incognito(true);
   otr_profile->SetPrefService(otr_prefs);
+  profile.GetHostContentSettingsMap();
 
   PrefProvider pref_content_settings_provider(&profile);
   PrefProvider pref_content_settings_provider_incognito(otr_profile);
@@ -254,6 +257,7 @@ TEST_F(PrefProviderTest, Incognito) {
 
 TEST_F(PrefProviderTest, Patterns) {
   TestingProfile testing_profile;
+  testing_profile.GetHostContentSettingsMap();
   PrefProvider pref_content_settings_provider(
       testing_profile.GetOriginalProfile());
 
@@ -315,6 +319,7 @@ TEST_F(PrefProviderTest, ResourceIdentifier) {
   cmd->AppendSwitch(switches::kEnableResourceContentSettings);
 
   TestingProfile testing_profile;
+  testing_profile.GetHostContentSettingsMap();
   PrefProvider pref_content_settings_provider(
       testing_profile.GetOriginalProfile());
 

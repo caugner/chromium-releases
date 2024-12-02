@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
@@ -32,6 +32,7 @@ ProgramManager::ProgramInfo::UniformInfo::UniformInfo(GLsizei _size,
                                                       const std::string& _name)
     : size(_size),
       type(_type),
+      is_array(false),
       name(_name) {
 }
 
@@ -61,7 +62,7 @@ void ProgramManager::ProgramInfo::Reset() {
   uniform_infos_.clear();
   sampler_indices_.clear();
   attrib_location_to_index_map_.clear();
-  uniform_location_to_index_map_.clear();
+  location_infos_.clear();
   UpdateLogInfo();
 }
 
@@ -157,14 +158,14 @@ void ProgramManager::ProgramInfo::Update() {
     }
   }
   // Create uniform location to index map.
-  uniform_location_to_index_map_.resize(max_location + 1);
+  location_infos_.resize(max_location + 1);
   for (GLint ii = 0; ii <= max_location; ++ii) {
-    uniform_location_to_index_map_[ii] = -1;
+    location_infos_[ii] = LocationInfo(-1, -1);
   }
   for (size_t ii = 0; ii < uniform_infos_.size(); ++ii) {
     const UniformInfo& info = uniform_infos_[ii];
     for (size_t jj = 0; jj < info.element_locations.size(); ++jj) {
-      uniform_location_to_index_map_[info.element_locations[jj]] = ii;
+      location_infos_[info.element_locations[jj]] = LocationInfo(ii, jj);
     }
   }
   valid_ = true;
@@ -217,17 +218,18 @@ GLint ProgramManager::ProgramInfo::GetAttribLocation(
   return -1;
 }
 
-bool ProgramManager::ProgramInfo::GetUniformTypeByLocation(
-    GLint location, GLenum* type) const {
-  if (location >= 0 &&
-      static_cast<size_t>(location) < uniform_location_to_index_map_.size()) {
-    GLint index = uniform_location_to_index_map_[location];
-    if (index >= 0) {
-      *type = uniform_infos_[index].type;
-      return true;
+const ProgramManager::ProgramInfo::UniformInfo*
+    ProgramManager::ProgramInfo::GetUniformInfoByLocation(
+        GLint location, GLint* array_index) const {
+  DCHECK(array_index);
+  if (location >= 0 && static_cast<size_t>(location) < location_infos_.size()) {
+    const LocationInfo& info = location_infos_[location];
+    if (info.uniform_index >= 0) {
+      *array_index = info.array_index;
+      return &uniform_infos_[info.uniform_index];
     }
   }
-  return false;
+  return NULL;
 }
 
 // Note: This is only valid to call right after a program has been linked
@@ -313,13 +315,14 @@ const ProgramManager::ProgramInfo::UniformInfo*
 
 bool ProgramManager::ProgramInfo::SetSamplers(
     GLint location, GLsizei count, const GLint* value) {
-  if (location >= 0 &&
-      static_cast<size_t>(location) < uniform_location_to_index_map_.size()) {
-    GLint index = uniform_location_to_index_map_[location];
-    if (index >= 0) {
-      UniformInfo& info = uniform_infos_[index];
-      if (info.IsSampler() && count <= info.size) {
-        std::copy(value, value + count, info.texture_units.begin());
+  if (location >= 0 && static_cast<size_t>(location) < location_infos_.size()) {
+    const LocationInfo& location_info = location_infos_[location];
+    if (location_info.uniform_index >= 0) {
+      UniformInfo& info = uniform_infos_[location_info.uniform_index];
+      count = std::min(info.size - location_info.array_index, count);
+      if (info.IsSampler() && count > 0) {
+        std::copy(value, value + count,
+                  info.texture_units.begin() + location_info.array_index);
         return true;
       }
     }
@@ -377,13 +380,17 @@ bool ProgramManager::ProgramInfo::AttachShader(
   return true;
 }
 
-void ProgramManager::ProgramInfo::DetachShader(
+bool ProgramManager::ProgramInfo::DetachShader(
     ShaderManager* shader_manager,
     ShaderManager::ShaderInfo* info) {
   DCHECK(shader_manager);
   DCHECK(info);
+  if (attached_shaders_[ShaderTypeToIndex(info->shader_type())].get() != info) {
+    return false;
+  }
   attached_shaders_[ShaderTypeToIndex(info->shader_type())] = NULL;
   shader_manager->UnuseShader(info);
+  return true;
 }
 
 void ProgramManager::ProgramInfo::DetachShaders(ShaderManager* shader_manager) {
@@ -450,15 +457,26 @@ bool ProgramManager::GetClientId(GLuint service_id, GLuint* client_id) const {
   return false;
 }
 
+bool ProgramManager::IsOwned(ProgramManager::ProgramInfo* info) {
+  for (ProgramInfoMap::iterator it = program_infos_.begin();
+       it != program_infos_.end(); ++it) {
+    if (it->second.get() == info) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void ProgramManager::RemoveProgramInfoIfUnused(
     ShaderManager* shader_manager, ProgramInfo* info) {
   DCHECK(shader_manager);
   DCHECK(info);
+  DCHECK(IsOwned(info));
   if (info->IsDeleted() && !info->InUse()) {
     info->DetachShaders(shader_manager);
     for (ProgramInfoMap::iterator it = program_infos_.begin();
          it != program_infos_.end(); ++it) {
-      if (it->second->service_id() == info->service_id()) {
+      if (it->second.get() == info) {
         program_infos_.erase(it);
         return;
       }
@@ -472,12 +490,14 @@ void ProgramManager::MarkAsDeleted(
     ProgramManager::ProgramInfo* info) {
   DCHECK(shader_manager);
   DCHECK(info);
+  DCHECK(IsOwned(info));
   info->MarkAsDeleted();
   RemoveProgramInfoIfUnused(shader_manager, info);
 }
 
 void ProgramManager::UseProgram(ProgramManager::ProgramInfo* info) {
   DCHECK(info);
+  DCHECK(IsOwned(info));
   info->IncUseCount();
 }
 
@@ -486,6 +506,7 @@ void ProgramManager::UnuseProgram(
     ProgramManager::ProgramInfo* info) {
   DCHECK(shader_manager);
   DCHECK(info);
+  DCHECK(IsOwned(info));
   info->DecUseCount();
   RemoveProgramInfoIfUnused(shader_manager, info);
 }

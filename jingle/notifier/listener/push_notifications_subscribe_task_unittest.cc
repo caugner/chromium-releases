@@ -1,10 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "jingle/notifier/listener/push_notifications_subscribe_task.h"
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_util.h"
 #include "jingle/notifier/listener/xml_element_util.h"
 #include "talk/xmpp/jid.h"
@@ -32,19 +32,18 @@ class PushNotificationsSubscribeTaskTest : public testing::Test {
 };
 
 TEST_F(PushNotificationsSubscribeTaskTest, MakeSubscriptionMessage) {
-  std::vector<PushNotificationsSubscribeTask::PushSubscriptionInfo>
-      subscription_list;
+  SubscriptionList subscriptions;
 
-  PushNotificationsSubscribeTask::PushSubscriptionInfo subscription;
+  Subscription subscription;
   subscription.channel = "test_channel1";
   subscription.from = "from.test.com";
-  subscription_list.push_back(subscription);
+  subscriptions.push_back(subscription);
   subscription.channel = "test_channel2";
   subscription.from = "from.test2.com";
-  subscription_list.push_back(subscription);
+  subscriptions.push_back(subscription);
   scoped_ptr<buzz::XmlElement> message(
       PushNotificationsSubscribeTask::MakeSubscriptionMessage(
-          subscription_list, jid_, task_id_));
+          subscriptions, jid_, task_id_));
   std::string expected_xml_string =
       StringPrintf(
           "<cli:iq type=\"set\" to=\"%s\" id=\"%s\" "

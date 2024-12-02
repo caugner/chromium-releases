@@ -1,8 +1,8 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "content/browser/geolocation/arbitrator_dependency_factories_for_test.h"
 #include "content/browser/geolocation/fake_access_token_store.h"
 #include "content/browser/geolocation/geolocation_provider.h"
@@ -91,7 +91,7 @@ class MockDependencyFactory : public GeolocationArbitratorDependencyFactory {
         access_token_store_(access_token_store) {
   }
 
-  virtual URLRequestContextGetter* GetContextGetter() {
+  virtual net::URLRequestContextGetter* GetContextGetter() {
     return NULL;
   }
 
@@ -105,7 +105,7 @@ class MockDependencyFactory : public GeolocationArbitratorDependencyFactory {
 
   virtual LocationProviderBase* NewNetworkLocationProvider(
       AccessTokenStore* access_token_store,
-      URLRequestContextGetter* context,
+      net::URLRequestContextGetter* context,
       const GURL& url,
       const string16& access_token) {
     return new StartStopMockLocationProvider(test_loop_);

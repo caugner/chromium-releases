@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -368,10 +368,6 @@ void FocusManager::RestoreFocusedView() {
           focus_change_reason_ = kReasonFocusRestore;
       }
     }
-  } else {
-    // Clearing the focus will focus the root window, so we still get key
-    // events.
-    ClearFocus();
   }
 }
 
@@ -483,9 +479,13 @@ bool FocusManager::IsTabTraversalKeyEvent(const KeyEvent& key_event) {
   return key_event.key_code() == ui::VKEY_TAB && !key_event.IsControlDown();
 }
 
-void FocusManager::ViewRemoved(View* parent, View* removed) {
-  if (focused_view_ && focused_view_ == removed)
-    ClearFocus();
+void FocusManager::ViewRemoved(View* removed) {
+  // If the view being removed contains (or is) the focused view,
+  // clear the focus.  However, it's not safe to call ClearFocus()
+  // (and in turn ClearNativeFocus()) here because ViewRemoved() can
+  // be called while the top level widget is being destroyed.
+  if (focused_view_ && removed && removed->Contains(focused_view_))
+    SetFocusedView(NULL);
 }
 
 void FocusManager::AddFocusChangeListener(FocusChangeListener* listener) {

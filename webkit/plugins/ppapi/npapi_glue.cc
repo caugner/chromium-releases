@@ -1,11 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/plugins/ppapi/npapi_glue.h"
 
 #include "base/logging.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "base/string_util.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/plugin_object.h"
@@ -51,7 +51,9 @@ bool PPVarToNPVariant(PP_Var var, NPVariant* result) {
         return false;
       }
       const std::string& value = string->value();
-      STRINGN_TO_NPVARIANT(base::strdup(value.c_str()), value.size(), *result);
+      char* c_string = static_cast<char*>(malloc(value.size()));
+      memcpy(c_string, value.data(), value.size());
+      STRINGN_TO_NPVARIANT(c_string, value.size(), *result);
       break;
     }
     case PP_VARTYPE_OBJECT: {
@@ -64,6 +66,10 @@ bool PPVarToNPVariant(PP_Var var, NPVariant* result) {
                           *result);
       break;
     }
+    case PP_VARTYPE_ARRAY:
+    case PP_VARTYPE_DICTIONARY:
+      VOID_TO_NPVARIANT(*result);
+      break;
   }
   return true;
 }

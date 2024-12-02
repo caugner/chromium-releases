@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,14 @@ var chrome = chrome || {};
   native function GetExtensionViews();
   native function GetChromeHidden();
   native function GetNextRequestId();
+  native function GetNextContextMenuId();
   native function OpenChannelToTab();
   native function GetRenderViewId();
   native function SetIconCommon();
   native function IsExtensionProcess();
   native function IsIncognitoProcess();
   native function GetUniqueSubEventName(eventName);
+  native function GetLocalFileSystem(name, path);
 
   var chromeHidden = GetChromeHidden();
 
@@ -259,6 +261,7 @@ var chrome = chrome || {};
     this.eventName_ = eventName;
     this.argSchemas_ = opt_argSchemas;
     this.subEvents_ = [];
+    this.callbackMap_ = {};
   };
 
   // Registers a callback to be called when this event is dispatched. If
@@ -275,24 +278,43 @@ var chrome = chrome || {};
 
     var subEvent = new chrome.Event(subEventName, this.argSchemas_);
     this.subEvents_.push(subEvent);
-    subEvent.addListener(cb);
+    var subEventCallback = cb;
+    if (opt_extraInfo && opt_extraInfo.indexOf("blocking") >= 0) {
+      var eventName = this.eventName_;
+      subEventCallback = function() {
+        var requestId = arguments[0].requestId;
+        try {
+          var result = cb.apply(null, arguments);
+          chrome.experimental.webRequest.eventHandled(
+              eventName, subEventName, requestId, result);
+        } catch (e) {
+          chrome.experimental.webRequest.eventHandled(
+              eventName, subEventName, requestId);
+          throw e;
+        }
+      };
+    }
+    this.callbackMap_[cb] = subEventCallback;
+    subEvent.addListener(subEventCallback);
   };
 
   // Unregisters a callback.
   chrome.WebRequestEvent.prototype.removeListener = function(cb) {
     var idx = this.findListener_(cb);
-    if (idx >= -1) {
+    if (idx < 0) {
       return;
     }
 
-    this.subEvents_[idx].removeListener(cb);
+    var subEventCallback = this.callbackMap_[cb];
+    this.subEvents_[idx].removeListener(subEventCallback);
     if (!this.subEvents_[idx].hasListeners())
       this.subEvents_.splice(idx, 1);
   };
 
   chrome.WebRequestEvent.prototype.findListener_ = function(cb) {
+    var subEventCallback = this.callbackMap_[cb];
     for (var i = 0; i < this.subEvents_.length; i++) {
-      if (this.subEvents_[i].findListener_(cb) > -1)
+      if (this.subEvents_[i].findListener_(subEventCallback) > -1)
         return i;
     }
 
@@ -320,14 +342,11 @@ var chrome = chrome || {};
   var customBindings = {};
 
   function setupPreferences() {
-    customBindings['Preference'] =
-        function(prefKey, valueSchema, customHandlers) {
-      if (customHandlers === undefined)
-        customHandlers = {};
+    customBindings['Preference'] = function(prefKey, valueSchema) {
       this.get = function(details, callback) {
         var getSchema = this.parameters.get;
         chromeHidden.validate([details, callback], getSchema);
-        return sendRequest(customHandlers.get || 'experimental.preferences.get',
+        return sendRequest('experimental.preferences.get',
                            [prefKey, details, callback],
                            extendSchema(getSchema));
       };
@@ -335,18 +354,19 @@ var chrome = chrome || {};
         var setSchema = this.parameters.set.slice();
         setSchema[0].properties.value = valueSchema;
         chromeHidden.validate([details, callback], setSchema);
-        return sendRequest(customHandlers.set || 'experimental.preferences.set',
+        return sendRequest('experimental.preferences.set',
                            [prefKey, details, callback],
                            extendSchema(setSchema));
       };
       this.clear = function(details, callback) {
         var clearSchema = this.parameters.clear;
         chromeHidden.validate([details, callback], clearSchema);
-        return sendRequest(customHandlers.clear ||
-                               'experimental.preferences.clear',
+        return sendRequest('experimental.preferences.clear',
                            [prefKey, details, callback],
                            extendSchema(clearSchema));
       };
+      this.onChange = new chrome.Event('experimental.preferences.' + prefKey
+                                           + '.onChange');
     };
     customBindings['Preference'].prototype = new CustomBindingsObject();
   }
@@ -373,7 +393,6 @@ var chrome = chrome || {};
 
   function setupHiddenContextMenuEvent(extensionId) {
     chromeHidden.contextMenus = {};
-    chromeHidden.contextMenus.nextId = 1;
     chromeHidden.contextMenus.handlers = {};
     var eventName = "contextMenus";
     chromeHidden.contextMenus.event = new chrome.Event(eventName);
@@ -630,11 +649,26 @@ var chrome = chrome || {};
           responseCallback();
       });
       port.onMessage.addListener(function(response) {
-        if (responseCallback)
-          responseCallback(response);
-        port.disconnect();
+        try {
+          if (responseCallback)
+            responseCallback(response);
+        } finally {
+          port.disconnect();
+          port = null;
+        }
       });
     };
+
+    apiFunctions["fileBrowserPrivate.requestLocalFileSystem"].customCallback =
+      function(name, request, response) {
+        var resp = response ? [chromeHidden.JSON.parse(response)] : [];
+        var fs = null;
+        if (!resp[0].error)
+          fs = GetLocalFileSystem(resp[0].name, resp[0].path);
+        if (request.callback)
+          request.callback(fs);
+        request.callback = null;
+      };
 
     apiFunctions["extension.getViews"].handleRequest = function(properties) {
       var windowId = -1;
@@ -761,7 +795,7 @@ var chrome = chrome || {};
     apiFunctions["contextMenus.create"].handleRequest =
         function() {
       var args = arguments;
-      var id = chromeHidden.contextMenus.nextId++;
+      var id = GetNextContextMenuId();
       args[0].generatedId = id;
       sendRequest(this.name, args, this.definition.parameters,
                   this.customCallback);

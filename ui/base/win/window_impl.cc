@@ -6,9 +6,10 @@
 
 #include <list>
 
-#include "ui/base/win/hwnd_util.h"
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "base/string_number_conversions.h"
+#include "base/win/wrapped_window_proc.h"
+#include "ui/base/win/hwnd_util.h"
 
 namespace ui {
 
@@ -143,27 +144,18 @@ void WindowImpl::Init(HWND parent, const gfx::Rect& bounds) {
     height = bounds.height();
   }
 
-  hwnd_ = CreateWindowEx(window_ex_style_, GetWindowClassName().c_str(), NULL,
+  std::wstring name(GetWindowClassName());
+  hwnd_ = CreateWindowEx(window_ex_style_, name.c_str(), NULL,
                          window_style_, x, y, width, height,
                          parent, NULL, NULL, this);
-  DCHECK(hwnd_);
+  CheckWindowCreated(hwnd_);
 
   // The window procedure should have set the data for us.
-  DCHECK(ui::GetWindowUserData(hwnd_) == this);
+  CHECK_EQ(this, ui::GetWindowUserData(hwnd_));
 }
 
 HICON WindowImpl::GetDefaultWindowIcon() const {
   return NULL;
-}
-
-// static
-bool WindowImpl::IsWindowImpl(HWND hwnd) {
-  wchar_t tmp[128];
-  if (!::GetClassName(hwnd, tmp, 128))
-    return false;
-
-  std::wstring class_name(tmp);
-  return class_name.find(kBaseClassName) == 0;
 }
 
 LRESULT WindowImpl::OnWndProc(UINT message, WPARAM w_param, LPARAM l_param) {
@@ -209,7 +201,7 @@ std::wstring WindowImpl::GetWindowClassName() {
   WNDCLASSEX class_ex;
   class_ex.cbSize = sizeof(WNDCLASSEX);
   class_ex.style = class_info.style;
-  class_ex.lpfnWndProc = &WindowImpl::WndProc;
+  class_ex.lpfnWndProc = base::win::WrappedWindowProc<&WindowImpl::WndProc>;
   class_ex.cbClsExtra = 0;
   class_ex.cbWndExtra = 0;
   class_ex.hInstance = NULL;
@@ -220,7 +212,7 @@ std::wstring WindowImpl::GetWindowClassName() {
   class_ex.lpszClassName = name.c_str();
   class_ex.hIconSm = class_ex.hIcon;
   ATOM atom = RegisterClassEx(&class_ex);
-  DCHECK(atom);
+  CHECK(atom) << GetLastError();
 
   ClassRegistrar::GetInstance()->RegisterClass(class_info, name, atom);
 

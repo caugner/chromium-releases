@@ -159,10 +159,33 @@ v8::Local<v8::Context> MockWebFrame::mainWorldScriptContext() const {
   return v8::Local<v8::Context>();
 }
 
+#ifdef WEB_FILE_SYSTEM_TYPE_EXTERNAL
 v8::Handle<v8::Value> MockWebFrame::createFileSystem(
-    int type, const WebString& name, const WebString& path) {
+    WebKit::WebFileSystem::Type type, const WebString& name,
+    const WebString& path) {
   return v8::Handle<v8::Value>();
 }
+
+v8::Handle<v8::Value> MockWebFrame::createFileEntry(
+    WebKit::WebFileSystem::Type type, const WebString& fileSystemName,
+    const WebString& fileSystemPath, const WebString& filePath,
+    bool isDirectory) {
+  return v8::Handle<v8::Value>();
+}
+#else
+v8::Handle<v8::Value> MockWebFrame::createFileSystem(
+    int type, const WebString& name,
+    const WebString& path) {
+  return v8::Handle<v8::Value>();
+}
+
+v8::Handle<v8::Value> MockWebFrame::createFileEntry(
+    int type, const WebString& fileSystemName,
+    const WebString& fileSystemPath, const WebString& filePath,
+    bool isDirectory) {
+  return v8::Handle<v8::Value>();
+}
+#endif
 #endif
 
 
@@ -217,7 +240,13 @@ bool MockWebFrame::isViewSourceModeEnabled() const {
   return false;
 }
 
+// TODO(bbudge) remove once WebKit change lands.
 WebURLLoader* MockWebFrame::createAssociatedURLLoader() {
+  return NULL;
+}
+
+WebURLLoader* MockWebFrame::createAssociatedURLLoader(
+    const WebURLLoaderOptions& options) {
   return NULL;
 }
 
@@ -232,10 +261,6 @@ bool MockWebFrame::isProcessingUserGesture() const {
 }
 
 bool MockWebFrame::willSuppressOpenerInNewFrame() const {
-  return false;
-}
-
-bool MockWebFrame::pageDismissalEventBeingDispatched() const {
   return false;
 }
 
@@ -299,6 +324,9 @@ WebString MockWebFrame::selectionAsMarkup() const {
 
 bool MockWebFrame::selectWordAroundCaret() {
   return false;
+}
+
+void MockWebFrame::selectRange(const WebPoint& start, const WebPoint& end) {
 }
 
 int MockWebFrame::printBegin(const WebSize& pageSize,
@@ -367,6 +395,10 @@ WebString MockWebFrame::contentAsMarkup() const {
   return WebString();
 }
 
+WebString MockWebFrame::renderTreeAsText(bool showDebugInfo) const {
+  return WebString();
+}
+
 WebString MockWebFrame::renderTreeAsText() const {
   return WebString();
 }
@@ -398,6 +430,10 @@ bool MockWebFrame::pauseSVGAnimation(const WebString& animationId,
                                      double time,
                                      const WebString& elementId) {
   return false;
+}
+
+WebString MockWebFrame::layerTreeAsText(bool showDebugInfo) const {
+  return WebString();
 }
 
 WebString MockWebFrame::layerTreeAsText() const {

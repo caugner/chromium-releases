@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_PLUGINS_PPAPI_DEVICE_CONTEXT_AUDIO_H_
-#define WEBKIT_PLUGINS_PPAPI_DEVICE_CONTEXT_AUDIO_H_
+#ifndef WEBKIT_PLUGINS_PPAPI_PPB_AUDIO_IMPL_H_
+#define WEBKIT_PLUGINS_PPAPI_PPB_AUDIO_IMPL_H_
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
 #include "ppapi/c/pp_completion_callback.h"
@@ -81,7 +81,8 @@ class PPB_Audio_Impl : public Resource,
   // AudioConfig used for creating this Audio object.
   scoped_refptr<PPB_AudioConfig_Impl> config_;
 
-  // PluginDelegate audio object that we delegate audio IPC through.
+  // PluginDelegate audio object that we delegate audio IPC through. We don't
+  // own this pointer but are responsible for calling Shutdown on it.
   PluginDelegate::PlatformAudio* audio_;
 
   // Is a create callback pending to fire?
@@ -104,4 +105,4 @@ class PPB_Audio_Impl : public Resource,
 }  // namespace ppapi
 }  // namespace webkit
 
-#endif  // WEBKIT_PLUGINS_PPAPI_DEVICE_CONTEXT_AUDIO_H_
+#endif  // WEBKIT_PLUGINS_PPAPI_PPB_AUDIO_IMPL_H_

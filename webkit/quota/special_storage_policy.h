@@ -1,11 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_QUOTA_SPECIAL_STORAGE_POLICY_H_
 #define WEBKIT_QUOTA_SPECIAL_STORAGE_POLICY_H_
 
-#include "base/ref_counted.h"
+#include <string>
+
+#include "base/memory/ref_counted.h"
 
 class GURL;
 
@@ -26,6 +28,10 @@ class SpecialStoragePolicy
 
   // Unlimited storage is not subject to 'quotas'.
   virtual bool IsStorageUnlimited(const GURL& origin) = 0;
+
+  // Checks if extension identified with |extension_id| is registered as
+  // file handler.
+  virtual bool IsFileHandler(const std::string& extension_id) = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<SpecialStoragePolicy>;

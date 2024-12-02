@@ -29,8 +29,6 @@
             '../ui/base/ui_base_switches.cc',
             'app_paths.h',
             'app_paths.cc',
-            'app_switches.h',
-            'app_switches.cc',
         ],
         'conditions': [
           ['OS!="linux" and OS!="freebsd" and OS!="openbsd"', {
@@ -40,6 +38,8 @@
               '../ui/base/gtk/gtk_signal.h',
               '../ui/base/gtk/gtk_signal_registrar.cc',
               '../ui/base/gtk/gtk_signal_registrar.h',
+              '../ui/base/gtk/gtk_windowing.cc',
+              '../ui/base/gtk/gtk_windowing.h',
               '../ui/base/x/x11_util.cc',
               '../ui/base/x/x11_util.h',
               '../ui/base/x/x11_util_internal.h',
@@ -56,16 +56,13 @@
       'msvs_guid': '4631946D-7D5F-44BD-A5A8-504C0A7033BE',
       'variables': {
         'app_base_target': 1,
-        'gl_binding_output_dir': '<(SHARED_INTERMEDIATE_DIR)/app',
       },
       'dependencies': [
-        # app resources and app_strings should be shared with the 64-bit
+        # app resources and ui_strings should be shared with the 64-bit
         # target, but it doesn't work due to a bug in gyp
-        'app_resources',
-        'app_strings',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
-        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/ui.gyp:ui_gfx',
         '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
         '../third_party/icu/icu.gyp:icui18n',
@@ -73,19 +70,14 @@
         '../third_party/libpng/libpng.gyp:libpng',
         '../third_party/sqlite/sqlite.gyp:sqlite',
         '../third_party/zlib/zlib.gyp:zlib',
+        '../ui/base/strings/ui_strings.gyp:ui_strings',
         '<(libjpeg_gyp_path):libjpeg',
-      ],
-      'include_dirs': [
-        '../third_party/mesa/MesaLib/include',
-        '<(gl_binding_output_dir)',
       ],
       # TODO(gregoryd): The direct_dependent_settings should be shared with
       # the 64-bit target, but it doesn't work due to a bug in gyp
       'direct_dependent_settings': {
         'include_dirs': [
           '..',
-          '../third_party/mesa/MesaLib/include',
-          '<(gl_binding_output_dir)',
         ],
       },
       'sources': [
@@ -137,6 +129,8 @@
         '../ui/base/gtk/gtk_signal.h',
         '../ui/base/gtk/gtk_signal_registrar.cc',
         '../ui/base/gtk/gtk_signal_registrar.h',
+        '../ui/base/gtk/gtk_windowing.cc',
+        '../ui/base/gtk/gtk_windowing.h',
         '../ui/base/keycodes/keyboard_code_conversion_gtk.cc',
         '../ui/base/keycodes/keyboard_code_conversion_gtk.h',
         '../ui/base/keycodes/keyboard_code_conversion_mac.mm',
@@ -169,6 +163,7 @@
         '../ui/base/models/button_menu_item_model.h',
         '../ui/base/models/menu_model.cc',
         '../ui/base/models/menu_model.h',
+        '../ui/base/models/menu_model_delegate.h',
         '../ui/base/models/simple_menu_model.cc',
         '../ui/base/models/simple_menu_model.h',
         '../ui/base/models/combobox_model.h',
@@ -198,23 +193,6 @@
         '../ui/base/x/x11_util.cc',
         '../ui/base/x/x11_util.h',
         '../ui/base/x/x11_util_internal.h',
-        'gfx/gl/gl_bindings.h',
-        'gfx/gl/gl_context.cc',
-        'gfx/gl/gl_context.h',
-        'gfx/gl/gl_context_linux.cc',
-        'gfx/gl/gl_context_mac.cc',
-        'gfx/gl/gl_context_osmesa.cc',
-        'gfx/gl/gl_context_osmesa.h',
-        'gfx/gl/gl_context_stub.cc',
-        'gfx/gl/gl_context_stub.h',
-        'gfx/gl/gl_context_win.cc',
-        'gfx/gl/gl_implementation.cc',
-        'gfx/gl/gl_implementation.h',
-        'gfx/gl/gl_implementation_linux.cc',
-        'gfx/gl/gl_implementation_mac.cc',
-        'gfx/gl/gl_implementation_win.cc',
-        'gfx/gl/gl_interface.h',
-        'gfx/gl/gl_interface.cc',
         'mac/nsimage_cache.h',
         'mac/nsimage_cache.mm',
         'mac/scoped_nsdisable_screen_updates.h',
@@ -228,14 +206,6 @@
         'sql/statement.h',
         'sql/transaction.cc',
         'sql/transaction.h',
-        'surface/accelerated_surface_mac.cc',
-        'surface/accelerated_surface_mac.h',
-        'surface/io_surface_support_mac.cc',
-        'surface/io_surface_support_mac.h',
-        'surface/transport_dib.h',
-        'surface/transport_dib_linux.cc',
-        'surface/transport_dib_mac.cc',
-        'surface/transport_dib_win.cc',
         'win/iat_patch_function.cc',
         'win/iat_patch_function.h',
         'win/scoped_co_mem.h',
@@ -244,42 +214,6 @@
         'win/scoped_prop.h',
         'win/shell.cc',
         'win/shell.h',
-        '<(gl_binding_output_dir)/gl_bindings_autogen_gl.cc',
-        '<(gl_binding_output_dir)/gl_bindings_autogen_gl.h',
-        '<(gl_binding_output_dir)/gl_bindings_autogen_mock.cc',
-        '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.cc',
-        '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.h',
-      ],
-      # hard_dependency is necessary for this target because it has actions
-      # that generate header files included by dependent targtets. The header
-      # files must be generated before the dependents are compiled. The usual
-      # semantics are to allow the two targets to build concurrently.
-      'hard_dependency': 1,
-      'actions': [
-        {
-          'action_name': 'generate_gl_bindings',
-          'inputs': [
-            'gfx/gl/generate_bindings.py',
-          ],
-          'outputs': [
-            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_gl.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_gl.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_mock.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_osmesa.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.h',
-          ],
-          'action': [
-            'python',
-            'gfx/gl/generate_bindings.py',
-            '<(gl_binding_output_dir)',
-          ],
-        },
       ],
       'conditions': [
         ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
@@ -335,27 +269,12 @@
           ],
         }],
         ['OS=="linux"', {
-          'sources': [
-            'gfx/gl/gl_context_egl.cc',
-            'gfx/gl/gl_context_egl.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_glx.h',
-          ],
           'sources!': [
             '../ui/base/keycodes/keyboard_code_conversion_mac.mm',
             '../ui/base/keycodes/keyboard_code_conversion_mac.h',
             '../ui/base/keycodes/keyboard_codes_win.h',
           ],
-          'include_dirs': [
-            # We don't use angle, but pull the EGL/GLES headers from there.
-            '../third_party/angle/include',
-          ],
           'all_dependent_settings': {
-            'defines': [
-              'GL_GLEXT_PROTOTYPES',
-            ],
             'ldflags': [
               '-L<(PRODUCT_DIR)',
             ],
@@ -372,7 +291,6 @@
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/Accelerate.framework',
               '$(SDKROOT)/System/Library/Frameworks/AudioUnit.framework',
-              '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
             ],
           },
           'sources!': [
@@ -386,17 +304,6 @@
           ],
         }],
         ['OS=="win"', {
-          'include_dirs': [
-            '../third_party/angle/include',
-          ],
-          'sources': [
-            'gfx/gl/gl_context_egl.cc',
-            'gfx/gl/gl_context_egl.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_egl.h',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.cc',
-            '<(gl_binding_output_dir)/gl_bindings_autogen_wgl.h',
-          ],
           'sources!': [
             '../ui/base/keycodes/keyboard_code_conversion_gtk.cc',
             '../ui/base/keycodes/keyboard_code_conversion_gtk.h',
@@ -420,11 +327,11 @@
           'type': '<(library)',
           'msvs_guid': '4987C6F9-B230-48E5-BF91-418EAE69AD90',
           'dependencies': [
-            # app resources and app_strings should be shared with the 32-bit
+            # app resources and ui_strings should be shared with the 32-bit
             # target, but it doesn't work due to a bug in gyp
             'app_resources',
-            'app_strings',
             '../base/base.gyp:base_nacl_win64',
+            '../ui/base/strings/ui_strings.gyp:ui_strings',
           ],
           'variables': {
             'app_base_target': 1,

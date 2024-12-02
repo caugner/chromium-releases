@@ -31,16 +31,17 @@
         'c/ppb_audio.h',
         'c/ppb_audio_config.h',
         'c/ppb_core.h',
-        'c/ppb_class.h',
         'c/ppb_graphics_2d.h',
         'c/ppb_image_data.h',
         'c/ppb_instance.h',
+        'c/ppb_messaging.h',
         'c/ppb_url_loader.h',
         'c/ppb_url_request_info.h',
         'c/ppb_url_response_info.h',
         'c/ppb_var.h',
         'c/ppp.h',
         'c/ppp_instance.h',
+        'c/ppp_messaging.h',
 
         # Dev interfaces.
         'c/dev/pp_cursor_type_dev.h',
@@ -51,6 +52,7 @@
         'c/dev/ppb_char_set_dev.h',
         'c/dev/ppb_context_3d_dev.h',
         'c/dev/ppb_context_3d_trusted_dev.h',
+        'c/dev/ppb_console_dev.h',
         'c/dev/ppb_cursor_control_dev.h',
         'c/dev/ppb_directory_reader_dev.h',
         'c/dev/ppb_file_chooser_dev.h',
@@ -60,6 +62,7 @@
         'c/dev/ppb_file_system_dev.h',
         'c/dev/ppb_find_dev.h',
         'c/dev/ppb_font_dev.h',
+        'c/dev/ppb_font_list_dev.h',
         'c/dev/ppb_fullscreen_dev.h',
         'c/dev/ppb_graphics_3d_dev.h',
         'c/dev/ppb_opengles_dev.h',
@@ -77,6 +80,7 @@
         'c/dev/ppp_scrollbar_dev.h',
         'c/dev/ppp_selection_dev.h',
         'c/dev/ppp_printing_dev.h',
+        'c/dev/ppp_video_decoder_dev.h',
         'c/dev/ppp_widget_dev.h',
         'c/dev/ppp_zoom_dev.h',
 
@@ -86,9 +90,11 @@
         'c/private/ppb_flash_file.h',
         'c/private/ppb_flash_menu.h',
         'c/private/ppb_flash_net_connector.h',
+        'c/private/ppb_instance_private.h',
         'c/private/ppb_nacl_private.h',
         'c/private/ppb_pdf.h',
         'c/private/ppb_proxy_private.h',
+        'c/private/ppp_instance_private.h',
 
         # Deprecated interfaces.
         'c/dev/deprecated_bool.h',
@@ -98,7 +104,9 @@
         # Trusted interfaces.
         'c/trusted/ppb_audio_trusted.h',
         'c/trusted/ppb_image_data_trusted.h',
+        'c/trusted/ppb_broker_trusted.h',
         'c/trusted/ppb_url_loader_trusted.h',
+        'c/trusted/ppp_broker.h',
       ],
     },
     {
@@ -200,6 +208,12 @@
         # Deprecated interfaces.
         'cpp/dev/scriptable_object_deprecated.h',
         'cpp/dev/scriptable_object_deprecated.cc',
+
+        # Private interfaces.
+        'cpp/private/instance_private.cc',
+        'cpp/private/instance_private.h',
+        'cpp/private/var_private.cc',
+        'cpp/private/var_private.h',
       ],
       'conditions': [
         ['OS=="win"', {

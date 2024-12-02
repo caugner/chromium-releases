@@ -6,10 +6,10 @@
 #define CONTENT_BROWSER_APPCACHE_CHROME_APPCACHE_SERVICE_H_
 #pragma once
 
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/common/notification_registrar.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/notification_registrar.h"
 #include "webkit/appcache/appcache_policy.h"
 #include "webkit/appcache/appcache_service.h"
 #include "webkit/quota/special_storage_policy.h"
@@ -35,7 +35,7 @@ class ChromeAppCacheService
   ChromeAppCacheService();
 
   void InitializeOnIOThread(
-      const FilePath& profile_path, bool is_incognito,
+      const FilePath& cache_path,  // may be empty to use in-memory structures
       scoped_refptr<HostContentSettingsMap> content_settings_map,
       scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy,
       bool clear_local_state_on_exit);

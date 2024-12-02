@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 
 #include "base/file_path.h"
 #include "base/json/json_writer.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/nullable_string16.h"
-#include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -437,7 +437,12 @@ void ParamTraits<IPC::ChannelHandle>::Log(const param_type& p,
   l->append(")");
 }
 
-LogData::LogData() {
+LogData::LogData()
+    : routing_id(0),
+      type(0),
+      sent(0),
+      receive(0),
+      dispatch(0) {
 }
 
 LogData::~LogData() {
@@ -455,7 +460,7 @@ void ParamTraits<LogData>::Write(Message* m, const param_type& p) {
 }
 
 bool ParamTraits<LogData>::Read(const Message* m, void** iter, param_type* r) {
-  int type;
+  int type = -1;
   bool result =
       ReadParam(m, iter, &r->channel) &&
       ReadParam(m, iter, &r->routing_id) &&

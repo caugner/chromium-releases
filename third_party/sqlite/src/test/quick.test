@@ -58,8 +58,6 @@ set EXCLUDE {
   crash7.test
   delete3.test
   fts3.test
-  fts.test
-  fts1.test
   fts2.test
   fuzz.test
   fuzz3.test

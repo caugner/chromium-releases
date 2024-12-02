@@ -7,11 +7,11 @@
 #include <limits>
 #include <set>
 
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
+#include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/resource.h"
 #include "webkit/plugins/ppapi/var.h"
@@ -43,9 +43,6 @@ template <typename T> static inline bool CheckIdType(T id, PPIdType type) {
 namespace webkit {
 namespace ppapi {
 
-static base::LazyInstance<ResourceTracker> g_resource_tracker(
-    base::LINKER_INITIALIZED);
-
 struct ResourceTracker::InstanceData {
   InstanceData() : instance(0) {}
 
@@ -69,6 +66,7 @@ scoped_refptr<Resource> ResourceTracker::GetResource(PP_Resource res) const {
 }
 
 // static
+ResourceTracker* ResourceTracker::global_tracker_ = NULL;
 ResourceTracker* ResourceTracker::singleton_override_ = NULL;
 
 ResourceTracker::ResourceTracker()
@@ -83,7 +81,9 @@ ResourceTracker::~ResourceTracker() {
 ResourceTracker* ResourceTracker::Get() {
   if (singleton_override_)
     return singleton_override_;
-  return g_resource_tracker.Pointer();
+  if (!global_tracker_)
+    global_tracker_ = new ResourceTracker;
+  return global_tracker_;
 }
 
 PP_Resource ResourceTracker::AddResource(Resource* resource) {
@@ -279,7 +279,8 @@ PP_Instance ResourceTracker::AddInstance(PluginInstance* instance) {
     new_instance = MakeTypedId(static_cast<PP_Instance>(base::RandUint64()),
                                PP_ID_TYPE_INSTANCE);
   } while (!new_instance ||
-           instance_map_.find(new_instance) != instance_map_.end());
+           instance_map_.find(new_instance) != instance_map_.end() ||
+           !instance->module()->ReserveInstanceID(new_instance));
 
   instance_map_[new_instance].instance = instance;
   return new_instance;

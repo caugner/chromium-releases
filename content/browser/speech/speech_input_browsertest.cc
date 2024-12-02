@@ -34,11 +34,21 @@ class FakeSpeechInputManager : public SpeechInputManager {
  public:
   FakeSpeechInputManager()
       : caller_id_(0),
-        delegate_(NULL) {
+        delegate_(NULL),
+        did_cancel_all_(false),
+        send_fake_response_(true) {
   }
 
   std::string grammar() {
     return grammar_;
+  }
+
+  bool did_cancel_all() {
+    return did_cancel_all_;
+  }
+
+  void set_send_fake_response(bool send) {
+    send_fake_response_ = send;
   }
 
   // SpeechInputManager methods.
@@ -56,9 +66,11 @@ class FakeSpeechInputManager : public SpeechInputManager {
     caller_id_ = caller_id;
     delegate_ = delegate;
     grammar_ = grammar;
-    // Give the fake result in a short while.
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
-        &FakeSpeechInputManager::SetFakeRecognitionResult));
+    if (send_fake_response_) {
+      // Give the fake result in a short while.
+      MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
+          &FakeSpeechInputManager::SetFakeRecognitionResult));
+    }
   }
   virtual void CancelRecognition(int caller_id) {
     VLOG(1) << "CancelRecognition invoked.";
@@ -73,6 +85,11 @@ class FakeSpeechInputManager : public SpeechInputManager {
   }
   virtual void CancelAllRequestsWithDelegate(Delegate* delegate) {
     VLOG(1) << "CancelAllRequestsWithDelegate invoked.";
+    // delegate_ is set to NULL if a fake result was received (see below), so
+    // check that delegate_ matches the incoming parameter only when there is
+    // no fake result sent.
+    EXPECT_TRUE(send_fake_response_ || delegate_ == delegate);
+    did_cancel_all_ = true;
   }
 
  private:
@@ -93,6 +110,8 @@ class FakeSpeechInputManager : public SpeechInputManager {
   int caller_id_;
   Delegate* delegate_;
   std::string grammar_;
+  bool did_cancel_all_;
+  bool send_fake_response_;
 };
 
 class SpeechInputBrowserTest : public InProcessBrowserTest {
@@ -108,41 +127,39 @@ class SpeechInputBrowserTest : public InProcessBrowserTest {
   }
 
  protected:
-  void LoadAndRunSpeechInputTest(const FilePath::CharType* filename) {
+  void LoadAndStartSpeechInputTest(const FilePath::CharType* filename) {
     // The test page calculates the speech button's coordinate in the page on
     // load & sets that coordinate in the URL fragment. We send mouse down & up
     // events at that coordinate to trigger speech recognition.
     GURL test_url = testUrl(filename);
     ui_test_utils::NavigateToURL(browser(), test_url);
-    std::string coords = browser()->GetSelectedTabContents()->GetURL().ref();
-    VLOG(1) << "Coordinates given by script: " << coords;
-    int comma_pos = coords.find(',');
-    ASSERT_NE(-1, comma_pos);
-    int x = 0;
-    ASSERT_TRUE(base::StringToInt(coords.substr(0, comma_pos).c_str(), &x));
-    int y = 0;
-    ASSERT_TRUE(base::StringToInt(coords.substr(comma_pos + 1).c_str(), &y));
 
     WebKit::WebMouseEvent mouse_event;
     mouse_event.type = WebKit::WebInputEvent::MouseDown;
     mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
-    mouse_event.x = x;
-    mouse_event.y = y;
+    mouse_event.x = 0;
+    mouse_event.y = 0;
     mouse_event.clickCount = 1;
     TabContents* tab_contents = browser()->GetSelectedTabContents();
     tab_contents->render_view_host()->ForwardMouseEvent(mouse_event);
     mouse_event.type = WebKit::WebInputEvent::MouseUp;
     tab_contents->render_view_host()->ForwardMouseEvent(mouse_event);
+  }
+
+  void RunSpeechInputTest(const FilePath::CharType* filename) {
+    LoadAndStartSpeechInputTest(filename);
 
     // The fake speech input manager would receive the speech input
     // request and return the test string as recognition result. The test page
     // then sets the URL fragment as 'pass' if it received the expected string.
+    TabContents* tab_contents = browser()->GetSelectedTabContents();
     ui_test_utils::WaitForNavigations(&tab_contents->controller(), 1);
     EXPECT_EQ("pass", browser()->GetSelectedTabContents()->GetURL().ref());
   }
 
   // InProcessBrowserTest methods.
   virtual void SetUpInProcessBrowserTestFixture() {
+    fake_speech_input_manager_.set_send_fake_response(true);
     speech_input_manager_ = &fake_speech_input_manager_;
 
     // Inject the fake manager factory so that the test result is returned to
@@ -183,13 +200,11 @@ SpeechInputManager* SpeechInputBrowserTest::speech_input_manager_ = NULL;
 // Marked as DISABLED due to http://crbug.com/71227
 #if defined(GOOGLE_CHROME_BUILD)
 #define MAYBE_TestBasicRecognition DISABLED_TestBasicRecognition
-#elif defined(OS_WIN)
-#define MAYBE_TestBasicRecognition DISABLED_TestBasicRecognition
 #else
 #define MAYBE_TestBasicRecognition TestBasicRecognition
 #endif
 IN_PROC_BROWSER_TEST_F(SpeechInputBrowserTest, MAYBE_TestBasicRecognition) {
-  LoadAndRunSpeechInputTest(FILE_PATH_LITERAL("basic_recognition.html"));
+  RunSpeechInputTest(FILE_PATH_LITERAL("basic_recognition.html"));
   EXPECT_TRUE(fake_speech_input_manager_.grammar().empty());
 }
 
@@ -197,15 +212,29 @@ IN_PROC_BROWSER_TEST_F(SpeechInputBrowserTest, MAYBE_TestBasicRecognition) {
 // Marked as DISALBED due to http://crbug.com/71227
 #if defined(GOOGLE_CHROME_BUILD)
 #define MAYBE_GrammarAttribute DISABLED_GrammarAttribute
-#elif defined(OS_WIN)
-#define MAYBE_GrammarAttribute FLAKY_GrammarAttribute
 #else
 #define MAYBE_GrammarAttribute GrammarAttribute
 #endif
 IN_PROC_BROWSER_TEST_F(SpeechInputBrowserTest, MAYBE_GrammarAttribute) {
-  LoadAndRunSpeechInputTest(FILE_PATH_LITERAL("grammar_attribute.html"));
+  RunSpeechInputTest(FILE_PATH_LITERAL("grammar_attribute.html"));
   EXPECT_EQ("http://example.com/grammar.xml",
             fake_speech_input_manager_.grammar());
+}
+
+// Marked as DISABLED due to http://crbug.com/71227
+IN_PROC_BROWSER_TEST_F(SpeechInputBrowserTest, DISABLED_TestCancelAll) {
+  // The test checks that the cancel-all callback gets issued when a session
+  // is pending, so don't send a fake response.
+  fake_speech_input_manager_.set_send_fake_response(false);
+
+  LoadAndStartSpeechInputTest(FILE_PATH_LITERAL("basic_recognition.html"));
+
+  // Make the renderer crash. This should trigger SpeechInputDispatcherHost to
+  // cancel all pending sessions.
+  GURL test_url("about:crash");
+  ui_test_utils::NavigateToURL(browser(), test_url);
+
+  EXPECT_TRUE(fake_speech_input_manager_.did_cancel_all());
 }
 
 }  // namespace speech_input

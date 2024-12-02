@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,12 @@
 #include "build/build_config.h"
 
 #include "base/file_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/ref_counted.h"
 #include "base/test/test_suite.h"
 #include "chrome/app/scoped_ole_initializer.h"
+#include "chrome/browser/chrome_content_browser_client.h"
+#include "chrome/common/chrome_content_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_util.h"
@@ -51,6 +53,10 @@ class ChromeTestSuite : public base::TestSuite {
   void SetBrowserDirectory(const FilePath& browser_dir) {
     browser_dir_ = browser_dir;
   }
+
+  // Client for embedding content in Chrome.
+  chrome::ChromeContentClient chrome_content_client_;
+  chrome::ChromeContentBrowserClient chrome_browser_content_client_;
 
   base::StatsTable* stats_table_;
 

@@ -178,7 +178,7 @@ void JingleSessionManager::Init(
     const std::string& local_jid,
     cricket::SessionManager* cricket_session_manager,
     IncomingSessionCallback* incoming_session_callback,
-    base::RSAPrivateKey* private_key,
+    crypto::RSAPrivateKey* private_key,
     scoped_refptr<net::X509Certificate> certificate) {
   if (MessageLoop::current() != message_loop()) {
     message_loop()->PostTask(
@@ -444,7 +444,10 @@ bool JingleSessionManager::ParseContent(
       std::string base64_cert = child->BodyText();
       std::string der_cert;
       bool ret = base::Base64Decode(base64_cert, &der_cert);
-      DCHECK(ret) << "Failed to decode certificate";
+      if (!ret) {
+        LOG(ERROR) << "Failed to decode certificate received from the peer.";
+        return false;
+      }
       certificate = net::X509Certificate::CreateFromBytes(der_cert.data(),
                                                           der_cert.length());
     }

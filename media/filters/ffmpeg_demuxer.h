@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,9 @@
 #include "base/synchronization/waitable_event.h"
 #include "media/base/buffers.h"
 #include "media/base/filters.h"
+#include "media/base/pipeline.h"
 #include "media/base/media_format.h"
 #include "media/filters/ffmpeg_glue.h"
-#include "media/filters/ffmpeg_interfaces.h"
 
 // FFmpeg forward declarations.
 struct AVFormatContext;
@@ -48,10 +48,10 @@ class FFmpegDemuxer;
 // Forward declaration for scoped_ptr_malloc.
 class ScopedPtrAVFree;
 
-class FFmpegDemuxerStream : public DemuxerStream, public AVStreamProvider {
+class FFmpegDemuxerStream : public DemuxerStream {
  public:
-  // Maintains a reference to |demuxer| and initializes itself using information
-  // inside |stream|.
+  // Keeps a copy of |demuxer| and initializes itself using information
+  // inside |stream|.  Both parameters must outlive |this|.
   FFmpegDemuxerStream(FFmpegDemuxer* demuxer, AVStream* stream);
 
   // Returns true is this stream has pending reads, false otherwise.
@@ -72,18 +72,19 @@ class FFmpegDemuxerStream : public DemuxerStream, public AVStreamProvider {
   virtual base::TimeDelta duration();
 
   // DemuxerStream implementation.
+  virtual Type type();
   virtual const MediaFormat& media_format();
+
+  // If |buffer_queue_| is not empty will execute on caller's thread, otherwise
+  // will post ReadTask to execute on demuxer's thread. Read will acquire
+  // |lock_| for the life of the function so that means |read_callback| must
+  // not make calls into FFmpegDemuxerStream directly or that may cause a
+  // deadlock. |read_callback| should execute as quickly as possible because
+  // |lock_| is held throughout the life of the callback.
   virtual void Read(Callback1<Buffer*>::Type* read_callback);
   // Bitstream converter to convert input packet.
   virtual void EnableBitstreamConverter();
-
-  // AVStreamProvider implementation.
   virtual AVStream* GetAVStream();
-
-
-
- protected:
-  virtual void* QueryInterface(const char* interface_id);
 
  private:
   virtual ~FFmpegDemuxerStream();
@@ -92,7 +93,8 @@ class FFmpegDemuxerStream : public DemuxerStream, public AVStreamProvider {
   void ReadTask(Callback1<Buffer*>::Type* read_callback);
 
   // Attempts to fulfill a single pending read by dequeueing a buffer and read
-  // callback pair and executing the callback.
+  // callback pair and executing the callback. The calling function must
+  // acquire |lock_| before calling this function.
   void FulfillPendingRead();
 
   // Converts an FFmpeg stream timestamp into a base::TimeDelta.
@@ -101,6 +103,7 @@ class FFmpegDemuxerStream : public DemuxerStream, public AVStreamProvider {
 
   FFmpegDemuxer* demuxer_;
   AVStream* stream_;
+  Type type_;
   MediaFormat media_format_;
   base::TimeDelta duration_;
   bool discontinuous_;
@@ -115,6 +118,13 @@ class FFmpegDemuxerStream : public DemuxerStream, public AVStreamProvider {
   // Used to translate bitstream formats.
   scoped_ptr<BitstreamConverter> bitstream_converter_;
 
+  // Used to synchronize access to |buffer_queue_|, |read_queue_|, and
+  // |stopped_|. This is so other threads can get access to buffers that have
+  // already been demuxed without having the demuxer thread sending the
+  // buffers. |lock_| must be acquired before any access to |buffer_queue_|,
+  // |read_queue_|, or |stopped_|.
+  base::Lock lock_;
+
   DISALLOW_COPY_AND_ASSIGN(FFmpegDemuxerStream);
 };
 
@@ -127,15 +137,19 @@ class FFmpegDemuxer : public Demuxer,
   // Posts a task to perform additional demuxing.
   virtual void PostDemuxTask();
 
+  void Initialize(
+      DataSource* data_source, PipelineStatusCallback* callback);
+
   // Filter implementation.
   virtual void Stop(FilterCallback* callback);
   virtual void Seek(base::TimeDelta time, FilterCallback* callback);
   virtual void OnAudioRendererDisabled();
+  virtual void set_host(FilterHost* filter_host);
+  virtual void SetPlaybackRate(float playback_rate);
+  virtual void SetPreload(Preload preload);
 
   // Demuxer implementation.
-  virtual void Initialize(DataSource* data_source, FilterCallback* callback);
-  virtual size_t GetNumberOfStreams();
-  virtual scoped_refptr<DemuxerStream> GetStream(int stream_id);
+  virtual scoped_refptr<DemuxerStream> GetStream(DemuxerStream::Type type);
 
   // FFmpegProtocol implementation.
   virtual int Read(int size, uint8* data);
@@ -153,7 +167,8 @@ class FFmpegDemuxer : public Demuxer,
   FRIEND_TEST_ALL_PREFIXES(FFmpegDemuxerTest, ProtocolRead);
 
   // Carries out initialization on the demuxer thread.
-  void InitializeTask(DataSource* data_source, FilterCallback* callback);
+  void InitializeTask(
+      DataSource* data_source, PipelineStatusCallback* callback);
 
   // Carries out a seek on the demuxer thread.
   void SeekTask(base::TimeDelta time, FilterCallback* callback);
@@ -196,8 +211,8 @@ class FFmpegDemuxer : public Demuxer,
   AVFormatContext* format_context_;
 
   // Two vector of streams:
-  //   - |streams_| is indexed for the Demuxer interface GetStream(), which only
-  //     contains supported streams and no NULL entries.
+  //   - |streams_| is indexed by type for the Demuxer interface GetStream(),
+  //     and contains NULLs for types which aren't present.
   //   - |packet_streams_| is indexed to mirror AVFormatContext when dealing
   //     with AVPackets returned from av_read_frame() and contain NULL entries
   //     representing unsupported streams where we throw away the data.
@@ -225,6 +240,11 @@ class FFmpegDemuxer : public Demuxer,
 
   size_t last_read_bytes_;
   int64 read_position_;
+
+  // Initialization can happen before set_host() is called, in which case we
+  // store these bits for deferred reporting to the FilterHost when we get one.
+  base::TimeDelta max_duration_;
+  PipelineStatus deferred_status_;
 
   DISALLOW_COPY_AND_ASSIGN(FFmpegDemuxer);
 };

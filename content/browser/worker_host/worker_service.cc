@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,15 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/sys_info.h"
 #include "base/threading/thread.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
-#include "chrome/common/worker_messages.h"
+#include "content/browser/resource_context.h"
 #include "content/browser/worker_host/worker_message_filter.h"
 #include "content/browser/worker_host/worker_process_host.h"
+#include "content/common/view_messages.h"
+#include "content/common/worker_messages.h"
 #include "net/base/registry_controlled_domain.h"
 
 const int WorkerService::kMaxWorkerProcessesWhenSharing = 10;
@@ -22,6 +23,7 @@ const int WorkerService::kMaxWorkersWhenSeparate = 64;
 const int WorkerService::kMaxWorkersPerTabWhenSeparate = 16;
 
 WorkerService* WorkerService::GetInstance() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   return Singleton<WorkerService>::get();
 }
 
@@ -68,13 +70,14 @@ void WorkerService::OnWorkerMessageFilterClosing(WorkerMessageFilter* filter) {
   TryStartingQueuedWorker();
 }
 
-void WorkerService::CreateWorker(const ViewHostMsg_CreateWorker_Params& params,
-                                 int route_id,
-                                 WorkerMessageFilter* filter,
-                                 URLRequestContextGetter* request_context) {
-
-  ChromeURLRequestContext* context = static_cast<ChromeURLRequestContext*>(
-      request_context->GetURLRequestContext());
+void WorkerService::CreateWorker(
+    const ViewHostMsg_CreateWorker_Params& params,
+    int route_id,
+    WorkerMessageFilter* filter,
+    const content::ResourceContext& resource_context) {
+  // TODO(willchan): Eliminate the need for this downcast.
+  bool is_incognito = static_cast<ChromeURLRequestContext*>(
+      resource_context.request_context())->is_incognito();
 
   // Generate a unique route id for the browser-worker communication that's
   // unique among all worker processes.  That way when the worker process sends
@@ -83,13 +86,13 @@ void WorkerService::CreateWorker(const ViewHostMsg_CreateWorker_Params& params,
   WorkerProcessHost::WorkerInstance instance(
       params.url,
       params.is_shared,
-      context->is_off_the_record(),
+      is_incognito,
       params.name,
       next_worker_route_id(),
       params.is_shared ? 0 : filter->render_process_id(),
       params.is_shared ? 0 : params.parent_appcache_host_id,
       params.is_shared ? params.script_resource_appcache_id : 0,
-      request_context);
+      resource_context);
   instance.AddFilter(filter, route_id);
   instance.worker_document_set()->Add(
       filter, params.document_id, filter->render_process_id(),
@@ -102,13 +105,12 @@ void WorkerService::LookupSharedWorker(
     const ViewHostMsg_CreateWorker_Params& params,
     int route_id,
     WorkerMessageFilter* filter,
-    bool off_the_record,
+    bool incognito,
     bool* exists,
     bool* url_mismatch) {
-
   *exists = true;
   WorkerProcessHost::WorkerInstance* instance = FindSharedWorkerInstance(
-      params.url, params.name, off_the_record);
+      params.url, params.name, incognito);
 
   if (!instance) {
     // If no worker instance currently exists, we need to create a pending
@@ -116,7 +118,7 @@ void WorkerService::LookupSharedWorker(
     // mismatched URL get the appropriate url_mismatch error at lookup time.
     // Having named shared workers was a Really Bad Idea due to details like
     // this.
-    instance = CreatePendingInstance(params.url, params.name, off_the_record);
+    instance = CreatePendingInstance(params.url, params.name, incognito);
     *exists = false;
   }
 
@@ -248,7 +250,7 @@ bool WorkerService::CreateWorkerFromInstance(
     // See if a worker with this name already exists.
     WorkerProcessHost::WorkerInstance* existing_instance =
         FindSharedWorkerInstance(
-            instance.url(), instance.name(), instance.off_the_record());
+            instance.url(), instance.name(), instance.incognito());
     WorkerProcessHost::WorkerInstance::FilterInfo filter_info =
         instance.GetFilter();
     // If this worker is already running, no need to create a new copy. Just
@@ -265,7 +267,7 @@ bool WorkerService::CreateWorkerFromInstance(
 
     // Look to see if there's a pending instance.
     WorkerProcessHost::WorkerInstance* pending = FindPendingInstance(
-        instance.url(), instance.name(), instance.off_the_record());
+        instance.url(), instance.name(), instance.incognito());
     // If there's no instance *and* no pending instance (or there is a pending
     // instance but it does not contain our filter info), then it means the
     // worker started up and exited already. Log a warning because this should
@@ -287,14 +289,14 @@ bool WorkerService::CreateWorkerFromInstance(
       instance.AddFilter(i->first, i->second);
     }
     RemovePendingInstances(
-        instance.url(), instance.name(), instance.off_the_record());
+        instance.url(), instance.name(), instance.incognito());
 
     // Remove any queued instances of this worker and copy over the filter to
     // this instance.
     for (WorkerProcessHost::Instances::iterator iter = queued_workers_.begin();
          iter != queued_workers_.end();) {
       if (iter->Matches(instance.url(), instance.name(),
-                        instance.off_the_record())) {
+                        instance.incognito())) {
         DCHECK(iter->NumFilters() == 1);
         WorkerProcessHost::WorkerInstance::FilterInfo filter_info =
             iter->GetFilter();
@@ -309,8 +311,8 @@ bool WorkerService::CreateWorkerFromInstance(
   if (!worker) {
     WorkerMessageFilter* first_filter = instance.filters().begin()->first;
     worker = new WorkerProcessHost(
-        first_filter->resource_dispatcher_host(),
-        instance.request_context());
+        &instance.resource_context(),
+        first_filter->resource_dispatcher_host());
     // TODO(atwilson): This won't work if the message is from a worker process.
     // We don't support that yet though (this message is only sent from
     // renderers) but when we do, we'll need to add code to pass in the current
@@ -494,7 +496,7 @@ const WorkerProcessHost::WorkerInstance* WorkerService::FindWorkerInstance(
 
 WorkerProcessHost::WorkerInstance*
 WorkerService::FindSharedWorkerInstance(const GURL& url, const string16& name,
-                                        bool off_the_record) {
+                                        bool incognito) {
   for (BrowserChildProcessHost::Iterator iter(ChildProcessInfo::WORKER_PROCESS);
        !iter.Done(); ++iter) {
     WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
@@ -502,7 +504,7 @@ WorkerService::FindSharedWorkerInstance(const GURL& url, const string16& name,
              worker->mutable_instances().begin();
          instance_iter != worker->mutable_instances().end();
          ++instance_iter) {
-      if (instance_iter->Matches(url, name, off_the_record))
+      if (instance_iter->Matches(url, name, incognito))
         return &(*instance_iter);
     }
   }
@@ -511,13 +513,13 @@ WorkerService::FindSharedWorkerInstance(const GURL& url, const string16& name,
 
 WorkerProcessHost::WorkerInstance*
 WorkerService::FindPendingInstance(const GURL& url, const string16& name,
-                                   bool off_the_record) {
+                                   bool incognito) {
   // Walk the pending instances looking for a matching pending worker.
   for (WorkerProcessHost::Instances::iterator iter =
            pending_shared_workers_.begin();
        iter != pending_shared_workers_.end();
        ++iter) {
-    if (iter->Matches(url, name, off_the_record)) {
+    if (iter->Matches(url, name, incognito)) {
       return &(*iter);
     }
   }
@@ -527,12 +529,12 @@ WorkerService::FindPendingInstance(const GURL& url, const string16& name,
 
 void WorkerService::RemovePendingInstances(const GURL& url,
                                            const string16& name,
-                                           bool off_the_record) {
+                                           bool incognito) {
   // Walk the pending instances looking for a matching pending worker.
   for (WorkerProcessHost::Instances::iterator iter =
            pending_shared_workers_.begin();
        iter != pending_shared_workers_.end(); ) {
-    if (iter->Matches(url, name, off_the_record)) {
+    if (iter->Matches(url, name, incognito)) {
       iter = pending_shared_workers_.erase(iter);
     } else {
       ++iter;
@@ -543,16 +545,15 @@ void WorkerService::RemovePendingInstances(const GURL& url,
 WorkerProcessHost::WorkerInstance*
 WorkerService::CreatePendingInstance(const GURL& url,
                                      const string16& name,
-                                     bool off_the_record) {
+                                     bool incognito) {
   // Look for an existing pending shared worker.
   WorkerProcessHost::WorkerInstance* instance =
-      FindPendingInstance(url, name, off_the_record);
+      FindPendingInstance(url, name, incognito);
   if (instance)
     return instance;
 
   // No existing pending worker - create a new one.
-  WorkerProcessHost::WorkerInstance pending(
-      url, true, off_the_record, name, MSG_ROUTING_NONE, 0, 0, 0, NULL);
+  WorkerProcessHost::WorkerInstance pending(url, true, incognito, name);
   pending_shared_workers_.push_back(pending);
   return &pending_shared_workers_.back();
 }

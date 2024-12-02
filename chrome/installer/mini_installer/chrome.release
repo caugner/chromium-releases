@@ -35,12 +35,9 @@ chrome.dll: %(VersionDir)s\
 nacl64.exe: %(VersionDir)s\
 nacl64.dll: %(VersionDir)s\
 ppGoogleNaClPluginChrome.dll: %(VersionDir)s\
-icudt46.dll: %(VersionDir)s\
-gears.dll: %(VersionDir)s\
+icudt.dll: %(VersionDir)s\
 resources.pak: %(VersionDir)s\
 locales\*.dll: %(VersionDir)s\Locales
-Resources\Inspector\*.*: %(VersionDir)s\Resources\Inspector
-Resources\Inspector\Images\*.*: %(VersionDir)s\Resources\Inspector\Images
 servers\*.dll: %(VersionDir)s\
 servers\*.exe: %(VersionDir)s\
 chrome_frame_helper.exe: %(VersionDir)s\
@@ -48,11 +45,12 @@ chrome_frame_helper.dll: %(VersionDir)s\
 Extensions\*.*: %(VersionDir)s\Extensions\
 av*.dll: %(VersionDir)s\
 pdf.dll: %(VersionDir)s\
-d3dx9_42.dll: %(VersionDir)s\
-D3DCompiler_42.dll: %(VersionDir)s\
+d3dx9_43.dll: %(VersionDir)s\
+D3DCompiler_43.dll: %(VersionDir)s\
 libEGL.dll: %(VersionDir)s\
 libGLESv2.dll: %(VersionDir)s\
 
 [GOOGLE_CHROME]
 gcswf32.dll: %(VersionDir)s\
 plugin.vch: %(VersionDir)s\
+FlashPlayerCPLApp.cpl: %(VersionDir)s\

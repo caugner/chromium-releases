@@ -16,7 +16,7 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -27,10 +27,10 @@
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
-#include "chrome/common/result_codes.h"
 #include "chrome/installer/util/google_chrome_sxs_distribution.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/install_util.h"
+#include "content/common/result_codes.h"
 #include "policy/policy_constants.h"
 
 namespace {
@@ -436,6 +436,18 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
 
   return WrapMessageBoxWithSEH(dlg_strings[1].c_str(), dlg_strings[0].c_str(),
                                flags, exit_now);
+}
+
+// Crashes the process after generating a dump for the provided exception. Note
+// that the crash reporter should be initialized before calling this function
+// for it to do anything.
+extern "C" int __declspec(dllexport) CrashForException(
+    EXCEPTION_POINTERS* info) {
+  if (g_breakpad) {
+    g_breakpad->WriteMinidumpForException(info);
+    ::ExitProcess(ResultCodes::KILLED);
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
 }
 
 // Determine whether configuration management allows loading the crash reporter.

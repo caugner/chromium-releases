@@ -10,30 +10,29 @@
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/themes/browser_theme_provider.h"
-#include "chrome/browser/ui/webui/generic_handler.h"
-#include "chrome/common/bindings_policy.h"
+#include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/browser/webui/generic_handler.h"
+#include "content/common/bindings_policy.h"
 
 namespace {
 
-std::wstring GetJavascript(const std::wstring& function_name,
-                           const std::vector<const Value*>& arg_list) {
-  std::wstring parameters;
+string16 GetJavascript(const std::string& function_name,
+                       const std::vector<const Value*>& arg_list) {
+  string16 parameters;
   std::string json;
   for (size_t i = 0; i < arg_list.size(); ++i) {
     if (i > 0)
-      parameters += L",";
+      parameters += char16(',');
 
     base::JSONWriter::Write(arg_list[i], false, &json);
-    parameters += UTF8ToWide(json);
+    parameters += UTF8ToUTF16(json);
   }
-  return function_name + L"(" + parameters + L");";
+  return ASCIIToUTF16(function_name) +
+      char16('(') + parameters + char16(')') + char16(';');
 }
 
 }  // namespace
@@ -59,7 +58,10 @@ WebUI::~WebUI() {
 
 // WebUI, public: -------------------------------------------------------------
 
-void WebUI::ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params) {
+const WebUI::TypeID WebUI::kNoWebUI = NULL;
+
+void WebUI::ProcessWebUIMessage(
+    const ExtensionHostMsg_DomMessage_Params& params) {
   // Look up the callback for this message.
   MessageCallbackMap::const_iterator callback =
       message_callbacks_.find(params.name);
@@ -70,21 +72,24 @@ void WebUI::ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params) {
   callback->second->Run(&params.arguments);
 }
 
-void WebUI::CallJavascriptFunction(const std::wstring& function_name) {
-  std::wstring javascript = function_name + L"();";
+void WebUI::CallJavascriptFunction(const std::string& function_name) {
+  DCHECK(IsStringASCII(function_name));
+  string16 javascript = ASCIIToUTF16(function_name + "();");
   ExecuteJavascript(javascript);
 }
 
-void WebUI::CallJavascriptFunction(const std::wstring& function_name,
+void WebUI::CallJavascriptFunction(const std::string& function_name,
                                    const Value& arg) {
+  DCHECK(IsStringASCII(function_name));
   std::vector<const Value*> args;
   args.push_back(&arg);
   ExecuteJavascript(GetJavascript(function_name, args));
 }
 
 void WebUI::CallJavascriptFunction(
-    const std::wstring& function_name,
+    const std::string& function_name,
     const Value& arg1, const Value& arg2) {
+  DCHECK(IsStringASCII(function_name));
   std::vector<const Value*> args;
   args.push_back(&arg1);
   args.push_back(&arg2);
@@ -92,8 +97,9 @@ void WebUI::CallJavascriptFunction(
 }
 
 void WebUI::CallJavascriptFunction(
-    const std::wstring& function_name,
+    const std::string& function_name,
     const Value& arg1, const Value& arg2, const Value& arg3) {
+  DCHECK(IsStringASCII(function_name));
   std::vector<const Value*> args;
   args.push_back(&arg1);
   args.push_back(&arg2);
@@ -102,11 +108,12 @@ void WebUI::CallJavascriptFunction(
 }
 
 void WebUI::CallJavascriptFunction(
-    const std::wstring& function_name,
+    const std::string& function_name,
     const Value& arg1,
     const Value& arg2,
     const Value& arg3,
     const Value& arg4) {
+  DCHECK(IsStringASCII(function_name));
   std::vector<const Value*> args;
   args.push_back(&arg1);
   args.push_back(&arg2);
@@ -116,13 +123,10 @@ void WebUI::CallJavascriptFunction(
 }
 
 void WebUI::CallJavascriptFunction(
-    const std::wstring& function_name,
+    const std::string& function_name,
     const std::vector<const Value*>& args) {
+  DCHECK(IsStringASCII(function_name));
   ExecuteJavascript(GetJavascript(function_name, args));
-}
-
-ui::ThemeProvider* WebUI::GetThemeProvider() const {
-  return GetProfile()->GetThemeProvider();
 }
 
 void WebUI::RegisterMessageCallback(const std::string &message,
@@ -151,9 +155,9 @@ void WebUI::AddMessageHandler(WebUIMessageHandler* handler) {
   handlers_.push_back(handler);
 }
 
-void WebUI::ExecuteJavascript(const std::wstring& javascript) {
+void WebUI::ExecuteJavascript(const string16& javascript) {
   GetRenderViewHost()->ExecuteJavascriptInWebFrame(string16(),
-                                                   WideToUTF16Hack(javascript));
+                                                   javascript);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -207,11 +211,10 @@ bool WebUIMessageHandler::ExtractIntegerValue(const ListValue* value,
   return false;
 }
 
-// TODO(viettrungluu): convert to string16 (or UTF-8 std::string?).
-std::wstring WebUIMessageHandler::ExtractStringValue(const ListValue* value) {
+string16 WebUIMessageHandler::ExtractStringValue(const ListValue* value) {
   string16 string16_value;
   if (value->GetString(0, &string16_value))
-    return UTF16ToWideHack(string16_value);
+    return string16_value;
   NOTREACHED();
-  return std::wstring();
+  return string16();
 }

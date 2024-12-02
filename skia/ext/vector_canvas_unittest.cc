@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,11 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "skia/ext/vector_canvas.h"
+#include "skia/ext/vector_platform_device_emf_win.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/effects/SkDashPathEffect.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/size.h"
 
 namespace skia {
 
@@ -97,7 +99,7 @@ class Image {
   Image(const skia::PlatformCanvas& canvas) : ignore_alpha_(true) {
     // Use a different way to access the bitmap. The normal way would be to
     // query the SkBitmap.
-    HDC context = canvas.getTopPlatformDevice().getBitmapDC();
+    HDC context = canvas.beginPlatformPaint();
     HGDIOBJ bitmap = GetCurrentObject(context, OBJ_BITMAP);
     EXPECT_TRUE(bitmap != NULL);
     // Initialize the clip region to the entire bitmap.
@@ -109,6 +111,7 @@ class Image {
     size_t size = row_length_ * height_;
     data_.resize(size);
     memcpy(&*data_.begin(), bitmap_data.bmBits, size);
+    canvas.endPlatformPaint();
   }
 
   // Loads the image from a canvas.
@@ -125,10 +128,10 @@ class Image {
     std::vector<unsigned char> compressed;
     ASSERT_TRUE(gfx::PNGCodec::Encode(&*data_.begin(),
                                       gfx::PNGCodec::FORMAT_BGRA,
-                                      width_,
-                                      height_,
+                                      gfx::Size(width_, height_),
                                       row_length_,
                                       true,
+                                      std::vector<gfx::PNGCodec::Comment>(),
                                       &compressed));
     ASSERT_TRUE(compressed.size());
     FILE* f = file_util::OpenFile(filename, "wb");
@@ -386,7 +389,8 @@ class VectorCanvasTest : public ImageTest {
     size_ = size;
     context_ = new Context();
     bitmap_ = new Bitmap(*context_, size_, size_);
-    vcanvas_ = new VectorCanvas(context_->context(), size_, size_);
+    vcanvas_ = new VectorCanvas(VectorPlatformDeviceEmfFactory::CreateDevice(
+        size_, size_, true, context_->context()));
     pcanvas_ = new PlatformCanvas(size_, size_, false);
 
     // Clear white.
@@ -452,7 +456,8 @@ TEST_F(VectorCanvasTest, Uninitialized) {
 
   context_ = new Context();
   bitmap_ = new Bitmap(*context_, size_, size_);
-  vcanvas_ = new VectorCanvas(context_->context(), size_, size_);
+  vcanvas_ = new VectorCanvas(VectorPlatformDeviceEmfFactory::CreateDevice(
+      size_, size_, true, context_->context()));
   pcanvas_ = new PlatformCanvas(size_, size_, false);
 
   // VectorCanvas default initialization is black.

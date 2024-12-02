@@ -1,8 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/base/filter_collection.h"
+
+#include "base/logging.h"
 
 namespace media {
 
@@ -10,12 +12,13 @@ FilterCollection::FilterCollection() {}
 
 FilterCollection::~FilterCollection() {}
 
-void FilterCollection::AddDataSource(DataSource* filter) {
-  AddFilter(DATA_SOURCE, filter);
+void FilterCollection::SetDemuxerFactory(DemuxerFactory* factory) {
+  DCHECK(factory);
+  demuxer_factory_.reset(factory);
 }
 
-void FilterCollection::AddDemuxer(Demuxer* filter) {
-  AddFilter(DEMUXER, filter);
+DemuxerFactory* FilterCollection::GetDemuxerFactory() {
+  return demuxer_factory_.get();
 }
 
 void FilterCollection::AddVideoDecoder(VideoDecoder* filter) {
@@ -40,15 +43,6 @@ bool FilterCollection::IsEmpty() const {
 
 void FilterCollection::Clear() {
   filters_.clear();
-}
-
-void FilterCollection::SelectDataSource(
-    scoped_refptr<DataSource>* filter_out) {
-  SelectFilter<DATA_SOURCE>(filter_out);
-}
-
-void FilterCollection::SelectDemuxer(scoped_refptr<Demuxer>* filter_out) {
-  SelectFilter<DEMUXER>(filter_out);
 }
 
 void FilterCollection::SelectVideoDecoder(

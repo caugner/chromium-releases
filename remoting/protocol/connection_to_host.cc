@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,9 @@ ConnectionToHost::ConnectionToHost(
       socket_factory_(socket_factory),
       port_allocator_session_factory_(session_factory),
       event_callback_(NULL),
-      dispatcher_(new ClientMessageDispatcher()) {
+      dispatcher_(new ClientMessageDispatcher()),
+      client_stub_(NULL),
+      video_stub_(NULL) {
 }
 
 ConnectionToHost::~ConnectionToHost() {
@@ -67,6 +69,7 @@ void ConnectionToHost::Connect(const std::string& username,
                              kChromotingTokenServiceName));
   jingle_client_ =
       new JingleClient(thread_, signal_strategy_.get(),
+                       network_manager_.release(), socket_factory_.release(),
                        port_allocator_session_factory_.release(), this);
   jingle_client_->Init();
 
@@ -91,6 +94,7 @@ void ConnectionToHost::ConnectSandboxed(scoped_refptr<XmppProxy> xmpp_proxy,
   signal_strategy_.reset(strategy);
   jingle_client_ =
       new JingleClient(thread_, signal_strategy_.get(),
+                       network_manager_.release(), socket_factory_.release(),
                        port_allocator_session_factory_.release(), this);
   jingle_client_->Init();
 
@@ -234,13 +238,6 @@ void ConnectionToHost::OnClientAuthenticated() {
 
   // Create and enable the input stub now that we're authenticated.
   input_stub_.reset(new InputSender(session_->event_channel()));
-  input_stub_->OnAuthenticated();
-
-  // Enable control channel stubs.
-  if (host_stub_.get())
-    host_stub_->OnAuthenticated();
-  if (client_stub_)
-    client_stub_->OnAuthenticated();
 }
 
 ConnectionToHost::State ConnectionToHost::state() const {

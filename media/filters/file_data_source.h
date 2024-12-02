@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,16 +20,19 @@ class FileDataSource : public DataSource {
   FileDataSource();
   virtual ~FileDataSource();
 
+  PipelineStatus Initialize(const std::string& url);
+
   // Implementation of Filter.
+  virtual void set_host(FilterHost* filter_host);
   virtual void Stop(FilterCallback* callback);
 
   // Implementation of DataSource.
-  virtual void Initialize(const std::string& url, FilterCallback* callback);
   virtual const MediaFormat& media_format();
   virtual void Read(int64 position, size_t size, uint8* data,
                     ReadCallback* read_callback);
   virtual bool GetSize(int64* size_out);
   virtual bool IsStreaming();
+  virtual void SetPreload(Preload preload);
 
  private:
   // Only allow factories and tests to create this object.

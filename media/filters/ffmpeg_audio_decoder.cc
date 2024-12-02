@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,12 +42,10 @@ void FFmpegAudioDecoder::DoInitialize(DemuxerStream* demuxer_stream,
   AutoTaskRunner done_runner(done_cb);
   *success = false;
 
-  // Get the AVStream by querying for the provider interface.
-  AVStreamProvider* av_stream_provider;
-  if (!demuxer_stream->QueryInterface(&av_stream_provider)) {
+  AVStream* av_stream = demuxer_stream->GetAVStream();
+  if (!av_stream) {
     return;
   }
-  AVStream* av_stream = av_stream_provider->GetAVStream();
 
   // Grab the AVStream's codec context and make sure we have sensible values.
   codec_context_ = av_stream->codec;
@@ -81,8 +79,6 @@ void FFmpegAudioDecoder::DoInitialize(DemuxerStream* demuxer_stream,
       av_get_bits_per_sample_fmt(codec_context_->sample_fmt));
   media_format_.SetAsInteger(MediaFormat::kSampleRate,
       codec_context_->sample_rate);
-  media_format_.SetAsString(MediaFormat::kMimeType,
-      mime_type::kUncompressedAudio);
 
   // Prepare the output buffer.
   output_buffer_.reset(static_cast<uint8*>(av_malloc(kOutputBufferSize)));

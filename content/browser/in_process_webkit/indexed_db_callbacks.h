@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "content/browser/in_process_webkit/indexed_db_dispatcher_host.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
@@ -17,7 +17,6 @@
 
 class IndexedDBMsg_CallbacksSuccessIDBDatabase;
 class IndexedDBMsg_CallbacksSuccessIDBIndex;
-class IndexedDBMsg_CallbacksSuccessIDBObjectStore;
 class IndexedDBMsg_CallbacksSuccessIDBTransaction;
 
 // Template magic to figure out what message to send to the renderer based on
@@ -28,9 +27,6 @@ template <> struct WebIDBToMsgHelper<WebKit::WebIDBDatabase> {
 };
 template <> struct WebIDBToMsgHelper<WebKit::WebIDBIndex> {
   typedef IndexedDBMsg_CallbacksSuccessIDBIndex MsgType;
-};
-template <> struct WebIDBToMsgHelper<WebKit::WebIDBObjectStore> {
-  typedef IndexedDBMsg_CallbacksSuccessIDBObjectStore MsgType;
 };
 template <> struct WebIDBToMsgHelper<WebKit::WebIDBTransaction> {
   typedef IndexedDBMsg_CallbacksSuccessIDBTransaction MsgType;
