@@ -14,7 +14,7 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
-import org.chromium.chrome.browser.preferences.bandwidth.DataReductionProxyUma;
+import org.chromium.chrome.browser.preferences.datareduction.DataReductionProxyUma;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 
 /**
@@ -78,8 +78,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
 
     @Override
     public boolean shouldShowContextMenu(ContextMenuParams params) {
-        return params != null && (params.isAnchor() || params.isEditable() || params.isImage()
-                || params.isSelectedText() || params.isVideo());
+        return params != null && (params.isAnchor() || params.isImage() || params.isVideo());
     }
 
     @Override

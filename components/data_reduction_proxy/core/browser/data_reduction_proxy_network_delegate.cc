@@ -204,20 +204,14 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
   if (data_reduction_proxy_bypass_stats_)
     data_reduction_proxy_bypass_stats_->OnUrlRequestCompleted(request, started);
 
-  // Only record for http or https urls.
-  bool is_http = request->url().SchemeIs("http");
-  bool is_https = request->url().SchemeIs("https");
-
-  if (request->status().status() != net::URLRequestStatus::SUCCESS)
-    return;
-
   // For better accuracy, we use the actual bytes read instead of the length
   // specified with the Content-Length header, which may be inaccurate,
   // or missing, as is the case with chunked encoding.
   int64 received_content_length = request->received_response_content_length();
   if (!request->was_cached() &&   // Don't record cached content
       received_content_length &&  // Zero-byte responses aren't useful.
-      (is_http || is_https)) {    // Only record for HTTP or HTTPS urls.
+      request->response_info().network_accessed &&  // Network was accessed.
+      request->url().SchemeIsHTTPOrHTTPS()) {
     int64 original_content_length =
         request->response_info().headers->GetInt64HeaderValue(
             "x-original-content-length");
@@ -233,9 +227,19 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
         GetAdjustedOriginalContentLength(request_type,
                                          original_content_length,
                                          received_content_length);
-    AccumulateContentLength(received_content_length,
-                            adjusted_original_content_length,
-                            request_type);
+    std::string mime_type;
+    if (request->status().status() == net::URLRequestStatus::SUCCESS)
+      request->GetMimeType(&mime_type);
+
+    std::string data_usage_host =
+        request->first_party_for_cookies().HostNoBrackets();
+    if (data_usage_host.empty()) {
+      data_usage_host = request->url().HostNoBrackets();
+    }
+
+    AccumulateDataUsage(received_content_length,
+                        adjusted_original_content_length, request_type,
+                        data_usage_host, mime_type);
 
     DCHECK(data_reduction_proxy_config_);
 
@@ -263,19 +267,21 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
   }
 }
 
-void DataReductionProxyNetworkDelegate::AccumulateContentLength(
-    int64 received_content_length,
-    int64 original_content_length,
-    DataReductionProxyRequestType request_type) {
-  DCHECK_GE(received_content_length, 0);
-  DCHECK_GE(original_content_length, 0);
+void DataReductionProxyNetworkDelegate::AccumulateDataUsage(
+    int64 data_used,
+    int64 original_size,
+    DataReductionProxyRequestType request_type,
+    const std::string& data_usage_host,
+    const std::string& mime_type) {
+  DCHECK_GE(data_used, 0);
+  DCHECK_GE(original_size, 0);
   if (data_reduction_proxy_io_data_) {
     data_reduction_proxy_io_data_->UpdateContentLengths(
-        received_content_length, original_content_length,
-        data_reduction_proxy_io_data_->IsEnabled(), request_type);
+        data_used, original_size, data_reduction_proxy_io_data_->IsEnabled(),
+        request_type, data_usage_host, mime_type);
   }
-  received_content_length_ += received_content_length;
-  original_content_length_ += original_content_length;
+  received_content_length_ += data_used;
+  original_content_length_ += original_size;
 }
 
 void OnResolveProxyHandler(const GURL& url,

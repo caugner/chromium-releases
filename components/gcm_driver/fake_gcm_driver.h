@@ -14,6 +14,9 @@ namespace gcm {
 class FakeGCMDriver : public GCMDriver {
  public:
   FakeGCMDriver();
+  explicit FakeGCMDriver(
+      const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner);
+
   ~FakeGCMDriver() override;
 
   // GCMDriver overrides:
@@ -54,7 +57,7 @@ class FakeGCMDriver : public GCMDriver {
   void UnregisterImpl(const std::string& app_id) override;
   void SendImpl(const std::string& app_id,
                 const std::string& receiver_id,
-                const GCMClient::OutgoingMessage& message) override;
+                const OutgoingMessage& message) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeGCMDriver);

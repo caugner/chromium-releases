@@ -11,15 +11,13 @@
 enum class ServiceAccessType;
 
 class KeyedServiceBaseFactory;
-class ProfileOAuth2TokenService;
-class SigninManager;
-
-namespace autofill {
-class PersonalDataManager;
-}
 
 namespace bookmarks {
-class BookmarkModel;
+class ManagedBookmarkService;
+}
+
+namespace invalidation {
+class ProfileInvalidationProvider;
 }
 
 namespace sync_driver {
@@ -45,37 +43,15 @@ class KeyedServiceProvider {
   // Ensures that all KeyedService factories are instantiated. Must be called
   // before any BrowserState instance is created so that dependencies are
   // correct.
-  virtual void AssertKeyedFactoriesBuilt() = 0;
+  void AssertKeyedFactoriesBuilt();
 
-  // Returns the bookmarks::BookmarkModel factory for dependencies.
-  virtual KeyedServiceBaseFactory* GetBookmarkModelFactory() = 0;
+  // Returns the bookmarks::ManagedBookmarkService factory for dependencies.
+  virtual KeyedServiceBaseFactory* GetManagedBookmarkServiceFactory() = 0;
 
-  // Returns an instance of bookmarks::BookmarkModel tied to |browser_state|.
-  virtual bookmarks::BookmarkModel* GetBookmarkModelForBrowserState(
-      ChromeBrowserState* browser_state) = 0;
-
-  // Returns the ProfileOAuth2TokenService factory for dependencies.
-  virtual KeyedServiceBaseFactory* GetProfileOAuth2TokenServiceFactory() = 0;
-
-  // Returns an instance of ProfileOAuth2TokenService tied to
+  // Returns an instance of bookmarks::ManagedBookmarkService tied to
   // |browser_state|.
-  virtual ProfileOAuth2TokenService*
-  GetProfileOAuth2TokenServiceForBrowserState(
-      ChromeBrowserState* browser_state) = 0;
-
-  // Returns the SigninManager factory for dependencies.
-  virtual KeyedServiceBaseFactory* GetSigninManagerFactory() = 0;
-
-  // Returns an instance of SigninManager tied to |browser_state|.
-  virtual SigninManager* GetSigninManagerForBrowserState(
-      ChromeBrowserState* browser_state) = 0;
-
-  // Returns the autofill::PersonalDataManager factory for dependencies.
-  virtual KeyedServiceBaseFactory* GetPersonalDataManagerFactory() = 0;
-
-  // Returns an instance of autofill::PersonalDataManager tied to
-  // |browser_state|.
-  virtual autofill::PersonalDataManager* GetPersonalDataManagerForBrowserState(
+  virtual bookmarks::ManagedBookmarkService*
+  GetManagedBookmarkServiceForBrowserState(
       ChromeBrowserState* browser_state) = 0;
 
   // Returns the sync_driver::SyncService factory for dependencies.
@@ -83,6 +59,16 @@ class KeyedServiceProvider {
 
   // Returns an instance of sync_driver::SyncService tied to |browser_state|.
   virtual sync_driver::SyncService* GetSyncServiceForBrowserState(
+      ChromeBrowserState* browser_state) = 0;
+
+  // Returns the invalidation::ProfileInvalidationProvider factory for
+  // dependencies.
+  virtual KeyedServiceBaseFactory* GetProfileInvalidationProviderFactory() = 0;
+
+  // Returns an instance of invalidation::ProfileInvalidationProvider tied to
+  // |browser_state|.
+  virtual invalidation::ProfileInvalidationProvider*
+  GetProfileInvalidationProviderForBrowserState(
       ChromeBrowserState* browser_state) = 0;
 
  private:

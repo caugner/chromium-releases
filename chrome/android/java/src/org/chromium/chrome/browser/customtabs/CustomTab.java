@@ -21,8 +21,6 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.EmptyTabObserver;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.banners.AppBannerManager;
@@ -33,6 +31,8 @@ import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
 import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
 import org.chromium.chrome.browser.tab.ChromeTab;
+import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -153,10 +153,12 @@ public class CustomTab extends ChromeTab {
 
     private CustomTabObserver mTabObserver;
     private final boolean mEnableUrlBarHiding;
+    private boolean mShouldReplaceCurrentEntry;
 
     /**
-     * Construct an CustomTab. It might load a prerendered {@link WebContents} for the URL, if
-     * {@link CustomTabsConnectionService} has successfully warmed up for the url.
+     * Construct an CustomTab. Note that url and referrer given here is only used to retrieve a
+     * prerendered web contents if it exists. It might load a prerendered {@link WebContents} for
+     * the URL, if {@link CustomTabsConnectionService} has successfully warmed up for the url.
      */
     public CustomTab(ChromeActivity activity, WindowAndroid windowAndroid, IBinder session,
             String url, String referrer, int parentTabId, boolean enableUrlBarHiding) {
@@ -166,6 +168,11 @@ public class CustomTab extends ChromeTab {
         CustomTabsConnection customTabsConnection =
                 CustomTabsConnection.getInstance(activity.getApplication());
         WebContents webContents = customTabsConnection.takePrerenderedUrl(session, url, referrer);
+        if (webContents == null) {
+            webContents = customTabsConnection.takeSpareWebContents();
+            // TODO(lizeb): Remove this once crbug.com/521729 is fixed.
+            if (webContents != null) mShouldReplaceCurrentEntry = true;
+        }
         if (webContents == null) {
             webContents = WebContentsFactory.createWebContents(isIncognito(), false);
         }
@@ -184,6 +191,8 @@ public class CustomTab extends ChromeTab {
      */
     void loadUrlAndTrackFromTimestamp(LoadUrlParams params, long timestamp) {
         mTabObserver.trackNextPageLoadFromTimestamp(timestamp);
+        if (mShouldReplaceCurrentEntry) params.setShouldReplaceCurrentEntry(true);
+        mShouldReplaceCurrentEntry = false;
         loadUrl(params);
     }
 
@@ -326,7 +335,7 @@ public class CustomTab extends ChromeTab {
 
         private static void logTransactionTooLargeOrRethrow(RuntimeException e, Intent intent) {
             // See http://crbug.com/369574.
-            if (e.getCause() != null && e.getCause() instanceof TransactionTooLargeException) {
+            if (e.getCause() instanceof TransactionTooLargeException) {
                 Log.e(TAG, "Could not resolve Activity for intent " + intent.toString(), e);
             } else {
                 throw e;
@@ -361,6 +370,11 @@ public class CustomTab extends ChromeTab {
                         new LoadUrlParams(mTargetUrl), SystemClock.elapsedRealtime());
                 mTargetUrl = null;
                 return false;
+            }
+
+            @Override
+            protected void bringActivityToForeground() {
+                // No-op here. If client's task is in background Chrome is unable to foreground it.
             }
         };
     }

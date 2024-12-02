@@ -524,7 +524,7 @@
         },
       ],
     }],
-    ['ozone_platform_dri==1 or ozone_platform_drm==1 or ozone_platform_gbm==1', {
+    ['ozone_platform_drm==1 or ozone_platform_gbm==1', {
       'targets': [
         {
           'target_name': 'libdrm',
@@ -535,6 +535,9 @@
             ],
           },
           'link_settings': {
+            'ldflags': [
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other libdrm)',
+            ],
             'libraries': [
               '<!@(<(pkg-config) --libs-only-l libdrm)',
             ],

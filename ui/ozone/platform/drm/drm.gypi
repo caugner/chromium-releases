@@ -11,7 +11,6 @@
       'ozone_platform_drm_unittests',
     ],
     'internal_ozone_platforms': [
-      'dri',
       'drm',
     ],
     'use_drm_atomic%': 0,
@@ -39,6 +38,8 @@
         'OZONE_IMPLEMENTATION',
       ],
       'sources': [
+        'common/client_native_pixmap_factory_drm.cc',
+        'common/client_native_pixmap_factory_drm.h',
         'common/drm_util.cc',
         'common/drm_util.h',
         'common/scoped_drm_types.cc',

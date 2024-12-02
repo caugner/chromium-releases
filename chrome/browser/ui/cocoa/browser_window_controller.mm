@@ -17,8 +17,7 @@
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/bookmarks/chrome_bookmark_client.h"
-#include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
+#include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
@@ -84,10 +83,10 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_ui_delegate.h"
-#include "components/web_modal/popup_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -96,7 +95,7 @@
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
+#include "ui/gfx/mac/scoped_cocoa_disable_screen_updates.h"
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
@@ -560,7 +559,7 @@ using content::WebContents;
 // going away) will again call to close the window when it's finally ready.
 - (BOOL)windowShouldClose:(id)sender {
   // Disable updates while closing all tabs to avoid flickering.
-  gfx::ScopedNSDisableScreenUpdates disabler;
+  gfx::ScopedCocoaDisableScreenUpdates disabler;
   // Give beforeunload handlers the chance to cancel the close before we hide
   // the window below.
   if (!browser_->ShouldCloseWindow())
@@ -604,7 +603,8 @@ using content::WebContents;
     [self saveWindowPositionIfNeeded];
   }
 
-  [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
+  NSView* rootView = [[[self window] contentView] superview];
+  [rootView cr_recursivelyInvokeBlock:^(id view) {
       if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
         [view windowDidChangeActive];
   }];
@@ -614,7 +614,8 @@ using content::WebContents;
 }
 
 - (void)windowDidResignMain:(NSNotification*)notification {
-  [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
+  NSView* rootView = [[[self window] contentView] superview];
+  [rootView cr_recursivelyInvokeBlock:^(id view) {
       if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
         [view windowDidChangeActive];
   }];
@@ -953,7 +954,7 @@ using content::WebContents;
   // window is getting shorter, the toolbar will move up within the window.
   // Soon after, a call to layoutSubviews corrects its position. Passing NO to
   // setFrame:display: should keep the toolbarView's intermediate position
-  // hidden, as should the prior call to NSDisableScreenUpdates(). For some
+  // hidden, as should the prior call to disable screen updates. For some
   // reason, neither prevents the toolbarView's intermediate position from
   // becoming visible. Its subsequent appearance in its correct location causes
   // the flicker. It may be that the Appkit assumes that updating the window
@@ -1018,7 +1019,7 @@ using content::WebContents;
     return;
 
   // Disable screen updates to prevent flickering.
-  gfx::ScopedNSDisableScreenUpdates disabler;
+  gfx::ScopedCocoaDisableScreenUpdates disabler;
 
   // Grow or shrink the window by the amount of the height change.  We adjust
   // the window height only in two cases:
@@ -1261,12 +1262,6 @@ using content::WebContents;
           [NSApp currentEvent], modifierFlags));
 }
 
-// Called when another part of the internal codebase needs to execute a
-// command.
-- (void)executeCommand:(int)command {
-  chrome::ExecuteCommand(browser_.get(), command);
-}
-
 - (BOOL)handledByExtensionCommand:(NSEvent*)event
     priority:(ui::AcceleratorManager::HandlerPriority)priority {
   return extension_keybinding_registry_->ProcessKeyEvent(
@@ -1463,7 +1458,7 @@ using content::WebContents;
   DCHECK_GT([tabViews count], 0U);
 
   // Disable screen updates so that this appears as a single visual change.
-  gfx::ScopedNSDisableScreenUpdates disabler;
+  gfx::ScopedCocoaDisableScreenUpdates disabler;
 
   // Set the window size. Need to do this before we detach the tab so it's
   // still in the window. We have to flip the coordinates as that's what
@@ -1675,8 +1670,9 @@ using content::WebContents;
   if (!contents)
     return NO;
 
-  return !web_modal::PopupManager::FromWebContents(contents)->
-      IsWebModalDialogActive(contents);
+  const web_modal::WebContentsModalDialogManager* manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(contents);
+  return !manager || !manager->IsDialogActive();
 }
 
 // TabStripControllerDelegate protocol.
@@ -1772,12 +1768,12 @@ using content::WebContents;
   if (!bookmarkBubbleController_) {
     BookmarkModel* model =
         BookmarkModelFactory::GetForProfile(browser_->profile());
-    ChromeBookmarkClient* client =
-        ChromeBookmarkClientFactory::GetForProfile(browser_->profile());
+    bookmarks::ManagedBookmarkService* managed =
+        ManagedBookmarkServiceFactory::GetForProfile(browser_->profile());
     const BookmarkNode* node = model->GetMostRecentlyAddedUserNodeForURL(url);
     bookmarkBubbleController_ =
         [[BookmarkBubbleController alloc] initWithParentWindow:[self window]
-                                                        client:client
+                                                       managed:managed
                                                          model:model
                                                           node:node
                                              alreadyBookmarked:alreadyMarked];
@@ -2142,9 +2138,10 @@ willAnimateFromState:(BookmarkBar::State)oldState
 }
 
 - (BOOL)isInAppKitFullscreen {
-  return ([[self window] styleMask] & NSFullScreenWindowMask) ==
-             NSFullScreenWindowMask ||
-         enteringAppKitFullscreen_;
+  return !exitingAppKitFullscreen_ &&
+         (([[self window] styleMask] & NSFullScreenWindowMask) ==
+              NSFullScreenWindowMask ||
+          enteringAppKitFullscreen_);
 }
 
 - (void)enterExtensionFullscreenForURL:(const GURL&)url

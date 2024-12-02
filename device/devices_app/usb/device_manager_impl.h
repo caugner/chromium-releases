@@ -12,15 +12,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "device/devices_app/usb/public/interfaces/device_manager.mojom.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/array.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
 
 namespace base {
 class SequencedTaskRunner;
-}
-
-namespace mojo {
-class ErrorHandler;
 }
 
 namespace device {
@@ -34,7 +31,7 @@ namespace usb {
 class DeviceManagerDelegate;
 
 // Implementation of the public DeviceManager interface. This interface can be
-// requested from the devices app located at "system:devices", if available.
+// requested from the devices app located at "mojo:devices", if available.
 class DeviceManagerImpl : public DeviceManager {
  public:
   DeviceManagerImpl(
@@ -43,7 +40,7 @@ class DeviceManagerImpl : public DeviceManager {
       scoped_refptr<base::SequencedTaskRunner> service_task_runner);
   ~DeviceManagerImpl() override;
 
-  void set_error_handler(mojo::ErrorHandler* error_handler);
+  void set_connection_error_handler(const mojo::Closure& error_handler);
 
  private:
   // DeviceManager implementation:
@@ -54,9 +51,8 @@ class DeviceManagerImpl : public DeviceManager {
                   const OpenDeviceCallback& callback) override;
 
   // Callback to handle the async response from the underlying UsbService.
-  void OnGetDevices(EnumerationOptionsPtr options,
-                    const GetDevicesCallback& callback,
-                    const std::vector<scoped_refptr<UsbDevice>>& devices);
+  void OnGetDevices(const GetDevicesCallback& callback,
+                    mojo::Array<DeviceInfoPtr> devices);
 
   mojo::StrongBinding<DeviceManager> binding_;
 

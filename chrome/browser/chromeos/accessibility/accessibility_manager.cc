@@ -827,10 +827,9 @@ void AccessibilityManager::UpdateBrailleImeState() {
   if (!profile_)
     return;
   PrefService* pref_service = profile_->GetPrefs();
-  std::vector<std::string> preload_engines;
-  base::SplitString(pref_service->GetString(prefs::kLanguagePreloadEngines),
-                    ',',
-                    &preload_engines);
+  std::vector<std::string> preload_engines =
+      base::SplitString(pref_service->GetString(prefs::kLanguagePreloadEngines),
+                        ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   std::vector<std::string>::iterator it =
       std::find(preload_engines.begin(),
                 preload_engines.end(),
@@ -845,7 +844,7 @@ void AccessibilityManager::UpdateBrailleImeState() {
   else
     preload_engines.erase(it);
   pref_service->SetString(prefs::kLanguagePreloadEngines,
-                          JoinString(preload_engines, ','));
+                          base::JoinString(preload_engines, ","));
   braille_ime_current_ = false;
 }
 
@@ -1097,8 +1096,7 @@ void AccessibilityManager::OnBrailleKeyEvent(const KeyEvent& event) {
 
 void AccessibilityManager::PostLoadChromeVox(Profile* profile) {
   // Do any setup work needed immediately after ChromeVox actually loads.
-  if (system_sounds_enabled_)
-    ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_ENABLED);
+  ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_ENABLED);
 
   if (chrome_vox_loaded_on_lock_screen_ ||
       should_speak_chrome_vox_announcements_on_user_screen_) {
@@ -1122,8 +1120,7 @@ void AccessibilityManager::PostLoadChromeVox(Profile* profile) {
 
 void AccessibilityManager::PostUnloadChromeVox(Profile* profile) {
   // Do any teardown work needed immediately after ChromeVox actually unloads.
-  if (system_sounds_enabled_)
-    ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_DISABLED);
+  ash::PlaySystemSoundAlways(SOUND_SPOKEN_FEEDBACK_DISABLED);
   // Clear the accessibility focus ring.
   AccessibilityFocusRingController::GetInstance()->SetFocusRing(
       std::vector<gfx::Rect>());

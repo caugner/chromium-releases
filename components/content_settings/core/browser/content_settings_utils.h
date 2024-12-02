@@ -28,8 +28,6 @@ class RuleIterator;
 
 typedef std::pair<ContentSettingsPattern, ContentSettingsPattern> PatternPair;
 
-std::string GetTypeName(ContentSettingsType type);
-
 std::string ContentSettingToString(ContentSetting setting);
 
 ContentSetting ContentSettingFromString(const std::string& name);
@@ -75,10 +73,6 @@ base::Value* GetContentSettingValueAndPatterns(
 // handled by the renderer.
 void GetRendererContentSettingRules(const HostContentSettingsMap* map,
                                     RendererContentSettingRules* rules);
-
-// Get the flags to use when registering the preference to store |content_type|
-// settings.
-uint32 PrefRegistrationFlagsForType(ContentSettingsType content_type);
 
 }  // namespace content_settings
 

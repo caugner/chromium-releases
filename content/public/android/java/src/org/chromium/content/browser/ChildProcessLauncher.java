@@ -14,13 +14,13 @@ import android.text.TextUtils;
 import android.util.Pair;
 import android.view.Surface;
 
-import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.library_loader.Linker;
 import org.chromium.content.app.ChildProcessService;
 import org.chromium.content.app.ChromiumLinkerParams;
@@ -337,7 +337,9 @@ public class ChildProcessLauncher {
     private static final long FREE_CONNECTION_DELAY_MILLIS = 1;
 
     private static void freeConnection(ChildProcessConnection connection) {
-        if (connection.equals(sSpareSandboxedConnection)) sSpareSandboxedConnection = null;
+        synchronized (ChildProcessLauncher.class) {
+            if (connection.equals(sSpareSandboxedConnection)) sSpareSandboxedConnection = null;
+        }
 
         // Freeing a service should be delayed. This is so that we avoid immediately reusing the
         // freed service (see http://crbug.com/164069): the framework might keep a service process

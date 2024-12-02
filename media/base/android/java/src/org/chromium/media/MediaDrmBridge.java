@@ -11,9 +11,9 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Handler;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -23,8 +23,10 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -66,12 +68,10 @@ public class MediaDrmBridge {
     private static final char[] HEX_CHAR_LOOKUP = "0123456789ABCDEF".toCharArray();
     private static final long INVALID_NATIVE_MEDIA_DRM_BRIDGE = 0;
 
-    // KeyStatus for CDM key information. MUST keep this value in sync with
-    // CdmKeyInformation::KeyStatus.
-    private static final int KEY_STATUS_USABLE = 0;
-    private static final int KEY_STATUS_INTERNAL_ERROR = 1;
-    private static final int KEY_STATUS_EXPIRED = 2;
-    private static final int KEY_STATUS_OUTPUT_NOT_ALLOWED = 3;
+    // On Android L and before, MediaDrm doesn't support KeyStatus. Use a dummy
+    // key ID to report key status info.
+    // See details: https://github.com/w3c/encrypted-media/issues/32
+    private static final byte[] DUMMY_KEY_ID = new byte[] {0};
 
     private MediaDrm mMediaDrm;
     private long mNativeMediaDrmBridge;
@@ -100,6 +100,39 @@ public class MediaDrmBridge {
     // lot of cases. To streamline implementation, we do not catch it in private
     // non-native methods and only catch it in public APIs.
     private boolean mProvisioningPending;
+
+    /**
+     *  An equivalent of MediaDrm.KeyStatus, which is only available on M+.
+     */
+    private static class KeyStatus {
+        private final byte[] mKeyId;
+        private final int mStatusCode;
+
+        private KeyStatus(byte[] keyId, int statusCode) {
+            mKeyId = keyId;
+            mStatusCode = statusCode;
+        }
+
+        @CalledByNative("KeyStatus")
+        private byte[] getKeyId() {
+            return mKeyId;
+        }
+
+        @CalledByNative("KeyStatus")
+        private int getStatusCode() {
+            return mStatusCode;
+        }
+    }
+
+    /**
+     *  Creates a dummy single element list of KeyStatus with a dummy key ID and
+     *  the specified keyStatus.
+     */
+    private static List<KeyStatus> getDummyKeysInfo(int statusCode) {
+        List<KeyStatus> keysInfo = new ArrayList<KeyStatus>();
+        keysInfo.add(new KeyStatus(DUMMY_KEY_ID, statusCode));
+        return keysInfo;
+    }
 
     /**
      *  This class contains data needed to call createSession().
@@ -167,6 +200,7 @@ public class MediaDrmBridge {
         return mNativeMediaDrmBridge != INVALID_NATIVE_MEDIA_DRM_BRIDGE;
     }
 
+    @TargetApi(Build.VERSION_CODES.M)
     private MediaDrmBridge(UUID schemeUUID, long nativeMediaDrmBridge)
             throws android.media.UnsupportedSchemeException {
         mSchemeUUID = schemeUUID;
@@ -181,7 +215,12 @@ public class MediaDrmBridge {
         mResetDeviceCredentialsPending = false;
         mProvisioningPending = false;
 
-        mMediaDrm.setOnEventListener(new MediaDrmListener());
+        mMediaDrm.setOnEventListener(new EventListener());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            mMediaDrm.setOnExpirationUpdateListener(new ExpirationUpdateListener(), null);
+            mMediaDrm.setOnKeyStatusChangeListener(new KeyStatusChangeListener(), null);
+        }
+
         mMediaDrm.setPropertyString(PRIVACY_MODE, ENABLE);
         mMediaDrm.setPropertyString(SESSION_SHARING, ENABLE);
 
@@ -689,7 +728,10 @@ public class MediaDrmBridge {
             }
             Log.d(TAG, "Key successfully added for session %s", bytesToHexString(sessionId));
             onPromiseResolved(promiseId);
-            onSessionKeysChange(sessionId, true, KEY_STATUS_USABLE);
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                onSessionKeysChange(sessionId,
+                        getDummyKeysInfo(MediaDrm.KeyStatus.STATUS_USABLE).toArray(), true);
+            }
             return;
         } catch (android.media.NotProvisionedException e) {
             // TODO(xhwang): Should we handle this?
@@ -821,12 +863,26 @@ public class MediaDrmBridge {
 
     private void onSessionMessage(final byte[] sessionId, final MediaDrm.KeyRequest request) {
         mHandler.post(new Runnable() {
+            @TargetApi(Build.VERSION_CODES.M)
             @Override
             public void run() {
-                if (isNativeMediaDrmBridgeValid()) {
-                    nativeOnSessionMessage(mNativeMediaDrmBridge, sessionId, request.getData(),
-                            request.getDefaultUrl());
+                if (!isNativeMediaDrmBridgeValid()) {
+                    return;
                 }
+
+                int requestType = MediaDrm.KeyRequest.REQUEST_TYPE_INITIAL;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    requestType = request.getRequestType();
+                } else {
+                    // Prior to M, getRequestType() is not supported. Do our best guess here: Assume
+                    // requests with a URL are renewals and all others are initial requests.
+                    requestType = request.getDefaultUrl().isEmpty()
+                            ? MediaDrm.KeyRequest.REQUEST_TYPE_INITIAL
+                            : MediaDrm.KeyRequest.REQUEST_TYPE_RENEWAL;
+                }
+
+                nativeOnSessionMessage(mNativeMediaDrmBridge, sessionId, requestType,
+                        request.getData(), request.getDefaultUrl());
             }
         });
     }
@@ -843,13 +899,25 @@ public class MediaDrmBridge {
     }
 
     private void onSessionKeysChange(
-            final byte[] sessionId, final boolean hasAdditionalUsableKey, final int keyStatus) {
+            final byte[] sessionId, final Object[] keysInfo, final boolean hasAdditionalUsableKey) {
         mHandler.post(new Runnable() {
             @Override
             public void run() {
                 if (isNativeMediaDrmBridgeValid()) {
                     nativeOnSessionKeysChange(
-                            mNativeMediaDrmBridge, sessionId, hasAdditionalUsableKey, keyStatus);
+                            mNativeMediaDrmBridge, sessionId, keysInfo, hasAdditionalUsableKey);
+                }
+            }
+        });
+    }
+
+    private void onSessionExpirationUpdate(final byte[] sessionId, final long expirationTime) {
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (isNativeMediaDrmBridgeValid()) {
+                    nativeOnSessionExpirationUpdate(
+                            mNativeMediaDrmBridge, sessionId, expirationTime);
                 }
             }
         });
@@ -878,16 +946,16 @@ public class MediaDrmBridge {
         });
     }
 
-    private class MediaDrmListener implements MediaDrm.OnEventListener {
+    private class EventListener implements MediaDrm.OnEventListener {
         @Override
         public void onEvent(
                 MediaDrm mediaDrm, byte[] sessionId, int event, int extra, byte[] data) {
             if (sessionId == null) {
-                Log.e(TAG, "MediaDrmListener: Null session.");
+                Log.e(TAG, "EventListener: Null session.");
                 return;
             }
             if (!sessionExists(sessionId)) {
-                Log.e(TAG, "MediaDrmListener: Invalid session %s", bytesToHexString(sessionId));
+                Log.e(TAG, "EventListener: Invalid session %s", bytesToHexString(sessionId));
                 return;
             }
             switch(event) {
@@ -913,13 +981,24 @@ public class MediaDrmBridge {
                     } else {
                         onLegacySessionError(sessionId,
                                 "MediaDrm EVENT_KEY_REQUIRED: Failed to generate request.");
-                        onSessionKeysChange(sessionId, false, KEY_STATUS_INTERNAL_ERROR);
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                            onSessionKeysChange(sessionId,
+                                    getDummyKeysInfo(MediaDrm.KeyStatus.STATUS_INTERNAL_ERROR)
+                                            .toArray(),
+                                    false);
+                        }
+                        Log.e(TAG, "EventListener: getKeyRequest failed.");
+                        return;
                     }
                     break;
                 case MediaDrm.EVENT_KEY_EXPIRED:
                     Log.d(TAG, "MediaDrm.EVENT_KEY_EXPIRED");
                     onLegacySessionError(sessionId, "MediaDrm EVENT_KEY_EXPIRED.");
-                    onSessionKeysChange(sessionId, false, KEY_STATUS_EXPIRED);
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                        onSessionKeysChange(sessionId,
+                                getDummyKeysInfo(MediaDrm.KeyStatus.STATUS_EXPIRED).toArray(),
+                                false);
+                    }
                     break;
                 case MediaDrm.EVENT_VENDOR_DEFINED:
                     Log.d(TAG, "MediaDrm.EVENT_VENDOR_DEFINED");
@@ -929,6 +1008,34 @@ public class MediaDrmBridge {
                     Log.e(TAG, "Invalid DRM event " + event);
                     return;
             }
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private class KeyStatusChangeListener implements MediaDrm.OnKeyStatusChangeListener {
+        private List<KeyStatus> getKeysInfo(List<MediaDrm.KeyStatus> keyInformation) {
+            List<KeyStatus> keysInfo = new ArrayList<KeyStatus>();
+            for (MediaDrm.KeyStatus keyStatus : keyInformation) {
+                keysInfo.add(new KeyStatus(keyStatus.getKeyId(), keyStatus.getStatusCode()));
+            }
+            return keysInfo;
+        }
+
+        @Override
+        public void onKeyStatusChange(MediaDrm md, byte[] sessionId,
+                List<MediaDrm.KeyStatus> keyInformation, boolean hasNewUsableKey) {
+            Log.d(TAG, "KeysStatusChange: " + bytesToHexString(sessionId) + ", " + hasNewUsableKey);
+
+            onSessionKeysChange(sessionId, getKeysInfo(keyInformation).toArray(), hasNewUsableKey);
+        }
+    }
+
+    @TargetApi(Build.VERSION_CODES.M)
+    private class ExpirationUpdateListener implements MediaDrm.OnExpirationUpdateListener {
+        @Override
+        public void onExpirationUpdate(MediaDrm md, byte[] sessionId, long expirationTime) {
+            Log.d(TAG, "ExpirationUpdate: " + bytesToHexString(sessionId) + ", " + expirationTime);
+            onSessionExpirationUpdate(sessionId, expirationTime);
         }
     }
 
@@ -1011,11 +1118,13 @@ public class MediaDrmBridge {
     private native void nativeOnPromiseRejected(
             long nativeMediaDrmBridge, long promiseId, String errorMessage);
 
-    private native void nativeOnSessionMessage(
-            long nativeMediaDrmBridge, byte[] sessionId, byte[] message, String destinationUrl);
+    private native void nativeOnSessionMessage(long nativeMediaDrmBridge, byte[] sessionId,
+            int requestType, byte[] message, String destinationUrl);
     private native void nativeOnSessionClosed(long nativeMediaDrmBridge, byte[] sessionId);
     private native void nativeOnSessionKeysChange(long nativeMediaDrmBridge, byte[] sessionId,
-            boolean hasAdditionalUsableKey, int keyStatus);
+            Object[] keysInfo, boolean hasAdditionalUsableKey);
+    private native void nativeOnSessionExpirationUpdate(
+            long nativeMediaDrmBridge, byte[] sessionId, long expirationTime);
     private native void nativeOnLegacySessionError(
             long nativeMediaDrmBridge, byte[] sessionId, String errorMessage);
 

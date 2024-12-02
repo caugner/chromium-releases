@@ -57,32 +57,40 @@ var tests = [
   },
 
   /**
-   * Test that changes to window height bubble down to dropdowns correctly.
+   * Test that the bookmarks menu can be closed by clicking the plugin and
+   * pressing escape.
    */
-  function testUiManagerResizeDropdown() {
-    var mockWindow = {
-      addEventListener: function(name, listener) {},  // Pass.
-      innerHeight: 1080
-    };
-    var mockZoomToolbar = {
-      clientHeight: 400
-    };
-    var toolbar = document.getElementById('material-toolbar');
-    var bookmarksDropdown = toolbar.$.bookmarks;
+  function testOpenCloseBookmarks() {
+    var toolbar = $('material-toolbar');
+    toolbar.show();
+    var dropdown = toolbar.$.bookmarks;
+    var plugin = $('plugin');
+    var ESC_KEY = 27;
 
-    var uiManager = new UiManager(mockWindow, toolbar, mockZoomToolbar);
+    // Clicking on the plugin should close the bookmarks menu.
+    chrome.test.assertFalse(dropdown.dropdownOpen);
+    MockInteractions.tap(dropdown.$.icon);
+    chrome.test.assertTrue(dropdown.dropdownOpen);
+    MockInteractions.tap(plugin);
+    chrome.test.assertFalse(dropdown.dropdownOpen,
+        "Clicking plugin closes dropdown");
 
-    chrome.test.assertTrue(bookmarksDropdown.lowerBound == 680);
+    MockInteractions.tap(dropdown.$.icon);
+    chrome.test.assertTrue(dropdown.dropdownOpen);
+    MockInteractions.pressAndReleaseKeyOn(document, ESC_KEY);
+    chrome.test.assertFalse(dropdown.dropdownOpen,
+        "Escape key closes dropdown");
+    chrome.test.assertTrue(toolbar.opened,
+        "First escape key does not close toolbar");
 
-    mockWindow.innerHeight = 480;
-    uiManager.resizeDropdowns_();
-    chrome.test.assertTrue(bookmarksDropdown.lowerBound == 80);
+    MockInteractions.pressAndReleaseKeyOn(document, ESC_KEY);
+    chrome.test.assertFalse(toolbar.opened,
+        "Second escape key closes toolbar");
 
     chrome.test.succeed();
   }
 ];
 
-var scriptingAPI = new PDFScriptingAPI(window, window);
-scriptingAPI.setLoadCallback(function() {
+importTestHelpers().then(function() {
   chrome.test.runTests(tests);
 });

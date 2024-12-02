@@ -6,7 +6,11 @@ found in the LICENSE file.
 
 <!--
 This file is a comprehensive list of Chrome user actions along with the owner
-and description for each user action.
+and description for each user action. A user action should be tied to an actual
+action taken by a user. It should be logged immediatly after a user takes the
+action, and should only be logged once per actual event. If an action is not
+user triggered, specify it using not_user_triggered="true" as an attribute to
+the <action> tag.
 
 Please run extract_actions.py to add new actions and pretty-print this file.
 
@@ -31,7 +35,7 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="AboutFlags_StartupTick">
+<action name="AboutFlags_StartupTick" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
@@ -93,6 +97,16 @@ should be able to be added at any place in this file.
     User enabled flag that Forces Data Saver Lo-Fi mode to be disabled via
     chrome://flags. The action is emitted once per startup when the flag is
     active.
+  </description>
+</action>
+
+<action name="AboutFlags_data-reduction-proxy-lo-fi@4">
+  <owner>bengr@chromium.org</owner>
+  <owner>megjablon@chromium.org</owner>
+  <description>
+    User enabled flag that Forces Data Saver Lo-Fi mode to be enabled only on
+    slow connections via chrome://flags. The action is emitted once per startup
+    when the flag is active.
   </description>
 </action>
 
@@ -1806,6 +1820,22 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="BookmarkNavigatorWidgetAdded">
+  <owner>aurimas@chromium.org</owner>
+  <description>
+    User added the &quot;bookmark navigator&quot; widget, which shows a
+    navigable hierarchy of the user's bookmarks, to their homescreen on Android.
+  </description>
+</action>
+
+<action name="BookmarkShortcutWidgetAdded">
+  <owner>aurimas@chromium.org</owner>
+  <description>
+    User added the &quot;bookmark shortcut&quot; widget, which is an icon to
+    open a single bookmark in Chrome, to their homescreen on Android.
+  </description>
+</action>
+
 <action name="Bookmarks_Search">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -2780,6 +2810,114 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="DownloadNotification.Button_AlwaysOpenType">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Always open type&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_Cancel">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Cancel&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_Discard">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Discard&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_Keep">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Keep&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_LearnInterrupted">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Learn More about Interrupted&quot; button on download
+    notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_LearnScanning">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Learn More about Scanning&quot; button on download
+    notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_OpenWhenComplete">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Open When Completed&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_Pause">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Pause&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_PlatformOpen">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Open&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_Resume">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Resume&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Button_ShowInFolder">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes &quot;Show in folder&quot; button on download notification.
+  </description>
+</action>
+
+<action name="DownloadNotification.Click_Completed">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes a download notification, which indicates a completed download.
+  </description>
+</action>
+
+<action name="DownloadNotification.Click_Dangerous">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes a download notification, which indicates a dangerous download.
+  </description>
+</action>
+
+<action name="DownloadNotification.Click_InProgress">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes a download notification, which indicates a download in progress.
+  </description>
+</action>
+
+<action name="DownloadNotification.Click_Stopped">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    User pushes a download notification, which indicates a cancelled or
+    interrupted download.
+  </description>
+</action>
+
 <action name="Duplicate">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -2923,14 +3061,14 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="Flash.JavaScriptUsed">
+<action name="Flash.JavaScriptUsed" not_user_triggered="true">
   <owner>tommycli@chromium.org</owner>
   <description>
     Count of Flash plugin instances that use JavaScript.
   </description>
 </action>
 
-<action name="Flash.PluginInstanceCreated">
+<action name="Flash.PluginInstanceCreated" not_user_triggered="true">
   <owner>thestig@chromium.org</owner>
   <description>Count of Flash plugin instances.</description>
 </action>
@@ -3220,12 +3358,12 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="FrameLoad">
+<action name="FrameLoad" not_user_triggered="true">
   <owner>thestig@chromium.org</owner>
   <description>Count of successful frame loads to new pages.</description>
 </action>
 
-<action name="FrameLoadWithFlash">
+<action name="FrameLoadWithFlash" not_user_triggered="true">
   <owner>thestig@chromium.org</owner>
   <description>Count of frame loads that also load PPAPI Flash.</description>
 </action>
@@ -7916,6 +8054,7 @@ should be able to be added at any place in this file.
     When user navigates back, using either system back or toolbar back button,
     from the preview page.
   </description>
+  <obsolete>Deprecated as of 7/2015</obsolete>
 </action>
 
 <action name="MobilePreviewPageReload">
@@ -7923,6 +8062,7 @@ should be able to be added at any place in this file.
   <description>
     User pressed reload button while the preview page is being shown.
   </description>
+  <obsolete>Deprecated as of 7/2015</obsolete>
 </action>
 
 <action name="MobilePreviewPageSingleTap">
@@ -7930,11 +8070,13 @@ should be able to be added at any place in this file.
   <description>
     User taped on the page while the preview page is being shown.
   </description>
+  <obsolete>Deprecated as of 7/2015</obsolete>
 </action>
 
 <action name="MobilePreviewPageTabClose">
   <owner>ksimbili@chromium.org</owner>
   <description>User closes the tab while preview page is loaded.</description>
+  <obsolete>Deprecated as of 7/2015</obsolete>
 </action>
 
 <action name="MobilePullGestureReload">
@@ -8370,12 +8512,12 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="NavEntryCommitted">
+<action name="NavEntryCommitted" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="NavEntryCommitted.SRP">
+<action name="NavEntryCommitted.SRP" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
@@ -10390,12 +10532,12 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="PageLoad">
+<action name="PageLoad" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="PageLoadSRP">
+<action name="PageLoadSRP" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
@@ -10908,17 +11050,17 @@ should be able to be added at any place in this file.
   <obsolete>Replaced by the histogram SB2.InterstitialAction</obsolete>
 </action>
 
-<action name="SSL.DisplayedInsecureContent">
+<action name="SSL.DisplayedInsecureContent" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="SSL.RanInsecureContent">
+<action name="SSL.RanInsecureContent" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="SSL.RanInsecureContentGoogle">
+<action name="SSL.RanInsecureContentGoogle" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
@@ -11058,6 +11200,7 @@ should be able to be added at any place in this file.
   <description>
     Counts the number of page loads controlled by a Service Worker.
   </description>
+  <obsolete>Replaced by ServiceWorker.PageLoad histogram.</obsolete>
 </action>
 
 <action name="SettingsResetBubble.LearnMore">
@@ -11298,7 +11441,7 @@ should be able to be added at any place in this file.
   <description>Please enter the description of the metric.</description>
 </action>
 
-<action name="StartupTick">
+<action name="StartupTick" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
@@ -11845,12 +11988,12 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="ThirdPartyCookieBlockingDisabled">
+<action name="ThirdPartyCookieBlockingDisabled" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
-<action name="ThirdPartyCookieBlockingEnabled">
+<action name="ThirdPartyCookieBlockingEnabled" not_user_triggered="true">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
 </action>

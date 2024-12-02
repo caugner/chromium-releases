@@ -180,8 +180,7 @@ v8::Local<v8::Object> LoadablePluginPlaceholder::GetV8ScriptableObject(
 
 void LoadablePluginPlaceholder::OnUnobscuredRectUpdate(
     const gfx::Rect& unobscured_rect) {
-  DCHECK(
-      content::RenderThread::Get()->GetTaskRunner()->BelongsToCurrentThread());
+  DCHECK(content::RenderThread::Get());
   if (!power_saver_enabled_ || !premade_throttler_ || !finished_loading_)
     return;
 
@@ -287,13 +286,14 @@ void LoadablePluginPlaceholder::DidFinishLoadingCallback() {
 
     blink::WebDOMEvent event = element.document().createEvent("MessageEvent");
     blink::WebDOMMessageEvent msg_event = event.to<blink::WebDOMMessageEvent>();
-    msg_event.initMessageEvent("message",     // type
-                               false,         // canBubble
-                               false,         // cancelable
-                               message_data,  // data
-                               "",            // origin [*]
-                               NULL,          // source [*]
-                               "");           // lastEventId
+    msg_event.initMessageEvent("message",           // type
+                               false,               // canBubble
+                               false,               // cancelable
+                               message_data,        // data
+                               "",                  // origin [*]
+                               NULL,                // source [*]
+                               element.document(),  // target document
+                               "");                 // lastEventId
     element.dispatchEvent(msg_event);
   }
 }
@@ -322,8 +322,7 @@ bool LoadablePluginPlaceholder::LoadingBlocked() const {
 }
 
 void LoadablePluginPlaceholder::RecheckSizeAndMaybeUnthrottle() {
-  DCHECK(
-      content::RenderThread::Get()->GetTaskRunner()->BelongsToCurrentThread());
+  DCHECK(content::RenderThread::Get());
   DCHECK(!in_size_recheck_);
 
   if (!plugin())

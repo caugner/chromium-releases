@@ -13,9 +13,9 @@ import sys
 import urllib2
 
 from telemetry.core import platform
-from telemetry.core.platform import trybot_device
 from telemetry import decorators
 from telemetry.internal.browser import possible_browser
+from telemetry.internal.platform import trybot_device
 
 CHROMIUM_CONFIG_FILENAME = 'tools/run-perf-test.cfg'
 BLINK_CONFIG_FILENAME = 'Tools/run-perf-test.cfg'
@@ -26,6 +26,7 @@ EXCLUDED_BOTS = {
     'linux_perf_tester',
     'linux_perf_bisector',
     'win_perf_bisect_builder',
+    'win64_nv_tester',
     'win_x64_perf_bisect_builder',
     'linux_perf_bisect_builder',
     'mac_perf_bisect_builder',
@@ -151,7 +152,7 @@ class PossibleTrybotBrowser(possible_browser.PossibleBrowser):
     for index, arg in enumerate(arguments):
       if arg.startswith('--browser='):
         if bot_platform == 'android':
-          arguments[index] = '--browser=android-chrome-shell'
+          arguments[index] = '--browser=android-chromium'
         elif any('x64' in bot for bot in self._builder_names[bot_platform]):
           arguments[index] = '--browser=release_x64'
           target_arch = 'x64'

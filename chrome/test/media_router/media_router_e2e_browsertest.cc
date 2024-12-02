@@ -7,8 +7,8 @@
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "chrome/browser/media/router/media_router.h"
+#include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_mojo_impl.h"
-#include "chrome/browser/media/router/media_router_mojo_impl_factory.h"
 #include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/media/router/media_source_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -36,8 +36,10 @@ namespace {
 const char kReceiver[] = "receiver";
 // URL to launch Castv2Player_Staging app on Chromecast
 const char kCastAppPresentationUrl[] =
-    "https://google.com/cast#__castAppId__=BE6E4473";
+    "https://google.com/cast#__castAppId__=BE6E4473/"
+    "__castClientId__=143692175507258981";
 }  // namespace
+
 
 namespace media_router {
 
@@ -51,7 +53,7 @@ MediaRouterE2EBrowserTest::~MediaRouterE2EBrowserTest() {
 void MediaRouterE2EBrowserTest::SetUpOnMainThread() {
   MediaRouterBaseBrowserTest::SetUpOnMainThread();
   media_router_ =
-      MediaRouterMojoImplFactory::GetApiForBrowserContext(browser()->profile());
+      MediaRouterFactory::GetApiForBrowserContext(browser()->profile());
   DCHECK(media_router_);
 }
 
@@ -61,9 +63,10 @@ void MediaRouterE2EBrowserTest::TearDownOnMainThread() {
 }
 
 void MediaRouterE2EBrowserTest::OnRouteResponseReceived(
-    scoped_ptr<MediaRoute> route,
+    const MediaRoute* route,
+    const std::string& presentation_id,
     const std::string& error) {
-  ASSERT_TRUE(route.get());
+  ASSERT_TRUE(route);
   route_id_ = route->media_route_id();
 }
 
@@ -85,10 +88,12 @@ void MediaRouterE2EBrowserTest::CreateMediaRoute(const MediaSource& source,
   const MediaSink& sink = it->second;
 
   // The callback will set route_id_ when invoked.
-  media_router_->CreateRoute(
-      source.id(), sink.id(), origin, tab_id,
+  std::vector<MediaRouteResponseCallback> route_response_callbacks;
+  route_response_callbacks.push_back(
       base::Bind(&MediaRouterE2EBrowserTest::OnRouteResponseReceived,
                  base::Unretained(this)));
+  media_router_->CreateRoute(source.id(), sink.id(), origin, tab_id,
+                             route_response_callbacks);
 
   // Wait for the route request to be fulfilled (and route to be started).
   ConditionalWait(base::TimeDelta::FromSeconds(30),

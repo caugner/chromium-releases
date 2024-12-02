@@ -52,8 +52,8 @@
 using extensions::BundleInstaller;
 using extensions::Extension;
 using extensions::Manifest;
-using extensions::PermissionMessageString;
-using extensions::PermissionMessageStrings;
+using extensions::CoalescedPermissionMessage;
+using extensions::CoalescedPermissionMessages;
 using extensions::PermissionSet;
 
 namespace {
@@ -154,20 +154,17 @@ SkBitmap GetDefaultIconBitmapForMaxScaleFactor(bool is_app) {
 bool AutoConfirmPrompt(ExtensionInstallPrompt::Delegate* delegate) {
   switch (extensions::ScopedTestDialogAutoConfirm::GetAutoConfirmValue()) {
     case extensions::ScopedTestDialogAutoConfirm::NONE:
-      LOG(WARNING) << "None!";
       return false;
     // We use PostTask instead of calling the delegate directly here, because in
     // the real implementations it's highly likely the message loop will be
     // pumping a few times before the user clicks accept or cancel.
     case extensions::ScopedTestDialogAutoConfirm::ACCEPT:
-      LOG(WARNING) << "Proceeding!";
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(&ExtensionInstallPrompt::Delegate::InstallUIProceed,
                      base::Unretained(delegate)));
       return true;
     case extensions::ScopedTestDialogAutoConfirm::CANCEL:
-      LOG(WARNING) << "Canceling!";
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::Bind(&ExtensionInstallPrompt::Delegate::InstallUIAbort,
@@ -249,7 +246,7 @@ ExtensionInstallPrompt::Prompt::~Prompt() {
 }
 
 void ExtensionInstallPrompt::Prompt::SetPermissions(
-    const PermissionMessageStrings& permissions,
+    const CoalescedPermissionMessages& permissions,
     PermissionsType permissions_type) {
   InstallPromptPermissions& install_permissions =
       GetPermissionsForType(permissions_type);
@@ -258,18 +255,19 @@ void ExtensionInstallPrompt::Prompt::SetPermissions(
   install_permissions.details.clear();
   install_permissions.is_showing_details.clear();
 
-  for (const PermissionMessageString& str : permissions) {
-    install_permissions.permissions.push_back(str.message);
+  for (const CoalescedPermissionMessage& msg : permissions) {
+    install_permissions.permissions.push_back(msg.message());
     // Add a dash to the front of each permission detail.
     base::string16 details;
-    if (!str.submessages.empty()) {
+    if (!msg.submessages().empty()) {
       std::vector<base::string16> detail_lines_with_bullets;
-      for (const auto& detail_line : str.submessages) {
+      for (const auto& detail_line : msg.submessages()) {
         detail_lines_with_bullets.push_back(base::ASCIIToUTF16("- ") +
                                             detail_line);
       }
 
-      details = JoinString(detail_lines_with_bullets, '\n');
+      details = base::JoinString(detail_lines_with_bullets,
+                                 base::ASCIIToUTF16("\n"));
     }
     install_permissions.details.push_back(details);
     install_permissions.is_showing_details.push_back(false);
@@ -886,8 +884,9 @@ void ExtensionInstallPrompt::ShowConfirmation() {
     const extensions::PermissionMessageProvider* message_provider =
         extensions::PermissionMessageProvider::Get();
 
-    prompt_->SetPermissions(message_provider->GetPermissionMessageStrings(
-                                permissions_to_display.get(), type),
+    prompt_->SetPermissions(message_provider->GetPermissionMessages(
+                                message_provider->GetAllPermissionIDs(
+                                    permissions_to_display.get(), type)),
                             REGULAR_PERMISSIONS);
 
     scoped_refptr<const extensions::PermissionSet> withheld =
@@ -895,8 +894,9 @@ void ExtensionInstallPrompt::ShowConfirmation() {
                    : nullptr;
     if (withheld && !withheld->IsEmpty()) {
       prompt_->SetPermissions(
-          message_provider->GetPermissionMessageStrings(withheld.get(), type),
-          PermissionsType::WITHHELD_PERMISSIONS);
+          message_provider->GetPermissionMessages(
+              message_provider->GetAllPermissionIDs(withheld.get(), type)),
+          WITHHELD_PERMISSIONS);
     }
   }
 

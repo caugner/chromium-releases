@@ -5,10 +5,7 @@
 import unittest
 
 from telemetry import decorators
-from telemetry.core import util
-
-util.AddDirToPythonPath(util.GetTelemetryDir(), 'third_party', 'mock')
-import mock  # pylint:disable=import-error
+import mock
 
 
 class FakePlatform(object):
@@ -161,3 +158,11 @@ class TestDeprecation(unittest.TestCase):
         'Class Bar is deprecated. It will no longer be supported on '
         'December 01, 2015. Please remove it or switch to an alternative '
         'before that time. \n', stacklevel=4)
+
+  def testReturnValue(self):
+    class Bar(object):
+      @decorators.Deprecated(2015, 12, 1, 'Testing only.')
+      def Foo(self, x):
+        return x
+
+    self.assertEquals(5, Bar().Foo(5))

@@ -22,6 +22,10 @@
 #include "ui/mojo/init/ui_init.h"
 #include "v8/include/v8.h"
 
+#if defined(OS_LINUX) && !defined(OS_ANDROID)
+#include "components/font_service/public/cpp/font_loader.h"
+#endif
+
 namespace html_viewer {
 
 namespace {
@@ -38,9 +42,7 @@ const char kJavaScriptFlags[] = "js-flags";
 size_t kDesiredMaxMemory = 20 * 1024 * 1024;
 
 // Paths resources are loaded from.
-const char kResourceIcudtl[] = "icudtl.dat";
-const char kResourceResourcesPak[] = "html_viewer_resources.pak";
-const char kResourceUIPak[] = "ui_test.pak";
+const char kResourceResourcesPak[] = "html_viewer.pak";
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
 const char kResourceNativesBlob[] = "natives_blob.bin";
 const char kResourceSnapshotBlob[] = "snapshot_blob.bin";
@@ -49,8 +51,6 @@ const char kResourceSnapshotBlob[] = "snapshot_blob.bin";
 std::set<std::string> GetResourcePaths() {
   std::set<std::string> paths;
   paths.insert(kResourceResourcesPak);
-  paths.insert(kResourceIcudtl);
-  paths.insert(kResourceUIPak);
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
   paths.insert(kResourceNativesBlob);
   paths.insert(kResourceSnapshotBlob);
@@ -93,9 +93,13 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
 
   if (!resource_loader_.BlockUntilLoaded()) {
     // Assume on error we're being shut down.
-    app_->Terminate();
+    app_->Quit();
     return;
   }
+
+#if defined(OS_LINUX) && !defined(OS_ANDROID)
+  SkFontConfigInterface::SetGlobal(new font_service::FontLoader(app_));
+#endif
 
   ui_init_.reset(
       new ui::mojo::UIInit(screen_size_in_pixels, device_pixel_ratio));
@@ -113,7 +117,7 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
 #endif
   blink::initialize(blink_platform_.get());
   base::i18n::InitializeICUWithFileDescriptor(
-      resource_loader_.ReleaseFile(kResourceIcudtl).TakePlatformFile(),
+      resource_loader_.GetICUFile().TakePlatformFile(),
       base::MemoryMappedFile::Region::kWholeFile);
 
   ui::RegisterPathProvider();
@@ -130,12 +134,13 @@ void GlobalState::InitIfNecessary(const gfx::Size& screen_size_in_pixels,
     blink::WebRuntimeFeatures::enableEncryptedMedia(false);
 
   if (!is_headless_) {
+    base::File pak_file = resource_loader_.ReleaseFile(kResourceResourcesPak);
+    base::File pak_file_2 = pak_file.Duplicate();
     ui::ResourceBundle::InitSharedInstanceWithPakFileRegion(
-        resource_loader_.ReleaseFile(kResourceResourcesPak),
-        base::MemoryMappedFile::Region::kWholeFile);
+        pak_file.Pass(), base::MemoryMappedFile::Region::kWholeFile);
     // TODO(sky): why is this always using 100?
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromFile(
-        resource_loader_.ReleaseFile(kResourceUIPak), ui::SCALE_FACTOR_100P);
+      pak_file_2.Pass(), ui::SCALE_FACTOR_100P);
   }
 
   compositor_thread_.Start();

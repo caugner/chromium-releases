@@ -50,16 +50,12 @@ const int32* SurfaceFactoryOzone::GetEGLSurfaceProperties(
 scoped_refptr<ui::NativePixmap> SurfaceFactoryOzone::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
     gfx::Size size,
-    BufferFormat format,
-    BufferUsage usage) {
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage) {
   return NULL;
 }
 
 bool SurfaceFactoryOzone::CanShowPrimaryPlaneAsOverlay() {
-  return false;
-}
-
-bool SurfaceFactoryOzone::CanCreateNativePixmap(BufferUsage usage) {
   return false;
 }
 

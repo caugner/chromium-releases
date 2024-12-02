@@ -38,21 +38,32 @@ void QuicSpdyServerStream::OnStreamHeadersComplete(bool fin, size_t frame_len) {
   MarkHeadersConsumed(decompressed_headers().length());
 }
 
-uint32 QuicSpdyServerStream::ProcessData(const char* data, uint32 data_len) {
-  body_.append(data, data_len);
+void QuicSpdyServerStream::OnDataAvailable() {
+  while (HasBytesToRead()) {
+    struct iovec iov;
+    if (GetReadableRegions(&iov, 1) == 0) {
+      // No more data to read.
+      break;
+    }
+    DVLOG(1) << "Processed " << iov.iov_len << " bytes for stream " << id();
+    body_.append(static_cast<char*>(iov.iov_base), iov.iov_len);
 
-  DCHECK(!request_headers_.empty());
-  if (content_length_ >= 0 &&
-      static_cast<int>(body_.size()) > content_length_) {
-    SendErrorResponse();
-    return 0;
+    if (content_length_ >= 0 &&
+        static_cast<int>(body_.size()) > content_length_) {
+      SendErrorResponse();
+      return;
+    }
+    MarkConsumed(iov.iov_len);
   }
-  DVLOG(1) << "Processed " << data_len << " bytes for stream " << id();
-  return data_len;
-}
+  if (!sequencer()->IsClosed()) {
+    sequencer()->SetUnblocked();
+    return;
+  }
 
-void QuicSpdyServerStream::OnFinRead() {
-  ReliableQuicStream::OnFinRead();
+  // If the sequencer is closed, then the all the body, including the fin,
+  // has been consumed.
+  OnFinRead();
+
   if (write_side_closed() || fin_buffered()) {
     return;
   }
@@ -74,7 +85,7 @@ void QuicSpdyServerStream::OnFinRead() {
 bool QuicSpdyServerStream::ParseRequestHeaders(const char* data,
                                                uint32 data_len) {
   DCHECK(headers_decompressed());
-  SpdyFramer framer(SPDY3);
+  SpdyFramer framer(HTTP2);
   size_t len = framer.ParseHeaderBlockInBuffer(data,
                                                data_len,
                                                &request_headers_);

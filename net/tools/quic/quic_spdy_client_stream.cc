@@ -52,22 +52,35 @@ void QuicSpdyClientStream::OnStreamHeadersComplete(bool fin,
   MarkHeadersConsumed(decompressed_headers().length());
 }
 
-uint32 QuicSpdyClientStream::ProcessData(const char* data, uint32 data_len) {
-  data_.append(data, data_len);
-  DCHECK(!response_headers_.empty());
-  if (content_length_ >= 0 &&
-      static_cast<int>(data_.size()) > content_length_) {
-    Reset(QUIC_BAD_APPLICATION_PAYLOAD);
-    return 0;
+void QuicSpdyClientStream::OnDataAvailable() {
+  while (HasBytesToRead()) {
+    struct iovec iov;
+    if (GetReadableRegions(&iov, 1) == 0) {
+      // No more data to read.
+      break;
+    }
+    DVLOG(1) << "Client processed " << iov.iov_len << " bytes for stream "
+             << id();
+    data_.append(static_cast<char*>(iov.iov_base), iov.iov_len);
+
+    if (content_length_ >= 0 &&
+        static_cast<int>(data_.size()) > content_length_) {
+      Reset(QUIC_BAD_APPLICATION_PAYLOAD);
+      return;
+    }
+    MarkConsumed(iov.iov_len);
   }
-  DVLOG(1) << "Client processed " << data_len << " bytes for stream " << id();
-  return data_len;
+  if (sequencer()->IsClosed()) {
+    OnFinRead();
+  } else {
+    sequencer()->SetUnblocked();
+  }
 }
 
 bool QuicSpdyClientStream::ParseResponseHeaders(const char* data,
                                                 uint32 data_len) {
   DCHECK(headers_decompressed());
-  SpdyFramer framer(SPDY3);
+  SpdyFramer framer(HTTP2);
   size_t len = framer.ParseHeaderBlockInBuffer(data,
                                                data_len,
                                                &response_headers_);

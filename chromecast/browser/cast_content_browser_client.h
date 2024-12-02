@@ -25,14 +25,14 @@ namespace media {
 class AudioManagerFactory;
 }
 
-namespace net {
-class HostResolver;
+namespace metrics {
+class MetricsService;
 }
 
 namespace chromecast {
 namespace media {
-class MediaPipelineDevice;
-class MediaPipelineDeviceParams;
+class MediaPipelineBackend;
+struct MediaPipelineDeviceParams;
 }
 
 namespace shell {
@@ -40,7 +40,7 @@ namespace shell {
 class CastBrowserMainParts;
 class URLRequestContextFactory;
 
-class CastContentBrowserClient: public content::ContentBrowserClient {
+class CastContentBrowserClient : public content::ContentBrowserClient {
  public:
   // Creates an implementation of CastContentBrowserClient. Platform should
   // link in an implementation as needed.
@@ -62,9 +62,19 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
 #if !defined(OS_ANDROID)
   // Creates a MediaPipelineDevice (CMA backend) for media playback, called
   // once per media player instance.
-  virtual scoped_ptr<media::MediaPipelineDevice> CreateMediaPipelineDevice(
+  virtual scoped_ptr<media::MediaPipelineBackend> CreateMediaPipelineBackend(
       const media::MediaPipelineDeviceParams& params);
 #endif
+
+  // Performs cleanup for process exit (but before AtExitManager cleanup).
+  void ProcessExiting();
+
+  // Invoked when the metrics client ID changes.
+  virtual void SetMetricsClientId(const std::string& client_id);
+
+  // Allows registration of extra metrics providers.
+  virtual void RegisterMetricsProviders(
+      ::metrics::MetricsService* metrics_service);
 
   // content::ContentBrowserClient implementation:
   content::BrowserMainParts* CreateBrowserMainParts(
@@ -116,6 +126,8 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
       int opener_render_view_id,
       int opener_render_frame_id,
       bool* no_javascript_access) override;
+  void RegisterUnsandboxedOutOfProcessMojoApplications(
+      std::vector<GURL>* urls) override;
 #if defined(OS_ANDROID)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,

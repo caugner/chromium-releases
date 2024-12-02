@@ -16,6 +16,8 @@
 #import "ios/net/http_response_headers_util.h"
 #import "ios/web/crw_network_activity_indicator_manager.h"
 #import "ios/web/navigation/crw_session_controller.h"
+#import "ios/web/navigation/crw_session_entry.h"
+#include "ios/web/navigation/navigation_item_impl.h"
 #include "ios/web/navigation/web_load_params.h"
 #include "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/js/crw_js_injection_manager.h"
@@ -30,17 +32,20 @@
 #import "ios/web/web_state/ui/crw_web_controller+protected.h"
 #import "ios/web/web_state/ui/crw_wk_web_view_crash_detector.h"
 #import "ios/web/web_state/ui/web_view_js_utils.h"
+#import "ios/web/web_state/ui/wk_back_forward_list_item_holder.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider.h"
 #import "ios/web/web_state/web_state_impl.h"
 #import "ios/web/web_state/web_view_internal_creation_util.h"
 #import "ios/web/webui/crw_web_ui_manager.h"
 #import "net/base/mac/url_conversions.h"
+#include "url/url_constants.h"
 
 #if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 #include "ios/web/public/cert_store.h"
 #include "ios/web/public/navigation_item.h"
 #include "ios/web/public/ssl_status.h"
 #import "ios/web/web_state/wk_web_view_security_util.h"
+#include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_info.h"
 #endif
 
@@ -116,6 +121,12 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   // Backs the property of the same name.
   base::scoped_nsobject<NSString> _documentMIMEType;
 
+  // Navigation type of the pending navigation action of the main frame. This
+  // value is assigned at |decidePolicyForNavigationAction| where the navigation
+  // type is extracted from the request and associated with a committed
+  // navigation item at |didCommitNavigation|.
+  scoped_ptr<WKNavigationType> _pendingNavigationTypeForMainFrame;
+
   // Whether the web page is currently performing window.history.pushState or
   // window.history.replaceState
   // Set to YES on window.history.willChangeState message. To NO on
@@ -175,6 +186,19 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 // Discards the pending referrer.
 - (void)discardPendingReferrerString;
 
+// Extracts the current navigation type from WKNavigationAction and sets it as
+// the pending navigation type. The value should be considered pending until it
+// becomes associated with a navigation item at |didCommitNavigation|.
+- (void)updatePendingNavigationTypeForMainFrameFromNavigationAction:
+    (WKNavigationAction*)action;
+
+// Returns the WKBackForwardListItemHolder for the current navigation item.
+- (web::WKBackForwardListItemHolder*)currentBackForwardListItemHolder;
+
+// Stores the current WKBackForwardListItem and the current navigation type
+// with the current navigation item.
+- (void)updateCurrentBackForwardListItemHolder;
+
 // Returns a new CRWWKWebViewCrashDetector created with the given |webView| or
 // nil if |webView| is nil. Callers are responsible for releasing the object.
 - (CRWWKWebViewCrashDetector*)newCrashDetectorWithWebView:(WKWebView*)webView;
@@ -226,12 +250,17 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 // Attempts to handle a script message. Returns YES on success, NO otherwise.
 - (BOOL)respondToWKScriptMessage:(WKScriptMessage*)scriptMessage;
 
+// Used to decide whether a load that generates errors with the
+// NSURLErrorCancelled code should be cancelled.
+- (BOOL)shouldAbortLoadForCancelledError:(NSError*)error;
+
 #if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 // Called when WKWebView estimatedProgress has been changed.
 - (void)webViewEstimatedProgressDidChange;
 
-// Called when WKWebView hasOnlySecureContent property has changed.
-- (void)webViewContentSecurityDidChange;
+// Called when WKWebView certificateChain or hasOnlySecureContent property has
+// changed.
+- (void)webViewSecurityFeaturesDidChange;
 #endif  // !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 
 // Called when WKWebView loading state has been changed.
@@ -402,6 +431,73 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   // code working for debug builds.
 }
 
+- (void)loadRequestForCurrentNavigationItem {
+  DCHECK(self.webView && !self.nativeController);
+
+  ProceduralBlock defaultNavigationBlock = ^{
+    [self registerLoadRequest:[self currentNavigationURL]
+                     referrer:[self currentSessionEntryReferrer]
+                   transition:[self currentTransition]];
+    [self loadRequest:[self requestForCurrentNavigationItem]];
+  };
+
+  // If there is no corresponding WKBackForwardListItem, fall back to
+  // the standard loading mechanism.
+  web::WKBackForwardListItemHolder* holder =
+      [self currentBackForwardListItemHolder];
+  if (!holder->back_forward_list_item()) {
+    defaultNavigationBlock();
+    return;
+  }
+
+  ProceduralBlock webViewNavigationBlock = ^{
+    // If the current navigation URL is the same as the URL of the visible
+    // page, that means the user requested a reload. |goToBackForwardListItem|
+    // will be a no-op when it is passed the current back forward list item,
+    // so |reload| must be explicitly called.
+    [self registerLoadRequest:[self currentNavigationURL]
+                     referrer:[self currentSessionEntryReferrer]
+                   transition:[self currentTransition]];
+    if ([self currentNavigationURL] == net::GURLWithNSURL([_wkWebView URL])) {
+      [_wkWebView reload];
+    } else {
+      [_wkWebView goToBackForwardListItem:holder->back_forward_list_item()];
+    }
+  };
+
+  // If the request is not a form submission or resubmission, or the user
+  // doesn't need to confirm the load, then continue right away.
+  web::NavigationItemImpl* currentItem =
+      [self currentSessionEntry].navigationItemImpl;
+  if ((holder->navigation_type() != WKNavigationTypeFormResubmitted &&
+       holder->navigation_type() != WKNavigationTypeFormSubmitted) ||
+      currentItem->ShouldSkipResubmitDataConfirmation()) {
+    webViewNavigationBlock();
+    return;
+  }
+
+  // If the request is form submission or resubmission, then prompt the
+  // user before proceeding.
+  [self.delegate webController:self
+      onFormResubmissionForRequest:nil
+                     continueBlock:webViewNavigationBlock
+                       cancelBlock:defaultNavigationBlock];
+}
+
+// Overrides the hashchange workaround in the super class that manually
+// triggers Javascript hashchange events. If navigating with native API,
+// i.e. using a back forward list item, hashchange events will be triggered
+// automatically, so no URL tampering is required.
+- (GURL)URLForHistoryNavigationFromItem:(web::NavigationItem*)fromItem
+                                 toItem:(web::NavigationItem*)toItem {
+  web::WKBackForwardListItemHolder* holder =
+      web::WKBackForwardListItemHolder::FromNavigationItem(toItem);
+
+  if (holder->back_forward_list_item()) {
+    return toItem->GetURL();
+  }
+  return [super URLForHistoryNavigationFromItem:fromItem toItem:toItem];
+}
 
 - (void)setPageChangeProbability:(web::PageChangeProbability)probability {
   // Nothing to do; no polling timer.
@@ -438,18 +534,13 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   self.webScrollView.zoomScale = zoomScale;
 }
 
-- (BOOL)shouldAbortLoadForCancelledError:(NSError*)cancelledError {
-  DCHECK_EQ(cancelledError.code, NSURLErrorCancelled);
-  // Do not abort the load if it is for an app specific URL, as such errors
-  // are produced during the app specific URL load process.
-  const GURL errorURL =
-      net::GURLWithNSURL(cancelledError.userInfo[NSURLErrorFailingURLErrorKey]);
-  if (web::GetWebClient()->IsAppSpecificURL(errorURL))
-    return NO;
-  // Don't abort NSURLErrorCancelled errors originating from navigation, as the
-  // WKWebView will automatically retry these loads.
-  WKWebViewErrorSource source = WKWebViewErrorSourceFromError(cancelledError);
-  return source != NAVIGATION;
+- (void)handleCancelledError:(NSError*)error {
+  if ([self shouldAbortLoadForCancelledError:error]) {
+    // Do not abort the load for WKWebView, because calling stopLoading may
+    // stop the subsequent provisional load as well.
+    [self loadCancelled];
+    [[self sessionController] discardNonCommittedEntries];
+  }
 }
 
 #pragma mark Private methods
@@ -466,7 +557,8 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   return @{
 #if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
     @"estimatedProgress" : @"webViewEstimatedProgressDidChange",
-    @"hasOnlySecureContent" : @"webViewContentSecurityDidChange",
+    @"certificateChain" : @"webViewSecurityFeaturesDidChange",
+    @"hasOnlySecureContent" : @"webViewSecurityFeaturesDidChange",
 #endif
     @"loading" : @"webViewLoadingStateDidChange",
     @"title" : @"webViewTitleDidChange",
@@ -566,7 +658,7 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 }
 
 - (void)updatePendingReferrerFromNavigationAction:(WKNavigationAction*)action {
-  if (action.targetFrame.isMainFrame)
+  if (action.targetFrame.mainFrame)
     [self setPendingReferrerString:GetRefererFromNavigationAction(action)];
 }
 
@@ -576,6 +668,36 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 
 - (void)discardPendingReferrerString {
   _pendingReferrerString.reset();
+}
+
+- (void)updatePendingNavigationTypeForMainFrameFromNavigationAction:
+    (WKNavigationAction*)action {
+  if (action.targetFrame.mainFrame)
+    _pendingNavigationTypeForMainFrame.reset(
+        new WKNavigationType(action.navigationType));
+}
+
+- (web::WKBackForwardListItemHolder*)currentBackForwardListItemHolder {
+  web::NavigationItem* item = [self currentSessionEntry].navigationItemImpl;
+  DCHECK(item);
+  web::WKBackForwardListItemHolder* holder =
+      web::WKBackForwardListItemHolder::FromNavigationItem(item);
+  DCHECK(holder);
+  return holder;
+}
+
+- (void)updateCurrentBackForwardListItemHolder {
+  web::WKBackForwardListItemHolder* holder =
+      [self currentBackForwardListItemHolder];
+  // If |decidePolicyForNavigationAction| gets called for every load,
+  // it should not necessary to perform this if check - just
+  // overwrite the holder with the newest data. See crbug.com/520279.
+  if (_pendingNavigationTypeForMainFrame) {
+    holder->set_back_forward_list_item(
+        [[_wkWebView backForwardList] currentItem]);
+    holder->set_navigation_type(*_pendingNavigationTypeForMainFrame);
+    _pendingNavigationTypeForMainFrame.reset();
+  }
 }
 
 - (CRWWKWebViewCrashDetector*)newCrashDetectorWithWebView:(WKWebView*)webView {
@@ -678,21 +800,44 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 
 #if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 - (void)updateSSLStatusForCurrentNavigationItem {
+  if ([self isBeingDestroyed])
+    return;
+
   DCHECK(self.webStateImpl);
   web::NavigationItem* item =
       self.webStateImpl->GetNavigationManagerImpl().GetLastCommittedItem();
   if (!item)
     return;
 
-  // WKWebView will not load unauthenticated content.
-  item->GetSSL().security_style = item->GetURL().SchemeIsCryptographic()
-                                      ? web::SECURITY_STYLE_AUTHENTICATED
-                                      : web::SECURITY_STYLE_UNAUTHENTICATED;
-  int contentStatus = [_wkWebView hasOnlySecureContent] ?
-      web::SSLStatus::NORMAL_CONTENT :
-      web::SSLStatus::DISPLAYED_INSECURE_CONTENT;
-  item->GetSSL().content_status = contentStatus;
-  [self didUpdateSSLStatusForCurrentNavigationItem];
+  web::SSLStatus previousSSLStatus = item->GetSSL();
+  web::SSLStatus& SSLStatus = item->GetSSL();
+  if (item->GetURL().SchemeIsCryptographic()) {
+    // TODO(eugenebut): Do not set security style to authenticated once
+    // proceeding with bad ssl cert is implemented.
+    SSLStatus.security_style = web::SECURITY_STYLE_AUTHENTICATED;
+    SSLStatus.content_status = [_wkWebView hasOnlySecureContent]
+                                   ? web::SSLStatus::NORMAL_CONTENT
+                                   : web::SSLStatus::DISPLAYED_INSECURE_CONTENT;
+
+    if (base::ios::IsRunningOnIOS9OrLater()) {
+      scoped_refptr<net::X509Certificate> cert(web::CreateCertFromChain(
+          [_wkWebView performSelector:@selector(certificateChain)]));
+      if (cert) {
+        SSLStatus.cert_id = web::CertStore::GetInstance()->StoreCert(
+            cert.get(), self.certGroupID);
+      } else {
+        SSLStatus.security_style = web::SECURITY_STYLE_UNAUTHENTICATED;
+        SSLStatus.cert_id = 0;
+      }
+    }
+  } else {
+    SSLStatus.security_style = web::SECURITY_STYLE_UNAUTHENTICATED;
+    SSLStatus.cert_id = 0;
+  }
+
+  if (!previousSSLStatus.Equals(SSLStatus)) {
+    [self didUpdateSSLStatusForCurrentNavigationItem];
+  }
 }
 #endif  // !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
 
@@ -808,6 +953,20 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
              : [super selectorToHandleJavaScriptCommand:command];
 }
 
+- (BOOL)shouldAbortLoadForCancelledError:(NSError*)error {
+  DCHECK_EQ(error.code, NSURLErrorCancelled);
+  // Do not abort the load if it is for an app specific URL, as such errors
+  // are produced during the app specific URL load process.
+  const GURL errorURL =
+      net::GURLWithNSURL(error.userInfo[NSURLErrorFailingURLErrorKey]);
+  if (web::GetWebClient()->IsAppSpecificURL(errorURL))
+    return NO;
+  // Don't abort NSURLErrorCancelled errors originating from navigation
+  // as the WKWebView will automatically retry these loads.
+  WKWebViewErrorSource source = WKWebViewErrorSourceFromError(error);
+  return source != NAVIGATION;
+}
+
 #pragma mark -
 #pragma mark JavaScript message handlers
 
@@ -872,7 +1031,12 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   }
 }
 
-- (void)webViewContentSecurityDidChange {
+- (void)webViewSecurityFeaturesDidChange {
+  if (self.loadPhase == web::LOAD_REQUESTED) {
+    // Do not update SSL Status for pending load. It will be updated in
+    // |webView:didCommitNavigation:| callback.
+    return;
+  }
   [self updateSSLStatusForCurrentNavigationItem];
 }
 
@@ -966,16 +1130,22 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 
   // The page will not be changed until this navigation is commited, so the
   // retrieved referrer will be pending until |didCommitNavigation| callback.
+  // Same for the last navigation type.
   [self updatePendingReferrerFromNavigationAction:navigationAction];
+  [self updatePendingNavigationTypeForMainFrameFromNavigationAction:
+            navigationAction];
 
-  if (navigationAction.sourceFrame.isMainFrame)
+  if (navigationAction.sourceFrame.mainFrame)
     self.documentMIMEType = nil;
 
-  web::FrameInfo targetFrame(navigationAction.targetFrame.isMainFrame);
+  web::FrameInfo targetFrame(navigationAction.targetFrame.mainFrame);
   BOOL isLinkClick = [self isLinkNavigation:navigationAction.navigationType];
   BOOL allowLoad = [self shouldAllowLoadWithRequest:request
                                         targetFrame:&targetFrame
                                         isLinkClick:isLinkClick];
+
+  allowLoad = allowLoad && self.webStateImpl->ShouldAllowRequest(request);
+
   decisionHandler(allowLoad ? WKNavigationActionPolicyAllow
                             : WKNavigationActionPolicyCancel);
 }
@@ -999,8 +1169,13 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   }
   if (navigationResponse.isForMainFrame)
     self.documentMIMEType = navigationResponse.response.MIMEType;
-  handler(navigationResponse.canShowMIMEType ? WKNavigationResponsePolicyAllow :
-              WKNavigationResponsePolicyCancel);
+
+  BOOL allowNavigation =
+      navigationResponse.canShowMIMEType &&
+      self.webStateImpl->ShouldAllowResponse(navigationResponse.response);
+
+  handler(allowNavigation ? WKNavigationResponsePolicyAllow
+                          : WKNavigationResponsePolicyCancel);
 }
 
 // TODO(stuartmorgan): Move all the guesswork around these states out of the
@@ -1008,6 +1183,13 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
 - (void)webView:(WKWebView *)webView
     didStartProvisionalNavigation:(WKNavigation *)navigation {
   GURL webViewURL = net::GURLWithNSURL(webView.URL);
+  if (webViewURL.is_empty()) {
+    // May happen on iOS9, however in didCommitNavigation: callback the URL
+    // will be "about:blank". TODO(eugenebut): File radar for this issue
+    // (crbug.com/523549).
+    webViewURL = GURL(url::kAboutBlankURL);
+  }
+
   // Intercept renderer-initiated navigations. If this navigation has not yet
   // been registered, do so. loadPhase check is necessary because
   // lastRegisteredRequestURL may be the same as the webViewURL on a new tab
@@ -1085,6 +1267,8 @@ WKWebViewErrorSource WKWebViewErrorSourceFromError(NSError* error) {
   _documentURL = net::GURLWithNSURL([_wkWebView URL]);
   DCHECK(_documentURL == self.lastRegisteredRequestURL);
   [self webPageChanged];
+
+  [self updateCurrentBackForwardListItemHolder];
 
 #if !defined(ENABLE_CHROME_NET_STACK_FOR_WKWEBVIEW)
   [self updateSSLStatusForCurrentNavigationItem];

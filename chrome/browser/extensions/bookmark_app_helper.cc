@@ -508,7 +508,9 @@ BookmarkAppHelper::~BookmarkAppHelper() {}
 void BookmarkAppHelper::Create(const CreateBookmarkAppCallback& callback) {
   callback_ = callback;
 
-  if (contents_) {
+  // Do not fetch the manifest for extension URLs.
+  if (contents_ &&
+      !contents_->GetVisibleURL().SchemeIs(extensions::kExtensionScheme)) {
     contents_->GetManifest(base::Bind(&BookmarkAppHelper::OnDidGetManifest,
                                      base::Unretained(this)));
   } else {
@@ -696,14 +698,20 @@ void BookmarkAppHelper::FinishInstallation(const Extension* extension) {
 void BookmarkAppHelper::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
+  // TODO(dominickn): bookmark app creation fails when extensions cannot be
+  // created (e.g. due to management policies). Add to shelf visibility should
+  // be gated on whether extensions can be created - see crbug.com/545541.
   switch (type) {
     case extensions::NOTIFICATION_CRX_INSTALLER_DONE: {
       const Extension* extension =
           content::Details<const Extension>(details).ptr();
-      DCHECK(extension);
-      DCHECK_EQ(AppLaunchInfo::GetLaunchWebURL(extension),
-                web_app_info_.app_url);
-      FinishInstallation(extension);
+      if (extension) {
+        DCHECK_EQ(AppLaunchInfo::GetLaunchWebURL(extension),
+                  web_app_info_.app_url);
+        FinishInstallation(extension);
+      } else {
+        callback_.Run(nullptr, web_app_info_);
+      }
       break;
     }
     case extensions::NOTIFICATION_EXTENSION_INSTALL_ERROR:
@@ -756,7 +764,7 @@ void GetWebApplicationInfoFromApp(
 }
 
 bool IsValidBookmarkAppUrl(const GURL& url) {
-  URLPattern origin_only_pattern(Extension::kValidWebExtentSchemes);
+  URLPattern origin_only_pattern(Extension::kValidBookmarkAppSchemes);
   origin_only_pattern.SetMatchAllURLs(true);
   return url.is_valid() && origin_only_pattern.MatchesURL(url);
 }

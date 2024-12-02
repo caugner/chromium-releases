@@ -39,7 +39,6 @@
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/glue/favicon_cache.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
@@ -49,8 +48,6 @@
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/sessions/notification_service_sessions_router.h"
 #include "chrome/browser/sync/supervised_user_signin_manager_wrapper.h"
-#include "chrome/browser/sync/sync_error_controller.h"
-#include "chrome/browser/sync/sync_stopped_reporter.h"
 #include "chrome/browser/sync/sync_type_preference_provider.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -58,8 +55,8 @@
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/sync_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
@@ -71,12 +68,16 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_metrics.h"
+#include "components/sync_driver/backend_migrator.h"
 #include "components/sync_driver/change_processor.h"
 #include "components/sync_driver/data_type_controller.h"
 #include "components/sync_driver/device_info.h"
 #include "components/sync_driver/pref_names.h"
+#include "components/sync_driver/sync_error_controller.h"
+#include "components/sync_driver/sync_stopped_reporter.h"
 #include "components/sync_driver/system_encryptor.h"
 #include "components/sync_driver/user_selectable_sync_type.h"
+#include "components/version_info/version_info_values.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -126,12 +127,6 @@ using syncer::SyncProtocolError;
 using syncer::WeakHandle;
 
 typedef GoogleServiceAuthError AuthError;
-
-const char* ProfileSyncService::kSyncServerUrl =
-    "https://clients4.google.com/chrome-sync";
-
-const char* ProfileSyncService::kDevServerUrl =
-    "https://clients4.google.com/chrome-sync/dev";
 
 const char kSyncUnrecoverableErrorHistogram[] =
     "Sync.UnrecoverableErrors";
@@ -244,11 +239,7 @@ ProfileSyncService::ProfileSyncService(
       backup_finished_(false),
       clear_browsing_data_(base::Bind(&ClearBrowsingData)),
       browsing_data_remover_observer_(NULL),
-      sync_stopped_reporter_(
-          new browser_sync::SyncStoppedReporter(
-              sync_service_url_,
-              profile_->GetRequestContext(),
-              browser_sync::SyncStoppedReporter::ResultCallback())),
+      passphrase_prompt_triggered_by_version_(false),
       weak_factory_(this),
       startup_controller_weak_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -277,10 +268,27 @@ ProfileSyncService::ProfileSyncService(
 
   DCHECK(factory_.get());
   local_device_ = factory_->CreateLocalDeviceInfoProvider();
+  sync_stopped_reporter_.reset(
+          new browser_sync::SyncStoppedReporter(
+              sync_service_url_,
+              local_device_->GetSyncUserAgent(),
+              profile_->GetRequestContext(),
+              browser_sync::SyncStoppedReporter::ResultCallback())),
   sessions_sync_manager_.reset(
       new SessionsSyncManager(profile, local_device_.get(), router.Pass()));
   device_info_sync_service_.reset(
       new DeviceInfoSyncService(local_device_.get()));
+
+  std::string last_version = sync_prefs_.GetLastRunVersion();
+  std::string current_version = PRODUCT_VERSION;
+  sync_prefs_.SetLastRunVersion(current_version);
+
+  // Check for a major version change. Note that the versions have format
+  // MAJOR.MINOR.BUILD.PATCH.
+  if (last_version.substr(0, last_version.find('.')) !=
+      current_version.substr(0, current_version.find('.'))) {
+    passphrase_prompt_triggered_by_version_ = true;
+  }
 }
 
 ProfileSyncService::~ProfileSyncService() {
@@ -437,7 +445,7 @@ void ProfileSyncService::RegisterNonBlockingType(syncer::ModelType type) {
 void ProfileSyncService::InitializeNonBlockingType(
     syncer::ModelType type,
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-    const base::WeakPtr<syncer::ModelTypeSyncProxyImpl>& type_sync_proxy) {
+    const base::WeakPtr<syncer_v2::ModelTypeSyncProxyImpl>& type_sync_proxy) {
   non_blocking_data_type_manager_.InitializeType(
       type, task_runner, type_sync_proxy);
 }
@@ -531,17 +539,14 @@ void ProfileSyncService::InitializeBackend(bool delete_stale_data) {
   if (backend_mode_ == SYNC && delete_stale_data)
     ClearStaleErrors();
 
-  scoped_ptr<syncer::UnrecoverableErrorHandler>
-      backend_unrecoverable_error_handler(
-          new browser_sync::BackendUnrecoverableErrorHandler(
-              MakeWeakHandle(weak_factory_.GetWeakPtr())));
-
   backend_->Initialize(this, sync_thread_.Pass(), GetJsEventHandler(),
-                       sync_service_url_, credentials, delete_stale_data,
+                       sync_service_url_,
+                       local_device_->GetSyncUserAgent(),
+                       credentials, delete_stale_data,
                        scoped_ptr<syncer::SyncManagerFactory>(
                            new syncer::SyncManagerFactory(GetManagerType()))
                            .Pass(),
-                       backend_unrecoverable_error_handler.Pass(),
+                       MakeWeakHandle(weak_factory_.GetWeakPtr()),
                        base::Bind(browser_sync::ChromeReportUnrecoverableError),
                        network_resources_.get(), saved_nigori_state_.Pass());
 }
@@ -589,17 +594,28 @@ void ProfileSyncService::OnDirectoryTypeStatusCounterUpdated(
 void ProfileSyncService::OnDataTypeRequestsSyncStartup(
     syncer::ModelType type) {
   DCHECK(syncer::UserTypes().Has(type));
-  if (backend_.get()) {
-    DVLOG(1) << "A data type requested sync startup, but it looks like "
-                "something else beat it to the punch.";
-    return;
-  }
 
   if (!GetPreferredDataTypes().Has(type)) {
     // We can get here as datatype SyncableServices are typically wired up
     // to the native datatype even if sync isn't enabled.
     DVLOG(1) << "Dropping sync startup request because type "
              << syncer::ModelTypeToString(type) << "not enabled.";
+    return;
+  }
+
+  // If this is a data type change after a major version update, reset the
+  // passphrase prompted state and notify observers.
+  if (IsPassphraseRequired() && passphrase_prompt_triggered_by_version_) {
+    // The major version has changed and a local syncable change was made.
+    // Reset the passphrase prompt state.
+    passphrase_prompt_triggered_by_version_ = false;
+    sync_prefs_.SetPassphrasePrompted(false);
+    NotifyObservers();
+  }
+
+  if (backend_.get()) {
+    DVLOG(1) << "A data type requested sync startup, but it looks like "
+                "something else beat it to the punch.";
     return;
   }
 
@@ -2603,38 +2619,6 @@ void ProfileSyncService::SetClearingBrowseringDataForTesting(
                         base::Time,
                         base::Time)> c) {
   clear_browsing_data_ = c;
-}
-
-GURL ProfileSyncService::GetSyncServiceURL(
-    const base::CommandLine& command_line) {
-  // By default, dev, canary, and unbranded Chromium users will go to the
-  // development servers. Development servers have more features than standard
-  // sync servers. Users with officially-branded Chrome stable and beta builds
-  // will go to the standard sync servers.
-  GURL result(kDevServerUrl);
-
-  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
-      channel == chrome::VersionInfo::CHANNEL_BETA) {
-    result = GURL(kSyncServerUrl);
-  }
-
-  // Override the sync server URL from the command-line, if sync server
-  // command-line argument exists.
-  if (command_line.HasSwitch(switches::kSyncServiceURL)) {
-    std::string value(command_line.GetSwitchValueASCII(
-        switches::kSyncServiceURL));
-    if (!value.empty()) {
-      GURL custom_sync_url(value);
-      if (custom_sync_url.is_valid()) {
-        result = custom_sync_url;
-      } else {
-        LOG(WARNING) << "The following sync URL specified at the command-line "
-                     << "is invalid: " << value;
-      }
-    }
-  }
-  return result;
 }
 
 void ProfileSyncService::CheckSyncBackupIfNeeded() {

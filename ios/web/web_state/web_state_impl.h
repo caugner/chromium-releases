@@ -22,6 +22,8 @@
 @protocol CRWRequestTrackerDelegate;
 @class CRWWebController;
 @protocol CRWWebViewProxy;
+@class NSURLRequest;
+@class NSURLResponse;
 
 namespace net {
 class HttpResponseHeaders;
@@ -36,6 +38,7 @@ struct LoadCommittedDetails;
 class NavigationManager;
 class WebInterstitialImpl;
 class WebStateFacadeDelegate;
+class WebStatePolicyDecider;
 class WebUIIOS;
 
 // Implementation of WebState.
@@ -105,11 +108,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
                                 int key_code,
                                 bool input_missing);
 
-  // Called when autocomplete is requested.
-  void OnAutocompleteRequested(const GURL& source_url,
-                               const std::string& form_name,
-                               bool user_initiated);
-
   // Called when new FaviconURL candidates are received.
   void OnFaviconUrlUpdated(const std::vector<FaviconURL>& candidates);
 
@@ -161,8 +159,6 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // specific scheme.
   virtual void LoadWebUIHtml(const base::string16& html, const GURL& url);
 
-  const base::string16& GetTitle() const;
-
   // Gets the HTTP response headers associated with the current page.
   // NOTE: For a WKWebView-based WebState, these headers are generated via
   // net::CreateHeadersFromNSHTTPURLResponse(); see comments in
@@ -180,6 +176,13 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // TODO(shreyasv): Rename this to ExecuteJavaScript for consitency with
   // upstream API.
   virtual void ExecuteJavaScriptAsync(const base::string16& script);
+
+  // Returns whether the navigation corresponding to |request| should be allowed
+  // to continue by asking its policy deciders. Defaults to true.
+  bool ShouldAllowRequest(NSURLRequest* request);
+  // Returns whether the navigation corresponding to |response| should be
+  // allowed to continue by asking its policy deciders. Defaults to true.
+  bool ShouldAllowResponse(NSURLResponse* response);
 
   // Request tracker management. For now, this exposes the RequestTracker for
   // embedders to use.
@@ -218,6 +221,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   const std::string& GetContentLanguageHeader() const override;
   const std::string& GetContentsMimeType() const override;
   bool ContentIsHTML() const override;
+  const base::string16& GetTitle() const override;
   bool IsLoading() const override;
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
@@ -250,6 +254,8 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
  protected:
   void AddObserver(WebStateObserver* observer) override;
   void RemoveObserver(WebStateObserver* observer) override;
+  void AddPolicyDecider(WebStatePolicyDecider* decider) override;
+  void RemovePolicyDecider(WebStatePolicyDecider* decider) override;
 
  private:
   // Creates a WebUIIOS object for |url| that is owned by the caller. Returns
@@ -281,6 +287,13 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // A list of observers notified when page state changes. Weak references.
   base::ObserverList<WebStateObserver, true> observers_;
+
+  // All the WebStatePolicyDeciders asked for navigation decision. Weak
+  // references.
+  // WebStatePolicyDeciders are semantically different from observers (they
+  // modify the behavior of the WebState) but are used like observers in the
+  // code, hence the ObserverList.
+  base::ObserverList<WebStatePolicyDecider, true> policy_deciders_;
 
   // Map of all the HTTP response headers received, for each URL.
   // This map is cleared after each page load, and only the headers of the main

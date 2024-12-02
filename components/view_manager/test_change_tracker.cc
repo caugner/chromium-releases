@@ -45,6 +45,9 @@ std::string ChangeToDescription1(const Change& change) {
       return base::StringPrintf("OnEmbedForDescendant view=%s",
                                 ViewIdToString(change.view_id).c_str());
 
+    case CHANGE_TYPE_UNEMBED:
+      return "OnUnembed";
+
     case CHANGE_TYPE_NODE_BOUNDS_CHANGED:
       return base::StringPrintf(
           "BoundsChanged view=%s old_bounds=%s new_bounds=%s",
@@ -116,9 +119,13 @@ std::vector<std::string> ChangesToDescription1(
 }
 
 std::string SingleChangeToDescription(const std::vector<Change>& changes) {
-  if (changes.size() != 1u)
-    return std::string();
-  return ChangeToDescription1(changes[0]);
+  std::string result;
+  for (auto& change : changes) {
+    if (!result.empty())
+      result += "\n";
+    result += ChangeToDescription1(change);
+  }
+  return result;
 }
 
 std::string SingleViewDescription(const std::vector<TestView>& views) {
@@ -133,7 +140,7 @@ std::string ChangeViewDescription(const std::vector<Change>& changes) {
   std::vector<std::string> view_strings(changes[0].views.size());
   for (size_t i = 0; i < changes[0].views.size(); ++i)
     view_strings[i] = "[" + changes[0].views[i].ToString() + "]";
-  return JoinString(view_strings, ',');
+  return base::JoinString(view_strings, ",");
 }
 
 TestView ViewDataToTestView(const ViewDataPtr& data) {
@@ -211,6 +218,12 @@ void TestChangeTracker::OnViewBoundsChanged(Id view_id,
   change.bounds2.y = new_bounds->y;
   change.bounds2.width = new_bounds->width;
   change.bounds2.height = new_bounds->height;
+  AddChange(change);
+}
+
+void TestChangeTracker::OnUnembed() {
+  Change change;
+  change.type = CHANGE_TYPE_UNEMBED;
   AddChange(change);
 }
 

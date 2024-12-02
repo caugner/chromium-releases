@@ -237,7 +237,8 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id,
           extensions::ExtensionUninstallDialog::Create(
               profile_, browser_->window()->GetNativeWindow(), this));
       extension_uninstall_dialog_->ConfirmUninstall(
-          extension, extensions::UNINSTALL_REASON_USER_INITIATED);
+          extension, extensions::UNINSTALL_REASON_USER_INITIATED,
+          extensions::UNINSTALL_SOURCE_TOOLBAR_CONTEXT_MENU);
       break;
     }
     case MANAGE: {
@@ -312,7 +313,7 @@ void ExtensionContextMenuModel::InitMenu(const Extension* extension,
       int uninstall_index = GetIndexOfCommandId(UNINSTALL);
       SetIcon(uninstall_index,
               ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-                  IDR_CONTROLLED_SETTING_MANDATORY));
+                  IDR_OMNIBOX_HTTPS_POLICY_WARNING));
     }
   }
 

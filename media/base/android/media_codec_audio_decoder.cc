@@ -107,9 +107,15 @@ MediaCodecDecoder::ConfigStatus MediaCodecAudioDecoder::ConfigureInternal() {
 
   DVLOG(1) << class_name() << "::" << __FUNCTION__;
 
+  if (configs_.audio_codec == kUnknownAudioCodec) {
+    DVLOG(0) << class_name() << "::" << __FUNCTION__
+             << " configuration parameters are required";
+    return kConfigFailure;
+  }
+
   media_codec_bridge_.reset(AudioCodecBridge::Create(configs_.audio_codec));
   if (!media_codec_bridge_)
-    return CONFIG_FAILURE;
+    return kConfigFailure;
 
   if (!(static_cast<AudioCodecBridge*>(media_codec_bridge_.get()))
            ->Start(
@@ -122,13 +128,14 @@ MediaCodecDecoder::ConfigStatus MediaCodecAudioDecoder::ConfigureInternal() {
                configs_.audio_seek_preroll_ns,
                true,
                GetMediaCrypto().obj())) {
-    DVLOG(1) << class_name() << "::" << __FUNCTION__ << " failed";
+    DVLOG(0) << class_name() << "::" << __FUNCTION__
+             << " failed: cannot start audio codec";
 
     media_codec_bridge_.reset();
-    return CONFIG_FAILURE;
+    return kConfigFailure;
   }
 
-  DVLOG(1) << class_name() << "::" << __FUNCTION__ << " succeeded";
+  DVLOG(0) << class_name() << "::" << __FUNCTION__ << " succeeded";
 
   SetVolumeInternal();
 
@@ -136,7 +143,7 @@ MediaCodecDecoder::ConfigStatus MediaCodecAudioDecoder::ConfigureInternal() {
   frame_count_ = 0;
   ResetTimestampHelper();
 
-  return CONFIG_OK;
+  return kConfigOk;
 }
 
 void MediaCodecAudioDecoder::OnOutputFormatChanged() {
@@ -151,6 +158,7 @@ void MediaCodecAudioDecoder::OnOutputFormatChanged() {
 }
 
 void MediaCodecAudioDecoder::Render(int buffer_index,
+                                    size_t offset,
                                     size_t size,
                                     bool render_output,
                                     base::TimeDelta pts,
@@ -164,7 +172,7 @@ void MediaCodecAudioDecoder::Render(int buffer_index,
   if (render_output) {
     int64 head_position =
         (static_cast<AudioCodecBridge*>(media_codec_bridge_.get()))
-            ->PlayOutputBuffer(buffer_index, size);
+            ->PlayOutputBuffer(buffer_index, size, offset);
 
     size_t new_frames_count = size / bytes_per_frame_;
     frame_count_ += new_frames_count;

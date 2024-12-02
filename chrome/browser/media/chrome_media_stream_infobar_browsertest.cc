@@ -22,8 +22,10 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/media_stream_request.h"
+#include "content/public/common/origin_util.h"
 #include "content/public/test/browser_test_utils.h"
 #include "media/base/media_switches.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 
 // MediaStreamPermissionTest ---------------------------------------------------
@@ -71,7 +73,12 @@ class MediaStreamPermissionTest : public WebRtcTestBase {
   content::WebContents* LoadTestPageInBrowser(Browser* browser) {
     EXPECT_TRUE(test_server()->Start());
 
-    ui_test_utils::NavigateToURL(browser, test_page_url());
+    // Uses the default server.
+    GURL url = test_page_url();
+
+    EXPECT_TRUE(content::IsOriginSecure(url));
+
+    ui_test_utils::NavigateToURL(browser, url);
     return browser->tab_strip_model()->GetActiveWebContents();
   }
 
@@ -107,40 +114,26 @@ IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
 }
 
 IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
-                       TestAcceptThenDenyWhichShouldBeSticky) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
+                       TestSecureOriginDenyIsSticky) {
   content::WebContents* tab_contents = LoadTestPageInTab();
+  EXPECT_TRUE(content::IsOriginSecure(tab_contents->GetLastCommittedURL()));
 
-  EXPECT_TRUE(GetUserMediaAndAccept(tab_contents));
   GetUserMediaAndDeny(tab_contents);
-
-  // Should fail with permission denied, instead of hanging.
-  GetUserMedia(tab_contents, kAudioVideoCallConstraints);
-  EXPECT_TRUE(test::PollingWaitUntil("obtainGetUserMediaResult()",
-                                     kFailedWithPermissionDeniedError,
-                                     tab_contents));
+  GetUserMediaAndExpectAutoDenyWithoutPrompt(tab_contents);
 }
 
-IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest, TestAcceptIsNotSticky) {
+IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
+                       TestSecureOriginAcceptIsSticky) {
   content::WebContents* tab_contents = LoadTestPageInTab();
+  EXPECT_TRUE(content::IsOriginSecure(tab_contents->GetLastCommittedURL()));
 
-  // If accept were sticky the second call would hang because it hangs if a
-  // bubble does not pop up.
   EXPECT_TRUE(GetUserMediaAndAccept(tab_contents));
-  EXPECT_TRUE(GetUserMediaAndAccept(tab_contents));
+  GetUserMediaAndExpectAutoAcceptWithoutPrompt(tab_contents);
 }
 
 IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest, TestDismissIsNotSticky) {
   content::WebContents* tab_contents = LoadTestPageInTab();
 
-  // If dismiss were sticky the second call would hang because it hangs if a
-  // bubble does not pop up.
   GetUserMediaAndDismiss(tab_contents);
   GetUserMediaAndDismiss(tab_contents);
 }
@@ -150,6 +143,7 @@ IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
   content::WebContents* tab_contents = LoadTestPageInTab();
 
   GetUserMediaAndDeny(tab_contents);
+  GetUserMediaAndExpectAutoDenyWithoutPrompt(tab_contents);
 
   HostContentSettingsMap* settings_map =
       browser()->profile()->GetHostContentSettingsMap();
@@ -158,23 +152,13 @@ IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
   settings_map->ClearSettingsForOneType(
       CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
 
-  // If a bubble is not launched now, this will hang.
   GetUserMediaAndDeny(tab_contents);
 }
 
-// Times out on win debug builds; http://crbug.com/295723 .
-#if defined(OS_WIN) && !defined(NDEBUG)
-#define MAYBE_DenyingMicDoesNotCauseStickyDenyForCameras \
-        DISABLED_DenyingMicDoesNotCauseStickyDenyForCameras
-#else
-#define MAYBE_DenyingMicDoesNotCauseStickyDenyForCameras \
-        DenyingMicDoesNotCauseStickyDenyForCameras
-#endif
 IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
-                       MAYBE_DenyingMicDoesNotCauseStickyDenyForCameras) {
+                       DenyingMicDoesNotCauseStickyDenyForCameras) {
   content::WebContents* tab_contents = LoadTestPageInTab();
 
-  // If mic blocking also blocked cameras, the second call here would hang.
   GetUserMediaWithSpecificConstraintsAndDeny(tab_contents,
                                              kAudioOnlyCallConstraints);
   EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAccept(
@@ -185,7 +169,6 @@ IN_PROC_BROWSER_TEST_F(MediaStreamPermissionTest,
                        DenyingCameraDoesNotCauseStickyDenyForMics) {
   content::WebContents* tab_contents = LoadTestPageInTab();
 
-  // If camera blocking also blocked mics, the second call here would hang.
   GetUserMediaWithSpecificConstraintsAndDeny(tab_contents,
                                              kVideoOnlyCallConstraints);
   EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAccept(

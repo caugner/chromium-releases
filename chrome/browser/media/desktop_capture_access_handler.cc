@@ -5,6 +5,7 @@
 #include "chrome/browser/media/desktop_capture_access_handler.h"
 
 #include "base/command_line.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media/desktop_streams_registry.h"
@@ -21,6 +22,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/media_stream_request.h"
+#include "content/public/common/origin_util.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/common/constants.h"
@@ -76,8 +78,8 @@ base::string16 GetApplicationTitle(content::WebContents* web_contents,
     return base::UTF8ToUTF16(title);
   }
   GURL url = web_contents->GetURL();
-  title = url.SchemeIsSecure() ? net::GetHostAndOptionalPort(url)
-                               : url.GetOrigin().spec();
+  title = content::IsOriginSecure(url) ? net::GetHostAndOptionalPort(url)
+                                       : url.GetOrigin().spec();
   return base::UTF8ToUTF16(title);
 }
 
@@ -178,8 +180,7 @@ void DesktopCaptureAccessHandler::ProcessScreenCaptureAccessRequest(
       IsBuiltInExtension(request.security_origin);
 
   const bool origin_is_secure =
-      request.security_origin.SchemeIsSecure() ||
-      request.security_origin.SchemeIs(extensions::kExtensionScheme) ||
+      content::IsOriginSecure(request.security_origin) ||
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kAllowHttpScreenCapture);
 
@@ -237,6 +238,7 @@ void DesktopCaptureAccessHandler::ProcessScreenCaptureAccessRequest(
       content::DesktopMediaID screen_id;
 #if defined(OS_CHROMEOS)
       screen_id = content::DesktopMediaID::RegisterAuraWindow(
+          content::DesktopMediaID::TYPE_SCREEN,
           ash::Shell::GetInstance()->GetPrimaryRootWindow());
 #else   // defined(OS_CHROMEOS)
       screen_id = content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN,

@@ -6,8 +6,8 @@
 #define MANDOLINE_UI_OMNIBOX_OMNIBOX_IMPL_H_
 
 #include "components/view_manager/public/cpp/view_manager_delegate.h"
-#include "mandoline/ui/browser/public/interfaces/omnibox.mojom.h"
-#include "mandoline/ui/browser/public/interfaces/view_embedder.mojom.h"
+#include "mandoline/ui/desktop_ui/public/interfaces/omnibox.mojom.h"
+#include "mandoline/ui/desktop_ui/public/interfaces/view_embedder.mojom.h"
 #include "mojo/application/public/cpp/application_delegate.h"
 #include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
@@ -57,12 +57,14 @@ class OmniboxImpl : public mojo::ApplicationDelegate,
               mojo::InterfaceRequest<Omnibox> request) override;
 
   // Overridden from Omnibox:
-  void SetClient(OmniboxClientPtr client) override;
   void ShowForURL(const mojo::String& url) override;
 
-  OmniboxClientPtr client_;
+  void HideWindow();
+  void ShowWindow();
+
   scoped_ptr<AuraInit> aura_init_;
   mojo::ApplicationImpl* app_impl_;
+  mojo::View* root_;
   mojo::String url_;
   views::Textfield* edit_;
   mojo::WeakBindingSet<Omnibox> bindings_;

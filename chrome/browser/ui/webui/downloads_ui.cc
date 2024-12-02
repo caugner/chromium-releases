@@ -41,15 +41,13 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
       content::WebUIDataSource::Create(chrome::kChromeUIDownloadsHost);
 
   source->AddLocalizedString("title", IDS_DOWNLOAD_TITLE);
-  source->AddLocalizedString("searchButton", IDS_DOWNLOAD_SEARCH_BUTTON);
   source->AddLocalizedString("searchResultsFor", IDS_DOWNLOAD_SEARCHRESULTSFOR);
   source->AddLocalizedString("downloads", IDS_DOWNLOAD_TITLE);
   source->AddLocalizedString("clearAll", IDS_DOWNLOAD_LINK_CLEAR_ALL);
   source->AddLocalizedString("openDownloadsFolder",
                              IDS_DOWNLOAD_LINK_OPEN_DOWNLOADS_FOLDER);
 
-  // No results/downloads messages that show instead of the downloads list.
-  source->AddLocalizedString("noDownloads", IDS_DOWNLOAD_NO_DOWNLOADS);
+  // No results message that shows instead of the downloads list.
   source->AddLocalizedString("noSearchResults",
                              IDS_DOWNLOAD_NO_SEARCH_RESULTS);
 
@@ -75,7 +73,6 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
   source->AddLocalizedString("controlPause", IDS_DOWNLOAD_LINK_PAUSE);
   if (browser_defaults::kDownloadPageHasShowInFolder)
     source->AddLocalizedString("controlShowInFolder", IDS_DOWNLOAD_LINK_SHOW);
-  source->AddLocalizedString("controlRetry", IDS_DOWNLOAD_LINK_RETRY);
   source->AddLocalizedString("controlCancel", IDS_DOWNLOAD_LINK_CANCEL);
   source->AddLocalizedString("controlResume", IDS_DOWNLOAD_LINK_RESUME);
   source->AddLocalizedString("controlRemoveFromList",
@@ -97,14 +94,32 @@ content::WebUIDataSource* CreateDownloadsUIHTMLSource(Profile* profile) {
                           IDR_DOWNLOADS_THROTTLED_ICON_LOADER_JS);
 
   if (switches::MdDownloadsEnabled()) {
-    source->AddResourcePath("downloads.css", IDR_MD_DOWNLOADS_DOWNLOADS_CSS);
-    source->AddResourcePath("item_view.html", IDR_MD_DOWNLOADS_ITEM_VIEW_HTML);
-    source->AddResourcePath("item_view.js", IDR_MD_DOWNLOADS_ITEM_VIEW_JS);
+    source->AddLocalizedString("search", IDS_MD_DOWNLOAD_SEARCH);
+    source->AddLocalizedString("controlRetry", IDS_MD_DOWNLOAD_LINK_RETRY);
+    source->AddLocalizedString("noDownloads", IDS_MD_DOWNLOAD_NO_DOWNLOADS);
+
+    source->AddResourcePath("action_service.html",
+                            IDR_MD_DOWNLOADS_ACTION_SERVICE_HTML);
+    source->AddResourcePath("action_service.js",
+                            IDR_MD_DOWNLOADS_ACTION_SERVICE_JS);
+    source->AddResourcePath("item.css", IDR_MD_DOWNLOADS_ITEM_CSS);
+    source->AddResourcePath("item.html", IDR_MD_DOWNLOADS_ITEM_HTML);
+    source->AddResourcePath("item.js", IDR_MD_DOWNLOADS_ITEM_JS);
+    source->AddResourcePath("manager.css", IDR_MD_DOWNLOADS_MANAGER_CSS);
     source->AddResourcePath("manager.html", IDR_MD_DOWNLOADS_MANAGER_HTML);
     source->AddResourcePath("manager.js", IDR_MD_DOWNLOADS_MANAGER_JS);
+    source->AddResourcePath("shared_style.css",
+                            IDR_MD_DOWNLOADS_SHARED_STYLE_CSS);
     source->AddResourcePath("strings.html", IDR_MD_DOWNLOADS_STRINGS_HTML);
+    source->AddResourcePath("toolbar.css", IDR_MD_DOWNLOADS_TOOLBAR_CSS);
+    source->AddResourcePath("toolbar.html", IDR_MD_DOWNLOADS_TOOLBAR_HTML);
+    source->AddResourcePath("toolbar.js", IDR_MD_DOWNLOADS_TOOLBAR_JS);
     source->SetDefaultResource(IDR_MD_DOWNLOADS_DOWNLOADS_HTML);
   } else {
+    source->AddLocalizedString("searchButton", IDS_DOWNLOAD_SEARCH_BUTTON);
+    source->AddLocalizedString("controlRetry", IDS_DOWNLOAD_LINK_RETRY);
+    source->AddLocalizedString("noDownloads", IDS_DOWNLOAD_NO_DOWNLOADS);
+
     source->AddResourcePath("item_view.js", IDR_DOWNLOADS_ITEM_VIEW_JS);
     source->AddResourcePath("focus_row.js", IDR_DOWNLOADS_FOCUS_ROW_JS);
     source->AddResourcePath("manager.js", IDR_DOWNLOADS_MANAGER_JS);

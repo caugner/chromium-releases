@@ -14,6 +14,7 @@
 #include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/autofill/core/common/password_form_field_prediction_map.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
@@ -58,28 +59,33 @@ const char kLoginAndSignupRegex[] =
     "N+P"  // Sign-up section.
     ".*";  // Anything beyond that.
 
+const char kAutocompleteUsername[] = "username";
+const char kAutocompleteCurrentPassword[] = "current-password";
+const char kAutocompleteNewPassword[] = "new-password";
+
+icu::RegexMatcher* CreateMatcher(
+    void* instance, const char* pattern) {
+  const icu::UnicodeString icu_pattern(pattern);
+
+  UErrorCode status = U_ZERO_ERROR;
+  // Use placement new to initialize the instance in the preallocated space.
+  // The "(instance)" is very important to force POD type initialization.
+  icu::RegexMatcher* matcher = new (instance) icu::RegexMatcher(
+      icu_pattern, UREGEX_CASE_INSENSITIVE, status);
+  DCHECK(U_SUCCESS(status));
+  return matcher;
+}
+
 struct LoginAndSignupLazyInstanceTraits
     : public base::DefaultLazyInstanceTraits<icu::RegexMatcher> {
   static icu::RegexMatcher* New(void* instance) {
-    const icu::UnicodeString icu_pattern(kLoginAndSignupRegex);
-
-    UErrorCode status = U_ZERO_ERROR;
-    // Use placement new to initialize the instance in the preallocated space.
-    // The "(instance)" is very important to force POD type initialization.
-    scoped_ptr<icu::RegexMatcher> matcher(new (instance) icu::RegexMatcher(
-        icu_pattern, UREGEX_CASE_INSENSITIVE, status));
-    DCHECK(U_SUCCESS(status));
-    return matcher.release();
+    return CreateMatcher(instance, kLoginAndSignupRegex);
   }
 };
 
-base::LazyInstance<icu::RegexMatcher, LoginAndSignupLazyInstanceTraits>
-    login_and_signup_matcher = LAZY_INSTANCE_INITIALIZER;
-
-bool MatchesLoginAndSignupPattern(base::StringPiece layout_sequence) {
-  icu::RegexMatcher* matcher = login_and_signup_matcher.Pointer();
+bool Matches(icu::RegexMatcher* matcher, base::StringPiece expression) {
   icu::UnicodeString icu_input(icu::UnicodeString::fromUTF8(
-      icu::StringPiece(layout_sequence.data(), layout_sequence.length())));
+      icu::StringPiece(expression.data(), expression.length())));
   matcher->reset(icu_input);
 
   UErrorCode status = U_ZERO_ERROR;
@@ -88,11 +94,14 @@ bool MatchesLoginAndSignupPattern(base::StringPiece layout_sequence) {
   return match == TRUE;
 }
 
+base::LazyInstance<icu::RegexMatcher, LoginAndSignupLazyInstanceTraits>
+    login_and_signup_matcher = LAZY_INSTANCE_INITIALIZER;
+
 // Given the sequence of non-password and password text input fields of a form,
 // represented as a string of Ns (non-password) and Ps (password), computes the
 // layout type of that form.
 PasswordForm::Layout SequenceToLayout(base::StringPiece layout_sequence) {
-  if (MatchesLoginAndSignupPattern(layout_sequence))
+  if (Matches(login_and_signup_matcher.Pointer(), layout_sequence))
     return PasswordForm::Layout::LAYOUT_LOGIN_AND_SIGNUP;
   return PasswordForm::Layout::LAYOUT_OTHER;
 }
@@ -101,8 +110,9 @@ PasswordForm::Layout SequenceToLayout(base::StringPiece layout_sequence) {
 // |element| is present and has the specified |value_in_lowercase|.
 bool HasAutocompleteAttributeValue(const WebInputElement& element,
                                    const char* value_in_lowercase) {
-  return base::LowerCaseEqualsASCII(element.getAttribute("autocomplete"),
-                                    value_in_lowercase);
+  return base::LowerCaseEqualsASCII(
+      base::StringPiece16(element.getAttribute("autocomplete")),
+      value_in_lowercase);
 }
 
 // Helper to determine which password is the main (current) one, and which is
@@ -118,10 +128,10 @@ bool LocateSpecificPasswords(std::vector<WebInputElement> passwords,
   // each kind as the element we are looking for.
   for (std::vector<WebInputElement>::const_iterator it = passwords.begin();
        it != passwords.end(); it++) {
-    if (HasAutocompleteAttributeValue(*it, "current-password") &&
+    if (HasAutocompleteAttributeValue(*it, kAutocompleteCurrentPassword) &&
         current_password->isNull()) {
       *current_password = *it;
-    } else if (HasAutocompleteAttributeValue(*it, "new-password") &&
+    } else if (HasAutocompleteAttributeValue(*it, kAutocompleteNewPassword) &&
         new_password->isNull()) {
       *new_password = *it;
     }
@@ -186,12 +196,28 @@ bool LocateSpecificPasswords(std::vector<WebInputElement> passwords,
   return true;
 }
 
+// Checks the |form_predictions| map to see if there is a key associated with
+// the |prediction_type| value. Assigns the key to |prediction_field| and
+// returns true if it is found.
+bool MapContainsPrediction(
+    const std::map<WebInputElement, PasswordFormFieldPredictionType>&
+        form_predictions,
+    PasswordFormFieldPredictionType prediction_type,
+    WebInputElement* prediction_field) {
+  for (auto it = form_predictions.begin(); it != form_predictions.end(); ++it) {
+    if (it->second == prediction_type) {
+      (*prediction_field) = it->first;
+      return true;
+    }
+  }
+  return false;
+}
+
 void FindPredictedElements(
     const WebFormElement& form,
-    const std::map<autofill::FormData,
-                   autofill::PasswordFormFieldPredictionMap>& form_predictions,
+    const std::map<FormData, PasswordFormFieldPredictionMap>& form_predictions,
     WebVector<WebFormControlElement>* control_elements,
-    std::map<autofill::PasswordFormFieldPredictionType, WebInputElement>*
+    std::map<WebInputElement, PasswordFormFieldPredictionType>*
         predicted_elements) {
   FormData form_data;
   if (!WebFormElementToFormData(form, WebFormControlElement(), EXTRACT_NONE,
@@ -217,26 +243,42 @@ void FindPredictedElements(
   std::vector<blink::WebFormControlElement> autofillable_elements =
       ExtractAutofillableElementsFromSet(*control_elements);
 
-  const autofill::PasswordFormFieldPredictionMap& field_predictions =
+  const PasswordFormFieldPredictionMap& field_predictions =
       predictions_iterator->second;
-  for (autofill::PasswordFormFieldPredictionMap::const_iterator prediction =
+  for (PasswordFormFieldPredictionMap::const_iterator prediction =
            field_predictions.begin();
        prediction != field_predictions.end(); ++prediction) {
-    const autofill::PasswordFormFieldPredictionType& type = prediction->first;
-    const autofill::FormFieldData& target_field = prediction->second;
+    const FormFieldData& target_field = prediction->first;
+    const PasswordFormFieldPredictionType& type = prediction->second;
 
     for (size_t i = 0; i < autofillable_elements.size(); ++i) {
       if (autofillable_elements[i].nameForAutofill() == target_field.name) {
         WebInputElement* input_element =
             toWebInputElement(&autofillable_elements[i]);
+        // TODO(sebsg): Investigate why this guard is necessary, see
+        // https://crbug.com/517490 for more details.
         if (input_element) {
-          (*predicted_elements)[type] = *input_element;
+          (*predicted_elements)[*input_element] = type;
         }
         break;
       }
     }
   }
 }
+
+// TODO(msramek): Move the reauthentication recognition code to the browser.
+const char kPasswordSiteUrlRegex[] =
+    "passwords(?:-[a-z-]+\\.corp)?\\.google\\.com";
+
+struct PasswordSiteUrlLazyInstanceTraits
+    : public base::DefaultLazyInstanceTraits<icu::RegexMatcher> {
+  static icu::RegexMatcher* New(void* instance) {
+    return CreateMatcher(instance, kPasswordSiteUrlRegex);
+  }
+};
+
+base::LazyInstance<icu::RegexMatcher, PasswordSiteUrlLazyInstanceTraits>
+    password_site_matcher = LAZY_INSTANCE_INITIALIZER;
 
 // Get information about a login form encapsulated in a PasswordForm struct.
 // If an element of |form| has an entry in |nonscript_modified_values|, the
@@ -247,8 +289,7 @@ void GetPasswordForm(
     PasswordForm* password_form,
     const std::map<const blink::WebInputElement, blink::WebString>*
         nonscript_modified_values,
-    const std::map<autofill::FormData,
-                   autofill::PasswordFormFieldPredictionMap>*
+    const std::map<FormData, PasswordFormFieldPredictionMap>*
         form_predictions) {
   WebInputElement latest_input_element;
   WebInputElement username_element;
@@ -258,6 +299,21 @@ void GetPasswordForm(
 
   WebVector<WebFormControlElement> control_elements;
   form.getFormControlElements(control_elements);
+
+  // Bail if this is a GAIA passwords site reauthentication form, so that
+  // the form will be ignored.
+  // TODO(msramek): Move this logic to the browser, and disable filling only
+  // for the sync credential and if passwords are being synced.
+  if (IsGaiaReauthenticationForm(
+          GURL(form.document().url()).GetOrigin(), control_elements)) {
+    return;
+  }
+
+  std::map<WebInputElement, PasswordFormFieldPredictionType> predicted_elements;
+  if (form_predictions) {
+    FindPredictedElements(form, *form_predictions, &control_elements,
+                          &predicted_elements);
+  }
 
   std::string layout_sequence;
   layout_sequence.reserve(control_elements.size());
@@ -277,6 +333,11 @@ void GetPasswordForm(
         layout_sequence.push_back('N');
     }
 
+    bool password_marked_by_autocomplete_attribute =
+        HasAutocompleteAttributeValue(*input_element,
+                                      kAutocompleteCurrentPassword) ||
+        HasAutocompleteAttributeValue(*input_element, kAutocompleteNewPassword);
+
     // If the password field is readonly, the page is likely using a virtual
     // keyboard and bypassing the password field value (see
     // http://crbug.com/475488). There is nothing Chrome can do to fill
@@ -288,9 +349,21 @@ void GetPasswordForm(
          (nonscript_modified_values &&
           nonscript_modified_values->find(*input_element) !=
               nonscript_modified_values->end()) ||
-         HasAutocompleteAttributeValue(*input_element, "current_password") ||
-         HasAutocompleteAttributeValue(*input_element, "new-password"))) {
-      passwords.push_back(*input_element);
+         password_marked_by_autocomplete_attribute)) {
+      // We add the field to the list of password fields if it was not flagged
+      // as a special NOT_PASSWORD prediction by Autofill. The NOT_PASSWORD
+      // mechanism exists because some webpages use the type "password" for
+      // fields which Autofill knows shouldn't be treated as passwords by the
+      // Password Manager. This is ultimately bypassed if the field has
+      // autocomplete attributes.
+      auto possible_password_element_iterator =
+          predicted_elements.find(*input_element);
+      if (password_marked_by_autocomplete_attribute ||
+          possible_password_element_iterator == predicted_elements.end() ||
+          possible_password_element_iterator->second !=
+              PREDICTION_NOT_PASSWORD) {
+        passwords.push_back(*input_element);
+      }
       // If we have not yet considered any element to be the username so far,
       // provisionally select the input element just before the first password
       // element to be the username. This choice will be overruled if we later
@@ -309,7 +382,8 @@ void GetPasswordForm(
 
     // Various input types such as text, url, email can be a username field.
     if (input_element->isTextField() && !input_element->isPasswordField()) {
-      if (HasAutocompleteAttributeValue(*input_element, "username")) {
+      if (HasAutocompleteAttributeValue(*input_element,
+                                        kAutocompleteUsername)) {
         if (password_form->username_marked_by_site) {
           // A second or subsequent element marked with autocomplete='username'.
           // This makes us less confident that we have understood the form. We
@@ -351,25 +425,25 @@ void GetPasswordForm(
   }
   password_form->layout = SequenceToLayout(layout_sequence);
 
-  std::map<autofill::PasswordFormFieldPredictionType, WebInputElement>
-      predicted_elements;
-  if (form_predictions) {
-    FindPredictedElements(form, *form_predictions, &control_elements,
-                          &predicted_elements);
-  }
+  WebInputElement predicted_username_element;
+  bool map_has_username_prediction = MapContainsPrediction(
+      predicted_elements, PREDICTION_USERNAME, &predicted_username_element);
+
   // Let server predictions override the selection of the username field. This
   // allows instant adjusting without changing Chromium code.
-  if (!predicted_elements[autofill::PREDICTION_USERNAME].isNull() &&
-      username_element != predicted_elements[autofill::PREDICTION_USERNAME]) {
+  auto username_element_iterator = predicted_elements.find(username_element);
+  if (map_has_username_prediction &&
+      (username_element_iterator == predicted_elements.end() ||
+       username_element_iterator->second != PREDICTION_USERNAME)) {
     auto it =
         find(other_possible_usernames.begin(), other_possible_usernames.end(),
-             predicted_elements[autofill::PREDICTION_USERNAME].value());
+             predicted_username_element.value());
     if (it != other_possible_usernames.end())
       other_possible_usernames.erase(it);
     if (!username_element.isNull()) {
       other_possible_usernames.push_back(username_element.value());
     }
-    username_element = predicted_elements[autofill::PREDICTION_USERNAME];
+    username_element = predicted_username_element;
     password_form->was_parsed_using_autofill_predictions = true;
   }
 
@@ -424,7 +498,7 @@ void GetPasswordForm(
   if (!new_password.isNull()) {
     password_form->new_password_element = new_password.nameForAutofill();
     password_form->new_password_value = new_password.value();
-    if (HasAutocompleteAttributeValue(new_password, "new-password"))
+    if (HasAutocompleteAttributeValue(new_password, kAutocompleteNewPassword))
       password_form->new_password_marked_by_site = true;
   }
 
@@ -473,12 +547,43 @@ GURL GetCanonicalOriginForDocument(const WebDocument& document) {
   return StripAuthAndParams(full_origin);
 }
 
+bool IsGaiaReauthenticationForm(
+    const GURL& origin,
+    const WebVector<blink::WebFormControlElement>& control_elements) {
+  if (origin != GaiaUrls::GetInstance()->gaia_url().GetOrigin())
+    return false;
+
+  bool has_rart_field = false;
+  bool has_continue_field = false;
+
+  for (const blink::WebFormControlElement& element : control_elements) {
+    // We're only interested in the presence
+    // of <input type="hidden" /> elements.
+    CR_DEFINE_STATIC_LOCAL(WebString, kHidden, ("hidden"));
+    const blink::WebInputElement* input = blink::toWebInputElement(&element);
+    if (!input || input->formControlType() != kHidden)
+      continue;
+
+    // There must be a hidden input named "rart".
+    if (input->formControlName() == "rart")
+      has_rart_field = true;
+
+    // There must be a hidden input named "continue", whose value points
+    // to a password (or password testing) site.
+    if (input->formControlName() == "continue" &&
+        Matches(password_site_matcher.Pointer(), input->value().utf8())) {
+      has_continue_field = true;
+    }
+  }
+
+  return has_rart_field && has_continue_field;
+}
+
 scoped_ptr<PasswordForm> CreatePasswordForm(
     const WebFormElement& web_form,
     const std::map<const blink::WebInputElement, blink::WebString>*
         nonscript_modified_values,
-    const std::map<autofill::FormData,
-                   autofill::PasswordFormFieldPredictionMap>*
+    const std::map<FormData, PasswordFormFieldPredictionMap>*
         form_predictions) {
   if (web_form.isNull())
     return scoped_ptr<PasswordForm>();

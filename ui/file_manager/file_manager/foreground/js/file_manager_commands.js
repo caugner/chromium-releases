@@ -78,17 +78,44 @@ CommandUtil.getCommandEntries = function(element) {
   } else if (element instanceof DirectoryItem ||
              element instanceof ShortcutItem) {
     // element are sub items in DirectoryTree.
-    return [element.entry];
+    return element.entry ? [element.entry] : [];
   } else if (element instanceof cr.ui.List) {
     // element is a normal List (eg. the file list on the right panel).
     var entries = element.selectedItems;
     // Check if it is Entry or not by checking for toURL().
-    return entries ||
-        entries.some(function(entry) { return !('toURL' in entry); }) ?
-        entries : [];
+    return entries.some(function(entry) { return !('toURL' in entry); }) ?
+        [] : entries;
   } else {
     return [];
   }
+};
+
+/**
+ * @param {EventTarget} element
+ * @param {!FileManager} fileManager
+ * @return {VolumeInfo}
+ */
+CommandUtil.getElementVolumeInfo = function(element, fileManager) {
+  if (element instanceof DirectoryTree && element.selectedItem)
+    return CommandUtil.getElementVolumeInfo(element.selectedItem, fileManager);
+  if (element instanceof VolumeItem)
+    return element.volumeInfo;
+  if (element instanceof ShortcutItem) {
+    return element.entry && fileManager.volumeManager.getVolumeInfo(
+        element.entry);
+  }
+  return null;
+};
+
+/**
+ * @param {!FileManager} fileManager
+ * @return {VolumeInfo}
+ * @private
+ */
+CommandUtil.getCurrentVolumeInfo = function(fileManager) {
+  var currentDirEntry = fileManager.directoryModel.getCurrentDirEntry();
+  return currentDirEntry ? fileManager.volumeManager.getVolumeInfo(
+      currentDirEntry) : null;
 };
 
 /**
@@ -369,21 +396,18 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager The file manager instance.
    */
   execute: function(event, fileManager) {
-    var root = CommandUtil.getCommandEntry(event.target);
-    if (!root) {
-      console.warn('unmount command executed on an element which does not ' +
-                   'have corresponding entry.');
-      return;
-    }
     var errorCallback = function() {
       fileManager.ui.alertDialog.showHtml(
           '', str('UNMOUNT_FAILED'), null, null, null);
     };
-    var volumeInfo = fileManager.volumeManager.getVolumeInfo(root);
+
+    var volumeInfo = CommandUtil.getElementVolumeInfo(
+        event.target, fileManager);
     if (!volumeInfo) {
       errorCallback();
       return;
     }
+
     fileManager.volumeManager_.unmount(
         volumeInfo,
         function() {},
@@ -394,24 +418,27 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
    * @this {CommandHandler}
    */
   canExecute: function(event, fileManager) {
-    var root = CommandUtil.getCommandEntry(event.target);
-    if (!root)
+    var volumeInfo = CommandUtil.getElementVolumeInfo(
+        event.target, fileManager);
+    if (!volumeInfo) {
+      event.canExecute = false;
+      event.command.setHidden(true);
       return;
-    var locationInfo = fileManager.volumeManager.getLocationInfo(root);
-    var rootType =
-        locationInfo && locationInfo.isRootEntry && locationInfo.rootType;
+    }
 
-    event.canExecute = (rootType == VolumeManagerCommon.RootType.ARCHIVE ||
-                        rootType == VolumeManagerCommon.RootType.REMOVABLE ||
-                        rootType == VolumeManagerCommon.RootType.PROVIDED);
+    var volumeType = volumeInfo.volumeType;
+    event.canExecute = (
+        volumeType === VolumeManagerCommon.VolumeType.ARCHIVE ||
+        volumeType === VolumeManagerCommon.VolumeType.REMOVABLE ||
+        volumeType === VolumeManagerCommon.VolumeType.PROVIDED);
     event.command.setHidden(!event.canExecute);
 
-    switch (rootType) {
-      case VolumeManagerCommon.RootType.ARCHIVE:
-      case VolumeManagerCommon.RootType.PROVIDED:
+    switch (volumeType) {
+      case VolumeManagerCommon.VolumeType.ARCHIVE:
+      case VolumeManagerCommon.VolumeType.PROVIDED:
         event.command.label = str('CLOSE_VOLUME_BUTTON_LABEL');
         break;
-      case VolumeManagerCommon.RootType.REMOVABLE:
+      case VolumeManagerCommon.VolumeType.REMOVABLE:
         event.command.label = str('UNMOUNT_DEVICE_BUTTON_LABEL');
         break;
     }
@@ -657,50 +684,89 @@ CommandHandler.COMMANDS_['drive-hosted-settings'] = /** @type {Command} */ ({
  * Deletes selected files.
  * @type {Command}
  */
-CommandHandler.COMMANDS_['delete'] = /** @type {Command} */ ({
+CommandHandler.COMMANDS_['delete'] = (function() {
   /**
-   * @param {!Event} event Command event.
-   * @param {!FileManager} fileManager FileManager to use.
+   * @constructor
+   * @implements {Command}
    */
-  execute: function(event, fileManager) {
-    var entries = CommandUtil.getCommandEntries(event.target);
+  var DeleteCommand = function() {};
 
-    var message = entries.length === 1 ?
-        strf('GALLERY_CONFIRM_DELETE_ONE', entries[0].name) :
-        strf('GALLERY_CONFIRM_DELETE_SOME', entries.length);
+  DeleteCommand.prototype = {
+    /**
+     * @param {!Event} event Command event.
+     * @param {!FileManager} fileManager FileManager to use.
+     */
+    execute: function(event, fileManager) {
+      var entries = CommandUtil.getCommandEntries(event.target);
 
-    fileManager.ui.deleteConfirmDialog.show(message, function() {
-      fileManager.fileOperationManager.deleteEntries(entries);
-    }, null, null);
-  },
-  /**
-   * @param {!Event} event Command event.
-   * @param {!FileManager} fileManager FileManager to use.
-   */
-  canExecute: function(event, fileManager) {
-    var entries = CommandUtil.getCommandEntries(event.target);
+      // Execute might be called without a call of canExecute method,
+      // e.g. called directly from code. Double check here not to delete
+      // undeletable entries.
+      if (this.containsFakeOrRootEntry_(entries, fileManager) ||
+          this.containsReadOnlyEntry_(entries, fileManager))
+        return;
 
-    // If it contains a fake entry, hide command.
-    var containsFakeEntry = entries.some(function(entry) {
-      return util.isFakeEntry(entry);
-    });
-    if (containsFakeEntry) {
-      event.canExecute = false;
-      event.command.setHidden(true);
-      return;
+      var message = entries.length === 1 ?
+          strf('GALLERY_CONFIRM_DELETE_ONE', entries[0].name) :
+          strf('GALLERY_CONFIRM_DELETE_SOME', entries.length);
+
+      fileManager.ui.deleteConfirmDialog.show(message, function() {
+        fileManager.fileOperationManager.deleteEntries(entries);
+      }, null, null);
+    },
+
+    /**
+     * @param {!Event} event Command event.
+     * @param {!FileManager} fileManager FileManager to use.
+     */
+    canExecute: function(event, fileManager) {
+      var entries = CommandUtil.getCommandEntries(event.target);
+
+      // If entries contain fake or root entry, hide delete option.
+      if (this.containsFakeOrRootEntry_(entries, fileManager)) {
+        event.canExecute = false;
+        event.command.setHidden(true);
+        return;
+      }
+
+      event.canExecute = entries.length > 0 &&
+          !this.containsReadOnlyEntry_(entries, fileManager);
+      event.command.setHidden(false);
+    },
+
+    /**
+     * @param {!Array<!Entry>} entries
+     * @param {!FileManager} fileManager
+     * @return {boolean} True if entries contain fake or root entry.
+     */
+    containsFakeOrRootEntry_: function(entries, fileManager) {
+      return entries.some(function(entry) {
+        if (util.isFakeEntry(entry))
+          return true;
+
+        var volumeInfo = fileManager.volumeManager.getVolumeInfo(entry);
+        if (!volumeInfo)
+          return true;
+
+        return volumeInfo.displayRoot === entry;
+      });
+    },
+
+    /**
+     * @param {!Array<!Entry>} entries
+     * @param {!FileManager} fileManager
+     * @return {boolean} True if entries contain read only entry.
+     */
+    containsReadOnlyEntry_: function(entries, fileManager) {
+      return entries.some(function(entry) {
+        var locationInfo = fileManager.volumeManager.getLocationInfo(entry);
+        return locationInfo && locationInfo.isReadOnly;
+      });
     }
+  };
 
-    // If it contains an entry which is on read only volume or no item is
-    // selected, disable command.
-    var containsReadOnlyEntry = entries.some(function(entry) {
-      var locationInfo = fileManager.volumeManager.getLocationInfo(entry);
-      return locationInfo && locationInfo.isReadOnly;
-    });
-
-    event.canExecute = !containsReadOnlyEntry && entries.length > 0;
-    event.command.setHidden(false);
-  }
-});
+  return new DeleteCommand();
+})();
 
 /**
  * Pastes files from clipboard.
@@ -856,6 +922,21 @@ CommandHandler.COMMANDS_['drive-go-to-drive'] = /** @type {Command} */ ({
 });
 
 /**
+ * Opens a file with default action.
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['default-action'] = /** @type {Command} */ ({
+  execute: function(event, fileManager) {
+    fileManager.taskController.executeDefaultAction();
+  },
+  canExecute: function(event, fileManager) {
+    var canExecute = fileManager.taskController.canExecuteDefaultAction();
+    event.canExecute = canExecute;
+    event.command.setHidden(!canExecute);
+  }
+});
+
+/**
  * Displays open with dialog for current selection.
  * @type {Command}
  */
@@ -881,8 +962,9 @@ CommandHandler.COMMANDS_['open-with'] = /** @type {Command} */ ({
    * @param {!FileManager} fileManager FileManager to use.
    */
   canExecute: function(event, fileManager) {
-    var tasks = fileManager.getSelection().tasks;
-    event.canExecute = tasks && tasks.size() > 1;
+    var canExecute = fileManager.taskController.canExecuteOpenWith();
+    event.canExecute = canExecute;
+    event.command.setHidden(!canExecute);
   }
 });
 
@@ -962,7 +1044,7 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
           return;
         currentEntry = entries.shift();
         chrome.fileManagerPrivate.pinDriveFile(
-            currentEntry.toURL(),
+            currentEntry,
             pin,
             steps.entryPinned);
       },
@@ -1360,69 +1442,26 @@ CommandHandler.COMMANDS_['install-new-extension'] = /** @type {Command} */ ({
 /**
  * Configures the currently selected volume.
  */
-CommandHandler.COMMANDS_['configure'] = (function() {
+CommandHandler.COMMANDS_['configure'] = /** @type {Command} */ ({
   /**
-   * @constructor
-   * @implements {Command}
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager FileManager to use.
    */
-  var ConfigureCommand = function() {
-  };
-
-  ConfigureCommand.prototype = {
-    __proto__: Command.prototype,
-
-    /**
-     * @param {EventTarget} element
-     * @param {!FileManager} fileManager
-     * @return {VolumeInfo}
-     * @private
-     */
-    getElementVolumeInfo_: function(element, fileManager) {
-      if (element instanceof VolumeItem)
-        return element.volumeInfo;
-      if (element instanceof ShortcutItem) {
-        return element.entry && fileManager.volumeManager.getVolumeInfo(
-            element.entry);
-      }
-    },
-
-    /**
-     * If the command is executed on the navigation list, then use it's volume
-     * info, otherwise use the currently opened volume.
-     *
-     * @param {!Event} event
-     * @param {!FileManager} fileManager
-     * @return {VolumeInfo}
-     * @private
-     */
-    getCommandVolumeInfo_: function(event, fileManager) {
-      var currentDirEntry = fileManager.directoryModel.getCurrentDirEntry();
-      return this.getElementVolumeInfo_(event.target, fileManager) ||
-          currentDirEntry && fileManager.volumeManager.getVolumeInfo(
-              currentDirEntry);
-    },
-
-    /**
-     * @override
-     */
-    execute: function(event, fileManager) {
-      var volumeInfo = this.getCommandVolumeInfo_(event, fileManager);
-      if (volumeInfo && volumeInfo.configurable)
-        fileManager.volumeManager.configure(volumeInfo);
-    },
-
-    /**
-     * @override
-     */
-    canExecute: function(event, fileManager) {
-      var volumeInfo = this.getCommandVolumeInfo_(event, fileManager);
-      event.canExecute = volumeInfo && volumeInfo.configurable;
-      event.command.setHidden(!event.canExecute);
-    }
-  };
-
-  return new ConfigureCommand();
-})();
+  execute: function(event, fileManager) {
+    var volumeInfo =
+        CommandUtil.getElementVolumeInfo(event.target, fileManager) ||
+        CommandUtil.getCurrentVolumeInfo(fileManager);
+    if (volumeInfo && volumeInfo.configurable)
+      fileManager.volumeManager.configure(volumeInfo);
+  },
+  canExecute: function(event, fileManager) {
+    var volumeInfo =
+        CommandUtil.getElementVolumeInfo(event.target, fileManager) ||
+        CommandUtil.getCurrentVolumeInfo(fileManager);
+    event.canExecute = volumeInfo && volumeInfo.configurable;
+    event.command.setHidden(!event.canExecute);
+  }
+});
 
 /**
  * Refreshes the currently selected directory.

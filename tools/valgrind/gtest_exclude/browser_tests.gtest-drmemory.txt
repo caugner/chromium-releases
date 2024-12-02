@@ -46,3 +46,20 @@ NaClBrowserTestGLibc.PPAPIPPBInstance
 NaClBrowserTestGLibc.PPAPIPPPInstance
 NaClBrowserTestGLibc.SimpleLoad
 NaClBrowserTestGLibc.SuccessfulLoadUMA
+
+# https://crbug.com/512140
+PluginPowerSaverBrowserTest.BackgroundTabPlugins
+
+# https://crbug.com/504885
+# The test takes too long.
+SmartSessionRestoreMRUTest.PRE_CorrectLoadingOrder
+SmartSessionRestoreMRUTest.CorrectLoadingOrder
+
+# https://crbug.com/516368
+PushMessagingBrowserTest.PushEventSuccess
+
+# https://crbug.com/519039
+AppViewTest.KillGuestCommunicatingWithWrongAppView
+
+# https://crbug.com/519087
+ExtensionTabsTest.GetAllWindowsAllTypes

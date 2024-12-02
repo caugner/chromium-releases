@@ -111,6 +111,10 @@ repack("repack_ui_test_pak") {
     "//ui/strings",
   ]
 
+  if (!is_ios) {
+    deps += [ "//third_party/WebKit/public:resources_grit" ]
+  }
+
   if (!is_mac) {
     deps += [ ":copy_ui_resources_100_percent" ]
   }
@@ -124,8 +128,15 @@ repack("repack_ui_test_pak") {
 
   if (toolkit_views) {
     deps += [ "//ui/views/resources" ]
-    sources +=
-        [ "$root_gen_dir/ui/views/resources/views_resources_100_percent.pak" ]
+    sources += [
+      "$root_gen_dir/blink/public/resources/blink_resources.pak",
+      "$root_gen_dir/ui/views/resources/views_resources_100_percent.pak",
+    ]
+  }
+
+  if (enable_app_list) {
+    deps += [ "//ui/app_list/resources" ]
+    sources += [ "$root_gen_dir/ui/app_list/resources/app_list_resources_100_percent.pak" ]
   }
 }
 

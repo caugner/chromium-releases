@@ -74,8 +74,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
-#include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -91,6 +89,8 @@
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/infobars/core/infobar.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
+#include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
@@ -98,10 +98,12 @@
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_service_impl.h"
+#include "components/search/search.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -1180,7 +1182,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
 IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
   MakeRequestFail make_request_fail("search.example");
 
-  chrome::EnableQueryExtractionForTesting();
+  search::EnableQueryExtractionForTesting();
 
   // Verifies that a default search is made using the provider configured via
   // policy. Also checks that default search can be completely disabled.
@@ -1681,7 +1683,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ExtensionInstallBlacklistSharedModules) {
 
   // Make sure that "import" and "export" are available to these extension IDs
   // by mocking the release channel.
-  extensions::ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_DEV);
+  extensions::ScopedCurrentChannel channel(version_info::Channel::DEV);
 
   // Verify that the extensions are not installed initially.
   ExtensionService* service = extension_service();
@@ -3419,12 +3421,6 @@ class MediaStreamDevicesControllerBrowserTest
                   NULL);
 
     if (whitelist_policy) {
-      // TODO(tommi): Remove the kiosk mode flag when the whitelist is visible
-      // in the media exceptions UI.
-      // See discussion here: https://codereview.chromium.org/15738004/
-      base::CommandLine::ForCurrentProcess()->AppendSwitch(
-          switches::kKioskMode);
-
       // Add an entry to the whitelist that allows the specified URL regardless
       // of the setting of kAudioCapturedAllowed.
       base::ListValue* list = new base::ListValue();
@@ -3838,5 +3834,32 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, NativeMessagingWhitelist) {
 }
 
 #endif  // !defined(CHROME_OS)
+
+
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+// Sets the hardware acceleration mode policy before the browser is started.
+class HardwareAccelerationModePolicyTest : public PolicyTest {
+ public:
+  HardwareAccelerationModePolicyTest() {}
+
+  void SetUpInProcessBrowserTestFixture() override {
+    PolicyTest::SetUpInProcessBrowserTestFixture();
+    PolicyMap policies;
+    policies.Set(key::kHardwareAccelerationModeEnabled,
+                 POLICY_LEVEL_MANDATORY,
+                 POLICY_SCOPE_USER,
+                 new base::FundamentalValue(false),
+                 NULL);
+    provider_.UpdateChromePolicy(policies);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(HardwareAccelerationModePolicyTest,
+                       HardwareAccelerationDisabled) {
+  // Verifies that hardware acceleration can be disabled with policy.
+  EXPECT_FALSE(
+      content::GpuDataManager::GetInstance()->GpuAccessAllowed(nullptr));
+}
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
 }  // namespace policy

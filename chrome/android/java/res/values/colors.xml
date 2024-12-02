@@ -38,7 +38,6 @@
     <!-- Website Settings Popup colors -->
     <color name="website_settings_popup_text">#444444</color>
     <color name="website_settings_popup_button_text">#444444</color>
-    <color name="website_settings_connection_broken_leading_text">#db4437</color>
     <color name="website_settings_popup_permission_spinner_text">#646464</color>
     <color name="website_settings_popup_text_link">#4285f4</color>
 
@@ -86,7 +85,7 @@
     <!-- Sad Tab colors -->
     <color name="sad_tab_header_text_color">#333333</color>
     <color name="sad_tab_body_text_color">#646464</color>
-    
+
     <!-- NTP Colors. Used on the bookmarks and recent tabs pages. -->
     <color name="ntp_bg">#fff</color>
     <color name="ntp_bg_incognito">#222</color>
@@ -103,6 +102,12 @@
     <!-- Contextual Search colors -->
     <color name="contextual_search_promo_text_color">#333333</color>
     <color name="contextual_search_promo_background_color">#EEEEEE</color>
+
+    <!-- Progress Bar colors -->
+    <color name="progress_bar_foreground">@color/light_active_color</color>
+    <color name="progress_bar_foreground_white">@android:color/white</color>
+    <color name="progress_bar_background">#3d4386f7</color>
+    <color name="progress_bar_background_white">#4d000000</color>
 
     <!-- Theme colors. Also used for toolbar background -->
     <color name="incognito_primary_color">#505050</color>
@@ -131,6 +136,7 @@
     <color name="reader_mode_header_bg">#ff494949</color>
 
     <!-- WebappActivity colors -->
+    <color name="webapp_default_bg">#fafafa</color>
     <color name="webapp_url_bar_bg">#fafafa</color>
     <color name="webapp_url_bar_separator">#e1e1e1</color>
 
@@ -138,8 +144,6 @@
     <color name="enhanced_bookmark_detail_text">#212121</color>
     <color name="enhanced_bookmark_detail_section">#7C7B79</color>
     <color name="enhanced_bookmark_app_bar_shadow_color">#1D000000</color>
-    <color name="enhanced_bookmark_selection_action_bar_background">#4F82F4</color>
-    <color name="enhanced_bookmark_drawer_selected_color">#4281F4</color>
     <color name="enhanced_bookmark_drawer_selected_background_color">#F0F0F0</color>
     <color name="enhanced_bookmark_list_item_highlight_color">#804281f4</color>
     <color name="enhanced_bookmark_icon_background_color">#ff787878</color>
@@ -147,4 +151,7 @@
 
     <!-- Opt out promo -->
     <color name="opt_out_text_color">#646464</color>
+
+    <!-- Media UI Colors -->
+    <color name="media_session_icon_color">#14181C</color>
 </resources>

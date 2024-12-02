@@ -25,7 +25,7 @@ scoped_ptr<PictureLayerTilingSet> CreateTilingSet(
     PictureLayerTilingClient* client) {
   LayerTreeSettings defaults;
   return PictureLayerTilingSet::Create(
-      ACTIVE_TREE, client, defaults.max_tiles_for_interest_area,
+      ACTIVE_TREE, client, defaults.tiling_interest_area_padding,
       defaults.skewport_target_time_in_seconds,
       defaults.skewport_extrapolation_limit_in_content_pixels);
 }
@@ -229,6 +229,7 @@ class PictureLayerTilingSetTestWithResources : public testing::Test {
     float scale = min_scale;
     for (int i = 0; i < num_tilings; ++i, scale += scale_increment) {
       PictureLayerTiling* tiling = set->AddTiling(scale, pile);
+      tiling->set_resolution(HIGH_RESOLUTION);
       tiling->CreateAllTilesForTesting();
       std::vector<Tile*> tiles = tiling->AllTilesForTesting();
       client.tile_manager()->InitializeTilesWithResourcesForTesting(tiles);

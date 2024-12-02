@@ -107,6 +107,12 @@ const char kSyncMemoryPressureWarningCount[] = "sync.memory_warning_count";
 // Stores if sync shutdown cleanly.
 const char kSyncShutdownCleanly[] = "sync.shutdown_cleanly";
 
+// Dictionary of last seen invalidation versions for each model type.
+const char kSyncInvalidationVersions[] = "sync.invalidation_versions";
+
+// The product version from the last restart of Chrome.
+const char kSyncLastRunVersion[] = "sync.last_run_version";
+
 }  // namespace prefs
 
 }  // namespace sync_driver

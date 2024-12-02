@@ -24,8 +24,9 @@
 namespace ui {
 
 GbmSurfaceFactory::GbmSurfaceFactory(bool allow_surfaceless)
-    : DrmSurfaceFactory(NULL), allow_surfaceless_(allow_surfaceless) {
-}
+    : DrmSurfaceFactory(nullptr),
+      allow_surfaceless_(allow_surfaceless),
+      drm_device_manager_(nullptr) {}
 
 GbmSurfaceFactory::~GbmSurfaceFactory() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -106,16 +107,19 @@ GbmSurfaceFactory::CreateSurfacelessEGLSurfaceForWidget(
 scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
     gfx::AcceleratedWidget widget,
     gfx::Size size,
-    BufferFormat format,
-    BufferUsage usage) {
-  if (usage == MAP)
-    return nullptr;
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage) {
+#if !defined(OS_CHROMEOS)
+  // Support for memory mapping accelerated buffers requires some
+  // CrOS-specific patches (using vgem).
+  DCHECK_EQ(gfx::BufferUsage::SCANOUT, usage);
+#endif
 
   scoped_refptr<GbmDevice> gbm = GetGbmDevice(widget);
   DCHECK(gbm);
 
   scoped_refptr<GbmBuffer> buffer =
-      GbmBuffer::CreateBuffer(gbm, format, size, true);
+      GbmBuffer::CreateBuffer(gbm, format, size, usage);
   if (!buffer.get())
     return nullptr;
 
@@ -129,20 +133,6 @@ scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
 bool GbmSurfaceFactory::CanShowPrimaryPlaneAsOverlay() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return allow_surfaceless_;
-}
-
-bool GbmSurfaceFactory::CanCreateNativePixmap(BufferUsage usage) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  switch (usage) {
-    case MAP:
-      return false;
-    case PERSISTENT_MAP:
-      return false;
-    case SCANOUT:
-      return true;
-  }
-  NOTREACHED();
-  return false;
 }
 
 scoped_refptr<GbmDevice> GbmSurfaceFactory::GetGbmDevice(

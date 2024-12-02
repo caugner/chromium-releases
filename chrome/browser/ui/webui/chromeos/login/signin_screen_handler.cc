@@ -48,6 +48,7 @@
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/system/system_clock.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_metrics.h"
@@ -365,7 +366,8 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("addUser", IDS_ADD_USER_BUTTON);
   builder->Add("browseAsGuest", IDS_GO_INCOGNITO_BUTTON);
   builder->Add("moreOptions", IDS_MORE_OPTIONS_BUTTON);
-  builder->Add("addSupervisedUser", IDS_CREATE_SUPERVISED_USER_MENU_LABEL);
+  builder->Add("addSupervisedUser",
+               IDS_CREATE_LEGACY_SUPERVISED_USER_MENU_LABEL);
   builder->Add("cancel", IDS_CANCEL);
   builder->Add("signOutUser", IDS_SCREEN_LOCK_SIGN_OUT);
   builder->Add("offlineLogin", IDS_OFFLINE_LOGIN_HTML);
@@ -439,7 +441,8 @@ void SigninScreenHandler::DeclareLocalizedValues(
                base::string16());
   builder->AddF("removeLegacySupervisedUserWarningText",
                IDS_LOGIN_POD_LEGACY_SUPERVISED_USER_REMOVE_WARNING,
-               base::UTF8ToUTF16(chrome::kSupervisedUserManagementDisplayURL));
+               base::UTF8ToUTF16(
+                   chrome::kLegacySupervisedUserManagementDisplayURL));
   builder->Add("removeUserWarningButtonTitle",
                IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON);
 
@@ -729,6 +732,10 @@ void SigninScreenHandler::UpdateStateInternal(NetworkError::ErrorReason reason,
     return;
   }
 
+  // Use the online login page if the user has not used the machine for awhile.
+  if (offline_login_active_)
+    gaia_screen_handler_->MonitorOfflineIdle(is_online);
+
   // Reload frame if network state is changed from {!ONLINE} -> ONLINE state.
   if (reason == NetworkError::ERROR_REASON_NETWORK_STATE_CHANGED &&
       from_not_online_to_online_transition) {
@@ -940,15 +947,6 @@ void SigninScreenHandler::ShowErrorScreen(LoginDisplay::SigninError error_id) {
 
 void SigninScreenHandler::ShowSigninUI(const std::string& email) {
   core_oobe_actor_->ShowSignInUI(email);
-}
-
-void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
-  gaia_screen_handler_->PasswordChangedFor(username);
-  gaia_screen_handler_->PopulateEmail(username);
-  core_oobe_actor_->ShowSignInUI(username);
-  CallJS("login.setAuthType", username,
-         static_cast<int>(UserSelectionScreen::ONLINE_SIGN_IN),
-         base::StringValue(""));
 }
 
 void SigninScreenHandler::ShowPasswordChangedDialog(bool show_password_error,
@@ -1285,6 +1283,15 @@ void SigninScreenHandler::HandleFocusPod(const std::string& user_id) {
     delegate_->CheckUserStatus(user_id);
   if (!test_focus_pod_callback_.is_null())
     test_focus_pod_callback_.Run();
+
+  bool use_24hour_clock = false;
+  if (user_manager::UserManager::Get()->GetKnownUserBooleanPref(
+          user_id, prefs::kUse24HourClock, &use_24hour_clock)) {
+    g_browser_process->platform_part()
+        ->GetSystemClock()
+        ->SetLastFocusedPodHourClockType(use_24hour_clock ? base::k24HourClock
+                                                          : base::k12HourClock);
+  }
 }
 
 void SigninScreenHandler::HandleGetPublicSessionKeyboardLayouts(

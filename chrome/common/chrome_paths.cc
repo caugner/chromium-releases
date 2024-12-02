@@ -60,6 +60,11 @@ const base::FilePath::CharType kFilepathSinglePrefExtensions[] =
 #else
     FILE_PATH_LITERAL("/usr/share/chromium/extensions");
 #endif  // defined(GOOGLE_CHROME_BUILD)
+
+// The path to the hint file that tells the pepper plugin loader
+// where it can find the latest component updated flash.
+const base::FilePath::CharType kComponentUpdatedFlashHint[] =
+    FILE_PATH_LITERAL("latest-component-updated-flash");
 #endif  // defined(OS_LINUX)
 
 static base::LazyInstance<base::FilePath>
@@ -481,7 +486,8 @@ bool PathProvider(int key, base::FilePath* result) {
       break;
     }
 #endif
-#if defined(OS_CHROMEOS) || (defined(OS_MACOSX) && !defined(OS_IOS))
+#if defined(OS_CHROMEOS) || (defined(OS_LINUX) && defined(CHROMIUM_BUILD)) || \
+    (defined(OS_MACOSX) && !defined(OS_IOS))
     case chrome::DIR_USER_EXTERNAL_EXTENSIONS: {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
@@ -558,6 +564,22 @@ bool PathProvider(int key, base::FilePath* result) {
       cur = cur.Append(kGCMStoreDirname);
       break;
 #endif  // !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+    case chrome::DIR_OFFLINE_PAGE_METADATA:
+      if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
+        return false;
+      cur = cur.Append(kOfflinePageMetadataDirname);
+      break;
+#endif  // defined(OS_ANDROID)
+#if defined(OS_LINUX)
+    case chrome::FILE_COMPONENT_FLASH_HINT:
+      if (!PathService::Get(chrome::DIR_COMPONENT_UPDATED_PEPPER_FLASH_PLUGIN,
+                            &cur)) {
+        return false;
+      }
+      cur = cur.Append(kComponentUpdatedFlashHint);
+      break;
+#endif  // defined(OS_LINUX)
 
     default:
       return false;

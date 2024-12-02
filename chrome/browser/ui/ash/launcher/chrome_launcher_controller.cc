@@ -405,7 +405,7 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
   // Right now ash::Shell isn't created for tests.
   // TODO(mukai): Allows it to observe display change and write tests.
   if (ash::Shell::HasInstance()) {
-    ash::Shell::GetInstance()->display_controller()->AddObserver(this);
+    ash::Shell::GetInstance()->window_tree_host_manager()->AddObserver(this);
     // If it got already set, we remove the observer first again and swap the
     // ItemDelegateManager.
     if (item_delegate_manager_)
@@ -433,7 +433,7 @@ ChromeLauncherController::~ChromeLauncherController() {
 
   model_->RemoveObserver(this);
   if (ash::Shell::HasInstance())
-    ash::Shell::GetInstance()->display_controller()->RemoveObserver(this);
+    ash::Shell::GetInstance()->window_tree_host_manager()->RemoveObserver(this);
   for (IDToItemControllerMap::iterator i = id_to_item_controller_map_.begin();
        i != id_to_item_controller_map_.end(); ++i) {
     int index = model_->ItemIndexByID(i->first);
@@ -610,34 +610,6 @@ bool ChromeLauncherController::IsPinnable(ash::ShelfID id) const {
            type == ash::TYPE_PLATFORM_APP ||
            type == ash::TYPE_WINDOWED_APP) &&
           CanPin());
-}
-
-void ChromeLauncherController::Install(ash::ShelfID id) {
-  LauncherItemController* controller = GetLauncherItemController(id);
-  if (!controller)
-    return;
-
-  std::string app_id = GetAppIDForShelfID(id);
-  if (extensions::util::IsExtensionInstalledPermanently(app_id, profile_))
-    return;
-
-  if (controller->type() == LauncherItemController::TYPE_APP) {
-    AppWindowLauncherItemController* app_window_controller =
-        static_cast<AppWindowLauncherItemController*>(controller);
-    app_window_controller->InstallApp();
-  }
-}
-
-bool ChromeLauncherController::CanInstall(ash::ShelfID id) {
-  int index = model_->ItemIndexByID(id);
-  if (index == -1)
-    return false;
-
-  ash::ShelfItemType type = model_->items()[index].type;
-  if (type != ash::TYPE_PLATFORM_APP)
-    return false;
-
-  return extensions::util::IsEphemeralApp(GetAppIDForShelfID(id), profile_);
 }
 
 void ChromeLauncherController::LockV1AppWithID(const std::string& app_id) {

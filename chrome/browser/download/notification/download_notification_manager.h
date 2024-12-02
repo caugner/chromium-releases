@@ -17,10 +17,12 @@ class DownloadNotificationManagerForProfile;
 
 class DownloadNotificationManager : public DownloadUIController::Delegate {
  public:
+  static bool IsEnabled();
+
   explicit DownloadNotificationManager(Profile* profile);
   ~DownloadNotificationManager() override;
 
-  void OnAllDownloadsRemoved(Profile* profile);
+  void OnAllDownloadsRemoving(Profile* profile);
   // DownloadUIController::Delegate:
   void OnNewDownloadReady(content::DownloadItem* item) override;
 

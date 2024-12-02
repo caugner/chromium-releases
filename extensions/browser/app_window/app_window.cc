@@ -237,6 +237,7 @@ AppWindow::AppWindow(BrowserContext* context,
       has_been_shown_(false),
       can_send_events_(false),
       is_hidden_(false),
+      delayed_show_type_(SHOW_ACTIVE),
       cached_always_on_top_(false),
       requested_alpha_enabled_(false),
       is_ime_window_(false),
@@ -288,10 +289,6 @@ void AppWindow::Init(const GURL& url,
 
   helper_.reset(new AppWebContentsHelper(
       browser_context_, extension_id_, web_contents(), app_delegate_.get()));
-
-  popup_manager_.reset(
-      new web_modal::PopupManager(GetWebContentsModalDialogHost()));
-  popup_manager_->RegisterWith(web_contents());
 
   UpdateExtensionAppIcon();
   AppWindowRegistry::Get(browser_context_)->AddAppWindow(this);
@@ -717,6 +714,11 @@ void AppWindow::WindowEventsReady() {
   SendOnWindowShownIfShown();
 }
 
+void AppWindow::NotifyRenderViewReady() {
+  if (app_window_contents_)
+    app_window_contents_->OnWindowReady();
+}
+
 void AppWindow::GetSerializedState(base::DictionaryValue* properties) const {
   DCHECK(properties);
 
@@ -963,15 +965,6 @@ void AppWindow::OnExtensionUnloaded(BrowserContext* browser_context,
     native_app_window_->Close();
 }
 
-void AppWindow::OnExtensionWillBeInstalled(
-    BrowserContext* browser_context,
-    const Extension* extension,
-    bool is_update,
-    bool from_ephemeral,
-    const std::string& old_name) {
-  if (extension->id() == extension_id())
-    native_app_window_->UpdateShelfMenu();
-}
 void AppWindow::SetWebContentsBlocked(content::WebContents* web_contents,
                                       bool blocked) {
   app_delegate_->SetWebContentsBlocked(web_contents, blocked);

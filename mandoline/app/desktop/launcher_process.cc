@@ -16,6 +16,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/trace_event/trace_event.h"
 #include "components/tracing/startup_tracing.h"
+#include "components/tracing/tracing_switches.h"
 #include "mandoline/app/core_services_initialization.h"
 #include "mandoline/app/desktop/launcher_process.h"
 #include "mojo/runner/context.h"
@@ -113,7 +114,7 @@ int LauncherProcessMain(int argc, char** argv) {
     message_loop.PostTask(FROM_HERE,
                           base::Bind(&mojo::runner::Context::Run,
                                      base::Unretained(&shell_context),
-                                     GURL("mojo:browser")));
+                                     GURL("mojo:desktop_ui")));
     message_loop.Run();
 
     // Must be called before |message_loop| is destroyed.

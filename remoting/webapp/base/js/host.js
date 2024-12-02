@@ -27,7 +27,10 @@ remoting.Host = function(hostId) {
   this.hostId = hostId;
   /** @type {string} */
   this.hostName = '';
-  /** @type {string} */
+  /**
+   * Either 'ONLINE' or 'OFFLINE'.
+   * @type {string}
+   */
   this.status = '';
   /** @type {string} */
   this.jabberId = '';
@@ -41,7 +44,13 @@ remoting.Host = function(hostId) {
   this.updatedTime = '';
   /** @type {string} */
   this.hostOfflineReason = '';
-  /** @type {string} */
+
+  /**
+   * TODO(kelvinp): Remove this once we have migrated away from XMPP based
+   * logging (crbug.com/523423).
+   *
+   * @type {string}
+   */
   this.loggingChannel = '';
   /** @type {remoting.Host.Options} */
   this.options = new remoting.Host.Options(hostId);

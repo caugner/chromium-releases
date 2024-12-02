@@ -182,11 +182,6 @@ ui::ThreePartImage& GetStrokeImage(bool active) {
   return GetMaskImage().HitTest(viewPoint, maskRect) ? self : nil;
 }
 
-// Returns |YES| if this tab can be torn away into a new window.
-- (BOOL)canBeDragged {
-  return [controller_ tabCanBeDragged:controller_];
-}
-
 // Handle clicks and drags in this button. We get here because we have
 // overridden acceptsFirstMouse: and the click is within our bounds.
 - (void)mouseDown:(NSEvent*)theEvent {
@@ -450,6 +445,7 @@ ui::ThreePartImage& GetStrokeImage(bool active) {
     return;
 
   [titleView_ setStringValue:title];
+  [closeButton_ setAccessibilityTitle:title];
 
   base::string16 title16 = base::SysNSStringToUTF16(title);
   bool isRTL = base::i18n::GetFirstStrongCharacterDirection(title16) ==

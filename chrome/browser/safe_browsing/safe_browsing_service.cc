@@ -21,7 +21,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/prefs/tracked/tracked_preference_validation_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
@@ -37,6 +36,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/browser/notification_service.h"
@@ -73,21 +74,21 @@ const base::FilePath::CharType kCookiesFile[] = FILE_PATH_LITERAL(" Cookies");
 
 // The default URL prefix where browser fetches chunk updates, hashes,
 // and reports safe browsing hits and malware details.
-const char* const kSbDefaultURLPrefix =
+const char kSbDefaultURLPrefix[] =
     "https://safebrowsing.google.com/safebrowsing";
 
 // The backup URL prefix used when there are issues establishing a connection
 // with the server at the primary URL.
-const char* const kSbBackupConnectErrorURLPrefix =
+const char kSbBackupConnectErrorURLPrefix[] =
     "https://alt1-safebrowsing.google.com/safebrowsing";
 
 // The backup URL prefix used when there are HTTP-specific issues with the
 // server at the primary URL.
-const char* const kSbBackupHttpErrorURLPrefix =
+const char kSbBackupHttpErrorURLPrefix[] =
     "https://alt2-safebrowsing.google.com/safebrowsing";
 
 // The backup URL prefix used when there are local network specific issues.
-const char* const kSbBackupNetworkErrorURLPrefix =
+const char kSbBackupNetworkErrorURLPrefix[] =
     "https://alt3-safebrowsing.google.com/safebrowsing";
 
 base::FilePath CookieFilePath() {
@@ -104,6 +105,13 @@ bool IsIncidentReportingServiceEnabled() {
 }
 #endif  // defined(FULL_SAFE_BROWSING)
 
+#if defined(SAFE_BROWSING_DB_REMOTE)
+// Android field trial
+const char kAndroidFieldExperiment[] = "SafeBrowsingAndroid";
+const char kAndroidFieldParam[] = "enabled";
+const char kAndroidCheckAllTypesParam[] = "check_all_resource_types";
+const char kAndroidFieldParamEnabledValue[] = "true";
+#endif  // defined(SAFE_BROWSING_DB_REMOTE)
 }  // namespace
 
 class SafeBrowsingURLRequestContextGetter
@@ -203,12 +211,26 @@ SafeBrowsingService* SafeBrowsingService::CreateSafeBrowsingService() {
   return factory_->CreateSafeBrowsingService();
 }
 
-
 SafeBrowsingService::SafeBrowsingService()
     : protocol_manager_(NULL),
       ping_manager_(NULL),
       enabled_(false),
       enabled_by_prefs_(false) {
+#if defined(SAFE_BROWSING_DB_REMOTE)
+  const std::string enabled_param = variations::GetVariationParamValue(
+      kAndroidFieldExperiment, kAndroidFieldParam);
+  is_android_field_trial_enabled_ =
+      (enabled_param == kAndroidFieldParamEnabledValue);
+
+  const std::string check_all_types_param = variations::GetVariationParamValue(
+      kAndroidFieldExperiment, kAndroidCheckAllTypesParam);
+  if (check_all_types_param == kAndroidFieldParamEnabledValue) {
+    resource_types_to_check_ = CHECK_ALL_RESOURCE_TYPES;
+  } else {
+    // Default
+    resource_types_to_check_ = CHECK_ONLY_DANGEROUS_TYPES;
+  }
+#endif  // defined(SAFE_BROWSING_DB_REMOTE)
 }
 
 SafeBrowsingService::~SafeBrowsingService() {

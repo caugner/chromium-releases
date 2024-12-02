@@ -353,7 +353,6 @@ TEST_F(AutofillMetricsTest, QualityMetrics) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -494,7 +493,6 @@ TEST_F(AutofillMetricsTest, Rappor_LowMismatchRate_NoMetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -537,7 +535,6 @@ TEST_F(AutofillMetricsTest, Rappor_NoDataServerAndHeuristic_NoMetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -580,7 +577,6 @@ TEST_F(AutofillMetricsTest, Rappor_HighServerMismatchRate_MetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -633,7 +629,6 @@ TEST_F(AutofillMetricsTest, Rappor_HighHeuristicMismatchRate_MetricsReported) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
   FormFieldData field;
@@ -687,7 +682,6 @@ TEST_F(AutofillMetricsTest, PredictedMetricsWithAutocomplete) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field1;
   test::CreateTestFormField("Select", "select", "USA", "select-one", &field1);
@@ -781,7 +775,6 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   std::vector<ServerFieldType> heuristic_types, server_types;
 
@@ -922,7 +915,6 @@ TEST_F(AutofillMetricsTest, StoredProfileCountAutofillableFormSubmission) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   // Three fields is enough to make it an autofillable form.
   FormFieldData field;
@@ -954,7 +946,6 @@ TEST_F(AutofillMetricsTest, StoredProfileCountNonAutofillableFormSubmission) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   // Two fields is not enough to make it an autofillable form.
   FormFieldData field;
@@ -974,6 +965,55 @@ TEST_F(AutofillMetricsTest, StoredProfileCountNonAutofillableFormSubmission) {
   // logged.
   histogram_tester.ExpectTotalCount(
       "Autofill.StoredProfileCountAtAutofillableFormSubmission", 0);
+}
+
+// Verify that when submitting an autofillable form, the proper number of edited
+// fields is logged.
+TEST_F(AutofillMetricsTest, NumberOfEditedAutofilledFields) {
+  // Construct a fillable form.
+  FormData form;
+  form.name = ASCIIToUTF16("TestForm");
+  form.origin = GURL("http://example.com/form.html");
+  form.action = GURL("http://example.com/submit.html");
+
+  std::vector<ServerFieldType> heuristic_types, server_types;
+
+  // Three fields is enough to make it an autofillable form.
+  FormFieldData field;
+  test::CreateTestFormField("Autofilled", "autofilled", "Elvis Aaron Presley",
+                            "text", &field);
+  field.is_autofilled = true;
+  form.fields.push_back(field);
+  heuristic_types.push_back(NAME_FULL);
+  server_types.push_back(NAME_FULL);
+
+  test::CreateTestFormField("Autofill Failed", "autofillfailed",
+                            "buddy@gmail.com", "text", &field);
+  field.is_autofilled = true;
+  form.fields.push_back(field);
+  heuristic_types.push_back(EMAIL_ADDRESS);
+  server_types.push_back(EMAIL_ADDRESS);
+
+  test::CreateTestFormField("Phone", "phone", "2345678901", "tel", &field);
+  field.is_autofilled = true;
+  form.fields.push_back(field);
+  heuristic_types.push_back(PHONE_HOME_CITY_AND_NUMBER);
+  server_types.push_back(PHONE_HOME_CITY_AND_NUMBER);
+
+  autofill_manager_->AddSeenForm(form, heuristic_types, server_types);
+
+  base::HistogramTester histogram_tester;
+  // Simulate text input in the first and second fields.
+  autofill_manager_->OnTextFieldDidChange(form, form.fields[0], TimeTicks());
+  autofill_manager_->OnTextFieldDidChange(form, form.fields[1], TimeTicks());
+
+  // Simulate form submission.
+  autofill_manager_->SubmitForm(form, TimeTicks::Now());
+
+  // An autofillable form was submitted, and the number of edited autofilled
+  // fields is logged.
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.NumberOfEditedAutofilledFieldsAtSubmission", 2, 1);
 }
 
 // Verify that we correctly log metrics regarding developer engagement.
@@ -1089,7 +1129,6 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1156,7 +1195,6 @@ TEST_F(AutofillMetricsTest, CreditCardInteractedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1205,7 +1243,6 @@ TEST_F(AutofillMetricsTest, CreditCardShownFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1283,7 +1320,6 @@ TEST_F(AutofillMetricsTest, CreditCardSelectedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1357,7 +1393,6 @@ TEST_F(AutofillMetricsTest, CreditCardFilledFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1476,7 +1511,6 @@ TEST_F(AutofillMetricsTest, CreditCardGetRealPanDuration) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1549,7 +1583,6 @@ TEST_F(AutofillMetricsTest, CreditCardSubmittedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1737,7 +1770,6 @@ TEST_F(AutofillMetricsTest, CreditCardWillSubmitFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1917,7 +1949,6 @@ TEST_F(AutofillMetricsTest, AddressInteractedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -1970,7 +2001,6 @@ TEST_F(AutofillMetricsTest, AddressShownFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2046,7 +2076,6 @@ TEST_F(AutofillMetricsTest, AddressFilledFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2132,7 +2161,6 @@ TEST_F(AutofillMetricsTest, AddressSubmittedFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2277,7 +2305,6 @@ TEST_F(AutofillMetricsTest, AddressWillSubmitFormEvents) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2412,7 +2439,6 @@ TEST_F(AutofillMetricsTest, CreditCardFormEventsAreSegmented) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2521,7 +2547,6 @@ TEST_F(AutofillMetricsTest, AddressFormEventsAreSegmented) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   std::vector<ServerFieldType> field_types;
@@ -2621,7 +2646,6 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Name", "name", "", "text", &field);
@@ -2747,7 +2771,6 @@ TEST_F(AutofillMetricsTest, UserHappinessFormInteraction) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Name", "name", "", "text", &field);
@@ -2851,7 +2874,6 @@ TEST_F(AutofillMetricsTest, FormFillDuration) {
   form.name = ASCIIToUTF16("TestForm");
   form.origin = GURL("http://example.com/form.html");
   form.action = GURL("http://example.com/submit.html");
-  form.user_submitted = true;
 
   FormFieldData field;
   test::CreateTestFormField("Name", "name", "", "text", &field);

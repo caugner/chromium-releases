@@ -12,7 +12,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/notification_details.h"
@@ -33,8 +32,8 @@
 
 namespace extensions {
 
-namespace bluetooth = core_api::bluetooth;
-namespace bt_private = core_api::bluetooth_private;
+namespace bluetooth = api::bluetooth;
+namespace bt_private = api::bluetooth_private;
 
 BluetoothEventRouter::BluetoothEventRouter(content::BrowserContext* context)
     : browser_context_(context),
@@ -327,7 +326,7 @@ void BluetoothEventRouter::OnListenerRemoved() {
 
 void BluetoothEventRouter::DispatchAdapterStateEvent() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  core_api::bluetooth::AdapterState state;
+  api::bluetooth::AdapterState state;
   PopulateAdapterState(*adapter_.get(), &state);
 
   scoped_ptr<base::ListValue> args =

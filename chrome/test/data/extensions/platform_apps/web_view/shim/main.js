@@ -18,6 +18,8 @@ var request_to_comm_channel_2 = 'connect_request';
 var response_from_comm_channel_1 = 'connected';
 var response_from_comm_channel_2 = 'connected_response';
 
+var GUEST_REDIRECT_FILE_NAME = 'guest_redirect.html';
+
 embedder.setUp_ = function(config) {
   if (!config || !config.testServer) {
     return;
@@ -34,13 +36,15 @@ embedder.setUp_ = function(config) {
   embedder.detectUserAgentURL = embedder.baseGuestURL + '/detect-user-agent';
   embedder.redirectGuestURL = embedder.baseGuestURL + '/server-redirect';
   embedder.redirectGuestURLDest = embedder.baseGuestURL +
-      '/extensions/platform_apps/web_view/shim/guest_redirect.html';
+      '/extensions/platform_apps/web_view/shim/' + GUEST_REDIRECT_FILE_NAME;
   embedder.closeSocketURL = embedder.baseGuestURL + '/close-socket';
   embedder.testImageBaseURL = embedder.baseGuestURL +
       '/extensions/platform_apps/web_view/shim/';
   embedder.virtualURL = 'http://virtualurl/';
   embedder.pluginURL = embedder.baseGuestURL +
       '/extensions/platform_apps/web_view/shim/embed.html';
+  embedder.mailtoTestURL = embedder.baseGuestURL +
+      '/extensions/platform_apps/web_view/shim/mailto.html';
 };
 
 window.runTest = function(testName) {
@@ -1330,6 +1334,54 @@ function testNavOnConsecutiveSrcAttributeChanges() {
   webview.src = testPage3;
 }
 
+function testNestedCrossOriginSubframes() {
+  var webview = document.createElement('webview');
+  var nestedFrameURL = embedder.baseGuestURL +
+      '/extensions/platform_apps/web_view/shim/parent_frame.html';
+  webview.onconsolemessage = function(e) {
+    window.console.log('guest.consolemessage ' + e.message);
+  };
+  webview.onloadstop = function() {
+    window.onmessage = function(e) {
+      if (e.data == 'frames-loaded') {
+        embedder.test.succeed();
+      }
+    };
+
+    // Ask the <webview> to load nested frames. It will reply via postMessage
+    // once frames have finished loading.
+    webview.contentWindow.postMessage('load-frames', '*');
+  };
+  webview.onloadabort = embedder.test.fail;
+
+  webview.src = nestedFrameURL;
+  document.body.appendChild(webview);
+}
+
+function testNestedSubframes() {
+  var webview = document.createElement('webview');
+  webview.partition = 'foobar';
+  var nestedFrameURL = 'parent_frame.html';
+  webview.onconsolemessage = function(e) {
+    window.console.log('guest.consolemessage ' + e.message);
+  };
+  webview.onloadstop = function() {
+    window.onmessage = function(e) {
+      if (e.data == 'frames-loaded') {
+        embedder.test.succeed();
+      }
+    };
+
+    // Ask the <webview> to load nested frames. It will reply via postMessage
+    // once frames have finished loading.
+    webview.contentWindow.postMessage('load-frames', '*');
+  };
+  webview.onloadabort = embedder.test.fail;
+
+  webview.src = nestedFrameURL;
+  document.body.appendChild(webview);
+}
+
 // This test verifies that we can set the <webview> src multiple times and the
 // changes will cause a navigation.
 function testNavOnSrcAttributeChange() {
@@ -1869,8 +1921,8 @@ function testLoadAbortEmptyResponse() {
 function testLoadAbortIllegalChromeURL() {
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
-    embedder.test.assertEq(-3, e.code);
-    embedder.test.assertEq('ERR_ABORTED', e.reason);
+    embedder.test.assertEq(-301, e.code);
+    embedder.test.assertEq('ERR_DISALLOWED_URL_SCHEME', e.reason);
   });
   webview.addEventListener('loadstop', function(e)  {
     embedder.test.assertEq('about:blank', webview.src);
@@ -1883,8 +1935,8 @@ function testLoadAbortIllegalChromeURL() {
 function testLoadAbortIllegalFileURL() {
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
-    embedder.test.assertEq(-3, e.code);
-    embedder.test.assertEq('ERR_ABORTED', e.reason);
+    embedder.test.assertEq(-301, e.code);
+    embedder.test.assertEq('ERR_DISALLOWED_URL_SCHEME', e.reason);
   });
   webview.addEventListener('loadstop', function(e) {
     embedder.test.assertEq('about:blank', webview.src);
@@ -1897,8 +1949,8 @@ function testLoadAbortIllegalFileURL() {
 function testLoadAbortIllegalJavaScriptURL() {
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
-    embedder.test.assertEq(-3, e.code);
-    embedder.test.assertEq('ERR_ABORTED', e.reason);
+    embedder.test.assertEq(-301, e.code);
+    embedder.test.assertEq('ERR_DISALLOWED_URL_SCHEME', e.reason);
   });
   webview.addEventListener('loadstop', function(e) {
     embedder.test.assertEq('about:blank', webview.src);
@@ -1912,8 +1964,8 @@ function testLoadAbortIllegalJavaScriptURL() {
 function testLoadAbortInvalidNavigation() {
   var webview = document.createElement('webview');
   webview.addEventListener('loadabort', function(e) {
-    embedder.test.assertEq(-3, e.code);
-    embedder.test.assertEq('ERR_ABORTED', e.reason);
+    embedder.test.assertEq(-300, e.code);
+    embedder.test.assertEq('ERR_INVALID_URL', e.reason);
     embedder.test.assertEq('', e.url);
   });
   webview.addEventListener('loadstop', function(e) {
@@ -1934,8 +1986,8 @@ function testLoadAbortNonWebSafeScheme() {
   var webview = document.createElement('webview');
   var chromeGuestURL = 'chrome-guest://abc123/';
   webview.addEventListener('loadabort', function(e) {
-    embedder.test.assertEq(-3, e.code);
-    embedder.test.assertEq('ERR_ABORTED', e.reason);
+    embedder.test.assertEq(-301, e.code);
+    embedder.test.assertEq('ERR_DISALLOWED_URL_SCHEME', e.reason);
     embedder.test.assertEq(chromeGuestURL, e.url);
   });
   webview.addEventListener('loadstop', function(e) {
@@ -2706,6 +2758,101 @@ function testCloseNewWindowCleanup() {
   });
 }
 
+function testFocusWhileFocused() {
+  var webview = new WebView();
+  webview.src = 'about:blank';
+
+  webview.addEventListener('loadstop', function(e) {
+    // Focus twice, then make sure that the internal element is still focused.
+    webview.focus();
+    webview.focus();
+    embedder.test.assertTrue(document.activeElement = webview);
+    embedder.test.assertTrue(webview.shadowRoot.activeElement);
+    embedder.test.succeed();
+  });
+
+  document.body.appendChild(webview);
+}
+
+function testPDFInWebview() {
+  var webview = document.createElement('webview');
+  var pdfUrl = 'test.pdf';
+  // partition 'foobar' has access to local resource |pdfUrl|.
+  webview.partition = 'foobar';
+  webview.onloadstop = embedder.test.succeed;
+  webview.onloadabort = embedder.test.fail;
+  webview.setAttribute('src', pdfUrl);
+  document.body.appendChild(webview);
+}
+
+// This test verifies that mailto links are enabled.
+function testMailtoLink() {
+  var webview = new WebView();
+  webview.src = embedder.mailtoTestURL;
+
+  webview.onloadstop = function() {
+    webview.onloadabort = function(e) {
+      // The mailto link should not trigger a loadabort.
+      if (e.url.substring(0, 7) == 'mailto:') {
+        embedder.test.fail();
+      }
+    };
+    webview.onloadstop = function() {
+      // If mailto links are disabled, then |webview.src| will now be
+      // 'about:blank'.
+      embedder.test.assertFalse(webview.src == 'about:blank');
+      embedder.test.succeed();
+    };
+    webview.executeScript({code:'document.getElementById("mailto").click()'});
+  };
+
+  document.body.appendChild(webview);
+}
+
+// This test navigates an unattached guest to 'about:blank', then it makes a
+// renderer/ navigation to a URL that results in a server side redirect. In the
+// end we verify that the redirected URL loads in the guest properly.
+function testRendererNavigationRedirectWhileUnattached() {
+  var webview = document.createElement('webview');
+  // So that |webview| is unattached, but can navigate.
+  webview.style.display = 'none';
+
+  var seenRedirectURLCommit = false;
+  var seenRedirectLoadStop = false;
+
+  var checkTest = function() {
+    if (seenRedirectLoadStop && seenRedirectURLCommit) {
+      embedder.test.succeed();
+    }
+  };
+
+  webview.onloadstop = function(e) {
+
+    webview.onloadstop = function() {
+      webview.onloadstop = null;
+      seenRedirectLoadStop = true;
+      checkTest();
+    };
+    webview.executeScript({
+      code: 'window.location.href="' + embedder.redirectGuestURL + '"',
+    }, function(res) {
+      if (!res || !res.length) {
+        embedder.test.fail();
+        return;
+      }
+    });
+  };
+
+  webview.onloadcommit = function(e) {
+    if (e.url.indexOf(GUEST_REDIRECT_FILE_NAME) != -1) {
+      seenRedirectURLCommit = true;
+      checkTest();
+    }
+  };
+  document.body.appendChild(webview);
+  webview.src = 'about:blank';
+};
+
 embedder.test.testList = {
   'testAllowTransparencyAttribute': testAllowTransparencyAttribute,
   'testAutosizeHeight': testAutosizeHeight,
@@ -2753,6 +2900,8 @@ embedder.test.testList = {
   'testNavOnConsecutiveSrcAttributeChanges':
       testNavOnConsecutiveSrcAttributeChanges,
   'testNavOnSrcAttributeChange': testNavOnSrcAttributeChange,
+  'testNestedCrossOriginSubframes': testNestedCrossOriginSubframes,
+  'testNestedSubframes': testNestedSubframes,
   'testReassignSrcAttribute': testReassignSrcAttribute,
   'testRemoveSrcAttribute': testRemoveSrcAttribute,
   'testPluginLoadInternalResource': testPluginLoadInternalResource,
@@ -2805,7 +2954,12 @@ embedder.test.testList = {
   'testZoomBeforeNavigation': testZoomBeforeNavigation,
   'testPlugin': testPlugin,
   'testGarbageCollect': testGarbageCollect,
-  'testCloseNewWindowCleanup': testCloseNewWindowCleanup
+  'testCloseNewWindowCleanup': testCloseNewWindowCleanup,
+  'testFocusWhileFocused': testFocusWhileFocused,
+  'testPDFInWebview': testPDFInWebview,
+  'testMailtoLink': testMailtoLink,
+  'testRendererNavigationRedirectWhileUnattached':
+       testRendererNavigationRedirectWhileUnattached
 };
 
 onload = function() {

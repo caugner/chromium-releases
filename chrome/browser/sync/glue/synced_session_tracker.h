@@ -11,11 +11,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/memory/scoped_vector.h"
-#include "chrome/browser/sync/sessions/tab_node_pool.h"
 #include "components/sessions/session_id.h"
 #include "components/sessions/session_types.h"
 #include "components/sync_driver/glue/synced_session.h"
+#include "components/sync_driver/tab_node_pool.h"
 
 namespace browser_sync {
 

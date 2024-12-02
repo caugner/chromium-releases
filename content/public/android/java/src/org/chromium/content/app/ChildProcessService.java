@@ -16,10 +16,10 @@ import android.os.RemoteException;
 import android.view.Surface;
 
 import org.chromium.base.BaseSwitches;
-import org.chromium.base.CalledByNative;
 import org.chromium.base.CommandLine;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
@@ -45,6 +45,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * for X in 0...N-1 (where N is {@link ChildProcessLauncher#MAX_REGISTERED_SERVICES})
  */
 @JNINamespace("content")
+@SuppressWarnings("SynchronizeOnNonFinalField")
 public class ChildProcessService extends Service {
     private static final String MAIN_THREAD_NAME = "ChildProcessMain";
     private static final String TAG = "cr.ChildProcessService";
@@ -203,8 +204,7 @@ public class ChildProcessService extends Service {
                         nativeRegisterGlobalFileDescriptor(
                                 fdInfo.mId, fdInfo.mFd.detachFd(), fdInfo.mOffset, fdInfo.mSize);
                     }
-                    nativeInitChildProcess(sContext.get().getApplicationContext(),
-                            ChildProcessService.this, mCpuCount, mCpuFeatures);
+                    nativeInitChildProcess(ChildProcessService.this, mCpuCount, mCpuFeatures);
                     if (mActivitySemaphore.tryAcquire()) {
                         ContentMain.start();
                         nativeExitChildProcess();
@@ -388,11 +388,10 @@ public class ChildProcessService extends Service {
      * The main entry point for a child process. This should be called from a new thread since
      * it will not return until the child process exits. See child_process_service.{h,cc}
      *
-     * @param applicationContext The Application Context of the current process.
      * @param service The current ChildProcessService object.
      * renderer.
      */
-    private static native void nativeInitChildProcess(Context applicationContext,
+    private static native void nativeInitChildProcess(
             ChildProcessService service, int cpuCount, long cpuFeatures);
 
     /**

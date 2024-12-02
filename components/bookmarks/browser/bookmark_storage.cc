@@ -4,6 +4,8 @@
 
 #include "components/bookmarks/browser/bookmark_storage.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
@@ -143,12 +145,11 @@ BookmarkStorage::BookmarkStorage(
     const base::FilePath& profile_path,
     base::SequencedTaskRunner* sequenced_task_runner)
     : model_(model),
-      writer_(profile_path.Append(kBookmarksFileName), sequenced_task_runner),
+      writer_(profile_path.Append(kBookmarksFileName),
+              sequenced_task_runner,
+              base::TimeDelta::FromMilliseconds(kSaveDelayMS)),
+      sequenced_task_runner_(sequenced_task_runner),
       weak_factory_(this) {
-  sequenced_task_runner_ = sequenced_task_runner;
-  writer_.set_commit_interval(base::TimeDelta::FromMilliseconds(kSaveDelayMS));
-  sequenced_task_runner_->PostTask(FROM_HERE,
-                                   base::Bind(&BackupCallback, writer_.path()));
 }
 
 BookmarkStorage::~BookmarkStorage() {
@@ -168,7 +169,27 @@ void BookmarkStorage::LoadBookmarks(
 }
 
 void BookmarkStorage::ScheduleSave() {
-  writer_.ScheduleWrite(this);
+  switch (backup_state_) {
+    case BACKUP_NONE:
+      backup_state_ = BACKUP_DISPATCHED;
+      sequenced_task_runner_->PostTaskAndReply(
+          FROM_HERE, base::Bind(&BackupCallback, writer_.path()),
+          base::Bind(&BookmarkStorage::OnBackupFinished,
+                     weak_factory_.GetWeakPtr()));
+      return;
+    case BACKUP_DISPATCHED:
+      // Currently doing a backup which will call this function when done.
+      return;
+    case BACKUP_ATTEMPTED:
+      writer_.ScheduleWrite(this);
+      return;
+  }
+  NOTREACHED();
+}
+
+void BookmarkStorage::OnBackupFinished() {
+  backup_state_ = BACKUP_ATTEMPTED;
+  ScheduleSave();
 }
 
 void BookmarkStorage::BookmarkModelDeleted() {

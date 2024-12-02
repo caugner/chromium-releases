@@ -18,6 +18,7 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -103,7 +104,7 @@ class DisableWebRtcEncryptionFlagTest : public testing::Test {
     from_command_line_.AppendSwitch(switches::kDisableWebRtcEncryption);
   }
 
-  void MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::Channel channel) {
+  void MaybeCopyDisableWebRtcEncryptionSwitch(version_info::Channel channel) {
     ChromeContentBrowserClient::MaybeCopyDisableWebRtcEncryptionSwitch(
         &to_command_line_,
         from_command_line_,
@@ -117,22 +118,22 @@ class DisableWebRtcEncryptionFlagTest : public testing::Test {
 };
 
 TEST_F(DisableWebRtcEncryptionFlagTest, UnknownChannel) {
-  MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::CHANNEL_UNKNOWN);
+  MaybeCopyDisableWebRtcEncryptionSwitch(version_info::Channel::UNKNOWN);
   EXPECT_TRUE(to_command_line_.HasSwitch(switches::kDisableWebRtcEncryption));
 }
 
 TEST_F(DisableWebRtcEncryptionFlagTest, CanaryChannel) {
-  MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::CHANNEL_CANARY);
+  MaybeCopyDisableWebRtcEncryptionSwitch(version_info::Channel::CANARY);
   EXPECT_TRUE(to_command_line_.HasSwitch(switches::kDisableWebRtcEncryption));
 }
 
 TEST_F(DisableWebRtcEncryptionFlagTest, DevChannel) {
-  MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::CHANNEL_DEV);
+  MaybeCopyDisableWebRtcEncryptionSwitch(version_info::Channel::DEV);
   EXPECT_TRUE(to_command_line_.HasSwitch(switches::kDisableWebRtcEncryption));
 }
 
 TEST_F(DisableWebRtcEncryptionFlagTest, BetaChannel) {
-  MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::CHANNEL_BETA);
+  MaybeCopyDisableWebRtcEncryptionSwitch(version_info::Channel::BETA);
 #if defined(OS_ANDROID)
   EXPECT_TRUE(to_command_line_.HasSwitch(switches::kDisableWebRtcEncryption));
 #else
@@ -141,7 +142,7 @@ TEST_F(DisableWebRtcEncryptionFlagTest, BetaChannel) {
 }
 
 TEST_F(DisableWebRtcEncryptionFlagTest, StableChannel) {
-  MaybeCopyDisableWebRtcEncryptionSwitch(VersionInfo::CHANNEL_STABLE);
+  MaybeCopyDisableWebRtcEncryptionSwitch(version_info::Channel::STABLE);
   EXPECT_FALSE(to_command_line_.HasSwitch(switches::kDisableWebRtcEncryption));
 }
 
@@ -151,6 +152,9 @@ class BlinkSettingsFieldTrialTest : public testing::Test {
  public:
   static const char kParserFieldTrialName[];
   static const char kIFrameFieldTrialName[];
+  static const char kResourcePrioritiesFieldTrialName[];
+  static const char kFakeGroupName[];
+  static const char kDefaultGroupName[];
 
   BlinkSettingsFieldTrialTest()
       : trial_list_(NULL),
@@ -165,19 +169,20 @@ class BlinkSettingsFieldTrialTest : public testing::Test {
     variations::testing::ClearAllVariationParams();
   }
 
-  void CreateFieldTrial(const char* trial_name) {
-    base::FieldTrialList::CreateFieldTrial(trial_name, kGroupName);
+  void CreateFieldTrial(const char* trial_name, const char* group_name) {
+    base::FieldTrialList::CreateFieldTrial(trial_name, group_name);
   }
 
   void CreateFieldTrialWithParams(
       const char* trial_name,
+      const char* group_name,
       const char* key1, const char* value1,
       const char* key2, const char* value2) {
     std::map<std::string, std::string> params;
     params.insert(std::make_pair(key1, value1));
     params.insert(std::make_pair(key2, value2));
-    CreateFieldTrial(trial_name);
-    variations::AssociateVariationParams(trial_name, kGroupName, params);
+    CreateFieldTrial(trial_name, kFakeGroupName);
+    variations::AssociateVariationParams(trial_name, kFakeGroupName, params);
   }
 
   void AppendContentBrowserClientSwitches() {
@@ -194,7 +199,6 @@ class BlinkSettingsFieldTrialTest : public testing::Test {
 
  private:
   static const int kFakeChildProcessId = 1;
-  static const char kGroupName[];
 
   ChromeContentBrowserClient client_;
   base::FieldTrialList trial_list_;
@@ -207,7 +211,10 @@ const char BlinkSettingsFieldTrialTest::kParserFieldTrialName[] =
     "BackgroundHtmlParserTokenLimits";
 const char BlinkSettingsFieldTrialTest::kIFrameFieldTrialName[] =
     "LowPriorityIFrames";
-const char BlinkSettingsFieldTrialTest::kGroupName[] = "FakeGroup";
+const char BlinkSettingsFieldTrialTest::kResourcePrioritiesFieldTrialName[] =
+    "ResourcePriorities";
+const char BlinkSettingsFieldTrialTest::kFakeGroupName[] = "FakeGroup";
+const char BlinkSettingsFieldTrialTest::kDefaultGroupName[] = "Default";
 
 TEST_F(BlinkSettingsFieldTrialTest, NoFieldTrial) {
   AppendContentBrowserClientSwitches();
@@ -215,14 +222,14 @@ TEST_F(BlinkSettingsFieldTrialTest, NoFieldTrial) {
 }
 
 TEST_F(BlinkSettingsFieldTrialTest, FieldTrialWithoutParams) {
-  CreateFieldTrial(kParserFieldTrialName);
+  CreateFieldTrial(kParserFieldTrialName, kFakeGroupName);
   AppendContentBrowserClientSwitches();
   EXPECT_FALSE(command_line().HasSwitch(switches::kBlinkSettings));
 }
 
 TEST_F(BlinkSettingsFieldTrialTest, BlinkSettingsSwitchAlreadySpecified) {
   AppendBlinkSettingsSwitch("foo");
-  CreateFieldTrialWithParams(kParserFieldTrialName,
+  CreateFieldTrialWithParams(kParserFieldTrialName, kFakeGroupName,
                              "key1", "value1", "key2", "value2");
   AppendContentBrowserClientSwitches();
   EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
@@ -231,7 +238,7 @@ TEST_F(BlinkSettingsFieldTrialTest, BlinkSettingsSwitchAlreadySpecified) {
 }
 
 TEST_F(BlinkSettingsFieldTrialTest, FieldTrialEnabled) {
-  CreateFieldTrialWithParams(kParserFieldTrialName,
+  CreateFieldTrialWithParams(kParserFieldTrialName, kFakeGroupName,
                              "key1", "value1", "key2", "value2");
   AppendContentBrowserClientSwitches();
   EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
@@ -240,9 +247,9 @@ TEST_F(BlinkSettingsFieldTrialTest, FieldTrialEnabled) {
 }
 
 TEST_F(BlinkSettingsFieldTrialTest, MultipleFieldTrialsEnabled) {
-  CreateFieldTrialWithParams(kParserFieldTrialName,
+  CreateFieldTrialWithParams(kParserFieldTrialName, kFakeGroupName,
                              "key1", "value1", "key2", "value2");
-  CreateFieldTrialWithParams(kIFrameFieldTrialName,
+  CreateFieldTrialWithParams(kIFrameFieldTrialName, kFakeGroupName,
                              "keyA", "valueA", "keyB", "valueB");
   AppendContentBrowserClientSwitches();
   EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
@@ -251,13 +258,66 @@ TEST_F(BlinkSettingsFieldTrialTest, MultipleFieldTrialsEnabled) {
 }
 
 TEST_F(BlinkSettingsFieldTrialTest, MultipleFieldTrialsDuplicateKeys) {
-  CreateFieldTrialWithParams(kParserFieldTrialName,
+  CreateFieldTrialWithParams(kParserFieldTrialName, kFakeGroupName,
                              "key1", "value1", "key2", "value2");
-  CreateFieldTrialWithParams(kIFrameFieldTrialName,
+  CreateFieldTrialWithParams(kIFrameFieldTrialName, kFakeGroupName,
                              "key2", "duplicate", "key3", "value3");
   AppendContentBrowserClientSwitches();
   EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
   EXPECT_EQ("key1=value1,key2=value2,key2=duplicate,key3=value3",
+            command_line().GetSwitchValueASCII(switches::kBlinkSettings));
+}
+
+TEST_F(BlinkSettingsFieldTrialTest, ResourcePrioritiesDefault) {
+  CreateFieldTrial(kResourcePrioritiesFieldTrialName, kDefaultGroupName);
+  AppendContentBrowserClientSwitches();
+  EXPECT_FALSE(command_line().HasSwitch(switches::kBlinkSettings));
+}
+
+TEST_F(BlinkSettingsFieldTrialTest, ResourcePrioritiesEverythingEnabled) {
+  CreateFieldTrial(kResourcePrioritiesFieldTrialName,
+                   "Everything_11111_1_1_10");
+  AppendContentBrowserClientSwitches();
+  EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
+  EXPECT_EQ("fetchDeferLateScripts=true,"
+            "fetchIncreaseFontPriority=true,"
+            "fetchIncreaseAsyncScriptPriority=true,"
+            "fetchIncreasePriorities=true",
+            command_line().GetSwitchValueASCII(switches::kBlinkSettings));
+}
+
+TEST_F(BlinkSettingsFieldTrialTest, ResourcePrioritiesDeferLateScripts) {
+  CreateFieldTrial(kResourcePrioritiesFieldTrialName,
+                   "LateScripts_10000_0_1_10");
+  AppendContentBrowserClientSwitches();
+  EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
+  EXPECT_EQ("fetchDeferLateScripts=true",
+            command_line().GetSwitchValueASCII(switches::kBlinkSettings));
+}
+
+TEST_F(BlinkSettingsFieldTrialTest, ResourcePrioritiesFontsEnabled) {
+  CreateFieldTrial(kResourcePrioritiesFieldTrialName, "FontOnly_01000_0_1_10");
+  AppendContentBrowserClientSwitches();
+  EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
+  EXPECT_EQ("fetchIncreaseFontPriority=true",
+            command_line().GetSwitchValueASCII(switches::kBlinkSettings));
+}
+
+TEST_F(BlinkSettingsFieldTrialTest, ResourcePrioritiesIncreaseAsyncScript) {
+  CreateFieldTrial(kResourcePrioritiesFieldTrialName,
+                   "AsyncScript_00100_0_1_10");
+  AppendContentBrowserClientSwitches();
+  EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
+  EXPECT_EQ("fetchIncreaseAsyncScriptPriority=true",
+            command_line().GetSwitchValueASCII(switches::kBlinkSettings));
+}
+
+TEST_F(BlinkSettingsFieldTrialTest, ResourcePrioritiesIncreasePriorities) {
+  CreateFieldTrial(kResourcePrioritiesFieldTrialName,
+                   "IncreasePriorities_00010_0_1_10");
+  AppendContentBrowserClientSwitches();
+  EXPECT_TRUE(command_line().HasSwitch(switches::kBlinkSettings));
+  EXPECT_EQ("fetchIncreasePriorities=true",
             command_line().GetSwitchValueASCII(switches::kBlinkSettings));
 }
 

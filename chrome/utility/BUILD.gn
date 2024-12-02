@@ -13,6 +13,7 @@ gypi_values = exec_script("//build/gypi_to_gn.py",
 static_library("utility") {
   sources = rebase_path(gypi_values.chrome_utility_sources, ".", "..")
   defines = []
+  configs += [ "//build/config:precompiled_headers" ]
 
   public_deps = []
   deps = [
@@ -20,7 +21,7 @@ static_library("utility") {
     "//components/safe_json:safe_json_parser_message_filter",
     "//components/search_engines",
     "//components/strings",
-    "//components/url_fixer",
+    "//components/url_formatter",
     "//content/public/common",
     "//content/public/utility",
     "//media",
@@ -105,5 +106,10 @@ static_library("utility") {
       "local_discovery/service_discovery_message_handler.cc",
       "local_discovery/service_discovery_message_handler.h",
     ]
+  }
+
+  if (safe_browsing_mode == 1) {
+    sources +=
+        rebase_path(gypi_values.chrome_utility_safe_browsing_sources, ".", "..")
   }
 }

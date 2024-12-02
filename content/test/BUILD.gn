@@ -22,12 +22,14 @@ content_tests_gypi_values =
 # GYP version //content/content_tests.gypi:test_support_content
 source_set("test_support") {
   testonly = true
-  public_deps = []
-  deps = [
-    "//cc/blink",
+  configs += [ "//build/config:precompiled_headers" ]
+  public_deps = [
     "//content/public/app:both",
     "//content/public/browser",
     "//content/public/common",
+  ]
+  deps = [
+    "//cc/blink",
     "//net:test_support",
     "//skia",
     "//storage/common",
@@ -43,6 +45,7 @@ source_set("test_support") {
     "//ui/events:gesture_detection",
     "//ui/gfx:test_support",
     "//ui/gl",
+    "//ui/gl:test_support",
     "//ui/resources",
     "//url",
   ]
@@ -150,6 +153,7 @@ source_set("test_support") {
 
     if (is_android) {
       deps += [
+        "//content/shell/android:copy_content_shell_assets",
         "//ui/android",
         "//ui/shell_dialogs",
       ]
@@ -187,6 +191,8 @@ source_set("browsertest_support") {
     "../public/test/content_browser_test_utils.cc",
     "../public/test/content_browser_test_utils.h",
     "../public/test/content_browser_test_utils_mac.mm",
+    "content_browser_test_utils_internal.cc",
+    "content_browser_test_utils_internal.h",
     "content_test_launcher.cc",
   ]
 
@@ -255,21 +261,66 @@ if (!is_ios) {
 
 # TODO(GYP) enable content_browsertests on Mac when it links.
 if (!is_mac) {
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("content_browsertests_run") {
+    testonly = true
+    deps = [
+      ":content_browsertests",
+    ]
+  }
+
   test("content_browsertests") {
     sources =
         rebase_path(content_tests_gypi_values.content_browsertests_sources,
                     ".",
                     "//content")
 
+    if (is_android || is_linux || is_mac || is_win) {
+      data = [
+        "data/",
+        "//net/data/",
+        "//media/test/data/",
+      ]
+
+      if (is_android) {
+        data += [ "$root_out_dir/content_shell_assets/content_shell.pak" ]
+      } else {
+        data += [
+          "$root_out_dir/content_shell.pak",
+          "//net/tools/testserver/",
+          "//ppapi/tests/test_case.html",
+          "//ppapi/tests/test_page.css",
+          "//third_party/pyftpdlib/",
+          "//third_party/pywebsocket/",
+          "//third_party/tlslite/",
+        ]
+
+        if (is_mac) {
+          data += [
+            "$root_out_dir/Content Shell.app/",
+            "$root_out_dir/plugins/test_netscape_plugin.plugin/",
+          ]
+        }
+        if (is_win) {
+          data += [ "$root_out_dir/plugins/np_test_netscape_plugin.dll" ]
+        }
+      }
+    }
+
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
 
-    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+    configs += [
+      "//build/config:precompiled_headers",
+      "//build/config/compiler:no_size_t_to_int_warning",
+    ]
 
     deps = [
       ":browsertest_support",
       ":web_ui_test_mojo_bindings",
       "//base/allocator",
       "//base/test:test_support",
+      "//content/browser/background_sync:background_sync_proto",
       "//content/common:mojo_bindings",
       "//content/gpu",
       "//content/public/common",
@@ -313,17 +364,16 @@ if (!is_mac) {
       "//ui/gfx",
       "//ui/gfx/geometry",
       "//ui/gl",
+      "//ui/gl:test_support",
       "//ui/resources",
       "//ui/shell_dialogs",
       "//ui/snapshot",
     ]
 
-    data_deps = [ "//ppapi:ppapi_tests" ]  # Loaded at runtime.
-
-    if (!is_chromeos) {
-      sources -=
-          [ "../browser/web_contents/touch_editable_impl_aura_browsertest.cc" ]
-    }
+    data_deps = [
+      "//ppapi:ppapi_tests",
+      "//third_party/mesa:osmesa",
+    ]
 
     if (is_win) {
       sources += rebase_path(
@@ -410,17 +460,50 @@ if (!is_mac) {
               "//content")
     }
 
-    if (!use_aura) {
-      sources -=
-          [ "../browser/web_contents/web_contents_view_aura_browsertest.cc" ]
+    if (use_aura) {
+      deps += [
+        "//ui/touch_selection:test_support",
+        "//ui/touch_selection:touch_selection",
+      ]
+    } else {
+      sources -= [
+        "../browser/renderer_host/input/touch_selection_controller_client_aura_browsertest.cc",
+        "../browser/web_contents/web_contents_view_aura_browsertest.cc",
+      ]
     }
   }
+}
+
+# TODO(GYP): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("content_unittests_run") {
+  testonly = true
+  deps = [
+    ":content_unittests",
+  ]
 }
 
 test("content_unittests") {
   sources = rebase_path(content_tests_gypi_values.content_unittests_sources,
                         ".",
                         "//content")
+
+  if (is_android || is_linux || is_mac || is_win) {
+    data = [
+      "data/",
+      "//net/data/ssl/certificates/",
+      "//media/test/data/",
+    ]
+
+    if (is_android) {
+      data += [ "$root_out_dir/content_shell_assets/content_shell.pak" ]
+    } else {
+      data += [ "$root_out_dir/content_shell.pak" ]
+    }
+  }
+
+  configs += [ "//build/config:precompiled_headers" ]
+
   deps = [
     ":test_support",
     "//base/allocator",
@@ -482,9 +565,13 @@ test("content_unittests") {
       "//third_party/icu",
       "//third_party/leveldatabase",
       "//third_party/libjingle",
+      "//ui/compositor:test_support",
       "//ui/gl",
+      "//ui/gl:test_support",
     ]
   }
+
+  data_deps = [ "//third_party/mesa:osmesa" ]
 
   if (!is_win) {
     sources += [ "../browser/file_descriptor_info_impl_unittest.cc" ]
@@ -645,6 +732,15 @@ if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
     }
   }
 
+  # TODO(GYP): Delete this after we've converted everything to GN.
+  # The _run targets exist only for compatibility w/ GYP.
+  group("content_gl_tests_run") {
+    testonly = true
+    deps = [
+      ":content_gl_tests",
+    ]
+  }
+
   test("content_gl_tests") {
     sources = [
       "../common/gpu/client/gl_helper_unittest.cc",
@@ -665,6 +761,7 @@ if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
       "//ui/gfx:test_support",
       "//ui/gfx/geometry",
       "//ui/gl",
+      "//ui/gl:test_support",
       "//v8",
     ]
 
@@ -695,6 +792,7 @@ if (!is_mac) {  # TODO(GYP) enable on Mac once it links.
       "//ui/gfx",
       "//ui/gfx/geometry",
       "//ui/gl",
+      "//ui/gl:test_support",
     ]
   }
 }

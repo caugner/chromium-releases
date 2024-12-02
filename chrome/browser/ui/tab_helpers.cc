@@ -11,7 +11,7 @@
 #include "chrome/browser/engagement/site_engagement_helper.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
-#include "chrome/browser/favicon/favicon_helper.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
@@ -40,13 +40,16 @@
 #include "chrome/common/chrome_switches.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
-#include "components/dom_distiller/content/web_contents_main_frame_observer.h"
+#include "components/dom_distiller/content/browser/web_contents_main_frame_observer.h"
+#include "components/dom_distiller/core/dom_distiller_switches.h"
 #include "components/history/content/browser/web_contents_top_sites_observer.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/password_manager/core/browser/password_manager.h"
+#include "components/tracing/tracing_switches.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/android/offline_pages/offline_page_web_contents_observer.h"
 #include "chrome/browser/android/voice_search_tab_helper.h"
 #include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
@@ -174,6 +177,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 
 #if defined(OS_ANDROID)
   ContextMenuHelper::CreateForWebContents(web_contents);
+  offline_pages::OfflinePageWebContentsObserver::CreateForWebContents(
+      web_contents);
   SingleTabModeTabHelper::CreateForWebContents(web_contents);
   VoiceSearchTabHelper::CreateForWebContents(web_contents);
   WindowAndroidHelper::CreateForWebContents(web_contents);

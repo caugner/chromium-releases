@@ -89,7 +89,7 @@ void DrmSurface::SchedulePageFlip() {
       RectToSkRect(UnionRects(pending_image_damage_, last_damage_));
 
   // Copy damage region.
-  canvas->drawImageRect(pending_image_.get(), &real_damage, real_damage, NULL);
+  canvas->drawImageRect(pending_image_.get(), real_damage, real_damage, NULL);
   last_damage_ = pending_image_damage_;
 
   pending_image_ = nullptr;
@@ -99,9 +99,14 @@ void DrmSurface::SchedulePageFlip() {
 
   // Update our front buffer pointer.
   std::swap(front_buffer_, back_buffer_);
-  pending_pageflip_ = window_->SchedulePageFlip(
-      false /* is_sync */,
-      base::Bind(&DrmSurface::OnPageFlip, weak_ptr_factory_.GetWeakPtr()));
+  // First set the pending flag otherwise there could be a re-entrancy issue if
+  // the callback is executed synchronously.
+  pending_pageflip_ = true;
+  if (!window_->SchedulePageFlip(false /* is_sync */,
+                                 base::Bind(&DrmSurface::OnPageFlip,
+                                            weak_ptr_factory_.GetWeakPtr()))) {
+    pending_pageflip_ = false;
+  }
 }
 
 void DrmSurface::OnPageFlip(gfx::SwapResult result) {

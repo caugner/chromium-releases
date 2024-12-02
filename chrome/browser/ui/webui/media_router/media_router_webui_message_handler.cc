@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
+#include "extensions/common/constants.h"
 
 namespace media_router {
 
@@ -26,7 +27,8 @@ const char kCloseDialog[] = "closeDialog";
 
 // JS function names.
 const char kSetInitialData[] = "media_router.ui.setInitialData";
-const char kAddRoute[] = "media_router.ui.addRoute";
+const char kOnCreateRouteResponseReceived[] =
+    "media_router.ui.onCreateRouteResponseReceived";
 const char kSetIssue[] = "media_router.ui.setIssue";
 const char kSetSinkList[] = "media_router.ui.setSinkList";
 const char kSetRouteList[] = "media_router.ui.setRouteList";
@@ -43,6 +45,7 @@ scoped_ptr<base::ListValue> SinksToValue(
     const MediaSink& sink = sink_with_cast_modes.sink;
     sink_val->SetString("id", sink.id());
     sink_val->SetString("name", sink.name());
+    sink_val->SetBoolean("isLaunching", sink.is_launching());
 
     scoped_ptr<base::ListValue> cast_modes_val(new base::ListValue);
     for (MediaCastMode cast_mode : sink_with_cast_modes.cast_modes)
@@ -55,7 +58,8 @@ scoped_ptr<base::ListValue> SinksToValue(
   return value.Pass();
 }
 
-scoped_ptr<base::DictionaryValue> RouteToValue(const MediaRoute& route) {
+scoped_ptr<base::DictionaryValue> RouteToValue(
+    const MediaRoute& route, const std::string& extension_id) {
   scoped_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue);
 
   dictionary->SetString("id", route.media_route_id());
@@ -63,15 +67,27 @@ scoped_ptr<base::DictionaryValue> RouteToValue(const MediaRoute& route) {
   dictionary->SetString("title", route.description());
   dictionary->SetBoolean("isLocal", route.is_local());
 
+  const std::string& custom_path = route.custom_controller_path();
+
+  if (!custom_path.empty()) {
+    std::string full_custom_controller_path = base::StringPrintf("%s://%s/%s",
+        extensions::kExtensionScheme, extension_id.c_str(),
+            custom_path.c_str());
+    DCHECK(GURL(full_custom_controller_path).is_valid());
+    dictionary->SetString("customControllerPath",
+                          full_custom_controller_path);
+  }
+
   return dictionary.Pass();
 }
 
 scoped_ptr<base::ListValue> RoutesToValue(
-    const std::vector<MediaRoute>& routes) {
+    const std::vector<MediaRoute>& routes, const std::string& extension_id) {
   scoped_ptr<base::ListValue> value(new base::ListValue);
 
   for (const MediaRoute& route : routes) {
-    scoped_ptr<base::DictionaryValue> route_val(RouteToValue(route));
+    scoped_ptr<base::DictionaryValue> route_val(RouteToValue(route,
+        extension_id));
     value->Append(route_val.release());
   }
 
@@ -87,6 +103,7 @@ scoped_ptr<base::ListValue> CastModesToValue(const CastModeSet& cast_modes,
     cast_mode_val->SetInteger("type", cast_mode);
     cast_mode_val->SetString("title",
                              MediaCastModeToTitle(cast_mode, source_host));
+    cast_mode_val->SetString("host", source_host);
     cast_mode_val->SetString(
         "description", MediaCastModeToDescription(cast_mode, source_host));
     value->Append(cast_mode_val.release());
@@ -139,8 +156,11 @@ std::string GetLearnMoreUrl(const base::DictionaryValue* args) {
 
 }  // namespace
 
-MediaRouterWebUIMessageHandler::MediaRouterWebUIMessageHandler()
-    : dialog_closing_(false) {
+MediaRouterWebUIMessageHandler::MediaRouterWebUIMessageHandler(
+    MediaRouterUI* media_router_ui)
+    : dialog_closing_(false),
+      media_router_ui_(media_router_ui) {
+  DCHECK(media_router_ui_);
 }
 
 MediaRouterWebUIMessageHandler::~MediaRouterWebUIMessageHandler() {
@@ -156,7 +176,8 @@ void MediaRouterWebUIMessageHandler::UpdateSinks(
 void MediaRouterWebUIMessageHandler::UpdateRoutes(
     const std::vector<MediaRoute>& routes) {
   DVLOG(2) << "UpdateRoutes";
-  scoped_ptr<base::ListValue> routes_val(RoutesToValue(routes));
+  scoped_ptr<base::ListValue> routes_val(RoutesToValue(routes,
+      media_router_ui_->GetRouteProviderExtensionId()));
   web_ui()->CallJavascriptFunction(kSetRouteList, *routes_val);
 }
 
@@ -169,10 +190,20 @@ void MediaRouterWebUIMessageHandler::UpdateCastModes(
   web_ui()->CallJavascriptFunction(kSetCastModeList, *cast_modes_val);
 }
 
-void MediaRouterWebUIMessageHandler::AddRoute(const MediaRoute& route) {
-  DVLOG(2) << "AddRoute";
-  scoped_ptr<base::DictionaryValue> route_value(RouteToValue(route));
-  web_ui()->CallJavascriptFunction(kAddRoute, *route_value);
+void MediaRouterWebUIMessageHandler::OnCreateRouteResponseReceived(
+    const MediaSink::Id& sink_id,
+    const MediaRoute* route) {
+  DVLOG(2) << "OnCreateRouteResponseReceived";
+  if (route) {
+    scoped_ptr<base::DictionaryValue> route_value(RouteToValue(*route,
+        media_router_ui_->GetRouteProviderExtensionId()));
+    web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
+                                     base::StringValue(sink_id), *route_value);
+  } else {
+    web_ui()->CallJavascriptFunction(kOnCreateRouteResponseReceived,
+                                     base::StringValue(sink_id),
+                                     *base::Value::CreateNullValue());
+  }
 }
 
 void MediaRouterWebUIMessageHandler::UpdateIssue(const Issue* issue) {
@@ -212,27 +243,27 @@ void MediaRouterWebUIMessageHandler::RegisterMessages() {
 void MediaRouterWebUIMessageHandler::OnRequestInitialData(
     const base::ListValue* args) {
   DVLOG(1) << "OnRequestInitialData";
-  MediaRouterUI* media_router_ui = GetMediaRouterUI();
-
   base::DictionaryValue initial_data;
 
-  initial_data.SetString("headerText", media_router_ui->GetInitialHeaderText());
+  initial_data.SetString("headerText",
+      media_router_ui_->GetInitialHeaderText());
+  initial_data.SetString("headerTextTooltip",
+      media_router_ui_->GetInitialHeaderTextTooltip());
 
-  scoped_ptr<base::ListValue> sinks(SinksToValue(media_router_ui->sinks()));
+  scoped_ptr<base::ListValue> sinks(SinksToValue(media_router_ui_->sinks()));
   initial_data.Set("sinks", sinks.release());
 
-  scoped_ptr<base::ListValue> routes(RoutesToValue(media_router_ui->routes()));
+  scoped_ptr<base::ListValue> routes(RoutesToValue(media_router_ui_->routes(),
+      media_router_ui_->GetRouteProviderExtensionId()));
   initial_data.Set("routes", routes.release());
 
   scoped_ptr<base::ListValue> cast_modes(CastModesToValue(
-      media_router_ui->cast_modes(),
-      // TODO(imcheng): Use media_router_ui->source_host() once DEFAULT mode
-      // is upstreamed.
-      std::string()));
+      media_router_ui_->cast_modes(),
+      media_router_ui_->GetFrameURLHost()));
   initial_data.Set("castModes", cast_modes.release());
 
   web_ui()->CallJavascriptFunction(kSetInitialData, initial_data);
-  media_router_ui->UIInitialized();
+  media_router_ui_->UIInitialized();
 }
 
 void MediaRouterWebUIMessageHandler::OnCreateRoute(
@@ -300,7 +331,7 @@ void MediaRouterWebUIMessageHandler::OnActOnIssue(
       static_cast<IssueAction::Type>(action_type_num);
   if (ActOnIssueType(action_type, args_dict))
     DVLOG(1) << "ActOnIssueType failed for Issue ID " << issue_id;
-  GetMediaRouterUI()->ClearIssue(issue_id);
+  media_router_ui_->ClearIssue(issue_id);
 }
 
 void MediaRouterWebUIMessageHandler::OnCloseRoute(
@@ -313,7 +344,7 @@ void MediaRouterWebUIMessageHandler::OnCloseRoute(
     DVLOG(1) << "Unable to extract args.";
     return;
   }
-  GetMediaRouterUI()->CloseRoute(route_id);
+  media_router_ui_->CloseRoute(route_id);
 }
 
 void MediaRouterWebUIMessageHandler::OnCloseDialog(
@@ -323,7 +354,7 @@ void MediaRouterWebUIMessageHandler::OnCloseDialog(
     return;
 
   dialog_closing_ = true;
-  GetMediaRouterUI()->Close();
+  media_router_ui_->Close();
 }
 
 bool MediaRouterWebUIMessageHandler::ActOnIssueType(
@@ -343,12 +374,4 @@ bool MediaRouterWebUIMessageHandler::ActOnIssueType(
   }
 }
 
-MediaRouterUI* MediaRouterWebUIMessageHandler::GetMediaRouterUI() {
-  MediaRouterUI* media_router_ui =
-      static_cast<MediaRouterUI*>(web_ui()->GetController());
-  DCHECK(media_router_ui);
-  return media_router_ui;
-}
-
 }  // namespace media_router
-

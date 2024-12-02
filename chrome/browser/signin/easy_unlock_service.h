@@ -228,6 +228,8 @@ class EasyUnlockService : public KeyedService,
   scoped_ptr<proximity_auth::CryptAuthClientFactory>
   CreateCryptAuthClientFactory() override;
   cryptauth::DeviceClassifier GetDeviceClassifier() override;
+  std::string GetAccountId() override;
+  gcm::GCMDriver* GetGCMDriver() override;
 
   ChromeProximityAuthClient* proximity_auth_client() {
     return &proximity_auth_client_;

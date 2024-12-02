@@ -14,7 +14,9 @@ namespace prefs {
 // preference.
 
 const char kAcceptLanguages[] = "intl.accept_languages";
+const char kHomePage[] = "homepage";
 const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
+const char kSearchSuggestEnabled[] = "search.suggest_enabled";
 
 }  // namespace prefs
 }  // namespace ios
@@ -66,9 +68,6 @@ const char kNetworkPredictionWifiOnly[] = "ios.dns_prefetching.wifi_only";
 
 // Which bookmarks folder should be visible on the new tab page v4.
 const char kNtpShownBookmarksFolder[] = "ntp.shown_bookmarks_folder";
-
-// The preferred SSO user for wallet payments.
-const char kPaymentsPreferredUserId[] = "ios.payments.preferred_user_id";
 
 // True if the memory debugging tools should be visible.
 extern const char kShowMemoryDebuggingTools[] =

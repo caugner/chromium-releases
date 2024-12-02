@@ -17,9 +17,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.Surface;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.Log;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -355,6 +355,7 @@ class MediaCodecBridge {
     @CalledByNative
     private void release() {
         try {
+            Log.w(TAG, "calling MediaCodec.release()");
             mMediaCodec.release();
         } catch (IllegalStateException e) {
             // The MediaCodec is stuck in a wrong state, possibly due to losing
@@ -393,7 +394,6 @@ class MediaCodecBridge {
                 status = MEDIA_CODEC_OK;
                 index = indexOrStatus;
             } else if (indexOrStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                Log.e(TAG, "dequeueInputBuffer: MediaCodec.INFO_TRY_AGAIN_LATER");
                 status = MEDIA_CODEC_DEQUEUE_INPUT_AGAIN_LATER;
             } else {
                 Log.e(TAG, "Unexpected index_or_status: " + indexOrStatus);
@@ -706,6 +706,7 @@ class MediaCodecBridge {
                 mAudioTrack = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRate, channelConfig,
                         AudioFormat.ENCODING_PCM_16BIT, minBufferSize, AudioTrack.MODE_STREAM);
                 if (mAudioTrack.getState() == AudioTrack.STATE_UNINITIALIZED) {
+                    Log.e(TAG, "Cannot create AudioTrack");
                     mAudioTrack = null;
                     return false;
                 }

@@ -993,7 +993,7 @@ util.isDropEffectAllowed = function(effectAllowed, dropEffect) {
  *
  * It also verifies if the name length is in the limit of the filesystem.
  *
- * @param {DirectoryEntry} parentEntry The URL of the parent directory entry.
+ * @param {!DirectoryEntry} parentEntry The entry of the parent directory.
  * @param {string} name New file or folder name.
  * @param {boolean} filterHiddenOn Whether to report the hidden file name error
  *     or not.
@@ -1016,7 +1016,7 @@ util.validateFileName = function(parentEntry, name, filterHiddenOn) {
 
   return new Promise(function(fulfill, reject) {
     chrome.fileManagerPrivate.validatePathNameLength(
-        parentEntry.toURL(),
+        parentEntry,
         name,
         function(valid) {
           if (valid)
@@ -1039,4 +1039,40 @@ util.addEventListenerToBackgroundComponent = function(target, type, handler) {
   window.addEventListener('pagehide', function() {
     target.removeEventListener(type, handler);
   });
+};
+
+/**
+ * Checks if an API call returned an error, and if yes then prints it.
+ */
+util.checkAPIError = function() {
+  if (chrome.runtime.lastError)
+    console.error(chrome.runtime.lastError.message);
+};
+
+/**
+ * Makes a promise which will be fulfilled |ms| milliseconds later.
+ * @param {number} ms The delay in milliseconds.
+ * @return {!Promise}
+ */
+util.delay = function(ms) {
+  return new Promise(function(resolve) {
+    setTimeout(resolve, ms);
+  });
+};
+
+/**
+ * Makes a promise which will be rejected if the given |promise| is not resolved
+ * or rejected for |ms| milliseconds.
+ * @param {!Promise} promise A promise which needs to be timed out.
+ * @param {number} ms Delay for the timeout in milliseconds.
+ * @param {string=} opt_message Error message for the timeout.
+ * @return {!Promise} A promise which can be rejected by timeout.
+ */
+util.timeoutPromise = function(promise, ms, opt_message) {
+  return Promise.race([
+    promise,
+    util.delay(ms).then(function() {
+      throw new Error(opt_message || 'Operation timed out.');
+    })
+  ]);
 };

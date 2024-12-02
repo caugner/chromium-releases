@@ -89,7 +89,9 @@ void OutputSurfaceImpl::SwapBuffers(cc::CompositorFrame* frame) {
     surface_size_ = frame_size;
   }
 
-  surface_->SubmitFrame(local_id_, mojo::Frame::From(*frame), mojo::Closure());
+  surface_->SubmitFrame(local_id_,
+                        mojo::CompositorFrame::From(*frame),
+                        mojo::Closure());
 
   client_->DidSwapBuffers();
   client_->DidSwapBuffersComplete();
@@ -205,9 +207,10 @@ void SurfaceBinding::PerViewManagerState::Init() {
 
   mojo::ServiceProviderPtr surfaces_service_provider;
   mojo::URLRequestPtr request(mojo::URLRequest::New());
-  request->url = mojo::String::From("mojo:surfaces_service");
+  request->url = mojo::String::From("mojo:view_manager");
   shell_->ConnectToApplication(request.Pass(),
                                GetProxy(&surfaces_service_provider),
+                               nullptr,
                                nullptr);
   ConnectToService(surfaces_service_provider.get(), &surface_);
   surface_->GetIdNamespace(
@@ -227,6 +230,7 @@ void SurfaceBinding::PerViewManagerState::Init() {
   request2->url = mojo::String::From("mojo:view_manager");
   shell_->ConnectToApplication(request2.Pass(),
                                GetProxy(&gpu_service_provider),
+                               nullptr,
                                nullptr);
   ConnectToService(gpu_service_provider.get(), &gpu_);
 }

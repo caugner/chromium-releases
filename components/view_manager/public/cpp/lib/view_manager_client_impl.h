@@ -19,8 +19,7 @@ class ViewManagerTransaction;
 
 // Manages the connection with the View Manager service.
 class ViewManagerClientImpl : public ViewManager,
-                              public ViewManagerClient,
-                              public ErrorHandler {
+                              public ViewManagerClient {
  public:
   ViewManagerClientImpl(ViewManagerDelegate* delegate,
                         Shell* shell,
@@ -52,6 +51,8 @@ class ViewManagerClientImpl : public ViewManager,
   void SetProperty(Id view_id,
                    const std::string& name,
                    const std::vector<uint8_t>& data);
+  void SetViewTextInputState(Id view_id, TextInputStatePtr state);
+  void SetImeVisibility(Id view_id, bool visible, TextInputStatePtr state);
 
   void Embed(const String& url, Id view_id);
   void Embed(mojo::URLRequestPtr request,
@@ -100,6 +101,7 @@ class ViewManagerClientImpl : public ViewManager,
       mojo::URLRequestPtr request,
       const OnEmbedForDescendantCallback& callback) override;
   void OnEmbeddedAppDisconnected(Id view_id) override;
+  void OnUnembed() override;
   void OnViewBoundsChanged(Id view_id,
                            RectPtr old_bounds,
                            RectPtr new_bounds) override;
@@ -122,9 +124,6 @@ class ViewManagerClientImpl : public ViewManager,
                         EventPtr event,
                         const Callback<void()>& callback) override;
   void OnViewFocused(Id focused_view_id) override;
-
-  // ErrorHandler implementation.
-  void OnConnectionError() override;
 
   void RootDestroyed(View* root);
 

@@ -118,15 +118,16 @@ void DeviceImpl::GetDeviceInfo(const GetDeviceInfoCallback& callback) {
     return;
   }
 
-  // TODO(rockot/reillyg): Support more than just the current configuration.
-  // Also, converting configuration info should be done in the TypeConverter,
-  // but GetConfiguration() is non-const so we do it here for now.
+  // TODO(rockot/reillyg): Converting configuration info should be done in the
+  // TypeConverter, but GetConfiguration() is non-const so we do it here for
+  // now.
   DeviceInfoPtr info = DeviceInfo::From(*device_handle_->GetDevice());
-  const UsbConfigDescriptor* config =
-      device_handle_->GetDevice()->GetConfiguration();
-  info->configurations = mojo::Array<ConfigurationInfoPtr>::New(0);
-  if (config)
-    info->configurations.push_back(ConfigurationInfo::From(*config));
+  const std::vector<UsbConfigDescriptor>& configs =
+      device_handle_->GetDevice()->configurations();
+  info->configurations = mojo::Array<ConfigurationInfoPtr>::New(configs.size());
+  for (size_t i = 0; i < configs.size(); ++i) {
+    info->configurations[i] = ConfigurationInfo::From(configs[i]);
+  }
   callback.Run(info.Pass());
 }
 
@@ -180,6 +181,16 @@ void DeviceImpl::Reset(const ResetCallback& callback) {
   }
 
   device_handle_->ResetDevice(WrapMojoCallback(callback));
+}
+
+void DeviceImpl::ClearHalt(uint8_t endpoint,
+                           const ClearHaltCallback& callback) {
+  if (!device_handle_) {
+    callback.Run(false);
+    return;
+  }
+
+  device_handle_->ClearHalt(endpoint, WrapMojoCallback(callback));
 }
 
 void DeviceImpl::ControlTransferIn(ControlTransferParamsPtr params,

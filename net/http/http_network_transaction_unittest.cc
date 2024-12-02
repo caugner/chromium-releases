@@ -288,10 +288,14 @@ class HttpNetworkTransactionTest
         AlternateProtocolToString(AlternateProtocolFromNextProto(GetParam()));
   }
 
-  // This is the expected return from a current server advertising SPDY.
+  std::string GetAlternativeServiceHttpHeader() {
+    return std::string("Alt-Svc: ") + GetAlternateProtocolFromParam() +
+           "=\"www.example.com:443\"\r\n";
+  }
+
   std::string GetAlternateProtocolHttpHeader() {
     return std::string("Alternate-Protocol: 443:") +
-        GetAlternateProtocolFromParam() + "\r\n\r\n";
+           GetAlternateProtocolFromParam() + "\r\n";
   }
 
   // Either |write_failure| specifies a write failure or |read_failure|
@@ -494,6 +498,7 @@ void FillLargeHeadersString(std::string* str, int size) {
     str->append(row, sizeof_row);
 }
 
+#if defined(NTLM_PORTABLE)
 // Alternative functions that eliminate randomness and dependency on the local
 // host name so that the generated NTLM messages are reproducible.
 void MockGenerateRandom1(uint8* output, size_t n) {
@@ -522,6 +527,7 @@ void MockGenerateRandom2(uint8* output, size_t n) {
 std::string MockGetHostName() {
   return "WTC-WIN7";
 }
+#endif  // defined(NTLM_PORTABLE)
 
 template<typename ParentPool>
 class CaptureGroupNameSocketPool : public ParentPool {
@@ -641,6 +647,7 @@ bool CheckDigestServerAuth(const AuthChallengeInfo* auth_challenge) {
   return true;
 }
 
+#if defined(NTLM_PORTABLE)
 bool CheckNTLMServerAuth(const AuthChallengeInfo* auth_challenge) {
   if (!auth_challenge)
     return false;
@@ -650,6 +657,7 @@ bool CheckNTLMServerAuth(const AuthChallengeInfo* auth_challenge) {
   EXPECT_EQ("ntlm", auth_challenge->scheme);
   return true;
 }
+#endif  // defined(NTLM_PORTABLE)
 
 }  // namespace
 
@@ -1027,11 +1035,9 @@ TEST_P(HttpNetworkTransactionTest, Head) {
                  base::Unretained(&proxy_headers_handler)));
 
   MockWrite data_writes1[] = {
-      MockWrite(
-          "HEAD / HTTP/1.1\r\n"
-          "Host: www.example.org\r\n"
-          "Connection: keep-alive\r\n"
-          "Content-Length: 0\r\n\r\n"),
+      MockWrite("HEAD / HTTP/1.1\r\n"
+                "Host: www.example.org\r\n"
+                "Connection: keep-alive\r\n\r\n"),
   };
   MockRead data_reads1[] = {
     MockRead("HTTP/1.1 404 Not Found\r\n"),
@@ -1441,8 +1447,8 @@ void HttpNetworkTransactionTest::PreconnectErrorResendRequestTest(
   SSLConfig ssl_config;
   session->ssl_config_service()->GetSSLConfig(&ssl_config);
   session->GetNextProtos(&ssl_config.next_protos);
-  session->http_stream_factory()->PreconnectStreams(
-      1, request, DEFAULT_PRIORITY, ssl_config, ssl_config);
+  session->http_stream_factory()->PreconnectStreams(1, request, ssl_config,
+                                                    ssl_config);
   // Wait for the preconnect to complete.
   // TODO(davidben): Some way to wait for an idle socket count might be handy.
   base::RunLoop().RunUntilIdle();
@@ -3840,8 +3846,12 @@ TEST_P(HttpNetworkTransactionTest,
   // CONNECT to mail.example.org:443 via SPDY.
   SpdyHeaderBlock connect2_block;
   connect2_block[spdy_util_.GetMethodKey()] = "CONNECT";
-  connect2_block[spdy_util_.GetPathKey()] = "mail.example.org:443";
-  connect2_block[spdy_util_.GetHostKey()] = "mail.example.org";
+  if (GetParam() >= kProtoHTTP2MinimumVersion) {
+    connect2_block[spdy_util_.GetHostKey()] = "mail.example.org:443";
+  } else {
+    connect2_block[spdy_util_.GetPathKey()] = "mail.example.org:443";
+    connect2_block[spdy_util_.GetHostKey()] = "mail.example.org";
+  }
   spdy_util_.MaybeAddVersionHeader(&connect2_block);
   scoped_ptr<SpdyFrame> connect2(
       spdy_util_.ConstructSpdySyn(3, connect2_block, LOWEST, false, false));
@@ -7323,11 +7333,9 @@ TEST_P(HttpNetworkTransactionTest, BuildRequest_HeadContentLengthZero) {
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
 
   MockWrite data_writes[] = {
-      MockWrite(
-          "HEAD / HTTP/1.1\r\n"
-          "Host: www.example.org\r\n"
-          "Connection: keep-alive\r\n"
-          "Content-Length: 0\r\n\r\n"),
+      MockWrite("HEAD / HTTP/1.1\r\n"
+                "Host: www.example.org\r\n"
+                "Connection: keep-alive\r\n\r\n"),
   };
 
   // Lastly, the server responds with the actual content.
@@ -7864,8 +7872,10 @@ scoped_refptr<HttpNetworkSession> SetupSessionForGroupNameTests(
       session->http_server_properties();
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(next_proto), "", 443);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
-      HostPortPair("host.with.alternate", 80), alternative_service, 1.0);
+      HostPortPair("host.with.alternate", 80), alternative_service, 1.0,
+      expiration);
 
   return session;
 }
@@ -7925,7 +7935,7 @@ TEST_P(HttpNetworkTransactionTest, GroupNameForDirectConnections) {
       },
   };
 
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     session_deps_.proxy_service.reset(
@@ -7953,7 +7963,6 @@ TEST_P(HttpNetworkTransactionTest, GroupNameForDirectConnections) {
       EXPECT_EQ(tests[i].expected_group_name,
                 transport_conn_pool->last_group_name_received());
   }
-
 }
 
 TEST_P(HttpNetworkTransactionTest, GroupNameForHTTPProxyConnections) {
@@ -7988,7 +7997,7 @@ TEST_P(HttpNetworkTransactionTest, GroupNameForHTTPProxyConnections) {
       },
   };
 
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     session_deps_.proxy_service.reset(
@@ -8058,7 +8067,7 @@ TEST_P(HttpNetworkTransactionTest, GroupNameForSOCKSConnections) {
       },
   };
 
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     session_deps_.proxy_service.reset(
@@ -8556,7 +8565,6 @@ TEST_P(HttpNetworkTransactionTest, CancelDuringInitRequestBody) {
 
 // Tests that changes to Auth realms are treated like auth rejections.
 TEST_P(HttpNetworkTransactionTest, ChangeAuthRealms) {
-
   HttpRequestInfo request;
   request.method = "GET";
   request.url = GURL("http://www.example.org/");
@@ -8711,18 +8719,207 @@ TEST_P(HttpNetworkTransactionTest, ChangeAuthRealms) {
   EXPECT_TRUE(response->auth_challenge.get() == NULL);
 }
 
+TEST_P(HttpNetworkTransactionTest, HonorAlternativeServiceHeader) {
+  session_deps_.next_protos = SpdyNextProtos();
+  session_deps_.use_alternative_services = true;
+
+  std::string alternative_service_http_header =
+      GetAlternativeServiceHttpHeader();
+
+  MockRead data_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternative_service_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, OK),
+  };
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("http://www.example.org/");
+  request.load_flags = 0;
+
+  StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
+
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  TestCompletionCallback callback;
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
+
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  HostPortPair http_host_port_pair("www.example.org", 80);
+  HttpServerProperties& http_server_properties =
+      *session->http_server_properties();
+  AlternativeServiceVector alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  EXPECT_TRUE(alternative_service_vector.empty());
+
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers.get() != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+  EXPECT_FALSE(response->was_fetched_via_spdy);
+  EXPECT_FALSE(response->was_npn_negotiated);
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("hello world", response_data);
+
+  alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  ASSERT_EQ(1u, alternative_service_vector.size());
+  EXPECT_EQ(AlternateProtocolFromNextProto(GetParam()),
+            alternative_service_vector[0].protocol);
+  EXPECT_EQ("www.example.com", alternative_service_vector[0].host);
+  EXPECT_EQ(443, alternative_service_vector[0].port);
+}
+
+// Alternative Service headers must be ignored when |use_alternative_services|
+// is false.
+TEST_P(HttpNetworkTransactionTest, DoNotHonorAlternativeServiceHeader) {
+  session_deps_.next_protos = SpdyNextProtos();
+  session_deps_.use_alternative_services = false;
+
+  std::string alternative_service_http_header =
+      GetAlternativeServiceHttpHeader();
+
+  MockRead data_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternative_service_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, OK),
+  };
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("http://www.example.org/");
+  request.load_flags = 0;
+
+  StaticSocketDataProvider data(data_reads, arraysize(data_reads), nullptr, 0);
+
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  TestCompletionCallback callback;
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
+
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  HostPortPair http_host_port_pair("www.example.org", 80);
+  HttpServerProperties& http_server_properties =
+      *session->http_server_properties();
+  AlternativeServiceVector alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  EXPECT_TRUE(alternative_service_vector.empty());
+
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != nullptr);
+  ASSERT_TRUE(response->headers.get() != nullptr);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+  EXPECT_FALSE(response->was_fetched_via_spdy);
+  EXPECT_FALSE(response->was_npn_negotiated);
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("hello world", response_data);
+
+  alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  EXPECT_TRUE(alternative_service_vector.empty());
+}
+
+TEST_P(HttpNetworkTransactionTest, HonorMultipleAlternativeServiceHeader) {
+  session_deps_.next_protos = SpdyNextProtos();
+  session_deps_.use_alternative_services = true;
+
+  MockRead data_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead("Alt-Svc: "),
+      MockRead(GetAlternateProtocolFromParam()),
+      MockRead("=\"www.example.com:443\";p=1.0,"),
+      MockRead("quic=\":1234\"\r\n\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, OK),
+  };
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("http://www.example.org/");
+  request.load_flags = 0;
+
+  StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
+
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  TestCompletionCallback callback;
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
+
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  HostPortPair http_host_port_pair("www.example.org", 80);
+  HttpServerProperties& http_server_properties =
+      *session->http_server_properties();
+  AlternativeServiceVector alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  EXPECT_TRUE(alternative_service_vector.empty());
+
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers.get() != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+  EXPECT_FALSE(response->was_fetched_via_spdy);
+  EXPECT_FALSE(response->was_npn_negotiated);
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("hello world", response_data);
+
+  alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  ASSERT_EQ(2u, alternative_service_vector.size());
+  EXPECT_EQ(AlternateProtocolFromNextProto(GetParam()),
+            alternative_service_vector[0].protocol);
+  EXPECT_EQ("www.example.com", alternative_service_vector[0].host);
+  EXPECT_EQ(443, alternative_service_vector[0].port);
+  EXPECT_EQ(QUIC, alternative_service_vector[1].protocol);
+  EXPECT_EQ("www.example.org", alternative_service_vector[1].host);
+  EXPECT_EQ(1234, alternative_service_vector[1].port);
+}
+
+// Alternate Protocol headers must be honored even if |use_alternative_services|
+// is false.
 TEST_P(HttpNetworkTransactionTest, HonorAlternateProtocolHeader) {
   session_deps_.next_protos = SpdyNextProtos();
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = false;
 
   std::string alternate_protocol_http_header =
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(SYNCHRONOUS, OK),
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, OK),
   };
 
   HttpRequestInfo request;
@@ -8773,7 +8970,7 @@ TEST_P(HttpNetworkTransactionTest, HonorAlternateProtocolHeader) {
 
 TEST_P(HttpNetworkTransactionTest, EmptyAlternateProtocolHeader) {
   session_deps_.next_protos = SpdyNextProtos();
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   MockRead data_reads[] = {
       MockRead("HTTP/1.1 200 OK\r\n"),
@@ -8799,8 +8996,9 @@ TEST_P(HttpNetworkTransactionTest, EmptyAlternateProtocolHeader) {
   HttpServerProperties& http_server_properties =
       *session->http_server_properties();
   AlternativeService alternative_service(QUIC, "", 80);
-  http_server_properties.SetAlternativeService(http_host_port_pair,
-                                               alternative_service, 1.0);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
+  http_server_properties.SetAlternativeService(
+      http_host_port_pair, alternative_service, 1.0, expiration);
 
   AlternativeServiceVector alternative_service_vector =
       http_server_properties.GetAlternativeServices(http_host_port_pair);
@@ -8831,9 +9029,117 @@ TEST_P(HttpNetworkTransactionTest, EmptyAlternateProtocolHeader) {
   EXPECT_TRUE(alternative_service_vector.empty());
 }
 
+TEST_P(HttpNetworkTransactionTest, AltSvcOverwritesAlternateProtocol) {
+  session_deps_.next_protos = SpdyNextProtos();
+  session_deps_.use_alternative_services = true;
+
+  std::string alternative_service_http_header =
+      GetAlternativeServiceHttpHeader();
+  std::string alternate_protocol_http_header = GetAlternateProtocolHttpHeader();
+
+  MockRead data_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternative_service_http_header.c_str()),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, OK),
+  };
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("http://www.example.org/");
+  request.load_flags = 0;
+
+  StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
+
+  session_deps_.socket_factory->AddSocketDataProvider(&data);
+
+  TestCompletionCallback callback;
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
+
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  HostPortPair http_host_port_pair("www.example.org", 80);
+  HttpServerProperties& http_server_properties =
+      *session->http_server_properties();
+  AlternativeServiceVector alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  EXPECT_TRUE(alternative_service_vector.empty());
+
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers.get() != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+  EXPECT_FALSE(response->was_fetched_via_spdy);
+  EXPECT_FALSE(response->was_npn_negotiated);
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("hello world", response_data);
+
+  alternative_service_vector =
+      http_server_properties.GetAlternativeServices(http_host_port_pair);
+  ASSERT_EQ(1u, alternative_service_vector.size());
+  EXPECT_EQ(AlternateProtocolFromNextProto(GetParam()),
+            alternative_service_vector[0].protocol);
+  EXPECT_EQ("www.example.com", alternative_service_vector[0].host);
+  EXPECT_EQ(443, alternative_service_vector[0].port);
+}
+
+// When |use_alternative_services| is false, do not observe alternative service
+// entries that point to a different host.
+TEST_P(HttpNetworkTransactionTest, DisableAlternativeServiceToDifferentHost) {
+  session_deps_.use_alternative_services = false;
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("http://www.example.org/");
+  request.load_flags = 0;
+
+  MockConnect mock_connect(ASYNC, ERR_CONNECTION_REFUSED);
+  StaticSocketDataProvider first_data;
+  first_data.set_connect_data(mock_connect);
+  session_deps_.socket_factory->AddSocketDataProvider(&first_data);
+
+  MockRead data_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n\r\n"), MockRead("hello world"),
+      MockRead(ASYNC, OK),
+  };
+  StaticSocketDataProvider second_data(data_reads, arraysize(data_reads),
+                                       nullptr, 0);
+  session_deps_.socket_factory->AddSocketDataProvider(&second_data);
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
+
+  base::WeakPtr<HttpServerProperties> http_server_properties =
+      session->http_server_properties();
+  AlternativeService alternative_service(
+      AlternateProtocolFromNextProto(GetParam()), "different.example.org", 80);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
+  http_server_properties->SetAlternativeService(
+      HostPortPair::FromURL(request.url), alternative_service, 1.0, expiration);
+
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
+  TestCompletionCallback callback;
+
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+  // The connetion to origin was refused, and the alternative service should not
+  // be used (even though mock data are there), therefore the request should
+  // fail.
+  EXPECT_EQ(ERR_CONNECTION_REFUSED, callback.GetResult(rv));
+}
+
 TEST_P(HttpNetworkTransactionTest,
        MarkBrokenAlternateProtocolAndFallback) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   HttpRequestInfo request;
   request.method = "GET";
@@ -8864,8 +9170,9 @@ TEST_P(HttpNetworkTransactionTest,
   const AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       666);  // Port is ignored by MockConnect anyway.
-  http_server_properties->SetAlternativeService(host_port_pair,
-                                                alternative_service, 1.0);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
+  http_server_properties->SetAlternativeService(
+      host_port_pair, alternative_service, 1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -8892,13 +9199,13 @@ TEST_P(HttpNetworkTransactionTest,
       alternative_service_vector[0]));
 }
 
+// Ensure that we are not allowed to redirect traffic via an alternate protocol
+// to an unrestricted (port >= 1024) when the original traffic was on a
+// restricted port (port < 1024).  Ensure that we can redirect in all other
+// cases.
 TEST_P(HttpNetworkTransactionTest,
        AlternateProtocolPortRestrictedBlocked) {
-  // Ensure that we're not allowed to redirect traffic via an alternate
-  // protocol to an unrestricted (port >= 1024) when the original traffic was
-  // on a restricted port (port < 1024).  Ensure that we can redirect in all
-  // other cases.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   HttpRequestInfo restricted_port_request;
   restricted_port_request.method = "GET";
@@ -8927,9 +9234,10 @@ TEST_P(HttpNetworkTransactionTest,
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       kUnrestrictedAlternatePort);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
       HostPortPair::FromURL(restricted_port_request.url), alternative_service,
-      1.0);
+      1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -8943,14 +9251,12 @@ TEST_P(HttpNetworkTransactionTest,
   EXPECT_EQ(ERR_CONNECTION_REFUSED, callback.WaitForResult());
 }
 
+// Ensure that we are allowed to redirect traffic via an alternate protocol to
+// an unrestricted (port >= 1024) when the original traffic was on a restricted
+// port (port < 1024) if we set |enable_user_alternate_protocol_ports|.
 TEST_P(HttpNetworkTransactionTest,
        AlternateProtocolPortRestrictedPermitted) {
-  // Ensure that we're allowed to redirect traffic via an alternate
-  // protocol to an unrestricted (port >= 1024) when the original traffic was
-  // on a restricted port (port < 1024) if we set
-  // enable_user_alternate_protocol_ports.
-
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.enable_user_alternate_protocol_ports = true;
 
   HttpRequestInfo restricted_port_request;
@@ -8980,9 +9286,10 @@ TEST_P(HttpNetworkTransactionTest,
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       kUnrestrictedAlternatePort);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
       HostPortPair::FromURL(restricted_port_request.url), alternative_service,
-      1.0);
+      1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -8995,13 +9302,13 @@ TEST_P(HttpNetworkTransactionTest,
   EXPECT_EQ(OK, callback.WaitForResult());
 }
 
+// Ensure that we are not allowed to redirect traffic via an alternate protocol
+// to an unrestricted (port >= 1024) when the original traffic was on a
+// restricted port (port < 1024).  Ensure that we can redirect in all other
+// cases.
 TEST_P(HttpNetworkTransactionTest,
        AlternateProtocolPortRestrictedAllowed) {
-  // Ensure that we're not allowed to redirect traffic via an alternate
-  // protocol to an unrestricted (port >= 1024) when the original traffic was
-  // on a restricted port (port < 1024).  Ensure that we can redirect in all
-  // other cases.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   HttpRequestInfo restricted_port_request;
   restricted_port_request.method = "GET";
@@ -9030,9 +9337,10 @@ TEST_P(HttpNetworkTransactionTest,
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       kRestrictedAlternatePort);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
       HostPortPair::FromURL(restricted_port_request.url), alternative_service,
-      1.0);
+      1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9046,13 +9354,13 @@ TEST_P(HttpNetworkTransactionTest,
   EXPECT_EQ(OK, callback.WaitForResult());
 }
 
+// Ensure that we are not allowed to redirect traffic via an alternate protocol
+// to an unrestricted (port >= 1024) when the original traffic was on a
+// restricted port (port < 1024).  Ensure that we can redirect in all other
+// cases.
 TEST_P(HttpNetworkTransactionTest,
        AlternateProtocolPortUnrestrictedAllowed1) {
-  // Ensure that we're not allowed to redirect traffic via an alternate
-  // protocol to an unrestricted (port >= 1024) when the original traffic was
-  // on a restricted port (port < 1024).  Ensure that we can redirect in all
-  // other cases.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   HttpRequestInfo unrestricted_port_request;
   unrestricted_port_request.method = "GET";
@@ -9081,9 +9389,10 @@ TEST_P(HttpNetworkTransactionTest,
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       kRestrictedAlternatePort);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
       HostPortPair::FromURL(unrestricted_port_request.url), alternative_service,
-      1.0);
+      1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9096,13 +9405,13 @@ TEST_P(HttpNetworkTransactionTest,
   EXPECT_EQ(OK, callback.WaitForResult());
 }
 
+// Ensure that we are not allowed to redirect traffic via an alternate protocol
+// to an unrestricted (port >= 1024) when the original traffic was on a
+// restricted port (port < 1024).  Ensure that we can redirect in all other
+// cases.
 TEST_P(HttpNetworkTransactionTest,
        AlternateProtocolPortUnrestrictedAllowed2) {
-  // Ensure that we're not allowed to redirect traffic via an alternate
-  // protocol to an unrestricted (port >= 1024) when the original traffic was
-  // on a restricted port (port < 1024).  Ensure that we can redirect in all
-  // other cases.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   HttpRequestInfo unrestricted_port_request;
   unrestricted_port_request.method = "GET";
@@ -9127,13 +9436,14 @@ TEST_P(HttpNetworkTransactionTest,
 
   base::WeakPtr<HttpServerProperties> http_server_properties =
       session->http_server_properties();
-  const int kUnrestrictedAlternatePort = 1024;
+  const int kUnrestrictedAlternatePort = 1025;
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       kUnrestrictedAlternatePort);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
       HostPortPair::FromURL(unrestricted_port_request.url), alternative_service,
-      1.0);
+      1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9146,11 +9456,11 @@ TEST_P(HttpNetworkTransactionTest,
   EXPECT_EQ(OK, callback.WaitForResult());
 }
 
+// Ensure that we are not allowed to redirect traffic via an alternate protocol
+// to an unsafe port, and that we resume the second HttpStreamFactoryImpl::Job
+// once the alternate protocol request fails.
 TEST_P(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
-  // Ensure that we're not allowed to redirect traffic via an alternate
-  // protocol to an unsafe port, and that we resume the second
-  // HttpStreamFactoryImpl::Job once the alternate protocol request fails.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
 
   HttpRequestInfo request;
   request.method = "GET";
@@ -9176,8 +9486,9 @@ TEST_P(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), "www.example.org",
       kUnsafePort);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(
-      HostPortPair::FromURL(request.url), alternative_service, 1.0);
+      HostPortPair::FromURL(request.url), alternative_service, 1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -9187,9 +9498,6 @@ TEST_P(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // The HTTP request should succeed.
   EXPECT_EQ(OK, callback.WaitForResult());
-
-  // Disable alternate protocol before the asserts.
- // HttpStreamFactory::set_use_alternate_protocols(false);
 
   const HttpResponseInfo* response = trans->GetResponseInfo();
   ASSERT_TRUE(response != NULL);
@@ -9202,7 +9510,7 @@ TEST_P(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
 }
 
 TEST_P(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   HttpRequestInfo request;
@@ -9214,12 +9522,12 @@ TEST_P(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
-    MockRead(ASYNC, OK)
-  };
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+      MockRead(ASYNC, OK)};
 
   StaticSocketDataProvider first_transaction(
       data_reads, arraysize(data_reads), NULL, 0);
@@ -9290,7 +9598,7 @@ TEST_P(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
 }
 
 TEST_P(HttpNetworkTransactionTest, AlternateProtocolWithSpdyLateBinding) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   HttpRequestInfo request;
@@ -9302,11 +9610,12 @@ TEST_P(HttpNetworkTransactionTest, AlternateProtocolWithSpdyLateBinding) {
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
-    MockRead(ASYNC, OK),
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+      MockRead(ASYNC, OK),
   };
 
   StaticSocketDataProvider first_transaction(
@@ -9406,7 +9715,7 @@ TEST_P(HttpNetworkTransactionTest, AlternateProtocolWithSpdyLateBinding) {
 }
 
 TEST_P(HttpNetworkTransactionTest, StallAlternateProtocolForNpnSpdy) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   HttpRequestInfo request;
@@ -9418,11 +9727,12 @@ TEST_P(HttpNetworkTransactionTest, StallAlternateProtocolForNpnSpdy) {
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
-    MockRead(ASYNC, OK),
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+      MockRead(ASYNC, OK),
   };
 
   StaticSocketDataProvider first_transaction(
@@ -9532,7 +9842,7 @@ class CapturingProxyResolverFactory : public ProxyResolverFactory {
 
 TEST_P(HttpNetworkTransactionTest,
        UseAlternateProtocolForTunneledNpnSpdy) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   ProxyConfig proxy_config;
@@ -9557,11 +9867,12 @@ TEST_P(HttpNetworkTransactionTest,
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
-    MockRead(ASYNC, OK),
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, ERR_TEST_PEER_CLOSE_AFTER_NEXT_MOCK_READ),
+      MockRead(ASYNC, OK),
   };
 
   StaticSocketDataProvider first_transaction(
@@ -9657,7 +9968,7 @@ TEST_P(HttpNetworkTransactionTest,
 
 TEST_P(HttpNetworkTransactionTest,
        UseAlternateProtocolForNpnSpdyWithExistingSpdySession) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   HttpRequestInfo request;
@@ -9669,10 +9980,11 @@ TEST_P(HttpNetworkTransactionTest,
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(ASYNC, OK),
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(ASYNC, OK),
   };
 
   StaticSocketDataProvider first_transaction(
@@ -10354,7 +10666,7 @@ TEST_P(HttpNetworkTransactionTest, MultiRoundAuth) {
 // This tests the case that a request is issued via http instead of spdy after
 // npn is negotiated.
 TEST_P(HttpNetworkTransactionTest, NpnWithHttpOverSSL) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   NextProtoVector next_protos;
   next_protos.push_back(kProtoHTTP11);
   session_deps_.next_protos = next_protos;
@@ -10375,10 +10687,11 @@ TEST_P(HttpNetworkTransactionTest, NpnWithHttpOverSSL) {
       GetAlternateProtocolHttpHeader();
 
   MockRead data_reads[] = {
-    MockRead("HTTP/1.1 200 OK\r\n"),
-    MockRead(alternate_protocol_http_header.c_str()),
-    MockRead("hello world"),
-    MockRead(SYNCHRONOUS, OK),
+      MockRead("HTTP/1.1 200 OK\r\n"),
+      MockRead(alternate_protocol_http_header.c_str()),
+      MockRead("\r\n"),
+      MockRead("hello world"),
+      MockRead(SYNCHRONOUS, OK),
   };
 
   SSLSocketDataProvider ssl(ASYNC, OK);
@@ -10414,11 +10727,11 @@ TEST_P(HttpNetworkTransactionTest, NpnWithHttpOverSSL) {
   EXPECT_TRUE(response->was_npn_negotiated);
 }
 
+// Simulate the SSL handshake completing with an NPN negotiation followed by an
+// immediate server closing of the socket.
+// Regression test for https://crbug.com/46369.
 TEST_P(HttpNetworkTransactionTest, SpdyPostNPNServerHangup) {
-  // Simulate the SSL handshake completing with an NPN negotiation
-  // followed by an immediate server closing of the socket.
-  // Fix crash:  http://crbug.com/46369
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   HttpRequestInfo request;
@@ -10476,10 +10789,10 @@ class UrlRecordingHttpAuthHandlerMock : public HttpAuthHandlerMock {
   GURL* url_;
 };
 
+// This test ensures that the URL passed into the proxy is upgraded to https
+// when doing an Alternate Protocol upgrade.
 TEST_P(HttpNetworkTransactionTest, SpdyAlternateProtocolThroughProxy) {
-  // This test ensures that the URL passed into the proxy is upgraded
-  // to https when doing an Alternate Protocol upgrade.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   session_deps_.proxy_service.reset(
@@ -11336,7 +11649,7 @@ TEST_P(HttpNetworkTransactionTest, ClientAuthCertCache_Proxy_Fail) {
 }
 
 TEST_P(HttpNetworkTransactionTest, UseIPConnectionPooling) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   // Set up a special HttpNetworkSession with a MockCachingHostResolver.
@@ -11435,7 +11748,7 @@ TEST_P(HttpNetworkTransactionTest, UseIPConnectionPooling) {
 }
 
 TEST_P(HttpNetworkTransactionTest, UseIPConnectionPoolingAfterResolution) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   // Set up a special HttpNetworkSession with a MockCachingHostResolver.
@@ -11562,7 +11875,7 @@ class OneTimeCachingHostResolver : public HostResolver {
 
 TEST_P(HttpNetworkTransactionTest,
        UseIPConnectionPoolingWithHostCacheExpiration) {
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   session_deps_.next_protos = SpdyNextProtos();
 
   // Set up a special HttpNetworkSession with a OneTimeCachingHostResolver.
@@ -11821,14 +12134,15 @@ class AltSvcCertificateVerificationTest : public HttpNetworkTransactionTest {
     data_refused.set_connect_data(mock_connect);
     session_deps_.socket_factory->AddSocketDataProvider(&data_refused);
 
-    session_deps_.use_alternate_protocols = true;
+    session_deps_.use_alternative_services = true;
     scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
     base::WeakPtr<HttpServerProperties> http_server_properties =
         session->http_server_properties();
     AlternativeService alternative_service(
         AlternateProtocolFromNextProto(GetParam()), alternative);
+    base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
     http_server_properties->SetAlternativeService(origin, alternative_service,
-                                                  1.0);
+                                                  1.0, expiration);
 
     // First request to alternative.
     if (pooling) {
@@ -11925,14 +12239,15 @@ TEST_P(HttpNetworkTransactionTest, AlternativeServiceNotOnHttp11) {
   session_deps_.socket_factory->AddSocketDataProvider(&data_refused);
 
   // Set up alternative service for origin.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
   base::WeakPtr<HttpServerProperties> http_server_properties =
       session->http_server_properties();
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), alternative);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(origin, alternative_service,
-                                                1.0);
+                                                1.0, expiration);
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(DEFAULT_PRIORITY, session.get()));
@@ -11997,14 +12312,15 @@ TEST_P(HttpNetworkTransactionTest, FailedAlternativeServiceIsNotUserVisible) {
   session_deps_.socket_factory->AddSocketDataProvider(&http_data);
 
   // Set up alternative service for origin.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
   base::WeakPtr<HttpServerProperties> http_server_properties =
       session->http_server_properties();
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), alternative);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(origin, alternative_service,
-                                                1.0);
+                                                1.0, expiration);
 
   HttpNetworkTransaction trans1(DEFAULT_PRIORITY, session.get());
   HttpRequestInfo request1;
@@ -12105,14 +12421,15 @@ TEST_P(HttpNetworkTransactionTest, AlternativeServiceShouldNotPoolToHttp11) {
   session_deps_.socket_factory->AddSocketDataProvider(&data_refused);
 
   // Set up alternative service for origin.
-  session_deps_.use_alternate_protocols = true;
+  session_deps_.use_alternative_services = true;
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps_));
   base::WeakPtr<HttpServerProperties> http_server_properties =
       session->http_server_properties();
   AlternativeService alternative_service(
       AlternateProtocolFromNextProto(GetParam()), alternative);
+  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
   http_server_properties->SetAlternativeService(origin, alternative_service,
-                                                1.0);
+                                                1.0, expiration);
 
   // First transaction to alternative to open an HTTP/1.1 socket.
   scoped_ptr<HttpTransaction> trans1(
@@ -12308,9 +12625,9 @@ TEST_P(HttpNetworkTransactionTest, DoNotUseSpdySessionIfCertDoesNotMatch) {
   scoped_ptr<SpdyFrame> resp1(spdy_util_.ConstructSpdyGetSynReply(NULL, 0, 1));
   scoped_ptr<SpdyFrame> body1(spdy_util_.ConstructSpdyBodyFrame(1, true));
   MockRead reads1[] = {
-    CreateMockRead(*resp1, 1),
-    CreateMockRead(*body1, 2),
-    MockRead(ASYNC, OK, 3) // EOF
+      CreateMockRead(*resp1, 1),
+      CreateMockRead(*body1, 2),
+      MockRead(ASYNC, OK, 3)  // EOF
   };
 
   scoped_ptr<DeterministicSocketData> data1(
@@ -12333,9 +12650,9 @@ TEST_P(HttpNetworkTransactionTest, DoNotUseSpdySessionIfCertDoesNotMatch) {
   scoped_ptr<SpdyFrame> resp2(spdy_util_.ConstructSpdyGetSynReply(NULL, 0, 1));
   scoped_ptr<SpdyFrame> body2(spdy_util_.ConstructSpdyBodyFrame(1, true));
   MockRead reads2[] = {
-    CreateMockRead(*resp2, 1),
-    CreateMockRead(*body2, 2),
-    MockRead(ASYNC, OK, 3) // EOF
+      CreateMockRead(*resp2, 1),
+      CreateMockRead(*body2, 2),
+      MockRead(ASYNC, OK, 3)  // EOF
   };
 
   scoped_ptr<DeterministicSocketData> data2(
@@ -13094,7 +13411,6 @@ class FakeStreamFactory : public HttpStreamFactory {
 
   void PreconnectStreams(int num_streams,
                          const HttpRequestInfo& info,
-                         RequestPriority priority,
                          const SSLConfig& server_ssl_config,
                          const SSLConfig& proxy_ssl_config) override {
     ADD_FAILURE();
@@ -13504,8 +13820,8 @@ TEST_P(HttpNetworkTransactionTest, CloseSSLSocketOnIdleForHttpRequest2) {
   HttpStreamFactory* http_stream_factory = session->http_stream_factory();
   SSLConfig ssl_config;
   session->ssl_config_service()->GetSSLConfig(&ssl_config);
-  http_stream_factory->PreconnectStreams(1, ssl_request, DEFAULT_PRIORITY,
-                                         ssl_config, ssl_config);
+  http_stream_factory->PreconnectStreams(1, ssl_request, ssl_config,
+                                         ssl_config);
   EXPECT_EQ(0, GetIdleSocketCountInSSLSocketPool(session.get()));
 
   // Start the HTTP request.  Pool should stall.

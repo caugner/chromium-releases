@@ -24,7 +24,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/android/android_about_app_info.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -34,8 +33,10 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/translate/core/browser/translate_prefs.h"
 #include "components/translate/core/common/translate_pref_names.h"
+#include "components/version_info/version_info.h"
 #include "components/web_resource/web_resource_pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/user_metrics.h"
 #include "jni/PrefServiceBridge_jni.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -274,12 +275,47 @@ static jboolean GetTranslateManaged(JNIEnv* env, jobject obj) {
   return GetPrefService()->IsManagedPreference(prefs::kEnableTranslate);
 }
 
+static jboolean GetAutoDetectEncodingEnabled(JNIEnv* env, jobject obj) {
+  return GetPrefService()->GetBoolean(prefs::kWebKitUsesUniversalDetector);
+}
+
 static jboolean GetSearchSuggestEnabled(JNIEnv* env, jobject obj) {
   return GetPrefService()->GetBoolean(prefs::kSearchSuggestEnabled);
 }
 
 static jboolean GetSearchSuggestManaged(JNIEnv* env, jobject obj) {
   return GetPrefService()->IsManagedPreference(prefs::kSearchSuggestEnabled);
+}
+
+static jboolean GetSafeBrowsingExtendedReportingEnabled(JNIEnv* env,
+                                                        jobject obj) {
+  return GetPrefService()->GetBoolean(
+      prefs::kSafeBrowsingExtendedReportingEnabled);
+}
+
+static void SetSafeBrowsingExtendedReportingEnabled(JNIEnv* env,
+                                                    jobject obj,
+                                                    jboolean enabled) {
+  GetPrefService()->SetBoolean(prefs::kSafeBrowsingExtendedReportingEnabled,
+                               enabled);
+}
+
+static jboolean GetSafeBrowsingExtendedReportingManaged(JNIEnv* env,
+                                                        jobject obj) {
+  return GetPrefService()->IsManagedPreference(
+      prefs::kSafeBrowsingExtendedReportingEnabled);
+}
+
+static jboolean GetSafeBrowsingEnabled(JNIEnv* env, jobject obj) {
+  return GetPrefService()->GetBoolean(prefs::kSafeBrowsingEnabled);
+}
+
+static void SetSafeBrowsingEnabled(JNIEnv* env, jobject obj, jboolean enabled) {
+  GetPrefService()->SetBoolean(prefs::kSafeBrowsingEnabled, enabled);
+}
+
+static jboolean GetSafeBrowsingManaged(JNIEnv* env, jobject obj) {
+  return GetPrefService()->IsManagedPreference(prefs::kSafeBrowsingEnabled);
 }
 
 static jboolean GetProtectedMediaIdentifierEnabled(JNIEnv* env, jobject obj) {
@@ -545,6 +581,12 @@ static void SetTranslateEnabled(JNIEnv* env, jobject obj, jboolean enabled) {
   GetPrefService()->SetBoolean(prefs::kEnableTranslate, enabled);
 }
 
+static void SetAutoDetectEncodingEnabled(JNIEnv* env, jobject obj,
+                                         jboolean enabled) {
+  content::RecordAction(base::UserMetricsAction("AutoDetectChange"));
+  GetPrefService()->SetBoolean(prefs::kWebKitUsesUniversalDetector, enabled);
+}
+
 static void ResetTranslateDefaults(JNIEnv* env, jobject obj) {
   scoped_ptr<translate::TranslatePrefs> translate_prefs =
       ChromeTranslateClient::CreateTranslatePrefs(GetPrefService());
@@ -629,15 +671,6 @@ static jboolean GetMicUserModifiable(JNIEnv* env, jobject obj) {
 static jboolean GetMicManagedByCustodian(JNIEnv* env, jobject obj) {
   return IsContentSettingManagedByCustodian(
              CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
-}
-
-static jboolean GetAutologinEnabled(JNIEnv* env, jobject obj) {
-  return GetPrefService()->GetBoolean(prefs::kAutologinEnabled);
-}
-
-static void SetAutologinEnabled(JNIEnv* env, jobject obj,
-                                jboolean autologinEnabled) {
-  GetPrefService()->SetBoolean(prefs::kAutologinEnabled, autologinEnabled);
 }
 
 static void SetJavaScriptAllowed(JNIEnv* env, jobject obj, jstring pattern,
@@ -739,15 +772,14 @@ static void ResetAcceptLanguages(JNIEnv* env,
 // Sends all information about the different versions to Java.
 // From browser_about_handler.cc
 static jobject GetAboutVersionStrings(JNIEnv* env, jobject obj) {
-  chrome::VersionInfo version_info;
-  std::string os_version = version_info.OSType();
+  std::string os_version = version_info::GetOSType();
   os_version += " " + AndroidAboutAppInfo::GetOsInfo();
 
   base::android::BuildInfo* android_build_info =
         base::android::BuildInfo::GetInstance();
   std::string application(android_build_info->package_label());
   application.append(" ");
-  application.append(version_info.Version());
+  application.append(version_info::GetVersionNumber());
 
   // OK to release, returning to Java.
   return Java_PrefServiceBridge_createAboutVersionStrings(
@@ -835,7 +867,7 @@ void PrefServiceBridge::PrependToAcceptLanguagesIfNecessary(
       parts.push_back(language);
     }
     parts.push_back(*accept_languages);
-    *accept_languages = JoinString(parts, ',');
+    *accept_languages = base::JoinString(parts, ",");
   }
 }
 

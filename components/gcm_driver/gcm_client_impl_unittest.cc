@@ -56,6 +56,7 @@ const char kSender2[] = "project_id2";
 const char kSender3[] = "project_id3";
 const char kRegistrationResponsePrefix[] = "token=";
 const char kUnregistrationResponsePrefix[] = "deleted=";
+const char kRawData[] = "example raw data";
 
 const char kInstanceID[] = "iid_1";
 const char kScope[] = "GCM";
@@ -65,7 +66,8 @@ const char kDeleteTokenResponse[] = "token=foo";
 MCSMessage BuildDownstreamMessage(
     const std::string& project_id,
     const std::string& app_id,
-    const std::map<std::string, std::string>& data) {
+    const std::map<std::string, std::string>& data,
+    const std::string& raw_data) {
   mcs_proto::DataMessageStanza data_message;
   data_message.set_from(project_id);
   data_message.set_category(app_id);
@@ -76,6 +78,7 @@ MCSMessage BuildDownstreamMessage(
     app_data->set_key(iter->first);
     app_data->set_value(iter->second);
   }
+  data_message.set_raw_data(raw_data);
   return MCSMessage(kDataMessageStanzaTag, data_message);
 }
 
@@ -285,7 +288,7 @@ class GCMClientImplTest : public testing::Test,
                       const std::string& message_id,
                       GCMClient::Result result) override {}
   void OnMessageReceived(const std::string& registration_id,
-                         const GCMClient::IncomingMessage& message) override;
+                         const IncomingMessage& message) override;
   void OnMessagesDeleted(const std::string& app_id) override;
   void OnMessageSendError(
       const std::string& app_id,
@@ -330,9 +333,7 @@ class GCMClientImplTest : public testing::Test,
   }
   const std::string& last_message_id() const { return last_message_id_; }
   GCMClient::Result last_result() const { return last_result_; }
-  const GCMClient::IncomingMessage& last_message() const {
-    return last_message_;
-  }
+  const IncomingMessage& last_message() const { return last_message_; }
   const GCMClient::SendErrorDetails& last_error_details() const {
     return last_error_details_;
   }
@@ -380,7 +381,7 @@ class GCMClientImplTest : public testing::Test,
   std::string last_registration_id_;
   std::string last_message_id_;
   GCMClient::Result last_result_;
-  GCMClient::IncomingMessage last_message_;
+  IncomingMessage last_message_;
   GCMClient::SendErrorDetails last_error_details_;
   base::Time last_token_fetch_time_;
   std::vector<AccountMapping> last_account_mappings_;
@@ -577,9 +578,8 @@ void GCMClientImplTest::OnGCMReady(
   last_token_fetch_time_ = last_token_fetch_time;
 }
 
-void GCMClientImplTest::OnMessageReceived(
-    const std::string& registration_id,
-    const GCMClient::IncomingMessage& message) {
+void GCMClientImplTest::OnMessageReceived(const std::string& registration_id,
+                                          const IncomingMessage& message) {
   last_event_ = MESSAGE_RECEIVED;
   last_app_id_ = registration_id;
   last_message_ = message;
@@ -818,7 +818,8 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessage) {
   expected_data["key2"] = "value2";
 
   // Message for kSender will be received.
-  MCSMessage message(BuildDownstreamMessage(kSender, kAppId, expected_data));
+  MCSMessage message(BuildDownstreamMessage(kSender, kAppId, expected_data,
+                                            std::string() /* raw_data */));
   EXPECT_TRUE(message.IsValid());
   ReceiveMessageFromMCS(message);
 
@@ -832,7 +833,8 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessage) {
   reset_last_event();
 
   // Message for kSender2 will be received.
-  MCSMessage message2(BuildDownstreamMessage(kSender2, kAppId, expected_data));
+  MCSMessage message2(BuildDownstreamMessage(kSender2, kAppId, expected_data,
+                                             std::string() /* raw_data */));
   EXPECT_TRUE(message2.IsValid());
   ReceiveMessageFromMCS(message2);
 
@@ -845,7 +847,8 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessage) {
   reset_last_event();
 
   // Message from kSender3 will be dropped.
-  MCSMessage message3(BuildDownstreamMessage(kSender3, kAppId, expected_data));
+  MCSMessage message3(BuildDownstreamMessage(kSender3, kAppId, expected_data,
+                                             std::string() /* raw_data */));
   EXPECT_TRUE(message3.IsValid());
   ReceiveMessageFromMCS(message3);
 
@@ -853,13 +856,31 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessage) {
   EXPECT_NE(kAppId, last_app_id());
 }
 
+TEST_F(GCMClientImplTest, DispatchDownstreamMessageRawData) {
+  std::vector<std::string> senders(1, kSender);
+  AddRegistration(kAppId, senders, "reg_id");
+
+  std::map<std::string, std::string> expected_data;
+
+  MCSMessage message(BuildDownstreamMessage(kSender, kAppId, expected_data,
+                                            kRawData));
+  EXPECT_TRUE(message.IsValid());
+  ReceiveMessageFromMCS(message);
+
+  EXPECT_EQ(MESSAGE_RECEIVED, last_event());
+  EXPECT_EQ(kAppId, last_app_id());
+  EXPECT_EQ(expected_data.size(), last_message().data.size());
+  EXPECT_EQ(kSender, last_message().sender_id);
+  EXPECT_EQ(kRawData, last_message().raw_data);
+}
+
 TEST_F(GCMClientImplTest, DispatchDownstreamMessageSendError) {
   std::map<std::string, std::string> expected_data;
   expected_data["message_type"] = "send_error";
   expected_data["google.message_id"] = "007";
   expected_data["error_details"] = "some details";
-  MCSMessage message(BuildDownstreamMessage(
-      kSender, kAppId, expected_data));
+  MCSMessage message(BuildDownstreamMessage(kSender, kAppId, expected_data,
+                                            std::string() /* raw_data */));
   EXPECT_TRUE(message.IsValid());
   ReceiveMessageFromMCS(message);
 
@@ -867,7 +888,7 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessageSendError) {
   EXPECT_EQ(kAppId, last_app_id());
   EXPECT_EQ("007", last_error_details().message_id);
   EXPECT_EQ(1UL, last_error_details().additional_data.size());
-  GCMClient::MessageData::const_iterator iter =
+  MessageData::const_iterator iter =
       last_error_details().additional_data.find("error_details");
   EXPECT_TRUE(iter != last_error_details().additional_data.end());
   EXPECT_EQ("some details", iter->second);
@@ -876,8 +897,8 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessageSendError) {
 TEST_F(GCMClientImplTest, DispatchDownstreamMessgaesDeleted) {
   std::map<std::string, std::string> expected_data;
   expected_data["message_type"] = "deleted_messages";
-  MCSMessage message(BuildDownstreamMessage(
-      kSender, kAppId, expected_data));
+  MCSMessage message(BuildDownstreamMessage(kSender, kAppId, expected_data,
+                                            std::string() /* raw_data */));
   EXPECT_TRUE(message.IsValid());
   ReceiveMessageFromMCS(message);
 
@@ -886,7 +907,7 @@ TEST_F(GCMClientImplTest, DispatchDownstreamMessgaesDeleted) {
 }
 
 TEST_F(GCMClientImplTest, SendMessage) {
-  GCMClient::OutgoingMessage message;
+  OutgoingMessage message;
   message.id = "007";
   message.time_to_live = 500;
   message.data["key"] = "value";
@@ -1284,6 +1305,19 @@ TEST_F(GCMClientImplStartAndStopTest, ImmediateStartAndThenDelayStart) {
   gcm_client()->Start(GCMClient::DELAYED_START);
   PumpLoopUntilIdle();
   EXPECT_EQ(GCMClientImpl::LOADED, gcm_client_state());
+}
+
+TEST_F(GCMClientImplStartAndStopTest, DelayedStartRace) {
+  // GCMClientImpl should be in INITIALIZED state at first.
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
+
+  // Delay start the GCM, then start it immediately while it's still loading.
+  gcm_client()->Start(GCMClient::DELAYED_START);
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIAL_DEVICE_CHECKIN, gcm_client_state());
+  DefaultCompleteCheckin();
+  EXPECT_EQ(GCMClientImpl::READY, gcm_client_state());
 }
 
 TEST_F(GCMClientImplStartAndStopTest, DelayedStart) {

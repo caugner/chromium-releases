@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_IO_THREAD_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,7 @@ class ProxyConfigService;
 class ProxyService;
 class SSLConfigService;
 class TransportSecurityState;
+class URLRequestBackoffManager;
 class URLRequestContext;
 class URLRequestContextGetter;
 class URLRequestJobFactory;
@@ -139,6 +141,7 @@ class IOThread : public content::BrowserThreadDelegate {
         proxy_script_fetcher_ftp_transaction_factory;
     scoped_ptr<net::URLRequestJobFactory>
         proxy_script_fetcher_url_request_job_factory;
+    scoped_ptr<net::URLRequestBackoffManager> url_request_backoff_manager;
     scoped_ptr<net::URLSecurityManager> url_security_manager;
     // TODO(willchan): Remove proxy script fetcher context since it's not
     // necessary now that I got rid of refcounting URLRequestContexts.
@@ -174,11 +177,11 @@ class IOThread : public content::BrowserThreadDelegate {
     net::NextProtoVector next_protos;
     Optional<std::string> trusted_spdy_proxy;
     std::set<net::HostPortPair> forced_spdy_exclusions;
-    Optional<bool> use_alternate_protocols;
+    Optional<bool> use_alternative_services;
     Optional<double> alternative_service_probability_threshold;
 
     Optional<bool> enable_quic;
-    Optional<bool> disable_insecure_quic;
+    Optional<bool> enable_insecure_quic;
     Optional<bool> enable_quic_for_proxies;
     Optional<bool> enable_quic_port_selection;
     Optional<bool> quic_always_require_handshake_confirmation;
@@ -331,9 +334,10 @@ class IOThread : public content::BrowserThreadDelegate {
       base::StringPiece quic_trial_group,
       bool quic_allowed_by_policy);
 
-  // Returns true if QUIC should be disabled for http:// URLs, as a result
-  // of a field trial.
-  static bool ShouldDisableInsecureQuic(
+  // Returns true if QUIC should be enabled for http:// URLs, as a result
+  // of a field trial or command line flag.
+  static bool ShouldEnableInsecureQuic(
+      const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
 
   // Returns true if the selection of the ephemeral port in bind() should be
@@ -373,6 +377,10 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // Returns true if QUIC should prefer AES-GCN even without hardware support.
   static bool ShouldQuicPreferAes(const VariationParameters& quic_trial_params);
+
+  // Returns true if QUIC should enable alternative services.
+  static bool ShouldQuicEnableAlternativeServices(
+      const VariationParameters& quic_trial_params);
 
   // Returns the maximum number of QUIC connections with high packet loss in a
   // row after which QUIC should be disabled.  Returns 0 if the default value

@@ -129,6 +129,9 @@
         "test": "gcm_unit_tests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "google_apis_unittests"
       },
       {
@@ -393,6 +396,9 @@
         "test": "gcm_unit_tests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
         "test": "google_apis_unittests"
       },
       {
@@ -836,6 +842,32 @@
       }
     ]
   },
+  "WebKit Linux Trusty": {
+    "gtest_tests": [
+      {
+        "test": "blink_heap_unittests"
+      },
+      {
+        "test": "blink_platform_unittests"
+      },
+      {
+        "test": "webkit_unit_tests"
+      },
+      {
+        "test": "wtf_unittests"
+      }
+    ],
+    "scripts": [
+      {
+        "name": "webkit_lint",
+        "script": "webkit_lint.py"
+      },
+      {
+        "name": "webkit_python_tests",
+        "script": "webkit_python_tests.py"
+      }
+    ]
+  },
   "WebKit Mac Oilpan": {
     "gtest_tests": [
       {
@@ -1123,6 +1155,32 @@
     ]
   },
   "WebKit Win Oilpan (dbg)": {
+    "gtest_tests": [
+      {
+        "test": "blink_heap_unittests"
+      },
+      {
+        "test": "blink_platform_unittests"
+      },
+      {
+        "test": "webkit_unit_tests"
+      },
+      {
+        "test": "wtf_unittests"
+      }
+    ],
+    "scripts": [
+      {
+        "name": "webkit_lint",
+        "script": "webkit_lint.py"
+      },
+      {
+        "name": "webkit_python_tests",
+        "script": "webkit_python_tests.py"
+      }
+    ]
+  },
+  "WebKit Win10": {
     "gtest_tests": [
       {
         "test": "blink_heap_unittests"

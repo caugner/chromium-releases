@@ -24,7 +24,7 @@ var remoting = remoting || {};
 /**
  * @param {remoting.ClientPlugin} plugin
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
- * @param {boolean} useApiaryForLogging
+ * @param {remoting.Logger} logger
  * @param {remoting.ClientSession.EventHandler} listener
  *
  * @constructor
@@ -33,7 +33,7 @@ var remoting = remoting || {};
  * @implements {remoting.ClientPlugin.ConnectionEventHandler}
  */
 remoting.ClientSession = function(
-    plugin, signalStrategy, useApiaryForLogging, listener) {
+    plugin, signalStrategy, logger, listener) {
   base.inherits(this, base.EventSourceImpl);
 
   /** @private */
@@ -58,7 +58,7 @@ remoting.ClientSession = function(
   this.hasReceivedFrame_ = false;
 
   /** @private {remoting.Logger} */
-  this.logger_ = this.createLogger_(useApiaryForLogging, signalStrategy);
+  this.logger_ = logger;
 
   /** @private */
   this.signalStrategy_ = signalStrategy;
@@ -72,13 +72,9 @@ remoting.ClientSession = function(
   /** @private {remoting.FormatIq} */
   this.iqFormatter_ = null;
 
-  /**
-   * Allow host-offline error reporting to be suppressed in situations where it
-   * would not be useful, for example, when using a cached host JID.
-   *
-   * @type {boolean} @private
-   */
-  this.logHostOfflineErrors_ = true;
+  /** @private {remoting.XmppErrorCache} */
+  this.xmppErrorCache_ = new remoting.XmppErrorCache();
+
 
   /** @private {remoting.ClientPlugin} */
   this.plugin_ = plugin;
@@ -136,8 +132,19 @@ remoting.ClientSession.EventHandler.prototype.onDisconnected =
 // the names given here.
 // The negative values represent state transitions that occur within the
 // web-app that have no corresponding plugin state transition.
+//
+// TODO(kelvinp): Merge this enum with remoting.ChromotingEvent.SessionState
+// once we have migrated away from XMPP-based logging (crbug.com/523423).
+// NOTE: The enums here correspond to the Chromoting.Connections enumerated
+// histogram defined in src/tools/metrics/histograms/histograms.xml. UMA
+// histograms don't work well with negative values, so only non-negative values
+// have been used for Chromoting.Connections.
+// The maximum values for the UMA enumerated histogram is included here for use
+// when uploading values to UMA.
+// The 2 lists should be kept in sync, and any new enums should be append-only.
 /** @enum {number} */
 remoting.ClientSession.State = {
+  MIN_STATE_ENUM: -3,
   CONNECTION_CANCELED: -3,  // Connection closed (gracefully) before connecting.
   CONNECTION_DROPPED: -2,  // Succeeded, but subsequently closed with an error.
   CREATED: -1,
@@ -147,7 +154,8 @@ remoting.ClientSession.State = {
   AUTHENTICATED: 3,
   CONNECTED: 4,
   CLOSED: 5,
-  FAILED: 6
+  FAILED: 6,
+  MAX_STATE_ENUM: 6,
 };
 
 /**
@@ -246,6 +254,9 @@ remoting.ClientSession.Capability = {
   // Indicates that the client supports 'cast'ing the video stream to a
   // cast-enabled device.
   CAST: 'casting',
+
+  // Indicates desktop shape support.
+  DESKTOP_SHAPE: 'desktopShape',
 };
 
 /**
@@ -373,27 +384,6 @@ remoting.ClientSession.prototype.hasReceivedFrame = function() {
 };
 
 /**
- * @param {boolean} useApiary
- * @param {remoting.SignalStrategy} signalStrategy
- * @return {remoting.Logger}
- *
- * @private
- */
-remoting.ClientSession.prototype.createLogger_ = function(
-    useApiary, signalStrategy) {
-  if (useApiary) {
-    var logger = new remoting.SessionLogger(
-      remoting.ChromotingEvent.Role.CLIENT,
-      remoting.TelemetryEventWriter.Client.write
-    );
-    signalStrategy.sendConnectionSetupResults(logger);
-    return logger;
-  } else {
-    return new remoting.LogToServer(signalStrategy);
-  }
-};
-
-/**
  * Sends a signaling message.
  *
  * @param {string} message XML string of IQ stanza to send to server.
@@ -447,6 +437,7 @@ remoting.ClientSession.prototype.onIncomingMessage_ = function(message) {
   var formatted = new XMLSerializer().serializeToString(message);
   console.log(base.timestamp() +
               this.iqFormatter_.prettifyReceiveIq(formatted));
+  this.xmppErrorCache_.processStanza(message);
   this.plugin_.onIncomingIq(formatted);
 };
 
@@ -497,10 +488,8 @@ remoting.ClientSession.prototype.onConnectionStatusUpdate =
  * @param {string} connectionType The new connection type.
  * @private
  */
-remoting.ClientSession.prototype.onRouteChanged =
-    function(channel, connectionType) {
-  console.log('plugin: Channel ' + channel + ' using ' +
-              connectionType + ' connection.');
+remoting.ClientSession.prototype.onRouteChanged = function(channel,
+                                                           connectionType) {
   this.logger_.setConnectionType(connectionType);
 };
 
@@ -562,8 +551,36 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
   }
 
   this.notifyStateChanges_(oldState, this.state_);
-  this.logger_.logClientSessionStateChange(this.state_, this.error_);
+  // Record state count in an UMA enumerated histogram.
+  recordState(this.state_);
+  this.logger_.logClientSessionStateChange(
+      this.state_, this.error_, this.xmppErrorCache_.getFirstError());
 };
+
+/**
+ * Records a Chromoting Connection State, stored in an UMA enumerated histogram.
+ * @param {remoting.ClientSession.State} state State identifier.
+ */
+function recordState(state) {
+  // According to src/base/metrics/histogram.h, for a UMA enumerated histogram,
+  // the upper limit should be 1 above the max-enum.
+  var histogram_max = remoting.ClientSession.State.MAX_STATE_ENUM -
+      remoting.ClientSession.State.MIN_STATE_ENUM + 1;
+
+  var metricDescription = {
+    metricName: 'Chromoting.Connections',
+    type: 'histogram-linear',
+    // According to histogram.h, minimum should be 1. Values less than minimum
+    // end up in the 0th bucket.
+    min: 1,
+    max: histogram_max,
+    // The # of buckets should include 1 for underflow.
+    buckets: histogram_max + 1
+  };
+
+  chrome.metricsPrivate.recordValue(metricDescription, state -
+      remoting.ClientSession.State.MIN_STATE_ENUM);
+}
 
 /**
  * @param {remoting.ClientSession.State} oldState The new state for the session.
@@ -632,13 +649,6 @@ remoting.ClientSession.prototype.translateState_ = function(previous, current) {
   if (previous == State.CONNECTING || previous == State.AUTHENTICATED) {
     if (current == State.CLOSED) {
       return remoting.ClientSession.State.CONNECTION_CANCELED;
-    } else if (current == State.FAILED &&
-        this.error_.hasTag(remoting.Error.Tag.HOST_IS_OFFLINE) &&
-        !this.logHostOfflineErrors_) {
-      // The application requested host-offline errors to be suppressed, for
-      // example, because this connection attempt is using a cached host JID.
-      console.log('Suppressing host-offline error.');
-      return State.CONNECTION_CANCELED;
     }
   } else if (previous == State.CONNECTED && current == State.FAILED) {
     return State.CONNECTION_DROPPED;
@@ -649,16 +659,4 @@ remoting.ClientSession.prototype.translateState_ = function(previous, current) {
 /** @private */
 remoting.ClientSession.prototype.reportStatistics = function() {
   this.logger_.logStatistics(this.plugin_.getPerfStats());
-};
-
-/**
- * Enable or disable logging of connection errors due to a host being offline.
- * For example, if attempting a connection using a cached JID, host-offline
- * errors should not be logged because the JID will be refreshed and the
- * connection retried.
- *
- * @param {boolean} enable True to log host-offline errors; false to suppress.
- */
-remoting.ClientSession.prototype.logHostOfflineErrors = function(enable) {
-  this.logHostOfflineErrors_ = enable;
 };

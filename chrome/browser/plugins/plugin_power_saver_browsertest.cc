@@ -94,7 +94,7 @@ void VerifyPluginMarkedEssential(content::WebContents* contents,
 
 }  // namespace
 
-class PluginPowerSaverBrowserTest : virtual public InProcessBrowserTest {
+class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnablePluginPowerSaver);

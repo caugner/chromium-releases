@@ -31,13 +31,6 @@ class InstallationState;
 class InstallerState;
 class ProductState;
 
-// Sets a bit in the registry to note that the latest OS upgrade notification
-// has been handled by this user. Returns true if the previous bit was
-// different or absent (i.e., the latest OS update wasn't handled yet), in
-// which case subsequent calls to this method will return false until the next
-// OS upgrade. This call is only valid on system-level installs.
-bool UpdateLastOSUpgradeHandledByActiveSetup(BrowserDistribution* dist);
-
 // Applies a patch file to source file using Courgette. Returns 0 in case of
 // success. In case of errors, it returns kCourgetteErrorOffset + a Courgette
 // status code, as defined in courgette/courgette.h
@@ -130,6 +123,10 @@ bool IsProcessorSupported();
 base::string16 GetRegistrationDataCommandKey(
     const AppRegistrationData& reg_data,
     const wchar_t* name);
+
+// Converts a product GUID into a SQuished gUID that is used for MSI installer
+// registry entries.
+base::string16 GuidToSquid(const base::string16& guid);
 
 // This class will enable the privilege defined by |privilege_name| on the
 // current process' token. The privilege will be disabled upon the

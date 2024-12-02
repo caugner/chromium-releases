@@ -26,6 +26,8 @@
 #include "url/gurl.h"
 
 #if defined(MOJO_RENDERER)
+#include "media/mojo/interfaces/renderer.mojom.h"
+#include "media/mojo/interfaces/service_factory.mojom.h"
 #include "media/mojo/services/mojo_renderer_impl.h"
 #include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/application/public/cpp/application_test_base.h"
@@ -102,6 +104,27 @@ const int k640WebMFileDurationMs = 2749;
 const int kOpusEndTrimmingWebMFileDurationMs = 2741;
 const int kVP9WebMFileDurationMs = 2736;
 const int kVP8AWebMFileDurationMs = 2734;
+
+#if !defined(MOJO_RENDERER)
+#if defined(OPUS_FIXED_POINT)
+static const char kOpusEndTrimmingHash_1[] =
+    "-4.57,-5.68,-6.54,-6.29,-4.35,-3.59,";
+static const char kOpusEndTrimmingHash_2[] =
+    "-11.93,-11.12,-8.27,-7.10,-7.84,-10.00,";
+static const char kOpusEndTrimmingHash_3[] =
+    "-13.32,-14.38,-13.70,-11.69,-10.20,-10.48,";
+#else
+// Hash for a full playthrough of "opus-trimming-test.(webm|ogg)".
+static const char kOpusEndTrimmingHash_1[] =
+    "-4.56,-5.65,-6.51,-6.29,-4.36,-3.59,";
+// The above hash, plus an additional playthrough starting from T=1s.
+static const char kOpusEndTrimmingHash_2[] =
+    "-11.89,-11.09,-8.25,-7.11,-7.84,-9.97,";
+// The above hash, plus an additional playthrough starting from T=6.36s.
+static const char kOpusEndTrimmingHash_3[] =
+    "-13.28,-14.35,-13.67,-11.68,-10.18,-10.46,";
+#endif  // defined(OPUS_FIXED_POINT)
+#endif
 
 #if defined(USE_PROPRIETARY_CODECS)
 #if !defined(DISABLE_EME_TESTS)
@@ -450,7 +473,6 @@ class MockMediaSource {
             base::Bind(&MockMediaSource::DemuxerOpened, base::Unretained(this)),
             base::Bind(&MockMediaSource::OnEncryptedMediaInitData,
                        base::Unretained(this)),
-            LogCB(),
             scoped_refptr<MediaLog>(new MediaLog()),
             true)),
         owned_chunk_demuxer_(chunk_demuxer_) {
@@ -484,6 +506,10 @@ class MockMediaSource {
     current_position_ = new_position;
 
     AppendData(seek_append_size);
+  }
+
+  void Seek(base::TimeDelta seek_time) {
+    chunk_demuxer_->StartWaitingForSeek(seek_time);
   }
 
   void AppendData(int size) {
@@ -620,11 +646,17 @@ class PipelineIntegrationTestHost : public mojo::test::ApplicationTestBase,
             ->ConnectToApplication(request.Pass())
             ->GetServiceProvider();
 
-    mojo::MediaRendererPtr mojo_media_renderer;
-    mojo::ConnectToService(service_provider, &mojo_media_renderer);
+    mojo::ConnectToService(service_provider, &media_service_factory_);
+
+    interfaces::RendererPtr mojo_renderer;
+    media_service_factory_->CreateRenderer(mojo::GetProxy(&mojo_renderer));
+
     return make_scoped_ptr(new MojoRendererImpl(message_loop_.task_runner(),
-                                                mojo_media_renderer.Pass()));
+                                                mojo_renderer.Pass()));
   }
+
+ private:
+  interfaces::ServiceFactoryPtr media_service_factory_;
 };
 #else
 class PipelineIntegrationTestHost : public testing::Test,
@@ -667,6 +699,12 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
 
   void StartHashedPipelineWithMediaSource(MockMediaSource* source) {
     hashing_enabled_ = true;
+    StartPipelineWithMediaSource(source);
+  }
+
+  void StartHashedClocklessPipelineWithMediaSource(MockMediaSource* source) {
+    hashing_enabled_ = true;
+    clockless_playback_ = true;
     StartPipelineWithMediaSource(source);
   }
 
@@ -775,6 +813,86 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed) {
   EXPECT_HASH_EQ("-3.59,-2.06,-0.43,2.15,0.77,-0.95,", GetAudioHash());
   EXPECT_TRUE(demuxer_->GetTimelineOffset().is_null());
 }
+
+TEST_F(PipelineIntegrationTest, BasicPlaybackOpusOggTrimmingHashed) {
+  ASSERT_EQ(PIPELINE_OK,
+            Start("opus-trimming-test.webm", kHashed | kClockless));
+
+  Play();
+
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_1, GetAudioHash());
+
+  // Seek within the pre-skip section, this should not cause a beep.
+  ASSERT_TRUE(Seek(base::TimeDelta::FromSeconds(1)));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_2, GetAudioHash());
+
+  // Seek somewhere outside of the pre-skip / end-trim section, demxuer should
+  // correctly preroll enough to accurately decode this segment.
+  ASSERT_TRUE(Seek(base::TimeDelta::FromMilliseconds(6360)));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_3, GetAudioHash());
+}
+
+TEST_F(PipelineIntegrationTest, BasicPlaybackOpusWebmTrimmingHashed) {
+  ASSERT_EQ(PIPELINE_OK,
+            Start("opus-trimming-test.webm", kHashed | kClockless));
+
+  Play();
+
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_1, GetAudioHash());
+
+  // Seek within the pre-skip section, this should not cause a beep.
+  ASSERT_TRUE(Seek(base::TimeDelta::FromSeconds(1)));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_2, GetAudioHash());
+
+  // Seek somewhere outside of the pre-skip / end-trim section, demxuer should
+  // correctly preroll enough to accurately decode this segment.
+  ASSERT_TRUE(Seek(base::TimeDelta::FromMilliseconds(6360)));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_3, GetAudioHash());
+}
+
+TEST_F(PipelineIntegrationTest,
+       BasicPlaybackOpusWebmTrimmingHashed_MediaSource) {
+  MockMediaSource source("opus-trimming-test.webm", kOpusAudioOnlyWebM,
+                         kAppendWholeFile);
+  StartHashedClocklessPipelineWithMediaSource(&source);
+  source.EndOfStream();
+
+  Play();
+
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_1, GetAudioHash());
+
+  // Seek within the pre-skip section, this should not cause a beep.
+  base::TimeDelta seek_time = base::TimeDelta::FromSeconds(1);
+  source.Seek(seek_time);
+  ASSERT_TRUE(Seek(seek_time));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_2, GetAudioHash());
+
+  // Seek somewhere outside of the pre-skip / end-trim section, demuxer should
+  // correctly preroll enough to accurately decode this segment.
+  seek_time = base::TimeDelta::FromMilliseconds(6360);
+  source.Seek(seek_time);
+  ASSERT_TRUE(Seek(seek_time));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_HASH_EQ(kOpusEndTrimmingHash_3, GetAudioHash());
+}
+
+// TODO(dalecurtis): Add an opus test file which FFmpeg and ChunkDemuxer will
+// both seek the same in and shows the difference of preroll.
+// http://crbug.com/509894
 
 TEST_F(PipelineIntegrationTest, BasicPlaybackLive) {
   ASSERT_EQ(PIPELINE_OK, Start("bear-320x240-live.webm", kHashed));
@@ -1596,7 +1714,7 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_VP8A_WebM) {
   ASSERT_EQ(PIPELINE_OK, Start("bear-vp8a.webm"));
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
-  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, VideoFrame::YV12A);
+  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, PIXEL_FORMAT_YV12A);
 }
 
 // Verify that VP8A video with odd width/height can be played back.
@@ -1604,7 +1722,7 @@ TEST_F(PipelineIntegrationTest, BasicPlayback_VP8A_Odd_WebM) {
   ASSERT_EQ(PIPELINE_OK, Start("bear-vp8a-odd-dimensions.webm"));
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
-  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, VideoFrame::YV12A);
+  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, PIXEL_FORMAT_YV12A);
 }
 
 // Verify that VP9 video with odd width/height can be played back.
@@ -1629,7 +1747,7 @@ TEST_F(PipelineIntegrationTest, P444_VP9_WebM) {
   ASSERT_EQ(PIPELINE_OK, Start("bear-320x240-P444.webm"));
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
-  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, VideoFrame::YV24);
+  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, PIXEL_FORMAT_YV24);
 }
 
 // Verify that frames of VP9 video in the BT.709 color space have the YV12HD
@@ -1638,9 +1756,8 @@ TEST_F(PipelineIntegrationTest, BT709_VP9_WebM) {
   ASSERT_EQ(PIPELINE_OK, Start("bear-vp9-bt709.webm"));
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
-  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, VideoFrame::YV12);
-  EXPECT_COLOR_SPACE_EQ(last_video_frame_color_space_,
-                        VideoFrame::COLOR_SPACE_HD_REC709);
+  EXPECT_VIDEO_FORMAT_EQ(last_video_frame_format_, PIXEL_FORMAT_YV12);
+  EXPECT_COLOR_SPACE_EQ(last_video_frame_color_space_, COLOR_SPACE_HD_REC709);
 }
 
 // Verify that videos with an odd frame size playback successfully.

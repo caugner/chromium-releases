@@ -16,11 +16,12 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_api.h"
-#include "extensions/common/extension_set.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/features/base_feature_provider.h"
 #include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/renderer/renderer_extension_registry.h"
+#include "extensions/renderer/v8_helpers.h"
 #include "gin/per_context_data.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -53,9 +54,20 @@ std::string GetContextTypeDescriptionString(Feature::Context context_type) {
       return "BLESSED_WEB_PAGE";
     case Feature::WEBUI_CONTEXT:
       return "WEBUI";
+    case Feature::SERVICE_WORKER_CONTEXT:
+      return "SERVICE_WORKER";
   }
   NOTREACHED();
   return std::string();
+}
+
+static std::string ToStringOrDefault(
+    const v8::Local<v8::String>& v8_string,
+    const std::string& dflt) {
+  if (v8_string.IsEmpty())
+    return dflt;
+  std::string ascii_value = *v8::String::Utf8Value(v8_string);
+  return ascii_value.empty() ? dflt : ascii_value;
 }
 
 }  // namespace
@@ -97,7 +109,7 @@ ScriptContext::ScriptContext(const v8::Local<v8::Context>& v8_context,
       runner_(new Runner(this)) {
   VLOG(1) << "Created context:\n" << GetDebugString();
   gin::PerContextData* gin_data = gin::PerContextData::From(v8_context);
-  CHECK(gin_data);  // may fail if the v8::Context hasn't been registered yet
+  CHECK(gin_data);
   gin_data->set_runner(runner_.get());
 }
 
@@ -110,12 +122,12 @@ ScriptContext::~ScriptContext() {
 }
 
 // static
-bool ScriptContext::IsSandboxedPage(const ExtensionSet& extensions,
-                                    const GURL& url) {
+bool ScriptContext::IsSandboxedPage(const GURL& url) {
   // TODO(kalman): This is checking the wrong thing. See comment in
   // HasAccessOrThrowError.
   if (url.SchemeIs(kExtensionScheme)) {
-    const Extension* extension = extensions.GetByID(url.host());
+    const Extension* extension =
+        RendererExtensionRegistry::Get()->GetByID(url.host());
     if (extension) {
       return SandboxedPageInfo::IsSandboxedPage(extension, url.path());
     }
@@ -210,12 +222,6 @@ void ScriptContext::DispatchEvent(const char* event_name,
                                  args};
   module_system_->CallModuleMethod(
       kEventBindings, "dispatchEvent", arraysize(argv), argv);
-}
-
-void ScriptContext::DispatchOnUnloadEvent() {
-  v8::HandleScope handle_scope(isolate());
-  v8::Context::Scope context_scope(v8_context());
-  module_system_->CallModuleMethod("unload_event", "dispatch");
 }
 
 std::string ScriptContext::GetContextTypeDescription() const {
@@ -371,6 +377,64 @@ std::string ScriptContext::GetDebugString() const {
       effective_extension_.get() ? effective_extension_->id().c_str()
                                  : "(none)",
       GetEffectiveContextTypeDescription().c_str());
+}
+
+std::string ScriptContext::GetStackTraceAsString() const {
+  v8::Local<v8::StackTrace> stack_trace =
+      v8::StackTrace::CurrentStackTrace(isolate(), 10);
+  if (stack_trace.IsEmpty() || stack_trace->GetFrameCount() <= 0) {
+    return "    <no stack trace>";
+  } else {
+    std::string result;
+    for (int i = 0; i < stack_trace->GetFrameCount(); ++i) {
+      v8::Local<v8::StackFrame> frame = stack_trace->GetFrame(i);
+      CHECK(!frame.IsEmpty());
+      result += base::StringPrintf(
+          "\n    at %s (%s:%d:%d)",
+          ToStringOrDefault(frame->GetFunctionName(), "<anonymous>").c_str(),
+          ToStringOrDefault(frame->GetScriptName(), "<anonymous>").c_str(),
+          frame->GetLineNumber(),
+          frame->GetColumn());
+    }
+    return result;
+  }
+}
+
+v8::Local<v8::Value> ScriptContext::RunScript(
+    v8::Local<v8::String> name,
+    v8::Local<v8::String> code,
+    const RunScriptExceptionHandler& exception_handler) {
+  v8::EscapableHandleScope handle_scope(isolate());
+  v8::Context::Scope context_scope(v8_context());
+
+  // Prepend extensions:: to |name| so that internal code can be differentiated
+  // from external code in stack traces. This has no effect on behaviour.
+  std::string internal_name =
+      base::StringPrintf("extensions::%s", *v8::String::Utf8Value(name));
+
+  if (internal_name.size() >= v8::String::kMaxLength) {
+    NOTREACHED() << "internal_name is too long.";
+    return v8::Undefined(isolate());
+  }
+
+  blink::WebScopedMicrotaskSuppression suppression;
+  v8::TryCatch try_catch(isolate());
+  try_catch.SetCaptureMessage(true);
+  v8::ScriptOrigin origin(
+      v8_helpers::ToV8StringUnsafe(isolate(), internal_name.c_str()));
+  v8::Local<v8::Script> script;
+  if (!v8::Script::Compile(v8_context(), code, &origin).ToLocal(&script)) {
+    exception_handler.Run(try_catch);
+    return v8::Undefined(isolate());
+  }
+
+  v8::Local<v8::Value> result;
+  if (!script->Run(v8_context()).ToLocal(&result)) {
+    exception_handler.Run(try_catch);
+    return v8::Undefined(isolate());
+  }
+
+  return handle_scope.Escape(result);
 }
 
 ScriptContext::Runner::Runner(ScriptContext* context) : context_(context) {

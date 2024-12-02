@@ -29,10 +29,8 @@
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/signin/profile_identity_provider.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/sync/glue/invalidation_helper.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/fake_server_invalidation_service.h"
@@ -63,7 +61,9 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/os_crypt/os_crypt.h"
 #include "components/search_engines/template_url_service.h"
+#include "components/signin/core/browser/profile_identity_provider.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/sync_driver/invalidation_helper.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
@@ -71,6 +71,7 @@
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/port_util.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -161,7 +162,8 @@ scoped_ptr<KeyedService> BuildP2PProfileInvalidationProvider(
               scoped_ptr<IdentityProvider>(new ProfileIdentityProvider(
                   SigninManagerFactory::GetForProfile(profile),
                   ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
-                  LoginUIServiceFactory::GetForProfile(profile))),
+                  LoginUIServiceFactory::GetShowLoginPopupCallbackForProfile(
+                      profile))),
               profile->GetRequestContext(), notification_target))));
 }
 

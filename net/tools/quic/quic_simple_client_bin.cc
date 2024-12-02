@@ -92,6 +92,8 @@ bool FLAGS_version_mismatch_ok = false;
 // If true, an HTTP response code of 3xx is considered to be a successful
 // response, otherwise a failure.
 bool FLAGS_redirect_is_success = true;
+// Initial MTU of the connection.
+int32 FLAGS_initial_mtu = 0;
 
 int main(int argc, char *argv[]) {
   base::CommandLine::Init(argc, argv);
@@ -120,7 +122,9 @@ int main(int argc, char *argv[]) {
         "--version_mismatch_ok       if specified a version mismatch in the "
         "handshake is not considered a failure\n"
         "--redirect_is_success       if specified an HTTP response code of 3xx "
-        "is considered to be a successful response, otherwise a failure\n";
+        "is considered to be a successful response, otherwise a failure\n"
+        "--initial_mtu=<initial_mtu> specify the initial MTU of the connection"
+        "\n";
     cout << help_str;
     exit(0);
   }
@@ -155,13 +159,21 @@ int main(int argc, char *argv[]) {
   if (line->HasSwitch("redirect_is_success")) {
     FLAGS_redirect_is_success = true;
   }
+  if (line->HasSwitch("initial_mtu")) {
+    if (!base::StringToInt(line->GetSwitchValueASCII("initial_mtu"),
+                           &FLAGS_initial_mtu)) {
+      std::cerr << "--initial_mtu must be an integer\n";
+      return 1;
+    }
+  }
 
   VLOG(1) << "server host: " << FLAGS_host << " port: " << FLAGS_port
           << " body: " << FLAGS_body << " headers: " << FLAGS_headers
           << " quiet: " << FLAGS_quiet
           << " quic-version: " << FLAGS_quic_version
           << " version_mismatch_ok: " << FLAGS_version_mismatch_ok
-          << " redirect_is_success: " << FLAGS_redirect_is_success;
+          << " redirect_is_success: " << FLAGS_redirect_is_success
+          << " initial_mtu: " << FLAGS_initial_mtu;
 
   base::AtExitManager exit_manager;
   base::MessageLoopForIO message_loop;
@@ -203,12 +215,14 @@ int main(int argc, char *argv[]) {
                                       server_id, versions);
   scoped_ptr<CertVerifier> cert_verifier;
   scoped_ptr<TransportSecurityState> transport_security_state;
+  client.set_initial_max_packet_length(
+      FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
   if (is_https) {
     // For secure QUIC we need to verify the cert chain.a
     cert_verifier.reset(CertVerifier::CreateDefault());
     transport_security_state.reset(new TransportSecurityState);
     client.SetProofVerifier(new ProofVerifierChromium(
-        cert_verifier.get(), transport_security_state.get()));
+        cert_verifier.get(), nullptr, transport_security_state.get()));
   }
   if (!client.Initialize()) {
     cerr << "Failed to initialize client." << endl;
@@ -258,7 +272,7 @@ int main(int argc, char *argv[]) {
   // Send the request.
   net::SpdyHeaderBlock header_block;
   net::CreateSpdyHeadersFromHttpRequest(request, request.extra_headers,
-                                        net::SPDY3, /*direct=*/ true,
+                                        net::HTTP2, /*direct=*/true,
                                         &header_block);
   client.SendRequestAndWaitForResponse(request, FLAGS_body, /*fin=*/true);
 

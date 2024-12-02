@@ -9,9 +9,9 @@ import android.content.SharedPreferences;
 import android.os.AsyncTask;
 import android.preference.PreferenceManager;
 
-import org.chromium.base.CalledByNative;
-import org.chromium.base.JNINamespace;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.annotations.JNINamespace;
 
 /**
  * The {@link BackgroundSyncLauncher} singleton is created and owned by the C++ browser. It

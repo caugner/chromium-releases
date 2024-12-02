@@ -28,11 +28,15 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "media/base/media.h"
-#include "ui/gl/gl_surface.h"
+#include "ui/gl/test/gl_surface_test_support.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "content/browser/android/in_process_surface_texture_manager.h"
+#endif
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/client_native_pixmap_factory.h"
 #endif
 
 namespace content {
@@ -89,9 +93,10 @@ void ContentTestSuite::Initialize() {
   media::InitializeMediaLibrary();
   // When running in a child process for Mac sandbox tests, the sandbox exists
   // to initialize GL, so don't do it here.
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kTestChildProcess)) {
-    gfx::GLSurface::InitializeOneOffForTests();
+  bool is_child_process = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kTestChildProcess);
+  if (!is_child_process) {
+    gfx::GLSurfaceTestSupport::InitializeOneOff();
     gpu::ApplyGpuDriverBugWorkarounds(base::CommandLine::ForCurrentProcess());
   }
 #endif
@@ -104,6 +109,13 @@ void ContentTestSuite::Initialize() {
 #endif
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   IOSurfaceManager::SetInstance(InProcessIOSurfaceManager::GetInstance());
+#endif
+#if defined(USE_OZONE)
+  if (!is_child_process) {
+    client_native_pixmap_factory_ = ui::ClientNativePixmapFactory::Create();
+    ui::ClientNativePixmapFactory::SetInstance(
+        client_native_pixmap_factory_.get());
+  }
 #endif
 }
 

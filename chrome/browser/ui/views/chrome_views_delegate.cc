@@ -13,7 +13,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#include "chrome/common/chrome_version_info.h"
+#include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/context_factory.h"
 #include "grit/chrome_unscaled_resources.h"
@@ -178,9 +178,8 @@ bool ChromeViewsDelegate::GetSavedWindowPlacement(
   if (!prefs)
     return false;
 
-  DCHECK(prefs->FindPreference(window_name.c_str()));
-  const base::DictionaryValue* dictionary =
-      prefs->GetDictionary(window_name.c_str());
+  DCHECK(prefs->FindPreference(window_name));
+  const base::DictionaryValue* dictionary = prefs->GetDictionary(window_name);
   int left = 0;
   int top = 0;
   int right = 0;
@@ -387,7 +386,7 @@ ui::ContextFactory* ChromeViewsDelegate::GetContextFactory() {
 }
 
 std::string ChromeViewsDelegate::GetApplicationName() {
-  return chrome::VersionInfo().Name();
+  return version_info::GetProductName();
 }
 
 #if defined(OS_WIN)

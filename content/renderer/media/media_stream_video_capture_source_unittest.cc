@@ -18,6 +18,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebHeap.h"
 
+using ::testing::_;
+
 namespace content {
 
 class MockVideoCapturerDelegate : public VideoCapturerDelegate {
@@ -120,15 +122,12 @@ TEST_F(MediaStreamVideoCapturerSourceTest, TabCaptureFixedResolutionByDefault) {
       MediaStreamVideoSource::kDefaultHeight);
   expected_params.requested_format.frame_rate =
       MediaStreamVideoSource::kDefaultFrameRate;
-  expected_params.requested_format.pixel_format = media::PIXEL_FORMAT_I420;
+  expected_params.requested_format.pixel_format =
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
   expected_params.resolution_change_policy =
       media::RESOLUTION_POLICY_FIXED_RESOLUTION;
 
-  EXPECT_CALL(mock_delegate(), StartCapture(
-      expected_params,
-      testing::_,
-      testing::_,
-      testing::_)).Times(1);
+  EXPECT_CALL(mock_delegate(), StartCapture(expected_params, _, _, _)).Times(1);
   blink::WebMediaStreamTrack track = StartSource();
   // When the track goes out of scope, the source will be stopped.
   EXPECT_CALL(mock_delegate(), StopCapture());
@@ -148,15 +147,12 @@ TEST_F(MediaStreamVideoCapturerSourceTest,
       MediaStreamVideoSource::kDefaultHeight);
   expected_params.requested_format.frame_rate =
       MediaStreamVideoSource::kDefaultFrameRate;
-  expected_params.requested_format.pixel_format = media::PIXEL_FORMAT_I420;
+  expected_params.requested_format.pixel_format =
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
   expected_params.resolution_change_policy =
       media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT;
 
-  EXPECT_CALL(mock_delegate(), StartCapture(
-      expected_params,
-      testing::_,
-      testing::_,
-      testing::_)).Times(1);
+  EXPECT_CALL(mock_delegate(), StartCapture(expected_params, _, _, _)).Times(1);
   blink::WebMediaStreamTrack track = StartSource();
   // When the track goes out of scope, the source will be stopped.
   EXPECT_CALL(mock_delegate(), StopCapture());
@@ -179,16 +175,18 @@ TEST_F(MediaStreamVideoCapturerSourceTest,
   media::VideoCaptureParams expected_params;
   expected_params.requested_format.frame_size.SetSize(1920, 1080);
   expected_params.requested_format.frame_rate = 60.0;
-  expected_params.requested_format.pixel_format = media::PIXEL_FORMAT_I420;
+  expected_params.requested_format.pixel_format =
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
   expected_params.resolution_change_policy =
       media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO;
 
-  EXPECT_CALL(mock_delegate(), StartCapture(
-      testing::Field(&media::VideoCaptureParams::resolution_change_policy,
-                     media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO),
-      testing::_,
-      testing::_,
-      testing::_)).Times(1);
+  EXPECT_CALL(
+      mock_delegate(),
+      StartCapture(
+          testing::Field(&media::VideoCaptureParams::resolution_change_policy,
+                         media::RESOLUTION_POLICY_FIXED_ASPECT_RATIO),
+          _, _, _))
+      .Times(1);
   blink::WebMediaStreamTrack track = StartSource();
   // When the track goes out of scope, the source will be stopped.
   EXPECT_CALL(mock_delegate(), StopCapture());
@@ -211,15 +209,12 @@ TEST_F(MediaStreamVideoCapturerSourceTest,
   media::VideoCaptureParams expected_params;
   expected_params.requested_format.frame_size.SetSize(1920, 1080);
   expected_params.requested_format.frame_rate = 60.0;
-  expected_params.requested_format.pixel_format = media::PIXEL_FORMAT_I420;
+  expected_params.requested_format.pixel_format =
+      media::VIDEO_CAPTURE_PIXEL_FORMAT_I420;
   expected_params.resolution_change_policy =
       media::RESOLUTION_POLICY_ANY_WITHIN_LIMIT;
 
-  EXPECT_CALL(mock_delegate(), StartCapture(
-      expected_params,
-      testing::_,
-      testing::_,
-      testing::_)).Times(1);
+  EXPECT_CALL(mock_delegate(), StartCapture(expected_params, _, _, _)).Times(1);
   blink::WebMediaStreamTrack track = StartSource();
   // When the track goes out of scope, the source will be stopped.
   EXPECT_CALL(mock_delegate(), StopCapture());
@@ -293,11 +288,7 @@ TEST_F(MediaStreamVideoCapturerSourceTest, CaptureTimeAndMetadataPlumbing) {
   VideoCaptureDeliverFrameCB deliver_frame_cb;
   VideoCapturerDelegate::RunningCallback running_cb;
 
-  EXPECT_CALL(mock_delegate(), StartCapture(
-      testing::_,
-      testing::_,
-      testing::_,
-      testing::_))
+  EXPECT_CALL(mock_delegate(), StartCapture(_, _, _, _))
       .Times(1)
       .WillOnce(testing::DoAll(testing::SaveArg<1>(&deliver_frame_cb),
                                testing::SaveArg<3>(&running_cb)));

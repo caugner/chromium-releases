@@ -33,7 +33,6 @@ static_library("renderer") {
     "//base/allocator",
     "//chrome/common",
     "//chrome/common:mojo_bindings",
-    "//chrome/common/net",
     "//chrome:resources",
     "//chrome:strings",
     "//components/autofill/content/renderer",
@@ -47,7 +46,7 @@ static_library("renderer") {
     "//components/omnibox/common",
     "//components/password_manager/content/renderer",
     "//components/plugins/renderer",
-    "//components/printing/renderer:printing_renderer",
+    "//components/printing/renderer",
     "//components/startup_metric_utils",
     "//components/translate/content/renderer",
     "//components/translate/core/common",
@@ -69,6 +68,10 @@ static_library("renderer") {
     "//ui/surface",
     "//v8:v8",
   ]
+
+  if (!is_ios) {
+    deps += [ "//chrome/common/net" ]
+  }
 
   if (enable_nacl) {
     deps += [
@@ -141,9 +144,16 @@ static_library("renderer") {
   if (enable_spellcheck) {
     sources +=
         rebase_path(gypi_values.chrome_renderer_spellchecker_sources, ".", "..")
-    deps += [ "//third_party/hunspell" ]
+    if (!is_android) {
+      deps += [ "//third_party/hunspell" ]
+    }
   }
-
+  if (!use_browser_spellchecker) {
+    sources -= [
+      "spellchecker/platform_spelling_engine.cc",
+      "spellchecker/platform_spelling_engine.h",
+    ]
+  }
   if (enable_basic_printing || enable_print_preview) {
     deps += [ "//printing" ]
     sources +=
@@ -161,9 +171,11 @@ static_library("renderer") {
   if (is_win) {
     deps += [ "//third_party/wtl" ]
   }
-  if (!is_android) {
-    sources +=
-        rebase_path(gypi_values.chrome_renderer_non_android_sources, ".", "..")
+  if (is_android) {
+    sources -= [
+      "spellchecker/hunspell_engine.cc",
+      "spellchecker/hunspell_engine.h",
+    ]
   }
 }
 

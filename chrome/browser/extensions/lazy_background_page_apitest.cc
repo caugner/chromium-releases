@@ -314,7 +314,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForRequest) {
 
 // Tests that the lazy background page stays alive while a NaCl module exists in
 // its DOM.
-#if !defined(DISABLE_NACL)
+#if !defined(DISABLE_NACL) && !defined(DISABLE_NACL_BROWSERTESTS)
 IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, NaCl) {
   {
     base::FilePath extdir;
@@ -386,8 +386,8 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, MAYBE_WaitForNTP) {
 // See crbug.com/248437
 IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, DISABLED_IncognitoSplitMode) {
   // Open incognito window.
-  Browser* incognito_browser = ui_test_utils::OpenURLOffTheRecord(
-      browser()->profile(), GURL("about:blank"));
+  Browser* incognito_browser =
+      OpenURLOffTheRecord(browser()->profile(), GURL("about:blank"));
 
   // Load the extension with incognito enabled.
   {

@@ -23,7 +23,9 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
-#include "chrome/browser/notifications/desktop_notification_service_factory.h"
+#include "chrome/browser/notifications/extension_welcome_notification_factory.h"
+#include "chrome/browser/notifications/notification_permission_context_factory.h"
+#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -61,6 +63,7 @@
 #include "apps/browser_context_keyed_service_factories.h"
 #include "chrome/browser/apps/ephemeral_app_service_factory.h"
 #include "chrome/browser/apps/shortcut_manager_factory.h"
+#include "chrome/browser/extensions/api/networking_private/networking_private_ui_delegate_factory_impl.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_verify_delegate_factory_impl.h"
 #include "chrome/browser/extensions/browser_context_keyed_service_factories.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -201,8 +204,12 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   CrossDevicePromoFactory::GetInstance();
 #endif
 #if defined(ENABLE_NOTIFICATIONS)
-  DesktopNotificationServiceFactory::GetInstance();
+#if defined(ENABLE_EXTENSIONS)
+  ExtensionWelcomeNotificationFactory::GetInstance();
 #endif
+  NotificationPermissionContextFactory::GetInstance();
+  NotifierStateTrackerFactory::GetInstance();
+#endif  // defined(ENABLE_NOTIFICATIONS)
   dom_distiller::DomDistillerServiceFactory::GetInstance();
   domain_reliability::DomainReliabilityServiceFactory::GetInstance();
   DownloadServiceFactory::GetInstance();
@@ -250,6 +257,11 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::NetworkingPrivateDelegateFactory::GetInstance()
       ->SetVerifyDelegateFactory(
           networking_private_verify_delegate_factory.Pass());
+  scoped_ptr<extensions::NetworkingPrivateUIDelegateFactoryImpl>
+      networking_private_ui_delegate_factory(
+          new extensions::NetworkingPrivateUIDelegateFactoryImpl);
+  extensions::NetworkingPrivateDelegateFactory::GetInstance()
+      ->SetUIDelegateFactory(networking_private_ui_delegate_factory.Pass());
 #endif
 #endif
 #if !defined(OS_ANDROID)

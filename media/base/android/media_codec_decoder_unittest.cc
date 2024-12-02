@@ -10,6 +10,8 @@
 #include "media/base/android/media_codec_bridge.h"
 #include "media/base/android/media_codec_video_decoder.h"
 #include "media/base/android/test_data_factory.h"
+#include "media/base/android/test_statistics.h"
+#include "media/base/buffers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/android/surface_texture.h"
 
@@ -27,12 +29,13 @@ namespace media {
 namespace {
 
 const base::TimeDelta kDefaultTimeout = base::TimeDelta::FromMilliseconds(200);
-const base::TimeDelta kAudioFramePeriod = base::TimeDelta::FromMilliseconds(20);
+const base::TimeDelta kAudioFramePeriod =
+    base::TimeDelta::FromSecondsD(1024.0 / 44100);  // 1024 samples @ 44100 Hz
 const base::TimeDelta kVideoFramePeriod = base::TimeDelta::FromMilliseconds(20);
 
 class AudioFactory : public TestDataFactory {
  public:
-  AudioFactory(const base::TimeDelta& duration);
+  AudioFactory(base::TimeDelta duration);
   DemuxerConfigs GetConfigs() const override;
 
  protected:
@@ -41,29 +44,26 @@ class AudioFactory : public TestDataFactory {
 
 class VideoFactory : public TestDataFactory {
  public:
-  VideoFactory(const base::TimeDelta& duration);
+  VideoFactory(base::TimeDelta duration);
   DemuxerConfigs GetConfigs() const override;
 
  protected:
   void ModifyAccessUnit(int index_in_chunk, AccessUnit* unit) override;
 };
 
-AudioFactory::AudioFactory(const base::TimeDelta& duration)
-    : TestDataFactory("vorbis-packet-%d", duration, kAudioFramePeriod) {
+AudioFactory::AudioFactory(base::TimeDelta duration)
+    : TestDataFactory("aac-44100-packet-%d", duration, kAudioFramePeriod) {
 }
 
 DemuxerConfigs AudioFactory::GetConfigs() const {
-  return TestDataFactory::CreateAudioConfigs(kCodecVorbis, duration_);
+  return TestDataFactory::CreateAudioConfigs(kCodecAAC, duration_);
 }
 
 void AudioFactory::ModifyAccessUnit(int index_in_chunk, AccessUnit* unit) {
-  // Vorbis needs 4 extra bytes padding on Android to decode properly. Check
-  // NuMediaExtractor.cpp in Android source code.
-  uint8 padding[4] = {0xff, 0xff, 0xff, 0xff};
-  unit->data.insert(unit->data.end(), padding, padding + 4);
+  unit->is_key_frame = true;
 }
 
-VideoFactory::VideoFactory(const base::TimeDelta& duration)
+VideoFactory::VideoFactory(base::TimeDelta duration)
     : TestDataFactory("h264-320x180-frame-%d", duration, kVideoFramePeriod) {
 }
 
@@ -82,42 +82,24 @@ void VideoFactory::ModifyAccessUnit(int index_in_chunk, AccessUnit* unit) {
   //
   // I keep the last PTS to be 3 for simplicity.
 
-  // Swap pts for second and third frames.
-  if (index_in_chunk == 1)  // second frame
-    unit->timestamp += frame_period_;
-  if (index_in_chunk == 2)  // third frame
-    unit->timestamp -= frame_period_;
-
-  if (index_in_chunk == 0)
-    unit->is_key_frame = true;
-}
-
-// Class that computes statistics: number of calls, minimum and maximum values.
-// It is used for PTS statistics to verify that playback did actually happen.
-
-template <typename T>
-class Minimax {
- public:
-  Minimax() : num_values_(0) {}
-  ~Minimax() {}
-
-  void AddValue(const T& value) {
-    ++num_values_;
-    if (value < min_)
-      min_ = value;
-    else if (max_ < value)
-      max_ = value;
+  // Swap pts for second and third frames. Make first frame a key frame.
+  switch (index_in_chunk) {
+    case 0:  // first frame
+      unit->is_key_frame = true;
+      break;
+    case 1:  // second frame
+      unit->timestamp += frame_period_;
+      break;
+    case 2:  // third frame
+      unit->timestamp -= frame_period_;
+      break;
+    case 3:  // fourth frame, do not modify
+      break;
+    default:
+      NOTREACHED();
+      break;
   }
-
-  const T& min() const { return min_; }
-  const T& max() const { return max_; }
-  int num_values() const { return num_values_; }
-
- private:
-  T min_;
-  T max_;
-  int num_values_;
-};
+}
 
 }  // namespace (anonymous)
 
@@ -168,10 +150,13 @@ class MediaCodecDecoderTest : public testing::Test {
   void OnDataRequested();
   void OnStarvation() { is_starved_ = true; }
   void OnStopDone() { is_stopped_ = true; }
-  void OnError() {}
+  void OnError() { DVLOG(0) << "MediaCodecDecoderTest::" << __FUNCTION__; }
   void OnUpdateCurrentTime(base::TimeDelta now_playing,
                            base::TimeDelta last_buffered) {
-    pts_stat_.AddValue(now_playing);
+    // Add the |last_buffered| value for PTS. For video it is the same as
+    // |now_playing| and is equal to PTS, for audio |last_buffered| should
+    // exceed PTS.
+    pts_stat_.AddValue(last_buffered);
 
     if (stop_request_time_ != kNoTimestamp() &&
         now_playing >= stop_request_time_) {
@@ -292,7 +277,7 @@ void MediaCodecDecoderTest::SetVideoSurface() {
   ASSERT_NE(nullptr, decoder_.get());
   MediaCodecVideoDecoder* video_decoder =
       static_cast<MediaCodecVideoDecoder*>(decoder_.get());
-  video_decoder->SetPendingSurface(surface.Pass());
+  video_decoder->SetVideoSurface(surface.Pass());
 }
 
 TEST_F(MediaCodecDecoderTest, AudioPrefetch) {
@@ -327,7 +312,7 @@ TEST_F(MediaCodecDecoderTest, AudioConfigureNoParams) {
   CreateAudioDecoder();
 
   // Cannot configure without config parameters.
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_FAILURE, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigFailure, decoder_->Configure());
 }
 
 TEST_F(MediaCodecDecoderTest, AudioConfigureValidParams) {
@@ -339,7 +324,7 @@ TEST_F(MediaCodecDecoderTest, AudioConfigureValidParams) {
   scoped_ptr<AudioFactory> factory(new AudioFactory(duration));
   decoder_->SetDemuxerConfigs(factory->GetConfigs());
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_OK, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigOk, decoder_->Configure());
 }
 
 TEST_F(MediaCodecDecoderTest, VideoConfigureNoParams) {
@@ -347,8 +332,22 @@ TEST_F(MediaCodecDecoderTest, VideoConfigureNoParams) {
 
   CreateVideoDecoder();
 
+  // decoder_->Configure() searches back for the key frame.
+  // We have to prefetch decoder.
+
+  base::TimeDelta duration = base::TimeDelta::FromMilliseconds(500);
+  SetDataFactory(scoped_ptr<VideoFactory>(new VideoFactory(duration)));
+
+  decoder_->Prefetch(base::Bind(&MediaCodecDecoderTest::SetPrefetched,
+                                base::Unretained(this), true));
+
+  EXPECT_TRUE(WaitForCondition(base::Bind(&MediaCodecDecoderTest::is_prefetched,
+                                          base::Unretained(this))));
+
+  SetVideoSurface();
+
   // Cannot configure without config parameters.
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_FAILURE, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigFailure, decoder_->Configure());
 }
 
 TEST_F(MediaCodecDecoderTest, VideoConfigureNoSurface) {
@@ -372,7 +371,7 @@ TEST_F(MediaCodecDecoderTest, VideoConfigureNoSurface) {
 
   // Surface is not set, Configure() should fail.
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_FAILURE, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigFailure, decoder_->Configure());
 }
 
 TEST_F(MediaCodecDecoderTest, VideoConfigureInvalidSurface) {
@@ -404,9 +403,9 @@ TEST_F(MediaCodecDecoderTest, VideoConfigureInvalidSurface) {
 
   MediaCodecVideoDecoder* video_decoder =
       static_cast<MediaCodecVideoDecoder*>(decoder_.get());
-  video_decoder->SetPendingSurface(surface.Pass());
+  video_decoder->SetVideoSurface(surface.Pass());
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_FAILURE, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigFailure, decoder_->Configure());
 }
 
 TEST_F(MediaCodecDecoderTest, VideoConfigureValidParams) {
@@ -432,7 +431,7 @@ TEST_F(MediaCodecDecoderTest, VideoConfigureValidParams) {
 
   // Now we can expect Configure() to succeed.
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_OK, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigOk, decoder_->Configure());
 }
 
 TEST_F(MediaCodecDecoderTest, AudioStartWithoutConfigure) {
@@ -460,13 +459,16 @@ TEST_F(MediaCodecDecoderTest, AudioStartWithoutConfigure) {
   EXPECT_FALSE(decoder_->Start(base::TimeDelta::FromMilliseconds(0)));
 }
 
+// http://crbug.com/518900
 TEST_F(MediaCodecDecoderTest, AudioPlayTillCompletion) {
   SKIP_TEST_IF_MEDIA_CODEC_BRIDGE_IS_NOT_AVAILABLE();
+
+  DVLOG(0) << "AudioPlayTillCompletion started";
 
   CreateAudioDecoder();
 
   base::TimeDelta duration = base::TimeDelta::FromMilliseconds(500);
-  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(600);
+  base::TimeDelta timeout = base::TimeDelta::FromMilliseconds(1500);
 
   SetDataFactory(scoped_ptr<AudioFactory>(new AudioFactory(duration)));
 
@@ -479,7 +481,7 @@ TEST_F(MediaCodecDecoderTest, AudioPlayTillCompletion) {
 
   decoder_->SetDemuxerConfigs(GetConfigs());
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_OK, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigOk, decoder_->Configure());
 
   EXPECT_TRUE(decoder_->Start(base::TimeDelta::FromMilliseconds(0)));
 
@@ -490,9 +492,11 @@ TEST_F(MediaCodecDecoderTest, AudioPlayTillCompletion) {
   EXPECT_TRUE(decoder_->IsStopped());
   EXPECT_TRUE(decoder_->IsCompleted());
 
-  // It is hard to properly estimate minimum and maximum values because
-  // reported times are different from PTS.
-  EXPECT_EQ(25, pts_stat_.num_values());
+  // Last buffered timestamp should be no less than PTS.
+  EXPECT_EQ(22, pts_stat_.num_values());
+  EXPECT_LE(data_factory_->last_pts(), pts_stat_.max());
+
+  DVLOG(0) << "AudioPlayTillCompletion stopping";
 }
 
 TEST_F(MediaCodecDecoderTest, VideoPlayTillCompletion) {
@@ -518,7 +522,7 @@ TEST_F(MediaCodecDecoderTest, VideoPlayTillCompletion) {
 
   SetVideoSurface();
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_OK, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigOk, decoder_->Configure());
 
   EXPECT_TRUE(decoder_->Start(base::TimeDelta::FromMilliseconds(0)));
 
@@ -555,7 +559,7 @@ TEST_F(MediaCodecDecoderTest, VideoStopAndResume) {
 
   SetVideoSurface();
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_OK, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigOk, decoder_->Configure());
 
   SetStopRequestAtTime(stop_request_time);
 
@@ -601,7 +605,8 @@ TEST_F(MediaCodecDecoderTest, VideoStopAndResume) {
   EXPECT_EQ(data_factory_->last_pts(), pts_stat_.max());
 }
 
-TEST_F(MediaCodecDecoderTest, AudioStarvationAndStop) {
+// http://crbug.com/518900
+TEST_F(MediaCodecDecoderTest, DISABLED_AudioStarvationAndStop) {
   SKIP_TEST_IF_MEDIA_CODEC_BRIDGE_IS_NOT_AVAILABLE();
 
   CreateAudioDecoder();
@@ -623,7 +628,7 @@ TEST_F(MediaCodecDecoderTest, AudioStarvationAndStop) {
   // Configure.
   decoder_->SetDemuxerConfigs(GetConfigs());
 
-  EXPECT_EQ(MediaCodecDecoder::CONFIG_OK, decoder_->Configure());
+  EXPECT_EQ(MediaCodecDecoder::kConfigOk, decoder_->Configure());
 
   // Start.
   EXPECT_TRUE(decoder_->Start(base::TimeDelta::FromMilliseconds(0)));
