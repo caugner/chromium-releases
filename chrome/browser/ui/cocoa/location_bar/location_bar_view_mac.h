@@ -56,8 +56,8 @@ class LocationBarViewMac : public LocationBar,
 
   // Overridden from LocationBar:
   virtual void ShowFirstRunBubble() OVERRIDE;
-  virtual void SetSuggestedText(const string16& text,
-                                InstantCompleteBehavior behavior) OVERRIDE;
+  virtual void SetInstantSuggestion(
+      const InstantSuggestion& suggestion) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
   virtual content::PageTransition GetPageTransition() const OVERRIDE;
@@ -81,6 +81,8 @@ class LocationBarViewMac : public LocationBar,
   virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
   virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
   virtual void TestPageActionPressed(size_t index) OVERRIDE;
+  virtual void TestActionBoxMenuItemSelected(int command_id) OVERRIDE;
+  virtual bool GetBookmarkStarVisibility() OVERRIDE;
 
   // Set/Get the editable state of the field.
   void SetEditable(bool editable);
@@ -89,7 +91,8 @@ class LocationBarViewMac : public LocationBar,
   // Set the starred state of the bookmark star.
   void SetStarred(bool starred);
 
-  // Set the icon image resource for the action box plus decoration.
+  // Set (or resets) the icon image resource for the action box plus decoration.
+  void ResetActionBoxIcon();
   void SetActionBoxIcon(int image_id);
 
   // Happens when the zoom changes for the active tab. |can_show_bubble| is
@@ -178,6 +181,8 @@ class LocationBarViewMac : public LocationBar,
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  Browser* browser() const { return browser_; }
+
  private:
   // Posts |notification| to the default notification center.
   void PostNotification(NSString* notification);
@@ -204,9 +209,6 @@ class LocationBarViewMac : public LocationBar,
 
   // Checks if the bookmark star should be enabled or not.
   bool IsStarEnabled();
-
-  // Update the Chrome To Mobile page action command state.
-  void UpdateChromeToMobileEnabled();
 
   // Updates the zoom decoration in the omnibox with the current zoom level.
   void UpdateZoomDecoration();

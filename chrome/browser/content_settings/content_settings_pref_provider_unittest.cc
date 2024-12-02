@@ -8,18 +8,18 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/prefs/default_pref_store.h"
+#include "base/prefs/overlay_user_pref_store.h"
+#include "base/prefs/public/pref_change_registrar.h"
+#include "base/prefs/testing_pref_store.h"
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/browser/prefs/default_pref_store.h"
-#include "chrome/browser/prefs/overlay_user_pref_store.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/browser/prefs/testing_pref_store.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -33,25 +33,6 @@
 
 using ::testing::_;
 using content::BrowserThread;
-
-namespace {
-
-void ExpectObsoleteGeolocationSetting(
-    const DictionaryValue& geo_settings_dictionary,
-    const GURL& primary_origin,
-    const GURL& secondary_origin,
-    ContentSetting expected_setting) {
-
-  const DictionaryValue* one_origin_settings;
-  ASSERT_TRUE(geo_settings_dictionary.GetDictionaryWithoutPathExpansion(
-      std::string(primary_origin.spec()), &one_origin_settings));
-  int setting_value;
-  ASSERT_TRUE(one_origin_settings->GetIntegerWithoutPathExpansion(
-      std::string(secondary_origin.spec()), &setting_value));
-  EXPECT_EQ(expected_setting, setting_value);
-}
-
-}  // namespace
 
 namespace content_settings {
 

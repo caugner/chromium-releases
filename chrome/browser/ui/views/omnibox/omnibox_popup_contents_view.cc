@@ -6,9 +6,10 @@
 
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/omnibox/inline_omnibox_popup_view.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_non_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "chrome/browser/ui/views/omnibox/touch_omnibox_popup_contents_view.h"
+#include "chrome/browser/ui/search/search.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
@@ -61,15 +62,10 @@ OmniboxPopupView* OmniboxPopupContentsView::Create(
     const gfx::Font& font,
     OmniboxView* omnibox_view,
     OmniboxEditModel* edit_model,
-    views::View* location_bar,
-    views::View* popup_parent_view) {
-  if (popup_parent_view) {
-    InlineOmniboxPopupView* inline_view =
-        new InlineOmniboxPopupView(font, omnibox_view, edit_model,
-                                   location_bar);
-    inline_view->Init();
-    popup_parent_view->AddChildView(inline_view);
-    return inline_view;
+    views::View* location_bar) {
+  if (chrome::search::IsInstantExtendedAPIEnabled(edit_model->profile())) {
+    OmniboxPopupNonView* non_view = new OmniboxPopupNonView(edit_model);
+    return non_view;
   }
 
   OmniboxPopupContentsView* view = NULL;
@@ -225,9 +221,14 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
     ash::SetWindowVisibilityAnimationType(
         popup_->GetNativeView(),
         ash::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
-    // No animation for autocomplete popup appearance.  see crbug.com/124104
+    // Meanie-pants designers won't let us animate the appearance in
+    // production, but we will do it anyway for desktop-aura for the time being
+    // as it lets usverify quickly that hotness is enabled.
+#if defined(OS_CHROMEOS)
+    // No animation for autocomplete popup appearance.
     ash::SetWindowVisibilityAnimationTransition(
         popup_->GetNativeView(), ash::ANIMATE_HIDE);
+#endif
 #endif
     popup_->SetContentsView(this);
     popup_->StackAbove(omnibox_view_->GetRelativeWindowForPopup());

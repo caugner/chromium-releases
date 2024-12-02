@@ -10,7 +10,7 @@
 // function setupCall(peerConnection)
 // function answerCall(peerConnection, message)
 
-// Currently these functions are supplied by jsep_call.js.
+// Currently these functions are supplied by jsep_call00.js and jsep01_call.js.
 
 /**
  * This object represents the call.
@@ -50,6 +50,12 @@ var gServerUrl = null;
 var gRemotePeerId = null;
 
 /**
+ * Whether or not to auto-respond by adding our local stream when we are called.
+ * @private
+ */
+var gAutoAddLocalToPeerConnectionStreamWhenCalled = true;
+
+/**
  * We need a STUN server for some API calls.
  * @private
  */
@@ -67,7 +73,7 @@ var STUN_SERVER = 'stun.l.google.com:19302';
  */
 function connect(serverUrl, clientName) {
   if (gOurPeerId != null)
-    failTest('connecting when already connected');
+    failTest('connecting, but is already connected.');
 
   debug('Connecting to ' + serverUrl + ' as ' + clientName);
   gServerUrl = serverUrl;
@@ -83,20 +89,56 @@ function connect(serverUrl, clientName) {
 }
 
 /**
+ * Checks if the remote peer has connected. Returns peer-connected if that is
+ * the case, otherwise no-peer-connected.
+ */
+function remotePeerIsConnected() {
+  if (gRemotePeerId == null)
+    returnToTest('no-peer-connected');
+  else
+    returnToTest('peer-connected');
+}
+
+/**
  * Initiates a call. We must be connected first, and we must have gotten hold
  * of a peer as well (e.g. precisely one peer must also have connected to the
- * server at this point).
+ * server at this point). Note that this function only sets up the call: it
+ * does not add any streams to the peer connection by itself.
  */
 function call() {
   if (gOurPeerId == null)
-    failTest('calling, but not connected');
+    failTest('calling, but not connected.');
   if (gRemotePeerId == null)
-    failTest('calling, but missing remote peer');
+    failTest('calling, but missing remote peer.');
   if (gPeerConnection != null)
-    failTest('calling, but call is up already');
+    failTest('calling, but call is up already.');
 
   gPeerConnection = createPeerConnection(STUN_SERVER);
   setupCall(gPeerConnection);
+}
+
+/**
+ * Adds the local stream to the call.
+ */
+function sendLocalStreamOverPeerConnection() {
+  if (gPeerConnection == null)
+    failTest('attempting to send local stream, but no call is up');
+
+  addLocalStreamToPeerConnection(gPeerConnection);
+  setupCall(gPeerConnection);
+  returnToTest('ok-local-stream-sent');
+}
+
+/**
+ * Removes the local stream from the call.
+ */
+function removeLocalStream() {
+  if (gPeerConnection == null)
+    failTest('attempting to remove local stream, but no call is up');
+
+  removeLocalStreamFromPeerConnection(gPeerConnection);
+  setupCall(gPeerConnection);
+  returnToTest('ok-local-stream-removed');
 }
 
 /**
@@ -113,21 +155,38 @@ function isCallActive() {
 }
 
 /**
- * Toggles the remote streams' enabled state on the peer connection, given that
- * a call is active. Returns ok-toggled on success.
+ * Toggles the remote audio stream's enabled state on the peer connection, given
+ * that a call is active. Returns ok-[typeToToggle]-toggled-to-[true/false]
+ * on success.
+ *
+ * @param selectAudioOrVideoTrack: A function that takes a remote stream as
+ *     argument and returns a track (e.g. either the video or audio track).
+ * @param typeToToggle: Either "audio" or "video" depending on what the selector
+ *     function selects.
  */
-function toggleRemoteStream() {
-  toggle_(gPeerConnection.remoteStreams[0]);
-  returnToTest('ok-toggled');
+function toggleRemoteStream(selectAudioOrVideoTrack, typeToToggle) {
+  if (gPeerConnection == null)
+    failTest('Tried to toggle remote stream, but no call is up.');
+  if (gPeerConnection.remoteStreams.length == 0)
+    failTest('Tried to toggle remote stream, but not receiving any stream.');
+
+  var track = selectAudioOrVideoTrack(gPeerConnection.remoteStreams[0]);
+  toggle_(track, 'remote', typeToToggle);
 }
 
 /**
- * Toggles the local streams' enabled state on the peer connection, given that
- * a call is active. Returns ok-toggled on success.
+ * See documentation on toggleRemoteStream (this function is the same except
+ * we are looking at local streams).
  */
-function toggleLocalStream() {
-  toggle_(gPeerConnection.localStreams[0]);
-  returnToTest('ok-toggled');
+function toggleLocalStream(selectAudioOrVideoTrack, typeToToggle) {
+  if (gPeerConnection == null)
+    failTest('Tried to toggle local stream, but no call is up.');
+  if (gPeerConnection.localStreams.length == 0)
+    failTest('Tried to toggle local stream, but there is no local' +
+             ' stream in the call (must send local stream first).');
+
+  var track = selectAudioOrVideoTrack(gPeerConnection.localStreams[0]);
+  toggle_(track, 'local', typeToToggle);
 }
 
 /**
@@ -141,6 +200,20 @@ function hangUp() {
   closeCall_();
   gAcceptsIncomingCalls = false;
   returnToTest('ok-call-hung-up');
+}
+
+/**
+ * Start accepting incoming calls again after a hangup.
+ */
+function acceptIncomingCallsAgain() {
+  gAcceptsIncomingCalls = true;
+}
+
+/**
+ * Do not auto-add the local stream when called.
+ */
+function doNotAutoAddLocalStreamWhenCalled() {
+  gAutoAddLocalToPeerConnectionStreamWhenCalled = false;
 }
 
 /**
@@ -172,25 +245,32 @@ function sendToPeer(peer, message) {
   request.send(message);
 }
 
-// Internals.
-
-/** @private */
-function isDisconnected_() {
+/**
+ * Returns true if we are disconnected from peerconnection_server.
+ */
+function isDisconnected() {
   return gOurPeerId == null;
 }
 
-/** @private */
-function toggle_(stream) {
-  if (!isCallActive())
-    failTest('Cannot manipulate local streams: no call active.');
+// Internals.
 
-  stream.videoTracks[0].enabled = !stream.videoTracks[0].enabled;
-  stream.audioTracks[0].enabled = !stream.audioTracks[0].enabled;
+/** @private */
+function toggle_(track, localOrRemote, audioOrVideo) {
+  if (!track)
+    failTest('Tried to toggle ' + localOrRemote + ' ' + audioOrVideo +
+             ' stream, but has no such stream.');
+
+  track.enabled = !track.enabled;
+  returnToTest('ok-' + audioOrVideo + '-toggled-to-' + track.enabled);
 }
 
 /** @private */
 function connectCallback_(request) {
   debug('Connect callback: ' + request.status + ', ' + request.readyState);
+  if (request.status == 0) {
+    debug('peerconnection_server doesn\'t seem to be up.');
+    returnToTest('failed-to-connect');
+  }
   if (request.readyState == 4 && request.status == 200) {
     gOurPeerId = parseOurPeerId_(request.responseText);
     gRemotePeerId = parseRemotePeerIdIfConnected_(request.responseText);
@@ -239,7 +319,7 @@ function parseRemotePeerIdIfConnected_(responseText) {
 
 /** @private */
 function startHangingGet_(server, ourId) {
-  if (isDisconnected_())
+  if (isDisconnected())
     return;
   hangingGetRequest = new XMLHttpRequest();
   hangingGetRequest.onreadystatechange = function() {
@@ -290,7 +370,8 @@ function handleServerNotification_(message) {
     // Peer connected - this must be our remote peer, and it must mean we
     // connected before them (except if we happened to connect to the server
     // at precisely the same moment).
-    debug('Got remote peer from notification ' + parsed[0]);
+    debug('Found remote peer with name ' + parsed[0] + ', id ' +
+          parsed[1] + ' when connecting.');
     gRemotePeerId = parseInt(parsed[1]);
   }
 }
@@ -317,12 +398,15 @@ function handlePeerMessage_(peerId, message) {
     return;
   }
   if (gPeerConnection == null && gAcceptsIncomingCalls) {
-    debug('We are being called: answer...');
-    if (gLocalStream == null)
-      failTest('We are being called, but we are not connected.');
-
     // The other side is calling us.
+    debug('We are being called: answer...');
+
     gPeerConnection = createPeerConnection(STUN_SERVER);
+    if (gAutoAddLocalToPeerConnectionStreamWhenCalled &&
+        obtainGetUserMediaResult() == 'ok-got-stream') {
+      debug('We have a local stream, so hook it up automatically.');
+      addLocalStreamToPeerConnection(gPeerConnection);
+    }
     answerCall(gPeerConnection, message);
     return;
   }

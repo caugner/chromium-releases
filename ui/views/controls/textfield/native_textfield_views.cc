@@ -371,6 +371,10 @@ void NativeTextfieldViews::AppendText(const string16& text) {
   SchedulePaint();
 }
 
+base::i18n::TextDirection NativeTextfieldViews::GetTextDirection() const {
+  return GetRenderText()->GetTextDirection();
+}
+
 string16 NativeTextfieldViews::GetSelectedText() const {
   return model_->GetSelectedText();
 }
@@ -556,6 +560,8 @@ void NativeTextfieldViews::HandleBlur() {
 
   if (touch_selection_controller_.get())
     touch_selection_controller_->ClientViewLostFocus();
+
+  ClearSelection();
 }
 
 ui::TextInputClient* NativeTextfieldViews::GetTextInputClient() {

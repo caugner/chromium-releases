@@ -206,9 +206,6 @@ void SyncBackendRegistrar::ActivateDataType(
 void SyncBackendRegistrar::DeactivateDataType(syncer::ModelType type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   base::AutoLock lock(lock_);
-  ChangeProcessor* change_processor = GetProcessorUnsafe(type);
-  if (change_processor)
-    change_processor->Stop();
 
   routing_info_.erase(type);
   ignore_result(processors_.erase(type));
@@ -222,13 +219,14 @@ bool SyncBackendRegistrar::IsTypeActivatedForTest(
 
 void SyncBackendRegistrar::OnChangesApplied(
     syncer::ModelType model_type,
+    int64 model_version,
     const syncer::BaseTransaction* trans,
     const syncer::ImmutableChangeRecordList& changes) {
   ChangeProcessor* processor = GetProcessor(model_type);
   if (!processor)
     return;
 
-  processor->ApplyChangesFromSyncModel(trans, changes);
+  processor->ApplyChangesFromSyncModel(trans, model_version, changes);
 }
 
 void SyncBackendRegistrar::OnChangesComplete(syncer::ModelType model_type) {
@@ -269,7 +267,6 @@ ChangeProcessor* SyncBackendRegistrar::GetProcessor(
   // We can only check if |processor| exists, as otherwise the type is
   // mapped to syncer::GROUP_PASSIVE.
   CHECK(IsCurrentThreadSafeForModel(type));
-  CHECK(processor->IsRunning());
   return processor;
 }
 

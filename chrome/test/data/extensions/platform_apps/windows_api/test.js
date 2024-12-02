@@ -7,26 +7,79 @@ var callbackPass = chrome.test.callbackPass;
 chrome.app.runtime.onLaunched.addListener(function() {
   chrome.test.runTests([
    function testCreateWindow() {
-     chrome.app.window.create('test.html', {}, callbackPass(function (win) {
-       chrome.test.assertTrue(typeof win.contentWindow.window === 'object');
-       chrome.test.assertEq('about:blank', win.contentWindow.location.href);
-       chrome.test.assertEq('<html><head></head><body></body></html>',
-           win.contentWindow.document.documentElement.outerHTML);
-     }))
+     chrome.app.window.create('test.html',
+                              {id: 'testId'},
+                              callbackPass(function(win) {
+       chrome.test.assertEq(typeof win.contentWindow.window, 'object');
+       chrome.test.assertTrue(
+         typeof win.contentWindow.document !== 'undefined');
+       chrome.test.assertFalse(
+         'about:blank' === win.contentWindow.location.href);
+       var cw = win.contentWindow.chrome.app.window.current();
+       chrome.test.assertEq(cw, win);
+       chrome.test.assertEq('testId', cw.id);
+       win.contentWindow.close();
+     }));
+   },
+
+   function testCreateBadWindow() {
+     chrome.app.window.create('404.html', callbackPass(function(win) {
+       chrome.test.assertTrue(typeof win === 'undefined');
+     }));
+   },
+
+   function testOnLoad() {
+     chrome.app.window.create('test.html', callbackPass(function(win) {
+       win.contentWindow.onload = callbackPass(function() {
+         chrome.test.assertEq(document.readyState, 'complete');
+         win.contentWindow.close();
+       });
+     }));
+   },
+
+   function testCreateMultiWindow() {
+     chrome.test.assertTrue(null === chrome.app.window.current());
+     chrome.app.window.create('test.html',
+                              {id: 'testId1'},
+                              callbackPass(function(win1) {
+       chrome.app.window.create('test.html',
+                                {id: 'testId2'},
+                                callbackPass(function(win2) {
+         var cw1 = win1.contentWindow.chrome.app.window.current();
+         var cw2 = win2.contentWindow.chrome.app.window.current();
+         chrome.test.assertEq('testId1', cw1.id);
+         chrome.test.assertEq('testId2', cw2.id);
+         chrome.test.assertTrue(cw1 === win1);
+         chrome.test.assertTrue(cw2 === win2);
+         chrome.test.assertFalse(cw1 === cw2);
+         win1.contentWindow.close();
+         win2.contentWindow.close();
+       }));
+     }));
    },
 
    function testUpdateWindowWidth() {
      chrome.app.window.create('test.html',
          {width:512, height:384, frame:'custom'},
          callbackPass(function(win) {
-           chrome.test.assertEq(512, win.contentWindow.innerWidth);
-           chrome.test.assertEq(384, win.contentWindow.innerHeight);
-           var oldWidth = win.contentWindow.outerWidth;
-           var oldHeight = win.contentWindow.outerHeight;
-           win.contentWindow.resizeBy(-256, 0);
-           chrome.test.assertEq(oldWidth - 256, win.contentWindow.outerWidth);
-           chrome.test.assertEq(oldHeight, win.contentWindow.outerHeight);
-         }));
+       chrome.test.assertEq(512, win.contentWindow.innerWidth);
+       chrome.test.assertEq(384, win.contentWindow.innerHeight);
+       var oldWidth = win.contentWindow.outerWidth;
+       var oldHeight = win.contentWindow.outerHeight;
+       win.contentWindow.resizeBy(-256, 0);
+       chrome.test.assertEq(oldWidth - 256, win.contentWindow.outerWidth);
+       chrome.test.assertEq(oldHeight, win.contentWindow.outerHeight);
+       win.contentWindow.close();
+     }));
+   },
+
+   function testOnClosedEvent() {
+     chrome.app.window.create('test.html', callbackPass(function(win) {
+       win.onClosed.addListener(callbackPass(function() {
+         // Mission accomplished.
+       }));
+       win.contentWindow.close();
+     }));
    },
 
    /*function testMaximize() {

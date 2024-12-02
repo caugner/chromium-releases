@@ -88,6 +88,13 @@ enum NotificationType {
 
   // Application-wide ----------------------------------------------------------
 
+  // This message is sent when the application is terminating (the last
+  // browser window has shutdown as part of an explicit user-initiated exit,
+  // or the user closed the last browser window on Windows/Linux and there are
+  // no BackgroundContents keeping the browser running). No source or details
+  // are passed.
+  NOTIFICATION_APP_TERMINATING,
+
 #if defined(OS_MACOSX)
   // This notification is sent when the app has no key window, such as when
   // all windows are closed but the app is still active. No source or details
@@ -144,6 +151,17 @@ enum NotificationType {
   // starting and finishing all painting.
   NOTIFICATION_INITIAL_NEW_TAB_UI_LOAD,
 
+#if defined(OS_ANDROID)
+  // Indicates that the new tab page is ready.  This is different than
+  // NOTIFICATION_INITIAL_NEW_TAB_UI_LOAD as the NTP might do some more in-page
+  // navigations after it's done loading, potentially causing flakyness in tests
+  // that would navigate as soon as the NTP is done loading.
+  // When this notification happen, it guarantees the page is not going to do
+  // any further navigation.
+  // The source is the WebContents containing the NTP.
+  NOTIFICATION_NEW_TAB_READY,
+#endif
+
   // Used to fire notifications about how long various events took to
   // complete.  E.g., this is used to get more fine grained timings from the
   // new tab page.  The source is a WebContents and the details is a
@@ -175,17 +193,9 @@ enum NotificationType {
   // Source<NavigationController> with a pointer to the controller for the
   // closed tab.  No details are expected.
   //
-  // See also NOTIFICATION_TAB_CONTENTS_DESTROYED, which is sent when the
-  // TabContents is destroyed, and content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-  // which is sent when the WebContents containing the NavigationController is
-  // destroyed.
+  // See also content::NOTIFICATION_WEB_CONTENTS_DESTROYED, which is sent when
+  // the WebContents containing the NavigationController is destroyed.
   NOTIFICATION_TAB_CLOSING,
-
-  // Sent when a TabContents is being destroyed.  At this point it's safe to
-  // call TabContents member functions, which is not true of the similar
-  // content::NOTIFICATION_WEB_CONTENTS_DESTROYED that fires later during
-  // teardown.  The source is a Source<TabContents>.  There are no details.
-  NOTIFICATION_TAB_CONTENTS_DESTROYED,
 
   // Stuff inside the tabs ---------------------------------------------------
 
@@ -444,7 +454,7 @@ enum NotificationType {
   NOTIFICATION_PRINT_JOB_EVENT,
 
   // Sent when a PrintJob has been released.
-  // Source is the TabContents that holds the print job.
+  // Source is the WebContents that holds the print job.
   NOTIFICATION_PRINT_JOB_RELEASED,
 
   // Shutdown ----------------------------------------------------------------
@@ -653,11 +663,6 @@ enum NotificationType {
   // Sent when an omnibox extension has updated the default suggestion. The
   // source is the profile.
   NOTIFICATION_EXTENSION_OMNIBOX_DEFAULT_SUGGESTION_CHANGED,
-
-  // Sent when an extension changes a preference value. The source is the
-  // profile, and the details are an ExtensionPrefStore::ExtensionPrefDetails
-  // object.
-  NOTIFICATION_EXTENSION_PREF_CHANGED,
 
   // Sent when a recording session for speech input has started.
   NOTIFICATION_EXTENSION_SPEECH_INPUT_RECORDING_STARTED,
@@ -1022,6 +1027,10 @@ enum NotificationType {
   // First paint event after this fires NOTIFICATION_LOGIN_WEBUI_VISIBLE.
   NOTIFICATION_WIZARD_FIRST_SCREEN_SHOWN,
 
+  // Sent when the EULA has been accepted in the first-run wizard. This is never
+  // sent if the EULA was already accepted at startup.
+  NOTIFICATION_WIZARD_EULA_ACCEPTED,
+
   // Sent when the specific part of login WebUI is considered to be visible.
   // That moment is tracked as the first paint event after one of the:
   // 1. NOTIFICATION_LOGIN_USER_IMAGES_LOADED
@@ -1112,20 +1121,17 @@ enum NotificationType {
   // Sent each time the InstantController is updated.
   NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
 
-  // Sent each time the InstantController shows the InstantLoader.
-  NOTIFICATION_INSTANT_CONTROLLER_SHOWN,
-
-  // Sent each time the InstantController hides the InstantLoader.
-  NOTIFICATION_INSTANT_CONTROLLER_HIDDEN,
-
-  // Sent when an Instant preview is committed. The Source is the TabContents
-  // containing the committed preview. There are no details.
+  // Sent when an Instant preview is committed. The Source is the WebContents
+  // containing the committed preview.
   NOTIFICATION_INSTANT_COMMITTED,
 
   // Sent when the Instant loader determines whether the page supports the
-  // Instant API or not. The details is a boolean indicating if the page
-  // supports Instant. The source is not used.
+  // Instant API or not.
   NOTIFICATION_INSTANT_SUPPORT_DETERMINED,
+
+  // Sent when the Browser Instant controller resets, this may result from
+  // a preference change.
+  NOTIFICATION_BROWSER_INSTANT_RESET,
 
   // Sent when the CaptivePortalService checks if we're behind a captive portal.
   // The Source is the Profile the CaptivePortalService belongs to, and the
@@ -1137,7 +1143,7 @@ enum NotificationType {
   // store are changed. The detail of this notification is a list of changes
   // represented by a vector of PasswordStoreChange. Each change includes a
   // change type (ADD, UPDATE, or REMOVE) as well as the
-  // |webkit::forms::PasswordForm|s that were affected.
+  // |content::PasswordForm|s that were affected.
   NOTIFICATION_LOGINS_CHANGED,
 
   // Sent when an import process has ended.
@@ -1214,6 +1220,10 @@ enum NotificationType {
   // Used only in unit testing.
   NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
 
+  // Sent when panel app icon is loaded.
+  // Used only in unit testing.
+  NOTIFICATION_PANEL_APP_ICON_LOADED,
+
   // Sent when panel strip get updated.
   // The source is the PanelStrip, no details.
   // Used only in coordination with notification balloons.
@@ -1256,6 +1266,13 @@ enum NotificationType {
   // The source is the SearchViewController whose animation is finished.
   // No details.
   NOTIFICATION_SEARCH_VIEW_CONTROLLER_ANIMATION_FINISHED,
+
+  // NTP for Instant Extended API.
+  // Sent when vertical offset of NTP background theme image in content view
+  // needs to be changed via |background_position| in new_tab_theme.css.
+  // The source is the Profile for the content view.
+  // Details is a the y-pos of |background_position| of new_tab_theme.css.
+  NOTIFICATION_NTP_BACKGROUND_THEME_Y_POS_CHANGED,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

@@ -26,7 +26,6 @@
 #include "content/common/gpu/gpu_memory_allocation.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
-#include "content/public/common/compositor_util.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
@@ -37,17 +36,13 @@
 #include "gpu/ipc/command_buffer_proxy.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
 
+namespace content {
 static base::LazyInstance<base::Lock>::Leaky
     g_all_shared_contexts_lock = LAZY_INSTANCE_INITIALIZER;
 static base::LazyInstance<std::set<WebGraphicsContext3DCommandBufferImpl*> >
     g_all_shared_contexts = LAZY_INSTANCE_INITIALIZER;
 
 namespace {
-
-void ClearSharedContexts() {
-  base::AutoLock lock(g_all_shared_contexts_lock.Get());
-  g_all_shared_contexts.Pointer()->clear();
-}
 
 void ClearSharedContextsIfInShareSet(
     WebGraphicsContext3DCommandBufferImpl* context) {
@@ -156,7 +151,9 @@ WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl(
       use_echo_for_swap_ack_(true) {
 #if defined(OS_MACOSX) || defined(OS_WIN)
   // Get ViewMsg_SwapBuffers_ACK from browser for single-threaded path.
-  use_echo_for_swap_ack_ = content::IsThreadedCompositingEnabled();
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  use_echo_for_swap_ack_ =
+      command_line.HasSwitch(switches::kEnableThreadedCompositing);
 #endif
 }
 
@@ -174,7 +171,7 @@ WebGraphicsContext3DCommandBufferImpl::
 }
 
 void WebGraphicsContext3DCommandBufferImpl::InitializeWithCommandBuffer(
-    CommandBufferProxy* command_buffer,
+    CommandBufferProxyImpl* command_buffer,
     const WebGraphicsContext3D::Attributes& attributes,
     bool bind_generates_resources) {
   DCHECK(command_buffer);
@@ -186,7 +183,7 @@ void WebGraphicsContext3DCommandBufferImpl::InitializeWithCommandBuffer(
 bool WebGraphicsContext3DCommandBufferImpl::Initialize(
     const WebGraphicsContext3D::Attributes& attributes,
     bool bind_generates_resources,
-    content::CauseForGpuLaunch cause) {
+    CauseForGpuLaunch cause) {
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::initialize");
 
   attributes_ = attributes;
@@ -282,7 +279,7 @@ bool WebGraphicsContext3DCommandBufferImpl::InitializeCommandBuffer(
   // for our share group isn't deleted.
   // (There's also a lock in our destructor.)
   base::AutoLock lock(g_all_shared_contexts_lock.Get());
-  CommandBufferProxy* share_group = NULL;
+  CommandBufferProxyImpl* share_group = NULL;
   if (attributes_.shareResources) {
     WebGraphicsContext3DCommandBufferImpl* share_group_context =
         g_all_shared_contexts.Pointer()->empty() ?
@@ -347,6 +344,9 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(
   gles2_helper_ = new gpu::gles2::GLES2CmdHelper(command_buffer_);
   if (!gles2_helper_->Initialize(kCommandBufferSize))
     return false;
+
+  if (attributes_.noAutomaticFlushes)
+    gles2_helper_->SetAutomaticFlushes(false);
 
   // Create a transfer buffer used to copy resources between the renderer
   // process and the GPU process.
@@ -1414,8 +1414,8 @@ void WebGraphicsContext3DCommandBufferImpl::OnMemoryAllocationChanged(
   if (memory_allocation_changed_callback_)
     memory_allocation_changed_callback_->onMemoryAllocationChanged(
         WebKit::WebGraphicsMemoryAllocation(
-            allocation.gpu_resource_size_in_bytes,
-            allocation.suggest_have_backbuffer));
+            allocation.bytes_limit_when_visible,
+            allocation.have_backbuffer_when_not_visible));
 }
 
 void WebGraphicsContext3DCommandBufferImpl::setErrorMessageCallback(
@@ -1455,7 +1455,7 @@ WebGraphicsContext3DCommandBufferImpl::CreateViewContext(
       const WebGraphicsContext3D::Attributes& attributes,
       bool bind_generates_resources,
       const GURL& active_url,
-      content::CauseForGpuLaunch cause) {
+      CauseForGpuLaunch cause) {
   WebGraphicsContext3DCommandBufferImpl* context =
       new WebGraphicsContext3DCommandBufferImpl(
           surface_id,
@@ -1482,8 +1482,8 @@ WebGraphicsContext3DCommandBufferImpl::CreateOffscreenContext(
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context(
       new WebGraphicsContext3DCommandBufferImpl(
           0, active_url, factory, null_client));
-  content::CauseForGpuLaunch cause =
-      content::CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
+  CauseForGpuLaunch cause =
+      CAUSE_FOR_GPU_LAUNCH_WEBGRAPHICSCONTEXT3DCOMMANDBUFFERIMPL_INITIALIZE;
   if (context->Initialize(attributes, false, cause))
     return context.release();
   return NULL;
@@ -1545,6 +1545,25 @@ void WebGraphicsContext3DCommandBufferImpl::pushGroupMarkerEXT(
 
 DELEGATE_TO_GL(popGroupMarkerEXT, PopGroupMarkerEXT);
 
+WebGLId WebGraphicsContext3DCommandBufferImpl::createVertexArrayOES() {
+  GLuint array;
+  gl_->GenVertexArraysOES(1, &array);
+  return array;
+}
+
+void WebGraphicsContext3DCommandBufferImpl::deleteVertexArrayOES(
+    WebGLId array) {
+  gl_->DeleteVertexArraysOES(1, &array);
+}
+
+DELEGATE_TO_GL_1R(isVertexArrayOES, IsVertexArrayOES, WebGLId, WGC3Dboolean)
+DELEGATE_TO_GL_1(bindVertexArrayOES, BindVertexArrayOES, WebGLId)
+
+DELEGATE_TO_GL_2(bindTexImage2DCHROMIUM, BindTexImage2DCHROMIUM,
+                 WGC3Denum, WGC3Dint)
+DELEGATE_TO_GL_2(releaseTexImage2DCHROMIUM, ReleaseTexImage2DCHROMIUM,
+                 WGC3Denum, WGC3Dint)
+
 GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {
   return webkit_glue::CreateCommandBufferSkiaGLBinding();
 }
@@ -1586,3 +1605,5 @@ void WebGraphicsContext3DCommandBufferImpl::OnErrorMessage(
     error_message_callback_->onErrorMessage(str, id);
   }
 }
+
+}  // namespace content

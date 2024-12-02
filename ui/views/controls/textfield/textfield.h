@@ -48,6 +48,9 @@ class VIEWS_EXPORT Textfield : public View {
     STYLE_LOWERCASE = 1 << 1
   };
 
+  // Returns true if the build or commandline dictates NativeTextfieldViews use.
+  static bool IsViewsTextfieldEnabled();
+
   Textfield();
   explicit Textfield(StyleFlags style);
   virtual ~Textfield();
@@ -62,9 +65,6 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Gets/sets the STYLE_OBSCURED bit, controlling whether characters in this
   // Textfield are displayed as asterisks/bullets.
-  // TODO(bryeung): Currently SetObscured is only used in
-  // chrome/browser/chromeos/options/wifi_config_view.cc, which is being
-  // converted to WebUI.  Please remove it when that happens.
   bool IsObscured() const;
   void SetObscured(bool obscured);
 
@@ -83,6 +83,9 @@ class VIEWS_EXPORT Textfield : public View {
 
   // Appends the given string to the previously-existing text in the field.
   void AppendText(const string16& text);
+
+  // Returns the text direction.
+  base::i18n::TextDirection GetTextDirection() const;
 
   // Returns the text that is currently selected.
   string16 GetSelectedText() const;
@@ -244,6 +247,7 @@ class VIEWS_EXPORT Textfield : public View {
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas) OVERRIDE;
   virtual bool OnKeyPressed(const ui::KeyEvent& e) OVERRIDE;
   virtual bool OnKeyReleased(const ui::KeyEvent& e) OVERRIDE;
+  virtual bool OnMouseDragged(const ui::MouseEvent& e) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;

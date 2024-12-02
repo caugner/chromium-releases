@@ -590,7 +590,8 @@ void MenuManager::ExecuteCommand(Profile* profile,
                                  WebContents* web_contents,
                                  const content::ContextMenuParams& params,
                                  const MenuItem::Id& menu_item_id) {
-  EventRouter* event_router = profile->GetExtensionEventRouter();
+  EventRouter* event_router = extensions::ExtensionSystem::Get(profile)->
+      event_router();
   if (!event_router)
     return;
 
@@ -671,7 +672,7 @@ void MenuManager::ExecuteCommand(Profile* profile,
   // Note: web_contents are NULL in unit tests :(
   if (web_contents && extensions::TabHelper::FromWebContents(web_contents)) {
     extensions::TabHelper::FromWebContents(web_contents)->
-        active_tab_permission_manager()->GrantIfRequested(extension);
+        active_tab_permission_granter()->GrantIfRequested(extension);
   }
 
   event_router->DispatchEventToExtension(

@@ -9,19 +9,14 @@
 #include "ui/aura/root_window_host.h"
 #include "ui/base/win/window_impl.h"
 
-namespace ui {
-class ViewProp;
-}
-
 namespace aura {
 
 class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
  public:
-  RootWindowHostWin(RootWindowHostDelegate* delegate,
-                    const gfx::Rect& bounds);
+  RootWindowHostWin(const gfx::Rect& bounds);
   virtual ~RootWindowHostWin();
-
   // RootWindowHost:
+  virtual void SetDelegate(RootWindowHostDelegate* delegate) OVERRIDE;
   virtual RootWindow* GetRootWindow() OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
@@ -33,12 +28,14 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
   virtual void SetCapture() OVERRIDE;
   virtual void ReleaseCapture() OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
-  virtual void ShowCursor(bool show) OVERRIDE;
   virtual bool QueryMouseLocation(gfx::Point* location_return) OVERRIDE;
   virtual bool ConfineCursorToRootWindow() OVERRIDE;
   virtual void UnConfineCursor() OVERRIDE;
   virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
   virtual void SetFocusWhenShown(bool focus_when_shown) OVERRIDE;
+  virtual bool CopyAreaToSkCanvas(const gfx::Rect& source_bounds,
+                                  const gfx::Point& dest_offset,
+                                  SkCanvas* canvas) OVERRIDE;
   virtual bool GrabSnapshot(
       const gfx::Rect& snapshot_bounds,
       std::vector<unsigned char>* png_representation) OVERRIDE;
@@ -83,8 +80,6 @@ class RootWindowHostWin : public RootWindowHost, public ui::WindowImpl {
   RECT saved_window_rect_;
   DWORD saved_window_style_;
   DWORD saved_window_ex_style_;
-
-  scoped_ptr<ui::ViewProp> prop_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowHostWin);
 };

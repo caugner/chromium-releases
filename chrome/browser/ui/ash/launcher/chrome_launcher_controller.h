@@ -17,10 +17,11 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/prefs/public/pref_change_registrar.h"
 #include "base/timer.h"
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
+#include "chrome/browser/prefs/pref_service_observer.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ui/aura/window_observer.h"
@@ -54,7 +55,8 @@ class ChromeLauncherController
       public ash::LauncherModelObserver,
       public ash::ShellObserver,
       public content::NotificationObserver,
-      public ProfileSyncServiceObserver {
+      public ProfileSyncServiceObserver,
+      public PrefServiceObserver {
  public:
   // Indicates if a launcher item is incognito or not.
   enum IncognitoState {
@@ -104,7 +106,7 @@ class ChromeLauncherController
   // Initializes this ChromeLauncherController.
   void Init();
 
-  // Returns the single ChromeLauncherController instnace.
+  // Returns the single ChromeLauncherController instance.
   static ChromeLauncherController* instance() { return instance_; }
 
   // Creates a new tabbed item on the launcher for |controller|.
@@ -146,19 +148,28 @@ class ChromeLauncherController
   // be pinned.
   bool IsPinnable(ash::LauncherID id) const;
 
-  // Opens the specified item.  |event_flags| holds the flags of the
-  // event which triggered this command.
-  void Open(ash::LauncherID id, int event_flags);
-
-  // Opens the application identified by |app_id|. If already running
-  // reactivates the most recently used window or tab owned by the app.
-  void OpenAppID(const std::string& app_id, int event_flags);
+  // Requests that the launcher item controller specified by |id| open a new
+  // instance of the app.  |event_flags| holds the flags of the event which
+  // triggered this command.
+  void Launch(ash::LauncherID id, int event_flags);
 
   // Closes the specified item.
   void Close(ash::LauncherID id);
 
   // Returns true if the specified item is open.
   bool IsOpen(ash::LauncherID id);
+
+  // Returns true if the specified item is for a platform app.
+  bool IsPlatformApp(ash::LauncherID id);
+
+  // Opens a new instance of the application identified by |app_id|.
+  // Used by the app-list, and by pinned-app launcher items.
+  void LaunchApp(const std::string& app_id, int event_flags);
+
+  // If |app_id| is running, reactivates the app's most recently active window,
+  // otherwise launches and activates the app.
+  // Used by the app-list, and by pinned-app launcher items.
+  void ActivateApp(const std::string& app_id, int event_flags);
 
   // Returns the launch type of app for the specified id.
   extensions::ExtensionPrefs::LaunchType GetLaunchType(ash::LauncherID id);
@@ -167,6 +178,7 @@ class ChromeLauncherController
   std::string GetAppID(TabContents* tab);
 
   ash::LauncherID GetLauncherIDForAppID(const std::string& app_id);
+  std::string GetAppIDForLauncherID(ash::LauncherID id);
 
   // Sets the image for an app tab. This is intended to be invoked from the
   // AppIconLoader.
@@ -190,6 +202,10 @@ class ChromeLauncherController
   // Returns true if the user is currently logged in as a guest.
   bool IsLoggedInAsGuest();
 
+  // Invoked when user clicks on button in the launcher and there is no last
+  // used window (or CTRL is held with the click).
+  void CreateNewWindow();
+
   // Invoked when the user clicks on button in the launcher to create a new
   // incognito window.
   void CreateNewIncognitoWindow();
@@ -207,7 +223,8 @@ class ChromeLauncherController
 
   Profile* profile() { return profile_; }
 
-  void SetAutoHideBehavior(ash::ShelfAutoHideBehavior behavior);
+  void SetAutoHideBehavior(ash::ShelfAutoHideBehavior behavior,
+                           aura::RootWindow* root_window);
 
   // The tab no longer represents its previously identified application.
   void RemoveTabFromRunningApp(TabContents* tab, const std::string& app_id);
@@ -223,15 +240,13 @@ class ChromeLauncherController
   const extensions::Extension* GetExtensionForAppID(const std::string& app_id);
 
   // ash::LauncherDelegate overrides:
-  virtual void CreateNewTab() OVERRIDE;
-  virtual void CreateNewWindow() OVERRIDE;
+  virtual void OnBrowserShortcutClicked(int event_flags) OVERRIDE;
   virtual void ItemClicked(const ash::LauncherItem& item,
                            int event_flags) OVERRIDE;
   virtual int GetBrowserShortcutResourceId() OVERRIDE;
   virtual string16 GetTitle(const ash::LauncherItem& item) OVERRIDE;
   virtual ui::MenuModel* CreateContextMenu(
-      const ash::LauncherItem& item) OVERRIDE;
-  virtual ui::MenuModel* CreateContextMenuForLauncher() OVERRIDE;
+      const ash::LauncherItem& item, aura::RootWindow* root) OVERRIDE;
   virtual ash::LauncherID GetIDByWindow(aura::Window* window) OVERRIDE;
   virtual bool IsDraggable(const ash::LauncherItem& item) OVERRIDE;
 
@@ -253,6 +268,9 @@ class ChromeLauncherController
 
   // Overridden from ProfileSyncServiceObserver:
   virtual void OnStateChanged() OVERRIDE;
+
+  // Overriden from PrefServiceObserver:
+  virtual void OnIsSyncingChanged() OVERRIDE;
 
  private:
   friend class BrowserLauncherItemControllerTest;
@@ -317,8 +335,6 @@ class ChromeLauncherController
 
   void StartLoadingAnimation();
   void StopLoadingAnimation();
-
-  bool IsActiveBrowserShowingNTP(Browser* browser);
 
   static ChromeLauncherController* instance_;
 

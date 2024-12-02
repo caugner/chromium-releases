@@ -50,8 +50,10 @@ message SystemProfileProto {
   }
   optional Channel channel = 10;
 
-  // The date the user installed the browser, in seconds since the epoch.
-  optional int64 install_date = 3;
+  // The date the user enabled UMA, in seconds since the epoch.
+  // If the user has toggled the UMA enabled state multiple times, this will
+  // be the most recent date on which UMA was enabled.
+  optional int64 uma_enabled_date = 3;
 
   // The user's selected application locale, i.e. the user interface language.
   // The locale includes a language code and, possibly, also a country code,
@@ -65,6 +67,9 @@ message SystemProfileProto {
 
     // The version of the OS.  The meaning of this field is OS-dependent.
     optional string version = 2;
+
+    // The fingerprint of the build.  This field is used only on Android.
+    optional string fingerprint = 3;
   }
   optional OS os = 5;
 

@@ -16,7 +16,6 @@
 #include "base/string_number_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/browser_thread_impl.h"
-#include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/gamepad/gamepad_service.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
@@ -67,12 +66,8 @@
 
 #if defined(OS_LINUX)
 #include "content/browser/device_monitor_linux.h"
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
 #include "content/browser/device_monitor_mac.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include <dbus/dbus-glib.h>
 #endif
 
 #if defined(TOOLKIT_GTK)
@@ -96,8 +91,7 @@
 #undef DestroyAll
 #endif
 
-using content::TraceControllerImpl;
-
+namespace content {
 namespace {
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
@@ -156,6 +150,9 @@ static void GLibLogHandler(const gchar* log_domain,
              strstr(message, "theme pixmap") ||
              strstr(message, "locate theme engine")) {
     LOG(ERROR) << "GTK theme error: " << message;
+  } else if (strstr(message, "Unable to create Ubuntu Menu Proxy") &&
+             strstr(log_domain, "<unknown>")) {
+    LOG(ERROR) << "GTK menu proxy create failed";
   } else if (strstr(message, "gtk_drag_dest_leave: assertion")) {
     LOG(ERROR) << "Drag destination deleted: http://crbug.com/18557";
   } else if (strstr(message, "Out of memory") &&
@@ -187,8 +184,6 @@ static void SetUpGLibLogHandler() {
 
 }  // namespace
 
-namespace content {
-
 // The currently-running BrowserMainLoop.  There can be one or zero.
 BrowserMainLoop* g_current_browser_main_loop = NULL;
 
@@ -203,9 +198,9 @@ class BrowserShutdownImpl {
 #if defined(OS_WIN)
     // At this point the message loop is still running yet we've shut everything
     // down. If any messages are processed we'll likely crash. Exit now.
-    ExitProcess(content::RESULT_CODE_NORMAL_EXIT);
+    ExitProcess(RESULT_CODE_NORMAL_EXIT);
 #elif defined(OS_POSIX) && !defined(OS_MACOSX)
-    _exit(content::RESULT_CODE_NORMAL_EXIT);
+    _exit(RESULT_CODE_NORMAL_EXIT);
 #else
     NOTIMPLEMENTED();
 #endif
@@ -222,22 +217,24 @@ media::AudioManager* BrowserMainLoop::GetAudioManager() {
 }
 
 // static
-media_stream::MediaStreamManager* BrowserMainLoop::GetMediaStreamManager() {
+MediaStreamManager* BrowserMainLoop::GetMediaStreamManager() {
   return g_current_browser_main_loop->media_stream_manager_.get();
 }
 // BrowserMainLoop construction / destruction =============================
 
-BrowserMainLoop::BrowserMainLoop(const content::MainFunctionParams& parameters)
+BrowserMainLoop::BrowserMainLoop(const MainFunctionParams& parameters)
     : parameters_(parameters),
       parsed_command_line_(parameters.command_line),
-      result_code_(content::RESULT_CODE_NORMAL_EXIT) {
+      result_code_(RESULT_CODE_NORMAL_EXIT) {
   DCHECK(!g_current_browser_main_loop);
   g_current_browser_main_loop = this;
 }
 
 BrowserMainLoop::~BrowserMainLoop() {
   DCHECK_EQ(this, g_current_browser_main_loop);
+#if !defined(OS_IOS)
   ui::Clipboard::DestroyClipboardForCurrentThread();
+#endif  // !defined(OS_IOS)
   g_current_browser_main_loop = NULL;
 }
 
@@ -304,7 +301,7 @@ void BrowserMainLoop::EarlyInitialization() {
         switches::kRendererProcessLimit);
     size_t process_limit;
     if (base::StringToSizeT(limit_string, &process_limit)) {
-      content::RenderProcessHost::SetMaxRendererProcessCount(process_limit);
+      RenderProcessHost::SetMaxRendererProcessCount(process_limit);
     }
   }
 #endif  // !defined(OS_IOS)
@@ -345,8 +342,7 @@ void BrowserMainLoop::MainMessageLoopStart() {
   }
 
   online_state_observer_.reset(new BrowserOnlineStateObserver);
-  media_stream_manager_.reset(
-      new media_stream::MediaStreamManager(audio_manager_.get()));
+  media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
 
   // Prior to any processing happening on the io thread, we create the
   // plugin service as it is predominantly used from the io thread,
@@ -366,6 +362,13 @@ void BrowserMainLoop::MainMessageLoopStart() {
 void BrowserMainLoop::CreateThreads() {
   if (parts_.get())
     result_code_ = parts_->PreCreateThreads();
+
+#if !defined(OS_IOS) && (!defined(GOOGLE_CHROME_BUILD) || defined(OS_ANDROID))
+  // Single-process is an unsupported and not fully tested mode, so
+  // don't enable it for official Chrome builds (except on Android).
+  if (parsed_command_line_.HasSwitch(switches::kSingleProcess))
+    RenderProcessHost::SetRunRendererInProcess(true);
+#endif
 
   if (result_code_ > 0)
     return;
@@ -460,7 +463,7 @@ void BrowserMainLoop::CreateThreads() {
         BrowserThread::IO, FROM_HERE, base::Bind(
             base::IgnoreResult(&GpuProcessHost::Get),
             GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
-            content::CAUSE_FOR_GPU_LAUNCH_BROWSER_STARTUP));
+            CAUSE_FOR_GPU_LAUNCH_BROWSER_STARTUP));
   }
 #endif  // !defined(OS_IOS)
 
@@ -572,10 +575,8 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
 #if !defined(OS_IOS)
         // Clean up state that lives on or uses the file_thread_ before
         // it goes away.
-        if (resource_dispatcher_host_.get()) {
-          resource_dispatcher_host_.get()->download_file_manager()->Shutdown();
+        if (resource_dispatcher_host_.get())
           resource_dispatcher_host_.get()->save_file_manager()->Shutdown();
-        }
 #endif  // !defined(OS_IOS)
         break;
       case BrowserThread::PROCESS_LAUNCHER:
@@ -615,9 +616,11 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
   // more head start for those operations to finish.
   BrowserThreadImpl::ShutdownThreadPool();
 
+#if !defined(OS_IOS)
   // Must happen after the I/O thread is shutdown since this class lives on the
   // I/O thread and isn't threadsafe.
   GamepadService::GetInstance()->Terminate();
+#endif  // !defined(OS_IOS)
 
   if (parts_.get())
     parts_->PostDestroyThreads();
@@ -639,7 +642,7 @@ void BrowserMainLoop::BrowserThreadsStarted() {
 #if !defined(OS_IOS)
   HistogramSynchronizer::GetInstance();
 
-  content::BrowserGpuChannelHostFactory::Initialize();
+  BrowserGpuChannelHostFactory::Initialize();
 #if defined(USE_AURA)
   ImageTransportFactory::Initialize();
 #endif
@@ -659,9 +662,10 @@ void BrowserMainLoop::BrowserThreadsStarted() {
 #endif  // !OS_IOS
 
 #if defined(ENABLE_INPUT_SPEECH)
-  speech_recognition_manager_.reset(new speech::SpeechRecognitionManagerImpl());
+  speech_recognition_manager_.reset(new SpeechRecognitionManagerImpl());
 #endif
 
+#if !defined(OS_IOS)
   // Alert the clipboard class to which threads are allowed to access the
   // clipboard:
   std::vector<base::PlatformThreadId> allowed_clipboard_threads;
@@ -673,6 +677,7 @@ void BrowserMainLoop::BrowserThreadsStarted() {
   allowed_clipboard_threads.push_back(io_thread_->thread_id());
 #endif
   ui::Clipboard::SetAllowedThreads(allowed_clipboard_threads);
+#endif  // !defined(OS_IOS)
 }
 
 void BrowserMainLoop::InitializeToolkit() {

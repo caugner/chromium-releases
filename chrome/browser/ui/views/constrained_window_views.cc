@@ -9,16 +9,20 @@
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "chrome/browser/ui/views/constrained_window_frame_simple.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "grit/chromium_strings.h"
@@ -40,6 +44,8 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
+#include "ui/views/window/dialog_client_view.h"
+#include "ui/views/window/dialog_delegate.h"
 #include "ui/views/window/frame_background.h"
 #include "ui/views/window/non_client_view.h"
 #include "ui/views/window/window_resources.h"
@@ -56,6 +62,7 @@
 #include "ash/shell.h"
 #include "ash/wm/custom_frame_view_ash.h"
 #include "ash/wm/visibility_controller.h"
+#include "ash/wm/window_animations.h"
 #include "ui/aura/window.h"
 #endif
 
@@ -160,9 +167,6 @@ class VistaWindowResources : public views::WindowResources {
 gfx::ImageSkia* XPWindowResources::images_[];
 gfx::ImageSkia* VistaWindowResources::images_[];
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowFrameView
-
 class ConstrainedWindowFrameView : public views::NonClientFrameView,
                                    public views::ButtonListener {
  public:
@@ -222,7 +226,7 @@ class ConstrainedWindowFrameView : public views::NonClientFrameView,
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
 
   SkColor GetTitleColor() const {
-    return container_->owner()->profile()->IsOffTheRecord()
+    return container_->owner()->GetBrowserContext()->IsOffTheRecord()
 #if defined(OS_WIN) && !defined(USE_AURA)
             || !ui::win::IsAeroGlassEnabled()
 #endif
@@ -282,9 +286,6 @@ const SkColor kContentsBorderShadow = SkColorSetARGB(51, 0, 0, 0);
 
 }  // namespace
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowFrameView, public:
-
 ConstrainedWindowFrameView::ConstrainedWindowFrameView(
     ConstrainedWindowViews* container)
     : NonClientFrameView(),
@@ -316,9 +317,6 @@ ConstrainedWindowFrameView::~ConstrainedWindowFrameView() {
 void ConstrainedWindowFrameView::UpdateWindowTitle() {
   SchedulePaintInRect(title_bounds_);
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowFrameView, views::NonClientFrameView implementation:
 
 gfx::Rect ConstrainedWindowFrameView::GetBoundsForClientView() const {
   return client_view_bounds_;
@@ -368,9 +366,6 @@ void ConstrainedWindowFrameView::GetWindowMask(const gfx::Size& size,
   views::GetDefaultWindowMask(size, window_mask);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowFrameView, views::View implementation:
-
 void ConstrainedWindowFrameView::OnPaint(gfx::Canvas* canvas) {
   PaintFrameBorder(canvas);
   PaintTitleBar(canvas);
@@ -387,17 +382,11 @@ void ConstrainedWindowFrameView::OnThemeChanged() {
   InitWindowResources();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowFrameView, views::ButtonListener implementation:
-
 void ConstrainedWindowFrameView::ButtonPressed(
     views::Button* sender, const ui::Event& event) {
   if (sender == close_button_)
     container_->CloseConstrainedWindow();
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowFrameView, private:
 
 int ConstrainedWindowFrameView::NonClientBorderThickness() const {
   return kFrameBorderThickness + kClientEdgeThickness;
@@ -571,24 +560,33 @@ class ConstrainedWindowFrameViewAsh : public ash::CustomFrameViewAsh {
 };
 #endif  // defined(USE_ASH)
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowViews, public:
-
 ConstrainedWindowViews::ConstrainedWindowViews(
-    TabContents* tab_contents,
-    views::WidgetDelegate* widget_delegate)
-    : tab_contents_(tab_contents),
+    content::WebContents* web_contents,
+    views::WidgetDelegate* widget_delegate,
+    bool enable_chrome_style,
+    ChromeStyleClientInsets chrome_style_client_insets)
+    : WebContentsObserver(web_contents),
+      web_contents_(web_contents),
+      enable_chrome_style_(enable_chrome_style),
+      chrome_style_client_insets_(chrome_style_client_insets),
       ALLOW_THIS_IN_INITIALIZER_LIST(native_constrained_window_(
           NativeConstrainedWindow::CreateNativeConstrainedWindow(this))) {
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
   params.delegate = widget_delegate;
   params.native_widget = native_constrained_window_->AsNativeWidget();
   params.child = true;
-  params.parent = tab_contents->web_contents()->GetNativeView();
+
+  if (enable_chrome_style_) {
+    params.parent_widget = Widget::GetTopLevelWidgetForNativeView(
+        web_contents_->GetView()->GetNativeView());
+  } else {
+    params.parent = web_contents_->GetNativeView();
+  }
+
 #if defined(USE_ASH)
   // Ash window headers can be transparent.
   params.transparent = true;
-  ash::SetChildWindowVisibilityChangesAnimated(params.parent);
+  ash::SetChildWindowVisibilityChangesAnimated(params.GetParent());
   // No animations should get performed on the window since that will re-order
   // the window stack which will then cause many problems.
   if (params.parent && params.parent->parent()) {
@@ -598,7 +596,25 @@ ConstrainedWindowViews::ConstrainedWindowViews(
 #endif
   Init(params);
 
-  tab_contents_->constrained_window_tab_helper()->AddConstrainedDialog(this);
+  if (enable_chrome_style_) {
+    // Set the dialog background color.
+    if (widget_delegate && widget_delegate->AsDialogDelegate()) {
+      views::Background* background = views::Background::CreateSolidBackground(
+          ConstrainedWindow::GetBackgroundColor());
+      views::DialogClientView* dialog_client_view =
+          widget_delegate->AsDialogDelegate()->GetDialogClientView();
+      if (dialog_client_view)
+        dialog_client_view->set_background(background);
+    }
+    PositionChromeStyleWindow(GetRootView()->bounds().size());
+    registrar_.Add(this,
+                   content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED,
+                   content::Source<content::WebContents>(web_contents));
+  }
+
+  ConstrainedWindowTabHelper* constrained_window_tab_helper =
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
+  constrained_window_tab_helper->AddConstrainedDialog(this);
 #if defined(USE_ASH)
   GetNativeWindow()->SetProperty(ash::kConstrainedWindowKey, true);
 #endif
@@ -607,32 +623,32 @@ ConstrainedWindowViews::ConstrainedWindowViews(
 ConstrainedWindowViews::~ConstrainedWindowViews() {
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowViews, ConstrainedWindow implementation:
-
 void ConstrainedWindowViews::ShowConstrainedWindow() {
-  ConstrainedWindowTabHelper* helper =
-      tab_contents_->constrained_window_tab_helper();
-  if (helper && helper->delegate())
-    helper->delegate()->WillShowConstrainedWindow(tab_contents_);
+#if defined(USE_ASH)
+  if (enable_chrome_style_) {
+    ash::SetWindowVisibilityAnimationType(
+        GetNativeWindow(),
+        ash::WINDOW_VISIBILITY_ANIMATION_TYPE_ROTATE);
+  }
+#endif
   Show();
   FocusConstrainedWindow();
 }
 
 void ConstrainedWindowViews::CloseConstrainedWindow() {
 #if defined(USE_ASH)
-  gfx::NativeView view = tab_contents_->web_contents()->GetNativeView();
+  gfx::NativeView view = web_contents_->GetNativeView();
   // Allow the parent to animate again.
   if (view && view->parent())
     view->parent()->ClearProperty(aura::client::kAnimationsDisabledKey);
 #endif
-  tab_contents_->constrained_window_tab_helper()->WillClose(this);
+  NotifyTabHelperWillClose();
   Close();
 }
 
 void ConstrainedWindowViews::FocusConstrainedWindow() {
   ConstrainedWindowTabHelper* helper =
-      tab_contents_->constrained_window_tab_helper();
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
   if ((!helper->delegate() ||
        helper->delegate()->ShouldFocusConstrainedWindow()) &&
       widget_delegate() &&
@@ -650,30 +666,38 @@ gfx::NativeWindow ConstrainedWindowViews::GetNativeWindow() {
   return Widget::GetNativeWindow();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowViews, views::Widget overrides:
+void ConstrainedWindowViews::NotifyTabHelperWillClose() {
+  if (!web_contents_)
+    return;
 
-views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableFramelessConstrainedDialogs)) {
-    return new ConstrainedWindowFrameSimple(this);
-  } else {
-#if defined(USE_ASH)
-    if (command_line->HasSwitch(ash::switches::kAuraGoogleDialogFrames))
-      return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(this);
-    ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
-    frame->Init(this);
-    return frame;
-#endif
-    return new ConstrainedWindowFrameView(this);
-  }
+  ConstrainedWindowTabHelper* constrained_window_tab_helper =
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_);
+  constrained_window_tab_helper->WillClose(this);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// ConstrainedWindowViews, NativeConstrainedWindowDelegate implementation:
+void ConstrainedWindowViews::CenterWindow(const gfx::Size& size) {
+  if (enable_chrome_style_)
+    PositionChromeStyleWindow(size);
+  else
+    Widget::CenterWindow(size);
+}
+
+views::NonClientFrameView* ConstrainedWindowViews::CreateNonClientFrameView() {
+  if (enable_chrome_style_)
+    return new ConstrainedWindowFrameSimple(this, chrome_style_client_insets_);
+#if defined(USE_ASH)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(ash::switches::kAuraGoogleDialogFrames))
+    return ash::Shell::GetInstance()->CreateDefaultNonClientFrameView(this);
+  ConstrainedWindowFrameViewAsh* frame = new ConstrainedWindowFrameViewAsh;
+  frame->Init(this);
+  return frame;
+#endif
+  return new ConstrainedWindowFrameView(this);
+}
 
 void ConstrainedWindowViews::OnNativeConstrainedWindowDestroyed() {
-  tab_contents_->constrained_window_tab_helper()->WillClose(this);
+  NotifyTabHelperWillClose();
 }
 
 void ConstrainedWindowViews::OnNativeConstrainedWindowMouseActivate() {
@@ -688,4 +712,44 @@ views::internal::NativeWidgetDelegate*
 int ConstrainedWindowViews::GetNonClientComponent(const gfx::Point& point) {
   // Prevent a constrained window to be moved by the user.
   return HTNOWHERE;
+}
+
+void ConstrainedWindowViews::WebContentsDestroyed(
+    content::WebContents* web_contents) {
+  web_contents_ = NULL;
+}
+
+void ConstrainedWindowViews::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK(enable_chrome_style_);
+  DCHECK_EQ(type, content::NOTIFICATION_WEB_CONTENTS_VISIBILITY_CHANGED);
+#if defined(USE_ASH)
+  ash::SuspendChildWindowVisibilityAnimations
+      suspend(GetNativeWindow()->parent());
+#endif
+  if (*content::Details<bool>(details).ptr()) {
+    Show();
+#if defined(USE_ASH)
+    GetNativeWindow()->parent()->StackChildAbove(
+        GetNativeWindow(), web_contents_->GetNativeView());
+#endif
+  } else {
+    Hide();
+  }
+}
+
+void ConstrainedWindowViews::PositionChromeStyleWindow(const gfx::Size& size) {
+  DCHECK(enable_chrome_style_);
+  ConstrainedWindowTabHelperDelegate* tab_helper_delegate =
+      ConstrainedWindowTabHelper::FromWebContents(web_contents_)->delegate();
+  gfx::Point point;
+  if (!tab_helper_delegate ||
+      !tab_helper_delegate->GetConstrainedWindowTopCenter(&point)) {
+    Widget::CenterWindow(size);
+    return;
+  }
+
+  SetBounds(gfx::Rect(point - gfx::Point(size.width() / 2, 0), size));
 }

@@ -85,43 +85,6 @@ void UninstallBrowserMonitor() {
 
 #endif // !defined(OS_ANDROID)
 
-bool ShouldRunStage3DFieldTrial() {
-#if !defined(OS_WIN)
-  return false;
-#else
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA)
-    return false;
-  return true;
-#endif
-}
-
-void InitializeStage3DFieldTrial() {
-  if (!ShouldRunStage3DFieldTrial()) {
-    base::FieldTrial* trial =
-        base::FieldTrialList::Find(content::kStage3DFieldTrialName);
-    if (trial)
-      trial->Disable();
-    return;
-  }
-
-  const base::FieldTrial::Probability kDivisor = 1000;
-  scoped_refptr<base::FieldTrial> trial(
-    base::FieldTrialList::FactoryGetFieldTrial(
-        content::kStage3DFieldTrialName, kDivisor,
-        content::kStage3DFieldTrialEnabledName, 2013, 3, 1, NULL));
-
-  // Produce the same result on every run of this client.
-  trial->UseOneTimeRandomization();
-
-  // Kill-switch, so disabled unless we get info from server.
-  int blacklisted_group = trial->AppendGroup(
-      content::kStage3DFieldTrialBlacklistedName, kDivisor);
-
-  bool enabled = (trial->group() != blacklisted_group);
-
-  UMA_HISTOGRAM_BOOLEAN("GPU.Stage3DFieldTrial", enabled);
-}
-
 void DisableCompositingFieldTrial() {
   base::FieldTrial* trial =
       base::FieldTrialList::Find(content::kGpuCompositingFieldTrialName);
@@ -135,6 +98,8 @@ bool ShouldRunCompositingFieldTrial() {
   return false;
 #endif
 
+// Necessary for linux_chromeos build since it defines both OS_LINUX
+// and OS_CHROMEOS.
 #if defined(OS_CHROMEOS)
   return false;
 #endif
@@ -145,24 +110,26 @@ bool ShouldRunCompositingFieldTrial() {
     return false;
 #endif
 
-  // The performance of accelerated compositing is too low with software
-  // rendering.
-  if (content::GpuDataManager::GetInstance()->ShouldUseSoftwareRendering())
-    return false;
-
   // Don't activate the field trial if force-compositing-mode has been
   // explicitly disabled from the command line.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableForceCompositingMode))
+          switches::kDisableForceCompositingMode) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableAcceleratedCompositing))
     return false;
 
   return true;
 }
 
-// Note: The compositing field trial may be created at startup time via the
+// Note 1: The compositing field trial may be created at startup time via the
 // Finch framework. In that case, all the Groups and probability values are
 // set before this function is called and any Field Trial setup calls
 // made here are simply ignored.
+// Note 2: Compositing field trials will be overwritten if accelerated
+// compositing is blacklisted. That check takes place in
+// IsThreadedCompositingEnabled() and IsForceCompositingModeEnabled() as
+// the blacklist information isn't available at the time the field trials
+// are initialized.
 // Early outs from this function intended to bypass activation of the field
 // trial must call DisableCompositingFieldTrial() before returning.
 void InitializeCompositingFieldTrial() {
@@ -177,7 +144,7 @@ void InitializeCompositingFieldTrial() {
   scoped_refptr<base::FieldTrial> trial(
     base::FieldTrialList::FactoryGetFieldTrial(
         content::kGpuCompositingFieldTrialName, kDivisor,
-        "disable", 2012, 12, 31, NULL));
+        "disable", 2013, 12, 31, NULL));
 
   // Produce the same result on every run of this client.
   trial->UseOneTimeRandomization();
@@ -185,7 +152,24 @@ void InitializeCompositingFieldTrial() {
   base::FieldTrial::Probability force_compositing_mode_probability = 0;
   base::FieldTrial::Probability threaded_compositing_probability = 0;
 
-   int force_compositing_group = trial->AppendGroup(
+  // Note: Threaded compositing mode isn't feature complete on mac or linux yet:
+  // http://crbug.com/133602 for mac
+  // http://crbug.com/140866 for linux
+
+  chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+  if (channel == chrome::VersionInfo::CHANNEL_CANARY ||
+      channel == chrome::VersionInfo::CHANNEL_DEV ||
+      channel == chrome::VersionInfo::CHANNEL_BETA) {
+#if defined(OS_WIN)
+    // Enable threaded compositing on Windows.
+    threaded_compositing_probability = kDivisor;
+#elif defined(OS_MACOSX)
+    // Enable force-compositing-mode on the Mac.
+    force_compositing_mode_probability = kDivisor;
+#endif
+  }
+
+  int force_compositing_group = trial->AppendGroup(
       content::kGpuCompositingFieldTrialForceCompositingEnabledName,
       force_compositing_mode_probability);
   int thread_group = trial->AppendGroup(

@@ -10,6 +10,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_router.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/web_intent_callbacks.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
@@ -24,6 +25,7 @@ const char kIntentIdKey[] = "intentId";
 const char kIntentSuccessKey[] = "success";
 const char kIntentDataKey[] = "data";
 const char kOnLaunchedEvent[] = "app.runtime.onLaunched";
+const char kOnRestartedEvent[] = "app.runtime.onRestarted";
 
 const char kCallbackNotFoundError[] =
     "WebIntent callback not found; perhaps already responded to";
@@ -36,8 +38,18 @@ namespace extensions {
 void AppEventRouter::DispatchOnLaunchedEvent(
     Profile* profile, const Extension* extension) {
   scoped_ptr<ListValue> arguments(new ListValue());
-  profile->GetExtensionEventRouter()->DispatchEventToExtension(
-      extension->id(), kOnLaunchedEvent, arguments.Pass(), NULL, GURL());
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToExtension(extension->id(), kOnLaunchedEvent,
+                               arguments.Pass(), NULL, GURL());
+}
+
+// static.
+void AppEventRouter::DispatchOnRestartedEvent(
+    Profile* profile, const Extension* extension) {
+  scoped_ptr<ListValue> arguments(new ListValue());
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToExtension(extension->id(), kOnRestartedEvent,
+                               arguments.Pass(), NULL, GURL());
 }
 
 // static.
@@ -58,8 +70,9 @@ void AppEventRouter::DispatchOnLaunchedEventWithFileEntry(
   // NOTE: This second argument is dropped before being dispatched to the client
   // code.
   args->Append(intent_data);
-  profile->GetExtensionEventRouter()->DispatchEventToExtension(
-      extension->id(), kOnLaunchedEvent, args.Pass(), NULL, GURL());
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToExtension(extension->id(), kOnLaunchedEvent, args.Pass(),
+                               NULL, GURL());
 }
 
 // static.
@@ -115,8 +128,9 @@ void AppEventRouter::DispatchOnLaunchedEventWithWebIntent(
   int intent_id =
       callbacks->RegisterCallback(extension, intents_dispatcher, source);
   args->Append(base::Value::CreateIntegerValue(intent_id));
-  profile->GetExtensionEventRouter()->DispatchEventToExtension(
-      extension->id(), kOnLaunchedEvent, args.Pass(), NULL, GURL());
+  extensions::ExtensionSystem::Get(profile)->event_router()->
+      DispatchEventToExtension(extension->id(), kOnLaunchedEvent, args.Pass(),
+                               NULL, GURL());
 }
 
 bool AppRuntimePostIntentResponseFunction::RunImpl() {

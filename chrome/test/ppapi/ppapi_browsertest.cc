@@ -138,8 +138,7 @@ TEST_PPAPI_IN_PROCESS(Broker)
 // Flaky, http://crbug.com/111355
 TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Broker)
 
-// Temporarily disabled: http://crbug.com/151734
-IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, DISABLED_Accept) {
+IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Accept) {
   // Accepting the infobar should grant permission to access the PPAPI broker.
   InfoBarObserver observer;
   observer.ExpectInfoBarAndAccept(true);
@@ -155,8 +154,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, DISABLED_Accept) {
                 url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
 }
 
-// Temporarily disabled: http://crbug.com/151734
-IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, DISABLED_Deny) {
+IN_PROC_BROWSER_TEST_F(PPAPIBrokerInfoBarTest, Deny) {
   // Canceling the infobar should deny permission to access the PPAPI broker.
   InfoBarObserver observer;
   observer.ExpectInfoBarAndAccept(false);
@@ -260,6 +258,7 @@ TEST_PPAPI_NACL_VIA_HTTP(Graphics2D_Paint)
 TEST_PPAPI_NACL_VIA_HTTP(Graphics2D_Scroll)
 TEST_PPAPI_NACL_VIA_HTTP(Graphics2D_Replace)
 TEST_PPAPI_NACL_VIA_HTTP(Graphics2D_Flush)
+TEST_PPAPI_NACL_VIA_HTTP(Graphics2D_FlushOffscreenUpdate)
 
 TEST_PPAPI_IN_PROCESS(Graphics3D)
 TEST_PPAPI_OUT_OF_PROCESS(Graphics3D)
@@ -505,36 +504,23 @@ TEST_PPAPI_NACL_VIA_HTTP(Memory)
 TEST_PPAPI_IN_PROCESS(VideoDecoder)
 TEST_PPAPI_OUT_OF_PROCESS(VideoDecoder)
 
-// Touch and SetLength fail on Mac and Linux due to sandbox restrictions.
-// http://crbug.com/101128
-#if defined(OS_MACOSX) || defined(OS_LINUX)
-#define MAYBE_FileIO_ReadWriteSetLength DISABLED_FileIO_ReadWriteSetLength
-#define MAYBE_FileIO_TouchQuery DISABLED_FileIO_TouchQuery
-#define MAYBE_FileIO_WillWriteWillSetLength \
-    DISABLED_FileIO_WillWriteWillSetLength
-#else
-#define MAYBE_FileIO_ReadWriteSetLength FileIO_ReadWriteSetLength
-#define MAYBE_FileIO_TouchQuery FileIO_TouchQuery
-#define MAYBE_FileIO_WillWriteWillSetLength FileIO_WillWriteWillSetLength
-#endif
-
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_Open)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_AbortCalls)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ParallelReads)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ParallelWrites)
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(MAYBE_FileIO_ReadWriteSetLength)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(MAYBE_FileIO_TouchQuery)
-TEST_PPAPI_IN_PROCESS_VIA_HTTP(MAYBE_FileIO_WillWriteWillSetLength)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_ReadWriteSetLength)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_TouchQuery)
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileIO_WillWriteWillSetLength)
 
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_Open)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_AbortCalls)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ParallelReads)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ParallelWrites)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_ReadWriteSetLength)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_TouchQuery)
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_WillWriteWillSetLength)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_ReadWriteSetLength)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_TouchQuery)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileIO_WillWriteWillSetLength)
 
 // PPAPINaclTest.FileIO_ParallelReads is flaky on Mac. http://crbug.com/121104
 #if defined(OS_MACOSX)
@@ -547,7 +533,7 @@ TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(MAYBE_FileIO_WillWriteWillSetLength)
 #if defined(OS_WIN)
 #define MAYBE_NACL_FileIO_TouchQuery DISABLED_FileIO_TouchQuery
 #else
-#define MAYBE_NACL_FileIO_TouchQuery MAYBE_FileIO_TouchQuery
+#define MAYBE_NACL_FileIO_TouchQuery FileIO_TouchQuery
 #endif
 
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_Open)
@@ -556,7 +542,7 @@ TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_ParallelReads)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_ParallelWrites)
 TEST_PPAPI_NACL_VIA_HTTP(FileIO_NotAllowMixedReadWrite)
 TEST_PPAPI_NACL_VIA_HTTP(MAYBE_NACL_FileIO_TouchQuery)
-TEST_PPAPI_NACL_VIA_HTTP(MAYBE_FileIO_ReadWriteSetLength)
+TEST_PPAPI_NACL_VIA_HTTP(FileIO_ReadWriteSetLength)
 // The following test requires PPB_FileIO_Trusted, not available in NaCl.
 TEST_PPAPI_NACL_VIA_HTTP(DISABLED_FileIO_WillWriteWillSetLength)
 
@@ -735,7 +721,10 @@ TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_TextSendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_BinarySendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_StressedSendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_BufferedAmount)
-TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_AbortCalls)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_AbortCallsWithCallback)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_AbortSendMessageCall)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_AbortCloseCall)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_AbortReceiveMessageCall)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_CcInterfaces)
 TEST_PPAPI_IN_PROCESS(WebSocket_UtilityInvalidConnect)
 TEST_PPAPI_IN_PROCESS(WebSocket_UtilityProtocols)
@@ -747,6 +736,34 @@ TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_UtilityGetProtocol)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_UtilityTextSendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_UtilityBinarySendReceive)
 TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_UtilityBufferedAmount)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_IsWebSocket)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_UninitializedPropertiesAccess)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_InvalidConnect)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_Protocols)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_GetURL)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_ValidConnect)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_InvalidClose)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_ValidClose)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_GetProtocol)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_TextSendReceive)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_BinarySendReceive)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_StressedSendReceive)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_BufferedAmount)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_AbortCallsWithCallback)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_AbortSendMessageCall)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_AbortCloseCall)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_AbortReceiveMessageCall)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_CcInterfaces)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_UtilityInvalidConnect)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_UtilityProtocols)
+TEST_PPAPI_OUT_OF_PROCESS(WebSocket_UtilityGetURL)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityValidConnect)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityInvalidClose)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityValidClose)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityGetProtocol)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityTextSendReceive)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityBinarySendReceive)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(WebSocket_UtilityBufferedAmount)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_IsWebSocket)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_UninitializedPropertiesAccess)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_InvalidConnect)
@@ -760,7 +777,10 @@ TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_TextSendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_BinarySendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_StressedSendReceive)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_BufferedAmount)
-TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_AbortCalls)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_AbortCallsWithCallback)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_AbortSendMessageCall)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_AbortCloseCall)
+TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_AbortReceiveMessageCall)
 TEST_PPAPI_NACL_VIA_HTTP_WITH_WS(WebSocket_CcInterfaces)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_UtilityInvalidConnect)
 TEST_PPAPI_NACL_VIA_HTTP(WebSocket_UtilityProtocols)
@@ -899,6 +919,9 @@ TEST_PPAPI_OUT_OF_PROCESS(FlashMessageLoop_RunWithoutQuit)
 TEST_PPAPI_IN_PROCESS(MouseCursor)
 TEST_PPAPI_OUT_OF_PROCESS(MouseCursor)
 TEST_PPAPI_NACL_VIA_HTTP(MouseCursor)
+
+// PPB_Printing only implemented for out of process.
+TEST_PPAPI_OUT_OF_PROCESS(Printing)
 
 // PPB_MessageLoop is only supported out-of-process.
 // TODO(dmichael): Enable for NaCl with the IPC proxy. crbug.com/116317

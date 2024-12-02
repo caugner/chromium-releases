@@ -30,8 +30,6 @@
 #include "content/common/mac/font_loader.h"
 #endif
 
-class DOMStorageContextImpl;
-class PluginServiceImpl;
 struct FontDescriptor;
 struct ViewHostMsg_CreateWindow_Params;
 
@@ -42,6 +40,7 @@ struct WebScreenInfo;
 namespace base {
 class ProcessMetrics;
 class SharedMemory;
+class TaskRunner;
 }
 
 namespace gfx {
@@ -62,7 +61,9 @@ struct WebPluginInfo;
 
 namespace content {
 class BrowserContext;
+class DOMStorageContextImpl;
 class MediaObserver;
+class PluginServiceImpl;
 class RenderWidgetHelper;
 class ResourceContext;
 class ResourceDispatcherHostImpl;
@@ -89,9 +90,8 @@ class RenderMessageFilter : public BrowserMessageFilter {
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
-  virtual void OverrideThreadForMessage(
-      const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+  virtual base::TaskRunner* OverrideTaskRunnerForMessage(
+      const IPC::Message& message) OVERRIDE;
 
   bool OffTheRecord() const;
 
@@ -188,7 +188,7 @@ class RenderMessageFilter : public BrowserMessageFilter {
   void OnGetHardwareBufferSize(uint32* buffer_size);
   void OnGetHardwareInputSampleRate(int* sample_rate);
   void OnGetHardwareSampleRate(int* sample_rate);
-  void OnGetHardwareInputChannelLayout(ChannelLayout* layout);
+  void OnGetHardwareInputChannelLayout(media::ChannelLayout* layout);
 
   // Used to look up the monitor color profile.
   void OnGetMonitorColorProfile(std::vector<char>* profile);

@@ -13,6 +13,7 @@
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gl_surface_mock.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_base.h"
+#include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/stream_texture_manager_mock.h"
@@ -1825,7 +1826,7 @@ TEST_F(GLES2DecoderTest, GenerateMipmapHandlesOutOfMemory) {
       .Times(1)
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, GenerateMipmapEXT(GL_TEXTURE_2D))
-       .Times(1);
+      .Times(1);
   EXPECT_CALL(*gl_, TexParameteri(
       GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR))
       .Times(1)
@@ -5250,6 +5251,124 @@ TEST_F(GLES2DecoderManualInitTest, CompressedTexImage2DS3TC) {
   }
 }
 
+TEST_F(GLES2DecoderManualInitTest, CompressedTexImage2DETC1) {
+  InitDecoder(
+      "GL_OES_compressed_ETC1_RGB8_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+  const uint32 kBucketId = 123;
+  CommonDecoder::Bucket* bucket = decoder_->CreateBucket(kBucketId);
+  ASSERT_TRUE(bucket != NULL);
+
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+
+  const GLenum kFormat = GL_ETC1_RGB8_OES;
+  const size_t kBlockSize = 8;
+
+  CompressedTexImage2DBucket cmd;
+  // test small width.
+  DoCompressedTexImage2D(GL_TEXTURE_2D, 0, kFormat, 4, 8, 0, 16, kBucketId);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // test small height.
+  DoCompressedTexImage2D(GL_TEXTURE_2D, 0, kFormat, 8, 4, 0, 16, kBucketId);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // test size too large.
+  cmd.Init(GL_TEXTURE_2D, 0, kFormat, 4, 4, 0, kBucketId);
+  bucket->SetSize(kBlockSize * 2);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+
+  // test size too small.
+  cmd.Init(GL_TEXTURE_2D, 0, kFormat, 4, 4, 0, kBucketId);
+  bucket->SetSize(kBlockSize / 2);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+
+  // Test a 16x16
+  DoCompressedTexImage2D(
+      GL_TEXTURE_2D, 0, kFormat, 16, 16, 0, kBlockSize * 16, kBucketId);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // Test CompressedTexSubImage not allowed
+  CompressedTexSubImage2DBucket sub_cmd;
+  bucket->SetSize(kBlockSize);
+  sub_cmd.Init(GL_TEXTURE_2D, 0, 0, 0, 4, 4, kFormat, kBucketId);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(sub_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Test TexSubImage not allowed for ETC1 compressed texture
+  TextureManager::TextureInfo* info = GetTextureInfo(client_texture_id_);
+  ASSERT_TRUE(info != NULL);
+  GLenum type, internal_format;
+  EXPECT_TRUE(info->GetLevelType(GL_TEXTURE_2D, 0, &type, &internal_format));
+  EXPECT_EQ(kFormat, internal_format);
+  TexSubImage2D texsub_cmd;
+  texsub_cmd.Init(GL_TEXTURE_2D, 0, 0, 0, 4, 4, GL_RGBA, GL_UNSIGNED_BYTE,
+           kSharedMemoryId, kSharedMemoryOffset, GL_FALSE);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(texsub_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+
+  // Test CopyTexSubImage not allowed for ETC1 compressed texture
+  CopyTexSubImage2D copy_cmd;
+  copy_cmd.Init(GL_TEXTURE_2D, 0, 0, 0, 0, 0, 4, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(copy_cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
+TEST_F(GLES2DecoderManualInitTest, GetCompressedTextureFormatsETC1) {
+  InitDecoder(
+      "GL_OES_compressed_ETC1_RGB8_texture",  // extensions
+      false,   // has alpha
+      false,   // has depth
+      false,   // has stencil
+      false,   // request alpha
+      false,   // request depth
+      false,   // request stencil
+      true);   // bind generates resource
+
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  typedef GetIntegerv::Result Result;
+  Result* result = static_cast<Result*>(shared_memory_address_);
+  GetIntegerv cmd;
+  result->size = 0;
+  EXPECT_CALL(*gl_, GetIntegerv(_, _))
+      .Times(0)
+      .RetiresOnSaturation();
+  cmd.Init(
+      GL_NUM_COMPRESSED_TEXTURE_FORMATS,
+      shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(1, result->GetNumResults());
+  GLint num_formats = result->GetData()[0];
+  EXPECT_EQ(1, num_formats);
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  result->size = 0;
+  cmd.Init(
+      GL_COMPRESSED_TEXTURE_FORMATS,
+      shared_memory_id_, shared_memory_offset_);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(num_formats, result->GetNumResults());
+
+  EXPECT_TRUE(ValueInArray(
+      GL_ETC1_RGB8_OES,
+      result->GetData(), result->GetNumResults()));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
 TEST_F(GLES2DecoderWithShaderTest, GetProgramInfoCHROMIUMValidArgs) {
   const uint32 kBucketId = 123;
   GetProgramInfoCHROMIUM cmd;
@@ -5290,7 +5409,7 @@ TEST_F(GLES2DecoderManualInitTest, EGLImageExternalBindTexture) {
       true);   // bind generates resource
   EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_EXTERNAL_OES, kNewServiceId));
   EXPECT_CALL(*gl_, GenTextures(1, _))
-     .WillOnce(SetArgumentPointee<1>(kNewServiceId));
+      .WillOnce(SetArgumentPointee<1>(kNewServiceId));
   BindTexture cmd;
   cmd.Init(GL_TEXTURE_EXTERNAL_OES, kNewClientId);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
@@ -7417,6 +7536,358 @@ TEST_F(GLES2DecoderWithShaderTest, BindUniformLocationCHROMIUM) {
   EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
 }
 
+class GLES2DecoderVertexArraysOESTest : public GLES2DecoderWithShaderTest {
+ public:
+  GLES2DecoderVertexArraysOESTest() { }
+
+  bool vertex_array_deleted_manually_;
+
+  virtual void SetUp() {
+    InitDecoder(
+        "GL_OES_vertex_array_object",  // extensions
+        false,  // has alpha
+        false,  // has depth
+        false,  // has stencil
+        false,  // request alpha
+        false,  // request depth
+        false,  // request stencil
+        true);  // bind generates resource
+    SetupDefaultProgram();
+
+    AddExpectationsForGenVertexArraysOES();
+    GenHelper<GenVertexArraysOESImmediate>(client_vertexarray_id_);
+
+    vertex_array_deleted_manually_ = false;
+  }
+
+  virtual void TearDown() {
+    // This should only be set if the test handled deletion of the vertex array
+    // itself. Necessary because vertex_array_objects are not sharable, and thus
+    // not managed in the ContextGroup, meaning they will be destroyed during
+    // test tear down
+    if (!vertex_array_deleted_manually_) {
+      AddExpectationsForDeleteVertexArraysOES();
+    }
+
+    GLES2DecoderWithShaderTest::TearDown();
+  }
+
+  void GenVertexArraysOESValidArgs() {
+    AddExpectationsForGenVertexArraysOES();
+    GetSharedMemoryAs<GLuint*>()[0] = kNewClientId;
+    GenVertexArraysOES cmd;
+    cmd.Init(1, shared_memory_id_, shared_memory_offset_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+    EXPECT_TRUE(GetVertexArrayInfo(kNewClientId) != NULL);
+    AddExpectationsForDeleteVertexArraysOES();
+  }
+
+  void GenVertexArraysOESInvalidArgs() {
+    EXPECT_CALL(*gl_, GenVertexArraysOES(_, _)).Times(0);
+    GetSharedMemoryAs<GLuint*>()[0] = client_vertexarray_id_;
+    GenVertexArraysOES cmd;
+    cmd.Init(1, shared_memory_id_, shared_memory_offset_);
+    EXPECT_EQ(error::kInvalidArguments, ExecuteCmd(cmd));
+  }
+
+  void GenVertexArraysOESImmediateValidArgs() {
+    AddExpectationsForGenVertexArraysOES();
+    GenVertexArraysOESImmediate* cmd =
+        GetImmediateAs<GenVertexArraysOESImmediate>();
+    GLuint temp = kNewClientId;
+    cmd->Init(1, &temp);
+    EXPECT_EQ(error::kNoError,
+              ExecuteImmediateCmd(*cmd, sizeof(temp)));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+    EXPECT_TRUE(GetVertexArrayInfo(kNewClientId) != NULL);
+    AddExpectationsForDeleteVertexArraysOES();
+  }
+
+  void GenVertexArraysOESImmediateInvalidArgs() {
+    EXPECT_CALL(*gl_, GenVertexArraysOES(_, _)).Times(0);
+    GenVertexArraysOESImmediate* cmd =
+        GetImmediateAs<GenVertexArraysOESImmediate>();
+    cmd->Init(1, &client_vertexarray_id_);
+    EXPECT_EQ(error::kInvalidArguments,
+              ExecuteImmediateCmd(*cmd, sizeof(&client_vertexarray_id_)));
+  }
+
+  void DeleteVertexArraysOESValidArgs() {
+    AddExpectationsForDeleteVertexArraysOES();
+    GetSharedMemoryAs<GLuint*>()[0] = client_vertexarray_id_;
+    DeleteVertexArraysOES cmd;
+    cmd.Init(1, shared_memory_id_, shared_memory_offset_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+    EXPECT_TRUE(
+        GetVertexArrayInfo(client_vertexarray_id_) == NULL);
+    vertex_array_deleted_manually_ = true;
+  }
+
+  void DeleteVertexArraysOESInvalidArgs() {
+    GetSharedMemoryAs<GLuint*>()[0] = kInvalidClientId;
+    DeleteVertexArraysOES cmd;
+    cmd.Init(1, shared_memory_id_, shared_memory_offset_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+
+  void DeleteVertexArraysOESImmediateValidArgs() {
+    AddExpectationsForDeleteVertexArraysOES();
+    DeleteVertexArraysOESImmediate& cmd =
+        *GetImmediateAs<DeleteVertexArraysOESImmediate>();
+    cmd.Init(1, &client_vertexarray_id_);
+    EXPECT_EQ(error::kNoError,
+              ExecuteImmediateCmd(cmd, sizeof(client_vertexarray_id_)));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+    EXPECT_TRUE(
+        GetVertexArrayInfo(client_vertexarray_id_) == NULL);
+    vertex_array_deleted_manually_ = true;
+  }
+
+  void DeleteVertexArraysOESImmediateInvalidArgs() {
+    DeleteVertexArraysOESImmediate& cmd =
+        *GetImmediateAs<DeleteVertexArraysOESImmediate>();
+    GLuint temp = kInvalidClientId;
+    cmd.Init(1, &temp);
+    EXPECT_EQ(error::kNoError,
+              ExecuteImmediateCmd(cmd, sizeof(temp)));
+  }
+
+  void IsVertexArrayOESValidArgs() {
+    IsVertexArrayOES cmd;
+    cmd.Init(client_vertexarray_id_, shared_memory_id_, shared_memory_offset_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  }
+
+  void IsVertexArrayOESInvalidArgsBadSharedMemoryId() {
+    IsVertexArrayOES cmd;
+    cmd.Init(
+        client_vertexarray_id_, kInvalidSharedMemoryId, shared_memory_offset_);
+    EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+    cmd.Init(
+        client_vertexarray_id_, shared_memory_id_, kInvalidSharedMemoryOffset);
+    EXPECT_EQ(error::kOutOfBounds, ExecuteCmd(cmd));
+  }
+
+  void BindVertexArrayOESValidArgs() {
+    AddExpectationsForBindVertexArrayOES();
+    BindVertexArrayOES cmd;
+    cmd.Init(client_vertexarray_id_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  }
+
+  void BindVertexArrayOESValidArgsNewId() {
+    BindVertexArrayOES cmd;
+    cmd.Init(kNewClientId);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+  }
+};
+
+class GLES2DecoderEmulatedVertexArraysOESTest
+    : public GLES2DecoderVertexArraysOESTest {
+ public:
+  GLES2DecoderEmulatedVertexArraysOESTest() { }
+
+  virtual void SetUp() {
+    InitDecoder(
+        "",     // extensions
+        false,  // has alpha
+        false,  // has depth
+        false,  // has stencil
+        false,  // request alpha
+        false,  // request depth
+        false,  // request stencil
+        true);  // bind generates resource
+    SetupDefaultProgram();
+
+    AddExpectationsForGenVertexArraysOES();
+    GenHelper<GenVertexArraysOESImmediate>(client_vertexarray_id_);
+
+    vertex_array_deleted_manually_ = false;
+  }
+};
+
+// Test vertex array objects with native support
+TEST_F(GLES2DecoderVertexArraysOESTest, GenVertexArraysOESValidArgs) {
+  GenVertexArraysOESValidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest, GenVertexArraysOESValidArgs) {
+  GenVertexArraysOESValidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, GenVertexArraysOESInvalidArgs) {
+  GenVertexArraysOESInvalidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest, ) {
+  GenVertexArraysOESInvalidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, GenVertexArraysOESImmediateValidArgs) {
+  GenVertexArraysOESImmediateValidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    GenVertexArraysOESImmediateValidArgs) {
+  GenVertexArraysOESImmediateValidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest,
+    GenVertexArraysOESImmediateInvalidArgs) {
+  GenVertexArraysOESImmediateInvalidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    GenVertexArraysOESImmediateInvalidArgs) {
+  GenVertexArraysOESImmediateInvalidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, DeleteVertexArraysOESValidArgs) {
+  DeleteVertexArraysOESValidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    DeleteVertexArraysOESValidArgs) {
+  DeleteVertexArraysOESValidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, DeleteVertexArraysOESInvalidArgs) {
+  DeleteVertexArraysOESInvalidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    DeleteVertexArraysOESInvalidArgs) {
+  DeleteVertexArraysOESInvalidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest,
+    DeleteVertexArraysOESImmediateValidArgs) {
+  DeleteVertexArraysOESImmediateValidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    DeleteVertexArraysOESImmediateValidArgs) {
+  DeleteVertexArraysOESImmediateValidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest,
+    DeleteVertexArraysOESImmediateInvalidArgs) {
+  DeleteVertexArraysOESImmediateInvalidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    DeleteVertexArraysOESImmediateInvalidArgs) {
+  DeleteVertexArraysOESImmediateInvalidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, IsVertexArrayOESValidArgs) {
+  IsVertexArrayOESValidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest, IsVertexArrayOESValidArgs) {
+  IsVertexArrayOESValidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest,
+    IsVertexArrayOESInvalidArgsBadSharedMemoryId) {
+  IsVertexArrayOESInvalidArgsBadSharedMemoryId();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    IsVertexArrayOESInvalidArgsBadSharedMemoryId) {
+  IsVertexArrayOESInvalidArgsBadSharedMemoryId();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, BindVertexArrayOESValidArgs) {
+  BindVertexArrayOESValidArgs();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest, BindVertexArrayOESValidArgs) {
+  BindVertexArrayOESValidArgs();
+}
+
+TEST_F(GLES2DecoderVertexArraysOESTest, BindVertexArrayOESValidArgsNewId) {
+  BindVertexArrayOESValidArgsNewId();
+}
+TEST_F(GLES2DecoderEmulatedVertexArraysOESTest,
+    BindVertexArrayOESValidArgsNewId) {
+  BindVertexArrayOESValidArgsNewId();
+}
+
+TEST_F(GLES2DecoderTest, BindTexImage2DCHROMIUM) {
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               0, 0);
+  TextureManager::TextureInfo* info =
+      group().texture_manager()->GetTextureInfo(client_texture_id_);
+  EXPECT_EQ(kServiceTextureId, info->service_id());
+
+  group().image_manager()->AddImage(gfx::GLImage::CreateGLImage(0), 1);
+  EXPECT_FALSE(group().image_manager()->LookupImage(1) == NULL);
+
+  GLsizei width;
+  GLsizei height;
+  GLenum type;
+  GLenum internal_format;
+
+  EXPECT_TRUE(info->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height));
+  EXPECT_EQ(3, width);
+  EXPECT_EQ(1, height);
+  EXPECT_TRUE(info->GetLevelType(GL_TEXTURE_2D, 0, &type, &internal_format));
+  EXPECT_EQ(static_cast<GLenum>(GL_RGBA), internal_format);
+  EXPECT_EQ(static_cast<GLenum>(GL_UNSIGNED_BYTE), type);
+  EXPECT_TRUE(info->GetLevelImage(GL_TEXTURE_2D, 0) == NULL);
+
+  // Bind image to texture.
+  BindTexImage2DCHROMIUM bind_tex_image_2d_cmd;
+  bind_tex_image_2d_cmd.Init(GL_TEXTURE_2D, 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(bind_tex_image_2d_cmd));
+  EXPECT_TRUE(info->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height));
+  // Image should now be set.
+  EXPECT_FALSE(info->GetLevelImage(GL_TEXTURE_2D, 0) == NULL);
+
+  // Define new texture image.
+  DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               0, 0);
+  EXPECT_TRUE(info->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height));
+  // Image should no longer be set.
+  EXPECT_TRUE(info->GetLevelImage(GL_TEXTURE_2D, 0) == NULL);
+}
+
+TEST_F(GLES2DecoderTest, ReleaseTexImage2DCHROMIUM) {
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 3, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               0, 0);
+  TextureManager::TextureInfo* info =
+      group().texture_manager()->GetTextureInfo(client_texture_id_);
+  EXPECT_EQ(kServiceTextureId, info->service_id());
+
+  group().image_manager()->AddImage(gfx::GLImage::CreateGLImage(0), 1);
+  EXPECT_FALSE(group().image_manager()->LookupImage(1) == NULL);
+
+  GLsizei width;
+  GLsizei height;
+  GLenum type;
+  GLenum internal_format;
+
+  EXPECT_TRUE(info->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height));
+  EXPECT_EQ(3, width);
+  EXPECT_EQ(1, height);
+  EXPECT_TRUE(info->GetLevelType(GL_TEXTURE_2D, 0, &type, &internal_format));
+  EXPECT_EQ(static_cast<GLenum>(GL_RGBA), internal_format);
+  EXPECT_EQ(static_cast<GLenum>(GL_UNSIGNED_BYTE), type);
+  EXPECT_TRUE(info->GetLevelImage(GL_TEXTURE_2D, 0) == NULL);
+
+  // Bind image to texture.
+  BindTexImage2DCHROMIUM bind_tex_image_2d_cmd;
+  bind_tex_image_2d_cmd.Init(GL_TEXTURE_2D, 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(bind_tex_image_2d_cmd));
+  EXPECT_TRUE(info->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height));
+  // Image should now be set.
+  EXPECT_FALSE(info->GetLevelImage(GL_TEXTURE_2D, 0) == NULL);
+
+  // Release image from texture.
+  ReleaseTexImage2DCHROMIUM release_tex_image_2d_cmd;
+  release_tex_image_2d_cmd.Init(GL_TEXTURE_2D, 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(release_tex_image_2d_cmd));
+  EXPECT_TRUE(info->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height));
+  // Image should no longer be set.
+  EXPECT_TRUE(info->GetLevelImage(GL_TEXTURE_2D, 0) == NULL);
+}
 
 // TODO(gman): Complete this test.
 // TEST_F(GLES2DecoderTest, CompressedTexImage2DGLError) {

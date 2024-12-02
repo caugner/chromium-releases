@@ -4,6 +4,7 @@
 
 #include "ppapi/proxy/flash_device_id_resource.h"
 
+#include "base/bind.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/proxy/dispatch_reply_message.h"
 #include "ppapi/proxy/ppapi_messages.h"
@@ -16,7 +17,7 @@ FlashDeviceIDResource::FlashDeviceIDResource(Connection connection,
                                              PP_Instance instance)
     : PluginResource(connection, instance),
       dest_(NULL) {
-  SendCreateToBrowser(PpapiHostMsg_FlashDeviceID_Create());
+  SendCreate(BROWSER, PpapiHostMsg_FlashDeviceID_Create());
 }
 
 FlashDeviceIDResource::~FlashDeviceIDResource() {
@@ -38,18 +39,11 @@ int32_t FlashDeviceIDResource::GetDeviceID(
   dest_ = id;
   callback_ = callback;
 
-  CallBrowser(PpapiHostMsg_FlashDeviceID_GetDeviceID());
+  Call<PpapiPluginMsg_FlashDeviceID_GetDeviceIDReply>(
+      BROWSER,
+      PpapiHostMsg_FlashDeviceID_GetDeviceID(),
+      base::Bind(&FlashDeviceIDResource::OnPluginMsgGetDeviceIDReply, this));
   return PP_OK_COMPLETIONPENDING;
-}
-
-void FlashDeviceIDResource::OnReplyReceived(
-    const ResourceMessageReplyParams& params,
-    const IPC::Message& msg) {
-  IPC_BEGIN_MESSAGE_MAP(FlashDeviceIDResource, msg)
-    PPAPI_DISPATCH_RESOURCE_REPLY(
-        PpapiPluginMsg_FlashDeviceID_GetDeviceIDReply,
-        OnPluginMsgGetDeviceIDReply)
-  IPC_END_MESSAGE_MAP()
 }
 
 void FlashDeviceIDResource::OnPluginMsgGetDeviceIDReply(

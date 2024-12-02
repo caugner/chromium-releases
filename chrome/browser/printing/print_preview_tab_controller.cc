@@ -10,6 +10,7 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+#include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
@@ -27,6 +28,7 @@
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/navigation_controller.h"
@@ -55,11 +57,13 @@ namespace {
 
 void EnableInternalPDFPluginForTab(TabContents* preview_tab) {
   // Always enable the internal PDF plugin for the print preview page.
+  webkit::WebPluginInfo pdf_plugin;
+  PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_plugin.path);
+
   ChromePluginServiceFilter::GetInstance()->OverridePluginForTab(
         preview_tab->web_contents()->GetRenderProcessHost()->GetID(),
         preview_tab->web_contents()->GetRenderViewHost()->GetRoutingID(),
-        GURL(),
-        ASCIIToUTF16(chrome::ChromeContentClient::kPDFPluginName));
+        GURL(), pdf_plugin);
 }
 
 // WebDialogDelegate that specifies what the print preview dialog
@@ -82,26 +86,13 @@ class PrintPreviewTabDelegate : public WebDialogDelegate {
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
 
  private:
-  gfx::Size size_;
+  TabContents* initiator_tab_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewTabDelegate);
 };
 
 PrintPreviewTabDelegate::PrintPreviewTabDelegate(TabContents* initiator_tab) {
-  const gfx::Size kMinDialogSize(800, 480);
-  const int kBorder = 50;
-  gfx::Rect rect;
-  initiator_tab->web_contents()->GetContainerBounds(&rect);
-  size_.set_width(std::max(rect.width(), kMinDialogSize.width()) - kBorder);
-  size_.set_height(std::max(rect.height(), kMinDialogSize.height()) - kBorder);
-
-#if defined(OS_MACOSX)
-  // Limit the maximum size on MacOS X.
-  // http://crbug.com/105815
-  const gfx::Size kMaxDialogSize(1000, 660);
-  size_.set_width(std::min(size_.width(), kMaxDialogSize.width()));
-  size_.set_height(std::min(size_.height(), kMaxDialogSize.height()));
-#endif
+  initiator_tab_ = initiator_tab;
 }
 
 PrintPreviewTabDelegate::~PrintPreviewTabDelegate() {
@@ -128,7 +119,21 @@ void PrintPreviewTabDelegate::GetWebUIMessageHandlers(
 }
 
 void PrintPreviewTabDelegate::GetDialogSize(gfx::Size* size) const {
-  *size = size_;
+  DCHECK(size);
+  const gfx::Size kMinDialogSize(800, 480);
+  const int kBorder = 50;
+  gfx::Rect rect;
+  initiator_tab_->web_contents()->GetContainerBounds(&rect);
+  size->set_width(std::max(rect.width(), kMinDialogSize.width()) - kBorder);
+  size->set_height(std::max(rect.height(), kMinDialogSize.height()) - kBorder);
+
+#if defined(OS_MACOSX)
+  // Limit the maximum size on MacOS X.
+  // http://crbug.com/105815
+  const gfx::Size kMaxDialogSize(1000, 660);
+  size->set_width(std::min(size->width(), kMaxDialogSize.width()));
+  size->set_height(std::min(size->height(), kMaxDialogSize.height()));
+#endif
 }
 
 std::string PrintPreviewTabDelegate::GetDialogArgs() const {
@@ -165,8 +170,10 @@ class PrintPreviewWebContentDelegate : public WebDialogWebContentsDelegate,
       const NativeWebKeyboardEvent& event) OVERRIDE;
 
   // Overridden from CoreTabHelperDelegate:
-  virtual bool CanReloadContents(TabContents* source) const OVERRIDE;
-  virtual bool CanSaveContents(TabContents* source) const OVERRIDE;
+  virtual bool CanReloadContents(
+      content::WebContents* web_contents) const OVERRIDE;
+  virtual bool CanSaveContents(
+      content::WebContents* web_contents) const OVERRIDE;
 
  private:
   TabContents* tab_;
@@ -183,12 +190,12 @@ PrintPreviewWebContentDelegate::PrintPreviewWebContentDelegate(
 PrintPreviewWebContentDelegate::~PrintPreviewWebContentDelegate() {}
 
 bool PrintPreviewWebContentDelegate::CanReloadContents(
-    TabContents* source) const {
+    content::WebContents* web_contents) const {
   return false;
 }
 
 bool PrintPreviewWebContentDelegate::CanSaveContents(
-    TabContents* source) const {
+    content::WebContents* web_contents) const {
   return false;
 }
 
@@ -283,8 +290,8 @@ void PrintPreviewTabController::Observe(
   if (type == content::NOTIFICATION_RENDERER_PROCESS_CLOSED) {
     OnRendererProcessClosed(
         content::Source<content::RenderProcessHost>(source).ptr());
-  } else if (type == chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED) {
-    OnTabContentsDestroyed(content::Source<TabContents>(source).ptr());
+  } else if (type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED) {
+    OnWebContentsDestroyed(content::Source<WebContents>(source).ptr());
   } else {
     DCHECK_EQ(content::NOTIFICATION_NAV_ENTRY_COMMITTED, type);
     TabContents* tab = TabContents::FromWebContents(
@@ -351,17 +358,19 @@ void PrintPreviewTabController::OnRendererProcessClosed(
     RemoveInitiatorTab(closed_initiator_tabs[i]);
 }
 
-void PrintPreviewTabController::OnTabContentsDestroyed(TabContents* tab) {
-  TabContents* preview_tab = GetPrintPreviewForTab(tab);
+void PrintPreviewTabController::OnWebContentsDestroyed(
+    content::WebContents* tab) {
+  TabContents* destroyed_tab_contents = TabContents::FromWebContents(tab);
+  TabContents* preview_tab = GetPrintPreviewForTab(destroyed_tab_contents);
   if (!preview_tab) {
     NOTREACHED();
     return;
   }
 
-  if (tab == preview_tab)
-    RemovePreviewTab(tab);
+  if (destroyed_tab_contents == preview_tab)
+    RemovePreviewTab(destroyed_tab_contents);
   else
-    RemoveInitiatorTab(tab);
+    RemoveInitiatorTab(destroyed_tab_contents);
 }
 
 void PrintPreviewTabController::OnNavEntryCommitted(
@@ -434,7 +443,8 @@ TabContents* PrintPreviewTabController::CreatePrintPreviewTab(
           initiator_tab);
   TabContents* preview_tab = constrained_delegate->tab();
   EnableInternalPDFPluginForTab(preview_tab);
-  preview_tab->core_tab_helper()->set_delegate(pp_wcd);
+  CoreTabHelper::FromWebContents(preview_tab->web_contents())->
+      set_delegate(pp_wcd);
 
   // Add an entry to the map.
   preview_tab_map_[preview_tab] = initiator_tab;
@@ -461,8 +471,8 @@ void PrintPreviewTabController::SetInitiatorTabURLAndTitle(
 
 void PrintPreviewTabController::AddObservers(TabContents* tab) {
   WebContents* web_contents = tab->web_contents();
-  registrar_.Add(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 content::Source<TabContents>(tab));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<WebContents>(web_contents));
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(&web_contents->GetController()));
 
@@ -479,8 +489,8 @@ void PrintPreviewTabController::AddObservers(TabContents* tab) {
 
 void PrintPreviewTabController::RemoveObservers(TabContents* tab) {
   WebContents* web_contents = tab->web_contents();
-  registrar_.Remove(this, chrome::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                    content::Source<TabContents>(tab));
+  registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                    content::Source<WebContents>(web_contents));
   registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
       content::Source<NavigationController>(&web_contents->GetController()));
 

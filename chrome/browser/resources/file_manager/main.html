@@ -82,6 +82,7 @@
       <script src="js/file_tasks.js"></script>
       <script src="js/file_transfer_controller.js"></script>
       <script src="js/file_type.js"></script>
+      <script src="js/selection.js"></script>
       <script src="js/volume_manager.js"></script>
       <script src="js/media/media_util.js"></script>
       <script src="js/metadata/metadata_cache.js"></script>
@@ -115,8 +116,8 @@
           ></command>
       <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL"
           ></command>
-      <command id="import-photos" i18n-values="label:IMPORT_PHOTOS_BUTTON_LABEL"
-          hidden></command>
+      <command id="import-photos" i18n-values="label:PHOTO_IMPORT_TITLE"
+          ></command>
 
       <command id="gdata-buy-more-space"
           i18n-values="label:GDATA_BUY_MORE_SPACE"
@@ -223,7 +224,7 @@
         <div class=dialog-body>
           <div class=filelist-panel>
             <div id="list-container">
-              <div class=detail-table tabindex=0></div>
+              <div class=detail-table id="detail-table" tabindex=0></div>
               <grid class=thumbnail-grid tabindex=0></grid>
               <div id="spinner-container">
                 <div id="spinner-with-text"></div>

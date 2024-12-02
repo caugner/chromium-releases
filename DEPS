@@ -2,21 +2,17 @@
 #  To use this DEPS file to re-create a Chromium release you
 #  need the tools from http://dev.chromium.org installed.
 #  
-#  This DEPS file corresponds to Chromium 23.0.1271.99
+#  This DEPS file corresponds to Chromium 24.0.1312.9
 #  
 #  
 #  
 vars = {
-  'pymox':
-    'http://pymox.googlecode.com/svn',
   'sfntly':
     'http://sfntly.googlecode.com/svn',
   'rlz':
     'http://rlz.googlecode.com/svn',
   'smhasher':
     'http://smhasher.googlecode.com/svn',
-  'jsr-305':
-    'http://jsr-305.googlecode.com/svn',
   'bidichecker':
     'http://bidichecker.googlecode.com/svn',
   'gsutil':
@@ -29,12 +25,12 @@ vars = {
     'http://google-breakpad.googlecode.com/svn',
   'sawbuck':
     'http://sawbuck.googlecode.com/svn',
-  'v8-i18n':
-    'http://v8-i18n.googlecode.com/svn',
   'mozc':
     'http://mozc.googlecode.com/svn',
   'git.chromium.org':
-    'https://chromium.googlesource.com',
+    'http://git.chromium.org',
+  'v8-i18n':
+    'http://v8-i18n.googlecode.com/svn',
   'webkit_trunk':
     'http://svn.webkit.org/repository/webkit/trunk',
   'selenium':
@@ -93,8 +89,8 @@ vars = {
     'http://libphonenumber.googlecode.com/svn',
   'native_client':
     'http://src.chromium.org/native_client',
-  'octane-benchmark':
-    'http://octane-benchmark.googlecode.com/svn',
+  'pymox':
+    'http://pymox.googlecode.com/svn',
   'google-cache-invalidation-api':
     'http://google-cache-invalidation-api.googlecode.com/svn',
   'google-safe-browsing':
@@ -112,15 +108,15 @@ deps_os = {
       'src/third_party/lighttpd':
       '/trunk/deps/third_party/lighttpd@33727',
       'src/third_party/gnu_binutils':
-      Var("native_client") + '/trunk/deps/third_party/gnu_binutils@9330',
+      Var("native_client") + '/trunk/deps/third_party/gnu_binutils@10001',
       'src/third_party/pefile':
       Var("pefile") + '/trunk@63',
       'src/third_party/psyco_win32':
       '/trunk/deps/third_party/psyco_win32@79861',
+      'src/third_party/mingw-w64/mingw/bin':
+      Var("native_client") + '/trunk/deps/third_party/mingw-w64/mingw/bin@10001',
       'src/third_party/perl':
       '/trunk/deps/third_party/perl@147900',
-      'src/third_party/mingw-w64/mingw/bin':
-      Var("native_client") + '/trunk/deps/third_party/mingw-w64/mingw/bin@9330',
       'src/chrome_frame/tools/test/reference_build/chrome_win':
       '/trunk/deps/reference_builds/chrome_win@89574',
       'src/third_party/gperf':
@@ -138,7 +134,7 @@ deps_os = {
       'src/third_party/xulrunner-sdk':
       '/trunk/deps/third_party/xulrunner-sdk@119756',
       'src/third_party/nss':
-      '/trunk/deps/third_party/nss@154476',
+      '/trunk/deps/third_party/nss@164196',
    },
    'mac': {
       'src/third_party/GTM':
@@ -154,7 +150,7 @@ deps_os = {
       'src/chrome/tools/test/reference_build/chrome_mac':
       '/trunk/deps/reference_builds/chrome_mac@137727',
       'src/third_party/nss':
-      '/trunk/deps/third_party/nss@154476',
+      '/trunk/deps/third_party/nss@164196',
    },
    'ios': {
       'src/third_party/mozc/chrome/chromeos/renderer':
@@ -223,8 +219,6 @@ deps_os = {
       None,
       'src/content/test/data/layout_tests/LayoutTests/storage/domstorage':
       None,
-      'src/tools/page_cycler/acid3':
-      None,
       'src/third_party/scons-2.0.1':
       None,
       'src/third_party/webdriver/pylib':
@@ -232,12 +226,12 @@ deps_os = {
       'src/third_party/WebKit/LayoutTests':
       None,
       'src/third_party/WebKit/Source/Platform/chromium/public':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Source/Platform/chromium/public@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Source/Platform/chromium/public@134077',
       'src/native_client/src/third_party/ppapi':
       None,
       'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/storage/domstorage':
       None,
-      'src/native_client_sdk/src/site_scons':
+      'src/tools/page_cycler/acid3':
       None,
       'src/chrome/test/data/perf/canvas_bench':
       None,
@@ -268,7 +262,7 @@ deps_os = {
       'src/third_party/WebKit/Source':
       None,
       'src/third_party/WebKit/Source/WebKit/chromium/public':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Source/WebKit/chromium/public@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Source/WebKit/chromium/public@134077',
       'src/content/test/data/layout_tests/LayoutTests/fast/events':
       None,
       'src/third_party/WebKit':
@@ -286,7 +280,7 @@ deps_os = {
       'src/third_party/webrtc':
       None,
       'src/third_party/nss':
-      '/trunk/deps/third_party/nss@154476',
+      '/trunk/deps/third_party/nss@164196',
       'src/third_party/swig/Lib':
       None,
       'src/third_party/libjpeg_turbo':
@@ -307,38 +301,42 @@ deps_os = {
       None,
    },
    'unix': {
-      'src/third_party/gold':
-      '/trunk/deps/third_party/gold@149858',
-      'src/third_party/swig/linux':
-      '/trunk/deps/third_party/swig/linux@69281',
-      'src/third_party/cros_system_api':
-      'http://git.chromium.org/chromiumos/platform/system_api.git@94ed6fa5e9c8d55d183260a41856899502af0459',
       'build/xvfb':
       '/trunk/tools/xvfb@121100',
-      'src/third_party/openssl':
-      '/trunk/deps/third_party/openssl@157142',
       'build/third_party/xvfb':
       '/trunk/tools/third_party/xvfb@125214',
+      'src/third_party/mtpd/source':
+      Var("git.chromium.org") + '/chromiumos/platform/mtpd.git@47f8e78eefbeeda76ec43cac3d2bdc54a010115c',
+      'src/third_party/cros_system_api':
+      Var("git.chromium.org") + '/chromiumos/platform/system_api.git@880d8d3d6c5c6e4b10bbf7461a8f84a1e599a471',
+      'src/third_party/gold':
+      '/trunk/deps/third_party/gold@149858',
       'src/third_party/libmtp':
-      '/trunk/deps/third_party/libmtp@162285',
-      'build/third_party/cbuildbot_chromite':
-      'https://git.chromium.org/chromiumos/chromite.git',
+      '/trunk/deps/third_party/libmtp@163169',
       'src/third_party/WebKit/Tools/gdb':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Tools/gdb@136278',
-      'src/third_party/xdg-utils':
-      '/trunk/deps/third_party/xdg-utils@149334',
-      'src/third_party/lss':
-      Var("linux-syscall-support") + '/trunk/lss@11',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Tools/gdb@134077',
       'src/chrome/tools/test/reference_build/chrome_linux':
       '/trunk/deps/reference_builds/chrome_linux@137712',
+      'src/third_party/xdg-utils':
+      '/trunk/deps/third_party/xdg-utils@149334',
+      'src/third_party/openssl':
+      '/trunk/deps/third_party/openssl@157142',
+      'src/third_party/cros_dbus_cplusplus/source':
+      Var("git.chromium.org") + '/chromiumos/third_party/dbus-cplusplus.git@5e8f6d9db5c2abfb91d91f751184f25bb5cd0900',
+      'src/third_party/swig/linux':
+      '/trunk/deps/third_party/swig/linux@69281',
+      'build/third_party/cbuildbot_chromite':
+      'https://git.chromium.org/chromiumos/chromite.git',
+      'src/third_party/lss':
+      Var("linux-syscall-support") + '/trunk/lss@13',
    },
    'android': {
       'src/third_party/android_tools':
-      'http://git.chromium.org/git/android_tools.git@e1bf0d38fe01f7ada8ff7ba96321c9af8c06d7c2',
+      Var("git.chromium.org") + '/git/android_tools.git@e1bf0d38fe01f7ada8ff7ba96321c9af8c06d7c2',
       'src/third_party/aosp':
       '/trunk/deps/third_party/aosp@148330',
       'src/third_party/freetype':
-      'http://git.chromium.org/git/chromium/src/third_party/freetype.git@41c2c4116acca09389cc5fe2ea393eaada546422',
+      Var("git.chromium.org") + '/git/chromium/src/third_party/freetype.git@41c2c4116acca09389cc5fe2ea393eaada546422',
    },
 }
 
@@ -346,15 +344,15 @@ deps = {
    'src/third_party/mozc/chrome/chromeos/renderer':
       Var("mozc") + '/trunk/src/chrome/chromeos/renderer@83',
    'src/content/test/data/layout_tests/LayoutTests/fast/filesystem/resources':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/fast/filesystem/resources@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/fast/filesystem/resources@134077',
    'src/third_party/skia/include':
-      Var("skia") + '/branches/chrome/m23_1271/include@5791',
+      Var("skia") + '/trunk/include@6161',
    'build/scripts/private/data/reliability':
-      '/trunk/src/chrome/test/data/reliability@143310',
+      '/trunk/src/chrome/test/data/reliability@159828',
    'src/third_party/flac':
-      '/trunk/deps/third_party/flac@149334',
+      '/trunk/deps/third_party/flac@160844',
    'src/third_party/v8-i18n':
-      Var("v8-i18n") + '/trunk@143',
+      Var("v8-i18n") + '/trunk@155',
    'src/chrome/test/data/perf/frame_rate/content':
       '/trunk/deps/frame_rate/content@93671',
    'src/third_party/ots':
@@ -364,37 +362,39 @@ deps = {
    'src/third_party/undoview':
       '/trunk/deps/third_party/undoview@119694',
    'src/googleurl':
-      Var("google-url") + '/trunk@179',
-   'build/third_party/lighttpd':
-      '/trunk/deps/third_party/lighttpd@58968',
+      Var("google-url") + '/trunk@180',
+   'src/third_party/cacheinvalidation/src':
+      Var("google-cache-invalidation-api") + '/trunk/src@220',
+   'src/tools/swarm_client':
+      '/trunk/tools/swarm_client@163381',
+   'src/third_party/opus/src':
+      '/trunk/deps/third_party/opus@164159',
    'src/third_party/webgl_conformance':
       '/trunk/deps/third_party/webgl/sdk/tests@148561',
    'src/third_party/hunspell_dictionaries':
-      '/trunk/deps/third_party/hunspell_dictionaries@149334',
+      '/trunk/deps/third_party/hunspell_dictionaries@164817',
    'src/content/test/data/layout_tests/LayoutTests/storage/indexeddb':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/storage/indexeddb@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/storage/indexeddb@134077',
    'src/sandbox/linux/seccomp-legacy':
-      Var("seccompsandbox") + '/trunk@187',
-   'src/chrome/test/data/perf/canvas_bench':
-      '/trunk/deps/canvas_bench@122605',
+      Var("seccompsandbox") + '/trunk@188',
    'src/content/test/data/layout_tests/LayoutTests/http/tests/appcache':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/http/tests/appcache@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/http/tests/appcache@134077',
    'src/third_party/libjingle/source':
-      Var("libjingle") + '/branches/ice@205',
+      Var("libjingle") + '/branches/m24@229',
    'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/http/tests/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/platform/chromium-win/http/tests/workers@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/platform/chromium-win/http/tests/workers@134077',
    'src/third_party/skia/gyp':
-      Var("skia") + '/branches/chrome/m23_1271/gyp@5742',
-   'src/third_party/scons-2.0.1':
-      Var("native_client") + '/trunk/src/third_party/scons-2.0.1@9330',
+      Var("skia") + '/trunk/gyp@6161',
+   'src/content/test/data/layout_tests/LayoutTests/platform/chromium/fast/events':
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/platform/chromium/fast/events@134077',
    'src/third_party/webdriver/pylib':
       Var("selenium") + '/trunk/py@16922',
-   'build/scripts/gsd_generate_index':
-      '/trunk/tools/gsd_generate_index@110568',
+   'build/third_party/swarm_client':
+      '/trunk/tools/swarm_client@164715',
    'src':
-      '/branches/1271/src@172193',
+      '/branches/1312/src@167035',
    'src/third_party/libyuv':
-      Var("libyuv") + '/trunk@359',
+      Var("libyuv") + '/trunk@426',
    'src/third_party/hunspell':
       '/trunk/deps/third_party/hunspell@149334',
    'src/third_party/libphonenumber/src/phonenumbers':
@@ -404,133 +404,135 @@ deps = {
    'src/third_party/safe_browsing/testing':
       Var("google-safe-browsing") + '/trunk/testing@112',
    'src/content/test/data/layout_tests/LayoutTests/http/tests/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/http/tests/workers@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/http/tests/workers@134077',
    'src/content/test/data/layout_tests/LayoutTests/fast/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/fast/workers@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/fast/workers@134077',
    'build/third_party/gsutil':
-      Var("gsutil") + '/trunk/src@145',
+      Var("gsutil") + '/trunk/src@263',
    'src/content/test/data/layout_tests/LayoutTests/media':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/media@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/media@134077',
    'src/third_party/pyftpdlib/src':
       Var("pyftpdlib") + '/trunk@977',
    'src/content/test/data/layout_tests/LayoutTests/storage/domstorage':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/storage/domstorage@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/storage/domstorage@134077',
    'src/third_party/snappy/src':
       Var("snappy") + '/trunk@63',
    'src/content/test/data/layout_tests/LayoutTests/platform/chromium/fast/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/platform/chromium/fast/workers@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/platform/chromium/fast/workers@134077',
    'src/tools/deps2git':
-      '/trunk/tools/deps2git@157441',
+      '/trunk/tools/deps2git@163971',
    'src/third_party/libjpeg_turbo':
       '/trunk/deps/third_party/libjpeg_turbo@149334',
    'src/third_party/pywebsocket/src':
-      Var("pywebsocket") + '/trunk/src@661',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium/fast/events':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/platform/chromium/fast/events@136278',
+      Var("pywebsocket") + '/trunk/src@662',
+   'src/third_party/scons-2.0.1':
+      Var("native_client") + '/trunk/src/third_party/scons-2.0.1@10001',
    'depot_tools':
-      '/trunk/tools/depot_tools@157451',
+      '/trunk/tools/depot_tools@164140',
    'src/third_party/bidichecker':
       Var("bidichecker") + '/trunk/lib@4',
    'commit-queue':
-      '/trunk/tools/commit-queue@157149',
+      '/trunk/tools/commit-queue@164546',
    'src/breakpad/src':
-      Var("google-breakpad") + '/branches/chrome_23/src@1071',
+      Var("google-breakpad") + '/trunk/src@1069',
    'src/third_party/WebKit/Source':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Source@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Source@134077',
    'src/content/test/data/layout_tests/LayoutTests/http/tests/resources':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/http/tests/resources@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/http/tests/resources@134077',
    'src/third_party/jsoncpp/source/src/lib_json':
       Var("jsoncpp") + '/trunk/jsoncpp/src/lib_json@248',
    'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/workers':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/platform/chromium-win/fast/workers@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/platform/chromium-win/fast/workers@134077',
    'build/scripts/command_wrapper/bin':
       '/trunk/tools/command_wrapper/bin@135178',
    'src/testing/gtest':
       Var("googletest") + '/trunk@621',
+   'build/scripts/gsd_generate_index':
+      '/trunk/tools/gsd_generate_index@164784',
    'src/testing/gmock':
       Var("googlemock") + '/trunk@405',
    'src/third_party/skia/src':
-      Var("skia") + '/branches/chrome/m23_1271/src@6383',
+      Var("skia") + '/trunk/src@6161',
    'src/chrome/test/data/extensions/api_test/permissions/nacl_enabled/bin':
-      Var("native_client") + '/trunk/src/native_client/tests/prebuilt@9768',
+      Var("native_client") + '/trunk/src/native_client/tests/prebuilt@10116',
    'src/third_party/smhasher/src':
       Var("smhasher") + '/trunk@146',
    'src/third_party/webrtc':
-      Var("webrtc") + '/branches/3.12/src@3217',
+      Var("webrtc") + '/branches/3.16/webrtc@3044',
    'src/native_client':
-      Var("native_client") + '/branches/1271/src/native_client@10251',
+      Var("native_client") + '/trunk/src/native_client@10116',
    'src/tools/page_cycler/acid3':
       '/trunk/deps/page_cycler/acid3@150075',
    'src/third_party/leveldatabase/src':
-      Var("leveldb") + '/trunk@67',
+      Var("leveldb") + '/trunk@68',
    'src/third_party/mozc/session':
       Var("mozc") + '/trunk/src/session@83',
    'build':
-      '/trunk/tools/build@157513',
+      '/trunk/tools/build@164786',
    'src/tools/gyp':
-      Var("gyp") + '/trunk@1501',
-   'src/third_party/libsrtp':
-      '/trunk/deps/third_party/libsrtp@157430',
+      Var("gyp") + '/trunk@1525',
+   'src/chrome/test/data/perf/canvas_bench':
+      '/trunk/deps/canvas_bench@122605',
    'src/third_party/ffmpeg':
-      '/branches/ffmpeg/1271@170612',
-   'src/third_party/cacheinvalidation/files/src/google':
-      Var("google-cache-invalidation-api") + '/trunk/src/google@220',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/storage/domstorage':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/platform/chromium-win/storage/domstorage@136278',
-   'src/native_client_sdk/src/site_scons':
-      Var("native_client") + '/trunk/src/native_client/site_scons@9768',
+      '/trunk/deps/third_party/ffmpeg@164413',
    'src/third_party/libexif/sources':
       '/trunk/deps/third_party/libexif/sources@146817',
+   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/storage/domstorage':
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/platform/chromium-win/storage/domstorage@134077',
+   'build/third_party/lighttpd':
+      '/trunk/deps/third_party/lighttpd@58968',
    'src/content/test/data/layout_tests/LayoutTests/http/tests/xmlhttprequest':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/http/tests/xmlhttprequest@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/http/tests/xmlhttprequest@134077',
    'src/third_party/jsoncpp/source/include':
       Var("jsoncpp") + '/trunk/jsoncpp/include@248',
    'src/third_party/libphonenumber/src/test':
       Var("libphonenumber") + '/trunk/cpp/test@456',
+   'src/third_party/libsrtp':
+      '/trunk/deps/third_party/libsrtp@162569',
    'src/third_party/WebKit/Tools/Scripts':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Tools/Scripts@136278',
-   'src/third_party/trace-viewer':
-      Var("trace-viewer") + '/trunk@168',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Tools/Scripts@134077',
+   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/events':
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/platform/chromium-win/fast/events@134077',
    'src/third_party/yasm/source/patched-yasm':
       '/trunk/deps/third_party/yasm/patched-yasm@154708',
    'src/content/test/data/layout_tests/LayoutTests/fast/files':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/fast/files@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/fast/files@134077',
    'src/sdch/open-vcdiff':
       Var("open-vcdiff") + '/trunk@42',
    'src/third_party/pymox/src':
       Var("pymox") + '/trunk@70',
    'src/content/test/data/layout_tests/LayoutTests/fast/events':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/fast/events@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/fast/events@134077',
    'src/third_party/WebKit':
       '/trunk/deps/third_party/WebKit@76115',
    'src/third_party/icu':
-      '/trunk/deps/third_party/icu46@158118',
+      '/trunk/deps/third_party/icu46@161442',
    'src/third_party/speex':
-      '/trunk/deps/third_party/speex@149334',
+      '/trunk/deps/third_party/speex@160092',
    'src/tools/grit':
-      Var("grit-i18n") + '/trunk@67',
+      Var("grit-i18n") + '/trunk@82',
    'src/third_party/WebKit/Tools/DumpRenderTree':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Tools/DumpRenderTree@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Tools/DumpRenderTree@134077',
    'src/third_party/webpagereplay':
-      Var("web-page-replay") + '/trunk@494',
-   'src/content/test/data/layout_tests/LayoutTests/platform/chromium-win/fast/events':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/platform/chromium-win/fast/events@136278',
+      Var("web-page-replay") + '/trunk@501',
+   'src/third_party/trace-viewer':
+      Var("trace-viewer") + '/trunk@179',
    'src/third_party/WebKit/LayoutTests':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests@134077',
    'src/third_party/swig/Lib':
       '/trunk/deps/third_party/swig/Lib@69281',
    'src/third_party/WebKit/Tools/TestWebKitAPI':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/Tools/TestWebKitAPI@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/Tools/TestWebKitAPI@134077',
    'src/third_party/angle':
-      Var("angleproject") + '/branches/chrome_m23@1322',
+      Var("angleproject") + '/trunk@1320',
    'src/v8':
-      Var("v8") + '/branches/3.13@12803',
+      Var("v8") + '/branches/3.14@12871',
    'src/third_party/libvpx':
-      '/trunk/deps/third_party/libvpx@152423',
+      '/trunk/deps/third_party/libvpx@163000',
    'src/content/test/data/layout_tests/LayoutTests/http/tests/websocket/tests':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/http/tests/websocket/tests@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/http/tests/websocket/tests@134077',
    'src/content/test/data/layout_tests/LayoutTests/fast/js/resources':
-      Var("webkit_trunk")[:-6] + '/branches/chromium/1271/LayoutTests/fast/js/resources@136278',
+      Var("webkit_trunk")[:-6] + '/branches/chromium/1312/LayoutTests/fast/js/resources@134077',
 }
 
 skip_child_includes =  ['breakpad', 'chrome_frame', 'delegate_execute', 'metro_driver', 'native_client_sdk', 'o3d', 'pdf', 'sdch', 'skia', 'testing', 'third_party', 'v8', 'win8'] 

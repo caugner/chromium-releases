@@ -38,6 +38,7 @@ cr.define('extensions', function() {
     },
     // @inheritdoc
     doDragOver: function(e) {
+      e.preventDefault();
     },
     // @inheritdoc
     doDrop: function(e) {
@@ -250,6 +251,15 @@ cr.define('extensions', function() {
       pageDiv.classList.remove('showing-banner');
       pageDiv.classList.remove('managed-mode');
       $('toggle-dev-on').disabled = false;
+    }
+
+    if (extensionsData.showDisabledExtensionsWarning) {
+      pageDiv.classList.add('showing-banner');
+      pageDiv.classList.add('sideload-wipeout');
+
+      // If we have two banners showing, make sure to have the room for both.
+      if (pageDiv.classList.contains('managed-mode'))
+        pageDiv.style.marginTop = '105px';
     }
 
     if (extensionsData.developerMode && !extensionsData.managedMode) {

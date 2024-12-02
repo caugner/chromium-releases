@@ -28,6 +28,17 @@
 #include "net/base/x509_certificate.h"
 #include "net/base/x509_util_nss.h"
 
+#if defined(OS_IOS)
+#include <CommonCrypto/CommonDigest.h>
+#include "net/base/x509_util_ios.h"
+#endif  // defined(OS_IOS)
+
+#define NSS_VERSION_NUM (NSS_VMAJOR * 10000 + NSS_VMINOR * 100 + NSS_VPATCH)
+#if NSS_VERSION_NUM < 31305
+// Added in NSS 3.13.5.
+#define SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED -8016
+#endif
+
 namespace net {
 
 namespace {
@@ -95,6 +106,10 @@ int MapSecurityError(int err) {
     case SEC_ERROR_UNTRUSTED_ISSUER:
     case SEC_ERROR_CA_CERT_INVALID:
       return ERR_CERT_AUTHORITY_INVALID;
+    // TODO(port): map ERR_CERT_NO_REVOCATION_MECHANISM.
+    case SEC_ERROR_OCSP_BAD_HTTP_RESPONSE:
+    case SEC_ERROR_OCSP_SERVER_ERROR:
+      return ERR_CERT_UNABLE_TO_CHECK_REVOCATION;
     case SEC_ERROR_REVOKED_CERTIFICATE:
     case SEC_ERROR_UNTRUSTED_CERT:  // Treat as revoked.
       return ERR_CERT_REVOKED;
@@ -102,45 +117,6 @@ int MapSecurityError(int err) {
     case SEC_ERROR_BAD_SIGNATURE:
     case SEC_ERROR_CERT_NOT_VALID:
     // TODO(port): add an ERR_CERT_WRONG_USAGE error code.
-    case SEC_ERROR_CERT_USAGES_INVALID:
-    case SEC_ERROR_INADEQUATE_KEY_USAGE:
-    case SEC_ERROR_INADEQUATE_CERT_TYPE:
-    case SEC_ERROR_POLICY_VALIDATION_FAILED:
-    case SEC_ERROR_CERT_NOT_IN_NAME_SPACE:
-    case SEC_ERROR_PATH_LEN_CONSTRAINT_INVALID:
-    case SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION:
-    case SEC_ERROR_EXTENSION_VALUE_INVALID:
-      return ERR_CERT_INVALID;
-    default:
-      LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
-      return ERR_FAILED;
-  }
-}
-
-// Map PORT_GetError() return values to our cert status flags.
-CertStatus MapCertErrorToCertStatus(int err) {
-  switch (err) {
-    case SSL_ERROR_BAD_CERT_DOMAIN:
-      return CERT_STATUS_COMMON_NAME_INVALID;
-    case SEC_ERROR_INVALID_TIME:
-    case SEC_ERROR_EXPIRED_CERTIFICATE:
-    case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
-      return CERT_STATUS_DATE_INVALID;
-    case SEC_ERROR_UNKNOWN_ISSUER:
-    case SEC_ERROR_UNTRUSTED_ISSUER:
-    case SEC_ERROR_CA_CERT_INVALID:
-      return CERT_STATUS_AUTHORITY_INVALID;
-    // TODO(port): map CERT_STATUS_NO_REVOCATION_MECHANISM.
-    case SEC_ERROR_OCSP_BAD_HTTP_RESPONSE:
-    case SEC_ERROR_OCSP_SERVER_ERROR:
-      return CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
-    case SEC_ERROR_REVOKED_CERTIFICATE:
-    case SEC_ERROR_UNTRUSTED_CERT:  // Treat as revoked.
-      return CERT_STATUS_REVOKED;
-    case SEC_ERROR_BAD_DER:
-    case SEC_ERROR_BAD_SIGNATURE:
-    case SEC_ERROR_CERT_NOT_VALID:
-    // TODO(port): add a CERT_STATUS_WRONG_USAGE error code.
     case SEC_ERROR_CERT_USAGES_INVALID:
     case SEC_ERROR_INADEQUATE_KEY_USAGE:  // Key usage.
     case SEC_ERROR_INADEQUATE_CERT_TYPE:  // Extended key usage and whether
@@ -150,10 +126,19 @@ CertStatus MapCertErrorToCertStatus(int err) {
     case SEC_ERROR_PATH_LEN_CONSTRAINT_INVALID:
     case SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION:
     case SEC_ERROR_EXTENSION_VALUE_INVALID:
-      return CERT_STATUS_INVALID;
+      return ERR_CERT_INVALID;
+    case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+      return ERR_CERT_WEAK_SIGNATURE_ALGORITHM;
     default:
-      return 0;
+      LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
+      return ERR_FAILED;
   }
+}
+
+// Map PORT_GetError() return values to our cert status flags.
+CertStatus MapCertErrorToCertStatus(int err) {
+  int net_error = MapSecurityError(err);
+  return MapNetErrorToCertStatus(net_error);
 }
 
 // Saves some information about the certificate chain cert_list in
@@ -227,8 +212,13 @@ void GetCertChainInfo(CERTCertList* cert_list,
 
   if (root_cert)
     verified_chain.push_back(root_cert);
+#if defined(OS_IOS)
+  verify_result->verified_cert =
+      x509_util_ios::CreateCertFromNSSHandles(verified_cert, verified_chain);
+#else
   verify_result->verified_cert =
       X509Certificate::CreateFromHandle(verified_cert, verified_chain);
+#endif  // defined(OS_IOS)
 }
 
 // IsKnownRoot returns true if the given certificate is one that we believe
@@ -314,17 +304,17 @@ CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
 
 // Forward declarations.
 SECStatus RetryPKIXVerifyCertWithWorkarounds(
-    X509Certificate::OSCertHandle cert_handle, int num_policy_oids,
+    CERTCertificate* cert_handle, int num_policy_oids,
     bool cert_io_enabled, std::vector<CERTValInParam>* cvin,
     CERTValOutParam* cvout);
-SECOidTag GetFirstCertPolicy(X509Certificate::OSCertHandle cert_handle);
+SECOidTag GetFirstCertPolicy(CERTCertificate* cert_handle);
 
 // Call CERT_PKIXVerifyCert for the cert_handle.
 // Verification results are stored in an array of CERTValOutParam.
 // If policy_oids is not NULL and num_policy_oids is positive, policies
 // are also checked.
 // Caller must initialize cvout before calling this function.
-SECStatus PKIXVerifyCert(X509Certificate::OSCertHandle cert_handle,
+SECStatus PKIXVerifyCert(CERTCertificate* cert_handle,
                          bool check_revocation,
                          bool cert_io_enabled,
                          const SECOidTag* policy_oids,
@@ -447,7 +437,7 @@ SECStatus PKIXVerifyCert(X509Certificate::OSCertHandle cert_handle,
 // CERT_PKIXVerifyCert.  All the arguments of this function are either the
 // arguments or local variables of PKIXVerifyCert.
 SECStatus RetryPKIXVerifyCertWithWorkarounds(
-    X509Certificate::OSCertHandle cert_handle, int num_policy_oids,
+    CERTCertificate* cert_handle, int num_policy_oids,
     bool cert_io_enabled, std::vector<CERTValInParam>* cvin,
     CERTValOutParam* cvout) {
   // We call this function when the first CERT_PKIXVerifyCert call in
@@ -528,7 +518,7 @@ SECStatus RetryPKIXVerifyCertWithWorkarounds(
 // be decoded.  The returned value must be freed with a
 // CERT_DestroyCertificatePoliciesExtension call.
 CERTCertificatePolicies* DecodeCertPolicies(
-    X509Certificate::OSCertHandle cert_handle) {
+    CERTCertificate* cert_handle) {
   SECItem policy_ext;
   SECStatus rv = CERT_FindCertExtension(cert_handle,
                                         SEC_OID_X509_CERTIFICATE_POLICIES,
@@ -544,7 +534,7 @@ CERTCertificatePolicies* DecodeCertPolicies(
 // Returns the OID tag for the first certificate policy in the certificate's
 // certificatePolicies extension.  Returns SEC_OID_UNKNOWN if the certificate
 // has no certificate policy.
-SECOidTag GetFirstCertPolicy(X509Certificate::OSCertHandle cert_handle) {
+SECOidTag GetFirstCertPolicy(CERTCertificate* cert_handle) {
   ScopedCERTCertificatePolicies policies(DecodeCertPolicies(cert_handle));
   if (!policies.get())
     return SEC_OID_UNKNOWN;
@@ -572,17 +562,25 @@ SECOidTag GetFirstCertPolicy(X509Certificate::OSCertHandle cert_handle) {
 
 HashValue CertPublicKeyHashSHA1(CERTCertificate* cert) {
   HashValue hash(HASH_VALUE_SHA1);
+#if defined(OS_IOS)
+  CC_SHA1(cert->derPublicKey.data, cert->derPublicKey.len, hash.data());
+#else
   SECStatus rv = HASH_HashBuf(HASH_AlgSHA1, hash.data(),
                               cert->derPublicKey.data, cert->derPublicKey.len);
   DCHECK_EQ(SECSuccess, rv);
+#endif
   return hash;
 }
 
 HashValue CertPublicKeyHashSHA256(CERTCertificate* cert) {
   HashValue hash(HASH_VALUE_SHA256);
+#if defined(OS_IOS)
+  CC_SHA256(cert->derPublicKey.data, cert->derPublicKey.len, hash.data());
+#else
   SECStatus rv = HASH_HashBuf(HASH_AlgSHA256, hash.data(),
                               cert->derPublicKey.data, cert->derPublicKey.len);
   DCHECK_EQ(rv, SECSuccess);
+#endif
   return hash;
 }
 
@@ -686,8 +684,12 @@ bool VerifyEV(CERTCertificate* cert_handle,
       return false;
   }
 
+#if defined(OS_IOS)
+  SHA1HashValue fingerprint = x509_util_ios::CalculateFingerprintNSS(root_ca);
+#else
   SHA1HashValue fingerprint =
       X509Certificate::CalculateFingerprint(root_ca);
+#endif
   return metadata->HasEVPolicyOID(fingerprint, ev_policy_oid);
 }
 
@@ -702,7 +704,15 @@ int CertVerifyProcNSS::VerifyInternal(X509Certificate* cert,
                                       int flags,
                                       CRLSet* crl_set,
                                       CertVerifyResult* verify_result) {
+#if defined(OS_IOS)
+  // For iOS, the entire chain must be loaded into NSS's in-memory certificate
+  // store.
+  x509_util_ios::NSSCertChain scoped_chain(cert);
+  CERTCertificate* cert_handle = scoped_chain.cert_handle();
+#else
   CERTCertificate* cert_handle = cert->os_cert_handle();
+#endif  // defined(OS_IOS)
+
   // Make sure that the hostname matches with the common name of the cert.
   SECStatus status = CERT_VerifyCertName(cert_handle, hostname.c_str());
   if (status != SECSuccess)

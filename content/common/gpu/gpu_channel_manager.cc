@@ -18,6 +18,17 @@
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_share_group.h"
 
+namespace content {
+
+GpuChannelManager::ImageOperation::ImageOperation(
+    int32 sync_point, base::Closure callback)
+    : sync_point(sync_point),
+      callback(callback) {
+}
+
+GpuChannelManager::ImageOperation::~ImageOperation() {
+}
+
 GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
                                      GpuWatchdog* watchdog,
                                      base::MessageLoopProxy* io_message_loop,
@@ -38,11 +49,17 @@ GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
 
 GpuChannelManager::~GpuChannelManager() {
   gpu_channels_.clear();
+  if (default_offscreen_surface_.get()) {
+    default_offscreen_surface_->Destroy();
+    default_offscreen_surface_ = NULL;
+  }
+  DCHECK(image_operations_.empty());
 }
 
 gpu::gles2::ProgramCache* GpuChannelManager::program_cache() {
   if (!program_cache_.get() &&
-      (gfx::g_ARB_get_program_binary || gfx::g_OES_get_program_binary) &&
+      (gfx::g_driver_gl.ext.b_ARB_get_program_binary ||
+       gfx::g_driver_gl.ext.b_OES_get_program_binary) &&
       !CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableGpuProgramCache)) {
     program_cache_.reset(new gpu::gles2::MemoryProgramCache());
@@ -91,6 +108,8 @@ bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_CloseChannel, OnCloseChannel)
     IPC_MESSAGE_HANDLER(GpuMsg_CreateViewCommandBuffer,
                         OnCreateViewCommandBuffer)
+    IPC_MESSAGE_HANDLER(GpuMsg_CreateImage, OnCreateImage)
+    IPC_MESSAGE_HANDLER(GpuMsg_DeleteImage, OnDeleteImage)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   return handled;
@@ -165,6 +184,81 @@ void GpuChannelManager::OnCreateViewCommandBuffer(
   Send(new GpuHostMsg_CommandBufferCreated(route_id));
 }
 
+void GpuChannelManager::CreateImage(
+    gfx::PluginWindowHandle window, int32 client_id, int32 image_id) {
+  gfx::Size size;
+
+  GpuChannelMap::const_iterator iter = gpu_channels_.find(client_id);
+  if (iter != gpu_channels_.end()) {
+    iter->second->CreateImage(window, image_id, &size);
+  }
+
+  Send(new GpuHostMsg_ImageCreated(size));
+}
+
+void GpuChannelManager::OnCreateImage(
+    gfx::PluginWindowHandle window, int32 client_id, int32 image_id) {
+  DCHECK(image_id);
+
+  if (image_operations_.empty()) {
+    CreateImage(window, client_id, image_id);
+  } else {
+    image_operations_.push_back(
+        new ImageOperation(0, base::Bind(&GpuChannelManager::CreateImage,
+                                         base::Unretained(this),
+                                         window,
+                                         client_id,
+                                         image_id)));
+  }
+}
+
+void GpuChannelManager::DeleteImage(int32 client_id, int32 image_id) {
+  GpuChannelMap::const_iterator iter = gpu_channels_.find(client_id);
+  if (iter != gpu_channels_.end()) {
+    iter->second->DeleteImage(image_id);
+  }
+}
+
+void GpuChannelManager::OnDeleteImage(
+    int32 client_id, int32 image_id, int32 sync_point) {
+  DCHECK(image_id);
+
+  if (!sync_point && image_operations_.empty()) {
+    DeleteImage(client_id, image_id);
+  } else {
+    image_operations_.push_back(
+        new ImageOperation(sync_point,
+                           base::Bind(&GpuChannelManager::DeleteImage,
+                                      base::Unretained(this),
+                                      client_id,
+                                      image_id)));
+    if (sync_point) {
+      sync_point_manager()->AddSyncPointCallback(
+          sync_point,
+          base::Bind(&GpuChannelManager::OnDeleteImageSyncPointRetired,
+                     base::Unretained(this),
+                     image_operations_.back()));
+    }
+  }
+}
+
+void GpuChannelManager::OnDeleteImageSyncPointRetired(
+    ImageOperation* image_operation) {
+  // Mark operation as no longer having a pending sync point.
+  image_operation->sync_point = 0;
+
+  // De-queue operations until we reach a pending sync point.
+  while (!image_operations_.empty()) {
+    // Check if operation has a pending sync point.
+    if (image_operations_.front()->sync_point)
+      return;
+
+    image_operations_.front()->callback.Run();
+    delete image_operations_.front();
+    image_operations_.pop_front();
+  }
+}
+
 void GpuChannelManager::LoseAllContexts() {
   MessageLoop::current()->PostTask(
       FROM_HERE,
@@ -175,3 +269,13 @@ void GpuChannelManager::LoseAllContexts() {
 void GpuChannelManager::OnLoseAllContexts() {
   gpu_channels_.clear();
 }
+
+gfx::GLSurface* GpuChannelManager::GetDefaultOffscreenSurface() {
+  if (!default_offscreen_surface_.get()) {
+    default_offscreen_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(
+        false, gfx::Size(1, 1));
+  }
+  return default_offscreen_surface_.get();
+}
+
+}  // namespace content

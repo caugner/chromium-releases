@@ -33,7 +33,6 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/metro_pin_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
@@ -68,6 +67,11 @@
 #include "base/win/metro.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
+#include "chrome/browser/ui/metro_pin_tab_helper_win.h"
+#endif
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
 #endif
 
 using content::HostZoomMap;
@@ -240,11 +244,12 @@ bool WrenchMenuModel::IsItemForCommandIdDynamic(int command_id) const {
   return command_id == IDC_ZOOM_PERCENT_DISPLAY ||
 #if defined(OS_MACOSX)
          command_id == IDC_FULLSCREEN ||
+#elif defined(OS_WIN)
+         command_id == IDC_PIN_TO_START_SCREEN ||
 #endif
          command_id == IDC_VIEW_BACKGROUND_PAGES ||
          command_id == IDC_UPGRADE_DIALOG ||
-         command_id == IDC_SHOW_SYNC_SETUP ||
-         command_id == IDC_PIN_TO_START_SCREEN;
+         command_id == IDC_SHOW_SYNC_SETUP;
 }
 
 string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
@@ -257,6 +262,17 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
       // Note: On startup, |window()| may be NULL.
       if (browser_->window() && browser_->window()->IsFullscreen())
         string_id = IDS_EXIT_FULLSCREEN_MAC;
+      return l10n_util::GetStringUTF16(string_id);
+    }
+#elif defined(OS_WIN)
+    case IDC_PIN_TO_START_SCREEN: {
+      int string_id = IDS_PIN_TO_START_SCREEN;
+      WebContents* web_contents = chrome::GetActiveWebContents(browser_);
+      MetroPinTabHelper* tab_helper =
+          web_contents ? MetroPinTabHelper::FromWebContents(web_contents)
+                       : NULL;
+      if (tab_helper && tab_helper->is_pinned())
+        string_id = IDS_UNPIN_FROM_START_SCREEN;
       return l10n_util::GetStringUTF16(string_id);
     }
 #endif
@@ -285,16 +301,6 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
       }
       return l10n_util::GetStringFUTF16(IDS_SYNC_MENU_PRE_SYNCED_LABEL,
           l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
-    }
-    case IDC_PIN_TO_START_SCREEN: {
-      int string_id = IDS_PIN_TO_START_SCREEN;
-      WebContents* web_contents = chrome::GetActiveWebContents(browser_);
-      MetroPinTabHelper* tab_helper =
-          web_contents ? MetroPinTabHelper::FromWebContents(web_contents)
-                       : NULL;
-      if (tab_helper && tab_helper->is_pinned())
-        string_id = IDS_UNPIN_FROM_START_SCREEN;
-      return l10n_util::GetStringUTF16(string_id);
     }
     default:
       NOTREACHED();
@@ -497,6 +503,14 @@ void WrenchMenuModel::Build() {
 
 #endif  // else of defined(OS_WIN)
 
+#if defined(USE_ASH)
+  if (chrome::HOST_DESKTOP_TYPE_NATIVE != chrome::HOST_DESKTOP_TYPE_ASH) {
+    AddItemWithStringId(IDC_TOGGLE_ASH_DESKTOP,
+                        ash::Shell::HasInstance() ? IDS_CLOSE_ASH_DESKTOP :
+                                                    IDS_OPEN_ASH_DESKTOP);
+  }
+#endif
+
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
                          bookmark_sub_menu_model_.get());
@@ -506,12 +520,10 @@ void WrenchMenuModel::Build() {
     // Metro mode, add the 'Relaunch Chrome in desktop mode'.
     AddSeparator(ui::SPACING_SEPARATOR);
     AddItemWithStringId(IDC_WIN8_DESKTOP_RESTART, IDS_WIN8_DESKTOP_RESTART);
-    AddSeparator(ui::SPACING_SEPARATOR);
   } else if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
     // In Windows 8 desktop, add the 'Relaunch Chrome in Windows 8 mode'.
     AddSeparator(ui::SPACING_SEPARATOR);
     AddItemWithStringId(IDC_WIN8_METRO_RESTART, IDS_WIN8_METRO_RESTART);
-    AddSeparator(ui::SPACING_SEPARATOR);
   }
 #endif
 

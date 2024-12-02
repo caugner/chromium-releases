@@ -9,6 +9,7 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/feedback/proto/common.pb.h"
+#include "chrome/browser/feedback/proto/dom.pb.h"
 #include "chrome/browser/feedback/proto/extension.pb.h"
 #include "chrome/browser/feedback/proto/math.pb.h"
 #include "chrome/browser/ui/webui/screenshot_source.h"
@@ -28,6 +29,8 @@ class Profile;
 namespace content {
 class WebContents;
 }
+
+extern const char kSyncDataKey[];
 
 class FeedbackUtil {
  public:

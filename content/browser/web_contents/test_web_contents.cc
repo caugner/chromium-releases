@@ -16,9 +16,9 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/password_form.h"
 #include "content/public/test/mock_render_process_host.h"
-#include "webkit/forms/password_form.h"
-#include "webkit/glue/webkit_glue.h"
+#include "webkit/glue/glue_serialize.h"
 
 namespace content {
 
@@ -77,7 +77,7 @@ void TestWebContents::TestDidNavigateWithReferrer(
   params.should_update_history = false;
   params.searchable_form_url = GURL();
   params.searchable_form_encoding = std::string();
-  params.password_form = webkit::forms::PasswordForm();
+  params.password_form = PasswordForm();
   params.security_info = std::string();
   params.gesture = NavigationGestureUser;
   params.was_within_same_page = false;
@@ -97,8 +97,6 @@ bool TestWebContents::CreateRenderViewForRenderManager(
   static_cast<RenderViewHostImpl*>(
       render_view_host)->CreateRenderView(string16(),
                                           opener_route_id,
-                                          -1,
-                                          std::string(),
                                           -1);
   return true;
 }
@@ -150,7 +148,7 @@ void TestWebContents::CommitPendingNavigation() {
   // Simulate the SwapOut_ACK that fires if you commit a cross-site navigation
   // without making any network requests.
   if (old_rvh != rvh)
-    static_cast<RenderViewHostImpl*>(old_rvh)->OnSwapOutACK();
+    static_cast<RenderViewHostImpl*>(old_rvh)->OnSwapOutACK(false);
 }
 
 int TestWebContents::GetNumberOfFocusCalls() {
@@ -176,8 +174,8 @@ void TestWebContents::SetOpener(TestWebContents* opener) {
   // This is normally only set in the WebContents constructor, which also
   // registers an observer for when the opener gets closed.
   opener_ = opener;
-  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
-                 content::Source<WebContents>(opener_));
+  registrar_.Add(this, NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 Source<WebContents>(opener_));
 }
 
 void TestWebContents::ExpectSetHistoryLengthAndPrune(

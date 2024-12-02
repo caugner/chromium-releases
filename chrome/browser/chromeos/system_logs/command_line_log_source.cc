@@ -33,7 +33,7 @@ void ExecuteCommandLines(chromeos::SystemLogsResponse* response) {
   command.AppendArg("--dump_server_info");
   commands.push_back(std::make_pair("cras", command));
 
-  command = CommandLine((FilePath("set")));
+  command = CommandLine((FilePath("/usr/bin/printenv")));
   commands.push_back(std::make_pair("env", command));
 
   command = CommandLine(FilePath("/usr/bin/setxkbmap"));
@@ -41,11 +41,17 @@ void ExecuteCommandLines(chromeos::SystemLogsResponse* response) {
   command.AppendArg("-query");
   commands.push_back(std::make_pair("setxkbmap", command));
 
+  command = CommandLine(FilePath("/usr/bin/xinput"));
+  command.AppendArg("list");
+  command.AppendArg("--long");
+  commands.push_back(std::make_pair("xinput", command));
+
   command = CommandLine(FilePath("/usr/bin/xrandr"));
   command.AppendArg("--verbose");
   commands.push_back(std::make_pair("xrandr", command));
 
   command = CommandLine(FilePath("/opt/google/touchpad/tpcontrol"));
+  command.AppendArg("status");
   commands.push_back(std::make_pair("hack-33025-touchpad", command));
 
   command = CommandLine(FilePath("/opt/google/touchpad/generate_userfeedback"));

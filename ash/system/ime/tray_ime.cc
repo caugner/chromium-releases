@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_delegate.h"
@@ -216,10 +217,13 @@ class IMENotificationView : public TrayNotificationView {
 
     // TODO(zork): Use IDS_ASH_STATUS_TRAY_THIRD_PARTY_IME_TURNED_ON_BUBBLE for
     // third party IMEs
-    return new views::Label(
+    views::Label* label = new views::Label(
         l10n_util::GetStringFUTF16(
             IDS_ASH_STATUS_TRAY_IME_TURNED_ON_BUBBLE,
-            current.short_name));
+            current.medium_name));
+    label->SetMultiLine(true);
+    label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    return label;
   }
 
 
@@ -335,7 +339,8 @@ void TrayIME::OnIMERefresh(bool show_message) {
     // refreshed.
     if (notification_) {
       notification_->UpdateLabel();
-    } else if (!Shell::GetInstance()->shelf()->IsVisible() || !message_shown_) {
+    } else if (!Shell::GetPrimaryRootWindowController()->shelf()->IsVisible() ||
+               !message_shown_) {
       ShowNotificationView();
       message_shown_ = true;
     }

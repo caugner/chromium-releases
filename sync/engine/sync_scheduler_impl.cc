@@ -300,16 +300,12 @@ void SyncSchedulerImpl::SendInitialSnapshot() {
 
 namespace {
 
-// Helper to extract the routing info and workers corresponding to types in
-// |types| from |current_routes| and |current_workers|.
+// Helper to extract the routing info corresponding to types in
+// |types| from |current_routes|.
 void BuildModelSafeParams(
     ModelTypeSet types_to_download,
     const ModelSafeRoutingInfo& current_routes,
-    const std::vector<ModelSafeWorker*>& current_workers,
-    ModelSafeRoutingInfo* result_routes,
-    std::vector<ModelSafeWorker*>* result_workers) {
-  std::set<ModelSafeGroup> active_groups;
-  active_groups.insert(GROUP_PASSIVE);
+    ModelSafeRoutingInfo* result_routes) {
   for (ModelTypeSet::Iterator iter = types_to_download.First(); iter.Good();
        iter.Inc()) {
     ModelType type = iter.Get();
@@ -317,13 +313,6 @@ void BuildModelSafeParams(
     DCHECK(route != current_routes.end());
     ModelSafeGroup group = route->second;
     (*result_routes)[type] = group;
-    active_groups.insert(group);
-  }
-
-  for(std::vector<ModelSafeWorker*>::const_iterator iter =
-          current_workers.begin(); iter != current_workers.end(); ++iter) {
-    if (active_groups.count((*iter)->GetModelSafeGroup()) > 0)
-      result_workers->push_back(*iter);
   }
 }
 
@@ -341,16 +330,10 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
   // for a pending configure job.
   DCHECK(!wait_interval_.get() || !wait_interval_->pending_configure_job.get());
 
-  // TODO(sync): now that ModelChanging commands only use those workers within
-  // the routing info, we don't really need |restricted_workers|. Remove it.
-  // crbug.com/133030
   ModelSafeRoutingInfo restricted_routes;
-  std::vector<ModelSafeWorker*> restricted_workers;
   BuildModelSafeParams(params.types_to_download,
                        params.routing_info,
-                       session_context_->workers(),
-                       &restricted_routes,
-                       &restricted_workers);
+                       &restricted_routes);
   session_context_->set_routing_info(params.routing_info);
 
   // Only reconfigure if we have types to download.
@@ -360,11 +343,11 @@ bool SyncSchedulerImpl::ScheduleConfiguration(
         session_context_,
         this,
         SyncSourceInfo(params.source,
-                       ModelSafeRoutingInfoToStateMap(
+                       ModelSafeRoutingInfoToInvalidationMap(
                            restricted_routes,
                            std::string())),
         restricted_routes,
-        restricted_workers));
+        session_context_->workers()));
     SyncSessionJob job(SyncSessionJob::CONFIGURATION,
                        TimeTicks::Now(),
                        session,
@@ -432,7 +415,7 @@ SyncSchedulerImpl::JobProcessDecision SyncSchedulerImpl::DecideOnJob(
   if (job.purpose == SyncSessionJob::NUDGE &&
       job.session->source().updates_source == GetUpdatesCallerInfo::LOCAL) {
     ModelTypeSet requested_types;
-    for (ModelTypeStateMap::const_iterator i =
+    for (ModelTypeInvalidationMap::const_iterator i =
          job.session->source().types.begin();
          i != job.session->source().types.end();
          ++i) {
@@ -596,29 +579,29 @@ void SyncSchedulerImpl::ScheduleNudgeAsync(
       << "source " << GetNudgeSourceString(source) << ", "
       << "types " << ModelTypeSetToString(types);
 
-  ModelTypeStateMap type_state_map =
-      ModelTypeSetToStateMap(types, std::string());
+  ModelTypeInvalidationMap invalidation_map =
+      ModelTypeSetToInvalidationMap(types, std::string());
   SyncSchedulerImpl::ScheduleNudgeImpl(delay,
                                        GetUpdatesFromNudgeSource(source),
-                                       type_state_map,
+                                       invalidation_map,
                                        false,
                                        nudge_location);
 }
 
 void SyncSchedulerImpl::ScheduleNudgeWithStatesAsync(
     const TimeDelta& delay,
-    NudgeSource source, const ModelTypeStateMap& type_state_map,
+    NudgeSource source, const ModelTypeInvalidationMap& invalidation_map,
     const tracked_objects::Location& nudge_location) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   SDVLOG_LOC(nudge_location, 2)
       << "Nudge scheduled with delay " << delay.InMilliseconds() << " ms, "
       << "source " << GetNudgeSourceString(source) << ", "
       << "payloads "
-      << ModelTypeStateMapToString(type_state_map);
+      << ModelTypeInvalidationMapToString(invalidation_map);
 
   SyncSchedulerImpl::ScheduleNudgeImpl(delay,
                                        GetUpdatesFromNudgeSource(source),
-                                       type_state_map,
+                                       invalidation_map,
                                        false,
                                        nudge_location);
 }
@@ -626,20 +609,20 @@ void SyncSchedulerImpl::ScheduleNudgeWithStatesAsync(
 void SyncSchedulerImpl::ScheduleNudgeImpl(
     const TimeDelta& delay,
     GetUpdatesCallerInfo::GetUpdatesSource source,
-    const ModelTypeStateMap& type_state_map,
+    const ModelTypeInvalidationMap& invalidation_map,
     bool is_canary_job, const tracked_objects::Location& nudge_location) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  DCHECK(!type_state_map.empty()) << "Nudge scheduled for no types!";
+  DCHECK(!invalidation_map.empty()) << "Nudge scheduled for no types!";
 
   SDVLOG_LOC(nudge_location, 2)
       << "In ScheduleNudgeImpl with delay "
       << delay.InMilliseconds() << " ms, "
       << "source " << GetUpdatesSourceString(source) << ", "
       << "payloads "
-      << ModelTypeStateMapToString(type_state_map)
+      << ModelTypeInvalidationMapToString(invalidation_map)
       << (is_canary_job ? " (canary)" : "");
 
-  SyncSourceInfo info(source, type_state_map);
+  SyncSourceInfo info(source, invalidation_map);
   UpdateNudgeTimeRecords(info);
 
   SyncSession* session(CreateSyncSession(info));
@@ -830,7 +813,7 @@ void SyncSchedulerImpl::UpdateNudgeTimeRecords(const SyncSourceInfo& info) {
 
   base::TimeTicks now = TimeTicks::Now();
   // Update timing information for how often datatypes are triggering nudges.
-  for (ModelTypeStateMap::const_iterator iter = info.types.begin();
+  for (ModelTypeInvalidationMap::const_iterator iter = info.types.begin();
        iter != info.types.end();
        ++iter) {
     base::TimeTicks previous = last_local_nudges_by_model_type_[iter->first];
@@ -1070,9 +1053,9 @@ SyncSession* SyncSchedulerImpl::CreateSyncSession(
 void SyncSchedulerImpl::PollTimerCallback() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   ModelSafeRoutingInfo r;
-  ModelTypeStateMap type_state_map =
-      ModelSafeRoutingInfoToStateMap(r, std::string());
-  SyncSourceInfo info(GetUpdatesCallerInfo::PERIODIC, type_state_map);
+  ModelTypeInvalidationMap invalidation_map =
+      ModelSafeRoutingInfoToInvalidationMap(r, std::string());
+  SyncSourceInfo info(GetUpdatesCallerInfo::PERIODIC, invalidation_map);
   SyncSession* s = CreateSyncSession(info);
 
   SyncSessionJob job(SyncSessionJob::POLL, TimeTicks::Now(),

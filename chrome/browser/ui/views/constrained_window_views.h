@@ -7,12 +7,16 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/constrained_window.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/views/widget/widget.h"
 
-class TabContents;
-
+namespace content {
+class WebContents;
+}
 namespace views {
 namespace internal {
 class NativeWidgetDelegate;
@@ -56,14 +60,24 @@ class NativeConstrainedWindow {
 //
 class ConstrainedWindowViews : public views::Widget,
                                public ConstrainedWindow,
-                               public NativeConstrainedWindowDelegate {
+                               public NativeConstrainedWindowDelegate,
+                               public content::WebContentsObserver,
+                               public content::NotificationObserver {
  public:
-  ConstrainedWindowViews(TabContents* tab_contents,
-                         views::WidgetDelegate* widget_delegate);
+  // Types of insets to use with chrome style frame.
+  enum ChromeStyleClientInsets {
+    DEFAULT_INSETS,
+    NO_INSETS,
+  };
+
+  ConstrainedWindowViews(content::WebContents* web_contents,
+                         views::WidgetDelegate* widget_delegate,
+                         bool enable_chrome_style,
+                         ChromeStyleClientInsets chrome_style_client_insets);
   virtual ~ConstrainedWindowViews();
 
-  // Returns the TabContents that constrains this Constrained Window.
-  TabContents* owner() const { return tab_contents_; }
+  // Returns the WebContents that constrains this Constrained Window.
+  content::WebContents* owner() const { return web_contents_; }
 
   // Overridden from ConstrainedWindow:
   virtual void ShowConstrainedWindow() OVERRIDE;
@@ -71,7 +85,15 @@ class ConstrainedWindowViews : public views::Widget,
   virtual void FocusConstrainedWindow() OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
 
+  // Overridden from views::Widget:
+  void CenterWindow(const gfx::Size& size);
+
+  // Default insets for the dialog:
+  static gfx::Insets GetDefaultInsets();
+
  private:
+  void NotifyTabHelperWillClose();
+
   // Overridden from views::Widget:
   virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
@@ -82,7 +104,27 @@ class ConstrainedWindowViews : public views::Widget,
       AsNativeWidgetDelegate() OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) OVERRIDE;
 
-  TabContents* tab_contents_;
+  // Overridden from content::WebContentsObserver:
+  virtual void WebContentsDestroyed(content::WebContents* web_contents)
+      OVERRIDE;
+
+  // Overridden from content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // Set the top of the window to overlap the browser chrome.
+  void PositionChromeStyleWindow(const gfx::Size& size);
+
+  content::NotificationRegistrar registrar_;
+  content::WebContents* web_contents_;
+
+  // TODO(wittman): remove once all constrained window dialogs are moved
+  // over to Chrome style.
+  const bool enable_chrome_style_;
+
+  // Client insets to use when |enable_chrome_style_| is true.
+  ChromeStyleClientInsets chrome_style_client_insets_;
 
   NativeConstrainedWindow* native_constrained_window_;
 

@@ -55,6 +55,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::URLRequestFailedJob;
+using content::URLRequestMockHTTPJob;
 
 namespace captive_portal {
 
@@ -485,7 +487,8 @@ int NumLoadingTabs() {
 }
 
 bool IsLoginTab(TabContents* tab_contents) {
-  return tab_contents->captive_portal_tab_helper()->IsLoginTab();
+  return CaptivePortalTabHelper::FromWebContents(
+      tab_contents->web_contents())->IsLoginTab();
 }
 
 // Tracks how many times each tab has been navigated since the Observer was
@@ -999,7 +1002,7 @@ bool CaptivePortalBrowserTest::CheckPending(Browser* browser) {
   CaptivePortalService* captive_portal_service =
       CaptivePortalServiceFactory::GetForProfile(browser->profile());
 
-  return captive_portal_service->FetchingURL() ||
+  return captive_portal_service->DetectionInProgress() ||
       captive_portal_service->TimerRunning();
 }
 
@@ -1539,7 +1542,8 @@ void CaptivePortalBrowserTest::SetSlowSSLLoadTime(
 
 CaptivePortalTabReloader* CaptivePortalBrowserTest::GetTabReloader(
     TabContents* tab_contents) const {
-  return tab_contents->captive_portal_tab_helper()->GetTabReloaderForTest();
+  return CaptivePortalTabHelper::FromWebContents(
+      tab_contents->web_contents())->GetTabReloaderForTest();
 }
 
 // Make sure there's no test for a captive portal on HTTP timeouts.  This will
@@ -1934,7 +1938,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, GoBack) {
 }
 
 // Checks that navigating back to a timeout triggers captive portal detection.
-IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, GoBackToTimeout) {
+// Disabling since very flakey: http://crbug.com/157467 .
+IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_GoBackToTimeout) {
   // Disable captive portal detection so the first navigation doesn't open a
   // login tab.
   EnableCaptivePortalDetection(browser()->profile(), false);
@@ -2055,7 +2060,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_TwoWindows) {
   // when running multiple tests at once, the original browser window may
   // remain the profile's active window.
   Browser* active_browser =
-      browser::FindTabbedBrowser(browser()->profile(), true);
+      browser::FindTabbedBrowser(browser()->profile(), true,
+                                 browser()->host_desktop_type());
   Browser* inactive_browser;
   if (active_browser == browser2) {
     // When only one test is running at a time, the new browser will probably be
@@ -2084,7 +2090,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_TwoWindows) {
   // Make sure the active window hasn't changed, and its new tab is
   // active.
   ASSERT_EQ(active_browser,
-            browser::FindTabbedBrowser(browser()->profile(), true));
+            browser::FindTabbedBrowser(browser()->profile(), true,
+                                       browser()->host_desktop_type()));
   ASSERT_EQ(1, active_browser->active_index());
 
   // Check that the only two navigated tabs were the new error tab in the

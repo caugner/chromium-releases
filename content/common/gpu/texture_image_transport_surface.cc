@@ -22,6 +22,8 @@ using gpu::gles2::ContextGroup;
 using gpu::gles2::TextureManager;
 typedef TextureManager::TextureInfo TextureInfo;
 
+namespace content {
+
 TextureImageTransportSurface::Texture::Texture()
     : client_id(0),
       sent_to_client(false) {
@@ -42,7 +44,10 @@ TextureImageTransportSurface::TextureImageTransportSurface(
         frontbuffer_is_protected_(true),
         protection_state_id_(0),
         handle_(handle),
-        parent_stub_(NULL) {
+        parent_stub_(NULL),
+        is_swap_buffers_pending_(false),
+        did_unschedule_(false),
+        did_flip_(false) {
   helper_.reset(new ImageTransportHelper(this,
                                          manager,
                                          stub,
@@ -88,6 +93,10 @@ bool TextureImageTransportSurface::Initialize() {
         texture.info, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   }
 
+  surface_ = manager->GetDefaultOffscreenSurface();
+  if (!surface_.get())
+    return false;
+
   if (!helper_->Initialize())
     return false;
 
@@ -104,7 +113,24 @@ void TextureImageTransportSurface::Destroy() {
     ReleaseParentStub();
   }
 
+  if (surface_.get())
+    surface_ = NULL;
+
   helper_->Destroy();
+}
+
+bool TextureImageTransportSurface::DeferDraws() {
+  // The command buffer hit a draw/clear command that could clobber the
+  // texture in use by the UI compositor. If a Swap is pending, abort
+  // processing of the command by returning true and unschedule until the Swap
+  // Ack arrives.
+  DCHECK(!did_unschedule_);
+  if (is_swap_buffers_pending_) {
+    did_unschedule_ = true;
+    helper_->SetScheduled(false);
+    return true;
+  }
+  return false;
 }
 
 bool TextureImageTransportSurface::Resize(const gfx::Size&) {
@@ -112,7 +138,7 @@ bool TextureImageTransportSurface::Resize(const gfx::Size&) {
 }
 
 bool TextureImageTransportSurface::IsOffscreen() {
-  return parent_stub_ ? parent_stub_->surface()->IsOffscreen() : true;
+  return true;
 }
 
 bool TextureImageTransportSurface::OnMakeCurrent(gfx::GLContext* context) {
@@ -193,11 +219,11 @@ void* TextureImageTransportSurface::GetShareHandle() {
 }
 
 void* TextureImageTransportSurface::GetDisplay() {
-  return parent_stub_ ? parent_stub_->surface()->GetDisplay() : NULL;
+  return surface_.get() ? surface_->GetDisplay() : NULL;
 }
 
 void* TextureImageTransportSurface::GetConfig() {
-  return parent_stub_ ? parent_stub_->surface()->GetConfig() : NULL;
+  return surface_.get() ? surface_->GetConfig() : NULL;
 }
 
 void TextureImageTransportSurface::OnResize(gfx::Size size) {
@@ -245,7 +271,9 @@ bool TextureImageTransportSurface::SwapBuffers() {
   params.protection_state_id = protection_state_id_;
   params.skip_ack = false;
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
-  helper_->SetScheduled(false);
+
+  DCHECK(!is_swap_buffers_pending_);
+  is_swap_buffers_pending_ = true;
   return true;
 }
 
@@ -280,13 +308,13 @@ bool TextureImageTransportSurface::PostSubBuffer(
     std::vector<gfx::Rect> regions_to_copy;
     GetRegionsToCopy(previous_damage_rect_, new_damage_rect, &regions_to_copy);
 
-    content::ScopedFrameBufferBinder fbo_binder(fbo_id_);
+    ScopedFrameBufferBinder fbo_binder(fbo_id_);
     glFramebufferTexture2DEXT(GL_FRAMEBUFFER,
         GL_COLOR_ATTACHMENT0,
         GL_TEXTURE_2D,
         front_texture_service_id,
         0);
-    content::ScopedTextureBinder texture_binder(back_texture_service_id);
+    ScopedTextureBinder texture_binder(back_texture_service_id);
 
     for (size_t i = 0; i < regions_to_copy.size(); ++i) {
       const gfx::Rect& region_to_copy = regions_to_copy[i];
@@ -296,7 +324,7 @@ bool TextureImageTransportSurface::PostSubBuffer(
             region_to_copy.width(), region_to_copy.height());
       }
     }
-  } else {
+  } else if (!surfaces_same_size && did_flip_) {
     DCHECK(new_damage_rect == gfx::Rect(expected_size));
   }
 
@@ -314,7 +342,9 @@ bool TextureImageTransportSurface::PostSubBuffer(
   params.height = height;
   params.protection_state_id = protection_state_id_;
   helper_->SendAcceleratedSurfacePostSubBuffer(params);
-  helper_->SetScheduled(false);
+
+  DCHECK(!is_swap_buffers_pending_);
+  is_swap_buffers_pending_ = true;
   return true;
 }
 
@@ -335,11 +365,11 @@ gfx::Size TextureImageTransportSurface::GetSize() {
 }
 
 void* TextureImageTransportSurface::GetHandle() {
-  return parent_stub_ ? parent_stub_->surface()->GetHandle() : NULL;
+  return surface_.get() ? surface_->GetHandle() : NULL;
 }
 
 unsigned TextureImageTransportSurface::GetFormat() {
-  return parent_stub_ ? parent_stub_->surface()->GetFormat() : 0;
+  return surface_.get() ? surface_->GetFormat() : 0;
 }
 
 void TextureImageTransportSurface::OnSetFrontSurfaceIsProtected(
@@ -362,18 +392,35 @@ void TextureImageTransportSurface::OnSetFrontSurfaceIsProtected(
   }
 }
 
-void TextureImageTransportSurface::OnBufferPresented(uint32 sync_point) {
+void TextureImageTransportSurface::OnBufferPresented(bool presented,
+                                                     uint32 sync_point) {
   if (sync_point == 0) {
-    BufferPresentedImpl();
+    BufferPresentedImpl(presented);
   } else {
     helper_->manager()->sync_point_manager()->AddSyncPointCallback(
         sync_point,
         base::Bind(&TextureImageTransportSurface::BufferPresentedImpl,
-                   this->AsWeakPtr()));
+                   this->AsWeakPtr(),
+                   presented));
   }
 }
 
-void TextureImageTransportSurface::BufferPresentedImpl() {
+void TextureImageTransportSurface::BufferPresentedImpl(bool presented) {
+  DCHECK(is_swap_buffers_pending_);
+  is_swap_buffers_pending_ = false;
+
+  if (presented) {
+    // If we had not flipped, the two frame damage tracking is inconsistent.
+    // So conservatively take the whole frame.
+    if (!did_flip_)
+      previous_damage_rect_ = gfx::Rect(textures_[front()].size);
+  } else {
+    front_ = back();
+    previous_damage_rect_ = gfx::Rect(0, 0, 0, 0);
+  }
+
+  did_flip_ = presented;
+
   // We're relying on the fact that the parent context is
   // finished with it's context when it inserts the sync point that
   // triggers this callback.
@@ -392,7 +439,10 @@ void TextureImageTransportSurface::BufferPresentedImpl() {
 
   // Even if MakeCurrent fails, schedule anyway, to trigger the lost context
   // logic.
-  helper_->SetScheduled(true);
+  if (did_unschedule_) {
+    did_unschedule_ = false;
+    helper_->SetScheduled(true);
+  }
 }
 
 void TextureImageTransportSurface::OnResizeViewACK() {
@@ -412,7 +462,7 @@ void TextureImageTransportSurface::ReleaseTexture(int id) {
   info->SetServiceId(0);
 
   {
-    content::ScopedFrameBufferBinder fbo_binder(fbo_id_);
+    ScopedFrameBufferBinder fbo_binder(fbo_id_);
     glDeleteTextures(1, &service_id);
   }
   glFlush();
@@ -455,7 +505,7 @@ void TextureImageTransportSurface::CreateBackTexture(const gfx::Size& size) {
   }
 
   {
-    content::ScopedTextureBinder texture_binder(service_id);
+    ScopedTextureBinder texture_binder(service_id);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -482,7 +532,7 @@ void TextureImageTransportSurface::AttachBackTextureToFBO() {
   TextureInfo* info = textures_[back()].info;
   DCHECK(info);
 
-  content::ScopedFrameBufferBinder fbo_binder(fbo_id_);
+  ScopedFrameBufferBinder fbo_binder(fbo_id_);
   glFramebufferTexture2DEXT(GL_FRAMEBUFFER,
       GL_COLOR_ATTACHMENT0,
       GL_TEXTURE_2D,
@@ -513,3 +563,5 @@ void TextureImageTransportSurface::ReleaseParentStub() {
   }
   parent_stub_ = NULL;
 }
+
+}  // namespace content

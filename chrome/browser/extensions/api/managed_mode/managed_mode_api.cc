@@ -11,9 +11,10 @@
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/api/preference/preference_api_constants.h"
 #include "chrome/browser/extensions/event_router.h"
-#include "chrome/browser/extensions/extension_preference_api_constants.h"
-#include "chrome/browser/managed_mode.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/managed_mode/managed_mode.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -22,7 +23,6 @@
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/managed_mode_policy_provider.h"
-#include "chrome/browser/policy/managed_mode_policy_provider_factory.h"
 #endif
 
 namespace {
@@ -35,7 +35,7 @@ const char kEnterSuccessKey[] = "success";
 
 }  // namespace
 
-namespace keys = extension_preference_api_constants;
+namespace keys = extensions::preference_api_constants;
 
 namespace extensions {
 
@@ -61,12 +61,14 @@ void ExtensionManagedModeEventRouter::Observe(
   DCHECK_EQ(std::string(prefs::kInManagedMode), pref_name);
 
   DictionaryValue* dict = new DictionaryValue();
-  dict->SetBoolean(extension_preference_api_constants::kValue,
+  dict->SetBoolean(
+      keys::kValue,
       g_browser_process->local_state()->GetBoolean(prefs::kInManagedMode));
   scoped_ptr<ListValue> args(new ListValue());
   args->Set(0, dict);
 
-  extensions::EventRouter* event_router = profile_->GetExtensionEventRouter();
+  extensions::EventRouter* event_router =
+      extensions::ExtensionSystem::Get(profile_)->event_router();
   event_router->DispatchEventToRenderers(kChangeEventName, args.Pass(), NULL,
                                          GURL(),
                                          extensions::EventFilteringInfo());
@@ -106,7 +108,7 @@ bool GetPolicyFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &key));
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::ManagedModePolicyProvider* policy_provider =
-      ManagedModePolicyProviderFactory::GetForProfile(profile_);
+      profile_->GetManagedModePolicyProvider();
   const base::Value* policy = policy_provider->GetPolicy(key);
   if (policy)
     SetResult(policy->DeepCopy());
@@ -123,7 +125,7 @@ bool SetPolicyFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->Get(1, &value));
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::ManagedModePolicyProvider* policy_provider =
-      ManagedModePolicyProviderFactory::GetForProfile(profile_);
+      profile_->GetManagedModePolicyProvider();
   policy_provider->SetPolicy(key, value);
 #endif
   return true;

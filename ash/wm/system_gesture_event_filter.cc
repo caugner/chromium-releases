@@ -63,7 +63,8 @@ bool SystemGestureEventFilter::PreHandleMouseEvent(aura::Window* target,
                                                    ui::MouseEvent* event) {
 #if defined(OS_CHROMEOS)
   if (event->type() == ui::ET_MOUSE_PRESSED && event->native_event() &&
-      ui::TouchFactory::GetInstance()->IsTouchDevicePresent()) {
+      ui::TouchFactory::GetInstance()->IsTouchDevicePresent() &&
+      Shell::GetInstance()->delegate()) {
     Shell::GetInstance()->delegate()->RecordUserMetricsAction(
       UMA_MOUSE_DOWN);
   }
@@ -114,8 +115,13 @@ ui::EventResult SystemGestureEventFilter::PreHandleGestureEvent(
         SystemPinchHandler::kSystemGesturePoints) {
       ash::AcceleratorController* accelerator =
           ash::Shell::GetInstance()->accelerator_controller();
-      if (accelerator->PerformAction(CYCLE_FORWARD_MRU, ui::Accelerator()))
+      if (accelerator->PerformAction(CYCLE_FORWARD_MRU_PRESSED,
+                                     ui::Accelerator())) {
+        accelerator->PerformAction(CYCLE_FORWARD_MRU_RELEASED,
+                                   ui::Accelerator());
         return ui::ER_CONSUMED;
+      }
+      accelerator->PerformAction(CYCLE_FORWARD_MRU_RELEASED, ui::Accelerator());
     }
     return ui::ER_UNHANDLED;
   }

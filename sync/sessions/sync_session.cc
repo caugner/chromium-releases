@@ -48,17 +48,17 @@ std::set<ModelSafeGroup> ComputeEnabledGroups(
   return enabled_groups;
 }
 
-void PurgeStaleStates(ModelTypeStateMap* original,
+void PurgeStaleStates(ModelTypeInvalidationMap* original,
                       const ModelSafeRoutingInfo& routing_info) {
-  std::vector<ModelTypeStateMap::iterator> iterators_to_delete;
-  for (ModelTypeStateMap::iterator i = original->begin();
+  std::vector<ModelTypeInvalidationMap::iterator> iterators_to_delete;
+  for (ModelTypeInvalidationMap::iterator i = original->begin();
        i != original->end(); ++i) {
     if (routing_info.end() == routing_info.find(i->first)) {
       iterators_to_delete.push_back(i);
     }
   }
 
-  for (std::vector<ModelTypeStateMap::iterator>::iterator
+  for (std::vector<ModelTypeInvalidationMap::iterator>::iterator
        it = iterators_to_delete.begin(); it != iterators_to_delete.end();
        ++it) {
     original->erase(*it);
@@ -157,7 +157,7 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
 
   bool is_share_useable = true;
   ModelTypeSet initial_sync_ended;
-  ModelTypeStateMap download_progress_markers;
+  ProgressMarkerMap download_progress_markers;
   for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
     ModelType type(ModelTypeFromInt(i));
     if (routing_info_.count(type) != 0) {
@@ -166,10 +166,7 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
       else
         is_share_useable = false;
     }
-    // TODO(dcheng): Is this correct? I'm guessing GetDownloadProgressAsString()
-    // shouldn't care about the ack handle...
-    dir->GetDownloadProgressAsString(type,
-                                     &download_progress_markers[type].payload);
+    dir->GetDownloadProgressAsString(type, &download_progress_markers[type]);
   }
 
   return SyncSessionSnapshot(
@@ -179,10 +176,10 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
       download_progress_markers,
       HasMoreToSync(),
       delegate_->IsSyncingCurrentlySilenced(),
-      status_controller_->TotalNumEncryptionConflictingItems(),
-      status_controller_->TotalNumHierarchyConflictingItems(),
-      status_controller_->TotalNumSimpleConflictingItems(),
-      status_controller_->TotalNumServerConflictingItems(),
+      status_controller_->num_encryption_conflicts(),
+      status_controller_->num_hierarchy_conflicts(),
+      status_controller_->num_simple_conflicts(),
+      status_controller_->num_server_conflicts(),
       source_,
       context_->notifications_enabled(),
       dir->GetEntriesCount(),
@@ -207,38 +204,19 @@ const std::set<ModelSafeGroup>& SyncSession::GetEnabledGroups() const {
   return enabled_groups_;
 }
 
+// TODO(rlarocque): Delete this function after refactoring conflict resolution.
 std::set<ModelSafeGroup> SyncSession::GetEnabledGroupsWithConflicts() const {
   const std::set<ModelSafeGroup>& enabled_groups = GetEnabledGroups();
   std::set<ModelSafeGroup> enabled_groups_with_conflicts;
   for (std::set<ModelSafeGroup>::const_iterator it =
            enabled_groups.begin(); it != enabled_groups.end(); ++it) {
-    const sessions::ConflictProgress* conflict_progress =
-        status_controller_->GetUnrestrictedConflictProgress(*it);
-    if (conflict_progress &&
-        (conflict_progress->SimpleConflictingItemsBegin() !=
-         conflict_progress->SimpleConflictingItemsEnd())) {
+    const std::set<syncable::Id>* ids =
+        status_controller_->GetUnrestrictedSimpleConflictIds(*it);
+    if (ids && ids->size() > 0) {
       enabled_groups_with_conflicts.insert(*it);
     }
   }
   return enabled_groups_with_conflicts;
-}
-
-std::set<ModelSafeGroup>
-    SyncSession::GetEnabledGroupsWithVerifiedUpdates() const {
-  const std::set<ModelSafeGroup>& enabled_groups = GetEnabledGroups();
-  std::set<ModelSafeGroup> enabled_groups_with_verified_updates;
-  for (std::set<ModelSafeGroup>::const_iterator it =
-           enabled_groups.begin(); it != enabled_groups.end(); ++it) {
-    const UpdateProgress* update_progress =
-        status_controller_->GetUnrestrictedUpdateProgress(*it);
-    if (update_progress &&
-        (update_progress->VerifiedUpdatesBegin() !=
-         update_progress->VerifiedUpdatesEnd())) {
-      enabled_groups_with_verified_updates.insert(*it);
-    }
-  }
-
-  return enabled_groups_with_verified_updates;
 }
 
 namespace {

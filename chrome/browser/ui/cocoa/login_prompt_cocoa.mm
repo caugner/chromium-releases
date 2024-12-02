@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #include "chrome/browser/ui/login/login_model.h"
 #include "chrome/browser/ui/login/login_prompt.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
@@ -24,8 +23,8 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::PasswordForm;
 using content::WebContents;
-using webkit::forms::PasswordForm;
 
 // ----------------------------------------------------------------------------
 // LoginHandlerMac
@@ -74,9 +73,7 @@ class LoginHandlerMac : public LoginHandler,
     WebContents* requesting_contents = GetWebContentsForLogin();
     DCHECK(requesting_contents);
 
-    TabContents* tab_contents =
-      TabContents::FromWebContents(requesting_contents);
-    SetDialog(new ConstrainedWindowMac(tab_contents, this));
+    SetDialog(new ConstrainedWindowMac(requesting_contents, this));
 
     NotifyAuthNeeded();
   }

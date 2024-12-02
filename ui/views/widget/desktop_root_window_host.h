@@ -6,6 +6,7 @@
 #define UI_VIEWS_WIDGET_DESKTOP_ROOT_WINDOW_HOST_H_
 
 #include "ui/base/ui_base_types.h"
+#include "ui/views/views_export.h"
 #include "ui/views/widget/widget.h"
 
 namespace aura {
@@ -14,25 +15,30 @@ class Window;
 }
 
 namespace gfx {
+class ImageSkia;
 class Rect;
 }
 
 namespace views {
+class DesktopNativeWidgetAura;
 namespace internal {
 class InputMethodDelegate;
 class NativeWidgetDelegate;
 }
 
-class DesktopRootWindowHost {
+class VIEWS_EXPORT DesktopRootWindowHost {
  public:
   virtual ~DesktopRootWindowHost() {}
 
   static DesktopRootWindowHost* Create(
       internal::NativeWidgetDelegate* native_widget_delegate,
+      DesktopNativeWidgetAura* desktop_native_widget_aura,
       const gfx::Rect& initial_bounds);
 
-  virtual void Init(aura::Window* content_window,
-                    const Widget::InitParams& params) = 0;
+  // Creates the aura resources associated with the native window we built.
+  // Caller takes ownership of returned RootWindow.
+  virtual aura::RootWindow* Init(aura::Window* content_window,
+                                 const Widget::InitParams& params) = 0;
 
   virtual void Close() = 0;
   virtual void CloseNow() = 0;
@@ -52,9 +58,9 @@ class DesktopRootWindowHost {
   virtual gfx::Rect GetClientAreaBoundsInScreen() const = 0;
   virtual gfx::Rect GetRestoredBounds() const = 0;
 
-  virtual void SetShape(gfx::NativeRegion native_region) = 0;
+  virtual gfx::Rect GetWorkAreaBoundsInScreen() const = 0;
 
-  virtual bool ShouldUseNativeFrame() = 0;
+  virtual void SetShape(gfx::NativeRegion native_region) = 0;
 
   virtual void Activate() = 0;
   virtual void Deactivate() = 0;
@@ -73,6 +79,38 @@ class DesktopRootWindowHost {
   virtual internal::InputMethodDelegate* GetInputMethodDelegate() = 0;
 
   virtual void SetWindowTitle(const string16& title) = 0;
+
+  virtual void ClearNativeFocus() = 0;
+
+  virtual Widget::MoveLoopResult RunMoveLoop(const gfx::Point& drag_offset) = 0;
+  virtual void EndMoveLoop() = 0;
+
+  virtual void SetVisibilityChangedAnimationsEnabled(bool value) = 0;
+
+  virtual bool ShouldUseNativeFrame() = 0;
+  virtual void FrameTypeChanged() = 0;
+  virtual NonClientFrameView* CreateNonClientFrameView() = 0;
+
+  virtual void SetFullscreen(bool fullscreen) = 0;
+  virtual bool IsFullscreen() const = 0;
+
+  virtual void SetOpacity(unsigned char opacity) = 0;
+
+  virtual void SetWindowIcons(const gfx::ImageSkia& window_icon,
+                              const gfx::ImageSkia& app_icon) = 0;
+
+  virtual void SetAccessibleName(const string16& name) = 0;
+  virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) = 0;
+  virtual void SetAccessibleState(ui::AccessibilityTypes::State state) = 0;
+
+  virtual void InitModalType(ui::ModalType modal_type) = 0;
+
+  virtual void FlashFrame(bool flash_frame) = 0;
+
+  // Called when the DesktopNativeWidgetAura's aura::Window is focused and
+  // blurred.
+  virtual void OnNativeWidgetFocus() = 0;
+  virtual void OnNativeWidgetBlur() = 0;
 };
 
 }  // namespace views

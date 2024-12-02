@@ -17,6 +17,8 @@
 using base::AutoLock;
 using base::MessageLoopProxy;
 
+namespace content {
+
 GpuListenerInfo::GpuListenerInfo() {}
 
 GpuListenerInfo::~GpuListenerInfo() {}
@@ -57,7 +59,7 @@ void GpuChannelHost::Connect(
   state_ = kConnected;
 }
 
-void GpuChannelHost::set_gpu_info(const content::GPUInfo& gpu_info) {
+void GpuChannelHost::set_gpu_info(const GPUInfo& gpu_info) {
   gpu_info_ = gpu_info;
 }
 
@@ -65,7 +67,7 @@ void GpuChannelHost::SetStateLost() {
   state_ = kLost;
 }
 
-const content::GPUInfo& GpuChannelHost::gpu_info() const {
+const GPUInfo& GpuChannelHost::gpu_info() const {
   return gpu_info_;
 }
 
@@ -106,9 +108,9 @@ bool GpuChannelHost::Send(IPC::Message* message) {
   return false;
 }
 
-CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
+CommandBufferProxyImpl* GpuChannelHost::CreateViewCommandBuffer(
     int32 surface_id,
-    CommandBufferProxy* share_group,
+    CommandBufferProxyImpl* share_group,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
     const GURL& active_url,
@@ -145,9 +147,9 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
 #endif
 }
 
-CommandBufferProxy* GpuChannelHost::CreateOffscreenCommandBuffer(
+CommandBufferProxyImpl* GpuChannelHost::CreateOffscreenCommandBuffer(
     const gfx::Size& size,
-    CommandBufferProxy* share_group,
+    CommandBufferProxyImpl* share_group,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
     const GURL& active_url,
@@ -199,7 +201,7 @@ GpuVideoDecodeAcceleratorHost* GpuChannelHost::CreateVideoDecoder(
 }
 
 void GpuChannelHost::DestroyCommandBuffer(
-    CommandBufferProxy* command_buffer) {
+    CommandBufferProxyImpl* command_buffer) {
   TRACE_EVENT0("gpu", "GpuChannelHost::DestroyCommandBuffer");
 
 #if defined(ENABLE_GPU)
@@ -215,7 +217,7 @@ void GpuChannelHost::DestroyCommandBuffer(
 }
 
 bool GpuChannelHost::CollectRenderingStatsForSurface(
-    int surface_id, content::GpuRenderingStats* stats) {
+    int surface_id, GpuRenderingStats* stats) {
   TRACE_EVENT0("gpu", "GpuChannelHost::CollectRenderingStats");
 
   return Send(new GpuChannelMsg_CollectRenderingStatsForSurface(surface_id,
@@ -315,4 +317,4 @@ void GpuChannelHost::MessageFilter::OnChannelError() {
   listeners_.clear();
 }
 
-
+}  // namespace content

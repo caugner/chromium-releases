@@ -27,8 +27,6 @@
 #include "ui/surface/transport_dib.h"
 #include "webkit/plugins/npapi/webplugin.h"
 
-class PluginChannel;
-
 namespace skia {
 class PlatformCanvas;
 }
@@ -38,6 +36,9 @@ namespace npapi {
 class WebPluginDelegateImpl;
 }
 }
+
+namespace content {
+class PluginChannel;
 
 #if defined(OS_MACOSX)
 class WebPluginAcceleratedSurfaceProxy;
@@ -67,8 +68,6 @@ class WebPluginProxy : public webkit::npapi::WebPlugin {
   virtual void WillDestroyWindow(gfx::PluginWindowHandle window) OVERRIDE;
 #if defined(OS_WIN)
   void SetWindowlessPumpEvent(HANDLE pump_messages_event);
-  void ReparentPluginWindow(HWND window, HWND parent);
-  void ReportExecutableMemory(size_t size);
 #endif
 
   virtual void CancelResource(unsigned long id) OVERRIDE;
@@ -310,5 +309,7 @@ class WebPluginProxy : public webkit::npapi::WebPlugin {
 
   base::WeakPtrFactory<WebPluginProxy> weak_factory_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_PLUGIN_WEBPLUGIN_PROXY_H_

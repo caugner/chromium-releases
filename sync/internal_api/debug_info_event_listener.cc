@@ -29,8 +29,6 @@ void DebugInfoEventListener::OnSyncCycleCompleted(
       snapshot.num_encryption_conflicts());
   sync_completed_event_info->set_num_hierarchy_conflicts(
       snapshot.num_hierarchy_conflicts());
-  sync_completed_event_info->set_num_simple_conflicts(
-      snapshot.num_simple_conflicts());
   sync_completed_event_info->set_num_server_conflicts(
       snapshot.num_server_conflicts());
 
@@ -101,7 +99,9 @@ void DebugInfoEventListener::OnCryptographerStateChanged(
   cryptographer_ready_ = cryptographer->is_ready();
 }
 
-void DebugInfoEventListener::OnPassphraseTypeChanged(PassphraseType type) {
+void DebugInfoEventListener::OnPassphraseTypeChanged(
+    PassphraseType type,
+    base::Time explicit_passphrase_time) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::PASSPHRASE_TYPE_CHANGED);
 }
 
@@ -118,9 +118,9 @@ void DebugInfoEventListener::OnNudgeFromDatatype(ModelType datatype) {
 }
 
 void DebugInfoEventListener::OnIncomingNotification(
-     const ModelTypeStateMap& type_state_map) {
+     const ModelTypeInvalidationMap& invalidation_map) {
   sync_pb::DebugEventInfo event_info;
-  ModelTypeSet types = ModelTypeStateMapToSet(type_state_map);
+  ModelTypeSet types = ModelTypeInvalidationMapToSet(invalidation_map);
 
   for (ModelTypeSet::Iterator it = types.First(); it.Good(); it.Inc()) {
     event_info.add_datatypes_notified_from_server(

@@ -13,6 +13,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -84,12 +85,15 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
   : browser_(browser),
     controller_(controller),
     confirm_close_factory_(browser),
+    initial_show_state_(ui::SHOW_STATE_DEFAULT),
     attention_request_id_(0) {
 
   pref_change_registrar_.Init(browser_->profile()->GetPrefs());
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
-
-  initial_show_state_ = chrome::GetSavedWindowShowState(browser_);
+  gfx::Rect bounds;
+  chrome::GetSavedWindowBoundsAndShowState(browser_,
+                                           &bounds,
+                                           &initial_show_state_);
 }
 
 BrowserWindowCocoa::~BrowserWindowCocoa() {
@@ -141,6 +145,10 @@ void BrowserWindowCocoa::ShowInactive() {
   [window() orderFront:controller_];
 }
 
+void BrowserWindowCocoa::Hide() {
+  // Not implemented.
+}
+
 void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
   gfx::Rect real_bounds = [controller_ enforceMinWindowSize:bounds];
 
@@ -166,16 +174,32 @@ void BrowserWindowCocoa::Close() {
   if ([controller_ overlayWindow]) {
     [controller_ deferPerformClose];
   } else {
-    // Make sure we hide the window immediately. Even though performClose:
-    // calls orderOut: eventually, it leaves the window on-screen long enough
-    // that we start to see tabs shutting down. http://crbug.com/23959
-    // TODO(viettrungluu): This is kind of bad, since |-performClose:| calls
-    // |-windowShouldClose:| (on its delegate, which is probably the
-    // controller) which may return |NO| causing the window to not be closed,
-    // thereby leaving a hidden window. In fact, our window-closing procedure
-    // involves a (indirect) recursion on |-performClose:|, which is also bad.
-    [window() orderOut:controller_];
-    [window() performClose:controller_];
+    // Using |-performClose:| can prevent the window from actually closing if
+    // a JavaScript beforeunload handler opens an alert during shutdown, as
+    // documented at <http://crbug.com/118424>. Re-implement
+    // -[NSWindow performClose:] as closely as possible to how Apple documents
+    // it.
+    //
+    // Before calling |-close|, hide the window immediately. |-performClose:|
+    // would do something similar, and this ensures that the window is removed
+    // from AppKit's display list. Not doing so can lead to crashes like
+    // <http://crbug.com/156101>.
+    id<NSWindowDelegate> delegate = [window() delegate];
+    SEL window_should_close = @selector(windowShouldClose:);
+    if ([delegate respondsToSelector:window_should_close]) {
+      if ([delegate windowShouldClose:window()]) {
+        [window() orderOut:nil];
+        [window() close];
+      }
+    } else if ([window() respondsToSelector:window_should_close]) {
+      if ([window() performSelector:window_should_close withObject:window()]) {
+        [window() orderOut:nil];
+        [window() close];
+      }
+    } else {
+      [window() orderOut:nil];
+      [window() close];
+    }
   }
 }
 
@@ -235,10 +259,6 @@ void BrowserWindowCocoa::BookmarkBarStateChanged(
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
       chrome::GetActiveWebContents(browser_)];
-}
-
-void BrowserWindowCocoa::SetDevToolsDockSide(DevToolsDockSide side) {
-  [controller_ setDevToolsDockToRight:side == DEVTOOLS_DOCK_SIDE_RIGHT];
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
@@ -558,14 +578,6 @@ bool BrowserWindowCocoa::InPresentationMode() {
   return [controller_ inPresentationMode];
 }
 
-void BrowserWindowCocoa::ShowInstant(TabContents* preview) {
-  [controller_ showInstant:preview->web_contents()];
-}
-
-void BrowserWindowCocoa::HideInstant() {
-  [controller_ hideInstant];
-}
-
 gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
   // Flip coordinates based on the primary screen.
   NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
@@ -598,6 +610,10 @@ FindBar* BrowserWindowCocoa::CreateFindBar() {
   return bridge;
 }
 
+bool BrowserWindowCocoa::GetConstrainedWindowTopY(int* top_y) {
+  return false;
+}
+
 void BrowserWindowCocoa::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
@@ -613,6 +629,17 @@ void BrowserWindowCocoa::Observe(int type,
       NOTREACHED();  // we don't ask for anything else!
       break;
   }
+}
+
+extensions::ActiveTabPermissionGranter*
+    BrowserWindowCocoa::GetActiveTabPermissionGranter() {
+  TabContents* tab_contents =
+      browser_->tab_strip_model()->GetActiveTabContents();
+  if (!tab_contents)
+    return NULL;
+  extensions::TabHelper* tab_helper =
+      extensions::TabHelper::FromWebContents(tab_contents->web_contents());
+  return tab_helper ? tab_helper->active_tab_permission_granter() : NULL;
 }
 
 void BrowserWindowCocoa::DestroyBrowser() {

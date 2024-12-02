@@ -15,29 +15,27 @@
 #include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/window_delegate.h"
 
-class WebContentsImpl;
-
 namespace aura {
 class Window;
-}
-
-namespace content {
-class WebContentsViewDelegate;
-class WebDragDestDelegate;
 }
 
 namespace ui {
 class DropTargetEvent;
 }
 
+namespace content {
+class WebContentsViewDelegate;
+class WebContentsImpl;
+class WebDragDestDelegate;
+
 class CONTENT_EXPORT WebContentsViewAura
-    : public content::WebContentsView,
-      public content::RenderViewHostDelegateView,
+    : public WebContentsView,
+      public RenderViewHostDelegateView,
       public aura::WindowDelegate,
       public aura::client::DragDropDelegate {
  public:
   WebContentsViewAura(WebContentsImpl* web_contents,
-                      content::WebContentsViewDelegate* delegate);
+                      WebContentsViewDelegate* delegate);
 
  private:
   virtual ~WebContentsViewAura();
@@ -48,8 +46,8 @@ class CONTENT_EXPORT WebContentsViewAura
 
   // Overridden from WebContentsView:
   virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
-  virtual content::RenderWidgetHostView* CreateViewForWidget(
-      content::RenderWidgetHost* render_widget_host) OVERRIDE;
+  virtual RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeView GetContentNativeView() const OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
@@ -58,13 +56,11 @@ class CONTENT_EXPORT WebContentsViewAura
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;
-  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void SetInitialFocus() OVERRIDE;
   virtual void StoreFocus() OVERRIDE;
   virtual void RestoreFocus() OVERRIDE;
-  virtual bool IsDoingDrag() const OVERRIDE;
-  virtual void CancelDragAndCloseTab() OVERRIDE;
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual bool IsEventTracking() const OVERRIDE;
   virtual void CloseTabAfterEventTracking() OVERRIDE;
@@ -72,8 +68,8 @@ class CONTENT_EXPORT WebContentsViewAura
 
   // Overridden from RenderViewHostDelegateView:
   virtual void ShowContextMenu(
-      const content::ContextMenuParams& params,
-      content::ContextMenuSourceType type) OVERRIDE;
+      const ContextMenuParams& params,
+      ContextMenuSourceType type) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -114,7 +110,7 @@ class CONTENT_EXPORT WebContentsViewAura
   // Overridden from ui::EventHandler:
   virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
   virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from aura::client::DragDropDelegate:
@@ -123,24 +119,18 @@ class CONTENT_EXPORT WebContentsViewAura
   virtual void OnDragExited() OVERRIDE;
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
 
-  gfx::Size initial_size_;
-
   scoped_ptr<aura::Window> window_;
 
   // The WebContentsImpl whose contents we display.
   WebContentsImpl* web_contents_;
 
-  content::RenderWidgetHostView* view_;
+  RenderWidgetHostView* view_;
 
-  scoped_ptr<content::WebContentsViewDelegate> delegate_;
+  scoped_ptr<WebContentsViewDelegate> delegate_;
 
   WebKit::WebDragOperationsMask current_drag_op_;
 
-  // Set to true if we want to close the tab after the system drag operation
-  // has finished.
-  bool close_tab_after_drag_ends_;
-
-  content::WebDragDestDelegate* drag_dest_delegate_;
+  WebDragDestDelegate* drag_dest_delegate_;
 
   // We keep track of the render view host we're dragging over.  If it changes
   // during a drag, we need to re-send the DragEnter message.  WARNING:
@@ -150,5 +140,7 @@ class CONTENT_EXPORT WebContentsViewAura
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsViewAura);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_WEB_CONTENTS_WEB_CONTENTS_VIEW_AURA_H_

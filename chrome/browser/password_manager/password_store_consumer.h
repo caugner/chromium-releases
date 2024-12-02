@@ -5,12 +5,10 @@
 #ifndef CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CONSUMER_H_
 #define CHROME_BROWSER_PASSWORD_MANAGER_PASSWORD_STORE_CONSUMER_H_
 
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 
-namespace webkit {
-namespace forms {
+namespace content {
 struct PasswordForm;
-}
 }
 
 // Reads from the PasswordStore are done asynchronously on a separate
@@ -26,7 +24,7 @@ class PasswordStoreConsumer {
   // anyway with an empty vector.
   virtual void OnPasswordStoreRequestDone(
       CancelableRequestProvider::Handle handle,
-      const std::vector<webkit::forms::PasswordForm*>& result) = 0;
+      const std::vector<content::PasswordForm*>& result) = 0;
 
   // The CancelableRequest framework needs both a callback (the
   // PasswordStoreConsumer::OnPasswordStoreRequestDone) as well as a

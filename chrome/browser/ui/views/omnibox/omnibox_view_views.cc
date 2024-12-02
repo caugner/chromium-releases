@@ -266,19 +266,17 @@ OmniboxViewViews::~OmniboxViewViews() {
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxViewViews public:
 
-void OmniboxViewViews::Init(views::View* popup_parent_view) {
+void OmniboxViewViews::Init() {
   // The height of the text view is going to change based on the font used.  We
   // don't want to stretch the height, and we want it vertically centered.
   // TODO(oshima): make sure the above happens with views.
   textfield_ = new AutocompleteTextfield(this, location_bar_view_);
   textfield_->SetController(this);
   textfield_->SetTextInputType(ui::TEXT_INPUT_TYPE_URL);
-  if (chrome::search::IsInstantExtendedAPIEnabled(
-          location_bar_view_->profile())) {
-    textfield_->SetBackgroundColor(chrome::search::kOmniboxBackgroundColor);
-  } else {
-    textfield_->SetBackgroundColor(LocationBarView::kOmniboxBackgroundColor);
-  }
+  textfield_->SetBackgroundColor(LocationBarView::GetColor(
+      chrome::search::IsInstantExtendedAPIEnabled(
+          location_bar_view_->profile()),
+      ToolbarModel::NONE, LocationBarView::BACKGROUND));
 
   if (popup_window_mode_)
     textfield_->SetReadOnly(true);
@@ -295,8 +293,7 @@ void OmniboxViewViews::Init(views::View* popup_parent_view) {
   // Create popup view using the same font as |textfield_|'s.
   popup_view_.reset(
       OmniboxPopupContentsView::Create(
-          textfield_->font(), this, model(), location_bar_view_,
-          popup_parent_view));
+          textfield_->font(), this, model(), location_bar_view_));
 
   // A null-border to zero out the focused border on textfield.
   const int vertical_margin = !popup_window_mode_ ?
@@ -693,10 +690,9 @@ gfx::NativeView OmniboxViewViews::GetRelativeWindowForPopup() const {
   return GetWidget()->GetTopLevelWidget()->GetNativeView();
 }
 
-void OmniboxViewViews::SetInstantSuggestion(const string16& input,
-                                            bool animate_to_complete) {
+void OmniboxViewViews::SetInstantSuggestion(const string16& input) {
 #if defined(OS_WIN) || defined(USE_AURA)
-  location_bar_view_->SetInstantSuggestion(input, animate_to_complete);
+  location_bar_view_->SetInstantSuggestion(input);
 #endif
 }
 
@@ -763,6 +759,19 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
          textfield_->GetCursorPosition() == textfield_->text().length());
   }
 
+  // Though the Textfield usually handles the right-arrow key for LTR text or
+  // left-arrow key for RTL text, we need to handle it if we have gray text
+  // (Instant suggestion) that needs to be committed.
+  if (textfield_->GetCursorPosition() == textfield_->text().length()) {
+    base::i18n::TextDirection direction = textfield_->GetTextDirection();
+    if ((direction == base::i18n::LEFT_TO_RIGHT &&
+         event.key_code() == ui::VKEY_RIGHT) ||
+        (direction == base::i18n::RIGHT_TO_LEFT &&
+         event.key_code() == ui::VKEY_LEFT)) {
+      return model()->CommitSuggestedText(true);
+    }
+  }
+
   return false;
 }
 
@@ -826,7 +835,7 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
 bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
   if (command_id == IDS_PASTE_AND_GO)
     return model()->CanPasteAndGo(GetClipboardText());
-  if (command_id == IDS_COPY_URL) {
+  if (command_id == IDC_COPY_URL) {
     return toolbar_model()->WouldReplaceSearchURLWithSearchTerms() &&
       !model()->user_input_in_progress();
   }
@@ -850,7 +859,7 @@ string16 OmniboxViewViews::GetLabelForCommandId(int command_id) const {
 void OmniboxViewViews::ExecuteCommand(int command_id) {
   if (command_id == IDS_PASTE_AND_GO)
     model()->PasteAndGo(GetClipboardText());
-  else if (command_id == IDS_COPY_URL)
+  else if (command_id == IDC_COPY_URL)
     CopyURL();
   else
     command_updater()->ExecuteCommand(command_id);
@@ -895,14 +904,19 @@ void OmniboxViewViews::EmphasizeURLComponents() {
                                                  &scheme, &host);
   const bool emphasize = model()->CurrentTextIsURL() && (host.len > 0);
 
+  bool instant_extended_api_enabled =
+      chrome::search::IsInstantExtendedAPIEnabled(
+          location_bar_view_->profile());
   SkColor base_color = LocationBarView::GetColor(
+      instant_extended_api_enabled,
       security_level_,
       emphasize ? LocationBarView::DEEMPHASIZED_TEXT : LocationBarView::TEXT);
   ApplyURLStyle(textfield_, 0, text.length(), base_color, false);
 
   if (emphasize) {
     SkColor normal_color =
-        LocationBarView::GetColor(security_level_, LocationBarView::TEXT);
+        LocationBarView::GetColor(instant_extended_api_enabled, security_level_,
+                                  LocationBarView::TEXT);
     ApplyURLStyle(textfield_, host.begin, host.end(), normal_color, false);
   }
 
@@ -910,7 +924,8 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   if (!model()->user_input_in_progress() && scheme.is_nonempty() &&
       (security_level_ != ToolbarModel::NONE)) {
     SkColor security_color = LocationBarView::GetColor(
-        security_level_, LocationBarView::SECURITY_TEXT);
+        instant_extended_api_enabled, security_level_,
+        LocationBarView::SECURITY_TEXT);
     bool use_strikethrough = (security_level_ == ToolbarModel::SECURITY_ERROR);
     ApplyURLStyle(textfield_, scheme.begin, scheme.end(),
                   security_color, use_strikethrough);

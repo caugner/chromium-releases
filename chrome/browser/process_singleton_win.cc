@@ -22,12 +22,14 @@
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
+#include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/wmi.h"
 #include "content/public/common/result_codes.h"
@@ -140,7 +142,8 @@ bool ActivateMetroChrome() {
     return false;
   }
   string16 app_id = ShellUtil::GetBrowserModelId(
-      BrowserDistribution::GetDistribution(), chrome_exe.value());
+      BrowserDistribution::GetDistribution(),
+      InstallUtil::IsPerUserInstall(chrome_exe.value().c_str()));
   if (app_id.empty()) {
     NOTREACHED() << "Failed to get chrome app user model id.";
     return false;
@@ -170,9 +173,10 @@ bool ActivateMetroChrome() {
 // Following conditions apply:-
 // 1. Windows 8 or greater.
 // 2. Not in Windows 8 immersive mode.
-// 3. Process integrity level is not high.
-// 4. The profile data directory is the default directory .
-// 5. Last used mode was immersive/machine is a tablet.
+// 3. Chrome is default browser.
+// 4. Process integrity level is not high.
+// 5. The profile data directory is the default directory.
+// 6. Last used mode was immersive/machine is a tablet.
 // TODO(ananta)
 // Move this function to a common place as the Windows 8 delegate_execute
 // handler can possibly use this.
@@ -185,6 +189,9 @@ bool ShouldLaunchInWindows8ImmersiveMode(const FilePath& user_data_dir) {
     return false;
 
   if (base::win::IsProcessImmersive(base::GetCurrentProcessHandle()))
+    return false;
+
+  if (!ShellIntegration::IsDefaultBrowser())
     return false;
 
   base::IntegrityLevel integrity_level = base::INTEGRITY_UNKNOWN;
@@ -266,7 +273,6 @@ bool ProcessSingleton::EscapeVirtualization(const FilePath& user_data_dir) {
 ProcessSingleton::ProcessSingleton(const FilePath& user_data_dir)
     : window_(NULL), locked_(false), foreground_window_(NULL),
     is_virtualized_(false), lock_file_(INVALID_HANDLE_VALUE) {
-  FilePath default_user_data_dir;
   // For Windows 8 and above check if we need to relaunch into Windows 8
   // immersive mode.
   if (ShouldLaunchInWindows8ImmersiveMode(user_data_dir)) {

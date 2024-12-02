@@ -828,7 +828,7 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
         chrome.fileBrowserPrivate.onFileTransfersUpdated.removeListener(
             onFileTransfersUpdated);
         if (chrome.extension.lastError) {
-          this.log_(
+          self.log_(
               'Error copying ' + sourceFileUrl + ' to ' + targetFileUrl);
           onFilesystemError({
             code: chrome.extension.lastError.message,
@@ -864,8 +864,14 @@ FileCopyManager.prototype.serviceNextTaskEntry_ = function(
         self.cancelCallback_ = null;
         chrome.fileBrowserPrivate.onFileTransfersUpdated.removeListener(
             onFileTransfersUpdated);
-        chrome.fileBrowserPrivate.cancelFileTransfers([sourceFileUrl],
-                                                      function() {});
+        if (task.sourceOnGData) {
+          chrome.fileBrowserPrivate.cancelFileTransfers([sourceFileUrl],
+                                                        function() {});
+        } else {
+          chrome.fileBrowserPrivate.cancelFileTransfers([targetFileUrl],
+                                                        function() {});
+        }
+
         self.doCancel_();
       };
 
@@ -941,7 +947,8 @@ FileCopyManager.prototype.copyEntry_ = function(sourceEntry,
   if (this.maybeCancel_())
     return;
 
-  self = this;
+  var self = this;
+
   function onSourceFileFound(file) {
     function onWriterCreated(writer) {
       var reportedProgress = 0;
@@ -963,7 +970,11 @@ FileCopyManager.prototype.copyEntry_ = function(sourceEntry,
       };
 
       writer.onwriteend = function() {
-        successCallback(targetEntry, file.size - reportedProgress);
+        sourceEntry.getMetadata(function(metadata) {
+          chrome.fileBrowserPrivate.setLastModified(targetEntry.toURL(),
+              '' + Math.round(metadata.modificationTime.getTime() / 1000));
+          successCallback(targetEntry, file.size - reportedProgress);
+        });
       };
 
       writer.write(file);

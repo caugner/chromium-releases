@@ -17,6 +17,7 @@
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_function_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager.h"
@@ -210,7 +211,7 @@ void AddMemoryDetails(DictionaryValue* result,
 
 #endif  // defined(ENABLE_TASK_MANAGER)
 
-} // local namespace
+}  // namespace
 
 ProcessesEventRouter* ProcessesEventRouter::GetInstance() {
   return Singleton<ProcessesEventRouter>::get();
@@ -258,7 +259,7 @@ void ProcessesEventRouter::ListenerAdded() {
 }
 
 void ProcessesEventRouter::ListenerRemoved() {
-  DCHECK(listeners_ > 0);
+  DCHECK_GT(listeners_, 0);
   --listeners_;
 #if defined(ENABLE_TASK_MANAGER)
   // The task manager has its own ref count to balance other callers of
@@ -396,7 +397,7 @@ void ProcessesEventRouter::OnItemsChanged(int start, int length) {
 
 void ProcessesEventRouter::OnItemsToBeRemoved(int start, int length) {
 #if defined(ENABLE_TASK_MANAGER)
-  DCHECK(length == 1);
+  DCHECK_EQ(length, 1);
 
   // Process exit for renderer processes has the data about exit code and
   // termination status, therefore we will rely on notifications and not on
@@ -475,17 +476,17 @@ void ProcessesEventRouter::ProcessClosedEvent(
 void ProcessesEventRouter::DispatchEvent(Profile* profile,
                                          const char* event_name,
                                          scoped_ptr<ListValue> event_args) {
-  if (profile && profile->GetExtensionEventRouter()) {
-    profile->GetExtensionEventRouter()->DispatchEventToRenderers(
-        event_name, event_args.Pass(), NULL, GURL(),
-        extensions::EventFilteringInfo());
+  if (profile && extensions::ExtensionSystem::Get(profile)->event_router()) {
+    extensions::ExtensionSystem::Get(profile)->event_router()->
+        DispatchEventToRenderers(event_name, event_args.Pass(), NULL, GURL(),
+                                 extensions::EventFilteringInfo());
   }
 }
 
 void ProcessesEventRouter::NotifyProfiles(const char* event_name,
                                           scoped_ptr<ListValue> event_args) {
   for (ProfileSet::iterator it = profiles_.begin();
-       it != profiles_.end(); it++) {
+       it != profiles_.end(); ++it) {
     Profile* profile = *it;
     scoped_ptr<ListValue> event_args_copy(event_args->DeepCopy());
     DispatchEvent(profile, event_name, event_args_copy.Pass());
@@ -496,11 +497,12 @@ void ProcessesEventRouter::NotifyProfiles(const char* event_name,
 // interest, we need to ask each profile whether it has one registered.
 // We only need to look for the profiles that have registered with the
 // this extension API.
-bool ProcessesEventRouter::HasEventListeners(std::string& event_name) {
+bool ProcessesEventRouter::HasEventListeners(const std::string& event_name) {
   for (ProfileSet::iterator it = profiles_.begin();
-       it != profiles_.end(); it++) {
+       it != profiles_.end(); ++it) {
     Profile* profile = *it;
-    extensions::EventRouter* router = profile->GetExtensionEventRouter();
+    extensions::EventRouter* router =
+        extensions::ExtensionSystem::Get(profile)->event_router();
     if (!router)
       continue;
 
@@ -508,6 +510,9 @@ bool ProcessesEventRouter::HasEventListeners(std::string& event_name) {
       return true;
   }
   return false;
+}
+
+GetProcessIdForTabFunction::GetProcessIdForTabFunction() : tab_id_(-1) {
 }
 
 bool GetProcessIdForTabFunction::RunImpl() {
@@ -566,6 +571,9 @@ void GetProcessIdForTabFunction::GetProcessIdForTab() {
 
   // Balance the AddRef in the RunImpl.
   Release();
+}
+
+TerminateFunction::TerminateFunction() : process_id_(-1) {
 }
 
 bool TerminateFunction::RunImpl() {
@@ -729,7 +737,7 @@ void GetProcessInfoFunction::GatherProcessInfo() {
         }
       }
     }
-    DCHECK(process_ids_.size() == 0);
+    DCHECK_EQ(process_ids_.size(), 0U);
   }
 
   SetResult(processes);

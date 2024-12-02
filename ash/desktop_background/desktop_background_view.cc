@@ -41,6 +41,7 @@ class ShowWallpaperAnimationObserver : public ui::ImplicitAnimationObserver,
   }
 
   virtual ~ShowWallpaperAnimationObserver() {
+    StopObservingImplicitAnimations();
     if (desktop_widget_)
       desktop_widget_->RemoveObserver(this);
   }
@@ -48,16 +49,24 @@ class ShowWallpaperAnimationObserver : public ui::ImplicitAnimationObserver,
  private:
   // Overridden from ui::ImplicitAnimationObserver:
   virtual void OnImplicitAnimationsCompleted() OVERRIDE {
+    DCHECK(desktop_widget_);
     ash::Shell* shell = ash::Shell::GetInstance();
+    // TODO(oshima): fix this for extended desktop.
     shell->GetPrimaryRootWindowController()->HandleDesktopBackgroundVisible();
     shell->user_wallpaper_delegate()->OnWallpaperAnimationFinished();
     // Only removes old component when wallpaper animation finished. If we
-    // remove the old one too early, there will be a white flash during
-    // animation.
-    if (root_window_->GetProperty(kComponentWrapper)) {
-      internal::DesktopBackgroundWidgetController* component =
-          root_window_->GetProperty(kComponentWrapper)->GetComponent(true);
-      root_window_->SetProperty(kWindowDesktopComponent, component);
+    // remove the old one before the new wallpaper is done fading in there will
+    // be a white flash during the animation.
+    if (root_window_->GetProperty(kAnimatingDesktopController)) {
+      DesktopBackgroundWidgetController* controller =
+          root_window_->GetProperty(kAnimatingDesktopController)->
+              GetController(true);
+      // |desktop_widget_| should be the same animating widget we try to move
+      // to |kDesktopController|. Otherwise, we may close |desktop_widget_|
+      // before move it to |kDesktopController|.
+      DCHECK_EQ(controller->widget(), desktop_widget_);
+      // Release the old controller and close its background widget.
+      root_window_->SetProperty(kDesktopController, controller);
     }
     delete this;
   }
@@ -125,7 +134,8 @@ void DesktopBackgroundView::OnPaint(gfx::Canvas* canvas) {
           RoundPositive(static_cast<double>(height()) / horizontal_ratio));
     }
 
-    gfx::Rect wallpaper_cropped_rect = wallpaper_rect.Center(cropped_size);
+    gfx::Rect wallpaper_cropped_rect = wallpaper_rect;
+    wallpaper_cropped_rect.ClampToCenteredSize(cropped_size);
     canvas->DrawImageInt(wallpaper,
         wallpaper_cropped_rect.x(), wallpaper_cropped_rect.y(),
         wallpaper_cropped_rect.width(), wallpaper_cropped_rect.height(),
@@ -150,7 +160,7 @@ bool DesktopBackgroundView::OnMousePressed(const ui::MouseEvent& event) {
 
 void DesktopBackgroundView::ShowContextMenuForView(views::View* source,
                                                    const gfx::Point& point) {
-  Shell::GetInstance()->ShowBackgroundMenu(GetWidget(), point);
+  Shell::GetInstance()->ShowContextMenu(point);
 }
 
 views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
@@ -173,7 +183,7 @@ views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
   // will animate from a white screen. Note that boot animation is different.
   // It animates from a white background.
   if (animation_type == ash::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE &&
-      NULL == root_window->GetProperty(internal::kComponentWrapper)) {
+      NULL == root_window->GetProperty(kAnimatingDesktopController)) {
     ash::SetWindowVisibilityAnimationTransition(desktop_widget->GetNativeView(),
                                                 ash::ANIMATE_NONE);
   } else {

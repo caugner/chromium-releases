@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/observer_list.h"
-#include "base/time.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -33,7 +32,7 @@ class MockDiskMountManager : public DiskMountManager {
   MOCK_METHOD0(RequestMountInfoRefresh, void(void));
   MOCK_METHOD4(MountPath, void(const std::string&, const std::string&,
                                const std::string&, MountType));
-  MOCK_METHOD1(UnmountPath, void(const std::string&));
+  MOCK_METHOD2(UnmountPath, void(const std::string&, UnmountOptions));
   MOCK_METHOD1(FormatUnmountedDevice, void(const std::string&));
   MOCK_METHOD1(FormatMountedDevice, void(const std::string&));
   MOCK_METHOD3(UnmountDeviceRecursive, void(const std::string&,

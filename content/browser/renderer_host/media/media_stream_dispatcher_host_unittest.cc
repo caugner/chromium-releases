@@ -28,17 +28,14 @@ using ::testing::DeleteArg;
 using ::testing::DoAll;
 using ::testing::Return;
 
-using content::BrowserThread;
-using content::BrowserThreadImpl;
-
 const int kProcessId = 5;
 const int kRenderId = 6;
 const int kPageRequestId = 7;
 
-namespace media_stream {
+namespace content {
 
 class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
-                                      public content::TestContentBrowserClient {
+                                      public TestContentBrowserClient {
  public:
   MockMediaStreamDispatcherHost(MessageLoop* message_loop,
                                 MediaStreamManager* manager)
@@ -51,9 +48,7 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
                void(int routing_id, int request_id, int audio_array_size,
                     int video_array_size));
   MOCK_METHOD2(OnStreamGenerationFailed, void(int routing_id, int request_id));
-  MOCK_METHOD2(OnAudioDeviceFailed, void(int routing_id, int index));
-  MOCK_METHOD2(OnVideoDeviceFailed, void(int routing_id, int index));
-  MOCK_METHOD0(GetMediaObserver, content::MediaObserver*());
+  MOCK_METHOD0(GetMediaObserver, MediaObserver*());
 
   // Accessor to private functions.
   void OnGenerateStream(int page_request_id, const StreamOptions& components) {
@@ -61,15 +56,6 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
                                                 page_request_id,
                                                 components,
                                                 GURL());
-  }
-  void OnGenerateStreamForDevice(int page_request_id,
-                                 const StreamOptions& components,
-                                 const std::string& device_id) {
-    MediaStreamDispatcherHost::OnGenerateStreamForDevice(kRenderId,
-                                                         page_request_id,
-                                                         components,
-                                                         device_id,
-                                                         GURL());
   }
   void OnStopGeneratedStream(const std::string& label) {
     MediaStreamDispatcherHost::OnStopGeneratedStream(kRenderId, label);
@@ -100,10 +86,6 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
       IPC_MESSAGE_HANDLER(MediaStreamMsg_StreamGenerated, OnStreamGenerated)
       IPC_MESSAGE_HANDLER(MediaStreamMsg_StreamGenerationFailed,
                           OnStreamGenerationFailed)
-      IPC_MESSAGE_HANDLER(MediaStreamHostMsg_VideoDeviceFailed,
-                          OnVideoDeviceFailed)
-      IPC_MESSAGE_HANDLER(MediaStreamHostMsg_AudioDeviceFailed,
-                          OnAudioDeviceFailed)
       IPC_MESSAGE_UNHANDLED(handled = false)
     IPC_END_MESSAGE_MAP()
     EXPECT_TRUE(handled);
@@ -139,22 +121,6 @@ class MockMediaStreamDispatcherHost : public MediaStreamDispatcherHost,
     label_= "";
   }
 
-  void OnAudioDeviceFailed(const IPC::Message& msg,
-                           std::string label,
-                           int index) {
-    OnAudioDeviceFailed(msg.routing_id(), index);
-    audio_devices_.erase(audio_devices_.begin() + index);
-    message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-  }
-
-  void OnVideoDeviceFailed(const IPC::Message& msg,
-                           std::string label,
-                           int index) {
-    OnVideoDeviceFailed(msg.routing_id(), index);
-    video_devices_.erase(video_devices_.begin() + index);
-    message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-  }
-
   MessageLoop* message_loop_;
   MediaStreamManager* manager_;
 };
@@ -181,8 +147,7 @@ class MediaStreamDispatcherHostTest : public testing::Test {
 
     // Create our own MediaStreamManager.
     audio_manager_.reset(media::AudioManager::Create());
-    media_stream_manager_.reset(
-        new media_stream::MediaStreamManager(audio_manager_.get()));
+    media_stream_manager_.reset(new MediaStreamManager(audio_manager_.get()));
     // Make sure we use fake devices to avoid long delays.
     media_stream_manager_->UseFakeDevice();
 
@@ -190,10 +155,10 @@ class MediaStreamDispatcherHostTest : public testing::Test {
                                               media_stream_manager_.get());
 
     // Use the fake content client and browser.
-    old_client_ = content::GetContentClient();
-    old_browser_client_ = content::GetContentClient()->browser();
+    old_client_ = GetContentClient();
+    old_browser_client_ = GetContentClient()->browser();
     content_client_.reset(new TestContentClient);
-    content::SetContentClient(content_client_.get());
+    SetContentClient(content_client_.get());
     content_client_->set_browser_for_testing(host_);
   }
 
@@ -201,8 +166,8 @@ class MediaStreamDispatcherHostTest : public testing::Test {
     message_loop_->RunAllPending();
 
     // Recover the old browser client and content client.
-    content::GetContentClient()->set_browser_for_testing(old_browser_client_);
-    content::SetContentClient(old_client_);
+    GetContentClient()->set_browser_for_testing(old_browser_client_);
+    SetContentClient(old_client_);
     content_client_.reset();
 
     // Delete the IO message loop to delete the device thread,
@@ -215,14 +180,14 @@ class MediaStreamDispatcherHostTest : public testing::Test {
   scoped_ptr<BrowserThreadImpl> io_thread_;
   scoped_ptr<media::AudioManager> audio_manager_;
   scoped_ptr<MediaStreamManager> media_stream_manager_;
-  content::ContentClient* old_client_;
-  content::ContentBrowserClient* old_browser_client_;
-  scoped_ptr<content::ContentClient> content_client_;
+  ContentClient* old_client_;
+  ContentBrowserClient* old_browser_client_;
+  scoped_ptr<ContentClient> content_client_;
   scoped_ptr<MockMediaObserver> media_observer_;
 };
 
 TEST_F(MediaStreamDispatcherHostTest, GenerateStream) {
-  StreamOptions options(false, true);
+  StreamOptions options(MEDIA_NO_SERVICE, MEDIA_DEVICE_VIDEO_CAPTURE);
 
   EXPECT_CALL(*host_, GetMediaObserver())
       .WillRepeatedly(Return(media_observer_.get()));
@@ -244,37 +209,11 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateStream) {
   EXPECT_EQ(host_->NumberOfStreams(), 0u);
 }
 
-TEST_F(MediaStreamDispatcherHostTest, GenerateStreamForDevice) {
-  static const char kDeviceId[] = "/dev/video0";
-
-  StreamOptions options(content::MEDIA_NO_SERVICE,
-                        content::MEDIA_DEVICE_VIDEO_CAPTURE);
-
-  EXPECT_CALL(*host_, GetMediaObserver())
-      .WillRepeatedly(Return(media_observer_.get()));
-  EXPECT_CALL(*host_, OnStreamGenerated(kRenderId, kPageRequestId, 0, 1));
-  host_->OnGenerateStreamForDevice(kPageRequestId, options, kDeviceId);
-
-  EXPECT_CALL(*media_observer_.get(), OnCaptureDevicesOpened(_, _, _));
-  EXPECT_CALL(*media_observer_.get(), OnCaptureDevicesClosed(_, _, _));
-
-  WaitForResult();
-
-  std::string label = host_->label_;
-
-  EXPECT_EQ(0u, host_->audio_devices_.size());
-  EXPECT_EQ(1u, host_->video_devices_.size());
-  EXPECT_EQ(1u, host_->NumberOfStreams());
-
-  host_->OnStopGeneratedStream(label);
-  EXPECT_EQ(0u, host_->NumberOfStreams());
-}
-
 TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
   // This test opens three video capture devices. Two fake devices exists and it
   // is expected the last call to |Open()| will open the first device again, but
   // with a different label.
-  StreamOptions options(false, true);
+  StreamOptions options(MEDIA_NO_SERVICE, MEDIA_DEVICE_VIDEO_CAPTURE);
 
   // Generate first stream.
   EXPECT_CALL(*host_, GetMediaObserver())
@@ -308,7 +247,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
   EXPECT_EQ(host_->video_devices_.size(), 1u);
   std::string label2 = host_->label_;
   std::string device_id2 = host_->video_devices_.front().device_id;
-  EXPECT_NE(device_id1, device_id2);
+  EXPECT_EQ(device_id1, device_id2);
   EXPECT_NE(label1, label2);
 
   // Check that we now have two opened streams.
@@ -330,7 +269,6 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
   std::string label3 = host_->label_;
   std::string device_id3 = host_->video_devices_.front().device_id;
   EXPECT_EQ(device_id1, device_id3);
-  EXPECT_NE(device_id2, device_id3);
   EXPECT_NE(label1, label3);
   EXPECT_NE(label2, label3);
 
@@ -344,7 +282,7 @@ TEST_F(MediaStreamDispatcherHostTest, GenerateThreeStreams) {
 }
 
 TEST_F(MediaStreamDispatcherHostTest, FailOpenVideoDevice) {
-  StreamOptions options(false, true);
+  StreamOptions options(MEDIA_NO_SERVICE, MEDIA_DEVICE_VIDEO_CAPTURE);
 
   EXPECT_CALL(*host_, GetMediaObserver())
       .WillRepeatedly(Return(media_observer_.get()));
@@ -356,7 +294,7 @@ TEST_F(MediaStreamDispatcherHostTest, FailOpenVideoDevice) {
 }
 
 TEST_F(MediaStreamDispatcherHostTest, CancelPendingStreamsOnChannelClosing) {
-  StreamOptions options(false, true);
+  StreamOptions options(MEDIA_NO_SERVICE, MEDIA_DEVICE_VIDEO_CAPTURE);
 
   EXPECT_CALL(*host_, GetMediaObserver())
       .WillRepeatedly(Return(media_observer_.get()));
@@ -376,7 +314,7 @@ TEST_F(MediaStreamDispatcherHostTest, CancelPendingStreamsOnChannelClosing) {
 }
 
 TEST_F(MediaStreamDispatcherHostTest, StopGeneratedStreamsOnChannelClosing) {
-  StreamOptions options(false, true);
+  StreamOptions options(MEDIA_NO_SERVICE, MEDIA_DEVICE_VIDEO_CAPTURE);
 
   EXPECT_CALL(*host_, GetMediaObserver())
       .WillRepeatedly(Return(media_observer_.get()));
@@ -402,4 +340,4 @@ TEST_F(MediaStreamDispatcherHostTest, StopGeneratedStreamsOnChannelClosing) {
   EXPECT_EQ(host_->NumberOfStreams(), 0u);
 }
 
-};  // namespace media_stream
+};  // namespace content

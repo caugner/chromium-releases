@@ -9,6 +9,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/event_disposition.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -31,8 +32,12 @@
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
+#include "chrome/browser/ui/views/extensions/disabled_extensions_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_container.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
+#include "chrome/browser/ui/views/search/search_view_controller.h"
+#include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -69,8 +74,6 @@
 #endif
 
 #if defined(USE_AURA)
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/search_view_controller.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/layer.h"
 #endif
@@ -108,6 +111,9 @@ const int kBadgeTopMargin = 2;
 const int kSearchTopButtonSpacing = 3;
 const int kSearchTopLocationBarSpacing = 2;
 const int kSearchToolbarSpacing = 5;
+
+// How often to show the disabled extension (sideload wipeout) bubble.
+const int kShowSideloadWipeoutBubbleMax = 3;
 
 gfx::ImageSkia* kPopupBackgroundEdge = NULL;
 
@@ -220,8 +226,7 @@ ToolbarView::~ToolbarView() {
   // browser.
 }
 
-void ToolbarView::Init(views::View* location_bar_parent,
-                       views::View* popup_parent_view) {
+void ToolbarView::Init(views::View* location_bar_parent) {
   back_ = new views::ButtonDropDown(this, new BackForwardMenuModel(
       browser_, BackForwardMenuModel::BACKWARD_MENU));
   back_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
@@ -293,9 +298,8 @@ void ToolbarView::Init(views::View* location_bar_parent,
   app_menu_->set_id(VIEW_ID_APP_MENU);
 
   // Add any necessary badges to the menu item based on the system state.
-  if (ShouldShowUpgradeRecommended() || ShouldShowIncompatibilityWarning()) {
+  if (ShouldShowUpgradeRecommended() || ShouldShowIncompatibilityWarning())
     UpdateAppMenuState();
-  }
   LoadImages();
 
   // Always add children in order from left to right, for accessibility.
@@ -306,18 +310,28 @@ void ToolbarView::Init(views::View* location_bar_parent,
   AddChildView(browser_actions_);
   AddChildView(app_menu_);
 
-  location_bar_->Init(popup_parent_view);
+  location_bar_->Init();
   show_home_button_.Init(prefs::kShowHomeButton,
                          browser_->profile()->GetPrefs(), this);
+  sideload_wipeout_bubble_shown_.Init(
+      prefs::kExtensionsSideloadWipeoutBubbleShown,
+      browser_->profile()->GetPrefs(), NULL);
+
   browser_actions_->Init();
 
   // Accessibility specific tooltip text.
-  if (BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser()) {
+  if (content::BrowserAccessibilityState::GetInstance()->
+          IsAccessibleBrowser()) {
     back_->SetTooltipText(
         l10n_util::GetStringUTF16(IDS_ACCNAME_TOOLTIP_BACK));
     forward_->SetTooltipText(
         l10n_util::GetStringUTF16(IDS_ACCNAME_TOOLTIP_FORWARD));
   }
+
+  int bubble_shown_count = sideload_wipeout_bubble_shown_.GetValue();
+  if (bubble_shown_count < kShowSideloadWipeoutBubbleMax &&
+      DisabledExtensionsView::MaybeShow(browser_, app_menu_))
+    sideload_wipeout_bubble_shown_.SetValue(++bubble_shown_count);
 }
 
 void ToolbarView::Update(WebContents* tab, bool should_restore_state) {
@@ -409,7 +423,6 @@ void ToolbarView::LayoutForSearch() {
         browser_->search_model()->mode().is_ntp()))
     return;
 
-#if defined(USE_AURA)
   const BrowserView* browser_view =
       static_cast<BrowserView*>(browser_->window());
   if (!browser_view)
@@ -431,11 +444,18 @@ void ToolbarView::LayoutForSearch() {
   // Note that parent of |location_bar_container_| i.e. BrowserView can't clip
   // its children, else it loses the 3D shadows.
   gfx::Rect parent_rect = location_bar_container_->parent()->GetLocalBounds();
-  gfx::Rect intersect_rect = parent_rect.Intersect(location_container_bounds);
+  gfx::Rect intersect_rect =
+      gfx::IntersectRects(parent_rect, location_container_bounds);
   // If the two bounds don't intersect, set bounds of |location_bar_container_|
   // to 0.
   location_bar_container_->SetBoundsRect(intersect_rect);
-#endif
+}
+
+views::View* ToolbarView::GetBookmarkBubbleAnchor() {
+  views::View* star_view = location_bar()->star_view();
+  if (star_view && star_view->visible())
+    return star_view;
+  return app_menu_;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -477,8 +497,8 @@ void ToolbarView::OnMenuButtonClicked(views::View* source,
   DCHECK_EQ(VIEW_ID_APP_MENU, source->id());
 
   wrench_menu_.reset(new WrenchMenu(browser_));
-  WrenchMenuModel model(this, browser_);
-  wrench_menu_->Init(&model);
+  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
+  wrench_menu_->Init(wrench_menu_model_.get());
 
   FOR_EACH_OBSERVER(views::MenuListener, menu_listeners_, OnMenuOpened());
 
@@ -520,9 +540,9 @@ PageActionImageView* ToolbarView::CreatePageActionImageView(
 
 void ToolbarView::OnInputInProgress(bool in_progress) {
   // The edit should make sure we're only notified when something changes.
-  DCHECK(model_->input_in_progress() != in_progress);
+  DCHECK(model_->GetInputInProgress() != in_progress);
 
-  model_->set_input_in_progress(in_progress);
+  model_->SetInputInProgress(in_progress);
   location_bar_->Update(NULL);
 }
 
@@ -822,6 +842,20 @@ bool ToolbarView::HitTestRect(const gfx::Rect& rect) const {
 
 void ToolbarView::OnPaint(gfx::Canvas* canvas) {
   View::OnPaint(canvas);
+
+  TabContents* tab_contents = GetTabContents();
+  if (tab_contents) {
+    InfoBarTabHelper* infobar_tab_helper =
+        InfoBarTabHelper::FromWebContents(tab_contents->web_contents());
+    int num_infobars = infobar_tab_helper->GetInfoBarCount();
+    const chrome::search::Mode& mode(browser_->search_model()->mode());
+    if ((mode.is_ntp() || mode.is_search_results()) && num_infobars > 0) {
+      canvas->FillRect(gfx::Rect(0, height() - 1, width(), 1),
+                       ThemeService::GetDefaultColor(
+                           ThemeService::COLOR_SEARCH_SEPARATOR_LINE));
+      return;
+    }
+  }
 
   if (is_display_mode_normal())
     return;

@@ -9,6 +9,7 @@
 #include "base/file_path.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/prefs/pref_value_map.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
@@ -18,7 +19,6 @@
 #include "chrome/browser/policy/policy_error_map.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/policy_path_parser.h"
-#include "chrome/browser/prefs/pref_value_map.h"
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
@@ -86,6 +86,9 @@ const DefaultSearchSimplePolicyHandlerEntry kDefaultSearchPolicyMap[] = {
     Value::TYPE_STRING },
   { key::kDefaultSearchProviderEncodings,
     prefs::kDefaultSearchProviderEncodings,
+    Value::TYPE_LIST },
+  { key::kDefaultSearchProviderAlternateURLs,
+    prefs::kDefaultSearchProviderAlternateURLs,
     Value::TYPE_LIST },
 };
 
@@ -224,9 +227,10 @@ bool ExtensionListPolicyHandler::CheckPolicySettings(
 void ExtensionListPolicyHandler::ApplyPolicySettings(
     const PolicyMap& policies,
     PrefValueMap* prefs) {
-  const Value* value = policies.GetValue(policy_name());
-  if (value)
-    prefs->SetValue(pref_path(), value->DeepCopy());
+  scoped_ptr<base::ListValue> list;
+  PolicyErrorMap errors;
+  if (CheckAndGetList(policies, &errors, &list) && list)
+    prefs->SetValue(pref_path(), list.release());
 }
 
 const char* ExtensionListPolicyHandler::pref_path() const {
@@ -236,9 +240,9 @@ const char* ExtensionListPolicyHandler::pref_path() const {
 bool ExtensionListPolicyHandler::CheckAndGetList(
     const PolicyMap& policies,
     PolicyErrorMap* errors,
-    const base::ListValue** extension_ids) {
+    scoped_ptr<base::ListValue>* extension_ids) {
   if (extension_ids)
-    *extension_ids = NULL;
+    extension_ids->reset();
 
   const base::Value* value = NULL;
   if (!CheckAndGetValue(policies, errors, &value))
@@ -253,7 +257,8 @@ bool ExtensionListPolicyHandler::CheckAndGetList(
     return false;
   }
 
-  // Check that the list contains valid extension ID strings only.
+  // Filter the list, rejecting any invalid extension IDs.
+  scoped_ptr<base::ListValue> filtered_list(new base::ListValue());
   for (base::ListValue::const_iterator entry(list_value->begin());
        entry != list_value->end(); ++entry) {
     std::string id;
@@ -262,19 +267,20 @@ bool ExtensionListPolicyHandler::CheckAndGetList(
                        entry - list_value->begin(),
                        IDS_POLICY_TYPE_ERROR,
                        ValueTypeToString(base::Value::TYPE_STRING));
-      return false;
+      continue;
     }
     if (!(allow_wildcards_ && id == "*") &&
         !extensions::Extension::IdIsValid(id)) {
       errors->AddError(policy_name(),
                        entry - list_value->begin(),
                        IDS_POLICY_VALUE_FORMAT_ERROR);
-      return false;
+      continue;
     }
+    filtered_list->Append(base::Value::CreateStringValue(id));
   }
 
   if (extension_ids)
-    *extension_ids = list_value;
+    *extension_ids = filtered_list.Pass();
 
   return true;
 }
@@ -649,6 +655,8 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
     prefs->SetString(prefs::kDefaultSearchProviderEncodings, std::string());
     prefs->SetString(prefs::kDefaultSearchProviderKeyword, std::string());
     prefs->SetString(prefs::kDefaultSearchProviderInstantURL, std::string());
+    prefs->SetValue(prefs::kDefaultSearchProviderAlternateURLs,
+                    new ListValue());
   } else {
     // The search URL is required.  The other entries are optional.  Just make
     // sure that they are all specified via policy, so that the regular prefs
@@ -665,6 +673,7 @@ void DefaultSearchPolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
       EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderEncodings);
       EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderKeyword);
       EnsureStringPrefExists(prefs, prefs::kDefaultSearchProviderInstantURL);
+      EnsureListPrefExists(prefs, prefs::kDefaultSearchProviderAlternateURLs);
 
       // For the name and keyword, default to the host if not specified.  If
       // there is no host (file: URLs?  Not sure), use "_" to guarantee that the
@@ -749,6 +758,15 @@ void DefaultSearchPolicyHandler::EnsureStringPrefExists(
   std::string value;
   if (!prefs->GetString(path, &value))
     prefs->SetString(path, value);
+}
+
+void DefaultSearchPolicyHandler::EnsureListPrefExists(
+    PrefValueMap* prefs,
+    const std::string& path) {
+  base::Value* value;
+  base::ListValue* list_value;
+  if (!prefs->GetValue(path, &value) || !value->GetAsList(&list_value))
+    prefs->SetValue(path, new ListValue());
 }
 
 

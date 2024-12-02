@@ -19,6 +19,7 @@
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/command_buffer/service/vertex_array_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_context_stub.h"
 #include "ui/gl/gl_surface_stub.h"
@@ -124,6 +125,12 @@ class GLES2DecoderTestBase : public testing::Test {
     return decoder_->GetQueryManager()->GetQuery(client_id);
   }
 
+  // This name doesn't match the underlying function, but doing it this way
+  // prevents the need to special-case the unit test generation
+  VertexAttribManager* GetVertexArrayInfo(GLuint client_id) {
+    return decoder_->GetVertexArrayManager()->GetVertexAttribManager(client_id);
+  }
+
   ProgramManager* program_manager() {
     return group_->program_manager();
   }
@@ -171,6 +178,10 @@ class GLES2DecoderTestBase : public testing::Test {
         gl_.get(), uniforms, num_uniforms);
   }
 
+  void SetupInitCapabilitiesExpectations();
+  void SetupInitStateExpectations();
+  void ExpectEnableDisable(GLenum cap, bool enable);
+
   // Setups up a shader for testing glUniform.
   void SetupShaderForUniform();
   void SetupDefaultProgram();
@@ -189,6 +200,7 @@ class GLES2DecoderTestBase : public testing::Test {
   void DoBindFramebuffer(GLenum target, GLuint client_id, GLuint service_id);
   void DoBindRenderbuffer(GLenum target, GLuint client_id, GLuint service_id);
   void DoBindTexture(GLenum target, GLuint client_id, GLuint service_id);
+  void DoBindVertexArrayOES(GLuint client_id, GLuint service_id);
 
   bool DoIsBuffer(GLuint client_id);
   bool DoIsFramebuffer(GLuint client_id);
@@ -321,6 +333,11 @@ class GLES2DecoderTestBase : public testing::Test {
   void AddExpectationsForSimulatedAttrib0(
       GLsizei num_vertices, GLuint buffer_id);
 
+  void AddExpectationsForGenVertexArraysOES();
+  void AddExpectationsForDeleteVertexArraysOES();
+  void AddExpectationsForBindVertexArrayOES();
+  void AddExpectationsForRestoreAttribState(GLuint attrib);
+
   GLvoid* BufferOffset(unsigned i) {
     return static_cast<int8 *>(NULL)+(i);
   }
@@ -368,6 +385,7 @@ class GLES2DecoderTestBase : public testing::Test {
   static const GLuint kServiceShaderId = 306;
   static const GLuint kServiceElementBufferId = 308;
   static const GLuint kServiceQueryId = 309;
+  static const GLuint kServiceVertexArrayId = 310;
 
   static const int32 kSharedMemoryId = 401;
   static const size_t kSharedBufferSize = 2048;
@@ -460,6 +478,7 @@ class GLES2DecoderTestBase : public testing::Test {
   GLuint client_vertex_shader_id_;
   GLuint client_fragment_shader_id_;
   GLuint client_query_id_;
+  GLuint client_vertexarray_id_;
 
   uint32 shared_memory_id_;
   uint32 shared_memory_offset_;

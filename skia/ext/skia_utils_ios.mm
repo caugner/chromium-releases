@@ -47,6 +47,12 @@ SkBitmap UIImageToSkBitmap(UIImage* image, CGSize size, bool is_opaque) {
   if (!context)
     return bitmap;
 
+  // We need to invert the y-axis of the canvas so that Core Graphics drawing
+  // happens right-side up. Skia has an upper-left origin and CG has a lower-
+  // left one.
+  CGContextScaleCTM(context, 1.0, -1.0);
+  CGContextTranslateCTM(context, 0, -size.height);
+
   // UIGraphicsPushContext be called from the main thread.
   // TODO(rohitrao): We can use CG to make this thread safe, but the mac code
   // calls setCurrentContext, so it's similarly limited to the main thread.
@@ -61,6 +67,7 @@ SkBitmap UIImageToSkBitmap(UIImage* image, CGSize size, bool is_opaque) {
 }
 
 UIImage* SkBitmapToUIImageWithColorSpace(const SkBitmap& skia_bitmap,
+                                         CGFloat scale,
                                          CGColorSpaceRef color_space) {
   if (skia_bitmap.isNull())
     return nil;
@@ -70,8 +77,9 @@ UIImage* SkBitmapToUIImageWithColorSpace(const SkBitmap& skia_bitmap,
       SkCreateCGImageRefWithColorspace(skia_bitmap, color_space));
 
   // Now convert to UIImage.
-  // TODO(rohitrao): Gotta incorporate the scale factor somewhere!
-  return [UIImage imageWithCGImage:cg_image.get()];
+  return [UIImage imageWithCGImage:cg_image.get()
+                             scale:scale
+                       orientation:UIImageOrientationUp];
 }
 
 }  // namespace gfx

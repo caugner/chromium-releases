@@ -8,14 +8,9 @@ include_rules = [
   "+remoting/client/plugin",
   "+sandbox/win/src",
   "+skia",
-  "+webkit/forms",  # Defines some types that are marshalled over IPC.
   "+webkit/glue",
   "+webkit/plugins",
   "+webkit/user_agent",
-
-  # TODO(jam): remove this once all of chrome doesn't depend on content/common.
-  "-content/common",
-  "+content/common/content_message_generator.h",  # needed by all_messages.h
 
   # TODO(jam): remove me once chrome_notifcation_types.h moves to browser
   "+content/public/browser/notification_source.h",

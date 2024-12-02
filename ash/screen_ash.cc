@@ -4,8 +4,11 @@
 
 #include "ash/screen_ash.h"
 
+#include "ash/display/display_controller.h"
 #include "ash/display/multi_display_manager.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/wm/property_util.h"
 #include "ash/wm/coordinate_conversion.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "base/logging.h"
@@ -38,33 +41,24 @@ gfx::Display ScreenAsh::FindDisplayContainingPoint(const gfx::Point& point) {
 
 // static
 gfx::Rect ScreenAsh::GetMaximizedWindowBoundsInParent(aura::Window* window) {
-  if (window->GetRootWindow() == Shell::GetPrimaryRootWindow())
-    return Shell::GetInstance()->shelf()->GetMaximizedWindowBounds(window);
+  if (GetRootWindowController(window->GetRootWindow())->launcher())
+    return GetDisplayWorkAreaBoundsInParent(window);
   else
     return GetDisplayBoundsInParent(window);
-}
-
-// static
-gfx::Rect ScreenAsh::GetUnmaximizedWorkAreaBoundsInParent(
-    aura::Window* window) {
-  if (window->GetRootWindow() == Shell::GetPrimaryRootWindow())
-    return Shell::GetInstance()->shelf()->GetUnmaximizedWorkAreaBounds(window);
-  else
-    return GetDisplayWorkAreaBoundsInParent(window);
 }
 
 // static
 gfx::Rect ScreenAsh::GetDisplayBoundsInParent(aura::Window* window) {
   return ConvertRectFromScreen(
       window->parent(),
-      gfx::Screen::GetDisplayNearestWindow(window).bounds());
+      Shell::GetScreen()->GetDisplayNearestWindow(window).bounds());
 }
 
 // static
 gfx::Rect ScreenAsh::GetDisplayWorkAreaBoundsInParent(aura::Window* window) {
   return ConvertRectFromScreen(
       window->parent(),
-      gfx::Screen::GetDisplayNearestWindow(window).work_area());
+      Shell::GetScreen()->GetDisplayNearestWindow(window).work_area());
 }
 
 // static
@@ -85,12 +79,26 @@ gfx::Rect ScreenAsh::ConvertRectFromScreen(aura::Window* window,
   return gfx::Rect(point, rect.size());
 }
 
+// static
+const gfx::Display& ScreenAsh::GetSecondaryDisplay() {
+  return *(Shell::GetInstance()->display_controller()->GetSecondaryDisplay());
+}
+
+// static
+const gfx::Display& ScreenAsh::GetDisplayForId(int64 display_id) {
+  return GetDisplayManager()->GetDisplayForId(display_id);
+}
+
+bool ScreenAsh::IsDIPEnabled() {
+  return true;
+}
+
 gfx::Point ScreenAsh::GetCursorScreenPoint() {
   return aura::Env::GetInstance()->last_mouse_location();
 }
 
 gfx::NativeWindow ScreenAsh::GetWindowAtCursorScreenPoint() {
-  const gfx::Point point = gfx::Screen::GetCursorScreenPoint();
+  const gfx::Point point = Shell::GetScreen()->GetCursorScreenPoint();
   return wm::GetRootWindowAt(point)->GetTopWindowContainingPoint(point);
 }
 
@@ -111,7 +119,7 @@ gfx::Display ScreenAsh::GetDisplayMatching(const gfx::Rect& match_rect) const {
 }
 
 gfx::Display ScreenAsh::GetPrimaryDisplay() const {
-  return *GetDisplayManager()->GetDisplayAt(0);
+  return DisplayController::GetPrimaryDisplay();
 }
 
 }  // namespace ash

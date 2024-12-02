@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/app_list/extension_app_item.h"
 
 #include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sorting.h"
@@ -20,6 +22,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
+#include "content/public/common/context_menu_params.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -30,11 +33,14 @@ using extensions::Extension;
 namespace {
 
 enum CommandId {
-  LAUNCH = 100,
+  LAUNCH_NEW = 100,
   TOGGLE_PIN,
+  CREATE_SHORTCUTS,
   OPTIONS,
   UNINSTALL,
   DETAILS,
+  MENU_NEW_WINDOW,
+  MENU_NEW_INCOGNITO_WINDOW,
   // Order matters in LAUNCHER_TYPE_xxxx and must match LaunchType.
   LAUNCH_TYPE_START = 200,
   LAUNCH_TYPE_PINNED_TAB = LAUNCH_TYPE_START,
@@ -121,11 +127,15 @@ ExtensionSorting* GetExtensionSorting(Profile* profile) {
   return profile->GetExtensionService()->extension_prefs()->extension_sorting();
 }
 
+bool MenuItemHasLauncherContext(const extensions::MenuItem* item) {
+  return item->contexts().Contains(extensions::MenuItem::LAUNCHER);
+}
+
 }  // namespace
 
 ExtensionAppItem::ExtensionAppItem(Profile* profile,
                                    const Extension* extension,
-                                   AppListController* controller)
+                                   AppListControllerDelegate* controller)
     : ChromeAppListItem(TYPE_APP),
       profile_(profile),
       extension_id_(extension->id()),
@@ -149,6 +159,46 @@ syncer::StringOrdinal ExtensionAppItem::GetPageOrdinal() const {
 
 syncer::StringOrdinal ExtensionAppItem::GetAppLaunchOrdinal() const {
   return GetExtensionSorting(profile_)->GetAppLaunchOrdinal(extension_id_);
+}
+
+void ExtensionAppItem::Move(const ExtensionAppItem* prev,
+                            const ExtensionAppItem* next) {
+  // Does nothing if no predecessor nor successor.
+  if (!prev && !next)
+    return;
+
+  ExtensionService* service = profile_->GetExtensionService();
+  service->extension_prefs()->SetAppDraggedByUser(extension_id_);
+
+  // Handles only predecessor or only successor case.
+  if (!prev || !next) {
+    syncer::StringOrdinal page = prev ? prev->GetPageOrdinal() :
+                                        next->GetPageOrdinal();
+    GetExtensionSorting(profile_)->SetPageOrdinal(extension_id_, page);
+    service->OnExtensionMoved(extension_id_,
+                              prev ? prev->extension_id() : std::string(),
+                              next ? next->extension_id() : std::string());
+    return;
+  }
+
+  // Handles both predecessor and successor are on the same page.
+  syncer::StringOrdinal prev_page = prev->GetPageOrdinal();
+  syncer::StringOrdinal next_page = next->GetPageOrdinal();
+  if (prev_page.Equals(next_page)) {
+    GetExtensionSorting(profile_)->SetPageOrdinal(extension_id_, prev_page);
+    service->OnExtensionMoved(extension_id_,
+                              prev->extension_id(),
+                              next->extension_id());
+    return;
+  }
+
+  // Otherwise, go with |next|. This is okay because app list does not split
+  // page based ntp page ordinal.
+  // TODO(xiyuan): Revisit this when implementing paging support.
+  GetExtensionSorting(profile_)->SetPageOrdinal(extension_id_, prev_page);
+  service->OnExtensionMoved(extension_id_,
+                            prev->extension_id(),
+                            std::string());
 }
 
 void ExtensionAppItem::LoadImage(const Extension* extension) {
@@ -197,7 +247,7 @@ void ExtensionAppItem::OnExtensionIconImageChanged(
 }
 
 bool ExtensionAppItem::IsItemForCommandIdDynamic(int command_id) const {
-  return command_id == TOGGLE_PIN;
+  return command_id == TOGGLE_PIN || command_id == LAUNCH_NEW;
 }
 
 string16 ExtensionAppItem::GetLabelForCommandId(int command_id) const {
@@ -205,6 +255,13 @@ string16 ExtensionAppItem::GetLabelForCommandId(int command_id) const {
     return controller_->IsAppPinned(extension_id_) ?
         l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_UNPIN) :
         l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_PIN);
+  } else if (command_id == LAUNCH_NEW) {
+    if (IsCommandIdChecked(LAUNCH_TYPE_PINNED_TAB) ||
+        IsCommandIdChecked(LAUNCH_TYPE_REGULAR_TAB)) {
+      return l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_NEW_TAB);
+    } else {
+      return l10n_util::GetStringUTF16(IDS_APP_LIST_CONTEXT_MENU_NEW_WINDOW);
+    }
   } else {
     NOTREACHED();
     return string16();
@@ -215,6 +272,9 @@ bool ExtensionAppItem::IsCommandIdChecked(int command_id) const {
   if (command_id >= LAUNCH_TYPE_START && command_id < LAUNCH_TYPE_LAST) {
     return static_cast<int>(GetExtensionLaunchType(profile_, extension_id_)) +
         LAUNCH_TYPE_START == command_id;
+  } else if (command_id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
+             command_id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
+    return extension_menu_items_->IsCommandIdChecked(command_id);
   }
   return false;
 }
@@ -235,6 +295,9 @@ bool ExtensionAppItem::IsCommandIdEnabled(int command_id) const {
   } else if (command_id == DETAILS) {
     const Extension* extension = GetExtension();
     return extension && extension->from_webstore();
+  } else if (command_id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
+             command_id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
+    return extension_menu_items_->IsCommandIdEnabled(command_id);
   }
   return true;
 }
@@ -246,13 +309,15 @@ bool ExtensionAppItem::GetAcceleratorForCommandId(
 }
 
 void ExtensionAppItem::ExecuteCommand(int command_id) {
-  if (command_id == LAUNCH) {
-    Activate(0);
+  if (command_id == LAUNCH_NEW) {
+    Launch(ui::EF_NONE);
   } else if (command_id == TOGGLE_PIN && controller_->CanPin()) {
     if (controller_->IsAppPinned(extension_id_))
       controller_->UnpinApp(extension_id_);
     else
       controller_->PinApp(extension_id_);
+  } else if (command_id == CREATE_SHORTCUTS) {
+    controller_->ShowCreateShortcutsDialog(profile_, extension_id_);
   } else if (command_id >= LAUNCH_TYPE_START &&
              command_id < LAUNCH_TYPE_LAST) {
     SetExtensionLaunchType(profile_,
@@ -265,6 +330,14 @@ void ExtensionAppItem::ExecuteCommand(int command_id) {
     StartExtensionUninstall();
   } else if (command_id == DETAILS) {
     ShowExtensionDetails();
+  } else if (command_id >= IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST &&
+             command_id <= IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST) {
+    extension_menu_items_->ExecuteCommand(command_id, NULL,
+                                          content::ContextMenuParams());
+  } else if (command_id == MENU_NEW_WINDOW) {
+    controller_->CreateNewWindow(false);
+  } else if (command_id == MENU_NEW_INCOGNITO_WINDOW) {
+    controller_->CreateNewWindow(true);
   }
 }
 
@@ -276,40 +349,96 @@ void ExtensionAppItem::Activate(int event_flags) {
   controller_->ActivateApp(profile_, extension->id(), event_flags);
 }
 
+void ExtensionAppItem::Launch(int event_flags) {
+  const Extension* extension = GetExtension();
+  if (!extension)
+    return;
+
+  controller_->LaunchApp(profile_, extension->id(), event_flags);
+}
+
 ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
-  // No context menu for Chrome app.
-  if (extension_id_ == extension_misc::kChromeAppId)
+  const Extension* extension = GetExtension();
+  if (!extension)
     return NULL;
 
-  if (!context_menu_model_.get()) {
-    context_menu_model_.reset(new ui::SimpleMenuModel(this));
-    context_menu_model_->AddItem(LAUNCH, UTF8ToUTF16(title()));
-    context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+  if (context_menu_model_.get())
+    return context_menu_model_.get();
+
+  context_menu_model_.reset(new ui::SimpleMenuModel(this));
+
+  if (extension_id_ == extension_misc::kChromeAppId) {
+    // Special context menu for Chrome app.
+#if defined(OS_CHROMEOS)
     context_menu_model_->AddItemWithStringId(
-        TOGGLE_PIN,
-        controller_->IsAppPinned(extension_id_) ?
-            IDS_APP_LIST_CONTEXT_MENU_UNPIN :
-            IDS_APP_LIST_CONTEXT_MENU_PIN);
-    context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
-    context_menu_model_->AddCheckItemWithStringId(
-        LAUNCH_TYPE_REGULAR_TAB,
-        IDS_APP_CONTEXT_MENU_OPEN_REGULAR);
-    context_menu_model_->AddCheckItemWithStringId(
-        LAUNCH_TYPE_PINNED_TAB,
-        IDS_APP_CONTEXT_MENU_OPEN_PINNED);
-    context_menu_model_->AddCheckItemWithStringId(
-        LAUNCH_TYPE_WINDOW,
-        IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
-    // Even though the launch type is Full Screen it is more accurately
-    // described as Maximized in Ash.
-    context_menu_model_->AddCheckItemWithStringId(
-        LAUNCH_TYPE_FULLSCREEN,
-        IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
-    context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
-    context_menu_model_->AddItemWithStringId(OPTIONS, IDS_NEW_TAB_APP_OPTIONS);
-    context_menu_model_->AddItemWithStringId(DETAILS, IDS_NEW_TAB_APP_DETAILS);
+        MENU_NEW_WINDOW,
+        IDS_LAUNCHER_NEW_WINDOW);
+    if (!profile_->IsOffTheRecord()) {
+      context_menu_model_->AddItemWithStringId(
+          MENU_NEW_INCOGNITO_WINDOW,
+          IDS_LAUNCHER_NEW_INCOGNITO_WINDOW);
+    }
+#else
+    NOTREACHED();
+#endif
+  } else {
+    extension_menu_items_.reset(new extensions::ContextMenuMatcher(
+        profile_, this, context_menu_model_.get(),
+        base::Bind(MenuItemHasLauncherContext)));
+
+    if (!extension->is_platform_app())
+      context_menu_model_->AddItem(LAUNCH_NEW, string16());
+
+    int index = 0;
+    extension_menu_items_->AppendExtensionItems(extension_id_, string16(),
+                                                &index);
+
+    if (controller_->CanPin()) {
+      context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+      context_menu_model_->AddItemWithStringId(
+          TOGGLE_PIN,
+          controller_->IsAppPinned(extension_id_) ?
+              IDS_APP_LIST_CONTEXT_MENU_UNPIN :
+              IDS_APP_LIST_CONTEXT_MENU_PIN);
+    }
+
+    if (controller_->CanShowCreateShortcutsDialog() &&
+        extension->is_platform_app()) {
+      context_menu_model_->AddItemWithStringId(
+          CREATE_SHORTCUTS,
+          IDS_NEW_TAB_APP_CREATE_SHORTCUT);
+    }
+
+    if (!extension->is_platform_app()) {
+      context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+      context_menu_model_->AddCheckItemWithStringId(
+          LAUNCH_TYPE_REGULAR_TAB,
+          IDS_APP_CONTEXT_MENU_OPEN_REGULAR);
+      context_menu_model_->AddCheckItemWithStringId(
+          LAUNCH_TYPE_PINNED_TAB,
+          IDS_APP_CONTEXT_MENU_OPEN_PINNED);
+      context_menu_model_->AddCheckItemWithStringId(
+          LAUNCH_TYPE_WINDOW,
+          IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
+      // Even though the launch type is Full Screen it is more accurately
+      // described as Maximized in Ash.
+      context_menu_model_->AddCheckItemWithStringId(
+          LAUNCH_TYPE_FULLSCREEN,
+          IDS_APP_CONTEXT_MENU_OPEN_MAXIMIZED);
+    }
+
+    if (!extension->is_platform_app()) {
+      context_menu_model_->AddSeparator(ui::NORMAL_SEPARATOR);
+      context_menu_model_->AddItemWithStringId(OPTIONS,
+                                               IDS_NEW_TAB_APP_OPTIONS);
+      context_menu_model_->AddItemWithStringId(DETAILS,
+                                               IDS_NEW_TAB_APP_DETAILS);
+    }
+
     context_menu_model_->AddItemWithStringId(UNINSTALL,
-                                             IDS_EXTENSIONS_UNINSTALL);
+                                             extension->is_platform_app() ?
+                                                 IDS_APP_LIST_UNINSTALL_ITEM :
+                                                 IDS_EXTENSIONS_UNINSTALL);
   }
 
   return context_menu_model_.get();

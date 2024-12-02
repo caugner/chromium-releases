@@ -26,7 +26,6 @@
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
-#include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/app/chrome_main_delegate.h"
@@ -202,6 +201,18 @@ void FilterDisabledTests() {
     // Tests chrome's network stack's cache (might not apply to CF).
     "URLRequestTestHTTP.VaryHeader",
     "URLRequestTestHTTP.GetZippedTest",
+
+    // Tests that requests can be blocked asynchronously in states
+    // OnBeforeURLRequest, OnBeforeSendHeaders and OnHeadersReceived. At least
+    // the second state is not supported by CF.
+    "URLRequestTestHTTP.NetworkDelegateBlockAsynchronously",
+
+    // Tests for cancelling requests in states OnBeforeSendHeaders and
+    // OnHeadersReceived, which do not seem supported by CF.
+    "URLRequestTestHTTP.NetworkDelegateCancelRequestSynchronously2",
+    "URLRequestTestHTTP.NetworkDelegateCancelRequestSynchronously3",
+    "URLRequestTestHTTP.NetworkDelegateCancelRequestAsynchronously2",
+    "URLRequestTestHTTP.NetworkDelegateCancelRequestAsynchronously3",
 
     // Tests that requests can be cancelled while blocking in
     // OnBeforeSendHeaders state. But this state is not supported by CF.
@@ -480,7 +491,7 @@ void FakeExternalTab::Initialize() {
   DCHECK(g_browser_process);
   g_browser_process->SetApplicationLocale("en-US");
 
-  content::RenderProcessHost::set_run_renderer_in_process(true);
+  content::RenderProcessHost::SetRunRendererInProcess(true);
 
   browser_process_->local_state()->RegisterBooleanPref(
       prefs::kMetricsReportingEnabled, false);
@@ -522,7 +533,6 @@ void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
   if (!launch_browser_)
     return;
 
-  base::win::ScopedCOMInitializer com;
   chrome_frame_test::CloseAllIEWindows();
 
   // Tweak IE settings to make it amenable to testing before launching it.
@@ -551,10 +561,8 @@ void CFUrlRequestUnittestRunner::StartChromeFrameInHostBrowser() {
 }
 
 void CFUrlRequestUnittestRunner::ShutDownHostBrowser() {
-  if (launch_browser_) {
-    base::win::ScopedCOMInitializer com;
+  if (launch_browser_)
     chrome_frame_test::CloseAllIEWindows();
-  }
 }
 
 void CFUrlRequestUnittestRunner::OnIEShutdownFailure() {
@@ -713,10 +721,8 @@ void CFUrlRequestUnittestRunner::OnInitializationTimeout() {
 
   StopFileLogger(true);
 
-  if (launch_browser_) {
-    base::win::ScopedCOMInitializer com;
+  if (launch_browser_)
     chrome_frame_test::CloseAllIEWindows();
-  }
 
   if (ie_configurator_.get() != NULL)
     ie_configurator_->RevertSettings();

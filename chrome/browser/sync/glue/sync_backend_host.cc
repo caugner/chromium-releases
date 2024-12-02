@@ -24,10 +24,12 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/token_service.h"
+#include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/browser/sync/glue/bridged_invalidator.h"
 #include "chrome/browser/sync/glue/change_processor.h"
 #include "chrome/browser/sync/glue/chrome_encryptor.h"
 #include "chrome/browser/sync/glue/chrome_sync_notification_bridge.h"
+#include "chrome/browser/sync/glue/device_info.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
 #include "chrome/browser/sync/invalidations/invalidator_storage.h"
 #include "chrome/browser/sync/sync_prefs.h"
@@ -118,13 +120,14 @@ class SyncBackendHost::Core
   virtual void OnEncryptionComplete() OVERRIDE;
   virtual void OnCryptographerStateChanged(
       syncer::Cryptographer* cryptographer) OVERRIDE;
-  virtual void OnPassphraseTypeChanged(syncer::PassphraseType type) OVERRIDE;
+  virtual void OnPassphraseTypeChanged(syncer::PassphraseType type,
+                                       base::Time passphrase_time) OVERRIDE;
 
   // syncer::InvalidationHandler implementation.
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdStateMap& id_state_map,
+      const syncer::ObjectIdInvalidationMap& invalidation_map,
       syncer::IncomingInvalidationSource source) OVERRIDE;
 
   // Note:
@@ -356,42 +359,12 @@ SyncBackendHost::~SyncBackendHost() {
 
 namespace {
 
-// Helper to construct a user agent string (ASCII) suitable for use by
-// the syncapi for any HTTP communication. This string is used by the sync
-// backend for classifying client types when calculating statistics.
-std::string MakeUserAgentForSyncApi() {
-  std::string user_agent;
-  user_agent = "Chrome ";
-#if defined(OS_WIN)
-  user_agent += "WIN ";
-#elif defined(OS_CHROMEOS)
-  user_agent += "CROS ";
-#elif defined(OS_LINUX)
-  user_agent += "LINUX ";
-#elif defined(OS_FREEBSD)
-  user_agent += "FREEBSD ";
-#elif defined(OS_OPENBSD)
-  user_agent += "OPENBSD ";
-#elif defined(OS_MACOSX)
-  user_agent += "MAC ";
-#endif
-  chrome::VersionInfo version_info;
-  if (!version_info.is_valid()) {
-    DLOG(ERROR) << "Unable to create chrome::VersionInfo object";
-    return user_agent;
-  }
-
-  user_agent += version_info.Version();
-  user_agent += " (" + version_info.LastChange() + ")";
-  if (!version_info.IsOfficialBuild())
-    user_agent += "-devel";
-  return user_agent;
-}
-
 scoped_ptr<syncer::HttpPostProviderFactory> MakeHttpBridgeFactory(
     const scoped_refptr<net::URLRequestContextGetter>& getter) {
+  chrome::VersionInfo version_info;
   return scoped_ptr<syncer::HttpPostProviderFactory>(
-      new syncer::HttpBridgeFactory(getter, MakeUserAgentForSyncApi()));
+      new syncer::HttpBridgeFactory(
+          getter, DeviceInfo::MakeUserAgentForSyncApi(version_info)));
 }
 
 }  // namespace
@@ -504,7 +477,8 @@ void SyncBackendHost::SetEncryptionPassphrase(const std::string& passphrase,
 
   // SetEncryptionPassphrase should never be called if we are currently
   // encrypted with an explicit passphrase.
-  DCHECK(!IsUsingExplicitPassphrase());
+  DCHECK(cached_passphrase_type_ == syncer::KEYSTORE_PASSPHRASE ||
+         cached_passphrase_type_ == syncer::IMPLICIT_PASSPHRASE);
 
   // Post an encryption task on the syncer thread.
   sync_thread_.message_loop()->PostTask(FROM_HERE,
@@ -762,16 +736,12 @@ bool SyncBackendHost::IsNigoriEnabled() const {
   return registrar_.get() && registrar_->IsNigoriEnabled();
 }
 
-bool SyncBackendHost::IsUsingExplicitPassphrase() {
-  // This should only be called once the nigori node has been downloaded, as
-  // otherwise we have no idea what kind of passphrase we are using. This will
-  // NOTREACH in sync_manager and return false if we fail to load the nigori
-  // node.
-  // TODO(zea): expose whether the custom passphrase is a frozen implicit
-  // passphrase or not to provide better messaging.
-  return IsNigoriEnabled() && (
-      cached_passphrase_type_ == syncer::CUSTOM_PASSPHRASE ||
-      cached_passphrase_type_ == syncer::FROZEN_IMPLICIT_PASSPHRASE);
+syncer::PassphraseType SyncBackendHost::GetPassphraseType() const {
+  return cached_passphrase_type_;
+}
+
+base::Time SyncBackendHost::GetExplicitPassphraseTime() const {
+  return cached_explicit_passphrase_time_;
 }
 
 bool SyncBackendHost::IsCryptographerReady(
@@ -1020,11 +990,11 @@ void SyncBackendHost::Core::OnCryptographerStateChanged(
 }
 
 void SyncBackendHost::Core::OnPassphraseTypeChanged(
-    syncer::PassphraseType type) {
+    syncer::PassphraseType type, base::Time passphrase_time) {
   host_.Call(
       FROM_HERE,
       &SyncBackendHost::HandlePassphraseTypeChangedOnFrontendLoop,
-      type);
+      type, passphrase_time);
 }
 
 void SyncBackendHost::Core::OnActionableError(
@@ -1049,14 +1019,14 @@ void SyncBackendHost::Core::OnInvalidatorStateChange(
 }
 
 void SyncBackendHost::Core::OnIncomingInvalidation(
-    const syncer::ObjectIdStateMap& id_state_map,
+    const syncer::ObjectIdInvalidationMap& invalidation_map,
     syncer::IncomingInvalidationSource source) {
   if (!sync_loop_)
     return;
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   host_.Call(FROM_HERE,
              &SyncBackendHost::HandleIncomingInvalidationOnFrontendLoop,
-             id_state_map, source);
+             invalidation_map, source);
 }
 
 void SyncBackendHost::Core::DoInitialize(const DoInitializeOptions& options) {
@@ -1441,12 +1411,12 @@ void SyncBackendHost::HandleInvalidatorStateChangeOnFrontendLoop(
 }
 
 void SyncBackendHost::HandleIncomingInvalidationOnFrontendLoop(
-    const syncer::ObjectIdStateMap& id_state_map,
+    const syncer::ObjectIdInvalidationMap& invalidation_map,
     syncer::IncomingInvalidationSource source) {
   if (!frontend_)
     return;
   DCHECK_EQ(MessageLoop::current(), frontend_loop_);
-  frontend_->OnIncomingInvalidation(id_state_map, source);
+  frontend_->OnIncomingInvalidation(invalidation_map, source);
 }
 
 bool SyncBackendHost::CheckPassphraseAgainstCachedPendingKeys(
@@ -1489,10 +1459,10 @@ void SyncBackendHost::NotifyPassphraseAccepted() {
 void SyncBackendHost::NotifyUpdatedToken(const std::string& token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TokenAvailableDetails details(GaiaConstants::kSyncService, token);
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TOKEN_UPDATED,
-      content::Source<Profile>(profile_),
-      content::Details<const TokenAvailableDetails>(&details));
+
+  TokenService* token_service = TokenServiceFactory::GetForProfile(profile_);
+  CHECK(token_service);
+  token_service->AddAuthTokenManually(details.service(), details.token());
 }
 
 void SyncBackendHost::NotifyEncryptedTypesChanged(
@@ -1515,11 +1485,13 @@ void SyncBackendHost::NotifyEncryptionComplete() {
 }
 
 void SyncBackendHost::HandlePassphraseTypeChangedOnFrontendLoop(
-    syncer::PassphraseType type) {
+    syncer::PassphraseType type,
+    base::Time explicit_passphrase_time) {
   DCHECK_EQ(MessageLoop::current(), frontend_loop_);
   DVLOG(1) << "Passphrase type changed to "
            << syncer::PassphraseTypeToString(type);
   cached_passphrase_type_ = type;
+  cached_explicit_passphrase_time_ = explicit_passphrase_time;
 }
 
 void SyncBackendHost::HandleStopSyncingPermanentlyOnFrontendLoop() {

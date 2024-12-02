@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ash/display/display_controller.h"
+#include "ash/display/multi_display_manager.h"
 #include "ash/shell.h"
 #include "ash/test/test_shell_delegate.h"
 #include "base/run_loop.h"
@@ -53,16 +54,18 @@ AshTestBase::~AshTestBase() {
 }
 
 void AshTestBase::SetUp() {
-  ui::TextInputTestSupport::Initilaize();
+  // Disable animations during tests.
+  ui::LayerAnimator::set_disable_animations_for_test(true);
+  ui::TextInputTestSupport::Initialize();
   // Creates Shell and hook with Desktop.
   TestShellDelegate* delegate = new TestShellDelegate;
   ash::Shell::CreateInstance(delegate);
   Shell::GetPrimaryRootWindow()->Show();
-  Shell::GetPrimaryRootWindow()->SetHostSize(gfx::Size(800, 600));
+  // Move the mouse cursor to far away so that native events doesn't
+  // interfere test expectations.
+  Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));
+  UpdateDisplay("800x600");
   Shell::GetInstance()->cursor_manager()->ShowCursor(true);
-
-  // Disable animations during tests.
-  ui::LayerAnimator::set_disable_animations_for_test(true);
 }
 
 void AshTestBase::TearDown() {
@@ -77,7 +80,8 @@ void AshTestBase::TearDown() {
 
 void AshTestBase::ChangeDisplayConfig(float scale,
                                       const gfx::Rect& bounds_in_pixel) {
-  gfx::Display display = gfx::Display(gfx::Screen::GetPrimaryDisplay().id());
+  gfx::Display display =
+      gfx::Display(Shell::GetScreen()->GetPrimaryDisplay().id());
   display.SetScaleAndBounds(scale, bounds_in_pixel);
   std::vector<gfx::Display> displays;
   displays.push_back(display);
@@ -87,19 +91,32 @@ void AshTestBase::ChangeDisplayConfig(float scale,
 
 void AshTestBase::UpdateDisplay(const std::string& display_specs) {
   std::vector<gfx::Display> displays = CreateDisplaysFromString(display_specs);
-  aura::Env::GetInstance()->display_manager()->
-      OnNativeDisplaysChanged(displays);
+  internal::MultiDisplayManager* display_manager =
+      static_cast<internal::MultiDisplayManager*>(
+          aura::Env::GetInstance()->display_manager());
+  display_manager->SetDisplayIdsForTest(&displays);
+  display_manager->OnNativeDisplaysChanged(displays);
+
+  bool is_host_origin_set = false;
+  for (size_t i = 0; i < displays.size(); ++i) {
+    if (displays[i].bounds_in_pixel().origin() != gfx::Point(0, 0)) {
+      is_host_origin_set = true;
+      break;
+    }
+  }
 
   // On non-testing environment, when a secondary display is connected, a new
   // native (i.e. X) window for the display is always created below the previous
-  // one for GPU performance reasons. Try to emulate the behavior.
-  Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
-  DCHECK_EQ(displays.size(), root_windows.size());
-  size_t next_y = 0;
-  for (size_t i = 0; i < root_windows.size(); ++i) {
-    const gfx::Size size = root_windows[i]->GetHostSize();
-    root_windows[i]->SetHostBounds(gfx::Rect(gfx::Point(0, next_y), size));
-    next_y += size.height();
+  // one for GPU performance reasons. Try to emulate the behavior unless host
+  // origins are explicitly set.
+  if (!is_host_origin_set) {
+    Shell::RootWindowList root_windows = Shell::GetAllRootWindows();
+    int next_y = 0;
+    for (size_t i = 0; i < root_windows.size(); ++i) {
+      const gfx::Size size = root_windows[i]->GetHostSize();
+      root_windows[i]->SetHostBounds(gfx::Rect(gfx::Point(0, next_y), size));
+      next_y += size.height();
+    }
   }
 }
 

@@ -5,6 +5,7 @@
 // TODO(eroman): put these methods into a namespace.
 
 var printLogEntriesAsText;
+var searchLogEntriesForText;
 var proxySettingsToString;
 var stripCookiesAndLoginInfo;
 
@@ -26,12 +27,39 @@ function canCollapseBeginWithEnd(beginEntry) {
  */
 printLogEntriesAsText = function(logEntries, parent, privacyStripping,
                                  logCreationTime) {
+  var tablePrinter = createTablePrinter(logEntries, privacyStripping,
+                                        logCreationTime);
+
+  // Format the table for fixed-width text.
+  tablePrinter.toText(0, parent);
+}
+
+/**
+ * Searches the table that would be output by printLogEntriesAsText for
+ * |searchString|.  Returns true if |searchString| would appear entirely within
+ * any field in the table.  |searchString| must be lowercase.
+ *
+ * Seperate function from printLogEntriesAsText since TablePrinter.toText
+ * modifies the DOM.
+ */
+searchLogEntriesForText = function(searchString, logEntries, privacyStripping) {
+  var tablePrinter =
+      createTablePrinter(logEntries, privacyStripping, undefined);
+
+  // Format the table for fixed-width text.
+  return tablePrinter.search(searchString);
+}
+
+/**
+ * Creates a TablePrinter for use by the above two functions.
+ */
+function createTablePrinter(logEntries, privacyStripping, logCreationTime) {
   var entries = LogGroupEntry.createArrayFrom(logEntries);
   var tablePrinter = new TablePrinter();
   var parameterOutputter = new ParameterOutputter(tablePrinter);
 
   if (entries.length == 0)
-    return;
+    return tablePrinter;
 
   var startTime = timeutil.convertTimeTicksToTime(entries[0].orig.time);
 
@@ -81,8 +109,7 @@ printLogEntriesAsText = function(logEntries, parent, privacyStripping,
     addRowWithTime(tablePrinter, logCreationTime, startTime);
   }
 
-  // Format the table for fixed-width text.
-  tablePrinter.toText(0, parent);
+  return tablePrinter;
 }
 
 /**
@@ -427,44 +454,64 @@ function reformatHeaders(entry) {
 function stripCookieOrLoginInfo(line) {
   var patterns = [
       // Cookie patterns
-      /^set-cookie:/i,
-      /^set-cookie2:/i,
-      /^cookie:/i,
+      /^set-cookie: /i,
+      /^set-cookie2: /i,
+      /^cookie: /i,
 
       // Unencrypted authentication patterns
-      /^authorization: \S*/i,
-      /^proxy-authorization: \S*/i];
+      /^authorization: \S*\s*/i,
+      /^proxy-authorization: \S*\s*/i];
+
+  // Prefix will hold the first part of the string that contains no private
+  // information.  If null, no part of the string contains private information.
+  var prefix = null;
   for (var i = 0; i < patterns.length; i++) {
     var match = patterns[i].exec(line);
-    if (match != null)
-      return match[0] + ' [value was stripped]';
+    if (match != null) {
+      prefix = match[0];
+      break;
+    }
   }
 
-  // Remove authentication information from data received from the server in
+  // Look for authentication information from data received from the server in
   // multi-round Negotiate authentication.
-  var challengePatterns = [
-      /^www-authenticate: (\S*)\s*/i,
-      /^proxy-authenticate: (\S*)\s*/i];
-  for (var i = 0; i < challengePatterns.length; i++) {
-    var match = challengePatterns[i].exec(line);
-    if (!match)
-      continue;
+  if (prefix === null) {
+    var challengePatterns = [
+        /^www-authenticate: (\S*)\s*/i,
+        /^proxy-authenticate: (\S*)\s*/i];
+    for (var i = 0; i < challengePatterns.length; i++) {
+      var match = challengePatterns[i].exec(line);
+      if (!match)
+        continue;
 
-    // If there's no data after the scheme name, do nothing.
-    if (match[0].length == line.length)
+      // If there's no data after the scheme name, do nothing.
+      if (match[0].length == line.length)
+        break;
+
+      // Ignore lines with commas, as they may contain lists of schemes, and
+      // the information we want to hide is Base64 encoded, so has no commas.
+      if (line.indexOf(',') >= 0)
+        break;
+
+      // Ignore Basic and Digest authentication challenges, as they contain
+      // public information.
+      if (/^basic$/i.test(match[1]) || /^digest$/i.test(match[1]))
+        break;
+
+      prefix = match[0];
       break;
+    }
+  }
 
-    // Ignore lines with commas in them, as they may contain lists of schemes,
-    // and the information we want to hide is Base64 encoded, so has no commas.
-    if (line.indexOf(',') >= 0)
-      break;
-
-    // Ignore Basic and Digest authentication challenges, as they contain
-    // public information.
-    if (/^basic$/i.test(match[1]) || /^digest$/i.test(match[1]))
-      break;
-
-    return match[0] + '[value was stripped]';
+  if (prefix) {
+    var suffix = line.slice(prefix.length);
+    // If private information has already been removed, keep the line as-is.
+    // This is often the case when viewing a loaded log.
+    // TODO(mmenke):  Remove '[value was stripped]' check once M24 hits stable.
+    if (suffix.search(/^\[[0-9]+ bytes were stripped\]$/) == -1 &&
+        suffix != '[value was stripped]') {
+      return prefix + '[' + suffix.length + ' bytes were stripped]';
+    }
   }
 
   return line;
@@ -669,4 +716,3 @@ proxySettingsToString = function(config) {
 
 // End of anonymous namespace.
 })();
-

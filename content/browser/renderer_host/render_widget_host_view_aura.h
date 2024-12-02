@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -23,7 +24,6 @@
 #include "webkit/glue/webcursor.h"
 
 namespace aura {
-class CompositorLock;
 class WindowTracker;
 }
 
@@ -32,12 +32,9 @@ class Canvas;
 }
 
 namespace ui {
+class CompositorLock;
 class InputMethod;
 class Texture;
-}
-
-namespace WebKit {
-class WebTouchEvent;
 }
 
 namespace content {
@@ -110,7 +107,7 @@ class RenderWidgetHostViewAura
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
       const base::Callback<void(bool)>& callback,
-      skia::PlatformCanvas* output) OVERRIDE;
+      skia::PlatformBitmap* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params_in_pixel,
@@ -127,8 +124,8 @@ class RenderWidgetHostViewAura
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
-  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
-                               bool processed) OVERRIDE;
+  virtual void ProcessAckedTouchEvent(const WebKit::WebTouchEvent& touch,
+                                      bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -187,7 +184,7 @@ class RenderWidgetHostViewAura
   // Overridden from ui::EventHandler:
   virtual ui::EventResult OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
   virtual ui::EventResult OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual ui::TouchStatus OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  virtual ui::EventResult OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
   virtual ui::EventResult OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
 
   // Overridden from aura::client::ActivationDelegate:
@@ -202,15 +199,18 @@ class RenderWidgetHostViewAura
   explicit RenderWidgetHostViewAura(RenderWidgetHost* host);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAuraTest, TouchEventState);
+
   class WindowObserver;
   friend class WindowObserver;
 
   // Overridden from ui::CompositorObserver:
   virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE;
-  virtual void OnCompositingWillStart(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingStarted(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingEnded(ui::Compositor* compositor) OVERRIDE;
   virtual void OnCompositingAborted(ui::Compositor* compositor) OVERRIDE;
+  virtual void OnCompositingLockStateChanged(
+      ui::Compositor* compositor) OVERRIDE;
 
   // Overridden from ImageTransportFactoryObserver:
   virtual void OnLostResources() OVERRIDE;
@@ -218,6 +218,7 @@ class RenderWidgetHostViewAura
   virtual ~RenderWidgetHostViewAura();
 
   void UpdateCursorIfOverSelf();
+  bool ShouldFastACK(uint64 surface_id);
   void UpdateExternalTexture();
   ui::InputMethod* GetInputMethod() const;
 
@@ -242,12 +243,12 @@ class RenderWidgetHostViewAura
 
   // Run the compositing callbacks.
   void RunCompositingDidCommitCallbacks(ui::Compositor* compositor);
-  void RunCompositingWillStartCallbacks(ui::Compositor* compositor);
 
   // Insert a sync point into the compositor's command stream and acknowledge
   // that we have presented the accelerated surface buffer.
   static void InsertSyncPointAndACK(int32 route_id,
                                     int gpu_host_id,
+                                    bool presented,
                                     ui::Compositor* compositor);
 
   // Called when window_ is removed from the window tree.
@@ -325,11 +326,11 @@ class RenderWidgetHostViewAura
   // Current tooltip text.
   string16 tooltip_;
 
-  std::vector< base::Callback<void(ui::Compositor*)> >
-      on_compositing_did_commit_callbacks_;
+  // The scale factor of the display the renderer is currently on.
+  float device_scale_factor_;
 
   std::vector< base::Callback<void(ui::Compositor*)> >
-      on_compositing_will_start_callbacks_;
+      on_compositing_did_commit_callbacks_;
 
   std::map<uint64, scoped_refptr<ui::Texture> >
       image_transport_clients_;
@@ -377,18 +378,31 @@ class RenderWidgetHostViewAura
 
   // Used to prevent further resizes while a resize is pending.
   class ResizeLock;
+  typedef std::vector<linked_ptr<ResizeLock> > ResizeLockList;
+
   // These locks are the ones waiting for a texture of the right size to come
   // back from the renderer/GPU process.
-  std::vector<linked_ptr<ResizeLock> > resize_locks_;
-  // These locks are the ones waiting for a frame to be drawn.
-  std::vector<linked_ptr<ResizeLock> > locks_pending_draw_;
+  ResizeLockList resize_locks_;
+  // These locks are the ones waiting for a frame to be committed.
+  ResizeLockList locks_pending_commit_;
 
   // This lock is for waiting for a front surface to become available to draw.
-  scoped_refptr<aura::CompositorLock> released_front_lock_;
+  scoped_refptr<ui::CompositorLock> released_front_lock_;
 
   // Used to track the state of the window we're created from. Only used when
   // created fullscreen.
   scoped_ptr<aura::WindowTracker> host_tracker_;
+
+  enum CanLockCompositorState {
+    YES,
+    // We locked, so at some point we'll need to kick a frame.
+    YES_DID_LOCK,
+    // No. A lock timed out, we need to kick a new frame before locking again.
+    NO_PENDING_RENDERER_FRAME,
+    // No. We've got a frame, but it hasn't been committed.
+    NO_PENDING_COMMIT,
+  };
+  CanLockCompositorState can_lock_compositor_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAura);
 };

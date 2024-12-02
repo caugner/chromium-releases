@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_COMMAND_CONTROLLER_H_
 #define CHROME_BROWSER_UI_BROWSER_COMMAND_CONTROLLER_H_
 
-#include "chrome/browser/api/prefs/pref_change_registrar.h"
+#include "base/prefs/public/pref_change_registrar.h"
+#include "chrome/browser/api/sync/profile_sync_service_observer.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
-#include "chrome/browser/sync/profile_sync_service_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -62,7 +62,6 @@ class BrowserCommandController : public CommandUpdater::CommandUpdaterDelegate,
   void FullscreenStateChanged();
   void PrintingStateChanged();
   void LoadingStateChanged(bool is_loading, bool force);
-  void SendToMobileStateChanged(bool send_to_mobile_available);
 
  private:
   enum FullScreenMode {

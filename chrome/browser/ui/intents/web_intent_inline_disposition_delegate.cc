@@ -42,12 +42,6 @@ bool WebIntentInlineDispositionDelegate::IsPopupOrPanel(
   return true;
 }
 
-bool WebIntentInlineDispositionDelegate::ShouldAddNavigationToHistory(
-    const history::HistoryAddPageArgs& add_page_args,
-    content::NavigationType navigation_type) {
-  return false;
-}
-
 content::WebContents* WebIntentInlineDispositionDelegate::OpenURLFromTab(
     content::WebContents* source, const content::OpenURLParams& params) {
   DCHECK(source);  // Can only be invoked from inline disposition.
@@ -95,12 +89,16 @@ bool WebIntentInlineDispositionDelegate::OnMessageReceived(
   IPC_END_MESSAGE_MAP()
   return handled;
 }
+
 void WebIntentInlineDispositionDelegate::RenderViewCreated(
     content::RenderViewHost* render_view_host) {
-  DCHECK(render_view_host);
-  render_view_host->EnableAutoResize(
-      WebIntentPicker::GetMinInlineDispositionSize(),
-      WebIntentPicker::GetMaxInlineDispositionSize());
+  render_view_host_ = render_view_host;
+  SetRenderViewSizeLimits();
+}
+
+void WebIntentInlineDispositionDelegate::DocumentAvailableInMainFrame() {
+  std::string css = "body { min-width:400px; }";
+  render_view_host_->InsertCSS(string16(), css);
 }
 
 content::WebContents* WebIntentInlineDispositionDelegate::
@@ -118,8 +116,21 @@ void WebIntentInlineDispositionDelegate::OnRequest(
   extension_function_dispatcher_.Dispatch(params,
                                           web_contents_->GetRenderViewHost());
 }
+
 void WebIntentInlineDispositionDelegate::ResizeDueToAutoResize(
     content::WebContents* source, const gfx::Size& pref_size) {
   DCHECK(picker_);
   picker_->OnInlineDispositionAutoResize(pref_size);
+}
+
+void WebIntentInlineDispositionDelegate::HandleKeyboardEvent(
+      content::WebContents* source,
+      const content::NativeWebKeyboardEvent& event) {
+  picker_->OnInlineDispositionHandleKeyboardEvent(event);
+}
+
+void WebIntentInlineDispositionDelegate::SetRenderViewSizeLimits() {
+  render_view_host_->EnableAutoResize(
+      picker_->GetMinInlineDispositionSize(),
+      picker_->GetMaxInlineDispositionSize());
 }

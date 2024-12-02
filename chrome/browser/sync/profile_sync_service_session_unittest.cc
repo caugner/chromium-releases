@@ -42,11 +42,11 @@
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
+#include "sync/internal_api/public/test/test_user_share.h"
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ui_base_types.h"
@@ -69,7 +69,7 @@ void BuildSessionSpecifics(const std::string& tag,
                            sync_pb::SessionSpecifics* meta) {
   meta->set_session_tag(tag);
   sync_pb::SessionHeader* header = meta->mutable_header();
-  header->set_device_type(sync_pb::SessionHeader_DeviceType_TYPE_LINUX);
+  header->set_device_type(sync_pb::SyncEnums_DeviceType_TYPE_LINUX);
   header->set_client_name("name");
 }
 
@@ -162,8 +162,6 @@ class ProfileSyncServiceSessionTest
         notified_of_refresh_(false) {}
   ProfileSyncService* sync_service() { return sync_service_.get(); }
 
-  TestIdFactory* ids() { return sync_service_->id_factory(); }
-
  protected:
   virtual TestingProfile* CreateProfile() OVERRIDE {
     TestingProfile* profile = new TestingProfile();
@@ -202,6 +200,7 @@ class ProfileSyncServiceSessionTest
   }
 
   virtual void TearDown() {
+    sync_service_->Shutdown();
     sync_service_.reset();
     profile()->ResetRequestContext();
 
@@ -289,8 +288,8 @@ class CreateRootHelper {
 
  private:
   void CreateRootCallback(ProfileSyncServiceSessionTest* test) {
-    success_ = ProfileSyncServiceTestHelper::CreateRoot(
-        syncer::SESSIONS, test->sync_service()->GetUserShare(), test->ids());
+    success_ = syncer::TestUserShare::CreateRoot(
+        syncer::SESSIONS, test->sync_service()->GetUserShare());
   }
 
   base::Closure callback_;
@@ -652,7 +651,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionUpdate) {
   {
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_UPDATE));
   }
@@ -671,7 +670,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionAdd) {
   {
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonChangeRecordList(
             node_id, ChangeRecord::ACTION_ADD));
   }
@@ -692,7 +691,7 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
   {
     syncer::WriteTransaction trans(FROM_HERE, sync_service_->GetUserShare());
     change_processor_->ApplyChangesFromSyncModel(
-        &trans,
+        &trans, 0,
         ProfileSyncServiceTestHelper::MakeSingletonDeletionChangeRecordList(
             node_id, deleted_specifics));
   }

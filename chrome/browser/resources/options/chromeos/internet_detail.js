@@ -380,9 +380,10 @@ cr.define('options.internet', function() {
         bannerDiv.hidden = true;
       } else {
         bannerDiv.hidden = false;
-        // controlledBy must match strings loaded in proxy_handler.cc and
-        // set in proxy_cros_settings_provider.cc.
-        $('banner-text').textContent = loadTimeData.getString(controlledBy);
+        // The possible banner texts are loaded in proxy_handler.cc.
+        var bannerText = 'proxyBanner' + controlledBy.charAt(0).toUpperCase() +
+                         controlledBy.slice(1);
+        $('banner-text').textContent = loadTimeData.getString(bannerText);
       }
     },
 
@@ -975,7 +976,8 @@ cr.define('options.internet', function() {
       var inetServerHostname = $('inet-server-hostname');
       inetServerHostname.value = data.serverHostname.value;
       inetServerHostname.resetHandler = function() {
-        inetServerHostname.value = data.serverHostname.default;
+        OptionsPage.hideBubble();
+        inetServerHostname.value = data.serverHostname.recommendedValue;
       };
     } else {
       OptionsPage.showTab($('internet-nav-tab'));
@@ -991,22 +993,24 @@ cr.define('options.internet', function() {
     indicators = cr.doc.querySelectorAll(
         '#details-internet-page .controlled-setting-indicator');
     for (var i = 0; i < indicators.length; i++) {
-      var dataProperty = indicators[i].getAttribute('data');
-      if (dataProperty && data[dataProperty]) {
-        var controlledBy = data[dataProperty].controlledBy;
-        if (controlledBy) {
-          indicators[i].controlledBy = controlledBy;
-          var forElement = $(indicators[i].getAttribute('for'));
-          if (forElement) {
-            forElement.disabled = controlledBy != 'recommended';
-            if (forElement.type == 'radio' && !forElement.checked)
-              indicators[i].hidden = true;
-            if (forElement.resetHandler)
-              indicators[i].resetHandler = forElement.resetHandler;
-          }
-        } else {
-          indicators[i].controlledBy = null;
-        }
+      var propName = indicators[i].getAttribute('data');
+      if (!propName || !data[propName])
+        continue;
+      var propData = data[propName];
+      // Create a synthetic pref change event decorated as
+      // CoreOptionsHandler::CreateValueForPref() does.
+      var event = new cr.Event(name);
+      event.value = {
+        value: propData.value,
+        controlledBy: propData.controlledBy,
+        recommendedValue: propData.recommendedValue,
+      };
+      indicators[i].handlePrefChange(event);
+      var forElement = $(indicators[i].getAttribute('for'));
+      if (forElement) {
+        forElement.disabled = propData.controlledBy == 'policy';
+        if (forElement.resetHandler)
+          indicators[i].resetHandler = forElement.resetHandler;
       }
     }
 

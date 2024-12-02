@@ -16,6 +16,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBTransaction.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
+namespace content {
+
 class IndexedDBCallbacksBase : public WebKit::WebIDBCallbacks {
  public:
   virtual ~IndexedDBCallbacksBase();
@@ -178,9 +180,13 @@ class IndexedDBCallbacks<WebKit::WebSerializedScriptValue>
   virtual void onSuccess(const WebKit::WebSerializedScriptValue& value,
                          const WebKit::WebIDBKey& key,
                          const WebKit::WebIDBKeyPath& keyPath);
+  virtual void onSuccess(long long value);
+  virtual void onSuccess();
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(IndexedDBCallbacks);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_IN_PROCESS_WEBKIT_INDEXED_DB_CALLBACKS_H_

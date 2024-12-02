@@ -15,7 +15,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/string16.h"
-#include "chrome/browser/cancelable_request.h"
+#include "base/time.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/refcounted_profile_keyed_service.h"
@@ -42,7 +43,6 @@ class Profile;
 
 namespace base {
 class Thread;
-class Time;
 }
 
 namespace content {
@@ -53,7 +53,7 @@ namespace history {
 class InMemoryHistoryBackend;
 class InMemoryURLIndex;
 class InMemoryURLIndexTest;
-class HistoryAddPageArgs;
+struct HistoryAddPageArgs;
 class HistoryBackend;
 class HistoryDatabase;
 struct HistoryDetails;
@@ -155,6 +155,19 @@ class HistoryService : public CancelableRequestProvider,
   // TODO(brettw) this should return the InMemoryHistoryBackend.
   history::URLDatabase* InMemoryDatabase();
 
+  // Following functions get URL information from in-memory database.
+  // They return false if database is not available (e.g. not loaded yet) or the
+  // URL does not exist.
+
+  // Reads the number of times the user has typed the given URL.
+  bool GetTypedCountForURL(const GURL& url, int* typed_count);
+
+  // Reads the last visit time for the given URL.
+  bool GetLastVisitTimeForURL(const GURL& url, base::Time* last_visit);
+
+  // Reads the number of times this URL has been visited.
+  bool GetVisitCountForURL(const GURL& url, int* visit_count);
+
   // Return the quick history index.
   history::InMemoryURLIndex* InMemoryIndex() const {
     return in_memory_url_index_.get();
@@ -165,7 +178,7 @@ class HistoryService : public CancelableRequestProvider,
 
   // Navigation ----------------------------------------------------------------
 
-  // Adds the given canonical URL to history with the current time as the visit
+  // Adds the given canonical URL to history with the given time as the visit
   // time. Referrer may be the empty string.
   //
   // The supplied render process host is used to scope the given page ID. Page
@@ -188,31 +201,19 @@ class HistoryService : public CancelableRequestProvider,
   //
   // All "Add Page" functions will update the visited link database.
   void AddPage(const GURL& url,
-               const void* id_scope,
-               int32 page_id,
-               const GURL& referrer,
-               content::PageTransition transition,
-               const history::RedirectList& redirects,
-               history::VisitSource visit_source,
-               bool did_replace_entry);
-
-  // For adding pages to history with a specific time. This is for testing
-  // purposes. Call the previous one to use the current time.
-  void AddPage(const GURL& url,
                base::Time time,
                const void* id_scope,
                int32 page_id,
                const GURL& referrer,
-               content::PageTransition transition,
                const history::RedirectList& redirects,
+               content::PageTransition transition,
                history::VisitSource visit_source,
                bool did_replace_entry);
 
   // For adding pages to history where no tracking information can be done.
-  void AddPage(const GURL& url, history::VisitSource visit_source) {
-    AddPage(url, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
-            history::RedirectList(), visit_source, false);
-  }
+  void AddPage(const GURL& url,
+               base::Time time,
+               history::VisitSource visit_source);
 
   // All AddPage variants end up here.
   void AddPage(const history::HistoryAddPageArgs& add_page_args);
@@ -255,7 +256,7 @@ class HistoryService : public CancelableRequestProvider,
    public:
     // Indicates that a URL is available. There will be exactly one call for
     // every URL in history.
-    virtual void OnURL(const GURL& url) = 0;
+    virtual void OnURL(const history::URLRow& url_row) = 0;
 
     // Indicates we are done iterating over URLs. Once called, there will be no
     // more callbacks made. This call is guaranteed to occur, even if there are
@@ -684,6 +685,11 @@ class HistoryService : public CancelableRequestProvider,
   // notification (NOTIFY_HISTORY_LOADED) and sets backend_loaded_ to true.
   void OnDBLoaded(int backend_id);
 
+  // Helper function for getting URL information.
+  // Reads a URLRow from in-memory database. Returns false if database is not
+  // available or the URL does not exist.
+  bool GetRowForURL(const GURL& url, history::URLRow* url_row);
+
   // Favicon -------------------------------------------------------------------
 
   // These favicon methods are exposed to the FaviconService. Instead of calling
@@ -758,21 +764,14 @@ class HistoryService : public CancelableRequestProvider,
       int desired_size_in_dip,
       const std::vector<ui::ScaleFactor>& desired_scale_factors);
 
-  // Used by FaviconService to set a favicon for |page_url| at |icon_url|.
-  // If the |icon_url| and |pixel_size| are consistent with the icons mapped
-  // to |page_url| and the pixel sizes of the bitmaps at |icon_url|:
-  //   The favicon bitmap for |icon_url| and |pixel_size| will be updated or
-  //   created if necessary.
-  // If |icon_url| and |pixel_size| are inconsistent:
-  //   A new favicon bitmap (and favicon if necessary) will be created. The
-  //   favicon sizes for |icon_url| will be set to the default favicon sizes to
-  //   indicate that the favicon sizes are no longer known.
-  //   Arbitrary favicons and favicon bitmaps associated to |page_url| and
-  //   |icon_url| may be deleted in order to maintain the restriction for the
-  //   max favicons per page, and max favicon bitmaps per icon URL.
+  // Used by FaviconService to set a favicon for |page_url| with |pixel_size|.
+  // If there is already a favicon bitmap of |pixel_size| for |page_url|, the
+  // favicon bitmap is overwritten. Otherwise, a new favicon and favicon bitmap
+  // is created using |page_url| as the fake icon URL. Arbitrary favicons and
+  // favicon bitmaps associated to |page_url| may be deleted in order to
+  // maintain the restriction for the max favicons per page.
   // TODO(pkotwicz): Remove once no longer required by sync.
   void MergeFavicon(const GURL& page_url,
-                    const GURL& icon_url,
                     history::IconType icon_type,
                     scoped_refptr<base::RefCountedMemory> bitmap_data,
                     const gfx::Size& pixel_size);
@@ -864,7 +863,7 @@ class HistoryService : public CancelableRequestProvider,
   }
 
   template<typename BackendFunc,
-           class RequestType,  // Descendant of CancelableRequstBase.
+           class RequestType,  // Descendant of CancelableRequestBase.
            typename ArgA,
            typename ArgB>
   Handle Schedule(SchedulePriority priority,
@@ -884,7 +883,7 @@ class HistoryService : public CancelableRequestProvider,
   }
 
   template<typename BackendFunc,
-           class RequestType,  // Descendant of CancelableRequstBase.
+           class RequestType,  // Descendant of CancelableRequestBase.
            typename ArgA,
            typename ArgB,
            typename ArgC>
@@ -906,7 +905,7 @@ class HistoryService : public CancelableRequestProvider,
   }
 
   template<typename BackendFunc,
-           class RequestType,  // Descendant of CancelableRequstBase.
+           class RequestType,  // Descendant of CancelableRequestBase.
            typename ArgA,
            typename ArgB,
            typename ArgC,
@@ -930,7 +929,7 @@ class HistoryService : public CancelableRequestProvider,
   }
 
   template<typename BackendFunc,
-           class RequestType,  // Descendant of CancelableRequstBase.
+           class RequestType,  // Descendant of CancelableRequestBase.
            typename ArgA,
            typename ArgB,
            typename ArgC,
@@ -1056,6 +1055,7 @@ class HistoryService : public CancelableRequestProvider,
   // A cache of the user-typed URLs kept in memory that is used by the
   // autocomplete system. This will be NULL until the database has been created
   // on the background thread.
+  // TODO(mrossetti): Consider changing ownership. See http://crbug.com/138321
   scoped_ptr<history::InMemoryHistoryBackend> in_memory_backend_;
 
   // The profile, may be null when testing.
@@ -1078,6 +1078,8 @@ class HistoryService : public CancelableRequestProvider,
   bool needs_top_sites_migration_;
 
   // The index used for quick history lookups.
+  // TODO(mrossetti): Move in_memory_url_index out of history_service.
+  // See http://crbug.com/138321
   scoped_ptr<history::InMemoryURLIndex> in_memory_url_index_;
 
   scoped_refptr<ObserverListThreadSafe<history::VisitDatabaseObserver> >

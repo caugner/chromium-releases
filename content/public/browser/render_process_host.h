@@ -72,8 +72,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // ResourceDispatcherHost.  Necessary for a cross-site request, in the case
   // that the original RenderViewHost is not live and thus cannot run an
   // unload handler.
-  virtual void CrossSiteSwapOutACK(
-      const ViewMsg_SwapOut_Params& params) = 0;
+  virtual void SimulateSwapOutACK(const ViewMsg_SwapOut_Params& params) = 0;
 
   // Called to wait for the next UpdateRect message for the specified render
   // widget.  Returns true if successful, and the msg out-param will contain a
@@ -213,7 +212,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Renderer is the same, it's just not crossing a process boundary.
 
   static bool run_renderer_in_process();
-  static void set_run_renderer_in_process(bool value);
+
+  // This also calls out to ContentBrowserClient::GetApplicationLocale and
+  // modifies the current process' command line.
+  static void SetRunRendererInProcess(bool value);
 
   // Allows iteration over all the RenderProcessHosts in the browser. Note
   // that each host may not be active, and therefore may have NULL channels.

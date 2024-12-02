@@ -53,6 +53,7 @@ enum TouchStatus;
 namespace views {
 
 class DefaultThemeProvider;
+class DesktopRootWindowHost;
 class InputMethod;
 class NativeWidget;
 class NonClientFrameView;
@@ -164,6 +165,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // and icon should not be rendered, and that the client area should be
     // equivalent to the window area.
     bool remove_standard_frame;
+    // Only used by ShellWindow on Windows. Specifies that the default icon of
+    // packaged app should be the system default icon.
+    bool use_system_default_icon;
     // Whether the widget should be maximized or minimized.
     ui::WindowShowState show_state;
     // Should the widget be double buffered? Default is false.
@@ -178,6 +182,11 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // When set, this value is used as the Widget's NativeWidget implementation.
     // The Widget will not construct a default one. Default is NULL.
     NativeWidget* native_widget;
+    // Aura-only. Provides a DesktopRootWindowHost implementation to use instead
+    // of the default one.
+    // TODO(beng): Figure out if there's a better way to expose this, e.g. get
+    // rid of NW subclasses and do this all via message handling.
+    DesktopRootWindowHost* desktop_root_window_host;
     bool top_level;
     // Only used by NativeWidgetAura. Specifies the type of layer for the
     // aura::Window. Default is LAYER_TEXTURED.
@@ -490,9 +499,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Clear native focus set to the Widget's NativeWidget.
   void ClearNativeFocus();
 
-  // Sets the focus to |native_view|.
-  void FocusNativeView(gfx::NativeView native_view);
-
   void set_frame_type(FrameType frame_type) { frame_type_ = frame_type; }
   FrameType frame_type() const { return frame_type_; }
 
@@ -604,7 +610,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // with it. TYPE_CONTROL and TYPE_TOOLTIP is not considered top level.
   bool is_top_level() const { return is_top_level_; }
 
-  // Returns the work are bounds of the screen the Widget belongs to.
+  // Returns the work area bounds of the screen the Widget belongs to.
   gfx::Rect GetWorkAreaBoundsInScreen() const;
 
   // Notification that our owner is closing.

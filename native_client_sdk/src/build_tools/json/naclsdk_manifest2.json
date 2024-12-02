@@ -2,37 +2,37 @@
   "bundles": [
     {
       "name": "sdk_tools",
-      "description": "Native Client SDK Tools, revision 134553",
+      "description": "Native Client SDK Tools, revision 160493",
       "stability": "stable",
       "recommended": "yes",
       "version": 1,
       "archives": [
         {
-          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/trunk.134553/sdk_tools.tgz",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/trunk.160493/sdk_tools.tgz",
           "checksum": {
-            "sha1": "298c15a94c8fa25b54ebabfc1ae05048f8baa937"
+            "sha1": "98799f2f2603d57a8b386f3898b0d69baa376448"
           },
           "host_os": "mac",
-          "size": 23446
+          "size": 25955
         },
         {
-          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/trunk.134553/sdk_tools.tgz",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/trunk.160493/sdk_tools.tgz",
           "checksum": {
-            "sha1": "298c15a94c8fa25b54ebabfc1ae05048f8baa937"
+            "sha1": "98799f2f2603d57a8b386f3898b0d69baa376448"
           },
           "host_os": "linux",
-          "size": 23446
+          "size": 25955
         },
         {
-          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/trunk.134553/sdk_tools.tgz",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/trunk.160493/sdk_tools.tgz",
           "checksum": {
-            "sha1": "298c15a94c8fa25b54ebabfc1ae05048f8baa937"
+            "sha1": "98799f2f2603d57a8b386f3898b0d69baa376448"
           },
           "host_os": "win",
-          "size": 23446
+          "size": 25955
         }
       ],
-      "revision": 134553
+      "revision": 160493
     },
     {
       "name": "gdb_builds",
@@ -42,7 +42,7 @@
       "version": 0,
       "archives": [
         {
-          "url": "http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/gdb_builds/0.1/gdb-win-builds.tgz",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/gdb_builds/0.1/gdb-win-builds.tgz",
           "checksum": {
             "sha1": "94c78870edcd50f95bb0db040252e766bb275c50"
           },
@@ -53,6 +53,21 @@
       "revision": 1
     },
     {
+      "name": "vs_addin",
+      "description": "Visual Studio Add-In for building and debugging NaCl applications",
+      "stability": "dev",
+      "recommended": "no",
+      "version": 0,
+      "repath": "vs_addin",
+      "archives": [
+        {
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/sdk/${revision}/vs_addin.tgz",
+          "host_os": "win"
+        }
+      ],
+      "revision": 1454
+    },
+    {
       "name": "pepper_16",
       "description": "Chrome 16 bundle, revision 1398",
       "stability": "post_stable",
@@ -60,7 +75,7 @@
       "version": 16,
       "archives": [
         {
-          "url": "http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/pepper_16_1398/naclsdk_mac.tgz",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/pepper_16_1398/naclsdk_mac.tgz",
           "checksum": {
             "sha1": "2fd1fefaea8e583d54b221929c45833d20309ec3"
           },
@@ -68,7 +83,7 @@
           "size": 150292794
         },
         {
-          "url": "http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/pepper_16_1398/naclsdk_linux.tgz",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/pepper_16_1398/naclsdk_linux.tgz",
           "checksum": {
             "sha1": "222e11cbc6406209936cad26f4013dfa33eb77cf"
           },
@@ -76,7 +91,7 @@
           "size": 151546130
         },
         {
-          "url": "http://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/pepper_16_1398/naclsdk_win.exe",
+          "url": "https://commondatastorage.googleapis.com/nativeclient-mirror/nacl/nacl_sdk/pepper_16_1398/naclsdk_win.exe",
           "checksum": {
             "sha1": "76088b2c4c6ca0fbac3c3fd68930c9a94a25351a"
           },
@@ -203,8 +218,8 @@
     {
       "name": "pepper_21",
       "description": "Chrome 21 bundle, revision xxxxx",
-      "stability": "stable",
-      "recommended": "yes",
+      "stability": "post_stable",
+      "recommended": "no",
       "version": 21,
       "repath": "pepper_21",
       "archives": [],
@@ -213,10 +228,20 @@
     {
       "name": "pepper_22",
       "description": "Chrome 22 bundle, revision xxxxx",
-      "stability": "beta",
-      "recommended": "no",
+      "stability": "stable",
+      "recommended": "yes",
       "version": 22,
       "repath": "pepper_22",
+      "archives": [],
+      "revision": 0
+    },
+    {
+      "name": "pepper_23",
+      "description": "Chrome 23 bundle, revision xxxxx",
+      "stability": "beta",
+      "recommended": "no",
+      "version": 23,
+      "repath": "pepper_23",
       "archives": [],
       "revision": 0
     },

@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/object_watcher.h"
 #include "base/win/scoped_bstr.h"
+#include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_hdc.h"
 #include "chrome/common/child_process_logging.h"
@@ -389,8 +390,7 @@ class PrintSystemWin : public PrintSystem {
           : last_page_printed_(-1),
             job_id_(-1),
             delegate_(NULL),
-            saved_dc_(0),
-            should_couninit_(false) {
+            saved_dc_(0) {
       }
 
       ~Core() {}
@@ -514,10 +514,8 @@ class PrintSystemWin : public PrintSystem {
           job_progress_watcher_.StopWatching();
           job_progress_watcher_.StartWatching(job_progress_event_.Get(), this);
         }
-        if (done && should_couninit_) {
-          CoUninitialize();
-          should_couninit_ = false;
-        }
+        if (done)
+          com_initializer_.reset();
       }
 
       virtual void OnRenderPDFPagesToMetafileFailed() OVERRIDE {
@@ -595,8 +593,9 @@ class PrintSystemWin : public PrintSystem {
         job_progress_event_.Set(CreateEvent(NULL, TRUE, FALSE, NULL));
         if (!job_progress_event_.Get())
           return false;
-        should_couninit_ = SUCCEEDED(CoInitializeEx(NULL,
-                                                    COINIT_MULTITHREADED));
+        scoped_ptr<base::win::ScopedCOMInitializer> com_initializer(
+            new base::win::ScopedCOMInitializer(
+                base::win::ScopedCOMInitializer::kMTA));
         base::win::ScopedComPtr<IXpsPrintJobStream> doc_stream;
         base::win::ScopedComPtr<IXpsPrintJobStream> print_ticket_stream;
         bool ret = false;
@@ -628,6 +627,7 @@ class PrintSystemWin : public PrintSystem {
                 if (SUCCEEDED(doc_stream->Close())) {
                   job_progress_watcher_.StartWatching(job_progress_event_.Get(),
                                                       this);
+                  com_initializer_.swap(com_initializer);
                   ret = true;
                 }
               }
@@ -638,10 +638,6 @@ class PrintSystemWin : public PrintSystem {
           if (xps_print_job_) {
             xps_print_job_->Cancel();
             xps_print_job_.Release();
-          }
-          if (should_couninit_) {
-            CoUninitialize();
-            should_couninit_ = false;
           }
         }
         return ret;
@@ -662,7 +658,7 @@ class PrintSystemWin : public PrintSystem {
       base::win::ScopedHandle job_progress_event_;
       base::win::ObjectWatcher job_progress_watcher_;
       base::win::ScopedComPtr<IXpsPrintJob> xps_print_job_;
-      bool should_couninit_;
+      scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_;
 
       DISALLOW_COPY_AND_ASSIGN(Core);
     };
@@ -889,19 +885,6 @@ std::string PrintSystemWin::GetSupportedMimeTypes() {
   return "application/pdf";
 }
 
-
-std::string PrintSystem::GenerateProxyId() {
-  GUID proxy_id = {0};
-  HRESULT hr = UuidCreate(&proxy_id);
-  DCHECK(SUCCEEDED(hr));
-  wchar_t* proxy_id_as_string = NULL;
-  UuidToString(&proxy_id, reinterpret_cast<RPC_WSTR *>(&proxy_id_as_string));
-  DCHECK(proxy_id_as_string);
-  std::string ret;
-  WideToUTF8(proxy_id_as_string, wcslen(proxy_id_as_string), &ret);
-  RpcStringFree(reinterpret_cast<RPC_WSTR *>(&proxy_id_as_string));
-  return ret;
-}
 
 scoped_refptr<PrintSystem> PrintSystem::CreateInstance(
     const base::DictionaryValue* print_system_settings) {

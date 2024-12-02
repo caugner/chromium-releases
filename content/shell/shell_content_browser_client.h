@@ -29,6 +29,9 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       RenderViewHost* render_view_host) OVERRIDE;
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
                                               int child_process_id) OVERRIDE;
+  virtual void OverrideWebkitPrefs(RenderViewHost* render_view_host,
+                                   const GURL& url,
+                                   webkit_glue::WebPreferences* prefs) OVERRIDE;
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
   virtual std::string GetDefaultDownloadName() OVERRIDE;
@@ -38,7 +41,8 @@ class ShellContentBrowserClient : public ContentBrowserClient {
 #if defined(OS_ANDROID)
   virtual void GetAdditionalMappedFilesForChildProcess(
       const CommandLine& command_line,
-      base::GlobalDescriptors::Mapping* mappings) OVERRIDE;
+      int child_process_id,
+      std::vector<content::FileDescriptorInfo>* mappings) OVERRIDE;
 #endif
 
   ShellBrowserContext* browser_context();

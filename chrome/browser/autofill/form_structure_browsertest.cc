@@ -12,7 +12,6 @@
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "googleurl/src/gurl.h"
@@ -60,7 +59,7 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
                                                        HTMLToDataURI(input)));
 
   AutofillManager* autofill_manager =
-      chrome::GetActiveTabContents(browser())->autofill_manager();
+      AutofillManager::FromWebContents(chrome::GetActiveWebContents(browser()));
   ASSERT_NE(static_cast<AutofillManager*>(NULL), autofill_manager);
   std::vector<FormStructure*> forms = autofill_manager->form_structures_.get();
   *output = FormStructureBrowserTest::FormStructuresToString(forms);

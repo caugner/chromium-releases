@@ -15,14 +15,21 @@ class WebString;
 class WebIDBTransaction;
 }
 
+namespace content {
+
 class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
  public:
   explicit RendererWebIDBDatabaseImpl(int32 idb_database_id);
   virtual ~RendererWebIDBDatabaseImpl();
 
+  // TODO(alecflett): Remove this when it is removed from webkit:
+  // https://bugs.webkit.org/show_bug.cgi?id=98085
+  static const long long AutogenerateObjectStoreId = -1;
+
   // WebKit::WebIDBDatabase
   virtual WebKit::WebIDBMetadata metadata() const;
   virtual WebKit::WebIDBObjectStore* createObjectStore(
+      long long objectstore_id,
       const WebKit::WebString& name,
       const WebKit::WebIDBKeyPath& key_path,
       bool auto_increment,
@@ -44,5 +51,7 @@ class RendererWebIDBDatabaseImpl : public WebKit::WebIDBDatabase {
  private:
   int32 idb_database_id_;
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBDATABASE_IMPL_H_

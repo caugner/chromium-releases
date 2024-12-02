@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/common/content_settings.h"
@@ -119,7 +120,7 @@ class ExtensionListPolicyHandler : public TypeCheckingPolicyHandler {
   // Runs sanity checks on the policy value and returns it in |extension_ids|.
   bool CheckAndGetList(const PolicyMap& policies,
                        PolicyErrorMap* errors,
-                       const base::ListValue** extension_ids);
+                       scoped_ptr<base::ListValue>* extension_ids);
 
  private:
   const char* pref_path_;
@@ -285,9 +286,13 @@ class DefaultSearchPolicyHandler : public ConfigurationPolicyHandler {
                                const Value** url_value,
                                std::string* url_string);
 
-  // Make sure that the |path| if present in |prefs_|.  If not, set it to
+  // Make sure that the |path| is present in |prefs_|.  If not, set it to
   // a blank string.
   void EnsureStringPrefExists(PrefValueMap* prefs, const std::string& path);
+
+  // Make sure that the |path| is present in |prefs_| and is a ListValue.  If
+  // not, set it to an empty list.
+  void EnsureListPrefExists(PrefValueMap* prefs, const std::string& path);
 
   // The ConfigurationPolicyHandler handlers for each default search policy.
   std::vector<ConfigurationPolicyHandler*> handlers_;

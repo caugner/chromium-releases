@@ -44,8 +44,7 @@ class ProxyConfigServiceDirect : public net::ProxyConfigService {
 
 net::ProxyConfigService* CreateSystemProxyConfigService(
     base::SingleThreadTaskRunner* ui_task_runner,
-    base::SingleThreadTaskRunner* io_thread_task_runner,
-    MessageLoopForIO* file_message_loop) {
+    base::SingleThreadTaskRunner* io_thread_task_runner) {
   DCHECK(ui_task_runner->BelongsToCurrentThread());
 
 #if defined(OS_WIN)
@@ -84,9 +83,7 @@ URLRequestContext::URLRequestContext(
     : ALLOW_THIS_IN_INITIALIZER_LIST(storage_(this)) {
   scoped_ptr<VlogNetLog> net_log(new VlogNetLog());
   storage_.set_host_resolver(
-      net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                    net::HostResolver::kDefaultRetryAttempts,
-                                    net_log.get()));
+      net::HostResolver::CreateDefaultResolver(net_log.get()));
   storage_.set_proxy_service(net::ProxyService::CreateUsingSystemProxyResolver(
       proxy_config_service.release(), 0u, net_log.get()));
   storage_.set_cert_verifier(net::CertVerifier::CreateDefault());
@@ -116,11 +113,10 @@ URLRequestContext::~URLRequestContext() {
 
 URLRequestContextGetter::URLRequestContextGetter(
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
-    MessageLoopForIO* file_message_loop)
+    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner)
     : network_task_runner_(network_task_runner) {
-  proxy_config_service_.reset(CreateSystemProxyConfigService(
-      ui_task_runner, network_task_runner_, file_message_loop));
+  proxy_config_service_.reset(
+      CreateSystemProxyConfigService(ui_task_runner, network_task_runner_));
 }
 
 net::URLRequestContext* URLRequestContextGetter::GetURLRequestContext() {

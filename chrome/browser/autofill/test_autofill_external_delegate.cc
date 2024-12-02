@@ -5,8 +5,10 @@
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
 
 TestAutofillExternalDelegate::TestAutofillExternalDelegate(
-    TabContents* tab_contents, AutofillManager* autofill_manager) :
-    AutofillExternalDelegate(tab_contents, autofill_manager) {}
+    content::WebContents* web_contents,
+    AutofillManager* autofill_manager)
+    : AutofillExternalDelegate(web_contents, autofill_manager) {
+}
 
 TestAutofillExternalDelegate::~TestAutofillExternalDelegate() {}
 
@@ -15,12 +17,6 @@ void TestAutofillExternalDelegate::ApplyAutofillSuggestions(
     const std::vector<string16>& autofill_labels,
     const std::vector<string16>& autofill_icons,
     const std::vector<int>& autofill_unique_ids) {}
-
-void TestAutofillExternalDelegate::OnQueryPlatformSpecific(
-    int query_id,
-    const webkit::forms::FormData& form,
-    const webkit::forms::FormField& field,
-    const gfx::Rect& bounds) {}
 
 void TestAutofillExternalDelegate::HideAutofillPopupInternal() {}
 

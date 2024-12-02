@@ -54,11 +54,12 @@ void BuildRootLayers(View* view, std::vector<ui::Layer*>* layers) {
 // Finally, make a default one.
 NativeWidget* CreateNativeWidget(NativeWidget* native_widget,
                                  internal::NativeWidgetDelegate* delegate,
+                                 Widget::InitParams::Type type,
                                  gfx::NativeView parent) {
   if (!native_widget) {
     if (ViewsDelegate::views_delegate) {
-      native_widget =
-          ViewsDelegate::views_delegate->CreateNativeWidget(delegate, parent);
+      native_widget = ViewsDelegate::views_delegate->CreateNativeWidget(
+          type, delegate, parent);
     }
     if (!native_widget) {
       native_widget =
@@ -150,11 +151,13 @@ Widget::InitParams::InitParams()
       mirror_origin_in_rtl(false),
       has_dropshadow(false),
       remove_standard_frame(false),
+      use_system_default_icon(false),
       show_state(ui::SHOW_STATE_DEFAULT),
       double_buffer(false),
       parent(NULL),
       parent_widget(NULL),
       native_widget(NULL),
+      desktop_root_window_host(NULL),
       top_level(false),
       layer_type(ui::LAYER_TEXTURED) {
 }
@@ -179,6 +182,7 @@ Widget::InitParams::InitParams(Type type)
       parent(NULL),
       parent_widget(NULL),
       native_widget(NULL),
+      desktop_root_window_host(NULL),
       top_level(false),
       layer_type(ui::LAYER_TEXTURED) {
 }
@@ -329,8 +333,8 @@ void Widget::Init(const InitParams& params) {
   widget_delegate_ = params.delegate ?
       params.delegate : new DefaultWidgetDelegate(this, params);
   ownership_ = params.ownership;
-  native_widget_ =
-      CreateNativeWidget(params.native_widget, this, params.GetParent())->
+  native_widget_ = CreateNativeWidget(
+      params.native_widget, this, params.type, params.GetParent())->
           AsNativeWidgetPrivate();
   GetRootView();
   default_theme_provider_.reset(new DefaultThemeProvider);
@@ -463,13 +467,15 @@ void Widget::CenterWindow(const gfx::Size& size) {
 
 void Widget::SetBoundsConstrained(const gfx::Rect& bounds) {
   gfx::Rect work_area =
-      gfx::Screen::GetDisplayNearestPoint(bounds.origin()).work_area();
+      gfx::Screen::GetScreenFor(GetNativeView())->GetDisplayNearestPoint(
+          bounds.origin()).work_area();
   if (work_area.IsEmpty()) {
     SetBounds(bounds);
   } else {
     // Inset the work area slightly.
     work_area.Inset(10, 10, 10, 10);
-    SetBounds(work_area.AdjustToFit(bounds));
+    work_area.AdjustToFit(bounds);
+    SetBounds(work_area);
   }
 }
 
@@ -733,10 +739,6 @@ void Widget::UpdateWindowTitle() {
   if (!non_client_view_)
     return;
 
-  // If the non-client view is rendering its own title, it'll need to relayout
-  // now.
-  non_client_view_->Layout();
-
   // Update the native frame's text. We do this regardless of whether or not
   // the native frame is being used, since this also updates the taskbar, etc.
   string16 window_title;
@@ -747,6 +749,11 @@ void Widget::UpdateWindowTitle() {
   }
   base::i18n::AdjustStringForLocaleDirection(&window_title);
   native_widget_->SetWindowTitle(window_title);
+  non_client_view_->UpdateWindowTitle();
+
+  // If the non-client view is rendering its own title, it'll need to relayout
+  // now and to get a paint update later on.
+  non_client_view_->Layout();
 }
 
 void Widget::UpdateWindowIcon() {
@@ -778,10 +785,6 @@ void Widget::SetFocusTraversableParentView(View* parent_view) {
 
 void Widget::ClearNativeFocus() {
   native_widget_->ClearNativeFocus();
-}
-
-void Widget::FocusNativeView(gfx::NativeView native_view) {
-  native_widget_->FocusNativeView(native_view);
 }
 
 NonClientFrameView* Widget::CreateNonClientFrameView() {
@@ -1038,12 +1041,15 @@ bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
   if (!compositor)
     return false;
 
+#if defined(OS_WIN) && defined(USE_AURA)
+  compositor->ScheduleDraw();
+#else
   // If the root view is animating, it is likely that it does not cover the same
   // set of pixels it did at the last frame, so we must clear when compositing
   // to avoid leaving ghosts.
   bool force_clear = false;
   if (GetRootView()->layer()) {
-    const ui::Transform& layer_transform = GetRootView()->layer()->transform();
+    const gfx::Transform& layer_transform = GetRootView()->layer()->transform();
     if (layer_transform != GetRootView()->GetTransform()) {
       // The layer has not caught up to the view (i.e., the layer is still
       // animating), and so a clear is required.
@@ -1064,6 +1070,7 @@ bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
   }
 
   compositor->Draw(force_clear);
+#endif
   return true;
 }
 
@@ -1105,7 +1112,7 @@ bool Widget::OnMouseEvent(const ui::MouseEvent& event) {
         native_widget_->ReleaseCapture();
       }
       GetRootView()->OnMouseReleased(event);
-      return (event.flags() & ui::EF_IS_NON_CLIENT) ? false : true;
+      return ((event.flags() & ui::EF_IS_NON_CLIENT) == 0);
     case ui::ET_MOUSE_MOVED:
     case ui::ET_MOUSE_DRAGGED:
       if (native_widget_->HasCapture() && is_mouse_button_pressed_) {
@@ -1188,12 +1195,12 @@ const std::vector<ui::Layer*>& Widget::GetRootLayers() {
 }
 
 bool Widget::HasHitTestMask() const {
-  return widget_delegate_->HasHitTestMask();
+  return widget_delegate_->WidgetHasHitTestMask();
 }
 
 void Widget::GetHitTestMask(gfx::Path* mask) const {
   DCHECK(mask);
-  widget_delegate_->GetHitTestMask(mask);
+  widget_delegate_->GetWidgetHitTestMask(mask);
 }
 
 Widget* Widget::AsWidget() {

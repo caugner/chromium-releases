@@ -10,15 +10,16 @@
 
 #include "ash/ash_export.h"
 #include "ash/system/user/login_status.h"
-#include "ash/wm/cursor_delegate.h"
 #include "ash/wm/cursor_manager.h"
 #include "ash/wm/shelf_types.h"
+#include "ash/wm/system_modal_container_event_filter_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/screen.h"
 #include "ui/gfx/size.h"
 
 class CommandLine;
@@ -67,6 +68,7 @@ class Launcher;
 class NestedDispatcherController;
 class PowerButtonController;
 class ScreenAsh;
+class SessionStateController;
 class ShellDelegate;
 class ShellObserver;
 class SystemTrayDelegate;
@@ -74,6 +76,7 @@ class SystemTray;
 class UserActivityDetector;
 class UserWallpaperDelegate;
 class VideoDetector;
+class WebNotificationTray;
 class WindowCycleController;
 
 namespace internal {
@@ -82,24 +85,23 @@ class ActivationController;
 class AppListController;
 class CaptureController;
 class DragDropController;
+class EventClientImpl;
 class EventRewriterEventFilter;
 class FocusCycler;
 class MagnificationController;
 class MouseCursorEventFilter;
 class OutputConfiguratorAnimation;
 class OverlayEventFilter;
-class PanelLayoutManager;
 class ResizeShadowController;
 class RootWindowController;
 class RootWindowLayoutManager;
 class ScreenPositionController;
 class ShadowController;
-class ShelfLayoutManager;
-class ShellContextMenu;
 class SlowAnimationEventFilter;
 class StackingController;
 class StatusAreaWidget;
 class SystemGestureEventFilter;
+class SystemModalContainerEventFilter;
 class TooltipController;
 class TouchObserverHUD;
 class VisibilityController;
@@ -112,7 +114,7 @@ class WorkspaceController;
 //
 // Upon creation, the Shell sets itself as the RootWindow's delegate, which
 // takes ownership of the Shell.
-class ASH_EXPORT Shell : ash::CursorDelegate {
+class ASH_EXPORT Shell : internal::SystemModalContainerEventFilterDelegate{
  public:
   typedef std::vector<aura::RootWindow*> RootWindowList;
   typedef std::vector<internal::RootWindowController*> RootWindowControllerList;
@@ -131,6 +133,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
     aura::shared::InputMethodEventFilter* input_method_event_filter();
     internal::SystemGestureEventFilter* system_gesture_event_filter();
     internal::WorkspaceController* workspace_controller();
+    internal::ScreenPositionController* screen_position_controller();
 
    private:
     Shell* shell_;  // not owned
@@ -166,27 +169,36 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   // until the another window who has a different root window becomes active.
   static aura::RootWindow* GetActiveRootWindow();
 
+  // Returns the global Screen object that's always active in ash.
+  static gfx::Screen* GetScreen();
+
   // Returns all root windows.
   static RootWindowList GetAllRootWindows();
 
   static aura::Window* GetContainer(aura::RootWindow* root_window,
                                     int container_id);
+  static const aura::Window* GetContainer(const aura::RootWindow* root_window,
+                                          int container_id);
 
   // Returns the list of containers that match |container_id| in
   // all root windows.
   static std::vector<aura::Window*> GetAllContainers(int container_id);
 
+  // True if "launcher per display" feature  is enabled.
+  static bool IsLauncherPerDisplayEnabled();
+
   void set_active_root_window(aura::RootWindow* active_root_window) {
     active_root_window_ = active_root_window;
   }
 
-  // Adds or removes |filter| from the aura::Env's CompoundEventFilter.
+  // Adds or removes |filter| from the aura::Env's pre-target event-handler
+  // list.
   void AddEnvEventFilter(aura::EventFilter* filter);
   void RemoveEnvEventFilter(aura::EventFilter* filter);
-  size_t GetEnvEventFilterCount() const;
 
-  // Shows the background menu over |widget|.
-  void ShowBackgroundMenu(views::Widget* widget, const gfx::Point& location);
+  // Shows the context menu for the background and launcher at
+  // |location_in_screen| (in screen coordinates).
+  void ShowContextMenu(const gfx::Point& location_in_screen);
 
   // Toggles app list.
   void ToggleAppList();
@@ -202,6 +214,11 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 
   // Returns true if a modal dialog window is currently open.
   bool IsModalWindowOpen() const;
+
+  // For testing only: set simulation that a modal window is open
+  void SimulateModalWindowOpenForTesting(bool modal_window_open) {
+    simulate_modal_window_open_for_testing_ = modal_window_open;
+  }
 
   // Creates a default views::NonClientFrameView for use by windows in the
   // Ash environment.
@@ -220,6 +237,10 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 
   // Called when the user logs in.
   void OnLoginStateChanged(user::LoginStatus status);
+
+  // Called when the login status changes.
+  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
+  void UpdateAfterLoginStatusChange(user::LoginStatus status);
 
   // Called when the application is exiting.
   void OnAppTerminating();
@@ -245,7 +266,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 #endif  // !defined(OS_MACOSX)
 
   aura::shared::CompoundEventFilter* env_filter() {
-    return env_filter_;
+    return env_filter_.get();
   }
   internal::TooltipController* tooltip_controller() {
     return tooltip_controller_.get();
@@ -261,6 +282,9 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   }
   PowerButtonController* power_button_controller() {
     return power_button_controller_.get();
+  }
+  SessionStateController* session_state_controller() {
+    return session_state_controller_.get();
   }
   UserActivityDetector* user_activity_detector() {
     return user_activity_detector_.get();
@@ -300,29 +324,43 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
     return magnification_controller_.get();
   }
 
-  Launcher* launcher() { return launcher_.get(); }
-
   const ScreenAsh* screen() { return screen_; }
 
   // Force the shelf to query for it's current visibility state.
   void UpdateShelfVisibility();
 
-  // Sets/gets the shelf auto-hide behavior.
-  void SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior);
-  ShelfAutoHideBehavior GetShelfAutoHideBehavior() const;
+  // TODO(oshima): Define an interface to access shelf/launcher
+  // state, or just use Launcher.
 
-  void SetShelfAlignment(ShelfAlignment alignment);
-  ShelfAlignment GetShelfAlignment();
+  // Sets/gets the shelf auto-hide behavior on |root_window|.
+  void SetShelfAutoHideBehavior(ShelfAutoHideBehavior behavior,
+                                aura::RootWindow* root_window);
+  ShelfAutoHideBehavior GetShelfAutoHideBehavior(
+      aura::RootWindow* root_window) const;
+
+  bool IsShelfAutoHideMenuHideChecked(aura::RootWindow* root);
+  ShelfAutoHideBehavior GetToggledShelfAutoHideBehavior(
+      aura::RootWindow* root_window);
+
+  // Sets/gets shelf's alignment on |root_window|.
+  void SetShelfAlignment(ShelfAlignment alignment,
+                         aura::RootWindow* root_window);
+  ShelfAlignment GetShelfAlignment(aura::RootWindow* root_window);
 
   // Dims or undims the screen.
   void SetDimming(bool should_dim);
 
-  // TODO(sky): don't expose this!
-  internal::ShelfLayoutManager* shelf() const { return shelf_; }
+  // Creates a modal background (a partially-opaque fullscreen window)
+  // on all displays for |window|.
+  void CreateModalBackground(aura::Window* window);
 
-  internal::StatusAreaWidget* status_area_widget() const {
-    return status_area_widget_;
-  }
+  // Called when a modal window is removed. It will activate
+  // another modal window if any, or remove modal screens
+  // on all displays.
+  void OnModalWindowRemoved(aura::Window* removed);
+
+  // Returns WebNotificationTray on the primary root window.
+  WebNotificationTray* GetWebNotificationTray();
 
   // Convenience accessor for members of StatusAreaWidget.
   SystemTrayDelegate* tray_delegate();
@@ -383,9 +421,8 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   void InitLayoutManagersForPrimaryDisplay(
       internal::RootWindowController* root_window_controller);
 
-  // aura::CursorManager::Delegate overrides:
-  virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
-  virtual void ShowCursor(bool visible) OVERRIDE;
+  // ash::internal::SystemModalContainerEventFilterDelegate overrides:
+  virtual bool CanWindowReceiveEvents(aura::Window* window) OVERRIDE;
 
   static Shell* instance_;
 
@@ -399,7 +436,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   aura::RootWindow* active_root_window_;
 
   // The CompoundEventFilter owned by aura::Env object.
-  aura::shared::CompoundEventFilter* env_filter_;
+  scoped_ptr<aura::shared::CompoundEventFilter> env_filter_;
 
   std::vector<WindowAndBoundsPair> to_restore_;
 
@@ -413,11 +450,8 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   scoped_ptr<UserWallpaperDelegate> user_wallpaper_delegate_;
   scoped_ptr<CapsLockDelegate> caps_lock_delegate_;
 
-  scoped_ptr<Launcher> launcher_;
-
   scoped_ptr<internal::AppListController> app_list_controller_;
 
-  scoped_ptr<internal::ShellContextMenu> shell_context_menu_;
   scoped_ptr<internal::StackingController> stacking_controller_;
   scoped_ptr<internal::ActivationController> activation_controller_;
   scoped_ptr<internal::CaptureController> capture_controller_;
@@ -429,6 +463,7 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   scoped_ptr<internal::VisibilityController> visibility_controller_;
   scoped_ptr<DesktopBackgroundController> desktop_background_controller_;
   scoped_ptr<PowerButtonController> power_button_controller_;
+  scoped_ptr<SessionStateController> session_state_controller_;
   scoped_ptr<UserActivityDetector> user_activity_detector_;
   scoped_ptr<VideoDetector> video_detector_;
   scoped_ptr<WindowCycleController> window_cycle_controller_;
@@ -440,6 +475,8 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
   scoped_ptr<aura::client::UserActionClient> user_action_client_;
   scoped_ptr<internal::MouseCursorEventFilter> mouse_cursor_filter_;
   scoped_ptr<internal::ScreenPositionController> screen_position_controller_;
+  scoped_ptr<internal::SystemModalContainerEventFilter> modality_filter_;
+  scoped_ptr<internal::EventClientImpl> event_client_;
 
   // An event filter that rewrites or drops an event.
   scoped_ptr<internal::EventRewriterEventFilter> event_rewriter_filter_;
@@ -472,21 +509,13 @@ class ASH_EXPORT Shell : ash::CursorDelegate {
 
   CursorManager cursor_manager_;
 
-  // The shelf for managing the launcher and the status widget in non-compact
-  // mode. Shell does not own the shelf. Instead, it is owned by container of
-  // the status area.
-  internal::ShelfLayoutManager* shelf_;
-
-  // Manages layout of panels. Owned by PanelContainer.
-  internal::PanelLayoutManager* panel_layout_manager_;
-
   ObserverList<ShellObserver> observers_;
-
-  // Widget containing system tray.
-  internal::StatusAreaWidget* status_area_widget_;
 
   // Used by ash/shell.
   content::BrowserContext* browser_context_;
+
+  // For testing only: simulate that a modal window is open
+  bool simulate_modal_window_open_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(Shell);
 };

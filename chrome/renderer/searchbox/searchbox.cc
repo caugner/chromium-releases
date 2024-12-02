@@ -15,7 +15,10 @@ SearchBox::SearchBox(content::RenderView* render_view)
       verbatim_(false),
       selection_start_(0),
       selection_end_(0),
-      results_base_(0) {
+      results_base_(0),
+      last_results_base_(0),
+      is_focused_(false),
+      active_tab_is_ntp_(false) {
 }
 
 SearchBox::~SearchBox() {
@@ -34,10 +37,12 @@ void SearchBox::SetSuggestions(
       render_view()->GetRoutingID(), render_view()->GetPageId(), suggestions));
 }
 
-void SearchBox::SetInstantPreviewHeight(int height, InstantSizeUnits units) {
-  render_view()->Send(new ChromeViewHostMsg_SetInstantPreviewHeight(
-      render_view()->GetRoutingID(), render_view()->GetPageId(), height,
-      units));
+void SearchBox::ShowInstantPreview(InstantShownReason reason,
+                                   int height,
+                                   InstantSizeUnits units) {
+  render_view()->Send(new ChromeViewHostMsg_ShowInstantPreview(
+      render_view()->GetRoutingID(), render_view()->GetPageId(), reason,
+      height, units));
 }
 
 gfx::Rect SearchBox::GetRect() {
@@ -56,6 +61,24 @@ gfx::Rect SearchBox::GetRect() {
                    static_cast<int>(static_cast<float>(rect_.height()) / zoom));
 }
 
+const std::vector<InstantAutocompleteResult>&
+    SearchBox::GetAutocompleteResults() {
+  // Remember the last requested autocomplete_results to account for race
+  // conditions between autocomplete providers returning new data and the user
+  // clicking on a suggestion.
+  last_autocomplete_results_ = autocomplete_results_;
+  last_results_base_ = results_base_;
+  return autocomplete_results_;
+}
+
+const InstantAutocompleteResult* SearchBox::GetAutocompleteResultWithId(
+    size_t restricted_id) const {
+  if (restricted_id < last_results_base_ ||
+      restricted_id >= last_results_base_ + last_autocomplete_results_.size())
+    return NULL;
+  return &last_autocomplete_results_[restricted_id - last_results_base_];
+}
+
 bool SearchBox::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SearchBox, message)
@@ -69,6 +92,10 @@ bool SearchBox::OnMessageReceived(const IPC::Message& message) {
                         OnAutocompleteResults)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxUpOrDownKeyPressed,
                         OnUpOrDownKeyPressed)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxFocus, OnFocus)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxBlur, OnBlur)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SearchBoxActiveTabModeChanged,
+                        OnActiveTabModeChanged)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -144,6 +171,30 @@ void SearchBox::OnUpOrDownKeyPressed(int count) {
   }
 }
 
+void SearchBox::OnFocus() {
+  is_focused_ = true;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchFocus(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
+void SearchBox::OnBlur() {
+  is_focused_ = false;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchBlur(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
+void SearchBox::OnActiveTabModeChanged(bool active_tab_is_ntp) {
+  active_tab_is_ntp_ = active_tab_is_ntp;
+  if (render_view()->GetWebView() && render_view()->GetWebView()->mainFrame()) {
+    extensions_v8::SearchBoxExtension::DispatchContextChange(
+        render_view()->GetWebView()->mainFrame());
+  }
+}
+
 void SearchBox::Reset() {
   query_.clear();
   verbatim_ = false;
@@ -151,4 +202,5 @@ void SearchBox::Reset() {
   results_base_ = 0;
   rect_ = gfx::Rect();
   autocomplete_results_.clear();
+  is_focused_ = false;
 }

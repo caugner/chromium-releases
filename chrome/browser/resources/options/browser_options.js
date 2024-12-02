@@ -25,20 +25,6 @@ cr.define('options', function() {
     syncSetupCompleted: false,
 
     /**
-     * The cached value of the instant.confirm_dialog_shown preference.
-     * @type {bool}
-     * @private
-     */
-    instantConfirmDialogShown_: false,
-
-    /**
-     * The cached value of the spellcheck.confirm_dialog_shown preference.
-     * @type {bool}
-     * @private
-     */
-    spellcheckConfirmDialogShown_: false,
-
-    /**
      * Keeps track of whether |onShowHomeButtonChanged_| has been called. See
      * |onShowHomeButtonChanged_|.
      * @type {bool}
@@ -110,7 +96,12 @@ cr.define('options', function() {
 
       // On Startup section.
       Preferences.getInstance().addEventListener('session.restore_on_startup',
-         this.onRestoreOnStartupChanged_.bind(this));
+          this.onRestoreOnStartupChanged_.bind(this));
+      Preferences.getInstance().addEventListener(
+          'session.urls_to_restore_on_startup',
+          function(event) {
+            $('startup-set-pages').disabled = event.value.disabled;
+          });
 
       $('startup-set-pages').onclick = function() {
         OptionsPage.navigateToPage('startup');
@@ -160,15 +151,6 @@ cr.define('options', function() {
       };
       $('default-search-engine').addEventListener('change',
           this.setDefaultSearchEngine_);
-      $('instant-enabled-control').customChangeHandler = function(event) {
-        if (this.checked && !self.instantConfirmDialogShown_) {
-          OptionsPage.showPageByName('instantConfirm', false);
-          return true;  // Stop default preference processing.
-        }
-        return false;  // Allow default preference processing.
-      };
-      Preferences.getInstance().addEventListener('instant.confirm_dialog_shown',
-          this.onInstantConfirmDialogShownChanged_.bind(this));
 
       // Users section.
       if (loadTimeData.valueExists('profilesInfo')) {
@@ -246,20 +228,6 @@ cr.define('options', function() {
         OptionsPage.navigateToPage('clearBrowserData');
         chrome.send('coreOptionsUserMetricsAction', ['Options_ClearData']);
       };
-      // 'spelling-enabled-control' element is only present on Chrome branded
-      // builds.
-      if ($('spelling-enabled-control')) {
-        $('spelling-enabled-control').customChangeHandler = function(event) {
-          if (this.checked && !self.spellcheckConfirmDialogShown_) {
-            OptionsPage.showPageByName('spellingConfirm', false);
-            return true;
-          }
-          return false;
-        };
-        Preferences.getInstance().addEventListener(
-            'spellcheck.confirm_dialog_shown',
-            this.onSpellcheckConfirmDialogShownChanged_.bind(this));
-      }
       // 'metricsReportingEnabled' element is only present on Chrome branded
       // builds.
       if ($('metricsReportingEnabled')) {
@@ -268,13 +236,6 @@ cr.define('options', function() {
               [String(event.target.checked)]);
         };
       }
-      $('do-not-track-enabled').customChangeHandler = function(event) {
-        if (this.checked) {
-          OptionsPage.showPageByName('doNotTrackConfirm', false);
-          return true;
-        }
-        return false;
-      };
 
       // Bluetooth (CrOS only).
       if (cr.isChromeOS) {
@@ -398,10 +359,6 @@ cr.define('options', function() {
                       ['Options_ManageSSLCertificates']);
         };
       }
-      $('sslCheckRevocation').onclick = function(event) {
-        chrome.send('checkRevocationCheckboxAction',
-            [String($('sslCheckRevocation').checked)]);
-      };
 
       // Cloud Print section.
       // 'cloudPrintProxyEnabled' is true for Chrome branded builds on
@@ -450,17 +407,6 @@ cr.define('options', function() {
         };
       }
 
-      // Background mode section.
-      if ($('backgroundModeCheckbox')) {
-        cr.defineProperty($('backgroundModeCheckbox'),
-            'controlledBy',
-            cr.PropertyKind.ATTR);
-        $('backgroundModeCheckbox').onclick = function(event) {
-          chrome.send('backgroundModeAction',
-              [String($('backgroundModeCheckbox').checked)]);
-        };
-      }
-
       // Factory reset section (CrOS only).
       if (cr.isChromeOS) {
         $('factory-reset-restart').onclick = function(event) {
@@ -482,11 +428,7 @@ cr.define('options', function() {
      * @private
      */
     onRestoreOnStartupChanged_: function(event) {
-      /** @const */ var showPagesValue = Number($('startup-show-pages').value);
       /** @const */ var showHomePageValue = 0;
-
-      $('startup-set-pages').disabled = event.value.disabled &&
-                                        event.value.value != showPagesValue;
 
       if (event.value.value == showHomePageValue) {
         // If the user previously selected "Show the homepage", the
@@ -656,17 +598,14 @@ cr.define('options', function() {
       $('sync-action-link').hidden = syncData.actionLinkText.length == 0;
       $('sync-action-link').disabled = syncData.managed;
 
-      if (cr.isChromeOS && syncData.hasError) {
-        // On Chrome OS, sign out the user and sign in again to get fresh
-        // credentials on auth errors.
-        $('sync-action-link').onclick = function(event) {
+      // On Chrome OS, sign out the user and sign in again to get fresh
+      // credentials on auth errors.
+      $('sync-action-link').onclick = function(event) {
+        if (cr.isChromeOS && syncData.hasError)
           SyncSetupOverlay.doSignOutOnAuthError();
-        };
-      } else {
-        $('sync-action-link').onclick = function(event) {
+        else
           SyncSetupOverlay.showErrorUI();
-        };
-      }
+      };
 
       if (syncData.hasError)
         $('sync-status').classList.add('sync-error');
@@ -754,26 +693,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Called when the value of the instant.confirm_dialog_shown preference
-     * changes. Cache this value.
-     * @param {Event} event Change event.
-     * @private
-     */
-    onInstantConfirmDialogShownChanged_: function(event) {
-      this.instantConfirmDialogShown_ = event.value.value;
-    },
-
-    /**
-     * Called when the value of the spellcheck.confirm_dialog_shown preference
-     * changes. Cache this value.
-     * @param {Event} event Change event.
-     * @private
-     */
-    onSpellcheckConfirmDialogShownChanged_: function(event) {
-      this.spellcheckConfirmDialogShown_ = event.value.value;
-    },
-
-    /**
      * Called when the value of the download.default_directory preference
      * changes.
      * @param {Event} event Change event.
@@ -791,6 +710,11 @@ cr.define('options', function() {
         path = path.replace(/\//g, ' \u203a ');
         $('downloadLocationPath').value = path;
       }
+      if (event.value.disabled)
+        $('download-location-label').classList.add('disabled');
+      else
+        $('download-location-label').classList.remove('disabled');
+      $('downloadLocationChangeButton').disabled = event.value.disabled;
     },
 
     /**
@@ -831,6 +755,8 @@ cr.define('options', function() {
       this.clearSearchEngines_();
       engineSelect = $('default-search-engine');
       engineSelect.disabled = defaultManaged;
+      if (defaultManaged && defaultValue == -1)
+        return;
       engineCount = engines.length;
       var defaultIndex = -1;
       for (var i = 0; i < engineCount; i++) {
@@ -1126,27 +1052,6 @@ cr.define('options', function() {
     },
 
     /**
-     * Set the checked state for the sslCheckRevocation checkbox.
-     * @private
-     */
-    setCheckRevocationCheckboxState_: function(checked, disabled) {
-      $('sslCheckRevocation').checked = checked;
-      $('sslCheckRevocation').disabled = disabled;
-    },
-
-    /**
-     * Set the checked state for the backgroundModeCheckbox element.
-     * @private
-     */
-    setBackgroundModeCheckboxState_: function(
-        checked, disabled, controlled_by) {
-      $('backgroundModeCheckbox').checked = checked;
-      $('backgroundModeCheckbox').disabled = disabled;
-      $('backgroundModeCheckbox').controlledBy = controlled_by;
-      OptionsPage.updateManagedBannerVisibility();
-    },
-
-    /**
      * Set the Cloud Print proxy UI to enabled, disabled, or processing.
      * @private
      */
@@ -1333,9 +1238,7 @@ cr.define('options', function() {
     'removeBluetoothDevice',
     'removeCloudPrintConnectorSection',
     'setAutoOpenFileTypesDisplayed',
-    'setBackgroundModeCheckboxState',
     'setBluetoothState',
-    'setCheckRevocationCheckboxState',
     'setFontSize',
     'setGtkThemeButtonEnabled',
     'setHighContrastCheckboxState',
@@ -1357,7 +1260,6 @@ cr.define('options', function() {
     'updateAccountPicture',
     'updateAutoLaunchState',
     'updateDefaultBrowserState',
-    'updateManagedBannerVisibility',
     'updateSearchEngines',
     'updateStartupPages',
     'updateSyncState',

@@ -5,7 +5,6 @@
 #include "chrome/browser/extensions/api/socket/socket.h"
 
 #include "base/bind.h"
-#include "chrome/browser/extensions/api/api_resource_event_notifier.h"
 #include "net/base/address_list.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -14,9 +13,10 @@
 
 namespace extensions {
 
-Socket::Socket(const std::string& owner_extension_id,
-               ApiResourceEventNotifier* event_notifier)
-    : ApiResource(owner_extension_id, event_notifier),
+const char kSocketTypeNotSupported[] = "Socket type does not support this API";
+
+Socket::Socket(const std::string& owner_extension_id)
+    : ApiResource(owner_extension_id, NULL),
       port_(0),
       is_connected_(false) {
 }
@@ -41,7 +41,7 @@ void Socket::WriteData() {
 
   WriteRequest& request = write_queue_.front();
 
-  DCHECK(request.byte_count > request.bytes_written);
+  DCHECK(request.byte_count >= request.bytes_written);
   io_buffer_write_ = new net::WrappedIOBuffer(
       request.io_buffer->data() + request.bytes_written);
   int result = WriteImpl(
@@ -85,6 +85,16 @@ bool Socket::SetKeepAlive(bool enable, int delay) {
 
 bool Socket::SetNoDelay(bool no_delay) {
   return false;
+}
+
+int Socket::Listen(const std::string& address, int port, int backlog,
+                   std::string* error_msg) {
+  *error_msg = kSocketTypeNotSupported;
+  return net::ERR_FAILED;
+}
+
+void Socket::Accept(const AcceptCompletionCallback& callback) {
+  callback.Run(net::ERR_FAILED, NULL);
 }
 
 // static

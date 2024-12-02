@@ -13,6 +13,8 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/message_pump_aurax11.h"
+#include "base/string_split.h"
+#include "base/string_number_conversions.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/touch/touch_factory.h"
 #include "ui/base/ui_base_switches.h"
@@ -65,6 +67,17 @@ const char* kCMTCachedAtoms[] = {
   AXIS_LABEL_PROP_ABS_FLING_STATE,
   NULL
 };
+
+#if defined(USE_XI2_MT)
+// If the calibration values were read, if this is true.
+bool calibration_values_read = false;
+
+// The (positive) calibration values for the four border sides.
+int left_border_touch_calibration = 0;
+int top_border_touch_calibration = 0;
+int right_border_touch_calibration = 0;
+int bottom_border_touch_calibration = 0;
+#endif
 
 // A class to support the detection of scroll events, using X11 valuators.
 class CMTEventData {
@@ -197,9 +210,9 @@ class CMTEventData {
     return touchpads_[xievent->sourceid];
   }
 
-  float GetNaturalScrollFactor(int deviceid) {
+  float GetNaturalScrollFactor(int sourceid) {
     // Natural scroll is touchpad-only.
-    if (!touchpads_[deviceid])
+    if (!touchpads_[sourceid])
       return -1.0f;
 
     return natural_scroll_enabled_ ? 1.0f : -1.0f;
@@ -216,12 +229,12 @@ class CMTEventData {
     if (y_offset)
       *y_offset = 0;
 
-    const int deviceid = xiev->deviceid;
-    if (!cmt_devices_[deviceid])
+    const int sourceid = xiev->sourceid;
+    if (!cmt_devices_[sourceid])
       return false;
 
-    const float natural_scroll_factor = GetNaturalScrollFactor(deviceid);
-    const Valuators v = device_to_valuators_[deviceid];
+    const float natural_scroll_factor = GetNaturalScrollFactor(sourceid);
+    const Valuators v = device_to_valuators_[sourceid];
     const bool has_x_offset = XIMaskIsSet(xiev->valuators.mask, v.scroll_x);
     const bool has_y_offset = XIMaskIsSet(xiev->valuators.mask, v.scroll_y);
     const bool is_scroll = has_x_offset || has_y_offset;
@@ -252,12 +265,12 @@ class CMTEventData {
     *vy = 0;
     *is_cancel = false;
 
-    const int deviceid = xiev->deviceid;
-    if (!cmt_devices_[deviceid])
+    const int sourceid = xiev->sourceid;
+    if (!cmt_devices_[sourceid])
       return false;
 
-    const float natural_scroll_factor = GetNaturalScrollFactor(deviceid);
-    const Valuators v = device_to_valuators_[deviceid];
+    const float natural_scroll_factor = GetNaturalScrollFactor(sourceid);
+    const Valuators v = device_to_valuators_[sourceid];
     if ((!XIMaskIsSet(xiev->valuators.mask, v.fling_vx) &&
             !XIMaskIsSet(xiev->valuators.mask, v.fling_vx_dbl)) ||
         (!XIMaskIsSet(xiev->valuators.mask, v.fling_vy) &&
@@ -297,10 +310,10 @@ class CMTEventData {
     *end_time = 0;
 
     XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
-    if (!cmt_devices_[xiev->deviceid])
+    if (!cmt_devices_[xiev->sourceid])
       return false;
 
-    Valuators v = device_to_valuators_[xiev->deviceid];
+    Valuators v = device_to_valuators_[xiev->sourceid];
     if ((!XIMaskIsSet(xiev->valuators.mask, v.start_time) &&
             !XIMaskIsSet(xiev->valuators.mask, v.start_time_dbl)) ||
         (!XIMaskIsSet(xiev->valuators.mask, v.end_time) &&
@@ -589,56 +602,80 @@ Atom GetNoopEventAtom() {
 }
 
 #if defined(USE_XI2_MT)
+
+void ReadTouchCalibrationValues() {
+  calibration_values_read = true;
+
+  std::vector<std::string> parts;
+  base::SplitString(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kTouchCalibration), ',', &parts);
+  if (parts.size() >= 4) {
+    if (!base::StringToInt(parts[0], &left_border_touch_calibration))
+      DLOG(ERROR) << "Incorrect left border calibration value passed.";
+    if (!base::StringToInt(parts[1], &right_border_touch_calibration))
+      DLOG(ERROR) << "Incorrect right border calibration value passed.";
+    if (!base::StringToInt(parts[2], &top_border_touch_calibration))
+      DLOG(ERROR) << "Incorrect top border calibration value passed.";
+    if (!base::StringToInt(parts[3], &bottom_border_touch_calibration))
+      DLOG(ERROR) << "Incorrect bottom border calibration value passed.";
+  }
+}
+
 gfx::Point CalibrateTouchCoordinates(
     const XIDeviceEvent* xievent) {
   int x = static_cast<int>(xievent->event_x);
   int y = static_cast<int>(xievent->event_y);
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-           switches::kEnableTouchCalibration))
+
+  if (!calibration_values_read)
+    ReadTouchCalibrationValues();
+
+  if (!left_border_touch_calibration && !right_border_touch_calibration &&
+      !top_border_touch_calibration && !bottom_border_touch_calibration)
     return gfx::Point(x, y);
-  // Temporarily disabling the calibration for X.
-  bool calibration_x = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableTouchCalibrationX);
-  gfx::Rect bounds = gfx::Screen::GetPrimaryDisplay().bounds_in_pixel();
-  const int kLeftBorder = 40;
-  const int kRightBorder = 40;
-  const int kBottomBorder = 30;
-  // A negative border offset will scale the top portion over the top area
-  // and a positive number will cut off n pixels.
-  const int kTopBorder = 0;
+
+  gfx::Rect bounds =
+      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().bounds_in_pixel();
   const int resolution_x = bounds.width();
   const int resolution_y = bounds.height();
   // The "grace area" (10% in this case) is to make it easier for the user to
   // navigate to the corner.
   const double kGraceAreaFraction = 0.1;
-  if (calibration_x) {
+  if (left_border_touch_calibration || right_border_touch_calibration) {
     // Offset the x position to the real
-    x -= kLeftBorder;
+    x -= left_border_touch_calibration;
     // Check if we are in the grace area of the left side.
     // Note: We might not want to do this when the gesture is locked?
-    if (x < 0 && x > -kLeftBorder * kGraceAreaFraction)
+    if (x < 0 && x > -left_border_touch_calibration * kGraceAreaFraction)
       x = 0;
     // Check if we are in the grace area of the right side.
     // Note: We might not want to do this when the gesture is locked?
-    if (x > resolution_x - kLeftBorder &&
-        x < resolution_x - kLeftBorder + kRightBorder * kGraceAreaFraction)
-      x = resolution_x - kLeftBorder;
+    if (x > resolution_x - left_border_touch_calibration &&
+        x < resolution_x - left_border_touch_calibration +
+            right_border_touch_calibration * kGraceAreaFraction)
+      x = resolution_x - left_border_touch_calibration;
     // Scale the screen area back to the full resolution of the screen.
-    x = (x * resolution_x) / (resolution_x - (kRightBorder + kLeftBorder));
+    x = (x * resolution_x) / (resolution_x - (right_border_touch_calibration +
+                                              left_border_touch_calibration));
   }
-  // When there is a top bezel we add our border,
-  y -= kTopBorder;
-  // and increase the sensitivity there.
-  if (kTopBorder < 0 && y < -2 * kTopBorder)
-    y /= 2;
+  if (top_border_touch_calibration || bottom_border_touch_calibration) {
+    // When there is a top bezel we add our border,
+    y -= top_border_touch_calibration;
 
-  // Check if we are in the grace area of the right side.
-  // Note: We might not want to do this when the gesture is locked?
-  if (y > resolution_y - kTopBorder &&
-      y < resolution_y - kTopBorder + kBottomBorder * kGraceAreaFraction)
-    y = resolution_y - kTopBorder;
-  // Scale the screen area back to the full resolution of the screen.
-  y = (y * resolution_y) / (resolution_y - (kBottomBorder + kTopBorder));
+    // Check if we are in the grace area of the top side.
+    // Note: We might not want to do this when the gesture is locked?
+    if (y < 0 && y > -top_border_touch_calibration * kGraceAreaFraction)
+      y = 0;
+
+    // Check if we are in the grace area of the bottom side.
+    // Note: We might not want to do this when the gesture is locked?
+    if (y > resolution_y - top_border_touch_calibration &&
+        y < resolution_y - top_border_touch_calibration +
+        bottom_border_touch_calibration * kGraceAreaFraction)
+      y = resolution_y - top_border_touch_calibration;
+    // Scale the screen area back to the full resolution of the screen.
+    y = (y * resolution_y) / (resolution_y - (bottom_border_touch_calibration +
+                                              top_border_touch_calibration));
+  }
   // Set the modified coordinate back to the event.
   return gfx::Point(x, y);
 }
@@ -803,9 +840,13 @@ base::TimeDelta EventTimeFromNative(const base::NativeEvent& native_event) {
       break;
     case GenericEvent: {
       double start, end;
+      float touch_timestamp;
       if (GetGestureTimes(native_event, &start, &end)) {
         // If the driver supports gesture times, use them.
         return base::TimeDelta::FromMicroseconds(end * 1000000);
+      } else if (ValuatorTracker::GetInstance()->ExtractValuator(*native_event,
+                 ValuatorTracker::VAL_TOUCH_RAW_TIMESTAMP, &touch_timestamp)) {
+        return base::TimeDelta::FromMicroseconds(touch_timestamp * 1000000);
       } else {
         XIDeviceEvent* xide =
             static_cast<XIDeviceEvent*>(native_event->xcookie.data);

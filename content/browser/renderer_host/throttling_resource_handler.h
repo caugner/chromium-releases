@@ -32,7 +32,7 @@ class ThrottlingResourceHandler : public LayeredResourceHandler,
                                    ResourceResponse* response,
                                    bool* defer) OVERRIDE;
   virtual bool OnResponseStarted(int request_id,
-                                 content::ResourceResponse* response,
+                                 ResourceResponse* response,
                                  bool* defer) OVERRIDE;
   virtual bool OnWillStart(int request_id, const GURL& url,
                            bool* defer) OVERRIDE;
@@ -40,6 +40,7 @@ class ThrottlingResourceHandler : public LayeredResourceHandler,
   // ResourceThrottleController implementation:
   virtual void Cancel() OVERRIDE;
   virtual void CancelAndIgnore() OVERRIDE;
+  virtual void CancelWithError(int error_code) OVERRIDE;
   virtual void Resume() OVERRIDE;
 
  private:
@@ -62,6 +63,8 @@ class ThrottlingResourceHandler : public LayeredResourceHandler,
 
   GURL deferred_url_;
   scoped_refptr<ResourceResponse> deferred_response_;
+
+  bool cancelled_by_resource_throttle_;
 };
 
 }  // namespace content

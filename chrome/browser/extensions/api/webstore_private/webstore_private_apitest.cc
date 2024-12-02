@@ -11,7 +11,6 @@
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
-#include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -55,8 +54,10 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
     }
   }
 
-  void OnExtensionInstallFailure(const std::string& id,
-                                 const std::string& error) OVERRIDE {
+  void OnExtensionInstallFailure(
+      const std::string& id,
+      const std::string& error,
+      WebstoreInstaller::FailureReason reason) OVERRIDE {
     received_failure_ = true;
     id_ = id;
     error_ = error;
@@ -326,21 +327,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallCancelled) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IncorrectManifest1) {
-  WebstoreInstallListener listener;
-  WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("incorrect_manifest1.html", "extension.crx"));
-  listener.Wait();
-  ASSERT_TRUE(listener.received_failure());
-  ASSERT_EQ("Manifest file is invalid.", listener.error());
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, IncorrectManifest2) {
-  WebstoreInstallListener listener;
-  WebstorePrivateApi::SetWebstoreInstallerDelegateForTesting(&listener);
   ASSERT_TRUE(RunInstallTest("incorrect_manifest2.html", "extension.crx"));
-  listener.Wait();
-  EXPECT_TRUE(listener.received_failure());
-  ASSERT_EQ("Manifest file is invalid.", listener.error());
 }
 
 // Tests that we can request an app installed bubble (instead of the default
@@ -388,6 +379,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, InstallTheme) {
   listener.Wait();
   ASSERT_TRUE(listener.received_success());
   ASSERT_EQ("iamefpfkojoapidjnbafmgkgncegbkad", listener.id());
+}
+
+// Tests that an error is properly reported when an empty crx is returned.
+IN_PROC_BROWSER_TEST_F(ExtensionWebstorePrivateApiTest, EmptyCrx) {
+  ASSERT_TRUE(RunInstallTest("empty.html", "empty.crx"));
 }
 
 // Tests successfully installing a bundle of 2 apps and 2 extensions.

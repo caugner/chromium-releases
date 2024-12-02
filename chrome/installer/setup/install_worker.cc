@@ -46,7 +46,10 @@
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item_list.h"
+
+#if !defined(OMIT_CHROME_FRAME)
 #include "chrome_frame/chrome_tab.h"
+#endif
 
 using base::win::RegKey;
 
@@ -59,6 +62,12 @@ enum ElevationPolicyId {
   OLD_ELEVATION_POLICY,
 };
 
+// The version identifying the work done by setup.exe --configure-user-settings
+// on user login by way of Active Setup.  Increase this value if the work done
+// in setup_main.cc's handling of kConfigureUserSettings changes and should be
+// executed again for all users.
+const wchar_t kActiveSetupVersion[] = L"24,0,0,0";
+
 // Although the UUID of the ChromeFrame class is used for the "current" value,
 // this is done only as a convenience; there is no need for the GUID of the Low
 // Rights policies to match the ChromeFrame class's GUID.  Hence, it is safe to
@@ -66,20 +75,33 @@ enum ElevationPolicyId {
 const wchar_t kIELowRightsPolicyOldGuid[] =
     L"{6C288DD7-76FB-4721-B628-56FAC252E199}";
 
+#if defined(OMIT_CHROME_FRAME)
+// For historical reasons, this GUID is the same as CLSID_ChromeFrame. Included
+// here to break the dependency on Chrome Frame when Chrome Frame is not being
+// built.
+// TODO(robertshield): Remove this when Chrome Frame works with Aura.
+const wchar_t kIELowRightsPolicyCurrentGuid[] =
+    L"{E0A900DF-9611-4446-86BD-4B1D47E7DB2A}";
+#endif
+
 const wchar_t kElevationPolicyKeyPath[] =
     L"SOFTWARE\\Microsoft\\Internet Explorer\\Low Rights\\ElevationPolicy\\";
 
 void GetIELowRightsElevationPolicyKeyPath(ElevationPolicyId policy,
                                           string16* key_path) {
   DCHECK(policy == CURRENT_ELEVATION_POLICY || policy == OLD_ELEVATION_POLICY);
-
   key_path->assign(kElevationPolicyKeyPath,
                    arraysize(kElevationPolicyKeyPath) - 1);
   if (policy == CURRENT_ELEVATION_POLICY) {
+#if defined(OMIT_CHROME_FRAME)
+    key_path->append(kIELowRightsPolicyCurrentGuid,
+                     arraysize(kIELowRightsPolicyCurrentGuid) - 1);
+#else
     wchar_t cf_clsid[64];
     int len = StringFromGUID2(__uuidof(ChromeFrame), &cf_clsid[0],
                               arraysize(cf_clsid));
     key_path->append(&cf_clsid[0], len - 1);
+#endif
   } else {
     key_path->append(kIELowRightsPolicyOldGuid,
                      arraysize(kIELowRightsPolicyOldGuid)- 1);
@@ -256,7 +278,7 @@ void AddDeleteUninstallShortcutsForMSIWorkItems(
     uninstall_link = uninstall_link.Append(
         product.distribution()->GetAppShortCutName());
     uninstall_link = uninstall_link.Append(
-        product.distribution()->GetUninstallLinkName() + L".lnk");
+        product.distribution()->GetUninstallLinkName() + installer::kLnkExt);
     VLOG(1) << "Deleting old uninstall shortcut (if present): "
             << uninstall_link.value();
     WorkItem* delete_link = work_item_list->AddDeleteTreeWorkItem(
@@ -1080,12 +1102,8 @@ void AddInstallWorkItems(const InstallationState& original_state,
     AddDelegateExecuteWorkItems(installer_state, src_path, new_version,
                                 product, install_list);
 
-// TODO(gab): This is only disabled for M22 as the shortcut CL using Active
-// Setup will not make it in M22.
-#if 0
-    AddActiveSetupWorkItems(installer_state, new_version, *product,
+    AddActiveSetupWorkItems(installer_state, setup_path, new_version, product,
                             install_list);
-#endif
   }
 
   // Add any remaining work items that involve special settings for
@@ -1362,6 +1380,7 @@ void AddDelegateExecuteWorkItems(const InstallerState& installer_state,
 }
 
 void AddActiveSetupWorkItems(const InstallerState& installer_state,
+                             const FilePath& setup_path,
                              const Version& new_version,
                              const Product& product,
                              WorkItemList* list) {
@@ -1377,7 +1396,8 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
   }
 
   const HKEY root = HKEY_LOCAL_MACHINE;
-  const string16 active_setup_path(GetActiveSetupPath(distribution));
+  const string16 active_setup_path(
+      InstallUtil::GetActiveSetupPath(distribution));
 
   VLOG(1) << "Adding registration items for Active Setup.";
   list->AddCreateRegKeyWorkItem(root, active_setup_path);
@@ -1385,9 +1405,11 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
                                distribution->GetAppShortCutName(), true);
 
   CommandLine cmd(installer_state.GetInstallerDirectory(new_version).
-      Append(installer::kSetupExe));
+      Append(setup_path.BaseName()));
   cmd.AppendSwitch(installer::switches::kConfigureUserSettings);
   cmd.AppendSwitch(installer::switches::kVerboseLogging);
+  cmd.AppendSwitch(installer::switches::kSystemLevel);
+  product.AppendProductFlags(&cmd);
   list->AddSetRegValueWorkItem(root, active_setup_path, L"StubPath",
                                cmd.GetCommandLineString(), true);
 
@@ -1399,10 +1421,8 @@ void AddActiveSetupWorkItems(const InstallerState& installer_state,
   list->AddSetRegValueWorkItem(root, active_setup_path, L"IsInstalled",
                                static_cast<DWORD>(1U), true);
 
-  string16 comma_separated_version(ASCIIToUTF16(new_version.GetString()));
-  ReplaceChars(comma_separated_version, L".", L",", &comma_separated_version);
   list->AddSetRegValueWorkItem(root, active_setup_path, L"Version",
-                               comma_separated_version, true);
+                               kActiveSetupVersion, true);
 }
 
 void AddDeleteOldIELowRightsPolicyWorkItems(
@@ -1547,6 +1567,7 @@ void AddQuickEnableApplicationHostWorkItems(
   CommandLine cmd_line(CommandLine::NO_PROGRAM);
   cmd_line.AppendSwitch(switches::kMultiInstall);
   cmd_line.AppendSwitch(switches::kChromeAppHost);
+  cmd_line.AppendSwitch(switches::kEnsureGoogleUpdatePresent);
 
   // For system-level binaries there is no way to keep the command state in sync
   // with the installation/uninstallation of the Application Host (which is

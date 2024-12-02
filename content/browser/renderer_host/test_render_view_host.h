@@ -110,7 +110,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       const gfx::Rect& src_subrect,
       const gfx::Size& dst_size,
       const base::Callback<void(bool)>& callback,
-      skia::PlatformCanvas* output) OVERRIDE;
+      skia::PlatformBitmap* output) OVERRIDE;
   virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
       const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
@@ -125,7 +125,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void PluginFocusChanged(bool focused, int plugin_id) OVERRIDE;
   virtual void StartPluginIme() OVERRIDE;
   virtual bool PostProcessEventForPluginIme(
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
+      const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle(
       bool opaque,
       bool root) OVERRIDE;
@@ -142,6 +142,13 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
       TransportDIB::Handle transport_dib) OVERRIDE;
 #elif defined(OS_ANDROID)
   virtual void StartContentIntent(const GURL&) OVERRIDE;
+  virtual void SetCachedBackgroundColor(SkColor color) OVERRIDE {}
+  virtual void SetCachedPageScaleFactorLimits(float minimum_scale,
+                                              float maximum_scale) OVERRIDE {}
+  virtual void UpdateFrameInfo(const gfx::Point& scroll_offset,
+                               float page_scale_factor,
+                               const gfx::Size& content_size) OVERRIDE {}
+  virtual void HasTouchEventHandlers(bool need_touch_events) OVERRIDE {}
 #elif defined(OS_WIN) && !defined(USE_AURA)
   virtual void WillWmDestroy() OVERRIDE;
 #endif
@@ -149,8 +156,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE {}
   virtual gfx::Rect GetBoundsInRootWindow() OVERRIDE;
 #endif
-  virtual void ProcessTouchAck(WebKit::WebInputEvent::Type type,
-                               bool processed) OVERRIDE { }
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE { }
   virtual void SetScrollOffsetPinning(
@@ -195,7 +200,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
 // this.
 //
 // Note that users outside of content must use this class by getting
-// the separate content::RenderViewHostTester interface via
+// the separate RenderViewHostTester interface via
 // RenderViewHostTester::For(rvh) on the RenderViewHost they want to
 // drive tests on.
 //
@@ -300,9 +305,7 @@ class TestRenderViewHost
 
   virtual bool CreateRenderView(const string16& frame_name,
                                 int opener_route_id,
-                                int32 max_page_id,
-                                const std::string& embedder_channel_name,
-                                int embedder_container_id) OVERRIDE;
+                                int32 max_page_id) OVERRIDE;
   virtual bool IsRenderViewLive() const OVERRIDE;
 
  private:
@@ -329,8 +332,7 @@ class TestRenderViewHost
 #endif
 
 // Adds methods to get straight at the impl classes.
-class RenderViewHostImplTestHarness
-    : public content::RenderViewHostTestHarness {
+class RenderViewHostImplTestHarness : public RenderViewHostTestHarness {
  public:
   RenderViewHostImplTestHarness();
   virtual ~RenderViewHostImplTestHarness();

@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -27,10 +27,12 @@
 #include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -43,7 +45,6 @@
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#include "chrome/browser/ui/metro_pin_tab_helper.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/search/search.h"
 #include "chrome/browser/ui/search/search_model.h"
@@ -68,8 +69,8 @@
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/escape.h"
+#include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/web_intent_data.h"
-#include "webkit/glue/webkit_glue.h"
 #include "webkit/user_agent/user_agent_util.h"
 
 #if defined(OS_MACOSX)
@@ -78,6 +79,7 @@
 
 #if defined(OS_WIN)
 #include "base/win/metro.h"
+#include "chrome/browser/ui/metro_pin_tab_helper_win.h"
 #endif
 
 namespace {
@@ -154,9 +156,13 @@ void ReloadInternal(Browser* browser,
 }
 
 bool HasConstrainedWindow(const Browser* browser) {
-  TabContents* tab_contents = GetActiveTabContents(browser);
-  return tab_contents && tab_contents->constrained_window_tab_helper()->
-      constrained_window_count();
+  WebContents* web_contents = GetActiveWebContents(browser);
+  if (!web_contents)
+    return false;
+
+  ConstrainedWindowTabHelper* constrained_window_tab_helper =
+      ConstrainedWindowTabHelper::FromWebContents(web_contents);
+  return constrained_window_tab_helper->constrained_window_count() > 0;
 }
 
 bool PrintPreviewShowing(const Browser* browser) {
@@ -234,7 +240,7 @@ int GetContentRestrictions(const Browser* browser) {
   return content_restrictions;
 }
 
-void NewEmptyWindow(Profile* profile) {
+void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
   bool incognito = profile->IsOffTheRecord();
   PrefService* prefs = profile->GetPrefs();
   if (incognito) {
@@ -252,23 +258,32 @@ void NewEmptyWindow(Profile* profile) {
 
   if (incognito) {
     content::RecordAction(UserMetricsAction("NewIncognitoWindow"));
-    OpenEmptyWindow(profile->GetOffTheRecordProfile());
+    OpenEmptyWindow(profile->GetOffTheRecordProfile(), desktop_type);
   } else {
     content::RecordAction(UserMetricsAction("NewWindow"));
     SessionService* session_service =
         SessionServiceFactory::GetForProfile(profile->GetOriginalProfile());
     if (!session_service ||
         !session_service->RestoreIfNecessary(std::vector<GURL>())) {
-      OpenEmptyWindow(profile->GetOriginalProfile());
+      OpenEmptyWindow(profile->GetOriginalProfile(), desktop_type);
     }
   }
 }
 
-Browser* OpenEmptyWindow(Profile* profile) {
-  Browser* browser = new Browser(Browser::CreateParams(profile));
+void NewEmptyWindow(Profile* profile) {
+  NewEmptyWindow(profile, HOST_DESKTOP_TYPE_NATIVE);
+}
+
+Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
+  Browser* browser = new Browser(
+      Browser::CreateParams(Browser::TYPE_TABBED, profile, desktop_type));
   AddBlankTab(browser, true);
   browser->window()->Show();
   return browser;
+}
+
+Browser* OpenEmptyWindow(Profile* profile) {
+  return OpenEmptyWindow(profile, HOST_DESKTOP_TYPE_NATIVE);
 }
 
 void OpenWindowWithRestoredTabs(Profile* profile) {
@@ -277,9 +292,11 @@ void OpenWindowWithRestoredTabs(Profile* profile) {
     service->RestoreMostRecentEntry(NULL);
 }
 
-void OpenURLOffTheRecord(Profile* profile, const GURL& url) {
+void OpenURLOffTheRecord(Profile* profile,
+                         const GURL& url,
+                         chrome::HostDesktopType desktop_type) {
   Browser* browser = browser::FindOrCreateTabbedBrowser(
-      profile->GetOffTheRecordProfile());
+      profile->GetOffTheRecordProfile(), desktop_type);
   AddSelectedTabWithURL(browser, url, content::PAGE_TRANSITION_LINK);
   browser->window()->Show();
 }
@@ -342,12 +359,28 @@ bool CanReload(const Browser* browser) {
 
 void Home(Browser* browser, WindowOpenDisposition disposition) {
   content::RecordAction(UserMetricsAction("Home"));
-  browser->OpenURL(OpenURLParams(
+
+  std::string extra_headers;
+#if defined(ENABLE_RLZ)
+  // If the home page is a Google home page, add the RLZ header to the request.
+  PrefService* pref_service = browser->profile()->GetPrefs();
+  if (pref_service) {
+    std::string home_page = pref_service->GetString(prefs::kHomePage);
+    if (google_util::IsGoogleHomePageUrl(home_page)) {
+      extra_headers = RLZTracker::GetAccessPointHttpHeader(
+          RLZTracker::CHROME_HOME_PAGE);
+    }
+  }
+#endif
+
+  OpenURLParams params(
       browser->profile()->GetHomePage(), Referrer(), disposition,
       content::PageTransitionFromInt(
           content::PAGE_TRANSITION_AUTO_BOOKMARK |
           content::PAGE_TRANSITION_HOME_PAGE),
-      false));
+      false);
+  params.extra_headers = extra_headers;
+  browser->OpenURL(params);
 }
 
 void OpenCurrentURL(Browser* browser) {
@@ -412,7 +445,9 @@ void NewTab(Browser* browser) {
     AddBlankTab(browser, true);
     GetActiveWebContents(browser)->GetView()->RestoreFocus();
   } else {
-    Browser* b = browser::FindOrCreateTabbedBrowser(browser->profile());
+    Browser* b =
+        browser::FindOrCreateTabbedBrowser(browser->profile(),
+                                           browser->host_desktop_type());
     AddBlankTab(b, true);
     b->window()->Show();
     // The call to AddBlankTab above did not set the focus to the tab as its
@@ -580,13 +615,13 @@ void BookmarkCurrentPage(Browser* browser) {
 
   GURL url;
   string16 title;
-  TabContents* tab = GetActiveTabContents(browser);
-  bookmark_utils::GetURLAndTitleToBookmark(tab->web_contents(), &url, &title);
+  WebContents* web_contents = GetActiveWebContents(browser);
+  GetURLAndTitleToBookmark(web_contents, &url, &title);
   bool was_bookmarked = model->IsBookmarked(url);
-  if (!was_bookmarked && browser->profile()->IsOffTheRecord()) {
+  if (!was_bookmarked && web_contents->GetBrowserContext()->IsOffTheRecord()) {
     // If we're incognito the favicon may not have been saved. Save it now
     // so that bookmarks have an icon for the page.
-    tab->favicon_tab_helper()->SaveFavicon();
+    FaviconTabHelper::FromWebContents(web_contents)->SaveFavicon();
   }
   bookmark_utils::AddIfNotBookmarked(model, url, title);
   // Make sure the model actually added a bookmark before showing the star. A
@@ -608,7 +643,7 @@ bool CanBookmarkCurrentPage(const Browser* browser) {
 }
 
 void BookmarkAllTabs(Browser* browser) {
-  BookmarkEditor::ShowBookmarkAllTabsDialog(browser);
+  chrome::ShowBookmarkAllTabsDialog(browser);
 }
 
 bool CanBookmarkAllTabs(const Browser* browser) {
@@ -616,8 +651,10 @@ bool CanBookmarkAllTabs(const Browser* browser) {
 }
 
 void TogglePagePinnedToStartScreen(Browser* browser) {
+#if defined(OS_WIN)
   MetroPinTabHelper::FromWebContents(GetActiveWebContents(browser))->
       TogglePinnedToStartScreen();
+#endif
 }
 
 void SavePage(Browser* browser) {
@@ -666,18 +703,6 @@ void ShowChromeToMobileBubble(Browser* browser) {
   // weird situations where the bubble is deleted as soon as it is shown.
   if (browser->window()->IsActive())
     browser->window()->ShowChromeToMobileBubble();
-}
-
-void ShareCurrentPage(Browser* browser) {
-  const GURL& current_url = chrome::GetActiveWebContents(browser)->GetURL();
-  webkit_glue::WebIntentData intent_data(
-      ASCIIToUTF16("http://webintents.org/share"),
-      ASCIIToUTF16("text/uri-list"),
-      UTF8ToUTF16(current_url.spec()));
-  scoped_ptr<content::WebIntentsDispatcher> dispatcher(
-      content::WebIntentsDispatcher::Create(intent_data));
-  static_cast<content::WebContentsDelegate*>(browser)->
-      WebIntentDispatch(NULL, dispatcher.release());
 }
 
 void Print(Browser* browser) {
@@ -778,10 +803,10 @@ void FindInPage(Browser* browser, bool find_next, bool forward_direction) {
     // We always want to search for the contents of the find pasteboard on OS X.
     find_text = GetFindPboardText();
 #endif
-    GetActiveTabContents(browser)->
-        find_tab_helper()->StartFinding(find_text,
-                                        forward_direction,
-                                        false);  // Not case sensitive.
+    FindTabHelper::FromWebContents(GetActiveWebContents(browser))->
+        StartFinding(find_text,
+                     forward_direction,
+                     false);  // Not case sensitive.
   }
 }
 

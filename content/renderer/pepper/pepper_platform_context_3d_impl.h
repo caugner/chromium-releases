@@ -14,17 +14,13 @@
 
 #ifdef ENABLE_GPU
 
+class CommandBufferProxy;
 namespace gpu {
-
 class CommandBuffer;
-
 }  // namespace gpu
 
-class CommandBufferProxy;
-class GpuChannelHost;
-class ContentGLContext;
-
 namespace content {
+class GpuChannelHost;
 
 class PepperParentContextProvider;
 
@@ -60,7 +56,7 @@ class PlatformContext3DImpl
   scoped_refptr<GpuChannelHost> channel_;
   unsigned int parent_texture_id_;
   bool has_alpha_;
-  CommandBufferProxy* command_buffer_;
+  CommandBufferProxyImpl* command_buffer_;
   base::Closure context_lost_callback_;
   ConsoleMessageCallback console_message_callback_;
   base::WeakPtrFactory<PlatformContext3DImpl> weak_ptr_factory_;

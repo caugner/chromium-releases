@@ -6,20 +6,17 @@
 
 # Sets up environment for building Chromium on Android.  It can either be
 # compiled with the Android tree or using the Android SDK/NDK. To build with
-# NDK/SDK: ". build/android/envsetup.sh --sdk".  Environment variable
+# NDK/SDK: ". build/android/envsetup.sh".  Environment variable
 # ANDROID_SDK_BUILD=1 will then be defined and used in the rest of the setup to
 # specifiy build type.
 
-# NOTE(yfriedman): This looks unnecessary but downstream the default value
-# should be 0 until all builds switch to SDK/NDK.
-export ANDROID_SDK_BUILD=1
-# Loop over args in case we add more arguments in the future.
-while [ "$1" != "" ]; do
-  case $1 in
-    -s | --sdk  ) export ANDROID_SDK_BUILD=1 ; shift ;;
-    *  )          shift ; break ;;
-  esac
-done
+# When building WebView as part of Android we can't use the SDK. Other builds
+# default to using the SDK.
+if [[ "${CHROME_ANDROID_BUILD_WEBVIEW}" -eq 1 ]]; then
+  export ANDROID_SDK_BUILD=0
+else
+  export ANDROID_SDK_BUILD=1
+fi
 
 if [[ "${ANDROID_SDK_BUILD}" -eq 1 ]]; then
   echo "Using SDK build"
@@ -73,10 +70,10 @@ elif [[ -z "$ANDROID_BUILD_TOP" || \
   echo "  . build/envsetup.sh"
   echo "  lunch"
   echo "Then try this again."
-  echo "Or did you mean NDK/SDK build. Run envsetup.sh with --sdk argument."
+  echo "Or did you mean NDK/SDK build. Run envsetup.sh without any arguments."
   return 1
-else
-  non_sdk_build_init
+elif [[ -n "$CHROME_ANDROID_BUILD_WEBVIEW" ]]; then
+  webview_build_init
 fi
 
 # Workaround for valgrind build
@@ -96,21 +93,17 @@ if [[ -d $GOMA_DIR ]]; then
 fi
 export ANDROID_GOMA_WRAPPER
 
-# http://crbug.com/143889.
-if ! echo "$GYP_DEFINES" | tr ' ' '\n' | grep -q '^clang=' | tail -n1 | \
-    grep -xq clang=1; then
-  export CC_target="${ANDROID_GOMA_WRAPPER} \
-    $(echo -n ${ANDROID_TOOLCHAIN}/*-gcc)"
-  export CXX_target="${ANDROID_GOMA_WRAPPER} \
-    $(echo -n ${ANDROID_TOOLCHAIN}/*-g++)"
-  export LINK_target=$(echo -n ${ANDROID_TOOLCHAIN}/*-gcc)
-  export AR_target=$(echo -n ${ANDROID_TOOLCHAIN}/*-ar)
-fi
+# Declare Android are cross compile.
+export GYP_CROSSCOMPILE=1
 
 # Performs a gyp_chromium run to convert gyp->Makefile for android code.
 android_gyp() {
+  # This is just a simple wrapper of gyp_chromium, please don't add anything
+  # in this function.
   echo "GYP_GENERATORS set to '$GYP_GENERATORS'"
-  "${CHROME_SRC}/build/gyp_chromium" --depth="${CHROME_SRC}" --check "$@"
+  (
+    "${CHROME_SRC}/build/gyp_chromium" --depth="${CHROME_SRC}" --check "$@"
+  )
 }
 
 # FLOCK needs to be null on system that has no flock

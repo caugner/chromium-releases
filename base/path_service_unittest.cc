@@ -8,12 +8,18 @@
 #include "base/file_util.h"
 #include "base/file_path.h"
 #include "base/scoped_temp_dir.h"
-#if defined(OS_WIN)
-#include "base/win/windows_version.h"
-#endif
+#include "base/string_util.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
 #include "testing/platform_test.h"
+
+#if defined(OS_WIN)
+#include <userenv.h>
+#include "base/win/windows_version.h"
+// userenv.dll is required for GetDefaultUserProfileDirectory().
+#pragma comment(lib, "userenv.lib")
+#endif
 
 namespace {
 
@@ -26,9 +32,28 @@ bool ReturnsValidPath(int dir_type) {
   // If chromium has never been started on this account, the cache path may not
   // exist.
   if (dir_type == base::DIR_CACHE)
-    return result && !path.value().empty();
+    return result && !path.empty();
 #endif
-  return result && !path.value().empty() && file_util::PathExists(path);
+#if defined(OS_LINUX)
+  // On the linux try-bots: a path is returned (e.g. /home/chrome-bot/Desktop),
+  // but it doesn't exist.
+  if (dir_type == base::DIR_USER_DESKTOP)
+    return result && !path.empty();
+#endif
+#if defined(OS_WIN)
+  // On Windows XP, the Quick Launch folder for the "Default User" doesn't exist
+  // by default. At least confirm that the path returned begins with the
+  // Default User's profile path.
+  if (dir_type == base::DIR_DEFAULT_USER_QUICK_LAUNCH &&
+      base::win::GetVersion() < base::win::VERSION_VISTA) {
+    wchar_t default_profile_path[MAX_PATH];
+    DWORD size = arraysize(default_profile_path);
+    return (result &&
+            ::GetDefaultUserProfileDirectory(default_profile_path, &size) &&
+            StartsWith(path.value(), default_profile_path, false));
+  }
+#endif
+  return result && !path.empty() && file_util::PathExists(path);
 }
 
 #if defined(OS_WIN)
@@ -53,10 +78,13 @@ typedef PlatformTest PathServiceTest;
 // later changes to Get broke the semantics of the function and yielded the
 // correct value while returning false.)
 TEST_F(PathServiceTest, Get) {
-  for (int key = base::DIR_CURRENT; key < base::PATH_END; ++key) {
+  for (int key = base::PATH_START + 1; key < base::PATH_END; ++key) {
 #if defined(OS_ANDROID)
-    if (key == base::FILE_MODULE)
-      continue;  // Android doesn't implement FILE_MODULE;
+    if (key == base::FILE_MODULE || key == base::DIR_USER_DESKTOP)
+      continue;  // Android doesn't implement FILE_MODULE and DIR_USER_DESKTOP;
+#elif defined(OS_IOS)
+    if (key == base::DIR_USER_DESKTOP)
+      continue;  // iOS doesn't implement DIR_USER_DESKTOP;
 #endif
     EXPECT_PRED1(ReturnsValidPath, key);
   }
@@ -83,7 +111,17 @@ TEST_F(PathServiceTest, Get) {
   }
 #elif defined(OS_MACOSX)
   for (int key = base::PATH_MAC_START + 1; key < base::PATH_MAC_END; ++key) {
-      EXPECT_PRED1(ReturnsValidPath, key);
+    EXPECT_PRED1(ReturnsValidPath, key);
+  }
+#elif defined(OS_ANDROID)
+  for (int key = base::PATH_ANDROID_START + 1; key < base::PATH_ANDROID_END;
+       ++key) {
+    EXPECT_PRED1(ReturnsValidPath, key);
+  }
+#elif defined(OS_POSIX)
+  for (int key = base::PATH_POSIX_START + 1; key < base::PATH_POSIX_END;
+       ++key) {
+    EXPECT_PRED1(ReturnsValidPath, key);
   }
 #endif
 }
@@ -110,4 +148,49 @@ TEST_F(PathServiceTest, Override) {
                                                      fake_cache_dir2,
                                                      true));
   EXPECT_TRUE(file_util::PathExists(fake_cache_dir2));
+}
+
+// Check if multiple overrides can co-exist.
+TEST_F(PathServiceTest, OverrideMultiple) {
+  int my_special_key = 666;
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  FilePath fake_cache_dir1(temp_dir.path().AppendASCII("1"));
+  EXPECT_TRUE(PathService::Override(my_special_key, fake_cache_dir1));
+  EXPECT_TRUE(file_util::PathExists(fake_cache_dir1));
+  ASSERT_EQ(1, file_util::WriteFile(fake_cache_dir1.AppendASCII("t1"), ".", 1));
+
+  FilePath fake_cache_dir2(temp_dir.path().AppendASCII("2"));
+  EXPECT_TRUE(PathService::Override(my_special_key + 1, fake_cache_dir2));
+  EXPECT_TRUE(file_util::PathExists(fake_cache_dir2));
+  ASSERT_EQ(1, file_util::WriteFile(fake_cache_dir2.AppendASCII("t2"), ".", 1));
+
+  FilePath result;
+  EXPECT_TRUE(PathService::Get(my_special_key, &result));
+  // Override might have changed the path representation but our test file
+  // should be still there.
+  EXPECT_TRUE(file_util::PathExists(result.AppendASCII("t1")));
+  EXPECT_TRUE(PathService::Get(my_special_key + 1, &result));
+  EXPECT_TRUE(file_util::PathExists(result.AppendASCII("t2")));
+}
+
+TEST_F(PathServiceTest, RemoveOverride) {
+  // Before we start the test we have to call RemoveOverride at least once to
+  // clear any overrides that might have been left from other tests.
+  PathService::RemoveOverride(base::DIR_TEMP);
+
+  FilePath original_user_data_dir;
+  EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &original_user_data_dir));
+  EXPECT_FALSE(PathService::RemoveOverride(base::DIR_TEMP));
+
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  EXPECT_TRUE(PathService::Override(base::DIR_TEMP, temp_dir.path()));
+  FilePath new_user_data_dir;
+  EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &new_user_data_dir));
+  EXPECT_NE(original_user_data_dir, new_user_data_dir);
+
+  EXPECT_TRUE(PathService::RemoveOverride(base::DIR_TEMP));
+  EXPECT_TRUE(PathService::Get(base::DIR_TEMP, &new_user_data_dir));
+  EXPECT_EQ(original_user_data_dir, new_user_data_dir);
 }

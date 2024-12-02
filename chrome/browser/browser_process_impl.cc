@@ -15,6 +15,7 @@
 #include "base/debug/alias.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/prefs/json_pref_store.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -42,7 +43,7 @@
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
+#include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -55,7 +56,7 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/status_icons/status_tray.h"
-#include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_content_client.h"
@@ -64,7 +65,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
@@ -80,7 +80,9 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if !defined(ENABLE_CONFIGURATION_POLICY)
+#if defined(ENABLE_CONFIGURATION_POLICY)
+#include "chrome/browser/policy/browser_policy_connector.h"
+#else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
@@ -96,8 +98,12 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/oom_priority_manager.h"
+#include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+#include "chrome/browser/web_resource/plugins_resource_service.h"
+#endif
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
 // How often to check if the persistent instance of Chrome needs to restart
@@ -138,7 +144,7 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       did_start_(false),
       checked_for_new_frames_(false),
       using_new_frames_(false),
-      thumbnail_generator_(new ThumbnailGenerator),
+      render_widget_snapshot_taker_(new RenderWidgetSnapshotTaker),
       download_status_updater_(new DownloadStatusUpdater) {
   g_browser_process = this;
 
@@ -214,9 +220,12 @@ void BrowserProcessImpl::StartTearDown() {
 
   ExtensionTabIdMap::GetInstance()->Shutdown();
 
+#if defined(ENABLE_CONFIGURATION_POLICY)
   // The policy providers managed by |browser_policy_connector_| need to shut
   // down while the IO and FILE threads are still alive.
-  browser_policy_connector_.reset();
+  if (browser_policy_connector_)
+    browser_policy_connector_->Shutdown();
+#endif
 
   // Stop the watchdog thread before stopping other threads.
   watchdog_thread_.reset();
@@ -306,7 +315,7 @@ void BrowserProcessImpl::EndSession() {
   ProfileManager* pm = profile_manager();
   std::vector<Profile*> profiles(pm->GetLoadedProfiles());
   for (size_t i = 0; i < profiles.size(); ++i)
-    profiles[i]->MarkAsCleanShutdown();
+    profiles[i]->SetExitType(Profile::EXIT_SESSION_ENDED);
 
   // Tell the metrics service it was cleanly shutdown.
   MetricsService* metrics = g_browser_process->metrics_service();
@@ -421,28 +430,28 @@ NotificationUIManager* BrowserProcessImpl::notification_ui_manager() {
 
 policy::BrowserPolicyConnector* BrowserProcessImpl::browser_policy_connector() {
   DCHECK(CalledOnValidThread());
-  if (!created_browser_policy_connector_) {
-    DCHECK(browser_policy_connector_.get() == NULL);
 #if defined(ENABLE_CONFIGURATION_POLICY)
+  if (!created_browser_policy_connector_) {
+    // Init() should not reenter this function. If it does this will DCHECK.
+    DCHECK(!browser_policy_connector_);
     browser_policy_connector_.reset(new policy::BrowserPolicyConnector());
     browser_policy_connector_->Init();
-#endif
-    // Init() should not reenter this function. Updating
-    // |created_browser_policy_connector_| here makes reentering hit the DCHECK.
     created_browser_policy_connector_ = true;
   }
   return browser_policy_connector_.get();
+#else
+  return NULL;
+#endif
 }
 
 policy::PolicyService* BrowserProcessImpl::policy_service() {
-  if (!policy_service_.get()) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-    policy_service_ = browser_policy_connector()->CreatePolicyService(NULL);
+  return browser_policy_connector()->GetPolicyService();
 #else
+  if (!policy_service_.get())
     policy_service_.reset(new policy::PolicyServiceStub());
-#endif
-  }
   return policy_service_.get();
+#endif
 }
 
 IconManager* BrowserProcessImpl::icon_manager() {
@@ -452,8 +461,8 @@ IconManager* BrowserProcessImpl::icon_manager() {
   return icon_manager_.get();
 }
 
-ThumbnailGenerator* BrowserProcessImpl::GetThumbnailGenerator() {
-  return thumbnail_generator_.get();
+RenderWidgetSnapshotTaker* BrowserProcessImpl::GetRenderWidgetSnapshotTaker() {
+  return render_widget_snapshot_taker_.get();
 }
 
 AutomationProviderList* BrowserProcessImpl::GetAutomationProviderList() {
@@ -724,7 +733,8 @@ void BrowserProcessImpl::CreateLocalState() {
   plugin_finder_disabled_pref_.reset(new BooleanPrefMember);
   plugin_finder_disabled_pref_->Init(prefs::kDisablePluginFinder,
                                    local_state_.get(), NULL);
-  plugin_finder_disabled_pref_->MoveToThread(BrowserThread::IO);
+  plugin_finder_disabled_pref_->MoveToThread(
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
 
   // Another policy that needs to be defined before the net subsystem is
   // initialized is MaxConnectionsPerProxy so we do it here.
@@ -791,6 +801,16 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
 
   if (local_state_->IsManagedPreference(prefs::kDefaultBrowserSettingEnabled))
     ApplyDefaultBrowserPolicy();
+
+  // Triggers initialization of the singleton instance on UI thread.
+  PluginFinder::GetInstance()->Init();
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  if (!plugins_resource_service_) {
+    plugins_resource_service_ = new PluginsResourceService(local_state());
+    plugins_resource_service_->StartAfterDelay();
+  }
+#endif
 }
 
 void BrowserProcessImpl::CreateIconManager() {

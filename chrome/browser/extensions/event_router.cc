@@ -4,22 +4,26 @@
 
 #include "chrome/browser/extensions/event_router.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/stl_util.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/processes/processes_api_constants.h"
+#include "chrome/browser/extensions/api/processes/processes_api.h"
 #include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
+#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/lazy_background_task_queue.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/extensions/system_info_event_router.h"
@@ -27,9 +31,9 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
-#include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/view_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -54,12 +58,13 @@ void NotifyEventListenerRemovedOnIOThread(
 void DispatchOnInstalledEvent(
     Profile* profile,
     const std::string& extension_id,
-    const Version& old_version) {
+    const Version& old_version,
+    bool chrome_updated) {
   if (!g_browser_process->profile_manager()->IsValidProfile(profile))
     return;
 
   RuntimeEventRouter::DispatchOnInstalledEvent(profile, extension_id,
-                                               old_version);
+                                               old_version, chrome_updated);
 }
 
 }  // namespace
@@ -115,21 +120,33 @@ void EventRouter::DispatchEvent(IPC::Sender* ipc_sender,
                            event_args.get(), event_url, user_gesture, info);
 }
 
-EventRouter::EventRouter(Profile* profile)
+EventRouter::EventRouter(Profile* profile, ExtensionPrefs* extension_prefs)
     : profile_(profile),
       extension_devtools_manager_(
           ExtensionSystem::Get(profile)->devtools_manager()),
-      listeners_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      listeners_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      dispatch_chrome_updated_event_(false) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
                  content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                  content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
+                 content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_INSTALLED,
                  content::Source<Profile>(profile_));
+
+  // NULL in unit_tests.
+  if (extension_prefs) {
+    // Check if registered events are up-to-date. We need to do this before
+    // reading the registered events, because it deletes them if they're out of
+    // date.
+    dispatch_chrome_updated_event_ =
+        !extension_prefs->CheckRegisteredEventsUpToDate();
+  }
 }
 
 EventRouter::~EventRouter() {}
@@ -383,6 +400,8 @@ void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,
   std::set<const EventListener*> listeners(
       listeners_.GetEventListeners(*event));
 
+  std::set<EventDispatchIdentifier> already_dispatched;
+
   // We dispatch events for lazy background pages first because attempting to do
   // so will cause those that are being suspended to cancel that suspension.
   // As canceling a suspension entails sending an event to the affected
@@ -394,8 +413,9 @@ void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,
     const EventListener* listener = *it;
     if (restrict_to_extension_id.empty() ||
         restrict_to_extension_id == listener->extension_id) {
-      if (!listener->process)
-        DispatchLazyEvent(listener->extension_id, event);
+      if (!listener->process) {
+        DispatchLazyEvent(listener->extension_id, event, &already_dispatched);
+      }
     }
   }
 
@@ -404,27 +424,41 @@ void EventRouter::DispatchEventImpl(const std::string& restrict_to_extension_id,
     const EventListener* listener = *it;
     if (restrict_to_extension_id.empty() ||
         restrict_to_extension_id == listener->extension_id) {
+
       if (listener->process) {
-        DispatchEventToProcess(listener->extension_id, listener->process,
-                               event);
+        EventDispatchIdentifier dispatch_id(
+            listener->process->GetBrowserContext(), listener->extension_id);
+        if (!ContainsKey(already_dispatched, dispatch_id)) {
+          DispatchEventToProcess(listener->extension_id, listener->process,
+              event);
+        }
       }
     }
   }
 }
 
-void EventRouter::DispatchLazyEvent(const std::string& extension_id,
-                                    const linked_ptr<Event>& event) {
+void EventRouter::DispatchLazyEvent(
+    const std::string& extension_id,
+    const linked_ptr<Event>& event,
+    std::set<EventDispatchIdentifier>* already_dispatched) {
   ExtensionService* service = profile_->GetExtensionService();
   // Check both the original and the incognito profile to see if we
   // should load a lazy bg page to handle the event. The latter case
   // occurs in the case of split-mode extensions.
   const Extension* extension = service->extensions()->GetByID(extension_id);
   if (extension) {
-    MaybeLoadLazyBackgroundPageToDispatchEvent(profile_, extension, event);
+    if (MaybeLoadLazyBackgroundPageToDispatchEvent(
+          profile_, extension, event)) {
+      already_dispatched->insert(std::make_pair(profile_, extension_id));
+    }
+
     if (profile_->HasOffTheRecordProfile() &&
         extension->incognito_split_mode()) {
-      MaybeLoadLazyBackgroundPageToDispatchEvent(
-          profile_->GetOffTheRecordProfile(), extension, event);
+      if (MaybeLoadLazyBackgroundPageToDispatchEvent(
+          profile_->GetOffTheRecordProfile(), extension, event)) {
+        already_dispatched->insert(
+            std::make_pair(profile_->GetOffTheRecordProfile(), extension_id));
+      }
     }
   }
 }
@@ -488,12 +522,12 @@ bool EventRouter::CanDispatchEventToProfile(Profile* profile,
   return true;
 }
 
-void EventRouter::MaybeLoadLazyBackgroundPageToDispatchEvent(
+bool EventRouter::MaybeLoadLazyBackgroundPageToDispatchEvent(
     Profile* profile,
     const Extension* extension,
     const linked_ptr<Event>& event) {
   if (!CanDispatchEventToProfile(profile, extension, event, NULL))
-    return;
+    return false;
 
   LazyBackgroundTaskQueue* queue =
       ExtensionSystem::Get(profile)->lazy_background_task_queue();
@@ -501,7 +535,10 @@ void EventRouter::MaybeLoadLazyBackgroundPageToDispatchEvent(
     queue->AddPendingTask(profile, extension->id(),
                           base::Bind(&EventRouter::DispatchPendingEvent,
                                      base::Unretained(this), event));
+    return true;
   }
+
+  return false;
 }
 
 void EventRouter::IncrementInFlightEvents(Profile* profile,
@@ -555,6 +592,11 @@ void EventRouter::Observe(int type,
       listeners_.RemoveListenersForProcess(renderer);
       break;
     }
+    case chrome::NOTIFICATION_EXTENSIONS_READY: {
+      // We're done restarting Chrome after an update.
+      dispatch_chrome_updated_event_ = false;
+      break;
+    }
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
       // Add all registered lazy listeners to our cache.
       const Extension* extension =
@@ -569,6 +611,12 @@ void EventRouter::Observe(int type,
           prefs->GetFilteredEvents(extension->id());
       if (filtered_events)
         listeners_.LoadFilteredLazyListeners(extension->id(), *filtered_events);
+
+      if (dispatch_chrome_updated_event_) {
+        MessageLoop::current()->PostTask(FROM_HERE,
+            base::Bind(&DispatchOnInstalledEvent, profile_, extension->id(),
+                       Version(), true));
+      }
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED: {
@@ -593,7 +641,7 @@ void EventRouter::Observe(int type,
 
       MessageLoop::current()->PostTask(FROM_HERE,
           base::Bind(&DispatchOnInstalledEvent, profile_, extension->id(),
-                     old_version));
+                     old_version, false));
       break;
     }
     default:

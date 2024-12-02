@@ -20,6 +20,7 @@
 
 namespace gfx {
 class Rect;
+class Transform;
 }
 
 namespace ui {
@@ -29,7 +30,6 @@ class LayerAnimationSequence;
 class LayerAnimationDelegate;
 class LayerAnimationObserver;
 class ScopedLayerAnimationSettings;
-class Transform;
 
 // When a property of layer needs to be changed it is set by way of
 // LayerAnimator. This enables LayerAnimator to animate property changes.
@@ -60,8 +60,8 @@ class COMPOSITOR_EXPORT LayerAnimator
   static LayerAnimator* CreateImplicitAnimator();
 
   // Sets the transform on the delegate. May cause an implicit animation.
-  virtual void SetTransform(const Transform& transform);
-  Transform GetTargetTransform() const;
+  virtual void SetTransform(const gfx::Transform& transform);
+  gfx::Transform GetTargetTransform() const;
 
   // Sets the bounds on the delegate. May cause an implicit animation.
   virtual void SetBounds(const gfx::Rect& bounds);
@@ -82,6 +82,10 @@ class COMPOSITOR_EXPORT LayerAnimator
   // Sets the grayscale on the delegate. May cause an implicit animation.
   virtual void SetGrayscale(float grayscale);
   float GetTargetGrayscale() const;
+
+  // Sets the color on the delegate. May cause an implicit animation.
+  virtual void SetColor(SkColor color);
+  SkColor GetTargetColor() const;
 
   // Sets the layer animation delegate the animator is associated with. The
   // animator does not own the delegate. The layer animator expects a non-NULL
@@ -190,6 +194,8 @@ class COMPOSITOR_EXPORT LayerAnimator
   virtual void ProgressAnimation(LayerAnimationSequence* sequence,
                                  base::TimeDelta delta);
 
+  void ProgressAnimationToEnd(LayerAnimationSequence* sequence);
+
   // Returns true if the sequence is owned by this animator.
   bool HasAnimation(LayerAnimationSequence* sequence) const;
 
@@ -198,14 +204,21 @@ class COMPOSITOR_EXPORT LayerAnimator
   friend class ScopedLayerAnimationSettings;
 
   // We need to keep track of the start time of every running animation.
-  struct RunningAnimation {
-    RunningAnimation(LayerAnimationSequence* sequence,
-                     base::TimeTicks start_time)
-        : sequence(sequence),
-          start_time(start_time) {
-    }
-    LayerAnimationSequence* sequence;
-    base::TimeTicks start_time;
+  class RunningAnimation {
+   public:
+    RunningAnimation(const base::WeakPtr<LayerAnimationSequence>& sequence,
+                     base::TimeTicks start_time);
+    ~RunningAnimation();
+
+    bool is_sequence_alive() const { return !!sequence_; }
+    LayerAnimationSequence* sequence() const { return sequence_.get(); }
+    base::TimeTicks start_time() const { return start_time_; }
+
+   private:
+    base::WeakPtr<LayerAnimationSequence> sequence_;
+    base::TimeTicks start_time_;
+
+    // Copy and assign are allowed.
   };
 
   typedef std::vector<RunningAnimation> RunningAnimations;
@@ -286,6 +299,9 @@ class COMPOSITOR_EXPORT LayerAnimator
   // Clears the animation queues and notifies any running animations that they
   // have been aborted.
   void ClearAnimationsInternal();
+
+  // Cleans up any running animations that may have been deleted.
+  void PurgeDeletedAnimations();
 
   // This is the queue of animations to run.
   AnimationQueue animation_queue_;

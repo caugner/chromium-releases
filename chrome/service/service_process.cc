@@ -155,11 +155,6 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
 
   request_context_getter_ = new ServiceURLRequestContextGetter();
 
-  // See if we have been suppiled an LSID in the command line. This LSID will
-  // override the credentials we use for Cloud Print.
-  std::string lsid = command_line.GetSwitchValueASCII(
-          switches::kServiceAccountLsid);
-
   FilePath user_data_dir;
   PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   FilePath pref_path = user_data_dir.Append(chrome::kServiceStateFileName);
@@ -175,7 +170,7 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   } else {
     // If no command-line value was specified, read the last used locale from
     // the prefs.
-    service_prefs_->GetString(prefs::kApplicationLocale, &locale);
+    locale = service_prefs_->GetString(prefs::kApplicationLocale, "");
     // If no locale was specified anywhere, use the default one.
     if (locale.empty())
       locale = kDefaultServiceProcessLocale;
@@ -185,26 +180,10 @@ bool ServiceProcess::Initialize(MessageLoopForUI* message_loop,
   PrepareRestartOnCrashEnviroment(command_line);
 
   // Enable Cloud Print if needed. First check the command-line.
-  bool cloud_print_proxy_enabled =
-      command_line.HasSwitch(switches::kEnableCloudPrintProxy);
-  if (!cloud_print_proxy_enabled) {
-    // Then check if the cloud print proxy was previously enabled.
-    service_prefs_->GetBoolean(prefs::kCloudPrintProxyEnabled,
-                               &cloud_print_proxy_enabled);
-  }
-
-  if (cloud_print_proxy_enabled) {
-    GetCloudPrintProxy()->EnableForUser(lsid);
-  }
-  // Enable Virtual Printer Driver if needed.
-  bool virtual_printer_driver_enabled = false;
-  service_prefs_->GetBoolean(prefs::kVirtualPrinterDriverEnabled,
-                             &virtual_printer_driver_enabled);
-
-  if (virtual_printer_driver_enabled) {
-    // Register the fact that there is at least one
-    // service needing the process.
-    OnServiceEnabled();
+  // Then check if the cloud print proxy was previously enabled.
+  if (command_line.HasSwitch(switches::kEnableCloudPrintProxy) ||
+      service_prefs_->GetBoolean(prefs::kCloudPrintProxyEnabled, false)) {
+    GetCloudPrintProxy()->EnableForUser(std::string());
   }
 
   VLOG(1) << "Starting Service Process IPC Server";
@@ -305,20 +284,6 @@ void ServiceProcess::OnCloudPrintProxyDisabled(bool persist_state) {
     service_prefs_->WritePrefs();
   }
   OnServiceDisabled();
-}
-
-void ServiceProcess::EnableVirtualPrintDriver() {
-  OnServiceEnabled();
-  // Save the preference that we have enabled the virtual driver.
-  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, true);
-  service_prefs_->WritePrefs();
-}
-
-void ServiceProcess::DisableVirtualPrintDriver() {
-  OnServiceDisabled();
-  // Save the preference that we have disabled the virtual driver.
-  service_prefs_->SetBoolean(prefs::kVirtualPrinterDriverEnabled, false);
-  service_prefs_->WritePrefs();
 }
 
 ServiceURLRequestContextGetter*

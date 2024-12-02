@@ -37,7 +37,6 @@
 #include "chrome/common/extensions/permissions/permission_set.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -192,7 +191,7 @@ BackgroundModeManager::BackgroundModeManager(
 
   // Listen for the application shutting down so we can decrement our KeepAlive
   // count.
-  registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
+  registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
                  content::NotificationService::AllSources());
 }
 
@@ -319,7 +318,7 @@ void BackgroundModeManager::Observe(
         }
       }
       break;
-    case content::NOTIFICATION_APP_TERMINATING:
+    case chrome::NOTIFICATION_APP_TERMINATING:
       // Make sure we aren't still keeping the app alive (only happens if we
       // don't receive an EXTENSIONS_READY notification for some reason).
       EndKeepAliveForStartup();
@@ -667,9 +666,9 @@ void BackgroundModeManager::CreateStatusTrayIcon() {
 
   // Set the image and add ourselves as a click observer on it.
   // TODO(rlp): Status tray icon should have submenus for each profile.
-  gfx::ImageSkia* image_skia = ResourceBundle::GetSharedInstance().
+  gfx::ImageSkia* image_skia = ui::ResourceBundle::GetSharedInstance().
       GetImageSkiaNamed(IDR_STATUS_TRAY_ICON);
-  status_icon_->SetImage(*image_skia->bitmap());
+  status_icon_->SetImage(*image_skia);
   status_icon_->SetToolTip(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   UpdateStatusTrayIconContextMenu();
 }

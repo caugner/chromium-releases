@@ -475,8 +475,8 @@ MetadataCache.prototype.evict_ = function() {
 MetadataCache.prototype.itemToUrl_ = function(item) {
   if (typeof(item) == 'string')
     return item;
-  else
-    return item.toURL();
+
+  return item._URL_ || (item._URL_ = item.toURL());
 };
 
 /**
@@ -501,7 +501,7 @@ MetadataCache.prototype.mergeProperties_ = function(url, data) {
   if (data == null) return;
   var properties = this.cache_[url].properties;
   for (var type in data) {
-    if (data.hasOwnProperty(type)) {
+    if (data.hasOwnProperty(type) && !properties.hasOwnProperty(type)) {
       properties[type] = data[type];
       this.notifyObservers_(url, type);
     }
@@ -696,17 +696,25 @@ GDataProvider.prototype.callApi_ = function() {
 
   chrome.fileBrowserPrivate.getGDataFileProperties(urls, function(props) {
     for (var index = 0; index < urls.length; index++) {
-      callbacks[index](self.convert_(props[index]));
+      callbacks[index](self.convert_(props[index], urls[index]));
     }
   });
 };
 
 /**
  * @param {GDataFileProperties} data GData file properties.
+ * @param {string} url File url.
  * @return {boolean} True if the file is available offline.
  */
-GDataProvider.isAvailableOffline = function(data) {
-  return data.isPresent;
+GDataProvider.isAvailableOffline = function(data, url) {
+  if (data.isPresent)
+    return true;
+
+  if (!data.isHosted)
+    return false;
+
+  var subtype = FileType.getType(url).subtype;
+  return subtype == 'doc' || subtype == 'sheet';
 };
 
 /**
@@ -721,17 +729,18 @@ GDataProvider.isAvailableWhenMetered = function(data) {
 /**
  * Converts API metadata to internal format.
  * @param {Object} data Metadata from API call.
+ * @param {string} url File url.
  * @return {Object} Metadata in internal format.
  * @private
  */
-GDataProvider.prototype.convert_ = function(data) {
+GDataProvider.prototype.convert_ = function(data, url) {
   var result = {};
   result.gdata = {
     present: data.isPresent,
     pinned: data.isPinned,
     hosted: data.isHosted,
     dirty: data.isDirty,
-    availableOffline: GDataProvider.isAvailableOffline(data),
+    availableOffline: GDataProvider.isAvailableOffline(data, url),
     availableWhenMetered: GDataProvider.isAvailableWhenMetered(data),
     contentUrl: (data.contentUrl || '').replace(/\?.*$/gi, ''),
     editUrl: data.editUrl || '',

@@ -18,20 +18,11 @@
 //
 class ConstrainedWindow {
  public:
-  static const int kVerticalPadding = 14; // top/bottom padding.
-  static const int kHorizontalPadding = 17; // left/right padding.
-  static const int kRowPadding = 20;  // Vertical margin between dialog rows.
-  static const int kBorderRadius = 2;  // Border radius for dialog corners.
-
-  // Font style for dialog text.
-  static const ui::ResourceBundle::FontStyle kTextFontStyle =
-      ui::ResourceBundle::BaseFont;
-  // Font style for dialog title.
-  static const ui::ResourceBundle::FontStyle kTitleFontStyle =
-      ui::ResourceBundle::MediumFont;
-
+  static int GetCloseButtonSize();  // Size of close button.
   static SkColor GetBackgroundColor();  // Dialog background color.
   static SkColor GetTextColor();  // Dialog text color.
+  static SkColor GetLinkColor();  // Dialog link color.
+  static SkColor GetSeparatorColor();  // Dialog separator color.
 
   // Makes the Constrained Window visible. Only one Constrained Window is shown
   // at a time per tab.
@@ -42,6 +33,9 @@ class ConstrainedWindow {
 
   // Sets focus on the Constrained Window.
   virtual void FocusConstrainedWindow();
+
+  // Runs a pulse animation for the constrained window.
+  virtual void PulseConstrainedWindow();
 
   // Checks if the constrained window can be shown.
   virtual bool CanShowConstrainedWindow();

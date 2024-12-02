@@ -22,9 +22,12 @@
 @class TabStripView;
 
 class Browser;
-class TabContents;
 class TabStripModelObserverBridge;
 class TabStripModel;
+
+namespace content {
+class WebContents;
+}
 
 // The interface for the tab strip controller's delegate.
 // Delegating TabStripModelObserverBridge's events (in lieu of directly
@@ -35,9 +38,6 @@ class TabStripModel;
 
 // Stripped down version of TabStripModelObserverBridge:selectTabWithContents.
 - (void)onActivateTabWithContents:(content::WebContents*)contents;
-
-// Stripped down version of TabStripModelObserverBridge:tabReplacedWithContents.
-- (void)onReplaceTabWithContents:(content::WebContents*)contents;
 
 // Stripped down version of TabStripModelObserverBridge:tabChangedWithContents.
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
@@ -254,7 +254,7 @@ class TabStripModel;
 
 @end
 
-// Returns the parent view to use when showing a sheet for a given tab contents.
-NSView* GetSheetParentViewForTabContents(TabContents* tab_contents);
+// Returns the parent view to use when showing a sheet for a given web contents.
+NSView* GetSheetParentViewForWebContents(content::WebContents* web_contents);
 
 #endif  // CHROME_BROWSER_UI_COCOA_TABS_TAB_STRIP_CONTROLLER_H_

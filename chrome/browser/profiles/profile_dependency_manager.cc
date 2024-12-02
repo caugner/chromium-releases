@@ -16,6 +16,8 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/api/commands/command_service_factory.h"
 #include "chrome/browser/extensions/api/discovery/suggested_links_registry_factory.h"
+#include "chrome/browser/extensions/app_restore_service_factory.h"
+#include "chrome/browser/extensions/api/tab_capture/tab_capture_registry_factory.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
@@ -25,7 +27,7 @@
 #include "chrome/browser/media_gallery/media_galleries_preferences_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
-#include "chrome/browser/plugin_prefs_factory.h"
+#include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
@@ -50,12 +52,14 @@
 #endif  // OS_WIN
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/browser/ui/tabs/pinned_tab_service_factory.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager_factory.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/user_style_sheet_watcher_factory.h"
+#include "chrome/browser/visitedlink/visitedlink_master_factory.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 
 #if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
@@ -63,7 +67,6 @@
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/managed_mode_policy_provider_factory.h"
 #include "chrome/browser/policy/user_policy_signin_service_factory.h"
 #endif
 
@@ -216,9 +219,11 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #endif
   DownloadServiceFactory::GetInstance();
 #if defined(ENABLE_EXTENSIONS)
+  extensions::AppRestoreServiceFactory::GetInstance();
   extensions::CommandServiceFactory::GetInstance();
   extensions::SuggestedLinksRegistryFactory::GetInstance();
   extensions::ExtensionSystemFactory::GetInstance();
+  extensions::TabCaptureRegistryFactory::GetInstance();
 #endif
   FaviconServiceFactory::GetInstance();
   FindBarStateFactory::GetInstance();
@@ -228,9 +233,6 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   GlobalErrorServiceFactory::GetInstance();
   GoogleURLTrackerFactory::GetInstance();
   HistoryServiceFactory::GetInstance();
-#if defined(ENABLE_CONFIGURATION_POLICY)
-  ManagedModePolicyProviderFactory::GetInstance();
-#endif
   MediaGalleriesPreferencesFactory::GetInstance();
   NTPResourceCacheFactory::GetInstance();
   PasswordStoreFactory::GetInstance();
@@ -257,6 +259,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
   SessionServiceFactory::GetInstance();
 #endif
   ShortcutsBackendFactory::GetInstance();
+  ThumbnailServiceFactory::GetInstance();
   SigninManagerFactory::GetInstance();
 #if defined(ENABLE_INPUT_SPEECH)
   SpeechInputExtensionManager::InitializeFactory();
@@ -274,6 +277,7 @@ void ProfileDependencyManager::AssertFactoriesBuilt() {
 #endif
   TokenServiceFactory::GetInstance();
   UserStyleSheetWatcherFactory::GetInstance();
+  VisitedLinkMasterFactory::GetInstance();
   WebDataServiceFactory::GetInstance();
   WebIntentsRegistryFactory::GetInstance();
 

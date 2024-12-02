@@ -27,9 +27,8 @@ using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 using ::testing::SaveArg;
 using ::testing::SetArgumentPointee;
-using content::BrowserThread;
 
-using content::BrowserThreadImpl;
+namespace content {
 
 static const int kStreamId = 50;
 
@@ -44,7 +43,7 @@ class MockAudioRendererHost : public AudioRendererHost {
  public:
   explicit MockAudioRendererHost(
       media::AudioManager* audio_manager,
-      content::MediaObserver* media_observer)
+      MediaObserver* media_observer)
       : AudioRendererHost(audio_manager, media_observer),
         shared_memory_length_(0) {
   }
@@ -196,12 +195,12 @@ class AudioRendererHostTest : public testing::Test {
 
     media::AudioParameters::Format format;
     if (mock_stream_)
-      format = media::AudioParameters::AUDIO_MOCK;
+      format = media::AudioParameters::AUDIO_FAKE;
     else
       format = media::AudioParameters::AUDIO_PCM_LINEAR;
 
     media::AudioParameters params(
-        format, CHANNEL_LAYOUT_STEREO,
+        format, media::CHANNEL_LAYOUT_STEREO,
         media::AudioParameters::kAudioCDSampleRate, 16,
         media::AudioParameters::kAudioCDSampleRate / 10);
 
@@ -256,7 +255,7 @@ class AudioRendererHostTest : public testing::Test {
     CHECK(host_->audio_entries_.size())
         << "Calls Create() before calling this method";
     media::AudioOutputController* controller =
-        host_->audio_entries_.begin()->second->controller;
+        host_->LookupControllerByIdForTesting(kStreamId);
     CHECK(controller) << "AudioOutputController not found";
 
     // Expect an error signal sent through IPC.
@@ -397,5 +396,6 @@ TEST_F(AudioRendererHostTest, SimulateErrorAndClose) {
   Close();
 }
 
-
 // TODO(hclam): Add tests for data conversation in low latency mode.
+
+}  // namespace content

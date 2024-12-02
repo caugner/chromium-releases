@@ -290,9 +290,9 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
   }
 
   void SetInfobarResponse(const GURL& requesting_url, bool allowed) {
-    TabContents* tab_contents = chrome::GetActiveTabContents(current_browser_);
+    WebContents* web_contents = chrome::GetActiveWebContents(current_browser_);
     TabSpecificContentSettings* content_settings =
-        tab_contents->content_settings();
+        TabSpecificContentSettings::FromWebContents(web_contents);
     const GeolocationSettingsState& settings_state =
         content_settings->geolocation_settings_state();
     size_t state_map_size = settings_state.state_map().size();
@@ -302,7 +302,7 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
       content::WindowedNotificationObserver observer(
           content::NOTIFICATION_LOAD_STOP,
           content::Source<NavigationController>(
-              &tab_contents->web_contents()->GetController()));
+              &web_contents->GetController()));
       if (allowed)
         infobar_->AsConfirmInfoBarDelegate()->Accept();
       else
@@ -310,7 +310,7 @@ class GeolocationBrowserTest : public InProcessBrowserTest {
       observer.Wait();
     }
 
-    tab_contents->infobar_tab_helper()->RemoveInfoBar(infobar_);
+    InfoBarTabHelper::FromWebContents(web_contents)->RemoveInfoBar(infobar_);
     LOG(WARNING) << "infobar response set";
     infobar_ = NULL;
     EXPECT_GT(settings_state.state_map().size(), state_map_size);
@@ -566,8 +566,8 @@ IN_PROC_BROWSER_TEST_F(GeolocationBrowserTest,
   iframe_xpath_ = L"//iframe[@id='iframe_1']";
   AddGeolocationWatch(true);
 
-  InfoBarTabHelper* infobar_helper =
-      chrome::GetActiveTabContents(current_browser_)->infobar_tab_helper();
+  InfoBarTabHelper* infobar_helper = InfoBarTabHelper::FromWebContents(
+      chrome::GetActiveWebContents(current_browser_));
   size_t num_infobars_before_cancel = infobar_helper->GetInfoBarCount();
   // Change the iframe, and ensure the infobar is gone.
   IFrameLoader change_iframe_1(current_browser_, 1, current_url_);

@@ -15,7 +15,6 @@
 #include "content/common/webkitplatformsupport_impl.h"
 #include "content/public/utility/content_utility_client.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 
 #if defined(TOOLKIT_GTK)
@@ -23,6 +22,8 @@
 
 #include "ui/gfx/gtk_util.h"
 #endif
+
+namespace content {
 
 namespace {
 
@@ -38,9 +39,9 @@ void ConvertVector(const SRC& src, DEST* dest) {
 UtilityThreadImpl::UtilityThreadImpl()
     : batch_mode_(false) {
   ChildProcess::current()->AddRefProcess();
-  webkit_platform_support_.reset(new content::WebKitPlatformSupportImpl);
+  webkit_platform_support_.reset(new WebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
-  content::GetContentClient()->utility()->UtilityThreadStarted();
+  GetContentClient()->utility()->UtilityThreadStarted();
 }
 
 UtilityThreadImpl::~UtilityThreadImpl() {
@@ -70,7 +71,7 @@ void UtilityThreadImpl::ReleaseCachedFonts() {
 
 
 bool UtilityThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
-  if (content::GetContentClient()->utility()->OnMessageReceived(msg))
+  if (GetContentClient()->utility()->OnMessageReceived(msg))
     return true;
 
   bool handled = true;
@@ -128,3 +129,5 @@ void UtilityThreadImpl::OnLoadPlugins(
   ReleaseProcessIfNeeded();
 }
 #endif
+
+}  // namespace content

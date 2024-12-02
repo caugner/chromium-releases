@@ -33,6 +33,15 @@
   } while (false);
 
 
+namespace {
+const int kNoTimeout = -1;
+const int kConnectTimeOut = 10;  // Seconds.
+
+bool FamilyIsTCP(int family) {
+  return family == AF_INET || family == AF_INET6;
+}
+}  // namespace
+
 namespace forwarder2 {
 
 bool Socket::BindUnix(const std::string& path, bool abstract) {
@@ -124,7 +133,6 @@ bool Socket::InitUnixSocket(const std::string& path, bool abstract) {
   abstract_ = abstract;
   family_ = PF_UNIX;
   addr_.addr_un.sun_family = family_;
-
   if (abstract) {
     // Copied from net/base/unix_domain_socket_posix.cc
     // Convert the path given into abstract socket name. It must start with
@@ -138,14 +146,12 @@ bool Socket::InitUnixSocket(const std::string& path, bool abstract) {
     memcpy(addr_.addr_un.sun_path, path.c_str(), path.size());
     addr_len_ = sizeof(sockaddr_un);
   }
-
   addr_ptr_ = reinterpret_cast<sockaddr*>(&addr_.addr_un);
   return InitSocketInternal();
 }
 
 bool Socket::InitTcpSocket(const std::string& host, int port) {
   port_ = port;
-
   if (host.empty()) {
     // Use localhost: INADDR_LOOPBACK
     family_ = AF_INET;
@@ -154,8 +160,7 @@ bool Socket::InitTcpSocket(const std::string& host, int port) {
   } else if (!Resolve(host)) {
     return false;
   }
-  CHECK(family_ == AF_INET || family_ == AF_INET6)
-      << "Invalid socket family.";
+  CHECK(FamilyIsTCP(family_)) << "Invalid socket family.";
   if (family_ == AF_INET) {
     addr_.addr4.sin_port = htons(port_);
     addr_ptr_ = reinterpret_cast<sockaddr*>(&addr_.addr4);
@@ -175,12 +180,35 @@ bool Socket::BindAndListen() {
     SetSocketError();
     return false;
   }
+  if (port_ == 0 && FamilyIsTCP(family_)) {
+    SockAddr addr;
+    memset(&addr, 0, sizeof(addr));
+    socklen_t addrlen = 0;
+    sockaddr* addr_ptr = NULL;
+    uint16* port_ptr = NULL;
+    if (family_ == AF_INET) {
+      addr_ptr = reinterpret_cast<sockaddr*>(&addr.addr4);
+      port_ptr = &addr.addr4.sin_port;
+      addrlen = sizeof(addr.addr4);
+    } else if (family_ == AF_INET6) {
+      addr_ptr = reinterpret_cast<sockaddr*>(&addr.addr6);
+      port_ptr = &addr.addr6.sin6_port;
+      addrlen = sizeof(addr.addr6);
+    }
+    errno = 0;
+    if (getsockname(socket_, addr_ptr, &addrlen) != 0) {
+      LOG(ERROR) << "getsockname error: " << safe_strerror(errno);;
+      SetSocketError();
+      return false;
+    }
+    port_ = ntohs(*port_ptr);
+  }
   return true;
 }
 
 bool Socket::Accept(Socket* new_socket) {
   DCHECK(new_socket != NULL);
-  if (!WaitForEvent()) {
+  if (!WaitForEvent(READ, kNoTimeout)) {
     SetSocketError();
     return false;
   }
@@ -197,11 +225,25 @@ bool Socket::Accept(Socket* new_socket) {
 }
 
 bool Socket::Connect() {
+  // Set non-block because we use select for connect.
+  const int kFlags = fcntl(socket_, F_GETFL);
+  DCHECK(!(kFlags & O_NONBLOCK));
+  fcntl(socket_, F_SETFL, kFlags | O_NONBLOCK);
   errno = 0;
-  if (HANDLE_EINTR(connect(socket_, addr_ptr_, addr_len_)) < 0) {
+  if (HANDLE_EINTR(connect(socket_, addr_ptr_, addr_len_)) < 0 &&
+      errno != EINPROGRESS) {
     SetSocketError();
+    PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
     return false;
   }
+  // Wait for connection to complete, or receive a notification.
+  if (!WaitForEvent(WRITE, kConnectTimeOut)) {
+    SetSocketError();
+    PRESERVE_ERRNO_HANDLE_EINTR(fcntl(socket_, F_SETFL, kFlags));
+    return false;
+  }
+  // Disable non-block since our code assumes blocking semantics.
+  fcntl(socket_, F_SETFL, kFlags);
   return true;
 }
 
@@ -232,6 +274,14 @@ bool Socket::Resolve(const std::string& host) {
       break;
   }
   return true;
+}
+
+int Socket::GetPort() {
+  if (!FamilyIsTCP(family_)) {
+    LOG(ERROR) << "Can't call GetPort() on an unix domain socket.";
+    return 0;
+  }
+  return port_;
 }
 
 bool Socket::IsFdInSet(const fd_set& fds) const {
@@ -266,7 +316,7 @@ void Socket::SetSocketError() {
 }
 
 int Socket::Read(char* buffer, size_t buffer_size) {
-  if (!WaitForEvent()) {
+  if (!WaitForEvent(READ, kNoTimeout)) {
     SetSocketError();
     return 0;
   }
@@ -298,15 +348,28 @@ int Socket::WriteNumBytes(const char* buffer, size_t num_bytes) {
   return bytes_written;
 }
 
-bool Socket::WaitForEvent() const {
+bool Socket::WaitForEvent(EventType type, int timeout_secs) const {
   if (exit_notifier_fd_ == -1 || socket_ == -1)
     return true;
   const int nfds = std::max(socket_, exit_notifier_fd_) + 1;
   fd_set read_fds;
+  fd_set write_fds;
   FD_ZERO(&read_fds);
-  FD_SET(socket_, &read_fds);
+  FD_ZERO(&write_fds);
+  if (type == READ)
+    FD_SET(socket_, &read_fds);
+  else
+    FD_SET(socket_, &write_fds);
   FD_SET(exit_notifier_fd_, &read_fds);
-  if (HANDLE_EINTR(select(nfds, &read_fds, NULL, NULL, NULL)) <= 0)
+
+  timeval tv = {};
+  timeval* tv_ptr = NULL;
+  if (timeout_secs > 0) {
+    tv.tv_sec = timeout_secs;
+    tv.tv_usec = 0;
+    tv_ptr = &tv;
+  }
+  if (HANDLE_EINTR(select(nfds, &read_fds, &write_fds, NULL, tv_ptr)) <= 0)
     return false;
   return !FD_ISSET(exit_notifier_fd_, &read_fds);
 }

@@ -11,15 +11,12 @@
 #include "base/callback.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/sandboxed_unpacker.h"
-#include "chrome/browser/policy/app_pack_updater.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
@@ -32,8 +29,6 @@ using extensions::SandboxedUnpacker;
 
 namespace chromeos {
 
-namespace {
-
 typedef base::Callback<void(
     scoped_refptr<Extension>,
     const FilePath&)> UnpackCallback;
@@ -41,10 +36,8 @@ typedef base::Callback<void(
 class ScreensaverUnpackerClient
     : public extensions::SandboxedUnpackerClient {
  public:
-  ScreensaverUnpackerClient(const FilePath& crx_path,
-                            const UnpackCallback& unpacker_callback)
-      : crx_path_(crx_path),
-        unpack_callback_(unpacker_callback) {}
+  explicit ScreensaverUnpackerClient(const UnpackCallback& unpacker_callback)
+      : unpack_callback_(unpacker_callback) {}
 
   void OnUnpackSuccess(const FilePath& temp_dir,
                        const FilePath& extension_root,
@@ -60,9 +53,6 @@ class ScreensaverUnpackerClient
       const FilePath& extension_base_path,
       const FilePath& screensaver_extension_path);
 
-  void NotifyAppPackOfDamagedFile();
-
-  FilePath crx_path_;
   UnpackCallback unpack_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreensaverUnpackerClient);
@@ -84,7 +74,6 @@ void ScreensaverUnpackerClient::OnUnpackSuccess(
 
 void ScreensaverUnpackerClient::OnUnpackFailure(const string16& error) {
   LOG(ERROR) << "Couldn't unpack screensaver extension. Error: " << error;
-  NotifyAppPackOfDamagedFile();
 }
 
 void ScreensaverUnpackerClient::LoadScreensaverExtension(
@@ -101,7 +90,6 @@ void ScreensaverUnpackerClient::LoadScreensaverExtension(
   if (!screensaver_extension) {
     LOG(ERROR) << "Could not load screensaver extension from: "
                << screensaver_extension_path.value() << " due to: " << error;
-    NotifyAppPackOfDamagedFile();
     return;
   }
 
@@ -113,24 +101,6 @@ void ScreensaverUnpackerClient::LoadScreensaverExtension(
           screensaver_extension,
           extension_base_path));
 }
-
-void ScreensaverUnpackerClient::NotifyAppPackOfDamagedFile() {
-  if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
-        base::Bind(&ScreensaverUnpackerClient::NotifyAppPackOfDamagedFile,
-                   this));
-    return;
-  }
-
-  policy::BrowserPolicyConnector* connector =
-      g_browser_process->browser_policy_connector();
-  policy::AppPackUpdater* updater = connector->GetAppPackUpdater();
-  if (updater)
-    updater->OnDamagedFileDetected(crx_path_);
-}
-
-}  // namespace
 
 KioskModeScreensaver::KioskModeScreensaver()
     : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
@@ -176,17 +146,21 @@ void KioskModeScreensaver::ScreensaverPathCallback(
   if (screensaver_crx.empty())
     return;
 
+  Profile* default_profile = ProfileManager::GetDefaultProfile();
+  if (!default_profile)
+    return;
+  FilePath extensions_dir =
+      default_profile->GetExtensionService()->install_directory();
   scoped_refptr<SandboxedUnpacker> screensaver_unpacker(
       new SandboxedUnpacker(
           screensaver_crx,
           true,
           Extension::COMPONENT,
           Extension::NO_FLAGS,
-          new ScreensaverUnpackerClient(
-              screensaver_crx,
-              base::Bind(
-                  &KioskModeScreensaver::SetupScreensaver,
-                  weak_ptr_factory_.GetWeakPtr()))));
+          extensions_dir,
+          new ScreensaverUnpackerClient(base::Bind(
+              &KioskModeScreensaver::SetupScreensaver,
+              weak_ptr_factory_.GetWeakPtr()))));
 
   // Fire off the unpacker on the file thread; don't need it to return.
   content::BrowserThread::PostTask(
@@ -225,29 +199,24 @@ void KioskModeScreensaver::OnUserActivity() {
   ash::Shell::GetInstance()->user_activity_detector()->RemoveObserver(this);
 
   // Find the retail mode login page.
-  if (WebUILoginDisplayHost::default_host()) {
-    WebUILoginDisplayHost* webui_host =
-        static_cast<WebUILoginDisplayHost*>(
-            WebUILoginDisplayHost::default_host());
-    OobeUI* oobe_ui = webui_host->GetOobeUI();
+  CHECK(WebUILoginDisplayHost::default_host());
+  WebUILoginDisplayHost* webui_host =
+      static_cast<WebUILoginDisplayHost*>(
+          WebUILoginDisplayHost::default_host());
+  OobeUI* oobe_ui = webui_host->GetOobeUI();
 
-    // Show the login spinner.
-    if (oobe_ui)
-      oobe_ui->ShowRetailModeLoginSpinner();
+  // Show the login spinner.
+  CHECK(oobe_ui);
+  oobe_ui->ShowRetailModeLoginSpinner();
 
-    // Close the screensaver, our login spinner is already showing.
-    ash::CloseScreensaver();
+  // Close the screensaver, our login spinner is already showing.
+  ash::CloseScreensaver();
 
-    // Log us in.
-    ExistingUserController* controller =
-        ExistingUserController::current_controller();
-    if (controller && !chromeos::UserManager::Get()->IsUserLoggedIn())
-      controller->LoginAsDemoUser();
-  } else {
-    // No default host for the WebUiLoginDisplay means that we're already in the
-    // process of logging in - shut down screensaver and do nothing else.
-    ash::CloseScreensaver();
-  }
+  // Log us in.
+  ExistingUserController* controller =
+      ExistingUserController::current_controller();
+  CHECK(controller);
+  controller->LoginAsDemoUser();
 
   ShutdownKioskModeScreensaver();
 }

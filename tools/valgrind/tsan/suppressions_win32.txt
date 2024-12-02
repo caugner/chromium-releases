@@ -48,6 +48,13 @@
   fun:_wfsopen
 }
 
+{
+  bug_158099_mmdevice_endpoint_shutdown_too_fast
+  ThreadSanitizer:Race
+  fun:GetLocalIdFromEndpointId
+  ...
+}
+
 ############################
 # Chromium
 
@@ -97,7 +104,6 @@
   bug_93932b
   ThreadSanitizer:Race
   ...
-  fun:ff_mpeg4video_split
   fun:avcodec_close
   fun:media::FFmpegVideoDecoder::ReleaseFFmpegResources
 }
@@ -178,9 +184,9 @@
   fun:media::FFmpegAudioDecoder::DoDecodeBuffer
 }
 {
-  bug_144928
+  bug_144928_a
   ThreadSanitizer:Race
-  fun:google_breakpad::CrashGenerationServer::HandleConnectionRequest
+  fun:google_breakpad::CrashGenerationServer::Handle*
   fun:google_breakpad::CrashGenerationServer::OnPipeConnected
   fun:RtlSetTimer
   fun:RtlSetTimer
@@ -193,20 +199,6 @@
 }
 {
   bug_144928_b
-  ThreadSanitizer:Race
-  fun:google_breakpad::CrashGenerationServer::HandleConnectingState
-  fun:google_breakpad::CrashGenerationServer::OnPipeConnected
-  fun:RtlSetTimer
-  fun:RtlSetTimer
-  fun:TpReleaseTimer
-  fun:TpReleaseTimer
-  fun:RtlMultiByteToUnicodeSize
-  fun:TpCallbackMayRunLong
-  fun:TpCallbackMayRunLong
-  fun:BaseThreadInitThunk
-}
-{
-  bug_144928_c
   ThreadSanitizer:Race
   fun:google_breakpad::CrashGenerationServer::~CrashGenerationServer
   fun:google_breakpad::CrashGenerationServer::`scalar deleting destructor'
@@ -223,5 +215,33 @@
   ...
   fun:GetAdaptersAddresses
   ...
+  fun:base::internal::RunnableAdapter::Run
+}
+
+{
+  bug_157076_a
+  ThreadSanitizer:Race
+  fun:win32thread_worker
+  fun:_callthreadstartex
+  fun:_threadstartex
+  fun:BaseThreadInitThunk
+}
+
+{
+  bug_157076_b
+  ThreadSanitizer:Race
+  fun:memset
+  fun:_free_dbg_nolock
+  fun:_free_dbg
+  fun:_aligned_free_dbg
+  fun:_aligned_free
+  fun:media::VideoFrame::~VideoFrame
+  fun:media::VideoFrame::`scalar deleting destructor'
+  fun:base::RefCountedThreadSafe::DeleteInternal
+  fun:base::RefCountedThreadSafe::Release
+  fun:base::RefCountedThreadSafe::Release
+  fun:scoped_refptr::operator=
+  fun:media::VideoRendererBase::AttemptFlush_Locked
+  fun:media::VideoRendererBase::OnDecoderFlushDone
   fun:base::internal::RunnableAdapter::Run
 }

@@ -75,6 +75,21 @@
 
 namespace {
 
+// Key used to attach ShowInShelfData to a DownloadItem.
+const char kShowInShelfKey[] = "chrome.download_util.show_in_shelf";
+
+// Class that tracks the "show in download shelf" setting for a download item.
+class ShowInShelfData : public base::SupportsUserData::Data {
+ public:
+  explicit ShowInShelfData(bool should_show) : should_show_(should_show) {
+  }
+
+  bool should_show() const { return should_show_; }
+
+ private:
+  const bool should_show_;
+};
+
 // Get the opacity based on |animation_progress|, with values in [0.0, 1.0].
 // Range of return value is [0, 255].
 int GetOpacity(double animation_progress) {
@@ -138,7 +153,7 @@ bool DownloadPathIsDangerous(const FilePath& download_path) {
   return false;
 #else
   FilePath desktop_dir;
-  if (!PathService::Get(chrome::DIR_USER_DESKTOP, &desktop_dir)) {
+  if (!PathService::Get(base::DIR_USER_DESKTOP, &desktop_dir)) {
     NOTREACHED();
     return false;
   }
@@ -155,6 +170,61 @@ gfx::ImageSkia* g_foreground_16 = NULL;
 gfx::ImageSkia* g_background_16 = NULL;
 gfx::ImageSkia* g_foreground_32 = NULL;
 gfx::ImageSkia* g_background_32 = NULL;
+
+void PaintCustomDownloadProgress(gfx::Canvas* canvas,
+                                 const gfx::ImageSkia& background_image,
+                                 const gfx::ImageSkia& foreground_image,
+                                 int image_size,
+                                 const gfx::Rect& bounds,
+                                 int start_angle,
+                                 int percent_done) {
+  // Draw the background progress image.
+  canvas->DrawImageInt(background_image,
+                       bounds.x(),
+                       bounds.y());
+
+  // Layer the foreground progress image in an arc proportional to the download
+  // progress. The arc grows clockwise, starting in the midnight position, as
+  // the download progresses. However, if the download does not have known total
+  // size (the server didn't give us one), then we just spin an arc around until
+  // we're done.
+  float sweep_angle = 0.0;
+  float start_pos = static_cast<float>(kStartAngleDegrees);
+  if (percent_done < 0) {
+    sweep_angle = kUnknownAngleDegrees;
+    start_pos = static_cast<float>(start_angle);
+  } else if (percent_done > 0) {
+    sweep_angle = static_cast<float>(kMaxDegrees / 100.0 * percent_done);
+  }
+
+  // Set up an arc clipping region for the foreground image. Don't bother using
+  // a clipping region if it would round to 360 (really 0) degrees, since that
+  // would eliminate the foreground completely and be quite confusing (it would
+  // look like 0% complete when it should be almost 100%).
+  canvas->Save();
+  if (sweep_angle < static_cast<float>(kMaxDegrees - 1)) {
+    SkRect oval;
+    oval.set(SkIntToScalar(bounds.x()),
+             SkIntToScalar(bounds.y()),
+             SkIntToScalar(bounds.x() + image_size),
+             SkIntToScalar(bounds.y() + image_size));
+    SkPath path;
+    path.arcTo(oval,
+               SkFloatToScalar(start_pos),
+               SkFloatToScalar(sweep_angle), false);
+    path.lineTo(SkIntToScalar(bounds.x() + image_size / 2),
+                SkIntToScalar(bounds.y() + image_size / 2));
+
+    // gfx::Canvas::ClipPath does not provide for anti-aliasing.
+    canvas->sk_canvas()->clipPath(path, SkRegion::kIntersect_Op, true);
+  }
+
+  canvas->DrawImageInt(foreground_image,
+                       bounds.x(),
+                       bounds.y());
+  canvas->Restore();
+}
+
 
 void PaintDownloadProgress(gfx::Canvas* canvas,
 #if defined(TOOLKIT_VIEWS)
@@ -202,46 +272,9 @@ void PaintDownloadProgress(gfx::Canvas* canvas,
                        bounds.x(),
                        bounds.y());
 
-  // Layer the foreground progress image in an arc proportional to the download
-  // progress. The arc grows clockwise, starting in the midnight position, as
-  // the download progresses. However, if the download does not have known total
-  // size (the server didn't give us one), then we just spin an arc around until
-  // we're done.
-  float sweep_angle = 0.0;
-  float start_pos = static_cast<float>(kStartAngleDegrees);
-  if (percent_done < 0) {
-    sweep_angle = kUnknownAngleDegrees;
-    start_pos = static_cast<float>(start_angle);
-  } else if (percent_done > 0) {
-    sweep_angle = static_cast<float>(kMaxDegrees / 100.0 * percent_done);
-  }
-
-  // Set up an arc clipping region for the foreground image. Don't bother using
-  // a clipping region if it would round to 360 (really 0) degrees, since that
-  // would eliminate the foreground completely and be quite confusing (it would
-  // look like 0% complete when it should be almost 100%).
-  canvas->Save();
-  if (sweep_angle < static_cast<float>(kMaxDegrees - 1)) {
-    SkRect oval;
-    oval.set(SkIntToScalar(bounds.x()),
-             SkIntToScalar(bounds.y()),
-             SkIntToScalar(bounds.x() + kProgressIconSize),
-             SkIntToScalar(bounds.y() + kProgressIconSize));
-    SkPath path;
-    path.arcTo(oval,
-               SkFloatToScalar(start_pos),
-               SkFloatToScalar(sweep_angle), false);
-    path.lineTo(SkIntToScalar(bounds.x() + kProgressIconSize / 2),
-                SkIntToScalar(bounds.y() + kProgressIconSize / 2));
-
-    // gfx::Canvas::ClipPath does not provide for anti-aliasing.
-    canvas->sk_canvas()->clipPath(path, SkRegion::kIntersect_Op, true);
-  }
-
-  canvas->DrawImageInt(*foreground,
-                       bounds.x(),
-                       bounds.y());
-  canvas->Restore();
+  PaintCustomDownloadProgress(canvas, *background, *foreground,
+                              kProgressIconSize, bounds, start_angle,
+                              percent_done);
 }
 
 void PaintDownloadComplete(gfx::Canvas* canvas,
@@ -270,10 +303,8 @@ void PaintDownloadComplete(gfx::Canvas* canvas,
 
   // Start at full opacity, then loop back and forth five times before ending
   // at zero opacity.
-  canvas->SaveLayerAlpha(GetOpacity(animation_progress), complete_bounds);
-  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
-  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y());
-  canvas->Restore();
+  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y(),
+                       GetOpacity(animation_progress));
 }
 
 void PaintDownloadInterrupted(gfx::Canvas* canvas,
@@ -302,10 +333,8 @@ void PaintDownloadInterrupted(gfx::Canvas* canvas,
 
   // Start at zero opacity, then loop back and forth five times before ending
   // at full opacity.
-  canvas->SaveLayerAlpha(GetOpacity(1.0 - animation_progress), complete_bounds);
-  canvas->sk_canvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
-  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y());
-  canvas->Restore();
+  canvas->DrawImageInt(*complete, complete_bounds.x(), complete_bounds.y(),
+                       GetOpacity(1.0 - animation_progress));
 }
 
 // Load a language dependent height so that the dangerous download confirmation
@@ -363,7 +392,7 @@ void DragDownload(const DownloadItem* download,
   if (!root_window || !aura::client::GetDragDropClient(root_window))
     return;
 
-  gfx::Point location = gfx::Screen::GetCursorScreenPoint();
+  gfx::Point location = gfx::Screen::GetScreenFor(view)->GetCursorScreenPoint();
   aura::client::GetDragDropClient(root_window)->StartDragAndDrop(
       data,
       root_window,
@@ -482,6 +511,16 @@ void RecordDownloadCount(ChromeDownloadCountTypes type) {
 void RecordDownloadSource(ChromeDownloadSource source) {
   UMA_HISTOGRAM_ENUMERATION(
       "Download.SourcesChrome", source, CHROME_DOWNLOAD_SOURCE_LAST_ENTRY);
+}
+
+bool ShouldShowInShelf(content::DownloadItem* item) {
+  ShowInShelfData* data =
+      static_cast<ShowInShelfData*>(item->GetUserData(kShowInShelfKey));
+  return !data || data->should_show();
+}
+
+void SetShouldShowInShelf(content::DownloadItem* item, bool should_show) {
+  item->SetUserData(kShowInShelfKey, new ShowInShelfData(should_show));
 }
 
 }  // namespace download_util

@@ -14,7 +14,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_checker.h"
-#include "base/time.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/configure_reason.h"
@@ -106,6 +105,7 @@ class SyncManager {
     // updated later in the list.
     virtual void OnChangesApplied(
         ModelType model_type,
+        int64 model_version,
         const BaseTransaction* trans,
         const ImmutableChangeRecordList& changes) = 0;
 

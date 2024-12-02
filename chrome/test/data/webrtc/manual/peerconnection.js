@@ -10,51 +10,62 @@
 function getUserMediaFromHere() {
   var audio = document.getElementById('audio').checked;
   var video = document.getElementById('video').checked;
+  var hints = document.getElementById('media-hints').value;
 
   try {
-    getUserMedia(video, audio);
+    getUserMedia(video, audio, hints);
   } catch (exception) {
     print_('getUserMedia says: ' + exception);
   }
 }
 
 function connectFromHere() {
-  if (obtainGetUserMediaResult() != 'ok-got-stream') {
-    print_('<b>Grant media access first.</b>')
-    return;
-  }
-
   var server = document.getElementById('server').value;
-  connect(server, 'whatever');  // Name doesn't matter
-
-  disable_('connect');
-  enable_('call');
+  // Generate a random name to distinguish us from other tabs:
+  var name = 'peer_' + Math.floor(Math.random() * 10000);
+  debug('Our name from now on will be ' + name);
+  connect(server, name);
 }
 
 function callFromHere() {
   call();
-  disable_('connect');
-  disable_('call');
-  enable_('hangup');
-  enable_('toggle-remote');
-  enable_('toggle-local');
+}
+
+function sendLocalStreamFromHere() {
+  sendLocalStreamOverPeerConnection();
+}
+
+function removeLocalStreamFromHere() {
+  removeLocalStream();
 }
 
 function hangUpFromHere() {
   hangUp();
-  disable_('connect');
-  enable_('call');
-  disable_('hangup');
-  disable_('toggle-remote');
-  disable_('toggle-local');
+  acceptIncomingCallsAgain();
 }
 
-function toggleRemoteFromHere() {
-  toggleRemoteStream();
+function toggleRemoteVideoFromHere() {
+  toggleRemoteStream(function(remoteStream) {
+    return remoteStream.videoTracks[0];
+  }, 'video');
 }
 
-function toggleLocalFromHere() {
-  toggleLocalStream();
+function toggleRemoteAudioFromHere() {
+  toggleRemoteStream(function(remoteStream) {
+    return remoteStream.audioTracks[0];
+  }, 'audio');
+}
+
+function toggleLocalVideoFromHere() {
+  toggleLocalStream(function(localStream) {
+    return localStream.videoTracks[0];
+  }, 'video');
+}
+
+function toggleLocalAudioFromHere() {
+  toggleLocalStream(function(localStream) {
+    return localStream.audioTracks[0];
+  }, 'audio');
 }
 
 function stopLocalFromHere() {
@@ -69,28 +80,31 @@ function showServerHelp() {
     + 'DME%20package:webrtc%5C.googlecode%5C.com.');
 }
 
+function toggleHelp() {
+  var help = document.getElementById('help');
+  if (help.style.display == 'none')
+    help.style.display = 'inline';
+  else
+    help.style.display = 'none';
+}
+
+function clearLog() {
+  document.getElementById('messages').innerHTML = '';
+  document.getElementById('debug').innerHTML = '';
+}
+
 window.onload = function() {
   replaceReturnCallback(print_);
-  checkErrorsPeriodically_();
-  getUserMedia(true, true);
+  replaceDebugCallback(debug_);
+  doNotAutoAddLocalStreamWhenCalled();
 }
 
 window.onunload = function() {
-  if (disabled_('connect'))
+  if (!isDisconnected())
     disconnect();
 }
 
 // Internals.
-
-/** @private */
-function enable_(element) {
-  document.getElementById(element).disabled = false;
-}
-
-/** @private */
-function disable_(element) {
-  document.getElementById(element).disabled = true;
-}
 
 /** @private */
 function disabled_(element) {
@@ -103,13 +117,12 @@ function print_(message) {
   if (message == 'ok-no-errors')
     return;
 
-  debug(message);
-  document.getElementById('debug').innerHTML += message + '<br>';
+  console.log(message);
+  document.getElementById('messages').innerHTML += message + '<br>';
 }
 
 /** @private */
-function checkErrorsPeriodically_() {
-  setInterval(function() {
-    getAnyTestFailures();
-  }, 100);
+function debug_(message) {
+  console.log(message);
+  document.getElementById('debug').innerHTML += message + '<br>';
 }

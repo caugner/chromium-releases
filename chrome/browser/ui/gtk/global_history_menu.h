@@ -8,7 +8,7 @@
 #include <map>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/cancelable_request.h"
+#include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
@@ -19,6 +19,7 @@
 #include "ui/base/gtk/owned_widget_gtk.h"
 
 class Browser;
+class Profile;
 
 namespace history {
 class TopSites;

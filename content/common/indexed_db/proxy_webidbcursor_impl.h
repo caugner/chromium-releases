@@ -14,7 +14,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
+
+namespace content {
 
 class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
  public:
@@ -32,9 +33,9 @@ class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
   virtual void postSuccessHandlerCallback();
 
   void SetPrefetchData(
-      const std::vector<content::IndexedDBKey>& keys,
-      const std::vector<content::IndexedDBKey>& primary_keys,
-      const std::vector<content::SerializedScriptValue>& values);
+      const std::vector<IndexedDBKey>& keys,
+      const std::vector<IndexedDBKey>& primary_keys,
+      const std::vector<SerializedScriptValue>& values);
 
   void CachedContinue(WebKit::WebIDBCallbacks* callbacks);
   void ResetPrefetchCache();
@@ -43,9 +44,9 @@ class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
   int32 idb_cursor_id_;
 
   // Prefetch cache.
-  std::deque<content::IndexedDBKey> prefetch_keys_;
-  std::deque<content::IndexedDBKey> prefetch_primary_keys_;
-  std::deque<content::SerializedScriptValue> prefetch_values_;
+  std::deque<IndexedDBKey> prefetch_keys_;
+  std::deque<IndexedDBKey> prefetch_primary_keys_;
+  std::deque<SerializedScriptValue> prefetch_values_;
 
   // Number of continue calls that would qualify for a pre-fetch.
   int continue_count_;
@@ -63,5 +64,7 @@ class RendererWebIDBCursorImpl : public WebKit::WebIDBCursor {
   enum { kMinPrefetchAmount = 5 };
   enum { kMaxPrefetchAmount = 100 };
 };
+
+}  // namespace content
 
 #endif  // CONTENT_COMMON_INDEXED_DB_PROXY_WEBIDBCURSOR_IMPL_H_

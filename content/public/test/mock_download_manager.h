@@ -12,10 +12,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace content {
+
 // To avoid leaking download_request_handle.h to embedders.
 void PrintTo(const DownloadRequestHandle& params, std::ostream* os);
-
-namespace content {
 
 class MockDownloadManager : public DownloadManager {
  public:
@@ -29,24 +29,13 @@ class MockDownloadManager : public DownloadManager {
   MOCK_METHOD1(Init, bool(BrowserContext* browser_context));
 
   // Gasket for handling scoped_ptr arguments.
-  virtual DownloadId StartDownload(
+  virtual DownloadItem* StartDownload(
       scoped_ptr<DownloadCreateInfo> info,
       scoped_ptr<ByteStreamReader> stream) OVERRIDE;
 
   MOCK_METHOD2(MockStartDownload,
-               DownloadId(DownloadCreateInfo*,
-                          ByteStreamReader*));
-  MOCK_METHOD4(UpdateDownload, void(int32 download_id,
-                                    int64 bytes_so_far,
-                                    int64 bytes_per_sec,
-                                    const std::string& hash_state));
-  MOCK_METHOD3(OnResponseCompleted, void(int32 download_id,
-                                         int64 size,
-                                         const std::string& hash));
+               DownloadItem*(DownloadCreateInfo*, ByteStreamReader*));
   MOCK_METHOD1(CancelDownload, void(int32 download_id));
-  MOCK_METHOD2(OnDownloadInterrupted,
-               void(int32 download_id,
-                    DownloadInterruptReason reason));
   MOCK_METHOD2(RemoveDownloadsBetween, int(base::Time remove_begin,
                                            base::Time remove_end));
   MOCK_METHOD1(RemoveDownloads, int(base::Time remove_begin));

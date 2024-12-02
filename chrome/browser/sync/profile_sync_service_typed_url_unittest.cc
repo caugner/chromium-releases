@@ -46,7 +46,6 @@
 #include "sync/internal_api/public/write_node.h"
 #include "sync/internal_api/public/write_transaction.h"
 #include "sync/protocol/typed_url_specifics.pb.h"
-#include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::Time;
@@ -186,6 +185,7 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
   virtual void TearDown() {
     history_backend_ = NULL;
     history_service_ = NULL;
+    service_->Shutdown();
     service_.reset();
     history_thread_.Stop();
     profile_.ResetRequestContext();

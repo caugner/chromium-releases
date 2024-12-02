@@ -7,10 +7,16 @@
 #include "base/command_line.h"
 #include "base/time.h"
 #include "base/values.h"
+#include "chrome/browser/debugger/devtools_window.h"
+#include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/extensions/window_controller.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
+#include "chrome/browser/ui/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/app_window.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -25,16 +31,67 @@ namespace extensions {
 namespace app_window_constants {
 const char kInvalidWindowId[] =
     "The window id can not be more than 256 characters long.";
-};
+}
 
 const char kNoneFrameOption[] = "none";
 const char kHtmlFrameOption[] = "experimental-html";
+
+namespace {
+
+// Opens an inspector window and delays the response to the
+// AppWindowCreateFunction until the DevToolsWindow has finished loading, and is
+// ready to stop on breakpoints in the callback.
+class DevToolsRestorer : public content::NotificationObserver {
+ public:
+  DevToolsRestorer(AppWindowCreateFunction* delayed_create_function,
+                   content::RenderViewHost* created_view)
+      : delayed_create_function_(delayed_create_function) {
+    DevToolsWindow* devtools_window =
+        DevToolsWindow::ToggleDevToolsWindow(
+            created_view,
+            true /* force_open */,
+            DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
+
+    registrar_.Add(
+        this,
+        content::NOTIFICATION_LOAD_STOP,
+        content::Source<content::NavigationController>(
+            &devtools_window->tab_contents()->web_contents()->GetController()));
+  }
+
+ protected:
+  // content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
+    DCHECK(type == content::NOTIFICATION_LOAD_STOP);
+    delayed_create_function_->SendDelayedResponse();
+    delete this;
+  }
+
+ private:
+  scoped_refptr<AppWindowCreateFunction> delayed_create_function_;
+  content::NotificationRegistrar registrar_;
+};
+
+}  // namespace
+
+void AppWindowCreateFunction::SendDelayedResponse() {
+  SendResponse(true);
+}
 
 bool AppWindowCreateFunction::RunImpl() {
   scoped_ptr<Create::Params> params(Create::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   GURL url = GetExtension()->GetResourceURL(params->url);
+  // Allow absolute URLs for component apps, otherwise prepend the extension
+  // path.
+  if (GetExtension()->location() == extensions::Extension::COMPONENT) {
+    GURL absolute = GURL(params->url);
+    if (absolute.has_scheme())
+      url = absolute;
+  }
 
   bool inject_html_titlebar = false;
 
@@ -122,19 +179,36 @@ bool AppWindowCreateFunction::RunImpl() {
       create_params.bounds.set_height(maximum_size.height());
     if (create_params.bounds.height() < minimum_size.height())
       create_params.bounds.set_height(minimum_size.height());
+
+    if (options->hidden.get())
+      create_params.hidden = *options->hidden.get();
   }
+
+  create_params.creator_process_id =
+      render_view_host_->GetProcess()->GetID();
+
   ShellWindow* shell_window =
       ShellWindow::Create(profile(), GetExtension(), url, create_params);
-  shell_window->GetBaseWindow()->Show();
 
-  content::WebContents* created_contents = shell_window->web_contents();
-  int view_id = created_contents->GetRenderViewHost()->GetRoutingID();
+  content::RenderViewHost* created_view =
+      shell_window->web_contents()->GetRenderViewHost();
+  int view_id = MSG_ROUTING_NONE;
+  if (create_params.creator_process_id == created_view->GetProcess()->GetID())
+    view_id = created_view->GetRoutingID();
 
   base::DictionaryValue* result = new base::DictionaryValue;
   result->Set("viewId", base::Value::CreateIntegerValue(view_id));
   result->Set("injectTitlebar",
       base::Value::CreateBooleanValue(inject_html_titlebar));
+  result->Set("id", base::Value::CreateStringValue(shell_window->window_key()));
   SetResult(result);
+
+  if (ShellWindowRegistry::Get(profile())->HadDevToolsAttached(created_view)) {
+    new DevToolsRestorer(this, created_view);
+    return true;
+  }
+
+  SendResponse(true);
   return true;
 }
 

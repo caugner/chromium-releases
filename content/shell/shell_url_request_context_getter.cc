@@ -6,13 +6,16 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/threading/worker_pool.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_switches.h"
 #include "content/shell/shell_network_delegate.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/default_server_bound_cert_store.h"
 #include "net/base/host_resolver.h"
+#include "net/base/mapped_host_resolver.h"
 #include "net/base/server_bound_cert_service.h"
 #include "net/base/ssl_config_service_defaults.h"
 #include "net/cookies/cookie_monster.h"
@@ -54,6 +57,8 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   if (!url_request_context_.get()) {
+    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+
     url_request_context_.reset(new net::URLRequestContext());
     network_delegate_.reset(new ShellNetworkDelegate);
     url_request_context_->set_network_delegate(network_delegate_.get());
@@ -66,10 +71,9 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     url_request_context_->set_accept_language("en-us,en");
     url_request_context_->set_accept_charset("iso-8859-1,*,utf-8");
 
-    storage_->set_host_resolver(
-        net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                      net::HostResolver::kDefaultRetryAttempts,
-                                      NULL));
+    scoped_ptr<net::HostResolver> host_resolver(
+        net::HostResolver::CreateDefaultResolver(NULL));
+
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
     // TODO(jam): use v8 if possible, look at chrome code.
     storage_->set_proxy_service(
@@ -79,8 +83,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         NULL));
     storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
     storage_->set_http_auth_handler_factory(
-        net::HttpAuthHandlerFactory::CreateDefault(
-            url_request_context_->host_resolver()));
+        net::HttpAuthHandlerFactory::CreateDefault(host_resolver.get()));
     storage_->set_http_server_properties(new net::HttpServerPropertiesImpl);
 
     FilePath cache_path = base_path_.Append(FILE_PATH_LITERAL("Cache"));
@@ -93,8 +96,6 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
                 BrowserThread::CACHE));
 
     net::HttpNetworkSession::Params network_session_params;
-    network_session_params.host_resolver =
-        url_request_context_->host_resolver();
     network_session_params.cert_verifier =
         url_request_context_->cert_verifier();
     network_session_params.server_bound_cert_service =
@@ -111,6 +112,30 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         url_request_context_->http_server_properties();
     network_session_params.ignore_certificate_errors =
         ignore_certificate_errors_;
+    if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
+      int value;
+      base::StringToInt(command_line.GetSwitchValueASCII(
+          switches::kTestingFixedHttpPort), &value);
+      network_session_params.testing_fixed_http_port = value;
+    }
+    if (command_line.HasSwitch(switches::kTestingFixedHttpsPort)) {
+      int value;
+      base::StringToInt(command_line.GetSwitchValueASCII(
+          switches::kTestingFixedHttpsPort), &value);
+      network_session_params.testing_fixed_https_port = value;
+    }
+    if (command_line.HasSwitch(switches::kHostResolverRules)) {
+      scoped_ptr<net::MappedHostResolver> mapped_host_resolver(
+          new net::MappedHostResolver(host_resolver.Pass()));
+      mapped_host_resolver->SetRulesFromString(
+          command_line.GetSwitchValueASCII(switches::kHostResolverRules));
+      host_resolver = mapped_host_resolver.Pass();
+    }
+
+    // Give |storage_| ownership at the end in case it's |mapped_host_resolver|.
+    storage_->set_host_resolver(host_resolver.Pass());
+    network_session_params.host_resolver =
+        url_request_context_->host_resolver();
 
     net::HttpCache* main_cache = new net::HttpCache(
         network_session_params, main_backend);

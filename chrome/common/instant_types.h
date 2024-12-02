@@ -13,9 +13,6 @@ enum InstantCompleteBehavior {
   // Autocomplete the suggestion immediately.
   INSTANT_COMPLETE_NOW,
 
-  // Autocomplete the suggestion after a delay.
-  INSTANT_COMPLETE_DELAYED,
-
   // Do not autocomplete the suggestion. The suggestion may still be displayed
   // in the omnibox, but not made a part of the omnibox text by default (e.g.,
   // by displaying the suggestion as non-highlighted, non-selected gray text).
@@ -77,6 +74,25 @@ enum InstantSizeUnits {
 
   // As a percentage of the height or width of the containing (parent) view.
   INSTANT_SIZE_PERCENT,
+};
+
+// What the Instant page contains when it requests to be shown.
+enum InstantShownReason {
+  // Contents are not specified; the page wants to be shown unconditionally.
+  // This is a stopgap to display in unexpected situations, and should not
+  // normally be used.
+  INSTANT_SHOWN_NOT_SPECIFIED,
+
+  // Custom content on the NTP, e.g. a custom logo.
+  INSTANT_SHOWN_CUSTOM_NTP_CONTENT,
+
+  // Query suggestions and search results relevant when the user is typing in
+  // the omnibox.
+  INSTANT_SHOWN_QUERY_SUGGESTIONS,
+
+  // ZeroSuggest suggestions relevant when the user has focused in the omnibox,
+  // but not yet typed anything.
+  INSTANT_SHOWN_ZERO_SUGGESTIONS,
 };
 
 #endif  // CHROME_COMMON_INSTANT_TYPES_H_

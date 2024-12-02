@@ -19,6 +19,7 @@
 #include "content/common/gpu/gpu_memory_tracking.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 
+namespace content {
 namespace {
 
 const int kDelayedScheduleManageTimeoutMs = 67;
@@ -76,6 +77,7 @@ GpuMemoryManager::GpuMemoryManager(GpuMemoryManagerClient* client,
       max_surfaces_with_frontbuffer_soft_limit_(
           max_surfaces_with_frontbuffer_soft_limit),
       bytes_available_gpu_memory_(0),
+      bytes_available_gpu_memory_overridden_(false),
       bytes_allocated_current_(0),
       bytes_allocated_historical_max_(0),
       window_count_has_been_received_(false),
@@ -87,33 +89,66 @@ GpuMemoryManager::GpuMemoryManager(GpuMemoryManagerClient* client,
       command_line->GetSwitchValueASCII(switches::kForceGpuMemAvailableMb),
       &bytes_available_gpu_memory_);
     bytes_available_gpu_memory_ *= 1024 * 1024;
-  } else {
-#if defined(OS_ANDROID)
-    bytes_available_gpu_memory_ = 64 * 1024 * 1024;
-#else
-#if defined(OS_CHROMEOS)
-    bytes_available_gpu_memory_ = 1024 * 1024 * 1024;
-#else
-    bytes_available_gpu_memory_ = 256 * 1024 * 1024;
-#endif
-#endif
-  }
+    bytes_available_gpu_memory_overridden_ = true;
+  } else
+    bytes_available_gpu_memory_ = GetDefaultAvailableGpuMemory();
 }
 
 GpuMemoryManager::~GpuMemoryManager() {
   DCHECK(tracking_groups_.empty());
 }
 
+void GpuMemoryManager::UpdateAvailableGpuMemory(
+   std::vector<GpuCommandBufferStubBase*>& stubs) {
+  // If the amount of video memory to use was specified at the command
+  // line, never change it.
+  if (bytes_available_gpu_memory_overridden_)
+    return;
+
+  // We do not have a reliable concept of multiple GPUs existing in
+  // a system, so just be safe and go with the minimum encountered.
+  size_t bytes_min = 0;
+  for (std::vector<GpuCommandBufferStubBase*>::iterator it = stubs.begin();
+      it != stubs.end(); ++it) {
+    GpuCommandBufferStubBase* stub = *it;
+    size_t bytes = 0;
+    if (stub->GetTotalGpuMemory(&bytes)) {
+      if (!bytes_min || bytes < bytes_min)
+        bytes_min = bytes;
+    }
+  }
+  if (!bytes_min)
+    return;
+
+  // Allow Chrome to use 75% of total GPU memory, or all-but-64MB of GPU
+  // memory, whichever is less.
+  bytes_available_gpu_memory_ = std::min(3 * bytes_min / 4,
+                                         bytes_min - 64*1024*1024);
+
+  // And never go below the default allocation
+  bytes_available_gpu_memory_ = std::max(bytes_available_gpu_memory_,
+                                         GetDefaultAvailableGpuMemory());
+
+  // And never go above 1GB
+  bytes_available_gpu_memory_ = std::min(bytes_available_gpu_memory_,
+                                         static_cast<size_t>(1024*1024*1024));
+}
+
 bool GpuMemoryManager::StubWithSurfaceComparator::operator()(
     GpuCommandBufferStubBase* lhs,
     GpuCommandBufferStubBase* rhs) {
-  DCHECK(lhs->has_surface_state() && rhs->has_surface_state());
-  const GpuCommandBufferStubBase::SurfaceState& lhs_ss = lhs->surface_state();
-  const GpuCommandBufferStubBase::SurfaceState& rhs_ss = rhs->surface_state();
-  if (lhs_ss.visible)
-    return !rhs_ss.visible || (lhs_ss.last_used_time > rhs_ss.last_used_time);
+  DCHECK(lhs->memory_manager_state().has_surface &&
+         rhs->memory_manager_state().has_surface);
+  const GpuCommandBufferStubBase::MemoryManagerState& lhs_mms =
+      lhs->memory_manager_state();
+  const GpuCommandBufferStubBase::MemoryManagerState& rhs_mms =
+      rhs->memory_manager_state();
+  if (lhs_mms.visible)
+    return !rhs_mms.visible || (lhs_mms.last_used_time >
+                                rhs_mms.last_used_time);
   else
-    return !rhs_ss.visible && (lhs_ss.last_used_time > rhs_ss.last_used_time);
+    return !rhs_mms.visible && (lhs_mms.last_used_time >
+                                rhs_mms.last_used_time);
 };
 
 void GpuMemoryManager::ScheduleManage(bool immediate) {
@@ -169,7 +204,7 @@ void GpuMemoryManager::RemoveTrackingGroup(
 }
 
 void GpuMemoryManager::GetVideoMemoryUsageStats(
-    content::GPUVideoMemoryUsageStats& video_memory_usage_stats) const {
+    GPUVideoMemoryUsageStats& video_memory_usage_stats) const {
   // For each context group, assign its memory usage to its PID
   video_memory_usage_stats.process_map.clear();
   for (std::set<GpuMemoryTrackingGroup*>::const_iterator i =
@@ -238,9 +273,10 @@ void GpuMemoryManager::Manage() {
     for (std::vector<GpuCommandBufferStubBase*>::iterator it = stubs.begin();
         it != stubs.end(); ++it) {
       GpuCommandBufferStubBase* stub = *it;
-      if (!stub->client_has_memory_allocation_changed_callback())
+      if (!stub->memory_manager_state().
+         client_has_memory_allocation_changed_callback)
         continue;
-      if (stub->has_surface_state())
+      if (stub->memory_manager_state().has_surface)
         stubs_with_surface.push_back(stub);
       else
         stubs_without_surface.push_back(stub);
@@ -265,8 +301,8 @@ void GpuMemoryManager::Manage() {
 
   for (size_t i = 0; i < stubs_with_surface.size(); ++i) {
     GpuCommandBufferStubBase* stub = stubs_with_surface[i];
-    DCHECK(stub->has_surface_state());
-    if (stub->surface_state().visible)
+    DCHECK(stub->memory_manager_state().has_surface);
+    if (stub->memory_manager_state().visible)
       stubs_with_surface_foreground.push_back(stub);
     else if (i < max_surfaces_with_frontbuffer_soft_limit_)
       stubs_with_surface_background.push_back(stub);
@@ -276,7 +312,7 @@ void GpuMemoryManager::Manage() {
   for (std::vector<GpuCommandBufferStubBase*>::const_iterator it =
       stubs_without_surface.begin(); it != stubs_without_surface.end(); ++it) {
     GpuCommandBufferStubBase* stub = *it;
-    DCHECK(!stub->has_surface_state());
+    DCHECK(!stub->memory_manager_state().has_surface);
 
     // Stubs without surfaces have deduced allocation state using the state
     // of surface stubs which are in the same context share group.
@@ -288,6 +324,12 @@ void GpuMemoryManager::Manage() {
     else
       stubs_without_surface_hibernated.push_back(stub);
   }
+
+  // Update the amount of GPU memory available on the system. Only use the
+  // stubs that are visible, because otherwise the set of stubs we are
+  // querying could become extremely large (resulting in hundreds of calls
+  // to the driver).
+  UpdateAvailableGpuMemory(stubs_with_surface_foreground);
 
   size_t bonus_allocation = 0;
 #if !defined(OS_ANDROID)
@@ -364,5 +406,7 @@ void GpuMemoryManager::Manage() {
       GpuMemoryAllocation(0, GpuMemoryAllocation::kHasNoBuffers),
       false);
 }
+
+}  // namespace content
 
 #endif

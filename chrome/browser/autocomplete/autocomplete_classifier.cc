@@ -13,6 +13,7 @@
 
 // static
 const int AutocompleteClassifier::kDefaultOmniboxProviders =
+    AutocompleteProvider::TYPE_BOOKMARK |
     AutocompleteProvider::TYPE_BUILTIN |
     AutocompleteProvider::TYPE_EXTENSION_APP |
     AutocompleteProvider::TYPE_HISTORY_CONTENTS |
@@ -21,6 +22,16 @@ const int AutocompleteClassifier::kDefaultOmniboxProviders =
     AutocompleteProvider::TYPE_KEYWORD |
     AutocompleteProvider::TYPE_SEARCH |
     AutocompleteProvider::TYPE_SHORTCUTS |
+    AutocompleteProvider::TYPE_ZERO_SUGGEST;
+
+// static
+const int AutocompleteClassifier::kInstantExtendedOmniboxProviders =
+    AutocompleteProvider::TYPE_BUILTIN |
+    AutocompleteProvider::TYPE_HISTORY_QUICK |
+    AutocompleteProvider::TYPE_HISTORY_URL |
+    // TODO: remove TYPE_SEARCH once it's no longer needed to pass
+    // the Instant suggestion through via FinalizeInstantQuery.
+    AutocompleteProvider::TYPE_SEARCH |
     AutocompleteProvider::TYPE_ZERO_SUGGEST;
 
 AutocompleteClassifier::AutocompleteClassifier(Profile* profile)

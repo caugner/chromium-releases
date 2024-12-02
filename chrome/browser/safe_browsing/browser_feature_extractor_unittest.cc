@@ -21,10 +21,10 @@
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
-#include "content/public/browser/navigation_controller.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/web_contents_tester.h"
 #include "googleurl/src/gurl.h"
@@ -57,7 +57,8 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     ChromeRenderViewHostTestHarness::SetUp();
     profile()->CreateHistoryService(true /* delete_file */, false /* no_db */);
     service_.reset(new StrictMock<MockClientSideDetectionService>());
-    extractor_.reset(new BrowserFeatureExtractor(contents(), service_.get()));
+    extractor_.reset(
+        new BrowserFeatureExtractor(web_contents(), service_.get()));
     num_pending_ = 0;
     browse_info_.reset(new BrowseInfo);
   }
@@ -91,23 +92,23 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     NavigateAndCommit(url, GURL(), content::PAGE_TRANSITION_LINK);
   }
 
-  // This is similar to NavigateAndCommit that is in test_tab_contents, but
+  // This is similar to NavigateAndCommit that is in WebContentsTester, but
   // allows us to specify the referrer and page_transition_type.
   void NavigateAndCommit(const GURL& url,
                          const GURL& referrer,
                          content::PageTransition type) {
-    contents()->GetController().LoadURL(
+    web_contents()->GetController().LoadURL(
         url, content::Referrer(referrer, WebKit::WebReferrerPolicyDefault),
         type, std::string());
 
     static int page_id = 0;
     content::RenderViewHost* rvh =
-        WebContentsTester::For(contents())->GetPendingRenderViewHost();
+        WebContentsTester::For(web_contents())->GetPendingRenderViewHost();
     if (!rvh) {
-      rvh = contents()->GetRenderViewHost();
+      rvh = web_contents()->GetRenderViewHost();
     }
-    WebContentsTester::For(contents())->ProceedWithCrossSiteNavigation();
-    WebContentsTester::For(contents())->TestDidNavigateWithReferrer(
+    WebContentsTester::For(web_contents())->ProceedWithCrossSiteNavigation();
+    WebContentsTester::For(web_contents())->TestDidNavigateWithReferrer(
         rvh, ++page_id, url,
         content::Referrer(referrer, WebKit::WebReferrerPolicyDefault), type);
   }
@@ -174,28 +175,32 @@ TEST_F(BrowserFeatureExtractorTest, RequestNotInitialized) {
 
 TEST_F(BrowserFeatureExtractorTest, UrlInHistory) {
   history_service()->AddPage(GURL("http://www.foo.com/bar.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
   history_service()->AddPage(GURL("https://www.foo.com/gaa.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);  // same host HTTPS.
   history_service()->AddPage(GURL("http://www.foo.com/gaa.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);  // same host HTTP.
   history_service()->AddPage(GURL("http://bar.foo.com/gaa.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);  // different host.
   history_service()->AddPage(GURL("http://www.foo.com/bar.html?a=b"),
                              base::Time::Now() - base::TimeDelta::FromHours(23),
-                             NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
-                             history::RedirectList(), history::SOURCE_BROWSED,
-                             false);
+                             NULL, 0, GURL(), history::RedirectList(),
+                             content::PAGE_TRANSITION_LINK,
+                             history::SOURCE_BROWSED, false);
   history_service()->AddPage(GURL("http://www.foo.com/bar.html"),
                              base::Time::Now() - base::TimeDelta::FromHours(25),
-                             NULL, 0, GURL(), content::PAGE_TRANSITION_TYPED,
-                             history::RedirectList(), history::SOURCE_BROWSED,
-                             false);
+                             NULL, 0, GURL(), history::RedirectList(),
+                             content::PAGE_TRANSITION_TYPED,
+                             history::SOURCE_BROWSED, false);
   history_service()->AddPage(GURL("https://www.foo.com/goo.html"),
                              base::Time::Now() - base::TimeDelta::FromDays(5),
-                             NULL, 0, GURL(), content::PAGE_TRANSITION_TYPED,
-                             history::RedirectList(), history::SOURCE_BROWSED,
-                             false);
+                             NULL, 0, GURL(), history::RedirectList(),
+                             content::PAGE_TRANSITION_TYPED,
+                             history::SOURCE_BROWSED, false);
 
   SimpleNavigateAndCommit(GURL("http://www.foo.com/bar.html"));
 
@@ -239,6 +244,7 @@ TEST_F(BrowserFeatureExtractorTest, UrlInHistory) {
 
 TEST_F(BrowserFeatureExtractorTest, MultipleRequestsAtOnce) {
   history_service()->AddPage(GURL("http://www.foo.com/bar.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
   SimpleNavigateAndCommit(GURL("http:/www.foo.com/bar.html"));
   ClientPhishingRequest request;
@@ -261,14 +267,19 @@ TEST_F(BrowserFeatureExtractorTest, MultipleRequestsAtOnce) {
 
 TEST_F(BrowserFeatureExtractorTest, BrowseFeatures) {
   history_service()->AddPage(GURL("http://www.foo.com/"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
   history_service()->AddPage(GURL("http://www.foo.com/page.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
   history_service()->AddPage(GURL("http://www.bar.com/"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
   history_service()->AddPage(GURL("http://www.bar.com/other_page.html"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
   history_service()->AddPage(GURL("http://www.baz.com/"),
+                             base::Time::Now(),
                              history::SOURCE_BROWSED);
 
   ClientPhishingRequest request;

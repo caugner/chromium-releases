@@ -87,10 +87,7 @@ cr.define('login', function() {
     showLoadingUI_: function(show) {
       $('gaia-loading').hidden = !show;
       this.frame_.hidden = show;
-
-      // Sign-in right panel is hidden if all its items are hidden.
-      $('signin-right').hidden = show ||
-          ($('createAccount').hidden && $('guestSignin').hidden);
+      $('signin-right').hidden = show;
     },
 
     /**
@@ -248,6 +245,15 @@ cr.define('login', function() {
 
       $('createAccount').hidden = !data.createAccount;
       $('guestSignin').hidden = !data.guestSignin;
+      // Only show Cancel button when user pods can be displayed.
+      $('login-header-bar').allowCancel =
+          data.isShowUsers && $('pod-row').pods.length;
+
+      // Sign-in right panel is hidden if all its items are hidden.
+      var noRightPanel = $('createAccount').hidden && $('guestSignin').hidden;
+      this.classList[noRightPanel ? 'add' : 'remove']('no-right-panel');
+      if (Oobe.getInstance().currentScreen === this)
+        Oobe.getInstance().updateScreenSize(this);
     },
 
     /**
@@ -280,8 +286,6 @@ cr.define('login', function() {
         this.loading = true;
         // Now that we're in logged in state header should be hidden.
         Oobe.getInstance().headerHidden = true;
-        // Clear any error messages that were shown before login.
-        Oobe.clearErrors();
       } else if (msg.method == 'loginUILoaded') {
         this.loading = false;
         $('error-message').update();

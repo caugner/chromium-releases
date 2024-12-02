@@ -15,6 +15,7 @@ class MessageLoop;
 
 namespace net {
 class HostResolver;
+class MappedHostResolver;
 class NetworkDelegate;
 class ProxyConfigService;
 class URLRequestContextStorage;

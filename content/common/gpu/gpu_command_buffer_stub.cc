@@ -33,6 +33,11 @@
 #include "content/public/common/sandbox_init.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "content/common/gpu/stream_texture_manager_android.h"
+#endif
+
+namespace content {
 namespace {
 
 // The GpuCommandBufferMemoryTracker class provides a bridge between the
@@ -71,7 +76,7 @@ void FastSetActiveURL(const GURL& url, size_t url_hash) {
   static size_t g_last_url_hash = 0;
   if (url_hash != g_last_url_hash) {
     g_last_url_hash = url_hash;
-    content::GetContentClient()->SetActiveURL(url);
+    GetContentClient()->SetActiveURL(url);
   }
 }
 
@@ -83,11 +88,13 @@ const int64 kHandleMoreWorkPeriodBusyMs = 1;
 
 }  // namespace
 
-GpuCommandBufferStub::SurfaceState::SurfaceState(int32 surface_id,
-                                                 bool visible,
-                                                 base::TimeTicks last_used_time)
-    : surface_id(surface_id),
+GpuCommandBufferStub::MemoryManagerState::MemoryManagerState(
+    bool has_surface,
+    bool visible,
+    base::TimeTicks last_used_time)
+    : has_surface(has_surface),
       visible(visible),
+      client_has_memory_allocation_changed_callback(false),
       last_used_time(last_used_time) {
 }
 
@@ -96,6 +103,7 @@ GpuCommandBufferStub::GpuCommandBufferStub(
     GpuCommandBufferStub* share_group,
     const gfx::GLSurfaceHandle& handle,
     gpu::gles2::MailboxManager* mailbox_manager,
+    gpu::gles2::ImageManager* image_manager,
     const gfx::Size& size,
     const gpu::gles2::DisallowedFeatures& disallowed_features,
     const std::string& allowed_extensions,
@@ -114,8 +122,8 @@ GpuCommandBufferStub::GpuCommandBufferStub(
       requested_attribs_(attribs),
       gpu_preference_(gpu_preference),
       route_id_(route_id),
+      surface_id_(surface_id),
       software_(software),
-      client_has_memory_allocation_changed_callback_(false),
       last_flush_count_(0),
       parent_stub_for_initialization_(),
       parent_texture_for_initialization_(0),
@@ -130,12 +138,12 @@ GpuCommandBufferStub::GpuCommandBufferStub(
   } else {
     context_group_ = new gpu::gles2::ContextGroup(
         mailbox_manager,
+        image_manager,
         new GpuCommandBufferMemoryTracker(channel),
         true);
   }
-  if (surface_id != 0)
-    surface_state_.reset(new GpuCommandBufferStubBase::SurfaceState(
-        surface_id, true, base::TimeTicks::Now()));
+  memory_manager_state_.reset(new GpuCommandBufferStubBase::MemoryManagerState(
+      surface_id != 0, true, base::TimeTicks::Now()));
   if (handle_.sync_point)
     OnWaitSyncPoint(handle_.sync_point);
 }
@@ -204,6 +212,8 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
                         OnWaitSyncPoint)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SignalSyncPoint,
                         OnSignalSyncPoint)
+    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SendClientManagedMemoryStats,
+                        OnReceivedClientManagedMemoryStats)
     IPC_MESSAGE_HANDLER(
         GpuCommandBufferMsg_SetClientHasMemoryAllocationChangedCallback,
         OnSetClientHasMemoryAllocationChangedCallback)
@@ -371,8 +381,8 @@ void GpuCommandBufferStub::OnInitialize(
         this,
         handle_);
   } else {
-    surface_ = gfx::GLSurface::CreateOffscreenGLSurface(software_,
-                                                        gfx::Size(1, 1));
+    GpuChannelManager* manager = channel_->gpu_channel_manager();
+    surface_ = manager->GetDefaultOffscreenSurface();
   }
 
   if (!surface_.get()) {
@@ -447,6 +457,10 @@ void GpuCommandBufferStub::OnInitialize(
         base::Bind(&GpuCommandBufferStub::OnCommandProcessed,
                    base::Unretained(this)));
   }
+
+#if defined(OS_ANDROID)
+  decoder_->SetStreamTextureManager(channel_->stream_texture_manager());
+#endif
 
   if (parent_stub_for_initialization_) {
     decoder_->SetParent(parent_stub_for_initialization_->decoder_.get(),
@@ -634,7 +648,7 @@ void GpuCommandBufferStub::OnGetTransferBuffer(
     if (buffer.shared_memory) {
 #if defined(OS_WIN)
       transfer_buffer = NULL;
-      content::BrokerDuplicateHandle(buffer.shared_memory->handle(),
+      BrokerDuplicateHandle(buffer.shared_memory->handle(),
           channel_->renderer_pid(), &transfer_buffer, FILE_MAP_READ |
           FILE_MAP_WRITE, 0);
       DCHECK(transfer_buffer != NULL);
@@ -694,11 +708,10 @@ void GpuCommandBufferStub::OnDestroyVideoDecoder(int decoder_route_id) {
 
 void GpuCommandBufferStub::OnSetSurfaceVisible(bool visible) {
   TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnSetSurfaceVisible");
-  DCHECK(surface_state_.get());
-  surface_state_->visible = visible;
-  surface_state_->last_used_time = base::TimeTicks::Now();
-    channel_->gpu_channel_manager()->gpu_memory_manager()->
-        ScheduleManage(visible);
+  memory_manager_state_->visible = visible;
+  memory_manager_state_->last_used_time = base::TimeTicks::Now();
+  channel_->gpu_channel_manager()->gpu_memory_manager()->
+      ScheduleManage(visible);
 }
 
 void GpuCommandBufferStub::OnDiscardBackbuffer() {
@@ -761,12 +774,21 @@ void GpuCommandBufferStub::OnSignalSyncPointAck(uint32 id) {
   Send(new GpuCommandBufferMsg_SignalSyncPointAck(route_id_, id));
 }
 
+void GpuCommandBufferStub::OnReceivedClientManagedMemoryStats(
+    const GpuManagedMemoryStats& stats) {
+  TRACE_EVENT0(
+      "gpu",
+      "GpuCommandBufferStub::OnReceivedClientManagedMemoryStats");
+  memory_manager_state_->managed_memory_stats = stats;
+}
+
 void GpuCommandBufferStub::OnSetClientHasMemoryAllocationChangedCallback(
     bool has_callback) {
   TRACE_EVENT0(
       "gpu",
       "GpuCommandBufferStub::OnSetClientHasMemoryAllocationChangedCallback");
-  client_has_memory_allocation_changed_callback_ = has_callback;
+  memory_manager_state_->client_has_memory_allocation_changed_callback =
+      has_callback;
   channel_->gpu_channel_manager()->gpu_memory_manager()->
       ScheduleManage(false);
 }
@@ -800,6 +822,12 @@ void GpuCommandBufferStub::SetPreemptByCounter(
     scheduler_->SetPreemptByCounter(preempt_by_counter_);
 }
 
+bool GpuCommandBufferStub::GetTotalGpuMemory(size_t* bytes) {
+  if (!MakeCurrent())
+    return false;
+  return context_->GetTotalGpuMemory(bytes);
+}
+
 gfx::Size GpuCommandBufferStub::GetSurfaceSize() const {
   if (!surface_)
     return gfx::Size();
@@ -812,29 +840,22 @@ bool GpuCommandBufferStub::IsInSameContextShareGroup(
       static_cast<const GpuCommandBufferStub&>(other).context_group_;
 }
 
-bool GpuCommandBufferStub::
-    client_has_memory_allocation_changed_callback() const {
-  return client_has_memory_allocation_changed_callback_;
+const GpuCommandBufferStubBase::MemoryManagerState&
+    GpuCommandBufferStub::memory_manager_state() const {
+  return *memory_manager_state_.get();
 }
-
-bool GpuCommandBufferStub::has_surface_state() const {
-  return surface_state_ != NULL;
-}
-
-const GpuCommandBufferStubBase::SurfaceState&
-    GpuCommandBufferStub::surface_state() const {
-  DCHECK(has_surface_state());
-  return *surface_state_.get();
-}
-
 void GpuCommandBufferStub::SetMemoryAllocation(
     const GpuMemoryAllocation& allocation) {
-  Send(new GpuCommandBufferMsg_SetMemoryAllocation(route_id_, allocation));
+  Send(new GpuCommandBufferMsg_SetMemoryAllocation(
+      route_id_, allocation.renderer_allocation));
   // This can be called outside of OnMessageReceived, so the context needs to be
   // made current before calling methods on the surface.
   if (!surface_ || !MakeCurrent())
     return;
-  surface_->SetFrontbufferAllocation(allocation.suggest_have_frontbuffer);
+  surface_->SetFrontbufferAllocation(
+      allocation.browser_allocation.suggest_have_frontbuffer);
 }
+
+}  // namespace content
 
 #endif  // defined(ENABLE_GPU)

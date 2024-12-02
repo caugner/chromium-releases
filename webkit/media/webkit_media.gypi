@@ -3,24 +3,43 @@
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'conditions': [
+      ['OS == "android" or OS == "ios"', {
+        # Android and iOS don't use ffmpeg.
+        'use_ffmpeg%': 0,
+      }, {  # 'OS != "android" and OS != "ios"'
+        'use_ffmpeg%': 1,
+      }],
+    ],
+  },
   'targets': [
     {
       'target_name': 'webkit_media',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
+      'include_dirs': [
+        '<(SHARED_INTERMEDIATE_DIR)',  # Needed by key_systems.cc.
+      ],
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '<(DEPTH)/media/media.gyp:shared_memory_support',
         '<(DEPTH)/media/media.gyp:yuv_convert',
         '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
       ],
       'sources': [
         'android/audio_decoder_android.cc',
-        'android/media_metadata_android.cc',
-        'android/media_metadata_android.h',
+        'android/media_player_bridge_manager_impl.cc',
+        'android/media_player_bridge_manager_impl.h',
         'android/stream_texture_factory_android.h',
         'android/webmediaplayer_android.cc',
         'android/webmediaplayer_android.h',
+        'android/webmediaplayer_impl_android.cc',
+        'android/webmediaplayer_impl_android.h',
+        'android/webmediaplayer_in_process_android.cc',
+        'android/webmediaplayer_in_process_android.h',
         'android/webmediaplayer_manager_android.cc',
         'android/webmediaplayer_manager_android.h',
         'android/webmediaplayer_proxy_android.cc',
@@ -43,13 +62,19 @@
         'crypto/proxy_decryptor.h',
         'filter_helpers.cc',
         'filter_helpers.h',
+        'media_stream_audio_renderer.cc',
+        'media_stream_audio_renderer.h',
         'media_stream_client.h',
         'preload.h',
-        'skcanvas_video_renderer.cc',
-        'skcanvas_video_renderer.h',
+        'simple_video_frame_provider.cc',
+        'simple_video_frame_provider.h',
+        'video_frame_provider.cc',
+        'video_frame_provider.h',
         'webmediaplayer_delegate.h',
         'webmediaplayer_impl.cc',
         'webmediaplayer_impl.h',
+        'webmediaplayer_ms.cc',
+        'webmediaplayer_ms.h',
         'webmediaplayer_proxy.cc',
         'webmediaplayer_proxy.h',
         'webmediaplayer_util.cc',
@@ -58,7 +83,7 @@
         'webvideoframe_impl.h',
       ],
       'conditions': [
-        ['inside_chromium_build==0', {
+        ['inside_chromium_build == 0', {
           'dependencies': [
             '<(DEPTH)/webkit/support/setup_third_party.gyp:third_party_headers',
           ],
@@ -86,11 +111,30 @@
     },
     {
       'target_name': 'clearkeycdm',
-      'type': 'shared_library',
+      'type': 'none',
+      'conditions': [
+        ['use_ffmpeg == 1' , {
+          'defines': ['CLEAR_KEY_CDM_USE_FFMPEG_DECODER'],
+          'dependencies': [
+            '<(DEPTH)/third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
+          ],
+          'sources': [
+            'crypto/ppapi/ffmpeg_cdm_audio_decoder.cc',
+            'crypto/ppapi/ffmpeg_cdm_audio_decoder.h',
+            'crypto/ppapi/ffmpeg_cdm_video_decoder.cc',
+            'crypto/ppapi/ffmpeg_cdm_video_decoder.h',
+          ],
+        }],
+        ['os_posix == 1 and OS != "mac"', {
+          'type': 'loadable_module',  # Must be in PRODUCT_DIR for ASAN bots.
+        }, {  # 'os_posix != 1 or OS == "mac"'
+          'type': 'shared_library',
+        }],
+      ],
       'defines': ['CDM_IMPLEMENTATION'],
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
-        '<(DEPTH)/media/media.gyp:media'
+        '<(DEPTH)/media/media.gyp:media',
       ],
       'sources': [
         'crypto/ppapi/clear_key_cdm.cc',
@@ -110,17 +154,20 @@
         'crypto/ppapi/linked_ptr.h',
       ],
       'conditions': [
-        ['os_posix==1 and OS!="mac"', {
+        ['os_posix == 1 and OS != "mac"', {
           'cflags': ['-fvisibility=hidden'],
-          'type': 'shared_library',
-          # -gstabs, used in the official builds, causes an ICE. Simply remove
-          # it.
-          'cflags!': ['-gstabs'],
+          'type': 'loadable_module',
+          # Allow the plugin wrapper to find the CDM in the same directory.
+          'ldflags': ['-Wl,-rpath=\$$ORIGIN'],
+          'libraries': [
+            # Built by clearkeycdm.
+            '<(PRODUCT_DIR)/libclearkeycdm.so',
+          ],
         }],
-        ['OS=="win"', {
+        ['OS == "win"', {
           'type': 'shared_library',
         }],
-        ['OS=="mac"', {
+        ['OS == "mac"', {
           'type': 'loadable_module',
           'mac_bundle': 1,
           'product_extension': 'plugin',

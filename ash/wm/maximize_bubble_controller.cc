@@ -86,7 +86,7 @@ MaximizeBubbleBorder::MaximizeBubbleBorder(views::View* content_view,
     : views::BubbleBorder(views::BubbleBorder::TOP_RIGHT,
                           views::BubbleBorder::NO_SHADOW),
       anchor_size_(anchor->size()),
-      anchor_screen_origin_(0,0),
+      anchor_screen_origin_(0, 0),
       content_view_(content_view) {
   views::View::ConvertPointToScreen(anchor, &anchor_screen_origin_);
   set_alignment(views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE);
@@ -226,8 +226,8 @@ class MaximizeBubbleController::Bubble : public views::BubbleDelegateView,
   virtual bool CanActivate() const OVERRIDE { return false; }
 
   // Overridden from views::WidgetDelegateView.
-  virtual bool HasHitTestMask() const OVERRIDE;
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE;
+  virtual bool WidgetHasHitTestMask() const OVERRIDE;
+  virtual void GetWidgetHitTestMask(gfx::Path* mask) const OVERRIDE;
 
   // Implementation of MouseWatcherListener.
   virtual void MouseMovedOutOfHost();
@@ -399,7 +399,7 @@ MaximizeBubbleController::Bubble::Bubble(
   set_parent_window(parent);
 
   set_notify_enter_exit_on_child(true);
-  set_try_mirroring_arrow(false);
+  set_adjust_if_offscreen(false);
   SetPaintToLayer(true);
   SetFillsBoundsOpaquely(false);
   set_color(kBubbleBackgroundColor);
@@ -473,11 +473,12 @@ void MaximizeBubbleController::Bubble::AnimationProgressed(
   bubble_widget_->GetNativeWindow()->SetBounds(rect);
 }
 
-bool MaximizeBubbleController::Bubble::HasHitTestMask() const {
+bool MaximizeBubbleController::Bubble::WidgetHasHitTestMask() const {
   return bubble_border_ != NULL;
 }
 
-void MaximizeBubbleController::Bubble::GetHitTestMask(gfx::Path* mask) const {
+void MaximizeBubbleController::Bubble::GetWidgetHitTestMask(
+    gfx::Path* mask) const {
   DCHECK(mask);
   DCHECK(bubble_border_);
   bubble_border_->GetMask(mask);
@@ -489,7 +490,7 @@ void MaximizeBubbleController::Bubble::MouseMovedOutOfHost() {
   // When we leave the bubble, we might be still be in gesture mode or over
   // the maximize button. So only close if none of the other cases apply.
   if (!owner_->frame_maximize_button()->is_snap_enabled()) {
-    gfx::Point screen_location = gfx::Screen::GetCursorScreenPoint();
+    gfx::Point screen_location = Shell::GetScreen()->GetCursorScreenPoint();
     if (!owner_->frame_maximize_button()->GetBoundsInScreen().Contains(
         screen_location)) {
         owner_->RequestDestructionThroughOwner();

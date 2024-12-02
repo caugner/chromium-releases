@@ -7,13 +7,13 @@
 
 #include <jni.h>
 
-#include "base/android/jni_helper.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/callback_forward.h"
 #include "base/string16.h"
 
 class GURL;
 class SkBitmap;
+class TabContents;
 
 namespace browser_sync {
 class SyncedTabDelegate;
@@ -34,6 +34,14 @@ class TabAndroid {
 
   static TabAndroid* GetNativeTab(JNIEnv* env, jobject obj);
 
+  // TODO(nileshagrawal): This should go away when all helpers
+  // have moved out of TabContents. crbug.com/153587
+  static TabContents* GetOrCreateTabContents(
+      content::WebContents* web_contents);
+
+  static TabContents* InitTabContentsFromView(JNIEnv* env,
+                                              jobject content_view);
+
   virtual browser_sync::SyncedTabDelegate* GetSyncedTabDelegate() = 0;
 
   int id() const {
@@ -52,17 +60,22 @@ class TabAndroid {
       const content::ContextMenuParams& params,
       const base::Callback<void(int)>& callback) = 0;
 
-  // --------------------------------------------------------------------------
-  // Public methods that call to Java via JNI
-  // --------------------------------------------------------------------------
   // Called when context menu option to create the bookmark shortcut on
   // homescreen is called.
   virtual void AddShortcutToBookmark(
       const GURL& url, const string16& title, const SkBitmap& skbitmap,
       int r_value, int g_value, int b_value) = 0;
 
+  // Called when the common ExternalProtocolHandler wants to
+  // run the external protocol dialog.
+  // TODO(jknotten): Remove this method. Making it non-abstract, so that
+  // derived classes may remove their implementation first.
+  virtual void RunExternalProtocolDialog(const GURL& url);
+
  protected:
   virtual ~TabAndroid();
+
+  static void InitTabHelpers(content::WebContents* web_contents);
 
   int tab_id_;
 };

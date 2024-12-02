@@ -11,6 +11,7 @@
 
 #include "base/threading/thread.h"
 #include "base/values.h"
+#include "chrome/service/cloud_print/connector_settings.h"
 #include "chrome/service/cloud_print/print_system.h"
 #include "chrome/service/cloud_print/printer_job_handler.h"
 
@@ -18,14 +19,14 @@
 //  - Matching local and cloud printers
 //  - Registration of local printers
 //  - Deleting cloud printers
-// All tasks are posted to the commond queue (PendingTasks) and executed
+// All tasks are posted to the common queue (PendingTasks) and executed
 // one-by-one in FIFO order.
 // CloudPrintConnector will notify client over Client interface.
 class CloudPrintConnector
     : public base::RefCountedThreadSafe<CloudPrintConnector>,
-      public cloud_print::PrintServerWatcherDelegate,
-      public PrinterJobHandlerDelegate,
-      public CloudPrintURLFetcherDelegate {
+      private cloud_print::PrintServerWatcherDelegate,
+      private PrinterJobHandlerDelegate,
+      private CloudPrintURLFetcherDelegate {
  public:
   class Client {
    public:
@@ -34,10 +35,7 @@ class CloudPrintConnector
      virtual ~Client() {}
   };
 
-  CloudPrintConnector(Client* client,
-                      const std::string& proxy_id,
-                      const GURL& cloud_print_server_url,
-                      const DictionaryValue* print_system_settings);
+  CloudPrintConnector(Client* client, const ConnectorSettings& settings);
 
   bool Start();
   void Stop();
@@ -46,31 +44,9 @@ class CloudPrintConnector
   // Return list of printer ids registered with CloudPrint.
   void GetPrinterIds(std::list<std::string>* printer_ids);
 
-  // Register printer from the list.
-  void RegisterPrinters(const printing::PrinterList& printers);
-
   // Check for jobs for specific printer. If printer id is empty
   // jobs will be checked for all available printers.
   void CheckForJobs(const std::string& reason, const std::string& printer_id);
-
-  // cloud_print::PrintServerWatcherDelegate implementation
-  virtual void OnPrinterAdded() OVERRIDE;
-  // PrinterJobHandler::Delegate implementation
-  virtual void OnPrinterDeleted(const std::string& printer_name) OVERRIDE;
-  virtual void OnAuthError() OVERRIDE;
-
-  // CloudPrintURLFetcher::Delegate implementation.
-  virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
-      const net::URLFetcher* source,
-      const GURL& url,
-      const std::string& data) OVERRIDE;
-  virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
-      const net::URLFetcher* source,
-      const GURL& url,
-      base::DictionaryValue* json_data,
-      bool succeeded) OVERRIDE;
-  virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() OVERRIDE;
-  virtual std::string GetAuthHeader() OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<CloudPrintConnector>;
@@ -102,6 +78,24 @@ class CloudPrintConnector
   };
 
   virtual ~CloudPrintConnector();
+  // cloud_print::PrintServerWatcherDelegate implementation
+  virtual void OnPrinterAdded() OVERRIDE;
+  // PrinterJobHandler::Delegate implementation
+  virtual void OnPrinterDeleted(const std::string& printer_name) OVERRIDE;
+  virtual void OnAuthError() OVERRIDE;
+
+  // CloudPrintURLFetcher::Delegate implementation.
+  virtual CloudPrintURLFetcher::ResponseAction HandleRawData(
+      const net::URLFetcher* source,
+      const GURL& url,
+      const std::string& data) OVERRIDE;
+  virtual CloudPrintURLFetcher::ResponseAction HandleJSONData(
+      const net::URLFetcher* source,
+      const GURL& url,
+      base::DictionaryValue* json_data,
+      bool succeeded) OVERRIDE;
+  virtual CloudPrintURLFetcher::ResponseAction OnRequestAuthError() OVERRIDE;
+  virtual std::string GetAuthHeader() OVERRIDE;
 
   // Begin response handlers
   CloudPrintURLFetcher::ResponseAction HandlePrinterListResponse(
@@ -157,31 +151,27 @@ class CloudPrintConnector
       const std::string& printer_name,
       const printing::PrinterCapsAndDefaults& caps_and_defaults);
 
+  // Register printer from the list.
+  void RegisterPrinters(const printing::PrinterList& printers);
+
   bool IsSamePrinter(const std::string& name1, const std::string& name2) const;
   bool InitPrintSystem();
 
   // CloudPrintConnector client.
   Client* client_;
-  // Print system settings.
-  scoped_ptr<DictionaryValue> print_system_settings_;
+  // Connector settings.
+  ConnectorSettings settings_;
   // Pointer to current print system.
   scoped_refptr<cloud_print::PrintSystem> print_system_;
   // Watcher for print system updates.
   scoped_refptr<cloud_print::PrintSystem::PrintServerWatcher>
       print_server_watcher_;
-  // Id of the Cloud Print proxy.
-  std::string proxy_id_;
-  // Cloud Print server url.
-  GURL cloud_print_server_url_;
   // A map of printer id to job handler.
   typedef std::map<std::string, scoped_refptr<PrinterJobHandler> >
       JobHandlerMap;
   JobHandlerMap job_handler_map_;
   // Next response handler.
   ResponseHandler next_response_handler_;
-  // If |true| printers that are not found locally will be deleted on GCP
-  // even if the local enumeration failed.
-  bool delete_on_enum_fail_;
   // The list of pending tasks to be done in the background.
   std::list<PendingTask> pending_tasks_;
   // The CloudPrintURLFetcher instance for the current request.

@@ -400,8 +400,9 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, InstallExtensionEvent) {
 
 // Test that PerformanceMonitor will correctly record events as an extension is
 // disabled and enabled.
+// Test is falky, see http://crbug.com/157980
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest,
-                       DisableAndEnableExtensionEvent) {
+                       DISABLED_DisableAndEnableExtensionEvent) {
   const int kNumEvents = 3;
 
   FilePath extension_path;
@@ -597,13 +598,18 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, GatherStatistics) {
 // code in the testing environment, even if the process died (this is not the
 // case when hand-testing). This code can be traced to MSDN functions in
 // base::GetTerminationStatus(), so there's not much we can do.
-IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, KilledByOSEvent) {
+IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, RendererKilledEvent) {
   content::CrashTab(chrome::GetActiveWebContents(browser()));
 
   Database::EventVector events = GetEvents();
 
   ASSERT_EQ(1u, events.size());
-  CheckEventType(EVENT_KILLED_BY_OS_CRASH, events[0]);
+  CheckEventType(EVENT_RENDERER_KILLED, events[0]);
+
+  // Check the url - since we never went anywhere, this should be about:blank.
+  std::string url;
+  ASSERT_TRUE(events[0]->data()->GetString("url", &url));
+  ASSERT_EQ("about:blank", url);
 }
 #endif  // !defined(OS_WIN)
 
@@ -620,6 +626,10 @@ IN_PROC_BROWSER_TEST_F(PerformanceMonitorBrowserTest, RendererCrashEvent) {
   ASSERT_EQ(1u, events.size());
 
   CheckEventType(EVENT_RENDERER_CRASH, events[0]);
+
+  std::string url;
+  ASSERT_TRUE(events[0]->data()->GetString("url", &url));
+  ASSERT_EQ("chrome://crash/", url);
 }
 
 IN_PROC_BROWSER_TEST_F(PerformanceMonitorUncleanExitBrowserTest,

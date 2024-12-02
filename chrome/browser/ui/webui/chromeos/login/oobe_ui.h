@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "content/public/browser/web_ui_controller.h"
 
@@ -18,6 +19,9 @@ class DictionaryValue;
 namespace chromeos {
 class BaseScreenHandler;
 class CoreOobeHandler;
+class ErrorScreenHandler;
+class NativeWindowDelegate;
+class NetworkStateInformer;
 class SigninScreenHandler;
 class SigninScreenHandlerDelegate;
 }
@@ -62,13 +66,18 @@ class OobeUI : public OobeDisplay,
   void ShowRetailModeLoginSpinner();
 
   // Shows the signin screen.
-  void ShowSigninScreen(SigninScreenHandlerDelegate* delegate);
+  void ShowSigninScreen(SigninScreenHandlerDelegate* delegate,
+                        NativeWindowDelegate* native_window_delegate);
 
   // Resets the delegate set in ShowSigninScreen.
   void ResetSigninScreenHandlerDelegate();
 
  private:
   void AddScreenHandler(BaseScreenHandler* handler);
+
+  // Reference to NetworkStateInformer that handles changes in network
+  // state.
+  scoped_refptr<NetworkStateInformer> network_state_informer_;
 
   // Reference to CoreOobeHandler that handles common requests of Oobe page.
   CoreOobeHandler* core_handler_;
@@ -80,7 +89,11 @@ class OobeUI : public OobeDisplay,
   EnterpriseEnrollmentScreenActor* enterprise_enrollment_screen_actor_;
   ResetScreenActor* reset_screen_actor_;
 
-  // Reference to SigninScreenHandler that handles sign-in screen requrests and
+  // Reference to ErrorScreenHandler that handles error screen
+  // requests and forward calls from native code to JS side.
+  ErrorScreenHandler* error_screen_handler_;
+
+  // Reference to SigninScreenHandler that handles sign-in screen requests and
   // forward calls from native code to JS side.
   SigninScreenHandler* signin_screen_handler_;
   UserImageScreenActor* user_image_screen_actor_;

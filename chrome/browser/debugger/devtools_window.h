@@ -40,6 +40,12 @@ class RenderViewHost;
 class WebContents;
 }
 
+enum DevToolsDockSide {
+  DEVTOOLS_DOCK_SIDE_UNDOCKED = 0,
+  DEVTOOLS_DOCK_SIDE_BOTTOM,
+  DEVTOOLS_DOCK_SIDE_RIGHT
+};
+
 class DevToolsWindow : private content::NotificationObserver,
                        private content::WebContentsDelegate,
                        private content::DevToolsFrontendHostDelegate,
@@ -47,7 +53,8 @@ class DevToolsWindow : private content::NotificationObserver,
  public:
   static const char kDevToolsApp[];
   static void RegisterUserPrefs(PrefService* prefs);
-  static TabContents* GetDevToolsContents(content::WebContents* inspected_tab);
+  static DevToolsWindow* GetDockedInstanceForInspectedTab(
+      content::WebContents* inspected_tab);
   static bool IsDevToolsWindow(content::RenderViewHost* window_rvh);
 
   static DevToolsWindow* OpenDevToolsWindowForWorker(
@@ -79,23 +86,42 @@ class DevToolsWindow : private content::NotificationObserver,
 
   TabContents* tab_contents() { return tab_contents_; }
   Browser* browser() { return browser_; }  // For tests.
-  bool is_docked() { return docked_; }
-  content::DevToolsClientHost* devtools_client_host() {
-    return frontend_host_;
-  }
+  DevToolsDockSide dock_side() { return dock_side_; }
+  content::DevToolsClientHost* devtools_client_host() { return frontend_host_; }
+
+  // Returns preferred devtools window width for given |container_width|. It
+  // tries to use the saved window width, or, if none exists, 1/3 of the
+  // container width, then clamps to try and ensure both devtools and content
+  // are at least somewhat visible.
+  // Called only for the case when devtools window is docked to the side.
+  int GetWidth(int container_width);
+
+  // Returns preferred devtools window height for given |container_height|.
+  // Uses the same logic as GetWidth.
+  // Called only for the case when devtools window is docked to bottom.
+  int GetHeight(int container_height);
+
+  // Stores preferred devtools window width for this instance.
+  void SetWidth(int width);
+
+  // Stores preferred devtools window height for this instance.
+  void SetHeight(int height);
 
  private:
   static DevToolsWindow* Create(Profile* profile,
                                 content::RenderViewHost* inspected_rvh,
-                                bool docked, bool shared_worker_frontend);
-  DevToolsWindow(TabContents* tab_contents, Profile* profile,
-                 content::RenderViewHost* inspected_rvh, bool docked);
+                                DevToolsDockSide dock_side,
+                                bool shared_worker_frontend);
+  DevToolsWindow(TabContents* tab_contents,
+                 Profile* profile,
+                 content::RenderViewHost* inspected_rvh,
+                 DevToolsDockSide dock_side);
 
   void CreateDevToolsBrowser();
   bool FindInspectedBrowserAndTabIndex(Browser**, int* tab);
   BrowserWindow* GetInspectedBrowserWindow();
   bool IsInspectedBrowserPopupOrPanel();
-  void UpdateFrontendAttachedState();
+  void UpdateFrontendDockSide();
 
   // Overridden from content::NotificationObserver.
   virtual void Observe(int type,
@@ -104,7 +130,8 @@ class DevToolsWindow : private content::NotificationObserver,
 
   void ScheduleAction(DevToolsToggleAction action);
   void DoAction();
-  static GURL GetDevToolsUrl(Profile* profile, bool docked,
+  static GURL GetDevToolsUrl(Profile* profile,
+                             DevToolsDockSide dock_side,
                              bool shared_worker_frontend);
   void UpdateTheme();
   void AddDevToolsExtensionsToClient();
@@ -133,6 +160,7 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void RunFileChooser(
       content::WebContents* web_contents,
       const content::FileChooserParams& params) OVERRIDE;
+  virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
 
   virtual void FrameNavigating(const std::string& url) OVERRIDE {}
 
@@ -143,8 +171,6 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void ActivateWindow() OVERRIDE;
   virtual void CloseWindow() OVERRIDE;
   virtual void MoveWindow(int x, int y) OVERRIDE;
-  virtual void DockWindow() OVERRIDE;
-  virtual void UndockWindow() OVERRIDE;
   virtual void SetDockSide(const std::string& side) OVERRIDE;
   virtual void OpenInNewTab(const std::string& url) OVERRIDE;
   virtual void SaveToFile(const std::string& url,
@@ -157,20 +183,24 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void FileSavedAs(const std::string& url)  OVERRIDE;
   virtual void AppendedTo(const std::string& url)  OVERRIDE;
 
-  void RequestSetDocked(bool docked);
-
   void UpdateBrowserToolbar();
+  bool IsDocked();
+  static DevToolsDockSide GetDockSideFromPrefs(Profile* profile);
+  static std::string SideToString(DevToolsDockSide dock_side);
+  static DevToolsDockSide SideFromString(const std::string& dock_side);
 
   Profile* profile_;
   TabContents* inspected_tab_;
   TabContents* tab_contents_;
   Browser* browser_;
-  bool docked_;
+  DevToolsDockSide dock_side_;
   bool is_loaded_;
   DevToolsToggleAction action_on_load_;
   content::NotificationRegistrar registrar_;
   content::DevToolsClientHost* frontend_host_;
   scoped_ptr<DevToolsFileHelper> file_helper_;
+  int width_;
+  int height_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };
 

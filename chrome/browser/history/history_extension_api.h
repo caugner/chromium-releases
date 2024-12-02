@@ -20,19 +20,12 @@ namespace base {
 class ListValue;
 }
 
-typedef std::vector<linked_ptr<
-    extensions::api::history::HistoryItem> > HistoryItemList;
-typedef std::vector<linked_ptr<
-    extensions::api::history::VisitItem> > VisitItemList;
-
 // Observes History service and routes the notifications as events to the
 // extension system.
 class HistoryExtensionEventRouter : public content::NotificationObserver {
  public:
-  explicit HistoryExtensionEventRouter();
+  explicit HistoryExtensionEventRouter(Profile* profile);
   virtual ~HistoryExtensionEventRouter();
-
-  void ObserveProfile(Profile* profile);
 
  private:
   // content::NotificationObserver::Observe.
@@ -93,6 +86,21 @@ class HistoryFunctionWithCallback : public HistoryFunction {
   // The actual call to SendResponse.  This is required since the semantics for
   // CancelableRequestConsumerT require it to be accessed after the call.
   void SendResponseToCallback();
+};
+
+class GetMostVisitedHistoryFunction : public HistoryFunctionWithCallback {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.history.getMostVisited");
+
+ protected:
+  virtual ~GetMostVisitedHistoryFunction() {}
+
+  // HistoryFunctionWithCallback:
+  virtual bool RunAsyncImpl() OVERRIDE;
+
+  // Callback for the history function to provide results.
+  void QueryComplete(CancelableRequestProvider::Handle handle,
+                     const history::FilteredURLList& data);
 };
 
 class GetVisitsHistoryFunction : public HistoryFunctionWithCallback {

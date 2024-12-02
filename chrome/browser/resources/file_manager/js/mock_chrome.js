@@ -378,24 +378,24 @@ chrome.fileBrowserPrivate = {
     setTimeout(callback, 0, response);
   },
 
-  gdataPreferences_: {
+  preferences_: {
     driveEnabled: true,
     cellularDisabled: true,
     hostedFilesDisabled: false
   },
 
-  onGDataPreferencesChanged: new MockEventSource(),
+  onPreferencesChanged: new MockEventSource(),
 
-  getGDataPreferences: function(callback) {
+  getPreferences: function(callback) {
     setTimeout(callback, 0, cloneShallow(
         chrome.fileBrowserPrivate.gdataPreferences_));
   },
 
-  setGDataPreferences: function(preferences) {
+  setPreferences: function(preferences) {
     for (var prop in preferences) {
-      chrome.fileBrowserPrivate.gdataPreferences_[prop] = preferences[prop];
+      chrome.fileBrowserPrivate.preferences_[prop] = preferences[prop];
     }
-    chrome.fileBrowserPrivate.onGDataPreferencesChanged.notify();
+    chrome.fileBrowserPrivate.onPreferencesChanged.notify();
   },
 
   networkConnectionState_: {
@@ -535,6 +535,7 @@ chrome.fileBrowserPrivate = {
       GALLERY_UNSAVED_CHANGES: 'Changes are not saved yet.',
       GALLERY_READONLY_WARNING: '$1 is read only. Edited images will be saved in the Downloads folder.',
       GALLERY_IMAGE_ERROR: 'This file could not be displayed',
+      GALLERY_IMAGE_TOO_BIG_ERROR: 'This file is too large to be opened.',
       GALLERY_VIDEO_ERROR: 'This file could not be played',
 
       GALLERY_ITEMS_SELECTED: '$1 items selected',
@@ -542,8 +543,6 @@ chrome.fileBrowserPrivate = {
       GALLERY_MOSAIC: 'Mosaic view',
       GALLERY_SLIDE: 'Slide view',
       GALLERY_SLIDESHOW: 'Slideshow',
-      GALLERY_SLIDESHOW_PAUSED:
-          'Paused. Press "Esc" to exit, any other key to resume.',
       GALLERY_DELETE: 'Delete',
 
       GALLERY_OK_LABEL: 'OK',

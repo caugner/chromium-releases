@@ -10,9 +10,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/web_contents_user_data.h"
 
 class OmniboxEditModel;
-class TabContents;
 
 namespace content {
 class RenderViewHost;
@@ -26,9 +26,9 @@ namespace search {
 // Per-tab search "helper".  Acts as the owner and controller of the tab's
 // search UI model.
 class SearchTabHelper : public content::WebContentsObserver,
-                        public content::NotificationObserver {
+                        public content::NotificationObserver,
+                        public content::WebContentsUserData<SearchTabHelper> {
  public:
-  SearchTabHelper(TabContents* contents, bool is_search_enabled);
   virtual ~SearchTabHelper();
 
   SearchModel* model() {
@@ -39,12 +39,19 @@ class SearchTabHelper : public content::WebContentsObserver,
   // affect the search mode.
   void OmniboxEditModelChanged(bool user_input_in_progress, bool cancelling);
 
+  // Invoked when the active navigation entry is updated in some way that might
+  // affect the search mode. This is used by Instant when it "fixes up" the
+  // virtual URL of the active entry. Regular navigations are captured through
+  // the notification system and shouldn't call this method.
+  void NavigationEntryUpdated();
+
   // Overridden from contents::WebContentsObserver:
   virtual void NavigateToPendingEntry(
       const GURL& url,
       content::NavigationController::ReloadType reload_type) OVERRIDE;
   virtual void DidStartProvisionalLoadForFrame(
       int64 frame_id,
+      int64 parent_frame_id,
       bool is_main_frame,
       const GURL& validated_url,
       bool is_error_page,
@@ -59,6 +66,9 @@ class SearchTabHelper : public content::WebContentsObserver,
                        const content::NotificationDetails& details) OVERRIDE;
 
  private:
+  explicit SearchTabHelper(content::WebContents* web_contents);
+  friend class content::WebContentsUserData<SearchTabHelper>;
+
   // Enum of the load states for the NTP.
   //
   // Once the user loads the NTP the |ntp_load_state_| changes to
@@ -94,7 +104,7 @@ class SearchTabHelper : public content::WebContentsObserver,
   void UpdateModelBasedOnURL(const GURL& url, NTPLoadState state, bool animate);
 
   // Returns the web contents associated with the tab that owns this helper.
-  content::WebContents* web_contents();
+  const content::WebContents* web_contents() const;
 
   // Returns the current RenderWidgetHost of the |web_contents()|.
   content::RenderWidgetHost* GetRenderWidgetHost();

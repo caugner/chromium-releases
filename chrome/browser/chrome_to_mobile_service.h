@@ -48,6 +48,7 @@ class ChromeToMobileService : public ProfileKeyedService,
  public:
   class Observer {
    public:
+    Observer();
     virtual ~Observer();
 
     // Called on generation of the page's MHTML snapshot.
@@ -55,28 +56,6 @@ class ChromeToMobileService : public ProfileKeyedService,
 
     // Called after URLFetcher responses from sending the URL (and snapshot).
     virtual void OnSendComplete(bool success) = 0;
-  };
-
-  enum Metric {
-    DEVICES_REQUESTED = 0,  // Cloud print was contacted to list devices.
-    DEVICES_AVAILABLE,      // Cloud print returned 1+ compatible devices.
-    BUBBLE_SHOWN,           // The page action bubble was shown.
-    SNAPSHOT_GENERATED,     // A snapshot was successfully generated.
-    SNAPSHOT_ERROR,         // An error occurred during snapshot generation.
-    SENDING_URL,            // Send was invoked (with or without a snapshot).
-    SENDING_SNAPSHOT,       // A snapshot was sent along with the page URL.
-    SEND_SUCCESS,           // Cloud print responded with success on send.
-    SEND_ERROR,             // Cloud print responded with failure on send.
-    LEARN_MORE_CLICKED,     // The "Learn more" help article link was clicked.
-    BAD_TOKEN,              // The cloud print access token could not be minted.
-    BAD_SEARCH_AUTH,        // The cloud print search request failed (auth).
-    BAD_SEARCH_OTHER,       // The cloud print search request failed (other).
-    BAD_SEND_407,           // The cloud print send response was errorCode==407.
-                            // "Print job added but failed to notify printer..."
-    BAD_SEND_ERROR,         // The cloud print send response was errorCode!=407.
-    BAD_SEND_AUTH,          // The cloud print send request failed (auth).
-    BAD_SEND_OTHER,         // The cloud print send request failed (other).
-    NUM_METRICS
   };
 
   // The supported mobile device operating systems.
@@ -113,6 +92,11 @@ class ChromeToMobileService : public ProfileKeyedService,
   // Returns whether Chrome To Mobile is enabled (gated on the Action Box UI).
   static bool IsChromeToMobileEnabled();
 
+  // Update and return the IDC_CHROME_TO_MOBILE_PAGE command enabled state; the
+  // state is derived from commandline, profile, and current page applicability.
+  // NOTE: Call this instead of IsCommandEnabled(IDC_CHROME_TO_MOBILE_PAGE).
+  static bool UpdateAndGetCommandState(Browser* browser);
+
   // Register the user prefs associated with this service.
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -144,10 +128,6 @@ class ChromeToMobileService : public ProfileKeyedService,
   // Virtual for unit test mocking.
   virtual void DeleteSnapshot(const FilePath& snapshot);
 
-  // Log a metric for the "ChromeToMobile.Service" histogram.
-  // Virtual for unit test mocking.
-  virtual void LogMetric(Metric metric) const;
-
   // Opens the "Learn More" help article link in the supplied |browser|.
   void LearnMore(Browser* browser) const;
 
@@ -171,7 +151,7 @@ class ChromeToMobileService : public ProfileKeyedService,
   virtual void OnInvalidatorStateChange(
       syncer::InvalidatorState state) OVERRIDE;
   virtual void OnIncomingInvalidation(
-      const syncer::ObjectIdStateMap& id_state_map,
+      const syncer::ObjectIdInvalidationMap& invalidation_map,
       syncer::IncomingInvalidationSource source) OVERRIDE;
 
   // Expose access token accessors for test purposes.
@@ -181,15 +161,15 @@ class ChromeToMobileService : public ProfileKeyedService,
  private:
   friend class MockChromeToMobileService;
 
-  // Enable or disable Chrome To Mobile with the browsers' command controllers.
-  // The feature state is automatically derived from internal conditions.
-  void UpdateCommandState() const;
-
   // Handle the attempted creation of a temporary file for snapshot generation.
-  // Alert the observer of failure or generate MHTML with an observer callback.
   void SnapshotFileCreated(base::WeakPtr<Observer> observer,
                            SessionID::id_type browser_id,
                            const FilePath& path);
+
+  // Handle the attempted MHTML snapshot generation; alerts the observer.
+  void SnapshotGenerated(base::WeakPtr<Observer> observer,
+                         const FilePath& path,
+                         int64 bytes);
 
   // Handle the attempted reading of the snapshot file for job submission.
   // Send valid snapshot contents if available, or log an error.
@@ -206,8 +186,7 @@ class ChromeToMobileService : public ProfileKeyedService,
   void ClearAccessToken();
 
   // Send the OAuth2AccessTokenFetcher request.
-  // Virtual for unit test mocking.
-  virtual void RequestAccessToken();
+  void RequestAccessToken();
 
   // Send the cloud print URLFetcher device search request.
   // Virtual for unit test mocking.

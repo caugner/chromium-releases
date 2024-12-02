@@ -27,6 +27,7 @@ cr.define('options', function() {
   /**
    * This is the absolute difference maintained between standard and
    * fixed-width font sizes. Refer http://crbug.com/91922.
+   * @const
    */
   OptionsPage.SIZE_DIFFERENCE_FIXED_STANDARD = 3;
 
@@ -81,6 +82,9 @@ cr.define('options', function() {
                                         opt_propertyBag) {
     // If |opt_propertyBag| is non-truthy, homogenize to object.
     opt_propertyBag = opt_propertyBag || {};
+
+    // If a bubble is currently being shown, hide it.
+    this.hideBubble();
 
     // Find the currently visible root-level page.
     var rootPage = null;
@@ -197,6 +201,10 @@ cr.define('options', function() {
     var path = window.location.pathname + window.location.hash;
     if (path)
       path = path.slice(1).replace(/\/(?:#|$)/, '');  // Remove trailing slash.
+
+    // Update tab title.
+    this.setTitle_(page.title);
+
     // The page is already in history (the user may have clicked the same link
     // twice). Do nothing.
     if (path == page.name &&
@@ -219,9 +227,6 @@ cr.define('options', function() {
                          {pageName: page.name},
                          page.title,
                          '/' + page.name + hash);
-
-    // Update tab title.
-    this.setTitle_(page.title);
   };
 
   /**
@@ -378,12 +383,38 @@ cr.define('options', function() {
   };
 
   /**
-   * Updates managed banner visibility state based on the topmost page.
+   * Returns the currently visible bubble, or null if no bubble is visible.
+   * @return {OptionsBubble} The bubble currently being shown.
    */
-  OptionsPage.updateManagedBannerVisibility = function() {
-    var topPage = this.getTopmostVisiblePage();
-    if (topPage)
-      topPage.updateManagedBannerVisibility();
+  OptionsPage.getVisibleBubble = function() {
+    var bubble = OptionsPage.bubble_;
+    return bubble && !bubble.hidden ? bubble : null;
+  };
+
+  /**
+   * Shows an informational bubble displaying |content| and pointing at the
+   * |anchor| element. If |content| has focusable elements, they join the
+   * current page's tab order as siblings of |anchor|.
+   * @param {HTMLDivElement} content The content of the bubble.
+   * @param {HTMLElement} anchor The element at which the bubble points.
+   */
+  OptionsPage.showBubble = function(content, anchor) {
+    OptionsPage.hideBubble();
+
+    var bubble = new options.OptionsBubble;
+    bubble.anchorNode = anchor;
+    bubble.arrowLocation = cr.ui.ArrowLocation.TOP_END;
+    bubble.content = content;
+    bubble.show();
+    OptionsPage.bubble_ = bubble;
+  };
+
+  /**
+   * Hides the currently visible bubble, if any.
+   */
+  OptionsPage.hideBubble = function() {
+    if (OptionsPage.bubble_)
+      OptionsPage.bubble_.hide();
   };
 
   /**
@@ -675,59 +706,6 @@ cr.define('options', function() {
     initializePage: function() {},
 
     /**
-     * Updates managed banner visibility state. This function iterates over
-     * all input fields of a page and if any of these is marked as managed
-     * it triggers the managed banner to be visible. The banner can be enforced
-     * being on through the managed flag of this class but it can not be forced
-     * being off if managed items exist.
-     */
-    updateManagedBannerVisibility: function() {
-      var bannerDiv = this.pageDiv.querySelector('.managed-prefs-banner');
-      // Create a banner for the overlay if we don't have one.
-      if (!bannerDiv) {
-        bannerDiv = $('managed-prefs-banner').cloneNode(true);
-        bannerDiv.id = null;
-
-        if (this.isOverlay) {
-          var content = this.pageDiv.querySelector('.content-area');
-          content.parentElement.insertBefore(bannerDiv, content);
-        } else {
-          bannerDiv.classList.add('main-page-banner');
-          var header = this.pageDiv.querySelector('header');
-          header.appendChild(bannerDiv);
-        }
-      }
-
-      var controlledByPolicy = false;
-      var controlledByExtension = false;
-      var inputElements = this.pageDiv.querySelectorAll('input[controlled-by]');
-      for (var i = 0; i < inputElements.length; i++) {
-        if (inputElements[i].controlledBy == 'policy')
-          controlledByPolicy = true;
-        else if (inputElements[i].controlledBy == 'extension')
-          controlledByExtension = true;
-      }
-
-      if (!controlledByPolicy && !controlledByExtension) {
-        this.pageDiv.classList.remove('showing-banner');
-      } else {
-        this.pageDiv.classList.add('showing-banner');
-
-        var text = bannerDiv.querySelector('#managed-prefs-text');
-        if (controlledByPolicy && !controlledByExtension) {
-          text.textContent =
-              loadTimeData.getString('policyManagedPrefsBannerText');
-        } else if (!controlledByPolicy && controlledByExtension) {
-          text.textContent =
-              loadTimeData.getString('extensionManagedPrefsBannerText');
-        } else if (controlledByPolicy && controlledByExtension) {
-          text.textContent = loadTimeData.getString(
-              'policyAndExtensionManagedPrefsBannerText');
-        }
-      }
-    },
-
-    /**
      * Gets the container div for this page if it is an overlay.
      * @type {HTMLElement}
      */
@@ -852,7 +830,6 @@ cr.define('options', function() {
      */
     onVisibilityChanged_: function() {
       OptionsPage.updateRootPageFreezeState();
-      OptionsPage.updateManagedBannerVisibility();
 
       if (this.isOverlay && !this.visible)
         OptionsPage.updateScrollPosition_();

@@ -44,12 +44,6 @@ cr.define('options', function() {
   };
 
   /**
-   * Internal URL scheme.
-   * @const
-   */
-  var CHROME_SCHEME = 'chrome://';
-
-  /**
    * Creates a new user images grid item.
    * @param {{url: string, title: string=, decorateFn: function=,
    *     clickHandler: function=}} imageInfo User image URL, optional title,
@@ -70,7 +64,8 @@ cr.define('options', function() {
     decorate: function() {
       GridItem.prototype.decorate.call(this);
       var imageEl = cr.doc.createElement('img');
-      if (this.dataItem.url.slice(0, CHROME_SCHEME.length) == CHROME_SCHEME)
+      var scheme = 'chrome://';
+      if (this.dataItem.url.slice(0, scheme.length) == scheme)
         imageEl.src = this.dataItem.url + '@' + window.devicePixelRatio + 'x';
       else
         imageEl.src = this.dataItem.url;
@@ -197,12 +192,8 @@ cr.define('options', function() {
      */
     updatePreview_: function() {
       var url = this.selectedItemUrl;
-      if (url && this.previewImage_) {
-        if (url.slice(0, CHROME_SCHEME.length) == CHROME_SCHEME)
-          this.previewImage_.src = url + '@' + window.devicePixelRatio + 'x';
-        else
-          this.previewImage_.src = url;
-      }
+      if (url && this.previewImage_)
+        this.previewImage_.src = url;
     },
 
     /**

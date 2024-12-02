@@ -10,20 +10,18 @@
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/test_autofill_external_delegate.h"
 #include "chrome/browser/ui/autofill/tab_autofill_manager_delegate.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents.h"
+#include "chrome/common/form_data.h"
+#include "chrome/common/form_field_data.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
 #include "ui/gfx/rect.h"
-#include "webkit/forms/form_data.h"
-#include "webkit/forms/form_field.h"
 
 using content::BrowserThread;
 using testing::_;
-using webkit::forms::FormData;
-using webkit::forms::FormField;
 using WebKit::WebAutofillClient;
 
 namespace {
@@ -36,9 +34,9 @@ const int kAutofillProfileId = 1;
 
 class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
  public:
-  MockAutofillExternalDelegate(TabContents* tab_contents,
+  MockAutofillExternalDelegate(content::WebContents* web_contents,
                                AutofillManager* autofill_manger)
-      : TestAutofillExternalDelegate(tab_contents, autofill_manger) {}
+      : TestAutofillExternalDelegate(web_contents, autofill_manger) {}
   ~MockAutofillExternalDelegate() {}
 
   MOCK_METHOD4(ApplyAutofillSuggestions, void(
@@ -47,15 +45,11 @@ class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
       const std::vector<string16>& autofill_icons,
       const std::vector<int>& autofill_unique_ids));
 
-  MOCK_METHOD4(OnQueryPlatformSpecific,
-               void(int query_id,
-                    const webkit::forms::FormData& form,
-                    const webkit::forms::FormField& field,
-                    const gfx::Rect& bounds));
-
   MOCK_METHOD0(ClearPreviewedForm, void());
 
   MOCK_METHOD0(HideAutofillPopup, void());
+
+  MOCK_METHOD1(SetBounds, void(const gfx::Rect& bounds));
 
  private:
   virtual void HideAutofillPopupInternal() {};
@@ -63,56 +57,43 @@ class MockAutofillExternalDelegate : public TestAutofillExternalDelegate {
 
 class MockAutofillManager : public AutofillManager {
  public:
-  explicit MockAutofillManager(TabContents* tab_contents)
+  explicit MockAutofillManager(content::WebContents* web_contents,
+                               autofill::AutofillManagerDelegate* delegate)
       // Force to use the constructor designated for unit test, but we don't
       // really need personal_data in this test so we pass a NULL pointer.
-      : AutofillManager(&delegate_, tab_contents, NULL),
-        delegate_(tab_contents) {
+      : AutofillManager(web_contents, delegate, NULL) {
   }
 
   MOCK_METHOD4(OnFillAutofillFormData,
                void(int query_id,
-                    const webkit::forms::FormData& form,
-                    const webkit::forms::FormField& field,
+                    const FormData& form,
+                    const FormFieldData& field,
                     int unique_id));
 
  protected:
   virtual ~MockAutofillManager() {}
-
- private:
-  TabAutofillManagerDelegate delegate_;
 };
 
 }  // namespace
 
-class AutofillExternalDelegateUnitTest : public TabContentsTestHarness {
+class AutofillExternalDelegateUnitTest
+    : public ChromeRenderViewHostTestHarness {
  public:
   AutofillExternalDelegateUnitTest()
       : ui_thread_(BrowserThread::UI, &message_loop_) {}
   virtual ~AutofillExternalDelegateUnitTest() {}
-
-  virtual void SetUp() OVERRIDE {
-    TabContentsTestHarness::SetUp();
-    autofill_manager_ = new MockAutofillManager(tab_contents());
-    external_delegate_.reset(new MockAutofillExternalDelegate(
-        tab_contents(),
-        autofill_manager_));
-  }
 
  protected:
   // Set up the expectation for a platform specific OnQuery call and then
   // execute it with the given QueryId.
   void IssueOnQuery(int query_id) {
     const FormData form;
-    FormField field;
+    FormFieldData field;
     field.is_focusable = true;
     field.should_autocomplete = true;
     const gfx::Rect bounds;
 
-    EXPECT_CALL(*external_delegate_,
-                OnQueryPlatformSpecific(query_id, form, field, bounds));
-
-    // This should call OnQueryPlatform specific.
+    EXPECT_CALL(*external_delegate_, SetBounds(bounds));
     external_delegate_->OnQuery(query_id, form, field, bounds, false);
   }
 
@@ -120,6 +101,26 @@ class AutofillExternalDelegateUnitTest : public TabContentsTestHarness {
   scoped_ptr<MockAutofillExternalDelegate> external_delegate_;
 
  private:
+  virtual void SetUp() OVERRIDE {
+    ChromeRenderViewHostTestHarness::SetUp();
+    TabAutofillManagerDelegate::CreateForWebContents(web_contents());
+    autofill_manager_ = new MockAutofillManager(
+        web_contents(),
+        TabAutofillManagerDelegate::FromWebContents(web_contents()));
+    external_delegate_.reset(new MockAutofillExternalDelegate(
+        web_contents(),
+        autofill_manager_));
+  }
+
+  virtual void TearDown() OVERRIDE {
+    // Order of destruction is important as AutofillManager relies on
+    // PersonalDataManager to be around when it gets destroyed. Also, a real
+    // AutofillManager is tied to the lifetime of the WebContents, so it must
+    // be destroyed at the destruction of the WebContents.
+    autofill_manager_ = NULL;
+    ChromeRenderViewHostTestHarness::TearDown();
+  }
+
   content::TestBrowserThread ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(AutofillExternalDelegateUnitTest);

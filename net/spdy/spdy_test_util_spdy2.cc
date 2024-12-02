@@ -228,9 +228,9 @@ SpdyFrame* ConstructSpdyCredential(
 
 // Construct a SPDY PING frame.
 // Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyPing() {
+SpdyFrame* ConstructSpdyPing(uint32 ping_id) {
   BufferedSpdyFramer framer(2);
-  return framer.CreatePingFrame(1);
+  return framer.CreatePingFrame(ping_id);
 }
 
 // Construct a SPDY GOAWAY frame.
@@ -968,7 +968,7 @@ HttpNetworkSession* SpdySessionDependencies::SpdyCreateSessionDeterministic(
 
 SpdyURLRequestContext::SpdyURLRequestContext()
     : ALLOW_THIS_IN_INITIALIZER_LIST(storage_(this)) {
-  storage_.set_host_resolver(new MockHostResolver());
+  storage_.set_host_resolver(scoped_ptr<HostResolver>(new MockHostResolver));
   storage_.set_cert_verifier(new MockCertVerifier);
   storage_.set_proxy_service(ProxyService::CreateDirect());
   storage_.set_ssl_config_service(new SSLConfigServiceDefaults);

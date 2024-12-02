@@ -15,7 +15,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/shortcut.h"
 #include "base/win/windows_version.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/gfx/icon_util.h"
@@ -82,7 +81,7 @@ std::vector<FilePath> GetShortcutPaths(
   } locations[] = {
     {
       shortcut_info.create_on_desktop,
-      chrome::DIR_USER_DESKTOP,
+      base::DIR_USER_DESKTOP,
       NULL
     }, {
       shortcut_info.create_in_applications_menu,
@@ -295,6 +294,23 @@ bool CreatePlatformShortcuts(
   }
 
   return success;
+}
+
+void UpdatePlatformShortcuts(
+    const FilePath& web_app_path,
+    const ShellIntegration::ShortcutInfo& shortcut_info) {
+  // Generates file name to use with persisted ico and shortcut file.
+  FilePath file_name =
+      web_app::internals::GetSanitizedFileName(shortcut_info.title);
+
+  // If an icon file exists, and is out of date, replace it with the new icon
+  // and let the shell know the icon has been modified.
+  FilePath icon_file = web_app_path.Append(file_name).ReplaceExtension(
+      FILE_PATH_LITERAL(".ico"));
+  if (file_util::PathExists(icon_file)) {
+    web_app::internals::CheckAndSaveIcon(icon_file,
+        *shortcut_info.favicon.ToSkBitmap());
+  }
 }
 
 void DeletePlatformShortcuts(

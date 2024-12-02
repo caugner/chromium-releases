@@ -1630,6 +1630,30 @@ SECStatus SSLClientSocketNSS::Core::PlatformClientAuthHandler(
 #endif
 }
 
+#elif defined(OS_IOS)
+
+SECStatus SSLClientSocketNSS::Core::ClientAuthHandler(
+    void* arg,
+    PRFileDesc* socket,
+    CERTDistNames* ca_names,
+    CERTCertificate** result_certificate,
+    SECKEYPrivateKey** result_private_key) {
+  Core* core = reinterpret_cast<Core*>(arg);
+  DCHECK(core->OnNSSTaskRunner());
+
+  core->PostOrRunCallback(
+      FROM_HERE,
+      base::Bind(&AddLogEvent, core->weak_net_log_,
+                 NetLog::TYPE_SSL_CLIENT_CERT_REQUESTED));
+
+  // TODO(droger): Support client auth on iOS. See http://crbug.com/145954).
+  LOG(WARNING) << "Client auth is not supported";
+
+  // Never send a certificate.
+  core->AddCertProvidedEvent(0);
+  return SECFailure;
+}
+
 #else  // NSS_PLATFORM_CLIENT_AUTH
 
 // static
@@ -2034,23 +2058,6 @@ int SSLClientSocketNSS::Core::DoHandshake() {
   } else {
     PRErrorCode prerr = PR_GetError();
     net_error = HandleNSSError(prerr, true);
-
-    // Some network devices that inspect application-layer packets seem to
-    // inject TCP reset packets to break the connections when they see
-    // TLS 1.1 in ClientHello or ServerHello. See http://crbug.com/130293.
-    //
-    // Only allow ERR_CONNECTION_RESET to trigger a TLS 1.1 -> TLS 1.0
-    // fallback. We don't lose much in this fallback because the explicit
-    // IV for CBC mode in TLS 1.1 is approximated by record splitting in
-    // TLS 1.0.
-    //
-    // ERR_CONNECTION_RESET is a common network error, so we don't want it
-    // to trigger a version fallback in general, especially the TLS 1.0 ->
-    // SSL 3.0 fallback, which would drop TLS extensions.
-    if (prerr == PR_CONNECT_RESET_ERROR &&
-        ssl_config_.version_max == SSL_PROTOCOL_VERSION_TLS1_1) {
-      net_error = ERR_SSL_PROTOCOL_ERROR;
-    }
 
     // If not done, stay in this state
     if (net_error == ERR_IO_PENDING) {

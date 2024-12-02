@@ -44,6 +44,10 @@ bool DialogDelegate::IsDialogButtonVisible(ui::DialogButton button) const {
   return true;
 }
 
+bool DialogDelegate::UseChromeStyle() const {
+  return false;
+}
+
 bool DialogDelegate::AreAcceleratorsEnabled(ui::DialogButton button) {
   return true;
 }
@@ -60,7 +64,7 @@ bool DialogDelegate::Cancel() {
   return true;
 }
 
-bool DialogDelegate::Accept(bool window_closiang) {
+bool DialogDelegate::Accept(bool window_closing) {
   return Accept();
 }
 
@@ -89,7 +93,11 @@ View* DialogDelegate::GetInitiallyFocusedView() {
 }
 
 ClientView* DialogDelegate::CreateClientView(Widget* widget) {
-  return new DialogClientView(widget, GetContentsView());
+  DialogClientView::StyleParams params = UseChromeStyle() ?
+      DialogClientView::GetChromeStyleParams() :
+      DialogClientView::StyleParams();
+
+  return new DialogClientView(widget, GetContentsView(), params);
 }
 
 const DialogClientView* DialogDelegate::GetDialogClientView() const {

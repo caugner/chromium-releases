@@ -1,40 +1,31 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import json
 import logging
-import shutil
 import socket
 import subprocess
-import tempfile
 import time
-import urllib2
 
-import adb_commands
-import browser_backend
-import browser_finder
-import cros_interface
-import inspector_backend
-
-def ConstructDefaultArgsFromTheSessionManager(self, cri):
-  # TODO(nduca): Fill this in with something
-  pass
+from chrome_remote_control import browser_backend
+from chrome_remote_control import cros_interface
 
 class CrOSBrowserBackend(browser_backend.BrowserBackend):
   """The backend for controlling a browser instance running on CrOS.
   """
   def __init__(self, browser_type, options, is_content_shell, cri):
-    super(CrOSBrowserBackend, self).__init__(is_content_shell)
+    super(CrOSBrowserBackend, self).__init__(is_content_shell, options)
     # Initialize fields so that an explosion during init doesn't break in Close.
     self._options = options
     assert not is_content_shell
     self._cri = cri
+    self._browser_type = browser_type
 
     tmp = socket.socket()
     tmp.bind(('', 0))
     self._port = tmp.getsockname()[1]
     tmp.close()
 
+    self._remote_debugging_port = self._cri.GetRemotePort()
     self._tmpdir = None
 
     self._X = None
@@ -48,13 +39,7 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
       logging.debug('stopping ui')
       self._cri.GetCmdOutput(['stop', 'ui'])
 
-    remote_port = self._cri.GetRemotePort()
-
-    args = ['/opt/google/chrome/chrome',
-            '--no-first-run',
-            '--aura-host-window-use-fullscreen',
-            '--remote-debugging-port=%i' % remote_port]
-
+    # Set up user data dir.
     if not is_content_shell:
       logging.info('Preparing user data dir')
       self._tmpdir = '/tmp/chrome_remote_control'
@@ -63,12 +48,16 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
         logging.critical('Feature not (yet) implemented.')
 
       # Ensure a clean user_data_dir.
-      self._cri.GetCmdOutput(['rm', '-rf', self._tmpdir])
+      self._cri.RmRF(self._tmpdir)
 
-      args.append('--user-data-dir=%s' % self._tmpdir)
+    # Set startup args.
+    args = ['/opt/google/chrome/chrome']
+    args.extend(self.GetBrowserStartupArgs())
 
     # Final bits of command line prep.
-    args.extend(options.extra_browser_args)
+    def EscapeIfNeeded(arg):
+      return arg.replace(' ', '" "')
+    args = [EscapeIfNeeded(arg) for arg in args]
     prevent_output = not options.show_stdout
 
     # Stop old X.
@@ -99,7 +88,8 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
       self._cri,
       args,
       prevent_output=prevent_output,
-      extra_ssh_args=['-L%i:localhost:%i' % (self._port, remote_port)],
+      extra_ssh_args=['-L%i:localhost:%i' % (
+          self._port, self._remote_debugging_port)],
       leave_ssh_alive=True,
       env={'DISPLAY': ':0',
            'USER': 'chronos'},
@@ -114,6 +104,25 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
       self.Close()
       raise
 
+  def GetBrowserStartupArgs(self):
+    args = super(CrOSBrowserBackend, self).GetBrowserStartupArgs()
+
+    args.extend([
+            '--allow-webui-compositing',
+            '--aura-host-window-use-fullscreen',
+            '--enable-smooth-scrolling',
+            '--enable-threaded-compositing',
+            '--enable-per-tile-painting',
+            '--enable-gpu-sandboxing',
+            '--enable-accelerated-layers',
+            '--force-compositing-mode',
+            '--remote-debugging-port=%i' % self._remote_debugging_port,
+            '--start-maximized'])
+    if not self.is_content_shell:
+      args.append('--user-data-dir=%s' % self._tmpdir)
+
+    return args
+
   def __del__(self):
     self.Close()
 
@@ -127,7 +136,7 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
       self._X = None
 
     if self._tmpdir:
-      self._cri.GetCmdOutput(['rm', '-rf', self._tmpdir])
+      self._cri.RmRF(self._tmpdir)
       self._tmpdir = None
 
     self._cri = None
@@ -139,19 +148,18 @@ class CrOSBrowserBackend(browser_backend.BrowserBackend):
 
   def CreateForwarder(self, host_port):
     assert self._cri
-    return SSHReverseForwarder(self._cri, host_port)
+    return SSHReverseForwarder(self._cri,
+                               host_port)
 
 class SSHReverseForwarder(object):
   def __init__(self, cri, host_port):
     self._proc = None
+    self._host_port = host_port
 
-    # TODO(nduca): Try to pick a remote port that is free in a smater way. This
-    # is idiotic.
-    self._remote_port = cri.GetRemotePort()
     self._proc = subprocess.Popen(
-      cri._FormSSHCommandLine(['sleep', '99999999999'],
-                              ['-R%i:localhost:%i' %
-                               (self._remote_port, host_port)]),
+      cri.FormSSHCommandLine(['sleep', '99999999999'],
+                             ['-R%i:localhost:%i' %
+                              (host_port, host_port)]),
       stdout=subprocess.PIPE,
       stderr=subprocess.PIPE,
       stdin=subprocess.PIPE,
@@ -164,7 +172,7 @@ class SSHReverseForwarder(object):
   @property
   def url(self):
     assert self._proc
-    return 'http://localhost:%i' % self._remote_port
+    return 'http://localhost:%i' % self._host_port
 
   def Close(self):
     if self._proc:

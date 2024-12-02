@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/protocol/sync.pb.h"
@@ -88,7 +89,7 @@ class BaseNode {
   virtual int64 GetId() const;
 
   // Returns the modification time of the object.
-  const base::Time& GetModificationTime() const;
+  base::Time GetModificationTime() const;
 
   // Nodes are hierarchically arranged into a single-rooted tree.
   // InitByRootLookup on ReadNode allows access to the root. GetParentId is
@@ -165,6 +166,14 @@ class BaseNode {
   // data.  Can only be called if GetModelType() == SESSIONS.
   const sync_pb::SessionSpecifics& GetSessionSpecifics() const;
 
+  // Getter specific to the DEVICE_INFO datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == DEVICE_INFO.
+  const sync_pb::DeviceInfoSpecifics& GetDeviceInfoSpecifics() const;
+
+  // Getter specific to the EXPERIMENTS datatype.  Returns protobuf
+  // data.  Can only be called if GetModelType() == EXPERIMENTS.
+  const sync_pb::ExperimentsSpecifics& GetExperimentsSpecifics() const;
+
   const sync_pb::EntitySpecifics& GetEntitySpecifics() const;
 
   // Returns the local external ID associated with the node.
@@ -238,6 +247,7 @@ class BaseNode {
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetNonBookmarkTitle);
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetNonBookmarkTitleWithEncryption);
   FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetPreviouslyEncryptedSpecifics);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, IncrementTransactionVersion);
 
   void* operator new(size_t size);  // Node is meant for stack use only.
 

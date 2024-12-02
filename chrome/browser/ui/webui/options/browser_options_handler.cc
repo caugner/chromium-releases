@@ -45,7 +45,9 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
@@ -72,6 +74,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -112,7 +115,8 @@ using content::UserMetricsAction;
 namespace options {
 
 BrowserOptionsHandler::BrowserOptionsHandler()
-    : template_url_service_(NULL),
+    : page_initialized_(false),
+      template_url_service_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_for_file_(this)),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_for_ui_(this)) {
   multiprofile_ = ProfileManager::IsMultipleProfilesEnabled();
@@ -186,7 +190,6 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
 #endif
     { "doNotTrack", IDS_OPTIONS_ENABLE_DO_NOT_TRACK },
     { "doNotTrackConfirmMessage", IDS_OPTIONS_ENABLE_DO_NOT_TRACK_BUBBLE_TEXT },
-    { "doNotTrackConfirmTitle", IDS_OPTIONS_ENABLE_DO_NOT_TRACK_BUBBLE_TITLE },
     { "doNotTrackConfirmEnable",
        IDS_OPTIONS_ENABLE_DO_NOT_TRACK_BUBBLE_ENABLE },
     { "doNotTrackConfirmDisable",
@@ -213,7 +216,6 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "homePageUseNewTab", IDS_OPTIONS_HOMEPAGE_USE_NEWTAB },
     { "homePageUseURL", IDS_OPTIONS_HOMEPAGE_USE_URL },
     { "instantConfirmMessage", IDS_INSTANT_OPT_IN_MESSAGE },
-    { "instantConfirmTitle", IDS_INSTANT_OPT_IN_TITLE },
     { "importData", IDS_OPTIONS_IMPORT_DATA_BUTTON },
     { "improveBrowsingExperience", IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE },
     { "languageAndSpellCheckSettingsButton",
@@ -250,7 +252,6 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
     { "sectionTitleStartup", IDS_OPTIONS_STARTUP_GROUP_NAME },
     { "sectionTitleSync", IDS_SYNC_OPTIONS_GROUP_NAME },
     { "spellingConfirmMessage", IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_TEXT },
-    { "spellingConfirmTitle", IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE },
     { "spellingConfirmEnable", IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_ENABLE },
     { "spellingConfirmDisable", IDS_CONTENT_CONTEXT_SPELLING_BUBBLE_DISABLE },
     { "spellingPref", IDS_OPTIONS_SPELLING_PREF },
@@ -329,6 +330,11 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
   };
 
   RegisterStrings(values, resources, arraysize(resources));
+  RegisterTitle(values, "instantConfirmOverlay", IDS_INSTANT_OPT_IN_TITLE);
+  RegisterTitle(values, "doNotTrackConfirmOverlay",
+                IDS_OPTIONS_ENABLE_DO_NOT_TRACK_BUBBLE_TITLE);
+  RegisterTitle(values, "spellingConfirmOverlay",
+                IDS_CONTENT_CONTEXT_SPELLING_ASK_GOOGLE);
   RegisterCloudPrintValues(values);
 
 #if !defined(OS_CHROMEOS)
@@ -374,30 +380,26 @@ void BrowserOptionsHandler::GetLocalizedValues(DictionaryValue* values) {
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
 
 #if defined(OS_CHROMEOS)
-    values->SetString("username",
-        chromeos::UserManager::Get()->IsUserLoggedIn() ?
-            chromeos::UserManager::Get()->GetLoggedInUser().email() :
-            std::string());
+  const chromeos::User* user = chromeos::UserManager::Get()->GetLoggedInUser();
+  values->SetString("username", user ? user->email() : std::string());
 
-    values->SetString(
-        "factoryResetWarning",
-        l10n_util::GetStringFUTF16(
-            IDS_OPTIONS_FACTORY_RESET_WARNING,
-            l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+  values->SetString(
+      "factoryResetWarning",
+      l10n_util::GetStringFUTF16(
+          IDS_OPTIONS_FACTORY_RESET_WARNING,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
 
-    values->SetString(
-        "factoryResetDescription",
-        l10n_util::GetStringFUTF16(
-            IDS_OPTIONS_FACTORY_RESET_DESCRIPTION,
-            l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+  values->SetString(
+      "factoryResetDescription",
+      l10n_util::GetStringFUTF16(
+          IDS_OPTIONS_FACTORY_RESET_DESCRIPTION,
+          l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
 #endif
 
   // Pass along sync status early so it will be available during page init.
   values->Set("syncData", GetSyncStateDictionary().release());
 
   values->SetString("privacyLearnMoreURL", chrome::kPrivacyLearnMoreURL);
-  values->SetString("sessionRestoreLearnMoreURL",
-                    chrome::kSessionRestoreLearnMoreURL);
   values->SetString("doNotTrackLearnMoreURL", chrome::kDoNotTrackLearnMoreURL);
 
   values->SetString(
@@ -491,12 +493,6 @@ void BrowserOptionsHandler::RegisterMessages() {
       "defaultZoomFactorAction",
       base::Bind(&BrowserOptionsHandler::HandleDefaultZoomFactor,
                  base::Unretained(this)));
-#if !defined(OS_CHROMEOS)
-  web_ui()->RegisterMessageCallback(
-      "metricsReportingCheckboxAction",
-      base::Bind(&BrowserOptionsHandler::HandleMetricsReportingCheckbox,
-                 base::Unretained(this)));
-#endif
 #if !defined(USE_NSS) && !defined(USE_OPENSSL)
   web_ui()->RegisterMessageCallback(
       "showManageSSLCertificates",
@@ -521,16 +517,6 @@ void BrowserOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "showNetworkProxySettings",
       base::Bind(&BrowserOptionsHandler::ShowNetworkProxySettings,
-                 base::Unretained(this)));
-#endif
-  web_ui()->RegisterMessageCallback(
-      "checkRevocationCheckboxAction",
-      base::Bind(&BrowserOptionsHandler::HandleCheckRevocationCheckbox,
-                 base::Unretained(this)));
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-  web_ui()->RegisterMessageCallback(
-      "backgroundModeAction",
-      base::Bind(&BrowserOptionsHandler::HandleBackgroundModeCheckbox,
                  base::Unretained(this)));
 #endif
 #if defined(OS_CHROMEOS)
@@ -566,6 +552,10 @@ void BrowserOptionsHandler::OnStateChanged() {
                                    *GetSyncStateDictionary());
 
   SendProfilesInfo();
+}
+
+void BrowserOptionsHandler::PageLoadStarted() {
+  page_initialized_ = false;
 }
 
 void BrowserOptionsHandler::InitializeHandler() {
@@ -611,44 +601,33 @@ void BrowserOptionsHandler::InitializeHandler() {
 #endif
 
 #if !defined(OS_CHROMEOS)
-  enable_metrics_recording_.Init(prefs::kMetricsReportingEnabled,
-                                 g_browser_process->local_state(), this);
   cloud_print_connector_email_.Init(prefs::kCloudPrintEmail, prefs, this);
   cloud_print_connector_enabled_.Init(prefs::kCloudPrintProxyEnabled, prefs,
                                       this);
-#endif
-
-  rev_checking_enabled_.Init(prefs::kCertRevocationCheckingEnabled,
-                             g_browser_process->local_state(), this);
-
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-  background_mode_enabled_.Init(prefs::kBackgroundModeEnabled,
-                                g_browser_process->local_state(), this);
 #endif
 
   auto_open_files_.Init(prefs::kDownloadExtensionsToOpen, prefs, this);
   default_font_size_.Init(prefs::kWebKitDefaultFontSize, prefs, this);
   default_zoom_level_.Init(prefs::kDefaultZoomLevel, prefs, this);
 #if !defined(OS_CHROMEOS)
-  proxy_prefs_.reset(
-      PrefSetObserver::CreateProxyPrefSetObserver(prefs, this));
+  proxy_prefs_.Init(prefs);
+  proxy_prefs_.Add(prefs::kProxy, this);
 #endif  // !defined(OS_CHROMEOS)
 }
 
 void BrowserOptionsHandler::InitializePage() {
+  page_initialized_ = true;
   OnTemplateURLServiceChanged();
   ObserveThemeChanged();
   OnStateChanged();
   UpdateDefaultBrowserState();
 
-  SetupMetricsReportingCheckbox();
   SetupMetricsReportingSettingVisibility();
   SetupPasswordGenerationSettingVisibility();
   SetupFontSizeSelector();
   SetupPageZoomSelector();
   SetupAutoOpenFileTypes();
   SetupProxySettingsSection();
-  SetupSSLConfigSettings();
 #if !defined(OS_CHROMEOS)
   if (cloud_print_connector_ui_enabled_) {
     SetupCloudPrintConnectorSection();
@@ -666,9 +645,6 @@ void BrowserOptionsHandler::InitializePage() {
         "BrowserOptions.enableFactoryResetSection");
   }
 
-#endif
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-  SetupBackgroundModeSettings();
 #endif
 }
 
@@ -812,7 +788,7 @@ void BrowserOptionsHandler::OnTemplateURLServiceChanged() {
   const TemplateURL* default_url =
       template_url_service_->GetDefaultSearchProvider();
 
-  int default_index = 0;
+  int default_index = -1;
   ListValue search_engines;
   TemplateURLService::TemplateURLVector model_urls(
       template_url_service_->GetTemplateURLs());
@@ -875,6 +851,13 @@ void BrowserOptionsHandler::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  // Notifications are used to update the UI dynamically when settings change in
+  // the background. If the UI is currently being loaded, no dynamic updates are
+  // possible (as the DOM and JS are not fully loaded) or necessary (as
+  // InitializePage() will update the UI at the end of the load).
+  if (!page_initialized_)
+    return;
+
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     ObserveThemeChanged();
 #if defined(OS_CHROMEOS)
@@ -888,7 +871,7 @@ void BrowserOptionsHandler::Observe(
     } else if (*pref_name == prefs::kDownloadExtensionsToOpen) {
       SetupAutoOpenFileTypes();
 #if !defined(OS_CHROMEOS)
-    } else if (proxy_prefs_->IsObserved(*pref_name)) {
+    } else if (proxy_prefs_.IsObserved(*pref_name)) {
       SetupProxySettingsSection();
 #endif  // !defined(OS_CHROMEOS)
     } else if ((*pref_name == prefs::kCloudPrintEmail) ||
@@ -901,10 +884,6 @@ void BrowserOptionsHandler::Observe(
       SetupFontSizeSelector();
     } else if (*pref_name == prefs::kDefaultZoomLevel) {
       SetupPageZoomSelector();
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-    } else if (*pref_name == prefs::kBackgroundModeEnabled) {
-      SetupBackgroundModeSettings();
-#endif
     } else {
       NOTREACHED();
     }
@@ -959,7 +938,7 @@ scoped_ptr<ListValue> BrowserOptionsHandler::GetProfilesInfoList() {
       gfx::Image icon = profiles::GetAvatarIconForWebUI(
           cache.GetAvatarIconOfProfileAtIndex(i), true);
       profile_value->SetString("iconURL",
-          web_ui_util::GetImageDataUrl(*icon.ToImageSkia()));
+          web_ui_util::GetBitmapDataUrl(icon.AsBitmap()));
     } else {
       size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
       profile_value->SetString("iconURL",
@@ -984,17 +963,24 @@ void BrowserOptionsHandler::CreateProfile(const ListValue* args) {
     return;
   string16 name, icon;
   bool create_box_checked;
+
+  Browser* browser =
+      browser::FindBrowserWithWebContents(web_ui()->GetWebContents());
+  chrome::HostDesktopType desktop_type = chrome::HOST_DESKTOP_TYPE_NATIVE;
+  if (browser)
+    desktop_type = browser->host_desktop_type();
+
   if (args->GetString(0, &name) && args->GetString(1, &icon)) {
     if (args->GetBoolean(2, &create_box_checked) && create_box_checked) {
       ProfileManager::CreateMultiProfileAsync(
-        name, icon, base::Bind(&CreateDesktopShortcutForProfile));
+        name, icon, base::Bind(&CreateDesktopShortcutForProfile), desktop_type);
     } else {
       ProfileManager::CreateMultiProfileAsync(
-        name, icon, ProfileManager::CreateCallback());
+        name, icon, ProfileManager::CreateCallback(), desktop_type);
     }
   } else {
     ProfileManager::CreateMultiProfileAsync(
-        string16(), string16(), ProfileManager::CreateCallback());
+        string16(), string16(), ProfileManager::CreateCallback(), desktop_type);
   }
 }
 
@@ -1048,7 +1034,7 @@ void BrowserOptionsHandler::ThemesSetGTK(const ListValue* args) {
 
 #if defined(OS_CHROMEOS)
 void BrowserOptionsHandler::UpdateAccountPicture() {
-  std::string email = chromeos::UserManager::Get()->GetLoggedInUser().email();
+  std::string email = chromeos::UserManager::Get()->GetLoggedInUser()->email();
   if (!email.empty()) {
     web_ui()->CallJavascriptFunction("BrowserOptions.updateAccountPicture");
     base::StringValue email_value(email);
@@ -1142,21 +1128,6 @@ void BrowserOptionsHandler::HandleAutoOpenButton(const ListValue* args) {
     DownloadPrefs::FromDownloadManager(manager)->ResetAutoOpen();
 }
 
-void BrowserOptionsHandler::HandleMetricsReportingCheckbox(
-    const ListValue* args) {
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
-  std::string checked_str = UTF16ToUTF8(ExtractStringValue(args));
-  bool enabled = checked_str == "true";
-  content::RecordAction(
-      enabled ?
-          UserMetricsAction("Options_MetricsReportingCheckbox_Enable") :
-          UserMetricsAction("Options_MetricsReportingCheckbox_Disable"));
-  bool is_enabled = OptionsUtil::ResolveMetricsReportingEnabled(enabled);
-  enable_metrics_recording_.SetValue(is_enabled);
-  SetupMetricsReportingCheckbox();
-#endif
-}
-
 void BrowserOptionsHandler::HandleDefaultFontSize(const ListValue* args) {
   int font_size;
   if (ExtractIntegerValue(args, &font_size)) {
@@ -1174,53 +1145,6 @@ void BrowserOptionsHandler::HandleDefaultZoomFactor(const ListValue* args) {
         WebKit::WebView::zoomFactorToZoomLevel(zoom_factor));
   }
 }
-
-void BrowserOptionsHandler::HandleCheckRevocationCheckbox(
-    const ListValue* args) {
-  std::string checked_str = UTF16ToUTF8(ExtractStringValue(args));
-  bool enabled = checked_str == "true";
-  content::RecordAction(
-      enabled ?
-          UserMetricsAction("Options_CheckCertRevocation_Enable") :
-          UserMetricsAction("Options_CheckCertRevocation_Disable"));
-  rev_checking_enabled_.SetValue(enabled);
-}
-
-#if !defined(OS_MACOSX) && !defined(OS_CHROMEOS)
-void BrowserOptionsHandler::HandleBackgroundModeCheckbox(
-    const ListValue* args) {
-  std::string checked_str = UTF16ToUTF8(ExtractStringValue(args));
-  bool enabled = checked_str == "true";
-  content::RecordAction(
-      enabled ?
-          UserMetricsAction("Options_BackgroundMode_Enable") :
-          UserMetricsAction("Options_BackgroundMode_Disable"));
-  background_mode_enabled_.SetValue(enabled);
-}
-
-void BrowserOptionsHandler::SetupBackgroundModeSettings() {
-    base::FundamentalValue checked(background_mode_enabled_.GetValue());
-    PrefService* service = g_browser_process->local_state();
-    DCHECK(service);
-    const PrefService::Preference* pref =
-        service->FindPreference(prefs::kBackgroundModeEnabled);
-    DCHECK(pref);
-    base::FundamentalValue disabled(!pref->IsUserModifiable());
-    std::string controlled_by_str;
-    if (pref->IsManaged())
-      controlled_by_str = "policy";
-    else if (pref->IsExtensionControlled())
-      controlled_by_str = "extension";
-    else if (pref->IsRecommended())
-      controlled_by_str = "recommended";
-    base::StringValue controlled_by(controlled_by_str);
-    web_ui()->CallJavascriptFunction(
-        "BrowserOptions.setBackgroundModeCheckboxState",
-        checked,
-        disabled,
-        controlled_by);
-}
-#endif
 
 #if !defined(OS_CHROMEOS)
 void BrowserOptionsHandler::ShowNetworkProxySettings(const ListValue* args) {
@@ -1397,15 +1321,6 @@ void BrowserOptionsHandler::SetupAccessibilityFeatures() {
 }
 #endif
 
-void BrowserOptionsHandler::SetupMetricsReportingCheckbox() {
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
-  base::FundamentalValue checked(enable_metrics_recording_.GetValue());
-  base::FundamentalValue disabled(enable_metrics_recording_.IsManaged());
-  web_ui()->CallJavascriptFunction(
-      "BrowserOptions.setMetricsReportingCheckboxState", checked, disabled);
-#endif
-}
-
 void BrowserOptionsHandler::SetupMetricsReportingSettingVisibility() {
 #if defined(GOOGLE_CHROME_BUILD) && defined(OS_CHROMEOS)
   // Don't show the reporting setting if we are in the guest mode.
@@ -1488,8 +1403,8 @@ void BrowserOptionsHandler::SetupProxySettingsSection() {
   bool is_extension_controlled = (proxy_config &&
                                   proxy_config->IsExtensionControlled());
 
-  base::FundamentalValue disabled(proxy_prefs_->IsManaged() ||
-                            is_extension_controlled);
+  base::FundamentalValue disabled(proxy_prefs_.IsManaged() ||
+                                  is_extension_controlled);
 
   // Get the appropriate info string to describe the button.
   string16 label_str;
@@ -1504,13 +1419,6 @@ void BrowserOptionsHandler::SetupProxySettingsSection() {
   web_ui()->CallJavascriptFunction(
       "BrowserOptions.setupProxySettingsSection", disabled, label);
 #endif  // !defined(OS_CHROMEOS)
-}
-
-void BrowserOptionsHandler::SetupSSLConfigSettings() {
-  base::FundamentalValue checked(rev_checking_enabled_.GetValue());
-  base::FundamentalValue disabled(rev_checking_enabled_.IsManaged());
-  web_ui()->CallJavascriptFunction(
-      "BrowserOptions.setCheckRevocationCheckboxState", checked, disabled);
 }
 
 }  // namespace options

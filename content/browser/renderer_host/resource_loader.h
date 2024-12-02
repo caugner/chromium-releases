@@ -12,12 +12,11 @@
 #include "content/public/browser/resource_controller.h"
 #include "net/url_request/url_request.h"
 
-class SSLClientAuthHandler;
-
 namespace content {
 class ResourceDispatcherHostLoginDelegate;
 class ResourceLoaderDelegate;
 class ResourceRequestInfoImpl;
+class SSLClientAuthHandler;
 
 // This class is responsible for driving the URLRequest (i.e., calling Start,
 // Read, and servicing events).  It has a ResourceHandler, which is typically a
@@ -76,6 +75,7 @@ class ResourceLoader : public net::URLRequest::Delegate,
   virtual void Resume() OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual void CancelAndIgnore() OVERRIDE;
+  virtual void CancelWithError(int error_code) OVERRIDE;
 
   void StartRequestInternal();
   void CancelRequestInternal(int error, bool from_renderer);

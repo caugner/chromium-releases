@@ -9,6 +9,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -37,8 +38,15 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_renderer_host.h"
+#include "crypto/nss_util.h"
 #include "net/base/cert_status_flags.h"
+#include "net/base/crypto_module.h"
+#include "net/base/net_errors.h"
 #include "net/test/test_server.h"
+
+#if defined(USE_NSS)
+#include "net/base/nss_cert_database.h"
+#endif  // defined(USE_NSS)
 
 using content::InterstitialPage;
 using content::NavigationController;
@@ -47,6 +55,7 @@ using content::SSLStatus;
 using content::WebContents;
 
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
+const FilePath::CharType kWsRoot[] = FILE_PATH_LITERAL("net/data/websocket");
 
 namespace {
 
@@ -83,8 +92,6 @@ class ProvisionalLoadWaiter : public content::WebContentsObserver {
 }  // namespace
 
 class SSLUITest : public InProcessBrowserTest {
-  typedef net::TestServer::SSLOptions SSLOptions;
-
  public:
   SSLUITest()
       : https_server_(net::TestServer::TYPE_HTTPS,
@@ -95,7 +102,10 @@ class SSLUITest : public InProcessBrowserTest {
                               FilePath(kDocRoot)),
         https_server_mismatched_(net::TestServer::TYPE_HTTPS,
                                  SSLOptions(SSLOptions::CERT_MISMATCHED_NAME),
-                                 FilePath(kDocRoot)) {}
+                                 FilePath(kDocRoot)),
+        wss_server_expired_(net::TestServer::TYPE_WSS,
+                            SSLOptions(SSLOptions::CERT_EXPIRED),
+                            FilePath(kWsRoot)) {}
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
     // Browser will both run and display insecure content.
@@ -205,9 +215,9 @@ class SSLUITest : public InProcessBrowserTest {
     observer.Wait();
   }
 
-  int GetConstrainedWindowCount() const {
-    return static_cast<int>(chrome::GetActiveTabContents(browser())->
-        constrained_window_tab_helper()->constrained_window_count());
+  size_t GetConstrainedWindowCount() const {
+    return ConstrainedWindowTabHelper::FromWebContents(
+        chrome::GetActiveWebContents(browser()))->constrained_window_count();
   }
 
   static bool GetFilePathWithHostAndPortReplacement(
@@ -288,8 +298,11 @@ class SSLUITest : public InProcessBrowserTest {
   net::TestServer https_server_;
   net::TestServer https_server_expired_;
   net::TestServer https_server_mismatched_;
+  net::TestServer wss_server_expired_;
 
  private:
+  typedef net::TestServer::SSLOptions SSLOptions;
+
   DISALLOW_COPY_AND_ASSIGN(SSLUITest);
 };
 
@@ -542,7 +555,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndGoForward) {
 // response from UI thread.
 IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndClose) {
   ASSERT_TRUE(test_server()->Start());
-  ASSERT_TRUE(https_server_expired_.Start());
+  ASSERT_TRUE(wss_server_expired_.Start());
 
   // Setup page title observer.
   WebContents* tab = chrome::GetActiveWebContents(browser());
@@ -552,11 +565,11 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndClose) {
   // Create GURLs to test pages.
   std::string masterUrlPath = StringPrintf("%s?%d",
       test_server()->GetURL("files/ssl/wss_close.html").spec().c_str(),
-      https_server_expired_.host_port_pair().port());
+      wss_server_expired_.host_port_pair().port());
   GURL masterUrl(masterUrlPath);
   std::string slaveUrlPath = StringPrintf("%s?%d",
       test_server()->GetURL("files/ssl/wss_close_slave.html").spec().c_str(),
-      https_server_expired_.host_port_pair().port());
+      wss_server_expired_.host_port_pair().port());
   GURL slaveUrl(slaveUrlPath);
 
   // Create tabs and visit pages which keep on creating wss connections.
@@ -584,15 +597,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndClose) {
 // share certificates policy with HTTPS correcly.
 IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndGoForward) {
   ASSERT_TRUE(test_server()->Start());
-  ASSERT_TRUE(https_server_expired_.Start());
-
-  // Start pywebsocket with TLS.
-  content::TestWebSocketServer wss_server;
-  int port = wss_server.UseRandomPort();
-  wss_server.UseTLS();
-  FilePath wss_root_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &wss_root_dir));
-  ASSERT_TRUE(wss_server.Start(wss_root_dir));
+  ASSERT_TRUE(wss_server_expired_.Start());
 
   // Setup page title observer.
   WebContents* tab = chrome::GetActiveWebContents(browser());
@@ -600,11 +605,15 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndGoForward) {
   watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
 
   // Visit bad HTTPS page.
-  std::string urlPath =
-      StringPrintf("%s%d%s", "https://localhost:", port, "/ws.html");
-  ui_test_utils::NavigateToURL(browser(), GURL(urlPath));
-  CheckAuthenticationBrokenState(tab, net::CERT_STATUS_COMMON_NAME_INVALID,
-                                 false, true);  // Interstitial showing
+  std::string scheme("https");
+  GURL::Replacements replacements;
+  replacements.SetSchemeStr(scheme);
+  ui_test_utils::NavigateToURL(
+      browser(),
+      wss_server_expired_.GetURL(
+          "connect_check.html").ReplaceComponents(replacements));
+  CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID, false,
+                                 true);  // Interstitial showing
 
   // Proceed anyway.
   ProceedThroughInterstitial(tab);
@@ -614,6 +623,81 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSInvalidCertAndGoForward) {
   const string16 result = watcher.WaitAndGetTitle();
   EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
 }
+
+#if defined(USE_NSS)
+// SSL client certificate tests are only enabled when using NSS for private key
+// storage, as only NSS can avoid modifying global machine state when testing.
+// See http://crbug.com/51132
+
+// Visit a HTTPS page which requires client cert authentication. The client
+// cert will be selected automatically, then a test which uses WebSocket runs.
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestWSSClientCert) {
+  // Open a temporary NSS DB for testing.
+  crypto::ScopedTestNSSDB test_nssdb;
+  ASSERT_TRUE(test_nssdb.is_open());
+
+  // Import client cert for test. These interfaces require NSS.
+  net::NSSCertDatabase* cert_db = net::NSSCertDatabase::GetInstance();
+  scoped_refptr<net::CryptoModule> crypt_module = cert_db->GetPublicModule();
+  std::string pkcs12_data;
+  FilePath cert_path;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &cert_path));
+  cert_path = cert_path.Append(
+      FILE_PATH_LITERAL("net/data/ssl/certificates/websocket_client_cert.p12"));
+  EXPECT_TRUE(file_util::ReadFileToString(cert_path, &pkcs12_data));
+  EXPECT_EQ(net::OK, cert_db->ImportFromPKCS12(crypt_module,
+                                               pkcs12_data,
+                                               string16(),
+                                               true,
+                                               NULL));
+
+  // Start WebSocket test server with TLS and client cert authentication.
+  net::TestServer::SSLOptions options(net::TestServer::SSLOptions::CERT_OK);
+  options.request_client_certificate = true;
+  FilePath ca_path;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &ca_path));
+  ca_path = ca_path.Append(
+      FILE_PATH_LITERAL("net/data/ssl/certificates/websocket_cacert.pem"));
+  options.client_authorities.push_back(ca_path);
+  net::TestServer wss_server(net::TestServer::TYPE_WSS,
+                             options,
+                             FilePath(FILE_PATH_LITERAL(
+                                 "net/data/websocket")));
+  ASSERT_TRUE(wss_server.Start());
+  std::string scheme("https");
+  GURL::Replacements replacements;
+  replacements.SetSchemeStr(scheme);
+  GURL url =
+      wss_server.GetURL("connect_check.html").ReplaceComponents(replacements);
+
+  // Setup page title observer.
+  WebContents* tab = chrome::GetActiveWebContents(browser());
+  content::TitleWatcher watcher(tab, ASCIIToUTF16("PASS"));
+  watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
+
+  // Add an entry into AutoSelectCertificateForUrls policy for automatic client
+  // cert selection.
+  Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
+  DCHECK(profile);
+  scoped_ptr<DictionaryValue> dict(new DictionaryValue());
+  dict->SetString("ISSUER.CN", "pywebsocket");
+  profile->GetHostContentSettingsMap()->SetWebsiteSetting(
+      ContentSettingsPattern::FromURL(url),
+      ContentSettingsPattern::FromURL(url),
+      CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
+      std::string(),
+      dict.release());
+
+  // Visit a HTTPS page which requires client certs.
+  ui_test_utils::NavigateToURL(browser(), url);
+  CheckAuthenticatedState(tab, false);
+
+  // Test page runs a WebSocket wss connection test. The result will be shown
+  // as page title.
+  const string16 result = watcher.WaitAndGetTitle();
+  EXPECT_TRUE(LowerCaseEqualsASCII(result, "pass"));
+}
+#endif  // defined(USE_NSS)
 
 // Flaky on CrOS http://crbug.com/92292
 #if defined(OS_CHROMEOS)
@@ -707,8 +791,15 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestBadHTTPSDownload) {
 // Insecure content
 //
 
+#if defined(OS_WIN)
+// http://crbug.com/152940 Flaky on win.
+#define MAYBE_TestDisplaysInsecureContent DISABLED_TestDisplaysInsecureContent
+#else
+#define MAYBE_TestDisplaysInsecureContent TestDisplaysInsecureContent
+#endif
+
 // Visits a page that displays insecure content.
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContent) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestDisplaysInsecureContent) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
@@ -765,7 +856,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestUnsafeContents) {
   // opened (the iframe content opens one).
   // Note: because of bug 1115868, no constrained window is opened right now.
   //       Once the bug is fixed, this will do the real check.
-  EXPECT_EQ(0, GetConstrainedWindowCount());
+  EXPECT_EQ(0U, GetConstrainedWindowCount());
 
   int img_width;
   EXPECT_TRUE(content::ExecuteJavaScriptAndExtractInt(
@@ -1054,7 +1145,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCloseTabWithUnsafePopup) {
         FROM_HERE, MessageLoop::QuitClosure(), base::TimeDelta::FromSeconds(1));
     content::RunMessageLoop();
   }
-  ASSERT_EQ(1, GetConstrainedWindowCount());
+  ASSERT_EQ(1U, GetConstrainedWindowCount());
 
   // Let's add another tab to make sure the browser does not exit when we close
   // the first tab.
@@ -1487,15 +1578,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITestBlock, TestBlockRunningInsecureContent) {
 // interstitial page showing.
 IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreCertErrors, TestWSS) {
   ASSERT_TRUE(test_server()->Start());
-  ASSERT_TRUE(https_server_expired_.Start());
-
-  // Start pywebsocket with TLS.
-  content::TestWebSocketServer wss_server;
-  int port = wss_server.UseRandomPort();
-  wss_server.UseTLS();
-  FilePath wss_root_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &wss_root_dir));
-  ASSERT_TRUE(wss_server.Start(wss_root_dir));
+  ASSERT_TRUE(wss_server_expired_.Start());
 
   // Setup page title observer.
   WebContents* tab = chrome::GetActiveWebContents(browser());
@@ -1503,9 +1586,13 @@ IN_PROC_BROWSER_TEST_F(SSLUITestIgnoreCertErrors, TestWSS) {
   watcher.AlsoWaitForTitle(ASCIIToUTF16("FAIL"));
 
   // Visit bad HTTPS page.
-  std::string url_path =
-      StringPrintf("%s%d%s", "https://localhost:", port, "/ws.html");
-  ui_test_utils::NavigateToURL(browser(), GURL(url_path));
+  std::string scheme("https");
+  GURL::Replacements replacements;
+  replacements.SetSchemeStr(scheme);
+  ui_test_utils::NavigateToURL(
+      browser(),
+      wss_server_expired_.GetURL(
+          "connect_check.html").ReplaceComponents(replacements));
 
   // We shouldn't have an interstitial page showing here.
 

@@ -4,10 +4,13 @@
 
 #include "ppapi/proxy/ppapi_proxy_test.h"
 
+#include <sstream>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop_proxy.h"
 #include "base/observer_list.h"
+#include "base/process_util.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
@@ -169,6 +172,7 @@ void PluginProxyTestHarness::SetUpHarness() {
 
   plugin_dispatcher_.reset(new PluginDispatcher(
       &MockGetInterface,
+      PpapiPermissions(),
       false));
   plugin_dispatcher_->InitWithTestSink(&sink());
   plugin_dispatcher_->DidCreateInstance(pp_instance());
@@ -195,6 +199,7 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
 
   plugin_dispatcher_.reset(new PluginDispatcher(
       &MockGetInterface,
+      PpapiPermissions(),
       false));
   plugin_dispatcher_->InitPluginWithChannel(&plugin_delegate_mock_,
                                             channel_handle,
@@ -314,7 +319,8 @@ void HostProxyTestHarness::SetUpHarness() {
   host_dispatcher_.reset(new HostDispatcher(
       pp_module(),
       &MockGetInterface,
-      status_receiver_.release()));
+      status_receiver_.release(),
+      PpapiPermissions()));
   host_dispatcher_->InitWithTestSink(&sink());
   HostDispatcher::SetForInstance(pp_instance(), host_dispatcher_.get());
 }
@@ -333,7 +339,8 @@ void HostProxyTestHarness::SetUpHarnessWithChannel(
   host_dispatcher_.reset(new HostDispatcher(
       pp_module(),
       &MockGetInterface,
-      status_receiver_.release()));
+      status_receiver_.release(),
+      PpapiPermissions()));
   ppapi::Preferences preferences;
   host_dispatcher_->InitHostWithChannel(&delegate_mock_, channel_handle,
                                         is_client, preferences);
@@ -411,8 +418,11 @@ void TwoWayTest::SetUp() {
   io_thread_.StartWithOptions(options);
   plugin_thread_.Start();
 
-  IPC::ChannelHandle handle;
-  handle.name = "TwoWayTestChannel";
+  // Construct the IPC handle name using the process ID so we can safely run
+  // multiple |TwoWayTest|s concurrently.
+  std::ostringstream handle_name;
+  handle_name << "TwoWayTestChannel" << base::GetCurrentProcId();
+  IPC::ChannelHandle handle(handle_name.str());
   base::WaitableEvent remote_harness_set_up(true, false);
   plugin_thread_.message_loop_proxy()->PostTask(
       FROM_HERE,

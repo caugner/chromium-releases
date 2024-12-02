@@ -119,7 +119,7 @@ void SessionEventExecutorWin::InjectKeyEvent(const KeyEvent& event) {
         VLOG(3) << "Sending Secure Attention Sequence to console";
 
         if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-          if (sas_injector_.get() == NULL)
+          if (!sas_injector_)
             sas_injector_ = SasInjector::Create();
           if (!sas_injector_->InjectSas())
             LOG(ERROR) << "Failed to inject Secure Attention Sequence.";
