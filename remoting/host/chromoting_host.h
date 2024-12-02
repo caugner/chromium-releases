@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/observer_list.h"
 #include "base/threading/thread.h"
 #include "remoting/base/encoder.h"
 #include "remoting/host/capturer.h"
@@ -19,6 +20,7 @@
 #include "remoting/host/ui_strings.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/signal_strategy.h"
+#include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/session_manager.h"
 #include "remoting/protocol/connection_to_client.h"
 
@@ -34,7 +36,6 @@ class Capturer;
 class ChromotingHostContext;
 class DesktopEnvironment;
 class Encoder;
-class MutableHostConfig;
 class ScreenRecorder;
 
 // A class to implement the functionality of a host process.
@@ -62,17 +63,14 @@ class ScreenRecorder;
 //    incoming connection.
 class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
                        public ClientSession::EventHandler,
-                       public SignalStrategy::StatusObserver,
                        public protocol::SessionManager::Listener {
  public:
-  // Factory methods that must be used to create ChromotingHost
-  // instances. It does NOT take ownership of |context|, and
-  // |environment|, but they should not be deleted until returned host
-  // is destroyed.
-  static ChromotingHost* Create(ChromotingHostContext* context,
-                                MutableHostConfig* config,
-                                DesktopEnvironment* environment,
-                                bool allow_nat_traversal);
+  // The caller must ensure that |context|, |signal_strategy| and
+  // |environment| out-live the host.
+  ChromotingHost(ChromotingHostContext* context,
+                 SignalStrategy* signal_strategy,
+                 DesktopEnvironment* environment,
+                 const protocol::NetworkSettings& network_settings);
 
   // Asynchronously start the host process.
   //
@@ -86,22 +84,24 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // called after shutdown is completed.
   void Shutdown(const base::Closure& shutdown_task);
 
-  // Adds |observer| to the list of status observers. Doesn't take
-  // ownership of |observer|, so |observer| must outlive this
-  // object. All status observers must be added before the host is
-  // started.
+  // Add/Remove |observer| to/from the list of status observers. Both
+  // methods can be called on the network thread only.
   void AddStatusObserver(HostStatusObserver* observer);
+  void RemoveStatusObserver(HostStatusObserver* observer);
 
-  // Sets shared secret for the host. All incoming connections are
-  // rejected if shared secret isn't set. Must be called on the
-  // network thread after the host is started.
-  void SetSharedSecret(const std::string& shared_secret);
+  // This method may be called only form
+  // HostStatusObserver::OnClientAuthenticated() to reject the new
+  // client.
+  void RejectAuthenticatingClient();
 
-  ////////////////////////////////////////////////////////////////////////////
-  // SignalStrategy::StatusObserver implementation.
-  virtual void OnStateChange(
-      SignalStrategy::StatusObserver::State state) OVERRIDE;
-  virtual void OnJidChange(const std::string& full_jid) OVERRIDE;
+  // Sets the authenticator factory to use for incoming
+  // connections. Incoming connections are rejected until
+  // authenticator factory is set. Must be called on the network
+  // thread after the host is started. Must not be called more than
+  // once per host instance because it may not be safe to delete
+  // factory before all authenticators it created are deleted.
+  void SetAuthenticatorFactory(
+      scoped_ptr<protocol::AuthenticatorFactory> authenticator_factory);
 
   ////////////////////////////////////////////////////////////////////////////
   // ClientSession::EventHandler implementation.
@@ -110,9 +110,12 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   virtual void OnSessionClosed(ClientSession* session) OVERRIDE;
   virtual void OnSessionSequenceNumber(ClientSession* session,
                                        int64 sequence_number) OVERRIDE;
+  virtual void OnSessionIpAddress(ClientSession* session,
+                                  const std::string& channel_name,
+                                  const net::IPEndPoint& end_point) OVERRIDE;
 
   // SessionManager::Listener implementation.
-  virtual void OnSessionManagerInitialized() OVERRIDE;
+  virtual void OnSessionManagerReady() OVERRIDE;
   virtual void OnIncomingSession(
       protocol::Session* session,
       protocol::SessionManager::IncomingSessionResponse* response) OVERRIDE;
@@ -120,11 +123,6 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Sets desired configuration for the protocol. Ownership of the
   // |config| is transferred to the object. Must be called before Start().
   void set_protocol_config(protocol::CandidateSessionConfig* config);
-
-  // TODO(wez): ChromotingHost shouldn't need to know about Me2Mom.
-  void set_it2me(bool is_it2me) {
-    is_it2me_ = is_it2me;
-  }
 
   // Notify all active client sessions that local input has been detected, and
   // that remote input should be ignored for a short time.
@@ -143,7 +141,6 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   friend class base::RefCountedThreadSafe<ChromotingHost>;
   friend class ChromotingHostTest;
 
-  typedef std::vector<HostStatusObserver*> StatusObserverList;
   typedef std::vector<ClientSession*> ClientList;
 
   enum State {
@@ -153,23 +150,16 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
     kStopped,
   };
 
-  // Caller keeps ownership of |context| and |environment|.
-  ChromotingHost(ChromotingHostContext* context,
-                 MutableHostConfig* config,
-                 DesktopEnvironment* environment,
-                 bool allow_nat_traversal);
-  virtual ~ChromotingHost();
-
   // Creates encoder for the specified configuration.
-  Encoder* CreateEncoder(const protocol::SessionConfig& config);
+  static Encoder* CreateEncoder(const protocol::SessionConfig& config);
+
+  virtual ~ChromotingHost();
 
   std::string GenerateHostAuthToken(const std::string& encoded_client_token);
 
   void AddAuthenticatedClient(ClientSession* client,
                               const protocol::SessionConfig& config,
                               const std::string& jid);
-
-  int AuthenticatedClientsCount() const;
 
   void StopScreenRecorder();
   void OnScreenRecorderStopped();
@@ -183,9 +173,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Parameters specified when the host was created.
   ChromotingHostContext* context_;
   DesktopEnvironment* desktop_environment_;
-  scoped_refptr<MutableHostConfig> config_;
-  HostKeyPair key_pair_;
-  bool allow_nat_traversal_;
+  protocol::NetworkSettings network_settings_;
 
   // TODO(lambroslambrou): The following is a temporary fix for Me2Me
   // (crbug.com/105995), pending the AuthenticatorFactory work.
@@ -197,17 +185,17 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   bool have_shared_secret_;
 
   // Connection objects.
-  scoped_ptr<SignalStrategy> signal_strategy_;
-  std::string local_jid_;
+  SignalStrategy* signal_strategy_;
   scoped_ptr<protocol::SessionManager> session_manager_;
 
-  // StatusObserverList is thread-safe and can be used on any thread.
-  StatusObserverList status_observers_;
+  // Must be used on the network thread only.
+  ObserverList<HostStatusObserver> status_observers_;
 
   // The connections to remote clients.
   ClientList clients_;
 
   // Session manager for the host process.
+  // TODO(sergeyu): Do we need to have one screen recorder per client?
   scoped_refptr<ScreenRecorder> recorder_;
 
   // Number of screen recorders that are currently being
@@ -222,14 +210,16 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   // Configuration of the protocol.
   scoped_ptr<protocol::CandidateSessionConfig> protocol_config_;
 
+  // Flags used for RejectAuthenticatingClient().
+  bool authenticating_client_;
+  bool reject_authenticating_client_;
+
   // Stores list of tasks that should be executed when we finish
   // shutdown. Used only while |state_| is set to kStopping.
   std::vector<base::Closure> shutdown_tasks_;
 
   // TODO(sergeyu): The following members do not belong to
   // ChromotingHost and should be moved elsewhere.
-  bool is_it2me_;
-  std::string access_code_;
   UiStrings ui_strings_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingHost);

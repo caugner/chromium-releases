@@ -7,13 +7,14 @@
 #include "base/bind.h"
 #include "chrome/browser/tab_contents/web_drag_utils_win.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 
-using content::BrowserThread;
 using WebKit::WebDragOperationNone;
+using content::BrowserThread;
+using content::WebContents;
 
 namespace {
 
@@ -32,15 +33,15 @@ static void GetCursorPositions(gfx::NativeWindow wnd, gfx::Point* client,
 // WebDragSource, public:
 
 WebDragSource::WebDragSource(gfx::NativeWindow source_wnd,
-                             TabContents* tab_contents)
+                             WebContents* web_contents)
     : ui::DragSource(),
       source_wnd_(source_wnd),
-      render_view_host_(tab_contents->render_view_host()),
+      render_view_host_(web_contents->GetRenderViewHost()),
       effect_(DROPEFFECT_NONE) {
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
-                 content::Source<TabContents>(tab_contents));
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
-                 content::Source<TabContents>(tab_contents));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
+                 content::Source<WebContents>(web_contents));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
+                 content::Source<WebContents>(web_contents));
 }
 
 WebDragSource::~WebDragSource() {
@@ -111,12 +112,12 @@ void WebDragSource::OnDragSourceMove() {
 void WebDragSource::Observe(int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (content::NOTIFICATION_TAB_CONTENTS_SWAPPED == type) {
+  if (content::NOTIFICATION_WEB_CONTENTS_SWAPPED == type) {
     // When the tab contents get swapped, our render view host goes away.
     // That's OK, we can continue the drag, we just can't send messages back to
     // our drag source.
     render_view_host_ = NULL;
-  } else if (content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED == type) {
+  } else if (content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED == type) {
     // This could be possible when we close the tab and the source is still
     // being used in DoDragDrop at the time that the virtual file is being
     // downloaded.

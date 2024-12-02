@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -194,6 +194,13 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     # on ChromeOS).
     self.SetUp()
 
+    # Forcibly trigger all plugins to get registered.  crbug.com/94123
+    # Sometimes flash files loaded too quickly after firing browser
+    # ends up getting downloaded, which seems to indicate that the plugin
+    # hasn't been registered yet.
+    if not self.IsChromeOS():
+      self.GetPluginsInfo()
+
     # TODO(dtu): Remove this after crosbug.com/4558 is fixed.
     if self.IsChromeOS():
       self.WaitUntil(lambda: not self.GetNetworkInfo()['offline_mode'])
@@ -255,12 +262,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
         A list of strings, where each string represents a currently-running
         'chrome' process ID.
       """
-      proc = subprocess.Popen(['pgrep', 'chrome'], stdout=subprocess.PIPE)
+      proc = subprocess.Popen(['pgrep', '^chrome$'], stdout=subprocess.PIPE)
       proc.wait()
       return [x.strip() for x in proc.stdout.readlines()]
 
     orig_pids = _GetListOfChromePids()
-    subprocess.call(['pkill', 'chrome'])
+    subprocess.call(['pkill', '^chrome$'])
 
     def _AreOrigPidsDead(orig_pids):
       """Determines whether all originally-running 'chrome' processes are dead.
@@ -442,7 +449,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       return False
     return stat_result.st_ino != old_inode
 
-  def RestartBrowser(self, clear_profile=True):
+  def RestartBrowser(self, clear_profile=True, pre_launch_hook=None):
     """Restart the browser.
 
     For use with tests that require to restart the browser.
@@ -451,8 +458,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       clear_profile: If True, the browser profile is cleared before restart.
                      Defaults to True, that is restarts browser with a clean
                      profile.
+      pre_launch_hook: If specified, must be a callable that is invoked before
+                       the browser is started again. Not supported in ChromeOS.
     """
     if self.IsChromeOS():
+      assert pre_launch_hook is None, 'Not supported in ChromeOS'
       self.TearDown()
       if clear_profile:
         self.CleanupBrowserProfileOnChromeOS()
@@ -464,6 +474,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     orig_clear_state = self.get_clear_profile()
     self.CloseBrowserAndServer()
     self.set_clear_profile(clear_profile)
+    if pre_launch_hook:
+      pre_launch_hook()
     logging.debug('Restarting browser with clear_profile=%s' %
                   self.get_clear_profile())
     self.LaunchBrowserAndServer()
@@ -662,7 +674,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     return self.EvalDataFrom(private_file)
 
   def WaitUntil(self, function, timeout=-1, retry_sleep=0.25, args=[],
-                expect_retval=None):
+                expect_retval=None, debug=True):
     """Poll on a condition until timeout.
 
     Waits until the |function| evalues to |expect_retval| or until |timeout|
@@ -695,6 +707,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                      exit criteria. In case this is None (the default),
                      |function|'s return value is checked for truth,
                      so 'non-empty-string' should match with True
+      debug: if True, displays debug info at each retry.
 
     Returns:
       True, if returning when |function| evaluated to True
@@ -708,9 +721,10 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       retval = function(*args)
       if (expect_retval is None and retval) or expect_retval == retval:
         return True
-      logging.debug('WaitUntil(%s) still waiting. '
-                    'Expecting %s. Last returned %s.' % (
-                    function, expect_retval, retval))
+      if debug:
+        logging.debug('WaitUntil(%s) still waiting. '
+                      'Expecting %s. Last returned %s.' % (
+                      function, expect_retval, retval))
       time.sleep(retry_sleep)
     return False
 
@@ -1131,6 +1145,48 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
                 'action': 'default'}
     self._GetResultFromJSONRequest(cmd_dict)
 
+  def _EnsureProtectorCheck(self):
+    """Ensure that Protector check for changed settings has been performed in
+    the current browser session.
+
+    No-op if Protector is disabled.
+    """
+    # Ensure that check for default search engine change has been performed.
+    self._GetResultFromJSONRequest({'command': 'LoadSearchEngineInfo'})
+
+  def GetProtectorState(self):
+    """Returns current Protector state.
+
+    This will trigger Protector's check for changed settings if it hasn't been
+    performed yet.
+
+    Returns:
+      A dictionary.
+      Example:
+        { u'enabled': True,
+          u'showing_change': False }
+    """
+    self._EnsureProtectorCheck()
+    cmd_dict = {'command': 'GetProtectorState'}
+    return self._GetResultFromJSONRequest(cmd_dict)
+
+  def ApplyProtectorChange(self):
+    """Applies the change shown by Protector and closes the bubble.
+
+    No-op if Protector is not showing any change.
+    """
+    cmd_dict = {'command': 'PerformProtectorAction',
+                'action': 'apply_change'}
+    self._GetResultFromJSONRequest(cmd_dict)
+
+  def DiscardProtectorChange(self):
+    """Discards the change shown by Protector and closes the bubble.
+
+    No-op if Protector is not showing any change.
+    """
+    cmd_dict = {'command': 'PerformProtectorAction',
+                'action': 'discard_change'}
+    self._GetResultFromJSONRequest(cmd_dict)
 
   def GetLocalStatePrefsInfo(self):
     """Return info about preferences.
@@ -1171,10 +1227,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     cmd_dict = {
       'command': 'SetLocalStatePrefs',
+      'windex': 0,
       'path': path,
       'value': value,
     }
-    self._GetResultFromJSONRequest(cmd_dict)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def GetPrefsInfo(self):
     """Return info about preferences.
@@ -1186,8 +1243,12 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     Returns:
       an instance of prefs_info.PrefsInfo
     """
+    cmd_dict = {
+      'command': 'GetPrefsInfo',
+      'windex': 0,
+    }
     return prefs_info.PrefsInfo(
-        self._SendJSONRequest(0, json.dumps({'command': 'GetPrefsInfo'}),
+        self._SendJSONRequest(-1, json.dumps(cmd_dict),
                               self.action_max_timeout_ms()))
 
   def SetPrefs(self, path, value):
@@ -1214,10 +1275,11 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
     """
     cmd_dict = {
       'command': 'SetPrefs',
+      'windex': 0,
       'path': path,
       'value': value,
     }
-    self._GetResultFromJSONRequest(cmd_dict)
+    self._GetResultFromJSONRequest(cmd_dict, windex=-1)
 
   def SendWebkitKeyEvent(self, key_type, key_code, tab_index=0, windex=0):
     """Send a webkit key event to the browser.
@@ -1526,6 +1588,10 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'command': 'GetBrowserInfo',
     }
     return self._GetResultFromJSONRequest(cmd_dict, windex=-1)
+
+  def IsAura(self):
+    """Is this Aura?"""
+    return self.GetBrowserInfo()['properties']['aura']
 
   def GetProcessInfo(self):
     """Returns information about browser-related processes that currently exist.
@@ -2657,7 +2723,7 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
 
   def FindInPage(self, search_string, forward=True,
                  match_case=False, find_next=False,
-                 tab_index=0, windex=0):
+                 tab_index=0, windex=0, timeout=-1):
     """Find the match count for the given search string and search parameters.
     This is equivalent to using the find box.
 
@@ -2667,7 +2733,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       match_case: Boolean to set for case sensitive search.
       find_next: Boolean to set to continue the search or start from beginning.
       tab_index: The tab index, default is 0.
-      window_index: The window index, default is 0.
+      windex: The window index, default is 0.
+      timeout: request timeout (in milliseconds), default is -1.
 
     Returns:
       number of matches found for the given search string and parameters
@@ -2689,7 +2756,8 @@ class PyUITest(pyautolib.PyUITestBase, unittest.TestCase):
       'match_case' : match_case,
       'find_next' : find_next,
     }
-    return self._GetResultFromJSONRequest(cmd_dict, windex=windex)
+    return self._GetResultFromJSONRequest(cmd_dict, windex=windex,
+                                          timeout=timeout)
 
   def ExecuteJavascript(self, js, tab_index=0, windex=0, frame_xpath=''):
     """Executes a script in the specified frame of a tab.
@@ -4618,15 +4686,14 @@ class Main(object):
 
     self._options, self._args = parser.parse_args()
     global _OPTIONS
-    _OPTIONS = self._options  # export options so other classes can access
+    _OPTIONS = self._options  # Export options so other classes can access.
 
-    # Setup logging - start with defaults
+    # Set up logging. All log messages will be prepended with a timestamp.
+    format = '%(asctime)s %(levelname)-8s %(message)s'
+
     level = logging.INFO
-    format = None
-
     if self._options.verbose:
       level=logging.DEBUG
-      format='%(asctime)s %(levelname)-8s %(message)s'
 
     logging.basicConfig(level=level, format=format,
                         filename=self._options.log_file)

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,7 +53,6 @@ void InputMethodBridge::OnBlur() {
 
 void InputMethodBridge::DispatchKeyEvent(const KeyEvent& key) {
   DCHECK(key.type() == ui::ET_KEY_PRESSED || key.type() == ui::ET_KEY_RELEASED);
-  DCHECK(widget_focused());
 
   // We can just dispatch the event here since the |key| is already processed by
   // the system-wide IME.
@@ -124,6 +123,11 @@ void InputMethodBridge::InsertChar(char16 ch, int flags) {
 ui::TextInputType InputMethodBridge::GetTextInputType() const {
   TextInputClient* client = GetTextInputClient();
   return client ? client->GetTextInputType() : ui::TEXT_INPUT_TYPE_NONE;
+}
+
+bool InputMethodBridge::CanComposeInline() const {
+  TextInputClient* client = GetTextInputClient();
+  return client ? client->CanComposeInline() : true;
 }
 
 gfx::Rect InputMethodBridge::GetCaretBounds() {

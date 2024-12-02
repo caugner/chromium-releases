@@ -30,9 +30,9 @@ using syncable::THEMES;
 using syncable::NIGORI;
 using syncable::PASSWORDS;
 using syncable::MODEL_TYPE_COUNT;
+using syncable::ModelTypeSet;
 using syncable::ModelType;
 using syncable::ModelTypeFromInt;
-using syncable::ModelTypeSet;
 
 class SyncBackendRegistrarTest : public testing::Test {
  protected:
@@ -56,10 +56,10 @@ class SyncBackendRegistrarTest : public testing::Test {
   }
 
   void ExpectHasProcessorsForTypes(const SyncBackendRegistrar& registrar,
-                                   const ModelTypeSet& types) {
+                                   ModelTypeSet types) {
     for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
       ModelType model_type = ModelTypeFromInt(i);
-      EXPECT_EQ(types.count(model_type) > 0,
+      EXPECT_EQ(types.Has(model_type),
                 registrar.IsTypeActivatedForTest(model_type));
     }
   }
@@ -88,10 +88,7 @@ TEST_F(SyncBackendRegistrarTest, ConstructorEmpty) {
 
 TEST_F(SyncBackendRegistrarTest, ConstructorNonEmpty) {
   TestingProfile profile;
-  ModelTypeSet initial_types;
-  initial_types.insert(BOOKMARKS);
-  initial_types.insert(NIGORI);
-  initial_types.insert(PASSWORDS);
+  const ModelTypeSet initial_types(BOOKMARKS, NIGORI, PASSWORDS);
   SyncBackendRegistrar registrar(initial_types, "test", &profile, &loop_);
   EXPECT_TRUE(registrar.IsNigoriEnabled());
   {
@@ -116,11 +113,9 @@ TEST_F(SyncBackendRegistrarTest, ConfigureDataTypes) {
   SyncBackendRegistrar registrar(ModelTypeSet(), "test", &profile, &loop_);
 
   // Add.
-  ModelTypeSet types1;
-  types1.insert(BOOKMARKS);
-  types1.insert(NIGORI);
-  types1.insert(AUTOFILL);
-  EXPECT_EQ(types1, registrar.ConfigureDataTypes(types1, ModelTypeSet()));
+  const ModelTypeSet types1(BOOKMARKS, NIGORI, AUTOFILL);
+  EXPECT_TRUE(
+      registrar.ConfigureDataTypes(types1, ModelTypeSet()).Equals(types1));
   {
     ModelSafeRoutingInfo expected_routing_info;
     expected_routing_info[BOOKMARKS] = GROUP_PASSIVE;
@@ -131,10 +126,8 @@ TEST_F(SyncBackendRegistrarTest, ConfigureDataTypes) {
   ExpectHasProcessorsForTypes(registrar, ModelTypeSet());
 
   // Add and remove.
-  ModelTypeSet types2;
-  types2.insert(PREFERENCES);
-  types2.insert(THEMES);
-  EXPECT_EQ(types2, registrar.ConfigureDataTypes(types2, types1));
+  const ModelTypeSet types2(PREFERENCES, THEMES);
+  EXPECT_TRUE(registrar.ConfigureDataTypes(types2, types1).Equals(types2));
   {
     ModelSafeRoutingInfo expected_routing_info;
     expected_routing_info[PREFERENCES] = GROUP_PASSIVE;
@@ -144,7 +137,7 @@ TEST_F(SyncBackendRegistrarTest, ConfigureDataTypes) {
   ExpectHasProcessorsForTypes(registrar, ModelTypeSet());
 
   // Remove.
-  EXPECT_TRUE(registrar.ConfigureDataTypes(ModelTypeSet(), types2).empty());
+  EXPECT_TRUE(registrar.ConfigureDataTypes(ModelTypeSet(), types2).Empty());
   ExpectRoutingInfo(&registrar, ModelSafeRoutingInfo());
   ExpectHasProcessorsForTypes(registrar, ModelTypeSet());
 
@@ -178,9 +171,9 @@ TEST_F(SyncBackendRegistrarTest, ActivateDeactivateUIDataType) {
   EXPECT_CALL(change_processor_mock, IsRunning())
       .WillRepeatedly(Return(false));
 
-  ModelTypeSet types;
-  types.insert(BOOKMARKS);
-  EXPECT_EQ(types, registrar.ConfigureDataTypes(types, ModelTypeSet()));
+  const ModelTypeSet types(BOOKMARKS);
+  EXPECT_TRUE(
+      registrar.ConfigureDataTypes(types, ModelTypeSet()).Equals(types));
   registrar.ActivateDataType(BOOKMARKS, GROUP_UI,
                              &change_processor_mock,
                              test_user_share_.user_share());
@@ -225,9 +218,9 @@ TEST_F(SyncBackendRegistrarTest, ActivateDeactivateNonUIDataType) {
   EXPECT_CALL(change_processor_mock, IsRunning())
       .WillRepeatedly(Return(false));
 
-  ModelTypeSet types;
-  types.insert(AUTOFILL);
-  EXPECT_EQ(types, registrar.ConfigureDataTypes(types, ModelTypeSet()));
+  const ModelTypeSet types(AUTOFILL);
+  EXPECT_TRUE(
+      registrar.ConfigureDataTypes(types, ModelTypeSet()).Equals(types));
   registrar.ActivateDataType(AUTOFILL, GROUP_DB,
                              &change_processor_mock,
                              test_user_share_.user_share());

@@ -11,7 +11,7 @@
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/content_constants.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
-#include "webkit/glue/password_form.h"
+#include "webkit/forms/password_form.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/plugins/npapi/plugin_host.h"
 
@@ -40,6 +40,7 @@ void ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Write(
   WriteParam(m, p.base_time.is_null());
   if (p.base_time.is_null())
     return;
+  WriteParam(m, p.base_ticks);
   WriteParam(m, p.base_time);
   WriteParam(m, p.proxy_start);
   WriteParam(m, p.proxy_end);
@@ -64,6 +65,7 @@ bool ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Read(
     return true;
 
   return
+      ReadParam(m, iter, &r->base_ticks) &&
       ReadParam(m, iter, &r->base_time) &&
       ReadParam(m, iter, &r->proxy_start) &&
       ReadParam(m, iter, &r->proxy_end) &&
@@ -82,6 +84,8 @@ bool ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Read(
 void ParamTraits<webkit_glue::ResourceLoadTimingInfo>::Log(const param_type& p,
                                                            std::string* l) {
   l->append("(");
+  LogParam(p.base_ticks, l);
+  l->append(", ");
   LogParam(p.base_time, l);
   l->append(", ");
   LogParam(p.proxy_start, l);
@@ -306,8 +310,8 @@ void ParamTraits<webkit::WebPluginInfo>::Log(const param_type& p,
   l->append(")");
 }
 
-void ParamTraits<webkit_glue::PasswordForm>::Write(Message* m,
-                                                   const param_type& p) {
+void ParamTraits<webkit::forms::PasswordForm>::Write(Message* m,
+                                                     const param_type& p) {
   WriteParam(m, p.signon_realm);
   WriteParam(m, p.origin);
   WriteParam(m, p.action);
@@ -323,8 +327,9 @@ void ParamTraits<webkit_glue::PasswordForm>::Write(Message* m,
   WriteParam(m, p.blacklisted_by_user);
 }
 
-bool ParamTraits<webkit_glue::PasswordForm>::Read(const Message* m, void** iter,
-                                                  param_type* p) {
+bool ParamTraits<webkit::forms::PasswordForm>::Read(const Message* m,
+                                                    void** iter,
+                                                    param_type* p) {
   return
       ReadParam(m, iter, &p->signon_realm) &&
       ReadParam(m, iter, &p->origin) &&
@@ -340,8 +345,8 @@ bool ParamTraits<webkit_glue::PasswordForm>::Read(const Message* m, void** iter,
       ReadParam(m, iter, &p->preferred) &&
       ReadParam(m, iter, &p->blacklisted_by_user);
 }
-void ParamTraits<webkit_glue::PasswordForm>::Log(const param_type& p,
-                                                 std::string* l) {
+void ParamTraits<webkit::forms::PasswordForm>::Log(const param_type& p,
+                                                   std::string* l) {
   l->append("<PasswordForm>");
 }
 

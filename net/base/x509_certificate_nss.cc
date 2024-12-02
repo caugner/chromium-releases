@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,8 @@
 #include "base/time.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
+#include "crypto/scoped_nss_types.h"
+#include "crypto/sha2.h"
 #include "net/base/asn1_util.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
@@ -190,8 +192,32 @@ void GetCertChainInfo(CERTCertList* cert_list,
     if (i == 0) {
       verified_cert = node->cert;
     } else {
+      // Because of an NSS bug, CERT_PKIXVerifyCert may chain a self-signed
+      // certificate of a root CA to another certificate of the same root CA
+      // key.  Detect that error and ignore the root CA certificate.
+      // See https://bugzilla.mozilla.org/show_bug.cgi?id=721288.
+      if (node->cert->isRoot) {
+        // NOTE: isRoot doesn't mean the certificate is a trust anchor.  It
+        // means the certificate is self-signed.  Here we assume isRoot only
+        // implies the certificate is self-issued.
+        CERTCertListNode* next_node = CERT_LIST_NEXT(node);
+        CERTCertificate* next_cert;
+        if (!CERT_LIST_END(next_node, cert_list)) {
+          next_cert = next_node->cert;
+        } else {
+          next_cert = root_cert;
+        }
+        // Test that |node->cert| is actually a self-signed certificate
+        // whose key is equal to |next_cert|, and not a self-issued
+        // certificate signed by another key of the same CA.
+        if (next_cert && SECITEM_ItemsAreEqual(&node->cert->derPublicKey,
+                                               &next_cert->derPublicKey)) {
+          continue;
+        }
+      }
       verified_chain.push_back(node->cert);
     }
+
     SECAlgorithmID& signature = node->cert->signature;
     SECOidTag oid_tag = SECOID_FindOIDTag(&signature.algorithm);
     switch (oid_tag) {
@@ -246,21 +272,23 @@ CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
                                        CERTCertificate* root,
                                        CRLSet* crl_set) {
   std::vector<CERTCertificate*> certs;
-  for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
-       !CERT_LIST_END(node, cert_list);
-       node = CERT_LIST_NEXT(node)) {
-    certs.push_back(node->cert);
-  }
-  certs.push_back(root);
 
-  CERTCertificate* prev = NULL;
-  for (std::vector<CERTCertificate*>::iterator i = certs.begin();
-       i != certs.end(); ++i) {
+  if (cert_list) {
+    for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
+         !CERT_LIST_END(node, cert_list);
+         node = CERT_LIST_NEXT(node)) {
+      certs.push_back(node->cert);
+    }
+  }
+  if (root)
+    certs.push_back(root);
+
+  // We iterate from the root certificate down to the leaf, keeping track of
+  // the issuer's SPKI at each step.
+  std::string issuer_spki_hash;
+  for (std::vector<CERTCertificate*>::reverse_iterator i = certs.rbegin();
+       i != certs.rend(); ++i) {
     CERTCertificate* cert = *i;
-    CERTCertificate* child = prev;
-    prev = cert;
-    if (child == NULL)
-      continue;
 
     base::StringPiece der(reinterpret_cast<char*>(cert->derCert.data),
                           cert->derCert.len);
@@ -270,12 +298,18 @@ CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
       NOTREACHED();
       return kCRLSetError;
     }
+    const std::string spki_hash = crypto::SHA256HashString(spki);
 
-    std::string serial_number(
-        reinterpret_cast<char*>(child->serialNumber.data),
-        child->serialNumber.len);
+    base::StringPiece serial_number = base::StringPiece(
+        reinterpret_cast<char*>(cert->serialNumber.data),
+        cert->serialNumber.len);
 
-    CRLSet::Result result = crl_set->CheckCertificate(serial_number, spki);
+    CRLSet::Result result = crl_set->CheckSPKI(spki_hash);
+
+    if (result != CRLSet::REVOKED && !issuer_spki_hash.empty())
+      result = crl_set->CheckSerial(serial_number, issuer_spki_hash);
+
+    issuer_spki_hash = spki_hash;
 
     switch (result) {
       case CRLSet::REVOKED:
@@ -777,11 +811,14 @@ X509Certificate* X509Certificate::CreateSelfSigned(
     base::TimeDelta valid_duration) {
   DCHECK(key);
 
+  base::Time not_valid_before = base::Time::Now();
+  base::Time not_valid_after = not_valid_before + valid_duration;
   CERTCertificate* cert = x509_util::CreateSelfSignedCert(key->public_key(),
                                                           key->key(),
                                                           subject,
                                                           serial_number,
-                                                          valid_duration);
+                                                          not_valid_before,
+                                                          not_valid_after);
 
   if (!cert)
     return NULL;
@@ -871,31 +908,17 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     flags &= ~VERIFY_EV_CERT;
   }
 
-  if (check_revocation && crl_set) {
-    // We have a CRLSet so we build a chain without revocation checking in
-    // order to try and check it ourselves.
-    status = PKIXVerifyCert(cert_handle_, false /* no revocation checking */,
-                            NULL, 0, cvout);
-    if (status == SECSuccess) {
-      CRLSetResult crl_set_result = CheckRevocationWithCRLSet(
-          cvout[cvout_cert_list_index].value.pointer.chain,
-          cvout[cvout_trust_anchor_index].value.pointer.cert,
-          crl_set);
-      if (crl_set_result == kCRLSetError) {
-        // An error occured during processing so we fall back to standard
-        // revocation checking.
-        status = PKIXVerifyCert(cert_handle_, check_revocation, NULL, 0, cvout);
-      } else {
-        DCHECK(crl_set_result == kCRLSetRevoked || crl_set_result == kCRLSetOk);
-        if (crl_set_result == kCRLSetRevoked) {
-          PORT_SetError(SEC_ERROR_REVOKED_CERTIFICATE);
-          status = SECFailure;
-        }
-      }
+  status = PKIXVerifyCert(cert_handle_, check_revocation, NULL, 0, cvout);
+
+  if (crl_set) {
+    CRLSetResult crl_set_result = CheckRevocationWithCRLSet(
+        cvout[cvout_cert_list_index].value.pointer.chain,
+        cvout[cvout_trust_anchor_index].value.pointer.cert,
+        crl_set);
+    if (crl_set_result == kCRLSetRevoked) {
+      PORT_SetError(SEC_ERROR_REVOKED_CERTIFICATE);
+      status = SECFailure;
     }
-  } else {
-    status = PKIXVerifyCert(cert_handle_, check_revocation,
-                            NULL, 0, cvout);
   }
 
   if (status != SECSuccess) {
@@ -1140,6 +1163,40 @@ bool X509Certificate::WriteOSCertHandleToPickle(OSCertHandle cert_handle,
   return pickle->WriteData(
       reinterpret_cast<const char*>(cert_handle->derCert.data),
       cert_handle->derCert.len);
+}
+
+// static
+void X509Certificate::GetPublicKeyInfo(OSCertHandle cert_handle,
+                                       size_t* size_bits,
+                                       PublicKeyType* type) {
+  // Since we might fail, set the output parameters to default values first.
+  *type = kPublicKeyTypeUnknown;
+  *size_bits = 0;
+
+  crypto::ScopedSECKEYPublicKey key(CERT_ExtractPublicKey(cert_handle));
+  if (!key.get())
+    return;
+
+  *size_bits = SECKEY_PublicKeyStrengthInBits(key.get());
+
+  switch (key->keyType) {
+    case rsaKey:
+      *type = kPublicKeyTypeRSA;
+      break;
+    case dsaKey:
+      *type = kPublicKeyTypeDSA;
+      break;
+    case dhKey:
+      *type = kPublicKeyTypeDH;
+      break;
+    case ecKey:
+      *type = kPublicKeyTypeECDSA;
+      break;
+    default:
+      *type = kPublicKeyTypeUnknown;
+      *size_bits = 0;
+      break;
+  }
 }
 
 }  // namespace net

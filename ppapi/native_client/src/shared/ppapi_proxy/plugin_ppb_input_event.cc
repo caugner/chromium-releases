@@ -1,6 +1,6 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can
-// be found in the LICENSE file.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_input_event.h"
 
@@ -23,7 +23,6 @@ namespace {
 using ppapi_proxy::DebugPrintf;
 using ppapi_proxy::GetMainSrpcChannel;
 using ppapi_proxy::kInvalidResourceId;
-using ppapi_proxy::kMaxVarSize;
 using ppapi_proxy::PluginInputEvent;
 using ppapi_proxy::PluginResource;
 using ppapi_proxy::Serialize;
@@ -31,7 +30,7 @@ using ppapi_proxy::Serialize;
 // InputEvent ------------------------------------------------------------------
 
 int32_t RequestInputEvents(PP_Instance instance, uint32_t event_classes) {
-  DebugPrintf("PPB_InputEvent::RequestInputEvents: instance=%"NACL_PRIu32", "
+  DebugPrintf("PPB_InputEvent::RequestInputEvents: instance=%"NACL_PRId32", "
               "event_classes=%"NACL_PRIu32"\n",
               instance, event_classes);
   uint32_t success = 0;
@@ -51,7 +50,7 @@ int32_t RequestInputEvents(PP_Instance instance, uint32_t event_classes) {
 int32_t RequestFilteringInputEvents(PP_Instance instance,
                                     uint32_t event_classes) {
   DebugPrintf("PPB_InputEvent::RequestFilteringInputEvents: instance="
-              "%"NACL_PRIu32", event_classes=%"NACL_PRIu32"\n",
+              "%"NACL_PRId32", event_classes=%"NACL_PRIu32"\n",
               instance, event_classes);
   uint32_t success = 0;
   NaClSrpcError srpc_result =
@@ -69,7 +68,7 @@ int32_t RequestFilteringInputEvents(PP_Instance instance,
 
 void ClearInputEventRequest(PP_Instance instance,
                             uint32_t event_classes) {
-  DebugPrintf("PPB_InputEvent::ClearInputEventRequest: instance=%"NACL_PRIu32
+  DebugPrintf("PPB_InputEvent::ClearInputEventRequest: instance=%"NACL_PRId32
               ", event_classes=%"NACL_PRIu32"\n",
               instance, event_classes);
     PpbInputEventRpcClient::PPB_InputEvent_ClearInputEventRequest(
@@ -83,7 +82,7 @@ void ClearInputEventRequest(PP_Instance instance,
 class InputEventGetter {
  public:
   InputEventGetter(PP_Resource resource, const char* function_name) {
-    DebugPrintf("PPB_InputEvent::%s: resource=%"NACL_PRIu32"\n",
+    DebugPrintf("PPB_InputEvent::%s: resource=%"NACL_PRId32"\n",
                 function_name,
                 resource);
     input_event_ =
@@ -139,7 +138,7 @@ PP_Resource CreateMouseInputEvent1_1(PP_Instance instance,
                                      int32_t click_count,
                                      const PP_Point* mouse_movement) {
   DebugPrintf("PPB_InputEvent::CreateMouseInputEvent: instance="
-              "%"NACL_PRIu32", type=%d, time_stamp=%lf, modifiers="
+              "%"NACL_PRId32", type=%d, time_stamp=%lf, modifiers="
               "%"NACL_PRIu32", mouse_button=%d, x=%"NACL_PRId32", y="
               "%"NACL_PRId32", click_count=%d, movement_x="
               "%"NACL_PRId32", movement_y=%"NACL_PRId32"\n",
@@ -218,7 +217,7 @@ PP_Resource CreateWheelInputEvent(PP_Instance instance,
                                   const PP_FloatPoint* wheel_ticks,
                                   PP_Bool scroll_by_page) {
   DebugPrintf("PPB_InputEvent::CreateWheelInputEvent: instance="
-              "%"NACL_PRIu32", time_stamp=%lf, modifiers="
+              "%"NACL_PRId32", time_stamp=%lf, modifiers="
               "%"NACL_PRIu32", delta.x=%d, delta.y=%d, ticks.x=%d, ticks.y=%d, "
               "scroll_by_page=%s\n",
               instance, time_stamp, modifiers, wheel_delta->x, wheel_delta->y,
@@ -268,11 +267,11 @@ PP_Resource CreateKeyboardInputEvent(PP_Instance instance,
                                      uint32_t key_code,
                                      struct PP_Var character_text) {
   DebugPrintf("PPB_InputEvent::CreateKeyboardInputEvent: instance="
-              "%"NACL_PRIu32", type=%d, time_stamp=%lf, modifiers="
+              "%"NACL_PRId32", type=%d, time_stamp=%lf, modifiers="
               "%"NACL_PRIu32", key_code=%"NACL_PRIu32"\n",
               instance, type, time_stamp, modifiers, key_code);
   // Serialize the character_text Var.
-  uint32_t text_size = kMaxVarSize;
+  uint32_t text_size = 0;
   nacl::scoped_array<char> text_bytes(Serialize(&character_text, 1,
                                                 &text_size));
   PP_Resource resource_id = kInvalidResourceId;
@@ -441,4 +440,3 @@ PP_Var PluginInputEvent::GetCharacterText() const {
 }
 
 }  // namespace ppapi_proxy
-

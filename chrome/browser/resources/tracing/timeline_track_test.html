@@ -1,7 +1,7 @@
 <!DOCTYPE HTML>
 <html>
 <!--
-Copyright (c) 2010 The Chromium Authors. All rights reserved.
+Copyright (c) 2012 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -42,6 +42,8 @@ found in the LICENSE file.
 <script>
   var TimelineCounter = tracing.TimelineCounter;
   var TimelineCounterTrack = tracing.TimelineCounterTrack;
+  var TimelineCpu = tracing.TimelineCpu;
+  var TimelineCpuTrack = tracing.TimelineCpuTrack;
   var TimelineSliceTrack = tracing.TimelineSliceTrack;
   var TimelineSlice = tracing.TimelineSlice;
   var TimelineViewport = tracing.TimelineViewport;
@@ -124,6 +126,35 @@ found in the LICENSE file.
     assertEquals(0, hits.length);
   }
 
+  function testBasicCpu() {
+    var testEl = getTestDiv('testBasicCpu');
+
+    var cpu = new TimelineCpu(7);
+    cpu.slices = [
+      new TimelineSlice('a', 0, 1, {}, 1),
+      new TimelineSlice('b', 1, 2.1, {}, 4.8)
+    ];
+    cpu.updateBounds();
+
+    var track = TimelineCpuTrack();
+    testEl.appendChild(track);
+    track.heading = 'CPU ' + cpu.cpuNumber;
+    track.cpu = cpu;
+    track.viewport = new TimelineViewport(testEl);
+    track.viewport.setPanAndScale(0,
+        track.clientWidth / (1.1 * cpu.maxTimestamp));
+  }
+
+  function testViewport() {
+    var testEl = getTestDiv('testViewport');
+
+    var track = tracing.TimelineViewportTrack();
+    testEl.appendChild(track);
+    track.viewport = new TimelineViewport(testEl);
+    track.viewport.setPanAndScale(0,
+        track.clientWidth / 1000);
+  }
+
   function testBasicCounter() {
     var testEl = getTestDiv('testBasicCounter');
 
@@ -144,13 +175,93 @@ found in the LICENSE file.
                    3.1, 0.5];
     ctr.updateBounds();
 
-    var track = TimelineCounterTrack();
+    var track = new TimelineCounterTrack();
     testEl.appendChild(track);
     track.heading = ctr.name;
     track.counter = ctr;
     track.viewport = new TimelineViewport(testEl);
     track.viewport.setPanAndScale(0,
         track.clientWidth / (1.1 * ctr.maxTimestamp));
+  }
+
+  /* You'll need visual inspection to test eliding with this one. */
+  function testElideVisualInspection() {
+    var optDicts = [ { trackName: 'elideOff', elide: false }, 
+                     { trackName: 'elideOn', elide: true } ];
+    for (dictIndex in optDicts) {
+      dict = optDicts[dictIndex];
+      var testEl = getTestDiv(dict.trackName);
+      var track = TimelineSliceTrack();
+      if (dict.elide) {
+        track.SHOULD_ELIDE_TEXT = true;
+      } else {
+        track.SHOULD_ELIDE_TEXT = false;
+      }
+      var tooLongTitle = 'Unless eliding this SHOULD NOT BE DISPLAYED.  ';
+      var bigTitle = 'Very big title name that goes on longer ' + 
+                     'than you may expect';
+      testEl.appendChild(track);
+      track.heading = 'Visual: ' + dict.trackName;
+      track.slices = [
+          // title, colorId, start, args, opt_duration
+          new TimelineSlice('a ' + tooLongTitle + bigTitle, 0, 1, {}, 1),
+          new TimelineSlice(bigTitle, 1, 2.1, {}, 4.8),
+          new TimelineSlice('cccc cccc cccc', 1, 7, {}, 0.5),
+          new TimelineSlice('d', 2, 7.6, {}, 1.0)
+      ];
+      track.viewport = new TimelineViewport(testEl);
+      track.viewport.setPanAndScale(0,
+        track.clientWidth / (1.1 * track.slices[track.slices.length - 1].end));
+    }
+  }
+
+  function testElide() {
+    var testEl = getTestDiv('testElide');
+    var track = TimelineSliceTrack();
+    testEl.appendChild(track);
+    var bigtitle = 'Super duper long long title ' + 
+      'holy moly when did you get so verbose?';
+    var smalltitle = 'small';
+    track.viewport = new TimelineViewport(testEl);
+    track.heading = 'testElide';
+    track.slices = [
+        // title, colorId, start, args, opt_duration
+        new TimelineSlice(bigtitle, 0, 1, {}, 1),
+        new TimelineSlice(smalltitle, 1, 2, {}, 1),
+    ];
+    track.viewport = new TimelineViewport(testEl);
+    track.viewport.setPanAndScale(0,
+      track.clientWidth / (1.1 * track.slices[track.slices.length - 1].end));
+    var stringWidthPair = undefined;
+    var pixWidth = track.viewport_.xViewVectorToWorld(1);
+    
+    // Small titles on big slices are not elided.
+    stringWidthPair = track.elidedTitleCache.get(track, pixWidth, smalltitle, 
+      track.labelWidth(smalltitle), 1);
+    assertEquals(smalltitle, stringWidthPair.string);
+    // Keep shrinking the slice until eliding starts.
+    var elidedWhenSmallEnough = false;
+    for (var sliceLength = 1; sliceLength >= 0.00001; sliceLength /= 2.0) {
+      stringWidthPair = track.elidedTitleCache.get(track, pixWidth, smalltitle, 
+        track.labelWidth(smalltitle), sliceLength);
+      if (stringWidthPair.string.length < smalltitle.length) {
+	elidedWhenSmallEnough = true;
+	break;
+      }
+    }
+    assertTrue(elidedWhenSmallEnough);
+
+    // Big titles are elided immediately.
+    var superBigTitle = '';
+    for (var x = 0; x < 10; x++) {
+      superBigTitle += bigtitle;
+    }
+    stringWidthPair = track.elidedTitleCache.get(track, pixWidth, 
+      superBigTitle, track.labelWidth(superBigTitle), 1);
+    assertTrue(stringWidthPair.string.length < superBigTitle.length);
+    // And elided text ends with ...
+    var len = stringWidthPair.string.length;
+    assertEquals('...', stringWidthPair.string.substring(len-3, len));
   }
 
 </script>

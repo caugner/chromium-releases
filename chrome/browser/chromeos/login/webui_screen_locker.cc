@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
+#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -20,6 +21,7 @@
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gfx/screen.h"
@@ -59,12 +61,16 @@ void WebUIScreenLocker::LockScreen(bool unlock_on_input) {
   UserList users(1, &chromeos::UserManager::Get()->logged_in_user());
   login_display_.reset(new WebUILoginDisplay(this));
   login_display_->set_background_bounds(bounds);
-  login_display_->Init(users, false, false);
+  login_display_->Init(users, false, true, false);
 
-  static_cast<OobeUI*>(GetWebUI())->ShowSigninScreen(login_display_.get());
+  static_cast<OobeUI*>(GetWebUI()->GetController())->ShowSigninScreen(
+      login_display_.get());
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_LOCK_WEBUI_READY,
                  content::NotificationService::AllSources());
 }
 
@@ -111,9 +117,25 @@ void WebUIScreenLocker::ClearErrors() {
   GetWebUI()->CallJavascriptFunction("cr.ui.Oobe.clearErrors");
 }
 
+gfx::NativeWindow WebUIScreenLocker::GetNativeWindow() const {
+  return lock_window_->GetNativeWindow();
+}
+
 WebUIScreenLocker::~WebUIScreenLocker() {
   DCHECK(lock_window_);
   lock_window_->Close();
+  // If LockScreen() was called, we need to clear the signin screen handler
+  // delegate set in ShowSigninScreen so that it no longer points to us.
+  if (login_display_.get()) {
+    static_cast<OobeUI*>(GetWebUI()->GetController())->
+        ResetSigninScreenHandlerDelegate();
+  }
+  // WebUILoginView::OnTabMainFrameFirstRender sets the screen mode to
+  // WebUIScreenLocker::GetScreenMode() = SCREEN_LOCKER_MODE. We need to reset
+  // the screen mode when the lock screen is hidden here.
+  chromeos::StatusAreaViewChromeos::SetScreenMode(
+      chromeos::StatusAreaViewChromeos::BROWSER_MODE);
+  SetStatusAreaEnabled(true);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -123,11 +145,21 @@ void WebUIScreenLocker::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type != chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED)
-    return;
-
-  const User& user = *content::Details<User>(details).ptr();
-  login_display_->OnUserImageChanged(user);
+  switch (type) {
+    case chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED: {
+      const User& user = *content::Details<User>(details).ptr();
+      login_display_->OnUserImageChanged(user);
+      break;
+    }
+    case chrome::NOTIFICATION_LOCK_WEBUI_READY: {
+      webui_ready_ = true;
+      if (lock_ready_)
+        ScreenLockReady();
+      break;
+    }
+    default:
+      NOTREACHED();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -156,8 +188,6 @@ void WebUIScreenLocker::CompleteLogin(const std::string& username,
 
 void WebUIScreenLocker::Login(const std::string& username,
                               const std::string& password) {
-  DCHECK(username == chromeos::UserManager::Get()->logged_in_user().email());
-
   chromeos::ScreenLocker::default_screen_locker()->Authenticate(
       ASCIIToUTF16(password));
 }
@@ -185,11 +215,8 @@ void WebUIScreenLocker::OnLockWindowReady() {
 ////////////////////////////////////////////////////////////////////////////////
 // Overridden from WebUILoginView:
 
-void WebUIScreenLocker::OnTabMainFrameFirstRender() {
-  WebUILoginView::OnTabMainFrameFirstRender();
-  webui_ready_ = true;
-  if (lock_ready_)
-    ScreenLockReady();
+StatusAreaViewChromeos::ScreenMode WebUIScreenLocker::GetScreenMode() {
+  return StatusAreaViewChromeos::SCREEN_LOCKER_MODE;
 }
 
 views::Widget::InitParams::Type WebUIScreenLocker::GetStatusAreaWidgetType() {

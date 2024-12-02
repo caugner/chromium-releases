@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -230,8 +230,6 @@ class CustomThreadWatcher : public ThreadWatcher {
   }
 };
 
-DISABLE_RUNNABLE_METHOD_REFCOUNT(CustomThreadWatcher);
-
 class ThreadWatcherTest : public ::testing::Test {
  public:
   static const TimeDelta kSleepTime;
@@ -251,7 +249,7 @@ class ThreadWatcherTest : public ::testing::Test {
       : setup_complete_(&lock_),
         initialized_(false) {
     webkit_thread_.reset(new content::TestBrowserThread(
-        BrowserThread::WEBKIT));
+        BrowserThread::WEBKIT_DEPRECATED));
     io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO));
     watchdog_thread_.reset(new WatchDogThread());
     webkit_thread_->Start();
@@ -317,10 +315,6 @@ class ThreadWatcherTest : public ::testing::Test {
   scoped_ptr<WatchDogThread> watchdog_thread_;
 };
 
-// DISABLE_RUNNABLE_METHOD_REFCOUNT is a convenience macro for disabling
-// refcounting of ThreadWatcherTest classes.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ThreadWatcherTest);
-
 // Define static constants.
 const TimeDelta ThreadWatcherTest::kSleepTime =
     TimeDelta::FromMilliseconds(50);
@@ -329,7 +323,7 @@ const TimeDelta ThreadWatcherTest::kUnresponsiveTime =
 const BrowserThread::ID ThreadWatcherTest::io_thread_id = BrowserThread::IO;
 const std::string ThreadWatcherTest::io_thread_name = "IO";
 const BrowserThread::ID ThreadWatcherTest::webkit_thread_id =
-    BrowserThread::WEBKIT;
+    BrowserThread::WEBKIT_DEPRECATED;
 const std::string ThreadWatcherTest::webkit_thread_name = "WEBKIT";
 const std::string ThreadWatcherTest::crash_on_hang_seconds = "24";
 const std::string ThreadWatcherTest::crash_on_hang_threads = "IO,UI";

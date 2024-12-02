@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -98,15 +97,53 @@ enum ProfileDownloadResult {
   kDownloadResultsCount
 };
 
-// Time histogram name for the default profile image download.
+// Time histogram prefix for the default profile image download.
 const char kProfileDownloadDefaultTime[] =
     "UserImage.ProfileDownloadTime.Default";
-// Time histogram name for a failed profile image download.
+// Time histogram prefix for a failed profile image download.
 const char kProfileDownloadFailureTime[] =
     "UserImage.ProfileDownloadTime.Failure";
-// Time histogram name for a successful profile image download.
-const char ProfileDownloadSuccessTime[] =
+// Time histogram prefix for a successful profile image download.
+const char kProfileDownloadSuccessTime[] =
     "UserImage.ProfileDownloadTime.Success";
+// Time histogram suffix for a profile image download after login.
+const char kProfileDownloadReasonLoggedIn[] = "LoggedIn";
+
+// Add a histogram showing the time it takes to download a profile image.
+// Separate histograms are reported for each download |reason| and |result|.
+void AddProfileImageTimeHistogram(ProfileDownloadResult result,
+                                  const std::string& download_reason,
+                                  const base::TimeDelta& time_delta) {
+  std::string histogram_name;
+  switch (result) {
+    case kDownloadFailure:
+      histogram_name = kProfileDownloadFailureTime;
+      break;
+    case kDownloadDefault:
+      histogram_name = kProfileDownloadDefaultTime;
+      break;
+    case kDownloadSuccess:
+      histogram_name = kProfileDownloadSuccessTime;
+      break;
+    default:
+      NOTREACHED();
+  }
+  if (!download_reason.empty()) {
+    histogram_name += ".";
+    histogram_name += download_reason;
+  }
+
+  static const base::TimeDelta min_time = base::TimeDelta::FromMilliseconds(1);
+  static const base::TimeDelta max_time = base::TimeDelta::FromSeconds(50);
+  const size_t bucket_count(50);
+
+  base::Histogram* counter = base::Histogram::FactoryTimeGet(
+      histogram_name, min_time, max_time, bucket_count,
+      base::Histogram::kUmaTargetedHistogramFlag);
+  counter->AddTime(time_delta);
+
+  DVLOG(1) << "Profile image download time: " << time_delta.InSecondsF();
+}
 
 // Used to handle the asynchronous response of deleting a cryptohome directory.
 class RemoveAttempt : public CryptohomeLibrary::Delegate {
@@ -185,29 +222,44 @@ class RealTPMTokenInfoDelegate : public crypto::TPMTokenInfoDelegate {
   virtual bool IsTokenReady() const OVERRIDE;
   virtual void GetTokenInfo(std::string* token_name,
                             std::string* user_pin) const OVERRIDE;
+ private:
+  // These are mutable since we need to cache them in IsTokenReady().
+  mutable bool token_ready_;
+  mutable std::string token_name_;
+  mutable std::string user_pin_;
 };
 
-RealTPMTokenInfoDelegate::RealTPMTokenInfoDelegate() {}
+RealTPMTokenInfoDelegate::RealTPMTokenInfoDelegate() : token_ready_(false) {}
 RealTPMTokenInfoDelegate::~RealTPMTokenInfoDelegate() {}
 
 bool RealTPMTokenInfoDelegate::IsTokenAvailable() const {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   return CrosLibrary::Get()->GetCryptohomeLibrary()->TpmIsEnabled();
 }
 
 bool RealTPMTokenInfoDelegate::IsTokenReady() const {
-  return CrosLibrary::Get()->GetCryptohomeLibrary()->Pkcs11IsTpmTokenReady();
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!token_ready_) {
+    // Retrieve token_name_ and user_pin_ here since they will never change
+    // and CryptohomeLibrary calls are not thread safe.
+    if (CrosLibrary::Get()->GetCryptohomeLibrary()->Pkcs11IsTpmTokenReady()) {
+      CrosLibrary::Get()->GetCryptohomeLibrary()->Pkcs11GetTpmTokenInfo(
+          &token_name_, &user_pin_);
+      token_ready_ = true;
+    }
+  }
+  return token_ready_;
 }
 
 void RealTPMTokenInfoDelegate::GetTokenInfo(std::string* token_name,
                                             std::string* user_pin) const {
-  std::string local_token_name;
-  std::string local_user_pin;
-  CrosLibrary::Get()->GetCryptohomeLibrary()->Pkcs11GetTpmTokenInfo(
-      &local_token_name, &local_user_pin);
+  // May be called from a non UI thread, but must only be called after
+  // IsTokenReady() returns true.
+  CHECK(token_ready_);
   if (token_name)
-    *token_name = local_token_name;
+    *token_name = token_name_;
   if (user_pin)
-    *user_pin = local_user_pin;
+    *user_pin = user_pin_;
 }
 
 }  // namespace
@@ -287,7 +339,8 @@ void UserManager::UserLoggedIn(const std::string& email) {
           BrowserThread::UI,
           FROM_HERE,
           base::Bind(&UserManager::DownloadProfileImage,
-                     base::Unretained(this)),
+                     base::Unretained(this),
+                     kProfileDownloadReasonLoggedIn),
           kProfileImageDownloadDelayMs);
     }
 
@@ -498,7 +551,7 @@ void UserManager::SaveUserImageFromProfileImage(const std::string& username) {
   }
 }
 
-void UserManager::DownloadProfileImage() {
+void UserManager::DownloadProfileImage(const std::string& reason) {
   if (profile_image_downloader_.get()) {
     // Another download is already in progress
     return;
@@ -509,6 +562,7 @@ void UserManager::DownloadProfileImage() {
     return;
   }
 
+  profile_image_download_reason_ = reason;
   profile_image_load_start_time_ = base::Time::Now();
   profile_image_downloader_.reset(new ProfileDownloader(this));
   profile_image_downloader_->Start();
@@ -556,8 +610,8 @@ void UserManager::NotifyLocalStateChanged() {
 // Protected constructor and destructor.
 UserManager::UserManager()
     : ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_(new UserImageLoader)),
-      guest_user_(kGuestUser),
-      stub_user_(kStubUser),
+      guest_user_(kGuestUser, true),
+      stub_user_(kStubUser, false),
       logged_in_user_(NULL),
       current_user_is_owner_(false),
       current_user_is_new_(false),
@@ -890,25 +944,19 @@ void UserManager::OnDownloadComplete(ProfileDownloader* downloader,
   DCHECK(profile_image_downloader.get() == downloader);
 
   ProfileDownloadResult result;
-  std::string time_histogram_name;
   if (!success) {
     result = kDownloadFailure;
-    time_histogram_name = kProfileDownloadFailureTime;
   } else if (downloader->GetProfilePicture().isNull()) {
     result = kDownloadDefault;
-    time_histogram_name = kProfileDownloadDefaultTime;
   } else {
     result = kDownloadSuccess;
-    time_histogram_name = ProfileDownloadSuccessTime;
   }
-
   UMA_HISTOGRAM_ENUMERATION("UserImage.ProfileDownloadResult",
       result, kDownloadResultsCount);
 
   DCHECK(!profile_image_load_start_time_.is_null());
   base::TimeDelta delta = base::Time::Now() - profile_image_load_start_time_;
-  VLOG(1) << "Profile image download time: " << delta.InSecondsF();
-  UMA_HISTOGRAM_TIMES(time_histogram_name, delta);
+  AddProfileImageTimeHistogram(result, profile_image_download_reason_, delta);
 
   if (result == kDownloadSuccess) {
     // Check if this image is not the same as already downloaded.
@@ -946,7 +994,7 @@ void UserManager::OnDownloadComplete(ProfileDownloader* downloader,
 }
 
 User* UserManager::CreateUser(const std::string& email) const {
-  User* user = new User(email);
+  User* user = new User(email, email == kGuestUser);
   user->set_oauth_token_status(LoadUserOAuthStatus(email));
   // Used to determine whether user's display name is unique.
   ++display_name_count_[user->GetDisplayName()];

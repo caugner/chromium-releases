@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -103,7 +103,7 @@ TEST_F(RenderViewTest, MacTestCmdUp) {
   render_thread_->sink().ClearMessages();
 
   const char* kArrowDownScrollDown =
-      "40,false,false,true,false\n1936\np1\n\np2";
+      "40,false,false,true,false\n10128\np1\n\np2";
   view->OnSetEditCommandsForNextKeyEvent(
       EditCommands(1, EditCommand("moveToEndOfDocument", "")));
   SendNativeKeyEvent(NativeWebKeyboardEvent(arrowDownKeyDown));

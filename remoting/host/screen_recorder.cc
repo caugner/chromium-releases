@@ -7,12 +7,12 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/stl_util.h"
 #include "base/sys_info.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "remoting/base/capture_data.h"
 #include "remoting/proto/control.pb.h"
@@ -255,7 +255,7 @@ void ScreenRecorder::DoSendVideoPacket(VideoPacket* packet) {
     } else {
       // TODO(hclam): Fix this code since it causes multiple deletion if there's
       // more than one connection.
-      done_task = base::Bind(&DeletePointer<VideoPacket>, packet);
+      done_task = base::Bind(&base::DeletePointer<VideoPacket>, packet);
     }
 
     (*i)->video_stub()->ProcessVideoPacket(packet, done_task);

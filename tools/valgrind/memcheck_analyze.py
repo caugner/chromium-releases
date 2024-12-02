@@ -197,6 +197,7 @@ class ValgrindError:
     self._suppression = None
     self._commandline = commandline
     self._testcase = testcase
+    self._additional = []
 
     # Iterate through the nodes, parsing <what|auxwhat><stack> pairs.
     description = None
@@ -207,6 +208,7 @@ class ValgrindError:
       elif node.localName == "xwhat":
         description = getTextOf(node, "text")
       elif node.localName == "stack":
+        assert description
         self._backtraces.append([description, gatherFrames(node, source_dir)])
         description = None
       elif node.localName == "origin":
@@ -217,7 +219,12 @@ class ValgrindError:
         description = None
         stack = None
         frames = None
-      elif node.localName == "suppression":
+      elif description and node.localName != None:
+        # The lastest description has no stack, e.g. "Address 0x28 is unknown"
+        self._additional.append(description)
+        description = None
+
+      if node.localName == "suppression":
         self._suppression = getCDATAOf(node, "rawtext");
 
   def __str__(self):
@@ -260,6 +267,9 @@ class ValgrindError:
           output += " (" + frame[OBJECT_FILE] + ")"
         output += "\n"
 
+    for additional in self._additional:
+      output += additional + "\n"
+
     assert self._suppression != None, "Your Valgrind doesn't generate " \
                                       "suppressions - is it too old?"
 
@@ -267,7 +277,7 @@ class ValgrindError:
       output += "The report came from the `%s` test.\n" % self._testcase
     output += "Suppression (error hash=#%016X#):\n" % self.ErrorHash()
     output += ("  For more info on using suppressions see "
-               "http://dev.chromium.org/developers/how-tos/using-valgrind#TOC-Suppressing-Errors")
+               "http://dev.chromium.org/developers/tree-sheriffs/sheriff-details-chromium/memory-sheriff#TOC-Suppressing-memory-reports")
 
     # Widen suppression slightly to make portable between mac and linux
     # TODO(timurrrr): Oops, these transformations should happen

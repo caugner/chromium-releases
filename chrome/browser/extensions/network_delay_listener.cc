@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "net/url_request/url_request.h"
 
 using content::BrowserThread;
+using content::GlobalRequestID;
 
 NetworkDelayListener::NetworkDelayListener()
     : resource_queue_(NULL),
@@ -29,7 +30,7 @@ NetworkDelayListener::NetworkDelayListener()
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DOM_CONTENT_LOADED,
                  content::NotificationService::AllSources());
   AddRef();  // Will be balanced in Cleanup().
 }
@@ -128,7 +129,7 @@ void NetworkDelayListener::Observe(
       // We only wait for background pages to load. If the extension has no
       // background page, ignore it.
       if (service->extension_prefs()->DelaysNetworkRequests(extension->id()) &&
-          !extension->background_url().is_empty()) {
+          extension->has_background_page()) {
         BrowserThread::PostTask(
             BrowserThread::IO, FROM_HERE,
             base::Bind(&NetworkDelayListener::OnExtensionPending,
@@ -149,7 +150,7 @@ void NetworkDelayListener::Observe(
       }
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
+    case chrome::NOTIFICATION_EXTENSION_HOST_DOM_CONTENT_LOADED: {
       const ExtensionHost* eh = content::Details<ExtensionHost>(details).ptr();
       if (eh->extension_host_type() !=
           chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE)

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,59 +35,44 @@ const char kSupportIdTag[] = "support-id";
 const char kSupportIdLifetimeTag[] = "support-id-lifetime";
 }
 
-RegisterSupportHostRequest::RegisterSupportHostRequest()
-    : message_loop_(NULL) {
+RegisterSupportHostRequest::RegisterSupportHostRequest(
+    SignalStrategy* signal_strategy,
+    HostKeyPair* key_pair,
+    const RegisterCallback& callback)
+    : signal_strategy_(signal_strategy),
+      key_pair_(key_pair),
+      callback_(callback) {
+  DCHECK(signal_strategy_);
+  DCHECK(key_pair_);
+  signal_strategy_->AddListener(this);
+  iq_sender_.reset(new IqSender(signal_strategy_));
 }
 
 RegisterSupportHostRequest::~RegisterSupportHostRequest() {
+  if (signal_strategy_)
+    signal_strategy_->RemoveListener(this);
 }
 
-bool RegisterSupportHostRequest::Init(HostConfig* config,
-                                      const RegisterCallback& callback) {
-  callback_ = callback;
+void RegisterSupportHostRequest::OnSignalStrategyStateChange(
+    SignalStrategy::State state) {
+  if (state == SignalStrategy::CONNECTED) {
+    DCHECK(!callback_.is_null());
 
-  if (!key_pair_.Load(config)) {
-    return false;
+    request_.reset(iq_sender_->SendIq(
+        buzz::STR_SET, kChromotingBotJid,
+        CreateRegistrationRequest(signal_strategy_->GetLocalJid()),
+        base::Bind(&RegisterSupportHostRequest::ProcessResponse,
+                   base::Unretained(this))));
+  } else if (state == SignalStrategy::DISCONNECTED) {
+    // We will reach here if signaling fails to connect.
+    CallCallback(false, std::string(), base::TimeDelta());
   }
-  return true;
 }
 
-void RegisterSupportHostRequest::OnSignallingConnected(
-    SignalStrategy* signal_strategy,
-    const std::string& jid) {
-  DCHECK(!callback_.is_null());
-
-  message_loop_ = MessageLoop::current();
-
-  iq_sender_.reset(new IqSender(signal_strategy));
-  request_.reset(iq_sender_->SendIq(
-      buzz::STR_SET, kChromotingBotJid, CreateRegistrationRequest(jid),
-      base::Bind(&RegisterSupportHostRequest::ProcessResponse,
-                 base::Unretained(this))));
+bool RegisterSupportHostRequest::OnSignalStrategyIncomingStanza(
+    const buzz::XmlElement* stanza) {
+  return false;
 }
-
-void RegisterSupportHostRequest::OnSignallingDisconnected() {
-  if (!message_loop_) {
-    // We will reach here with |message_loop_| NULL if the Host's
-    // XMPP connection attempt fails.
-    CHECK(!callback_.is_null());
-    DCHECK(!request_.get());
-    callback_.Run(false, std::string(), base::TimeDelta());
-    return;
-  }
-  DCHECK_EQ(message_loop_, MessageLoop::current());
-  request_.reset();
-  iq_sender_.reset();
-}
-
-// Ignore any notifications other than signalling
-// connected/disconnected events.
-void RegisterSupportHostRequest::OnAccessDenied() { }
-void RegisterSupportHostRequest::OnClientAuthenticated(
-    const std::string& jid) { }
-void RegisterSupportHostRequest::OnClientDisconnected(
-    const std::string& jid) { }
-void RegisterSupportHostRequest::OnShutdown() { }
 
 XmlElement* RegisterSupportHostRequest::CreateRegistrationRequest(
     const std::string& jid) {
@@ -95,7 +80,7 @@ XmlElement* RegisterSupportHostRequest::CreateRegistrationRequest(
       QName(kChromotingXmlNamespace, kRegisterQueryTag));
   XmlElement* public_key = new XmlElement(
       QName(kChromotingXmlNamespace, kPublicKeyTag));
-  public_key->AddText(key_pair_.GetPublicKey());
+  public_key->AddText(key_pair_->GetPublicKey());
   query->AddElement(public_key);
   query->AddElement(CreateSignature(jid));
   return query;
@@ -112,7 +97,7 @@ XmlElement* RegisterSupportHostRequest::CreateSignature(
       QName(kChromotingXmlNamespace, kSignatureTimeAttr), time_str);
 
   std::string message = jid + ' ' + time_str;
-  std::string signature(key_pair_.GetSignature(message));
+  std::string signature(key_pair_->GetSignature(message));
   signature_tag->AddText(signature);
 
   return signature_tag;
@@ -176,13 +161,24 @@ bool RegisterSupportHostRequest::ParseResponse(const XmlElement* response,
   return true;
 }
 
-
 void RegisterSupportHostRequest::ProcessResponse(const XmlElement* response) {
-  DCHECK_EQ(message_loop_, MessageLoop::current());
   std::string support_id;
   base::TimeDelta lifetime;
   bool success = ParseResponse(response, &support_id, &lifetime);
-  callback_.Run(success, support_id, lifetime);
+  CallCallback(success, support_id, lifetime);
+}
+
+void RegisterSupportHostRequest::CallCallback(
+    bool success, const std::string& support_id, base::TimeDelta lifetime) {
+  // Cleanup state before calling the callback.
+  request_.reset();
+  iq_sender_.reset();
+  signal_strategy_->RemoveListener(this);
+  signal_strategy_ = NULL;
+
+  RegisterCallback callback = callback_;
+  callback_.Reset();
+  callback.Run(success, support_id, lifetime);
 }
 
 }  // namespace remoting

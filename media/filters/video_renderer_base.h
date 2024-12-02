@@ -1,16 +1,6 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-// VideoRendererBase creates its own thread for the sole purpose of timing frame
-// presentation.  It handles reading from the decoder and stores the results in
-// a queue of decoded frames, calling OnFrameAvailable() on subclasses to notify
-// when a frame is ready to display.
-//
-// The media filter methods Initialize(), Stop(), SetPlaybackRate() and Seek()
-// should be serialized, which they commonly are the pipeline thread.
-// As long as VideoRendererBase is initialized, GetCurrentFrame() is safe to
-// call from any thread, at any time, including inside of OnFrameAvailable().
 
 #ifndef MEDIA_FILTERS_VIDEO_RENDERER_BASE_H_
 #define MEDIA_FILTERS_VIDEO_RENDERER_BASE_H_
@@ -27,13 +17,30 @@
 
 namespace media {
 
-// TODO(scherkus): to avoid subclasses, consider using a peer/delegate interface
-// and pass in a reference to the constructor.
+// VideoRendererBase creates its own thread for the sole purpose of timing frame
+// presentation.  It handles reading from the decoder and stores the results in
+// a queue of decoded frames and executing a callback when a frame is ready for
+// rendering.
 class MEDIA_EXPORT VideoRendererBase
     : public VideoRenderer,
       public base::PlatformThread::Delegate {
  public:
-  VideoRendererBase();
+  typedef base::Callback<void(bool)> SetOpaqueCB;
+
+  // |paint_cb| is executed on the video frame timing thread whenever a new
+  // frame is available for painting via GetCurrentFrame().
+  //
+  // |set_opaque_cb| is executed when the renderer is initialized to inform
+  // the player whether the decoder's output will be opaque or not.
+  //
+  // Implementors should avoid doing any sort of heavy work in this method and
+  // instead post a task to a common/worker thread to handle rendering.  Slowing
+  // down the video thread may result in losing synchronization with audio.
+  //
+  // TODO(scherkus): pass the VideoFrame* to this callback and remove
+  // Get/PutCurrentFrame() http://crbug.com/108435
+  VideoRendererBase(const base::Closure& paint_cb,
+                    const SetOpaqueCB& set_opaque_cb);
   virtual ~VideoRendererBase();
 
   // Filter implementation.
@@ -62,32 +69,6 @@ class MEDIA_EXPORT VideoRendererBase
   void GetCurrentFrame(scoped_refptr<VideoFrame>* frame_out);
   void PutCurrentFrame(scoped_refptr<VideoFrame> frame);
 
- protected:
-  // Subclass interface.  Called before any other initialization in the base
-  // class takes place.
-  //
-  // Implementors typically use the media format of |decoder| to create their
-  // output surfaces.
-  virtual bool OnInitialize(VideoDecoder* decoder) = 0;
-
-  // Subclass interface.  Called after all other stopping actions take place.
-  //
-  // Implementors should perform any necessary cleanup before calling the
-  // callback.
-  virtual void OnStop(const base::Closure& callback) = 0;
-
-  // Subclass interface.  Called when a new frame is ready for display, which
-  // can be accessed via GetCurrentFrame().
-  //
-  // Implementors should avoid doing any sort of heavy work in this method and
-  // instead post a task to a common/worker thread to handle rendering.  Slowing
-  // down the video thread may result in losing synchronization with audio.
-  //
-  // IMPORTANT: This method is called on the video renderer thread, which is
-  // different from the thread OnInitialize(), OnStop(), and the rest of the
-  // class executes on.
-  virtual void OnFrameAvailable() = 0;
-
  private:
   // Callback from the video decoder delivering decoded video frames.
   void FrameReady(scoped_refptr<VideoFrame> frame);
@@ -103,14 +84,18 @@ class MEDIA_EXPORT VideoRendererBase
   // the next frame timestamp (may be NULL), and the provided playback rate.
   //
   // We don't use |playback_rate_| to avoid locking.
-  base::TimeDelta CalculateSleepDuration(VideoFrame* next_frame,
-                                         float playback_rate);
+  base::TimeDelta CalculateSleepDuration(
+      const scoped_refptr<VideoFrame>& next_frame,
+      float playback_rate);
 
   // Safely handles entering to an error state.
   void EnterErrorState_Locked(PipelineStatus status);
 
   // Helper function that flushes the buffers when a Stop() or error occurs.
   void DoStopOrError_Locked();
+
+  // Return the number of frames currently held by this class.
+  int NumFrames_Locked() const;
 
   // Used for accessing data members.
   base::Lock lock_;
@@ -120,7 +105,7 @@ class MEDIA_EXPORT VideoRendererBase
   // Queue of incoming frames as well as the current frame since the last time
   // OnFrameAvailable() was called.
   typedef std::deque<scoped_refptr<VideoFrame> > VideoFrameQueue;
-  VideoFrameQueue frames_queue_ready_;
+  VideoFrameQueue ready_frames_;
 
   // The current frame available to subclasses for rendering via
   // GetCurrentFrame().  |current_frame_| can only be altered when
@@ -180,9 +165,6 @@ class MEDIA_EXPORT VideoRendererBase
   // Video thread handle.
   base::PlatformThreadHandle thread_;
 
-  // Previous time returned from the pipeline.
-  base::TimeDelta previous_time_;
-
   // Keep track of various pending operations:
   //   - |pending_read_| is true when there's an active video decoding request.
   //   - |pending_paint_| is true when |current_frame_| is currently being
@@ -206,6 +188,13 @@ class MEDIA_EXPORT VideoRendererBase
   base::TimeDelta seek_timestamp_;
 
   VideoDecoder::ReadCB read_cb_;
+
+  // Embedder callback for notifying a new frame is available for painting.
+  base::Closure paint_cb_;
+
+  // Callback to execute to inform the player if the video decoder's output is
+  // opaque.
+  SetOpaqueCB set_opaque_cb_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoRendererBase);
 };

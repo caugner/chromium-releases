@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,8 +32,6 @@ struct DefaultLazyInstanceTraits;
 
 namespace webkit {
 namespace npapi {
-
-WEBKIT_PLUGINS_EXPORT extern FilePath::CharType kDefaultPluginLibraryName[];
 
 // This struct holds entry points into a plugin.  The entry points are
 // slightly different between Win/Mac and Unixes.  Note that the interface for
@@ -82,15 +80,18 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // Register an internal plugin with the specified plugin information.
   // An internal plugin must be registered before it can
   // be loaded using PluginList::LoadPlugin().
-  void RegisterInternalPlugin(const webkit::WebPluginInfo& info);
+  // If |add_at_beginning| is true the plugin will be added earlier in
+  // the list so that it can override the MIME types of older registrations.
+  void RegisterInternalPlugin(const webkit::WebPluginInfo& info,
+                              bool add_at_beginning);
 
   // This second version is for "plugins" that have been compiled directly into
   // the binary -- callers must provide the plugin information and the entry
-  // points. If |add_at_beginning| is true the plugin will be added earlier in
-  // the list so that it can override the MIME types of older registrations.
-  void RegisterInternalPlugin(const webkit::WebPluginInfo& info,
-                              const PluginEntryPoints& entry_points,
-                              bool add_at_beginning);
+  // points.
+  void RegisterInternalPluginWithEntryPoints(
+      const webkit::WebPluginInfo& info,
+      bool add_at_beginning,
+      const PluginEntryPoints& entry_points);
 
   // Removes a specified internal plugin from the list. The search will match
   // on the path from the version info previously registered.
@@ -136,8 +137,7 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // The |allow_wildcard| parameter controls whether this function
   // returns plugins which support wildcard mime types (* as the mime
   // type).  The |info| parameter is required to be non-NULL.  The
-  // list is in order of "most desirable" to "least desirable",
-  // meaning that the default plugin is at the end of the list.
+  // list is in order of "most desirable" to "least desirable".
   // If |use_stale| is NULL, this will load the plug-in list if necessary.
   // If it is not NULL, the plug-in list will not be loaded, and |*use_stale|
   // will be true iff the plug-in list was stale.
@@ -293,9 +293,6 @@ class WEBKIT_PLUGINS_EXPORT PluginList {
   // Need synchronization for the above members since this object can be
   // accessed on multiple threads.
   base::Lock lock_;
-
-  // Set to true if the default plugin is enabled.
-  bool default_plugin_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginList);
 };

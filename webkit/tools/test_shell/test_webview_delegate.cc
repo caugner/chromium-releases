@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/weburlrequest_extradata_impl.h"
 #include "webkit/glue/window_open_disposition.h"
-#include "webkit/media/video_renderer_impl.h"
+#include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 #include "webkit/media/webmediaplayer_impl.h"
 #include "webkit/plugins/npapi/webplugin_impl.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -98,6 +98,7 @@ using WebKit::WebFileSystem;
 using WebKit::WebFileSystemCallbacks;
 using WebKit::WebFormElement;
 using WebKit::WebFrame;
+using WebKit::WebGraphicsContext3D;
 using WebKit::WebHistoryItem;
 using WebKit::WebImage;
 using WebKit::WebMediaPlayer;
@@ -127,7 +128,6 @@ using WebKit::WebURLResponse;
 using WebKit::WebWidget;
 using WebKit::WebWindowFeatures;
 using WebKit::WebWorker;
-using WebKit::WebWorkerClient;
 using WebKit::WebVector;
 using WebKit::WebView;
 
@@ -338,6 +338,19 @@ WebStorageNamespace* TestWebViewDelegate::createSessionStorageNamespace(
       WebStorageNamespace::m_sessionStorageQuota);
 }
 
+WebGraphicsContext3D* TestWebViewDelegate::createGraphicsContext3D(
+    const WebGraphicsContext3D::Attributes& attributes,
+    bool direct) {
+  if (!shell_->webView())
+    return NULL;
+  scoped_ptr<WebGraphicsContext3D> context(
+      new webkit::gpu::WebGraphicsContext3DInProcessImpl(
+          gfx::kNullPluginWindow, NULL));
+  if (!context->initialize(attributes, shell_->webView(), direct))
+    return NULL;
+  return context.release();
+}
+
 void TestWebViewDelegate::didAddMessageToConsole(
     const WebConsoleMessage& message, const WebString& source_name,
     unsigned source_line) {
@@ -455,7 +468,7 @@ WebString TestWebViewDelegate::autoCorrectWord(const WebString& word) {
 void TestWebViewDelegate::runModalAlertDialog(
     WebFrame* frame, const WebString& message) {
   if (!shell_->layout_test_mode()) {
-    ShowJavaScriptAlert(UTF16ToWideHack(message));
+    ShowJavaScriptAlert(message);
   } else {
     printf("ALERT: %s\n", message.utf8().data());
   }
@@ -648,18 +661,15 @@ WebMediaPlayer* TestWebViewDelegate::createMediaPlayer(
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
 
-  scoped_ptr<webkit_media::WebMediaPlayerImpl> result(
-      new webkit_media::WebMediaPlayerImpl(
-          client,
-          base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
-          collection.release(),
-          message_loop_factory.release(),
-          NULL,
-          new media::MediaLog()));
-  if (!result->Initialize(frame, false)) {
-    return NULL;
-  }
-  return result.release();
+  return new webkit_media::WebMediaPlayerImpl(
+      frame,
+      client,
+      base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
+      collection.release(),
+      NULL,
+      message_loop_factory.release(),
+      NULL,
+      new media::MediaLog());
 }
 
 WebApplicationCacheHost* TestWebViewDelegate::createApplicationCacheHost(
@@ -769,8 +779,8 @@ void TestWebViewDelegate::didStartProvisionalLoad(WebFrame* frame) {
   }
 
   if (shell_->layout_test_controller()->StopProvisionalFrameLoads()) {
-    printf("%S - stopping load in didStartProvisionalLoadForFrame callback\n",
-           GetFrameDescription(frame).c_str());
+    printf("%s - stopping load in didStartProvisionalLoadForFrame callback\n",
+           UTF16ToUTF8(GetFrameDescription(frame)).c_str());
     frame->stopLoading();
   }
   UpdateAddressBar(frame->view());
@@ -837,8 +847,8 @@ void TestWebViewDelegate::didReceiveTitle(
 void TestWebViewDelegate::didFinishDocumentLoad(WebFrame* frame) {
   unsigned pending_unload_events = frame->unloadListenerCount();
   if (pending_unload_events) {
-    printf("%S - has %u onunload handler(s)\n",
-        GetFrameDescription(frame).c_str(), pending_unload_events);
+    printf("%s - has %u onunload handler(s)\n",
+        UTF16ToUTF8(GetFrameDescription(frame)).c_str(), pending_unload_events);
   }
 }
 
@@ -1138,20 +1148,21 @@ void TestWebViewDelegate::UpdateSessionHistory(WebFrame* frame) {
   entry->SetContentState(webkit_glue::HistoryItemToString(history_item));
 }
 
-std::wstring TestWebViewDelegate::GetFrameDescription(WebFrame* webframe) {
-  std::wstring name = UTF16ToWideHack(webframe->name());
+string16 TestWebViewDelegate::GetFrameDescription(WebFrame* webframe) {
+  std::string name = UTF16ToUTF8(webframe->name());
 
   if (webframe == shell_->webView()->mainFrame()) {
     if (name.length())
-      return L"main frame \"" + name + L"\"";
+      name = "main frame \"" + name + "\"";
     else
-      return L"main frame";
+      name = "main frame";
   } else {
     if (name.length())
-      return L"frame \"" + name + L"\"";
+      name = "frame \"" + name + "\"";
     else
-      return L"frame (anonymous)";
+      name = "frame (anonymous)";
   }
+  return UTF8ToUTF16(name);
 }
 
 void TestWebViewDelegate::set_fake_window_rect(const WebRect& rect) {

@@ -58,7 +58,7 @@ std::string GetStringPref(const char* path, const std::string& fallback) {
 
 } // namespace
 
-AppsPromo::PromoData::PromoData() {}
+AppsPromo::PromoData::PromoData() : user_group(AppsPromo::USERS_NONE) {}
 AppsPromo::PromoData::PromoData(const std::string& id,
                                 const std::string& header,
                                 const std::string& button,
@@ -296,7 +296,6 @@ int AppsPromo::GetPromoCounter() const {
 
 void AppsPromo::SetPromoCounter(int val) {
   prefs_->SetInteger(prefs::kAppsPromoCounter, val);
-  prefs_->ScheduleSavePersistentPrefs();
 }
 
 bool AppsPromo::GetDefaultAppsInstalled() const {
@@ -312,7 +311,7 @@ AppsPromo::UserGroup AppsPromo::GetCurrentUserGroup() const {
 
 AppsPromoLogoFetcher::AppsPromoLogoFetcher(
     Profile* profile,
-    AppsPromo::PromoData promo_data)
+    const AppsPromo::PromoData& promo_data)
     : profile_(profile),
       promo_data_(promo_data) {
   if (SupportsLogoURL()) {

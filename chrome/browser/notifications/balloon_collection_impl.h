@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,6 +72,10 @@ class BalloonCollectionImpl : public BalloonCollection,
   virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
 #endif
 
+  // base_ is embedded, so this is a simple accessor for the number of
+  // balloons in the collection.
+  int count() const { return base_.count(); }
+
  protected:
   // Calculates layout values for the balloons including
   // the scaling, the max/min sizes, and the upper left corner of each.
@@ -139,6 +143,10 @@ class BalloonCollectionImpl : public BalloonCollection,
     // to be repositioned.
     bool ComputeOffsetToMoveAbovePanels(const gfx::Rect& panel_bounds);
 
+    void enable_computing_panel_offset() {
+      need_to_compute_panel_offset_ = true;
+    }
+
    private:
     // Layout parameters
     int VerticalEdgeMargin() const;
@@ -157,6 +165,10 @@ class BalloonCollectionImpl : public BalloonCollection,
     Placement placement_;
     gfx::Rect work_area_;
 
+    // The flag that indicates that the panel offset computation should be
+    // performed.
+    bool need_to_compute_panel_offset_;
+
     // The offset that guarantees that the notificaitions shown in the
     // lower-right or lower-left corner of the screen will go above currently
     // shown panels and will not be obscured by them.
@@ -165,13 +177,22 @@ class BalloonCollectionImpl : public BalloonCollection,
     DISALLOW_COPY_AND_ASSIGN(Layout);
   };
 
-  // Creates a new balloon. Overridable by unit tests.  The caller is
-  // responsible for freeing the pointer returned.
+  // Creates a new balloon. Overridable by derived classes and unit tests.
+  // The caller is responsible for freeing the pointer returned.
   virtual Balloon* MakeBalloon(const Notification& notification,
                                Profile* profile);
 
+  // Protected implementation of Add with additional add_to_front parameter
+  // for use by derived classes.
+  void AddImpl(const Notification& notification,
+               Profile* profile,
+               bool add_to_front);
+
   // Gets a bounding box for all the current balloons in screen coordinates.
   gfx::Rect GetBalloonsBoundingBox() const;
+
+  BalloonCollectionBase& base() { return base_; }
+  Layout& layout() { return layout_; }
 
  private:
   // Adjusts the positions of the balloons (e.g., when one is closed).

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,11 +43,14 @@ class NET_EXPORT HttpUtil {
   // Parses the value of a Content-Type header.  The resulting mime_type and
   // charset values are normalized to lowercase.  The mime_type and charset
   // output values are only modified if the content_type_str contains a mime
-  // type and charset value, respectively.
+  // type and charset value, respectively.  The boundary output value is
+  // optional and will be assigned the (quoted) value of the boundary
+  // paramter, if any.
   static void ParseContentType(const std::string& content_type_str,
                                std::string* mime_type,
                                std::string* charset,
-                               bool* had_charset);
+                               bool* had_charset,
+                               std::string* boundary);
 
   // Scans the headers and look for the first "Range" header in |headers|,
   // if "Range" exists and the first one of it is well formatted then returns
@@ -100,6 +103,13 @@ class NET_EXPORT HttpUtil {
 
   // Whether the character is the start of a quotation mark.
   static bool IsQuote(char c);
+
+  // Whether the string is a valid |token| as defined in RFC 2616 Sec 2.2.
+  static bool IsToken(std::string::const_iterator begin,
+                      std::string::const_iterator end);
+  static bool IsToken(const std::string& str) {
+    return IsToken(str.begin(), str.end());
+  }
 
   // RFC 2616 Sec 2.2:
   // quoted-string = ( <"> *(qdtext | quoted-pair ) <"> )
@@ -307,8 +317,12 @@ class NET_EXPORT HttpUtil {
     }
     std::string value() const {
       return value_is_quoted_ ? unquoted_value_ : std::string(value_begin_,
-                                                               value_end_);
+                                                              value_end_);
     }
+
+    // The value before unquoting (if any).
+    std::string raw_value() const { return std::string(value_begin_,
+                                                       value_end_); }
 
    private:
     HttpUtil::ValuesIterator props_;

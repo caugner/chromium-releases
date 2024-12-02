@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,6 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sidebar/sidebar_container.h"
-#include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
@@ -31,25 +29,27 @@
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
-#include "chrome/browser/ui/cocoa/repost_form_warning_mac.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
 #include "chrome/browser/ui/cocoa/task_manager_mac.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/page_info_bubble.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/task_manager_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/rect.h"
+
+using content::SSLStatus;
+using content::WebContents;
 
 // Replicate specific 10.7 SDK declarations for building with prior SDKs.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
@@ -75,10 +75,8 @@ BrowserWindowCocoa::BrowserWindowCocoa(Browser* browser,
                                        BrowserWindowController* controller)
   : browser_(browser),
     controller_(controller),
-    confirm_close_factory_(browser) {
-  registrar_.Add(
-      this, chrome::NOTIFICATION_SIDEBAR_CHANGED,
-      content::Source<SidebarManager>(SidebarManager::GetInstance()));
+    confirm_close_factory_(browser),
+    attention_request_id_(0) {
 
   pref_change_registrar_.Init(browser_->profile()->GetPrefs());
   pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
@@ -180,8 +178,13 @@ void BrowserWindowCocoa::Deactivate() {
   NOTIMPLEMENTED();
 }
 
-void BrowserWindowCocoa::FlashFrame() {
-  [NSApp requestUserAttention:NSInformationalRequest];
+void BrowserWindowCocoa::FlashFrame(bool flash) {
+  if (flash) {
+    attention_request_id_ = [NSApp requestUserAttention:NSInformationalRequest];
+  } else {
+    [NSApp cancelUserAttentionRequest:attention_request_id_];
+    attention_request_id_ = 0;
+  }
 }
 
 bool BrowserWindowCocoa::IsActive() const {
@@ -202,7 +205,7 @@ StatusBubble* BrowserWindowCocoa::GetStatusBubble() {
 
 void BrowserWindowCocoa::ToolbarSizeChanged(bool is_animating) {
   // According to beng, this is an ugly method that comes from the days when the
-  // download shelf was a ChromeView attached to the TabContents, and as its
+  // download shelf was a ChromeView attached to the WebContents, and as its
   // size changed via animation it notified through TCD/etc to the browser view
   // to relayout for each tick of the animation. We don't need anything of the
   // sort on Mac.
@@ -225,7 +228,11 @@ void BrowserWindowCocoa::BookmarkBarStateChanged(
 
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
-      browser_->GetSelectedTabContents()];
+      browser_->GetSelectedWebContents()];
+}
+
+void BrowserWindowCocoa::SetDevToolsDockSide(DevToolsDockSide side) {
+  [controller_ setDevToolsDockToRight:side == DEVTOOLS_DOCK_SIDE_RIGHT];
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
@@ -327,7 +334,7 @@ void BrowserWindowCocoa::UpdateReloadStopState(bool is_loading, bool force) {
 
 void BrowserWindowCocoa::UpdateToolbar(TabContentsWrapper* contents,
                                        bool should_restore_state) {
-  [controller_ updateToolbarWithContents:contents->tab_contents()
+  [controller_ updateToolbarWithContents:contents->web_contents()
                       shouldRestoreState:should_restore_state ? YES : NO];
 }
 
@@ -368,6 +375,17 @@ bool BrowserWindowCocoa::IsToolbarVisible() const {
          browser_->SupportsWindowFeature(Browser::FEATURE_LOCATIONBAR);
 }
 
+gfx::Rect BrowserWindowCocoa::GetRootWindowResizerRect() const {
+  if (IsDownloadShelfVisible())
+    return gfx::Rect();
+  NSRect tabRect = [controller_ selectedTabGrowBoxRect];
+  return gfx::Rect(NSRectToCGRect(tabRect));
+}
+
+bool BrowserWindowCocoa::IsPanel() const {
+  return false;
+}
+
 // This is called from Browser, which in turn is called directly from
 // a menu option.  All we do here is set a preference.  The act of
 // setting the preference sends notifications to all windows who then
@@ -395,8 +413,7 @@ void BrowserWindowCocoa::ShowTaskManager() {
   TaskManagerDialog::Show();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (CommandLine::ForCurrentProcess()
-        ->HasSwitch(switches::kEnableWebUITaskManager)) {
+  if (chrome_web_ui::IsMoreWebUI()) {
     TaskManagerDialog::Show();
   } else {
     TaskManagerMac::Show(false);
@@ -409,8 +426,7 @@ void BrowserWindowCocoa::ShowBackgroundPages() {
   TaskManagerDialog::ShowBackgroundPages();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (CommandLine::ForCurrentProcess()
-        ->HasSwitch(switches::kEnableWebUITaskManager)) {
+  if (chrome_web_ui::IsMoreWebUI()) {
     TaskManagerDialog::ShowBackgroundPages();
   } else {
     TaskManagerMac::Show(true);
@@ -431,11 +447,6 @@ bool BrowserWindowCocoa::IsDownloadShelfVisible() const {
 DownloadShelf* BrowserWindowCocoa::GetDownloadShelf() {
   DownloadShelfController* shelfController = [controller_ downloadShelf];
   return [shelfController bridge];
-}
-
-void BrowserWindowCocoa::ShowRepostFormWarningDialog(
-    TabContents* tab_contents) {
-  RepostFormWarningMac::Create(GetNativeHandle(), tab_contents);
 }
 
 void BrowserWindowCocoa::ShowCollectedCookiesDialog(
@@ -463,13 +474,13 @@ int BrowserWindowCocoa::GetExtraRenderViewHeight() const {
   return 0;
 }
 
-void BrowserWindowCocoa::TabContentsFocused(TabContents* tab_contents) {
+void BrowserWindowCocoa::WebContentsFocused(WebContents* contents) {
   NOTIMPLEMENTED();
 }
 
 void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
                                       const GURL& url,
-                                      const NavigationEntry::SSLStatus& ssl,
+                                      const SSLStatus& ssl,
                                       bool show_history) {
   browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
 }
@@ -545,7 +556,7 @@ bool BrowserWindowCocoa::InPresentationMode() {
 }
 
 void BrowserWindowCocoa::ShowInstant(TabContentsWrapper* preview) {
-  [controller_ showInstant:preview->tab_contents()];
+  [controller_ showInstant:preview->web_contents()];
 }
 
 void BrowserWindowCocoa::HideInstant() {
@@ -588,10 +599,6 @@ void BrowserWindowCocoa::Observe(int type,
       [controller_ updateBookmarkBarVisibilityWithAnimation:YES];
       break;
     }
-    case chrome::NOTIFICATION_SIDEBAR_CHANGED:
-      UpdateSidebarForContents(
-          content::Details<SidebarContainer>(details)->tab_contents());
-      break;
     default:
       NOTREACHED();  // we don't ask for anything else!
       break;
@@ -609,15 +616,9 @@ NSWindow* BrowserWindowCocoa::window() const {
   return [controller_ window];
 }
 
-void BrowserWindowCocoa::UpdateSidebarForContents(TabContents* tab_contents) {
-  if (tab_contents == browser_->GetSelectedTabContents()) {
-    [controller_ updateSidebarForContents:tab_contents];
-  }
-}
-
-void BrowserWindowCocoa::ShowAvatarBubble(TabContents* tab_contents,
+void BrowserWindowCocoa::ShowAvatarBubble(WebContents* web_contents,
                                           const gfx::Rect& rect) {
-  NSView* view = tab_contents->GetNativeView();
+  NSView* view = web_contents->GetNativeView();
   NSRect bounds = [view bounds];
   NSPoint point;
   point.x = NSMinX(bounds) + rect.right();

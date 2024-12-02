@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,11 @@
 #include "base/tracked_objects.h"
 
 #if defined(OS_MACOSX)
-#include <mach/mach.h>
 #include <sys/resource.h>
 #include <algorithm>
 #endif
 
 #if defined(OS_LINUX)
-#include <dlfcn.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -42,8 +40,7 @@ namespace {
 
 #if !defined(OS_MACOSX)
 // Mac name code is in in platform_thread_mac.mm.
-LazyInstance<ThreadLocalPointer<char>,
-             LeakyLazyInstanceTraits<ThreadLocalPointer<char> > >
+LazyInstance<ThreadLocalPointer<char> >::Leaky
     current_thread_name = LAZY_INSTANCE_INITIALIZER;
 #endif
 
@@ -133,9 +130,7 @@ bool CreateThread(size_t stack_size, bool joinable,
 PlatformThreadId PlatformThread::CurrentId() {
   // Pthreads doesn't have the concept of a thread ID, so we have to reach down
   // into the kernel.
-#if defined(OS_MACOSX)
-  return mach_thread_self();
-#elif defined(OS_LINUX)
+#if defined(OS_LINUX)
   return syscall(__NR_gettid);
 #elif defined(OS_ANDROID)
   return gettid();
@@ -153,24 +148,27 @@ void PlatformThread::YieldCurrentThread() {
 
 // static
 void PlatformThread::Sleep(int duration_ms) {
+  // NOTE: This function will be supplanted by the other version of Sleep
+  // in the future.  See issue 108171 for more information.
+  Sleep(TimeDelta::FromMilliseconds(duration_ms));
+}
+
+// static
+void PlatformThread::Sleep(TimeDelta duration) {
   struct timespec sleep_time, remaining;
 
-  // Contains the portion of duration_ms >= 1 sec.
-  sleep_time.tv_sec = duration_ms / 1000;
-  duration_ms -= sleep_time.tv_sec * 1000;
-
-  // Contains the portion of duration_ms < 1 sec.
-  sleep_time.tv_nsec = duration_ms * 1000 * 1000;  // nanoseconds.
+  // Break the duration into seconds and nanoseconds.
+  // NOTE: TimeDelta's microseconds are int64s while timespec's
+  // nanoseconds are longs, so this unpacking must prevent overflow.
+  sleep_time.tv_sec = duration.InSeconds();
+  duration -= TimeDelta::FromSeconds(sleep_time.tv_sec);
+  sleep_time.tv_nsec = duration.InMicroseconds() * 1000;  // nanoseconds
 
   while (nanosleep(&sleep_time, &remaining) == -1 && errno == EINTR)
     sleep_time = remaining;
 }
 
-// Linux SetName is currently disabled, as we need to distinguish between
-// helper threads (where it's ok to make this call) and the main thread
-// (where making this call renames our process, causing tools like killall
-// to stop working).
-#if 0 && defined(OS_LINUX)
+#if defined(OS_LINUX)
 // static
 void PlatformThread::SetName(const char* name) {
   // have to cast away const because ThreadLocalPointer does not support const
@@ -178,31 +176,22 @@ void PlatformThread::SetName(const char* name) {
   current_thread_name.Pointer()->Set(const_cast<char*>(name));
   tracked_objects::ThreadData::InitializeThreadContext(name);
 
+  // On linux we can get the thread names to show up in the debugger by setting
+  // the process name for the LWP.  We don't want to do this for the main
+  // thread because that would rename the process, causing tools like killall
+  // to stop working.
+  if (PlatformThread::CurrentId() == getpid())
+    return;
+
   // http://0pointer.de/blog/projects/name-your-threads.html
-
-  // glibc recently added support for pthread_setname_np, but it's not
-  // commonly available yet.  So test for it at runtime.
-  int (*dynamic_pthread_setname_np)(pthread_t, const char*);
-  *reinterpret_cast<void**>(&dynamic_pthread_setname_np) =
-      dlsym(RTLD_DEFAULT, "pthread_setname_np");
-
-  if (dynamic_pthread_setname_np) {
-    // This limit comes from glibc, which gets it from the kernel
-    // (TASK_COMM_LEN).
-    const int kMaxNameLength = 15;
-    std::string shortened_name = std::string(name).substr(0, kMaxNameLength);
-    int err = dynamic_pthread_setname_np(pthread_self(),
-                                         shortened_name.c_str());
-    if (err < 0)
-      DLOG(ERROR) << "pthread_setname_np: " << safe_strerror(err);
-  } else {
-    // Implementing this function without glibc is simple enough.  (We
-    // don't do the name length clipping as above because it will be
-    // truncated by the callee (see TASK_COMM_LEN above).)
-    int err = prctl(PR_SET_NAME, name);
-    if (err < 0)
-      DPLOG(ERROR) << "prctl(PR_SET_NAME)";
-  }
+  // Set the name for the LWP (which gets truncated to 15 characters).
+  // Note that glibc also has a 'pthread_setname_np' api, but it may not be
+  // available everywhere and it's only benefit over using prctl directly is
+  // that it can set the name of threads other than the current thread.
+  int err = prctl(PR_SET_NAME, name);
+  // We expect EPERM failures in sandboxed processes, just ignore those.
+  if (err < 0 && errno != EPERM)
+    DPLOG(ERROR) << "prctl(PR_SET_NAME)";
 }
 #elif defined(OS_MACOSX)
 // Mac is implemented in platform_thread_mac.mm.

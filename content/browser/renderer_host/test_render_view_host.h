@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,15 +19,15 @@
 
 namespace content {
 class BrowserContext;
+class NavigationController;
 class RenderProcessHostFactory;
+class SiteInstance;
 }
 
 namespace gfx {
 class Rect;
 }
 
-class NavigationController;
-class SiteInstance;
 class TestTabContents;
 struct ViewHostMsg_FrameNavigate_Params;
 
@@ -37,6 +37,11 @@ void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
                         int page_id,
                         const GURL& url,
                         content::PageTransition transition_type);
+
+// Utility function to fake the ViewHostMsg_UpdateRect IPC arriving at a RWH.
+void SimulateUpdateRect(RenderWidgetHost* widget,
+                        TransportDIB::Id bitmap,
+                        const gfx::Rect& rect);
 
 // This file provides a testing framework for mocking out the RenderProcessHost
 // layer. It allows you to test RenderViewHost, TabContents,
@@ -54,6 +59,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   explicit TestRenderWidgetHostView(RenderWidgetHost* rwh);
   virtual ~TestRenderWidgetHostView();
 
+  virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE {}
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE {}
   virtual void InitAsFullscreen(
@@ -65,6 +71,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE {}
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE {}
   virtual void Focus() OVERRIDE {}
@@ -128,6 +135,7 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
 #endif
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE { }
+  virtual void ProcessTouchAck(bool processed) OVERRIDE { }
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE { }
   virtual void SetScrollOffsetPinning(
@@ -164,8 +172,12 @@ class TestRenderWidgetHostView : public RenderWidgetHostView {
 // CreateRenderViewForRenderManager when more complicate tests start using this.
 class TestRenderViewHost : public RenderViewHost {
  public:
-  TestRenderViewHost(SiteInstance* instance,
-                     RenderViewHostDelegate* delegate,
+  // If the given TabContnets has a pending RVH, returns it, otherwise NULL.
+  static TestRenderViewHost* GetPendingForController(
+      content::NavigationController* controller);
+
+  TestRenderViewHost(content::SiteInstance* instance,
+                     content::RenderViewHostDelegate* delegate,
                      int routing_id);
   virtual ~TestRenderViewHost();
 
@@ -210,6 +222,12 @@ class TestRenderViewHost : public RenderViewHost {
     return is_waiting_for_beforeunload_ack_;
   }
 
+  // Returns whether the RenderViewHost is currently waiting to hear the result
+  // of an unload handler from the renderer.
+  bool is_waiting_for_unload_ack() const {
+    return is_waiting_for_unload_ack_;
+  }
+
   // Sets whether the RenderViewHost is currently swapped out, and thus
   // filtering messages from the renderer.
   void set_is_swapped_out(bool is_swapped_out) {
@@ -227,7 +245,8 @@ class TestRenderViewHost : public RenderViewHost {
 
   // RenderViewHost overrides --------------------------------------------------
 
-  virtual bool CreateRenderView(const string16& frame_name) OVERRIDE;
+  virtual bool CreateRenderView(const string16& frame_name,
+                                int32 max_page_id) OVERRIDE;
   virtual bool IsRenderViewLive() const OVERRIDE;
 
  private:
@@ -264,8 +283,8 @@ class TestRenderViewHostFactory : public RenderViewHostFactory {
   virtual void set_render_process_host_factory(
       content::RenderProcessHostFactory* rph_factory);
   virtual RenderViewHost* CreateRenderViewHost(
-      SiteInstance* instance,
-      RenderViewHostDelegate* delegate,
+      content::SiteInstance* instance,
+      content::RenderViewHostDelegate* delegate,
       int routing_id,
       SessionStorageNamespace* session_storage) OVERRIDE;
 
@@ -289,7 +308,7 @@ class RenderViewHostTestHarness : public testing::Test {
   RenderViewHostTestHarness();
   virtual ~RenderViewHostTestHarness();
 
-  NavigationController& controller();
+  content::NavigationController& controller();
   virtual TestTabContents* contents();
   TestRenderViewHost* rvh();
   TestRenderViewHost* pending_rvh();

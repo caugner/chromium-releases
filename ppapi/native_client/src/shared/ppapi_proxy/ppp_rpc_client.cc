@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -40,21 +40,17 @@ NaClSrpcError CompletionCallbackRpcClient::RunCompletionCallback(
 
 NaClSrpcError PppRpcClient::PPP_InitializeModule(
     NaClSrpcChannel* channel,
-    int32_t pid,
     PP_Module module,
     NaClSrpcImcDescType upcall_channel_desc,
-    char* service_description,
-    int32_t* nacl_pid,
+    const char* service_description,
     int32_t* success)  {
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPP_InitializeModule:iihs:ii",
-      pid,
+      "PPP_InitializeModule:ihs:i",
       module,
       upcall_channel_desc,
       service_description,
-      nacl_pid,
       success
   );
   return retval;
@@ -72,7 +68,7 @@ NaClSrpcError PppRpcClient::PPP_ShutdownModule(
 
 NaClSrpcError PppRpcClient::PPP_GetInterface(
     NaClSrpcChannel* channel,
-    char* interface_name,
+    const char* interface_name,
     int32_t* exports_interface_name)  {
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
@@ -215,17 +211,15 @@ NaClSrpcError PppInstanceRpcClient::PPP_Instance_DidDestroy(
 NaClSrpcError PppInstanceRpcClient::PPP_Instance_DidChangeView(
     NaClSrpcChannel* channel,
     PP_Instance instance,
-    nacl_abi_size_t position_bytes, int32_t* position,
-    nacl_abi_size_t clip_bytes, int32_t* clip,
-    int32_t is_fullscreen)  {
+    PP_Resource resource,
+    nacl_abi_size_t view_data_bytes, char* view_data)  {
   NaClSrpcError retval;
   retval = NaClSrpcInvokeBySignature(
       channel,
-      "PPP_Instance_DidChangeView:iIIi:",
+      "PPP_Instance_DidChangeView:iiC:",
       instance,
-      position_bytes, position,
-      clip_bytes, clip,
-      is_fullscreen
+      resource,
+      view_data_bytes, view_data
   );
   if (retval == NACL_SRPC_RESULT_INTERNAL)
     ppapi_proxy::CleanUpAfterDeadNexe(instance);

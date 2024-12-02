@@ -1,10 +1,11 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
 .most-visited {
   position: absolute;
+  z-index: 0;
 }
 
 .most-visited {
@@ -61,13 +62,18 @@ html[dir=rtl] .most-visited .close-button {
 }
 
 .most-visited .favicon {
-  background: no-repeat 5px 50%;
+  -webkit-margin-start: 5px;
+  background: no-repeat left 50%;
   bottom: 7px;
   box-sizing: border-box;
   display: block;
   height: 16px;
   position: absolute;
-  width: 100%;
+  width: 16px;
+}
+
+html[dir='rtl'] .most-visited .favicon {
+  background-position-x: right;
 }
 
 .most-visited .color-stripe {
@@ -80,7 +86,7 @@ html[dir=rtl] .most-visited .close-button {
   margin-bottom: 8px;
   position: absolute;
   width: 100%;
-  z-index: 100;
+  z-index: 10;
 }
 
 .most-visited .title {
@@ -95,6 +101,8 @@ html[dir=rtl] .most-visited .close-button {
 
 .thumbnail {
   background: no-repeat;
+  /* This shows for missing thumbnails. */
+  background-color: #eee;
   background-size: 100%;
   border-radius: 3px;
   /* These max dimensions are not necessary, as the sizing logic in the .js

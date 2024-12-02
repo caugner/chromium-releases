@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,14 +19,21 @@
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/user_manager.h"
+#endif
+
 using content::BrowserThread;
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 class LoginHandlerSource : public ChromeURLDataManager::DataSource {
  public:
@@ -86,8 +93,14 @@ class LoginHandlerHtmlDelegate : public HtmlDialogUIDelegate,
   }
 
   // HtmlDialogUIDelegate methods:
-  virtual bool IsDialogModal() const OVERRIDE {
-    return true;
+  virtual ui::ModalType GetDialogModalType() const OVERRIDE {
+#if defined(OS_CHROMEOS)
+    return chromeos::UserManager::Get()->user_is_logged_in() ?
+           ui::MODAL_TYPE_WINDOW :
+           ui::MODAL_TYPE_SYSTEM;
+#else
+    return ui::MODAL_TYPE_WINDOW;
+#endif
   }
 
   virtual string16 GetDialogTitle() const OVERRIDE {
@@ -115,7 +128,7 @@ class LoginHandlerHtmlDelegate : public HtmlDialogUIDelegate,
 
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
 
-  virtual void OnCloseContents(TabContents* source,
+  virtual void OnCloseContents(WebContents* source,
                                bool* out_close_dialog) OVERRIDE {}
 
   virtual bool ShouldShowDialogTitle() const OVERRIDE {
@@ -124,7 +137,7 @@ class LoginHandlerHtmlDelegate : public HtmlDialogUIDelegate,
 
   // WebUIMessageHandler method:
   virtual void RegisterMessages() OVERRIDE {
-    web_ui_->RegisterMessageCallback(
+    web_ui()->RegisterMessageCallback(
         "GetAutofill",
         base::Bind(&LoginHandlerHtmlDelegate::GetAutofill,
                    base::Unretained(this)));
@@ -230,11 +243,11 @@ void LoginHandlerHtmlDelegate::ShowAutofillData(const string16& username,
 }
 
 void LoginHandlerHtmlDelegate::SendAutofillData() {
-  if (!closed_ && web_ui_ && has_autofill_ && ready_for_autofill_) {
+  if (!closed_ && web_ui() && has_autofill_ && ready_for_autofill_) {
     StringValue username_v(autofill_username_);
     StringValue password_v(autofill_password_);
-    web_ui_->CallJavascriptFunction("setAutofillCredentials",
-                                    username_v, password_v);
+    web_ui()->CallJavascriptFunction("setAutofillCredentials",
+                                     username_v, password_v);
   }
 }
 
@@ -242,15 +255,15 @@ void LoginHandlerHtml::BuildViewForPasswordManager(
     PasswordManager* manager, const string16& explanation) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  TabContents* tab_contents = GetTabContentsForLogin();
+  WebContents* web_contents = GetWebContentsForLogin();
   TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   Profile* profile = wrapper->profile();
   LoginHandlerSource::RegisterDataSource(profile);
   delegate_ = new LoginHandlerHtmlDelegate(this, explanation);
   ConstrainedWindow* dialog =
       ConstrainedHtmlUI::CreateConstrainedHtmlDialog(
-          profile, delegate_, wrapper)->window();
+          profile, delegate_, NULL, wrapper)->window();
 
   SetModel(manager);
   SetDialog(dialog);

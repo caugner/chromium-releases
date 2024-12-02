@@ -9,7 +9,6 @@
 
 #include "base/compiler_specific.h"
 #include "ppapi/c/pp_instance.h"
-#include "ppapi/c/pp_module.h"
 #include "ppapi/shared_impl/var.h"
 #include "webkit/plugins/webkit_plugins_export.h"
 
@@ -33,13 +32,12 @@ class NPObjectVar : public Var {
   // You should always use FromNPObject to create an NPObjectVar. This function
   // guarantees that we maintain the 1:1 mapping between NPObject and
   // NPObjectVar.
-  NPObjectVar(PP_Module module, PP_Instance instance, NPObject* np_object);
+  NPObjectVar(PP_Instance instance, NPObject* np_object);
 
   virtual ~NPObjectVar();
 
   // Var overrides.
   virtual NPObjectVar* AsNPObjectVar() OVERRIDE;
-  virtual PP_Var GetPPVar() OVERRIDE;
   virtual PP_VarType GetType() const OVERRIDE;
 
   // Returns the underlying NPObject corresponding to this NPObjectVar.

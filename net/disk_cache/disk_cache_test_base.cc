@@ -79,8 +79,8 @@ void DiskCacheTestWithCache::InitCache() {
 // We are expected to leak memory when simulating crashes.
 void DiskCacheTestWithCache::SimulateCrash() {
   ASSERT_TRUE(implementation_ && !memory_only_);
-  TestOldCompletionCallback cb;
-  int rv = cache_impl_->FlushQueueForTest(&cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_impl_->FlushQueueForTest(cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
   cache_impl_->ClearRefCountForTest();
 
@@ -106,47 +106,47 @@ void DiskCacheTestWithCache::SetMaxSize(int size) {
 
 int DiskCacheTestWithCache::OpenEntry(const std::string& key,
                                       disk_cache::Entry** entry) {
-  TestOldCompletionCallback cb;
-  int rv = cache_->OpenEntry(key, entry, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->OpenEntry(key, entry, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::CreateEntry(const std::string& key,
                                         disk_cache::Entry** entry) {
-  TestOldCompletionCallback cb;
-  int rv = cache_->CreateEntry(key, entry, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->CreateEntry(key, entry, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::DoomEntry(const std::string& key) {
-  TestOldCompletionCallback cb;
-  int rv = cache_->DoomEntry(key, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->DoomEntry(key, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::DoomAllEntries() {
-  TestOldCompletionCallback cb;
-  int rv = cache_->DoomAllEntries(&cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->DoomAllEntries(cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::DoomEntriesBetween(const base::Time initial_time,
                                                const base::Time end_time) {
-  TestOldCompletionCallback cb;
-  int rv = cache_->DoomEntriesBetween(initial_time, end_time, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->DoomEntriesBetween(initial_time, end_time, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::DoomEntriesSince(const base::Time initial_time) {
-  TestOldCompletionCallback cb;
-  int rv = cache_->DoomEntriesSince(initial_time, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->DoomEntriesSince(initial_time, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::OpenNextEntry(void** iter,
                                           disk_cache::Entry** next_entry) {
-  TestOldCompletionCallback cb;
-  int rv = cache_->OpenNextEntry(iter, next_entry, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_->OpenNextEntry(iter, next_entry, cb.callback());
   return cb.GetResult(rv);
 }
 
@@ -154,82 +154,63 @@ void DiskCacheTestWithCache::FlushQueueForTest() {
   if (memory_only_ || !cache_impl_)
     return;
 
-  TestOldCompletionCallback cb;
-  int rv = cache_impl_->FlushQueueForTest(&cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_impl_->FlushQueueForTest(cb.callback());
   EXPECT_EQ(net::OK, cb.GetResult(rv));
 }
 
-void DiskCacheTestWithCache::RunTaskForTest(Task* task) {
+void DiskCacheTestWithCache::RunTaskForTest(const base::Closure& closure) {
   if (memory_only_ || !cache_impl_) {
-    task->Run();
-    delete task;
+    closure.Run();
     return;
   }
 
-  TestOldCompletionCallback cb;
-  int rv = cache_impl_->RunTaskForTest(task, &cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_impl_->RunTaskForTest(closure, cb.callback());
   EXPECT_EQ(net::OK, cb.GetResult(rv));
 }
 
 int DiskCacheTestWithCache::ReadData(disk_cache::Entry* entry, int index,
                                      int offset, net::IOBuffer* buf, int len) {
-  TestOldCompletionCallback cb;
-  int rv = entry->ReadData(index, offset, buf, len, &cb);
+  net::TestCompletionCallback cb;
+  int rv = entry->ReadData(index, offset, buf, len, cb.callback());
   return cb.GetResult(rv);
 }
-
 
 int DiskCacheTestWithCache::WriteData(disk_cache::Entry* entry, int index,
                                       int offset, net::IOBuffer* buf, int len,
                                       bool truncate) {
-  TestOldCompletionCallback cb;
-  int rv = entry->WriteData(index, offset, buf, len, &cb, truncate);
+  net::TestCompletionCallback cb;
+  int rv = entry->WriteData(index, offset, buf, len, cb.callback(), truncate);
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::ReadSparseData(disk_cache::Entry* entry,
                                            int64 offset, net::IOBuffer* buf,
                                            int len) {
-  TestOldCompletionCallback cb;
-  int rv = entry->ReadSparseData(offset, buf, len, &cb);
+  net::TestCompletionCallback cb;
+  int rv = entry->ReadSparseData(offset, buf, len, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::WriteSparseData(disk_cache::Entry* entry,
                                             int64 offset,
                                             net::IOBuffer* buf, int len) {
-  TestOldCompletionCallback cb;
-  int rv = entry->WriteSparseData(offset, buf, len, &cb);
+  net::TestCompletionCallback cb;
+  int rv = entry->WriteSparseData(offset, buf, len, cb.callback());
   return cb.GetResult(rv);
 }
 
-// Simple task to run part of a test from the cache thread.
-class TrimTask : public Task {
- public:
-  TrimTask(disk_cache::BackendImpl* backend, bool deleted, bool empty)
-      : backend_(backend),
-        deleted_(deleted),
-        empty_(empty) {}
-
-  virtual void Run() {
-    if (deleted_)
-      backend_->TrimDeletedListForTest(empty_);
-    else
-      backend_->TrimForTest(empty_);
-  }
-
- protected:
-  disk_cache::BackendImpl* backend_;
-  bool deleted_;
-  bool empty_;
-};
-
 void DiskCacheTestWithCache::TrimForTest(bool empty) {
-  RunTaskForTest(new TrimTask(cache_impl_, false, empty));
+  RunTaskForTest(base::Bind(&disk_cache::BackendImpl::TrimForTest,
+                            base::Unretained(cache_impl_),
+                            empty));
 }
 
 void DiskCacheTestWithCache::TrimDeletedListForTest(bool empty) {
-  RunTaskForTest(new TrimTask(cache_impl_, true, empty));
+  RunTaskForTest(base::Bind(&disk_cache::BackendImpl::TrimDeletedListForTest,
+                            base::Unretained(cache_impl_),
+                            empty));
 }
 
 void DiskCacheTestWithCache::TearDown() {
@@ -278,10 +259,10 @@ void DiskCacheTestWithCache::InitDiskCache() {
       use_current_thread_ ? base::MessageLoopProxy::current() :
                             cache_thread_.message_loop_proxy();
 
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
   int rv = disk_cache::BackendImpl::CreateBackend(
                cache_path_, force_creation_, size_, type_,
-               disk_cache::kNoRandom, thread, NULL, &cache_, &cb);
+               disk_cache::kNoRandom, thread, NULL, &cache_, cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 }
 
@@ -305,7 +286,7 @@ void DiskCacheTestWithCache::InitDiskCacheImpl() {
 
   cache_impl_->SetType(type_);
   cache_impl_->SetFlags(disk_cache::kNoRandom);
-  TestOldCompletionCallback cb;
-  int rv = cache_impl_->Init(&cb);
+  net::TestCompletionCallback cb;
+  int rv = cache_impl_->Init(cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 }

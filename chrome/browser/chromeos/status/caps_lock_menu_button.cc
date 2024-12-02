@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 #include <string>
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
+#include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/status/status_area_bubble.h"
 #include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "chrome/browser/chromeos/view_ids.h"
@@ -66,7 +68,16 @@ CapsLockMenuButton::CapsLockMenuButton(StatusAreaButton::Delegate* delegate)
   SetIcon(*ResourceBundle::GetSharedInstance().GetBitmapNamed(
       IDR_STATUSBAR_CAPS_LOCK));
   UpdateAccessibleName();
-  UpdateUIFromCurrentCapsLock(input_method::XKeyboard::CapsLockIsEnabled());
+
+  input_method::InputMethodManager* ime_manager =
+      input_method::InputMethodManager::GetInstance();
+  UpdateUIFromCurrentCapsLock(ime_manager->GetXKeyboard()->CapsLockIsEnabled());
+
+  // Status bar should be initialized after SystemKeyEventListener on the
+  // device. SystemKeyEventListener is never initialized on chrome for cros
+  // running on linux.
+  DCHECK(SystemKeyEventListener::GetInstance() ||
+         !system::runtime_environment::IsRunningOnChromeOS());
   if (SystemKeyEventListener::GetInstance())
     SystemKeyEventListener::GetInstance()->AddCapsLockObserver(this);
 }
@@ -80,7 +91,9 @@ CapsLockMenuButton::~CapsLockMenuButton() {
 // views::View implementation:
 
 void CapsLockMenuButton::OnLocaleChanged() {
-  UpdateUIFromCurrentCapsLock(input_method::XKeyboard::CapsLockIsEnabled());
+  input_method::InputMethodManager* ime_manager =
+      input_method::InputMethodManager::GetInstance();
+  UpdateUIFromCurrentCapsLock(ime_manager->GetXKeyboard()->CapsLockIsEnabled());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,8 +119,7 @@ void CapsLockMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
       kDummyCommandId,
       string16(),
       views::MenuItemView::NORMAL);
-  status_ = new StatusAreaBubbleContentView(source,
-                                            CreateImageViewWithCapsLockIcon(),
+  status_ = new StatusAreaBubbleContentView(CreateImageViewWithCapsLockIcon(),
                                             GetText());
   submenu->AddChildView(status_);
   menu->CreateSubmenu()->set_resize_open_menu(true);
@@ -165,14 +177,14 @@ void CapsLockMenuButton::Observe(int type,
 }
 
 void CapsLockMenuButton::UpdateAccessibleName() {
-  int id = IDS_STATUSBAR_CAPS_LOCK_ENABLED_PRESS_SHIFT_KEYS;
+  int id = IDS_STATUSBAR_CAPS_LOCK_ENABLED_PRESS_SHIFT_AND_SEARCH_KEYS;
   if (HasCapsLock())
     id = IDS_STATUSBAR_CAPS_LOCK_ENABLED_PRESS_SEARCH;
   SetAccessibleName(l10n_util::GetStringUTF16(id));
 }
 
 string16 CapsLockMenuButton::GetText() const {
-  int id = IDS_STATUSBAR_CAPS_LOCK_ENABLED_PRESS_SHIFT_KEYS;
+  int id = IDS_STATUSBAR_CAPS_LOCK_ENABLED_PRESS_SHIFT_AND_SEARCH_KEYS;
   if (HasCapsLock())
     id = IDS_STATUSBAR_CAPS_LOCK_ENABLED_PRESS_SEARCH;
   return l10n_util::GetStringUTF16(id);
@@ -202,7 +214,14 @@ void CapsLockMenuButton::MaybeShowBubble() {
       // We've already shown the bubble |kMaxBubbleCount| times.
       !should_show_bubble_ ||
       // Don't show the bubble when Caps Lock key is available.
-      HasCapsLock())
+      HasCapsLock() ||
+      // Don't show it when the status area is hidden.
+      (parent() && !parent()->visible()) ||
+      // Don't show the bubble when screen is locked as this results in two
+      // visible caps lock bubbles (crbug.com/105280). The greater problem of
+      // displaying bubbles from all caps lock menu buttons regardless of
+      // visibility is described in crbug.com/106776.
+      ScreenLocker::default_screen_locker())
     return;
 
   ++bubble_count_;
@@ -219,9 +238,9 @@ void CapsLockMenuButton::CreateAndShowBubble() {
     return;
   }
   bubble_controller_.reset(
-      StatusAreaBubbleController::ShowBubbleForAWhile(
-          new StatusAreaBubbleContentView(this,
-                                          CreateImageViewWithCapsLockIcon(),
+      StatusAreaBubbleController::ShowBubbleUnderViewForAWhile(
+          this,
+          new StatusAreaBubbleContentView(CreateImageViewWithCapsLockIcon(),
                                           GetText())));
 }
 

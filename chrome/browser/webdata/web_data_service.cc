@@ -23,18 +23,18 @@
 #include "chrome/browser/webdata/logins_table.h"
 #include "chrome/browser/webdata/token_service_table.h"
 #include "chrome/browser/webdata/web_apps_table.h"
-#include "chrome/browser/webdata/web_intents_table.h"
 #include "chrome/browser/webdata/web_database.h"
+#include "chrome/browser/webdata/web_intents_table.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/glue/form_field.h"
-#include "webkit/glue/password_form.h"
+#include "webkit/forms/form_field.h"
+#include "webkit/forms/password_form.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -45,8 +45,8 @@
 using base::Bind;
 using base::Time;
 using content::BrowserThread;
-using webkit_glue::FormField;
-using webkit_glue::PasswordForm;
+using webkit::forms::FormField;
+using webkit::forms::PasswordForm;
 using webkit_glue::WebIntentServiceData;
 
 namespace {
@@ -678,15 +678,16 @@ void WebDataService::InitializeDatabaseIfNecessary() {
     failed_init_ = true;
     delete db;
     if (main_loop_) {
-      main_loop_->PostTask(FROM_HERE,
-          NewRunnableMethod(this, &WebDataService::DBInitFailed, init_status));
+      main_loop_->PostTask(
+          FROM_HERE,
+          base::Bind(&WebDataService::DBInitFailed, this, init_status));
     }
     return;
   }
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &WebDataService::NotifyDatabaseLoadedOnUIThread));
+      base::Bind(&WebDataService::NotifyDatabaseLoadedOnUIThread, this));
 
   db_ = db;
   db_->BeginTransaction();
@@ -806,10 +807,12 @@ void WebDataService::GetKeywordsImpl(WebDataRequest* request) {
         db_->GetKeywordTable()->GetDefaultSearchProviderID();
     result.builtin_keyword_version =
         db_->GetKeywordTable()->GetBuiltinKeywordVersion();
-    result.default_search_provider_id_backup =
-        db_->GetKeywordTable()->GetDefaultSearchProviderIDBackup();
     result.did_default_search_provider_change =
         db_->GetKeywordTable()->DidDefaultSearchProviderChange();
+    result.default_search_provider_backup =
+        result.did_default_search_provider_change ?
+        db_->GetKeywordTable()->GetDefaultSearchProviderBackup() :
+        NULL;
     request->SetResult(
         new WDResult<WDKeywordsResult>(KEYWORDS_RESULT, result));
   }

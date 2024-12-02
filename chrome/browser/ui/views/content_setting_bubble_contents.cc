@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,10 +18,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
-#include "content/browser/plugin_service.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/plugin_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/button/radio_button.h"
@@ -48,6 +47,9 @@ const int kMaxContentsWidth = 500;
 // When we have multiline labels, we should set a minimum width lest we get very
 // narrow bubbles with lots of line-wrapping.
 const int kMinMultiLineContentsWidth = 250;
+
+using content::PluginService;
+using content::WebContents;
 
 class ContentSettingBubbleContents::Favicon : public views::ImageView {
  public:
@@ -106,18 +108,18 @@ gfx::NativeCursor ContentSettingBubbleContents::Favicon::GetCursor(
 ContentSettingBubbleContents::ContentSettingBubbleContents(
     ContentSettingBubbleModel* content_setting_bubble_model,
     Profile* profile,
-    TabContents* tab_contents,
+    WebContents* web_contents,
     views::View* anchor_view,
     views::BubbleBorder::ArrowLocation arrow_location)
     : BubbleDelegateView(anchor_view, arrow_location),
       content_setting_bubble_model_(content_setting_bubble_model),
       profile_(profile),
-      tab_contents_(tab_contents),
+      web_contents_(web_contents),
       custom_link_(NULL),
       manage_link_(NULL),
       close_button_(NULL) {
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 content::Source<TabContents>(tab_contents));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<WebContents>(web_contents));
 }
 
 ContentSettingBubbleContents::~ContentSettingBubbleContents() {
@@ -135,7 +137,7 @@ gfx::Size ContentSettingBubbleContents::GetPreferredSize() {
 
 gfx::Rect ContentSettingBubbleContents::GetAnchorRect() {
   gfx::Rect rect(BubbleDelegateView::GetAnchorRect());
-  rect.Offset(0, -5);
+  rect.Inset(0, anchor_view() ? 5 : 0);
   return rect;
 }
 
@@ -210,14 +212,14 @@ void ContentSettingBubbleContents::Init() {
   const ContentSettingBubbleModel::RadioGroup& radio_group =
       bubble_content.radio_group;
   if (!radio_group.radio_items.empty()) {
+    if (!bubble_content_empty)
+      layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
     for (ContentSettingBubbleModel::RadioItems::const_iterator i =
          radio_group.radio_items.begin();
          i != radio_group.radio_items.end(); ++i) {
       views::RadioButton* radio = new views::RadioButton(UTF8ToUTF16(*i), 0);
       radio->set_listener(this);
       radio_group_.push_back(radio);
-      if (!bubble_content_empty)
-        layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
       layout->StartRow(0, single_column_set_id);
       layout->AddView(radio);
       bubble_content_empty = false;
@@ -334,7 +336,7 @@ void ContentSettingBubbleContents::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
-  DCHECK(source == content::Source<TabContents>(tab_contents_));
-  tab_contents_ = NULL;
+  DCHECK(type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
+  DCHECK(source == content::Source<WebContents>(web_contents_));
+  web_contents_ = NULL;
 }

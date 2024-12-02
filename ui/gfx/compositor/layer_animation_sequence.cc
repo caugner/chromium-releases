@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,9 @@ LayerAnimationSequence::LayerAnimationSequence(LayerAnimationElement* element)
 }
 
 LayerAnimationSequence::~LayerAnimationSequence() {
+  FOR_EACH_OBSERVER(LayerAnimationObserver,
+                    observers_,
+                    DetachedFromSequence(this));
 }
 
 void LayerAnimationSequence::Progress(base::TimeDelta elapsed,
@@ -110,16 +113,29 @@ bool LayerAnimationSequence::HasCommonProperty(
 }
 
 void LayerAnimationSequence::AddObserver(LayerAnimationObserver* observer) {
-  if (!observers_.HasObserver(observer))
+  if (!observers_.HasObserver(observer)) {
     observers_.AddObserver(observer);
+    observer->AttachedToSequence(this);
+  }
 }
 
 void LayerAnimationSequence::RemoveObserver(LayerAnimationObserver* observer) {
   observers_.RemoveObserver(observer);
+  observer->DetachedFromSequence(this);
 }
 
 void LayerAnimationSequence::OnScheduled() {
   NotifyScheduled();
+}
+
+void LayerAnimationSequence::OnAnimatorDestroyed() {
+  if (observers_.might_have_observers()) {
+    ObserverListBase<LayerAnimationObserver>::Iterator it(observers_);
+    LayerAnimationObserver* obs;
+    while ((obs = it.GetNext()) != NULL)
+      if (!obs->RequiresNotificationWhenAnimatorDestroyed())
+        RemoveObserver(obs);
+  }
 }
 
 void LayerAnimationSequence::NotifyScheduled() {

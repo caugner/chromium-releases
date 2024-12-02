@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,17 +48,17 @@ enum NotificationType {
 
   // Sent when the language (English, French...) for a page has been detected.
   // The details Details<std::string> contain the ISO 639-1 language code and
-  // the source is Source<TabContents>.
+  // the source is Source<WebContents>.
   NOTIFICATION_TAB_LANGUAGE_DETERMINED,
 
   // Sent when a page has been translated. The source is the tab for that page
-  // (Source<TabContents>) and the details are the language the page was
+  // (Source<WebContents>) and the details are the language the page was
   // originally in and the language it was translated to
   // (std::pair<std::string, std::string>).
   NOTIFICATION_PAGE_TRANSLATED,
 
   // Sent after the renderer returns a snapshot of tab contents.
-  // The source (Source<TabContentsWrapper>) is the RenderViewHost for which
+  // The source (Source<content::WebContents>) is the RenderViewHost for which
   // the snapshot was generated and the details (Details<const SkBitmap>) is
   // the actual snapshot.
   NOTIFICATION_TAB_SNAPSHOT_TAKEN,
@@ -75,6 +75,12 @@ enum NotificationType {
   // dialog. The details is a Details<RenderViewHost> with a pointer to the RVH
   // for the shown dialog.
   NOTIFICATION_HTML_DIALOG_SHOWN,
+
+  // A new tab is created from an existing tab to serve as a target of a
+  // navigation that is about to happen. The source will be a Source<Profile>
+  // corresponding to the profile in which the new tab will live.  Details in
+  // the form of a RetargetingDetails object are provided.
+  NOTIFICATION_RETARGETING,
 
   // Application-modal dialogs -----------------------------------------------
 
@@ -116,7 +122,8 @@ enum NotificationType {
 
   // Used to fire notifications about how long various events took to
   // complete.  E.g., this is used to get more fine grained timings from the
-  // new tab page.  Details is a MetricEventDurationDetails.
+  // new tab page.  The source is a WebContents and the details is a
+  // MetricEventDurationDetails.
   NOTIFICATION_METRIC_EVENT_DURATION,
 
   // This notification is sent when TabContents::SetAppExtension is invoked.
@@ -426,7 +433,13 @@ enum NotificationType {
   // an ExtensionHost* and the source is a Profile*.
   NOTIFICATION_EXTENSION_HOST_DESTROYED,
 
-  // Sent by an ExtensionHost when it finished its initial page load.
+  // Sent by an ExtensionHost when it has finished loading its initial DOM
+  // content, not (necessarily) including any external resources.
+  // The details are an ExtensionHost* and the source is a Profile*.
+  NOTIFICATION_EXTENSION_HOST_DOM_CONTENT_LOADED,
+
+  // Sent by an ExtensionHost when it has finished its initial page load,
+  // including any external resources.
   // The details are an ExtensionHost* and the source is a Profile*.
   NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
 
@@ -464,7 +477,7 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
 
   // Sent when a page action's visibility has changed. The source is the
-  // ExtensionAction* that changed. The details are a TabContents*.
+  // ExtensionAction* that changed. The details are a WebContents*.
   NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
 
   // Sent by an extension to notify the browser about the results of a unit
@@ -655,21 +668,6 @@ enum NotificationType {
   // Details will be an AccessibilityMenuInfo.
   NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
 
-  // Notification that the volume was changed, for propagating
-  // to an accessibility extension.
-  // Details will be an AccessibilityVolumeInfo.
-  NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED,
-
-  // Notification that the screen is unlocked, for propagating to an
-  // accessibility extension.
-  // Details will be an AccessibilityEmptyEventInfo.
-  NOTIFICATION_ACCESSIBILITY_SCREEN_UNLOCKED,
-
-  // Notification that the system woke up from sleep, for propagating to an
-  // accessibility extension.
-  // Details will be an AccessibilityEmptyEventInfo.
-  NOTIFICATION_ACCESSIBILITY_WOKE_UP,
-
   // Content Settings --------------------------------------------------------
 
   // Sent when content settings change. The source is a HostContentSettings
@@ -685,9 +683,9 @@ enum NotificationType {
   // details are None.
   NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
 
-  // Sent when content settings change for a tab. The source is a TabContents
-  // object, the details are None.
-  NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
+  // Sent when content settings change for a tab. The source is a
+  // content::WebContents object, the details are None.
+  NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
 
   // Sync --------------------------------------------------------------------
 
@@ -699,6 +697,10 @@ enum NotificationType {
 
   // The sync service is finished the configuration process.
   NOTIFICATION_SYNC_CONFIGURE_DONE,
+
+  // A service is requesting a sync datatype refresh for the current profile.
+  // The details value is a const syncable::ModelType.
+  NOTIFICATION_SYNC_REFRESH,
 
   // The session service has been saved.  This notification type is only sent
   // if there were new SessionService commands to save, and not for no-op save
@@ -719,13 +721,6 @@ enum NotificationType {
   // Sent when a cookie changes. The source is a Profile object, the details
   // are a ChromeCookieDetails object.
   NOTIFICATION_COOKIE_CHANGED,
-
-  // Sidebar -----------------------------------------------------------------
-
-  // Sent when the sidebar state is changed.
-  // The source is a SidebarManager instance, the details are the changed
-  // SidebarContainer object.
-  NOTIFICATION_SIDEBAR_CHANGED,
 
   // Token Service -----------------------------------------------------------
 
@@ -783,6 +778,12 @@ enum NotificationType {
   // Sent when a chromium os user logs in.
   NOTIFICATION_LOGIN_USER_CHANGED,
 
+  // Sent when the chromium session is first started. If this is a new user this
+  // will not be sent until a profile picture has been selected, unlike
+  // NOTIFICATION_LOGIN_USER_CHANGED which is sent immediately after the user
+  // has logged in. This will be sent again if the browser crashes and restarts.
+  NOTIFICATION_SESSION_STARTED,
+
   // Sent when user image is updated.
   NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
 
@@ -796,6 +797,9 @@ enum NotificationType {
   // Sent when a chromium os user attempts to log in.  The source is
   // all and the details are AuthenticationNotificationDetails.
   NOTIFICATION_LOGIN_AUTHENTICATION,
+
+  // Sent when webui lock screen is ready.
+  NOTIFICATION_LOCK_WEBUI_READY,
 
   // Sent when webui login screen is ready and gaia iframe has loaded.
   NOTIFICATION_LOGIN_WEBUI_READY,
@@ -854,6 +858,10 @@ enum NotificationType {
   // Sent when a bookmark's context menu is shown. Used to notify
   // tests that the context menu has been created and shown.
   NOTIFICATION_BOOKMARK_CONTEXT_MENU_SHOWN,
+
+  // Notification that the nested loop using during tab dragging has returned.
+  // Used for testing.
+  NOTIFICATION_TAB_DRAG_LOOP_DONE,
 #endif
 
   // Sent when the tab's closeable state has changed due to increase/decrease
@@ -882,7 +890,7 @@ enum NotificationType {
   // store are changed. The detail of this notification is a list of changes
   // represented by a vector of PasswordStoreChange. Each change includes a
   // change type (ADD, UPDATE, or REMOVE) as well as the
-  // |webkit_glue::PasswordForm|s that were affected.
+  // |webkit::forms::PasswordForm|s that were affected.
   NOTIFICATION_LOGINS_CHANGED,
 
   // Sent when an import process has ended.
@@ -892,7 +900,7 @@ enum NotificationType {
   NOTIFICATION_EXTENSION_LAUNCHER_REORDERED,
 
   // Sent when an app is installed and an NTP has been shown. Source is the
-  // TabContents that was shown, and Details is the string ID of the extension
+  // WebContents that was shown, and Details is the string ID of the extension
   // which was installed.
   NOTIFICATION_APP_INSTALLED_TO_NTP,
 
@@ -983,6 +991,15 @@ enum NotificationType {
   // error. The detail is a GlobalError object that has changed or NULL if
   // all error UIs should update.
   NOTIFICATION_GLOBAL_ERRORS_CHANGED,
+
+  // BrowsingDataRemover ----------------------------------------------------
+  // Sent on the UI thread after BrowsingDataRemover has removed browsing data
+  // but before it has notified its explicit observers. The source is a
+  // Source<Profile> containing the profile in which browsing data was removed,
+  // and the detail is a BrowsingDataRemover::NotificationDetail containing the
+  // removal mask and the start of the removal timeframe with which
+  // BrowsingDataRemove::Remove was called.
+  NOTIFICATION_BROWSING_DATA_REMOVED,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

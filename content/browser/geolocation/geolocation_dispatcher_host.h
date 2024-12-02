@@ -6,17 +6,19 @@
 #define CONTENT_BROWSER_GEOLOCATION_GEOLOCATION_DISPATCHER_HOST_H_
 #pragma once
 
-#include "content/browser/browser_message_filter.h"
+#include "content/public/browser/browser_message_filter.h"
 
+namespace content {
 class GeolocationPermissionContext;
+}
 
 // GeolocationDispatcherHost is a browser filter for Geolocation messages.
 // It's the complement of GeolocationDispatcher (owned by RenderView).
-class GeolocationDispatcherHost : public BrowserMessageFilter {
+class GeolocationDispatcherHost : public content::BrowserMessageFilter {
  public:
   static GeolocationDispatcherHost* New(
       int render_process_id,
-      GeolocationPermissionContext* geolocation_permission_context);
+      content::GeolocationPermissionContext* geolocation_permission_context);
 
  protected:
   GeolocationDispatcherHost() {}

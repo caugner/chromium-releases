@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/resource_util.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view_win.h"
 #include "content/shell/resource.h"
 #include "googleurl/src/gurl.h"
 #include "grit/webkit_resources.h"
@@ -94,6 +95,9 @@ void Shell::PlatformSetAddressBarURL(const GURL& url) {
               reinterpret_cast<LPARAM>(url_string.c_str()));
 }
 
+void Shell::PlatformSetIsLoading(bool loading) {
+}
+
 void Shell::PlatformCreateWindow(int width, int height) {
   window_ = CreateWindow(kWindowClass, kWindowTitle,
                          WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
@@ -141,6 +145,12 @@ void Shell::PlatformCreateWindow(int width, int height) {
   ShowWindow(window_, SW_SHOW);
 
   PlatformSizeTo(width, height);
+}
+
+void Shell::PlatformSetContents() {
+  TabContentsViewWin* view =
+      static_cast<TabContentsViewWin*>(tab_contents_->GetView());
+  view->SetParent(window_);
 }
 
 void Shell::PlatformSizeTo(int width, int height) {
@@ -202,7 +212,7 @@ LRESULT CALLBACK Shell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
       switch (id) {
         case IDM_NEW_WINDOW:
           CreateNewWindow(
-              shell->tab_contents()->browser_context(),
+              shell->tab_contents()->GetBrowserContext(),
               GURL(), NULL, MSG_ROUTING_NONE, NULL);
           break;
         case IDM_CLOSE_WINDOW:

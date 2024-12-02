@@ -18,9 +18,12 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
 
-class NavigationController;
 class PrefService;
-class TabContents;
+
+namespace content {
+class NavigationController;
+class WebContents;
+}
 
 // This object is responsible for checking the Google URL once per network
 // change, and if necessary prompting the user to see if they want to change to
@@ -119,9 +122,9 @@ class GoogleURLTracker : public content::URLFetcherDelegate,
   void SearchCommitted();
   void OnNavigationPending(const content::NotificationSource& source,
                            const GURL& pending_url);
-  void OnNavigationCommittedOrTabClosed(TabContents* tab_contents,
+  void OnNavigationCommittedOrTabClosed(content::WebContents* web_contents,
                                         int type);
-  void ShowGoogleURLInfoBarIfNecessary(TabContents* tab_contents);
+  void ShowGoogleURLInfoBarIfNecessary(content::WebContents* web_contents);
 
   content::NotificationRegistrar registrar_;
   InfobarCreator infobar_creator_;
@@ -146,7 +149,7 @@ class GoogleURLTracker : public content::URLFetcherDelegate,
   bool need_to_prompt_;    // True if the last fetched Google URL is not
                            // matched with current user's default Google URL
                            // nor the last prompted Google URL.
-  NavigationController* controller_;
+  content::NavigationController* controller_;
   InfoBarDelegate* infobar_;
   GURL search_url_;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,7 +101,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   enum MenuPosition {
     POSITION_BEST_FIT,
     POSITION_ABOVE_BOUNDS,
-    POSITION_BELOW_BOUNDS
+    POSITION_BELOW_BOUNDS,
+    POSITION_OVER_BOUNDS
   };
 
   // Constructor for use with the top level menu item. This menu is never
@@ -216,6 +217,11 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Returns the type of this menu.
   const Type& GetType() const { return type_; }
+
+  // Returns the requested menu position.
+  const MenuPosition& GetRequestedMenuPosition() {
+    return requested_menu_position_;
+  }
 
   // Sets whether this item is selected. This is invoked as the user moves
   // the mouse around the menu while open.

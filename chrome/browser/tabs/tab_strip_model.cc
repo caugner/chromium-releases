@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,13 +25,19 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_view.h"
+
+using content::NavigationController;
+using content::NavigationEntry;
+using content::UserMetricsAction;
+using content::WebContents;
 
 namespace {
 
@@ -67,7 +73,7 @@ TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
       order_controller_(NULL) {
   DCHECK(delegate_);
   registrar_.Add(this,
-                 content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+                 content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_UNLOADED,
@@ -142,14 +148,14 @@ void TabStripModel::InsertTabContentsAt(int index,
       ForgetAllOpeners();
     }
     // Anything opened by a link we deem to have an opener.
-    data->SetGroup(&selected_contents->controller());
+    data->SetGroup(&selected_contents->web_contents()->GetController());
   } else if ((add_types & ADD_INHERIT_OPENER) && selected_contents) {
     if (active) {
       // Forget any existing relationships, we don't want to make things too
       // confusing by having multiple groups active at the same time.
       ForgetAllOpeners();
     }
-    data->opener = &selected_contents->controller();
+    data->opener = &selected_contents->web_contents()->GetController();
   }
 
   contents_data_.insert(contents_data_.begin() + index, data);
@@ -172,7 +178,8 @@ TabContentsWrapper* TabStripModel::ReplaceTabContentsAt(
   DCHECK(ContainsIndex(index));
   TabContentsWrapper* old_contents = GetContentsAt(index);
 
-  ForgetOpenersAndGroupsReferencing(&(old_contents->controller()));
+  ForgetOpenersAndGroupsReferencing(
+      &(old_contents->web_contents()->GetController()));
 
   contents_data_[index]->contents = new_contents;
 
@@ -205,20 +212,21 @@ TabContentsWrapper* TabStripModel::DiscardTabContentsAt(int index) {
   DCHECK(ContainsIndex(index));
   TabContentsWrapper* null_contents =
       new TabContentsWrapper(
-          new TabContents(profile(),
-                          NULL /* site_instance */,
-                          MSG_ROUTING_NONE,
-                          NULL /* base_tab_contents */,
-                          NULL /* session_storage_namespace */));
+          WebContents::Create(profile(),
+                              NULL /* site_instance */,
+                              MSG_ROUTING_NONE,
+                              NULL /* base_tab_contents */,
+                              NULL /* session_storage_namespace */));
   TabContentsWrapper* old_contents = GetContentsAt(index);
-  NavigationEntry* old_nav_entry = old_contents->controller().GetActiveEntry();
+  NavigationEntry* old_nav_entry =
+      old_contents->web_contents()->GetController().GetActiveEntry();
   if (old_nav_entry) {
     // Set the new tab contents to reload this URL when clicked.
     // This also allows the tab to keep drawing the favicon and page title.
-    NavigationEntry* new_nav_entry = new NavigationEntry(*old_nav_entry);
+    NavigationEntry* new_nav_entry = NavigationEntry::Create(*old_nav_entry);
     std::vector<NavigationEntry*> entries;
     entries.push_back(new_nav_entry);
-    null_contents->controller().Restore(0, false, &entries);
+    null_contents->web_contents()->GetController().Restore(0, false, &entries);
   }
   ReplaceTabContentsAt(index, null_contents);
   // Mark the tab so it will reload when we click.
@@ -238,7 +246,8 @@ TabContentsWrapper* TabStripModel::DetachTabContentsAt(int index) {
   int next_selected_index = order_controller_->DetermineNewSelectedIndex(index);
   delete contents_data_.at(index);
   contents_data_.erase(contents_data_.begin() + index);
-  ForgetOpenersAndGroupsReferencing(&(removed_contents->controller()));
+  ForgetOpenersAndGroupsReferencing(
+      &(removed_contents->web_contents()->GetController()));
   if (empty())
     closing_all_ = true;
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
@@ -369,11 +378,11 @@ int TabStripModel::GetIndexOfTabContents(
   return kNoTab;
 }
 
-int TabStripModel::GetWrapperIndex(const TabContents* contents) const {
+int TabStripModel::GetWrapperIndex(const WebContents* contents) const {
   int index = 0;
   TabContentsDataVector::const_iterator iter = contents_data_.begin();
   for (; iter != contents_data_.end(); ++iter, ++index) {
-    if ((*iter)->contents->tab_contents() == contents)
+    if ((*iter)->contents->web_contents() == contents)
       return index;
   }
   return kNoTab;
@@ -384,7 +393,7 @@ int TabStripModel::GetIndexOfController(
   int index = 0;
   TabContentsDataVector::const_iterator iter = contents_data_.begin();
   for (; iter != contents_data_.end(); ++iter, ++index) {
-    if (&(*iter)->contents->controller() == controller)
+    if (&(*iter)->contents->web_contents()->GetController() == controller)
       return index;
   }
   return kNoTab;
@@ -418,7 +427,7 @@ bool TabStripModel::CloseTabContentsAt(int index, uint32 close_types) {
 bool TabStripModel::TabsAreLoading() const {
   TabContentsDataVector::const_iterator iter = contents_data_.begin();
   for (; iter != contents_data_.end(); ++iter) {
-    if ((*iter)->contents->tab_contents()->IsLoading())
+    if ((*iter)->contents->web_contents()->IsLoading())
       return true;
   }
   return false;
@@ -429,8 +438,18 @@ NavigationController* TabStripModel::GetOpenerOfTabContentsAt(int index) {
   return contents_data_.at(index)->opener;
 }
 
+void TabStripModel::SetOpenerOfTabContentsAt(
+    int index,
+    content::NavigationController* opener) {
+  DCHECK(ContainsIndex(index));
+  DCHECK(opener);
+  contents_data_[index]->opener = opener;
+}
+
 int TabStripModel::GetIndexOfNextTabContentsOpenedBy(
-    const NavigationController* opener, int start_index, bool use_group) const {
+    const NavigationController* opener,
+    int start_index,
+    bool use_group) const {
   DCHECK(opener);
   DCHECK(ContainsIndex(start_index));
 
@@ -448,8 +467,7 @@ int TabStripModel::GetIndexOfNextTabContentsOpenedBy(
 }
 
 int TabStripModel::GetIndexOfFirstTabContentsOpenedBy(
-    const NavigationController* opener,
-    int start_index) const {
+    const NavigationController* opener, int start_index) const {
   DCHECK(opener);
   DCHECK(ContainsIndex(start_index));
 
@@ -709,8 +727,8 @@ void TabStripModel::AddTabContents(TabContentsWrapper* contents,
 
   // TODO(sky): figure out why this is here and not in InsertTabContentsAt. When
   // here we seem to get failures in startup perf tests.
-  // Ensure that the new TabContentsView begins at the same size as the
-  // previous TabContentsView if it existed.  Otherwise, the initial WebKit
+  // Ensure that the new WebContentsView begins at the same size as the
+  // previous WebContentsView if it existed.  Otherwise, the initial WebKit
   // layout will be performed based on a width of 0 pixels, causing a
   // very long, narrow, inaccurate layout.  Because some scripts on pages (as
   // well as WebKit's anchor link location calculation) are run on the
@@ -719,13 +737,13 @@ void TabStripModel::AddTabContents(TabContentsWrapper* contents,
   // new background tab.
   if (TabContentsWrapper* old_contents = GetActiveTabContents()) {
     if ((add_types & ADD_ACTIVE) == 0) {
-      contents->tab_contents()->view()->
-          SizeContents(old_contents->tab_contents()->
-                          view()->GetContainerSize());
+      contents->web_contents()->GetView()->
+          SizeContents(old_contents->web_contents()->
+              GetView()->GetContainerSize());
       // We need to hide the contents or else we get and execute paints for
       // background tabs. With enough background tabs they will steal the
       // backing store of the visible tab causing flashing. See bug 20831.
-      contents->tab_contents()->HideContents();
+      contents->web_contents()->HideContents();
     }
   }
 }
@@ -778,8 +796,8 @@ bool TabStripModel::IsContextMenuCommandEnabled(
       std::vector<int> indices = GetIndicesForCommand(context_index);
       for (size_t i = 0; i < indices.size(); ++i) {
         TabContentsWrapper* tab = GetTabContentsAt(indices[i]);
-        if (tab && tab->tab_contents()->delegate()->CanReloadContents(
-                tab->tab_contents())) {
+        if (tab && tab->web_contents()->GetDelegate()->CanReloadContents(
+                tab->web_contents())) {
           return true;
         }
       }
@@ -830,25 +848,25 @@ void TabStripModel::ExecuteContextMenuCommand(
   DCHECK(command_id > CommandFirst && command_id < CommandLast);
   switch (command_id) {
     case CommandNewTab:
-      UserMetrics::RecordAction(UserMetricsAction("TabContextMenu_NewTab"));
+      content::RecordAction(UserMetricsAction("TabContextMenu_NewTab"));
       delegate()->AddBlankTabAt(context_index + 1, true);
       break;
 
     case CommandReload: {
-      UserMetrics::RecordAction(UserMetricsAction("TabContextMenu_Reload"));
+      content::RecordAction(UserMetricsAction("TabContextMenu_Reload"));
       std::vector<int> indices = GetIndicesForCommand(context_index);
       for (size_t i = 0; i < indices.size(); ++i) {
         TabContentsWrapper* tab = GetTabContentsAt(indices[i]);
-        if (tab && tab->tab_contents()->delegate()->CanReloadContents(
-                tab->tab_contents())) {
-          tab->controller().Reload(true);
+        if (tab && tab->web_contents()->GetDelegate()->CanReloadContents(
+                tab->web_contents())) {
+          tab->web_contents()->GetController().Reload(true);
         }
       }
       break;
     }
 
     case CommandDuplicate: {
-      UserMetrics::RecordAction(UserMetricsAction("TabContextMenu_Duplicate"));
+      content::RecordAction(UserMetricsAction("TabContextMenu_Duplicate"));
       std::vector<int> indices = GetIndicesForCommand(context_index);
       // Copy the TabContents off as the indices will change as tabs are
       // duplicated.
@@ -864,7 +882,7 @@ void TabStripModel::ExecuteContextMenuCommand(
     }
 
     case CommandCloseTab: {
-      UserMetrics::RecordAction(UserMetricsAction("TabContextMenu_CloseTab"));
+      content::RecordAction(UserMetricsAction("TabContextMenu_CloseTab"));
       std::vector<int> indices = GetIndicesForCommand(context_index);
       // Copy the TabContents off as the indices will change as we remove
       // things.
@@ -882,7 +900,7 @@ void TabStripModel::ExecuteContextMenuCommand(
     }
 
     case CommandCloseOtherTabs: {
-      UserMetrics::RecordAction(
+      content::RecordAction(
           UserMetricsAction("TabContextMenu_CloseOtherTabs"));
       InternalCloseTabs(GetIndicesClosedByCommand(context_index, command_id),
                         CLOSE_CREATE_HISTORICAL_TAB);
@@ -890,7 +908,7 @@ void TabStripModel::ExecuteContextMenuCommand(
     }
 
     case CommandCloseTabsToRight: {
-      UserMetrics::RecordAction(
+      content::RecordAction(
           UserMetricsAction("TabContextMenu_CloseTabsToRight"));
       InternalCloseTabs(GetIndicesClosedByCommand(context_index, command_id),
                         CLOSE_CREATE_HISTORICAL_TAB);
@@ -898,13 +916,13 @@ void TabStripModel::ExecuteContextMenuCommand(
     }
 
     case CommandRestoreTab: {
-      UserMetrics::RecordAction(UserMetricsAction("TabContextMenu_RestoreTab"));
+      content::RecordAction(UserMetricsAction("TabContextMenu_RestoreTab"));
       delegate_->RestoreTab();
       break;
     }
 
     case CommandTogglePinned: {
-      UserMetrics::RecordAction(
+      content::RecordAction(
           UserMetricsAction("TabContextMenu_TogglePinned"));
       std::vector<int> indices = GetIndicesForCommand(context_index);
       bool pin = WillContextMenuPin(context_index);
@@ -925,7 +943,7 @@ void TabStripModel::ExecuteContextMenuCommand(
     }
 
     case CommandBookmarkAllTabs: {
-      UserMetrics::RecordAction(
+      content::RecordAction(
           UserMetricsAction("TabContextMenu_BookmarkAllTabs"));
 
       delegate_->BookmarkAllTabs();
@@ -996,11 +1014,11 @@ void TabStripModel::Observe(int type,
                             const content::NotificationSource& source,
                             const content::NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
       // Sometimes, on qemu, it seems like a TabContents object can be destroyed
       // while we still have a reference to it. We need to break this reference
       // here so we don't crash later.
-      int index = GetWrapperIndex(content::Source<TabContents>(source).ptr());
+      int index = GetWrapperIndex(content::Source<WebContents>(source).ptr());
       if (index != TabStripModel::kNoTab) {
         // Note that we only detach the contents here, not close it - it's
         // already been closed. We just want to undo our bookkeeping.
@@ -1068,13 +1086,13 @@ bool TabStripModel::ContextMenuCommandToBrowserCommand(int cmd_id,
 void TabStripModel::GetIndicesWithSameDomain(int index,
                                              std::vector<int>* indices) {
   TabContentsWrapper* tab = GetTabContentsAt(index);
-  std::string domain = tab->tab_contents()->GetURL().host();
+  std::string domain = tab->web_contents()->GetURL().host();
   if (domain.empty())
     return;
   for (int i = 0; i < count(); ++i) {
     if (i == index)
       continue;
-    if (GetTabContentsAt(i)->tab_contents()->GetURL().host() == domain)
+    if (GetTabContentsAt(i)->web_contents()->GetURL().host() == domain)
       indices->push_back(i);
   }
 }
@@ -1084,7 +1102,7 @@ void TabStripModel::GetIndicesWithSameOpener(int index,
   NavigationController* opener = contents_data_[index]->group;
   if (!opener) {
     // If there is no group, find all tabs with the selected tab as the opener.
-    opener = &(GetTabContentsAt(index)->controller());
+    opener = &(GetTabContentsAt(index)->web_contents()->GetController());
     if (!opener)
       return;
   }
@@ -1092,7 +1110,7 @@ void TabStripModel::GetIndicesWithSameOpener(int index,
     if (i == index)
       continue;
     if (contents_data_[i]->group == opener ||
-        &(GetTabContentsAt(i)->controller()) == opener) {
+        &(GetTabContentsAt(i)->web_contents()->GetController()) == opener) {
       indices->push_back(i);
     }
   }
@@ -1109,11 +1127,11 @@ std::vector<int> TabStripModel::GetIndicesForCommand(int index) const {
 
 bool TabStripModel::IsNewTabAtEndOfTabStrip(
     TabContentsWrapper* contents) const {
-  const GURL& url = contents->tab_contents()->GetURL();
+  const GURL& url = contents->web_contents()->GetURL();
   return url.SchemeIs(chrome::kChromeUIScheme) &&
          url.host() == chrome::kChromeUINewTabHost &&
          contents == GetContentsAt(count() - 1) &&
-         contents->controller().entry_count() == 1;
+         contents->web_contents()->GetController().GetEntryCount() == 1;
 }
 
 bool TabStripModel::InternalCloseTabs(const std::vector<int>& in_indices,
@@ -1143,7 +1161,7 @@ bool TabStripModel::InternalCloseTabs(const std::vector<int>& in_indices,
     for (size_t i = 0; i < indices.size(); ++i) {
       TabContentsWrapper* detached_contents = GetContentsAt(indices[i]);
       content::RenderProcessHost* process =
-          detached_contents->tab_contents()->GetRenderProcessHost();
+          detached_contents->web_contents()->GetRenderProcessHost();
       std::map<content::RenderProcessHost*, size_t>::iterator iter =
           processes.find(process);
       if (iter == processes.end()) {
@@ -1169,14 +1187,14 @@ bool TabStripModel::InternalCloseTabs(const std::vector<int>& in_indices,
     if (index == kNoTab)
       continue;
 
-    detached_contents->tab_contents()->OnCloseStarted();
+    detached_contents->web_contents()->OnCloseStarted();
 
     // Update the explicitly closed state. If the unload handlers cancel the
     // close the state is reset in Browser. We don't update the explicitly
     // closed state if already marked as explicitly closed as unload handlers
     // call back to this if the close is allowed.
-    if (!detached_contents->tab_contents()->closed_by_user_gesture()) {
-      detached_contents->tab_contents()->set_closed_by_user_gesture(
+    if (!detached_contents->web_contents()->GetClosedByUserGesture()) {
+      detached_contents->web_contents()->SetClosedByUserGesture(
           close_types & CLOSE_USER_GESTURE);
     }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,7 @@
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/system/screen_locker_settings.h"
-#include "chrome/browser/chromeos/system/touchpad_settings.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -44,6 +44,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kTapToClickEnabled,
                              false,
                              PrefService::SYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kPrimaryMouseButtonRight,
+                             false,
+                             PrefService::SYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kLabsMediaplayerEnabled,
                              false,
                              PrefService::UNSYNCABLE_PREF);
@@ -53,8 +56,23 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   // Check if the accessibility pref is already registered, which can happen
   // in WizardController::RegisterPrefs. We still want to try to register
   // the pref here in case of Chrome/Linux with ChromeOS=1.
-  if (prefs->FindPreference(prefs::kAccessibilityEnabled) == NULL) {
-    prefs->RegisterBooleanPref(prefs::kAccessibilityEnabled,
+  if (prefs->FindPreference(prefs::kSpokenFeedbackEnabled) == NULL) {
+    prefs->RegisterBooleanPref(prefs::kSpokenFeedbackEnabled,
+                               false,
+                               PrefService::UNSYNCABLE_PREF);
+  }
+  if (prefs->FindPreference(prefs::kHighContrastEnabled) == NULL) {
+    prefs->RegisterBooleanPref(prefs::kHighContrastEnabled,
+                               false,
+                               PrefService::UNSYNCABLE_PREF);
+  }
+  if (prefs->FindPreference(prefs::kScreenMagnifierEnabled) == NULL) {
+    prefs->RegisterBooleanPref(prefs::kScreenMagnifierEnabled,
+                               false,
+                               PrefService::UNSYNCABLE_PREF);
+  }
+  if (prefs->FindPreference(prefs::kVirtualKeyboardEnabled) == NULL) {
+    prefs->RegisterBooleanPref(prefs::kVirtualKeyboardEnabled,
                                false,
                                PrefService::UNSYNCABLE_PREF);
   }
@@ -205,9 +223,11 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
 
 void Preferences::Init(PrefService* prefs) {
   tap_to_click_enabled_.Init(prefs::kTapToClickEnabled, prefs, this);
-  accessibility_enabled_.Init(prefs::kAccessibilityEnabled, prefs, this);
+  accessibility_enabled_.Init(prefs::kSpokenFeedbackEnabled, prefs, this);
   sensitivity_.Init(prefs::kTouchpadSensitivity, prefs, this);
   use_24hour_clock_.Init(prefs::kUse24HourClock, prefs, this);
+  primary_mouse_button_right_.Init(prefs::kPrimaryMouseButtonRight,
+                                   prefs, this);
   language_hotkey_next_engine_in_menu_.Init(
       prefs::kLanguageHotkeyNextEngineInMenu, prefs, this);
   language_hotkey_previous_engine_.Init(
@@ -300,7 +320,7 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
   }
   if (!pref_name || *pref_name == prefs::kTouchpadSensitivity) {
     int sensitivity = sensitivity_.GetValue();
-    system::touchpad_settings::SetSensitivity(sensitivity);
+    system::pointer_settings::SetSensitivity(sensitivity);
     if (pref_name) {
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Touchpad.Sensitivity.Changed", sensitivity, 1, 5, 5);
@@ -308,6 +328,14 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Touchpad.Sensitivity.Started", sensitivity, 1, 5, 5);
     }
+  }
+  if (!pref_name || *pref_name == prefs::kPrimaryMouseButtonRight) {
+    const bool right = primary_mouse_button_right_.GetValue();
+    system::mouse_settings::SetPrimaryButtonRight(right);
+    if (pref_name)
+      UMA_HISTOGRAM_BOOLEAN("Mouse.PrimaryButtonRight.Changed", right);
+    else
+      UMA_HISTOGRAM_BOOLEAN("Mouse.PrimaryButtonRight.Started", right);
   }
 
   // We don't handle prefs::kLanguageCurrentInputMethod and PreviousInputMethod

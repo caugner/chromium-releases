@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -933,6 +933,20 @@ static void PPB_Fullscreen_GetScreenSizeDispatcher(
   );
 }
 
+static void PPB_Gamepad_SampleGamepadsDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbGamepadRpcServer::PPB_Gamepad_SampleGamepads(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
+  );
+}
+
 static void PPB_Graphics2D_CreateDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -1160,23 +1174,22 @@ static void PPB_Graphics3DTrusted_InitCommandBufferDispatcher(
       rpc,
       done,
       inputs[0]->u.ival,
-      inputs[1]->u.ival,
       &(outputs[0]->u.ival)
   );
 }
 
-static void PPB_Graphics3DTrusted_GetRingBufferDispatcher(
+static void PPB_Graphics3DTrusted_SetGetBufferDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
     NaClSrpcArg** outputs,
     NaClSrpcClosure* done
 ) {
-  PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_GetRingBuffer(
+  UNREFERENCED_PARAMETER(outputs);
+  PpbGraphics3DRpcServer::PPB_Graphics3DTrusted_SetGetBuffer(
       rpc,
       done,
       inputs[0]->u.ival,
-      &(outputs[0]->u.hval),
-      &(outputs[1]->u.ival)
+      inputs[1]->u.ival
   );
 }
 
@@ -1527,6 +1540,82 @@ static void PPB_MouseLock_UnlockMouseDispatcher(
       rpc,
       done,
       inputs[0]->u.ival
+  );
+}
+
+static void PPB_NetAddress_Private_AreEqualDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetAddressPrivateRpcServer::PPB_NetAddress_Private_AreEqual(
+      rpc,
+      done,
+      inputs[0]->u.count, inputs[0]->arrays.carr,
+      inputs[1]->u.count, inputs[1]->arrays.carr,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_NetAddress_Private_AreHostsEqualDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetAddressPrivateRpcServer::PPB_NetAddress_Private_AreHostsEqual(
+      rpc,
+      done,
+      inputs[0]->u.count, inputs[0]->arrays.carr,
+      inputs[1]->u.count, inputs[1]->arrays.carr,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_NetAddress_Private_DescribeDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetAddressPrivateRpcServer::PPB_NetAddress_Private_Describe(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.count, inputs[1]->arrays.carr,
+      inputs[2]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
+  );
+}
+
+static void PPB_NetAddress_Private_ReplacePortDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetAddressPrivateRpcServer::PPB_NetAddress_Private_ReplacePort(
+      rpc,
+      done,
+      inputs[0]->u.count, inputs[0]->arrays.carr,
+      inputs[1]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr,
+      &(outputs[1]->u.ival)
+  );
+}
+
+static void PPB_NetAddress_Private_GetAnyAddressDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbNetAddressPrivateRpcServer::PPB_NetAddress_Private_GetAnyAddress(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
   );
 }
 
@@ -2057,6 +2146,36 @@ static void PPB_Testing_GetLiveObjectsForInstanceDispatcher(
   );
 }
 
+static void PPB_Testing_SimulateInputEventDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  UNREFERENCED_PARAMETER(outputs);
+  PpbTestingRpcServer::PPB_Testing_SimulateInputEvent(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.ival
+  );
+}
+
+static void PPB_Testing_GetDocumentURLDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbTestingRpcServer::PPB_Testing_GetDocumentURL(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr,
+      &(outputs[1]->u.count), outputs[1]->arrays.carr
+  );
+}
+
 static void PPB_UDPSocket_Private_CreateDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -2436,6 +2555,211 @@ static void PPB_URLResponseInfo_GetBodyAsFileRefDispatcher(
   );
 }
 
+static void PPB_WebSocket_CreateDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_Create(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_IsWebSocketDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_IsWebSocket(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_ConnectDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_Connect(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.count, inputs[1]->arrays.carr,
+      inputs[2]->u.count, inputs[2]->arrays.carr,
+      inputs[3]->u.ival,
+      inputs[4]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_CloseDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_Close(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.ival,
+      inputs[2]->u.count, inputs[2]->arrays.carr,
+      inputs[3]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_ReceiveMessageDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_ReceiveMessage(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_SendMessageDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_SendMessage(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      inputs[1]->u.count, inputs[1]->arrays.carr,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_GetBufferedAmountDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetBufferedAmount(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.lval)
+  );
+}
+
+static void PPB_WebSocket_GetCloseCodeDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetCloseCode(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_GetCloseReasonDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetCloseReason(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
+  );
+}
+
+static void PPB_WebSocket_GetCloseWasCleanDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetCloseWasClean(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_GetExtensionsDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetExtensions(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
+  );
+}
+
+static void PPB_WebSocket_GetProtocolDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetProtocol(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
+  );
+}
+
+static void PPB_WebSocket_GetReadyStateDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetReadyState(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
+  );
+}
+
+static void PPB_WebSocket_GetURLDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PpbWebSocketRpcServer::PPB_WebSocket_GetURL(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.count), outputs[0]->arrays.carr
+  );
+}
+
 static void PPB_Widget_IsWidgetDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -2605,6 +2929,7 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_Font_PixelOffsetForCharacter:iCCi:i", PPB_Font_PixelOffsetForCharacterDispatcher },
   { "PPB_Fullscreen_SetFullscreen:ii:i", PPB_Fullscreen_SetFullscreenDispatcher },
   { "PPB_Fullscreen_GetScreenSize:i:Ci", PPB_Fullscreen_GetScreenSizeDispatcher },
+  { "PPB_Gamepad_SampleGamepads:i:C", PPB_Gamepad_SampleGamepadsDispatcher },
   { "PPB_Graphics2D_Create:iCi:i", PPB_Graphics2D_CreateDispatcher },
   { "PPB_Graphics2D_IsGraphics2D:i:i", PPB_Graphics2D_IsGraphics2DDispatcher },
   { "PPB_Graphics2D_Describe:i:Cii", PPB_Graphics2D_DescribeDispatcher },
@@ -2619,8 +2944,8 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_Graphics3D_GetError:i:i", PPB_Graphics3D_GetErrorDispatcher },
   { "PPB_Graphics3D_SwapBuffers:ii:i", PPB_Graphics3D_SwapBuffersDispatcher },
   { "PPB_Graphics3DTrusted_CreateRaw:iiI:i", PPB_Graphics3DTrusted_CreateRawDispatcher },
-  { "PPB_Graphics3DTrusted_InitCommandBuffer:ii:i", PPB_Graphics3DTrusted_InitCommandBufferDispatcher },
-  { "PPB_Graphics3DTrusted_GetRingBuffer:i:hi", PPB_Graphics3DTrusted_GetRingBufferDispatcher },
+  { "PPB_Graphics3DTrusted_InitCommandBuffer:i:i", PPB_Graphics3DTrusted_InitCommandBufferDispatcher },
+  { "PPB_Graphics3DTrusted_SetGetBuffer:ii:", PPB_Graphics3DTrusted_SetGetBufferDispatcher },
   { "PPB_Graphics3DTrusted_GetState:i:C", PPB_Graphics3DTrusted_GetStateDispatcher },
   { "PPB_Graphics3DTrusted_Flush:ii:", PPB_Graphics3DTrusted_FlushDispatcher },
   { "PPB_Graphics3DTrusted_FlushSync:ii:C", PPB_Graphics3DTrusted_FlushSyncDispatcher },
@@ -2643,6 +2968,11 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_Messaging_PostMessage:iC:", PPB_Messaging_PostMessageDispatcher },
   { "PPB_MouseLock_LockMouse:ii:i", PPB_MouseLock_LockMouseDispatcher },
   { "PPB_MouseLock_UnlockMouse:i:", PPB_MouseLock_UnlockMouseDispatcher },
+  { "PPB_NetAddress_Private_AreEqual:CC:i", PPB_NetAddress_Private_AreEqualDispatcher },
+  { "PPB_NetAddress_Private_AreHostsEqual:CC:i", PPB_NetAddress_Private_AreHostsEqualDispatcher },
+  { "PPB_NetAddress_Private_Describe:iCi:C", PPB_NetAddress_Private_DescribeDispatcher },
+  { "PPB_NetAddress_Private_ReplacePort:Ci:Ci", PPB_NetAddress_Private_ReplacePortDispatcher },
+  { "PPB_NetAddress_Private_GetAnyAddress:i:C", PPB_NetAddress_Private_GetAnyAddressDispatcher },
   { "PPB_PDF_GetLocalizedString:ii:C", PPB_PDF_GetLocalizedStringDispatcher },
   { "PPB_PDF_GetResourceImage:ii:i", PPB_PDF_GetResourceImageDispatcher },
   { "PPB_PDF_GetFontFileWithFallback:iCCi:i", PPB_PDF_GetFontFileWithFallbackDispatcher },
@@ -2678,6 +3008,8 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_Testing_RunMessageLoop:i:", PPB_Testing_RunMessageLoopDispatcher },
   { "PPB_Testing_QuitMessageLoop:i:", PPB_Testing_QuitMessageLoopDispatcher },
   { "PPB_Testing_GetLiveObjectsForInstance:i:i", PPB_Testing_GetLiveObjectsForInstanceDispatcher },
+  { "PPB_Testing_SimulateInputEvent:ii:", PPB_Testing_SimulateInputEventDispatcher },
+  { "PPB_Testing_GetDocumentURL:i:CC", PPB_Testing_GetDocumentURLDispatcher },
   { "PPB_UDPSocket_Private_Create:i:i", PPB_UDPSocket_Private_CreateDispatcher },
   { "PPB_UDPSocket_Private_IsUDPSocket:i:i", PPB_UDPSocket_Private_IsUDPSocketDispatcher },
   { "PPB_UDPSocket_Private_Bind:iCi:i", PPB_UDPSocket_Private_BindDispatcher },
@@ -2703,6 +3035,20 @@ NaClSrpcHandlerDesc PpbRpcs::srpc_methods[] = {
   { "PPB_URLResponseInfo_IsURLResponseInfo:i:i", PPB_URLResponseInfo_IsURLResponseInfoDispatcher },
   { "PPB_URLResponseInfo_GetProperty:ii:C", PPB_URLResponseInfo_GetPropertyDispatcher },
   { "PPB_URLResponseInfo_GetBodyAsFileRef:i:i", PPB_URLResponseInfo_GetBodyAsFileRefDispatcher },
+  { "PPB_WebSocket_Create:i:i", PPB_WebSocket_CreateDispatcher },
+  { "PPB_WebSocket_IsWebSocket:i:i", PPB_WebSocket_IsWebSocketDispatcher },
+  { "PPB_WebSocket_Connect:iCCii:i", PPB_WebSocket_ConnectDispatcher },
+  { "PPB_WebSocket_Close:iiCi:i", PPB_WebSocket_CloseDispatcher },
+  { "PPB_WebSocket_ReceiveMessage:ii:i", PPB_WebSocket_ReceiveMessageDispatcher },
+  { "PPB_WebSocket_SendMessage:iC:i", PPB_WebSocket_SendMessageDispatcher },
+  { "PPB_WebSocket_GetBufferedAmount:i:l", PPB_WebSocket_GetBufferedAmountDispatcher },
+  { "PPB_WebSocket_GetCloseCode:i:i", PPB_WebSocket_GetCloseCodeDispatcher },
+  { "PPB_WebSocket_GetCloseReason:i:C", PPB_WebSocket_GetCloseReasonDispatcher },
+  { "PPB_WebSocket_GetCloseWasClean:i:i", PPB_WebSocket_GetCloseWasCleanDispatcher },
+  { "PPB_WebSocket_GetExtensions:i:C", PPB_WebSocket_GetExtensionsDispatcher },
+  { "PPB_WebSocket_GetProtocol:i:C", PPB_WebSocket_GetProtocolDispatcher },
+  { "PPB_WebSocket_GetReadyState:i:i", PPB_WebSocket_GetReadyStateDispatcher },
+  { "PPB_WebSocket_GetURL:i:C", PPB_WebSocket_GetURLDispatcher },
   { "PPB_Widget_IsWidget:i:i", PPB_Widget_IsWidgetDispatcher },
   { "PPB_Widget_Paint:iCi:i", PPB_Widget_PaintDispatcher },
   { "PPB_Widget_HandleEvent:ii:i", PPB_Widget_HandleEventDispatcher },

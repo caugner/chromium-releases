@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,13 +72,13 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
     ui_test_utils::RunMessageLoop();
   }
 
-  // Find the extension by iterating backwards since it is likely last.
+  // Find the loaded extension by its path. See crbug.com/59531 for why
+  // we cannot just use last_loaded_extension_id_.
   FilePath extension_path = path;
   file_util::AbsolutePath(&extension_path);
   const Extension* extension = NULL;
-  for (ExtensionList::const_reverse_iterator iter =
-           service->extensions()->rbegin();
-       iter != service->extensions()->rend(); ++iter) {
+  for (ExtensionSet::const_iterator iter = service->extensions()->begin();
+       iter != service->extensions()->end(); ++iter) {
     if ((*iter)->path() == extension_path) {
       extension = *iter;
       break;
@@ -92,7 +92,8 @@ const Extension* ExtensionBrowserTest::LoadExtensionWithOptions(
   // The call to OnExtensionInstalled ensures the other extension prefs
   // are set up with the defaults.
   service->extension_prefs()->OnExtensionInstalled(
-      extension, Extension::ENABLED, false, 0);
+      extension, Extension::ENABLED, false,
+      StringOrdinal::CreateInitialOrdinal());
 
   // Toggling incognito or file access will reload the extension, so wait for
   // the reload and grab the new extension instance. The default state is
@@ -141,17 +142,21 @@ const Extension* ExtensionBrowserTest::LoadExtensionIncognito(
   return LoadExtensionWithOptions(path, true, true);
 }
 
-bool ExtensionBrowserTest::LoadExtensionAsComponent(const FilePath& path) {
+const Extension* ExtensionBrowserTest::LoadExtensionAsComponent(
+    const FilePath& path) {
   ExtensionService* service = browser()->profile()->GetExtensionService();
 
   std::string manifest;
   if (!file_util::ReadFileToString(path.Append(Extension::kManifestFilename),
                                    &manifest))
-    return false;
+    return NULL;
 
-  service->component_loader()->Add(manifest, path);
-
-  return true;
+  const Extension* extension =
+      service->component_loader()->Add(manifest, path);
+  if (!extension)
+    return NULL;
+  last_loaded_extension_id_ = extension->id();
+  return extension;
 }
 
 FilePath ExtensionBrowserTest::PackExtension(const FilePath& dir_path) {
@@ -189,7 +194,8 @@ FilePath ExtensionBrowserTest::PackExtensionWithOptions(
   if (!creator->Run(dir_path,
                     crx_path,
                     pem_path,
-                    pem_out_path)) {
+                    pem_out_path,
+                    ExtensionCreator::kOverwriteCRX)) {
     ADD_FAILURE() << "ExtensionCreator::Run() failed: "
                   << creator->error_message();
     return FilePath();
@@ -215,7 +221,7 @@ class MockAbortExtensionInstallUI : public ExtensionInstallUI {
 
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
 
-  virtual void OnInstallFailure(const std::string& error) {}
+  virtual void OnInstallFailure(const string16& error) {}
 };
 
 class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
@@ -296,13 +302,14 @@ const Extension* ExtensionBrowserTest::InstallOrUpdateExtension(
             << " num after: " << base::IntToString(num_after)
             << " Installed extensions follow:";
 
-    for (size_t i = 0; i < service->extensions()->size(); ++i)
-      VLOG(1) << "  " << (*service->extensions())[i]->id();
+    for (ExtensionSet::const_iterator it = service->extensions()->begin();
+         it != service->extensions()->end(); ++it)
+      VLOG(1) << "  " << (*it)->id();
 
     VLOG(1) << "Errors follow:";
-    const std::vector<std::string>* errors =
+    const std::vector<string16>* errors =
         ExtensionErrorReporter::GetInstance()->GetErrors();
-    for (std::vector<std::string>::const_iterator iter = errors->begin();
+    for (std::vector<string16>::const_iterator iter = errors->begin();
          iter != errors->end(); ++iter)
       VLOG(1) << *iter;
 

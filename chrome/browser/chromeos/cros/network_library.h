@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@
 #include "base/observer_list.h"
 #include "base/string16.h"
 #include "base/timer.h"
+#include "chrome/browser/chromeos/cros/network_ui_data.h"
+#include "googleurl/src/gurl.h"
 #include "third_party/cros/chromeos_network.h"
 
 namespace base {
@@ -43,6 +45,7 @@ enum PropertyIndex {
   PROPERTY_INDEX_ACTIVATION_STATE,
   PROPERTY_INDEX_ACTIVE_PROFILE,
   PROPERTY_INDEX_ARP_GATEWAY,
+  PROPERTY_INDEX_AUTHENTICATION,
   PROPERTY_INDEX_AUTO_CONNECT,
   PROPERTY_INDEX_AVAILABLE_TECHNOLOGIES,
   PROPERTY_INDEX_CARRIER,
@@ -115,9 +118,21 @@ enum PropertyIndex {
   PROPERTY_INDEX_ONC_CLIENT_CERT_PATTERN,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_CLIENT_CERT_REF,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_CLIENT_CERT_TYPE,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_ETHERNET,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_IPSEC,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_L2TP,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_OPENVPN,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_EXCLUDE_DOMAINS,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_FTP,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_HOST,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_HTTP,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_HTTPS,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_MANUAL,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_PAC,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_PORT,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_SETTINGS,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_SOCKS,  // Used internally for ONC parsing
+  PROPERTY_INDEX_ONC_PROXY_TYPE,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_REMOVE,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_WIFI,  // Used internally for ONC parsing
   PROPERTY_INDEX_ONC_VPN,  // Used internally for ONC parsing
@@ -363,6 +378,15 @@ enum ProviderType {
   PROVIDER_TYPE_OPEN_VPN,
   // Add new provider types before PROVIDER_TYPE_MAX.
   PROVIDER_TYPE_MAX,
+};
+
+// Proxy type specified in ONC.
+enum ProxyOncType {
+  PROXY_ONC_DIRECT,
+  PROXY_ONC_WPAD,
+  PROXY_ONC_PAC,
+  PROXY_ONC_MANUAL,
+  PROXY_ONC_MAX,
 };
 
 // Simple wrapper for property Cellular.FoundNetworks.
@@ -621,6 +645,19 @@ class Network {
   };
   friend class TestApi;
 
+  // Structure used only for parsing ONC's ProxySettings value.
+  struct ProxyOncConfig {
+    ProxyOncConfig() : type(PROXY_ONC_DIRECT) {}
+
+    ProxyOncType type;
+    std::string pac_url;  // Only for PROXY_TYPE_PAC.
+    // Concatenated string of manual proxies only for PROXY_TYPE_MANUAL,
+    // formatted using chromeos::ProxyConfigServiceImpl::ProxyConfig::
+    // EncodeAndAppendProxyServer.
+    std::string manual_spec;
+    std::string bypass_rules;  // Only for PROXY_TYPE_MANUAL.
+  };
+
   const std::string& service_path() const { return service_path_; }
   const std::string& name() const { return name_; }
   const std::string& device_path() const { return device_path_; }
@@ -665,6 +702,8 @@ class Network {
   const DictionaryValue* ui_data() const { return &ui_data_; }
   DictionaryValue* ui_data() { return &ui_data_; }
 
+  ProxyOncConfig& proxy_onc_config() { return proxy_onc_config_; }
+
   void set_notify_failure(bool state) { notify_failure_ = state; }
 
   void SetPreferred(bool preferred);
@@ -674,6 +713,8 @@ class Network {
   void SetName(const std::string& name);
 
   void SetSaveCredentials(bool save_credentials);
+
+  void ClearUIData();
 
   // Return a string representation of the state code.
   std::string GetStateString() const;
@@ -771,6 +812,8 @@ class Network {
   // This allows the implementation classes access to privates.
   NETWORK_LIBRARY_IMPL_FRIENDS;
 
+  FRIEND_TEST_ALL_PREFIXES(NetworkLibraryTest, GetUserExpandedValue);
+
   // Use these functions at your peril.  They are used by the various
   // parsers to set state, and really shouldn't be used by anything else
   // because they don't do the error checking and sending to the
@@ -811,7 +854,8 @@ class Network {
   int priority_;  // determines order in network list.
   bool auto_connect_;
   bool save_credentials_;  // save passphrase and EAP credentials to disk.
-  std::string proxy_config_;
+  std::string proxy_config_;  // ProxyConfig property in flimflam.
+  ProxyOncConfig proxy_onc_config_;  // Only used for parsing ONC proxy value.
 
   // Unique identifier, set the first time the network is parsed.
   std::string unique_id_;
@@ -1084,6 +1128,8 @@ class CellularNetwork : public WirelessNetwork {
   // Returns true if one of the usage_url_ / payment_url_ (or both) is defined.
   bool SupportsDataPlan() const;
 
+  // Return a URL for account info page.
+  GURL GetAccountInfoUrl() const;
   // Return a string representation of network technology.
   std::string GetNetworkTechnologyString() const;
   // Return a string representation of activation state.
@@ -1196,7 +1242,8 @@ class WifiNetwork : public WirelessNetwork {
   const bool eap_use_system_cas() const { return eap_use_system_cas_; }
   const std::string& eap_identity() const { return eap_identity_; }
   const std::string& eap_anonymous_identity() const {
-    return eap_anonymous_identity_; }
+    return eap_anonymous_identity_;
+  }
   const std::string& eap_passphrase() const { return eap_passphrase_; }
 
   const std::string& GetPassphrase() const;
@@ -1619,6 +1666,13 @@ class NetworkLibrary {
   virtual Network* FindRememberedNetworkByUniqueId(
       const std::string& unique_id) const = 0;
 
+  // Return a pointer to the ONC dictionary for a network identified by unique
+  // ID. Returns NULL if there is no ONC dictionary available for that network.
+  // The ONC dictionary is usually only present for policy-configure networks
+  // which get reconfigured at startup.
+  virtual const base::DictionaryValue* FindOncForNetwork(
+      const std::string& unique_id) const = 0;
+
   // Retrieves the data plans associated with |path|, NULL if there are no
   // associated plans.
   virtual const CellularDataPlanVector* GetDataPlans(
@@ -1641,7 +1695,7 @@ class NetworkLibrary {
 
   // Returns home carrier ID if available, otherwise empty string is returned.
   // Carrier ID format: <carrier name> (country). Ex.: "Verizon (us)".
-  virtual std::string GetCellularHomeCarrierId() const = 0;
+  virtual const std::string& GetCellularHomeCarrierId() const = 0;
 
   // Passes |old_pin|, |new_pin| to change SIM card PIM.
   virtual void ChangePin(const std::string& old_pin,
@@ -1789,8 +1843,12 @@ class NetworkLibrary {
   virtual void SwitchToPreferredNetwork() = 0;
 
   // Load networks from an Open Network Configuration blob.
+  // If there was an error, this will return false and |error| will be set to
+  // the error message.
   virtual bool LoadOncNetworks(const std::string& onc_blob,
-                               const std::string& passcode) = 0;
+                               const std::string& passcode,
+                               NetworkUIData::ONCSource source,
+                               std::string* error) = 0;
 
   // This sets the active network for the network type. Note: priority order
   // is unchanged (i.e. if a wifi network is set to active, but an ethernet

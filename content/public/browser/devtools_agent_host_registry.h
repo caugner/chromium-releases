@@ -9,17 +9,20 @@
 #include "content/common/content_export.h"
 
 class RenderViewHost;
-class TabContents;
 
 namespace content {
 
 class DevToolsAgentHost;
+class WebContents;
 
 class CONTENT_EXPORT DevToolsAgentHostRegistry {
  public:
   // Returns DevToolsAgentHost that can be used for inspecting |rvh|.
   // New DevToolsAgentHost will be created if it does not exist.
   static DevToolsAgentHost* GetDevToolsAgentHost(RenderViewHost* rvh);
+
+  // Returns render view host instance for given |agent_host|.
+  static RenderViewHost* GetRenderViewHost(DevToolsAgentHost* agent_host);
 
   // Returns true iff an instance of DevToolsAgentHost for the |rvh|
   // does exist.
@@ -31,7 +34,7 @@ class CONTENT_EXPORT DevToolsAgentHostRegistry {
       int worker_process_id,
       int worker_route_id);
 
-  static bool IsDebuggerAttached(TabContents* tab_contents);
+  static bool IsDebuggerAttached(WebContents* web_contents);
 };
 
 }  // namespace content

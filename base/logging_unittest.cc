@@ -165,8 +165,11 @@ TEST_F(LoggingTest, LoggingIsLazy) {
   DVLOG(1) << mock_log_source.Log();
   DVLOG_IF(1, true) << mock_log_source.Log();
 }
-// Test is failing on 963 branch.
-TEST_F(LoggingTest, DISABLED_CheckStreamsAreLazy) {
+
+// Official builds have CHECKs directly call BreakDebugger.
+#if !defined(LOGGING_IS_OFFICIAL_BUILD)
+
+TEST_F(LoggingTest, CheckStreamsAreLazy) {
   MockLogSource mock_log_source, uncalled_mock_log_source;
   EXPECT_CALL(mock_log_source, Log()).Times(8).
       WillRepeatedly(Return("check message"));
@@ -181,6 +184,8 @@ TEST_F(LoggingTest, DISABLED_CheckStreamsAreLazy) {
   CHECK_NE(mock_log_source.Log(), mock_log_source.Log())
       << mock_log_source.Log();
 }
+
+#endif
 
 TEST_F(LoggingTest, DebugLoggingReleaseBehavior) {
 #if !defined(NDEBUG)

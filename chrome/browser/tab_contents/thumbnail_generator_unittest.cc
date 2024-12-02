@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,6 @@
 #include "content/browser/renderer_host/backing_store_skia.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/browser/tab_contents/render_view_host_manager.h"
-#include "content/common/view_messages.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "skia/ext/platform_canvas.h"
@@ -21,6 +19,8 @@
 #include "third_party/skia/include/core/SkColorPriv.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/surface/transport_dib.h"
+
+using content::WebContents;
 
 static const int kBitmapWidth = 100;
 static const int kBitmapHeight = 100;
@@ -59,7 +59,7 @@ class ThumbnailGeneratorTest : public testing::Test {
   ThumbnailGeneratorTest() {
     profile_.reset(new TestingProfile());
     process_ = new MockRenderProcessHost(profile_.get());
-    widget_.reset(new RenderWidgetHost(process_, 1));
+    widget_.reset(new RenderWidgetHost(process_, MSG_ROUTING_NONE));
     view_.reset(new TestRenderWidgetHostViewWithBackingStoreSkia(
         widget_.get()));
     // Paiting will be skipped if there's no view.
@@ -70,7 +70,7 @@ class ThumbnailGeneratorTest : public testing::Test {
     // will want a RenderWidget, so it works out OK.
     content::NotificationService::current()->Notify(
         content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-        content::Source<RenderViewHostManager>(NULL),
+        content::Source<WebContents>(NULL),
         content::Details<RenderViewHost>(reinterpret_cast<RenderViewHost*>(
             widget_.get())));
 
@@ -94,12 +94,6 @@ class ThumbnailGeneratorTest : public testing::Test {
   enum TransportType { TRANSPORT_BLACK, TRANSPORT_WHITE, TRANSPORT_OTHER };
 
   void SendPaint(TransportType type) {
-    ViewHostMsg_UpdateRect_Params params;
-    params.bitmap_rect = gfx::Rect(0, 0, kBitmapWidth, kBitmapHeight);
-    params.view_size = params.bitmap_rect.size();
-    params.copy_rects.push_back(params.bitmap_rect);
-    params.flags = 0;
-
     scoped_ptr<skia::PlatformCanvas> canvas(
         transport_dib_->GetPlatformCanvas(kBitmapWidth, kBitmapHeight));
     switch (type) {
@@ -117,10 +111,8 @@ class ThumbnailGeneratorTest : public testing::Test {
         break;
     }
 
-    params.bitmap = transport_dib_->id();
-
-    ViewHostMsg_UpdateRect msg(1, params);
-    widget_->OnMessageReceived(msg);
+    gfx::Rect rect(0, 0, kBitmapWidth, kBitmapHeight);
+    SimulateUpdateRect(widget_.get(), transport_dib_->id(), rect);
   }
 
   TransportType ClassifyFirstPixel(const SkBitmap& bitmap) {
@@ -218,7 +210,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, CalculateBoringScore_Empty) {
 TEST_F(ThumbnailGeneratorSimpleTest, CalculateBoringScore_SingleColor) {
   const SkColor kBlack = SkColorSetRGB(0, 0, 0);
   const gfx::Size kSize(20, 10);
-  gfx::CanvasSkia canvas(kSize.width(), kSize.height(), true);
+  gfx::CanvasSkia canvas(kSize, true);
   // Fill all pixesl in black.
   canvas.FillRect(kBlack, gfx::Rect(gfx::Point(), kSize));
 
@@ -233,7 +225,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, CalculateBoringScore_TwoColors) {
   const SkColor kWhite = SkColorSetRGB(0xFF, 0xFF, 0xFF);
   const gfx::Size kSize(20, 10);
 
-  gfx::CanvasSkia canvas(kSize.width(), kSize.height(), true);
+  gfx::CanvasSkia canvas(kSize, true);
   // Fill all pixesl in black.
   canvas.FillRect(kBlack, gfx::Rect(gfx::Point(), kSize));
   // Fill the left half pixels in white.
@@ -249,7 +241,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, CalculateBoringScore_TwoColors) {
 
 TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_TallerThanWide) {
   // The input bitmap is vertically long.
-  gfx::CanvasSkia canvas(40, 90, true);
+  gfx::CanvasSkia canvas(gfx::Size(40, 90), true);
   SkBitmap bitmap =
       skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
 
@@ -266,7 +258,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_TallerThanWide) {
 
 TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_WiderThanTall) {
   // The input bitmap is horizontally long.
-  gfx::CanvasSkia canvas(90, 40, true);
+  gfx::CanvasSkia canvas(gfx::Size(90, 40), true);
   SkBitmap bitmap =
       skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
 
@@ -283,7 +275,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_WiderThanTall) {
 
 TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_NotClipped) {
   // The input bitmap is square.
-  gfx::CanvasSkia canvas(40, 40, true);
+  gfx::CanvasSkia canvas(gfx::Size(40, 40), true);
   SkBitmap bitmap =
       skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
 
@@ -300,7 +292,7 @@ TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_NotClipped) {
 
 TEST_F(ThumbnailGeneratorSimpleTest, GetClippedBitmap_NonSquareOutput) {
   // The input bitmap is square.
-  gfx::CanvasSkia canvas(40, 40, true);
+  gfx::CanvasSkia canvas(gfx::Size(40, 40), true);
   SkBitmap bitmap =
       skia::GetTopDevice(*canvas.sk_canvas())->accessBitmap(false);
 

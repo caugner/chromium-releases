@@ -21,12 +21,15 @@
 #include "content/public/browser/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
 
-class NavigationEntry;
 class Profile;
 class SessionCommand;
+class TabContentsWrapper;
 struct SessionTab;
 struct SessionWindow;
-class TabContentsWrapper;
+
+namespace content {
+class NavigationEntry;
+}
 
 // SessionService ------------------------------------------------------------
 
@@ -136,7 +139,7 @@ class SessionService : public BaseSessionService,
   void UpdateTabNavigation(const SessionID& window_id,
                            const SessionID& tab_id,
                            int index,
-                           const NavigationEntry& entry);
+                           const content::NavigationEntry& entry);
 
   // Notification that a tab has restored its entries or a closed tab is being
   // reused.
@@ -169,16 +172,6 @@ class SessionService : public BaseSessionService,
   // SessionCommands to browser state, then notify the callback.
   Handle GetLastSession(CancelableRequestConsumerBase* consumer,
                         const SessionCallback& callback);
-
-  // Fetches the contents of the current session, notifying the callback when
-  // done. If the callback is supplied an empty vector of SessionWindows
-  // it means the session could not be restored.
-  //
-  // The created request does NOT directly invoke the callback, rather the
-  // callback invokes OnGotSessionCommands from which we map the
-  // SessionCommands to browser state, then notify the callback.
-  Handle GetCurrentSession(CancelableRequestConsumerBase* consumer,
-                           const SessionCallback& callback);
 
   // Overridden from BaseSessionService because we want some UMA reporting on
   // session update activities.

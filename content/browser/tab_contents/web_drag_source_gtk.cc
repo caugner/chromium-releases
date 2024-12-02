@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,15 @@
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/tab_contents/drag_utils_gtk.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents_view.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_util.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_screen_utils.h"
@@ -29,11 +31,12 @@
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebDragOperationNone;
+using content::WebContents;
 
 namespace content {
 
-WebDragSourceGtk::WebDragSourceGtk(TabContents* tab_contents)
-    : tab_contents_(tab_contents),
+WebDragSourceGtk::WebDragSourceGtk(WebContents* web_contents)
+    : web_contents_(web_contents),
       drag_pixbuf_(NULL),
       drag_failed_(false),
       drag_widget_(gtk_invisible_new()),
@@ -74,7 +77,7 @@ void WebDragSourceGtk::StartDragging(const WebDropData& drop_data,
   // Guard against re-starting before previous drag completed.
   if (drag_context_) {
     NOTREACHED();
-    tab_contents_->SystemDragEnded();
+    web_contents_->SystemDragEnded();
     return;
   }
 
@@ -98,6 +101,8 @@ void WebDragSourceGtk::StartDragging(const WebDropData& drop_data,
                                                 &download_url_)) {
     targets_mask |= ui::DIRECT_SAVE_FILE;
   }
+  if (!drop_data.custom_data.empty())
+    targets_mask |= ui::CUSTOM_DATA;
 
   // NOTE: Begin a drag even if no targets present. Otherwise, things like
   // draggable list elements will not work.
@@ -141,7 +146,7 @@ void WebDragSourceGtk::StartDragging(const WebDropData& drop_data,
   if (!drag_context_) {
     drag_failed_ = true;
     drop_data_.reset();
-    tab_contents_->SystemDragEnded();
+    web_contents_->SystemDragEnded();
     return;
   }
 
@@ -159,8 +164,8 @@ void WebDragSourceGtk::DidProcessEvent(GdkEvent* event) {
   GdkEventMotion* event_motion = reinterpret_cast<GdkEventMotion*>(event);
   gfx::Point client = ui::ClientPoint(GetContentNativeView());
 
-  if (tab_contents_->render_view_host()) {
-    tab_contents_->render_view_host()->DragSourceMovedTo(
+  if (web_contents_->GetRenderViewHost()) {
+    web_contents_->GetRenderViewHost()->DragSourceMovedTo(
         client.x(), client.y(),
         static_cast<int>(event_motion->x_root),
         static_cast<int>(event_motion->y_root));
@@ -245,9 +250,9 @@ void WebDragSourceGtk::OnDragDataGet(GtkWidget* sender,
                 new DragDownloadFile(file_path,
                                      linked_ptr<net::FileStream>(file_stream),
                                      download_url_,
-                                     tab_contents_->GetURL(),
-                                     tab_contents_->encoding(),
-                                     tab_contents_);
+                                     web_contents_->GetURL(),
+                                     web_contents_->GetEncoding(),
+                                     web_contents_);
             drag_file_downloader->Start(
                 new drag_download_util::PromiseFileFinalizer(
                     drag_file_downloader));
@@ -259,11 +264,23 @@ void WebDragSourceGtk::OnDragDataGet(GtkWidget* sender,
 
         // Return the status code to the file manager.
         gtk_selection_data_set(selection_data,
-                               selection_data->target,
-                               8,
+                               gtk_selection_data_get_target(selection_data),
+                               kBitsPerByte,
                                reinterpret_cast<guchar*>(&status_code),
                                1);
       }
+      break;
+    }
+
+    case ui::CUSTOM_DATA: {
+      Pickle custom_data;
+      ui::WriteCustomDataToPickle(drop_data_->custom_data, &custom_data);
+      gtk_selection_data_set(
+          selection_data,
+          ui::GetAtomForTarget(ui::CUSTOM_DATA),
+          kBitsPerByte,
+          reinterpret_cast<const guchar*>(custom_data.data()),
+          custom_data.size());
       break;
     }
 
@@ -280,8 +297,8 @@ gboolean WebDragSourceGtk::OnDragFailed(GtkWidget* sender,
   gfx::Point root = ui::ScreenPoint(GetContentNativeView());
   gfx::Point client = ui::ClientPoint(GetContentNativeView());
 
-  if (tab_contents_->render_view_host()) {
-    tab_contents_->render_view_host()->DragSourceEndedAt(
+  if (web_contents_->GetRenderViewHost()) {
+    web_contents_->GetRenderViewHost()->DragSourceEndedAt(
         client.x(), client.y(), root.x(), root.y(),
         WebDragOperationNone);
   }
@@ -352,21 +369,21 @@ void WebDragSourceGtk::OnDragEnd(GtkWidget* sender,
     gfx::Point root = ui::ScreenPoint(GetContentNativeView());
     gfx::Point client = ui::ClientPoint(GetContentNativeView());
 
-    if (tab_contents_->render_view_host()) {
-      tab_contents_->render_view_host()->DragSourceEndedAt(
+    if (web_contents_->GetRenderViewHost()) {
+      web_contents_->GetRenderViewHost()->DragSourceEndedAt(
           client.x(), client.y(), root.x(), root.y(),
           content::GdkDragActionToWebDragOp(drag_context->action));
     }
   }
 
-  tab_contents_->SystemDragEnded();
+  web_contents_->SystemDragEnded();
 
   drop_data_.reset();
   drag_context_ = NULL;
 }
 
 gfx::NativeView WebDragSourceGtk::GetContentNativeView() const {
-  return tab_contents_->view()->GetContentNativeView();
+  return web_contents_->GetView()->GetContentNativeView();
 }
 
 gboolean WebDragSourceGtk::OnDragIconExpose(GtkWidget* sender,

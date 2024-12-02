@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,9 @@
 #include "base/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string_split.h"
 #include "base/sync_socket.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
@@ -31,16 +31,17 @@
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/renderer/gamepad_shared_memory_reader.h"
 #include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
 #include "content/renderer/gpu/renderer_gl_context.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/renderer/media/audio_input_message_filter.h"
 #include "content/renderer/media/audio_message_filter.h"
+#include "content/renderer/media/pepper_platform_video_decoder_impl.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
 #include "content/renderer/p2p/p2p_transport_impl.h"
 #include "content/renderer/pepper_platform_context_3d_impl.h"
-#include "content/renderer/pepper_platform_video_decoder_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/render_widget_fullscreen_pepper.h"
@@ -141,7 +142,7 @@ class PlatformImage2DImpl
     *byte_count = dib_->size();
 #if defined(OS_WIN)
     return reinterpret_cast<intptr_t>(dib_->handle());
-#elif defined(OS_MACOSX)
+#elif defined(OS_MACOSX) || defined(OS_ANDROID)
     return static_cast<intptr_t>(dib_->handle().fd);
 #elif defined(OS_POSIX)
     return static_cast<intptr_t>(dib_->handle());
@@ -248,8 +249,7 @@ bool PlatformAudioImpl::Initialize(
 
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &PlatformAudioImpl::InitializeOnIOThread,
-                        params));
+      base::Bind(&PlatformAudioImpl::InitializeOnIOThread, this, params));
   return true;
 }
 
@@ -257,7 +257,7 @@ bool PlatformAudioImpl::StartPlayback() {
   if (filter_) {
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &PlatformAudioImpl::StartPlaybackOnIOThread));
+        base::Bind(&PlatformAudioImpl::StartPlaybackOnIOThread, this));
     return true;
   }
   return false;
@@ -267,7 +267,7 @@ bool PlatformAudioImpl::StopPlayback() {
   if (filter_) {
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &PlatformAudioImpl::StopPlaybackOnIOThread));
+        base::Bind(&PlatformAudioImpl::StopPlaybackOnIOThread, this));
     return true;
   }
   return false;
@@ -329,8 +329,8 @@ void PlatformAudioImpl::OnLowLatencyCreated(
       client_->StreamCreated(handle, length, socket_handle);
   } else {
     main_message_loop_proxy_->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &PlatformAudioImpl::OnLowLatencyCreated,
-                          handle, socket_handle, length));
+        base::Bind(&PlatformAudioImpl::OnLowLatencyCreated, this, handle,
+                   socket_handle, length));
   }
 }
 
@@ -415,24 +415,21 @@ bool PlatformAudioInputImpl::Initialize(
 
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &PlatformAudioInputImpl::InitializeOnIOThread,
-                        params));
+      base::Bind(&PlatformAudioInputImpl::InitializeOnIOThread, this, params));
   return true;
 }
 
 bool PlatformAudioInputImpl::StartCapture() {
   ChildProcess::current()->io_message_loop()->PostTask(
     FROM_HERE,
-    NewRunnableMethod(this,
-        &PlatformAudioInputImpl::StartCaptureOnIOThread));
+    base::Bind(&PlatformAudioInputImpl::StartCaptureOnIOThread, this));
   return true;
 }
 
 bool PlatformAudioInputImpl::StopCapture() {
   ChildProcess::current()->io_message_loop()->PostTask(
     FROM_HERE,
-    NewRunnableMethod(this,
-        &PlatformAudioInputImpl::StopCaptureOnIOThread));
+    base::Bind(&PlatformAudioInputImpl::StopCaptureOnIOThread, this));
   return true;
 }
 
@@ -495,9 +492,10 @@ void PlatformAudioInputImpl::OnLowLatencyCreated(
     if (client_)
       client_->StreamCreated(handle, length, socket_handle);
   } else {
-    main_message_loop_proxy_->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &PlatformAudioInputImpl::OnLowLatencyCreated,
-                          handle, socket_handle, length));
+    main_message_loop_proxy_->PostTask(
+        FROM_HERE,
+        base::Bind(&PlatformAudioInputImpl::OnLowLatencyCreated, this,
+                   handle, socket_handle, length));
   }
 }
 
@@ -644,6 +642,29 @@ class PlatformVideoCaptureImpl
  private:
   scoped_ptr<media::VideoCaptureHandlerProxy> handler_proxy_;
   media::VideoCapture* video_capture_;
+};
+
+class PluginInstanceLockTarget : public MouseLockDispatcher::LockTarget {
+ public:
+  PluginInstanceLockTarget(webkit::ppapi::PluginInstance* plugin)
+      : plugin_(plugin) {}
+
+  virtual void OnLockMouseACK(bool succeeded) OVERRIDE {
+    plugin_->OnLockMouseACK(succeeded);
+  }
+
+  virtual void OnMouseLockLost() OVERRIDE {
+    plugin_->OnMouseLockLost();
+  }
+
+  virtual bool HandleMouseLockedInputEvent(
+      const WebKit::WebMouseEvent &event) OVERRIDE {
+    plugin_->HandleMouseLockedInputEvent(event);
+    return true;
+  }
+
+ private:
+  webkit::ppapi::PluginInstance* plugin_;
 };
 
 }  // namespace
@@ -822,13 +843,11 @@ void PpapiBrokerImpl::ConnectPluginToBroker(
   base::SyncSocket::Handle plugin_handle = base::kInvalidPlatformFileValue;
   int32_t result = PP_OK;
 
-  base::SyncSocket* sockets[2] = {0};
-  if (base::SyncSocket::CreatePair(sockets)) {
-    // The socket objects will be deleted when this function exits, closing the
-    // handles. Any uses of the socket must duplicate them.
-    scoped_ptr<base::SyncSocket> broker_socket(sockets[0]);
-    scoped_ptr<base::SyncSocket> plugin_socket(sockets[1]);
-
+  // The socket objects will be deleted when this function exits, closing the
+  // handles. Any uses of the socket must duplicate them.
+  scoped_ptr<base::SyncSocket> broker_socket(new base::SyncSocket());
+  scoped_ptr<base::SyncSocket> plugin_socket(new base::SyncSocket());
+  if (base::SyncSocket::CreatePair(broker_socket.get(), plugin_socket.get())) {
     result = dispatcher_->SendHandleToBroker(client->pp_instance(),
                                              broker_socket->handle());
 
@@ -854,15 +873,11 @@ PepperPluginDelegateImpl::PepperPluginDelegateImpl(RenderViewImpl* render_view)
       has_saved_context_menu_action_(false),
       saved_context_menu_action_(0),
       focused_plugin_(NULL),
-      mouse_lock_owner_(NULL),
-      mouse_locked_(false),
-      pending_lock_request_(false),
-      pending_unlock_request_(false),
       last_mouse_event_target_(NULL) {
 }
 
 PepperPluginDelegateImpl::~PepperPluginDelegateImpl() {
-  DCHECK(!mouse_lock_owner_);
+  DCHECK(mouse_lock_instances_.empty());
 }
 
 scoped_refptr<webkit::ppapi::PluginModule>
@@ -981,18 +996,30 @@ bool PepperPluginDelegateImpl::StopWaitingForPpapiBrokerConnection(
   return false;
 }
 
-void PepperPluginDelegateImpl::ViewInitiatedPaint() {
+void PepperPluginDelegateImpl::ViewWillInitiatePaint() {
   // Notify all of our instances that we started painting. This is used for
   // internal bookkeeping only, so we know that the set can not change under
   // us.
   for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
            active_instances_.begin();
        i != active_instances_.end(); ++i)
-    (*i)->ViewInitiatedPaint();
+    (*i)->ViewWillInitiatePaint();
+}
+
+void PepperPluginDelegateImpl::ViewInitiatedPaint() {
+  // Notify all instances that we painted.  The same caveats apply as for
+  // ViewFlushedPaint regarding instances closing themselves, so we take
+  // similar precautions.
+  std::set<webkit::ppapi::PluginInstance*> plugins = active_instances_;
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i = plugins.begin();
+       i != plugins.end(); ++i) {
+    if (active_instances_.find(*i) != active_instances_.end())
+      (*i)->ViewInitiatedPaint();
+  }
 }
 
 void PepperPluginDelegateImpl::ViewFlushedPaint() {
-  // Notify all instances that we painted. This will call into the plugin, and
+  // Notify all instances that we flushed. This will call into the plugin, and
   // we it may ask to close itself as a result. This will, in turn, modify our
   // set, possibly invalidating the iterator. So we iterate on a copy that
   // won't change out from under us.
@@ -1013,7 +1040,7 @@ void PepperPluginDelegateImpl::ViewFlushedPaint() {
     // What about the case where a new one is created in a callback at a new
     // address and we don't issue the callback? We're still OK since this
     // callback is used for flush callbacks and we could not have possibly
-    // started a new paint (ViewInitiatedPaint) for the new plugin while
+    // started a new paint (ViewWillInitiatePaint) for the new plugin while
     // processing a previous paint for an existing one.
     if (active_instances_.find(*i) != active_instances_.end())
       (*i)->ViewFlushedPaint();
@@ -1150,8 +1177,7 @@ bool PepperPluginDelegateImpl::CanComposeInline() const {
 void PepperPluginDelegateImpl::PluginCrashed(
     webkit::ppapi::PluginInstance* instance) {
   render_view_->PluginCrashed(instance->module()->path());
-
-  UnlockMouse(instance);
+  UnSetAndDeleteLockTargetAdapter(instance);
 }
 
 void PepperPluginDelegateImpl::InstanceCreated(
@@ -1165,14 +1191,8 @@ void PepperPluginDelegateImpl::InstanceCreated(
 void PepperPluginDelegateImpl::InstanceDeleted(
     webkit::ppapi::PluginInstance* instance) {
   active_instances_.erase(instance);
+  UnSetAndDeleteLockTargetAdapter(instance);
 
-  if (mouse_lock_owner_ && mouse_lock_owner_ == instance) {
-    // UnlockMouse() will determine whether a ViewHostMsg_UnlockMouse needs to
-    // be sent, and set internal state properly. We only need to forget about
-    // the current |mouse_lock_owner_|.
-    UnlockMouse(mouse_lock_owner_);
-    mouse_lock_owner_ = NULL;
-  }
   if (last_mouse_event_target_ == instance)
     last_mouse_event_target_ = NULL;
   if (focused_plugin_ == instance)
@@ -1296,6 +1316,9 @@ PepperPluginDelegateImpl::ConnectToPpapiBroker(
 
   webkit::ppapi::PluginModule* plugin_module =
       webkit::ppapi::ResourceHelper::GetPluginModule(client);
+  if (!plugin_module)
+    return NULL;
+
   PpapiBroker* broker = plugin_module->GetBroker();
   if (!broker) {
     broker_impl = CreatePpapiBroker(plugin_module);
@@ -1349,54 +1372,18 @@ void PepperPluginDelegateImpl::OnSetFocus(bool has_focus) {
     (*i)->SetContentAreaFocus(has_focus);
 }
 
+void PepperPluginDelegateImpl::PageVisibilityChanged(bool is_visible) {
+  for (std::set<webkit::ppapi::PluginInstance*>::iterator i =
+           active_instances_.begin();
+       i != active_instances_.end(); ++i)
+    (*i)->PageVisibilityChanged(is_visible);
+}
+
 bool PepperPluginDelegateImpl::IsPluginFocused() const {
   return focused_plugin_ != NULL;
 }
 
-void PepperPluginDelegateImpl::OnLockMouseACK(bool succeeded) {
-  DCHECK(!mouse_locked_ && pending_lock_request_);
-
-  mouse_locked_ = succeeded;
-  pending_lock_request_ = false;
-  if (pending_unlock_request_ && !succeeded) {
-    // We have sent an unlock request after the lock request. However, since
-    // the lock request has failed, the unlock request will be ignored by the
-    // browser side and there won't be any response to it.
-    pending_unlock_request_ = false;
-  }
-  // If the PluginInstance has been deleted, |mouse_lock_owner_| can be NULL.
-  if (mouse_lock_owner_) {
-    webkit::ppapi::PluginInstance* last_mouse_lock_owner = mouse_lock_owner_;
-    if (!succeeded) {
-      // Reset |mouse_lock_owner_| to NULL before calling OnLockMouseACK(), so
-      // that if OnLockMouseACK() results in calls to any mouse lock method
-      // (e.g., LockMouse()), the method will see consistent internal state.
-      mouse_lock_owner_ = NULL;
-    }
-
-    last_mouse_lock_owner->OnLockMouseACK(succeeded ? PP_OK : PP_ERROR_FAILED);
-  }
-}
-
-void PepperPluginDelegateImpl::OnMouseLockLost() {
-  DCHECK(mouse_locked_ && !pending_lock_request_);
-
-  mouse_locked_ = false;
-  pending_unlock_request_ = false;
-  // If the PluginInstance has been deleted, |mouse_lock_owner_| can be NULL.
-  if (mouse_lock_owner_) {
-    // Reset |mouse_lock_owner_| to NULL before calling OnMouseLockLost(), so
-    // that if OnMouseLockLost() results in calls to any mouse lock method
-    // (e.g., LockMouse()), the method will see consistent internal state.
-    webkit::ppapi::PluginInstance* last_mouse_lock_owner = mouse_lock_owner_;
-    mouse_lock_owner_ = NULL;
-
-    last_mouse_lock_owner->OnMouseLockLost();
-  }
-}
-
-bool PepperPluginDelegateImpl::HandleMouseEvent(
-    const WebKit::WebMouseEvent& event) {
+void PepperPluginDelegateImpl::WillHandleMouseEvent() {
   // This method is called for every mouse event that the render view receives.
   // And then the mouse event is forwarded to WebKit, which dispatches it to the
   // event target. Potentially a Pepper plugin will receive the event.
@@ -1405,19 +1392,6 @@ bool PepperPluginDelegateImpl::HandleMouseEvent(
   // event, it will notify us via DidReceiveMouseEvent() and set itself as
   // |last_mouse_event_target_|.
   last_mouse_event_target_ = NULL;
-
-  if (mouse_locked_) {
-    if (mouse_lock_owner_) {
-      // |cursor_info| is ignored since it is hidden when the mouse is locked.
-      WebKit::WebCursorInfo cursor_info;
-      mouse_lock_owner_->HandleInputEvent(event, &cursor_info);
-    }
-
-    // If the mouse is locked, only the current owner of the mouse lock can
-    // process mouse events.
-    return true;
-  }
-  return false;
 }
 
 bool PepperPluginDelegateImpl::OpenFileSystem(
@@ -1689,9 +1663,6 @@ void PepperPluginDelegateImpl::OnConnectTcpACK(
 }
 
 uint32 PepperPluginDelegateImpl::TCPSocketCreate() {
-  if (!CanUseSocketAPIs())
-    return 0;
-
   uint32 socket_id = 0;
   render_view_->Send(new PpapiHostMsg_PPBTCPSocket_Create(
       render_view_->routing_id(), 0, &socket_id));
@@ -1704,8 +1675,8 @@ void PepperPluginDelegateImpl::TCPSocketConnect(
     const std::string& host,
     uint16_t port) {
   tcp_sockets_.AddWithID(socket, socket_id);
-  render_view_->Send(
-      new PpapiHostMsg_PPBTCPSocket_Connect(socket_id, host, port));
+  render_view_->Send(new PpapiHostMsg_PPBTCPSocket_Connect(
+      render_view_->routing_id(), socket_id, host, port));
 }
 
 void PepperPluginDelegateImpl::TCPSocketConnectWithNetAddress(
@@ -1713,8 +1684,8 @@ void PepperPluginDelegateImpl::TCPSocketConnectWithNetAddress(
       uint32 socket_id,
       const PP_NetAddress_Private& addr) {
   tcp_sockets_.AddWithID(socket, socket_id);
-  render_view_->Send(
-      new PpapiHostMsg_PPBTCPSocket_ConnectWithNetAddress(socket_id, addr));
+  render_view_->Send(new PpapiHostMsg_PPBTCPSocket_ConnectWithNetAddress(
+      render_view_->routing_id(), socket_id, addr));
 }
 
 void PepperPluginDelegateImpl::TCPSocketSSLHandshake(
@@ -1748,9 +1719,6 @@ void PepperPluginDelegateImpl::TCPSocketDisconnect(uint32 socket_id) {
 }
 
 uint32 PepperPluginDelegateImpl::UDPSocketCreate() {
-  if (!CanUseSocketAPIs())
-    return 0;
-
   uint32 socket_id = 0;
   render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Create(
       render_view_->routing_id(), 0, &socket_id));
@@ -1762,7 +1730,8 @@ void PepperPluginDelegateImpl::UDPSocketBind(
     uint32 socket_id,
     const PP_NetAddress_Private& addr) {
   udp_sockets_.AddWithID(socket, socket_id);
-  render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Bind(socket_id, addr));
+  render_view_->Send(new PpapiHostMsg_PPBUDPSocket_Bind(
+      render_view_->routing_id(), socket_id, addr));
 }
 
 void PepperPluginDelegateImpl::UDPSocketRecvFrom(uint32 socket_id,
@@ -1813,14 +1782,14 @@ int32_t PepperPluginDelegateImpl::ShowContextMenu(
   params.custom_items = menu->menu_data();
 
   // Transform the position to be in render view's coordinates.
-  if (instance->IsFullscreen(instance->pp_instance()) ||
+  if (instance->view_data().is_fullscreen ||
       instance->FlashIsFullscreen(instance->pp_instance())) {
     WebKit::WebRect rect = render_view_->windowRect();
     params.x -= rect.x;
     params.y -= rect.y;
   } else {
-    params.x += instance->position().x();
-    params.y += instance->position().y();
+    params.x += instance->view_data().rect.point.x;
+    params.y += instance->view_data().rect.point.y;
   }
 
   IPC::Message* msg = new ViewHostMsg_ContextMenu(render_view_->routing_id(),
@@ -1955,56 +1924,23 @@ ppapi::Preferences PepperPluginDelegateImpl::GetPreferences() {
   return ppapi::Preferences(render_view_->webkit_preferences());
 }
 
-void PepperPluginDelegateImpl::LockMouse(
+bool PepperPluginDelegateImpl::LockMouse(
     webkit::ppapi::PluginInstance* instance) {
-  DCHECK(instance);
-  if (!MouseLockedOrPending()) {
-    DCHECK(!mouse_lock_owner_);
-    pending_lock_request_ = true;
-    mouse_lock_owner_ = instance;
 
-    render_view_->Send(
-        new ViewHostMsg_LockMouse(render_view_->routing_id()));
-  } else if (instance != mouse_lock_owner_) {
-    // Another plugin instance is using mouse lock. Fail immediately.
-    instance->OnLockMouseACK(PP_ERROR_FAILED);
-  } else {
-    if (mouse_locked_) {
-      instance->OnLockMouseACK(PP_OK);
-    } else if (pending_lock_request_) {
-      instance->OnLockMouseACK(PP_ERROR_INPROGRESS);
-    } else {
-      // The only case left here is
-      // !mouse_locked_ && !pending_lock_request_ && pending_unlock_request_,
-      // which is not possible.
-      NOTREACHED();
-      instance->OnLockMouseACK(PP_ERROR_FAILED);
-    }
-  }
+  return render_view_->mouse_lock_dispatcher()->LockMouse(
+      GetOrCreateLockTargetAdapter(instance));
 }
 
 void PepperPluginDelegateImpl::UnlockMouse(
     webkit::ppapi::PluginInstance* instance) {
-  DCHECK(instance);
+  render_view_->mouse_lock_dispatcher()->UnlockMouse(
+      GetOrCreateLockTargetAdapter(instance));
+}
 
-  // If no one is using mouse lock or the user is not |instance|, ignore
-  // the unlock request.
-  if (MouseLockedOrPending() && mouse_lock_owner_ == instance) {
-    if (mouse_locked_ || pending_lock_request_) {
-      DCHECK(!mouse_locked_ || !pending_lock_request_);
-      if (!pending_unlock_request_) {
-        pending_unlock_request_ = true;
-
-        render_view_->Send(
-            new ViewHostMsg_UnlockMouse(render_view_->routing_id()));
-      }
-    } else {
-      // The only case left here is
-      // !mouse_locked_ && !pending_lock_request_ && pending_unlock_request_,
-      // which is not possible.
-      NOTREACHED();
-    }
-  }
+bool PepperPluginDelegateImpl::IsMouseLocked(
+    webkit::ppapi::PluginInstance* instance) {
+  return render_view_->mouse_lock_dispatcher()->IsMouseLockedTo(
+      GetOrCreateLockTargetAdapter(instance));
 }
 
 void PepperPluginDelegateImpl::DidChangeCursor(
@@ -2026,6 +1962,16 @@ void PepperPluginDelegateImpl::DidReceiveMouseEvent(
 
 bool PepperPluginDelegateImpl::IsInFullscreenMode() {
   return render_view_->is_fullscreen();
+}
+
+void PepperPluginDelegateImpl::SampleGamepads(WebKit::WebGamepads* data) {
+  if (!gamepad_shared_memory_reader_.get())
+    gamepad_shared_memory_reader_.reset(new content::GamepadSharedMemoryReader);
+  gamepad_shared_memory_reader_->SampleGamepads(*data);
+}
+
+bool PepperPluginDelegateImpl::IsPageVisible() const {
+  return !render_view_->is_hidden();
 }
 
 bool PepperPluginDelegateImpl::OnMessageReceived(const IPC::Message& message) {
@@ -2145,12 +2091,24 @@ PepperPluginDelegateImpl::GetParentContextForPlatformContext3D() {
   return parent_context;
 }
 
-bool PepperPluginDelegateImpl::CanUseSocketAPIs() {
-  WebView* webview = render_view_->webview();
-  WebFrame* main_frame = webview ? webview->mainFrame() : NULL;
-  GURL url(main_frame ? GURL(main_frame->document().url()) : GURL());
-  if (!url.is_valid())
-    return false;
+MouseLockDispatcher::LockTarget*
+    PepperPluginDelegateImpl::GetOrCreateLockTargetAdapter(
+    webkit::ppapi::PluginInstance* instance) {
+  MouseLockDispatcher::LockTarget* target = mouse_lock_instances_[instance];
+  if (target)
+    return target;
 
-  return content::GetContentClient()->renderer()->AllowSocketAPI(url);
+  return mouse_lock_instances_[instance] =
+      new PluginInstanceLockTarget(instance);
+}
+
+void PepperPluginDelegateImpl::UnSetAndDeleteLockTargetAdapter(
+    webkit::ppapi::PluginInstance* instance) {
+  LockTargetMap::iterator it = mouse_lock_instances_.find(instance);
+  if (it != mouse_lock_instances_.end()) {
+    MouseLockDispatcher::LockTarget* target = it->second;
+    render_view_->mouse_lock_dispatcher()->OnLockTargetDestroyed(target);
+    delete target;
+    mouse_lock_instances_.erase(it);
+  }
 }

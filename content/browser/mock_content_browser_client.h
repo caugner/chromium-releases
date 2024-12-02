@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,21 +23,19 @@ class MockContentBrowserClient : public ContentBrowserClient {
 
   virtual BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* widget) OVERRIDE;
-  virtual TabContentsView* CreateTabContentsView(
-      TabContents* tab_contents) OVERRIDE;
+  virtual WebContentsView* CreateWebContentsView(
+      WebContents* web_contents) OVERRIDE;
   virtual void RenderViewHostCreated(
       RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderProcessHostCreated(
       RenderProcessHost* host) OVERRIDE;
-  virtual void PluginProcessHostCreated(PluginProcessHost* host) OVERRIDE;
-  virtual WebUIFactory* GetWebUIFactory() OVERRIDE;
+  virtual WebUIControllerFactory* GetWebUIControllerFactory() OVERRIDE;
   virtual GURL GetEffectiveURL(content::BrowserContext* browser_context,
                                const GURL& url) OVERRIDE;
   virtual bool ShouldUseProcessPerSite(BrowserContext* browser_context,
                                        const GURL& effective_url) OVERRIDE;
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE;
+  virtual bool IsHandledURL(const GURL& url) OVERRIDE;
   virtual bool IsSuitableHost(RenderProcessHost* process_host,
                               const GURL& site_url) OVERRIDE;
   virtual void SiteInstanceGotProcess(SiteInstance* site_instance) OVERRIDE;
@@ -126,7 +124,7 @@ class MockContentBrowserClient : public ContentBrowserClient {
       int render_process_id) OVERRIDE;
   virtual std::string GetWorkerProcessTitle(
       const GURL& url, const content::ResourceContext& context) OVERRIDE;
-  virtual ResourceDispatcherHost* GetResourceDispatcherHost() OVERRIDE;
+  virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual ui::Clipboard* GetClipboard() OVERRIDE;
   virtual MHTMLGenerationManager* GetMHTMLGenerationManager() OVERRIDE;
   virtual net::NetLog* GetNetLog() OVERRIDE;
@@ -143,6 +141,7 @@ class MockContentBrowserClient : public ContentBrowserClient {
   virtual void ClearCookies(RenderViewHost* rvh)  OVERRIDE;
   virtual FilePath GetDefaultDownloadDirectory() OVERRIDE;
   virtual std::string GetDefaultDownloadName() OVERRIDE;
+  virtual bool AllowSocketAPI(const GURL& url) OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;

@@ -57,7 +57,6 @@
       <if expr="not pp_ifdef('_google_chrome')">
         <include name="IDR_CUSTOM_PRODUCT_LOGO" file="chromium/product_logo.png" type="BINDATA" />
       </if>
-      <include name="IDR_DEFAULT_THUMBNAIL" file="default_thumbnail.png" type="BINDATA" />
       <include name="IDR_DOCK_HIGH" file="dock_tab_high.png" type="BINDATA" />
       <include name="IDR_DOCK_MAX" file="dock_tab_max.png" type="BINDATA" />
       <include name="IDR_DOCK_WIDE" file="dock_tab_wide.png" type="BINDATA" />
@@ -106,6 +105,7 @@
       <include name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_16" file="download_progress_foreground16.png" type="BINDATA" />
       <include name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_32" file="download_progress_foreground32.png" type="BINDATA" />
       <include name="IDR_EXTENSION_DEFAULT_ICON" file="extension_default_icon.png" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_FAVICON" file="plugin.png" type="BINDATA" />
       <include name="IDR_EXTENSIONS_RATING_STAR_HALF_LEFT" file="extensions_rating_star_half_left.png" type="BINDATA" />
       <include name="IDR_EXTENSIONS_RATING_STAR_HALF_RIGHT" file="extensions_rating_star_half_right.png" type="BINDATA" />
       <include name="IDR_EXTENSIONS_RATING_STAR_OFF" file="extensions_rating_star_off.png" type="BINDATA" />
@@ -176,6 +176,9 @@
       <include name="IDR_OMNIBOX_STAR" file="omnibox_star.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_STAR_DARK" file="omnibox_star_dark.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_STAR_SELECTED" file="omnibox_star_selected.png" type="BINDATA" />
+      <include name="IDR_OMNIBOX_TTS" file="omnibox_tts.png" type="BINDATA" />
+      <include name="IDR_OMNIBOX_TTS_DARK" file="omnibox_tts_dark.png" type="BINDATA" />
+      <include name="IDR_OMNIBOX_TTS_SELECTED" file="omnibox_tts_selected.png" type="BINDATA" />
       <include name="IDR_OPT_IN_BUTTON" file="opt_in_button.png" type="BINDATA" />
       <include name="IDR_OPT_IN_BUTTON_P" file="opt_in_button_p.png" type="BINDATA" />
       <include name="IDR_OTR_ICON" file="otr_icon.png" type="BINDATA" />
@@ -376,6 +379,8 @@
         <include name="IDR_STATUS_TRAY_ICON_PRESSED" file="chromium/product_logo_22.png" type="BINDATA" />
       </if>
       <if expr="is_macosx">
+        <include name="IDR_SWIPE_BACK" file="back_large.png" type="BINDATA" />
+        <include name="IDR_SWIPE_FORWARD" file="forward_large.png" type="BINDATA" />
         <include name="IDR_TABPOSE_CLOSE" file="tabpose_close.png" type="BINDATA" />
       </if>
       <include name="IDR_THEME_BUTTON_BACKGROUND" file="notused.png" type="BINDATA" />
@@ -413,18 +418,22 @@
       <if expr="pp_ifdef('_google_chrome')">
         <include name="IDR_WEBSTORE_ICON" file="google_chrome/webstore_icon.png" type="BINDATA" />
         <include name="IDR_WEBSTORE_ICON_16" file="google_chrome/webstore_icon_16.png" type="BINDATA" />
+        <include name="IDR_WEBSTORE_ICON_24" file="google_chrome/webstore_icon_24.png" type="BINDATA" />
         <include name="IDR_WEBSTORE_ICON_32" file="google_chrome/webstore_icon_32.png" type="BINDATA" />
         <include name="IDR_WIZARD_ICON" file="google_chrome/wizard_icon.png" type="BINDATA" />
         <include name="IDR_WIZARD_ICON_RTL" file="google_chrome/wizard_icon_rtl.png" type="BINDATA" />
         <include name="IRD_SYNC_PROMO_INFO_GRAPHIC" file="google_chrome/sync_promo_info_graphic.png" type="BINDATA" />
+        <include name="IRD_SYNC_PROMO_INFO_GRAPHIC_1" file="google_chrome/sync_promo_info_graphic_1.png" type="BINDATA" />
       </if>
       <if expr="not pp_ifdef('_google_chrome')">
         <include name="IDR_WEBSTORE_ICON" file="chromium/webstore_icon.png" type="BINDATA" />
         <include name="IDR_WEBSTORE_ICON_16" file="chromium/webstore_icon_16.png" type="BINDATA" />
+        <include name="IDR_WEBSTORE_ICON_24" file="chromium/webstore_icon_24.png" type="BINDATA" />
         <include name="IDR_WEBSTORE_ICON_32" file="chromium/webstore_icon_32.png" type="BINDATA" />
         <include name="IDR_WIZARD_ICON" file="chromium/wizard_icon.png" type="BINDATA" />
         <include name="IDR_WIZARD_ICON_RTL" file="chromium/wizard_icon_rtl.png" type="BINDATA" />
         <include name="IRD_SYNC_PROMO_INFO_GRAPHIC" file="chromium/sync_promo_info_graphic.png" type="BINDATA" />
+        <include name="IRD_SYNC_PROMO_INFO_GRAPHIC_1" file="chromium/sync_promo_info_graphic_1.png" type="BINDATA" />
       </if>
 
       <!-- Images only used by the Views toolkit. -->
@@ -487,8 +496,8 @@
         <include name="IDR_DROPDOWN_TOP_RIGHT_P" file="textbutton_dropdown_tr_p.png" type="BINDATA" />
         <include name="IDR_ENROLL_SUCCESS" file="enroll_success.png" type="BINDATA"/>
         <include name="IDR_ENROLL_FAILURE" file="enroll_failure.png" type="BINDATA"/>
+        <include name="IDR_GUEST_ICON" file="guest_icon.png" type="BINDATA" />
         <include name="IDR_HELP_MENU" file="help_16.png" type="BINDATA" />
-        <include name="IDR_INCOGNITO_GUY" file="incognito_guy.png" type="BINDATA" />
         <include name="IDR_ICON_ADD_USER20" file="icon_add_user20.png" type="BINDATA" />
         <include name="IDR_ICON_POWER20" file="icon_power20.png" type="BINDATA" />
         <include name="IDR_LOGIN_DEFAULT_USER" file="avatar_beaker.png" type="BINDATA" />
@@ -560,6 +569,13 @@
         <include name="IDR_STATUSBAR_NETWORK_ROAMING" file="statusbar_network_roaming.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_SECURE" file="statusbar_network_secure.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_WARNING" file="statusbar_network_warning.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_ICON1" file="statusbar_volume_icon1.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_ICON2" file="statusbar_volume_icon2.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_ICON3" file="statusbar_volume_icon3.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_ICON_MUTE" file="statusbar_volume_icon_mute.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_SLIDER_EMPTY" file="statusbar_volume_slider_empty.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_SLIDER_FULL" file="statusbar_volume_slider_full.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_VOLUME_SLIDER_THUMB" file="statusbar_volume_slider_thumb.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_WINDOW_MAXIMIZE" file="statusbar_window_maximize.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_WINDOW_RESTORE" file="statusbar_window_restore.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_WIRED" file="statusbar_wired.png" type="BINDATA" />
@@ -572,6 +588,13 @@
         <include name="IDR_VOLUME_BUBBLE_UP_ICON" file="volume_up_icon.png" type="BINDATA" />
         <include name="IDR_VOLUME_BUBBLE_DOWN_ICON" file="volume_down_icon.png" type="BINDATA" />
         <include name="IDR_VOLUME_BUBBLE_MUTE_ICON" file="volume_mute_icon.png" type="BINDATA" />
+      </if>
+
+      <!-- Images only used by aura. -->
+      <if expr="pp_ifdef('use_aura')">
+        <include name="IDR_APP_LIST_INCOGNITO" file="app_list_incognito.png" type="BINDATA" />
+        <include name="IDR_APP_LIST_SETTINGS" file="app_list_settings.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_MULTIPLE_WINDOW" file="statusbar_multiple_window.png" type="BINDATA" />
       </if>
     </includes>
   </release>

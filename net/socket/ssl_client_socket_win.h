@@ -45,7 +45,7 @@ class SSLClientSocketWin : public SSLClientSocket {
                      const SSLClientSocketContext& context);
   ~SSLClientSocketWin();
 
-  // SSLClientSocket methods:
+  // SSLClientSocket implementation.
   virtual void GetSSLInfo(SSLInfo* ssl_info);
   virtual void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
   virtual int ExportKeyingMaterial(const base::StringPiece& label,
@@ -55,27 +55,29 @@ class SSLClientSocketWin : public SSLClientSocket {
   virtual NextProtoStatus GetNextProto(std::string* proto,
                                        std::string* server_protos);
 
-  // StreamSocket methods:
-  virtual int Connect(OldCompletionCallback* callback);
-  virtual void Disconnect();
-  virtual bool IsConnected() const;
-  virtual bool IsConnectedAndIdle() const;
-  virtual int GetPeerAddress(AddressList* address) const;
-  virtual int GetLocalAddress(IPEndPoint* address) const;
-  virtual const BoundNetLog& NetLog() const { return net_log_; }
-  virtual void SetSubresourceSpeculation();
-  virtual void SetOmniboxSpeculation();
-  virtual bool WasEverUsed() const;
-  virtual bool UsingTCPFastOpen() const;
-  virtual int64 NumBytesRead() const;
-  virtual base::TimeDelta GetConnectTimeMicros() const;
+  // StreamSocket implementation.
+  virtual int Connect(const CompletionCallback& callback) OVERRIDE;
+  virtual void Disconnect() OVERRIDE;
+  virtual bool IsConnected() const OVERRIDE;
+  virtual bool IsConnectedAndIdle() const OVERRIDE;
+  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
+  virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
+  virtual const BoundNetLog& NetLog() const  OVERRIDE{ return net_log_; }
+  virtual void SetSubresourceSpeculation() OVERRIDE;
+  virtual void SetOmniboxSpeculation() OVERRIDE;
+  virtual bool WasEverUsed() const OVERRIDE;
+  virtual bool UsingTCPFastOpen() const OVERRIDE;
+  virtual int64 NumBytesRead() const OVERRIDE;
+  virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
 
-  // Socket methods:
-  virtual int Read(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
-  virtual int Write(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
+  // Socket implementation.
+  virtual int Read(IOBuffer* buf, int buf_len,
+                   const CompletionCallback& callback) OVERRIDE;
+  virtual int Write(IOBuffer* buf, int buf_len,
+                    const CompletionCallback& callback) OVERRIDE;
 
-  virtual bool SetReceiveBufferSize(int32 size);
-  virtual bool SetSendBufferSize(int32 size);
+  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
 
  private:
   bool completed_handshake() const {
@@ -111,25 +113,20 @@ class SSLClientSocketWin : public SSLClientSocket {
   void LogConnectionTypeMetrics() const;
   void FreeSendBuffer();
 
-  // Internal callbacks as async operations complete.
-  OldCompletionCallbackImpl<SSLClientSocketWin> handshake_io_callback_;
-  OldCompletionCallbackImpl<SSLClientSocketWin> read_callback_;
-  OldCompletionCallbackImpl<SSLClientSocketWin> write_callback_;
-
   scoped_ptr<ClientSocketHandle> transport_;
   HostPortPair host_and_port_;
   SSLConfig ssl_config_;
 
   // User function to callback when the Connect() completes.
-  OldCompletionCallback* user_connect_callback_;
+  CompletionCallback user_connect_callback_;
 
   // User function to callback when a Read() completes.
-  OldCompletionCallback* user_read_callback_;
+  CompletionCallback user_read_callback_;
   scoped_refptr<IOBuffer> user_read_buf_;
   int user_read_buf_len_;
 
   // User function to callback when a Write() completes.
-  OldCompletionCallback* user_write_callback_;
+  CompletionCallback user_write_callback_;
   scoped_refptr<IOBuffer> user_write_buf_;
   int user_write_buf_len_;
 

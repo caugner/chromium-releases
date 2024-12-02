@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -54,8 +55,14 @@ void ChromeLogger::Log(LogLevel level, const char* file, int line,
   }
 }
 
+void ChromeLogger::SetSystemResources(
+    invalidation::SystemResources* resources) {
+  // Do nothing.
+}
+
 ChromeScheduler::ChromeScheduler()
-    : created_on_loop_(MessageLoop::current()),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      created_on_loop_(MessageLoop::current()),
       is_started_(false),
       is_stopped_(false) {
   CHECK(created_on_loop_);
@@ -71,29 +78,33 @@ void ChromeScheduler::Start() {
   CHECK(!is_started_);
   is_started_ = true;
   is_stopped_ = false;
-  scoped_runnable_method_factory_.reset(
-      new ScopedRunnableMethodFactory<ChromeScheduler>(this));
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void ChromeScheduler::Stop() {
   CHECK_EQ(created_on_loop_, MessageLoop::current());
   is_stopped_ = true;
   is_started_ = false;
-  scoped_runnable_method_factory_.reset();
+  weak_factory_.InvalidateWeakPtrs();
   STLDeleteElements(&posted_tasks_);
   posted_tasks_.clear();
 }
 
-void ChromeScheduler::Schedule(
-    invalidation::TimeDelta delay,
-    invalidation::Closure* task) {
+void ChromeScheduler::Schedule(invalidation::TimeDelta delay,
+                               invalidation::Closure* task) {
+  DCHECK(invalidation::IsCallbackRepeatable(task));
   CHECK_EQ(created_on_loop_, MessageLoop::current());
-  Task* task_to_post = MakeTaskToPost(task);
-  if (!task_to_post) {
+
+  if (!is_started_) {
+    delete task;
     return;
   }
+
+  posted_tasks_.insert(task);
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, task_to_post, delay.InMillisecondsRoundedUp());
+      FROM_HERE, base::Bind(&ChromeScheduler::RunPostedTask,
+                            weak_factory_.GetWeakPtr(), task),
+      delay);
 }
 
 bool ChromeScheduler::IsRunningOnThread() const {
@@ -105,19 +116,9 @@ invalidation::Time ChromeScheduler::GetCurrentTime() const {
   return base::Time::Now();
 }
 
-Task* ChromeScheduler::MakeTaskToPost(
-    invalidation::Closure* task) {
-  DCHECK(invalidation::IsCallbackRepeatable(task));
-  CHECK_EQ(created_on_loop_, MessageLoop::current());
-  if (!scoped_runnable_method_factory_.get()) {
-    delete task;
-    return NULL;
-  }
-  posted_tasks_.insert(task);
-  Task* task_to_post =
-      scoped_runnable_method_factory_->NewRunnableMethod(
-          &ChromeScheduler::RunPostedTask, task);
-  return task_to_post;
+void ChromeScheduler::SetSystemResources(
+    invalidation::SystemResources* resources) {
+  // Do nothing.
 }
 
 void ChromeScheduler::RunPostedTask(invalidation::Closure* task) {
@@ -172,6 +173,11 @@ void ChromeStorage::ReadAllKeys(invalidation::ReadAllKeysCallback* done) {
   LOG(WARNING) << "ignoring call to ReadAllKeys(callback)";
 }
 
+void ChromeStorage::SetSystemResources(
+    invalidation::SystemResources* resources) {
+  // Do nothing.
+}
+
 void ChromeStorage::RunAndDeleteWriteKeyCallback(
     invalidation::WriteKeyCallback* callback) {
   callback->Run(invalidation::Status(invalidation::Status::SUCCESS, ""));
@@ -188,7 +194,7 @@ void ChromeStorage::RunAndDeleteReadKeyCallback(
 
 ChromeNetwork::ChromeNetwork()
     : packet_handler_(NULL),
-      scoped_callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
 
 ChromeNetwork::~ChromeNetwork() {
   STLDeleteElements(&network_status_receivers_);
@@ -210,14 +216,21 @@ void ChromeNetwork::AddNetworkStatusReceiver(
   network_status_receivers_.push_back(network_status_receiver);
 }
 
+void ChromeNetwork::SetSystemResources(
+    invalidation::SystemResources* resources) {
+  // Do nothing.
+}
+
 void ChromeNetwork::UpdatePacketHandler(
     CacheInvalidationPacketHandler* packet_handler) {
   packet_handler_ = packet_handler;
   if (packet_handler_ != NULL) {
     packet_handler_->SetMessageReceiver(
-        scoped_callback_factory_.NewCallback(
-            &ChromeNetwork::HandleInboundMessage));
+        new invalidation::MessageCallback(
+            base::Bind(&ChromeNetwork::HandleInboundMessage,
+                       weak_factory_.GetWeakPtr())));
   }
+  packet_handler_->SendSubscriptionRequest();
 }
 
 void ChromeNetwork::HandleInboundMessage(const std::string& incoming_message) {
@@ -242,6 +255,7 @@ ChromeSystemResources::~ChromeSystemResources() {
 void ChromeSystemResources::Start() {
   internal_scheduler_->Start();
   listener_scheduler_->Start();
+  is_started_ = true;
 }
 
 void ChromeSystemResources::Stop() {

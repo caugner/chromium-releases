@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,6 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
@@ -46,8 +45,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
-#include "content/browser/download/download_item.h"
 #include "content/browser/download/download_persistent_store_info.h"
+#include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "sql/connection.h"
@@ -58,15 +57,11 @@
 
 using base::Time;
 using base::TimeDelta;
+using content::DownloadItem;
 
 namespace history {
 class HistoryTest;
 }
-
-// Specialize RunnableMethodTraits for HistoryTest so we can create callbacks.
-// None of these callbacks can outlast the test, so there is not need to retain
-// the HistoryTest object.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(history::HistoryTest);
 
 namespace history {
 
@@ -168,7 +163,7 @@ class HistoryTest : public testing::Test {
 
     // Make sure we don't have any event pending that could disrupt the next
     // test.
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
   }
 
@@ -176,7 +171,7 @@ class HistoryTest : public testing::Test {
     DCHECK(history_service_.get());
 
     history_service_->NotifyRenderProcessHostDestruction(0);
-    history_service_->SetOnBackendDestroyTask(new MessageLoop::QuitTask);
+    history_service_->SetOnBackendDestroyTask(MessageLoop::QuitClosure());
     history_service_->Cleanup();
     history_service_ = NULL;
 

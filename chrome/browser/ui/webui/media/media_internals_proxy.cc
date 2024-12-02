@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_ui.h"
 
 using content::BrowserThread;
 
@@ -168,7 +169,8 @@ void MediaInternalsProxy::AddNetEventOnUIThread(Value* entry) {
         FROM_HERE,
         base::Bind(
             &MediaInternalsProxy::SendNetEventsOnUIThread, this),
-        kMediaInternalsProxyEventDelayMilliseconds);
+        base::TimeDelta::FromMilliseconds(
+            kMediaInternalsProxyEventDelayMilliseconds));
   }
   pending_net_updates_->Append(entry);
 }
@@ -185,6 +187,6 @@ void MediaInternalsProxy::CallJavaScriptFunctionOnUIThread(
   scoped_ptr<Value> args_value(args);
   std::vector<const Value*> args_vector;
   args_vector.push_back(args_value.get());
-  string16 update = WebUI::GetJavascriptCall(function, args_vector);
+  string16 update = content::WebUI::GetJavascriptCall(function, args_vector);
   UpdateUIOnUIThread(update);
 }

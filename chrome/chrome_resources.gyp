@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -11,7 +11,7 @@
       'target_name': 'chrome_extra_resources',
       'type': 'none',
       'dependencies': [
-        '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:generate_devtools_grd',
+        '../content/browser/debugger/devtools_resources.gyp:devtools_resources',
       ],
       # These resources end up in resources.pak because they are resources
       # used by internal pages.  Putting them in a spearate pak file makes
@@ -35,6 +35,13 @@
           'action_name': 'options_resources',
           'variables': {
             'grit_grd_file': 'browser/resources/options_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          'action_name': 'options2_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/options2_resources.grd',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -67,38 +74,12 @@
           'includes': [ '../build/grit_action.gypi' ],
         },
         {
-          'action_name': 'devtools_frontend_resources',
+          'action_name': 'devtools_discovery_page_resources',
           'variables': {
             'grit_grd_file':
-               'browser/debugger/frontend/devtools_frontend_resources.grd',
+               'browser/debugger/frontend/devtools_discovery_page_resources.grd',
           },
           'includes': [ '../build/grit_action.gypi' ]
-        },
-        {
-          'action_name': 'devtools_resources',
-          # This can't use ../build/grit_action.gypi because the grd file
-          # is generated a build time, so the trick of using grit_info to get
-          # the real inputs/outputs at GYP time isn't possible.
-          'variables': {
-            'grit_cmd': ['python', '../tools/grit/grit.py'],
-            'grit_grd_file': '<(SHARED_INTERMEDIATE_DIR)/devtools/devtools_resources.grd',
-          },
-          'inputs': [
-            '<(grit_grd_file)',
-            '<!@pymod_do_main(grit_info --inputs)',
-          ],
-          'outputs': [
-            '<(grit_out_dir)/grit/devtools_resources.h',
-            '<(grit_out_dir)/devtools_resources.pak',
-            '<(grit_out_dir)/grit/devtools_resources_map.cc',
-            '<(grit_out_dir)/grit/devtools_resources_map.h',
-          ],
-          'action': ['<@(grit_cmd)',
-                     '-i', '<(grit_grd_file)', 'build',
-                     '-o', '<(grit_out_dir)',
-                     '-D', 'SHARED_INTERMEDIATE_DIR=<(SHARED_INTERMEDIATE_DIR)',
-                     '<@(grit_defines)' ],
-          'message': 'Generating resources from <(grit_grd_file)',
         },
       ],
       'includes': [ '../build/grit_target.gypi' ],
@@ -143,18 +124,6 @@
       # generated headers.
       'target_name': 'chrome_strings',
       'type': 'none',
-      'conditions': [
-        ['OS=="win"', {
-          # HACK(nsylvain): We want to enforce a fake dependency on
-          # intaller_util_string.  install_util depends on both
-          # chrome_strings and installer_util_strings, but for some reasons
-          # Incredibuild does not enforce it (most likely a bug). By changing
-          # the type and making sure we depend on installer_util_strings, it
-          # will always get built before installer_util.
-          'type': 'dummy_executable',
-          'dependencies': ['chrome.gyp:installer_util_strings'],
-        }],
-      ],
       'actions': [
         # Localizable resources.
         {
@@ -298,7 +267,6 @@
         # derive the dependencies from the output files.
         'chrome_resources',
         'chrome_strings',
-        'default_plugin/default_plugin.gyp:default_plugin_resources',
         'platform_locale_settings',
         'theme_resources',
         '<(DEPTH)/content/content_resources.gyp:content_resources',

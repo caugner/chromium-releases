@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/common/spellcheck_messages.h"
 #include "content/public/renderer/render_thread.h"
 #include "third_party/hunspell/src/hunspell/hunspell.hxx"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingResult.h"
 
 using base::TimeTicks;
 using content::RenderThread;
@@ -113,8 +114,13 @@ bool SpellCheck::SpellCheckWord(
   string16 word;
   int word_start;
   int word_length;
-  if (!text_iterator_.IsInitialized())
-    text_iterator_.Initialize(&character_attributes_, true);
+  if (!text_iterator_.IsInitialized() &&
+      !text_iterator_.Initialize(&character_attributes_, true)) {
+      // We failed to initialize text_iterator_, return as spelled correctly.
+      VLOG(1) << "Failed to initialize SpellcheckWordIterator";
+      return true;
+  }
+
   text_iterator_.SetText(in_word, in_word_len);
   while (text_iterator_.GetNextWord(&word, &word_start, &word_length)) {
     // Found a word (or a contraction) that the spellchecker can check the
@@ -137,6 +143,50 @@ bool SpellCheck::SpellCheckWord(
   }
 
   return true;
+}
+
+bool SpellCheck::SpellCheckParagraph(
+    const string16& text,
+    int tag,
+    std::vector<WebKit::WebTextCheckingResult>* results) {
+#if !defined(OS_MACOSX)
+  // Mac has its own spell checker, so this method will not be used.
+
+  DCHECK(results);
+
+  size_t length = text.length();
+  size_t offset = 0;
+
+  // Spellcheck::SpellCheckWord() automatically breaks text into words and
+  // checks the spellings of the extracted words. This function sets the
+  // position and length of the first misspelled word and returns false when
+  // the text includes misspelled words. Therefore, we just repeat calling the
+  // function until it returns true to check the whole text.
+  int misspelling_start = 0;
+  int misspelling_length = 0;
+  while (offset <= length) {
+    if (SpellCheckWord(&text[offset],
+                       length - offset,
+                       0,
+                       &misspelling_start,
+                       &misspelling_length,
+                       NULL)) {
+      return true;
+    }
+
+    if (results) {
+      results->push_back(WebKit::WebTextCheckingResult(
+          WebKit::WebTextCheckingTypeSpelling,
+          misspelling_start + offset,
+          misspelling_length));
+    }
+    offset += misspelling_start + misspelling_length;
+  }
+
+  return false;
+#else
+  return true;
+#endif
 }
 
 string16 SpellCheck::GetAutoCorrectionWord(const string16& word, int tag) {
@@ -241,8 +291,10 @@ bool SpellCheck::CheckSpelling(const string16& word_to_check, int tag) {
   bool word_correct = false;
 
   if (is_using_platform_spelling_engine_) {
-    RenderThread::Get()->Send(new SpellCheckHostMsg_PlatformCheckSpelling(
+#if defined(OS_MACOSX)
+    RenderThread::Get()->Send(new SpellCheckHostMsg_CheckSpelling(
         word_to_check, tag, &word_correct));
+#endif
   } else {
     std::string word_to_check_utf8(UTF16ToUTF8(word_to_check));
     // Hunspell shouldn't let us exceed its max, but check just in case
@@ -266,8 +318,10 @@ void SpellCheck::FillSuggestionList(
     const string16& wrong_word,
     std::vector<string16>* optional_suggestions) {
   if (is_using_platform_spelling_engine_) {
-    RenderThread::Get()->Send(new SpellCheckHostMsg_PlatformFillSuggestionList(
+#if defined(OS_MACOSX)
+    RenderThread::Get()->Send(new SpellCheckHostMsg_FillSuggestionList(
         wrong_word, optional_suggestions));
+#endif
     return;
   }
 
@@ -295,8 +349,13 @@ void SpellCheck::FillSuggestionList(
 // returns a concatenated word which is not in the selected dictionary
 // (e.g. "in'n'out") but each word is valid.
 bool SpellCheck::IsValidContraction(const string16& contraction, int tag) {
-  if (!contraction_iterator_.IsInitialized())
-    contraction_iterator_.Initialize(&character_attributes_, false);
+  if (!contraction_iterator_.IsInitialized() &&
+      !contraction_iterator_.Initialize(&character_attributes_, false)) {
+    // We failed to initialize the word iterator, return as spelled correctly.
+    VLOG(1) << "Failed to initialize contraction_iterator_";
+    return true;
+  }
+
   contraction_iterator_.SetText(contraction.c_str(), contraction.length());
 
   string16 word;

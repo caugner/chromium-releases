@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "native_client/src/include/nacl_base.h"
 #include "native_client/src/include/nacl_macros.h"
 #include "native_client/src/include/nacl_scoped_ptr.h"
@@ -41,7 +42,7 @@
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 #include "native_client/src/trusted/plugin/browser_interface.h"
 #include "native_client/src/trusted/plugin/desc_based_handle.h"
-#include "native_client/src/trusted/plugin/manifest.h"
+#include "native_client/src/trusted/plugin/json_manifest.h"
 #include "native_client/src/trusted/plugin/nacl_subprocess.h"
 #include "native_client/src/trusted/plugin/nexe_arch.h"
 #include "native_client/src/trusted/plugin/plugin_error.h"
@@ -648,13 +649,14 @@ void Plugin::ShutDownSubprocesses() {
 
 bool Plugin::LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
                                   NaClSubprocess* subprocess,
+                                  const Manifest* manifest,
+                                  bool should_report_uma,
                                   ErrorInfo* error_info,
                                   pp::CompletionCallback init_done_cb,
                                   pp::CompletionCallback crash_cb) {
-  ServiceRuntime* new_service_runtime = new(std::nothrow) ServiceRuntime(
-      this,
-      init_done_cb,
-      crash_cb);
+  ServiceRuntime* new_service_runtime =
+      new ServiceRuntime(this, manifest, should_report_uma, init_done_cb,
+                         crash_cb);
   subprocess->set_service_runtime(new_service_runtime);
   PLUGIN_PRINTF(("Plugin::LoadNaClModuleCommon (service_runtime=%p)\n",
                  static_cast<void*>(new_service_runtime)));
@@ -730,8 +732,8 @@ bool Plugin::LoadNaClModule(nacl::DescWrapper* wrapper,
   // associated listener threads do not go unjoined because if they
   // outlive the Plugin object, they will not be memory safe.
   ShutDownSubprocesses();
-  if (!(LoadNaClModuleCommon(wrapper, &main_subprocess_, error_info,
-                             init_done_cb, crash_cb))) {
+  if (!(LoadNaClModuleCommon(wrapper, &main_subprocess_, manifest_.get(),
+                             true, error_info, init_done_cb, crash_cb))) {
     return false;
   }
   PLUGIN_PRINTF(("Plugin::LoadNaClModule (%s)\n",
@@ -750,6 +752,7 @@ bool Plugin::LoadNaClModuleContinuationIntern(ErrorInfo* error_info) {
 }
 
 NaClSubprocessId Plugin::LoadHelperNaClModule(nacl::DescWrapper* wrapper,
+                                              const Manifest* manifest,
                                               ErrorInfo* error_info) {
   NaClSubprocessId next_id = next_nacl_subprocess_id();
   nacl::scoped_ptr<NaClSubprocess> nacl_subprocess(
@@ -760,7 +763,10 @@ NaClSubprocessId Plugin::LoadHelperNaClModule(nacl::DescWrapper* wrapper,
     return kInvalidNaClSubprocessId;
   }
 
-  if (!(LoadNaClModuleCommon(wrapper, nacl_subprocess.get(), error_info,
+  // Do not report UMA stats for translator-related nexes.
+  // TODO(sehr): define new UMA stats for translator related nexe events.
+  if (!(LoadNaClModuleCommon(wrapper, nacl_subprocess.get(), manifest,
+                             false, error_info,
                              pp::BlockUntilComplete(),
                              pp::BlockUntilComplete())
         // We need not wait for the init_done callback.  We can block
@@ -865,7 +871,10 @@ class ProgressEvent {
 
 const char* const Plugin::kNaClMIMEType = "application/x-nacl";
 
-bool Plugin::IsForeignMIMEType() const {
+bool Plugin::NexeIsContentHandler() const {
+  // Tests if the MIME type is not a NaCl MIME type.
+  // If the MIME type is foreign, then this NEXE is being used as a content
+  // type handler rather than directly by an HTML document.
   return
       !mime_type().empty() &&
       mime_type() != kNaClMIMEType;
@@ -896,26 +905,27 @@ bool Plugin::Init(uint32_t argc, const char* argn[], const char* argv[]) {
   HistogramEnumerateOsArch(GetSandboxISA());
   init_time_ = NaClGetTimeOfDayMicroseconds();
 
-  BrowserInterface* browser_interface = new(std::nothrow) BrowserInterface;
+  scoped_ptr<BrowserInterface> browser_interface(
+      new(std::nothrow) BrowserInterface);
   if (browser_interface == NULL) {
     return false;
   }
   ScriptableHandle* handle = ScriptableHandle::NewPlugin(this);
-  if (handle == NULL) {
+  if (handle == NULL)
     return false;
-  }
+
   set_scriptable_handle(handle);
   PLUGIN_PRINTF(("Plugin::Init (scriptable_handle=%p)\n",
                  static_cast<void*>(scriptable_handle())));
   url_util_ = pp::URLUtil_Dev::Get();
-  if (url_util_ == NULL) {
+  if (url_util_ == NULL)
     return false;
-  }
+
   PLUGIN_PRINTF(("Plugin::Init (url_util_=%p)\n",
                  static_cast<const void*>(url_util_)));
 
   bool status = Plugin::Init(
-      browser_interface,
+      browser_interface.release(),
       static_cast<int>(argc),
       // TODO(polina): Can we change the args on our end to be const to
       // avoid these ugly casts?
@@ -935,10 +945,14 @@ bool Plugin::Init(uint32_t argc, const char* argn[], const char* argv[]) {
     }
 
     const char* manifest_url = LookupArgument(kSrcManifestAttribute);
-    // If the MIME type is foreign, then 'src' will be the URL for the content
-    // and 'nacl' will be the URL for the manifest.
-    if (IsForeignMIMEType()) {
+    if (NexeIsContentHandler()) {
+      // For content handlers 'src' will be the URL for the content
+      // and 'nacl' will be the URL for the manifest.
       manifest_url = LookupArgument(kNaClManifestAttribute);
+      // For content handlers the NEXE runs in the security context of the
+      // content it is rendering and the NEXE itself appears to be a
+      // cross-origin resource stored in a Chrome extension.  We request
+      // universal access during the NEXE load so that we can read the NEXE.
     }
     // Use the document URL as the base for resolving relative URLs to find the
     // manifest.  This takes into account the setting of <base> tags that
@@ -991,18 +1005,14 @@ Plugin::Plugin(PP_Instance pp_instance)
       last_error_string_(""),
       ppapi_proxy_(NULL),
       enable_dev_interfaces_(false),
-      replayDidChangeView(false),
-      replayHandleDocumentLoad(false),
       init_time_(0),
       ready_time_(0),
       nexe_size_(0),
       time_of_last_progress_event_(0) {
   PLUGIN_PRINTF(("Plugin::Plugin (this=%p, pp_instance=%"
                  NACL_PRId32")\n", static_cast<void*>(this), pp_instance));
-  NaClSrpcModuleInit();
-  nexe_downloader_.Initialize(this);
-  pnacl_.Initialize(this);
   callback_factory_.Initialize(this);
+  nexe_downloader_.Initialize(this);
 }
 
 
@@ -1057,11 +1067,6 @@ Plugin::~Plugin() {
   // lifetime of the service threads.
   ShutDownSubprocesses();
 
-  // Shutdown Srpc module only after the service threads are done.
-  // NB: NaClSrpcModuleInit and Fini should be invoked at dll
-  // load/unload and not in the Plugin ctor/dtor.
-  NaClSrpcModuleFini();
-
   delete wrapper_factory_;
   delete browser_interface_;
   delete[] argv_;
@@ -1077,19 +1082,16 @@ Plugin::~Plugin() {
 }
 
 
-void Plugin::DidChangeView(const pp::Rect& position, const pp::Rect& clip) {
+void Plugin::DidChangeView(const pp::View& view) {
   PLUGIN_PRINTF(("Plugin::DidChangeView (this=%p)\n",
                  static_cast<void*>(this)));
 
   if (!BrowserPpp::is_valid(ppapi_proxy_)) {
     // Store this event and replay it when the proxy becomes available.
-    replayDidChangeView = true;
-    replayDidChangeViewPosition = position;
-    replayDidChangeViewClip = clip;
-    return;
+    view_to_replay_ = view;
   } else {
     ppapi_proxy_->ppp_instance_interface()->DidChangeView(
-        pp_instance(), &(position.pp_rect()), &(clip.pp_rect()));
+        pp_instance(), view.pp_resource());
   }
 }
 
@@ -1097,9 +1099,7 @@ void Plugin::DidChangeView(const pp::Rect& position, const pp::Rect& clip) {
 void Plugin::DidChangeFocus(bool has_focus) {
   PLUGIN_PRINTF(("Plugin::DidChangeFocus (this=%p)\n",
                  static_cast<void*>(this)));
-  if (!BrowserPpp::is_valid(ppapi_proxy_)) {
-    return;
-  } else {
+  if (BrowserPpp::is_valid(ppapi_proxy_)) {
     ppapi_proxy_->ppp_instance_interface()->DidChangeFocus(
         pp_instance(), PP_FromBool(has_focus));
   }
@@ -1127,8 +1127,7 @@ bool Plugin::HandleDocumentLoad(const pp::URLLoader& url_loader) {
                  static_cast<void*>(this)));
   if (!BrowserPpp::is_valid(ppapi_proxy_)) {
     // Store this event and replay it when the proxy becomes available.
-    replayHandleDocumentLoad = true;
-    replayHandleDocumentLoadURLLoader = url_loader;
+    document_load_to_replay_ = url_loader;
     // Return true so that the browser keeps servicing this loader so we can
     // perform requests on it later.
     return true;
@@ -1275,6 +1274,15 @@ void Plugin::NexeDidCrash(int32_t pp_error) {
                    " non-PP_OK arg -- SHOULD NOT HAPPEN\n"));
   }
   PLUGIN_PRINTF(("Plugin::NexeDidCrash: crash event!\n"));
+  int exit_status = main_subprocess_.service_runtime()->exit_status();
+  if (-1 != exit_status) {
+    // The NaCl module voluntarily exited.  However, this is still a
+    // crash from the point of view of Pepper, since PPAPI plugins are
+    // event handlers and should never exit.
+    PLUGIN_PRINTF((("Plugin::NexeDidCrash: nexe exited with status %d"
+                    " so this is a \"controlled crash\".\n"),
+                   exit_status));
+  }
   // If the crash occurs during load, we just want to report an error
   // that fits into our load progress event grammar.  If the crash
   // occurs after loaded/loadend, then we use ReportDeadNexe to send a
@@ -1305,7 +1313,7 @@ void Plugin::BitcodeDidTranslate(int32_t pp_error) {
   // Inform JavaScript that we successfully translated the bitcode to a nexe.
   EnqueueProgressEvent(kProgressEventProgress);
   nacl::scoped_ptr<nacl::DescWrapper>
-      wrapper(pnacl_.ReleaseTranslatedFD());
+      wrapper(pnacl_coordinator_.get()->ReleaseTranslatedFD());
   ErrorInfo error_info;
   bool was_successful = LoadNaClModule(
       wrapper.get(), &error_info,
@@ -1348,7 +1356,7 @@ bool Plugin::StartProxiedExecution(NaClSrpcChannel* srpc_channel,
   // Check that the .nexe exports the PPAPI intialization method.
   NaClSrpcService* client_service = srpc_channel->client;
   if (NaClSrpcServiceMethodIndex(client_service,
-                                 "PPP_InitializeModule:iihs:ii") ==
+                                 "PPP_InitializeModule:ihs:i") ==
       kNaClSrpcInvalidMethodIndex) {
     error_info->SetReport(
         ERROR_START_PROXY_CHECK_PPP,
@@ -1372,7 +1380,7 @@ bool Plugin::StartProxiedExecution(NaClSrpcChannel* srpc_channel,
   CHECK(module != NULL);  // We could not have gotten past init stage otherwise.
   int32_t pp_error =
       ppapi_proxy->InitializeModule(module->pp_module(),
-                                     module->get_browser_interface());
+                                    module->get_browser_interface());
   PLUGIN_PRINTF(("Plugin::StartProxiedExecution (pp_error=%"
                  NACL_PRId32")\n", pp_error));
   if (pp_error != PP_OK) {
@@ -1409,15 +1417,13 @@ bool Plugin::StartProxiedExecution(NaClSrpcChannel* srpc_channel,
   zoom_adapter_.reset(new(std::nothrow) ZoomAdapter(this));
 
   // Replay missed events.
-  if (replayDidChangeView) {
-    replayDidChangeView = false;
-    DidChangeView(replayDidChangeViewPosition, replayDidChangeViewClip);
+  if (!view_to_replay_.is_null()) {
+    DidChangeView(view_to_replay_);
+    view_to_replay_ = pp::View();
   }
-  if (replayHandleDocumentLoad) {
-    replayHandleDocumentLoad = false;
-    HandleDocumentLoad(replayHandleDocumentLoadURLLoader);
-    // Release our reference on this loader.
-    replayHandleDocumentLoadURLLoader = pp::URLLoader();
+  if (!document_load_to_replay_.is_null()) {
+    HandleDocumentLoad(document_load_to_replay_);
+    document_load_to_replay_ = pp::URLLoader();
   }
   bool is_valid_proxy = BrowserPpp::is_valid(ppapi_proxy_);
   PLUGIN_PRINTF(("Plugin::StartProxiedExecution (is_valid_proxy=%d)\n",
@@ -1621,7 +1627,10 @@ void Plugin::ProcessNaClManifest(const nacl::string& manifest_json) {
       pp::CompletionCallback translate_callback =
           callback_factory_.NewCallback(&Plugin::BitcodeDidTranslate);
       // Will always call the callback on success or failure.
-      pnacl_.BitcodeToNative(program_url, translate_callback);
+      pnacl_coordinator_.reset(
+          PnaclCoordinator::BitcodeToNative(this,
+                                            program_url,
+                                            translate_callback));
       return;
     } else {
       pp::CompletionCallback open_callback =
@@ -1630,6 +1639,7 @@ void Plugin::ProcessNaClManifest(const nacl::string& manifest_json) {
       CHECK(
           nexe_downloader_.Open(program_url,
                                 DOWNLOAD_TO_FILE,
+                                NexeIsContentHandler(),
                                 open_callback,
                                 &UpdateDownloadProgress));
       return;
@@ -1671,6 +1681,7 @@ void Plugin::RequestNaClManifest(const nacl::string& url) {
     // Will always call the callback on success or failure.
     CHECK(nexe_downloader_.Open(nmf_resolved_url.AsString(),
                                 DOWNLOAD_TO_BUFFER,
+                                NexeIsContentHandler(),
                                 open_callback,
                                 NULL));
   } else {
@@ -1679,6 +1690,7 @@ void Plugin::RequestNaClManifest(const nacl::string& url) {
     // Will always call the callback on success or failure.
     CHECK(nexe_downloader_.Open(nmf_resolved_url.AsString(),
                                 DOWNLOAD_TO_FILE,
+                                NexeIsContentHandler(),
                                 open_callback,
                                 NULL));
   }
@@ -1691,11 +1703,19 @@ bool Plugin::SetManifestObject(const nacl::string& manifest_json,
        manifest_json.c_str()));
   if (error_info == NULL)
     return false;
-  manifest_.reset(
-      new Manifest(url_util_, manifest_base_url(), GetSandboxISA()));
-  if (!manifest_->Init(manifest_json, error_info)) {
+  // Determine whether lookups should use portable (i.e., pnacl versions)
+  // rather than platform-specific files.
+  bool should_prefer_portable =
+      (getenv("NACL_PREFER_PORTABLE_IN_MANIFEST") != NULL);
+  nacl::scoped_ptr<JsonManifest> json_manifest(
+      new JsonManifest(url_util_,
+                       manifest_base_url(),
+                       GetSandboxISA(),
+                       should_prefer_portable));
+  if (!json_manifest->Init(manifest_json, error_info)) {
     return false;
   }
+  manifest_.reset(json_manifest.release());
   return true;
 }
 
@@ -1741,8 +1761,10 @@ int32_t Plugin::GetPOSIXFileDesc(const nacl::string& url) {
 
 
 bool Plugin::StreamAsFile(const nacl::string& url,
+                          bool permits_extension_urls,
                           PP_CompletionCallback callback) {
-  PLUGIN_PRINTF(("Plugin::StreamAsFile (url='%s')\n", url.c_str()));
+  PLUGIN_PRINTF(("Plugin::StreamAsFile (url='%s', permits_extension_urls=%d)\n",
+                 url.c_str(), permits_extension_urls));
   FileDownloader* downloader = new FileDownloader();
   downloader->Initialize(this);
   url_downloaders_.insert(downloader);
@@ -1763,6 +1785,7 @@ bool Plugin::StreamAsFile(const nacl::string& url,
   // If true, will always call the callback on success or failure.
   return downloader->Open(url,
                           DOWNLOAD_TO_FILE,
+                          permits_extension_urls || NexeIsContentHandler(),
                           open_callback,
                           &UpdateDownloadProgress);
 }

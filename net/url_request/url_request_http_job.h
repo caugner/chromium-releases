@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "net/base/auth.h"
 #include "net/base/completion_callback.h"
@@ -52,8 +51,11 @@ class URLRequestHttpJob : public URLRequestJob {
   void SaveNextCookie();
   void FetchResponseCookies(std::vector<std::string>* cookies);
 
-  // Process the Strict-Transport-Security header, if one exists.
+  // Processes the Strict-Transport-Security header, if one exists.
   void ProcessStrictTransportSecurityHeader();
+
+  // Processes the Public-Key-Pins header, if one exists.
+  void ProcessPublicKeyPinsHeader();
 
   // |result| should be net::OK, or the request is canceled.
   void OnHeadersReceivedCallback(int result);
@@ -85,7 +87,7 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual void ContinueWithCertificate(X509Certificate* client_cert) OVERRIDE;
   virtual void ContinueDespiteLastError() OVERRIDE;
   virtual bool ReadRawData(IOBuffer* buf, int buf_size,
-                           int *bytes_read) OVERRIDE;
+                           int* bytes_read) OVERRIDE;
   virtual void StopCaching() OVERRIDE;
   virtual void DoneReading() OVERRIDE;
   virtual HostPortPair GetSocketAddress() const OVERRIDE;
@@ -106,8 +108,7 @@ class URLRequestHttpJob : public URLRequestJob {
   AuthState server_auth_state_;
   AuthCredentials auth_credentials_;
 
-  OldCompletionCallbackImpl<URLRequestHttpJob> start_callback_;
-  OldCompletionCallbackImpl<URLRequestHttpJob> read_callback_;
+  CompletionCallback start_callback_;
   CompletionCallback notify_before_headers_sent_callback_;
 
   bool read_in_progress_;
@@ -214,8 +215,7 @@ class URLRequestHttpJob : public URLRequestJob {
   base::TimeTicks start_time_;
 
   scoped_ptr<HttpFilterContext> filter_context_;
-  ScopedRunnableMethodFactory<URLRequestHttpJob> method_factory_;
-  base::WeakPtrFactory<URLRequestHttpJob> weak_ptr_factory_;
+  base::WeakPtrFactory<URLRequestHttpJob> weak_factory_;
 
   CompletionCallback on_headers_received_callback_;
 

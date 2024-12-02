@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,9 @@
 #include "base/platform_file.h"
 #include "ipc/ipc_platform_file.h"
 #include "ppapi/c/pp_instance.h"
-#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
-
-struct PPB_Flash_NetConnector;
+#include "ppapi/utility/completion_callback_factory.h"
 
 namespace ppapi {
 

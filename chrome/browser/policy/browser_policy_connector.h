@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,17 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/policy/cloud_policy_data_store.h"
+#include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/configuration_policy_handler_list.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class TestingBrowserProcess;
 class TokenService;
 
 namespace policy {
 
+class CloudPolicyDataStore;
 class CloudPolicyProvider;
 class CloudPolicySubsystem;
 class ConfigurationPolicyProvider;
@@ -34,12 +34,6 @@ class UserPolicyTokenCache;
 // respective classes.
 class BrowserPolicyConnector : public content::NotificationObserver {
  public:
-  // Indicates the type of token passed to SetDeviceCredentials.
-  enum TokenType {
-    TOKEN_TYPE_GAIA,  // A gaia service token.
-    TOKEN_TYPE_OAUTH, // An OAuth v2 access token.
-  };
-
   // Builds an uninitialized BrowserPolicyConnector, suitable for testing.
   // Init() should be called to create and start the policy machinery.
   BrowserPolicyConnector();
@@ -74,10 +68,13 @@ class BrowserPolicyConnector : public content::NotificationObserver {
     return user_cloud_policy_subsystem_.get();
   }
 
-  // Triggers registration for device policy.
+  // Triggers registration for device policy, using the |owner_email| account.
+  // |token| is an oauth token to authenticate the registration request, and
+  // |known_machine_id| is true if the server should do additional checks based
+  // on the machine_id used for the request.
   void RegisterForDevicePolicy(const std::string& owner_email,
                                const std::string& token,
-                               TokenType token_type);
+                               bool known_machine_id);
 
   // Returns true if this device is managed by an enterprise (as opposed to
   // a local owner).
@@ -85,6 +82,9 @@ class BrowserPolicyConnector : public content::NotificationObserver {
 
   // Locks the device to an enterprise domain.
   EnterpriseInstallAttributes::LockResult LockDevice(const std::string& user);
+
+  // Returns the device serial number, or an empty string if not available.
+  static std::string GetSerialNumber();
 
   // Returns the enterprise domain if device is managed.
   std::string GetEnterpriseDomain();
@@ -127,8 +127,7 @@ class BrowserPolicyConnector : public content::NotificationObserver {
 
   // Works out the user affiliation by checking the given |user_name| against
   // the installation attributes.
-  policy::CloudPolicyDataStore::UserAffiliation GetUserAffiliation(
-      const std::string& user_name);
+  UserAffiliation GetUserAffiliation(const std::string& user_name);
 
  private:
   // content::NotificationObserver method overrides:
@@ -139,10 +138,9 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   // Initializes the device cloud policy infrasturcture.
   void InitializeDevicePolicy();
 
-  // Activates the device cloud policy subsystem. This will be posted as a task
-  // from InitializeDevicePolicy since it needs to wait for the message loops to
-  // be running.
-  void InitializeDevicePolicySubsystem();
+  // Complete initialization once the message loops are running and the
+  // local_state is initialized.
+  void CompleteInitialization();
 
   static ConfigurationPolicyProvider* CreateManagedPlatformProvider();
   static ConfigurationPolicyProvider* CreateRecommendedPlatformProvider();

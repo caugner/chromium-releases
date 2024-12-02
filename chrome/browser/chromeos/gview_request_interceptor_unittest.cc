@@ -14,10 +14,11 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "content/browser/mock_resource_context.h"
-#include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/dummy_resource_handler.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/test/test_browser_thread.h"
+#include "ipc/ipc_message.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
@@ -28,6 +29,7 @@
 #include "webkit/plugins/npapi/mock_plugin_list.h"
 
 using content::BrowserThread;
+using content::PluginService;
 
 namespace chromeos {
 
@@ -107,7 +109,7 @@ class GViewRequestInterceptorTest : public testing::Test {
     ChromePluginServiceFilter* filter =
         ChromePluginServiceFilter::GetInstance();
     filter->RegisterResourceContext(plugin_prefs_, resource_context);
-    PluginService::GetInstance()->set_filter(filter);
+    PluginService::GetInstance()->SetFilter(filter);
 
     ASSERT_TRUE(PathService::Get(chrome::FILE_PDF_PLUGIN, &pdf_path_));
 
@@ -127,7 +129,7 @@ class GViewRequestInterceptorTest : public testing::Test {
     ChromePluginServiceFilter* filter =
         ChromePluginServiceFilter::GetInstance();
     filter->UnregisterResourceContext(resource_context);
-    PluginService::GetInstance()->set_filter(NULL);
+    PluginService::GetInstance()->SetFilter(NULL);
   }
 
   void RegisterPDFPlugin() {
@@ -245,7 +247,7 @@ TEST_F(GViewRequestInterceptorTest, InterceptPdfWhenDisabled) {
   EXPECT_EQ(GURL(kPdfUrlIntercepted), request.url());
 }
 
-#if !defined(OFFICIAL_BUILD)
+#if !defined(GOOGLE_CHROME_BUILD)
 // Official builds have pdf plugin by default, and we cannot unload it, so the
 // test fails. Since pdf plugin is always present, we don't need to run this
 // test.

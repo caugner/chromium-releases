@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
@@ -47,10 +48,10 @@
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -60,6 +61,10 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
 
 namespace {
 
@@ -146,7 +151,7 @@ class NotificationBridge : public content::NotificationObserver {
        nibFileNamed:(NSString*)nibName {
   DCHECK(model && commands && profile && [nibName length]);
   if ((self = [super initWithNibName:nibName
-                              bundle:base::mac::MainAppBundle()])) {
+                              bundle:base::mac::FrameworkBundle()])) {
     toolbarModel_ = model;
     commands_ = commands;
     profile_ = profile;
@@ -421,7 +426,7 @@ class NotificationBridge : public content::NotificationObserver {
   [homeButton_ setEnabled:commands->IsCommandEnabled(IDC_HOME) ? YES : NO];
 }
 
-- (void)updateToolbarWithContents:(TabContents*)tab
+- (void)updateToolbarWithContents:(WebContents*)tab
                shouldRestoreState:(BOOL)shouldRestore {
   locationBarView_->Update(tab, shouldRestore ? true : false);
 
@@ -753,10 +758,10 @@ class NotificationBridge : public content::NotificationObserver {
   if (url.SchemeIs(chrome::kJavaScriptScheme)) {
     browser_->window()->GetLocationBar()->location_entry()->SetUserText(
         OmniboxView::StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
-    return;
   }
-  browser_->GetSelectedTabContents()->OpenURL(url, GURL(), CURRENT_TAB,
-                                              content::PAGE_TRANSITION_TYPED);
+  OpenURLParams params(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
+  browser_->GetSelectedWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)
@@ -771,8 +776,9 @@ class NotificationBridge : public content::NotificationObserver {
       base::SysNSStringToUTF16(text), string16(), false, false, &match, NULL);
   GURL url(match.destination_url);
 
-  browser_->GetSelectedTabContents()->OpenURL(url, GURL(), CURRENT_TAB,
-                                              content::PAGE_TRANSITION_TYPED);
+  OpenURLParams params(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false);
+  browser_->GetSelectedWebContents()->OpenURL(params);
 }
 
 // (URLDropTargetController protocol)

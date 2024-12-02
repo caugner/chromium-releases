@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,14 +39,15 @@ class ResourceMessageFilter;
 class SaveFileManager;
 class TabContents;
 struct DownloadSaveInfo;
-struct GlobalRequestID;
 struct ResourceHostMsg_Request;
 struct ViewMsg_SwapOut_Params;
 
 namespace content {
 class ResourceContext;
 class ResourceDispatcherHostDelegate;
+struct GlobalRequestID;
 }
+
 namespace net {
 class CookieList;
 class URLRequestJobFactory;
@@ -58,15 +59,20 @@ class DeletableFileReference;
 
 class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
  public:
-  explicit ResourceDispatcherHost(
-      const ResourceQueue::DelegateSet& resource_queue_delegates);
+  ResourceDispatcherHost();
   virtual ~ResourceDispatcherHost();
 
-  void Initialize();
+  // Returns the current ResourceDispatcherHost. May return NULL if it hasn't
+  // been created yet.
+  static ResourceDispatcherHost* Get();
 
   // Puts the resource dispatcher host in an inactive state (unable to begin
   // new requests).  Cancels all pending requests.
   void Shutdown();
+
+  // Adds a delegate that can delay requests. This should be called early, i.e.
+  // in the ContentBrowserClient::ResourceDispatcherHostCreated callback.
+  void AddResourceQueueDelegate(ResourceQueueDelegate* delegate);
 
   // Returns true if the message was a resource message that was processed.
   // If it was, message_was_ok will be false iff the message was corrupt.
@@ -75,13 +81,13 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
                          bool* message_was_ok);
 
   // Initiates a download by explicit request of the renderer, e.g. due to
-  // alt-clicking a link.  If |request| is malformed or not permitted or the RDH
-  // is shutting down, then |started_cb| will be called immediately. There is no
-  // situation in which |started_cb| will never be called.
-  void BeginDownload(
-      net::URLRequest* request,  // ownership is taken
+  // alt-clicking a link.  If the download is started, |started_cb| will be
+  // called on the UI thread with the DownloadId; otherwise an error code will
+  // be returned.
+  net::Error BeginDownload(
+      scoped_ptr<net::URLRequest> request,
+      bool prefer_cache,
       const DownloadSaveInfo& save_info,
-      bool prompt_for_save_location,
       const DownloadResourceHandler::OnStartedCallback& started_cb,
       int child_id,
       int route_id,
@@ -91,13 +97,13 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   // request from the renderer or another child process).
   void BeginSaveFile(const GURL& url,
                      const GURL& referrer,
-                     int process_unique_id,
+                     int child_id,
                      int route_id,
                      const content::ResourceContext& context);
 
   // Cancels the given request if it still exists. We ignore cancels from the
   // renderer in the event of a download.
-  void CancelRequest(int process_unique_id,
+  void CancelRequest(int child_id,
                      int request_id,
                      bool from_renderer);
 
@@ -108,21 +114,21 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   // new_first_party_for_cookies.  Otherwise, pass false as
   // has_new_first_party_for_cookies, and new_first_party_for_cookies will not
   // be used.
-  void FollowDeferredRedirect(int process_unique_id,
+  void FollowDeferredRedirect(int child_id,
                               int request_id,
                               bool has_new_first_party_for_cookies,
                               const GURL& new_first_party_for_cookies);
 
   // Starts a request that was deferred during ResourceHandler::OnWillStart().
-  void StartDeferredRequest(int process_unique_id, int request_id);
+  void StartDeferredRequest(int child_id, int request_id);
 
   // Returns true if it's ok to send the data. If there are already too many
   // data messages pending, it pauses the request and returns false. In this
   // case the caller should not send the data.
-  bool WillSendData(int process_unique_id, int request_id);
+  bool WillSendData(int child_id, int request_id);
 
   // Pauses or resumes network activity for a particular request.
-  void PauseRequest(int process_unique_id, int request_id, bool pause);
+  void PauseRequest(int child_id, int request_id, bool pause);
 
   // Returns the number of pending requests. This is designed for the unittests
   int pending_requests() const {
@@ -130,8 +136,8 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   }
 
   // Intended for unit-tests only. Returns the memory cost of all the
-  // outstanding requests (pending and blocked) for |process_unique_id|.
-  int GetOutstandingRequestsMemoryCost(int process_unique_id) const;
+  // outstanding requests (pending and blocked) for |child_id|.
+  int GetOutstandingRequestsMemoryCost(int child_id) const;
 
   // Intended for unit-tests only. Overrides the outstanding requests bound.
   void set_max_outstanding_requests_cost_per_process(int limit) {
@@ -160,11 +166,11 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
                                         ResourceType::Type resource_type);
 
   // Force cancels any pending requests for the given process.
-  void CancelRequestsForProcess(int process_unique_id);
+  void CancelRequestsForProcess(int child_id);
 
   // Force cancels any pending requests for the given route id.  This method
   // acts like CancelRequestsForProcess when route_id is -1.
-  void CancelRequestsForRoute(int process_unique_id, int route_id);
+  void CancelRequestsForRoute(int child_id, int route_id);
 
   // Force cancels any pending requests for the given |context|. This is
   // necessary to ensure that before |context| goes away, all requests
@@ -182,7 +188,7 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
       net::SSLCertRequestInfo* cert_request_info) OVERRIDE;
   virtual void OnSSLCertificateError(net::URLRequest* request,
                                      const net::SSLInfo& ssl_info,
-                                     bool is_hsts_host) OVERRIDE;
+                                     bool fatal) OVERRIDE;
   virtual bool CanGetCookies(const net::URLRequest* request,
                              const net::CookieList& cookie_list) const OVERRIDE;
   virtual bool CanSetCookie(const net::URLRequest* request,
@@ -191,8 +197,6 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
   virtual void OnReadCompleted(net::URLRequest* request,
                                int bytes_read) OVERRIDE;
-
-  void OnResponseCompleted(net::URLRequest* request);
 
   void OnUserGesture(TabContents* tab);
 
@@ -212,26 +216,27 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
                                    int* render_view_host_id);
 
   // Retrieves a net::URLRequest.  Must be called from the IO thread.
-  net::URLRequest* GetURLRequest(const GlobalRequestID& request_id) const;
+  net::URLRequest* GetURLRequest(
+      const content::GlobalRequestID& request_id) const;
 
-  void RemovePendingRequest(int process_unique_id, int request_id);
+  void RemovePendingRequest(int child_id, int request_id);
 
   // Causes all new requests for the route identified by
-  // |process_unique_id| and |route_id| to be blocked (not being
+  // |child_id| and |route_id| to be blocked (not being
   // started) until ResumeBlockedRequestsForRoute or
   // CancelBlockedRequestsForRoute is called.
-  void BlockRequestsForRoute(int process_unique_id, int route_id);
+  void BlockRequestsForRoute(int child_id, int route_id);
 
   // Resumes any blocked request for the specified route id.
-  void ResumeBlockedRequestsForRoute(int process_unique_id, int route_id);
+  void ResumeBlockedRequestsForRoute(int child_id, int route_id);
 
   // Cancels any blocked request for the specified route id.
-  void CancelBlockedRequestsForRoute(int process_unique_id, int route_id);
+  void CancelBlockedRequestsForRoute(int child_id, int route_id);
 
   // Decrements the pending_data_count for the request and resumes
   // the request if it was paused due to too many pending data
   // messages sent.
-  void DataReceivedACK(int process_unique_id, int request_id);
+  void DataReceivedACK(int child_id, int request_id);
 
   // Maintains a collection of temp files created in support of
   // the download_to_file capability. Used to grant access to the
@@ -267,7 +272,7 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   // Marks the request as "parked". This happens if a request is
   // redirected cross-site and needs to be resumed by a new render view.
   void MarkAsTransferredNavigation(
-      const GlobalRequestID& transferred_request_id,
+      const content::GlobalRequestID& transferred_request_id,
       net::URLRequest* transferred_request);
 
  private:
@@ -294,7 +299,7 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   bool PauseRequestIfNeeded(ResourceDispatcherHostRequestInfo* info);
 
   // Resumes the given request by calling OnResponseStarted or OnReadCompleted.
-  void ResumeRequest(const GlobalRequestID& request_id);
+  void ResumeRequest(const content::GlobalRequestID& request_id);
 
   // Internal function to start reading for the first time.
   void StartReading(net::URLRequest* request);
@@ -313,6 +318,9 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   // true on success.
   bool CompleteResponseStarted(net::URLRequest* request);
 
+  void ResponseCompleted(net::URLRequest* request);
+  void CallResponseCompleted(int child_id, int request_id);
+
   // Helper function for regular and download requests.
   void BeginRequestInternal(net::URLRequest* request);
 
@@ -326,14 +334,14 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
       net::URLRequest* request,
       const ResourceDispatcherHostRequestInfo& request_info);
 
-  // Updates the "cost" of outstanding requests for |process_unique_id|.
+  // Updates the "cost" of outstanding requests for |child_id|.
   // The "cost" approximates how many bytes are consumed by all the in-memory
   // data structures supporting this request (net::URLRequest object,
   // HttpNetworkTransaction, etc...).
   // The value of |cost| is added to the running total, and the resulting
   // sum is returned.
   int IncrementOutstandingRequestsMemoryCost(int cost,
-                                             int process_unique_id);
+                                             int child_id);
 
   // Estimate how much heap space |request| will consume to run.
   static int CalculateApproximateMemoryCost(net::URLRequest* request);
@@ -345,7 +353,8 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   // It may be enhanced in the future to provide some kind of prioritization
   // mechanism. We should also consider a hashtable or binary tree if it turns
   // out we have a lot of things here.
-  typedef std::map<GlobalRequestID, net::URLRequest*> PendingRequestList;
+  typedef std::map<content::GlobalRequestID, net::URLRequest*>
+      PendingRequestList;
 
   // Deletes the pending request identified by the iterator passed in.
   // This function will invalidate the iterator passed in. Callers should
@@ -353,17 +362,17 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   void RemovePendingRequest(const PendingRequestList::iterator& iter);
 
   // Notify our observers that we started receiving a response for a request.
-  void NotifyResponseStarted(net::URLRequest* request, int process_unique_id);
+  void NotifyResponseStarted(net::URLRequest* request, int child_id);
 
   // Notify our observers that a request has been redirected.
   void NotifyReceivedRedirect(net::URLRequest* request,
-                              int process_unique_id,
+                              int child_id,
                               const GURL& new_url);
 
   // Tries to handle the url with an external protocol. If the request is
   // handled, the function returns true. False otherwise.
   bool HandleExternalProtocol(int request_id,
-                              int process_unique_id,
+                              int child_id,
                               int route_id,
                               const GURL& url,
                               ResourceType::Type resource_type,
@@ -379,7 +388,7 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
                                  net::URLRequest *request);
 
   // Resumes or cancels (if |cancel_requests| is true) any blocked requests.
-  void ProcessBlockedRequestsForRoute(int process_unique_id,
+  void ProcessBlockedRequestsForRoute(int child_id,
                                       int route_id,
                                       bool cancel_requests);
 
@@ -434,6 +443,13 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
 
   HttpAuthResourceType HttpAuthResourceTypeOf(net::URLRequest* request);
 
+  // Returns whether the URLRequest identified by |transferred_request_id| is
+  // currently in the process of being transferred to a different renderer.
+  // This happens if a request is redirected cross-site and needs to be resumed
+  // by a new render view.
+  bool IsTransferredNavigation(
+      const content::GlobalRequestID& transferred_request_id) const;
+
   PendingRequestList pending_requests_;
 
   // Collection of temp files downloaded for child processes via
@@ -451,6 +467,9 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
 
   // Handles the resource requests from the moment we want to start them.
   ResourceQueue resource_queue_;
+
+  // Used temporarily during construction.
+  ResourceQueue::DelegateSet* temporarily_delegate_set_;
 
   // We own the download file writing thread and manager
   scoped_refptr<DownloadFileManager> download_file_manager_;
@@ -478,7 +497,7 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
   typedef std::map<ProcessRouteIDs, BlockedRequestsList*> BlockedRequestMap;
   BlockedRequestMap blocked_requests_map_;
 
-  // Maps the process_unique_ids to the approximate number of bytes
+  // Maps the child_ids to the approximate number of bytes
   // being used to service its resource requests. No entry implies 0 cost.
   typedef std::map<int, int> OutstandingRequestsMemoryCostMap;
   OutstandingRequestsMemoryCostMap outstanding_requests_memory_cost_map_;
@@ -508,7 +527,8 @@ class CONTENT_EXPORT ResourceDispatcherHost : public net::URLRequest::Delegate {
 
   // Maps the request ID of request that is being transferred to a new RVH
   // to the respective request.
-  typedef std::map<GlobalRequestID, net::URLRequest*> TransferredNavigations;
+  typedef std::map<content::GlobalRequestID, net::URLRequest*>
+      TransferredNavigations;
   TransferredNavigations transferred_navigations_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcherHost);

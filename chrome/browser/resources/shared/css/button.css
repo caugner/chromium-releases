@@ -1,4 +1,4 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -59,17 +59,13 @@ select:not(.custom-appearance):focus {
   -webkit-transition: border-color 200ms;
   /* We use border color because it follows the border radius (unlike outline).
    * This is particularly noticeable on mac. */
-  border-color: #4080fa;
+  border-color: rgb(64, 128, 250);
   outline: none;
 }
 
-/* Search boxes use an outline because it follows the contours of the box.
- * TODO(estade): remove the first 2 of these selectors when we use checkbox.css
- * in more places. */
-html:not(#print-preview) input[type='checkbox']:not(.custom-appearance):focus,
-html:not(#print-preview) input[type='radio']:not(.custom-appearance):focus,
+/* Search boxes use an outline because it follows the contours of the box. */
 input[type='search']:not(.custom-appearance):focus {
-  outline-color: #4080fa;
+  outline-color: rgb(64, 128, 250);
 }
 
 /* TODO(jhawkins): Refactor button styling and remove !important here. This is
@@ -77,17 +73,24 @@ input[type='search']:not(.custom-appearance):focus {
  * higher specificity.
  */
 .link-button,
-.link-button:focus,
-.link-button:hover {
+.link-button:focus {
   -webkit-box-shadow: none !important;
   background: transparent none !important;
   border: none !important;
-  color: rgb(63, 110, 194);
+  color: rgb(17, 85, 204) !important;
   cursor: pointer;
+  /* Input elements have -webkit-small-control which overrides the body font.
+   * Resolve this by using 'inherit'. */
+  font-family: inherit;
   margin: 0;
+  padding: 0 4px !important;
+}
+
+.link-button:hover {
   text-decoration: underline;
 }
 
 .link-button:active {
-  color: rgb(37, 64, 113);
+  color: rgb(5, 37, 119) !important;
+  text-decoration: underline;
 }

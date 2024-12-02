@@ -17,9 +17,14 @@
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "content/test/test_browser_thread.h"
 #include "net/base/auth.h"
 #include "net/base/mock_host_resolver.h"
+
+using content::NavigationController;
+using content::OpenURLParams;
+using content::Referrer;
 
 namespace {
 
@@ -240,14 +245,15 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, PrefetchAuthCancels) {
   TabContentsWrapper* contents =
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
 
   WindowedLoadStopObserver load_stop_waiter(controller, 1);
-  browser()->OpenURL(
-      test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+      false));
 
   load_stop_waiter.Wait();
   EXPECT_TRUE(observer.handlers_.empty());
@@ -266,7 +272,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
 
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
@@ -281,12 +287,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
     // no_auth_page_2.
     WindowedLoadStopObserver load_stop_waiter(controller, 2);
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        auth_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        auth_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
-    browser()->OpenURL(
-        no_auth_page_2, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        no_auth_page_2, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_cancelled_waiter.Wait();
     load_stop_waiter.Wait();
     EXPECT_TRUE(observer.handlers_.empty());
@@ -297,8 +304,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
     // As above, we wait for two LOAD_STOP events; one for each navigation.
     WindowedLoadStopObserver load_stop_waiter(controller, 2);
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        auth_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        auth_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
     ASSERT_TRUE(browser()->CanGoBack());
@@ -320,8 +328,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
     // We wait for two LOAD_STOP events; one for each navigation.
     WindowedLoadStopObserver load_stop_waiter(controller, 2);
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        auth_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        auth_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
     ASSERT_TRUE(browser()->CanGoForward());
@@ -335,8 +344,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, TestCancelAuth) {
   {
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        auth_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        auth_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
     WindowedAuthCancelledObserver auth_cancelled_waiter(controller);
     LoginHandler* handler = *observer.handlers_.begin();
@@ -361,7 +371,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmCancellation) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
 
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -370,8 +380,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmCancellation) {
 
   {
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
   }
 
@@ -413,7 +424,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmConfirmation) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
 
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -424,8 +435,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, MultipleRealmConfirmation) {
   {
     WindowedAuthNeededObserver auth_needed_waiter(controller);
 
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
   }
 
@@ -465,15 +477,16 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, IncorrectConfirmation) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
 
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
 
   {
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
   }
 
@@ -536,7 +549,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, NoLoginPromptForFavicon) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
 
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
 
   observer.Register(content::Source<NavigationController>(controller));
@@ -546,8 +559,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, NoLoginPromptForFavicon) {
   {
     GURL test_page = test_server()->GetURL(kFaviconTestPage);
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     load_stop_waiter.Wait();
   }
 
@@ -557,8 +571,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, NoLoginPromptForFavicon) {
     GURL test_page = test_server()->GetURL(kFaviconResource);
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
     ASSERT_EQ(1u, observer.handlers_.size());
 
@@ -591,7 +606,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, BlockCrossdomainPrompt) {
   TabContentsWrapper* contents = browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
 
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
 
@@ -609,8 +624,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, BlockCrossdomainPrompt) {
     test_page = test_page.ReplaceComponents(replacements);
 
     WindowedLoadStopObserver load_stop_waiter(controller, 1);
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     load_stop_waiter.Wait();
   }
 
@@ -630,8 +646,9 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, BlockCrossdomainPrompt) {
     test_page = test_page.ReplaceComponents(replacements);
 
     WindowedAuthNeededObserver auth_needed_waiter(controller);
-    browser()->OpenURL(
-        test_page, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        test_page, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED,
+        false));
     auth_needed_waiter.Wait();
     ASSERT_EQ(1u, observer.handlers_.size());
 
@@ -656,7 +673,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
   TabContentsWrapper* contents_1 =
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents_1);
-  NavigationController* controller_1 = &contents_1->controller();
+  NavigationController* controller_1 =
+      &contents_1->web_contents()->GetController();
 
   // Open a new tab.
   ui_test_utils::NavigateToURLWithDisposition(
@@ -670,7 +688,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents_2);
   ASSERT_NE(contents_1, contents_2);
-  NavigationController* controller_2 = &contents_2->controller();
+  NavigationController* controller_2 =
+      &contents_2->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller_1));
@@ -680,13 +699,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, SupplyRedundantAuths) {
     // Open different auth urls in each tab.
     WindowedAuthNeededObserver auth_needed_waiter_1(controller_1);
     WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
-    contents_1->tab_contents()->OpenURL(OpenURLParams(
+    contents_1->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/1"),
         content::Referrer(),
         CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED,
         false));
-    contents_2->tab_contents()->OpenURL(OpenURLParams(
+    contents_2->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/2"),
         content::Referrer(),
         CURRENT_TAB,
@@ -722,7 +741,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
   TabContentsWrapper* contents_1 =
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents_1);
-  NavigationController* controller_1 = &contents_1->controller();
+  NavigationController* controller_1 =
+      &contents_1->web_contents()->GetController();
 
   // Open a new tab.
   ui_test_utils::NavigateToURLWithDisposition(
@@ -736,7 +756,8 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents_2);
   ASSERT_NE(contents_1, contents_2);
-  NavigationController* controller_2 = &contents_2->controller();
+  NavigationController* controller_2 =
+      &contents_2->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller_1));
@@ -746,13 +767,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest, CancelRedundantAuths) {
     // Open different auth urls in each tab.
     WindowedAuthNeededObserver auth_needed_waiter_1(controller_1);
     WindowedAuthNeededObserver auth_needed_waiter_2(controller_2);
-    contents_1->tab_contents()->OpenURL(OpenURLParams(
+    contents_1->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/1"),
         content::Referrer(),
         CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED,
         false));
-    contents_2->tab_contents()->OpenURL(OpenURLParams(
+    contents_2->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/2"),
         content::Referrer(),
         CURRENT_TAB,
@@ -789,7 +810,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   TabContentsWrapper* contents =
       browser()->GetSelectedTabContentsWrapper();
   ASSERT_TRUE(contents);
-  NavigationController* controller = &contents->controller();
+  NavigationController* controller = &contents->web_contents()->GetController();
 
   // Open an incognito window.
   Browser* browser_incognito = CreateIncognitoBrowser();
@@ -800,7 +821,7 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
   ASSERT_TRUE(contents_incognito);
   ASSERT_NE(contents, contents_incognito);
   NavigationController* controller_incognito =
-      &contents_incognito->controller();
+      &contents_incognito->web_contents()->GetController();
 
   LoginPromptBrowserTestObserver observer;
   observer.Register(content::Source<NavigationController>(controller));
@@ -813,13 +834,13 @@ IN_PROC_BROWSER_TEST_F(LoginPromptBrowserTest,
     WindowedAuthNeededObserver auth_needed_waiter(controller);
     WindowedAuthNeededObserver auth_needed_waiter_incognito(
         controller_incognito);
-    contents->tab_contents()->OpenURL(OpenURLParams(
+    contents->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/1"),
         content::Referrer(),
         CURRENT_TAB,
         content::PAGE_TRANSITION_TYPED,
         false));
-    contents_incognito->tab_contents()->OpenURL(OpenURLParams(
+    contents_incognito->web_contents()->OpenURL(OpenURLParams(
         test_server()->GetURL("auth-basic/2"),
         content::Referrer(),
         CURRENT_TAB,

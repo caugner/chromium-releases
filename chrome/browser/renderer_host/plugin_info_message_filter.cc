@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,9 @@
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/plugin_service.h"
 #include "content/browser/plugin_service_filter.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/plugin_service.h"
 #include "googleurl/src/gurl.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -26,6 +26,8 @@
 #include "chrome/common/attrition_experiments.h"
 #include "chrome/installer/util/google_update_settings.h"
 #endif
+
+using content::PluginService;
 
 namespace {
 
@@ -58,19 +60,33 @@ void PluginInfobarExperiment(bool* allow_outdated,
 
 }  // namespace
 
-PluginInfoMessageFilter::PluginInfoMessageFilter(
-    int render_process_id,
-    Profile* profile)
-  : render_process_id_(render_process_id),
-    resource_context_(profile->GetResourceContext()),
-    host_content_settings_map_(profile->GetHostContentSettingsMap()),
-    weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+PluginInfoMessageFilter::Context::Context(int render_process_id,
+                                          Profile* profile)
+    : render_process_id_(render_process_id),
+      resource_context_(&profile->GetResourceContext()),
+      host_content_settings_map_(profile->GetHostContentSettingsMap()) {
   allow_outdated_plugins_.Init(prefs::kPluginsAllowOutdated,
                                profile->GetPrefs(), NULL);
   allow_outdated_plugins_.MoveToThread(content::BrowserThread::IO);
   always_authorize_plugins_.Init(prefs::kPluginsAlwaysAuthorize,
                                  profile->GetPrefs(), NULL);
   always_authorize_plugins_.MoveToThread(content::BrowserThread::IO);
+}
+
+PluginInfoMessageFilter::Context::Context()
+    : render_process_id_(0),
+      resource_context_(NULL),
+      host_content_settings_map_(NULL) {
+}
+
+PluginInfoMessageFilter::Context::~Context() {
+}
+
+PluginInfoMessageFilter::PluginInfoMessageFilter(
+    int render_process_id,
+    Profile* profile)
+    : context_(render_process_id, profile),
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 PluginInfoMessageFilter::~PluginInfoMessageFilter() {}
@@ -127,13 +143,13 @@ void PluginInfoMessageFilter::PluginsLoaded(
   ChromeViewHostMsg_GetPluginInfo_Status status;
   webkit::WebPluginInfo plugin;
   std::string actual_mime_type;
-  DecidePluginStatus(params, &status, &plugin, &actual_mime_type);
+  context_.DecidePluginStatus(params, &status, &plugin, &actual_mime_type);
   ChromeViewHostMsg_GetPluginInfo::WriteReplyParams(
       reply_msg, status, plugin, actual_mime_type);
   Send(reply_msg);
 }
 
-void PluginInfoMessageFilter::DecidePluginStatus(
+void PluginInfoMessageFilter::Context::DecidePluginStatus(
     const GetPluginInfo_Params& params,
     ChromeViewHostMsg_GetPluginInfo_Status* status,
     webkit::WebPluginInfo* plugin,
@@ -176,7 +192,8 @@ void PluginInfoMessageFilter::DecidePluginStatus(
   }
 
   // Check if the plug-in requires authorization.
-  if (group->RequiresAuthorization(*plugin) &&
+  if ((group->RequiresAuthorization(*plugin) ||
+       PluginService::GetInstance()->IsPluginUnstable(plugin->path)) &&
       !always_authorize &&
       plugin_setting != CONTENT_SETTING_BLOCK &&
       uses_default_content_setting) {
@@ -191,7 +208,7 @@ void PluginInfoMessageFilter::DecidePluginStatus(
     status->value = ChromeViewHostMsg_GetPluginInfo_Status::kBlocked;
 }
 
-bool PluginInfoMessageFilter::FindEnabledPlugin(
+bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
     int render_view_id,
     const GURL& url,
     const GURL& top_origin_url,
@@ -204,46 +221,39 @@ bool PluginInfoMessageFilter::FindEnabledPlugin(
   std::vector<std::string> mime_types;
   PluginService::GetInstance()->GetPluginInfoArray(
       url, mime_type, allow_wildcard, &matching_plugins, &mime_types);
-  if (matching_plugins.empty()) {
-    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
-    return true;
-  }
-
-  if (matching_plugins.size() > 1 &&
-      matching_plugins.back().path ==
-          FilePath(webkit::npapi::kDefaultPluginLibraryName)) {
-    // If there is at least one plug-in handling the required MIME type (apart
-    // from the default plug-in), we don't need the default plug-in.
-    matching_plugins.pop_back();
-  }
-
-  content::PluginServiceFilter* filter = PluginService::GetInstance()->filter();
-  bool allowed = false;
+  content::PluginServiceFilter* filter =
+      PluginService::GetInstance()->GetFilter();
+  bool found = false;
   for (size_t i = 0; i < matching_plugins.size(); ++i) {
-    if (!filter || filter->ShouldUsePlugin(render_process_id_,
-                                           render_view_id,
-                                           &resource_context_,
-                                           url,
-                                           top_origin_url,
-                                           &matching_plugins[i])) {
+    bool enabled = !filter || filter->ShouldUsePlugin(render_process_id_,
+                                                      render_view_id,
+                                                      resource_context_,
+                                                      url,
+                                                      top_origin_url,
+                                                      &matching_plugins[i]);
+    if (!found || enabled) {
       *plugin = matching_plugins[i];
       *actual_mime_type = mime_types[i];
-      allowed = true;
-      break;
-    } else if (i == 0) {
-      *plugin = matching_plugins[i];
-      *actual_mime_type = mime_types[i];
+      if (enabled) {
+        // We have found an enabled plug-in. Return immediately.
+        return false;
+      }
+      // We have found a plug-in, but it's disabled. Keep looking for an
+      // enabled one.
+      found = true;
     }
   }
 
-  if (!allowed) {
+  // If we're here and have previously found a plug-in, it must have been
+  // disabled.
+  if (found)
     status->value = ChromeViewHostMsg_GetPluginInfo_Status::kDisabled;
-    return true;
-  }
-  return false;
+  else
+    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
+  return true;
 }
 
-void PluginInfoMessageFilter::GetPluginContentSetting(
+void PluginInfoMessageFilter::Context::GetPluginContentSetting(
     const webkit::WebPluginInfo* plugin,
     const GURL& policy_url,
     const GURL& plugin_url,

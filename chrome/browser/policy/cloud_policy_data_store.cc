@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,8 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/policy/proto/device_management_backend.pb.h"
-#include "chrome/browser/policy/proto/device_management_constants.h"
+
+namespace em = enterprise_management;
 
 namespace policy {
 
@@ -16,13 +17,13 @@ CloudPolicyDataStore::~CloudPolicyDataStore() {}
 // static
 CloudPolicyDataStore* CloudPolicyDataStore::CreateForUserPolicies() {
   return new CloudPolicyDataStore(em::DeviceRegisterRequest::USER,
-                                  kChromeUserPolicyType);
+                                  dm_protocol::kChromeUserPolicyType);
 }
 
 // static
 CloudPolicyDataStore* CloudPolicyDataStore::CreateForDevicePolicies() {
   return new CloudPolicyDataStore(em::DeviceRegisterRequest::DEVICE,
-                                  kChromeDevicePolicyType);
+                                  dm_protocol::kChromeDevicePolicyType);
 }
 
 CloudPolicyDataStore::CloudPolicyDataStore(
@@ -31,6 +32,7 @@ CloudPolicyDataStore::CloudPolicyDataStore(
     : user_affiliation_(USER_AFFILIATION_NONE),
       policy_register_type_(policy_register_type),
       policy_type_(policy_type),
+      known_machine_id_(false),
       token_cache_loaded_(false) {}
 
 void CloudPolicyDataStore::SetDeviceToken(const std::string& device_token,
@@ -105,6 +107,10 @@ void CloudPolicyDataStore::set_user_affiliation(
   user_affiliation_ = user_affiliation;
 }
 
+void CloudPolicyDataStore::set_known_machine_id(bool known_machine_id) {
+  known_machine_id_ = known_machine_id;
+}
+
 const std::string& CloudPolicyDataStore::device_token() const {
   return device_token_;
 }
@@ -146,10 +152,25 @@ const std::string& CloudPolicyDataStore::user_name() const {
   return user_name_;
 }
 
-CloudPolicyDataStore::UserAffiliation
-    CloudPolicyDataStore::user_affiliation() const {
+UserAffiliation CloudPolicyDataStore::user_affiliation() const {
   return user_affiliation_;
 }
+
+bool CloudPolicyDataStore::known_machine_id() const {
+  return known_machine_id_;
+}
+
+#if defined(OS_CHROMEOS)
+DeviceStatusCollector*
+    CloudPolicyDataStore::device_status_collector() {
+  return device_status_collector_.get();
+}
+
+void CloudPolicyDataStore::set_device_status_collector(
+    DeviceStatusCollector* collector) {
+  device_status_collector_.reset(collector);
+}
+#endif
 
 void CloudPolicyDataStore::AddObserver(
     CloudPolicyDataStore::Observer* observer) {

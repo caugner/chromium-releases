@@ -4,25 +4,11 @@
 
 #include "chrome/browser/platform_util.h"
 
+#include "ash/wm/window_util.h"
 #include "base/logging.h"
 #include "ui/aura/window.h"
 
 namespace platform_util {
-
-void ShowItemInFolder(const FilePath& full_path) {
-  // TODO(beng):
-  NOTIMPLEMENTED();
-}
-
-void OpenItem(const FilePath& full_path) {
-  // TODO(beng):
-  NOTIMPLEMENTED();
-}
-
-void OpenExternal(const GURL& url) {
-  // TODO(beng):
-  NOTIMPLEMENTED();
-}
 
 gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
   return view->GetToplevelWindow();
@@ -33,11 +19,11 @@ gfx::NativeView GetParent(gfx::NativeView view) {
 }
 
 bool IsWindowActive(gfx::NativeWindow window) {
-  return window->IsActive();
+  return ash::IsActiveWindow(window);
 }
 
 void ActivateWindow(gfx::NativeWindow window) {
-  window->Activate();
+  ash::ActivateWindow(window);
 }
 
 bool IsVisible(gfx::NativeView view) {

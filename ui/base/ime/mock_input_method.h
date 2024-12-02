@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,7 @@ namespace ui {
 
 class TextInputClient;
 
-// A mock InputMethod implementation for testing classes that use the
-// ui::InputMethod interface such as aura::DesktopHost.
+// A mock ui::InputMethod implementation for minimum input support.
 class UI_EXPORT MockInputMethod : public InputMethod {
  public:
   explicit MockInputMethod(internal::InputMethodDelegate* delegate);
@@ -37,18 +36,11 @@ class UI_EXPORT MockInputMethod : public InputMethod {
   virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE;
   virtual bool IsActive() OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
-
-  // If called, the next key press will not generate a Char event. Instead, it
-  // will generate the VKEY_PROCESSKEY RawKeyDown event.
-  void ConsumeNextKey();
-
-  // Sends VKEY_PROCESSKEY.
-  void SendFakeProcessKeyEvent(bool pressed, int flags) const;
+  virtual bool CanComposeInline() const OVERRIDE;
 
  private:
   internal::InputMethodDelegate* delegate_;
   TextInputClient* text_input_client_;
-  bool consume_next_key_;
 
   DISALLOW_COPY_AND_ASSIGN(MockInputMethod);
 };

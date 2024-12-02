@@ -15,6 +15,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/cocoa_protocols.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -213,8 +214,8 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
   // tests. This is a harmless failure for test_shell_tests.
   g_resource_data_pack = new ui::DataPack;
   NSString *resource_path =
-      [base::mac::MainAppBundle() pathForResource:@"test_shell"
-                                          ofType:@"pak"];
+      [base::mac::FrameworkBundle() pathForResource:@"test_shell"
+                                             ofType:@"pak"];
   FilePath resources_pak_path([resource_path fileSystemRepresentation]);
   if (!g_resource_data_pack->Load(resources_pak_path)) {
     LOG(FATAL) << "failed to load test_shell.pak";
@@ -224,7 +225,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
 
   // Load the Ahem font, which is used by layout tests.
   const char* ahem_path_c;
-  NSString* ahem_path = [[base::mac::MainAppBundle() resourcePath]
+  NSString* ahem_path = [[base::mac::FrameworkBundle() resourcePath]
       stringByAppendingPathComponent:@"AHEM____.TTF"];
   ahem_path_c = [ahem_path fileSystemRepresentation];
   FSRef ahem_fsref;
@@ -532,7 +533,7 @@ void TestShell::ResizeSubViews() {
 }
 
 void TestShell::LoadURLForFrame(const GURL& url,
-                                const std::wstring& frame_name) {
+                                const string16& frame_name) {
   if (!url.is_valid())
     return;
 
@@ -545,7 +546,7 @@ void TestShell::LoadURLForFrame(const GURL& url,
   }
 
   navigation_controller_->LoadEntry(
-      new TestNavigationEntry(-1, url, std::wstring(), frame_name));
+      new TestNavigationEntry(-1, url, frame_name));
 }
 
 bool TestShell::PromptForSaveFile(const wchar_t* prompt_title,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,6 +85,7 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   virtual MessageLoop* GetMessageLoop() OVERRIDE;
   virtual IPC::SyncChannel* GetChannel() OVERRIDE;
   virtual std::string GetLocale() OVERRIDE;
+  virtual IPC::SyncMessageFilter* GetSyncMessageFilter() OVERRIDE;
   virtual void AddRoute(int32 routing_id,
                         IPC::Channel::Listener* listener) OVERRIDE;
   virtual void RemoveRoute(int32 routing_id) OVERRIDE;
@@ -134,10 +135,6 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
     return appcache_dispatcher_.get();
   }
 
-  IndexedDBDispatcher* indexed_db_dispatcher() const {
-    return indexed_db_dispatcher_.get();
-  }
-
   AudioInputMessageFilter* audio_input_message_filter() {
     return audio_input_message_filter_.get();
   }
@@ -177,9 +174,8 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
 
   void Init();
 
-  void OnSetZoomLevelForCurrentURL(const GURL& url, double zoom_level);
+  void OnSetZoomLevelForCurrentURL(const std::string& host, double zoom_level);
   void OnDOMStorageEvent(const DOMStorageMsg_Event_Params& params);
-  void OnSetNextPageID(int32 next_page_id);
   void OnSetCSSColors(const std::vector<CSSColors::CSSColorMapping>& colors);
   void OnCreateNewView(const ViewMsg_New_Params& params);
   void OnTransferBitmap(const SkBitmap& bitmap, int resource_id);
@@ -191,9 +187,8 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   void IdleHandlerInForegroundTab();
 
   // These objects live solely on the render thread.
-  scoped_ptr<ScopedRunnableMethodFactory<RenderThreadImpl> > task_factory_;
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
-  scoped_ptr<IndexedDBDispatcher> indexed_db_dispatcher_;
+  scoped_ptr<IndexedDBDispatcher> main_thread_indexed_db_dispatcher_;
   scoped_ptr<RendererWebKitPlatformSupportImpl> webkit_platform_support_;
   scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
 

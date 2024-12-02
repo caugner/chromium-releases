@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "content/browser/renderer_host/resource_handler.h"
+#include "content/browser/renderer_host/layered_resource_handler.h"
 
 class ResourceDispatcherHost;
 
@@ -20,34 +20,23 @@ namespace webkit {
 struct WebPluginInfo;
 }
 
+namespace content {
+
 // Used to buffer a request until enough data has been received.
-class BufferedResourceHandler : public ResourceHandler {
+class BufferedResourceHandler : public LayeredResourceHandler {
  public:
   BufferedResourceHandler(ResourceHandler* handler,
                           ResourceDispatcherHost* host,
                           net::URLRequest* request);
 
   // ResourceHandler implementation:
-  virtual bool OnUploadProgress(int request_id,
-                                uint64 position,
-                                uint64 size) OVERRIDE;
-  virtual bool OnRequestRedirected(int request_id,
-                                   const GURL& new_url,
-                                   content::ResourceResponse* response,
-                                   bool* defer) OVERRIDE;
   virtual bool OnResponseStarted(int request_id,
                                  content::ResourceResponse* response) OVERRIDE;
-  virtual bool OnWillStart(int request_id,
-                           const GURL& url,
-                           bool* defer) OVERRIDE;
   virtual bool OnWillRead(int request_id,
                           net::IOBuffer** buf,
                           int* buf_size,
                           int min_size) OVERRIDE;
   virtual bool OnReadCompleted(int request_id, int* bytes_read) OVERRIDE;
-  virtual bool OnResponseCompleted(int request_id,
-                                   const net::URLRequestStatus& status,
-                                   const std::string& security_info) OVERRIDE;
   virtual void OnRequestClosed() OVERRIDE;
 
  private:
@@ -62,9 +51,8 @@ class BufferedResourceHandler : public ResourceHandler {
   // Returns true if we have to keep buffering data.
   bool KeepBuffering(int bytes_read);
 
-  // Sends a pending OnResponseStarted notification. |in_complete| is true if
-  // this is invoked from |OnResponseCompleted|.
-  bool CompleteResponseStarted(int request_id, bool in_complete);
+  // Sends a pending OnResponseStarted notification.
+  bool CompleteResponseStarted(int request_id);
 
   // Returns true if we have to wait until the plugin list is generated.
   bool ShouldWaitForPlugins();
@@ -76,15 +64,22 @@ class BufferedResourceHandler : public ResourceHandler {
   // loaded.
   bool ShouldDownload(bool* need_plugin_list);
 
-  // Informs the original ResourceHandler |real_handler_| that the response will
-  // be handled entirely by the new ResourceHandler |handler|.
-  // A reference to |handler| is acquired.
-  void UseAlternateResourceHandler(int request_id, ResourceHandler* handler);
+  // Informs the original ResourceHandler |next_handler_| that the response
+  // will be handled entirely by the new ResourceHandler |handler|.  A
+  // reference to |handler| is acquired.  Returns false to indicate an error,
+  // which will result in the request being cancelled.
+  bool UseAlternateResourceHandler(int request_id, ResourceHandler* handler);
+
+  // Forwards any queued events to |next_handler_|.  Returns false to indicate
+  // an error, which will result in the request being cancelled.
+  bool ForwardPendingEventsToNextHandler(int request_id);
+
+  // Copies data from |read_buffer_| to |next_handler_|.
+  void CopyReadBufferToNextHandler(int request_id);
 
   // Called on the IO thread once the list of plugins has been loaded.
   void OnPluginsLoaded(const std::vector<webkit::WebPluginInfo>& plugins);
 
-  scoped_refptr<ResourceHandler> real_handler_;
   scoped_refptr<content::ResourceResponse> response_;
   ResourceDispatcherHost* host_;
   net::URLRequest* request_;
@@ -95,9 +90,13 @@ class BufferedResourceHandler : public ResourceHandler {
   bool sniff_content_;
   bool wait_for_plugins_;
   bool buffering_;
+  bool next_handler_needs_response_started_;
+  bool next_handler_needs_will_read_;
   bool finished_;
 
   DISALLOW_COPY_AND_ASSIGN(BufferedResourceHandler);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_BUFFERED_RESOURCE_HANDLER_H_

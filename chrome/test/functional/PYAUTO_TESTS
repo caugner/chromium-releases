@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -67,7 +67,9 @@
       'policy_prefs_ui',
       'popups',
       'prefs',
+      'prefs_ui',
       'process_count',
+      'protector',
       'pyauto_webdriver',
       'search_engines',
       'shortcuts',
@@ -85,8 +87,6 @@
       '-autofill.AutofillTest.testFillProfileCrazyCharacters',
       # crbug.com/99475
       '-autofill.AutofillTest.testNoDuplicatePhoneNumsInPrefs',
-      # crbug.com/103456
-      '-indexeddb.IndexedDBTest.testVersionChangeCrashResilience',
       # crbug.com/99506
       '-notifications.NotificationsTest.testSpecialURLNotification',
       # crbug.com/71715
@@ -111,16 +111,16 @@
       '-plugins.PluginsTest.testAllowPluginException',
       # crbug.com/85307
       '-plugins.PluginsTest.testKillAndReloadAllPlugins',
-      # crbug.com/88574
+      # crbug.com/88574 and crbug.com/110914
       '-special_tabs.SpecialTabsTest.testSpecialURLTabs',
       # crbug.com/88593
       '-sync.SyncTest.testPersonalStuffSyncSection',
-      # crbug.com/100591
-      '-pdf.PDFTest.testPDFRunner',
       # crbug.com/100593
       '-nacl_sdk.NaClSDKTest.testVerifyNaClPlugin',
       # crbug.com/105560
       '-notifications',
+      # crbug.com/112051
+      '-prefs_ui.PrefsUITest.testChangeExceptionBehaviorUI',
     ],
 
     'win': [
@@ -128,16 +128,9 @@
       # which contains the sync protobufs.
       #'sync.SyncIntegrationTest',
 
-      # crbug.com/104886 - cannot trigger dangerous download.
-      '-downloads.DownloadsTest.testSaveDangerousFile',
-
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # Some download test fails on win official builder, only thru buildbot
-      # when downloading the small zip file.
-      # crbug.com/91225
-      '-find_in_page.FindMatchTests.testSearchInPDF',
       # Disabled on vista in the actual test. crbug.com/89767
       # -imports.ImportsTest.testImportFirefoxDataTwice
       # Disabled on vista in the actual test. crbug.com/89767
@@ -184,8 +177,6 @@
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
       # crbug.com/75724
       '-downloads.DownloadsTest.testSaveDangerousFile',
-      # crbug.com/93956
-       '-find_in_page.FindMatchTests.testSearchInPDF',
       '-ntp.NTPTest.testLaunchAppNewWindow',  # crbug.com/79812
       # Causes browser crash.  crbug.com/93548
       '-notifications.NotificationsTest.testIncognitoNotification',
@@ -208,11 +199,13 @@
       # crbug.com/98526
       '-pyauto_webdriver.PyAutoWebDriverTest.testCanConnectToRestartedBrowser',
       '-pyauto_webdriver.PyAutoWebDriverTest.testTypeIntoTextBox',
+      # crbug.com/109035
+      '-youtube.YoutubeTest.testPlayerBytes',
+      # crbug.com/109035
+      '-youtube.YoutubeTest.testPlayerResolution',
     ],
 
     'linux': [  # linux != chromeos
-      # Enabling here since it's disabled on other platforms.  crbug.com/88574
-      'special_tabs.SpecialTabsTest.testSpecialURLTabs',
       # ===========================
       # Permanently-disabled tests.
       # ===========================
@@ -247,23 +240,20 @@
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
       # ==================================================
-      # crbug.com/91225
-      '-find_in_page.FindMatchTests.testSearchInPDF',
       # crbug.com/85310
       '-instant',
       # crbug.com/91033
       '-omnibox.OmniboxTest.testOmniboxSearchHistory',
-      # crbug.com/102767
-      '-process_count.ProcessCountTest.testProcessCountExtensionProcess',
-      '-process_count.ProcessCountTest.testProcessCountFlashProcess',
       # Gnome / kwallet popups on linux break sync tests.  crbug.com/80329
       '-sync',
-      # crbug.com/87837
-      '-plugins.PluginsTest.testKillAndReloadAllPlugins',
       # crbug.com/66072
       '-notifications.NotificationsTest.testNotificationOrderAfterClosingOne',
       # crbug.com/103379
       '-policy.PolicyTest.testDisable3DAPIs',
+      # crbug.com/109035
+      '-youtube.YoutubeTest.testPlayerBytes',
+      # crbug.com/109035
+      '-youtube.YoutubeTest.testPlayerResolution',
     ],
 
     # ChromeOS is linux, but note that this section does not include the
@@ -293,6 +283,12 @@
       '-imports',
       # Multi-profile doesn't apply to chromeos yet.
       '-multiprofile',
+      # These require a custom setup on ChromeOS and have their own suite for
+      # this platform.
+      '-policy',
+      '-policy_prefs_ui',
+      # No Protector on ChromeOS.
+      '-protector',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
@@ -303,10 +299,15 @@
       # Downloads panel stays even after declining a download.
       # crosbug.com/14728
       '-downloads.DownloadsTest.testDeclineDangerousDownload',
+      # crosbug.com/19556
+      '-extensions.ExtensionsTest.testAllowAccessFileURLs',
+      '-extensions.ExtensionsTest.testAllowIncognitoExtension',
+      '-extensions.ExtensionsTest.testDisableEnableExtension',
       # Need internal data dirs in autotest package. crosbug.com/6855
       '-find_in_page.FindMatchTests.testSearchInPDF',
-      # Plugin crash infobar does not show up for file:/// flash urls
-      # crosbug.com/14971
+      # crosbug.com/24496
+      '-infobars.InfobarTest.testPluginCrashForMultiTabs',
+      # crbug.com/109035
       '-infobars.InfobarTest.testPluginCrashInfobar',
       # Flaky: crosbug.com/14439
       '-instant',
@@ -314,6 +315,8 @@
       '-ntp.NTPTest.testLaunchAppFullScreen',
       # Content history broken in omnibox.  crosbug.com/14416
       '-omnibox.OmniboxTest.testContentHistory',
+      # crbug.com/91033
+      '-omnibox.OmniboxTest.testOmniboxSearchHistory',
       # crosbug.com/19760
       '-passwords.PasswordTest.testClearFetchedCredForNewUserName',
       '-passwords.PasswordTest.testSavedPasswordInTabsAndWindows',
@@ -326,8 +329,8 @@
       '-prefs.PrefsTest.testSessionRestore',
       # sync tests were running into a secondary passphrase. crosbug.com/15016.
       '-sync',
-      # crbug.com/87837
-      '-plugins.PluginsTest.testKillAndReloadAllPlugins',
+      # crbug.com/109035
+      '-plugins.PluginsTest.testBlockPluginException',
       # Deal with i18n chars.  crosbug.com/12639
       '-autofill.AutofillTest.testFillProfileCrazyCharacters',
       '-downloads.DownloadsTest.testCrazyFilenames',
@@ -342,6 +345,8 @@
       '-notifications.NotificationsTest.testOriginPrefsNotSavedInIncognito',
       # crbug.com/103379
       '-policy.PolicyTest.testDisable3DAPIs',
+      # Chrome driver does not work in Chrome OS.
+      '-prefs_ui',
     ],
   },
 
@@ -424,8 +429,12 @@
   'FULL': {
     'all': [
       '@CONTINUOUS',
+      'media.media_basic_playback',
       'nacl_sdk',
       'translate',
+
+      # Remove when r119687 reaches official builds.  Revisit 01/31/2012
+      '-special_tabs.SpecialTabsTest.testSpecialAcceratorTabs',
 
       # ==================================================
       # Disabled tests that need to be investigated/fixed.
@@ -443,6 +452,14 @@
       # crbug.com/98681
       '-nacl_sdk.NaClSDKTest.testNaClSDK',
       '-nacl_sdk.NaClSDKTest.testVerifyPrereleaseGallery',
+      # crbug.com/109148
+      '-extensions.ExtensionsTest.testTriggerBrowserAction',
+      '-extensions.ExtensionsTest.testTriggerPageAction',
+      '-extensions.ExtensionsTest.testTriggerPageActionWithPopup',
+      # crbug.com/109160
+      '-execute_javascript.ExecuteJavascriptTest.testExecuteJavascriptInExtension',
+      # crbug.com/111407
+      '-indexeddb.IndexedDBTest.testConnectionsClosedOnTabClose',
     ],
 
     'win': [
@@ -467,8 +484,6 @@
       # ==================================================
       # crbug.com/101787
       '-enterprise.EnterpriseTestReverse.testDefaultSearchProviderDisabled',
-      # crbug.com/98500
-      '-enterprise.EnterpriseTestReverse.testAlwaysAuthorizePluginsDisabled',
       # crbug.com/96896
       '-enterprise.EnterpriseTest.testDisabledPlugins',
       '-enterprise.EnterpriseTest.testEnabledPlugins',
@@ -526,10 +541,10 @@
       # ==================================================
       # crbug.com/101787
       '-enterprise.EnterpriseTestReverse.testDefaultSearchProviderDisabled',
-      # crbug.com/98500
-      '-enterprise.EnterpriseTestReverse.testAlwaysAuthorizePluginsDisabled',
       # crbug.com/97179
       '-enterprise.EnterpriseTest.testAlwaysAuthorizePlugins',
+      # crbug.com/111289
+      '-extensions.ExtensionsTest.testAllowAccessFileURLs',
     ],
 
     'chromeos': [
@@ -587,6 +602,15 @@
     ],
   },
 
+  # ChromeOS policy tests. These are shared with Desktop Chrome tests, but
+  # require custom setup on ChromeOS.
+  'CHROMEOS_POLICY': {
+    'chromeos': [
+      'policy',
+      'policy_prefs_ui',
+    ],
+  },
+
   # ChromeOS volume tests.
   'CHROMEOS_VOLUME': {
     'chromeos': [
@@ -613,18 +637,7 @@
   # HTML5 media performance tests.
   'AV_PERF': {
      'linux': [
-       'media.media_playbacktime',
-       'media.media_perf',
-       'media.media_fps',
-     ],
-  },
-
-  # HTML5 media functional tests.
-  'AV_FUNC': {
-     'linux': [
-       'media.media_event_simple_action',
-       'media.media_event_simple_test',
-       'media.media_event_track',
+       'media.media_constrained_network_perf',
      ],
   },
 }

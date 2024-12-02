@@ -29,9 +29,10 @@
 #include "chrome/browser/ui/webui/fileicon_source.h"
 #include "chrome/browser/ui/webui/fileicon_source_chromeos.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/gfx/image/image.h"
 
@@ -44,6 +45,9 @@
 #endif
 
 using content::BrowserThread;
+using content::DownloadItem;
+using content::DownloadManager;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -85,7 +89,7 @@ void CountDownloadsDOMEvents(DownloadsDOMEvent event) {
 }  // namespace
 
 class DownloadsDOMHandler::OriginalDownloadManagerObserver
-    : public DownloadManager::Observer {
+    : public content::DownloadManager::Observer {
  public:
   explicit OriginalDownloadManagerObserver(
       DownloadManager::Observer* observer,
@@ -121,10 +125,9 @@ class DownloadsDOMHandler::OriginalDownloadManagerObserver
 
 DownloadsDOMHandler::DownloadsDOMHandler(DownloadManager* dlm)
     : search_text_(),
-      download_manager_(dlm),
-      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      download_manager_(dlm) {
   // Create our fileicon data source.
-  Profile::FromBrowserContext(dlm->BrowserContext())->
+  Profile::FromBrowserContext(dlm->GetBrowserContext())->
       GetChromeURLDataManager()->AddDataSource(
 #if defined(OS_CHROMEOS)
       new FileIconSourceCros());
@@ -144,7 +147,7 @@ void DownloadsDOMHandler::Init() {
   download_manager_->AddObserver(this);
 
   Profile* profile =
-      Profile::FromBrowserContext(download_manager_->BrowserContext());
+      Profile::FromBrowserContext(download_manager_->GetBrowserContext());
   Profile* original_profile = profile->GetOriginalProfile();
   if (original_profile != profile) {
     original_download_manager_observer_.reset(
@@ -153,45 +156,45 @@ void DownloadsDOMHandler::Init() {
 }
 
 void DownloadsDOMHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("getDownloads",
+  web_ui()->RegisterMessageCallback("getDownloads",
       base::Bind(&DownloadsDOMHandler::HandleGetDownloads,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("openFile",
+  web_ui()->RegisterMessageCallback("openFile",
       base::Bind(&DownloadsDOMHandler::HandleOpenFile,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("drag",
+  web_ui()->RegisterMessageCallback("drag",
       base::Bind(&DownloadsDOMHandler::HandleDrag,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("saveDangerous",
+  web_ui()->RegisterMessageCallback("saveDangerous",
       base::Bind(&DownloadsDOMHandler::HandleSaveDangerous,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("discardDangerous",
+  web_ui()->RegisterMessageCallback("discardDangerous",
       base::Bind(&DownloadsDOMHandler::HandleDiscardDangerous,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("show",
+  web_ui()->RegisterMessageCallback("show",
       base::Bind(&DownloadsDOMHandler::HandleShow,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("togglepause",
+  web_ui()->RegisterMessageCallback("togglepause",
       base::Bind(&DownloadsDOMHandler::HandlePause,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("resume",
+  web_ui()->RegisterMessageCallback("resume",
       base::Bind(&DownloadsDOMHandler::HandlePause,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("remove",
+  web_ui()->RegisterMessageCallback("remove",
       base::Bind(&DownloadsDOMHandler::HandleRemove,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("cancel",
+  web_ui()->RegisterMessageCallback("cancel",
       base::Bind(&DownloadsDOMHandler::HandleCancel,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("clearAll",
+  web_ui()->RegisterMessageCallback("clearAll",
       base::Bind(&DownloadsDOMHandler::HandleClearAll,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("openDownloadsFolder",
+  web_ui()->RegisterMessageCallback("openDownloadsFolder",
       base::Bind(&DownloadsDOMHandler::HandleOpenDownloadsFolder,
                  base::Unretained(this)));
 }
 
-void DownloadsDOMHandler::OnDownloadUpdated(DownloadItem* download) {
+void DownloadsDOMHandler::OnDownloadUpdated(content::DownloadItem* download) {
   // Get the id for the download. Our downloads are sorted latest to first,
   // and the id is the index into that list. We should be careful of sync
   // errors between the UI and the download_items_ list (we may wish to use
@@ -214,7 +217,7 @@ void DownloadsDOMHandler::OnDownloadUpdated(DownloadItem* download) {
 
   ListValue results_value;
   results_value.Append(download_util::CreateDownloadItemValue(download, id));
-  web_ui_->CallJavascriptFunction("downloadUpdated", results_value);
+  web_ui()->CallJavascriptFunction("downloadUpdated", results_value);
 }
 
 // A download has started or been deleted. Query our DownloadManager for the
@@ -225,7 +228,7 @@ void DownloadsDOMHandler::ModelChanged() {
                                      &download_items_);
   // If we have a parent profile, let it add its downloads to the results.
   Profile* profile =
-      Profile::FromBrowserContext(download_manager_->BrowserContext());
+      Profile::FromBrowserContext(download_manager_->GetBrowserContext());
   if (profile->GetOriginalProfile() != profile) {
     DownloadServiceFactory::GetForProfile(
         profile->GetOriginalProfile())->GetDownloadManager()->SearchDownloads(
@@ -287,7 +290,7 @@ void DownloadsDOMHandler::HandleDrag(const ListValue* args) {
     IconManager* im = g_browser_process->icon_manager();
     gfx::Image* icon = im->LookupIcon(file->GetUserVerifiedFilePath(),
                                       IconLoader::NORMAL);
-    gfx::NativeView view = web_ui_->tab_contents()->GetNativeView();
+    gfx::NativeView view = web_ui()->GetWebContents()->GetNativeView();
     {
       // Enable nested tasks during DnD, while |DragDownload()| blocks.
       MessageLoop::ScopedNestableTaskAllower allower(MessageLoop::current());
@@ -346,7 +349,7 @@ void DownloadsDOMHandler::HandleClearAll(const ListValue* args) {
   download_manager_->RemoveAllDownloads();
 
   Profile* profile =
-      Profile::FromBrowserContext(download_manager_->BrowserContext());
+      Profile::FromBrowserContext(download_manager_->GetBrowserContext());
   // If this is an incognito downloader, clear All should clear main download
   // manager as well.
   if (profile->GetOriginalProfile() != profile)
@@ -375,7 +378,7 @@ void DownloadsDOMHandler::SendCurrentDownloads() {
     results_value.Append(download_util::CreateDownloadItemValue(*it, index));
   }
 
-  web_ui_->CallJavascriptFunction("downloadsList", results_value);
+  web_ui()->CallJavascriptFunction("downloadsList", results_value);
 }
 
 void DownloadsDOMHandler::ClearDownloadItems() {

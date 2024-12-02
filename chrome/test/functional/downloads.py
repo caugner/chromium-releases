@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -84,8 +84,15 @@ class DownloadsTest(pyauto.PyUITest):
     return self.GetDownloadsInfo().Downloads()[download_index]['id']
 
   def _MakeFile(self, size):
-    """Make a file on-the-fly with the given size. Returns the path to the
-       file.
+    """Make a file on-the-fly with the given size.
+
+    Note that it's really a 1byte file even though ls -lh will report it as
+    of file |size| (du reports the correct usage on disk), but it's good
+    enough for downloads tests because chrome will treat it as a file of size
+    |size| when downloading.
+
+    Returns:
+        the path to the created file.
     """
     fd, file_path = tempfile.mkstemp(suffix='.zip', prefix='file-downloads-')
     os.lseek(fd, size, 0)
@@ -205,7 +212,10 @@ class DownloadsTest(pyauto.PyUITest):
     """
     # Create a 1 GB file on the fly
     file_path = self._MakeFile(2**30)
-    self._DeleteAfterShutdown(file_path)
+    # Ensure there's sufficient space remaining to download file.
+    free_space = test_utils.GetFreeSpace(self.GetDownloadDirectory().value())
+    assert free_space >= 2**30, \
+        'Not enough disk space to download. Got %d free' % free_space
     file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   os.path.basename(file_path))
@@ -329,6 +339,10 @@ class DownloadsTest(pyauto.PyUITest):
     """
     # Create a 250 MB file on the fly
     file_path = self._MakeFile(2**28)
+    # Ensure there's sufficient space remaining to download file.
+    free_space = test_utils.GetFreeSpace(self.GetDownloadDirectory().value())
+    assert free_space >= 2**28, \
+        'Not enough disk space to download. Got %d free' % free_space
 
     file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
@@ -367,6 +381,10 @@ class DownloadsTest(pyauto.PyUITest):
     # Create a big file (250 MB) on the fly, so that the download won't finish
     # before being cancelled.
     file_path = self._MakeFile(2**28)
+    # Ensure there's sufficient space remaining to download file.
+    free_space = test_utils.GetFreeSpace(self.GetDownloadDirectory().value())
+    assert free_space >= 2**28, \
+        'Not enough disk space to download. Got %d free' % free_space
     file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   os.path.basename(file_path))
@@ -448,6 +466,10 @@ class DownloadsTest(pyauto.PyUITest):
     """Verify that during downloading, % values increases,
        and once download is over, % value is 100"""
     file_path = self._MakeFile(2**24)
+    # Ensure there's sufficient space remaining to download file.
+    free_space = test_utils.GetFreeSpace(self.GetDownloadDirectory().value())
+    assert free_space >= 2**24, \
+        'Not enough disk space to download. Got %d free' % free_space
     file_url = self.GetFileURLForPath(file_path)
     downloaded_pkg = os.path.join(self.GetDownloadDirectory().value(),
                                   os.path.basename(file_path))

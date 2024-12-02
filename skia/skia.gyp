@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -7,6 +7,9 @@
     {
       'target_name': 'skia',
       'type': '<(component)',
+      'variables': {
+        'optimize': 'max',
+      },
       'sources': [
         #'../third_party/skia/src/animator/SkAnimate.h',
         #'../third_party/skia/src/animator/SkAnimateActive.cpp',
@@ -341,7 +344,9 @@
 
         '../third_party/skia/src/gpu/GrAAHairLinePathRenderer.cpp',
         '../third_party/skia/src/gpu/GrAAHairLinePathRenderer.h',
-        '../third_party/skia/src/gpu/GrAddPathRenderers_aahairline.cpp',
+        '../third_party/skia/src/gpu/GrAAConvexPathRenderer.cpp',
+        '../third_party/skia/src/gpu/GrAAConvexPathRenderer.h',
+        '../third_party/skia/src/gpu/GrAddPathRenderers_default.cpp',
         '../third_party/skia/src/gpu/GrAllocator.h',
         '../third_party/skia/src/gpu/GrAllocPool.h',
         '../third_party/skia/src/gpu/GrAllocPool.cpp',
@@ -367,7 +372,8 @@
         '../third_party/skia/src/gpu/GrGLRenderTarget.cpp',
         '../third_party/skia/src/gpu/GrGLRenderTarget.h',
         '../third_party/skia/src/gpu/GrGLStencilBuffer.cpp',
-        '../third_party/skia/src/gpu/GrGLStencilBuffer.h',
+        '../third_party/skia/src/gpu/GrGLSL.cpp',
+        '../third_party/skia/src/gpu/GrGLSL.h',
         '../third_party/skia/src/gpu/GrGLTexture.cpp',
         '../third_party/skia/src/gpu/GrGLTexture.h',
         '../third_party/skia/src/gpu/GrGLUtil.cpp',
@@ -479,6 +485,7 @@
         #'../third_party/skia/src/ports/SkFontHost_none.cpp',
         '../third_party/skia/src/ports/SkFontHost_sandbox_none.cpp',
         '../third_party/skia/src/ports/SkFontHost_win.cpp',
+        '../third_party/skia/src/ports/SkGlobalInitialization_chromium.cpp',
         #'../third_party/skia/src/ports/SkImageDecoder_CG.cpp',
         #'../third_party/skia/src/ports/SkImageDecoder_empty.cpp',
         #'../third_party/skia/src/ports/SkImageRef_ashmem.cpp',
@@ -497,8 +504,10 @@
         '../third_party/skia/src/ports/sk_predefined_gamma.h',
 
         '../third_party/skia/include/utils/mac/SkCGUtils.h',
+        '../third_party/skia/include/utils/SkDeferredCanvas.h',
         '../third_party/skia/include/utils/SkMatrix44.h',
         '../third_party/skia/src/utils/mac/SkCreateCGImageRef.cpp',
+        '../third_party/skia/src/utils/SkDeferredCanvas.cpp',
         '../third_party/skia/src/utils/SkMatrix44.cpp',
 
         '../third_party/skia/include/core/Sk64.h',
@@ -726,9 +735,24 @@
         'SK_BUILD_NO_IMAGE_ENCODE',
         'GR_GL_CUSTOM_SETUP_HEADER="GrGLConfig_chrome.h"',
         'GR_STATIC_RECT_VB=1',
+        'GR_USE_OFFSCREEN_AA=0',
         'GR_AGGRESSIVE_SHADER_OPTS=1',
         'SK_DISABLE_FAST_AA_STROKE_RECT',
         'SK_DEFAULT_FONT_CACHE_LIMIT=(20*1024*1024)',
+
+        # temporary for landing Skia rev 3077 with minimal layout test breakage
+        'SK_SIMPLE_TWOCOLOR_VERTICAL_GRADIENTS',
+
+        # skia uses static initializers to initialize the serialization logic
+        # of its "pictures" library. This is currently not used in chrome; if
+        # it ever gets used the processes that use it need to call
+        # SkGraphics::Init().
+        'SK_ALLOW_STATIC_GLOBAL_INITIALIZERS=0',
+
+        # Temporarily disable the Skia fix in
+        # http://code.google.com/p/skia/source/detail?r=3037 ; enabling that
+        # fix will require substantial rebaselining.
+        'SK_DRAW_POS_TEXT_IGNORE_SUBPIXEL_LEFT_ALIGN_FIX',
       ],
       'sources!': [
         '../third_party/skia/include/core/SkTypes.h',
@@ -784,13 +808,21 @@
             'ext/SkFontHost_fontconfig.cpp',
             'ext/SkFontHost_fontconfig_direct.cpp',
           ],
-        }, {  # use_glib == 0
+        }],
+        [ 'use_glib == 0 and OS != "android"', {
           'sources/': [ ['exclude', '_linux\\.(cc|cpp)$'] ],
           'sources!': [
             '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
             '../third_party/skia/src/ports/SkFontHost_TryeType_Tables.cpp',
             '../third_party/skia/src/ports/SkFontHost_gamma_none.cpp',
             '../third_party/skia/src/ports/SkFontHost_tables.cpp',
+          ],
+        }],
+        [ 'OS == "android"', {
+          'sources/': [
+            ['exclude', '_linux\\.(cc|cpp)$'],
+            ['include', 'ext/platform_device_linux\\.cc$'],
+            ['include', 'ext/platform_canvas_linux\\.cc$'],
           ],
         }],
         [ 'toolkit_uses_gtk == 1', {
@@ -923,6 +955,7 @@
           '../third_party/skia/include/pdf',
           '../third_party/skia/include/gpu',
           '../third_party/skia/include/ports',
+          '../third_party/skia/include/utils',
           'ext',
         ],
         'mac_framework_dirs': [
@@ -981,6 +1014,9 @@
     {
       'target_name': 'skia_opts',
       'type': 'static_library',
+      'variables': {
+        'optimize': 'max',
+      },
       'include_dirs': [
         '..',
         'config',
@@ -1030,7 +1066,12 @@
            }],
           ],
           # The assembly uses the frame pointer register (r7 in Thumb/r11 in
-          # ARM), the compiler doesn't like that.
+          # ARM), the compiler doesn't like that. Explicitly remove the
+          # -fno-omit-frame-pointer flag for Android, as that gets added to all
+          # targets via common.gypi.
+          'cflags!': [
+            '-fno-omit-frame-pointer',
+          ],
           'cflags': [
             '-fomit-frame-pointer',
           ],
@@ -1064,6 +1105,9 @@
     {
       'target_name': 'skia_libtess',
       'type': 'static_library',
+      'variables': {
+        'optimize': 'max',
+      },
       'include_dirs': [
         '../third_party/skia/third_party/glu',
       ],

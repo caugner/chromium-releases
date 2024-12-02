@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,14 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_settings_menu_model.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "ui/base/animation/slide_animation.h"
+#include "ui/base/animation/linear_animation.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -38,13 +38,24 @@
 #include "ui/views/painter.h"
 #include "ui/views/widget/widget_delegate.h"
 
+#if defined(USE_AURA) && defined(USE_X11)
+#include "ui/base/x/x11_util.h"
+#endif
+
+using content::WebContents;
+
 namespace {
 
 // The height in pixels of the titlebar.
 const int kTitlebarHeight = 24;
 
 // The thickness in pixels of the border.
+#if defined(USE_AURA)
+// No border inside the window frame; see comment in PaintFrameBorder().
+const int kBorderThickness = 0;
+#else
 const int kBorderThickness = 1;
+#endif
 
 // No client edge is present.
 const int kPanelClientEdgeThickness = 0;
@@ -67,6 +78,9 @@ const int kSettingsButtonAndCloseButtonSpacing = 8;
 
 // This value is experimental and subjective.
 const int kUpdateSettingsVisibilityAnimationMs = 120;
+
+// This value is experimental and subjective.
+const int kSettingsButtonAnimationFrameRate = 50;
 
 // Colors used to draw active titlebar under default theme.
 const SkColor kActiveTitleTextDefaultColor = SK_ColorBLACK;
@@ -226,6 +240,17 @@ const SkPaint& GetAttentionBackgroundDefaultPaint() {
 
 }  // namespace
 
+// Settings button animation.
+class SettingsButtonAnimation : public ui::LinearAnimation {
+ public:
+  SettingsButtonAnimation(int duration,
+                          int frame_rate,
+                          ui::AnimationDelegate* delegate)
+      : ui::LinearAnimation(duration, frame_rate, delegate) {}
+ protected:
+  virtual void AnimateToState(double state) OVERRIDE {}
+};
+
 // PanelBrowserFrameView::MouseWatcher -----------------------------------------
 
 PanelBrowserFrameView::MouseWatcher::MouseWatcher(PanelBrowserFrameView* view)
@@ -263,15 +288,16 @@ void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(
       break;
   }
 }
-#elif defined(USE_AURA)
+#elif defined(USE_AURA) && defined(USE_X11)
 base::EventStatus PanelBrowserFrameView::MouseWatcher::WillProcessEvent(
-    const base::NativeEvent& event) {
+    XEvent* const& event) {
   return base::EVENT_CONTINUE;
 }
 
 void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(
-    const base::NativeEvent& event) {
-  NOTIMPLEMENTED();
+    XEvent* const& event) {
+  if (ui::IsMotionEvent(event))
+    HandleGlobalMouseMoveEvent();
 }
 #elif defined(TOOLKIT_USES_GTK)
 void PanelBrowserFrameView::MouseWatcher::WillProcessEvent(GdkEvent* event) {
@@ -279,20 +305,14 @@ void PanelBrowserFrameView::MouseWatcher::WillProcessEvent(GdkEvent* event) {
 
 void PanelBrowserFrameView::MouseWatcher::DidProcessEvent(GdkEvent* event) {
   switch (event->type) {
-    case GDK_MOTION_NOTIFY:
+    case GDK_ENTER_NOTIFY:
     case GDK_LEAVE_NOTIFY:
+    case GDK_MOTION_NOTIFY:
       HandleGlobalMouseMoveEvent();
       break;
     default:
       break;
   }
-}
-#elif defined(USE_AURA)
-base::MessagePumpObserver::EventStatus
-PanelBrowserFrameView::MouseWatcher::WillProcessXEvent(
-    XEvent* xevent) {
-  NOTIMPLEMENTED();
-  return EVENT_CONTINUE;
 }
 #endif
 
@@ -315,7 +335,12 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
       close_button_(NULL),
       title_icon_(NULL),
       title_label_(NULL),
-      is_settings_button_visible_(false) {
+      is_settings_button_visible_(false),
+#if defined(USE_AURA)
+      has_settings_button_(panel_browser_view_->panel()->browser()->is_app()) {
+#else
+      has_settings_button_(true) {
+#endif
   frame->set_frame_type(views::Widget::FRAME_TYPE_FORCE_CUSTOM);
 
   const ButtonResources& settings_button_resources =
@@ -327,9 +352,9 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
   settings_button_->set_alignment(views::TextButton::ALIGN_CENTER);
   settings_button_->set_border(NULL);
   settings_button_->SetTooltipText(
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS));
+      l10n_util::GetStringUTF16(IDS_PANEL_WINDOW_SETTINGS_BUTTON_TOOLTIP));
   settings_button_->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_SETTINGS));
+      l10n_util::GetStringUTF16(IDS_PANEL_WINDOW_SETTINGS_BUTTON_TOOLTIP));
   settings_button_->SetVisible(is_settings_button_visible_);
   AddChildView(settings_button_);
 
@@ -357,7 +382,8 @@ PanelBrowserFrameView::PanelBrowserFrameView(BrowserFrame* frame,
   title_label_->SetAutoColorReadabilityEnabled(false);
   AddChildView(title_label_);
 
-  mouse_watcher_.reset(new MouseWatcher(this));
+  if (has_settings_button_)
+    mouse_watcher_.reset(new MouseWatcher(this));
 }
 
 PanelBrowserFrameView::~PanelBrowserFrameView() {
@@ -405,7 +431,7 @@ int PanelBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (frame_component != HTNOWHERE)
     return frame_component;
 
-  if (close_button_->IsVisible() &&
+  if (close_button_->visible() &&
       close_button_->GetMirroredBounds().Contains(point))
     return HTCLOSE;
 
@@ -482,14 +508,20 @@ void PanelBrowserFrameView::Layout() {
       show_settings_button = false;
     }
   }
+
+  if (!has_settings_button_)
+    show_settings_button = false;
+
   close_button_->SetVisible(show_close_button);
   settings_button_->SetVisible(show_settings_button);
   title_label_->SetVisible(show_title_label);
 
   // Cancel the settings button animation if the layout of titlebar is being
   // updated.
-  if (settings_button_animator_.get() && settings_button_animator_->IsShowing())
-    settings_button_animator_->Reset();
+  if (settings_button_animator_.get() &&
+      settings_button_animator_->is_animating()) {
+    settings_button_animator_->Stop();
+  }
 
   // Layout the close button.
   int right = width();
@@ -609,7 +641,7 @@ bool PanelBrowserFrameView::ShouldTabIconViewAnimate() const {
   // This function is queried during the creation of the window as the
   // TabIconView we host is initialized, so we need to NULL check the selected
   // TabContents because in this condition there is not yet a selected tab.
-  TabContents* current_tab = browser_view()->GetSelectedTabContents();
+  WebContents* current_tab = browser_view()->GetSelectedWebContents();
   return current_tab ? current_tab->IsLoading() : false;
 }
 
@@ -751,12 +783,22 @@ void PanelBrowserFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
   // Paint the background.
   if (paint_state_ == PAINT_FOR_ATTENTION || UsingDefaultTheme()) {
     const SkPaint& paint = GetDefaultFrameTheme(paint_state_);
-    canvas->DrawRectInt(0, 0, width(), kTitlebarHeight, paint);
+    canvas->DrawRect(gfx::Rect(0, 0, width(), kTitlebarHeight), paint);
   } else {
     SkBitmap* bitmap = GetFrameTheme(paint_state_);
     canvas->TileImageInt(*bitmap, 0, 0, width(), kTitlebarHeight);
   }
 
+#if defined(USE_AURA)
+  // Aura recognizes aura::client::WINDOW_TYPE_PANEL and will draw the
+  // appropriate frame and shadow. See ash/wm/shadow_controller.h.
+
+  // Draw the divider between the titlebar and the client area.
+  if (height() > kTitlebarHeight) {
+    canvas->DrawRect(gfx::Rect(0, kTitlebarHeight, width() - 1, 1),
+                     kDividerColor);
+  }
+#else
   // Draw the top border.
   const EdgeResources& frame_edges = GetFrameEdges();
   canvas->DrawBitmapInt(*(frame_edges.top_left), 0, 0);
@@ -798,9 +840,11 @@ void PanelBrowserFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
 
   // Draw the divider between the titlebar and the client area.
   if (height() > kTitlebarHeight) {
-    canvas->DrawRectInt(kDividerColor, kBorderThickness, kTitlebarHeight,
-                        width() - 1 - 2 * kBorderThickness, kBorderThickness);
+    canvas->DrawRect(gfx::Rect(kBorderThickness, kTitlebarHeight,
+                               width() - 1 - 2 * kBorderThickness,
+                               kBorderThickness), kDividerColor);
   }
+#endif  // !defined(USE_AURA)
 }
 
 string16 PanelBrowserFrameView::GetTitleText() const {
@@ -812,6 +856,9 @@ void PanelBrowserFrameView::UpdateTitleBar() {
 }
 
 void PanelBrowserFrameView::OnFocusChanged(bool focused) {
+  if (!has_settings_button_)
+    return;
+
   UpdateSettingsButtonVisibility(focused,
                                  mouse_watcher_->IsCursorInViewBounds());
   SchedulePaint();
@@ -821,12 +868,18 @@ void PanelBrowserFrameView::OnMouseEnterOrLeaveWindow(bool mouse_entered) {
   // Panel might be closed when we still watch the mouse event.
   if (!panel_browser_view_->panel())
     return;
+
+  if (!has_settings_button_)
+    return;
+
   UpdateSettingsButtonVisibility(panel_browser_view_->focused(),
                                  mouse_entered);
 }
 
 void PanelBrowserFrameView::UpdateSettingsButtonVisibility(
     bool focused, bool cursor_in_view) {
+  DCHECK(has_settings_button_);
+
   // The settings button is not shown in the overflow state.
   if (panel_browser_view_->panel()->expansion_state() == Panel::IN_OVERFLOW)
     return;
@@ -836,21 +889,20 @@ void PanelBrowserFrameView::UpdateSettingsButtonVisibility(
     return;
   is_settings_button_visible_ = is_settings_button_visible;
 
-  // Even if we're hidng the settings button, we still make it visible for the
+  // Even if we're hiding the settings button, we still make it visible for the
   // time period that the animation is running.
   settings_button_->SetVisible(true);
 
   if (settings_button_animator_.get()) {
-    if (settings_button_animator_->IsShowing())
-      settings_button_animator_->Reset();
+    if (settings_button_animator_->is_animating())
+      settings_button_animator_->Stop();
   } else {
-    settings_button_animator_.reset(new ui::SlideAnimation(this));
-    settings_button_animator_->SetTweenType(ui::Tween::LINEAR);
-    settings_button_animator_->SetSlideDuration(
-        kUpdateSettingsVisibilityAnimationMs);
+    settings_button_animator_.reset(new SettingsButtonAnimation(
+        PanelManager::AdjustTimeInterval(kUpdateSettingsVisibilityAnimationMs),
+        kSettingsButtonAnimationFrameRate, this));
   }
 
-  settings_button_animator_->Show();
+  settings_button_animator_->Start();
 }
 
 bool PanelBrowserFrameView::EnsureSettingsMenuCreated() {

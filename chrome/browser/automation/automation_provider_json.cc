@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,22 +14,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/automation_id.h"
 #include "chrome/common/automation_messages.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 
-namespace {
-
-// Util for creating a JSON error return string (dict with key
-// 'error' and error string value).  No need to quote input.
-std::string JSONErrorString(const std::string& err) {
-  std::string prefix = "{\"error\": \"";
-  std::string no_quote_err;
-  std::string suffix = "\"}";
-
-  base::JsonDoubleQuote(err, false, &no_quote_err);
-  return prefix + no_quote_err + suffix;
-}
-
-}  // namespace
+using automation::Error;
+using automation::ErrorCode;
+using content::WebContents;
 
 AutomationJSONReply::AutomationJSONReply(AutomationProvider* provider,
                                          IPC::Message* reply_message)
@@ -53,10 +42,23 @@ void AutomationJSONReply::SendSuccess(const Value* value) {
 }
 
 void AutomationJSONReply::SendError(const std::string& error_message) {
+  SendError(Error(error_message));
+}
+
+void AutomationJSONReply::SendErrorCode(ErrorCode code) {
+  SendError(Error(code));
+}
+
+void AutomationJSONReply::SendError(const Error& error) {
   DCHECK(message_) << "Resending reply for JSON automation request";
-  std::string json_string = JSONErrorString(error_message);
-  AutomationMsg_SendJSONRequest::WriteReplyParams(
-      message_, json_string, false);
+
+  base::DictionaryValue dict;
+  dict.SetString("error", error.message());
+  dict.SetInteger("code", error.code());
+  std::string json;
+  base::JSONWriter::Write(&dict, false /* pretty_print */, &json);
+
+  AutomationMsg_SendJSONRequest::WriteReplyParams(message_, json, false);
   provider_->Send(message_);
   message_ = NULL;
 }
@@ -69,7 +71,7 @@ bool GetBrowserFromJSONArgs(
     AutomationId id;
     if (!GetAutomationIdFromJSONArgs(args, "auto_id", &id, error))
       return false;
-    TabContents* tab;
+    WebContents* tab;
     if (!automation_util::GetTabForId(id, &tab)) {
       *error = "'auto_id' does not refer to an open tab";
       return false;
@@ -97,7 +99,7 @@ bool GetBrowserFromJSONArgs(
 
 bool GetTabFromJSONArgs(
     DictionaryValue* args,
-    TabContents** tab,
+    WebContents** tab,
     std::string* error) {
   if (args->HasKey("auto_id")) {
     AutomationId id;
@@ -117,7 +119,7 @@ bool GetTabFromJSONArgs(
       *error = "'tab_index' missing or invalid";
       return false;
     }
-    *tab = automation_util::GetTabContentsAt(browser_index, tab_index);
+    *tab = automation_util::GetWebContentsAt(browser_index, tab_index);
     if (!*tab) {
       *error = "Cannot locate tab from given indices";
       return false;
@@ -129,7 +131,7 @@ bool GetTabFromJSONArgs(
 bool GetBrowserAndTabFromJSONArgs(
     DictionaryValue* args,
     Browser** browser,
-    TabContents** tab,
+    WebContents** tab,
     std::string* error) {
   return GetBrowserFromJSONArgs(args, browser, error) &&
          GetTabFromJSONArgs(args, tab, error);
@@ -164,10 +166,10 @@ bool GetRenderViewFromJSONArgs(
     }
   } else {
     // If the render view id is not specified, check for browser/tab indices.
-    TabContents* tab = NULL;
+    WebContents* tab = NULL;
     if (!GetTabFromJSONArgs(args, &tab, error))
       return false;
-    *rvh = tab->render_view_host();
+    *rvh = tab->GetRenderViewHost();
   }
   return true;
 }

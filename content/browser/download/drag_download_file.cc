@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,15 +7,18 @@
 #include "base/bind.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
-#include "content/browser/browser_context.h"
-#include "content/browser/download/download_item.h"
 #include "content/browser/download/download_stats.h"
 #include "content/browser/download/download_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item.h"
 #include "net/base/file_stream.h"
 
 using content::BrowserThread;
+using content::DownloadItem;
+using content::DownloadManager;
+using content::WebContents;
 
 DragDownloadFile::DragDownloadFile(
     const FilePath& file_name_or_path,
@@ -23,15 +26,18 @@ DragDownloadFile::DragDownloadFile(
     const GURL& url,
     const GURL& referrer,
     const std::string& referrer_encoding,
-    TabContents* tab_contents)
+    WebContents* web_contents)
     : file_stream_(file_stream),
       url_(url),
       referrer_(referrer),
       referrer_encoding_(referrer_encoding),
-      tab_contents_(tab_contents),
+      web_contents_(web_contents),
       drag_message_loop_(MessageLoop::current()),
       is_started_(false),
       is_successful_(false),
+#if defined(OS_WIN)
+      is_running_nested_message_loop_(false),
+#endif
       download_manager_(NULL),
       download_manager_observer_added_(false),
       download_item_(NULL) {
@@ -119,18 +125,20 @@ void DragDownloadFile::InitiateDownload() {
   }
 #endif
 
-  download_manager_ = tab_contents_->browser_context()->GetDownloadManager();
+  download_manager_ = web_contents_->GetBrowserContext()->GetDownloadManager();
   download_manager_observer_added_ = true;
   download_manager_->AddObserver(this);
 
   DownloadSaveInfo save_info;
   save_info.file_path = file_path_;
   save_info.file_stream = file_stream_;
-  download_manager_->DownloadUrlToFile(url_,
-                                       referrer_,
-                                       referrer_encoding_,
-                                       save_info,
-                                       tab_contents_);
+
+  download_manager_->DownloadUrl(url_,
+                                 referrer_,
+                                 referrer_encoding_,
+                                 false,
+                                 save_info,
+                                 web_contents_);
   download_stats::RecordDownloadCount(
       download_stats::INITIATED_BY_DRAG_N_DROP_COUNT);
 }
@@ -182,7 +190,7 @@ void DragDownloadFile::ModelChanged() {
   }
 }
 
-void DragDownloadFile::OnDownloadUpdated(DownloadItem* download) {
+void DragDownloadFile::OnDownloadUpdated(content::DownloadItem* download) {
   AssertCurrentlyOnUIThread();
   if (download->IsCancelled() ||
       (download->GetState() == DownloadItem::REMOVING)) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/base/single_request_host_resolver.h"
+#include "net/url_request/url_request_context_getter.h"
 
 using base::TimeDelta;
 using content::BrowserThread;
@@ -56,9 +57,8 @@ const double Predictor::kDiscardableExpectedValue = 0.05;
 // system that uses a higher trim ratio when the list is large.
 // static
 const double Predictor::kReferrerTrimRatio = 0.97153;
-const TimeDelta Predictor::kDurationBetweenTrimmings = TimeDelta::FromHours(1);
-const TimeDelta Predictor::kDurationBetweenTrimmingIncrements =
-    TimeDelta::FromSeconds(15);
+const int64 Predictor::kDurationBetweenTrimmingsHours = 1;
+const int64 Predictor::kDurationBetweenTrimmingIncrementsSeconds = 15;
 const size_t Predictor::kUrlsTrimmedPerIncrement = 5u;
 const size_t Predictor::kMaxSpeculativeParallelResolves = 3;
 // To control our congestion avoidance system, which discards a queue when
@@ -121,6 +121,7 @@ class Predictor::LookupRequest {
 
 Predictor::Predictor(bool preconnect_enabled)
     : initial_observer_(NULL),
+      url_request_context_getter_(NULL),
       predictor_enabled_(true),
       peak_pending_lookups_(0),
       shutdown_(false),
@@ -130,7 +131,8 @@ Predictor::Predictor(bool preconnect_enabled)
       host_resolver_(NULL),
       preconnect_enabled_(preconnect_enabled),
       consecutive_omnibox_preconnect_count_(0),
-      next_trim_time_(base::TimeTicks::Now() + kDurationBetweenTrimmings) {
+      next_trim_time_(base::TimeTicks::Now() +
+                      TimeDelta::FromHours(kDurationBetweenTrimmingsHours)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -141,8 +143,8 @@ Predictor::~Predictor() {
 }
 
 // static
-Predictor* Predictor::CreatePredictor(
-    bool preconnect_enabled, bool simple_shutdown) {
+Predictor* Predictor::CreatePredictor(bool preconnect_enabled,
+                                      bool simple_shutdown) {
   if (simple_shutdown)
     return new SimplePredictor(preconnect_enabled);
   return new Predictor(preconnect_enabled);
@@ -159,11 +161,14 @@ void Predictor::RegisterUserPrefs(PrefService* user_prefs) {
 
 void Predictor::InitNetworkPredictor(PrefService* user_prefs,
                                      PrefService* local_state,
-                                     IOThread* io_thread) {
+                                     IOThread* io_thread,
+                                     net::URLRequestContextGetter* getter) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   bool predictor_enabled =
       user_prefs->GetBoolean(prefs::kNetworkPredictionEnabled);
+
+  url_request_context_getter_ = getter;
 
   // Gather the list of hostnames to prefetch on startup.
   UrlList urls = GetPredictedUrlListAtStartup(user_prefs, local_state);
@@ -241,7 +246,8 @@ void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
         last_omnibox_preconnect_ = now;
         const int kConnectionsNeeded = 1;
         PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
-                             kConnectionsNeeded);
+                             kConnectionsNeeded,
+                             url_request_context_getter_);
         return;  // Skip pre-resolution, since we'll open a connection.
       }
     } else {
@@ -280,7 +286,8 @@ void Predictor::PreconnectUrlAndSubresources(const GURL& url) {
     UrlInfo::ResolutionMotivation motivation(UrlInfo::EARLY_LOAD_MOTIVATED);
     const int kConnectionsNeeded = 1;
     PreconnectOnUIThread(CanonicalizeUrl(url), motivation,
-                         kConnectionsNeeded);
+                         kConnectionsNeeded,
+                         url_request_context_getter_);
     PredictFrameSubresources(url.GetWithEmptyPath());
   }
 }
@@ -697,10 +704,10 @@ void Predictor::FinalizeInitializationOnIOThread(
   initial_observer_.reset(new InitialObserver());
   host_resolver_ = io_thread->globals()->host_resolver.get();
 
-  // ScopedRunnableMethodFactory instances need to be created and destroyed
+  // base::WeakPtrFactory instances need to be created and destroyed
   // on the same thread. The predictor lives on the IO thread and will die
   // from there so now that we're on the IO thread we need to properly
-  // initialize the ScopedrunnableMethodFactory.
+  // initialize the base::WeakPtrFactory.
   // TODO(groby): Check if WeakPtrFactory has the same constraint.
   weak_factory_.reset(new base::WeakPtrFactory<Predictor>(this));
 
@@ -886,8 +893,10 @@ void Predictor::PrepareFrameSubresources(const GURL& url) {
     // size of the list with all the "Leaf" nodes in the tree (nodes that don't
     // load any subresources).  If we learn about this resource, we will instead
     // provide a more carefully estimated preconnection count.
-    if (preconnect_enabled_)
-      PreconnectOnIOThread(url, UrlInfo::SELF_REFERAL_MOTIVATED, 2);
+    if (preconnect_enabled_) {
+      PreconnectOnIOThread(url, UrlInfo::SELF_REFERAL_MOTIVATED, 2,
+                           url_request_context_getter_);
+    }
     return;
   }
 
@@ -910,7 +919,8 @@ void Predictor::PrepareFrameSubresources(const GURL& url) {
       int count = static_cast<int>(std::ceil(connection_expectation));
       if (url.host() == future_url->first.host())
         ++count;
-      PreconnectOnIOThread(future_url->first, motivation, count);
+      PreconnectOnIOThread(future_url->first, motivation, count,
+                           url_request_context_getter_);
     } else if (connection_expectation > kDNSPreresolutionWorthyExpectedValue) {
       evalution = PRERESOLUTION;
       future_url->second.preresolution_increment();
@@ -1036,7 +1046,7 @@ void Predictor::TrimReferrers() {
   base::TimeTicks now = base::TimeTicks::Now();
   if (now < next_trim_time_)
     return;
-  next_trim_time_ = now + kDurationBetweenTrimmings;
+  next_trim_time_ = now + TimeDelta::FromHours(kDurationBetweenTrimmingsHours);
 
   LoadUrlsForTrimming();
   PostIncrementalTrimTask();
@@ -1053,11 +1063,13 @@ void Predictor::LoadUrlsForTrimming() {
 void Predictor::PostIncrementalTrimTask() {
   if (urls_being_trimmed_.empty())
     return;
+  const TimeDelta kDurationBetweenTrimmingIncrements =
+      TimeDelta::FromSeconds(kDurationBetweenTrimmingIncrementsSeconds);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&Predictor::IncrementalTrimReferrers,
                  weak_factory_->GetWeakPtr(), false),
-      kDurationBetweenTrimmingIncrements.InMilliseconds());
+      kDurationBetweenTrimmingIncrements);
 }
 
 void Predictor::IncrementalTrimReferrers(bool trim_all_now) {
@@ -1201,9 +1213,11 @@ GURL Predictor::CanonicalizeUrl(const GURL& url) {
   return GURL(scheme + "://" + url.host() + colon_plus_port);
 }
 
-void SimplePredictor::InitNetworkPredictor(PrefService* user_prefs,
-                                           PrefService* local_state,
-                                           IOThread* io_thread) {
+void SimplePredictor::InitNetworkPredictor(
+    PrefService* user_prefs,
+    PrefService* local_state,
+    IOThread* io_thread,
+    net::URLRequestContextGetter* getter) {
   // Empty function for unittests.
 }
 

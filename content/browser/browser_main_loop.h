@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 class CommandLine;
 class HighResolutionTimerManager;
 class MessageLoop;
+class ResourceDispatcherHost;
 class SystemMessageWindowWin;
 
 namespace base {
@@ -58,6 +59,9 @@ class BrowserMainLoop {
 
   void InitializeMainThread();
 
+  // Called right after the browser threads have been started.
+  void BrowserThreadsStarted();
+
   // Members initialized on construction ---------------------------------------
   const content::MainFunctionParams& parameters_;
   const CommandLine& parsed_command_line_;
@@ -79,6 +83,11 @@ class BrowserMainLoop {
   // Members initialized in |InitializeMainThread()| ---------------------------
   // This must get destroyed before other threads that are created in parts_.
   scoped_ptr<BrowserThreadImpl> main_thread_;
+
+  // Members initialized in |BrowserThreadsStarted()| --------------------------
+  scoped_ptr<ResourceDispatcherHost> resource_dispatcher_host_;
+
+  // Members initialized in |RunMainMessageLoopParts()| ------------------------
   scoped_ptr<BrowserProcessSubThread> db_thread_;
   scoped_ptr<WebKitThread> webkit_thread_;
   scoped_ptr<BrowserProcessSubThread> file_user_blocking_thread_;
@@ -86,9 +95,6 @@ class BrowserMainLoop {
   scoped_ptr<BrowserProcessSubThread> process_launcher_thread_;
   scoped_ptr<BrowserProcessSubThread> cache_thread_;
   scoped_ptr<BrowserProcessSubThread> io_thread_;
-#if defined(OS_CHROMEOS)
-  scoped_ptr<BrowserProcessSubThread> web_socket_proxy_thread_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserMainLoop);
 };

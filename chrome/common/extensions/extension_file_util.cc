@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,7 +24,6 @@
 #include "chrome/common/extensions/extension_message_bundle.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "chrome/common/extensions/extension_sidebar_defaults.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
 #include "net/base/file_stream.h"
@@ -57,6 +56,35 @@ FilePath InstallExtension(const FilePath& unpacked_source_dir,
       return FilePath();
   }
 
+  FilePath profile_temp_dir = GetUserDataTempDir();
+  // Move the extracted extension to a temp folder under the profile which will
+  // then be moved to the final destination to ensure integrity of the installed
+  // extension. The first move is actually a copy+delete to ensure proper
+  // behavor in case we are moving a folder inside another folder on the same
+  // level because Move will attempt rename in this case instead of proper move.
+  // PLEASE NOTE: This issue has been observed in extension unit tests that try
+  // to install user exnteions (not crx files but unpacked ones) from subfolder
+  // of the temp folder. In that case a move will only rename the folder insted
+  // of miving it into the destination folder as expected. That is the reason we
+  // do copy+delete instead of a plain delete here! It can happen in the wild
+  // with say autounpacked archive going to the temp folder and the user tries
+  // to install it from there.
+  ScopedTempDir extension_temp_dir;
+  if (profile_temp_dir.empty() ||
+      !extension_temp_dir.CreateUniqueTempDirUnderPath(profile_temp_dir)) {
+    LOG(ERROR) << "Creating of temp dir under in the profile failed.";
+    return FilePath();
+  }
+  if (!file_util::CopyDirectory(unpacked_source_dir,
+                                extension_temp_dir.path(), true)) {
+    LOG(ERROR) << "Moving extension from : " << unpacked_source_dir.value()
+               << " to : " << extension_temp_dir.path().value() << " failed.";
+    return FilePath();
+  }
+  file_util::Delete(unpacked_source_dir, true);
+  FilePath crx_temp_source =
+      extension_temp_dir.path().Append(unpacked_source_dir.BaseName());
+
   // Try to find a free directory. There can be legitimate conflicts in the case
   // of overinstallation of the same version.
   const int kMaxAttempts = 100;
@@ -70,13 +98,16 @@ FilePath InstallExtension(const FilePath& unpacked_source_dir,
   }
 
   if (version_dir.empty()) {
-    DLOG(ERROR) << "Could not find a home for extension " << id << " with "
-                << "version " << version << ".";
+    LOG(ERROR) << "Could not find a home for extension " << id << " with "
+               << "version " << version << ".";
     return FilePath();
   }
 
-  if (!file_util::Move(unpacked_source_dir, version_dir))
+  if (!file_util::Move(crx_temp_source, version_dir)) {
+    LOG(ERROR) << "Installing extension from : " << crx_temp_source.value()
+               << " into : " << version_dir.value() << " failed.";
     return FilePath();
+  }
 
   return version_dir;
 }
@@ -93,6 +124,30 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
                                        Extension::Location location,
                                        int flags,
                                        std::string* error) {
+  scoped_ptr<DictionaryValue> manifest(LoadManifest(extension_path, error));
+  if (!manifest.get())
+    return NULL;
+  if (!extension_l10n_util::LocalizeExtension(extension_path, manifest.get(),
+                                              error))
+    return NULL;
+
+  scoped_refptr<Extension> extension(Extension::Create(
+      extension_path,
+      location,
+      *manifest,
+      flags,
+      error));
+  if (!extension.get())
+    return NULL;
+
+  if (!ValidateExtension(extension.get(), error))
+    return NULL;
+
+  return extension;
+}
+
+DictionaryValue* LoadManifest(const FilePath& extension_path,
+                              std::string* error) {
   FilePath manifest_path =
       extension_path.Append(Extension::kManifestFilename);
   if (!file_util::PathExists(manifest_path)) {
@@ -122,23 +177,7 @@ scoped_refptr<Extension> LoadExtension(const FilePath& extension_path,
     return NULL;
   }
 
-  DictionaryValue* manifest = static_cast<DictionaryValue*>(root.get());
-  if (!extension_l10n_util::LocalizeExtension(extension_path, manifest, error))
-    return NULL;
-
-  scoped_refptr<Extension> extension(Extension::Create(
-      extension_path,
-      location,
-      *manifest,
-      flags,
-      error));
-  if (!extension.get())
-    return NULL;
-
-  if (!ValidateExtension(extension.get(), error))
-    return NULL;
-
-  return extension;
+  return static_cast<DictionaryValue*>(root.release());
 }
 
 bool ValidateExtension(const Extension* extension, std::string* error) {
@@ -249,12 +288,26 @@ bool ValidateExtension(const Extension* extension, std::string* error) {
     }
   }
 
+  // Validate that background scripts exist.
+  for (size_t i = 0; i < extension->background_scripts().size(); ++i) {
+    if (!file_util::PathExists(
+            extension->GetResource(
+                extension->background_scripts()[i]).GetFilePath())) {
+      *error = l10n_util::GetStringFUTF8(
+          IDS_EXTENSION_LOAD_BACKGROUND_SCRIPT_FAILED,
+          UTF8ToUTF16(extension->background_scripts()[i]));
+      return false;
+    }
+  }
+
   // Validate background page location, except for hosted apps, which should use
   // an external URL. Background page for hosted apps are verified when the
   // extension is created (in Extension::InitFromValue)
-  if (!extension->background_url().is_empty() && !extension->is_hosted_app()) {
+  if (extension->has_background_page() &&
+      !extension->is_hosted_app() &&
+      extension->background_scripts().empty()) {
     FilePath page_path = ExtensionURLToRelativeFilePath(
-        extension->background_url());
+        extension->GetBackgroundURL());
     const FilePath path = extension->GetResource(page_path).GetFilePath();
     if (path.empty() || !file_util::PathExists(path)) {
       *error =
@@ -276,21 +329,6 @@ bool ValidateExtension(const Extension* extension, std::string* error) {
           l10n_util::GetStringFUTF8(
               IDS_EXTENSION_LOAD_OPTIONS_PAGE_FAILED,
               options_path.LossyDisplayName());
-      return false;
-    }
-  }
-
-  // Validate sidebar default page location.
-  ExtensionSidebarDefaults* sidebar_defaults = extension->sidebar_defaults();
-  if (sidebar_defaults && sidebar_defaults->default_page().is_valid()) {
-    FilePath page_path = ExtensionURLToRelativeFilePath(
-        sidebar_defaults->default_page());
-    const FilePath path = extension->GetResource(page_path).GetFilePath();
-    if (path.empty() || !file_util::PathExists(path)) {
-      *error =
-          l10n_util::GetStringFUTF8(
-              IDS_EXTENSION_LOAD_SIDEBAR_PAGE_FAILED,
-              page_path.LossyDisplayName());
       return false;
     }
   }

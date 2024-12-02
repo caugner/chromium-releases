@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,11 @@
 #include "ui/gfx/compositor/compositor_observer.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/layer_animation_sequence.h"
-#include "ui/gfx/compositor/test/test_compositor.h"
 #include "ui/gfx/compositor/test/test_compositor_host.h"
 #include "ui/gfx/gfx_paths.h"
+#include "ui/gfx/skia_util.h"
+
+#include "ui/gfx/compositor/compositor_setup.h"
 
 namespace ui {
 
@@ -106,10 +108,9 @@ std::string GetLayerChildrenNames(const Layer& layer) {
 
 // There are three test classes in here that configure the Compositor and
 // Layer's slightly differently:
-// - LayerWithNullDelegateTest uses TestCompositor and NullLayerDelegate as the
-//   LayerDelegate. This is typically the base class you want to use.
-// - LayerWithDelegateTest uses TestCompositor and does not set a LayerDelegate
-//   on the delegates.
+// - LayerWithNullDelegateTest uses NullLayerDelegate as the LayerDelegate. This
+//   is typically the base class you want to use.
+// - LayerWithDelegateTest uses LayerDelegate on the delegates.
 // - LayerWithRealCompositorTest when a real compositor is required for testing.
 //    - Slow because they bring up a window and run the real compositor. This
 //      is typically not what you want.
@@ -117,7 +118,7 @@ std::string GetLayerChildrenNames(const Layer& layer) {
 class ColoredLayer : public Layer, public LayerDelegate {
  public:
   explicit ColoredLayer(SkColor color)
-      : Layer(Layer::LAYER_HAS_TEXTURE),
+      : Layer(Layer::LAYER_TEXTURED),
         color_(color) {
     set_delegate(this);
   }
@@ -146,6 +147,7 @@ class LayerWithRealCompositorTest : public testing::Test {
 
   // Overridden from testing::Test:
   virtual void SetUp() OVERRIDE {
+    ui::DisableTestCompositor();
     const gfx::Rect host_bounds(10, 10, 500, 500);
     window_.reset(TestCompositorHost::Create(host_bounds));
     window_->Show();
@@ -169,7 +171,7 @@ class LayerWithRealCompositorTest : public testing::Test {
   }
 
   Layer* CreateNoTextureLayer(const gfx::Rect& bounds) {
-    Layer* layer = CreateLayer(Layer::LAYER_HAS_NO_TEXTURE);
+    Layer* layer = CreateLayer(Layer::LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
   }
@@ -295,7 +297,7 @@ class TestCompositorObserver : public CompositorObserver {
   DISALLOW_COPY_AND_ASSIGN(TestCompositorObserver);
 };
 
-}
+}  // namespace
 
 #if defined(OS_WIN)
 // These are disabled on windows as they don't run correctly on the buildbot.
@@ -359,7 +361,8 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
 
   // Overridden from testing::Test:
   virtual void SetUp() OVERRIDE {
-    compositor_ = new TestCompositor(this);
+    ui::SetupTestCompositor();
+    compositor_ = new ui::Compositor(this, NULL, gfx::Size(1000, 1000));
   }
 
   virtual void TearDown() OVERRIDE {
@@ -378,7 +381,7 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
   }
 
   virtual Layer* CreateNoTextureLayer(const gfx::Rect& bounds) {
-    Layer* layer = CreateLayer(Layer::LAYER_HAS_NO_TEXTURE);
+    Layer* layer = CreateLayer(Layer::LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
   }
@@ -413,7 +416,7 @@ class LayerWithDelegateTest : public testing::Test, public CompositorDelegate {
   bool schedule_draw_invoked_;
 
  private:
-  scoped_refptr<TestCompositor> compositor_;
+  scoped_refptr<ui::Compositor> compositor_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerWithDelegateTest);
 };
@@ -584,13 +587,13 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
   }
 
   Layer* CreateTextureLayer(const gfx::Rect& bounds) {
-    Layer* layer = CreateLayer(Layer::LAYER_HAS_TEXTURE);
+    Layer* layer = CreateLayer(Layer::LAYER_TEXTURED);
     layer->SetBounds(bounds);
     return layer;
   }
 
   Layer* CreateNoTextureLayer(const gfx::Rect& bounds) OVERRIDE {
-    Layer* layer = CreateLayer(Layer::LAYER_HAS_NO_TEXTURE);
+    Layer* layer = CreateLayer(Layer::LAYER_NOT_DRAWN);
     layer->SetBounds(bounds);
     return layer;
   }
@@ -605,414 +608,11 @@ class LayerWithNullDelegateTest : public LayerWithDelegateTest {
   DISALLOW_COPY_AND_ASSIGN(LayerWithNullDelegateTest);
 };
 
-// With the webkit compositor, we don't explicitly textures for layers, making
-// tests that check that we do fail.
-#if defined(USE_WEBKIT_COMPOSITOR)
-#define NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(X) DISABLED_ ## X
-#else
-#define NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(X) X
-#endif
-
-// Verifies that a layer which is set never to have a texture does not
-// get a texture when SetFillsBoundsOpaquely is called.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(
-           LayerNoTextureSetFillsBoundsOpaquely)) {
-  scoped_ptr<Layer> parent(CreateNoTextureLayer(gfx::Rect(0, 0, 400, 400)));
-  scoped_ptr<Layer> child(CreateNoTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  parent->Add(child.get());
-
-  compositor()->SetRootLayer(parent.get());
-  parent->SetFillsBoundsOpaquely(true);
-  child->SetFillsBoundsOpaquely(true);
-  Draw();
-  RunPendingMessages();
-  EXPECT_TRUE(child->texture() == NULL);
-  EXPECT_TRUE(parent->texture() == NULL);
-
-  parent->SetFillsBoundsOpaquely(false);
-  child->SetFillsBoundsOpaquely(false);
-  Draw();
-  RunPendingMessages();
-  EXPECT_TRUE(child->texture() == NULL);
-  EXPECT_TRUE(parent->texture() == NULL);
-}
-
-// Verifies that a layer does not have a texture when the hole is the size
-// of the parent layer.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(LayerNoTextureHoleSizeOfLayer)) {
-  scoped_ptr<Layer> parent(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-  scoped_ptr<Layer> child(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  parent->Add(child.get());
-
-  Draw();
-  EXPECT_EQ(gfx::Rect(50, 50, 100, 100), parent->hole_rect());
-  EXPECT_TRUE(parent->texture() != NULL);
-
-  child->SetBounds(gfx::Rect(0, 0, 400, 400));
-  Draw();
-  EXPECT_TRUE(parent->texture() == NULL);
-}
-
-// Verifies that a layer which has opacity == 0 does not have a texture.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(LayerNoTextureTransparent)) {
-  scoped_ptr<Layer> parent(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-  scoped_ptr<Layer> child(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  parent->Add(child.get());
-
-  parent->SetOpacity(0.0f);
-  child->SetOpacity(0.0f);
-  Draw();
-  EXPECT_TRUE(parent->texture() == NULL);
-  EXPECT_TRUE(child->texture() == NULL);
-
-  parent->SetOpacity(1.0f);
-  Draw();
-  EXPECT_TRUE(parent->texture() != NULL);
-  EXPECT_TRUE(child->texture() == NULL);
-
-  child->SetOpacity(1.0f);
-  Draw();
-  EXPECT_TRUE(parent->texture() != NULL);
-  EXPECT_TRUE(child->texture() != NULL);
-}
-
-// Verifies that no texture is created for a layer with empty bounds.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(LayerTextureNonEmptySchedulePaint)) {
-  scoped_ptr<Layer> layer(CreateTextureRootLayer(gfx::Rect(0, 0, 0, 0)));
-  Draw();
-  EXPECT_TRUE(layer->texture() == NULL);
-
-  layer->SetBounds(gfx::Rect(0, 0, 400, 400));
-  Draw();
-  EXPECT_TRUE(layer->texture() != NULL);
-}
-
-// Verifies that when there are many potential holes, the largest one is picked.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(LargestHole)) {
-  scoped_ptr<Layer> parent(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-
-  scoped_ptr<Layer> child1(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  parent->Add(child1.get());
-
-  scoped_ptr<Layer> child2(CreateTextureLayer(gfx::Rect(75, 75, 200, 200)));
-  parent->Add(child2.get());
-
-  Draw();
-
-  EXPECT_EQ(gfx::Rect(75, 75, 200, 200), parent->hole_rect());
-}
-
-// Verifies that the largest hole in the draw order is picked
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(HoleGeneratedFromLeaf)) {
-  // Layer tree looks like:
-  // node 1
-  // |_ node 11
-  //    |_ node 111
-  // |_ node 12
-  //    |_ node 121
-
-  scoped_ptr<Layer> node1(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-
-  scoped_ptr<Layer> node11(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  node1->Add(node11.get());
-
-  scoped_ptr<Layer> node12(CreateTextureLayer(gfx::Rect(75, 75, 200, 200)));
-  node1->Add(node12.get());
-
-  scoped_ptr<Layer> node111(CreateTextureLayer(gfx::Rect(10, 10, 20, 20)));
-  node11->Add(node111.get());
-
-  scoped_ptr<Layer> node121(CreateTextureLayer(gfx::Rect(10, 10, 190, 190)));
-  node12->Add(node121.get());
-
-  Draw();
-
-  EXPECT_EQ(gfx::Rect(75, 75, 200, 200), node1->hole_rect());
-  EXPECT_EQ(gfx::Rect(25, 25, 75, 75), node11->hole_rect());
-  EXPECT_EQ(gfx::Rect(10, 10, 190, 190), node12->hole_rect());
-}
-
-// Verifies that a hole can only punched into a layer with opacity = 1.0f.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(NoHoleWhenPartialOpacity)) {
-  // Layer tree looks like:
-  // node 1
-  // |_ node 11
-  //    |_ node 111
-
-  scoped_ptr<Layer> node1(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-
-  scoped_ptr<Layer> node11(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  node1->Add(node11.get());
-
-  scoped_ptr<Layer> node111(CreateTextureLayer(gfx::Rect(10, 10, 20, 20)));
-  node11->Add(node111.get());
-
-  Draw();
-  EXPECT_EQ(gfx::Rect(50, 50, 100, 100), node1->hole_rect());
-  EXPECT_EQ(gfx::Rect(10, 10, 20, 20), node11->hole_rect());
-
-
-  node11->SetOpacity(0.5f);
-  Draw();
-  EXPECT_TRUE(node1->hole_rect().IsEmpty());
-  EXPECT_TRUE(node11->hole_rect().IsEmpty());
-}
-
-// Verifies that a non visible layer or any of its children is not a hole.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(NonVisibleLayerCannotBeHole)) {
-  // Layer tree looks like:
-  // node 1
-  // |_ node 11
-  //    |_ node 111
-
-  scoped_ptr<Layer> node1(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-
-  scoped_ptr<Layer> node11(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  node1->Add(node11.get());
-
-  scoped_ptr<Layer> node111(CreateTextureLayer(gfx::Rect(10, 10, 20, 20)));
-  node11->Add(node111.get());
-
-  Draw();
-  EXPECT_EQ(gfx::Rect(50, 50, 100, 100), node1->hole_rect());
-  EXPECT_EQ(gfx::Rect(10, 10, 20, 20), node11->hole_rect());
-
-
-  node11->SetVisible(false);
-  Draw();
-  EXPECT_TRUE(node1->hole_rect().IsEmpty());
-  EXPECT_TRUE(node11->hole_rect().IsEmpty());
-}
-
-// Verifies that a layer which doesn't fill its bounds opaquely cannot punch a
-// hole. However its children should still be able to punch a hole.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(
-           LayerNotFillingBoundsOpaquelyCannotBeHole)) {
-  // Layer tree looks like:
-  // node 1
-  // |_ node 11
-  //    |_ node 111
-
-  scoped_ptr<Layer> node1(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-
-  scoped_ptr<Layer> node11(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  node1->Add(node11.get());
-
-  scoped_ptr<Layer> node111(CreateTextureLayer(gfx::Rect(10, 10, 20, 20)));
-  node11->Add(node111.get());
-
-  Draw();
-  EXPECT_EQ(gfx::Rect(50, 50, 100, 100), node1->hole_rect());
-  EXPECT_EQ(gfx::Rect(10, 10, 20, 20), node11->hole_rect());
-
-
-  node11->SetFillsBoundsOpaquely(false);
-  Draw();
-  EXPECT_EQ(gfx::Rect(60, 60, 20, 20), node1->hole_rect());
-  EXPECT_TRUE(node11->hole_rect().IsEmpty());
-}
-
-// Verifies that the hole is with respect to the local bounds of its parent.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(HoleLocalBounds)) {
-  scoped_ptr<Layer> parent(CreateTextureRootLayer(
-      gfx::Rect(100, 100, 150, 150)));
-
-  scoped_ptr<Layer> child(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  parent->Add(child.get());
-
-  Draw();
-
-  EXPECT_EQ(gfx::Rect(50, 50, 100, 100), parent->hole_rect());
-}
-
-// Verifies that there is no hole present when one of the child layers has a
-// transform.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(NoHoleWithTransform)) {
-  scoped_ptr<Layer> parent(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-  scoped_ptr<Layer> child(CreateTextureLayer(gfx::Rect(50, 50, 100, 100)));
-  parent->Add(child.get());
-
-  Draw();
-
-  EXPECT_TRUE(!parent->hole_rect().IsEmpty());
-
-  ui::Transform t;
-  t.SetTranslate(-50, -50);
-  t.ConcatRotate(45.0f);
-  t.ConcatTranslate(50, 50);
-  child->SetTransform(t);
-
-  Draw();
-
-  EXPECT_EQ(gfx::Rect(0, 0, 0, 0), parent->hole_rect());
-}
-
-// Verifies that if the child layer is rotated by a multiple of ninety degrees
-// we punch a hole
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(HoleWithNinetyDegreeTransforms)) {
-  scoped_ptr<Layer> parent(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-  scoped_ptr<Layer> child(CreateTextureLayer(gfx::Rect(50, 50, 50, 50)));
-  parent->Add(child.get());
-
-  Draw();
-
-  EXPECT_TRUE(!parent->hole_rect().IsEmpty());
-
-  for (int i = -4; i <= 4; ++i) {
-    SCOPED_TRACE(::testing::Message() << "Iteration " << i);
-
-    ui::Transform t;
-    // Need to rotate in local coordinates.
-    t.SetTranslate(-25, -25);
-    t.ConcatRotate(90.0f * i);
-    t.ConcatTranslate(25, 25);
-    child->SetTransform(t);
-
-    gfx::Rect target_rect(child->bounds().size());
-    t.ConcatTranslate(child->bounds().x(), child->bounds().y());
-    t.TransformRect(&target_rect);
-
-    Draw();
-
-    EXPECT_EQ(target_rect, parent->hole_rect());
-  }
-}
-
-// Verifies that a layer which doesn't have a texture cannot punch a
-// hole. However its children should still be able to punch a hole.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(
-           HoleWithRelativeNinetyDegreeTransforms)) {
-  // Layer tree looks like:
-  // node 1
-  // |_ node 11
-  // |_ node 12
-
-  scoped_ptr<Layer> node1(CreateTextureRootLayer(gfx::Rect(0, 0, 400, 400)));
-
-  scoped_ptr<Layer> node11(CreateTextureLayer(gfx::Rect(50, 50, 50, 50)));
-  node1->Add(node11.get());
-
-  scoped_ptr<Layer> node12(CreateTextureLayer(gfx::Rect(50, 50, 50, 50)));
-  node1->Add(node12.get());
-
-  Draw();
-
-  EXPECT_EQ(gfx::Rect(0, 0, 50, 50), node11->hole_rect());
-  EXPECT_TRUE(node12->hole_rect().IsEmpty());
-
-  ui::Transform t1;
-  // Need to rotate in local coordinates.
-  t1.SetTranslate(-25, -25);
-  t1.ConcatRotate(45.0f);
-  t1.ConcatTranslate(25, 25);
-  node11->SetTransform(t1);
-
-  Draw();
-
-  EXPECT_TRUE(node12->hole_rect().IsEmpty());
-  EXPECT_TRUE(node11->hole_rect().IsEmpty());
-
-  ui::Transform t2;
-  // Need to rotate in local coordinates.
-  t2.SetTranslate(-25, -25);
-  t2.ConcatRotate(-135.0f);
-  t2.ConcatTranslate(25, 25);
-  node12->SetTransform(t2);
-
-  // Do translation of target rect in order to account for inprecision of
-  // using floating point matrices vs integer rects.
-  ui::Transform t3;
-  gfx::Rect target_rect = gfx::Rect(node11->bounds().size());
-  t3.ConcatTransform(t2);
-  t1.GetInverse(&t1);
-  t3.ConcatTransform(t1);
-  t3.TransformRect(&target_rect);
-
-  Draw();
-
-  EXPECT_TRUE(node12->hole_rect().IsEmpty());
-  EXPECT_EQ(target_rect, node11->hole_rect());
-}
-
-// Create this hierarchy:
-// L1 (no texture)
-//  +- L11 (texture)
-//  +- L12 (no texture) (added after L1 is already set as root-layer)
-//    +- L121 (texture)
-//    +- L122 (texture)
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(NoCompositor)) {
-  scoped_ptr<Layer> l1(CreateLayer(Layer::LAYER_HAS_NO_TEXTURE));
-  scoped_ptr<Layer> l11(CreateLayer(Layer::LAYER_HAS_TEXTURE));
-  scoped_ptr<Layer> l12(CreateLayer(Layer::LAYER_HAS_NO_TEXTURE));
-  scoped_ptr<Layer> l121(CreateLayer(Layer::LAYER_HAS_TEXTURE));
-  scoped_ptr<Layer> l122(CreateLayer(Layer::LAYER_HAS_TEXTURE));
-
-  EXPECT_EQ(NULL, l1->texture());
-  EXPECT_EQ(NULL, l11->texture());
-  EXPECT_EQ(NULL, l12->texture());
-  EXPECT_EQ(NULL, l121->texture());
-  EXPECT_EQ(NULL, l122->texture());
-
-  l1->Add(l11.get());
-  l1->SetBounds(gfx::Rect(0, 0, 500, 500));
-  l11->SetBounds(gfx::Rect(5, 5, 490, 490));
-
-  EXPECT_EQ(NULL, l11->texture());
-
-  compositor()->SetRootLayer(l1.get());
-
-  EXPECT_EQ(NULL, l1->texture());
-
-  // Despite having type LAYER_HAS_TEXTURE, l11 will not have one set yet
-  // because it has never been asked to draw.
-  EXPECT_EQ(NULL, l11->texture());
-
-  l12->Add(l121.get());
-  l12->Add(l122.get());
-  l12->SetBounds(gfx::Rect(5, 5, 480, 480));
-  l121->SetBounds(gfx::Rect(5, 5, 100, 100));
-  l122->SetBounds(gfx::Rect(110, 110, 100, 100));
-
-  EXPECT_EQ(NULL, l121->texture());
-  EXPECT_EQ(NULL, l122->texture());
-
-  l1->Add(l12.get());
-
-  // By asking l121 and l122 to paint, we cause them to generate a texture.
-  SchedulePaintForLayer(l121.get());
-  SchedulePaintForLayer(l122.get());
-  Draw();
-
-  EXPECT_EQ(NULL, l12->texture());
-  EXPECT_TRUE(NULL != l121->texture());
-  EXPECT_TRUE(NULL != l122->texture());
-
-  // Toggling l2's visibility should drop all sub-layer textures.
-  l12->SetVisible(false);
-  EXPECT_EQ(NULL, l12->texture());
-  EXPECT_EQ(NULL, l121->texture());
-  EXPECT_EQ(NULL, l122->texture());
-}
-
 // Various visibile/drawn assertions.
 TEST_F(LayerWithNullDelegateTest, Visibility) {
-  scoped_ptr<Layer> l1(new Layer(Layer::LAYER_HAS_TEXTURE));
-  scoped_ptr<Layer> l2(new Layer(Layer::LAYER_HAS_TEXTURE));
-  scoped_ptr<Layer> l3(new Layer(Layer::LAYER_HAS_TEXTURE));
+  scoped_ptr<Layer> l1(new Layer(Layer::LAYER_TEXTURED));
+  scoped_ptr<Layer> l2(new Layer(Layer::LAYER_TEXTURED));
+  scoped_ptr<Layer> l3(new Layer(Layer::LAYER_TEXTURED));
   l1->Add(l2.get());
   l2->Add(l3.get());
 
@@ -1025,11 +625,9 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
   EXPECT_TRUE(l1->IsDrawn());
   EXPECT_TRUE(l2->IsDrawn());
   EXPECT_TRUE(l3->IsDrawn());
-#if defined(USE_WEBKIT_COMPOSITOR)
   EXPECT_EQ(1.f, l1->web_layer().opacity());
   EXPECT_EQ(1.f, l2->web_layer().opacity());
   EXPECT_EQ(1.f, l3->web_layer().opacity());
-#endif
 
   compositor()->SetRootLayer(l1.get());
 
@@ -1039,33 +637,27 @@ TEST_F(LayerWithNullDelegateTest, Visibility) {
   EXPECT_FALSE(l1->IsDrawn());
   EXPECT_FALSE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-#if defined(USE_WEBKIT_COMPOSITOR)
   EXPECT_EQ(0.f, l1->web_layer().opacity());
-#endif
 
   l3->SetVisible(false);
   EXPECT_FALSE(l1->IsDrawn());
   EXPECT_FALSE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-#if defined(USE_WEBKIT_COMPOSITOR)
   EXPECT_EQ(0.f, l3->web_layer().opacity());
-#endif
 
   l1->SetVisible(true);
   EXPECT_TRUE(l1->IsDrawn());
   EXPECT_TRUE(l2->IsDrawn());
   EXPECT_FALSE(l3->IsDrawn());
-#if defined(USE_WEBKIT_COMPOSITOR)
   EXPECT_EQ(1.f, l1->web_layer().opacity());
-#endif
 }
 
 // Checks that stacking-related methods behave as advertised.
 TEST_F(LayerWithNullDelegateTest, Stacking) {
-  scoped_ptr<Layer> root(new Layer(Layer::LAYER_HAS_NO_TEXTURE));
-  scoped_ptr<Layer> l1(new Layer(Layer::LAYER_HAS_TEXTURE));
-  scoped_ptr<Layer> l2(new Layer(Layer::LAYER_HAS_TEXTURE));
-  scoped_ptr<Layer> l3(new Layer(Layer::LAYER_HAS_TEXTURE));
+  scoped_ptr<Layer> root(new Layer(Layer::LAYER_NOT_DRAWN));
+  scoped_ptr<Layer> l1(new Layer(Layer::LAYER_TEXTURED));
+  scoped_ptr<Layer> l2(new Layer(Layer::LAYER_TEXTURED));
+  scoped_ptr<Layer> l3(new Layer(Layer::LAYER_TEXTURED));
   l1->set_name("1");
   l2->set_name("2");
   l3->set_name("3");
@@ -1093,28 +685,30 @@ TEST_F(LayerWithNullDelegateTest, Stacking) {
 
   root->StackAbove(l2.get(), l1.get());
   EXPECT_EQ("3,1,2", GetLayerChildrenNames(*root.get()));
-}
 
-// Checks that the invalid rect assumes correct values when setting bounds.
-// TODO(vollick): for USE_WEBKIT_COMPOSITOR, use WebKit's dirty rect.
-TEST_F(LayerWithNullDelegateTest,
-       NOT_APPLICABLE_TO_WEBKIT_COMPOSITOR(SetBoundsInvalidRect)) {
-  scoped_ptr<Layer> l1(CreateTextureLayer(gfx::Rect(0, 0, 200, 200)));
-  compositor()->SetRootLayer(l1.get());
+  root->StackAtBottom(l2.get());
+  EXPECT_EQ("2,3,1", GetLayerChildrenNames(*root.get()));
 
-  // After a draw the invalid rect should be empty.
-  Draw();
-  EXPECT_TRUE(l1->invalid_rect().IsEmpty());
+  root->StackAtBottom(l3.get());
+  EXPECT_EQ("3,2,1", GetLayerChildrenNames(*root.get()));
 
-  // After a move the invalid rect should be empty.
-  l1->SetBounds(gfx::Rect(5, 5, 200, 200));
-  EXPECT_TRUE(l1->invalid_rect().IsEmpty());
+  root->StackAtBottom(l3.get());
+  EXPECT_EQ("3,2,1", GetLayerChildrenNames(*root.get()));
 
-  // Bounds change should trigger both the invalid rect to update as well as
-  // CompositorDelegate being told to draw.
-  l1->SetBounds(gfx::Rect(5, 5, 100, 100));
-  EXPECT_EQ(gfx::Rect(0, 0, 100, 100).ToString(),
-            l1->invalid_rect().ToString());
+  root->StackBelow(l2.get(), l3.get());
+  EXPECT_EQ("2,3,1", GetLayerChildrenNames(*root.get()));
+
+  root->StackBelow(l1.get(), l3.get());
+  EXPECT_EQ("2,1,3", GetLayerChildrenNames(*root.get()));
+
+  root->StackBelow(l3.get(), l2.get());
+  EXPECT_EQ("3,2,1", GetLayerChildrenNames(*root.get()));
+
+  root->StackBelow(l3.get(), l2.get());
+  EXPECT_EQ("3,2,1", GetLayerChildrenNames(*root.get()));
+
+  root->StackBelow(l3.get(), l1.get());
+  EXPECT_EQ("2,3,1", GetLayerChildrenNames(*root.get()));
 }
 
 // Verifies SetBounds triggers the appropriate painting/drawing.
@@ -1342,6 +936,89 @@ TEST_F(LayerWithRealCompositorTest, MAYBE_Opacity) {
   ASSERT_FALSE(bitmap.empty());
   // WritePNGFile(bitmap, ref_img);
   EXPECT_TRUE(IsSameAsPNGFile(bitmap, ref_img));
+}
+
+namespace {
+
+class SchedulePaintLayerDelegate : public LayerDelegate {
+ public:
+  SchedulePaintLayerDelegate() : paint_count_(0), layer_(NULL) {}
+
+  virtual ~SchedulePaintLayerDelegate() {}
+
+  void set_layer(Layer* layer) {
+    layer_ = layer;
+    layer_->set_delegate(this);
+  }
+
+  void SetSchedulePaintRect(const gfx::Rect& rect) {
+    schedule_paint_rect_ = rect;
+  }
+
+  int GetPaintCountAndClear() {
+    int value = paint_count_;
+    paint_count_ = 0;
+    return value;
+  }
+
+  const gfx::Rect& last_clip_rect() const { return last_clip_rect_; }
+
+ private:
+  // Overridden from LayerDelegate:
+  virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE {
+    paint_count_++;
+    if (!schedule_paint_rect_.IsEmpty()) {
+      layer_->SchedulePaint(schedule_paint_rect_);
+      schedule_paint_rect_ = gfx::Rect();
+    }
+    SkRect sk_clip_rect;
+    if (canvas->GetSkCanvas()->getClipBounds(&sk_clip_rect))
+      last_clip_rect_ = gfx::SkRectToRect(sk_clip_rect);
+  }
+
+  int paint_count_;
+  Layer* layer_;
+  gfx::Rect schedule_paint_rect_;
+  gfx::Rect last_clip_rect_;
+
+  DISALLOW_COPY_AND_ASSIGN(SchedulePaintLayerDelegate);
+};
+
+}  // namespace
+
+// Verifies that if SchedulePaint is invoked during painting the layer is still
+// marked dirty.
+TEST_F(LayerWithDelegateTest, SchedulePaintFromOnPaintLayer) {
+  scoped_ptr<Layer> root(CreateColorLayer(SK_ColorRED,
+                                          gfx::Rect(0, 0, 500, 500)));
+  SchedulePaintLayerDelegate child_delegate;
+  scoped_ptr<Layer> child(CreateColorLayer(SK_ColorBLUE,
+                                           gfx::Rect(0, 0, 200, 200)));
+  child_delegate.set_layer(child.get());
+
+  root->Add(child.get());
+
+  SchedulePaintForLayer(root.get());
+  DrawTree(root.get());
+  schedule_draw_invoked_ = false;
+  child->SchedulePaint(gfx::Rect(0, 0, 20, 20));
+  child_delegate.GetPaintCountAndClear();
+  EXPECT_TRUE(schedule_draw_invoked_);
+  schedule_draw_invoked_ = false;
+  // Set a rect so that when OnPaintLayer() is invoked SchedulePaint is invoked
+  // again.
+  child_delegate.SetSchedulePaintRect(gfx::Rect(10, 10, 30, 30));
+  DrawTree(root.get());
+  // |child| should have been painted once.
+  EXPECT_EQ(1, child_delegate.GetPaintCountAndClear());
+  // ScheduleDraw() should have been invoked.
+  EXPECT_TRUE(schedule_draw_invoked_);
+  // Because SchedulePaint() was invoked from OnPaintLayer() |child| should
+  // still need to be painted.
+  DrawTree(root.get());
+  EXPECT_EQ(1, child_delegate.GetPaintCountAndClear());
+  EXPECT_TRUE(child_delegate.last_clip_rect().Contains(
+                  gfx::Rect(10, 10, 30, 30)));
 }
 
 } // namespace ui

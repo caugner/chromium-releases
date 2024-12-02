@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "content/common/child_process.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_messages.h"
-#include "content/common/gpu/transport_texture.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "ui/gfx/gl/gl_context.h"
@@ -26,15 +25,20 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
+namespace {
+const int64 kHandleMoreWorkPeriodMs = 1;
+}
+
 GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
                        GpuWatchdog* watchdog,
-                       int renderer_id,
+                       gfx::GLShareGroup* share_group,
+                       int client_id,
                        bool software)
     : gpu_channel_manager_(gpu_channel_manager),
-      renderer_id_(renderer_id),
+      client_id_(client_id),
       renderer_process_(base::kNullProcessHandle),
       renderer_pid_(base::kNullProcessId),
-      share_group_(new gfx::GLShareGroup),
+      share_group_(share_group ? share_group : new gfx::GLShareGroup),
       watchdog_(watchdog),
       software_(software),
       handle_messages_scheduled_(false),
@@ -42,7 +46,11 @@ GpuChannel::GpuChannel(GpuChannelManager* gpu_channel_manager,
       num_contexts_preferring_discrete_gpu_(0),
       weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(gpu_channel_manager);
-  DCHECK(renderer_id);
+  DCHECK(client_id);
+
+  static int last_channel_id = 0;
+  channel_id_ = ++last_channel_id;
+
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
   log_messages_ = command_line->HasSwitch(switches::kLogPluginMessages);
   disallowed_features_.multisampling =
@@ -56,15 +64,6 @@ GpuChannel::~GpuChannel() {
   if (renderer_process_)
     CloseHandle(renderer_process_);
 #endif
-}
-
-TransportTexture* GpuChannel::GetTransportTexture(int32 route_id) {
-  return transport_textures_.Lookup(route_id);
-}
-
-void GpuChannel::DestroyTransportTexture(int32 route_id) {
-  transport_textures_.Remove(route_id);
-  router_.RemoveRoute(route_id);
 }
 
 bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
@@ -112,7 +111,7 @@ bool GpuChannel::OnMessageReceived(const IPC::Message& message) {
 }
 
 void GpuChannel::OnChannelError() {
-  gpu_channel_manager_->RemoveChannel(renderer_id_);
+  gpu_channel_manager_->RemoveChannel(client_id_);
 }
 
 void GpuChannel::OnChannelConnected(int32 peer_pid) {
@@ -154,7 +153,7 @@ void GpuChannel::OnScheduled() {
   // Post a task to handle any deferred messages. The deferred message queue is
   // not emptied here, which ensures that OnMessageReceived will continue to
   // defer newly received messages until the ones in the queue have all been
-  // handled by HandleDeferredMessages. HandleDeferredMessages is invoked as a
+  // handled by HandleMessage. HandleMessage is invoked as a
   // task to prevent reentrancy.
   MessageLoop::current()->PostTask(
       FROM_HERE,
@@ -173,12 +172,12 @@ void GpuChannel::DestroySoon() {
 
 void GpuChannel::OnDestroy() {
   TRACE_EVENT0("gpu", "GpuChannel::OnDestroy");
-  gpu_channel_manager_->RemoveChannel(renderer_id_);
+  gpu_channel_manager_->RemoveChannel(client_id_);
 }
 
 void GpuChannel::CreateViewCommandBuffer(
     gfx::PluginWindowHandle window,
-    int32 render_view_id,
+    int32 surface_id,
     const GPUCreateCommandBufferConfig& init_params,
     int32* route_id) {
   *route_id = MSG_ROUTING_NONE;
@@ -200,8 +199,7 @@ void GpuChannel::CreateViewCommandBuffer(
       init_params.attribs,
       init_params.gpu_preference,
       *route_id,
-      renderer_id_,
-      render_view_id,
+      surface_id,
       watchdog_,
       software_));
   router_.AddRoute(*route_id, stub.get());
@@ -223,8 +221,6 @@ bool GpuChannel::OnControlMessageReceived(const IPC::Message& msg) {
                                     OnCreateOffscreenCommandBuffer)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_DestroyCommandBuffer,
                                     OnDestroyCommandBuffer)
-    IPC_MESSAGE_HANDLER(GpuChannelMsg_CreateTransportTexture,
-        OnCreateTransportTexture)
     IPC_MESSAGE_HANDLER(GpuChannelMsg_Echo, OnEcho);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuChannelMsg_WillGpuSwitchOccur,
                                     OnWillGpuSwitchOccur)
@@ -256,16 +252,22 @@ void GpuChannel::HandleMessage() {
         Send(reply);
       }
     } else {
-      // If the channel becomes unscheduled as a result of handling the message,
-      // synthesize an IPC message to flush the command buffer that became
-      // unscheduled.
-      for (StubMap::Iterator<GpuCommandBufferStub> it(&stubs_);
-           !it.IsAtEnd();
-           it.Advance()) {
-        GpuCommandBufferStub* stub = it.GetCurrentValue();
-        if (!stub->IsScheduled()) {
+      // If the channel becomes unscheduled as a result of handling the message
+      // or has more work to do, synthesize an IPC message to flush the command
+      // buffer that became unscheduled.
+      GpuCommandBufferStub* stub = stubs_.Lookup(message->routing_id());
+      if (stub) {
+        if (!stub->IsScheduled() || stub->HasMoreWork()) {
           deferred_messages_.push_front(new GpuCommandBufferMsg_Rescheduled(
               stub->route_id()));
+        }
+        if (stub->HasMoreWork() && !handle_messages_scheduled_) {
+          MessageLoop::current()->PostDelayedTask(
+              FROM_HERE,
+              base::Bind(&GpuChannel::HandleMessage,
+                         weak_factory_.GetWeakPtr()),
+              base::TimeDelta::FromMilliseconds(kHandleMoreWorkPeriodMs));
+          handle_messages_scheduled_ = true;
         }
       }
     }
@@ -326,7 +328,7 @@ void GpuChannel::OnCreateOffscreenCommandBuffer(
       init_params.attribs,
       init_params.gpu_preference,
       route_id,
-      0, 0, watchdog_,
+      0, watchdog_,
       software_));
   router_.AddRoute(route_id, stub.get());
   stubs_.AddWithID(stub.release(), route_id);
@@ -364,24 +366,6 @@ void GpuChannel::OnDestroyCommandBuffer(int32 route_id,
     Send(reply_message);
 }
 
-void GpuChannel::OnCreateTransportTexture(int32 context_route_id,
-                                          int32 host_id) {
- #if defined(ENABLE_GPU)
-   GpuCommandBufferStub* stub = stubs_.Lookup(context_route_id);
-   int32 route_id = GenerateRouteID();
-
-   scoped_ptr<TransportTexture> transport(
-       new TransportTexture(this, channel_.get(), stub->decoder(),
-                            host_id, route_id));
-   router_.AddRoute(route_id, transport.get());
-   transport_textures_.AddWithID(transport.release(), route_id);
-
-   IPC::Message* msg = new GpuTransportTextureHostMsg_TransportTextureCreated(
-       host_id, route_id);
-   Send(msg);
- #endif
-}
-
 void GpuChannel::OnEcho(const IPC::Message& message) {
   TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnEcho");
   Send(new IPC::Message(message));
@@ -410,18 +394,13 @@ void GpuChannel::OnWillGpuSwitchOccur(bool is_creating_context,
 }
 
 void GpuChannel::OnCloseChannel() {
-  gpu_channel_manager_->RemoveChannel(renderer_id_);
+  gpu_channel_manager_->RemoveChannel(client_id_);
   // At this point "this" is deleted!
 }
 
 bool GpuChannel::Init(base::MessageLoopProxy* io_message_loop,
                       base::WaitableEvent* shutdown_event) {
-  // Check whether we're already initialized.
-  if (channel_.get()) {
-    // TODO(xhwang): Added to investigate crbug.com/95732. Clean up after fixed.
-    CHECK(false);
-    return true;
-  }
+  DCHECK(!channel_.get());
 
   // Map renderer ID to a (single) channel to that process.
   std::string channel_name = GetChannelName();
@@ -448,7 +427,7 @@ void GpuChannel::DidDestroyCommandBuffer(gfx::GpuPreference gpu_preference) {
 }
 
 std::string GpuChannel::GetChannelName() {
-  return StringPrintf("%d.r%d.gpu", base::GetCurrentProcId(), renderer_id_);
+  return StringPrintf("%d.r%d.gpu", base::GetCurrentProcId(), channel_id_);
 }
 
 #if defined(OS_POSIX)

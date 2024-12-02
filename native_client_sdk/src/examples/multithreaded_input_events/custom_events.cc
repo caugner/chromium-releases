@@ -1,10 +1,10 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <sstream>
 
-#include "examples/multithreaded_input_events/custom_events.h"
+#include "custom_events.h"
 
 namespace event_queue {
 

@@ -12,8 +12,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/task.h"
-#include "chrome/browser/sync/unrecoverable_error_handler.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler.h"
 #include "chrome/browser/sync/glue/model_associator.h"
 
 class BookmarkModel;
@@ -40,9 +40,8 @@ class BookmarkModelAssociator
       UnrecoverableErrorHandler* unrecoverable_error_handler);
   virtual ~BookmarkModelAssociator();
 
-  // Invokes BookmarkModel::SetMobileFolderVisible() based on whether the mobile
-  // node exists.
-  void UpdateMobileNodeVisibility();
+  // Updates the visibility of the permanents node in the BookmarkModel.
+  void UpdatePermanentNodeVisibility();
 
   // AssociatorInterface implementation.
   //
@@ -137,7 +136,7 @@ class BookmarkModelAssociator
   // Used to post PersistAssociation tasks to the current message loop and
   // guarantees no invocations can occur if |this| has been deleted. (This
   // allows this class to be non-refcounted).
-  ScopedRunnableMethodFactory<BookmarkModelAssociator> persist_associations_;
+  base::WeakPtrFactory<BookmarkModelAssociator> weak_factory_;
 
   int number_of_new_sync_nodes_created_at_association_;
 

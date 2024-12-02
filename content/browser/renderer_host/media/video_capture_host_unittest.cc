@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/browser/resource_context.h"
 #include "content/common/media/video_capture_messages.h"
+#include "media/audio/audio_manager.h"
 #include "media/video/capture/video_capture_types.h"
 
 #include "testing/gmock/include/gmock/gmock.h"
@@ -185,7 +186,7 @@ class MockVideoCaptureHost : public VideoCaptureHost {
 };
 
 ACTION_P(ExitMessageLoop, message_loop) {
-  message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 class VideoCaptureHostTest : public testing::Test {
@@ -205,9 +206,12 @@ class VideoCaptureHostTest : public testing::Test {
     io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
                                            message_loop_.get()));
 
+    audio_manager_ = AudioManager::Create();
+
     // Create a MediaStreamManager instance and hand over pointer to
     // ResourceContext.
-    media_stream_manager_.reset(new media_stream::MediaStreamManager());
+    media_stream_manager_.reset(new media_stream::MediaStreamManager(
+        audio_manager_));
 
 #ifndef TEST_REAL_CAPTURE_DEVICE
     media_stream_manager_->UseFakeDevice();
@@ -246,7 +250,7 @@ class VideoCaptureHostTest : public testing::Test {
 
   // Called on the VideoCaptureManager thread.
   static void PostQuitMessageLoop(MessageLoop* message_loop) {
-    message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
   // Called on the main thread.
@@ -368,6 +372,7 @@ class VideoCaptureHostTest : public testing::Test {
   scoped_ptr<BrowserThreadImpl> ui_thread_;
   scoped_ptr<BrowserThreadImpl> io_thread_;
   scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
+  scoped_refptr<AudioManager> audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureHostTest);
 };
@@ -397,7 +402,7 @@ TEST_F(VideoCaptureHostTest, StartCaptureError) {
   StartCapture();
   NotifyPacketReady();
   SimulateError();
-  base::PlatformThread::Sleep(200);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
 }
 
 #ifdef DUMP_VIDEO

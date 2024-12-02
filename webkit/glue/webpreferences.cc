@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,6 +41,7 @@ WebPreferences::WebPreferences()
       web_security_enabled(true),
       javascript_can_open_windows_automatically(true),
       loads_images_automatically(true),
+      images_enabled(true),
       plugins_enabled(true),
       dom_paste_enabled(false),  // enables execCommand("paste")
       developer_extras_enabled(false),  // Requires extra work by embedder
@@ -75,6 +76,7 @@ WebPreferences::WebPreferences()
       show_composited_layer_tree(false),
       show_fps_counter(false),
       asynchronous_spell_checking_enabled(true),
+      unified_textchecker_enabled(false),
       accelerated_compositing_enabled(false),
       threaded_compositing_enabled(false),
       force_compositing_mode(false),
@@ -82,10 +84,13 @@ WebPreferences::WebPreferences()
       composite_to_texture_enabled(false),
       fixed_position_compositing_enabled(false),
       accelerated_layers_enabled(false),
+      accelerated_animation_enabled(false),
       accelerated_video_enabled(false),
       accelerated_2d_canvas_enabled(false),
-      accelerated_drawing_enabled(false),
+      accelerated_painting_enabled(false),
+      accelerated_filters_enabled(false),
       accelerated_plugins_enabled(false),
+      partial_swap_enabled(false),
       memory_info_enabled(false),
       interactive_form_validation_enabled(true),
       fullscreen_enabled(false),
@@ -94,7 +99,8 @@ WebPreferences::WebPreferences()
       should_print_backgrounds(false),
       enable_scroll_animator(false),
       hixie76_websocket_protocol_enabled(false),
-      visual_word_movement_enabled(false) {
+      visual_word_movement_enabled(false),
+      per_tile_painting_enabled(false) {
 }
 
 WebPreferences::~WebPreferences() {
@@ -182,6 +188,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setJavaScriptCanOpenWindowsAutomatically(
       javascript_can_open_windows_automatically);
   settings->setLoadsImagesAutomatically(loads_images_automatically);
+  settings->setImagesEnabled(images_enabled);
   settings->setPluginsEnabled(plugins_enabled);
   settings->setDOMPasteAllowed(dom_paste_enabled);
   settings->setDeveloperExtrasEnabled(developer_extras_enabled);
@@ -201,8 +208,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setXSSAuditorEnabled(xss_auditor_enabled);
   settings->setDNSPrefetchingEnabled(dns_prefetching_enabled);
   settings->setLocalStorageEnabled(local_storage_enabled);
-  WebRuntimeFeatures::enableDatabase(
-      WebRuntimeFeatures::isDatabaseEnabled() || databases_enabled);
+  WebRuntimeFeatures::enableDatabase(databases_enabled);
   settings->setOfflineWebApplicationCacheEnabled(application_cache_enabled);
   settings->setCaretBrowsingEnabled(caret_browsing_enabled);
   settings->setHyperlinkAuditingEnabled(hyperlink_auditing_enabled);
@@ -277,8 +283,11 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Enable gpu-accelerated 2d canvas if requested on the command line.
   settings->setAccelerated2dCanvasEnabled(accelerated_2d_canvas_enabled);
 
-  // Enable gpu-accelerated drawing if requested on the command line.
-  settings->setAcceleratedDrawingEnabled(accelerated_drawing_enabled);
+  // Enable gpu-accelerated painting if requested on the command line.
+  settings->setAcceleratedPaintingEnabled(accelerated_painting_enabled);
+
+  // Enable gpu-accelerated filters if requested on the command line.
+  settings->setAcceleratedFiltersEnabled(accelerated_filters_enabled);
 
   // Enabling accelerated layers from the command line enabled accelerated
   // 3D CSS, Video, and Animations.
@@ -287,7 +296,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setAcceleratedCompositingForVideoEnabled(
       accelerated_video_enabled);
   settings->setAcceleratedCompositingForAnimationEnabled(
-      accelerated_layers_enabled);
+      accelerated_animation_enabled);
 
   // Enabling accelerated plugins if specified from the command line.
   settings->setAcceleratedCompositingForPluginsEnabled(
@@ -297,11 +306,15 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setAcceleratedCompositingForCanvasEnabled(
       experimental_webgl_enabled || accelerated_2d_canvas_enabled);
 
+  // Enable partial swaps if specified form the command line.
+  settings->setPartialSwapEnabled(partial_swap_enabled);
+
   // Enable memory info reporting to page if requested on the command line.
   settings->setMemoryInfoEnabled(memory_info_enabled);
 
   settings->setAsynchronousSpellCheckingEnabled(
       asynchronous_spell_checking_enabled);
+  settings->setUnifiedTextCheckerEnabled(unified_textchecker_enabled);
 
   for (WebInspectorPreferences::const_iterator it = inspector_settings.begin();
        it != inspector_settings.end(); ++it)
@@ -323,6 +336,9 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setHixie76WebSocketProtocolEnabled(
       hixie76_websocket_protocol_enabled);
   settings->setVisualWordMovementEnabled(visual_word_movement_enabled);
+
+  // Enable per-tile painting if requested on the command line.
+  settings->setPerTilePaintingEnabled(per_tile_painting_enabled);
 
   WebNetworkStateNotifier::setOnLine(is_online);
 }

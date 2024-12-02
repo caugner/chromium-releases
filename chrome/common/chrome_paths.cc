@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
@@ -60,6 +61,16 @@ const FilePath::CharType kInternalNaClHelperBootstrapFileName[] =
     FILE_PATH_LITERAL("nacl_helper_bootstrap");
 #endif
 
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+
+const FilePath::CharType kO3DPluginFileName[] =
+    FILE_PATH_LITERAL("pepper/libppo3dautoplugin.so");
+
+const FilePath::CharType kGTalkPluginFileName[] =
+    FILE_PATH_LITERAL("pepper/libppgoogletalk.so");
+
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 }  // namespace
 
 namespace chrome {
@@ -147,12 +158,17 @@ bool PathProvider(int key, FilePath* result) {
       // and annoyed a lot of users.
       break;
     case chrome::DIR_CRASH_DUMPS:
+#if defined(OS_CHROMEOS)
+      // ChromeOS uses a separate directory. See http://crosbug.com/25089
+      cur = FilePath("/var/log/chrome");
+#else
       // The crash reports are always stored relative to the default user data
       // directory.  This avoids the problem of having to re-initialize the
       // exception handler after parsing command line options, which may
       // override the location of the app's profile directory.
       if (!GetDefaultUserDataDirectory(&cur))
         return false;
+#endif
       cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
       create_dir = true;
       break;
@@ -162,7 +178,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
-      cur = base::mac::MainAppBundlePath();
+      cur = base::mac::FrameworkBundlePath();
       cur = cur.Append(FILE_PATH_LITERAL("Resources"));
 #else
       if (!PathService::Get(chrome::DIR_APP, &cur))
@@ -206,7 +222,7 @@ bool PathProvider(int key, FilePath* result) {
       break;
     case chrome::DIR_MEDIA_LIBS:
 #if defined(OS_MACOSX)
-      *result = base::mac::MainAppBundlePath();
+      *result = base::mac::FrameworkBundlePath();
       *result = result->Append("Libraries");
       return true;
 #else
@@ -242,6 +258,10 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(kInternalNaClPluginFileName);
       break;
+    case chrome::FILE_PNACL_COMPONENT:
+      // TODO(jvoung): Do we want a default value or just the ability to
+      // override immediately when testing on bots to avoid race conditions?
+      return false;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     case chrome::FILE_NACL_HELPER:
       if (!PathService::Get(base::DIR_MODULE, &cur))
@@ -253,11 +273,21 @@ bool PathProvider(int key, FilePath* result) {
         return false;
       cur = cur.Append(kInternalNaClHelperBootstrapFileName);
       break;
+    case chrome::FILE_O3D_PLUGIN:
+        if (!PathService::Get(base::DIR_MODULE, &cur))
+          return false;
+      cur = cur.Append(kO3DPluginFileName);
+      break;
+    case chrome::FILE_GTALK_PLUGIN:
+        if (!PathService::Get(base::DIR_MODULE, &cur))
+          return false;
+      cur = cur.Append(kGTalkPluginFileName);
+      break;
 #endif
     case chrome::FILE_RESOURCES_PACK:
 #if defined(OS_MACOSX)
       if (base::mac::AmIBundled()) {
-        cur = base::mac::MainAppBundlePath();
+        cur = base::mac::FrameworkBundlePath();
         cur = cur.Append(FILE_PATH_LITERAL("Resources"))
                  .Append(FILE_PATH_LITERAL("resources.pak"));
         break;
@@ -385,7 +415,7 @@ bool PathProvider(int key, FilePath* result) {
 
     case chrome::DIR_DEFAULT_APPS:
 #if defined(OS_MACOSX)
-      cur = base::mac::MainAppBundlePath();
+      cur = base::mac::FrameworkBundlePath();
       cur = cur.Append(FILE_PATH_LITERAL("Default Apps"));
 #else
       if (!PathService::Get(chrome::DIR_APP, &cur))

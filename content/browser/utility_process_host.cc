@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
+#include "content/browser/browser_child_process_host_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/utility_messages.h"
 #include "content/public/browser/content_browser_client.h"
@@ -36,8 +37,7 @@ bool UtilityProcessHost::Client::OnMessageReceived(
 
 UtilityProcessHost::UtilityProcessHost(Client* client,
                                        BrowserThread::ID client_thread_id)
-    : BrowserChildProcessHost(content::PROCESS_TYPE_UTILITY),
-      client_(client),
+    : client_(client),
       client_thread_id_(client_thread_id),
       is_batch_mode_(false),
       no_sandbox_(false),
@@ -46,10 +46,14 @@ UtilityProcessHost::UtilityProcessHost(Client* client,
 #else
       child_flags_(ChildProcessHost::CHILD_NORMAL),
 #endif
+      use_linux_zygote_(false),
       started_(false) {
+  process_.reset(
+      new BrowserChildProcessHostImpl(content::PROCESS_TYPE_UTILITY, this));
 }
 
 UtilityProcessHost::~UtilityProcessHost() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(!is_batch_mode_);
 }
 
@@ -57,7 +61,7 @@ bool UtilityProcessHost::Send(IPC::Message* message) {
   if (!StartProcess())
     return false;
 
-  return BrowserChildProcessHost::Send(message);
+  return process_->Send(message);
 }
 
 bool UtilityProcessHost::StartBatchMode()  {
@@ -86,9 +90,9 @@ bool UtilityProcessHost::StartProcess() {
     return true;
   // Name must be set or metrics_service will crash in any test which
   // launches a UtilityProcessHost.
-  set_name(ASCIIToUTF16("utility process"));
+  process_->SetName(ASCIIToUTF16("utility process"));
 
-  std::string channel_id = child_process_host()->CreateChannel();
+  std::string channel_id = process_->GetHost()->CreateChannel();
   if (channel_id.empty())
     return false;
 
@@ -129,11 +133,17 @@ bool UtilityProcessHost::StartProcess() {
   cmd_line->AppendSwitchPath(switches::kUtilityProcessAllowedDir, exposed_dir_);
 #endif
 
-  Launch(
+  bool use_zygote = false;
+
+#if defined(OS_LINUX)
+  use_zygote = !no_sandbox_ && use_linux_zygote_;
+#endif
+
+  process_->Launch(
 #if defined(OS_WIN)
       exposed_dir_,
 #elif defined(OS_POSIX)
-      false,
+      use_zygote,
       env_,
 #endif
       cmd_line);
@@ -144,8 +154,8 @@ bool UtilityProcessHost::StartProcess() {
 bool UtilityProcessHost::OnMessageReceived(const IPC::Message& message) {
   BrowserThread::PostTask(
       client_thread_id_, FROM_HERE,
-      base::IgnoreReturn<bool>(
-          base::Bind(&Client::OnMessageReceived, client_.get(), message)));
+      base::Bind(base::IgnoreResult(&Client::OnMessageReceived),
+                 client_.get(), message));
   return true;
 }
 

@@ -15,13 +15,16 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::UserMetricsAction;
+using content::WebContents;
 
 namespace chromeos {
 
@@ -67,7 +70,7 @@ void LocaleChangeGuard::RevertLocaleChange(const ListValue* list) {
   if (reverted_)
     return;
   reverted_ = true;
-  UserMetrics::RecordAction(UserMetricsAction("LanguageChange_Revert"));
+  content::RecordAction(UserMetricsAction("LanguageChange_Revert"));
   profile_->ChangeAppLocale(
       from_locale_, Profile::APP_LOCALE_CHANGED_VIA_REVERT);
 
@@ -85,7 +88,8 @@ void LocaleChangeGuard::Observe(int type,
   }
   switch (type) {
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
-      if (profile_ == content::Source<TabContents>(source)->browser_context()) {
+      if (profile_ ==
+          content::Source<WebContents>(source)->GetBrowserContext()) {
         // We need to perform locale change check only once, so unsubscribe.
         registrar_.Remove(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
                           content::NotificationService::AllSources());
@@ -104,10 +108,8 @@ void LocaleChangeGuard::Observe(int type,
           }
           std::string owner_locale =
               prefs->GetString(prefs::kApplicationLocale);
-          if (!owner_locale.empty()) {
+          if (!owner_locale.empty())
             local_state->SetString(prefs::kOwnerLocale, owner_locale);
-            local_state->ScheduleSavePersistentPrefs();
-          }
         }
       }
       break;
@@ -192,10 +194,9 @@ void LocaleChangeGuard::AcceptLocaleChange() {
   }
   if (prefs->GetString(prefs::kApplicationLocale) != to_locale_)
     return;
-  UserMetrics::RecordAction(UserMetricsAction("LanguageChange_Accept"));
+  content::RecordAction(UserMetricsAction("LanguageChange_Accept"));
   prefs->SetString(prefs::kApplicationLocaleBackup, to_locale_);
   prefs->SetString(prefs::kApplicationLocaleAccepted, to_locale_);
-  prefs->ScheduleSavePersistentPrefs();
 }
 
 void LocaleChangeGuard::PrepareChangingLocale(

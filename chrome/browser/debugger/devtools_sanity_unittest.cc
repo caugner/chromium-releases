@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
@@ -19,25 +20,33 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/worker_host/worker_process_host.h"
-#include "content/browser/worker_host/worker_service.h"
-#include "content/browser/worker_host/worker_service_observer.h"
+#include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/child_process_data.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_manager.h"
-#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/worker_service.h"
+#include "content/public/browser/worker_service_observer.h"
 #include "net/test/test_server.h"
 
 using content::BrowserThread;
 using content::DevToolsManager;
 using content::DevToolsAgentHost;
 using content::DevToolsAgentHostRegistry;
+using content::NavigationController;
+using content::WebContents;
+using content::WorkerService;
+using content::WorkerServiceObserver;
 
 namespace {
 
@@ -82,7 +91,7 @@ const char kSharedWorkerTestPage[] =
 const char kReloadSharedWorkerTestPage[] =
     "files/workers/debug_shared_worker_initialization.html";
 
-void RunTestFuntion(DevToolsWindow* window, const char* test_name) {
+void RunTestFunction(DevToolsWindow* window, const char* test_name) {
   std::string result;
 
   // At first check that JavaScript part of the front-end is loaded by
@@ -122,7 +131,7 @@ class DevToolsSanityTest : public InProcessBrowserTest {
  protected:
   void RunTest(const std::string& test_name, const std::string& test_page) {
     OpenDevToolsWindow(test_page);
-    RunTestFuntion(window_, test_name.c_str());
+    RunTestFunction(window_, test_name.c_str());
     CloseDevToolsWindow();
   }
 
@@ -134,13 +143,13 @@ class DevToolsSanityTest : public InProcessBrowserTest {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
         content::NotificationService::AllSources());
-    inspected_rvh_ = GetInspectedTab()->render_view_host();
+    inspected_rvh_ = GetInspectedTab()->GetRenderViewHost();
     window_ = DevToolsWindow::OpenDevToolsWindow(inspected_rvh_);
     observer.Wait();
   }
 
-  TabContents* GetInspectedTab() {
-    return browser()->GetTabContentsAt(0);
+  WebContents* GetInspectedTab() {
+    return browser()->GetWebContentsAt(0);
   }
 
   void CloseDevToolsWindow() {
@@ -169,10 +178,10 @@ void TimeoutCallback(const std::string& timeout_message) {
 
 // Base class for DevTools tests that test devtools functionality for
 // extensions and content scripts.
-class DevToolsExtensionDebugTest : public DevToolsSanityTest,
-                                   public content::NotificationObserver {
+class DevToolsExtensionTest : public DevToolsSanityTest,
+                              public content::NotificationObserver {
  public:
-  DevToolsExtensionDebugTest() : DevToolsSanityTest() {
+  DevToolsExtensionTest() : DevToolsSanityTest() {
     PathService::Get(chrome::DIR_TEST_DATA, &test_extensions_dir_);
     test_extensions_dir_ = test_extensions_dir_.AppendASCII("devtools");
     test_extensions_dir_ = test_extensions_dir_.AppendASCII("extensions");
@@ -252,6 +261,12 @@ class DevToolsExtensionDebugTest : public DevToolsSanityTest,
   FilePath test_extensions_dir_;
 };
 
+class DevToolsExperimentalExtensionTest : public DevToolsExtensionTest {
+ public:
+  void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(switches::kEnableExperimentalExtensionApis);
+  }
+};
 
 class WorkerDevToolsSanityTest : public InProcessBrowserTest {
  public:
@@ -279,11 +294,11 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
     virtual void WorkerCreated (
         WorkerProcessHost* process,
         const WorkerProcessHost::WorkerInstance& instance) OVERRIDE {
-      worker_data_->worker_process_id = process->id();
+      worker_data_->worker_process_id = process->GetData().id;
       worker_data_->worker_route_id = instance.worker_route_id();
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          new MessageLoop::QuitTask);
+          MessageLoop::QuitClosure());
       delete this;
     }
     virtual void WorkerDestroyed(
@@ -310,11 +325,11 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
     virtual void WorkerDestroyed(
         WorkerProcessHost* process,
         int worker_route_id) OVERRIDE {
-      ASSERT_EQ(worker_data_->worker_process_id, process->id());
+      ASSERT_EQ(worker_data_->worker_process_id, process->GetData().id);
       ASSERT_EQ(worker_data_->worker_route_id, worker_route_id);
       WorkerService::GetInstance()->RemoveObserver(this);
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-          new MessageLoop::QuitTask);
+          MessageLoop::QuitClosure());
       delete this;
     }
     virtual void WorkerContextStarted(
@@ -330,17 +345,15 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
 
     scoped_refptr<WorkerData> worker_data = WaitForFirstSharedWorker();
     OpenDevToolsWindowForSharedWorker(worker_data.get());
-    RunTestFuntion(window_, test_name);
+    RunTestFunction(window_, test_name);
     CloseDevToolsWindow();
   }
 
   static void TerminateWorkerOnIOThread(
       scoped_refptr<WorkerData> worker_data) {
-    for (BrowserChildProcessHost::Iterator iter(content::PROCESS_TYPE_WORKER);
-         !iter.Done(); ++iter) {
-      if (iter->id() == worker_data->worker_process_id) {
-        WorkerProcessHost* host = static_cast<WorkerProcessHost*>(*iter);
-        host->TerminateWorker(worker_data->worker_route_id);
+    for (WorkerProcessHostIterator iter; !iter.Done(); ++iter) {
+      if (iter.GetData().id == worker_data->worker_process_id) {
+        iter->TerminateWorker(worker_data->worker_route_id);
         WorkerService::GetInstance()->AddObserver(
             new WorkerTerminationObserver(worker_data));
         return;
@@ -358,17 +371,15 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
 
   static void WaitForFirstSharedWorkerOnIOThread(
       scoped_refptr<WorkerData> worker_data) {
-    BrowserChildProcessHost::Iterator iter(content::PROCESS_TYPE_WORKER);
-    for (; !iter.Done(); ++iter) {
-      WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
-      const WorkerProcessHost::Instances& instances = worker->instances();
+    for (WorkerProcessHostIterator iter; !iter.Done(); ++iter) {
+      const WorkerProcessHost::Instances& instances = iter->instances();
       for (WorkerProcessHost::Instances::const_iterator i = instances.begin();
            i != instances.end(); ++i) {
 
-        worker_data->worker_process_id = worker->id();
+        worker_data->worker_process_id = iter.GetData().id;
         worker_data->worker_route_id = i->worker_route_id();
         BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-            new MessageLoop::QuitTask);
+            MessageLoop::QuitClosure());
         return;
       }
     }
@@ -398,12 +409,12 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
         agent_host,
         window_->devtools_client_host());
     RenderViewHost* client_rvh = window_->GetRenderViewHost();
-    TabContents* client_contents = client_rvh->delegate()->GetAsTabContents();
+    WebContents* client_contents = client_rvh->delegate()->GetAsWebContents();
     if (client_contents->IsLoading()) {
       ui_test_utils::WindowedNotificationObserver observer(
           content::NOTIFICATION_LOAD_STOP,
           content::Source<NavigationController>(
-              &client_contents->controller()));
+              &client_contents->GetController()));
       observer.Wait();
     }
   }
@@ -426,19 +437,34 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestShowScriptsTab) {
 // Tests that scripts tab is populated with inspected scripts even if it
 // hadn't been shown by the moment inspected paged refreshed.
 // @see http://crbug.com/26312
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest,
-                       FAILS_TestScriptsTabIsPopulatedOnInspectedPageRefresh) {
+IN_PROC_BROWSER_TEST_F(
+    DevToolsSanityTest,
+    DISABLED_TestScriptsTabIsPopulatedOnInspectedPageRefresh) {
   // Clear inspector settings to ensure that Elements will be
   // current panel when DevTools window is open.
   content::GetContentClient()->browser()->ClearInspectorSettings(
-      GetInspectedTab()->render_view_host());
+      GetInspectedTab()->GetRenderViewHost());
   RunTest("testScriptsTabIsPopulatedOnInspectedPageRefresh",
           kDebuggerTestPage);
 }
 
+// Tests that chrome.devtools extension is correctly exposed.
+IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
+                       TestDevToolsExtensionAPI) {
+  LoadExtension("devtools_extension");
+  RunTest("waitForTestResultsInConsole", "");
+}
+
+// Tests that chrome.experimental.devtools extension is correctly exposed
+// when the extension has experimental permission.
+IN_PROC_BROWSER_TEST_F(DevToolsExperimentalExtensionTest,
+                       TestDevToolsExperimentalExtensionAPI) {
+  LoadExtension("devtools_experimental");
+  RunTest("waitForTestResultsInConsole", "");
+}
+
 // Tests that a content script is in the scripts list.
-// This test is disabled, see bug 28961.
-IN_PROC_BROWSER_TEST_F(DevToolsExtensionDebugTest,
+IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
                        TestContentScriptIsPresent) {
   LoadExtension("simple_content_script");
   RunTest("testContentScriptIsPresent", kPageWithContentScript);
@@ -489,7 +515,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestConsoleOnNavigateBack) {
   RunTest("testConsoleOnNavigateBack", kNavigateBackTestPage);
 }
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
 // http://crbug.com/103539
 #define TestReattachAfterCrash FLAKY_TestReattachAfterCrash
 #endif
@@ -502,11 +528,12 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestReattachAfterCrash) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()));
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   browser()->Reload(CURRENT_TAB);
   observer.Wait();
 
-  RunTestFuntion(window_, "testReattachAfterCrash");
+  RunTestFunction(window_, "testReattachAfterCrash");
   CloseDevToolsWindow();
 }
 
@@ -562,7 +589,7 @@ IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
     ui_test_utils::NavigateToURL(browser(), url);
 
     // Wait until worker script is paused on the debugger statement.
-    RunTestFuntion(window_, "testPauseInSharedWorkerInitialization");
+    RunTestFunction(window_, "testPauseInSharedWorkerInitialization");
     CloseDevToolsWindow();
 }
 

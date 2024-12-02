@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
@@ -59,9 +60,8 @@ class NET_EXPORT OriginBoundCertService
   // could not be completed immediately, in which case the result code will
   // be passed to the callback when available.
   //
-  // If |out_req| is non-NULL, then |*out_req| will be filled with a handle to
-  // the async request. This handle is not valid after the request has
-  // completed.
+  // |*out_req| will be filled with a handle to the async request. This handle
+  // is not valid after the request has completed.
   int GetOriginBoundCert(
       const std::string& origin,
       const std::vector<uint8>& requested_types,
@@ -76,6 +76,9 @@ class NET_EXPORT OriginBoundCertService
   // callback will not be called.
   void CancelRequest(RequestHandle req);
 
+  // Returns the backing OriginBoundCertStore.
+  OriginBoundCertStore* GetCertStore();
+
   // Public only for unit testing.
   int cert_count();
   uint64 requests() const { return requests_; }
@@ -86,20 +89,26 @@ class NET_EXPORT OriginBoundCertService
   friend class OriginBoundCertServiceWorker;  // Calls HandleResult.
 
   // On success, |private_key| stores a DER-encoded PrivateKeyInfo
-  // struct, and |cert| stores a DER-encoded certificate. Returns
-  // OK if successful and an error code otherwise.
+  // struct, |cert| stores a DER-encoded certificate, |creation_time| stores the
+  // start of the validity period of the certificate and |expiration_time|
+  // stores the expiration time of the certificate. Returns OK if successful and
+  // an error code otherwise.
   // |serial_number| is passed in because it is created with the function
   // base::RandInt, which opens the file /dev/urandom. /dev/urandom is opened
   // with a LazyInstance, which is not allowed on a worker thread.
   static int GenerateCert(const std::string& origin,
                           SSLClientCertType type,
                           uint32 serial_number,
+                          base::Time* creation_time,
+                          base::Time* expiration_time,
                           std::string* private_key,
                           std::string* cert);
 
   void HandleResult(const std::string& origin,
                     int error,
                     SSLClientCertType type,
+                    base::Time creation_time,
+                    base::Time expiration_time,
                     const std::string& private_key,
                     const std::string& cert);
 

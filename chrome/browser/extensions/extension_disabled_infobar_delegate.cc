@@ -17,10 +17,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -163,9 +163,7 @@ void ExtensionDisabledInfobarDelegate::Observe(
     DCHECK_EQ(chrome::NOTIFICATION_EXTENSION_UNLOADED, type);
     UnloadedExtensionInfo* info =
         content::Details<UnloadedExtensionInfo>(details).ptr();
-    if (info->reason == extension_misc::UNLOAD_REASON_DISABLE ||
-        info->reason == extension_misc::UNLOAD_REASON_UNINSTALL)
-      extension = info->extension;
+    extension = info->extension;
   }
   if (extension == extension_)
     RemoveSelf();

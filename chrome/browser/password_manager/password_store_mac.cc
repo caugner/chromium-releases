@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,20 +10,21 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/logging.h"
+#include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/keychain_mac.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/notification_service_impl.h"
+#include "content/public/browser/notification_service.h"
 
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 
 // Utility class to handle the details of constructing and running a keychain
 // search from a set of attributes.
@@ -150,7 +151,7 @@ void KeychainSearch::FindMatchingItems(std::vector<SecKeychainItemRef>* items) {
       NULL, kSecInternetPasswordItemClass, &search_attributes_, &search_ref_);
 
   if (result != noErr) {
-    LOG(ERROR) << "Keychain lookup failed with error " << result;
+    OSSTATUS_LOG(ERROR, result) << "Keychain lookup failed";
     return;
   }
 
@@ -260,7 +261,7 @@ bool FillPasswordFormFromKeychainItem(const MacKeychain& keychain,
     // We don't log errSecAuthFailed because that just means that the user
     // chose not to allow us access to the item.
     if (result != errSecAuthFailed) {
-      LOG(ERROR) << "Keychain data load failed: " << result;
+      OSSTATUS_LOG(ERROR, result) << "Keychain data load failed";
     }
     return false;
   }
@@ -641,7 +642,7 @@ SecKeychainItemRef MacKeychainPasswordFormAdapter::KeychainItemForForm(
 std::vector<SecKeychainItemRef>
     MacKeychainPasswordFormAdapter::MatchingKeychainItems(
         const std::string& signon_realm,
-        webkit_glue::PasswordForm::Scheme scheme,
+        webkit::forms::PasswordForm::Scheme scheme,
         const char* path, const char* username) {
   std::vector<SecKeychainItemRef> matches;
 
@@ -755,12 +756,6 @@ bool PasswordStoreMac::Init() {
   }
   ScheduleTask(base::Bind(&PasswordStoreMac::CreateNotificationService, this));
   return PasswordStore::Init();
-}
-
-void PasswordStoreMac::ScheduleTask(Task* task) {
-  if (thread_.get()) {
-    thread_->message_loop()->PostTask(FROM_HERE, task);
-  }
 }
 
 void PasswordStoreMac::ScheduleTask(const base::Closure& task) {
@@ -887,7 +882,7 @@ void PasswordStoreMac::RemoveLoginsCreatedBetweenImpl(
 }
 
 void PasswordStoreMac::GetLoginsImpl(GetLoginsRequest* request,
-                                     const webkit_glue::PasswordForm& form) {
+                                     const webkit::forms::PasswordForm& form) {
   MacKeychainPasswordFormAdapter keychain_adapter(keychain_.get());
   std::vector<PasswordForm*> keychain_forms =
       keychain_adapter.PasswordsFillingForm(form);
@@ -960,7 +955,7 @@ bool PasswordStoreMac::AddToKeychainIfNecessary(const PasswordForm& form) {
 }
 
 bool PasswordStoreMac::DatabaseHasFormMatchingKeychainForm(
-    const webkit_glue::PasswordForm& form) {
+    const webkit::forms::PasswordForm& form) {
   bool has_match = false;
   std::vector<PasswordForm*> database_forms;
   login_metadata_db_->GetLogins(form, &database_forms);
@@ -1016,5 +1011,5 @@ void PasswordStoreMac::RemoveKeychainForms(
 }
 
 void PasswordStoreMac::CreateNotificationService() {
-  notification_service_.reset(new NotificationServiceImpl);
+  notification_service_.reset(content::NotificationService::Create());
 }

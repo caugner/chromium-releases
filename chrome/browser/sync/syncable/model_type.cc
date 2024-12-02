@@ -287,17 +287,6 @@ StringValue* ModelTypeToValue(ModelType model_type) {
   return Value::CreateStringValue("");
 }
 
-std::string ModelTypeSetToString(const ModelTypeSet& model_types) {
-  std::string result;
-  for (ModelTypeSet::const_iterator iter = model_types.begin();
-       iter != model_types.end();) {
-    result += ModelTypeToString(*iter);
-    if (++iter != model_types.end())
-      result += ", ";
-  }
-  return result;
-}
-
 ModelType ModelTypeFromValue(const Value& value) {
   if (value.IsType(Value::TYPE_STRING)) {
     std::string result;
@@ -350,63 +339,22 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
   return UNSPECIFIED;
 }
 
-std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types) {
+std::string ModelTypeSetToString(ModelTypeSet model_types) {
   std::string result;
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    if (model_types[i]) {
-      if (!result.empty()) {
-        result += ", ";
-      }
-      result += ModelTypeToString(ModelTypeFromInt(i));
+  for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {
+    if (!result.empty()) {
+      result += ", ";
     }
+    result += ModelTypeToString(it.Get());
   }
   return result;
 }
 
-ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set) {
-  ModelTypeBitSet bitset;
-  for (ModelTypeSet::const_iterator iter = set.begin(); iter != set.end();
-       ++iter) {
-    bitset.set(*iter);
-  }
-  return bitset;
-}
-
-ModelTypeSet ModelTypeBitSetToSet(const ModelTypeBitSet& bit_set) {
-  ModelTypeSet set;
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    syncable::ModelType type = syncable::ModelTypeFromInt(i);
-    if (bit_set[type]) {
-      set.insert(type);
-    }
-  }
-  return set;
-}
-
-ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types) {
+base::ListValue* ModelTypeSetToValue(ModelTypeSet model_types) {
   ListValue* value = new ListValue();
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    if (model_types[i]) {
-      value->Append(
-          Value::CreateStringValue(ModelTypeToString(ModelTypeFromInt(i))));
-    }
-  }
-  return value;
-}
-
-ModelTypeBitSet ModelTypeBitSetFromValue(const base::ListValue& value) {
-  ModelTypeBitSet result;
-  for (ListValue::const_iterator i = value.begin(); i != value.end(); ++i) {
-    result.set(ModelTypeFromValue(**i));
-  }
-  return result;
-}
-
-ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types) {
-  ListValue* value = new ListValue();
-  for (ModelTypeSet::const_iterator i = model_types.begin();
-       i != model_types.end(); ++i) {
-    value->Append(Value::CreateStringValue(ModelTypeToString(*i)));
+  for (ModelTypeSet::Iterator it = model_types.First(); it.Good(); it.Inc()) {
+    value->Append(
+        Value::CreateStringValue(ModelTypeToString(it.Get())));
   }
   return value;
 }
@@ -414,7 +362,7 @@ ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types) {
 ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value) {
   ModelTypeSet result;
   for (ListValue::const_iterator i = value.begin(); i != value.end(); ++i) {
-    result.insert(ModelTypeFromValue(**i));
+    result.Put(ModelTypeFromValue(**i));
   }
   return result;
 }
@@ -661,14 +609,6 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
     *model_type = UNSPECIFIED;
     return false;
   }
-}
-
-ModelTypeSet GetAllRealModelTypes() {
-  ModelTypeSet all_types;
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    all_types.insert(ModelTypeFromInt(i));
-  }
-  return all_types;
 }
 
 bool IsRealDataType(ModelType model_type) {

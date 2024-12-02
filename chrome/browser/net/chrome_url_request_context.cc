@@ -118,8 +118,7 @@ class FactoryForMedia : public ChromeURLRequestContextFactory {
 ChromeURLRequestContextGetter::ChromeURLRequestContextGetter(
     Profile* profile,
     ChromeURLRequestContextFactory* factory)
-    : io_thread_(g_browser_process->io_thread()),
-      factory_(factory) {
+    : factory_(factory) {
   DCHECK(factory);
   DCHECK(profile);
   RegisterPrefsObserver(profile);
@@ -280,9 +279,9 @@ void ChromeURLRequestContextGetter::Observe(
               &ChromeURLRequestContextGetter::OnAcceptLanguageChange,
               this,
               accept_language));
-    } else if (*pref_name_in == prefs::kDefaultCharset) {
+    } else if (*pref_name_in == prefs::kGlobalDefaultCharset) {
       std::string default_charset =
-          prefs->GetString(prefs::kDefaultCharset);
+          prefs->GetString(prefs::kGlobalDefaultCharset);
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
           base::Bind(
@@ -309,7 +308,7 @@ void ChromeURLRequestContextGetter::RegisterPrefsObserver(Profile* profile) {
 
   registrar_.Init(profile->GetPrefs());
   registrar_.Add(prefs::kAcceptLanguages, this);
-  registrar_.Add(prefs::kDefaultCharset, this);
+  registrar_.Add(prefs::kGlobalDefaultCharset, this);
   registrar_.Add(prefs::kClearSiteDataOnExit, this);
 }
 

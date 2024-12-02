@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -7,6 +7,38 @@
       'targets': [
         {
           'target_name': 'chrome_dll',
+          'type': 'none',
+          'dependencies': [
+            'chrome_main_dll',
+          ],
+          'conditions': [
+            ['incremental_chrome_dll==1', {
+              # Linking to a different directory and then hardlinking back
+              # to OutDir is a workaround to avoid having the .ilk for
+              # chrome.exe and chrome.dll conflicting. See crbug.com/92528
+              # for more information. Done on the dll instead of the exe so
+              # that people launching from VS don't need to modify
+              # $(TargetPath) for the exe.
+              'actions': [
+                {
+                  'action_name': 'hardlink_to_output',
+                  'inputs': [
+                    '$(OutDir)\\initial\\chrome.dll',
+                  ],
+                  'outputs': [
+                    '$(OutDir)\\chrome.dll',
+                  ],
+                  'action': ['tools\\build\\win\\hardlink_failsafe.bat',
+                             '$(OutDir)\\initial\\chrome.dll',
+                             '$(OutDir)\\chrome.dll'],
+                  'msvs_cygwin_shell': 0,
+                }
+              ],
+            }],
+          ]
+        },
+        {
+          'target_name': 'chrome_main_dll',
           'type': 'shared_library',
           'variables': {
             'enable_wexit_time_destructors': 1,
@@ -16,6 +48,11 @@
             'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'conditions': [
+            ['use_aura==1', {
+              'dependencies': [
+                '../ui/gfx/compositor/compositor.gyp:compositor',
+              ],
+            }],
             ['OS=="win"', {
               'product_name': 'chrome',
               'dependencies': [
@@ -127,17 +164,6 @@
                   'AdditionalManifestFiles': '$(ProjectDir)\\app\\chrome.dll.manifest',
                 },
               },
-              'conditions': [
-                ['incremental_chrome_dll==1', {
-                  # Linking to a different directory and then hardlinking back
-                  # to OutDir is a workaround to avoid having the .ilk for
-                  # chrome.exe and chrome.dll conflicting. See crbug.com/92528
-                  # for more information. Done on the dll instead of the exe so
-                  # that people launching from VS don't need to modify
-                  # $(TargetPath) for the exe.
-                  'msvs_postbuild': 'tools\\build\\win\\hardlink_failsafe.bat $(OutDir)\\initial\\chrome.dll $(OutDir)\\chrome.dll'
-                }]
-              ]
             }],  # OS=="win"
             ['OS=="mac"', {
               # The main browser executable's name is <(mac_product_name).
@@ -245,10 +271,8 @@
                 'app/nibs/Notification.xib',
                 'app/nibs/Panel.xib',
                 'app/nibs/PreviewableContents.xib',
-                'app/nibs/ReportBug.xib',
                 'app/nibs/SaveAccessoryView.xib',
                 'app/nibs/SadTab.xib',
-                'app/nibs/SearchEngineDialog.xib',
                 'app/nibs/SpeechInputBubble.xib',
                 'app/nibs/TabView.xib',
                 'app/nibs/TaskManager.xib',
@@ -269,6 +293,7 @@
                 'app/theme/omnibox_https_valid.pdf',
                 'app/theme/omnibox_https_warning.pdf',
                 'app/theme/omnibox_search.pdf',
+                'app/theme/omnibox_tts.pdf',
                 'app/theme/otr_icon.pdf',
                 'app/theme/star.pdf',
                 'app/theme/star_lit.pdf',
@@ -349,7 +374,8 @@
                   # but this seems like a really good place to store them.
                   'postbuild_name': 'Tweak Info.plist',
                   'action': ['<(tweak_info_plist_path)',
-                             '-b<(mac_breakpad)',
+                             '--breakpad=<(mac_breakpad_compiled_in)',
+                             '--breakpad_uploads=<(mac_breakpad_uploads)',
                              '-k0',
                              '-s1',
                              '<(branding)',
@@ -443,6 +469,8 @@
                     # A real .dSYM is needed for dump_syms to operate on.
                     'mac_real_dsym': 1,
                   },
+                }],
+                ['mac_breakpad_compiled_in==1', {
                   'sources': [
                     'app/breakpad_mac.mm',
                     'app/breakpad_mac.h',
@@ -460,13 +488,13 @@
                       ],
                     },
                   ],
-                }, {  # else: mac_breakpad!=1
+                }, {  # else: mac_breakpad_compiled_in!=1
                   # No Breakpad, put in the stubs.
                   'sources': [
                     'app/breakpad_mac_stubs.mm',
                     'app/breakpad_mac.h',
                   ],
-                }],  # mac_breakpad
+                }],  # mac_breakpad_compiled_in
                 ['mac_keystone==1', {
                   'mac_bundle_resources': [
                     'browser/mac/keystone_promote_preflight.sh',

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,7 +32,7 @@ namespace {
 void LogErrors(PolicyErrorMap* errors) {
   PolicyErrorMap::const_iterator iter;
   for (iter = errors->begin(); iter != errors->end(); ++iter) {
-    string16 policy = ASCIIToUTF16(GetPolicyName(iter->first));
+    string16 policy = ASCIIToUTF16(iter->first);
     DLOG(WARNING) << "Policy " << policy << ": " << iter->second;
   }
 }
@@ -63,6 +63,10 @@ void ConfigurationPolicyPrefStore::AddObserver(PrefStore::Observer* observer) {
 void ConfigurationPolicyPrefStore::RemoveObserver(
     PrefStore::Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+size_t ConfigurationPolicyPrefStore::NumberOfObservers() const {
+  return observers_.size();
 }
 
 bool ConfigurationPolicyPrefStore::IsInitializationComplete() const {
@@ -120,15 +124,6 @@ ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore() {
   return new ConfigurationPolicyPrefStore(
       g_browser_process->browser_policy_connector()->
           GetRecommendedCloudProvider());
-}
-
-bool
-ConfigurationPolicyPrefStore::IsProxyPolicy(ConfigurationPolicyType policy) {
-  return policy == kPolicyProxyMode ||
-      policy == kPolicyProxyServerMode ||
-      policy == kPolicyProxyServer ||
-      policy == kPolicyProxyPacUrl ||
-      policy == kPolicyProxyBypassList;
 }
 
 void ConfigurationPolicyPrefStore::Refresh() {

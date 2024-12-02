@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,9 @@ void MockAuthenticator::AuthenticateToLogin(Profile* profile,
 void MockAuthenticator::CompleteLogin(Profile* profile,
                                       const std::string& username,
                                       const std::string& password) {
+  CHECK_EQ(expected_username_, username);
+  CHECK_EQ(expected_password_, password);
+  OnLoginSuccess(GaiaAuthConsumer::ClientLoginResult(), false);
 }
 
 void MockAuthenticator::AuthenticateToUnlock(const std::string& username,
@@ -57,9 +60,6 @@ void MockAuthenticator::OnLoginSuccess(
 
 void MockAuthenticator::OnLoginFailure(const LoginFailure& failure) {
     consumer_->OnLoginFailure(failure);
-    VLOG(1) << "Posting a QuitTask to UI thread";
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -97,14 +97,6 @@ scoped_refptr<Authenticator> MockLoginUtils::CreateAuthenticator(
       consumer, expected_username_, expected_password_);
 }
 
-void MockLoginUtils::SetBackgroundView(BackgroundView* background_view) {
-  background_view_ = background_view;
-}
-
-BackgroundView* MockLoginUtils::GetBackgroundView() {
-  return background_view_;
-}
-
 std::string MockLoginUtils::GetOffTheRecordCommandLine(
     const GURL& start_url,
     const CommandLine& base_command_line,
@@ -118,6 +110,9 @@ void MockLoginUtils::TransferDefaultCookies(Profile* default_profile,
 
 void MockLoginUtils::TransferDefaultAuthCache(Profile* default_profile,
                                               Profile* new_profile) {
+}
+
+void MockLoginUtils::StopBackgroundFetchers() {
 }
 
 }  // namespace chromeos

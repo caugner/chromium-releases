@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
 #include "base/string_piece.h"
-#include "net/base/dns_util.h"
-#include "net/base/dnsrr_resolver.h"
+#include "net/base/crl_set.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/x509_certificate.h"
 #include "net/socket/ssl_client_socket.h"
@@ -35,22 +34,10 @@ SSLHostInfo::SSLHostInfo(
       rev_checking_enabled_(ssl_config.rev_checking_enabled),
       verify_ev_cert_(ssl_config.verify_ev_cert),
       verifier_(cert_verifier),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
-      dnsrr_resolver_(NULL),
-      dns_callback_(NULL),
-      dns_handle_(DnsRRResolver::kInvalidHandle) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 SSLHostInfo::~SSLHostInfo() {
-  if (dns_handle_ != DnsRRResolver::kInvalidHandle) {
-    dnsrr_resolver_->CancelResolve(dns_handle_);
-    delete dns_callback_;
-  }
-}
-
-void SSLHostInfo::StartDnsLookup(DnsRRResolver* dnsrr_resolver) {
-  dnsrr_resolver_ = dnsrr_resolver;
-  // Note: currently disabled.
 }
 
 const SSLHostInfo::State& SSLHostInfo::state() const {
@@ -126,8 +113,9 @@ bool SSLHostInfo::ParseInner(const std::string& data) {
       VLOG(1) << "Kicking off verification for " << hostname_;
       verification_start_time_ = base::TimeTicks::Now();
       verification_end_time_ = base::TimeTicks();
+      scoped_refptr<CRLSet> crl_set(SSLConfigService::GetCRLSet());
       int rv = verifier_.Verify(
-          cert_.get(), hostname_, flags, crl_set_, &cert_verify_result_,
+          cert_.get(), hostname_, flags, crl_set, &cert_verify_result_,
           base::Bind(&SSLHostInfo::VerifyCallback, weak_factory_.GetWeakPtr()),
           // TODO(willchan): Figure out how to use NetLog here.
           BoundNetLog());

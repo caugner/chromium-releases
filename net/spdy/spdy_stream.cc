@@ -4,6 +4,7 @@
 
 #include "net/spdy/spdy_stream.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/values.h"
@@ -71,8 +72,7 @@ void SpdyStream::SetDelegate(Delegate* delegate) {
   if (pushed_) {
     CHECK(response_received());
     MessageLoop::current()->PostTask(
-        FROM_HERE, NewRunnableMethod(this,
-                                     &SpdyStream::PushedStreamReplayData));
+        FROM_HERE, base::Bind(&SpdyStream::PushedStreamReplayData, this));
   } else {
     continue_buffering_data_ = false;
   }
@@ -128,6 +128,10 @@ void SpdyStream::set_spdy_headers(
   request_ = headers;
 }
 
+void SpdyStream::AdjustSendWindowSize(int delta_window_size) {
+  send_window_size_ = send_window_size_ + delta_window_size;
+}
+
 void SpdyStream::IncreaseSendWindowSize(int delta_window_size) {
   DCHECK_GE(delta_window_size, 1);
   int new_window_size = send_window_size_ + delta_window_size;
@@ -157,7 +161,7 @@ void SpdyStream::IncreaseSendWindowSize(int delta_window_size) {
       NetLog::TYPE_SPDY_STREAM_SEND_WINDOW_UPDATE,
       make_scoped_refptr(new NetLogSpdyStreamWindowUpdateParameter(
           stream_id_, delta_window_size, send_window_size_)));
-  if (stalled_by_flow_control_) {
+  if (send_window_size_ > 0 && stalled_by_flow_control_) {
     stalled_by_flow_control_ = false;
     io_state_ = STATE_SEND_BODY;
     DoLoop(OK);
@@ -325,7 +329,7 @@ void SpdyStream::OnDataReceived(const char* data, int length) {
     return;
   }
 
-  if (session_->flow_control())
+  if (session_->is_flow_control_enabled())
     DecreaseRecvWindowSize(length);
 
   // Track our bandwidth.
@@ -409,8 +413,11 @@ int SpdyStream::WriteStreamData(IOBuffer* data, int length,
   return session_->WriteStreamData(stream_id_, data, length, flags);
 }
 
-bool SpdyStream::GetSSLInfo(SSLInfo* ssl_info, bool* was_npn_negotiated) {
-  return session_->GetSSLInfo(ssl_info, was_npn_negotiated);
+bool SpdyStream::GetSSLInfo(SSLInfo* ssl_info,
+                            bool* was_npn_negotiated,
+                            SSLClientSocket::NextProto* protocol_negotiated) {
+  return session_->GetSSLInfo(
+      ssl_info, was_npn_negotiated, protocol_negotiated);
 }
 
 bool SpdyStream::GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) {

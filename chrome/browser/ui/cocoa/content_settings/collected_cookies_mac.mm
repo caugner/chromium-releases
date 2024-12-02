@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/mac/bundle_locations.h"
 #import "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
@@ -145,8 +145,8 @@ void CollectedCookiesMac::OnSheetDidEnd(NSWindow* sheet) {
   DCHECK(wrapper);
 
   NSString* nibpath =
-      [base::mac::MainAppBundle() pathForResource:@"CollectedCookies"
-                                          ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"CollectedCookies"
+                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     wrapper_ = wrapper;
     [self loadTreeModelFromTabContentsWrapper];

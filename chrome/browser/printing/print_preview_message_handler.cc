@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,18 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/print_preview_ui.h"
+#include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/common/print_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::WebContents;
 
 namespace {
 
@@ -63,9 +66,9 @@ RefCountedBytes* GetDataFromHandle(base::SharedMemoryHandle handle,
 namespace printing {
 
 PrintPreviewMessageHandler::PrintPreviewMessageHandler(
-    TabContents* tab_contents)
-    : TabContentsObserver(tab_contents) {
-  DCHECK(tab_contents);
+    WebContents* web_contents)
+    : content::WebContentsObserver(web_contents) {
+  DCHECK(web_contents);
 }
 
 PrintPreviewMessageHandler::~PrintPreviewMessageHandler() {
@@ -81,7 +84,7 @@ TabContentsWrapper* PrintPreviewMessageHandler::GetPrintPreviewTab() {
 }
 
 TabContentsWrapper* PrintPreviewMessageHandler::tab_contents_wrapper() {
-  return TabContentsWrapper::GetCurrentWrapperForContents(tab_contents());
+  return TabContentsWrapper::GetCurrentWrapperForContents(web_contents());
 }
 
 PrintPreviewUI* PrintPreviewMessageHandler::OnFailure(int document_cookie) {
@@ -91,15 +94,19 @@ PrintPreviewUI* PrintPreviewMessageHandler::OnFailure(int document_cookie) {
   // Inform the print preview tab of the failure.
   TabContentsWrapper* print_preview_tab = GetPrintPreviewTab();
   // User might have closed it already.
-  if (!print_preview_tab || !print_preview_tab->web_ui())
+  if (!print_preview_tab || !print_preview_tab->web_contents()->GetWebUI())
     return NULL;
 
-  return static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
+  return static_cast<PrintPreviewUI*>(
+      print_preview_tab->web_contents()->GetWebUI()->GetController());
 }
 
 void PrintPreviewMessageHandler::OnRequestPrintPreview(
-    bool source_is_modifiable) {
-  PrintPreviewTabController::PrintPreview(tab_contents_wrapper());
+    bool source_is_modifiable, bool webnode_only) {
+  TabContentsWrapper* tab = tab_contents_wrapper();
+  if (webnode_only)
+    tab->print_view_manager()->PrintPreviewForWebNode();
+  PrintPreviewTabController::PrintPreview(tab);
   PrintPreviewUI::SetSourceIsModifiable(GetPrintPreviewTab(),
                                         source_is_modifiable);
 }
@@ -112,11 +119,11 @@ void PrintPreviewMessageHandler::OnDidGetPreviewPageCount(
   }
 
   TabContentsWrapper* print_preview_tab = GetPrintPreviewTab();
-  if (!print_preview_tab || !print_preview_tab->web_ui())
+  if (!print_preview_tab || !print_preview_tab->web_contents()->GetWebUI())
     return;
 
-  PrintPreviewUI* print_preview_ui =
-      static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
+  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
+      print_preview_tab->web_contents()->GetWebUI()->GetController());
 
   if (!params.is_modifiable || params.clear_preview_data)
     print_preview_ui->ClearAllPreviewData();
@@ -127,11 +134,11 @@ void PrintPreviewMessageHandler::OnDidGetPreviewPageCount(
 void PrintPreviewMessageHandler::OnDidPreviewPage(
     const PrintHostMsg_DidPreviewPage_Params& params) {
   TabContentsWrapper* print_preview_tab = GetPrintPreviewTab();
-  if (!print_preview_tab || !print_preview_tab->web_ui())
+  if (!print_preview_tab || !print_preview_tab->web_contents()->GetWebUI())
     return;
 
-  PrintPreviewUI* print_preview_ui =
-      static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
+  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
+      print_preview_tab->web_contents()->GetWebUI()->GetController());
   int page_number = params.page_number;
   if (page_number >= FIRST_PAGE_INDEX && params.data_size) {
     RefCountedBytes* data_bytes =
@@ -156,11 +163,11 @@ void PrintPreviewMessageHandler::OnMetafileReadyForPrinting(
   // Get the print preview tab.
   TabContentsWrapper* print_preview_tab = GetPrintPreviewTab();
   // User might have closed it already.
-  if (!print_preview_tab || !print_preview_tab->web_ui())
+  if (!print_preview_tab || !print_preview_tab->web_contents()->GetWebUI())
     return;
 
-  PrintPreviewUI* print_preview_ui =
-      static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
+  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
+      print_preview_tab->web_contents()->GetWebUI()->GetController());
 
   if (params.reuse_existing_data) {
     // Need to match normal rendering where we are expected to send this.
@@ -196,14 +203,16 @@ void PrintPreviewMessageHandler::OnPrintPreviewFailed(int document_cookie) {
 }
 
 void PrintPreviewMessageHandler::OnDidGetDefaultPageLayout(
-    const PageSizeMargins& page_layout_in_points) {
+    const PageSizeMargins& page_layout_in_points,
+    bool has_custom_page_size_style) {
   TabContentsWrapper* print_preview_tab = GetPrintPreviewTab();
-  if (!print_preview_tab || !print_preview_tab->web_ui())
+  if (!print_preview_tab || !print_preview_tab->web_contents()->GetWebUI())
     return;
 
-  PrintPreviewUI* print_preview_ui =
-      static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
-  print_preview_ui->OnDidGetDefaultPageLayout(page_layout_in_points);
+  PrintPreviewUI* print_preview_ui = static_cast<PrintPreviewUI*>(
+      print_preview_tab->web_contents()->GetWebUI()->GetController());
+  print_preview_ui->OnDidGetDefaultPageLayout(page_layout_in_points,
+                                              has_custom_page_size_style);
 }
 
 void PrintPreviewMessageHandler::OnPrintPreviewCancelled(int document_cookie) {

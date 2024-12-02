@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "content/browser/javascript_dialogs.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/javascript_dialogs.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/view_type.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -29,26 +29,28 @@
 
 class Browser;
 class Extension;
+class PrefsTabHelper;
 class RenderWidgetHostView;
-class TabContents;
 struct WebPreferences;
 
 namespace content {
 class RenderProcessHost;
+class SiteInstance;
 }
 
 // This class is the browser component of an extension component's RenderView.
 // It handles setting up the renderer process, if needed, with special
 // privileges available to extensions.  It may have a view to be shown in the
 // browser UI, or it may be hidden.
-class ExtensionHost : public TabContentsDelegate,
-                      public TabContentsObserver,
+class ExtensionHost : public content::WebContentsDelegate,
+                      public content::WebContentsObserver,
                       public ExtensionFunctionDispatcher::Delegate,
                       public content::NotificationObserver {
  public:
   class ProcessCreationQueue;
 
-  ExtensionHost(const Extension* extension, SiteInstance* site_instance,
+  ExtensionHost(const Extension* extension,
+                content::SiteInstance* site_instance,
                 const GURL& url, content::ViewType host_type);
   virtual ~ExtensionHost();
 
@@ -70,9 +72,12 @@ class ExtensionHost : public TabContentsDelegate,
   // instantiate Browser objects.
   void CreateView(Browser* browser);
 
+  // Helper variant of the above for cases where no Browser is present.
+  void CreateViewWithoutBrowser();
+
   const Extension* extension() const { return extension_; }
   const std::string& extension_id() const { return extension_id_; }
-  TabContents* host_contents() const { return host_contents_.get(); }
+  content::WebContents* host_contents() const { return host_contents_.get(); }
   RenderViewHost* render_view_host() const;
   content::RenderProcessHost* render_process_host() const;
   bool did_stop_loading() const { return did_stop_loading_; }
@@ -86,9 +91,9 @@ class ExtensionHost : public TabContentsDelegate,
   const GURL& GetURL() const;
 
   // ExtensionFunctionDispatcher::Delegate
-  virtual TabContents* GetAssociatedTabContents() const OVERRIDE;
-  void set_associated_tab_contents(TabContents* associated_tab_contents) {
-    associated_tab_contents_ = associated_tab_contents;
+  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
+  void set_associated_web_contents(content::WebContents* web_contents) {
+    associated_web_contents_ = web_contents;
   }
 
   // Returns true if the render view is initialized and didn't crash.
@@ -106,30 +111,39 @@ class ExtensionHost : public TabContentsDelegate,
   // |size_limit| in both width and height.
   void DisableScrollbarsForSmallWindows(const gfx::Size& size_limit);
 
-  // TabContentsObserver
+  // content::WebContentsObserver
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewReady() OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   virtual void DocumentAvailableInMainFrame() OVERRIDE;
+  virtual void DocumentLoadedInFrame(int64 frame_id) OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
 
-  // TabContentsDelegate
+  // content::WebContentsDelegate
+  virtual content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) OVERRIDE;
+  virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event)
       OVERRIDE;
-  virtual void UpdatePreferredSize(TabContents* source,
+  virtual void UpdatePreferredSize(content::WebContents* source,
                                    const gfx::Size& pref_size) OVERRIDE;
   virtual content::JavaScriptDialogCreator* GetJavaScriptDialogCreator()
       OVERRIDE;
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
+  virtual void RunFileChooser(
+      content::WebContents* tab,
+      const content::FileChooserParams& params) OVERRIDE;
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture) OVERRIDE;
-  virtual void CloseContents(TabContents* contents) OVERRIDE;
+  virtual void CloseContents(content::WebContents* contents) OVERRIDE;
+  virtual bool ShouldSuppressDialogs() OVERRIDE;
 
   // content::NotificationObserver
   virtual void Observe(int type,
@@ -154,7 +168,6 @@ class ExtensionHost : public TabContentsDelegate,
 
   // ExtensionFunctionDispatcher::Delegate
   virtual Browser* GetBrowser() OVERRIDE;
-  virtual gfx::NativeView GetNativeViewOfHost() OVERRIDE;
 
   // Message handlers.
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
@@ -187,7 +200,10 @@ class ExtensionHost : public TabContentsDelegate,
 #endif
 
   // The host for our HTML content.
-  scoped_ptr<TabContents> host_contents_;
+  scoped_ptr<content::WebContents> host_contents_;
+
+  // Helpers that take care of extra functionality for our host contents.
+  scoped_ptr<PrefsTabHelper> prefs_tab_helper_;
 
   // A weak pointer to the current or pending RenderViewHost. We don't access
   // this through the host_contents because we want to deal with the pending
@@ -211,8 +227,8 @@ class ExtensionHost : public TabContentsDelegate,
   // are used here, others are not hosted by ExtensionHost.
   content::ViewType extension_host_type_;
 
-  // The relevant TabContents associated with this ExtensionHost, if any.
-  TabContents* associated_tab_contents_;
+  // The relevant WebContents associated with this ExtensionHost, if any.
+  content::WebContents* associated_web_contents_;
 
   // Used to measure how long it's been since the host was created.
   PerfTimer since_created_;

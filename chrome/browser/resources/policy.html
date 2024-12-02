@@ -16,16 +16,16 @@
 </head>
 <body i18n-values=".style.fontFamily:fontfamily; .style.fontSize:fontsize">
   <h1 id="about-policy-title" i18n-content="policyTitle"></h1>
+  <div id="fetch-policies">
+    <button id="fetch-policies-button" i18n-content="fetchPoliciesText">
+    </button>
+  </div>
   <div id="main-content">
     <div id="data-template">
       <section id="status-section" jsselect="status" hidden
           jsdisplay="displayStatusSection">
         <div class="separator">
           <span id="status-title" i18n-content="statusPaneTitle"></span>
-          <div id="fetch-policies">
-            <button id="fetch-policies-button" i18n-content="fetchPoliciesText">
-            </button>
-          </div>
         </div>
           <div id="status-pane">
             <fieldset class="status-box" jsdisplay="displayDeviceStatus">
@@ -103,9 +103,7 @@
               '': 'none'">
             <table id="policy-table">
               <tr>
-                <!-- TODO(joaodasilva): http://crbug.com/102114
                 <th i18n-content="appliesToTableHeader"></th>
-                -->
                 <th i18n-content="policyLevelTableHeader"></th>
                 <th i18n-content="policyNameTableHeader"></th>
                 <th i18n-content="policyValueTableHeader"></th>
@@ -115,11 +113,9 @@
                   jsvalues=".className: $this.set ?
                   'policy-set': 'policy-unset';
                   .hidden: !Policy.shouldDisplayPolicy($this)">
-                <!-- TODO(joaodasilva): http://crbug.com/102114
                 <td>
-                  <span class="policy-type" jscontent="sourceType"></span>
+                  <span class="policy-type" jscontent="scope"></span>
                 </td>
-                -->
                 <td>
                   <span class="policy-level" jscontent="level"></span>
                 </td>

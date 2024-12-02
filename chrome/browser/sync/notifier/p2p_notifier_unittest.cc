@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,9 +75,8 @@ class P2PNotifierTest : public testing::Test {
   }
 
   syncable::ModelTypePayloadMap MakePayloadMap(
-      const syncable::ModelTypeSet& types) {
-    return syncable::ModelTypePayloadMapFromBitSet(
-        syncable::ModelTypeBitSetFromSet(types), "");
+      syncable::ModelTypeSet types) {
+    return syncable::ModelTypePayloadMapFromEnumSet(types, "");
   }
 
   MessageLoop message_loop_;
@@ -127,7 +126,7 @@ TEST_F(P2PNotifierTest, P2PNotificationDataDefault) {
   EXPECT_TRUE(notification_data.IsTargeted(""));
   EXPECT_FALSE(notification_data.IsTargeted("other1"));
   EXPECT_FALSE(notification_data.IsTargeted("other2"));
-  EXPECT_TRUE(notification_data.GetChangedTypes().empty());
+  EXPECT_TRUE(notification_data.GetChangedTypes().Empty());
   const std::string& notification_data_str = notification_data.ToString();
   EXPECT_EQ(
       "{\"changedTypes\":[],\"notificationType\":\"notifySelf\","
@@ -139,15 +138,14 @@ TEST_F(P2PNotifierTest, P2PNotificationDataDefault) {
 }
 
 TEST_F(P2PNotifierTest, P2PNotificationDataNonDefault) {
-  syncable::ModelTypeSet changed_types;
-  changed_types.insert(syncable::BOOKMARKS);
-  changed_types.insert(syncable::THEMES);
+  const syncable::ModelTypeSet changed_types(
+      syncable::BOOKMARKS, syncable::THEMES);
   const P2PNotificationData notification_data(
       "sender", NOTIFY_ALL, changed_types);
   EXPECT_TRUE(notification_data.IsTargeted("sender"));
   EXPECT_TRUE(notification_data.IsTargeted("other1"));
   EXPECT_TRUE(notification_data.IsTargeted("other2"));
-  EXPECT_EQ(changed_types, notification_data.GetChangedTypes());
+  EXPECT_TRUE(notification_data.GetChangedTypes().Equals(changed_types));
   const std::string& notification_data_str = notification_data.ToString();
   EXPECT_EQ(
       "{\"changedTypes\":[\"Bookmarks\",\"Themes\"],"
@@ -160,13 +158,13 @@ TEST_F(P2PNotifierTest, P2PNotificationDataNonDefault) {
 }
 
 TEST_F(P2PNotifierTest, NotificationsBasic) {
-  syncable::ModelTypeSet enabled_types;
-  enabled_types.insert(syncable::BOOKMARKS);
-  enabled_types.insert(syncable::PREFERENCES);
+  syncable::ModelTypeSet enabled_types(
+      syncable::BOOKMARKS, syncable::PREFERENCES);
 
   EXPECT_CALL(mock_observer_, OnNotificationStateChange(true));
   EXPECT_CALL(mock_observer_,
-              OnIncomingNotification(MakePayloadMap(enabled_types)));
+              OnIncomingNotification(MakePayloadMap(enabled_types),
+                                     REMOTE_NOTIFICATION));
 
   p2p_notifier_->SetUniqueId("sender");
   p2p_notifier_->UpdateCredentials("foo@bar.com", "fake_token");
@@ -174,28 +172,26 @@ TEST_F(P2PNotifierTest, NotificationsBasic) {
   // Sent with target NOTIFY_OTHERS so should not be propagated to
   // |mock_observer_|.
   {
-    syncable::ModelTypeSet changed_types;
-    enabled_types.insert(syncable::THEMES);
-    enabled_types.insert(syncable::APPS);
+    syncable::ModelTypeSet changed_types(
+        syncable::THEMES, syncable::APPS);
     p2p_notifier_->SendNotification(changed_types);
   }
 }
 
 TEST_F(P2PNotifierTest, SendNotificationData) {
-  syncable::ModelTypeSet enabled_types;
-  enabled_types.insert(syncable::BOOKMARKS);
-  enabled_types.insert(syncable::PREFERENCES);
+  syncable::ModelTypeSet enabled_types(
+      syncable::BOOKMARKS, syncable::PREFERENCES);
 
-  syncable::ModelTypeSet changed_types;
-  changed_types.insert(syncable::THEMES);
-  changed_types.insert(syncable::APPS);
+  syncable::ModelTypeSet changed_types(
+      syncable::THEMES, syncable::APPS);
 
   const syncable::ModelTypePayloadMap& changed_payload_map =
       MakePayloadMap(changed_types);
 
   EXPECT_CALL(mock_observer_, OnNotificationStateChange(true));
   EXPECT_CALL(mock_observer_,
-              OnIncomingNotification(MakePayloadMap(enabled_types)));
+              OnIncomingNotification(MakePayloadMap(enabled_types),
+                                     REMOTE_NOTIFICATION));
 
   p2p_notifier_->SetUniqueId("sender");
   p2p_notifier_->UpdateCredentials("foo@bar.com", "fake_token");
@@ -207,7 +203,8 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
+                                                     REMOTE_NOTIFICATION));
   p2p_notifier_->SendNotificationDataForTest(
       P2PNotificationData("sender", NOTIFY_SELF, changed_types));
 
@@ -227,7 +224,8 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
+                                                     REMOTE_NOTIFICATION));
   p2p_notifier_->SendNotificationDataForTest(
       P2PNotificationData("sender2", NOTIFY_OTHERS, changed_types));
 
@@ -238,13 +236,15 @@ TEST_F(P2PNotifierTest, SendNotificationData) {
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
+                                                     REMOTE_NOTIFICATION));
   p2p_notifier_->SendNotificationDataForTest(
       P2PNotificationData("sender", NOTIFY_ALL, changed_types));
 
   // Should be propagated.
   Mock::VerifyAndClearExpectations(&mock_observer_);
-  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map));
+  EXPECT_CALL(mock_observer_, OnIncomingNotification(changed_payload_map,
+                                                     REMOTE_NOTIFICATION));
   p2p_notifier_->SendNotificationDataForTest(
       P2PNotificationData("sender2", NOTIFY_ALL, changed_types));
 

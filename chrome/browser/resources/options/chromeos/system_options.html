@@ -31,67 +31,70 @@
             i18n-content="brightnessIncrease"></button>
       </div>
     </section>
-    <section id="touchpad-controls" hidden>
-      <h3 i18n-content="touchpad"></h3>
+    <section id="input-controls">
+      <h3 i18n-content="pointer"></h3>
       <div class="option-control-table">
         <span class="option-name" i18n-content="sensitivity"></span>
-	      <div id="touchpad-value">
+        <div id="pointer-value">
           <div id="slider-control">
             <input id="sensitivity-range" type="range" min="1" max="5"
                 pref="settings.touchpad.sensitivity2" class="touch-slider">
             <div>
               <span i18n-content="sensitivityLess"></span>
               <span i18n-content="sensitivityMore"
-                  class="touchpad-sensitivity-more"></span>
+                  class="pointer-sensitivity-more"></span>
             </div>
           </div>
         </div>
-        <div id="tap-to-click" class="checkbox">
+      </div>
+    </section>
+    <section id="touchpad-controls" hidden>
+      <h3 i18n-content="touchpad"></h3>
+      <div class="option-control-table">
+        <div class="checkbox">
           <label>
-            <input id="tap-to-click-check"
-                pref="settings.touchpad.enable_tap_to_click"
-                type="checkbox">
+            <input type="checkbox"
+                pref="settings.touchpad.enable_tap_to_click">
             <span i18n-content="enableTapToClick"></span>
           </label>
         </div>
-      </div>  
+      </div>
+    </section>
+    <section id="mouse-controls" hidden>
+      <h3 i18n-content="mouse"></h3>
+      <div class="option-control-table">
+        <div class="checkbox">
+          <label>
+            <input type="checkbox" pref="settings.mouse.primary_right">
+            <span i18n-content="primaryMouseRight"></span>
+          </label>
+        </div>
+      </div>
     </section>
     <!-- By default, the bluetooth section is hidden.  It is only
-         visible if the command line flag --enable_bluetooth is set. -->
+         visible if the command line flag --enable_bluetooth is set
+         and a bluetooth adapter is discovered or emmulating ChromeOS. -->
     <section id="bluetooth-devices" hidden>
       <h3 i18n-content="bluetooth"></h3>
       <div id="bluetooth-options-div">
-        <div id="bluetooth-buttons">
-          <button id="enable-bluetooth" i18n-content="enableBluetooth" hidden>
-          <button id="disable-bluetooth" i18n-content="disableBluetooth">
+        <div class="checkbox">
+          <label>
+            <input type="checkbox" id ="enable-bluetooth">
+            <span i18n-content="enableBluetooth">
+          </label>
         </div>
-        <div id="no-bluetooth-devices-label" 
-            i18n-content="noBluetoothDevicesFound">
-        </div>
-        <div id="bluetooth-device-list">
-          <!-- A list of connected devices is inserted here on page load. -->
-          <!-- The list of devices is updated asynchronously on clicking
-               'Find Devices'. -->
-        </div>
-        <!-- Template for items in list of Bluetooth devices -->
-        <div id="bluetooth-item-template" class="bluetooth-item" hidden>
-          <div class="bluetooth-item-text">
-            <div class="network-name-label"></div>
-            <div class="bluetooth-status">
-              <span class="network-status-label"></span>
-              <div class="inline-spinner" hidden></div>
-            </div>
-            <div class="bluetooth-instructions"></div>
+        <div class="settings-list bluetooth-device-list" hidden>
+          <list id="bluetooth-paired-devices-list"></list>
+          <div id="bluetooth-paired-devices-list-empty-placeholder"
+              class="bluetooth-empty-list-label" hidden>
+            <span i18n-content="bluetoothNoDevices"></span>
           </div>
-          <div class="bluetooth-button-group"></div>
         </div>
-        <div id = "bluetooth-finder-container">
-          <button id="bluetooth-find-devices" 
-              i18n-content="findBluetoothDevices"></button>
-          <div id="bluetooth-scanning-icon" 
-              class="inline-spinner transparent"></div>
-          <span id="bluetooth-scanning-label" class="transparent"
-              i18n-content="bluetoothScanning"></span>
+        <div id="bluetooth-button-group">
+          <button id="bluetooth-add-device"
+              i18n-content="addBluetoothDevice" hidden></button>
+          <button id="bluetooth-reconnect-device"
+              i18n-content="bluetoothConnectDevice" disabled hidden></button>
         </div>
       </div>
     </section>
@@ -114,8 +117,32 @@
         <div class="option-name">
           <div class="checkbox">
             <label>
-              <input id="accesibility-check" type="checkbox">
-              <span i18n-content="accessibility"></span>
+              <input id="accessibility-spoken-feedback-check" type="checkbox">
+              <span i18n-content="accessibilitySpokenFeedback"></span>
+            </label>
+          </div>
+        </div>
+        <div class="option-name">
+          <div class="checkbox">
+            <label>
+              <input id="accessibility-high-contrast-check" type="checkbox">
+              <span i18n-content="accessibilityHighContrast"></span>
+            </label>
+          </div>
+        </div>
+        <div class="option-name">
+          <div class="checkbox">
+            <label>
+              <input id="accessibility-screen-magnifier-check" type="checkbox">
+              <span i18n-content="accessibilityScreenMagnifier"></span>
+            </label>
+          </div>
+        </div>
+        <div class="option-name">
+          <div class="checkbox">
+            <label>
+              <input id="accessibility-virtual-keyboard-check" type="checkbox">
+              <span i18n-content="accessibilityVirtualKeyboard"></span>
             </label>
           </div>
         </div>

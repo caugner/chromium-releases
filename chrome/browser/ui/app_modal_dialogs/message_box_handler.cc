@@ -13,31 +13,33 @@
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
 #include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/browser/javascript_dialogs.h"
 #include "grit/generated_resources.h"
+#include "ui/base/javascript_message_type.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/message_box_flags.h"
 
-class ChromeJavaScriptDialogCreator : public content::JavaScriptDialogCreator {
+using content::JavaScriptDialogCreator;
+using content::WebContents;
+
+class ChromeJavaScriptDialogCreator : public JavaScriptDialogCreator {
  public:
   static ChromeJavaScriptDialogCreator* GetInstance();
 
-  virtual void RunJavaScriptDialog(content::JavaScriptDialogDelegate* delegate,
-                                   TitleType title_type,
-                                   const string16& title,
-                                   int dialog_flags,
-                                   const string16& message_text,
-                                   const string16& default_prompt_text,
-                                   IPC::Message* reply_message,
-                                   bool* did_suppress_message) OVERRIDE;
+  virtual void RunJavaScriptDialog(
+      WebContents* web_contents,
+      TitleType title_type,
+      const string16& title,
+      ui::JavascriptMessageType javascript_message_type,
+      const string16& message_text,
+      const string16& default_prompt_text,
+      const DialogClosedCallback& callback,
+      bool* did_suppress_message) OVERRIDE;
 
   virtual void RunBeforeUnloadDialog(
-      content::JavaScriptDialogDelegate* delegate,
+      WebContents* web_contents,
       const string16& message_text,
-      IPC::Message* reply_message) OVERRIDE;
+      const DialogClosedCallback& callback) OVERRIDE;
 
-  virtual void ResetJavaScriptState(
-      content::JavaScriptDialogDelegate* delegate) OVERRIDE;
+  virtual void ResetJavaScriptState(WebContents* web_contents) OVERRIDE;
 
  private:
   explicit ChromeJavaScriptDialogCreator();
@@ -49,9 +51,9 @@ class ChromeJavaScriptDialogCreator : public content::JavaScriptDialogCreator {
                     const string16& title,
                     bool is_alert);
 
-  void CancelPendingDialogs(content::DialogDelegate* delegate);
+  void CancelPendingDialogs(WebContents* web_contents);
 
-  // Mapping between the JavaScriptDialogDelegates and their extra data. The key
+  // Mapping between the WebContents and their extra data. The key
   // is a void* because the pointer is just a cookie and is never dereferenced.
   typedef std::map<void*, ChromeJavaScriptDialogExtraData>
       JavaScriptDialogExtraDataMap;
@@ -72,18 +74,18 @@ ChromeJavaScriptDialogCreator* ChromeJavaScriptDialogCreator::GetInstance() {
 }
 
 void ChromeJavaScriptDialogCreator::RunJavaScriptDialog(
-    content::JavaScriptDialogDelegate* delegate,
+    WebContents* web_contents,
     TitleType title_type,
     const string16& title,
-    int dialog_flags,
+    ui::JavascriptMessageType javascript_message_type,
     const string16& message_text,
     const string16& default_prompt_text,
-    IPC::Message* reply_message,
+    const DialogClosedCallback& callback,
     bool* did_suppress_message)  {
   *did_suppress_message = false;
 
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_[delegate];
+      &javascript_dialog_extra_data_[web_contents];
 
   if (extra_data->suppress_javascript_messages_) {
     *did_suppress_message = true;
@@ -101,47 +103,47 @@ void ChromeJavaScriptDialogCreator::RunJavaScriptDialog(
     display_suppress_checkbox = true;
   }
 
-  bool is_alert = dialog_flags == ui::MessageBoxFlags::kIsJavascriptAlert;
+  bool is_alert = javascript_message_type == ui::JAVASCRIPT_MESSAGE_TYPE_ALERT;
   string16 dialog_title = GetTitle(title_type, title, is_alert);
 
   AppModalDialogQueue::GetInstance()->AddDialog(new JavaScriptAppModalDialog(
-      delegate,
+      web_contents,
       extra_data,
       dialog_title,
-      dialog_flags,
+      javascript_message_type,
       message_text,
       default_prompt_text,
       display_suppress_checkbox,
       false,  // is_before_unload_dialog
-      reply_message));
+      callback));
 }
 
 void ChromeJavaScriptDialogCreator::RunBeforeUnloadDialog(
-    content::JavaScriptDialogDelegate* delegate,
+    WebContents* web_contents,
     const string16& message_text,
-    IPC::Message* reply_message) {
+    const DialogClosedCallback& callback) {
   ChromeJavaScriptDialogExtraData* extra_data =
-      &javascript_dialog_extra_data_[delegate];
+      &javascript_dialog_extra_data_[web_contents];
 
   string16 full_message = message_text + ASCIIToUTF16("\n\n") +
       l10n_util::GetStringUTF16(IDS_BEFOREUNLOAD_MESSAGEBOX_FOOTER);
 
   AppModalDialogQueue::GetInstance()->AddDialog(new JavaScriptAppModalDialog(
-      delegate,
+      web_contents,
       extra_data,
       l10n_util::GetStringUTF16(IDS_BEFOREUNLOAD_MESSAGEBOX_TITLE),
-      ui::MessageBoxFlags::kIsJavascriptConfirm,
+      ui::JAVASCRIPT_MESSAGE_TYPE_CONFIRM,
       full_message,
       string16(),  // default_prompt_text
       false,       // display_suppress_checkbox
       true,        // is_before_unload_dialog
-      reply_message));
+      callback));
 }
 
 void ChromeJavaScriptDialogCreator::ResetJavaScriptState(
-    content::JavaScriptDialogDelegate* delegate) {
-  CancelPendingDialogs(delegate);
-  javascript_dialog_extra_data_.erase(delegate);
+    WebContents* web_contents) {
+  CancelPendingDialogs(web_contents);
+  javascript_dialog_extra_data_.erase(web_contents);
 }
 
 string16 ChromeJavaScriptDialogCreator::GetTitle(TitleType title_type,
@@ -172,14 +174,14 @@ string16 ChromeJavaScriptDialogCreator::GetTitle(TitleType title_type,
 }
 
 void ChromeJavaScriptDialogCreator::CancelPendingDialogs(
-    content::DialogDelegate* delegate) {
+    WebContents* web_contents) {
   AppModalDialogQueue* queue = AppModalDialogQueue::GetInstance();
   AppModalDialog* active_dialog = queue->active_dialog();
-  if (active_dialog && active_dialog->delegate() == delegate)
+  if (active_dialog && active_dialog->web_contents() == web_contents)
     active_dialog->Invalidate();
   for (AppModalDialogQueue::iterator i = queue->begin();
        i != queue->end(); ++i) {
-    if ((*i)->delegate() == delegate)
+    if ((*i)->web_contents() == web_contents)
       (*i)->Invalidate();
   }
 }

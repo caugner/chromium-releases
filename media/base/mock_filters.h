@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -72,8 +72,7 @@ class MockDataSource : public DataSource {
  public:
   MockDataSource();
 
-  // Filter implementation.
-  virtual void set_host(FilterHost* host);
+  virtual void set_host(DataSourceHost* data_source_host);
 
   MOCK_METHOD1(Stop, void(const base::Closure& callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
@@ -105,8 +104,8 @@ class MockDataSource : public DataSource {
 class MockDemuxer : public Demuxer {
  public:
   MockDemuxer();
-  // Filter implementation.
-  virtual void set_host(FilterHost* host);
+
+  virtual void set_host(DemuxerHost* demuxer_host);
   MOCK_METHOD1(Stop, void(const base::Closure& callback));
   MOCK_METHOD1(SetPlaybackRate, void(float playback_rate));
   MOCK_METHOD1(SetPreload, void(Preload preload));
@@ -149,7 +148,6 @@ class MockDemuxerFactory : public DemuxerFactory {
   // DemuxerFactory methods.
   MOCK_METHOD2(Build, void(const std::string& url,
                            const BuildCallback& callback));
-  virtual DemuxerFactory* Clone() const;
 
  private:
   scoped_refptr<MockDemuxer> demuxer_;
@@ -188,10 +186,11 @@ class MockVideoDecoder : public VideoDecoder {
 
   // VideoDecoder implementation.
   MOCK_METHOD3(Initialize, void(DemuxerStream* stream,
-                                const base::Closure& callback,
+                                const PipelineStatusCB& callback,
                                 const StatisticsCallback& stats_callback));
   MOCK_METHOD1(Read, void(const ReadCB& callback));
   MOCK_METHOD0(natural_size, const gfx::Size&());
+  MOCK_CONST_METHOD0(HasAlpha, bool());
 
  protected:
   virtual ~MockVideoDecoder();
@@ -214,14 +213,11 @@ class MockAudioDecoder : public AudioDecoder {
   MOCK_METHOD3(Initialize, void(DemuxerStream* stream,
                                 const base::Closure& callback,
                                 const StatisticsCallback& stats_callback));
+  MOCK_METHOD1(Read, void(const ReadCB& callback));
   MOCK_METHOD1(ProduceAudioSamples, void(scoped_refptr<Buffer>));
   MOCK_METHOD0(bits_per_channel, int(void));
   MOCK_METHOD0(channel_layout, ChannelLayout(void));
   MOCK_METHOD0(samples_per_second, int(void));
-
-  void ConsumeAudioSamplesForTest(scoped_refptr<Buffer> buffer) {
-    AudioDecoder::ConsumeAudioSamples(buffer);
-  }
 
  protected:
   virtual ~MockAudioDecoder();
@@ -297,14 +293,13 @@ class MockFilterCollection {
   MockVideoRenderer* video_renderer() const { return video_renderer_; }
   MockAudioRenderer* audio_renderer() const { return audio_renderer_; }
 
-  FilterCollection* filter_collection() const {
-    return filter_collection(true, true, true, PIPELINE_OK);
+  scoped_ptr<FilterCollection> filter_collection() const {
+    return filter_collection(true, true, true, PIPELINE_OK).Pass();
   }
 
-  FilterCollection* filter_collection(bool include_demuxer,
-                                      bool run_build_callback,
-                                      bool run_build,
-                                      PipelineStatus build_status) const;
+  scoped_ptr<FilterCollection> filter_collection(
+      bool include_demuxer, bool run_build_callback, bool run_build,
+      PipelineStatus build_status) const;
 
  private:
   scoped_refptr<MockDemuxer> demuxer_;

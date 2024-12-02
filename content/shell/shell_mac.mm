@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/string_piece.h"
 #include "base/sys_string_conversions.h"
 #include "content/shell/resource.h"
+#include "googleurl/src/gurl.h"
 
 // Receives notification that the window is closing so that it can start the
 // tear-down process. Is responsible for deleting itself when done.
@@ -125,6 +126,9 @@ void Shell::PlatformSetAddressBarURL(const GURL& url) {
   [url_edit_view_ setStringValue:url_string];
 }
 
+void Shell::PlatformSetIsLoading(bool loading) {
+}
+
 void Shell::PlatformCreateWindow(int width, int height) {
   NSRect initial_window_bounds = NSMakeRect(0, 0, width, height);
   window_ = [[NSWindow alloc] initWithContentRect:initial_window_bounds
@@ -176,6 +180,10 @@ void Shell::PlatformCreateWindow(int width, int height) {
 
   // show the window
   [window_ makeKeyAndOrderFront:nil];
+}
+
+void Shell::PlatformSetContents() {
+  // TODO(avi): I don't know what goes here.
 }
 
 void Shell::PlatformSizeTo(int width, int height) {

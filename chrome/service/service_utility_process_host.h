@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
-#include "base/task.h"
 #include "ipc/ipc_channel.h"
 #include "content/public/common/child_process_host_delegate.h"
 #include "printing/pdf_render_settings.h"
@@ -57,7 +56,8 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
     // successfully into |metafile|.
     virtual void OnRenderPDFPagesToMetafileSucceeded(
         const printing::Emf& metafile,
-        int highest_rendered_page_number) {}
+        int highest_rendered_page_number,
+        double scale_factor) {}
     // Called when no page in the passed in PDF could be rendered.
     virtual void OnRenderPDFPagesToMetafileFailed() {}
 
@@ -81,7 +81,8 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
 
     // Invoked when a metafile file is ready.
     void MetafileAvailable(const FilePath& metafile_path,
-                           int highest_rendered_page_number);
+                           int highest_rendered_page_number,
+                           double scale_factor);
 
     DISALLOW_COPY_AND_ASSIGN(Client);
   };
@@ -109,9 +110,7 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
   virtual FilePath GetUtilityProcessCmd();
 
   // ChildProcessHostDelegate implementation:
-  virtual bool CanShutdown() OVERRIDE;
   virtual void OnChildDisconnected() OVERRIDE;
-  virtual void ShutdownStarted() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
@@ -131,7 +130,8 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
   base::ProcessHandle handle() const { return handle_; }
 
   // Messages handlers:
-  void OnRenderPDFPagesToMetafileSucceeded(int highest_rendered_page_number);
+  void OnRenderPDFPagesToMetafileSucceeded(int highest_rendered_page_number,
+                                           double scale_factor);
   void OnRenderPDFPagesToMetafileFailed();
   void OnGetPrinterCapsAndDefaultsSucceeded(
       const std::string& printer_name,

@@ -51,7 +51,7 @@ const SkColor kMaximizeButtonBackgroundColor = SkColorSetRGB(0, 255, 0);
 const SkColor kCloseButtonBackgroundColor = SkColorSetRGB(255, 0, 0);
 
 bool HitVisibleView(views::View* view, gfx::Point point) {
-  return view->IsVisible() && view->GetMirroredBounds().Contains(point);
+  return view->visible() && view->GetMirroredBounds().Contains(point);
 }
 
 }  // namespace
@@ -131,10 +131,10 @@ class WindowControlButton : public views::CustomButton {
 // Layer that visually sits "behind" the window contents and expands out to
 // provide visual resize handles on the sides.  Hit testing and resize handling
 // is in the parent NonClientFrameView.
-class FrameBackground : public views::View,
-                        public ui::AnimationDelegate {
+class FrameBackgroundView : public views::View,
+                            public ui::AnimationDelegate {
  public:
-  FrameBackground()
+  FrameBackgroundView()
       : ALLOW_THIS_IN_INITIALIZER_LIST(
             size_animation_(new ui::SlideAnimation(this))),
         ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -144,7 +144,7 @@ class FrameBackground : public views::View,
     SetPaintToLayer(true);
     UpdateOpacity();
   }
-  virtual ~FrameBackground() {
+  virtual ~FrameBackgroundView() {
   }
 
   void Configure(const gfx::Rect& start_bounds, const gfx::Rect& end_bounds) {
@@ -211,7 +211,7 @@ class FrameBackground : public views::View,
   // Expanded bounds, with edges visible from behind the client area.
   gfx::Rect end_bounds_;
 
-  DISALLOW_COPY_AND_ASSIGN(FrameBackground);
+  DISALLOW_COPY_AND_ASSIGN(FrameBackgroundView);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -221,7 +221,7 @@ BrowserNonClientFrameViewAura::BrowserNonClientFrameViewAura(
     BrowserFrame* frame, BrowserView* browser_view)
     : BrowserNonClientFrameView(frame, browser_view),
       last_hittest_code_(HTNOWHERE) {
-  frame_background_ = new FrameBackground();
+  frame_background_ = new FrameBackgroundView();
   AddChildView(frame_background_);
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -246,8 +246,8 @@ BrowserNonClientFrameViewAura::BrowserNonClientFrameViewAura(
   // Associate our WindowFrame interface with our owning window/widget so
   // we get callbacks from aura_shell.
   frame->AsWidget()->SetNativeWindowProperty(
-      aura_shell::kWindowFrameKey,
-      static_cast<aura_shell::WindowFrame*>(this));
+      ash::kWindowFrameKey,
+      static_cast<ash::WindowFrame*>(this));
 }
 
 BrowserNonClientFrameViewAura::~BrowserNonClientFrameViewAura() {
@@ -569,7 +569,7 @@ void BrowserNonClientFrameViewAura::OnWidgetActivationChanged(
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// aura_shell::WindowFrame overrides:
+// ash::WindowFrame overrides:
 
 void BrowserNonClientFrameViewAura::OnWindowHoverChanged(bool hovered) {
   if (hovered) {

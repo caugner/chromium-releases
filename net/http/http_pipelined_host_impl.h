@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,11 @@
 #include "net/base/net_export.h"
 #include "net/http/http_pipelined_connection.h"
 #include "net/http/http_pipelined_host.h"
+#include "net/http/http_pipelined_host_capability.h"
+
+namespace base {
+class Value;
+}
 
 namespace net {
 
@@ -34,7 +39,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedHostImpl
   HttpPipelinedHostImpl(HttpPipelinedHost::Delegate* delegate,
                         const HostPortPair& origin,
                         HttpPipelinedConnection::Factory* factory,
-                        Capability capability);
+                        HttpPipelinedHostCapability capability);
   virtual ~HttpPipelinedHostImpl();
 
   // HttpPipelinedHost interface
@@ -43,7 +48,8 @@ class NET_EXPORT_PRIVATE HttpPipelinedHostImpl
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       const BoundNetLog& net_log,
-      bool was_npn_negotiated) OVERRIDE;
+      bool was_npn_negotiated,
+      SSLClientSocket::NextProto protocol_negotiated) OVERRIDE;
 
   virtual HttpPipelinedStream* CreateStreamOnExistingPipeline() OVERRIDE;
 
@@ -62,6 +68,10 @@ class NET_EXPORT_PRIVATE HttpPipelinedHostImpl
 
   virtual const HostPortPair& origin() const OVERRIDE;
 
+  // Creates a Value summary of this host's |pipelines_|. Caller assumes
+  // ownership of the returned Value.
+  virtual base::Value* PipelineInfoToValue() const OVERRIDE;
+
   // Returns the maximum number of in-flight pipelined requests we'll allow on a
   // single connection.
   static int max_pipeline_depth() { return 3; }
@@ -79,17 +89,26 @@ class NET_EXPORT_PRIVATE HttpPipelinedHostImpl
   void OnPipelineEmpty(HttpPipelinedConnection* pipeline);
 
   // Adds the next pending request to the pipeline if it's still usuable.
-  void AddRequestToPipeline(HttpPipelinedConnection* connection);
+  void AddRequestToPipeline(HttpPipelinedConnection* pipeline);
 
   // Returns the current pipeline capacity based on |capability_|. This should
   // not be called if |capability_| is INCAPABLE.
   int GetPipelineCapacity() const;
 
+  // Returns true if |pipeline| can handle a new request. This is true if the
+  // |pipeline| is active, usable, has capacity, and |capability_| is
+  // sufficient.
+  bool CanPipelineAcceptRequests(HttpPipelinedConnection* pipeline) const;
+
+  // Called when |this| moves from UNKNOWN |capability_| to PROBABLY_CAPABLE.
+  // Causes all pipelines to increase capacity to start pipelining.
+  void NotifyAllPipelinesHaveCapacity();
+
   HttpPipelinedHost::Delegate* delegate_;
   const HostPortPair origin_;
   PipelineInfoMap pipelines_;
   scoped_ptr<HttpPipelinedConnection::Factory> factory_;
-  Capability capability_;
+  HttpPipelinedHostCapability capability_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpPipelinedHostImpl);
 };

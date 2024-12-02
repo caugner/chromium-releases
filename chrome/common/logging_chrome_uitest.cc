@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,9 +75,9 @@ TEST_F(ChromeLoggingTest, EnvironmentLogFileName) {
 #define EXPECTED_ASSERT_CRASHES 1
 #endif
 
-// Touch build will start an extra renderer process (the extension process)
-// for the virtual keyboard.
-#if defined(TOUCH_UI)
+// Virtual keyboard build will start an extra renderer process (the extension
+// process) for the virtual keyboard.
+#if defined(USE_VIRTUAL_KEYBOARD)
 #define EXPECTED_ASSERT_ERRORS 2
 #else
 #define EXPECTED_ASSERT_ERRORS 1
@@ -123,8 +123,13 @@ class CheckFalseTest : public UITest {
   }
 };
 
-// Fails on 963 branch.
+#if defined(OS_WIN)
+// http://crbug.com/38497
+#define CheckFails FLAKY_CheckFails
+#elif defined(OS_MACOSX)
+// Crash service doesn't exist for the Mac yet: http://crbug.com/45243
 #define CheckFails DISABLED_CheckFails
+#endif
 // Launch the app in assertion test mode, then close the app.
 TEST_F(CheckFalseTest, CheckFails) {
   expected_errors_ = EXPECTED_ASSERT_ERRORS;
@@ -150,13 +155,17 @@ class RendererCrashTest : public UITest {
 #else
 #define EXPECTED_CRASH_CRASHES 1
 #endif
-// Test not passing on 963 branch for Linux either.
-#if defined(OS_MACOSX) || defined(OS_LINUX)
+
+#if defined(OS_MACOSX)
 // Crash service doesn't exist for the Mac yet: http://crbug.com/45243
-#define Crash DISABLED_Crash
+#define MAYBE_Crash DISABLED_Crash
+#elif defined(OS_CHROME)
+#define MAYBE_Crash FLAKY_Crash
+#else
+#define MAYBE_Crash Crash
 #endif
 // Launch the app in renderer crash test mode, then close the app.
-TEST_F(RendererCrashTest, Crash) {
+TEST_F(RendererCrashTest, MAYBE_Crash) {
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   ASSERT_TRUE(browser->WaitForTabCountToBecome(1));

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -305,10 +306,12 @@ void BookmarkEditorGtk::Init(GtkWindow* parent_window) {
       GTK_STOCK_CANCEL, GTK_RESPONSE_REJECT,
       GTK_STOCK_SAVE, GTK_RESPONSE_ACCEPT,
       NULL);
+#if !GTK_CHECK_VERSION(2, 22, 0)
   gtk_dialog_set_has_separator(GTK_DIALOG(dialog_), FALSE);
+#endif
 
   if (show_tree_) {
-    GtkWidget* action_area = GTK_DIALOG(dialog_)->action_area;
+    GtkWidget* action_area = gtk_dialog_get_action_area(GTK_DIALOG(dialog_));
     new_folder_button_ = gtk_button_new_with_label(
         l10n_util::GetStringUTF8(
             IDS_BOOKMARK_EDITOR_NEW_FOLDER_BUTTON).c_str());
@@ -588,7 +591,8 @@ void BookmarkEditorGtk::AddNewFolder(GtkTreeIter* parent, GtkTreeIter* child) {
   gtk_tree_store_append(tree_store_, child, parent);
   gtk_tree_store_set(
       tree_store_, child,
-      bookmark_utils::FOLDER_ICON, GtkThemeService::GetFolderIcon(true),
+      bookmark_utils::FOLDER_ICON,
+      GtkThemeService::GetFolderIcon(true)->ToGdkPixbuf(),
       bookmark_utils::FOLDER_NAME,
           l10n_util::GetStringUTF8(IDS_BOOKMARK_EDITOR_NEW_FOLDER_NAME).c_str(),
       bookmark_utils::ITEM_ID, static_cast<int64>(0),

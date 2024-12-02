@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,6 +85,16 @@ const PPB_Var* PPBVarInterface() {
       GetBrowserInterfaceSafe(PPB_VAR_INTERFACE));
 }
 
+const PPB_VarArrayBuffer* PPBVarArrayBufferInterface() {
+  return static_cast<const PPB_VarArrayBuffer*>(
+      GetBrowserInterfaceSafe(PPB_VAR_ARRAY_BUFFER_INTERFACE));
+}
+
+const PPB_WebSocket* PPBWebSocketInterface() {
+  return static_cast<const PPB_WebSocket*>(
+      GetBrowserInterfaceSafe(PPB_WEBSOCKET_INTERFACE));
+}
+
 // Plugin interface helpers
 
 const void* GetPluginInterface(const char* interface_name) {
@@ -109,9 +119,21 @@ const PPP_InputEvent* PPPInputEventInterface() {
   return static_cast<const PPP_InputEvent*>(ppp);
 }
 
-const PPP_Instance* PPPInstanceInterface() {
-  static const void* ppp = GetPluginInterfaceSafe(PPP_INSTANCE_INTERFACE);
-  return static_cast<const PPP_Instance*>(ppp);
+PPP_Instance_Combined* PPPInstanceInterface() {
+  static PPP_Instance_Combined combined;
+  if (!combined.initialized()) {
+    // Note: don't use "safe" version since that will assert if 1.1 isn't
+    // supported, which isn't required.
+    const void* instance1_1 = GetPluginInterface(
+        PPP_INSTANCE_INTERFACE_1_1);
+    if (instance1_1) {
+      combined.Init1_1(static_cast<const PPP_Instance_1_1*>(instance1_1));
+    } else {
+      combined.Init1_0(static_cast<const PPP_Instance_1_0*>(
+          GetPluginInterfaceSafe(PPP_INSTANCE_INTERFACE_1_0)));
+    }
+  }
+  return &combined;
 }
 
 const PPP_Messaging* PPPMessagingInterface() {

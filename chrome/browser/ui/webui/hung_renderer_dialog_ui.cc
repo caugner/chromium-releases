@@ -4,16 +4,17 @@
 
 #include "chrome/browser/ui/webui/hung_renderer_dialog_ui.h"
 
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 
-HungRendererDialogUI::HungRendererDialogUI(TabContents* contents)
-    : HtmlDialogUI(contents) {
+HungRendererDialogUI::HungRendererDialogUI(content::WebUI* web_ui)
+    : HtmlDialogUI(web_ui) {
   ChromeWebUIDataSource* source =
       new ChromeWebUIDataSource(chrome::kChromeUIHungRendererDialogHost);
 
@@ -34,7 +35,7 @@ HungRendererDialogUI::HungRendererDialogUI(TabContents* contents)
   // Set default resource.
   source->set_default_resource(IDR_HUNG_RENDERER_DIALOG_HTML);
 
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(source);
 
   // Set up the chrome://theme/ source.

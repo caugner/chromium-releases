@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/memory/singleton.h"
+#include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/auto_launch_trial.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
@@ -29,16 +31,27 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if defined(OS_WIN)
+#include "chrome/installer/util/auto_launch_util.h"
+#endif
+
+using content::BrowserThread;
+using content::UserMetricsAction;
+
 BrowserOptionsHandler::BrowserOptionsHandler()
-    : template_url_service_(NULL), startup_custom_pages_table_model_(NULL) {
+    : template_url_service_(NULL),
+      startup_custom_pages_table_model_(NULL),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_for_file_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_for_ui_(this)) {
 #if !defined(OS_MACOSX)
   default_browser_worker_ = new ShellIntegration::DefaultBrowserWorker(this);
 #endif
@@ -83,53 +96,56 @@ void BrowserOptionsHandler::GetLocalizedValues(
                 IDS_OPTIONS_GENERAL_TAB_LABEL);
 
   localized_strings->SetString("instantLearnMoreLink",
-      ASCIIToUTF16(browser::InstantLearnMoreURL().spec()));
+      ASCIIToUTF16(chrome::kInstantLearnMoreURL));
   localized_strings->SetString("defaultBrowserUnknown",
       l10n_util::GetStringFUTF16(IDS_OPTIONS_DEFAULTBROWSER_UNKNOWN,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
   localized_strings->SetString("defaultBrowserUseAsDefault",
       l10n_util::GetStringFUTF16(IDS_OPTIONS_DEFAULTBROWSER_USEASDEFAULT,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  localized_strings->SetString("autoLaunchText",
+      l10n_util::GetStringFUTF16(IDS_AUTOLAUNCH_TEXT,
+          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
 }
 
 void BrowserOptionsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("becomeDefaultBrowser",
+  web_ui()->RegisterMessageCallback("becomeDefaultBrowser",
       base::Bind(&BrowserOptionsHandler::BecomeDefaultBrowser,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setDefaultSearchEngine",
+  web_ui()->RegisterMessageCallback("setDefaultSearchEngine",
       base::Bind(&BrowserOptionsHandler::SetDefaultSearchEngine,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("removeStartupPages",
+  web_ui()->RegisterMessageCallback("removeStartupPages",
       base::Bind(&BrowserOptionsHandler::RemoveStartupPages,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("addStartupPage",
+  web_ui()->RegisterMessageCallback("addStartupPage",
       base::Bind(&BrowserOptionsHandler::AddStartupPage,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("editStartupPage",
+  web_ui()->RegisterMessageCallback("editStartupPage",
       base::Bind(&BrowserOptionsHandler::EditStartupPage,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setStartupPagesToCurrentPages",
+  web_ui()->RegisterMessageCallback("setStartupPagesToCurrentPages",
       base::Bind(&BrowserOptionsHandler::SetStartupPagesToCurrentPages,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("dragDropStartupPage",
+  web_ui()->RegisterMessageCallback("dragDropStartupPage",
       base::Bind(&BrowserOptionsHandler::DragDropStartupPage,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("requestAutocompleteSuggestions",
+  web_ui()->RegisterMessageCallback("requestAutocompleteSuggestions",
       base::Bind(&BrowserOptionsHandler::RequestAutocompleteSuggestions,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("enableInstant",
+  web_ui()->RegisterMessageCallback("enableInstant",
       base::Bind(&BrowserOptionsHandler::EnableInstant,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("disableInstant",
+  web_ui()->RegisterMessageCallback("disableInstant",
       base::Bind(&BrowserOptionsHandler::DisableInstant,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("getInstantFieldTrialStatus",
+  web_ui()->RegisterMessageCallback("getInstantFieldTrialStatus",
       base::Bind(&BrowserOptionsHandler::GetInstantFieldTrialStatus,
                  base::Unretained(this)));
 }
 
 void BrowserOptionsHandler::Initialize() {
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
 
   // Create our favicon data source.
   profile->GetChromeURLDataManager()->AddDataSource(
@@ -152,6 +168,47 @@ void BrowserOptionsHandler::Initialize() {
   UpdateSearchEngines();
 
   autocomplete_controller_.reset(new AutocompleteController(profile, this));
+
+#if defined(OS_WIN)
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+      base::Bind(&BrowserOptionsHandler::CheckAutoLaunch,
+                 weak_ptr_factory_for_ui_.GetWeakPtr(),
+                 weak_ptr_factory_for_file_.GetWeakPtr()));
+  weak_ptr_factory_for_ui_.DetachFromThread();
+#endif
+}
+
+void BrowserOptionsHandler::CheckAutoLaunch(
+    base::WeakPtr<BrowserOptionsHandler> weak_this) {
+#if defined(OS_WIN)
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  // Pass in weak pointer to this to avoid race if BrowserOptionsHandler is
+  // deleted.
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+      base::Bind(&BrowserOptionsHandler::CheckAutoLaunchCallback,
+                 weak_this,
+                 auto_launch_trial::IsInAutoLaunchGroup(),
+                 auto_launch_util::WillLaunchAtLogin(FilePath())));
+#endif
+}
+
+void BrowserOptionsHandler::CheckAutoLaunchCallback(
+    bool is_in_auto_launch_group,
+    bool will_launch_at_login) {
+#if defined(OS_WIN)
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (is_in_auto_launch_group) {
+    web_ui()->RegisterMessageCallback("toggleAutoLaunch",
+        base::Bind(&BrowserOptionsHandler::ToggleAutoLaunch,
+        base::Unretained(this)));
+
+    base::FundamentalValue enabled(will_launch_at_login);
+    web_ui()->CallJavascriptFunction("BrowserOptions.updateAutoLaunchState",
+      enabled);
+  }
+#endif
 }
 
 void BrowserOptionsHandler::UpdateDefaultBrowserState() {
@@ -184,7 +241,7 @@ void BrowserOptionsHandler::BecomeDefaultBrowser(const ListValue* args) {
   if (default_browser_policy_.IsManaged())
     return;
 
-  UserMetrics::RecordAction(UserMetricsAction("Options_SetAsDefaultBrowser"));
+  content::RecordAction(UserMetricsAction("Options_SetAsDefaultBrowser"));
 #if defined(OS_MACOSX)
   if (ShellIntegration::SetAsDefaultBrowser())
     UpdateDefaultBrowserState();
@@ -195,7 +252,7 @@ void BrowserOptionsHandler::BecomeDefaultBrowser(const ListValue* args) {
 
   // If the user attempted to make Chrome the default browser, then he/she
   // arguably wants to be notified when that changes.
-  PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   prefs->SetBoolean(prefs::kCheckDefaultBrowser, true);
 }
 
@@ -236,8 +293,9 @@ void BrowserOptionsHandler::SetDefaultBrowserUIString(int status_string_id) {
       (status_string_id == IDS_OPTIONS_DEFAULTBROWSER_DEFAULT ||
        status_string_id == IDS_OPTIONS_DEFAULTBROWSER_NOTDEFAULT)));
 
-  web_ui_->CallJavascriptFunction("BrowserOptions.updateDefaultBrowserState",
-                                  *status_string, *is_default, *can_be_default);
+  web_ui()->CallJavascriptFunction(
+      "BrowserOptions.updateDefaultBrowserState",
+      *status_string, *is_default, *can_be_default);
 }
 
 void BrowserOptionsHandler::OnTemplateURLServiceChanged() {
@@ -267,9 +325,9 @@ void BrowserOptionsHandler::OnTemplateURLServiceChanged() {
   scoped_ptr<Value> default_managed(Value::CreateBooleanValue(
       template_url_service_->is_default_search_managed()));
 
-  web_ui_->CallJavascriptFunction("BrowserOptions.updateSearchEngines",
-                                  search_engines, *default_value,
-                                  *default_managed);
+  web_ui()->CallJavascriptFunction("BrowserOptions.updateSearchEngines",
+                                   search_engines, *default_value,
+                                   *default_managed);
 }
 
 void BrowserOptionsHandler::SetDefaultSearchEngine(const ListValue* args) {
@@ -285,12 +343,12 @@ void BrowserOptionsHandler::SetDefaultSearchEngine(const ListValue* args) {
       selected_index < static_cast<int>(model_urls.size()))
     template_url_service_->SetDefaultSearchProvider(model_urls[selected_index]);
 
-  UserMetrics::RecordAction(UserMetricsAction("Options_SearchEngineChanged"));
+  content::RecordAction(UserMetricsAction("Options_SearchEngineChanged"));
 }
 
 void BrowserOptionsHandler::UpdateSearchEngines() {
   template_url_service_ =
-      TemplateURLServiceFactory::GetForProfile(Profile::FromWebUI(web_ui_));
+      TemplateURLServiceFactory::GetForProfile(Profile::FromWebUI(web_ui()));
   if (template_url_service_) {
     template_url_service_->Load();
     template_url_service_->AddObserver(this);
@@ -299,7 +357,7 @@ void BrowserOptionsHandler::UpdateSearchEngines() {
 }
 
 void BrowserOptionsHandler::UpdateStartupPages() {
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   const SessionStartupPref startup_pref =
       SessionStartupPref::GetStartupPref(profile->GetPrefs());
   startup_custom_pages_table_model_->SetURLs(startup_pref.urls);
@@ -319,8 +377,8 @@ void BrowserOptionsHandler::OnModelChanged() {
     startup_pages.Append(entry);
   }
 
-  web_ui_->CallJavascriptFunction("BrowserOptions.updateStartupPages",
-                                  startup_pages);
+  web_ui()->CallJavascriptFunction("BrowserOptions.updateStartupPages",
+                                   startup_pages);
 }
 
 void BrowserOptionsHandler::OnItemsChanged(int start, int length) {
@@ -435,7 +493,7 @@ void BrowserOptionsHandler::DragDropStartupPage(const ListValue* args) {
 }
 
 void BrowserOptionsHandler::SaveStartupPagesPref() {
-  PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
 
   SessionStartupPref pref = SessionStartupPref::GetStartupPref(prefs);
   pref.urls = startup_custom_pages_table_model_->GetURLs();
@@ -454,20 +512,37 @@ void BrowserOptionsHandler::RequestAutocompleteSuggestions(
 }
 
 void BrowserOptionsHandler::EnableInstant(const ListValue* args) {
-  InstantController::Enable(Profile::FromWebUI(web_ui_));
+  InstantController::Enable(Profile::FromWebUI(web_ui()));
 }
 
 void BrowserOptionsHandler::DisableInstant(const ListValue* args) {
-  InstantController::Disable(Profile::FromWebUI(web_ui_));
+  InstantController::Disable(Profile::FromWebUI(web_ui()));
+}
+
+void BrowserOptionsHandler::ToggleAutoLaunch(const ListValue* args) {
+#if defined(OS_WIN)
+  if (!auto_launch_trial::IsInAutoLaunchGroup())
+    return;
+
+  bool enable;
+  CHECK_EQ(args->GetSize(), 1U);
+  CHECK(args->GetBoolean(0, &enable));
+
+  // Make sure we keep track of how many disable and how many enable.
+  auto_launch_trial::UpdateToggleAutoLaunchMetric(enable);
+  content::BrowserThread::PostTask(
+      content::BrowserThread::FILE, FROM_HERE,
+      base::Bind(&auto_launch_util::SetWillLaunchAtLogin, enable, FilePath()));
+#endif  // OS_WIN
 }
 
 void BrowserOptionsHandler::GetInstantFieldTrialStatus(const ListValue* args) {
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   base::FundamentalValue enabled(
       InstantFieldTrial::IsInstantExperiment(profile) &&
       !InstantFieldTrial::IsHiddenExperiment(profile));
-  web_ui_->CallJavascriptFunction("BrowserOptions.setInstantFieldTrialStatus",
-                                  enabled);
+  web_ui()->CallJavascriptFunction("BrowserOptions.setInstantFieldTrialStatus",
+                                   enabled);
 }
 
 void BrowserOptionsHandler::OnResultChanged(bool default_match_changed) {
@@ -489,6 +564,6 @@ void BrowserOptionsHandler::OnResultChanged(bool default_match_changed) {
     suggestions.Append(entry);
   }
 
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "BrowserOptions.updateAutocompleteSuggestions", suggestions);
 }

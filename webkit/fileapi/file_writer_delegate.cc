@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/quota_file_util.h"
 
@@ -159,7 +158,7 @@ void FileWriterDelegate::OnCertificateRequested(
 
 void FileWriterDelegate::OnSSLCertificateError(net::URLRequest* request,
                                                const net::SSLInfo& ssl_info,
-                                               bool is_hsts_host) {
+                                               bool fatal) {
   NOTREACHED();
   OnError(base::PLATFORM_FILE_ERROR_SECURITY);
 }
@@ -169,7 +168,7 @@ void FileWriterDelegate::OnResponseStarted(net::URLRequest* request) {
   // file_stream_->Seek() blocks the IO thread.
   // See http://crbug.com/75548.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
-  if (!request->status().is_success()) {
+  if (!request->status().is_success() || request->GetResponseCode() != 200) {
     OnError(base::PLATFORM_FILE_ERROR_FAILED);
     return;
   }

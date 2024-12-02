@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 
 namespace {
 
-static const char kApplicationOctetStream[] = "application/octet-stream";
+const char kApplicationOctetStream[] = "application/octet-stream";
 
 base::LazyInstance<webkit::npapi::PluginList> g_singleton =
     LAZY_INSTANCE_INITIALIZER;
@@ -53,11 +53,18 @@ bool AllowMimeTypeMismatch(const std::string& orig_mime_type,
 namespace webkit {
 namespace npapi {
 
-FilePath::CharType kDefaultPluginLibraryName[] =
-    FILE_PATH_LITERAL("default_plugin");
-
 // Some version ranges can be shared across operating systems. This should be
 // done where possible to avoid duplication.
+// TODO(bauerb): The |requires_authorization| flag should be part of
+// PluginGroupDefinition, not VersionRangeDefinition.
+static const VersionRangeDefinition kAllVersionsInfobarVersionRange[] = {
+    { "", "", "", true }
+};
+
+static const VersionRangeDefinition kAllVersionsNoInfobarVersionRange[] = {
+    { "", "", "", false }
+};
+
 // This is up to date with
 // http://www.adobe.com/support/security/bulletins/apsb11-26.html
 static const VersionRangeDefinition kFlashVersionRange[] = {
@@ -89,6 +96,16 @@ static const VersionRangeDefinition kSilverlightVersionRange[] = {
     kSilverlightVersionRange, arraysize(kSilverlightVersionRange), \
     "http://www.microsoft.com/getsilverlight/" }
 
+#define kChromePdfDefinition { \
+    "google-chrome-pdf", "Chrome PDF Viewer", "Chrome PDF Viewer", \
+    kAllVersionsNoInfobarVersionRange, \
+    arraysize(kAllVersionsNoInfobarVersionRange), "" }
+
+#define kGoogleTalkDefinition { \
+    "google-talk", "Google Talk NPAPI Plugin", "Google Talk NPAPI Plugin", \
+    kAllVersionsNoInfobarVersionRange, \
+    arraysize(kAllVersionsNoInfobarVersionRange), ""}
+
 #if defined(OS_MACOSX)
 // Plugin Groups for Mac.
 // Plugins are listed here as soon as vulnerabilities and solutions
@@ -118,7 +135,9 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
   { "flip4mac", "Flip4Mac", "Flip4Mac", kFlip4MacVersionRange,
     arraysize(kFlip4MacVersionRange),
     "http://www.telestream.net/flip4mac-wmv/overview.htm" },
-  kShockwaveDefinition
+  kShockwaveDefinition,
+  kChromePdfDefinition,
+  kGoogleTalkDefinition,
 };
 
 #elif defined(OS_WIN)
@@ -128,8 +147,8 @@ static const VersionRangeDefinition kQuicktimeVersionRange[] = {
     { "", "", "7.6.9", true }
 };
 static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "0", "7", "6.0.290", true },  // "290" is not a typo.
-    { "7", "", "10.1", true }  // JDK7u1 identifies itself as 10.1
+    { "0", "7", "6.0.310", true },  // "310" is not a typo.
+    { "7", "", "10.3", true }  // JDK7u3 identifies itself as 10.3
 };
 // This is up to date with
 // http://www.adobe.com/support/security/bulletins/apsb11-24.html
@@ -143,9 +162,6 @@ static const VersionRangeDefinition kDivXVersionRange[] = {
 };
 static const VersionRangeDefinition kRealPlayerVersionRange[] = {
     { "", "", "12.0.1.666", true }
-};
-static const VersionRangeDefinition kWindowsMediaPlayerVersionRange[] = {
-    { "", "", "", true }
 };
 static const PluginGroupDefinition kGroupDefinitions[] = {
   kFlashDefinition,
@@ -169,16 +185,23 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
     "http://www.real.com/realplayer/download" },
   // These are here for grouping, no vulnerabilities known.
   { "windows-media-player", PluginGroup::kWindowsMediaPlayerGroupName,
-    "Windows Media Player", kWindowsMediaPlayerVersionRange,
-    arraysize(kWindowsMediaPlayerVersionRange), "" },
+    "Windows Media Player", kAllVersionsInfobarVersionRange,
+    arraysize(kAllVersionsInfobarVersionRange), "" },
   { "microsoft-office", "Microsoft Office", "Microsoft Office",
     NULL, 0, "" },
+  { "nvidia-3d", "NVIDIA 3D", "NVIDIA 3D", kAllVersionsInfobarVersionRange,
+    arraysize(kAllVersionsInfobarVersionRange), "" },
+  kChromePdfDefinition,
+  kGoogleTalkDefinition,
 };
 
 #elif defined(OS_CHROMEOS)
 // ChromeOS generally has (autoupdated) system plug-ins and no user-installable
-// plug-ins.
-static const PluginGroupDefinition kGroupDefinitions[] = { };
+// plug-ins, so we just use these definitions for grouping.
+static const PluginGroupDefinition kGroupDefinitions[] = {
+  kFlashDefinition,
+  kChromePdfDefinition,
+};
 
 #else  // Most importantly, covers desktop Linux.
 static const VersionRangeDefinition kJavaVersionRange[] = {
@@ -202,6 +225,8 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
   { "redhat-icetea-java", "IcedTea", "IcedTea",
     kRedhatIcedTeaVersionRange, arraysize(kRedhatIcedTeaVersionRange),
     "http://www.linuxsecurity.com/content/section/3/170/" },
+  kChromePdfDefinition,
+  kGoogleTalkDefinition,
 };
 #endif
 
@@ -246,36 +271,28 @@ void PluginList::AddExtraPluginDir(const FilePath& plugin_dir) {
 #endif
 }
 
-void PluginList::RegisterInternalPlugin(const webkit::WebPluginInfo& info) {
+void PluginList::RegisterInternalPlugin(const webkit::WebPluginInfo& info,
+                                        bool add_at_beginning) {
   PluginEntryPoints entry_points = {0};
-  InternalPlugin plugin = { info, entry_points };
-
-  base::AutoLock lock(lock_);
-  // Newer registrations go earlier in the list so they can override the MIME
-  // types of older registrations.
-  internal_plugins_.insert(internal_plugins_.begin(), plugin);
-
-  if (info.path.value() == kDefaultPluginLibraryName)
-    default_plugin_enabled_ = true;
+  RegisterInternalPluginWithEntryPoints(info, add_at_beginning, entry_points);
 }
 
-void PluginList::RegisterInternalPlugin(const webkit::WebPluginInfo& info,
-                                        const PluginEntryPoints& entry_points,
-                                        bool add_at_beginning) {
+void PluginList::RegisterInternalPluginWithEntryPoints(
+    const webkit::WebPluginInfo& info,
+    bool add_at_beginning,
+    const PluginEntryPoints& entry_points) {
   InternalPlugin plugin = { info, entry_points };
 
   base::AutoLock lock(lock_);
 
+  internal_plugins_.push_back(plugin);
   if (add_at_beginning) {
     // Newer registrations go earlier in the list so they can override the MIME
     // types of older registrations.
-    internal_plugins_.insert(internal_plugins_.begin(), plugin);
+    extra_plugin_paths_.insert(extra_plugin_paths_.begin(), info.path);
   } else {
-    internal_plugins_.push_back(plugin);
+    extra_plugin_paths_.push_back(info.path);
   }
-
-  if (info.path.value() == kDefaultPluginLibraryName)
-    default_plugin_enabled_ = true;
 }
 
 void PluginList::UnregisterInternalPlugin(const FilePath& path) {
@@ -365,8 +382,7 @@ bool PluginList::ParseMimeTypes(
 }
 
 PluginList::PluginList()
-    : plugins_need_refresh_(true),
-      default_plugin_enabled_(false) {
+    : plugins_need_refresh_(true) {
   PlatformInit();
   AddHardcodedPluginGroups(kGroupDefinitions,
                            ARRAYSIZE_UNSAFE(kGroupDefinitions));
@@ -374,8 +390,7 @@ PluginList::PluginList()
 
 PluginList::PluginList(const PluginGroupDefinition* definitions,
                        size_t num_definitions)
-    : plugins_need_refresh_(true),
-      default_plugin_enabled_(false) {
+    : plugins_need_refresh_(true) {
   // Don't do platform-dependend initialization in unit tests.
   AddHardcodedPluginGroups(definitions, num_definitions);
 }
@@ -441,11 +456,10 @@ void PluginList::LoadPlugin(const FilePath& path,
   if (!ShouldLoadPlugin(plugin_info, plugin_groups))
     return;
 
-  if (path.value() != kDefaultPluginLibraryName
 #if defined(OS_WIN) && !defined(NDEBUG)
-      && path.BaseName().value() != L"npspy.dll"  // Make an exception for NPSPY
+  if (path.BaseName().value() != L"npspy.dll")  // Make an exception for NPSPY
 #endif
-      ) {
+  {
     for (size_t i = 0; i < plugin_info.mime_types.size(); ++i) {
       // TODO: don't load global handlers for now.
       // WebKit hands to the Plugin before it tries
@@ -465,25 +479,14 @@ void PluginList::GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths) {
   // other methods if they're called on other threads.
   std::vector<FilePath> extra_plugin_paths;
   std::vector<FilePath> extra_plugin_dirs;
-  std::vector<InternalPlugin> internal_plugins;
   {
     base::AutoLock lock(lock_);
     extra_plugin_paths = extra_plugin_paths_;
     extra_plugin_dirs = extra_plugin_dirs_;
-    internal_plugins = internal_plugins_;
   }
 
   std::vector<FilePath> directories_to_scan;
   GetPluginDirectories(&directories_to_scan);
-
-  // Load internal plugins first so that, if both an internal plugin and a
-  // "discovered" plugin want to handle the same type, the internal plugin
-  // will have precedence.
-  for (size_t i = 0; i < internal_plugins.size(); ++i) {
-    if (internal_plugins[i].info.path.value() == kDefaultPluginLibraryName)
-      continue;
-    plugin_paths->push_back(internal_plugins[i].info.path);
-  }
 
   for (size_t i = 0; i < extra_plugin_paths.size(); ++i) {
     const FilePath& path = extra_plugin_paths[i];
@@ -503,10 +506,6 @@ void PluginList::GetPluginPathsToLoad(std::vector<FilePath>* plugin_paths) {
 #if defined(OS_WIN)
   GetPluginPathsFromRegistry(plugin_paths);
 #endif
-
-  // Load the default plugin last.
-  if (default_plugin_enabled_)
-    plugin_paths->push_back(FilePath(kDefaultPluginLibraryName));
 }
 
 void PluginList::SetPlugins(const std::vector<webkit::WebPluginInfo>& plugins) {
@@ -579,8 +578,7 @@ void PluginList::GetPluginInfoArray(
     for (size_t i = 0; i < plugins.size(); ++i) {
       if (SupportsType(plugins[i], mime_type, allow_wildcard)) {
         FilePath path = plugins[i].path;
-        if (path.value() != kDefaultPluginLibraryName &&
-            visited_plugins.insert(path).second) {
+        if (visited_plugins.insert(path).second) {
           info->push_back(plugins[i]);
           if (actual_mime_types)
             actual_mime_types->push_back(mime_type);
@@ -601,35 +599,13 @@ void PluginList::GetPluginInfoArray(
       for (size_t i = 0; i < plugins.size(); ++i) {
         if (SupportsExtension(plugins[i], extension, &actual_mime_type)) {
           FilePath path = plugins[i].path;
-          if (path.value() != kDefaultPluginLibraryName &&
-              visited_plugins.insert(path).second &&
+          if (visited_plugins.insert(path).second &&
               AllowMimeTypeMismatch(mime_type, actual_mime_type)) {
             info->push_back(plugins[i]);
             if (actual_mime_types)
               actual_mime_types->push_back(actual_mime_type);
           }
         }
-      }
-    }
-  }
-
-  // Add the default plugin at the end if it supports the mime type given,
-  // and the default plugin is enabled.
-  for (size_t i = 0; i < plugin_groups_.size(); ++i) {
-#if defined(OS_WIN)
-    if (plugin_groups_[i]->identifier().compare(
-        WideToUTF8(kDefaultPluginLibraryName)) == 0) {
-#else
-    if (plugin_groups_[i]->identifier().compare(
-        kDefaultPluginLibraryName) == 0) {
-#endif
-      DCHECK_NE(0U, plugin_groups_[i]->web_plugin_infos().size());
-      const webkit::WebPluginInfo& default_info =
-          plugin_groups_[i]->web_plugin_infos()[0];
-      if (SupportsType(default_info, mime_type, allow_wildcard)) {
-        info->push_back(default_info);
-        if (actual_mime_types)
-          actual_mime_types->push_back(mime_type);
       }
     }
   }

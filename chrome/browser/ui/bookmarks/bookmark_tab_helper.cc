@@ -10,21 +10,25 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 
 namespace {
 
-bool CanShowBookmarkBar(WebUI* ui) {
-  return ui && static_cast<ChromeWebUI*>(ui)->CanShowBookmarkBar();
+bool CanShowBookmarkBar(content::WebUI* ui) {
+  if (!ui)
+    return false;
+  NewTabUI* new_tab = NewTabUI::FromWebUIController(ui->GetController());
+  return new_tab && new_tab->CanShowBookmarkBar();
 }
 
 }  // namespace
 
 BookmarkTabHelper::BookmarkTabHelper(TabContentsWrapper* tab_contents)
-    : TabContentsObserver(tab_contents->tab_contents()),
+    : content::WebContentsObserver(tab_contents->web_contents()),
       is_starred_(false),
       tab_contents_wrapper_(tab_contents),
       delegate_(NULL),
@@ -42,22 +46,22 @@ BookmarkTabHelper::~BookmarkTabHelper() {
 }
 
 bool BookmarkTabHelper::ShouldShowBookmarkBar() {
-  if (tab_contents()->showing_interstitial_page())
+  if (web_contents()->ShowingInterstitialPage())
     return false;
 
   // See TabContents::GetWebUIForCurrentState() comment for more info. This case
   // is very similar, but for non-first loads, we want to use the committed
   // entry. This is so the bookmarks bar disappears at the same time the page
   // does.
-  if (tab_contents()->controller().GetLastCommittedEntry()) {
+  if (web_contents()->GetController().GetLastCommittedEntry()) {
     // Not the first load, always use the committed Web UI.
-    return CanShowBookmarkBar(tab_contents()->committed_web_ui());
+    return CanShowBookmarkBar(web_contents()->GetCommittedWebUI());
   }
 
   // When it's the first load, we know either the pending one or the committed
   // one will have the Web UI in it (see GetWebUIForCurrentState), and only one
   // of them will be valid, so we can just check both.
-  return CanShowBookmarkBar(tab_contents()->web_ui());
+  return CanShowBookmarkBar(web_contents()->GetWebUI());
 }
 
 void BookmarkTabHelper::DidNavigateMainFrame(
@@ -101,10 +105,10 @@ BookmarkTabHelper::BookmarkDrag*
 
 void BookmarkTabHelper::UpdateStarredStateForCurrentURL() {
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   BookmarkModel* model = profile->GetBookmarkModel();
   const bool old_state = is_starred_;
-  is_starred_ = (model && model->IsBookmarked(tab_contents()->GetURL()));
+  is_starred_ = (model && model->IsBookmarked(web_contents()->GetURL()));
 
   if (is_starred_ != old_state && delegate())
     delegate()->URLStarredChanged(tab_contents_wrapper_, is_starred_);

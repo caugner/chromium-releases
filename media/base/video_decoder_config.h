@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 
 namespace media {
 
-enum VideoCodec {
+enum MEDIA_EXPORT VideoCodec {
   // These values are histogrammed over time; do not change their ordinal
   // values.  When deleting a codec replace it with a dummy value; when adding a
   // codec, do so at the bottom (and update kVideoCodecMax).
@@ -33,6 +33,28 @@ enum VideoCodec {
   kVideoCodecMax = kCodecVP8  // Must equal the last "real" codec above.
 };
 
+// Video stream profile.  This *must* match PP_VideoDecoder_Profile.
+enum MEDIA_EXPORT VideoCodecProfile {
+  // Keep the values in this enum unique, as they imply format (h.264 vs. VP8,
+  // for example), and keep the values for a particular format grouped
+  // together for clarity.
+  VIDEO_CODEC_PROFILE_UNKNOWN = -1,
+  H264PROFILE_MIN = 0,
+  H264PROFILE_BASELINE = H264PROFILE_MIN,
+  H264PROFILE_MAIN,
+  H264PROFILE_EXTENDED,
+  H264PROFILE_HIGH,
+  H264PROFILE_HIGH10PROFILE,
+  H264PROFILE_HIGH422PROFILE,
+  H264PROFILE_HIGH444PREDICTIVEPROFILE,
+  H264PROFILE_SCALABLEBASELINE,
+  H264PROFILE_SCALABLEHIGH,
+  H264PROFILE_STEREOHIGH,
+  H264PROFILE_MULTIVIEWHIGH,
+  H264PROFILE_MAX = H264PROFILE_MULTIVIEWHIGH,
+  VIDEO_CODEC_PROFILE_MAX = H264PROFILE_MAX,
+};
+
 class MEDIA_EXPORT VideoDecoderConfig {
  public:
   // Constructs an uninitialized object. Clients should call Initialize() with
@@ -42,6 +64,7 @@ class MEDIA_EXPORT VideoDecoderConfig {
   // Constructs an initialized object. It is acceptable to pass in NULL for
   // |extra_data|, otherwise the memory is copied.
   VideoDecoderConfig(VideoCodec codec,
+                     VideoCodecProfile profile,
                      VideoFrame::Format format,
                      const gfx::Size& coded_size,
                      const gfx::Rect& visible_rect,
@@ -53,18 +76,28 @@ class MEDIA_EXPORT VideoDecoderConfig {
 
   // Resets the internal state of this object.
   void Initialize(VideoCodec codec,
+                  VideoCodecProfile profile,
                   VideoFrame::Format format,
                   const gfx::Size& coded_size,
                   const gfx::Rect& visible_rect,
                   int frame_rate_numerator, int frame_rate_denominator,
                   int aspect_ratio_numerator, int aspect_ratio_denominator,
-                  const uint8* extra_data, size_t extra_data_size);
+                  const uint8* extra_data, size_t extra_data_size,
+                  bool record_stats);
+
+  // Deep copies |video_config|.
+  void CopyFrom(const VideoDecoderConfig& video_config);
 
   // Returns true if this object has appropriate configuration values, false
   // otherwise.
   bool IsValidConfig() const;
 
+  // Returns a human-readable string describing |*this|.  For debugging & test
+  // output only.
+  std::string AsHumanReadableString() const;
+
   VideoCodec codec() const;
+  VideoCodecProfile profile() const;
 
   // Video format used to determine YUV buffer sizes.
   VideoFrame::Format format() const;
@@ -102,6 +135,7 @@ class MEDIA_EXPORT VideoDecoderConfig {
 
  private:
   VideoCodec codec_;
+  VideoCodecProfile profile_;
 
   VideoFrame::Format format_;
 

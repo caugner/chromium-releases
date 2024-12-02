@@ -66,8 +66,8 @@ PassiveLogCollector::PassiveLogCollector()
   trackers_[net::NetLog::SOURCE_SOCKET_STREAM] = &socket_stream_tracker_;
   trackers_[net::NetLog::SOURCE_CONNECT_JOB] = &connect_job_tracker_;
   trackers_[net::NetLog::SOURCE_SOCKET] = &socket_tracker_;
-  trackers_[net::NetLog::SOURCE_INIT_PROXY_RESOLVER] =
-      &init_proxy_resolver_tracker_;
+  trackers_[net::NetLog::SOURCE_PROXY_SCRIPT_DECIDER] =
+      &proxy_script_decider_tracker_;
   trackers_[net::NetLog::SOURCE_SPDY_SESSION] = &spdy_session_tracker_;
   trackers_[net::NetLog::SOURCE_HOST_RESOLVER_IMPL_REQUEST] =
       &dns_request_tracker_;
@@ -83,6 +83,8 @@ PassiveLogCollector::PassiveLogCollector()
   trackers_[net::NetLog::SOURCE_UDP_SOCKET] = &udp_socket_tracker_;
   trackers_[net::NetLog::SOURCE_CERT_VERIFIER_JOB] =
       &cert_verifier_job_tracker_;
+  trackers_[net::NetLog::SOURCE_HTTP_PIPELINED_CONNECTION] =
+      &http_pipelined_connection_tracker_;
   // Make sure our mapping is up-to-date.
   for (size_t i = 0; i < arraysize(trackers_); ++i)
     DCHECK(trackers_[i]) << "Unhandled SourceType: " << i;
@@ -488,22 +490,23 @@ PassiveLogCollector::RequestTracker::DoAddEntry(
 }
 
 //----------------------------------------------------------------------------
-// InitProxyResolverTracker
+// ProxyScriptDeciderTracker
 //----------------------------------------------------------------------------
 
-const size_t PassiveLogCollector::InitProxyResolverTracker::kMaxNumSources = 20;
-const size_t PassiveLogCollector::InitProxyResolverTracker::kMaxGraveyardSize =
-    3;
+const size_t PassiveLogCollector::ProxyScriptDeciderTracker::kMaxNumSources
+    = 20;
+const size_t PassiveLogCollector::ProxyScriptDeciderTracker::kMaxGraveyardSize
+    = 3;
 
-PassiveLogCollector::InitProxyResolverTracker::InitProxyResolverTracker()
+PassiveLogCollector::ProxyScriptDeciderTracker::ProxyScriptDeciderTracker()
     : SourceTracker(kMaxNumSources, kMaxGraveyardSize, NULL) {
 }
 
 PassiveLogCollector::SourceTracker::Action
-PassiveLogCollector::InitProxyResolverTracker::DoAddEntry(
+PassiveLogCollector::ProxyScriptDeciderTracker::DoAddEntry(
     const ChromeNetLog::Entry& entry, SourceInfo* out_info) {
   AddEntryToSourceInfo(entry, out_info);
-  if (entry.type == net::NetLog::TYPE_INIT_PROXY_RESOLVER &&
+  if (entry.type == net::NetLog::TYPE_PROXY_SCRIPT_DECIDER &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
   }
@@ -779,6 +782,33 @@ PassiveLogCollector::CertVerifierJobTracker::DoAddEntry(
     SourceInfo* out_info) {
   AddEntryToSourceInfo(entry, out_info);
   if (entry.type == net::NetLog::TYPE_CERT_VERIFIER_JOB &&
+      entry.phase == net::NetLog::PHASE_END) {
+    return ACTION_MOVE_TO_GRAVEYARD;
+  }
+  return ACTION_NONE;
+}
+
+//----------------------------------------------------------------------------
+// HttpPipelinedConnectionTracker
+//----------------------------------------------------------------------------
+
+const size_t
+PassiveLogCollector::HttpPipelinedConnectionTracker::kMaxNumSources = 100;
+
+const size_t
+PassiveLogCollector::HttpPipelinedConnectionTracker::kMaxGraveyardSize = 25;
+
+PassiveLogCollector::
+    HttpPipelinedConnectionTracker::HttpPipelinedConnectionTracker()
+        : SourceTracker(kMaxNumSources, kMaxGraveyardSize, NULL) {
+}
+
+PassiveLogCollector::SourceTracker::Action
+PassiveLogCollector::HttpPipelinedConnectionTracker::DoAddEntry(
+    const ChromeNetLog::Entry& entry,
+    SourceInfo* out_info) {
+  AddEntryToSourceInfo(entry, out_info);
+  if (entry.type == net::NetLog::TYPE_HTTP_PIPELINED_CONNECTION &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
   }

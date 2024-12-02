@@ -6,6 +6,7 @@
 
 #include <limits>
 
+#include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/threading/thread_restrictions.h"
@@ -338,7 +339,7 @@ BrowserThemePack* BrowserThemePack::BuildFromExtension(
   DCHECK(extension);
   DCHECK(extension->is_theme());
 
-  BrowserThemePack* pack = new BrowserThemePack;
+  scoped_refptr<BrowserThemePack> pack = new BrowserThemePack;
   pack->BuildHeader(extension);
   pack->BuildTintsFromJSON(extension->GetThemeTints());
   pack->BuildColorsFromJSON(extension->GetThemeColors());
@@ -351,8 +352,10 @@ BrowserThemePack* BrowserThemePack::BuildFromExtension(
                                 &file_paths);
   pack->BuildSourceImagesArray(file_paths);
 
-  if (!pack->LoadRawBitmapsTo(file_paths, &pack->prepared_images_))
+  if (!pack->LoadRawBitmapsTo(file_paths, &pack->prepared_images_)) {
+    delete pack;
     return NULL;
+  }
 
   pack->GenerateFrameImages(&pack->prepared_images_);
 
@@ -363,7 +366,7 @@ BrowserThemePack* BrowserThemePack::BuildFromExtension(
   pack->GenerateTabBackgroundImages(&pack->prepared_images_);
 
   // The BrowserThemePack is now in a consistent state.
-  return pack;
+  return pack.release();
 }
 
 // static

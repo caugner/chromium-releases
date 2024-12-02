@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,7 +72,7 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
   virtual void UpdateFont() = 0;
 
   // Updates the visibility of the text in the native text field.
-  virtual void UpdateIsPassword() = 0;
+  virtual void UpdateIsObscured() = 0;
 
   // Updates the enabled state of the native text field.
   virtual void UpdateEnabled() = 0;
@@ -143,6 +143,9 @@ class VIEWS_EXPORT NativeTextfieldWrapper {
 
   // Clears Edit history.
   virtual void ClearEditHistory() = 0;
+
+  // Get the height in pixels of the first font used in this textfield.
+  virtual int GetFontHeight() = 0;
 
   // Creates an appropriate NativeTextfieldWrapper for the platform.
   static NativeTextfieldWrapper* CreateWrapper(Textfield* field);

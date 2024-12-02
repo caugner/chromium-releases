@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,10 +8,13 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_field_trial.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
@@ -20,6 +23,7 @@
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -311,7 +315,59 @@ HistoryURLProvider::HistoryURLProvider(ACProviderListener* listener,
                                        Profile* profile)
     : HistoryProvider(listener, profile, "HistoryURL"),
       prefixes_(GetPrefixes()),
-      params_(NULL) {
+      params_(NULL),
+      enable_aggressive_scoring_(false) {
+  enum AggressivenessOption {
+    AGGRESSIVENESS_DISABLED = 0,
+    AGGRESSIVENESS_ENABLED = 1,
+    AGGRESSIVENESS_AUTO_BUT_NOT_IN_FIELD_TRIAL = 2,
+    AGGRESSIVENESS_FIELD_TRIAL_DEFAULT_GROUP = 3,
+    AGGRESSIVENESS_FIELD_TRIAL_EXPERIMENT_GROUP = 4,
+    NUM_OPTIONS = 5
+  };
+  // should always be overwritten
+  AggressivenessOption aggressiveness_option = NUM_OPTIONS;
+
+  const std::string switch_value = CommandLine::ForCurrentProcess()->
+      GetSwitchValueASCII(switches::kOmniboxAggressiveHistoryURL);
+  if (switch_value == switches::kOmniboxAggressiveHistoryURLEnabled) {
+    aggressiveness_option = AGGRESSIVENESS_ENABLED;
+    enable_aggressive_scoring_ = true;
+  } else if (switch_value == switches::kOmniboxAggressiveHistoryURLDisabled) {
+    aggressiveness_option = AGGRESSIVENESS_DISABLED;
+    enable_aggressive_scoring_ = false;
+  } else {
+    // Either: switch_value == switches::kOmniboxAggressiveHistoryURLAuto
+    // or someone passed an invalid command line flag.  We'll default
+    // the latter case to automatic but report an error.
+    if (!switch_value.empty() &&
+        (switch_value != switches::kOmniboxAggressiveHistoryURLAuto)) {
+      LOG(ERROR) << "Invalid --omnibox-aggressive-with-history-url option "
+                 << "received on command line: " << switch_value;
+      LOG(ERROR) << "Making automatic.";
+    }
+    // Automatic means eligible for the field trial.
+    if (AutocompleteFieldTrial::InAggressiveHUPFieldTrial()) {
+      if (AutocompleteFieldTrial::InAggressiveHUPFieldTrialExperimentGroup()) {
+        enable_aggressive_scoring_ = true;
+        aggressiveness_option = AGGRESSIVENESS_FIELD_TRIAL_EXPERIMENT_GROUP;
+      } else {
+        enable_aggressive_scoring_ = false;
+        aggressiveness_option = AGGRESSIVENESS_FIELD_TRIAL_DEFAULT_GROUP;
+      }
+    } else {
+      enable_aggressive_scoring_ = false;
+      aggressiveness_option = AGGRESSIVENESS_AUTO_BUT_NOT_IN_FIELD_TRIAL;
+    }
+  }
+
+  // Add a beacon to the logs that'll allow us to identify later what
+  // aggressiveness state a user is in.  Do this by incrementing a
+  // bucket in a histogram, where the bucket represents the user's
+  // aggressiveness state.
+  UMA_HISTOGRAM_ENUMERATION(
+      "Omnibox.AggressiveHistoryURLProviderFieldTrialBeacon",
+      aggressiveness_option, NUM_OPTIONS);
 }
 
 void HistoryURLProvider::Start(const AutocompleteInput& input,
@@ -448,6 +504,13 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   if (!backend)
     return;
 
+  // Determine relevancy of highest scoring match, if any.
+  int relevance = -1;
+  for (ACMatches::const_iterator it = params->matches.begin();
+       it != params->matches.end(); ++it) {
+    relevance = std::max(relevance, it->relevance);
+  }
+
   // Remove redirects and trim list to size.  We want to provide up to
   // kMaxMatches results plus the What You Typed result, if it was added to
   // |history_matches| above.
@@ -459,9 +522,13 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
     DCHECK(!have_what_you_typed_match ||
            (match.url_info.url() !=
             GURL(params->matches.front().destination_url)));
-    AutocompleteMatch ac_match =
-        HistoryMatchToACMatch(params, match, history_matches, NORMAL,
-                              history_matches.size() - 1 - i);
+    // With aggressive scoring, we assume that the results are all of similar
+    // quality, so we give them consecutively decreasing scores.
+    relevance = (enable_aggressive_scoring_ && (relevance > 0)) ?
+       (relevance - 1) :
+       CalculateRelevance(NORMAL, history_matches.size() - 1 - i);
+    AutocompleteMatch ac_match = HistoryMatchToACMatch(params, match,
+        NORMAL, relevance);
     params->matches.push_back(ac_match);
   }
 }
@@ -519,21 +586,21 @@ history::Prefixes HistoryURLProvider::GetPrefixes() {
   return prefixes;
 }
 
-// static
-int HistoryURLProvider::CalculateRelevance(AutocompleteInput::Type input_type,
-                                           MatchType match_type,
-                                           size_t match_number) {
+int HistoryURLProvider::CalculateRelevance(MatchType match_type,
+                                           size_t match_number) const {
+  int shift = enable_aggressive_scoring_ ? kMaxMatches : 0;
+
   switch (match_type) {
     case INLINE_AUTOCOMPLETE:
-      return 1410;
+      return 1410 + shift;
 
     case UNVISITED_INTRANET:
-      return 1400;
+      return 1400 + shift;
 
     case WHAT_YOU_TYPED:
-      return 1200;
+      return 1200 + shift;
 
-    default:
+    default:  // NORMAL
       return 900 + static_cast<int>(match_number);
   }
 }
@@ -636,8 +703,7 @@ const history::Prefix* HistoryURLProvider::BestPrefix(
 AutocompleteMatch HistoryURLProvider::SuggestExactInput(
     const AutocompleteInput& input,
     bool trim_http) {
-  AutocompleteMatch match(this,
-      CalculateRelevance(input.type(), WHAT_YOU_TYPED, 0), false,
+  AutocompleteMatch match(this, CalculateRelevance(WHAT_YOU_TYPED, 0), false,
       AutocompleteMatch::URL_WHAT_YOU_TYPED);
 
   const GURL& url = input.canonicalized_url();
@@ -721,7 +787,7 @@ bool HistoryURLProvider::FixupExactSuggestion(
       break;
   }
 
-  match->relevance = CalculateRelevance(input.type(), type, 0);
+  match->relevance = CalculateRelevance(type, 0);
 
   if (type == UNVISITED_INTRANET && !matches->empty()) {
     // If there are any other matches, then don't promote this match here, in
@@ -777,8 +843,8 @@ bool HistoryURLProvider::PromoteMatchForInlineAutocomplete(
   // there's no way to know about "foo/", make reaching this point prevent any
   // future pass from suggesting the exact input as a better match.
   params->dont_suggest_exact_input = true;
-  params->matches.push_back(HistoryMatchToACMatch(params, match, matches,
-                                                  INLINE_AUTOCOMPLETE, 0));
+  params->matches.push_back(HistoryMatchToACMatch(params, match,
+      INLINE_AUTOCOMPLETE, CalculateRelevance(INLINE_AUTOCOMPLETE, 0)));
   return true;
 }
 
@@ -889,12 +955,10 @@ size_t HistoryURLProvider::RemoveSubsequentMatchesOf(
 AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
     HistoryURLProviderParams* params,
     const history::HistoryMatch& history_match,
-    const history::HistoryMatches& history_matches,
     MatchType match_type,
-    size_t match_number) {
+    int relevance) {
   const history::URLRow& info = history_match.url_info;
-  AutocompleteMatch match(this,
-      CalculateRelevance(params->input.type(), match_type, match_number),
+  AutocompleteMatch match(this, relevance,
       !!info.visit_count(), AutocompleteMatch::HISTORY_URL);
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());

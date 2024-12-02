@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,26 @@
 #endif
 
 #include <sstream>
+
 #include "base/logging.h"
 #include "base/string_util.h"
-#include "third_party/mozc/session/commands.pb.h"
+#include "third_party/mozc/session/candidates_lite.pb.h"
+
+#if defined(HAVE_IBUS) && defined(USE_AURA)
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
+#include "ui/aura/client/aura_constants.h"
+#include "ui/aura/root_window.h"
+#include "ui/base/ime/ibus_client_impl.h"
+#include "ui/base/ime/input_method_ibus.h"
+
+namespace {
+
+// The list of input method IDs for Mozc Japanese IMEs.
+const char* kMozcJaInputMethodIds[] = { "mozc", "mozc-jp", "mozc-dv" };
+
+}  // namespace
+#endif
 
 namespace chromeos {
 namespace input_method {
@@ -70,9 +87,24 @@ class IBusUiControllerImpl : public IBusUiController {
   IBusUiControllerImpl()
       : ibus_(NULL),
         ibus_panel_service_(NULL) {
+#if defined(USE_AURA)
+    ui::InputMethodIBus* input_method = GetChromeInputMethod();
+    DCHECK(input_method);
+    input_method->set_ibus_client(scoped_ptr<ui::internal::IBusClient>(
+        new IBusChromeOSClientImpl(this)).Pass());
+#endif  // USE_AURA
   }
 
   ~IBusUiControllerImpl() {
+#if defined(USE_AURA)
+    ui::InputMethodIBus* input_method = GetChromeInputMethod();
+    if (input_method) {
+      ui::internal::IBusClient* client = input_method->ibus_client();
+      // We assume that no objects other than |this| set an IBus client.
+      DCHECK(client);
+      static_cast<IBusChromeOSClientImpl*>(client)->set_ui(NULL);
+    }
+#endif  // USE_AURA
     // ibus_panel_service_ depends on ibus_, thus unref it first.
     if (ibus_panel_service_) {
       DisconnectPanelServiceSignals();
@@ -149,7 +181,9 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void NotifyCandidateClicked(int index, int button, int flags) {
+  virtual void NotifyCandidateClicked(int index,
+                                      int button,
+                                      int flags) OVERRIDE {
     if (!ibus_ || !ibus_bus_is_connected(ibus_)) {
       LOG(ERROR) << "NotifyCandidateClicked: bus is not connected.";
       return;
@@ -167,7 +201,7 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void NotifyCursorUp() {
+  virtual void NotifyCursorUp() OVERRIDE {
     if (!ibus_ || !ibus_bus_is_connected(ibus_)) {
       LOG(ERROR) << "NotifyCursorUp: bus is not connected.";
       return;
@@ -182,7 +216,7 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void NotifyCursorDown() {
+  virtual void NotifyCursorDown() OVERRIDE {
     if (!ibus_ || !ibus_bus_is_connected(ibus_)) {
       LOG(ERROR) << "NotifyCursorDown: bus is not connected.";
       return;
@@ -196,7 +230,7 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void NotifyPageUp() {
+  virtual void NotifyPageUp() OVERRIDE {
     if (!ibus_ || !ibus_bus_is_connected(ibus_)) {
       LOG(ERROR) << "NotifyPageUp: bus is not connected.";
       return;
@@ -211,7 +245,7 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void NotifyPageDown() {
+  virtual void NotifyPageDown() OVERRIDE {
     if (!ibus_ || !ibus_bus_is_connected(ibus_)) {
       LOG(ERROR) << "NotifyPageDown: bus is not connected.";
       return;
@@ -226,7 +260,7 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void Connect() {
+  virtual void Connect() OVERRIDE {
     // It's totally fine if ConnectToIBus() fails here, as we'll get
     // "connected" gobject signal once the connection becomes ready.
     if (ConnectToIBus())
@@ -234,16 +268,77 @@ class IBusUiControllerImpl : public IBusUiController {
   }
 
   // IBusUiController override.
-  virtual void AddObserver(Observer* observer) {
+  virtual void AddObserver(Observer* observer) OVERRIDE {
     observers_.AddObserver(observer);
   }
 
   // IBusUiController override.
-  virtual void RemoveObserver(Observer* observer) {
+  virtual void RemoveObserver(Observer* observer) OVERRIDE {
     observers_.RemoveObserver(observer);
   }
 
  private:
+#if defined(USE_AURA)
+  // A class for customizing the behavior of ui::InputMethodIBus for Chrome OS.
+  class IBusChromeOSClientImpl : public ui::internal::IBusClientImpl {
+   public:
+    explicit IBusChromeOSClientImpl(IBusUiControllerImpl* ui)
+        : ui_(ui) {
+    }
+
+    // ui::IBusClient override.
+    virtual InputMethodType GetInputMethodType() OVERRIDE {
+      const std::string current_input_method_id = GetCurrentInputMethodId();
+      return InputMethodUtil::IsKeyboardLayout(current_input_method_id) ?
+          INPUT_METHOD_XKB_LAYOUT : INPUT_METHOD_NORMAL;
+    }
+
+    virtual void SetCursorLocation(IBusInputContext* context,
+                                   int32 x,
+                                   int32 y,
+                                   int32 w,
+                                   int32 h) OVERRIDE {
+      if (!ui_)
+        return;
+
+      const std::string current_input_method_id = GetCurrentInputMethodId();
+      for (size_t i = 0; i < arraysize(kMozcJaInputMethodIds); ++i) {
+        if (kMozcJaInputMethodIds[i] == current_input_method_id) {
+          // Mozc Japanese IMEs require cursor location information to show the
+          // suggestion window in a correct position.
+          ui::internal::IBusClientImpl::SetCursorLocation(context, x, y, w, h);
+          break;  // call IBusUiControllerImpl::SetCursorLocation() as well.
+        }
+      }
+
+      // We don't have to call ibus_input_context_set_cursor_location() on
+      // Chrome OS because the candidate window for IBus is integrated with
+      // Chrome.
+      ui_->SetCursorLocation(NULL, x, y, w, h);
+    }
+
+    void set_ui(IBusUiControllerImpl* ui) {
+      ui_ = ui;
+    }
+
+   private:
+    std::string GetCurrentInputMethodId() {
+      InputMethodManager* manager = InputMethodManager::GetInstance();
+      return manager->current_input_method().id();
+    }
+
+    IBusUiControllerImpl* ui_;
+  };
+
+  // Returns a ui::InputMethodIBus object which is associated with the root
+  // window.
+  static ui::InputMethodIBus* GetChromeInputMethod() {
+    return reinterpret_cast<ui::InputMethodIBus*>(
+        aura::RootWindow::GetInstance()->GetProperty(
+            aura::client::kRootWindowInputMethod));
+  }
+#endif  // USE_AURA
+
   // Functions that end with Thunk are used to deal with glib callbacks.
   //
   // Note that we cannot use CHROMEG_CALLBACK_0() here as we'll define
@@ -468,6 +563,7 @@ class IBusUiControllerImpl : public IBusUiController {
                          gint y,
                          gint width,
                          gint height) {
+    // Note: |panel| might be NULL. See IBusChromeOSClientImpl above.
     FOR_EACH_OBSERVER(Observer, observers_,
                       OnSetCursorLocation(x, y, width, height));
   }

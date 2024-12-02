@@ -9,9 +9,9 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/c/ppb_var.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
@@ -21,6 +21,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/ppb_var_shared.h"
 #include "ppapi/shared_impl/var.h"
 
 namespace ppapi {
@@ -52,35 +53,13 @@ PluginDispatcher* CheckExceptionAndGetDispatcher(const PP_Var& object,
   // The object is invalid. This means we can't figure out which dispatcher
   // to use, which is OK because the call will fail anyway. Set the exception.
   if (exception) {
-    *exception = StringVar::StringToPPVar(0,
+    *exception = StringVar::StringToPPVar(
         std::string("Attempting to use an invalid object"));
   }
   return NULL;
 }
 
 // PPB_Var_Deprecated plugin ---------------------------------------------------
-
-void AddRefVar(PP_Var var) {
-  PpapiGlobals::Get()->GetVarTracker()->AddRefVar(var);
-}
-
-void ReleaseVar(PP_Var var) {
-  PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(var);
-}
-
-PP_Var VarFromUtf8(PP_Module module, const char* data, uint32_t len) {
-  return StringVar::StringToPPVar(module, data, len);
-}
-
-const char* VarToUtf8(PP_Var var, uint32_t* len) {
-  StringVar* str = StringVar::FromPPVar(var);
-  if (str) {
-    *len = static_cast<uint32_t>(str->value().size());
-    return str->value().c_str();
-  }
-  *len = 0;
-  return NULL;
-}
 
 bool HasProperty(PP_Var var,
                  PP_Var name,
@@ -274,23 +253,6 @@ PP_Var CreateObject(PP_Instance instance,
   return result.Return(dispatcher);
 }
 
-const PPB_Var_Deprecated var_deprecated_interface = {
-  &AddRefVar,
-  &ReleaseVar,
-  &VarFromUtf8,
-  &VarToUtf8,
-  &HasProperty,
-  &HasMethod,
-  &GetProperty,
-  &EnumerateProperties,
-  &SetProperty,
-  &RemoveProperty,
-  &Call,
-  &Construct,
-  &IsInstanceOf,
-  &CreateObject
-};
-
 InterfaceProxy* CreateVarDeprecatedProxy(Dispatcher* dispatcher) {
   return new PPB_Var_Deprecated_Proxy(dispatcher );
 }
@@ -313,6 +275,23 @@ PPB_Var_Deprecated_Proxy::~PPB_Var_Deprecated_Proxy() {
 
 // static
 const InterfaceProxy::Info* PPB_Var_Deprecated_Proxy::GetInfo() {
+  static const PPB_Var_Deprecated var_deprecated_interface = {
+    ppapi::PPB_Var_Shared::GetVarInterface1_0()->AddRef,
+    ppapi::PPB_Var_Shared::GetVarInterface1_0()->Release,
+    ppapi::PPB_Var_Shared::GetVarInterface1_0()->VarFromUtf8,
+    ppapi::PPB_Var_Shared::GetVarInterface1_0()->VarToUtf8,
+    &HasProperty,
+    &HasMethod,
+    &GetProperty,
+    &EnumerateProperties,
+    &SetProperty,
+    &RemoveProperty,
+    &Call,
+    &Construct,
+    &IsInstanceOf,
+    &CreateObject
+  };
+
   static const Info info = {
     &var_deprecated_interface,
     PPB_VAR_DEPRECATED_INTERFACE,
@@ -363,8 +342,7 @@ bool PPB_Var_Deprecated_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
 void PPB_Var_Deprecated_Proxy::OnMsgAddRefObject(int64 object_id,
                                                  int* /* unused */) {
-  PP_Var var;
-  var.type = PP_VARTYPE_OBJECT;
+  PP_Var var = { PP_VARTYPE_OBJECT };
   var.value.as_id = object_id;
   ppb_var_impl_->AddRef(var);
 }
@@ -524,8 +502,7 @@ void PPB_Var_Deprecated_Proxy::SetAllowPluginReentrancy() {
 }
 
 void PPB_Var_Deprecated_Proxy::DoReleaseObject(int64 object_id) {
-  PP_Var var;
-  var.type = PP_VARTYPE_OBJECT;
+  PP_Var var = { PP_VARTYPE_OBJECT };
   var.value.as_id = object_id;
   ppb_var_impl_->Release(var);
 }

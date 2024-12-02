@@ -9,13 +9,17 @@
 #include "chrome/browser/tab_contents/insecure_content_infobar_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 
-InfoBarTabHelper::InfoBarTabHelper(TabContents* tab_contents)
-    : TabContentsObserver(tab_contents),
+using content::NavigationController;
+using content::WebContents;
+
+InfoBarTabHelper::InfoBarTabHelper(WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
       infobars_enabled_(true) {
-  DCHECK(tab_contents);
+  DCHECK(web_contents);
 }
 
 InfoBarTabHelper::~InfoBarTabHelper() {
@@ -55,7 +59,8 @@ void InfoBarTabHelper::AddInfoBar(InfoBarDelegate* delegate) {
   if (infobars_.size() == 1) {
     registrar_.Add(
         this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::Source<NavigationController>(&tab_contents()->controller()));
+        content::Source<NavigationController>(
+            &web_contents()->GetController()));
   }
 }
 
@@ -118,8 +123,10 @@ void InfoBarTabHelper::RemoveInfoBarInternal(InfoBarDelegate* delegate,
   infobars_.erase(infobars_.begin() + i);
   // Remove ourselves as an observer if we are tracking no more InfoBars.
   if (infobars_.empty()) {
-    registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-        content::Source<NavigationController>(&tab_contents()->controller()));
+    registrar_.Remove(
+        this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
+        content::Source<NavigationController>(
+            &web_contents()->GetController()));
   }
 }
 
@@ -176,7 +183,7 @@ void InfoBarTabHelper::Observe(int type,
                                const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED: {
-      DCHECK(&tab_contents()->controller() ==
+      DCHECK(&web_contents()->GetController() ==
              content::Source<NavigationController>(source).ptr());
 
       content::LoadCommittedDetails& committed_details =

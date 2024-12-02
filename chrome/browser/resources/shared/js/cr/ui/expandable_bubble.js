@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,11 +30,10 @@ cr.define('cr.ui', function() {
             '<div class="expandable-bubble-title"></div>' +
             '<div class="expandable-bubble-main" hidden></div>' +
           '</div>' +
-          '<div class="expandable-bubble-close" hidden></div>' +
-          '<div class="expandable-bubble-shadow"></div>' +
-          '<div class="expandable-bubble-arrow"></div>';
+          '<div class="expandable-bubble-close" hidden></div>';
 
       this.hidden = true;
+      this.bubbleSuppressed = false;
       this.handleCloseEvent = this.hide;
     },
 
@@ -69,7 +68,7 @@ cr.define('cr.ui', function() {
       this.anchorNode_ = node;
 
       if (!this.hidden)
-        this.resizeAndReposition_();
+        this.resizeAndReposition();
     },
 
     /**
@@ -82,23 +81,44 @@ cr.define('cr.ui', function() {
     },
 
     /**
+     * Temporarily suppresses the bubble from view (and toggles it back).
+     * 'Suppressed' and 'hidden' are two bubble states that both indicate that
+     * the bubble should not be visible, but when you 'un-suppress' a bubble,
+     * only a suppressed bubble becomes visible. This can be handy, for example,
+     * if the user switches away from the app card (then we need to know which
+     * bubbles to show (only the suppressed ones, not the hidden ones). Hiding
+     * and un-hiding a bubble overrides the suppressed state (a bubble cannot
+     * be suppressed but not hidden).
+     */
+    set suppressed(suppress) {
+      if (suppress) {
+        // If the bubble is already hidden, then we don't need to suppress it.
+        if (this.hidden)
+          return;
+
+        this.hidden = true;
+      } else if (this.bubbleSuppressed) {
+        this.hidden = false;
+      }
+      this.bubbleSuppressed = suppress;
+      this.resizeAndReposition(this);
+    },
+
+    /**
      * Updates the position of the bubble.
      * @private
      */
     reposition_: function() {
       var clientRect = this.anchorNode_.getBoundingClientRect();
-      if (clientRect.width <= 0) {
-        // When the page loads initially, the icons for the apps haven't loaded
-        // yet so the width of the anchor is 0. We then make sure we don't draw
-        // at 0,0 by drawing off-screen instead. We'll get another chance to
-        // reposition when the icons have loaded.
-        this.style.top = "-999px";
-        return;
-      }
 
-      this.style.left = this.style.right = clientRect.left + 'px';
+      // Center bubble in collapsed mode (if it doesn't take up all the room we
+      // have).
+      var offset = 0;
+      if (!this.expanded)
+        offset = (clientRect.width - parseInt(this.style.width)) / 2;
+      this.style.left = this.style.right = clientRect.left + offset + 'px';
 
-      var top = clientRect.top - 1;
+      var top = Math.max(0, clientRect.top - 4);
       this.style.top = this.expanded ?
           (top - this.offsetHeight + this.unexpandedHeight) + 'px' :
           top + 'px';
@@ -108,14 +128,18 @@ cr.define('cr.ui', function() {
      * Resizes the bubble and then repositions it.
      * @private
      */
-    resizeAndReposition_: function() {
+    resizeAndReposition: function() {
       var clientRect = this.anchorNode_.getBoundingClientRect();
       var width = clientRect.width;
 
       var bubbleTitle = this.querySelector('.expandable-bubble-title');
       var closeElement = this.querySelector('.expandable-bubble-close');
       var closeWidth = this.expanded ? closeElement.clientWidth : 0;
-      var margin = 12;
+      var margin = 15;
+
+      // Suppress the width style so we can get it to calculate its width.
+      // We'll set the right width again when we are done.
+      bubbleTitle.style.width = '';
 
       if (this.expanded) {
         // We always show the full title but never show less width than 250
@@ -125,17 +149,17 @@ cr.define('cr.ui', function() {
         this.style.marginLeft = (width - expandedWidth) + 'px';
         width = expandedWidth;
       } else {
+        var newWidth = Math.min(bubbleTitle.scrollWidth + margin, width);
+        // If we've maxed out in width then apply the mask.
+        this.masked = newWidth == width;
+        width = newWidth;
         this.style.marginLeft = '0';
       }
 
-      // Width is dynamic (when not expanded) based on the width of the anchor
-      // node, and the title and shadow need to follow suit.
+      // Width is determined by the width of the title (when not expanded) but
+      // capped to the width of the anchor node.
       this.style.width = width + 'px';
       bubbleTitle.style.width = Math.max(0, width - margin - closeWidth) + 'px';
-      var bubbleContent = this.querySelector('.expandable-bubble-main');
-      bubbleContent.style.width = Math.max(0, width - margin) + 'px';
-      var bubbleShadow = this.querySelector('.expandable-bubble-shadow');
-      bubbleShadow.style.width = width ? width + 2 + 'px' : 0 + 'px';
 
       // Also reposition the bubble -- dimensions have potentially changed.
       this.reposition_();
@@ -149,7 +173,7 @@ cr.define('cr.ui', function() {
       this.querySelector('.expandable-bubble-main').hidden = false;
       this.querySelector('.expandable-bubble-close').hidden = false;
       this.expanded = true;
-      this.resizeAndReposition_();
+      this.resizeAndReposition();
     },
 
     /**
@@ -161,7 +185,7 @@ cr.define('cr.ui', function() {
       this.querySelector('.expandable-bubble-main').hidden = true;
       this.querySelector('.expandable-bubble-close').hidden = true;
       this.expanded = false;
-      this.resizeAndReposition_();
+      this.resizeAndReposition();
     },
 
     /**
@@ -193,13 +217,13 @@ cr.define('cr.ui', function() {
 
       document.body.appendChild(this);
       this.hidden = false;
-      this.resizeAndReposition_();
+      this.resizeAndReposition();
 
       this.eventTracker_ = new EventTracker;
       this.eventTracker_.add(window,
-                             'load', this.resizeAndReposition_.bind(this));
+                             'load', this.resizeAndReposition.bind(this));
       this.eventTracker_.add(window,
-                             'resize', this.resizeAndReposition_.bind(this));
+                             'resize', this.resizeAndReposition.bind(this));
       this.eventTracker_.add(this, 'click', this.onNotificationClick_);
 
       var doc = this.ownerDocument;
@@ -212,6 +236,7 @@ cr.define('cr.ui', function() {
      */
     hide: function() {
       this.hidden = true;
+      this.bubbleSuppressed = false;
       this.eventTracker_.removeAll();
       this.parentNode.removeChild(this);
     },
@@ -262,6 +287,15 @@ cr.define('cr.ui', function() {
    * @type {boolean}
    */
   cr.defineProperty(ExpandableBubble, 'expanded', cr.PropertyKind.BOOL_ATTR);
+
+  /**
+   * Whether the title needs to be masked out towards the right, which indicates
+   * to the user that part of the text is clipped. This is only used when the
+   * bubble is collapsed and the title doesn't fit because it is maxed out in
+   * width within the anchored node.
+   * @type {boolean}
+   */
+  cr.defineProperty(ExpandableBubble, 'masked', cr.PropertyKind.BOOL_ATTR);
 
   return {
     ExpandableBubble: ExpandableBubble

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/ui/global_error_bubble_view_base.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 
@@ -16,9 +18,12 @@ typedef struct _GtkWidget GtkWidget;
 class GlobalError;
 class Profile;
 
-class GlobalErrorBubble : public BubbleDelegateGtk {
+class GlobalErrorBubble : public BubbleDelegateGtk,
+                          public GlobalErrorBubbleViewBase {
  public:
-  GlobalErrorBubble(Profile* profile, GlobalError* error, GtkWidget* anchor);
+  GlobalErrorBubble(Browser* browser,
+                    const base::WeakPtr<GlobalError>& error,
+                    GtkWidget* anchor);
   virtual ~GlobalErrorBubble();
 
   // BubbleDelegateGtk implementation.
@@ -29,8 +34,11 @@ class GlobalErrorBubble : public BubbleDelegateGtk {
   CHROMEGTK_CALLBACK_0(GlobalErrorBubble, void, OnAcceptButton);
   CHROMEGTK_CALLBACK_0(GlobalErrorBubble, void, OnCancelButton);
 
+  virtual void CloseBubbleView() OVERRIDE;
+
+  Browser* browser_;
   BubbleGtk* bubble_;
-  GlobalError* error_;
+  base::WeakPtr<GlobalError> error_;
 
   DISALLOW_COPY_AND_ASSIGN(GlobalErrorBubble);
 };

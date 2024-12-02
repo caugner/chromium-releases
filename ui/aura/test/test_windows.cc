@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,25 +33,55 @@ Window* CreateTestWindowWithDelegate(WindowDelegate* delegate,
                                      Window* parent) {
   return CreateTestWindowWithDelegateAndType(
       delegate,
-      aura::WINDOW_TYPE_NORMAL,
+      aura::client::WINDOW_TYPE_NORMAL,
       id,
       bounds,
       parent);
 }
 
 Window* CreateTestWindowWithDelegateAndType(WindowDelegate* delegate,
-                                            WindowType type,
+                                            client::WindowType type,
                                             int id,
                                             const gfx::Rect& bounds,
                                             Window* parent) {
   Window* window = new Window(delegate);
   window->set_id(id);
   window->SetType(type);
-  window->Init(ui::Layer::LAYER_HAS_TEXTURE);
+  window->Init(ui::Layer::LAYER_TEXTURED);
   window->SetBounds(bounds);
   window->Show();
   window->SetParent(parent);
   return window;
+}
+
+Window* CreateTransientChild(int id, Window* parent) {
+  Window* window = new Window(NULL);
+  window->set_id(id);
+  window->SetType(aura::client::WINDOW_TYPE_NORMAL);
+  window->Init(ui::Layer::LAYER_TEXTURED);
+  window->SetParent(NULL);
+  parent->AddTransientChild(window);
+  return window;
+}
+
+template <typename T>
+bool ObjectIsAbove(T* upper, T* lower) {
+  DCHECK_EQ(upper->parent(), lower->parent());
+  DCHECK_NE(upper, lower);
+  const std::vector<T*>& children = upper->parent()->children();
+  const size_t upper_i =
+      std::find(children.begin(), children.end(), upper) - children.begin();
+  const size_t lower_i =
+      std::find(children.begin(), children.end(), lower) - children.begin();
+  return upper_i > lower_i;
+}
+
+bool WindowIsAbove(Window* upper, Window* lower) {
+  return ObjectIsAbove<Window>(upper, lower);
+}
+
+bool LayerIsAbove(Window* upper, Window* lower) {
+  return ObjectIsAbove<ui::Layer>(upper->layer(), lower->layer());
 }
 
 }  // namespace test

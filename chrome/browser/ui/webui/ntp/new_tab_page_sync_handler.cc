@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,11 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
@@ -54,19 +57,17 @@ NewTabPageSyncHandler::MessageType
   }
 }
 
-WebUIMessageHandler* NewTabPageSyncHandler::Attach(WebUI* web_ui) {
-  sync_service_ = Profile::FromWebUI(web_ui)->GetProfileSyncService();
+void NewTabPageSyncHandler::RegisterMessages() {
+  sync_service_ = ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+      Profile::FromWebUI(web_ui()));
   DCHECK(sync_service_);  // This shouldn't get called by an incognito NTP.
   DCHECK(!sync_service_->IsManaged());  // And neither if sync is managed.
   sync_service_->AddObserver(this);
-  return WebUIMessageHandler::Attach(web_ui);
-}
 
-void NewTabPageSyncHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("GetSyncMessage",
+  web_ui()->RegisterMessageCallback("GetSyncMessage",
       base::Bind(&NewTabPageSyncHandler::HandleGetSyncMessage,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncLinkClicked",
+  web_ui()->RegisterMessageCallback("SyncLinkClicked",
       base::Bind(&NewTabPageSyncHandler::HandleSyncLinkClicked,
                  base::Unretained(this)));
 }
@@ -123,7 +124,7 @@ void NewTabPageSyncHandler::HandleSyncLinkClicked(const ListValue* args) {
     value.SetString("syncEnabledMessage",
                     l10n_util::GetStringFUTF16(IDS_SYNC_NTP_SYNCED_TO,
                     user));
-    web_ui_->CallJavascriptFunction("syncAlreadyEnabled", value);
+    web_ui()->CallJavascriptFunction("syncAlreadyEnabled", value);
   } else {
     // User clicked the 'Start now' link to begin syncing.
     ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_NTP);
@@ -178,5 +179,5 @@ void NewTabPageSyncHandler::SendSyncMessageToPage(
       }
     }
   }
-  web_ui_->CallJavascriptFunction("syncMessageChanged", value);
+  web_ui()->CallJavascriptFunction("syncMessageChanged", value);
 }

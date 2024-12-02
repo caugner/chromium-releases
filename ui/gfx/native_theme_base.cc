@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,6 @@
 #include "ui/gfx/size.h"
 
 namespace {
-
-// Hardcoded colors for use when there is no system theme (Aura, ChromeOS).
-const SkColor kDefaultDialogBackgroundColor = SkColorSetRGB(200, 200, 200);
-const SkColor kInvalidColorIdColor = SkColorSetRGB(255, 0, 128);
 
 // These are the default dimensions of radio buttons and checkboxes.
 const int kCheckboxAndRadioWidth = 13;
@@ -204,19 +200,6 @@ void NativeThemeBase::Paint(SkCanvas* canvas,
       NOTREACHED() << "Unknown theme part: " << part;
       break;
   }
-}
-
-SkColor NativeThemeBase::GetSystemColor(ColorId color_id) const {
-  // This implementation returns hardcoded colors. It's used by NativeThemeAura
-  // and NativeThemeChromeos and overridden by NativeThemeGtk.
-  switch (color_id) {
-    case kColorId_DialogBackground:
-      return kDefaultDialogBackgroundColor;
-    default:
-      NOTREACHED() << "Invalid color_id: " << color_id;
-      break;
-  }
-  return kInvalidColorIdColor;
 }
 
 NativeThemeBase::NativeThemeBase() {

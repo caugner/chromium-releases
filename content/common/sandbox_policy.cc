@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,6 +57,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"npggNT.des",                  // GameGuard 2008.
   L"npggNT.dll",                  // GameGuard (older).
   L"oawatch.dll",                 // Online Armor.
+  L"owexplorer-10513.dll",        // Overwolf.
   L"pavhook.dll",                 // Panda Internet Security.
   L"pavshook.dll",                // Panda Antivirus.
   L"pavshookwow.dll",             // Panda Antivirus.
@@ -251,16 +252,27 @@ void AddBaseHandleClosePolicy(sandbox::TargetPolicy* policy) {
 bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   sandbox::ResultCode result;
 
-  // Add the policy for the pipes
+  // Add the policy for the client side of a pipe. It is just a file
+  // in the \pipe\ namespace. We restrict it to pipes that start with
+  // "chrome." so the sandboxed process cannot connect to system services.
   result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
                            L"\\??\\pipe\\chrome.*");
   if (result != sandbox::SBOX_ALL_OK)
     return false;
-
+  // Allow the server side of a pipe restricted to the "chrome.nacl."
+  // namespace so that it cannot impersonate other system or other chrome
+  // service pipes.
   result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
                            sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
                            L"\\\\.\\pipe\\chrome.nacl.*");
+  if (result != sandbox::SBOX_ALL_OK)
+    return false;
+  // Allow the server side of sync sockets, which are pipes that have
+  // the "chrome.sync" namespace and a randomly generated suffix.
+  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
+                           sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
+                           L"\\\\.\\pipe\\chrome.sync.*");
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 
@@ -294,17 +306,26 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
 // backend. Note that the GPU process is connected to the interactive
 // desktop.
 // TODO(cpu): Lock down the sandbox more if possible.
-// TODO(apatrick): Use D3D9Ex to render windowless.
 bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
 #if !defined(NACL_WIN64)  // We don't need this code on win nacl64.
   if (base::win::GetVersion() > base::win::VERSION_XP) {
-    policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                          sandbox::USER_LIMITED);
     if (cmd_line->GetSwitchValueASCII(switches::kUseGL) ==
         gfx::kGLImplementationDesktopName) {
+      policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                            sandbox::USER_LIMITED);
       policy->SetJobLevel(sandbox::JOB_UNPROTECTED, 0);
       policy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
     } else {
+      if (cmd_line->GetSwitchValueASCII(switches::kUseGL) ==
+          gfx::kGLImplementationSwiftShaderName ||
+          cmd_line->HasSwitch(switches::kReduceGpuSandbox)) {
+        policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                              sandbox::USER_LIMITED);
+      } else {
+        policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                              sandbox::USER_RESTRICTED);
+      }
+
       // UI restrictions break when we access Windows from outside our job.
       // However, we don't want a proxy window in this process because it can
       // introduce deadlocks where the renderer blocks on the gpu, which in
@@ -421,7 +442,7 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
 
   // If it is the GPU process then it can be disabled by a command line flag.
   if ((type == content::PROCESS_TYPE_GPU) &&
-      (browser_command_line.HasSwitch(switches::kDisableGpuSandbox))) {
+      (cmd_line->HasSwitch(switches::kDisableGpuSandbox))) {
     in_sandbox = false;
     DVLOG(1) << "GPU sandbox is disabled";
   }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,9 @@
 #define CHROME_COMMON_EXTENSIONS_EXTENSION_SET_H_
 #pragma once
 
+#include <iterator>
 #include <map>
 #include <string>
-#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
@@ -44,17 +44,39 @@ class ExtensionSet {
  public:
   typedef std::pair<FilePath, std::string> ExtensionPathAndDefaultLocale;
   typedef std::map<std::string, scoped_refptr<const Extension> > ExtensionMap;
-  typedef ExtensionMap::const_iterator const_iterator;
+
+  // Iteration over the values of the map (given that it's an ExtensionSet,
+  // it should iterate like a set iterator).
+  class const_iterator :
+      public std::iterator<std::input_iterator_tag,
+                           scoped_refptr<const Extension> > {
+   public:
+    const_iterator() {}
+    explicit const_iterator(ExtensionMap::const_iterator it) :
+        it_(it) {}
+    const_iterator& operator++() {
+      ++it_;
+      return *this;
+    }
+    const scoped_refptr<const Extension> operator*() {
+      return it_->second;
+    }
+    bool operator!=(const const_iterator& other) { return it_ != other.it_; }
+    bool operator==(const const_iterator& other) { return it_ == other.it_; }
+
+   private:
+    ExtensionMap::const_iterator it_;
+  };
 
   ExtensionSet();
   ~ExtensionSet();
 
-  // Gets the number of extensions contained.
   size_t size() const;
+  bool is_empty() const;
 
   // Iteration support.
-  const_iterator begin() const { return extensions_.begin(); }
-  const_iterator end() const { return extensions_.end(); }
+  const_iterator begin() const { return const_iterator(extensions_.begin()); }
+  const_iterator end() const { return const_iterator(extensions_.end()); }
 
   // Returns true if the set contains the specified extension.
   bool Contains(const std::string& id) const;
@@ -63,19 +85,34 @@ class ExtensionSet {
   // previous extension with the same ID is removed.
   void Insert(const scoped_refptr<const Extension>& extension);
 
+  // Copies different items from |extensions| to the current set and returns
+  // whether anything changed.
+  bool InsertAll(const ExtensionSet& extensions);
+
   // Removes the specified extension.
   void Remove(const std::string& id);
 
+  // Removes all extensions.
+  void Clear();
+
   // Returns the extension ID, or empty if none. This includes web URLs that
   // are part of an extension's web extent.
-  std::string GetIdByURL(const ExtensionURLInfo& info) const;
+  std::string GetExtensionOrAppIDByURL(const ExtensionURLInfo& info) const;
 
   // Returns the Extension, or NULL if none.  This includes web URLs that are
   // part of an extension's web extent.
   // NOTE: This can return NULL if called before UpdateExtensions receives
   // bulk extension data (e.g. if called from
   // EventBindings::HandleContextCreated)
-  const Extension* GetByURL(const ExtensionURLInfo& info) const;
+  const Extension* GetExtensionOrAppByURL(const ExtensionURLInfo& info) const;
+
+  // Returns the hosted app whose web extent contains the URL.
+  const Extension* GetHostedAppByURL(const ExtensionURLInfo& info) const;
+
+  // Returns a hosted app that contains any URL that overlaps with the given
+  // extent, if one exists.
+  const Extension* GetHostedAppByOverlappingWebExtent(
+      const URLPatternSet& extent) const;
 
   // Returns true if |new_url| is in the extent of the same extension as
   // |old_url|.  Also returns true if neither URL is in an app.

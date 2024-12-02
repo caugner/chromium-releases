@@ -80,14 +80,14 @@ std::string GetNameForVirtualFilePath(const std::string& path) {
 
 PPB_FileRef_Impl::PPB_FileRef_Impl(const PPB_FileRef_CreateInfo& info,
                                    PPB_FileSystem_Impl* file_system)
-    : FileRefImpl(FileRefImpl::InitAsImpl(), info),
+    : PPB_FileRef_Shared(PPB_FileRef_Shared::InitAsImpl(), info),
       file_system_(file_system),
       external_file_system_path_() {
 }
 
 PPB_FileRef_Impl::PPB_FileRef_Impl(const PPB_FileRef_CreateInfo& info,
                                    const FilePath& external_file_path)
-    : FileRefImpl(FileRefImpl::InitAsImpl(), info),
+    : PPB_FileRef_Shared(PPB_FileRef_Shared::InitAsImpl(), info),
       file_system_(),
       external_file_system_path_(external_file_path) {
 }
@@ -173,8 +173,7 @@ int32_t PPB_FileRef_Impl::MakeDirectory(PP_Bool make_ancestors,
     return PP_ERROR_FAILED;
   if (!plugin_instance->delegate()->MakeDirectory(
           GetFileSystemURL(), PP_ToBool(make_ancestors),
-          new FileCallbacks(plugin_instance->module()->AsWeakPtr(),
-                            pp_resource(), callback, NULL, NULL, NULL)))
+          new FileCallbacks(this, callback, NULL, NULL, NULL)))
     return PP_ERROR_FAILED;
   return PP_OK_COMPLETIONPENDING;
 }
@@ -194,8 +193,7 @@ int32_t PPB_FileRef_Impl::Touch(PP_Time last_access_time,
           GetFileSystemURL(),
           PPTimeToTime(last_access_time),
           PPTimeToTime(last_modified_time),
-          new FileCallbacks(plugin_instance->module()->AsWeakPtr(),
-                            pp_resource(), callback, NULL, NULL, NULL)))
+          new FileCallbacks(this, callback, NULL, NULL, NULL)))
     return PP_ERROR_FAILED;
   return PP_OK_COMPLETIONPENDING;
 }
@@ -211,8 +209,7 @@ int32_t PPB_FileRef_Impl::Delete(PP_CompletionCallback callback) {
     return PP_ERROR_FAILED;
   if (!plugin_instance->delegate()->Delete(
           GetFileSystemURL(),
-          new FileCallbacks(plugin_instance->module()->AsWeakPtr(),
-                            pp_resource(), callback, NULL, NULL, NULL)))
+          new FileCallbacks(this, callback, NULL, NULL, NULL)))
     return PP_ERROR_FAILED;
   return PP_OK_COMPLETIONPENDING;
 }
@@ -238,8 +235,7 @@ int32_t PPB_FileRef_Impl::Rename(PP_Resource new_pp_file_ref,
     return PP_ERROR_FAILED;
   if (!plugin_instance->delegate()->Rename(
           GetFileSystemURL(), new_file_ref->GetFileSystemURL(),
-          new FileCallbacks(plugin_instance->module()->AsWeakPtr(),
-                            pp_resource(), callback, NULL, NULL, NULL)))
+          new FileCallbacks(this, callback, NULL, NULL, NULL)))
     return PP_ERROR_FAILED;
   return PP_OK_COMPLETIONPENDING;
 }
@@ -248,11 +244,7 @@ PP_Var PPB_FileRef_Impl::GetAbsolutePath() {
   if (GetFileSystemType() != PP_FILESYSTEMTYPE_EXTERNAL)
     return GetPath();
   if (!external_path_var_.get()) {
-    PluginModule* plugin_module = ResourceHelper::GetPluginModule(this);
-    if (!plugin_module)
-      return PP_MakeNull();
     external_path_var_ = new StringVar(
-        plugin_module->pp_module(),
         external_file_system_path_.AsUTF8Unsafe());
   }
   return external_path_var_->GetPPVar();

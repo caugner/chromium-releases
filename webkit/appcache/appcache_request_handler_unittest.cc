@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
 #include "net/base/net_errors.h"
@@ -55,24 +54,13 @@ class AppCacheRequestHandlerTest : public testing::Test {
     virtual void OnContentBlocked(int host_id, const GURL& manifest_url) {}
   };
 
-  // Helper class run a test on our io_thread. The io_thread
-  // is spun up once and reused for all tests.
+  // Helper callback to run a test on our io_thread. The io_thread is spun up
+  // once and reused for all tests.
   template <class Method>
-  class WrapperTask : public Task {
-   public:
-    WrapperTask(AppCacheRequestHandlerTest* test, Method method)
-        : test_(test), method_(method) {
-    }
-
-    virtual void Run() {
-      test_->SetUpTest();
-      (test_->*method_)();
-    }
-
-   private:
-    AppCacheRequestHandlerTest* test_;
-    Method method_;
-  };
+  void MethodWrapper(Method method) {
+    SetUpTest();
+    (this->*method)();
+  }
 
   // Subclasses to simulate particular responses so test cases can
   // exercise fallback code paths.
@@ -168,7 +156,9 @@ class AppCacheRequestHandlerTest : public testing::Test {
   void RunTestOnIOThread(Method method) {
     test_finished_event_ .reset(new base::WaitableEvent(false, false));
     io_thread_->message_loop()->PostTask(
-        FROM_HERE, new WrapperTask<Method>(this, method));
+        FROM_HERE,
+        base::Bind(&AppCacheRequestHandlerTest::MethodWrapper<Method>,
+                   base::Unretained(this), method));
     test_finished_event_->Wait();
   }
 
@@ -370,8 +360,8 @@ class AppCacheRequestHandlerTest : public testing::Test {
     handler_->GetExtraResponseInfo(&cache_id, &manifest_url);
     EXPECT_EQ(1, cache_id);
     EXPECT_EQ(GURL("http://blah/manifest/"), manifest_url);
-    EXPECT_TRUE(host_->main_resource_was_fallback_);
-    EXPECT_EQ(GURL("http://blah/fallbackurl"), host_->fallback_url_);
+    EXPECT_TRUE(host_->main_resource_was_namespace_entry_);
+    EXPECT_EQ(GURL("http://blah/fallbackurl"), host_->namespace_entry_url_);
 
     EXPECT_EQ(GURL("http://blah/manifest/"),
               host_->preferred_manifest_url());

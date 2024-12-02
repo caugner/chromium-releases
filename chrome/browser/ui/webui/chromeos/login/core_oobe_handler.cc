@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chrome/common/chrome_version_info.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -53,10 +55,10 @@ void CoreOobeHandler::Initialize() {
 }
 
 void CoreOobeHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(kJsApiToggleAccessibility,
+  web_ui()->RegisterMessageCallback(kJsApiToggleAccessibility,
       base::Bind(&CoreOobeHandler::OnToggleAccessibility,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(kJsApiScreenStateInitialize,
+  web_ui()->RegisterMessageCallback(kJsApiScreenStateInitialize,
       base::Bind(&CoreOobeHandler::OnInitialized,
                  base::Unretained(this)));
 }
@@ -66,7 +68,7 @@ void CoreOobeHandler::OnInitialized(const base::ListValue* args) {
 }
 
 void CoreOobeHandler::OnToggleAccessibility(const base::ListValue* args) {
-  accessibility::ToggleAccessibility(web_ui_);
+  accessibility::ToggleAccessibility(web_ui());
 }
 
 void CoreOobeHandler::ShowOobeUI(bool show) {
@@ -80,8 +82,12 @@ void CoreOobeHandler::ShowOobeUI(bool show) {
 }
 
 void CoreOobeHandler::UpdateOobeUIVisibility() {
-  base::FundamentalValue showValue(show_oobe_ui_);
-  web_ui_->CallJavascriptFunction("cr.ui.Oobe.showOobeUI", showValue);
+  // Don't show version label on the stable channel by default.
+  base::FundamentalValue show_version(
+      chrome::VersionInfo::GetChannel() != chrome::VersionInfo::CHANNEL_STABLE);
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.showVersion", show_version);
+  base::FundamentalValue show_value(show_oobe_ui_);
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.showOobeUI", show_value);
 }
 
 void CoreOobeHandler::OnOSVersionLabelTextUpdated(
@@ -98,9 +104,9 @@ void CoreOobeHandler::UpdateLabel(const std::string& id,
                                   const std::string& text) {
   base::StringValue id_value(UTF8ToUTF16(id));
   base::StringValue text_value(UTF8ToUTF16(text));
-  web_ui_->CallJavascriptFunction("cr.ui.Oobe.setLabelText",
-                                  id_value,
-                                  text_value);
+  web_ui()->CallJavascriptFunction("cr.ui.Oobe.setLabelText",
+                                   id_value,
+                                   text_value);
 }
 
 }  // namespace chromeos

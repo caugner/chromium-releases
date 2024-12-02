@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,13 @@
 #include "base/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
+#include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/mac/scoped_nsexception_enabler.h"
 #include "base/memory/ref_counted.h"
 #include "base/sys_string_conversions.h"
-#include "base/task.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/mac/authorization_util.h"
 #import "chrome/browser/mac/keystone_registration.h"
@@ -261,16 +262,16 @@ NSString* const kVersionKey = @"KSVersion";
 }
 
 - (NSDictionary*)infoDictionary {
-  // Use [NSBundle mainBundle] to get the application's own bundle identifier
+  // Use base::mac::OuterBundle() to get the Chrome app's own bundle identifier
   // and path, not the framework's.  For auto-update, the application is
   // what's significant here: it's used to locate the outermost part of the
   // application for the existence checker and other operations that need to
   // see the entire application bundle.
-  return [[NSBundle mainBundle] infoDictionary];
+  return [base::mac::OuterBundle() infoDictionary];
 }
 
 - (void)loadParameters {
-  NSBundle* appBundle = [NSBundle mainBundle];
+  NSBundle* appBundle = base::mac::OuterBundle();
   NSDictionary* infoDictionary = [self infoDictionary];
 
   NSString* productID = [infoDictionary objectForKey:@"KSProductID"];
@@ -415,9 +416,9 @@ NSString* const kVersionKey = @"KSVersion";
     return NO;
 
   // Load the KeystoneRegistration framework bundle if present.  It lives
-  // inside the framework, so use base::mac::MainAppBundle();
+  // inside the framework, so use base::mac::FrameworkBundle();
   NSString* ksrPath =
-      [[base::mac::MainAppBundle() privateFrameworksPath]
+      [[base::mac::FrameworkBundle() privateFrameworksPath]
           stringByAppendingPathComponent:@"KeystoneRegistration.framework"];
   NSBundle* ksrBundle = [NSBundle bundleWithPath:ksrPath];
   [ksrBundle load];
@@ -745,8 +746,8 @@ NSString* const kVersionKey = @"KSVersion";
   // authenticating, may actually result in different ownership being applied
   // to files and directories.
   NSFileManager* fileManager = [NSFileManager defaultManager];
-  NSString* executablePath = [[NSBundle mainBundle] executablePath];
-  NSString* frameworkPath = [base::mac::MainAppBundle() bundlePath];
+  NSString* executablePath = [base::mac::OuterBundle() executablePath];
+  NSString* frameworkPath = [base::mac::FrameworkBundle() bundlePath];
   return ![fileManager isWritableFileAtPath:appPath_] ||
          ![fileManager isWritableFileAtPath:executablePath] ||
          ![fileManager isWritableFileAtPath:frameworkPath];
@@ -831,8 +832,9 @@ NSString* const kVersionKey = @"KSVersion";
   // However, preflight operation (and promotion) should only be asynchronous
   // if the synchronous parameter is NO.
   NSString* preflightPath =
-      [base::mac::MainAppBundle() pathForResource:@"keystone_promote_preflight"
-                                           ofType:@"sh"];
+      [base::mac::FrameworkBundle()
+          pathForResource:@"keystone_promote_preflight"
+                   ofType:@"sh"];
   const char* preflightPathC = [preflightPath fileSystemRepresentation];
   const char* userBrandFile = NULL;
   const char* systemBrandFile = NULL;
@@ -852,7 +854,8 @@ NSString* const kVersionKey = @"KSVersion";
       NULL,  // pipe
       &exit_status);
   if (status != errAuthorizationSuccess) {
-    LOG(ERROR) << "AuthorizationExecuteWithPrivileges preflight: " << status;
+    OSSTATUS_LOG(ERROR, status)
+        << "AuthorizationExecuteWithPrivileges preflight";
     [self updateStatus:kAutoupdatePromoteFailed version:nil];
     return;
   }
@@ -917,8 +920,9 @@ NSString* const kVersionKey = @"KSVersion";
 
   SEL selector = @selector(changePermissionsForPromotionWithTool:);
   NSString* toolPath =
-      [base::mac::MainAppBundle() pathForResource:@"keystone_promote_postflight"
-                                           ofType:@"sh"];
+      [base::mac::FrameworkBundle()
+          pathForResource:@"keystone_promote_postflight"
+                   ofType:@"sh"];
 
   PerformBridge::PostPerform(self, selector, toolPath);
 }
@@ -938,7 +942,8 @@ NSString* const kVersionKey = @"KSVersion";
       NULL,  // pipe
       &exit_status);
   if (status != errAuthorizationSuccess) {
-    LOG(ERROR) << "AuthorizationExecuteWithPrivileges postflight: " << status;
+    OSSTATUS_LOG(ERROR, status)
+        << "AuthorizationExecuteWithPrivileges postflight";
   } else if (exit_status != 0) {
     LOG(ERROR) << "keystone_promote_postflight status " << exit_status;
   }
@@ -964,20 +969,33 @@ NSString* const kVersionKey = @"KSVersion";
 
 @end  // @implementation KeystoneGlue
 
-namespace keystone_glue {
+namespace {
 
-std::string BrandCode() {
-  KeystoneGlue* keystoneGlue = [KeystoneGlue defaultKeystoneGlue];
-  NSString* brand_path = [keystoneGlue brandFilePath];
+std::string BrandCodeInternal() {
+  KeystoneGlue* keystone_glue = [KeystoneGlue defaultKeystoneGlue];
+  NSString* brand_path = [keystone_glue brandFilePath];
 
   if (![brand_path length])
     return std::string();
 
-  std::string brand_code;
-  file_util::ReadFileToString(FilePath([brand_path fileSystemRepresentation]),
-                              &brand_code);
+  NSDictionary* dict =
+      [NSDictionary dictionaryWithContentsOfFile:brand_path];
+  NSString* brand_code =
+      base::mac::ObjCCast<NSString>([dict objectForKey:kBrandKey]);
+  if (brand_code)
+    return [brand_code UTF8String];
 
-  return brand_code;
+  return std::string();
+}
+
+}  // namespace
+
+namespace keystone_glue {
+
+std::string BrandCode() {
+  // |s_brand_code| is leaked.
+  static std::string* s_brand_code = new std::string(BrandCodeInternal());
+  return *s_brand_code;
 }
 
 bool KeystoneEnabled() {

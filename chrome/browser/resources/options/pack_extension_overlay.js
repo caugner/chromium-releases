@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,7 +35,7 @@ cr.define('options', function() {
       $('packExtensionCommit').onclick = function(event) {
         var extensionPath = $('extensionRootDir').value;
         var privateKeyPath = $('extensionPrivateKey').value;
-        chrome.send('pack', [extensionPath, privateKeyPath]);
+        chrome.send('pack', [extensionPath, privateKeyPath, 0]);
       };
       $('browseExtensionDir').addEventListener('click',
           this.handleBrowseExtensionDir_.bind(this));
@@ -77,11 +77,39 @@ cr.define('options', function() {
      * @private
      */
     handleBrowsePrivateKey_: function(e) {
-      this.showFileDialog_('file', 'load', function(filePath) {
+      this.showFileDialog_('file', 'pem', function(filePath) {
         $('extensionPrivateKey').value = filePath;
       });
     },
   };
+
+  /**
+   * Wrap up the pack process by showing the success |message| and closing
+   * the overlay.
+   * @param {String} message The message to show to the user.
+   */
+  PackExtensionOverlay.showSuccessMessage = function(message) {
+    OptionsPage.closeOverlay();
+    AlertOverlay.show(localStrings.getString('packExtensionOverlay'),
+      message, localStrings.getString('ok'), "",
+      function() {
+        OptionsPage.closeOverlay();
+      }, null);
+  }
+
+  /**
+   * Post an alert overlay showing |message|, and upon acknowledgement, close
+   * the alert overlay and return to showing the PackExtensionOverlay.
+   */
+  PackExtensionOverlay.showError = function(message) {
+    OptionsPage.closeOverlay();
+    AlertOverlay.show(localStrings.getString('packExtensionErrorTitle'),
+      message, localStrings.getString('ok'), "",
+      function() {
+        OptionsPage.closeOverlay();
+        OptionsPage.showPageByName('packExtensionOverlay', false);
+      }, null);
+  }
 
   // Export
   return {

@@ -33,8 +33,11 @@ IPC_STRUCT_BEGIN(ExtensionHostMsg_Request_Params)
   // URL of the frame the request was sent from. This isn't necessarily an
   // extension url. Extension requests can also originate from content scripts,
   // in which case extension_id will indicate the ID of the associated
-  // extension. Or, they can origiante from hosted apps or normal web pages.
+  // extension. Or, they can originate from hosted apps or normal web pages.
   IPC_STRUCT_MEMBER(GURL, source_url)
+
+  // Web security origin of the frame the request was sent from.
+  IPC_STRUCT_MEMBER(string16, source_origin)
 
   // Unique request id to match requests and responses.
   IPC_STRUCT_MEMBER(int, request_id)
@@ -99,10 +102,6 @@ struct ExtensionMsg_Loaded_Params {
   ~ExtensionMsg_Loaded_Params();
   explicit ExtensionMsg_Loaded_Params(const Extension* extension);
 
-  // A copy constructor is needed because this structure can end up getting
-  // copied inside the IPC machinery on gcc <= 4.2.
-  ExtensionMsg_Loaded_Params(const ExtensionMsg_Loaded_Params& other);
-
   // Creates a new extension from the data in this object.
   scoped_refptr<Extension> ConvertToExtension() const;
 
@@ -115,11 +114,6 @@ struct ExtensionMsg_Loaded_Params {
   // The path the extension was loaded from. This is used in the renderer only
   // to generate the extension ID for extensions that are loaded unpacked.
   FilePath path;
-
-  // The extension's current active permissions.
-  ExtensionAPIPermissionSet apis;
-  URLPatternSet explicit_hosts;
-  URLPatternSet scriptable_hosts;
 
   // We keep this separate so that it can be used in logging.
   std::string id;

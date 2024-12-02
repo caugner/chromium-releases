@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,8 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_WIN)
 #include <atlbase.h>  // NOLINT
 #include <atlwin.h>  // NOLINT
-#endif
-
 #include <vector>  // NOLINT
 
 #include "base/compiler_specific.h"
@@ -21,7 +18,6 @@
 #include "ui/base/models/table_model.h"
 #include "ui/base/models/table_model_observer.h"
 #include "ui/views/controls/table/table_view.h"
-#include "ui/views/controls/table/table_view2.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -133,8 +129,6 @@ void TestTableModel::SetObserver(ui::TableModelObserver* observer) {
 int TestTableModel::CompareValues(int row1, int row2, int column_id) {
   return rows_[row1][column_id] - rows_[row2][column_id];
 }
-
-#if defined(OS_WIN)
 
 // TableViewTest ---------------------------------------------------------------
 
@@ -465,183 +459,5 @@ TEST_F(NullModelTableViewTest, DISABLED_NullModel) {
   // There's nothing explicit to test. If there is a bug in TableView relating
   // to a NULL model we'll crash.
 }
-
-#endif  // OS_WIN
-
-////////////////////////////////////////////////////////////////////////////////
-// TableView2 Tests
-
-class TableView2Test : public testing::Test, views::WidgetDelegate {
- public:
-  virtual void SetUp();
-  virtual void TearDown();
-
-  virtual views::View* GetContentsView() OVERRIDE {
-    return table_;
-  }
-  virtual views::Widget* GetWidget() OVERRIDE {
-    return table_->GetWidget();
-  }
-  virtual const views::Widget* GetWidget() const OVERRIDE {
-    return table_->GetWidget();
-  }
-
-  // Returns the contents of a cell in the table.
-  std::string GetCellValue(int row, int column);
-
- protected:
-  // Creates the model.
-  TestTableModel* CreateModel();
-
-  virtual views::TableTypes GetTableType() {
-    return views::TEXT_ONLY;
-  }
-
-  scoped_ptr<TestTableModel> model_;
-
-  // The table. This is owned by the window.
-  views::TableView2* table_;
-
- private:
-  MessageLoopForUI message_loop_;
-  views::Widget* window_;
-};
-
-void TableView2Test::SetUp() {
-#if defined(OS_WIN)
-  OleInitialize(NULL);
-#endif
-  model_.reset(CreateModel());
-  std::vector<ui::TableColumn> columns;
-  columns.resize(2);
-  columns[0].id = 0;
-  columns[1].id = 1;
-  table_ = new views::TableView2(model_.get(), columns, GetTableType(),
-                                 views::TableView2::NONE);
-  window_ = views::Widget::CreateWindowWithBounds(
-      this,
-      gfx::Rect(100, 100, 512, 512));
-  window_->Show();
-}
-
-void TableView2Test::TearDown() {
-  window_->Close();
-  // Temporary workaround to avoid leak of RootView::pending_paint_task_.
-  message_loop_.RunAllPending();
-#if defined(OS_WIN)
-  OleUninitialize();
-#endif
-}
-
-TestTableModel* TableView2Test::CreateModel() {
-  return new TestTableModel();
-}
-
-std::string TableView2Test::GetCellValue(int row, int column) {
-#if defined(OS_WIN)
-  wchar_t str[128] = {0};
-  LVITEM item = {0};
-  item.mask = LVIF_TEXT;
-  item.iItem = row;
-  item.iSubItem = column;
-  item.pszText = str;
-  item.cchTextMax = 128;
-  BOOL r = ListView_GetItem(table_->GetTestingHandle(), &item);
-  DCHECK(r);
-  return WideToUTF8(str);
-#else
-  GtkTreeModel* gtk_model =
-      gtk_tree_view_get_model(GTK_TREE_VIEW(table_->GetTestingHandle()));
-  DCHECK(gtk_model);
-  GtkTreeIter row_iter;
-  gboolean r = gtk_tree_model_iter_nth_child(gtk_model, &row_iter, NULL, row);
-  DCHECK(r);
-  gchar* text = NULL;
-  gtk_tree_model_get(gtk_model, &row_iter, column, &text, -1);
-  DCHECK(text);
-  std::string value(text);
-  g_free(text);
-  return value;
-#endif
-}
-
-// Tests that the table correctly reflects changes to the model.
-TEST_F(TableView2Test, ModelChangesTest) {
-  ASSERT_EQ(3, table_->GetRowCount());
-  EXPECT_EQ("0", GetCellValue(0, 0));
-  EXPECT_EQ("1", GetCellValue(1, 0));
-  EXPECT_EQ("2", GetCellValue(2, 1));
-
-  // Test adding rows and that OnItemsAdded works.
-  model_->AddRow(3, 3, 3);
-  model_->AddRow(4, 4, 4);
-  table_->OnItemsAdded(3, 2);
-  ASSERT_EQ(5, table_->GetRowCount());
-  EXPECT_EQ("3", GetCellValue(3, 0));
-  EXPECT_EQ("4", GetCellValue(4, 1));
-
-  // Test removing rows and that OnItemsRemoved works.
-  model_->RemoveRow(1);
-  model_->RemoveRow(1);
-  table_->OnItemsRemoved(1, 2);
-  ASSERT_EQ(3, table_->GetRowCount());
-  EXPECT_EQ("0", GetCellValue(0, 0));
-  EXPECT_EQ("3", GetCellValue(1, 0));
-  EXPECT_EQ("4", GetCellValue(2, 1));
-
-  // Test changing rows and that OnItemsChanged works.
-  model_->ChangeRow(1, 1, 1);
-  model_->ChangeRow(2, 2, 2);
-  table_->OnItemsChanged(1, 2);
-  EXPECT_EQ("0", GetCellValue(0, 0));
-  EXPECT_EQ("1", GetCellValue(1, 0));
-  EXPECT_EQ("2", GetCellValue(2, 1));
-
-  // Test adding and removing rows and using OnModelChanged.
-  model_->RemoveRow(2);
-  model_->AddRow(2, 5, 5);
-  model_->AddRow(3, 6, 6);
-  table_->OnModelChanged();
-  ASSERT_EQ(4, table_->GetRowCount());
-  EXPECT_EQ("0", GetCellValue(0, 0));
-  EXPECT_EQ("1", GetCellValue(1, 0));
-  EXPECT_EQ("5", GetCellValue(2, 1));
-  EXPECT_EQ("6", GetCellValue(3, 1));
-}
-
-// Test the selection on a single-selection table.
-TEST_F(TableView2Test, SingleSelectionTest) {
-  EXPECT_EQ(0, table_->SelectedRowCount());
-  EXPECT_EQ(-1, table_->GetFirstSelectedRow());
-
-  table_->SelectRow(0);
-  EXPECT_EQ(1, table_->SelectedRowCount());
-  EXPECT_EQ(0, table_->GetFirstSelectedRow());
-
-  table_->SelectRow(2);
-  EXPECT_EQ(1, table_->SelectedRowCount());
-  EXPECT_EQ(2, table_->GetFirstSelectedRow());
-
-  table_->ClearSelection();
-  EXPECT_EQ(0, table_->SelectedRowCount());
-  EXPECT_EQ(-1, table_->GetFirstSelectedRow());
-}
-
-// Row focusing are not supported on Linux yet.
-#if defined(OS_WIN)
-// Test the row focus on a single-selection table.
-TEST_F(TableView2Test, RowFocusTest) {
-  EXPECT_EQ(-1, table_->GetFirstFocusedRow());
-
-  table_->FocusRow(0);
-  EXPECT_EQ(0, table_->GetFirstFocusedRow());
-
-  table_->FocusRow(2);
-  EXPECT_EQ(2, table_->GetFirstFocusedRow());
-
-  table_->ClearRowFocus();
-  EXPECT_EQ(-1, table_->GetFirstSelectedRow());
-}
-#endif
 
 }  // namespace views

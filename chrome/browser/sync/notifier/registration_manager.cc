@@ -70,13 +70,13 @@ RegistrationManager::~RegistrationManager() {
 }
 
 void RegistrationManager::SetRegisteredTypes(
-    const syncable::ModelTypeSet& types) {
+    syncable::ModelTypeSet types) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
 
   for (int i = syncable::FIRST_REAL_MODEL_TYPE;
        i < syncable::MODEL_TYPE_COUNT; ++i) {
     syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
-    if (types.count(model_type) > 0) {
+    if (types.Has(model_type)) {
       if (!IsTypeRegistered(model_type)) {
         TryRegisterType(model_type, false /* is_retry */);
       }
@@ -125,7 +125,7 @@ syncable::ModelTypeSet RegistrationManager::GetRegisteredTypes() const {
        i < syncable::MODEL_TYPE_COUNT; ++i) {
     syncable::ModelType model_type = syncable::ModelTypeFromInt(i);
     if (IsTypeRegistered(model_type)) {
-      registered_types.insert(model_type);
+      registered_types.Put(model_type);
     }
   }
   return registered_types;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,7 +68,6 @@ class ScrollView;
 class Widget;
 
 namespace internal {
-class NativeWidgetView;
 class RootView;
 }
 
@@ -242,23 +241,22 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // as with Labels).
   virtual int GetHeightForWidth(int w);
 
-  // Set whether the receiving view is visible. Painting is scheduled as needed
+  // Set whether this view is visible. Painting is scheduled as needed.
   virtual void SetVisible(bool visible);
 
   // Return whether a view is visible
-  virtual bool IsVisible() const;
+  bool visible() const { return visible_; }
 
-  // Return whether a view and its ancestors are visible. Returns true if the
-  // path from this view to the root view is visible.
-  virtual bool IsVisibleInRootView() const;
+  // Returns true if this view is drawn on screen.
+  virtual bool IsDrawn() const;
 
   // Set whether this view is enabled. A disabled view does not receive keyboard
-  // or mouse inputs. If flag differs from the current value, SchedulePaint is
-  // invoked.
+  // or mouse inputs. If |enabled| differs from the current value, SchedulePaint
+  // is invoked.
   void SetEnabled(bool enabled);
 
   // Returns whether the view is enabled.
-  virtual bool IsEnabled() const;
+  bool enabled() const { return enabled_; }
 
   // This indicates that the view completely fills its bounds in an opaque
   // color. This doesn't affect compositing but is a hint to the compositor to
@@ -273,13 +271,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   const ui::Transform& GetTransform() const;
 
-  // Clipping parameters. Clipping happens from the right and/or bottom. The
-  // clipping amount is in parent's coordinate system, as in, if the view is
-  // rotated, then the clipping will be applied after the rotation (and other
-  // transformations, if any).
-  void set_clip_x(float x) { clip_x_ = x; }
-  void set_clip_y(float y) { clip_y_ = y; }
-  void set_clip(float x, float y) { clip_x_ = x; clip_y_ = y; }
+  // Clipping parameters. Clipping is done relative to the view bounds.
+  void set_clip_insets(gfx::Insets clip_insets) { clip_insets_ = clip_insets; }
 
   // Sets the transform to the supplied transform.
   void SetTransform(const ui::Transform& transform);
@@ -434,6 +427,9 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Convert a point from a View's coordinate system to that of the screen.
   static void ConvertPointToScreen(const View* src, gfx::Point* point);
 
+  // Convert a point from a View's coordinate system to that of the screen.
+  static void ConvertPointFromScreen(const View* dst, gfx::Point* point);
+
   // Applies transformation on the rectangle, which is in the view's coordinate
   // system, to convert it into the parent's coordinate system.
   gfx::Rect ConvertRectToParent(const gfx::Rect& rect) const;
@@ -584,6 +580,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // does nothing. Override as needed.
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event);
 
+  // This method is invoked for each GestureEvent created by GestureRecognizer.
+  // Default implementation does nothing. Override as needed.
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event);
+
   // Set the MouseHandler for a drag session.
   //
   // A drag session is a stream of mouse events starting
@@ -631,7 +631,8 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Sets a keyboard accelerator for that view. When the user presses the
   // accelerator key combination, the AcceleratorPressed method is invoked.
   // Note that you can set multiple accelerators for a view by invoking this
-  // method several times.
+  // method several times. Note also that AcceleratorPressed is invoked only
+  // when CanHandleAccelerators() is true.
   virtual void AddAccelerator(const ui::Accelerator& accelerator);
 
   // Removes the specified accelerator for this view.
@@ -642,6 +643,11 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Overridden from AcceleratorTarget:
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+
+  // Returns whether accelerators are enabled for this view. Accelerators are
+  // enabled if the containing widget is visible and the view is enabled() and
+  // IsDrawn()
+  virtual bool CanHandleAccelerators() const OVERRIDE;
 
   // Focus ---------------------------------------------------------------------
 
@@ -662,18 +668,20 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // IMPORTANT NOTE: loops in the focus hierarchy are not supported.
   void SetNextFocusableView(View* view);
 
-  // Sets whether this view can accept the focus.
+  // Sets whether this view is capable of taking focus.
   // Note that this is false by default so that a view used as a container does
   // not get the focus.
   void set_focusable(bool focusable) { focusable_ = focusable; }
 
-  // Returns true if the view is focusable (IsFocusable) and visible in the root
-  // view. See also IsFocusable.
-  bool IsFocusableInRootView() const;
+  // Returns true if this view is capable of taking focus.
+  bool focusable() const { return focusable_ && enabled_ && visible_; }
+
+  // Returns true if this view is |focusable_|, |enabled_| and drawn.
+  virtual bool IsFocusable() const;
 
   // Return whether this view is focusable when the user requires full keyboard
   // access, even though it may not be normally focusable.
-  bool IsAccessibilityFocusableInRootView() const;
+  bool IsAccessibilityFocusable() const;
 
   // Set whether this view can be made focusable if the user requires
   // full keyboard access, even though it's not normally focusable.
@@ -695,7 +703,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Invoked when a view is about to be requested for focus due to the focus
   // traversal. Reverse is this request was generated going backward
   // (Shift-Tab).
-  virtual void AboutToRequestFocusFromTabTraversal(bool reverse) { }
+  virtual void AboutToRequestFocusFromTabTraversal(bool reverse) {}
 
   // Invoked when a key is pressed before the key event is processed (and
   // potentially eaten) by the focus manager for tab traversal, accelerators and
@@ -752,8 +760,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // to provide right-click menu display triggerd by the keyboard (i.e. for the
   // Chrome toolbar Back and Forward buttons). No source needs to be specified,
   // as it is always equal to the current View.
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture);
+  virtual void ShowContextMenu(const gfx::Point& p, bool is_mouse_gesture);
 
   // Drag and drop -------------------------------------------------------------
 
@@ -1008,12 +1015,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Focus ---------------------------------------------------------------------
 
-  // Returns whether this view can accept focus.
-  // A view can accept focus if it's enabled, focusable and visible.
-  // This method is intended for views to use when calculating preferred size.
-  // The FocusManager and other places use IsFocusableInRootView.
-  virtual bool IsFocusable() const;
-
   // Override to be notified when focus has changed either to or from this View.
   virtual void OnFocus();
   virtual void OnBlur();
@@ -1085,7 +1086,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 #endif
 
  private:
-  friend class internal::NativeWidgetView;
   friend class internal::RootView;
   friend class FocusManager;
   friend class ViewStorage;
@@ -1255,9 +1255,13 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   bool ProcessMouseDragged(const MouseEvent& event, DragInfo* drop_info);
   void ProcessMouseReleased(const MouseEvent& event);
 
-  // RootView will invoke this with incoming TouchEvents. Returns the
-  // the result of OnTouchEvent.
+  // RootView will invoke this with incoming TouchEvents. Returns the result
+  // of OnTouchEvent.
   ui::TouchStatus ProcessTouchEvent(const TouchEvent& event);
+
+  // RootView will invoke this with incoming GestureEvents. Returns the result
+  // of OnGestureEvent.
+  ui::GestureStatus ProcessGestureEvent(const GestureEvent& event);
 
   // Accelerators --------------------------------------------------------------
 
@@ -1353,8 +1357,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Clipping parameters. skia transformation matrix does not give us clipping.
   // So we do it ourselves.
-  float clip_x_;
-  float clip_y_;
+  gfx::Insets clip_insets_;
 
   // Layout --------------------------------------------------------------------
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,14 +17,24 @@ namespace {
 // Resource ID of the image to use as stub image.
 const int kStubImageResourceID = IDR_PROFILE_PICTURE_LOADING;
 
+// Returns account name portion of an email.
+std::string GetUserName(const std::string& email) {
+  std::string::size_type i = email.find('@');
+  if (i == 0 || i == std::string::npos) {
+    return email;
+  }
+  return email.substr(0, i);
+}
+
 }  // namespace
 
-User::User(const std::string& email)
+User::User(const std::string& email, bool is_guest)
     : email_(email),
       display_email_(email),
       oauth_token_status_(OAUTH_TOKEN_STATUS_UNKNOWN),
       image_index_(kInvalidImageIndex),
-      image_is_stub_(false) {
+      image_is_stub_(false),
+      is_guest_(is_guest) {
   image_ = *ResourceBundle::GetSharedInstance().GetBitmapNamed(
       kDefaultImageResources[0]);
 }
@@ -44,12 +54,12 @@ void User::SetStubImage(int image_index) {
   image_is_stub_ = true;
 }
 
+std::string User::GetAccountName() const {
+  return GetUserName(email_);
+}
+
 std::string User::GetDisplayName() const {
-  size_t i = display_email_.find('@');
-  if (i == 0 || i == std::string::npos) {
-    return display_email_;
-  }
-  return display_email_.substr(0, i);
+  return GetUserName(display_email_);
 }
 
 bool User::NeedsNameTooltip() const {

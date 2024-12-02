@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,6 +29,11 @@ class StringOrdinal {
   // Creates an invalid StringOrdinal.
   StringOrdinal();
 
+  // Creates a valid initial StringOrdinal, this is called to create the first
+  // element of StringOrdinal list (i.e. before we have any other values we can
+  // generate from).
+  static StringOrdinal CreateInitialOrdinal();
+
   bool IsValid() const;
 
   // All remaining functions can only be called if IsValid() holds.
@@ -38,6 +43,9 @@ class StringOrdinal {
 
   // Returns true iff |*this| < |other|.
   bool LessThan(const StringOrdinal& other) const;
+
+  // Returns true iff |*this| > |other|.
+  bool GreaterThan(const StringOrdinal& other) const;
 
   // Returns true iff |*this| == |other| (i.e. |*this| < |other| and
   // |other| < |*this| are both false).
@@ -58,6 +66,9 @@ class StringOrdinal {
   // string will be valid.
   std::string ToString() const;
 
+  // Do this so we can use std::find on a std::vector of StringOrdinals.
+  bool operator==(const StringOrdinal& rhs) const;
+
   // Use of copy constructor and default assignment for this class is allowed.
 
  private:
@@ -67,6 +78,12 @@ class StringOrdinal {
   // The validity of the StringOrdinal (i.e., is it of the format [a-z]*[b-z]),
   // created to cache validity to prevent frequent recalculations.
   bool is_valid_;
+};
+
+// A helper class that can be used by STL containers that require sorting.
+class StringOrdinalLessThan {
+ public:
+  bool operator() (const StringOrdinal& lhs, const StringOrdinal& rhs) const;
 };
 
 #endif  // CHROME_COMMON_STRING_ORDINAL_H_

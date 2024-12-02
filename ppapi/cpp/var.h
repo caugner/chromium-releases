@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_var.h"
 
 
@@ -93,7 +92,7 @@ class Var {
   /// @param[in] other The <code>Var</code> to be assigned.
   ///
   /// @return A resulting <code>Var</code>.
-  Var& operator=(const Var& other);
+  virtual Var& operator=(const Var& other);
 
   /// This function compares object identity (rather than value identity) for
   /// objects, dictionaries, and arrays
@@ -157,6 +156,9 @@ class Var {
     return var_.type == PP_VARTYPE_INT32 ||
            var_.type == PP_VARTYPE_DOUBLE;
   }
+
+  /// This function determines if this <code>Var</code> is an ArrayBuffer.
+  bool is_array_buffer() const { return var_.type == PP_VARTYPE_ARRAY_BUFFER; }
 
   /// AsBool() converts this <code>Var</code> to a bool. Assumes the
   /// internal representation is_bool(). If it's not, it will assert in debug

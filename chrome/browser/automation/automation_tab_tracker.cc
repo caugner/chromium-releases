@@ -4,9 +4,11 @@
 
 #include "chrome/browser/automation/automation_tab_tracker.h"
 
-#include "content/browser/tab_contents/navigation_controller.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_source.h"
+
+using content::NavigationController;
 
 AutomationTabTracker::AutomationTabTracker(IPC::Message::Sender* automation)
     : AutomationResourceTracker<NavigationController*>(automation) {
@@ -60,16 +62,16 @@ void AutomationTabTracker::Observe(
     default:
       NOTREACHED();
   }
-  AutomationResourceTracker<NavigationController*>::Observe(type, source,
-                                                            details);
+  AutomationResourceTracker<NavigationController*>::Observe(
+      type, source, details);
 }
 
 base::Time AutomationTabTracker::GetLastNavigationTime(int handle) {
   if (ContainsHandle(handle)) {
     NavigationController* controller = GetResource(handle);
     if (controller) {
-      std::map<NavigationController*, base::Time>::const_iterator iter =
-          last_navigation_times_.find(controller);
+      std::map<NavigationController*, base::Time>::const_iterator iter
+          = last_navigation_times_.find(controller);
       if (iter != last_navigation_times_.end())
         return iter->second;
     }

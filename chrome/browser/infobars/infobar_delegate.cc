@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,12 @@
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
+
+using content::NavigationEntry;
 
 // InfoBarDelegate ------------------------------------------------------------
 
@@ -60,8 +63,8 @@ LinkInfoBarDelegate* InfoBarDelegate::AsLinkInfoBarDelegate() {
   return NULL;
 }
 
-PluginInstallerInfoBarDelegate*
-    InfoBarDelegate::AsPluginInstallerInfoBarDelegate() {
+RegisterProtocolHandlerInfoBarDelegate*
+    InfoBarDelegate::AsRegisterProtocolHandlerInfoBarDelegate() {
   return NULL;
 }
 
@@ -84,15 +87,16 @@ InfoBarDelegate::InfoBarDelegate(InfoBarTabHelper* infobar_helper)
 void InfoBarDelegate::StoreActiveEntryUniqueID(
     InfoBarTabHelper* infobar_helper) {
   NavigationEntry* active_entry =
-      infobar_helper->tab_contents()->controller().GetActiveEntry();
-  contents_unique_id_ = active_entry ? active_entry->unique_id() : 0;
+      infobar_helper->web_contents()->GetController().GetActiveEntry();
+  contents_unique_id_ = active_entry ? active_entry->GetUniqueID() : 0;
 }
 
 bool InfoBarDelegate::ShouldExpireInternal(
     const content::LoadCommittedDetails& details) const {
-  return (contents_unique_id_ != details.entry->unique_id()) ||
+  return (contents_unique_id_ != details.entry->GetUniqueID()) ||
       (content::PageTransitionStripQualifier(
-          details.entry->transition_type()) == content::PAGE_TRANSITION_RELOAD);
+          details.entry->GetTransitionType()) ==
+              content::PAGE_TRANSITION_RELOAD);
 }
 
 void InfoBarDelegate::RemoveSelf() {

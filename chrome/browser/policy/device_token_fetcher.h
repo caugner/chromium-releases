@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,27 +6,29 @@
 #define CHROME_BROWSER_POLICY_DEVICE_TOKEN_FETCHER_H_
 #pragma once
 
+#include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/policy/device_management_backend.h"
-#include "chrome/browser/policy/proto/device_management_backend.pb.h"
+#include "chrome/browser/policy/cloud_policy_constants.h"
+
+namespace enterprise_management {
+class DeviceManagementResponse;
+}
 
 namespace policy {
 
 class CloudPolicyCacheBase;
 class CloudPolicyDataStore;
 class DelayedWorkScheduler;
+class DeviceManagementRequestJob;
 class DeviceManagementService;
 class PolicyNotifier;
-
-namespace em = enterprise_management;
 
 // Fetches the device token that can be used for policy requests with the device
 // management server, either from disk if it already has been successfully
 // requested, otherwise from the device management server. An instance of the
 // fetcher is shared as a singleton by all users of the device management token
 // to ensure they all get the same token.
-class DeviceTokenFetcher
-    : public DeviceManagementBackend::DeviceRegisterResponseDelegate {
+class DeviceTokenFetcher {
  public:
   // |service| is used to talk to the device management service and |cache| is
   // used to persist whether the device is unmanaged.
@@ -52,11 +54,6 @@ class DeviceTokenFetcher
 
   // Cancels any pending work on this fetcher and resets it to inactive state.
   void Reset();
-
-  // DeviceManagementBackend::DeviceRegisterResponseDelegate method overrides:
-  virtual void HandleRegisterResponse(
-      const em::DeviceRegisterResponse& response) OVERRIDE;
-  virtual void OnError(DeviceManagementBackend::ErrorCode code) OVERRIDE;
 
  private:
   friend class DeviceTokenFetcherTest;
@@ -92,12 +89,17 @@ class DeviceTokenFetcher
                   PolicyNotifier* notifier,
                   DelayedWorkScheduler* scheduler);
 
-  // Moves the fetcher into a new state.
-  void SetState(FetcherState state);
-
   // Resets |backend_|, then uses |auth_token_| and |device_id_| to perform
   // an actual token fetch.
   void FetchTokenInternal();
+
+  // Handles token fetch request completion.
+  void OnTokenFetchCompleted(
+      DeviceManagementStatus status,
+      const enterprise_management::DeviceManagementResponse& response);
+
+  // Moves the fetcher into a new state.
+  void SetState(FetcherState state);
 
   // DelayedWorkScheduler::Client:
   virtual void DoWork();
@@ -105,7 +107,7 @@ class DeviceTokenFetcher
   // Service and backend. A new backend is created whenever the fetcher gets
   // reset.
   DeviceManagementService* service_;  // weak
-  scoped_ptr<DeviceManagementBackend> backend_;
+  scoped_ptr<DeviceManagementRequestJob> request_job_;
 
   // Reference to the cache. Used to persist and read unmanaged state.
   CloudPolicyCacheBase* cache_;
@@ -113,10 +115,7 @@ class DeviceTokenFetcher
   PolicyNotifier* notifier_;
 
   // Refresh parameters.
-  int64 token_fetch_error_delay_ms_;
-  int64 token_fetch_error_max_delay_ms_;
   int64 effective_token_fetch_error_delay_ms_;
-  int64 unmanaged_device_refresh_rate_ms_;
 
   // State the fetcher is currently in.
   FetcherState state_;

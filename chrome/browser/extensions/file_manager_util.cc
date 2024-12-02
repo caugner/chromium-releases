@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "chrome/browser/extensions/file_manager_util.h"
@@ -11,6 +11,9 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/simple_message_box.h"
@@ -19,21 +22,25 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/plugin_service.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/plugin_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
+#include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/media/media_player.h"
 #endif
 
 using content::BrowserThread;
+using content::PluginService;
+using content::UserMetricsAction;
 
 #define FILEBROWSER_DOMAIN "hhaomjibdihmijegdhdafkllkbggdgoj"
 const char kFileBrowserDomain[] = FILEBROWSER_DOMAIN;
@@ -53,6 +60,7 @@ const char kMediaPlayerPlaylistUrl[] = FILEBROWSER_URL("playlist.html");
 #undef FILEBROWSER_URL
 #undef FILEBROWSER_DOMAIN
 
+const char kCRXExtension[] = ".crx";
 const char kPdfExtension[] = ".pdf";
 // List of file extension we can open in tab.
 const char* kBrowserSupportedExtensions[] = {
@@ -82,27 +90,31 @@ const char* kUMATrackingExtensions[] = {
   ".mov", ".mpg", ".log"
 };
 
-bool IsSupportedBrowserExtension(const char* ext) {
+bool IsSupportedBrowserExtension(const char* file_extension) {
   for (size_t i = 0; i < arraysize(kBrowserSupportedExtensions); i++) {
-    if (base::strcasecmp(ext, kBrowserSupportedExtensions[i]) == 0) {
+    if (base::strcasecmp(file_extension, kBrowserSupportedExtensions[i]) == 0) {
       return true;
     }
   }
   return false;
 }
 
-bool IsSupportedAVExtension(const char* ext) {
+bool IsSupportedAVExtension(const char* file_extension) {
   for (size_t i = 0; i < arraysize(kAVExtensions); i++) {
-    if (base::strcasecmp(ext, kAVExtensions[i]) == 0) {
+    if (base::strcasecmp(file_extension, kAVExtensions[i]) == 0) {
       return true;
     }
   }
   return false;
+}
+
+bool IsCRXFile(const char* file_extension) {
+  return base::strcasecmp(file_extension, kCRXExtension) == 0;
 }
 
 // If pdf plugin is enabled, we should open pdf files in a tab.
-bool ShouldBeOpenedWithPdfPlugin(const char* ext) {
-  if (base::strcasecmp(ext, kPdfExtension) != 0)
+bool ShouldBeOpenedWithPdfPlugin(const char* file_extension) {
+  if (base::strcasecmp(file_extension, kPdfExtension) != 0)
     return false;
 
   Browser* browser = BrowserList::GetLastActive();
@@ -125,11 +137,11 @@ bool ShouldBeOpenedWithPdfPlugin(const char* ext) {
 
 // Returns index |ext| has in the |array|. If there is no |ext| in |array|, last
 // element's index is return (last element should have irrelevant value).
-int UMAExtensionIndex(const char *ext,
+int UMAExtensionIndex(const char *file_extension,
                       const char** array,
                       size_t array_size) {
   for (size_t i = 0; i < array_size; i++) {
-    if (base::strcasecmp(ext, array[i]) == 0) {
+    if (base::strcasecmp(file_extension, array[i]) == 0) {
       return i;
     }
   }
@@ -203,10 +215,8 @@ bool ConvertFileToFileSystemUrl(
 
 bool ConvertFileToRelativeFileSystemPath(
     Profile* profile, const FilePath& full_file_path, FilePath* virtual_path) {
-  fileapi::FileSystemPathManager* path_manager =
-      profile->GetFileSystemContext()->path_manager();
   fileapi::ExternalFileSystemMountPointProvider* provider =
-      path_manager->external_provider();
+      profile->GetFileSystemContext()->external_provider();
   if (!provider)
     return false;
 
@@ -265,6 +275,40 @@ GURL GetFileBrowserUrlWithParams(
   return GURL(url);
 }
 
+string16 GetTitleFromType(SelectFileDialog::Type dialog_type) {
+  string16 title;
+  switch (dialog_type) {
+    case SelectFileDialog::SELECT_NONE:
+      // Full page file manager doesn't need a title.
+      break;
+
+    case SelectFileDialog::SELECT_FOLDER:
+      title = l10n_util::GetStringUTF16(
+          IDS_FILE_BROWSER_SELECT_FOLDER_TITLE);
+      break;
+
+    case SelectFileDialog::SELECT_SAVEAS_FILE:
+      title = l10n_util::GetStringUTF16(
+          IDS_FILE_BROWSER_SELECT_SAVEAS_FILE_TITLE);
+      break;
+
+    case SelectFileDialog::SELECT_OPEN_FILE:
+      title = l10n_util::GetStringUTF16(
+          IDS_FILE_BROWSER_SELECT_OPEN_FILE_TITLE);
+      break;
+
+    case SelectFileDialog::SELECT_OPEN_MULTI_FILE:
+      title = l10n_util::GetStringUTF16(
+          IDS_FILE_BROWSER_SELECT_OPEN_MULTI_FILE_TITLE);
+      break;
+
+    default:
+      NOTREACHED();
+  }
+
+  return title;
+}
+
 void ViewFolder(const FilePath& dir) {
   Browser* browser = BrowserList::GetLastActive();
   if (!browser)
@@ -279,7 +323,7 @@ void ViewFolder(const FilePath& dir) {
   std::string url = chrome::kChromeUIFileManagerURL;
   url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(), false);
 
-  UserMetrics::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
+  content::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
   browser->ShowSingletonTabRespectRef(GURL(url));
 }
 
@@ -306,19 +350,17 @@ bool TryViewingFile(const FilePath& full_path, bool enqueue) {
   if (!browser)
     return true;
 
-  std::string ext = full_path.Extension();
+  std::string file_extension = full_path.Extension();
   // For things supported natively by the browser, we should open it
   // in a tab.
-  if (IsSupportedBrowserExtension(ext.data()) ||
-      ShouldBeOpenedWithPdfPlugin(ext.data())) {
-    std::string path;
-    path = "file://";
-    path.append(net::EscapeUrlEncodedData(full_path.value(), false));
-    browser->AddSelectedTabWithURL(GURL(path), content::PAGE_TRANSITION_LINK);
+  if (IsSupportedBrowserExtension(file_extension.data()) ||
+      ShouldBeOpenedWithPdfPlugin(file_extension.data())) {
+    browser->AddSelectedTabWithURL(net::FilePathToFileURL(full_path),
+                                   content::PAGE_TRANSITION_LINK);
     return true;
   }
 #if defined(OS_CHROMEOS)
-  if (IsSupportedAVExtension(ext.data())) {
+  if (IsSupportedAVExtension(file_extension.data())) {
     MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
 
     if (mediaplayer->GetPlaylist().empty())
@@ -336,8 +378,13 @@ bool TryViewingFile(const FilePath& full_path, bool enqueue) {
   }
 #endif  // OS_CHROMEOS
 
+  if (IsCRXFile(file_extension.data())) {
+    InstallCRX(browser->profile(), full_path);
+    return true;
+  }
+
   // Unknown file type. Record UMA and show an error message.
-  size_t extension_index = UMAExtensionIndex(ext.data(),
+  size_t extension_index = UMAExtensionIndex(file_extension.data(),
                                              kUMATrackingExtensions,
                                              arraysize(kUMATrackingExtensions));
   UMA_HISTOGRAM_ENUMERATION("FileBrowser.OpeningFileType",
@@ -346,5 +393,17 @@ bool TryViewingFile(const FilePath& full_path, bool enqueue) {
   return false;
 }
 
-}  // namespace file_manager_util
+void InstallCRX(Profile* profile, const FilePath& full_path) {
+  ExtensionService* service = profile->GetExtensionService();
+  CHECK(service);
+  if (!service)
+    return;
 
+  scoped_refptr<CrxInstaller> installer(CrxInstaller::Create(service,
+                                            new ExtensionInstallUI(profile)));
+  installer->set_is_gallery_install(false);
+  installer->set_allow_silent_install(false);
+  installer->InstallCrx(full_path);
+}
+
+}  // namespace file_manager_util

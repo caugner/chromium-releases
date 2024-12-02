@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CONTENT_RENDERER_MEDIA_WEBRTC_AUDIO_DEVICE_IMPL_H_
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -111,9 +112,10 @@ class CONTENT_EXPORT WebRtcAudioDeviceImpl
   static bool ImplementsThreadSafeReferenceCounting() { return true; }
 
   // AudioDevice::RenderCallback implementation.
-  virtual void Render(const std::vector<float*>& audio_data,
-                      size_t number_of_frames,
-                      size_t audio_delay_milliseconds) OVERRIDE;
+  virtual size_t Render(const std::vector<float*>& audio_data,
+                        size_t number_of_frames,
+                        size_t audio_delay_milliseconds) OVERRIDE;
+  virtual void OnError() OVERRIDE;
 
   // AudioInputDevice::CaptureCallback implementation.
   virtual void Capture(const std::vector<float*>& audio_data,
@@ -125,9 +127,6 @@ class CONTENT_EXPORT WebRtcAudioDeviceImpl
   virtual void OnDeviceStopped() OVERRIDE;
 
   // webrtc::Module implementation.
-  virtual int32_t Version(char* version,
-                          uint32_t& remaining_buffer_in_bytes,
-                          uint32_t& position) const OVERRIDE;
   virtual int32_t ChangeUniqueId(const int32_t id) OVERRIDE;
   virtual int32_t TimeUntilNextProcess() OVERRIDE;
   virtual int32_t Process() OVERRIDE;
@@ -321,8 +320,8 @@ class CONTENT_EXPORT WebRtcAudioDeviceImpl
   // on the input/capture side.
   int session_id_;
 
-  // Protects |recording_|.
-  base::Lock lock_;
+  // Protects |recording_|, |output_delay_ms_|, |input_delay_ms_|.
+  mutable base::Lock lock_;
 
   int bytes_per_sample_;
 

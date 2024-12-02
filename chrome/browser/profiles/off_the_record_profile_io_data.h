@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,6 +43,9 @@ class OffTheRecordProfileIOData : public ProfileIOData {
     base::Callback<ChromeURLDataManagerBackend*(void)>
         GetChromeURLDataManagerBackendGetter() const;
     const content::ResourceContext& GetResourceContext() const;
+    // GetResourceContextNoInit() does not call LazyInitialize() so it can be
+    // safely be used during initialization.
+    const content::ResourceContext& GetResourceContextNoInit() const;
     scoped_refptr<ChromeURLRequestContextGetter>
         GetMainRequestContextGetter() const;
     scoped_refptr<ChromeURLRequestContextGetter>
@@ -93,6 +96,7 @@ class OffTheRecordProfileIOData : public ProfileIOData {
   OffTheRecordProfileIOData();
   virtual ~OffTheRecordProfileIOData();
 
+  static std::string GetSSLSessionCacheShard();
   virtual void LazyInitializeInternal(
       ProfileParams* profile_params) const OVERRIDE;
   virtual scoped_refptr<ChromeURLRequestContext> InitializeAppRequestContext(
@@ -109,6 +113,7 @@ class OffTheRecordProfileIOData : public ProfileIOData {
 
   mutable scoped_ptr<net::HttpTransactionFactory> main_http_factory_;
   mutable scoped_ptr<net::FtpTransactionFactory> ftp_factory_;
+  static unsigned ssl_session_cache_instance_;  // See GetSSLSessionCacheShard.
 
   DISALLOW_COPY_AND_ASSIGN(OffTheRecordProfileIOData);
 };

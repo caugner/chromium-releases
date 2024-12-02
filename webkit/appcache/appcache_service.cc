@@ -5,6 +5,7 @@
 #include "webkit/appcache/appcache_service.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -22,6 +23,14 @@
 #include "webkit/quota/special_storage_policy.h"
 
 namespace appcache {
+
+namespace {
+
+void DeferredCallback(const net::CompletionCallback& callback, int rv) {
+  callback.Run(rv);
+}
+
+}  // namespace
 
 AppCacheInfoCollection::AppCacheInfoCollection() {}
 
@@ -51,14 +60,9 @@ class AppCacheService::NewAsyncHelper
     if (!callback_.is_null()) {
       // Defer to guarantee async completion.
       MessageLoop::current()->PostTask(
-          FROM_HERE, base::Bind(&DeferredCallCallback, callback_, rv));
+          FROM_HERE, base::Bind(&DeferredCallback, callback_, rv));
     }
     callback_.Reset();
-  }
-
-  static void DeferredCallCallback(const net::CompletionCallback& callback,
-                                   int rv) {
-    callback.Run(rv);
   }
 
   AppCacheService* service_;
@@ -79,8 +83,9 @@ class AppCacheService::AsyncHelper
     : public AppCacheStorage::Delegate {
  public:
   AsyncHelper(
-      AppCacheService* service, net::OldCompletionCallback* callback)
-      : service_(service), callback_(callback) {
+      AppCacheService* service, const net::CompletionCallback& callback)
+      : service_(service),
+        callback_(callback) {
     service_->pending_helpers_.insert(this);
   }
 
@@ -94,27 +99,22 @@ class AppCacheService::AsyncHelper
 
  protected:
   void CallCallback(int rv) {
-    if (callback_) {
+    if (!callback_.is_null()) {
       // Defer to guarantee async completion.
       MessageLoop::current()->PostTask(
-          FROM_HERE, base::Bind(&DeferredCallCallback, callback_, rv));
+          FROM_HERE, base::Bind(&DeferredCallback, callback_, rv));
     }
-    callback_ = NULL;
-  }
-
-  static void DeferredCallCallback(net::OldCompletionCallback* callback,
-                                   int rv) {
-    callback->Run(rv);
+    callback_.Reset();
   }
 
   AppCacheService* service_;
-  net::OldCompletionCallback* callback_;
+  net::CompletionCallback callback_;
 };
 
 void AppCacheService::AsyncHelper::Cancel() {
-  if (callback_) {
-    callback_->Run(net::ERR_ABORTED);
-    callback_ = NULL;
+  if (!callback_.is_null()) {
+    callback_.Run(net::ERR_ABORTED);
+    callback_.Reset();
   }
   service_->storage()->CancelDelegateCallbacks(this);
   service_ = NULL;
@@ -338,18 +338,14 @@ class AppCacheService::CheckResponseHelper : AsyncHelper {
   CheckResponseHelper(
       AppCacheService* service, const GURL& manifest_url, int64 cache_id,
       int64 response_id)
-      : AsyncHelper(service, NULL),
+      : AsyncHelper(service, net::CompletionCallback()),
         manifest_url_(manifest_url),
         cache_id_(cache_id),
         response_id_(response_id),
         kIOBufferSize(32 * 1024),
         expected_total_size_(0),
         amount_headers_read_(0),
-        amount_data_read_(0),
-        ALLOW_THIS_IN_INITIALIZER_LIST(read_info_callback_(
-            this, &CheckResponseHelper::OnReadInfoComplete)),
-        ALLOW_THIS_IN_INITIALIZER_LIST(read_data_callback_(
-            this, &CheckResponseHelper::OnReadDataComplete)) {
+        amount_data_read_(0) {
   }
 
   virtual void Start() {
@@ -382,8 +378,6 @@ class AppCacheService::CheckResponseHelper : AsyncHelper {
   int64 expected_total_size_;
   int amount_headers_read_;
   int amount_data_read_;
-  net::OldCompletionCallbackImpl<CheckResponseHelper> read_info_callback_;
-  net::OldCompletionCallbackImpl<CheckResponseHelper> read_data_callback_;
   DISALLOW_COPY_AND_ASSIGN(CheckResponseHelper);
 };
 
@@ -418,7 +412,9 @@ void AppCacheService::CheckResponseHelper::OnGroupLoaded(
   response_reader_.reset(service_->storage()->CreateResponseReader(
       manifest_url_, group->group_id(), response_id_));
   info_buffer_ = new HttpResponseInfoIOBuffer();
-  response_reader_->ReadInfo(info_buffer_, &read_info_callback_);
+  response_reader_->ReadInfo(
+      info_buffer_, base::Bind(&CheckResponseHelper::OnReadInfoComplete,
+                               base::Unretained(this)));
 }
 
 void AppCacheService::CheckResponseHelper::OnReadInfoComplete(int result) {
@@ -433,16 +429,20 @@ void AppCacheService::CheckResponseHelper::OnReadInfoComplete(int result) {
 
   // Start reading the data.
   data_buffer_ = new net::IOBuffer(kIOBufferSize);
-  response_reader_->ReadData(data_buffer_, kIOBufferSize,
-                             &read_data_callback_);
+  response_reader_->ReadData(
+      data_buffer_, kIOBufferSize,
+      base::Bind(&CheckResponseHelper::OnReadDataComplete,
+                 base::Unretained(this)));
 }
 
 void AppCacheService::CheckResponseHelper::OnReadDataComplete(int result) {
   if (result > 0) {
     // Keep reading until we've read thru everything or failed to read.
     amount_data_read_ += result;
-    response_reader_->ReadData(data_buffer_, kIOBufferSize,
-                               &read_data_callback_);
+    response_reader_->ReadData(
+        data_buffer_, kIOBufferSize,
+        base::Bind(&CheckResponseHelper::OnReadDataComplete,
+                   base::Unretained(this)));
     return;
   }
 
@@ -467,7 +467,8 @@ void AppCacheService::CheckResponseHelper::OnReadDataComplete(int result) {
 AppCacheService::AppCacheService(quota::QuotaManagerProxy* quota_manager_proxy)
     : appcache_policy_(NULL), quota_client_(NULL),
       quota_manager_proxy_(quota_manager_proxy),
-      request_context_(NULL), clear_local_state_on_exit_(false)  {
+      request_context_(NULL), clear_local_state_on_exit_(false),
+      save_session_state_(false) {
   if (quota_manager_proxy_) {
     quota_client_ = new AppCacheQuotaClient(this);
     quota_manager_proxy_->RegisterClient(quota_client_);

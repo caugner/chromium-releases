@@ -1,13 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/gfx/gl/gl_context_cgl.h"
 
+#include <OpenGL/CGLRenderers.h>
 #include <vector>
 
 #include "base/logging.h"
 #include "ui/gfx/gl/gl_bindings.h"
+#include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface_cgl.h"
 
 namespace gfx {
@@ -36,11 +38,14 @@ bool GLContextCGL::Initialize(
   }
 
   std::vector<CGLPixelFormatAttribute> attribs;
-  attribs.push_back(kCGLPFAPBuffer);
   bool using_offline_renderer =
       SupportsDualGpus() && gpu_preference == PreferIntegratedGpu;
   if (using_offline_renderer) {
     attribs.push_back(kCGLPFAAllowOfflineRenderers);
+  }
+  if (GetGLImplementation() == kGLImplementationAppleGL) {
+    attribs.push_back(kCGLPFARendererID);
+    attribs.push_back((CGLPixelFormatAttribute) kCGLRendererGenericFloatID);
   }
   attribs.push_back((CGLPixelFormatAttribute) 0);
 
@@ -86,16 +91,6 @@ bool GLContextCGL::MakeCurrent(GLSurface* surface) {
   if (IsCurrent(surface))
     return true;
 
-  if (CGLSetPBuffer(static_cast<CGLContextObj>(context_),
-                    static_cast<CGLPBufferObj>(surface->GetHandle()),
-                    0,
-                    0,
-                    0) != kCGLNoError) {
-    LOG(ERROR) << "Error attaching pbuffer to context.";
-    Destroy();
-    return false;
-  }
-
   if (CGLSetCurrentContext(
       static_cast<CGLContextObj>(context_)) != kCGLNoError) {
     LOG(ERROR) << "Unable to make gl context current.";
@@ -122,7 +117,6 @@ void GLContextCGL::ReleaseCurrent(GLSurface* surface) {
 
   SetCurrent(NULL, NULL);
   CGLSetCurrentContext(NULL);
-  CGLSetPBuffer(static_cast<CGLContextObj>(context_), NULL, 0, 0, 0);
 }
 
 bool GLContextCGL::IsCurrent(GLSurface* surface) {
@@ -135,20 +129,6 @@ bool GLContextCGL::IsCurrent(GLSurface* surface) {
 
   if (!native_context_is_current)
     return false;
-
-  if (surface) {
-    CGLPBufferObj current_surface = NULL;
-    GLenum face;
-    GLint level;
-    GLint screen;
-    CGLGetPBuffer(static_cast<CGLContextObj>(context_),
-                  &current_surface,
-                  &face,
-                  &level,
-                  &screen);
-    if (current_surface != surface->GetHandle())
-      return false;
-  }
 
   return true;
 }
@@ -164,6 +144,17 @@ void GLContextCGL::SetSwapInterval(int interval) {
 
 GpuPreference GLContextCGL::GetGpuPreference() {
   return gpu_preference_;
+}
+
+void GLContextCGL::ForceUseOfDiscreteGPU() {
+  static CGLPixelFormatObj format = NULL;
+  if (format)
+    return;
+  CGLPixelFormatAttribute attribs[1];
+  attribs[0] = static_cast<CGLPixelFormatAttribute>(0);
+  GLint num_pixel_formats = 0;
+  CGLChoosePixelFormat(attribs, &format, &num_pixel_formats);
+  // format is deliberately leaked.
 }
 
 }  // namespace gfx

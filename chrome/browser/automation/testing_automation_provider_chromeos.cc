@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,11 @@
 #include "chrome/browser/automation/automation_provider_json.h"
 #include "chrome/browser/automation/automation_provider_observers.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/audio_handler.h"
+#include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros/screen_lock_library.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/dbus/update_engine_client.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
@@ -186,26 +186,38 @@ const char* EnterpriseStatusToString(
 // PolicyLevel (Mandatory or Recommended policies).
 DictionaryValue* CreateDictionaryWithPolicies(
     policy::CloudPolicySubsystem* policy_subsystem,
-    policy::CloudPolicyCacheBase::PolicyLevel policy_level) {
+    policy::PolicyLevel policy_level) {
   DictionaryValue* dict = new DictionaryValue;
   policy::CloudPolicyCacheBase* policy_cache =
       policy_subsystem->GetCloudPolicyCacheBase();
   if (policy_cache) {
-    const policy::PolicyMap* policy_map = policy_cache->policy(policy_level);
+    const policy::PolicyMap* policy_map = policy_cache->policy();
     if (policy_map) {
       policy::PolicyMap::const_iterator i;
-      for (i = policy_map->begin(); i != policy_map->end(); i++)
-        dict->Set(policy::GetPolicyName(i->first),
-                  i->second->DeepCopy());
+      for (i = policy_map->begin(); i != policy_map->end(); i++) {
+        if (i->second.level == policy_level)
+          dict->Set(i->first, i->second.value->DeepCopy());
+      }
     }
   }
   return dict;
 }
 
 // Last reported power status.
-chromeos::PowerSupplyStatus power_status;
+chromeos::PowerSupplyStatus global_power_status;
 
 }  // namespace
+
+class PowerManagerClientObserverForTesting
+    : public chromeos::PowerManagerClient::Observer {
+ public:
+  virtual ~PowerManagerClientObserverForTesting() {}
+
+  virtual void PowerChanged(const chromeos::PowerSupplyStatus& status)
+      OVERRIDE {
+    global_power_status = status;
+  }
+};
 
 void TestingAutomationProvider::GetLoginInfo(DictionaryValue* args,
                                              IPC::Message* reply_message) {
@@ -276,7 +288,7 @@ void TestingAutomationProvider::Login(DictionaryValue* args,
 void TestingAutomationProvider::LockScreen(DictionaryValue* args,
                                            IPC::Message* reply_message) {
   new ScreenLockUnlockObserver(this, reply_message, true);
-  CrosLibrary::Get()->GetScreenLockLibrary()->
+  DBusThreadManager::Get()->GetPowerManagerClient()->
       NotifyScreenLockRequested();
 }
 
@@ -326,19 +338,19 @@ void TestingAutomationProvider::GetBatteryInfo(DictionaryValue* args,
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
 
   return_value->SetBoolean("battery_is_present",
-                           power_status.battery_is_present);
-  return_value->SetBoolean("line_power_on", power_status.line_power_on);
-  if (power_status.battery_is_present) {
+                           global_power_status.battery_is_present);
+  return_value->SetBoolean("line_power_on", global_power_status.line_power_on);
+  if (global_power_status.battery_is_present) {
     return_value->SetBoolean("battery_fully_charged",
-                             power_status.battery_is_full);
+                             global_power_status.battery_is_full);
     return_value->SetDouble("battery_percentage",
-                            power_status.battery_percentage);
-    if (power_status.line_power_on) {
-      int64 time = power_status.battery_seconds_to_full;
-      if (time > 0 || power_status.battery_is_full)
+                            global_power_status.battery_percentage);
+    if (global_power_status.line_power_on) {
+      int64 time = global_power_status.battery_seconds_to_full;
+      if (time > 0 || global_power_status.battery_is_full)
         return_value->SetInteger("battery_seconds_to_full", time);
     } else {
-      int64 time = power_status.battery_seconds_to_empty;
+      int64 time = global_power_status.battery_seconds_to_empty;
       if (time > 0)
         return_value->SetInteger("battery_seconds_to_empty", time);
     }
@@ -906,7 +918,7 @@ void TestingAutomationProvider::EnrollEnterpriseDevice(
   }
   user_controller->login_display_host()->StartWizard(
       chromeos::WizardController::kEnterpriseEnrollmentScreenName,
-      GURL());
+      NULL);
   chromeos::WizardController* wizard_controller =
       chromeos::WizardController::default_controller();
   if (!wizard_controller) {
@@ -924,7 +936,7 @@ void TestingAutomationProvider::EnrollEnterpriseDevice(
   // Set up an observer (it will delete itself).
   new EnrollmentObserver(this, reply_message, enroll_screen->GetActor(),
                          enroll_screen);
-  enroll_screen->OnAuthSubmitted(user, password, "", "");
+  enroll_screen->GetActor()->SubmitTestCredentials(user, password);
 }
 
 void TestingAutomationProvider::GetEnterprisePolicyInfo(
@@ -975,16 +987,16 @@ void TestingAutomationProvider::GetEnterprisePolicyInfo(
   // Get PolicyMaps.
   return_value->Set("device_mandatory_policies",
                     CreateDictionaryWithPolicies(device_cloud_policy,
-                        policy::CloudPolicyCacheBase::POLICY_LEVEL_MANDATORY));
+                        policy::POLICY_LEVEL_MANDATORY));
   return_value->Set("user_mandatory_policies",
                     CreateDictionaryWithPolicies(user_cloud_policy,
-                        policy::CloudPolicyCacheBase::POLICY_LEVEL_MANDATORY));
+                        policy::POLICY_LEVEL_MANDATORY));
   return_value->Set("device_recommended_policies",
       CreateDictionaryWithPolicies(device_cloud_policy,
-          policy::CloudPolicyCacheBase::POLICY_LEVEL_RECOMMENDED));
+          policy::POLICY_LEVEL_RECOMMENDED));
   return_value->Set("user_recommended_policies",
       CreateDictionaryWithPolicies(user_cloud_policy,
-          policy::CloudPolicyCacheBase::POLICY_LEVEL_RECOMMENDED));
+          policy::POLICY_LEVEL_RECOMMENDED));
   reply.SendSuccess(return_value.get());
 }
 
@@ -1124,7 +1136,15 @@ void TestingAutomationProvider::CaptureProfilePhoto(
   window->Show();
 }
 
-void TestingAutomationProvider::PowerChanged(
-    const chromeos::PowerSupplyStatus& status) {
-  power_status = status;
+void TestingAutomationProvider::AddChromeosObservers() {
+  power_manager_observer_ = new PowerManagerClientObserverForTesting;
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->
+      AddObserver(power_manager_observer_);
+}
+
+void TestingAutomationProvider::RemoveChromeosObservers() {
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->
+      RemoveObserver(power_manager_observer_);
+  delete power_manager_observer_;
+  power_manager_observer_ = NULL;
 }

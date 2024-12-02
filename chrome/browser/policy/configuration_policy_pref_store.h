@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PREF_STORE_H_
 #define CHROME_BROWSER_POLICY_CONFIGURATION_POLICY_PREF_STORE_H_
 #pragma once
+
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -16,24 +18,6 @@
 class PrefValueMap;
 
 namespace policy {
-
-// Constants for the "Proxy Server Mode" defined in the policies.
-// Note that these diverge from internal presentation defined in
-// ProxyPrefs::ProxyMode for legacy reasons. The following four
-// PolicyProxyModeType types were not very precise and had overlapping use
-// cases.
-enum PolicyProxyModeType {
-  // Disable Proxy, connect directly.
-  kPolicyNoProxyServerMode = 0,
-  // Auto detect proxy or use specific PAC script if given.
-  kPolicyAutoDetectProxyServerMode = 1,
-  // Use manually configured proxy servers (fixed servers).
-  kPolicyManuallyConfiguredProxyServerMode = 2,
-  // Use system proxy server.
-  kPolicyUseSystemProxyServerMode = 3,
-
-  MODE_COUNT
-};
 
 // An implementation of PrefStore that bridges policy settings as read from a
 // ConfigurationPolicyProvider to preferences.
@@ -49,6 +33,7 @@ class ConfigurationPolicyPrefStore
   // PrefStore methods:
   virtual void AddObserver(PrefStore::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(PrefStore::Observer* observer) OVERRIDE;
+  virtual size_t NumberOfObservers() const OVERRIDE;
   virtual bool IsInitializationComplete() const OVERRIDE;
   virtual ReadResult GetValue(const std::string& key,
                               const Value** result) const OVERRIDE;
@@ -71,9 +56,6 @@ class ConfigurationPolicyPrefStore
 
   // Creates a ConfigurationPolicyPrefStore that reads recommended cloud policy.
   static ConfigurationPolicyPrefStore* CreateRecommendedCloudPolicyPrefStore();
-
-  // Returns true if the given policy is a proxy policy.
-  static bool IsProxyPolicy(ConfigurationPolicyType policy);
 
  private:
   // Refreshes policy information, rereading policy from the provider and

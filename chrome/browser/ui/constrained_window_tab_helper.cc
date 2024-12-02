@@ -7,16 +7,19 @@
 #include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/navigation_details.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/registry_controlled_domain.h"
+
+using content::WebContents;
 
 ConstrainedWindowTabHelper::ConstrainedWindowTabHelper(
     TabContentsWrapper* wrapper)
-    : TabContentsObserver(wrapper->tab_contents()),
+    : content::WebContentsObserver(wrapper->web_contents()),
       wrapper_(wrapper),
       delegate_(NULL) {
 }
@@ -68,14 +71,14 @@ void ConstrainedWindowTabHelper::WillClose(ConstrainedWindow* window) {
 }
 
 void ConstrainedWindowTabHelper::BlockTabContent(bool blocked) {
-  TabContents* contents = tab_contents();
+  WebContents* contents = web_contents();
   if (!contents) {
     // The TabContents has already disconnected.
     return;
   }
 
   // RenderViewHost may be NULL during shutdown.
-  RenderViewHost* host = contents->render_view_host();
+  RenderViewHost* host = contents->GetRenderViewHost();
   if (host) {
     host->set_ignore_input_events(blocked);
     host->Send(
@@ -90,7 +93,7 @@ void ConstrainedWindowTabHelper::DidNavigateMainFrame(
     const content::FrameNavigateParams& params) {
   // Close constrained windows if necessary.
   if (!net::RegistryControlledDomainService::SameDomainOrHost(
-          details.previous_url, details.entry->url()))
+          details.previous_url, details.entry->GetURL()))
     CloseConstrainedWindows();
 }
 
@@ -101,7 +104,7 @@ void ConstrainedWindowTabHelper::DidGetIgnoredUIEvent() {
   }
 }
 
-void ConstrainedWindowTabHelper::TabContentsDestroyed(TabContents* tab) {
+void ConstrainedWindowTabHelper::WebContentsDestroyed(WebContents* tab) {
   // First cleanly close all child windows.
   // TODO(mpcomplete): handle case if MaybeCloseChildWindows() already asked
   // some of these to close.  CloseWindows is async, so it might get called

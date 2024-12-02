@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,14 @@
 #include "chrome/browser/ui/gtk/status_bubble_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/gfx/native_widget_types.h"
+
+using content::WebContents;
 
 TabContentsContainerGtk::TabContentsContainerGtk(StatusBubbleGtk* status_bubble)
     : tab_(NULL),
@@ -65,8 +67,8 @@ void TabContentsContainerGtk::Init() {
 void TabContentsContainerGtk::SetTab(TabContentsWrapper* tab) {
   HideTab(tab_);
   if (tab_) {
-    registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                      content::Source<TabContents>(tab_->tab_contents()));
+    registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                      content::Source<WebContents>(tab_->web_contents()));
   }
 
   tab_ = tab;
@@ -78,8 +80,8 @@ void TabContentsContainerGtk::SetTab(TabContentsWrapper* tab) {
   } else if (tab_) {
     // Otherwise we actually have to add it to the widget hierarchy.
     PackTab(tab);
-    registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                   content::Source<TabContents>(tab_->tab_contents()));
+    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                   content::Source<WebContents>(tab_->web_contents()));
   }
 }
 
@@ -96,8 +98,8 @@ void TabContentsContainerGtk::SetPreview(TabContentsWrapper* preview) {
   preview_ = preview;
 
   PackTab(preview);
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 content::Source<TabContents>(preview_->tab_contents()));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<WebContents>(preview_->web_contents()));
 }
 
 void TabContentsContainerGtk::RemovePreview() {
@@ -106,12 +108,12 @@ void TabContentsContainerGtk::RemovePreview() {
 
   HideTab(preview_);
 
-  GtkWidget* preview_widget = preview_->tab_contents()->GetNativeView();
+  GtkWidget* preview_widget = preview_->web_contents()->GetNativeView();
   if (preview_widget)
     gtk_container_remove(GTK_CONTAINER(expanded_), preview_widget);
 
-  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                    content::Source<TabContents>(preview_->tab_contents()));
+  registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                    content::Source<WebContents>(preview_->web_contents()));
   preview_ = NULL;
 }
 
@@ -128,7 +130,7 @@ void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
   if (!tab)
     return;
 
-  gfx::NativeView widget = tab->tab_contents()->GetNativeView();
+  gfx::NativeView widget = tab->web_contents()->GetNativeView();
   if (widget) {
     if (widget->parent != expanded_)
       gtk_container_add(GTK_CONTAINER(expanded_), widget);
@@ -137,35 +139,38 @@ void TabContentsContainerGtk::PackTab(TabContentsWrapper* tab) {
 
   // We need to make sure that we are below the findbar.
   // Sometimes the content native view will be null.
-  if (tab->tab_contents()->GetContentNativeView()) {
+  if (tab->web_contents()->GetContentNativeView()) {
     GdkWindow* content_gdk_window =
-        tab->tab_contents()->GetContentNativeView()->window;
+        tab->web_contents()->GetContentNativeView()->window;
     if (content_gdk_window)
       gdk_window_lower(content_gdk_window);
   }
 
-  tab->tab_contents()->ShowContents();
+  tab->web_contents()->ShowContents();
 }
 
 void TabContentsContainerGtk::HideTab(TabContentsWrapper* tab) {
   if (!tab)
     return;
 
-  gfx::NativeView widget = tab->tab_contents()->GetNativeView();
+  gfx::NativeView widget = tab->web_contents()->GetNativeView();
   if (widget)
     gtk_widget_hide(widget);
 
-  tab->tab_contents()->WasHidden();
+  tab->web_contents()->WasHidden();
 }
 
 void TabContentsContainerGtk::DetachTab(TabContentsWrapper* tab) {
-  gfx::NativeView widget = tab->tab_contents()->GetNativeView();
+  gfx::NativeView widget = tab->web_contents()->GetNativeView();
 
   // It is possible to detach an unrealized, unparented TabContents if you
   // slow things down enough in valgrind. Might happen in the real world, too.
-  if (widget && widget->parent) {
-    DCHECK_EQ(widget->parent, expanded_);
-    gtk_container_remove(GTK_CONTAINER(expanded_), widget);
+  if (widget) {
+    GtkWidget* parent = gtk_widget_get_parent(widget);
+    if (parent) {
+      DCHECK_EQ(parent, expanded_);
+      gtk_container_remove(GTK_CONTAINER(expanded_), widget);
+    }
   }
 }
 
@@ -173,17 +178,17 @@ void TabContentsContainerGtk::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
+  DCHECK(type == content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
 
-  TabContentsDestroyed(content::Source<TabContents>(source).ptr());
+  WebContentsDestroyed(content::Source<WebContents>(source).ptr());
 }
 
-void TabContentsContainerGtk::TabContentsDestroyed(TabContents* contents) {
-  // Sometimes, a TabContents is destroyed before we know about it. This allows
+void TabContentsContainerGtk::WebContentsDestroyed(WebContents* contents) {
+  // Sometimes, a WebContents is destroyed before we know about it. This allows
   // us to clean up our state in case this happens.
-  if (preview_ && contents == preview_->tab_contents())
+  if (preview_ && contents == preview_->web_contents())
     PopPreview();
-  else if (tab_ && contents == tab_->tab_contents())
+  else if (tab_ && contents == tab_->web_contents())
     SetTab(NULL);
   else
     NOTREACHED();
@@ -195,7 +200,7 @@ void TabContentsContainerGtk::TabContentsDestroyed(TabContents* contents) {
 gboolean TabContentsContainerGtk::OnFocus(GtkWidget* widget,
                                           GtkDirectionType focus) {
   if (preview_) {
-    gtk_widget_child_focus(tab_->tab_contents()->GetContentNativeView(), focus);
+    gtk_widget_child_focus(tab_->web_contents()->GetContentNativeView(), focus);
     return TRUE;
   }
 

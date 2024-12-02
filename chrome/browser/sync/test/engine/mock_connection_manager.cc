@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -29,6 +29,7 @@ using sync_pb::CommitMessage;
 using sync_pb::CommitResponse;
 using sync_pb::CommitResponse_EntryResponse;
 using sync_pb::GetUpdatesMessage;
+using sync_pb::SyncEnums;
 using sync_pb::SyncEntity;
 using syncable::DirectoryManager;
 using syncable::FIRST_REAL_MODEL_TYPE;
@@ -70,8 +71,9 @@ void MockConnectionManager::SetCommitTimeRename(string prepend) {
   commit_time_rename_prepended_string_ = prepend;
 }
 
-void MockConnectionManager::SetMidCommitCallback(Callback0::Type* callback) {
-  mid_commit_callback_.reset(callback);
+void MockConnectionManager::SetMidCommitCallback(
+    const base::Closure& callback) {
+  mid_commit_callback_ = callback;
 }
 
 void MockConnectionManager::SetMidCommitObserver(
@@ -113,12 +115,12 @@ bool MockConnectionManager::PostBufferToPath(PostBufferParams* params,
 
   // Default to an ok connection.
   params->response.server_status = HttpResponse::SERVER_CONNECTION_OK;
-  response.set_error_code(ClientToServerResponse::SUCCESS);
+  response.set_error_code(SyncEnums::SUCCESS);
   const string current_store_birthday = store_birthday();
   response.set_store_birthday(current_store_birthday);
   if (post.has_store_birthday() && post.store_birthday() !=
       current_store_birthday) {
-    response.set_error_code(ClientToServerResponse::NOT_MY_BIRTHDAY);
+    response.set_error_code(SyncEnums::NOT_MY_BIRTHDAY);
     response.set_error_message("Merry Unbirthday!");
     response.SerializeToString(&params->buffer_out);
     store_birthday_sent_ = true;
@@ -148,18 +150,18 @@ bool MockConnectionManager::PostBufferToPath(PostBufferParams* params,
   {
     base::AutoLock lock(response_code_override_lock_);
     if (throttling_) {
-      response.set_error_code(ClientToServerResponse::THROTTLED);
+      response.set_error_code(SyncEnums::THROTTLED);
       throttling_ = false;
     }
 
     if (fail_with_auth_invalid_)
-      response.set_error_code(ClientToServerResponse::AUTH_INVALID);
+      response.set_error_code(SyncEnums::AUTH_INVALID);
   }
 
   response.SerializeToString(&params->buffer_out);
   if (post.message_contents() == ClientToServerMessage::COMMIT &&
-      mid_commit_callback_.get()) {
-    mid_commit_callback_->Run();
+      !mid_commit_callback_.is_null()) {
+    mid_commit_callback_.Run();
   }
   if (mid_commit_observer_) {
     mid_commit_observer_->Observe();
@@ -230,9 +232,50 @@ SyncEntity* MockConnectionManager::AddUpdateBookmark(int id, int parent_id,
                            sync_ts);
 }
 
+SyncEntity* MockConnectionManager::AddUpdateSpecifics(
+    int id, int parent_id, string name, int64 version, int64 sync_ts,
+    bool is_dir, int64 position, const sync_pb::EntitySpecifics& specifics) {
+  SyncEntity* ent = AddUpdateMeta(
+      TestIdFactory::FromNumber(id).GetServerId(),
+      TestIdFactory::FromNumber(parent_id).GetServerId(),
+      name, version, sync_ts);
+  ent->set_position_in_parent(position);
+  ent->mutable_specifics()->CopyFrom(specifics);
+  ent->set_folder(is_dir);
+  return ent;
+}
+
+sync_pb::SyncEntity* MockConnectionManager::SetNigori(
+    int id, int64 version,int64 sync_ts,
+    const sync_pb::EntitySpecifics& specifics) {
+  SyncEntity* ent = GetUpdateResponse()->add_entries();
+  ent->set_id_string(TestIdFactory::FromNumber(id).GetServerId());
+  ent->set_parent_id_string(TestIdFactory::FromNumber(0).GetServerId());
+  ent->set_server_defined_unique_tag(syncable::ModelTypeToRootTag(
+      syncable::NIGORI));
+  ent->set_name("Nigori");
+  ent->set_non_unique_name("Nigori");
+  ent->set_version(version);
+  ent->set_sync_timestamp(sync_ts);
+  ent->set_mtime(sync_ts);
+  ent->set_ctime(1);
+  ent->set_position_in_parent(0);
+  ent->set_folder(false);
+  ent->mutable_specifics()->CopyFrom(specifics);
+  return ent;
+}
+
 SyncEntity* MockConnectionManager::AddUpdateFull(string id, string parent_id,
                                                  string name, int64 version,
                                                  int64 sync_ts, bool is_dir) {
+  SyncEntity* ent = AddUpdateMeta(id, parent_id, name, version, sync_ts);
+  AddDefaultBookmarkData(ent, is_dir);
+  return ent;
+}
+
+SyncEntity* MockConnectionManager::AddUpdateMeta(string id, string parent_id,
+                                                 string name, int64 version,
+                                                 int64 sync_ts) {
   SyncEntity* ent = GetUpdateResponse()->add_entries();
   ent->set_id_string(id);
   ent->set_parent_id_string(parent_id);
@@ -243,8 +286,6 @@ SyncEntity* MockConnectionManager::AddUpdateFull(string id, string parent_id,
   ent->set_mtime(sync_ts);
   ent->set_ctime(1);
   ent->set_position_in_parent(GeneratePositionInParent());
-  AddDefaultBookmarkData(ent, is_dir);
-
   return ent;
 }
 
@@ -364,7 +405,7 @@ void MockConnectionManager::ProcessGetUpdates(ClientToServerMessage* csm,
     ModelType model_type = syncable::ModelTypeFromInt(i);
     sync_pb::DataTypeProgressMarker const* progress_marker =
         GetProgressMarkerForType(gu.from_progress_marker(), model_type);
-    EXPECT_EQ(expected_filter_[i], (progress_marker != NULL))
+    EXPECT_EQ(expected_filter_.Has(model_type), (progress_marker != NULL))
         << "Syncer requested_types differs from test expectation.";
     if (progress_marker) {
       EXPECT_EQ((expected_payloads_.count(model_type) > 0 ?
@@ -411,7 +452,7 @@ void MockConnectionManager::ProcessGetUpdates(ClientToServerMessage* csm,
 }
 
 void MockConnectionManager::SetClearUserDataResponseStatus(
-  sync_pb::ClientToServerResponse::ErrorType errortype ) {
+  sync_pb::SyncEnums::ErrorType errortype ) {
   // Note: this is not a thread-safe set, ok for now.  NOT ok if tests
   // run the syncer on the background thread while this method is called.
   clear_user_data_response_errortype_ = errortype;
@@ -433,11 +474,11 @@ void MockConnectionManager::ProcessAuthenticate(
   EXPECT_FALSE(auth_token.empty());
 
   if (auth_token != valid_auth_token_) {
-    response->set_error_code(ClientToServerResponse::AUTH_INVALID);
+    response->set_error_code(SyncEnums::AUTH_INVALID);
     return;
   }
 
-  response->set_error_code(ClientToServerResponse::SUCCESS);
+  response->set_error_code(SyncEnums::SUCCESS);
   response->mutable_authenticate()->CopyFrom(auth_response_);
   auth_response_.Clear();
 }

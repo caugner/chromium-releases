@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,27 +13,29 @@
 #include "base/timer.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_ui_controller.h"
 
 class GURL;
 class PrefService;
 class Profile;
 
 // The TabContents used for the New Tab page.
-class NewTabUI : public ChromeWebUI,
+class NewTabUI : public content::WebUIController,
                  public content::NotificationObserver {
  public:
-  explicit NewTabUI(TabContents* manager);
+  explicit NewTabUI(content::WebUI* web_ui);
   virtual ~NewTabUI();
 
-  // Override WebUI methods so we can hook up the paint timer to the render
-  // view host.
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewReused(RenderViewHost* render_view_host) OVERRIDE;
-
   static void RegisterUserPrefs(PrefService* prefs);
+
+  // Sets up any experiment in which the NTP might want to participate.
+  // The CWS footer link is one such example.
+  static void SetupFieldTrials();
+
+  // Returns whether or not the CWS footer experiment is enabled.
+  static bool IsWebStoreExperimentEnabled();
 
   // Adds "url", "title", and "direction" keys on incoming dictionary, setting
   // title as the url as a fallback on empty title.
@@ -41,8 +43,23 @@ class NewTabUI : public ChromeWebUI,
                                       const string16& title,
                                       const GURL& gurl);
 
+  // Returns a pointer to a NewTabUI if the WebUIController object is a new tab
+  // page.
+  static NewTabUI* FromWebUIController(content::WebUIController* ui);
+
   // The current preference version.
   static int current_pref_version() { return current_pref_version_; }
+
+  // WebUIController implementation:
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewReused(RenderViewHost* render_view_host) OVERRIDE;
+
+  // Returns true if the bookmark bar can be displayed over this webui, detached
+  // from the location bar.
+  bool CanShowBookmarkBar() const;
+
+  bool showing_sync_bubble() { return showing_sync_bubble_; }
+  void set_showing_sync_bubble(bool showing) { showing_sync_bubble_ = showing; }
 
   class NewTabHTMLSource : public ChromeURLDataManager::DataSource {
    public:
@@ -80,9 +97,7 @@ class NewTabUI : public ChromeWebUI,
   void StartTimingPaint(RenderViewHost* render_view_host);
   void PaintTimeout();
 
-  // Overridden from ChromeWebUI. Determines if the bookmarks bar can be shown
-  // detached from the location bar.
-  virtual bool CanShowBookmarkBar() const OVERRIDE;
+  Profile* GetProfile() const;
 
   content::NotificationRegistrar registrar_;
 
@@ -94,6 +109,9 @@ class NewTabUI : public ChromeWebUI,
   base::OneShotTimer<NewTabUI> timer_;
   // The preference version. This used for migrating prefs of the NTP.
   static const int current_pref_version_ = 3;
+
+  // If the sync promo NTP bubble is being shown.
+  bool showing_sync_bubble_;
 
   DISALLOW_COPY_AND_ASSIGN(NewTabUI);
 };

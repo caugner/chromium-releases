@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,12 +16,13 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/base/net_util.h"
@@ -32,7 +33,10 @@
 #include "ui/base/text/text_elider.h"
 
 using content::BrowserThread;
-using webkit_glue::PasswordForm;
+using content::NavigationController;
+using content::RenderViewHostDelegate;
+using content::WebContents;
+using webkit::forms::PasswordForm;
 
 class LoginHandlerImpl;
 
@@ -107,7 +111,7 @@ LoginHandler::~LoginHandler() {
   SetModel(NULL);
 }
 
-void LoginHandler::SetPasswordForm(const webkit_glue::PasswordForm& form) {
+void LoginHandler::SetPasswordForm(const webkit::forms::PasswordForm& form) {
   password_form_ = form;
 }
 
@@ -115,10 +119,10 @@ void LoginHandler::SetPasswordManager(PasswordManager* password_manager) {
   password_manager_ = password_manager;
 }
 
-TabContents* LoginHandler::GetTabContentsForLogin() const {
+WebContents* LoginHandler::GetWebContentsForLogin() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  return tab_util::GetTabContentsByID(render_process_host_id_,
+  return tab_util::GetWebContentsByID(render_process_host_id_,
                                       tab_contents_id_);
 }
 
@@ -198,23 +202,17 @@ void LoginHandler::AddObservers() {
 
   // This is probably OK; we need to listen to everything and we break out of
   // the Observe() if we aren't handling the same auth_info().
-  registrar_.Add(this, chrome::NOTIFICATION_AUTH_SUPPLIED,
-                 content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, chrome::NOTIFICATION_AUTH_CANCELLED,
-                 content::NotificationService::AllBrowserContextsAndSources());
+  registrar_.reset(new content::NotificationRegistrar);
+  registrar_->Add(this, chrome::NOTIFICATION_AUTH_SUPPLIED,
+                  content::NotificationService::AllBrowserContextsAndSources());
+  registrar_->Add(this, chrome::NOTIFICATION_AUTH_CANCELLED,
+                  content::NotificationService::AllBrowserContextsAndSources());
 }
 
 void LoginHandler::RemoveObservers() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  registrar_.Remove(
-      this, chrome::NOTIFICATION_AUTH_SUPPLIED,
-      content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Remove(
-      this, chrome::NOTIFICATION_AUTH_CANCELLED,
-      content::NotificationService::AllBrowserContextsAndSources());
-
-  DCHECK(registrar_.IsEmpty());
+  registrar_.reset();
 }
 
 void LoginHandler::Observe(int type,
@@ -224,7 +222,7 @@ void LoginHandler::Observe(int type,
   DCHECK(type == chrome::NOTIFICATION_AUTH_SUPPLIED ||
          type == chrome::NOTIFICATION_AUTH_CANCELLED);
 
-  TabContents* requesting_contents = GetTabContentsForLogin();
+  WebContents* requesting_contents = GetWebContentsForLogin();
   if (!requesting_contents)
     return;
 
@@ -280,9 +278,9 @@ void LoginHandler::NotifyAuthNeeded() {
       content::NotificationService::current();
   NavigationController* controller = NULL;
 
-  TabContents* requesting_contents = GetTabContentsForLogin();
+  WebContents* requesting_contents = GetWebContentsForLogin();
   if (requesting_contents)
-    controller = &requesting_contents->controller();
+    controller = &requesting_contents->GetController();
 
   LoginNotificationDetails details(this);
 
@@ -299,9 +297,9 @@ void LoginHandler::NotifyAuthCancelled() {
       content::NotificationService::current();
   NavigationController* controller = NULL;
 
-  TabContents* requesting_contents = GetTabContentsForLogin();
+  WebContents* requesting_contents = GetWebContentsForLogin();
   if (requesting_contents)
-    controller = &requesting_contents->controller();
+    controller = &requesting_contents->GetController();
 
   LoginNotificationDetails details(this);
 
@@ -315,13 +313,14 @@ void LoginHandler::NotifyAuthSupplied(const string16& username,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(WasAuthHandled());
 
-  TabContents* requesting_contents = GetTabContentsForLogin();
+  WebContents* requesting_contents = GetWebContentsForLogin();
   if (!requesting_contents)
     return;
 
   content::NotificationService* service =
       content::NotificationService::current();
-  NavigationController* controller = &requesting_contents->controller();
+  NavigationController* controller =
+      &requesting_contents->GetController();
   AuthSuppliedLoginNotificationDetails details(this, username, password);
 
   service->Notify(
@@ -436,7 +435,7 @@ void MakeInputForPasswordManager(
 void LoginDialogCallback(const GURL& request_url,
                          net::AuthChallengeInfo* auth_info,
                          LoginHandler* handler) {
-  TabContents* parent_contents = handler->GetTabContentsForLogin();
+  WebContents* parent_contents = handler->GetWebContentsForLogin();
   if (!parent_contents || handler->WasAuthHandled()) {
     // The request may have been cancelled, or it may be for a renderer
     // not hosted by a tab (e.g. an extension). Cancel just in case

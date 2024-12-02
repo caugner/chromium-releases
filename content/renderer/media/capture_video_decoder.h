@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "content/common/content_export.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/filters.h"
+#include "media/base/pipeline_status.h"
 #include "media/base/video_frame.h"
 #include "media/video/capture/video_capture.h"
 
@@ -41,7 +42,7 @@ class CONTENT_EXPORT CaptureVideoDecoder
   // Decoder implementation.
   virtual void Initialize(
       media::DemuxerStream* demuxer_stream,
-      const base::Closure& filter_callback,
+      const media::PipelineStatusCB& filter_callback,
       const media::StatisticsCallback& stat_callback) OVERRIDE;
   virtual void Read(const ReadCB& callback) OVERRIDE;
   virtual const gfx::Size& natural_size() OVERRIDE;
@@ -78,7 +79,7 @@ class CONTENT_EXPORT CaptureVideoDecoder
 
   void InitializeOnDecoderThread(
       media::DemuxerStream* demuxer_stream,
-      const base::Closure& filter_callback,
+      const media::PipelineStatusCB& filter_callback,
       const media::StatisticsCallback& stat_callback);
   void ReadOnDecoderThread(const ReadCB& callback);
 
@@ -98,12 +99,14 @@ class CONTENT_EXPORT CaptureVideoDecoder
   media::VideoCapture::VideoCaptureCapability capability_;
   gfx::Size natural_size_;
   DecoderState state_;
+  bool got_first_frame_;
   ReadCB read_cb_;
   base::Closure pending_stop_cb_;
   media::StatisticsCallback statistics_callback_;
 
   media::VideoCaptureSessionId video_stream_id_;
   media::VideoCapture* capture_engine_;
+  base::Time last_frame_timestamp_;
   base::Time start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(CaptureVideoDecoder);

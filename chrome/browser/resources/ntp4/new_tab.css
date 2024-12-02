@@ -1,4 +1,4 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -13,13 +13,13 @@ html {
 }
 
 body {
-  background-size: auto 100%;
-  margin: 0;
   /* Don't highlight links when they're tapped.  Safari has bugs here that
      show up as flicker when dragging in some situations */
   -webkit-tap-highlight-color: transparent;
   /* Don't allow selecting text - can occur when dragging */
   -webkit-user-select: none;
+  background-size: auto 100%;
+  margin: 0;
 }
 
 /* [hidden] does display:none, but its priority is too low in some cases. */
@@ -28,18 +28,18 @@ body {
 }
 
 #notification-container {
+  -webkit-transition-duration: 100ms;
+  -webkit-transition-property: opacity;
   display: block;
   margin-top: 2px;
   position: relative;
   text-align: center;
-  z-index: 100;
-  -webkit-transition-duration: 100ms;
-  -webkit-transition-property: opacity;
+  z-index: 15;
 }
 
 #notification-container.inactive {
-  opacity: 0;
   -webkit-transition-duration: 200ms;
+  opacity: 0;
 }
 
 #notification {
@@ -58,15 +58,15 @@ body {
 }
 
 #notification .close-button {
-  vertical-align: middle;
   -webkit-margin-start: 0.5em;
+  vertical-align: middle;
 }
 
 .close-button {
   background: no-repeat;
   background-color: transparent;
   /* TODO(estade): this should animate between states. */
-  background-image: url('chrome://theme/IDR_CLOSE_BAR');
+  background-image: url('../../../../ui/resources/close_bar.png');
   border: 0;
   cursor: default;
   display: inline-block;
@@ -77,19 +77,19 @@ body {
 
 .close-button:hover,
 .close-button:focus {
-  background-image: url('chrome://theme/IDR_CLOSE_BAR_H');
+  background-image: url('../../../../ui/resources/close_bar_h.png');
 }
 
 .close-button:active {
-  background-image: url('chrome://theme/IDR_CLOSE_BAR_P');
+  background-image: url('../../../../ui/resources/close_bar_p.png');
 }
 
 .linkButton {
+  -webkit-margin-start: 0.5em;
   color: #06C;
   cursor: pointer;
   display: inline-block;
   text-decoration: underline;
-  -webkit-margin-start: 0.5em;
 }
 
 #card-slider-frame {
@@ -152,9 +152,9 @@ html[dir='rtl'] #attribution {
 }
 
 #footer-content {
+  -webkit-box-align: center;
   display: -webkit-box;
   height: 49px;
-  -webkit-box-align: center;
 }
 
 #footer-content > * {
@@ -172,6 +172,7 @@ html[dir='rtl'] #attribution {
 /* Login Status. **************************************************************/
 
 #login-container {
+  -webkit-box-shadow: none;
   background: transparent none;
   border: none;
   cursor: pointer;
@@ -184,10 +185,8 @@ html[dir='rtl'] #attribution {
   position: fixed;
   right: 0;
   text-align: right;
-  text-decoration: none;
   top: 0;
-  z-index: 100;
-  -webkit-box-shadow: none;
+  z-index: 10;
 }
 
 html[dir='rtl'] #login-container {
@@ -196,14 +195,18 @@ html[dir='rtl'] #login-container {
 }
 
 .login-status-icon {
+  -webkit-padding-end: 37px;
   background-position: right center;
   background-repeat: no-repeat;
   min-height: 27px;
-  -webkit-padding-end: 37px;
 }
 
 html[dir='rtl'] .login-status-icon {
   background-position-x: left;
+}
+
+.profile-name:hover {
+  text-decoration: underline;
 }
 
 .link-span {
@@ -223,10 +226,10 @@ html[dir='rtl'] .login-status-icon {
 }
 
 .login-status-row {
-  display: -webkit-box;
   -webkit-box-align: center;
   -webkit-box-orient: horizontal;
   -webkit-box-pack: end;
+  display: -webkit-box;
 }
 
 #login-status-advanced-container {
@@ -240,26 +243,36 @@ html[dir='rtl'] .login-status-icon {
 /* Trash. *********************************************************************/
 
 #trash {
-  color: #7F7F7F;
+  -webkit-transition: top 200ms, opacity 0;
+  -webkit-transition-delay: 0, 200ms;
+  color: #222;
   height: 100%;
   position: absolute;
   opacity: 0;
   right: 0;
   top: 50px;
-  -webkit-transition: top 200ms, opacity 0;
-  -webkit-transition-delay: 0, 200ms;
+  width: auto;
+}
+
+html[dir='rtl'] #trash {
+  left: 0;
+  right: auto;
 }
 
 #footer.showing-trash-mode #trash {
-  opacity: 1;
-  top: 0;
   -webkit-transition-delay: 0, 0;
+  -webkit-transition-duration: 0, 200ms;
+  opacity: 0.75;
+  top: 0;
 }
 
-#trash > span {
-  background-image: url('images/trash.png');
-  background-position: 7px;
-  background-repeat: no-repeat;
+#footer.showing-trash-mode #trash.drag-target {
+  opacity: 1;
+}
+
+#trash > .trash-text {
+  -webkit-padding-end: 7px;
+  -webkit-padding-start: 30px;
   border: 1px dashed #7f7f7f;
   border-radius: 4px;
   display: inline-block;
@@ -268,13 +281,34 @@ html[dir='rtl'] .login-status-icon {
   padding-top: 10px;
   position: relative;
   top: 7px;
-  -webkit-padding-end: 7px;
-  -webkit-padding-start: 30px;
+}
+
+#trash > .lid,
+#trash > .can {
+  top: 18px;
+}
+
+#footer.showing-trash-mode #trash.drag-target .lid {
+  -webkit-transform: rotate(-45deg);
+}
+
+html[dir='rtl'] #footer.showing-trash-mode #trash.drag-target .lid {
+  -webkit-transform: rotate(45deg);
+}
+
+#fontMeasuringDiv {
+  /* The font attributes match the nav inputs. */
+  font-size: 8pt;
+  font-weight: bold;
+  pointer-events: none;
+  position: absolute;
+  visibility: hidden;
 }
 
 /* Page switcher buttons. *****************************************************/
 
 .page-switcher {
+  -webkit-transition: width 150ms, right 150ms, background-color 150ms;
   background-color: transparent;
   border: none;
   bottom: 0;
@@ -287,5 +321,48 @@ html[dir='rtl'] .login-status-icon {
   outline: none;
   top: 0;
   z-index: 5;
-  -webkit-transition: width 150ms, right 150ms, background-color 150ms;
+}
+
+#chrome-web-store-href {
+  -webkit-padding-end: 12px;
+  /* Match transition delay of recently closed button. */
+  -webkit-transition-delay: 100ms;
+  color: #7F7F7F;
+  cursor: pointer;
+  display: none;
+  margin: 0;
+  text-decoration: none;
+}
+
+#chrome-web-store-title {
+  -webkit-padding-end: 26px;
+  -webkit-padding-start: 16px;
+  background: url('chrome://theme/IDR_WEBSTORE_ICON_24') right 50% no-repeat;
+  display: inline-block;
+  font-weight: bold;
+  font-size: 9pt;
+  line-height: 49px;
+}
+
+#chrome-web-store-href:hover {
+  color: #666;
+}
+
+html[dir='rtl'] #chrome-web-store-title {
+  background-position-x: left;
+}
+
+/* Show the chrome-web-store button when the experiment is turned on. */
+.enable-cws-experiment #chrome-web-store-href {
+  display: inline-block;
+}
+
+/* Reserve space for the menu button even when it's hidden. */
+#footer.showing-trash-mode #chrome-web-store-href {
+  visibility: hidden;
+}
+
+#footer.showing-trash-mode #chrome-web-store-href {
+  -webkit-transition-delay: 0;
+  opacity: 0;
 }

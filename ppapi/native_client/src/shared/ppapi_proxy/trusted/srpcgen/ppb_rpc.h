@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -25,13 +25,13 @@ class NaClFileRpcServer {
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance,
-      char* url,
+      const char* url,
       int32_t callback_id);
   static void GetFileDesc(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance,
-      char* url,
+      const char* url,
       NaClSrpcImcDescType* file_desc);
 
  private:
@@ -45,7 +45,7 @@ class PpbRpcServer {
   static void PPB_GetInterface(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      char* interface_name,
+      const char* interface_name,
       int32_t* exports_interface_name);
 
  private:
@@ -487,6 +487,20 @@ class PpbFullscreenRpcServer {
   void operator=(const PpbFullscreenRpcServer);
 };  // class PpbFullscreenRpcServer
 
+class PpbGamepadRpcServer {
+ public:
+  static void PPB_Gamepad_SampleGamepads(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      nacl_abi_size_t* data_bytes, char* data);
+
+ private:
+  PpbGamepadRpcServer();
+  PpbGamepadRpcServer(const PpbGamepadRpcServer&);
+  void operator=(const PpbGamepadRpcServer);
+};  // class PpbGamepadRpcServer
+
 class PpbGraphics2DRpcServer {
  public:
   static void PPB_Graphics2D_Create(
@@ -590,14 +604,12 @@ class PpbGraphics3DRpcServer {
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Resource resource_id,
-      int32_t size,
       int32_t* success);
-  static void PPB_Graphics3DTrusted_GetRingBuffer(
+  static void PPB_Graphics3DTrusted_SetGetBuffer(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Resource resource_id,
-      NaClSrpcImcDescType* shm_desc,
-      int32_t* shm_size);
+      int32_t shm_id);
   static void PPB_Graphics3DTrusted_GetState(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
@@ -796,6 +808,46 @@ class PpbMouseLockRpcServer {
   void operator=(const PpbMouseLockRpcServer);
 };  // class PpbMouseLockRpcServer
 
+class PpbNetAddressPrivateRpcServer {
+ public:
+  static void PPB_NetAddress_Private_AreEqual(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr1_bytes, char* addr1,
+      nacl_abi_size_t addr2_bytes, char* addr2,
+      int32_t* equals);
+  static void PPB_NetAddress_Private_AreHostsEqual(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t addr1_bytes, char* addr1,
+      nacl_abi_size_t addr2_bytes, char* addr2,
+      int32_t* equals);
+  static void PPB_NetAddress_Private_Describe(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      int32_t module,
+      nacl_abi_size_t addr_bytes, char* addr,
+      int32_t include_port,
+      nacl_abi_size_t* description_bytes, char* description);
+  static void PPB_NetAddress_Private_ReplacePort(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      nacl_abi_size_t src_addr_bytes, char* src_addr,
+      int32_t port,
+      nacl_abi_size_t* dst_addr_bytes, char* dst_addr,
+      int32_t* success);
+  static void PPB_NetAddress_Private_GetAnyAddress(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      int32_t is_ipv6,
+      nacl_abi_size_t* addr_bytes, char* addr);
+
+ private:
+  PpbNetAddressPrivateRpcServer();
+  PpbNetAddressPrivateRpcServer(const PpbNetAddressPrivateRpcServer&);
+  void operator=(const PpbNetAddressPrivateRpcServer);
+};  // class PpbNetAddressPrivateRpcServer
+
 class PpbPdfRpcServer {
  public:
   static void PPB_PDF_GetLocalizedString(
@@ -943,7 +995,7 @@ class PpbTCPSocketPrivateRpcServer {
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Resource tcp_socket,
-      char* host,
+      const char* host,
       int32_t port,
       int32_t callback_id,
       int32_t* pp_error);
@@ -970,7 +1022,7 @@ class PpbTCPSocketPrivateRpcServer {
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Resource tcp_socket,
-      char* server_name,
+      const char* server_name,
       int32_t server_port,
       int32_t callback_id,
       int32_t* pp_error);
@@ -1023,6 +1075,17 @@ class PpbTestingRpcServer {
       NaClSrpcClosure* done,
       PP_Instance instance,
       int32_t* live_object_count);
+  static void PPB_Testing_SimulateInputEvent(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      PP_Resource input_event);
+  static void PPB_Testing_GetDocumentURL(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      nacl_abi_size_t* components_bytes, char* components,
+      nacl_abi_size_t* url_bytes, char* url);
 
  private:
   PpbTestingRpcServer();
@@ -1217,6 +1280,94 @@ class PpbURLResponseInfoRpcServer {
   PpbURLResponseInfoRpcServer(const PpbURLResponseInfoRpcServer&);
   void operator=(const PpbURLResponseInfoRpcServer);
 };  // class PpbURLResponseInfoRpcServer
+
+class PpbWebSocketRpcServer {
+ public:
+  static void PPB_WebSocket_Create(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Instance instance,
+      PP_Resource* resource);
+  static void PPB_WebSocket_IsWebSocket(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource instance,
+      int32_t* is_websocket);
+  static void PPB_WebSocket_Connect(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      nacl_abi_size_t url_bytes, char* url,
+      nacl_abi_size_t protocols_bytes, char* protocols,
+      int32_t protocol_count,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_WebSocket_Close(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      int32_t code,
+      nacl_abi_size_t reason_bytes, char* reason,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_WebSocket_ReceiveMessage(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      int32_t callback_id,
+      int32_t* pp_error);
+  static void PPB_WebSocket_SendMessage(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      nacl_abi_size_t message_bytes, char* message,
+      int32_t* pp_error);
+  static void PPB_WebSocket_GetBufferedAmount(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      int64_t* buffered_amount);
+  static void PPB_WebSocket_GetCloseCode(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      int32_t* close_code);
+  static void PPB_WebSocket_GetCloseReason(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      nacl_abi_size_t* reason_bytes, char* reason);
+  static void PPB_WebSocket_GetCloseWasClean(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      int32_t* was_clean);
+  static void PPB_WebSocket_GetExtensions(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      nacl_abi_size_t* extensions_bytes, char* extensions);
+  static void PPB_WebSocket_GetProtocol(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      nacl_abi_size_t* protocol_bytes, char* protocol);
+  static void PPB_WebSocket_GetReadyState(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      int32_t* ready_state);
+  static void PPB_WebSocket_GetURL(
+      NaClSrpcRpc* rpc,
+      NaClSrpcClosure* done,
+      PP_Resource ws,
+      nacl_abi_size_t* url_bytes, char* url);
+
+ private:
+  PpbWebSocketRpcServer();
+  PpbWebSocketRpcServer(const PpbWebSocketRpcServer&);
+  void operator=(const PpbWebSocketRpcServer);
+};  // class PpbWebSocketRpcServer
 
 class PpbWidgetRpcServer {
  public:

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -218,6 +218,7 @@
 #define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
 #define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
 #define IDC_LOCK_SCREEN                 45300     // ChromeOS only
+#define IDC_SHUTDOWN                    45400     // ChromeOS only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
@@ -253,6 +254,8 @@
 #define IDC_CONTENT_CONTEXT_MUTE 50131
 #define IDC_CONTENT_CONTEXT_LOOP 50132
 #define IDC_CONTENT_CONTEXT_CONTROLS 50133
+#define IDC_CONTENT_CONTEXT_ROTATECW 50134
+#define IDC_CONTENT_CONTEXT_ROTATECCW 50135
 // Edit items.
 #define IDC_CONTENT_CONTEXT_COPY 50140
 #define IDC_CONTENT_CONTEXT_CUT 50141

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -57,7 +59,7 @@ class PrintSystemTaskProxy
  private:
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
-  friend class DeleteTask<PrintSystemTaskProxy>;
+  friend class base::DeleteHelper<PrintSystemTaskProxy>;
 
 #if defined(UNIT_TEST) && defined(USE_CUPS)
   FRIEND_TEST_ALL_PREFIXES(PrintSystemTaskProxyTest, DetectDuplexModeCUPS);
@@ -68,7 +70,7 @@ class PrintSystemTaskProxy
 #endif
 
 #if defined(USE_CUPS)
-  bool GetPrinterCapabilitiesCUPS(
+  static bool GetPrinterCapabilitiesCUPS(
       const printing::PrinterCapsAndDefaults& printer_info,
       const std::string& printer_name,
       bool* set_color_as_default,

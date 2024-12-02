@@ -1,6 +1,5 @@
-#!/usr/bin/python
-#
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -110,6 +109,13 @@ class HGen(GeneratorByFile):
 
   def GenerateFile(self, filenode, releases, options):
     savename = GetOutFileName(filenode, GetOption('dstroot'))
+    unique_releases = filenode.GetUniqueReleases(releases)
+    if not unique_releases:
+      if os.path.isfile(savename):
+        print "Removing stale %s for this range." % filenode.GetName()
+        os.remove(os.path.realpath(savename))
+      return False
+
     out = IDLOutFile(savename)
     self.GenerateHead(out, filenode, releases, options)
     self.GenerateBody(out, filenode, releases, options)
@@ -120,7 +126,6 @@ class HGen(GeneratorByFile):
     __pychecker__ = 'unusednames=options'
     cgen = CGen()
     gpath = GetOption('guard')
-    release = releases[0]
     def_guard = GetOutFileName(filenode, relpath=gpath)
     def_guard = def_guard.replace(os.sep,'_').replace('.','_').upper() + '_'
 
@@ -130,9 +135,17 @@ class HGen(GeneratorByFile):
     assert(fileinfo.IsA('Comment'))
 
     out.Write('%s\n' % cgen.Copyright(cright_node))
-    out.Write('/* From %s modified %s. */\n\n'% (
-        filenode.GetProperty('NAME').replace(os.sep,'/'),
-        filenode.GetProperty('DATETIME')))
+
+    # Wrap the From ... modified ... comment if it would be >80 characters.
+    from_text = 'From %s' % (
+        filenode.GetProperty('NAME').replace(os.sep,'/'))
+    modified_text = 'modified %s.' % (
+        filenode.GetProperty('DATETIME'))
+    if len(from_text) + len(modified_text) < 74:
+      out.Write('/* %s %s */\n\n' % (from_text, modified_text))
+    else:
+      out.Write('/* %s,\n *   %s\n */\n\n' % (from_text, modified_text))
+
     out.Write('#ifndef %s\n#define %s\n\n' % (def_guard, def_guard))
     # Generate set of includes
 
@@ -164,7 +177,12 @@ class HGen(GeneratorByFile):
     for node in filenode.GetListOf('Interface'):
       idefs = ''
       macro = cgen.GetInterfaceMacro(node)
-      for rel in node.GetUniqueReleases(releases):
+      unique = node.GetUniqueReleases(releases)
+
+      # Skip this interface if there are no matching versions
+      if not unique: continue
+
+      for rel in unique:
         version = node.GetVersion(rel)
         name = cgen.GetInterfaceString(node, version)
         strver = str(version).replace('.', '_')
@@ -222,5 +240,5 @@ def Main(args):
   return failed
 
 if __name__ == '__main__':
-  retval = Main(sys.argv[1:])
-  sys.exit(retval)
+  sys.exit(Main(sys.argv[1:]))
+

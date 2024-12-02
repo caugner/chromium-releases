@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "content/public/common/page_transition_types.h"
 #include "webkit/glue/webpreferences.h"
 
+class SiteInstanceImpl;
 class TestRenderViewHost;
 
 // Subclass TabContents to ensure it creates TestRenderViewHosts and does
@@ -17,7 +18,7 @@ class TestRenderViewHost;
 class TestTabContents : public TabContents {
  public:
   TestTabContents(content::BrowserContext* browser_context,
-                  SiteInstance* instance);
+                  content::SiteInstance* instance);
   virtual ~TestTabContents();
 
   TestRenderViewHost* pending_rvh() const;
@@ -53,7 +54,7 @@ class TestTabContents : public TabContents {
 
   // Returns a clone of this TestTabContents. The returned object is also a
   // TestTabContents. The caller owns the returned object.
-  virtual TabContents* Clone() OVERRIDE;
+  virtual content::WebContents* Clone() OVERRIDE;
 
   // Creates a pending navigation to the given URL with the default parameters
   // and then commits the load with a page ID one larger than any seen. This
@@ -73,30 +74,32 @@ class TestTabContents : public TabContents {
   bool transition_cross_site;
 
   // Allow mocking of the RenderViewHostDelegate::View.
-  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
-  void set_view_delegate(RenderViewHostDelegate::View* view) {
+  virtual content::RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
+  void set_view_delegate(content::RenderViewHostDelegate::View* view) {
     delegate_view_override_ = view;
   }
 
   // Establish expected arguments for |SetHistoryLengthAndPrune()|. When
   // |SetHistoryLengthAndPrune()| is called, the arguments are compared
   // with the expected arguments specified here.
-  void ExpectSetHistoryLengthAndPrune(const SiteInstance* site_instance,
-                                      int history_length,
-                                      int32 min_page_id);
+  void ExpectSetHistoryLengthAndPrune(
+      const content::SiteInstance* site_instance,
+      int history_length,
+      int32 min_page_id);
 
   // Compares the arguments passed in with the expected arguments passed in
   // to |ExpectSetHistoryLengthAndPrune()|.
-  virtual void SetHistoryLengthAndPrune(const SiteInstance* site_instance,
-                                        int history_length,
-                                        int32 min_page_id) OVERRIDE;
+  virtual void SetHistoryLengthAndPrune(
+      const content::SiteInstance* site_instance,
+      int history_length,
+      int32 min_page_id) OVERRIDE;
 
  private:
-  RenderViewHostDelegate::View* delegate_view_override_;
+  content::RenderViewHostDelegate::View* delegate_view_override_;
 
   // Expectations for arguments of |SetHistoryLengthAndPrune()|.
   bool expect_set_history_length_and_prune_;
-  scoped_refptr<const SiteInstance>
+  scoped_refptr<const SiteInstanceImpl>
     expect_set_history_length_and_prune_site_instance_;
   int expect_set_history_length_and_prune_history_length_;
   int32 expect_set_history_length_and_prune_min_page_id_;

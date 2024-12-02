@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -49,11 +49,9 @@ static void PPP_InitializeModuleDispatcher(
       rpc,
       done,
       inputs[0]->u.ival,
-      inputs[1]->u.ival,
-      inputs[2]->u.hval,
-      inputs[3]->arrays.str,
-      &(outputs[0]->u.ival),
-      &(outputs[1]->u.ival)
+      inputs[1]->u.hval,
+      inputs[2]->arrays.str,
+      &(outputs[0]->u.ival)
   );
 }
 
@@ -206,9 +204,8 @@ static void PPP_Instance_DidChangeViewDispatcher(
       rpc,
       done,
       inputs[0]->u.ival,
-      inputs[1]->u.count, inputs[1]->arrays.iarr,
-      inputs[2]->u.count, inputs[2]->arrays.iarr,
-      inputs[3]->u.ival
+      inputs[1]->u.ival,
+      inputs[2]->u.count, inputs[2]->arrays.carr
   );
 }
 
@@ -427,7 +424,7 @@ static void PPP_Zoom_ZoomDispatcher(
 
 NaClSrpcHandlerDesc PppRpcs::srpc_methods[] = {
   { "RunCompletionCallback:iiC:", RunCompletionCallbackDispatcher },
-  { "PPP_InitializeModule:iihs:ii", PPP_InitializeModuleDispatcher },
+  { "PPP_InitializeModule:ihs:i", PPP_InitializeModuleDispatcher },
   { "PPP_ShutdownModule::", PPP_ShutdownModuleDispatcher },
   { "PPP_GetInterface:s:i", PPP_GetInterfaceDispatcher },
   { "PPP_Audio_StreamCreated:ihih:", PPP_Audio_StreamCreatedDispatcher },
@@ -437,7 +434,7 @@ NaClSrpcHandlerDesc PppRpcs::srpc_methods[] = {
   { "PPP_InputEvent_HandleInputEvent:iiCC:i", PPP_InputEvent_HandleInputEventDispatcher },
   { "PPP_Instance_DidCreate:iiCC:i", PPP_Instance_DidCreateDispatcher },
   { "PPP_Instance_DidDestroy:i:", PPP_Instance_DidDestroyDispatcher },
-  { "PPP_Instance_DidChangeView:iIIi:", PPP_Instance_DidChangeViewDispatcher },
+  { "PPP_Instance_DidChangeView:iiC:", PPP_Instance_DidChangeViewDispatcher },
   { "PPP_Instance_DidChangeFocus:ib:", PPP_Instance_DidChangeFocusDispatcher },
   { "PPP_Instance_HandleDocumentLoad:ii:i", PPP_Instance_HandleDocumentLoadDispatcher },
   { "PPP_Messaging_HandleMessage:iC:", PPP_Messaging_HandleMessageDispatcher },

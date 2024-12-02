@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,16 @@
 
 #include "base/bind.h"
 #include "base/file_path.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/settings/settings_backend.h"
 #include "chrome/browser/extensions/settings/settings_namespace.h"
 #include "chrome/browser/extensions/settings/settings_leveldb_storage.h"
+#include "chrome/browser/extensions/settings/weak_unlimited_settings_storage.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/extensions/api/extension_api.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 
@@ -75,6 +78,50 @@ void DeleteStorageOnFileThread(
   backend->DeleteStorage(extension_id);
 }
 
+void CallbackWithUnlimitedStorage(
+    const std::string& extension_id,
+    const SettingsFrontend::StorageCallback& callback,
+    SettingsBackend* backend) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  WeakUnlimitedSettingsStorage unlimited_storage(
+      backend->GetStorage(extension_id));
+  callback.Run(&unlimited_storage);
+}
+
+// Returns the integer at |path| in |dict| as a size_t, or a default value if
+// there's nothing found at that path.
+size_t GetStringAsInteger(
+    const DictionaryValue& dict, const std::string& path, size_t default_size) {
+  std::string as_string;
+  if (!dict.GetString(path, &as_string))
+    return default_size;
+  size_t as_integer = default_size;
+  CHECK(base::StringToSizeT(as_string, &as_integer));
+  return as_integer;
+}
+
+// Constructs a |Limits| configuration by looking up the QUOTA_BYTES,
+// QUOTA_BYTES_PER_ITEM, and MAX_ITEMS properties of a storage area defined
+// in chrome/common/extensions/api/experimental.storage.json (via ExtensionAPI).
+SettingsStorageQuotaEnforcer::Limits GetLimitsFromExtensionAPI(
+    const std::string& storage_area_id) {
+  const DictionaryValue* storage_schema =
+      ExtensionAPI::GetInstance()->GetSchema("experimental.storage");
+  CHECK(storage_schema);
+
+  DictionaryValue* properties = NULL;
+  storage_schema->GetDictionary(
+      "properties." + storage_area_id + ".properties", &properties);
+  CHECK(properties);
+
+  SettingsStorageQuotaEnforcer::Limits limits = {
+    GetStringAsInteger(*properties, "QUOTA_BYTES.value", UINT_MAX),
+    GetStringAsInteger(*properties, "QUOTA_BYTES_PER_ITEM.value", UINT_MAX),
+    GetStringAsInteger(*properties, "MAX_ITEMS.value", UINT_MAX),
+  };
+  return limits;
+}
+
 }  // namespace
 
 // Ref-counted container for a SettingsBackend object.
@@ -84,11 +131,12 @@ class SettingsFrontend::BackendWrapper
   // Creates a new BackendWrapper and initializes it on the FILE thread.
   static scoped_refptr<BackendWrapper> CreateAndInit(
       const scoped_refptr<SettingsStorageFactory>& factory,
+      const SettingsStorageQuotaEnforcer::Limits& quota,
       const scoped_refptr<SettingsObserverList>& observers,
       const FilePath& path) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     scoped_refptr<BackendWrapper> backend_wrapper =
-        new BackendWrapper(factory, observers);
+        new BackendWrapper(factory, quota, observers);
     BrowserThread::PostTask(
         BrowserThread::FILE,
         FROM_HERE,
@@ -118,8 +166,10 @@ class SettingsFrontend::BackendWrapper
 
   BackendWrapper(
       const scoped_refptr<SettingsStorageFactory>& storage_factory,
+      const SettingsStorageQuotaEnforcer::Limits& quota,
       const scoped_refptr<SettingsObserverList>& observers)
       : storage_factory_(storage_factory),
+        quota_(quota),
         observers_(observers),
         backend_(NULL) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -138,7 +188,7 @@ class SettingsFrontend::BackendWrapper
   void InitOnFileThread(const FilePath& path) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
     DCHECK(!backend_);
-    backend_ = new SettingsBackend(storage_factory_, path, observers_);
+    backend_ = new SettingsBackend(storage_factory_, path, quota_, observers_);
     storage_factory_ = NULL;
     observers_ = NULL;
   }
@@ -151,6 +201,7 @@ class SettingsFrontend::BackendWrapper
 
   // Only need these until |backend_| exists.
   scoped_refptr<SettingsStorageFactory> storage_factory_;
+  const SettingsStorageQuotaEnforcer::Limits quota_;
   scoped_refptr<SettingsObserverList> observers_;
 
   // Wrapped Backend.  Used exclusively on the FILE thread, and is created on
@@ -162,12 +213,12 @@ class SettingsFrontend::BackendWrapper
 
 // SettingsFrontend
 
-/* static */
+// static
 SettingsFrontend* SettingsFrontend::Create(Profile* profile) {
   return new SettingsFrontend(new SettingsLeveldbStorage::Factory(), profile);
 }
 
-/* static */
+// static
 SettingsFrontend* SettingsFrontend::Create(
     const scoped_refptr<SettingsStorageFactory>& storage_factory,
     Profile* profile) {
@@ -176,7 +227,9 @@ SettingsFrontend* SettingsFrontend::Create(
 
 SettingsFrontend::SettingsFrontend(
     const scoped_refptr<SettingsStorageFactory>& factory, Profile* profile)
-    : profile_(profile),
+    : local_quota_limit_(GetLimitsFromExtensionAPI("local")),
+      sync_quota_limit_(GetLimitsFromExtensionAPI("sync")),
+      profile_(profile),
       observers_(new SettingsObserverList()),
       profile_observer_(new DefaultObserver(profile)) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -188,24 +241,28 @@ SettingsFrontend::SettingsFrontend(
   backends_[settings_namespace::LOCAL].app =
       BackendWrapper::CreateAndInit(
           factory,
+          local_quota_limit_,
           observers_,
           profile_path.AppendASCII(
               ExtensionService::kLocalAppSettingsDirectoryName));
   backends_[settings_namespace::LOCAL].extension =
       BackendWrapper::CreateAndInit(
           factory,
+          local_quota_limit_,
           observers_,
           profile_path.AppendASCII(
               ExtensionService::kLocalExtensionSettingsDirectoryName));
   backends_[settings_namespace::SYNC].app =
       BackendWrapper::CreateAndInit(
           factory,
+          sync_quota_limit_,
           observers_,
           profile_path.AppendASCII(
               ExtensionService::kSyncAppSettingsDirectoryName));
   backends_[settings_namespace::SYNC].extension =
       BackendWrapper::CreateAndInit(
           factory,
+          sync_quota_limit_,
           observers_,
           profile_path.AppendASCII(
               ExtensionService::kSyncExtensionSettingsDirectoryName));
@@ -251,14 +308,28 @@ void SettingsFrontend::RunWithStorage(
     return;
   }
 
+  // A neat way to implement unlimited storage; if the extension has the
+  // unlimited storage permission, force through all calls to Set() (in the
+  // same way that writes from sync ignore quota).
+  // But only if it's local storage (bad stuff would happen if sync'ed
+  // storage is allowed to be unlimited).
+  bool is_unlimited =
+      settings_namespace == settings_namespace::LOCAL &&
+      extension->HasAPIPermission(ExtensionAPIPermission::kUnlimitedStorage);
+
   scoped_refptr<BackendWrapper> backend;
   if (extension->is_app()) {
     backend = backends_[settings_namespace].app;
   } else {
     backend = backends_[settings_namespace].extension;
   }
+
   backend->RunWithBackend(
-      base::Bind(&CallbackWithStorage, extension_id, callback));
+      base::Bind(
+          is_unlimited ?
+              &CallbackWithUnlimitedStorage : &CallbackWithStorage,
+          extension_id,
+          callback));
 }
 
 void SettingsFrontend::DeleteStorageSoon(

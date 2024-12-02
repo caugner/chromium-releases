@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -38,6 +39,7 @@ class JsonPrefStore : public PersistentPrefStore,
                               const base::Value** result) const OVERRIDE;
   virtual void AddObserver(PrefStore::Observer* observer) OVERRIDE;
   virtual void RemoveObserver(PrefStore::Observer* observer) OVERRIDE;
+  virtual size_t NumberOfObservers() const OVERRIDE;
   virtual bool IsInitializationComplete() const OVERRIDE;
 
   // PersistentPrefStore overrides:
@@ -50,8 +52,6 @@ class JsonPrefStore : public PersistentPrefStore,
   virtual bool ReadOnly() const OVERRIDE;
   virtual PrefReadError ReadPrefs() OVERRIDE;
   virtual void ReadPrefsAsync(ReadErrorDelegate* error_delegate) OVERRIDE;
-  virtual bool WritePrefs() OVERRIDE;
-  virtual void ScheduleWritePrefs() OVERRIDE;
   virtual void CommitPendingWrite() OVERRIDE;
   virtual void ReportValueChanged(const std::string& key) OVERRIDE;
 

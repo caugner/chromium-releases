@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,10 @@
 
 #include "content/browser/renderer_host/gpu_message_filter.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/process_util.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/gpu/gpu_surface_tracker.h"
 #include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/common/gpu/gpu_messages.h"
 
@@ -41,97 +43,10 @@ bool GpuMessageFilter::OnMessageReceived(
   return handled;
 }
 
-// Callbacks used in this file.
-namespace {
-
-class EstablishChannelCallback
-    : public CallbackRunner<Tuple3<const IPC::ChannelHandle&,
-                                   base::ProcessHandle,
-                                   const content::GPUInfo&> > {
- public:
-  EstablishChannelCallback(GpuMessageFilter* filter, IPC::Message* reply)
-      : filter_(filter->AsWeakPtr()),
-        reply_(reply) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  }
-
-  virtual void RunWithParams(const TupleType& params) {
-    DispatchToMethod(this, &EstablishChannelCallback::Send, params);
-  }
-
-  void Send(const IPC::ChannelHandle& channel,
-            base::ProcessHandle gpu_process_for_browser,
-            const content::GPUInfo& gpu_info) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-    if (!filter_)
-      return;
-
-    base::ProcessHandle renderer_process_for_gpu;
-    if (gpu_process_for_browser != 0) {
-#if defined(OS_WIN)
-      // Create a process handle that the renderer process can give to the GPU
-      // process to give it access to its handles.
-      DuplicateHandle(base::GetCurrentProcessHandle(),
-                      filter_->peer_handle(),
-                      gpu_process_for_browser,
-                      &renderer_process_for_gpu,
-                      PROCESS_DUP_HANDLE,
-                      FALSE,
-                      0);
-#else
-      renderer_process_for_gpu = filter_->peer_handle();
-#endif
-    } else {
-      renderer_process_for_gpu = 0;
-    }
-
-    GpuHostMsg_EstablishGpuChannel::WriteReplyParams(reply_,
-                                                     channel,
-                                                     renderer_process_for_gpu,
-                                                     gpu_info);
-    filter_->Send(reply_);
-  }
-
- private:
-  base::WeakPtr<GpuMessageFilter> filter_;
-  IPC::Message* reply_;
-};
-
-class CreateCommandBufferCallback : public CallbackRunner<Tuple1<int32> > {
- public:
-  CreateCommandBufferCallback(GpuMessageFilter* filter,
-                              IPC::Message* reply) :
-      filter_(filter->AsWeakPtr()),
-      reply_(reply) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  }
-
-  virtual void RunWithParams(const TupleType& params) {
-    DispatchToMethod(this, &CreateCommandBufferCallback::Send, params);
-  }
-
-  void Send(int32 route_id) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    GpuHostMsg_CreateViewCommandBuffer::WriteReplyParams(reply_, route_id);
-    if (filter_)
-      filter_->Send(reply_);
-  }
-
- private:
-  base::WeakPtr<GpuMessageFilter> filter_;
-  IPC::Message* reply_;
-};
-
-}  // namespace
-
 void GpuMessageFilter::OnEstablishGpuChannel(
     content::CauseForGpuLaunch cause_for_gpu_launch,
     IPC::Message* reply) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  scoped_ptr<EstablishChannelCallback> callback(
-      new EstablishChannelCallback(this, reply));
 
   // TODO(apatrick): Eventually, this will return the route ID of a
   // GpuProcessStub, from which the renderer process will create a
@@ -153,20 +68,34 @@ void GpuMessageFilter::OnEstablishGpuChannel(
     gpu_host_id_ = host->host_id();
   }
 
-  host->EstablishGpuChannel(render_process_id_, callback.release());
+  host->EstablishGpuChannel(
+      render_process_id_,
+      base::Bind(&GpuMessageFilter::EstablishChannelCallback,
+                 AsWeakPtr(),
+                 reply));
 }
 
 void GpuMessageFilter::OnCreateViewCommandBuffer(
-    int32 render_view_id,
+    int32 surface_id,
     const GPUCreateCommandBufferConfig& init_params,
     IPC::Message* reply) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
+  GpuSurfaceTracker* surface_tracker = GpuSurfaceTracker::Get();
+  gfx::PluginWindowHandle compositing_surface = gfx::kNullPluginWindow;
+
+  int renderer_id = 0;
+  int render_widget_id = 0;
+  bool result = surface_tracker->GetRenderWidgetIDForSurface(
+      surface_id, &renderer_id, &render_widget_id);
+  if (result && renderer_id == render_process_id_) {
+    compositing_surface = surface_tracker->GetSurfaceHandle(surface_id);
+  } else {
+    DLOG(ERROR) << "Renderer " << render_process_id_
+                << " tried to access a surface for renderer " << renderer_id;
+  }
+
   GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
-
-  gfx::PluginWindowHandle compositing_surface =
-      render_widget_helper_->LookupCompositingSurface(render_view_id);
-
   if (!host || compositing_surface == gfx::kNullPluginWindow) {
     // TODO(apatrick): Eventually, this IPC message will be routed to a
     // GpuProcessStub with a particular routing ID. The error will be set if
@@ -178,8 +107,49 @@ void GpuMessageFilter::OnCreateViewCommandBuffer(
 
   host->CreateViewCommandBuffer(
       compositing_surface,
-      render_view_id,
+      surface_id,
       render_process_id_,
       init_params,
-      new CreateCommandBufferCallback(this, reply));
+      base::Bind(&GpuMessageFilter::CreateCommandBufferCallback,
+                 AsWeakPtr(),
+                 reply));
 }
+
+void GpuMessageFilter::EstablishChannelCallback(
+    IPC::Message* reply,
+    const IPC::ChannelHandle& channel,
+    base::ProcessHandle gpu_process_for_browser,
+    const content::GPUInfo& gpu_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  base::ProcessHandle renderer_process_for_gpu;
+  if (gpu_process_for_browser != 0) {
+#if defined(OS_WIN)
+    // Create a process handle that the renderer process can give to the GPU
+    // process to give it access to its handles.
+    DuplicateHandle(base::GetCurrentProcessHandle(),
+                    peer_handle(),
+                    gpu_process_for_browser,
+                    &renderer_process_for_gpu,
+                    PROCESS_DUP_HANDLE,
+                    FALSE,
+                    0);
+#else
+    renderer_process_for_gpu = peer_handle();
+#endif
+  } else {
+    renderer_process_for_gpu = 0;
+  }
+
+  GpuHostMsg_EstablishGpuChannel::WriteReplyParams(
+      reply, channel, renderer_process_for_gpu, gpu_info);
+  Send(reply);
+}
+
+void GpuMessageFilter::CreateCommandBufferCallback(
+    IPC::Message* reply, int32 route_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  GpuHostMsg_CreateViewCommandBuffer::WriteReplyParams(reply, route_id);
+  Send(reply);
+}
+

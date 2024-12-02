@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -136,14 +136,14 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
     LOG(ERROR) << "Scoped dir lookup failed!";
 
   bool is_share_useable = true;
-  syncable::ModelTypeBitSet initial_sync_ended;
+  syncable::ModelTypeSet initial_sync_ended;
   std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
   for (int i = syncable::FIRST_REAL_MODEL_TYPE;
        i < syncable::MODEL_TYPE_COUNT; ++i) {
     syncable::ModelType type(syncable::ModelTypeFromInt(i));
     if (routing_info_.count(type) != 0) {
       if (dir->initial_sync_ended_for_type(type))
-        initial_sync_ended.set(type);
+        initial_sync_ended.Put(type);
       else
         is_share_useable = false;
     }
@@ -165,7 +165,17 @@ SyncSessionSnapshot SyncSession::TakeSnapshot() const {
       status_controller_->did_commit_items(),
       source_,
       dir->GetEntriesCount(),
-      status_controller_->sync_start_time());
+      status_controller_->sync_start_time(),
+      !Succeeded());
+}
+
+void SyncSession::SendEventNotification(SyncEngineEvent::EventCause cause) {
+  SyncEngineEvent event(cause);
+  const SyncSessionSnapshot& snapshot = TakeSnapshot();
+  event.snapshot = &snapshot;
+
+  DVLOG(1) << "Sending event with snapshot: " << snapshot.ToString();
+  context()->NotifyListeners(event);
 }
 
 SyncSourceInfo SyncSession::TestAndSetSource() {
@@ -180,7 +190,6 @@ bool SyncSession::HasMoreToSync() const {
   const StatusController* status = status_controller_.get();
   return ((status->commit_ids().size() < status->unsynced_handles().size()) &&
       status->syncer_status().num_successful_commits > 0) ||
-      status->conflict_sets_built() ||
       status->conflicts_resolved();
       // Or, we have conflicting updates, but we're making progress on
       // resolving them...
@@ -224,6 +233,28 @@ std::set<ModelSafeGroup>
   return enabled_groups_with_verified_updates;
 }
 
+namespace {
+// Return true if the command in question was attempted and did not complete
+// successfully.
+//
+bool IsError(SyncerError error) {
+  return error != UNSET
+      && error != SYNCER_OK
+      && error != SERVER_RETURN_MIGRATION_DONE;
+}
+}  // namespace
+
+bool SyncSession::Succeeded() const {
+  const bool download_updates_error =
+      IsError(status_controller_->error().last_download_updates_result);
+  const bool post_commit_error =
+      IsError(status_controller_->error().last_post_commit_result);
+  const bool process_commit_response_error =
+      IsError(status_controller_->error().last_process_commit_response_result);
+  return !download_updates_error
+      && !post_commit_error
+      && !process_commit_response_error;
+}
 
 }  // namespace sessions
 }  // namespace browser_sync

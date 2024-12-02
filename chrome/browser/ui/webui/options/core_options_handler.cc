@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,21 +13,23 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_ui.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::UserMetricsAction;
 
 CoreOptionsHandler::CoreOptionsHandler()
     : handlers_host_(NULL) {
@@ -37,7 +39,7 @@ CoreOptionsHandler::~CoreOptionsHandler() {}
 
 void CoreOptionsHandler::Initialize() {
   clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      Profile::FromWebUI(web_ui_),
+                                      Profile::FromWebUI(web_ui()),
                                       this);
   UpdateClearPluginLSOData();
 }
@@ -85,8 +87,7 @@ void CoreOptionsHandler::GetStaticLocalizedValues(
       l10n_util::GetStringFUTF16(IDS_OPTIONS_SEARCH_PAGE_HELP_TITLE,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
   localized_strings->SetString("searchPageHelpURL",
-      google_util::AppendGoogleLocaleParam(
-          GURL(chrome::kChromeHelpURL)).spec());
+                               chrome::kSettingsSearchHelpURL);
 
   // Common
   localized_strings->SetString("ok",
@@ -111,13 +112,6 @@ void CoreOptionsHandler::Uninitialize() {
   }
 }
 
-WebUIMessageHandler* CoreOptionsHandler::Attach(WebUI* web_ui) {
-  WebUIMessageHandler* result = WebUIMessageHandler::Attach(web_ui);
-  DCHECK(web_ui_);
-  registrar_.Init(Profile::FromWebUI(web_ui_)->GetPrefs());
-  return result;
-}
-
 void CoreOptionsHandler::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
@@ -133,37 +127,39 @@ void CoreOptionsHandler::Observe(int type,
 }
 
 void CoreOptionsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("coreOptionsInitialize",
+  registrar_.Init(Profile::FromWebUI(web_ui())->GetPrefs());
+
+  web_ui()->RegisterMessageCallback("coreOptionsInitialize",
       base::Bind(&CoreOptionsHandler::HandleInitialize,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("fetchPrefs",
+  web_ui()->RegisterMessageCallback("fetchPrefs",
       base::Bind(&CoreOptionsHandler::HandleFetchPrefs,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("observePrefs",
+  web_ui()->RegisterMessageCallback("observePrefs",
       base::Bind(&CoreOptionsHandler::HandleObservePrefs,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setBooleanPref",
+  web_ui()->RegisterMessageCallback("setBooleanPref",
       base::Bind(&CoreOptionsHandler::HandleSetBooleanPref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setIntegerPref",
+  web_ui()->RegisterMessageCallback("setIntegerPref",
       base::Bind(&CoreOptionsHandler::HandleSetIntegerPref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setDoublePref",
+  web_ui()->RegisterMessageCallback("setDoublePref",
       base::Bind(&CoreOptionsHandler::HandleSetDoublePref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setStringPref",
+  web_ui()->RegisterMessageCallback("setStringPref",
       base::Bind(&CoreOptionsHandler::HandleSetStringPref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setURLPref",
+  web_ui()->RegisterMessageCallback("setURLPref",
       base::Bind(&CoreOptionsHandler::HandleSetURLPref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setListPref",
+  web_ui()->RegisterMessageCallback("setListPref",
       base::Bind(&CoreOptionsHandler::HandleSetListPref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("clearPref",
+  web_ui()->RegisterMessageCallback("clearPref",
       base::Bind(&CoreOptionsHandler::HandleClearPref,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("coreOptionsUserMetricsAction",
+  web_ui()->RegisterMessageCallback("coreOptionsUserMetricsAction",
       base::Bind(&CoreOptionsHandler::HandleUserMetricsAction,
                  base::Unretained(this)));
 }
@@ -174,7 +170,7 @@ void CoreOptionsHandler::HandleInitialize(const ListValue* args) {
 }
 
 base::Value* CoreOptionsHandler::FetchPref(const std::string& pref_name) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
 
   const PrefService::Preference* pref =
       pref_service->FindPreference(pref_name.c_str());
@@ -191,7 +187,7 @@ void CoreOptionsHandler::ObservePref(const std::string& pref_name) {
 void CoreOptionsHandler::SetPref(const std::string& pref_name,
                                  const base::Value* value,
                                  const std::string& metric) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
 
   switch (value->GetType()) {
     case base::Value::TYPE_BOOLEAN:
@@ -206,19 +202,16 @@ void CoreOptionsHandler::SetPref(const std::string& pref_name,
       return;
   }
 
-  pref_service->ScheduleSavePersistentPrefs();
-
   ProcessUserMetric(value, metric);
 }
 
 void CoreOptionsHandler::ClearPref(const std::string& pref_name,
                                    const std::string& metric) {
-  PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
   pref_service->ClearPref(pref_name.c_str());
-  pref_service->ScheduleSavePersistentPrefs();
 
   if (!metric.empty())
-    UserMetrics::RecordComputedAction(metric);
+    content::RecordComputedAction(metric);
 }
 
 void CoreOptionsHandler::ProcessUserMetric(const base::Value* value,
@@ -233,13 +226,13 @@ void CoreOptionsHandler::ProcessUserMetric(const base::Value* value,
     metric_string += bool_value ? "_Enable" : "_Disable";
   }
 
-  UserMetrics::RecordComputedAction(metric_string);
+  content::RecordComputedAction(metric_string);
 }
 
 void CoreOptionsHandler::NotifyPrefChanged(
     const std::string& pref_name,
     const std::string& controlling_pref_name) {
-  const PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  const PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
   const PrefService::Preference* pref =
       pref_service->FindPreference(pref_name.c_str());
   if (!pref)
@@ -256,8 +249,8 @@ void CoreOptionsHandler::NotifyPrefChanged(
     ListValue result_value;
     result_value.Append(base::Value::CreateStringValue(pref_name.c_str()));
     result_value.Append(CreateValueForPref(pref, controlling_pref));
-    web_ui_->CallJavascriptFunction(WideToASCII(callback_function),
-                                    result_value);
+    web_ui()->CallJavascriptFunction(WideToASCII(callback_function),
+                                     result_value);
   }
 }
 
@@ -272,8 +265,7 @@ DictionaryValue* CoreOptionsHandler::CreateValueForPref(
     dict->SetString("controlledBy", "policy");
   } else if (controlling_pref->IsExtensionControlled()) {
     dict->SetString("controlledBy", "extension");
-  } else if (controlling_pref->IsUserModifiable() &&
-             !controlling_pref->IsDefaultValue()) {
+  } else if (controlling_pref->IsRecommended()) {
     dict->SetString("controlledBy", "recommended");
   }
   dict->SetBoolean("disabled", !controlling_pref->IsUserModifiable());
@@ -315,8 +307,8 @@ void CoreOptionsHandler::HandleFetchPrefs(const ListValue* args) {
 
     result_value.Set(pref_name.c_str(), FetchPref(pref_name));
   }
-  web_ui_->CallJavascriptFunction(UTF16ToASCII(callback_function),
-                                  result_value);
+  web_ui()->CallJavascriptFunction(UTF16ToASCII(callback_function),
+                                   result_value);
 }
 
 void CoreOptionsHandler::HandleObservePrefs(const ListValue* args) {
@@ -453,13 +445,13 @@ void CoreOptionsHandler::HandleClearPref(const ListValue* args) {
 void CoreOptionsHandler::HandleUserMetricsAction(const ListValue* args) {
   std::string metric = UTF16ToUTF8(ExtractStringValue(args));
   if (!metric.empty())
-    UserMetrics::RecordComputedAction(metric);
+    content::RecordComputedAction(metric);
 }
 
 void CoreOptionsHandler::UpdateClearPluginLSOData() {
   scoped_ptr<base::Value> enabled(
       base::Value::CreateBooleanValue(
           clear_plugin_lso_data_enabled_.GetValue()));
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "OptionsPage.setClearPluginLSODataEnabled", *enabled);
 }

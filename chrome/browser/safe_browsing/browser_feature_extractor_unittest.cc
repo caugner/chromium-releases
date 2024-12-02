@@ -20,7 +20,6 @@
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/referrer.h"
@@ -28,7 +27,6 @@
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 
 using ::testing::Return;
 using ::testing::StrictMock;
@@ -93,14 +91,14 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
   void NavigateAndCommit(const GURL& url,
                          const GURL& referrer,
                          content::PageTransition type) {
-    contents()->controller().LoadURL(
+    contents()->GetController().LoadURL(
         url, content::Referrer(referrer, WebKit::WebReferrerPolicyDefault),
         type, std::string());
 
     static int page_id = 0;
     RenderViewHost* rvh = contents()->pending_rvh();
     if (!rvh) {
-      rvh = contents()->render_view_host();
+      rvh = contents()->GetRenderViewHost();
     }
     contents()->ProceedWithCrossSiteNavigation();
     contents()->TestDidNavigateWithReferrer(

@@ -1,8 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
@@ -17,7 +18,7 @@ class BrowserThreadTest : public testing::Test {
  public:
   void Release() const {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    loop_.PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    loop_.PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
  protected:
@@ -35,26 +36,8 @@ class BrowserThreadTest : public testing::Test {
 
   static void BasicFunction(MessageLoop* message_loop) {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-    message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
-
-  static void DoNothing() {
-  }
-
-  class DummyTask : public Task {
-   public:
-    explicit DummyTask(bool* deleted) : deleted_(deleted) { }
-    ~DummyTask() {
-      *deleted_ = true;
-    }
-
-    void Run() {
-      CHECK(false);
-    }
-
-   private:
-    bool* deleted_;
-  };
 
   class DeletedOnFile
       : public base::RefCountedThreadSafe<
@@ -65,7 +48,7 @@ class BrowserThreadTest : public testing::Test {
 
     ~DeletedOnFile() {
       CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-      message_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+      message_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     }
 
    private:
@@ -101,14 +84,6 @@ TEST_F(BrowserThreadTest, Release) {
   MessageLoop::current()->Run();
 }
 
-TEST_F(BrowserThreadTest, TaskToNonExistentThreadIsDeleted) {
-  bool deleted = false;
-  BrowserThread::PostTask(
-      BrowserThread::WEBKIT, FROM_HERE,
-      new DummyTask(&deleted));
-  EXPECT_TRUE(deleted);
-}
-
 TEST_F(BrowserThreadTest, ReleasedOnCorrectThread) {
   {
     scoped_refptr<DeletedOnFile> test(
@@ -142,47 +117,10 @@ TEST_F(BrowserThreadTest, PostTaskAndReply) {
   ASSERT_TRUE(BrowserThread::PostTaskAndReply(
       BrowserThread::FILE,
       FROM_HERE,
-      base::Bind(&BrowserThreadTest::DoNothing),
+      base::Bind(&base::DoNothing),
       base::Bind(&MessageLoop::Quit,
                  base::Unretained(MessageLoop::current()->current()))));
   MessageLoop::current()->Run();
-}
-
-
-TEST_F(BrowserThreadTest, TaskToNonExistentThreadIsDeletedViaMessageLoopProxy) {
-  bool deleted = false;
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT);
-  message_loop_proxy->PostTask(FROM_HERE, new DummyTask(&deleted));
-  EXPECT_TRUE(deleted);
-}
-
-TEST_F(BrowserThreadTest, PostTaskViaMessageLoopProxyAfterThreadExits) {
-  scoped_ptr<BrowserThreadImpl> io_thread(
-      new BrowserThreadImpl(BrowserThread::IO));
-  io_thread->Start();
-  io_thread->Stop();
-
-  bool deleted = false;
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
-  bool ret = message_loop_proxy->PostTask(FROM_HERE, new DummyTask(&deleted));
-  EXPECT_FALSE(ret);
-  EXPECT_TRUE(deleted);
-}
-
-TEST_F(BrowserThreadTest, PostTaskViaMessageLoopProxyAfterThreadIsDeleted) {
-  {
-    scoped_ptr<BrowserThreadImpl> io_thread(
-        new BrowserThreadImpl(BrowserThread::IO));
-    io_thread->Start();
-  }
-  bool deleted = false;
-  scoped_refptr<base::MessageLoopProxy> message_loop_proxy =
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
-  bool ret = message_loop_proxy->PostTask(FROM_HERE, new DummyTask(&deleted));
-  EXPECT_FALSE(ret);
-  EXPECT_TRUE(deleted);
 }
 
 }

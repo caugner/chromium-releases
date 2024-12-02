@@ -21,8 +21,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/view_event_test_base.h"
-#include "content/browser/tab_contents/page_navigator.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/page_navigator.h"
 #include "content/test/test_browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/accessibility/accessibility_types.h"
@@ -37,6 +37,9 @@
 #include "ui/views/widget/widget.h"
 
 using content::BrowserThread;
+using content::OpenURLParams;
+using content::PageNavigator;
+using content::WebContents;
 
 #if defined(OS_LINUX)
 // See http://crbug.com/40040 for details.
@@ -97,6 +100,10 @@ class ViewsDelegateImpl : public views::ViewsDelegate {
 #if defined(OS_WIN)
   virtual HICON GetDefaultWindowIcon() const OVERRIDE { return 0; }
 #endif
+  virtual views::NonClientFrameView* CreateDefaultNonClientFrameView(
+      views::Widget* widget) OVERRIDE {
+    return NULL;
+  }
 
   virtual void AddRef() OVERRIDE {
   }
@@ -116,18 +123,7 @@ class ViewsDelegateImpl : public views::ViewsDelegate {
 // PageNavigator implementation that records the URL.
 class TestingPageNavigator : public PageNavigator {
  public:
-  // Deprecated. Please use the one-argument variant.
-  // TODO(adriansc): Remove this function once refactoring has changed
-  // all call sites.
-  virtual TabContents* OpenURL(const GURL& url,
-                               const GURL& referrer,
-                               WindowOpenDisposition disposition,
-                               content::PageTransition transition) OVERRIDE {
-    return OpenURL(OpenURLParams(url, content::Referrer(), disposition,
-                                 transition, false));
-  }
-
-  virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
+  virtual WebContents* OpenURL(const OpenURLParams& params) OVERRIDE {
     url_ = params.url;
     return NULL;
   }
@@ -172,7 +168,6 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
       : ViewEventTestBase(),
         model_(NULL),
         bb_view_(NULL),
-        ui_thread_(BrowserThread::UI, MessageLoop::current()),
         file_thread_(BrowserThread::FILE, MessageLoop::current()) {
   }
 
@@ -211,7 +206,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     bb_view_pref_ = bb_view_->GetPreferredSize();
     bb_view_pref_.set_width(1000);
     views::TextButton* button = GetBookmarkButton(4);
-    while (button->IsVisible()) {
+    while (button->visible()) {
       bb_view_pref_.set_width(bb_view_pref_.width() - 25);
       bb_view_->SetBounds(0, 0, bb_view_pref_.width(), bb_view_pref_.height());
       bb_view_->Layout();
@@ -229,7 +224,7 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
     bb_view_.reset();
     browser_.reset();
     profile_.reset();
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
 
     ViewEventTestBase::TearDown();
@@ -292,7 +287,6 @@ class BookmarkBarViewEventTestBase : public ViewEventTestBase {
   gfx::Size bb_view_pref_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<Browser> browser_;
-  content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
   ViewsDelegateImpl views_delegate_;
 };

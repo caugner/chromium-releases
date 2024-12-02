@@ -15,6 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
+#include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/timer.h"
@@ -40,8 +41,10 @@ using content::BrowserThread;
 namespace {
 // Extends an omaha compatible update check url |query| string. Does
 // not mutate the string if it would be longer than |limit| chars.
-bool AddQueryString(std::string id, std::string version,
-                    size_t limit, std::string* query) {
+bool AddQueryString(const std::string& id,
+                    const std::string& version,
+                    size_t limit,
+                    std::string* query) {
   std::string additional =
       base::StringPrintf("id=%s&v=%s&uc", id.c_str(), version.c_str());
   additional = "x=" + net::EscapeQueryParamValue(additional, true);
@@ -74,10 +77,13 @@ static std::string HexStringToID(const std::string& hexstr) {
   std::string id;
   for (size_t i = 0; i < hexstr.size(); ++i) {
     int val;
-    if (base::HexStringToInt(hexstr.begin() + i, hexstr.begin() + i + 1, &val))
+    if (base::HexStringToInt(base::StringPiece(hexstr.begin() + i,
+                                               hexstr.begin() + i + 1),
+                             &val)) {
       id.append(1, val + 'a');
-    else
+    } else {
       id.append(1, 'a');
+    }
   }
   DCHECK(Extension::IdIsValid(id));
   return id;
@@ -203,7 +209,7 @@ struct CrxUpdateItem {
 
 typedef ComponentUpdateService::Configurator Config;
 
-CrxComponent::CrxComponent() {}
+CrxComponent::CrxComponent() : installer(NULL) {}
 CrxComponent::~CrxComponent() {}
 
 //////////////////////////////////////////////////////////////////////////////
@@ -594,6 +600,7 @@ void CrxUpdateService::ParseManifest(const std::string& xml) {
     UtilityProcessHost* host =
         new UtilityProcessHost(new ManifestParserBridge(this),
                                BrowserThread::UI);
+    host->set_use_linux_zygote(true);
     host->Send(new ChromeUtilityMsg_ParseUpdateManifest(xml));
   }
 }

@@ -6,11 +6,11 @@
 #define CHROME_BROWSER_UI_WEBUI_TASK_MANAGER_UI_H_
 #pragma once
 
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 
-class TaskManagerUI : public ChromeWebUI {
+class TaskManagerUI : public content::WebUIController {
  public:
-  explicit TaskManagerUI(TabContents* contents);
+  explicit TaskManagerUI(content::WebUI* web_ui);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskManagerUI);

@@ -26,7 +26,8 @@ pp::Point GetCenter(const pp::Rect& rect) {
       rect.x() + rect.width() / 2,
       rect.y() + rect.height() / 2);
 }
-}
+
+}  // namespace
 
 void TestInputEvent::RunTests(const std::string& filter) {
   RUN_TEST(Events, filter);
@@ -52,20 +53,19 @@ TestInputEvent::~TestInputEvent() {
              "plugin.removeEventListener('message',"
              "                           plugin.wait_for_messages_handler);"
              "delete plugin.wait_for_messages_handler;";
-  pp::Var exception;
-  instance_->ExecuteScript(js_code, &exception);
+  instance_->EvalScript(js_code);
 }
 
 bool TestInputEvent::Init() {
-  input_event_interface_ = static_cast<PPB_InputEvent const*>(
+  input_event_interface_ = static_cast<const PPB_InputEvent*>(
       pp::Module::Get()->GetBrowserInterface(PPB_INPUT_EVENT_INTERFACE));
-  mouse_input_event_interface_ = static_cast<PPB_MouseInputEvent const*>(
+  mouse_input_event_interface_ = static_cast<const PPB_MouseInputEvent*>(
       pp::Module::Get()->GetBrowserInterface(
           PPB_MOUSE_INPUT_EVENT_INTERFACE));
-  wheel_input_event_interface_ = static_cast<PPB_WheelInputEvent const*>(
+  wheel_input_event_interface_ = static_cast<const PPB_WheelInputEvent*>(
       pp::Module::Get()->GetBrowserInterface(
           PPB_WHEEL_INPUT_EVENT_INTERFACE));
-  keyboard_input_event_interface_ = static_cast<PPB_KeyboardInputEvent const*>(
+  keyboard_input_event_interface_ = static_cast<const PPB_KeyboardInputEvent*>(
       pp::Module::Get()->GetBrowserInterface(
           PPB_KEYBOARD_INPUT_EVENT_INTERFACE));
 
@@ -74,7 +74,7 @@ bool TestInputEvent::Init() {
       mouse_input_event_interface_ &&
       wheel_input_event_interface_ &&
       keyboard_input_event_interface_ &&
-      InitTestingInterface();
+      CheckTestingInterface();
 
   // Set up a listener for our message that signals that all input events have
   // been received.
@@ -94,9 +94,7 @@ bool TestInputEvent::Init() {
              "plugin.addEventListener('message', wait_for_messages_handler);"
              // Stash it on the plugin so we can remove it in the destructor.
              "plugin.wait_for_messages_handler = wait_for_messages_handler;";
-  pp::Var exception;
-  instance_->ExecuteScript(js_code, &exception);
-  success = success && exception.is_undefined();
+  instance_->EvalScript(js_code);
 
   return success;
 }
@@ -246,9 +244,8 @@ void TestInputEvent::HandleMessage(const pp::Var& message_data) {
   }
 }
 
-void TestInputEvent::DidChangeView(const pp::Rect& position,
-                                   const pp::Rect& clip) {
-  view_rect_ = position;
+void TestInputEvent::DidChangeView(const pp::View& view) {
+  view_rect_ = view.GetRect();
 }
 
 std::string TestInputEvent::TestEvents() {

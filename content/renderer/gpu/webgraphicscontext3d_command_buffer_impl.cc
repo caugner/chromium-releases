@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,10 @@
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/synchronization/lock.h"
+#include "content/common/child_process.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/gpu/command_buffer_proxy.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
@@ -35,11 +37,20 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
 
-static base::LazyInstance<base::Lock,
-                          base::LeakyLazyInstanceTraits<base::Lock> >
+static base::LazyInstance<base::Lock>::Leaky
     g_all_shared_contexts_lock = LAZY_INSTANCE_INITIALIZER;
 static base::LazyInstance<std::set<WebGraphicsContext3DCommandBufferImpl*> >
     g_all_shared_contexts = LAZY_INSTANCE_INITIALIZER;
+
+namespace {
+
+void ClearSharedContexts() {
+  base::AutoLock lock(g_all_shared_contexts_lock.Get());
+  g_all_shared_contexts.Pointer()->clear();
+}
+
+} // namespace anonymous
+
 
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
     : initialize_failed_(false),
@@ -64,6 +75,7 @@ WebGraphicsContext3DCommandBufferImpl::
   if (host_) {
     if (host_->WillGpuSwitchOccur(false, gpu_preference_)) {
       host_->ForciblyCloseChannel();
+      ClearSharedContexts();
     }
   }
 
@@ -107,6 +119,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
       // channel and recreate it.
       if (host_->WillGpuSwitchOccur(true, gpu_preference_)) {
         host_->ForciblyCloseChannel();
+        ClearSharedContexts();
         retry = true;
       }
     } else {
@@ -133,7 +146,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     RenderViewImpl* render_view = RenderViewImpl::FromWebView(web_view);
     if (!render_view)
       return false;
-    render_view_routing_id_ = render_view->routing_id();
+    surface_id_ = render_view->surface_id();
     web_view_ = web_view;
   }
   return true;
@@ -146,6 +159,14 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL() {
     return false;
 
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::MaybeInitializeGL");
+
+  // If the context is being initialized on something other than the main
+  // thread, then drop the web_view_ pointer so we don't accidentally
+  // dereference it.
+  MessageLoop* main_message_loop =
+      ChildProcess::current()->main_thread()->message_loop();
+  if (MessageLoop::current() != main_message_loop)
+    web_view_ = NULL;
 
   // Convert WebGL context creation attributes into RendererGLContext / EGL size
   // requests.
@@ -181,7 +202,7 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL() {
     if (render_directly_to_web_view_) {
       context_ = RendererGLContext::CreateViewContext(
           host_,
-          render_view_routing_id_,
+          surface_id_,
           share_group,
           preferred_extensions,
           attribs,
@@ -311,10 +332,6 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
   cached_height_ = height;
 
   gl_->ResizeCHROMIUM(width, height);
-
-#ifdef FLIP_FRAMEBUFFER_VERTICALLY
-  scanline_.reset(new uint8[width * 4]);
-#endif  // FLIP_FRAMEBUFFER_VERTICALLY
 }
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
@@ -322,9 +339,10 @@ void WebGraphicsContext3DCommandBufferImpl::FlipVertically(
     uint8* framebuffer,
     unsigned int width,
     unsigned int height) {
-  uint8* scanline = scanline_.get();
-  if (!scanline)
+  if (width == 0)
     return;
+  scanline_.resize(width * 4);
+  uint8* scanline = &scanline_[0];
   unsigned int row_bytes = width * 4;
   unsigned int count = height / 2;
   for (unsigned int i = 0; i < count; i++) {
@@ -391,7 +409,7 @@ bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
 
 void WebGraphicsContext3DCommandBufferImpl::synthesizeGLError(
     WGC3Denum error) {
-  if (find(synthetic_errors_.begin(), synthetic_errors_.end(), error) ==
+  if (std::find(synthetic_errors_.begin(), synthetic_errors_.end(), error) ==
       synthetic_errors_.end()) {
     synthetic_errors_.push_back(error);
   }
@@ -1113,8 +1131,12 @@ void WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete() {
   // This may be called after tear-down of the RenderView.
   RenderViewImpl* renderview =
       web_view_ ? RenderViewImpl::FromWebView(web_view_) : NULL;
-  if (renderview)
-    renderview->OnViewContextSwapBuffersComplete();
+  if (renderview) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&RenderViewImpl::OnViewContextSwapBuffersComplete,
+                   renderview));
+  }
 
   if (swapbuffers_complete_callback_)
     swapbuffers_complete_callback_->onSwapBuffersComplete();
@@ -1142,6 +1164,9 @@ void WebGraphicsContext3DCommandBufferImpl::
 
 DELEGATE_TO_GL_5(texImageIOSurface2DCHROMIUM, TexImageIOSurface2DCHROMIUM,
                  WGC3Denum, WGC3Dint, WGC3Dint, WGC3Duint, WGC3Duint)
+
+DELEGATE_TO_GL_5(texStorage2DEXT, TexStorage2DEXT,
+                 WGC3Denum, WGC3Dint, WGC3Duint, WGC3Dint, WGC3Dint)
 
 #if WEBKIT_USING_SKIA
 GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {
@@ -1173,6 +1198,8 @@ void WebGraphicsContext3DCommandBufferImpl::OnContextLost(
   if (context_lost_callback_) {
     context_lost_callback_->onContextLost();
   }
+  if (attributes_.shareResources)
+    ClearSharedContexts();
   RenderViewImpl* renderview =
       web_view_ ? RenderViewImpl::FromWebView(web_view_) : NULL;
   if (renderview)

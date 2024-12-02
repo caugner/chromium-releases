@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,8 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::WebContents;
+
 namespace {
 
 class TestFunctionDispatcherDelegate
@@ -30,11 +32,7 @@ class TestFunctionDispatcherDelegate
     return browser_;
   }
 
-  virtual gfx::NativeView GetNativeViewOfHost() OVERRIDE {
-    return NULL;
-  }
-
-  virtual TabContents* GetAssociatedTabContents() const OVERRIDE {
+  virtual WebContents* GetAssociatedWebContents() const OVERRIDE {
     return NULL;
   }
 
@@ -94,6 +92,12 @@ base::DictionaryValue* ToDictionary(base::Value* val) {
   return static_cast<base::DictionaryValue*>(val);
 }
 
+base::ListValue* ToList(base::Value* val) {
+  EXPECT_TRUE(val);
+  EXPECT_EQ(base::Value::TYPE_LIST, val->GetType());
+  return static_cast<base::ListValue*>(val);
+}
+
 scoped_refptr<Extension> CreateEmptyExtension() {
   std::string error;
   const FilePath test_extension_path;
@@ -138,8 +142,8 @@ base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
   RunFunction(function, args, browser, flags);
   EXPECT_TRUE(function->GetError().empty()) << "Unexpected error: "
       << function->GetError();
-  EXPECT_TRUE(function->GetResultValue()) << "No result value found";
-  return function->GetResultValue()->DeepCopy();
+  return (function->GetResultValue() == NULL) ? NULL :
+      function->GetResultValue()->DeepCopy();
 }
 
 // This helps us be able to wait until an AsyncExtensionFunction calls

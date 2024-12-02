@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,15 @@
 #include "content/browser/download/download_buffer.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_manager.h"
-#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_stats.h"
 #include "content/browser/download/interrupt_reasons.h"
-#include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager_delegate.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -29,6 +30,9 @@
 #include "net/url_request/url_request_context.h"
 
 using content::BrowserThread;
+using content::DownloadId;
+using content::DownloadItem;
+using content::DownloadManager;
 
 DownloadResourceHandler::DownloadResourceHandler(
     ResourceDispatcherHost* rdh,
@@ -36,19 +40,16 @@ DownloadResourceHandler::DownloadResourceHandler(
     int render_view_id,
     int request_id,
     const GURL& url,
-    DownloadId dl_id,
     DownloadFileManager* download_file_manager,
     net::URLRequest* request,
-    bool save_as,
     const DownloadResourceHandler::OnStartedCallback& started_cb,
     const DownloadSaveInfo& save_info)
-    : download_id_(dl_id),
+    : download_id_(DownloadId::Invalid()),
       global_id_(render_process_host_id, request_id),
       render_view_id_(render_view_id),
       content_length_(0),
       download_file_manager_(download_file_manager),
       request_(request),
-      save_as_(save_as),
       started_cb_(started_cb),
       save_info_(save_info),
       buffer_(new content::DownloadBuffer),
@@ -56,7 +57,6 @@ DownloadResourceHandler::DownloadResourceHandler(
       is_paused_(false),
       last_buffer_size_(0),
       bytes_read_(0) {
-  DCHECK(dl_id.IsValid());
   download_stats::RecordDownloadCount(download_stats::UNTHROTTLED_COUNT);
 }
 
@@ -79,7 +79,6 @@ bool DownloadResourceHandler::OnRequestRedirected(
 bool DownloadResourceHandler::OnResponseStarted(
     int request_id,
     content::ResourceResponse* response) {
-  DCHECK(download_id_.IsValid());
   VLOG(20) << __FUNCTION__ << "()" << DebugString()
            << " request_id = " << request_id;
   download_start_time_ = base::TimeTicks::Now();
@@ -97,17 +96,15 @@ bool DownloadResourceHandler::OnResponseStarted(
     ResourceDispatcherHost::InfoForRequest(request_);
 
   // Deleted in DownloadManager.
-  DownloadCreateInfo* info = new DownloadCreateInfo(FilePath(), GURL(),
+  scoped_ptr<DownloadCreateInfo> info(new DownloadCreateInfo(FilePath(), GURL(),
       base::Time::Now(), 0, content_length_, DownloadItem::IN_PROGRESS,
-      download_id_, request_info->has_user_gesture(),
-      request_info->transition_type());
+      request_info->has_user_gesture(), request_info->transition_type()));
   info->url_chain = request_->url_chain();
   info->referrer_url = GURL(request_->referrer());
   info->start_time = base::Time::Now();
-  info->received_bytes = 0;
+  info->received_bytes = save_info_.offset;
   info->total_bytes = content_length_;
   info->state = DownloadItem::IN_PROGRESS;
-  info->download_id = download_id_;
   info->has_user_gesture = request_info->has_user_gesture();
   info->content_disposition = content_disposition_;
   info->mime_type = response->mime_type;
@@ -117,10 +114,16 @@ bool DownloadResourceHandler::OnResponseStarted(
   DownloadRequestHandle request_handle(rdh_, global_id_.child_id,
                                        render_view_id_, global_id_.request_id);
 
-  // TODO(ahendrickson) -- Get the last modified time and etag, so we can
-  // resume downloading.
-
-  CallStartedCB(net::OK);
+  // Get the last modified time and etag.
+  const net::HttpResponseHeaders* headers = request_->response_headers();
+  if (headers) {
+    std::string last_modified_hdr;
+    std::string etag;
+    if (headers->EnumerateHeader(NULL, "Last-Modified", &last_modified_hdr))
+      info->last_modified = last_modified_hdr;
+    if (headers->EnumerateHeader(NULL, "ETag", &etag))
+      info->etag = etag;
+  }
 
   std::string content_type_header;
   if (!response->headers ||
@@ -136,26 +139,29 @@ bool DownloadResourceHandler::OnResponseStarted(
   }
 
   info->prompt_user_for_save_location =
-      save_as_ && save_info_.file_path.empty();
+      save_info_.prompt_for_save_location && save_info_.file_path.empty();
   info->referrer_charset = request_->context()->referrer_charset();
   info->save_info = save_info_;
+
+
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&DownloadFileManager::StartDownload,
-                 download_file_manager_, info, request_handle));
+      base::Bind(&DownloadResourceHandler::StartOnUIThread, this,
+                 base::Passed(&info), request_handle));
 
-  // We can't start saving the data before we create the file on disk.
-  // The request will be un-paused in DownloadFileManager::CreateDownloadFile.
+  // We can't start saving the data before we create the file on disk and have a
+  // download id. The request will be un-paused in
+  // DownloadFileManager::CreateDownloadFile.
   rdh_->PauseRequest(global_id_.child_id, global_id_.request_id, true);
 
   return true;
 }
 
-void DownloadResourceHandler::CallStartedCB(net::Error error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+void DownloadResourceHandler::CallStartedCB(DownloadId id, net::Error error) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (started_cb_.is_null())
     return;
-  started_cb_.Run(download_id_, error);
+  started_cb_.Run(id, error);
   started_cb_.Reset();
 }
 
@@ -225,6 +231,20 @@ bool DownloadResourceHandler::OnResponseCompleted(
     int request_id,
     const net::URLRequestStatus& status,
     const std::string& security_info) {
+  if (!download_id_.IsValid()) {
+    // We got cancelled before the task which sets the id ran on the IO thread.
+    // Wait for it.
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(base::IgnoreResult(&BrowserThread::PostTask),
+            BrowserThread::IO, FROM_HERE,
+            base::Bind(base::IgnoreResult(
+                &DownloadResourceHandler::OnResponseCompleted), this,
+                request_id, status, security_info)));
+                                  
+    return true;
+  }
+
   VLOG(20) << __FUNCTION__ << "()" << DebugString()
            << " request_id = " << request_id
            << " status.status() = " << status.status()
@@ -251,8 +271,12 @@ bool DownloadResourceHandler::OnResponseCompleted(
 
   download_stats::RecordAcceptsRanges(accept_ranges_, bytes_read_);
 
-  if (!download_id_.IsValid())
-    CallStartedCB(error_code);
+  // If the callback was already run on the UI thread, this will be a noop.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&DownloadResourceHandler::CallStartedCB, this,
+                 download_id_, error_code));
+
   // We transfer ownership to |DownloadFileManager| to delete |buffer_|,
   // so that any functions queued up on the FILE thread are executed
   // before deletion.
@@ -268,6 +292,33 @@ bool DownloadResourceHandler::OnResponseCompleted(
 void DownloadResourceHandler::OnRequestClosed() {
   UMA_HISTOGRAM_TIMES("SB2.DownloadDuration",
                       base::TimeTicks::Now() - download_start_time_);
+}
+
+void DownloadResourceHandler::StartOnUIThread(
+    scoped_ptr<DownloadCreateInfo> info,
+    DownloadRequestHandle handle) {
+  DownloadManager* download_manager = handle.GetDownloadManager();
+  if (!download_manager) {
+    // NULL in unittests or if the page closed right after starting the
+    // download.
+    return;
+  }
+  info->download_id = download_manager->delegate()->GetNextId();
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&DownloadResourceHandler::set_download_id, this,
+                 info->download_id));
+  CallStartedCB(info->download_id, net::OK);
+  // It's safe to continue on with download initiation before we have
+  // confirmation that that download_id_ has been set on the IO thread, as any
+  // messages generated by the UI thread that affect the IO thread will be
+  // behind the message posted above.
+  download_file_manager_->StartDownload(info.release(), handle);
+}
+
+void DownloadResourceHandler::set_download_id(content::DownloadId id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  download_id_ = id;
 }
 
 // If the content-length header is not present (or contains something other

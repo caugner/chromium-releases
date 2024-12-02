@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,9 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/string_piece.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_export.h"
 #include "net/base/net_log.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_chunked_decoder.h"
@@ -26,7 +28,7 @@ class IOBuffer;
 class SSLCertRequestInfo;
 class SSLInfo;
 
-class HttpStreamParser  : public ChunkCallback {
+class NET_EXPORT_PRIVATE HttpStreamParser  : public ChunkCallback {
  public:
   // Any data in |read_buffer| will be used before reading from the socket
   // and any data left over after parsing the stream will be put into
@@ -44,12 +46,13 @@ class HttpStreamParser  : public ChunkCallback {
   int SendRequest(const std::string& request_line,
                   const HttpRequestHeaders& headers,
                   UploadDataStream* request_body,
-                  HttpResponseInfo* response, OldCompletionCallback* callback);
+                  HttpResponseInfo* response,
+                  const CompletionCallback& callback);
 
-  int ReadResponseHeaders(OldCompletionCallback* callback);
+  int ReadResponseHeaders(const CompletionCallback& callback);
 
   int ReadResponseBody(IOBuffer* buf, int buf_len,
-                       OldCompletionCallback* callback);
+                       const CompletionCallback& callback);
 
   void Close(bool not_reusable);
 
@@ -76,13 +79,38 @@ class HttpStreamParser  : public ChunkCallback {
   // ChunkCallback methods.
   virtual void OnChunkAvailable() OVERRIDE;
 
+  // Encodes the given |payload| in the chunked format to |output|.
+  // Returns the number of bytes written to |output|. |output_size| should
+  // be large enough to store the encoded chunk, which is payload.size() +
+  // kChunkHeaderFooterSize. Returns ERR_INVALID_ARGUMENT if |output_size|
+  // is not large enough.
+  //
+  // The output will look like: "HEX\r\n[payload]\r\n"
+  // where HEX is a length in hexdecimal (without the "0x" prefix).
+  static int EncodeChunk(const base::StringPiece& payload,
+                         char* output,
+                         size_t output_size);
+
+  // Returns true if request headers and body should be merged (i.e. the
+  // sum is small enough and the body is in memory, and not chunked).
+  static bool ShouldMergeRequestHeadersAndBody(
+      const std::string& request_headers,
+      const UploadDataStream* request_body);
+
+  // The number of extra bytes required to encode a chunk.
+  static const size_t kChunkHeaderFooterSize;
+
  private:
   // FOO_COMPLETE states implement the second half of potentially asynchronous
   // operations and don't necessarily mean that FOO is complete.
   enum State {
     STATE_NONE,
     STATE_SENDING_HEADERS,
-    STATE_SENDING_BODY,
+    // If the request comes with a body, either of the following two
+    // states will be executed, depending on whether the body is chunked
+    // or not.
+    STATE_SENDING_CHUNKED_BODY,
+    STATE_SENDING_NON_CHUNKED_BODY,
     STATE_REQUEST_SENT,
     STATE_READ_HEADERS,
     STATE_READ_HEADERS_COMPLETE,
@@ -113,7 +141,8 @@ class HttpStreamParser  : public ChunkCallback {
 
   // The implementations of each state of the state machine.
   int DoSendHeaders(int result);
-  int DoSendBody(int result);
+  int DoSendChunkedBody(int result);
+  int DoSendNonChunkedBody(int result);
   int DoReadHeaders();
   int DoReadHeadersComplete(int result);
   int DoReadBody();
@@ -175,13 +204,13 @@ class HttpStreamParser  : public ChunkCallback {
 
   // The callback to notify a user that their request or response is
   // complete or there was an error
-  OldCompletionCallback* user_callback_;
+  CompletionCallback callback_;
 
   // In the client callback, the client can do anything, including
   // destroying this class, so any pending callback must be issued
   // after everything else is done.  When it is time to issue the client
-  // callback, move it from |user_callback_| to |scheduled_callback_|.
-  OldCompletionCallback* scheduled_callback_;
+  // callback, move it from |callback_| to |scheduled_callback_|.
+  CompletionCallback scheduled_callback_;
 
   // The underlying socket.
   ClientSocketHandle* const connection_;
@@ -189,11 +218,14 @@ class HttpStreamParser  : public ChunkCallback {
   BoundNetLog net_log_;
 
   // Callback to be used when doing IO.
-  OldCompletionCallbackImpl<HttpStreamParser> io_callback_;
+  CompletionCallback io_callback_;
 
   // Stores an encoded chunk for chunked uploads.
   // Note: This should perhaps be improved to not create copies of the data.
   scoped_refptr<IOBuffer> chunk_buf_;
+  // The size of the chunk buffer (chunk_buf_). The chunk buffer is
+  // guaranteed to be large enough to hold the encoded chunk.
+  const size_t chunk_buffer_size_;
   size_t chunk_length_;
   size_t chunk_length_without_encoding_;
   bool sent_last_chunk_;

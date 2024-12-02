@@ -55,6 +55,12 @@ BookmarkNode::BookmarkNode(int64 id, const GURL& url)
 BookmarkNode::~BookmarkNode() {
 }
 
+void BookmarkNode::SetTitle(const string16& title) {
+  // Remove extra whitespace from folder/bookmark names.
+  ui::TreeNode<BookmarkNode>::SetTitle(CollapseWhitespace(title, false));
+}
+
+
 bool BookmarkNode::IsVisible() const {
   return true;
 }
@@ -99,39 +105,21 @@ class SortComparator : public std::binary_function<const BookmarkNode*,
   icu::Collator* collator_;
 };
 
-// MobileNode ------------------------------------------------------------------
+}  // namespace
 
-// The visibility of the mobile node changes based on sync state, requiring a
-// special subclass.
-class MobileNode : public BookmarkNode {
- public:
-  explicit MobileNode(int64 id);
-  virtual ~MobileNode();
+// BookmarkPermanentNode -------------------------------------------------------
 
-  void set_visible(bool value) { visible_ = value; }
-
-  // BookmarkNode overrides:
-  virtual bool IsVisible() const OVERRIDE;
-
- private:
-  bool visible_;
-
-  DISALLOW_COPY_AND_ASSIGN(MobileNode);
-};
-
-MobileNode::MobileNode(int64 id)
+BookmarkPermanentNode::BookmarkPermanentNode(int64 id)
     : BookmarkNode(id, GURL()),
-      visible_(false) {
+      visible_(true) {
 }
 
-MobileNode::~MobileNode() {
+BookmarkPermanentNode::~BookmarkPermanentNode() {
 }
 
-bool MobileNode::IsVisible() const {
+bool BookmarkPermanentNode::IsVisible() const {
   return visible_ || !empty();
 }
-
-}  // namespace
 
 // BookmarkModel --------------------------------------------------------------
 
@@ -315,14 +303,11 @@ const SkBitmap& BookmarkModel::GetFavicon(const BookmarkNode* node) {
 }
 
 void BookmarkModel::SetTitle(const BookmarkNode* node, const string16& title) {
-  // Remove extra whitespace from folder/bookmark names.
-  string16 mutable_title = CollapseWhitespace(title, false);
-
   if (!node) {
     NOTREACHED();
     return;
   }
-  if (node->GetTitle() == mutable_title)
+  if (node->GetTitle() == title)
     return;
 
   if (is_permanent_node(node)) {
@@ -333,7 +318,7 @@ void BookmarkModel::SetTitle(const BookmarkNode* node, const string16& title) {
   // The title index doesn't support changing the title, instead we remove then
   // add it back.
   index_->Remove(node);
-  AsMutable(node)->set_title(mutable_title);
+  AsMutable(node)->SetTitle(title);
   index_->Add(node);
 
   if (store_.get())
@@ -450,7 +435,7 @@ const BookmarkNode* BookmarkModel::AddFolder(const BookmarkNode* parent,
   BookmarkNode* new_node = new BookmarkNode(generate_next_node_id(), GURL());
   new_node->set_date_folder_modified(Time::Now());
   // Folders shouldn't have line breaks in their titles.
-  new_node->set_title(CollapseWhitespace(title, false));
+  new_node->SetTitle(title);
   new_node->set_type(BookmarkNode::FOLDER);
 
   return AddNode(AsMutable(parent), index, new_node, false);
@@ -482,7 +467,7 @@ const BookmarkNode* BookmarkModel::AddURLWithCreationTime(
   SetDateFolderModified(parent, creation_time);
 
   BookmarkNode* new_node = new BookmarkNode(generate_next_node_id(), url);
-  new_node->set_title(title);
+  new_node->SetTitle(title);
   new_node->set_date_added(creation_time);
   new_node->set_type(BookmarkNode::URL);
 
@@ -548,9 +533,22 @@ void BookmarkModel::ClearStore() {
   store_ = NULL;
 }
 
-void BookmarkModel::SetMobileFolderVisible(bool value) {
+void BookmarkModel::SetPermanentNodeVisible(BookmarkNode::Type type,
+                                            bool value) {
   DCHECK(loaded_);
-  static_cast<MobileNode*>(mobile_node_)->set_visible(value);
+  switch (type) {
+    case BookmarkNode::BOOKMARK_BAR:
+      bookmark_bar_node_->set_visible(value);
+      break;
+    case BookmarkNode::OTHER_NODE:
+      other_node_->set_visible(value);
+      break;
+    case BookmarkNode::MOBILE:
+      mobile_node_->set_visible(value);
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 bool BookmarkModel::IsBookmarkedNoLock(const GURL& url) {
@@ -740,26 +738,33 @@ bool BookmarkModel::IsValidIndex(const BookmarkNode* parent,
                           (allow_end && index == parent->child_count()))));
 }
 
-BookmarkNode* BookmarkModel::CreatePermanentNode(BookmarkNode::Type type) {
+BookmarkPermanentNode* BookmarkModel::CreatePermanentNode(
+    BookmarkNode::Type type) {
   DCHECK(type == BookmarkNode::BOOKMARK_BAR ||
          type == BookmarkNode::OTHER_NODE ||
          type == BookmarkNode::MOBILE);
-  BookmarkNode* node;
-  if (type == BookmarkNode::MOBILE) {
-    node = new MobileNode(generate_next_node_id());
-    node->set_title(
-        l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_MOBILE_FOLDER_NAME));
-  } else {
-    node = new BookmarkNode(generate_next_node_id(), GURL());
-    if (type == BookmarkNode::BOOKMARK_BAR) {
-      node->set_title(l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_FOLDER_NAME));
-    } else if (type == BookmarkNode::OTHER_NODE) {
-      node->set_title(
-          l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_OTHER_FOLDER_NAME));
-    } else {
+  BookmarkPermanentNode* node =
+      new BookmarkPermanentNode(generate_next_node_id());
+  if (type == BookmarkNode::MOBILE)
+    node->set_visible(false);  // Mobile node is initially hidden.
+
+  int title_id;
+  switch (type) {
+    case BookmarkNode::BOOKMARK_BAR:
+      title_id = IDS_BOOKMARK_BAR_FOLDER_NAME;
+      break;
+    case BookmarkNode::OTHER_NODE:
+      title_id = IDS_BOOKMARK_BAR_OTHER_FOLDER_NAME;
+      break;
+    case BookmarkNode::MOBILE:
+      title_id = IDS_BOOKMARK_BAR_MOBILE_FOLDER_NAME;
+      break;
+    default:
       NOTREACHED();
-    }
+      title_id = IDS_BOOKMARK_BAR_FOLDER_NAME;
+      break;
   }
+  node->SetTitle(l10n_util::GetStringUTF16(title_id));
   node->set_type(type);
   return node;
 }
@@ -856,9 +861,12 @@ int64 BookmarkModel::generate_next_node_id() {
 }
 
 BookmarkLoadDetails* BookmarkModel::CreateLoadDetails() {
-  BookmarkNode* bb_node = CreatePermanentNode(BookmarkNode::BOOKMARK_BAR);
-  BookmarkNode* other_node = CreatePermanentNode(BookmarkNode::OTHER_NODE);
-  BookmarkNode* mobile_node = CreatePermanentNode(BookmarkNode::MOBILE);
+  BookmarkPermanentNode* bb_node =
+      CreatePermanentNode(BookmarkNode::BOOKMARK_BAR);
+  BookmarkPermanentNode* other_node =
+      CreatePermanentNode(BookmarkNode::OTHER_NODE);
+  BookmarkPermanentNode* mobile_node =
+      CreatePermanentNode(BookmarkNode::MOBILE);
   return new BookmarkLoadDetails(bb_node, other_node, mobile_node,
                                  new BookmarkIndex(profile_), next_node_id_);
 }

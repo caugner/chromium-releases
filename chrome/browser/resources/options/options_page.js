@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -147,12 +147,51 @@ cr.define('options', function() {
   };
 
   /**
+   * Updates the parts of the UI necessary for correctly hiding or displaying
+   * subpages.
+   * @private
+   */
+  OptionsPage.updateDisplayForShowOrHideSubpage_ = function() {
+    OptionsPage.updateSubpageBackdrop_();
+    OptionsPage.updateAriaHiddenForPages_();
+    OptionsPage.updateScrollPosition_();
+  };
+
+  /**
+   * Sets the aria-hidden attribute for pages which have been 'overlapped' by a
+   * sub-page, and removes aria-hidden from the topmost page or subpage.
+   * @private
+   */
+  OptionsPage.updateAriaHiddenForPages_ = function() {
+    var visiblePages = OptionsPage.getVisiblePages_();
+
+    // |visiblePages| is empty when switching top-level pages.
+    if (!visiblePages.length)
+      return;
+
+    var topmostPage = visiblePages.pop();
+
+    for (var i = 0; i < visiblePages.length; ++i) {
+      var page = visiblePages[i];
+      var nestingLevel = page.nestingLevel;
+      var container = nestingLevel > 0 ?
+        $('subpage-sheet-container-' + nestingLevel) : $('page-container');
+      container.setAttribute('aria-hidden', true);
+    }
+
+    var topmostPageContainer = topmostPage.nestingLevel > 0 ?
+        $('subpage-sheet-container-' + topmostPage.nestingLevel) :
+        $('page-container');
+    topmostPageContainer.removeAttribute('aria-hidden');
+  };
+
+  /**
    * Updates the visibility and stacking order of the subpage backdrop
    * according to which subpage is topmost and visible.
    * @private
    */
   OptionsPage.updateSubpageBackdrop_ = function () {
-    var topmostPage = this.getTopmostVisibleNonOverlayPage_();
+    var topmostPage = OptionsPage.getTopmostVisibleNonOverlayPage_();
     var nestingLevel = topmostPage ? topmostPage.nestingLevel : 0;
 
     var subpageBackdrop = $('subpage-backdrop');
@@ -172,7 +211,7 @@ cr.define('options', function() {
    * @private
    */
   OptionsPage.updateScrollPosition_ = function () {
-    var topmostPage = this.getTopmostVisibleNonOverlayPage_();
+    var topmostPage = OptionsPage.getTopmostVisibleNonOverlayPage_();
     var nestingLevel = topmostPage ? topmostPage.nestingLevel : 0;
 
     var container = (nestingLevel > 0) ?
@@ -276,6 +315,22 @@ cr.define('options', function() {
     var overlay = this.getVisibleOverlay_();
     if (overlay)
       overlay.visible = false;
+  };
+
+  /**
+   * Returns the pages which are currently visible, ordered by nesting level
+   * (ascending).
+   * @return {Array.OptionPage} The pages which are currently visible, ordered
+   * by nesting level (ascending).
+   */
+  OptionsPage.getVisiblePages_ = function() {
+    var visiblePages = [];
+    for (var name in this.registeredPages) {
+      var page = this.registeredPages[name];
+      if (page.visible)
+        visiblePages[page.nestingLevel] = page;
+    }
+    return visiblePages;
   };
 
   /**
@@ -938,10 +993,10 @@ cr.define('options', function() {
       OptionsPage.updateManagedBannerVisibility();
 
       // A subpage was shown or hidden.
-      if (!this.isOverlay && this.nestingLevel > 0) {
-        OptionsPage.updateSubpageBackdrop_();
+      if (!this.isOverlay && this.nestingLevel > 0)
+        OptionsPage.updateDisplayForShowOrHideSubpage_();
+      else if (this.isOverlay && !visible)
         OptionsPage.updateScrollPosition_();
-      }
 
       cr.dispatchPropertyChange(this, 'visible', visible, !visible);
     },

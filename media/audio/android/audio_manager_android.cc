@@ -10,15 +10,14 @@
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
 
-// static
-AudioManager* AudioManager::CreateAudioManager() {
+AudioManager* CreateAudioManager() {
   return new AudioManagerAndroid();
 }
 
 AudioManagerAndroid::AudioManagerAndroid() {}
 
 AudioManagerAndroid::~AudioManagerAndroid() {
-  audio_thread_.Stop();
+  audio_thread_->Stop();
 }
 
 bool AudioManagerAndroid::HasAudioOutputDevices() {

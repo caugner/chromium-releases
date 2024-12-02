@@ -7,13 +7,15 @@
 #include "base/base64.h"
 #include "base/file_util.h"
 #include "base/format_macros.h"
-#include "base/logging.h"
 #include "base/stringprintf.h"
+#include "base/string_util.h"
 #include "base/values.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/zip.h"
 #include "chrome/test/webdriver/webdriver_error.h"
 #include "chrome/test/webdriver/webdriver_util.h"
 
+using base::DictionaryValue;
 using base::Value;
 
 namespace webdriver {
@@ -37,24 +39,49 @@ Capabilities::Capabilities()
       detach(false),
       load_async(false),
       native_events(false),
-      verbose(false) { }
+      no_website_testing_defaults(false) {
+  log_levels[LogType::kDriver] = kAllLogLevel;
+}
 
 Capabilities::~Capabilities() { }
 
 CapabilitiesParser::CapabilitiesParser(
-    const base::DictionaryValue* capabilities_dict,
+    const DictionaryValue* capabilities_dict,
     const FilePath& root_path,
+    const Logger& logger,
     Capabilities* capabilities)
     : dict_(capabilities_dict),
       root_(root_path),
+      logger_(logger),
       caps_(capabilities) {
 }
 
 CapabilitiesParser::~CapabilitiesParser() { }
 
 Error* CapabilitiesParser::Parse() {
+  // Parse WebDriver standard capabilities.
+  typedef Error* (CapabilitiesParser::*Parser)(const Value*);
+
+  struct NameAndParser {
+    const char* name;
+    Parser parser;
+  };
+  NameAndParser name_and_parser[] = {
+    { "proxy", &CapabilitiesParser::ParseProxy },
+    { "loggingPrefs", &CapabilitiesParser::ParseLoggingPrefs }
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(name_and_parser); ++i) {
+    Value* value;
+    if (dict_->Get(name_and_parser[i].name, &value)) {
+      Error* error = (this->*name_and_parser[i].parser)(value);
+      if (error)
+        return error;
+    }
+  }
+
+  // Parse Chrome custom capabilities (a.k.a., ChromeOptions).
   const char kOptionsKey[] = "chromeOptions";
-  const base::DictionaryValue* options = dict_;
+  const DictionaryValue* options = dict_;
   bool legacy_options = true;
   Value* options_value;
   if (dict_->Get(kOptionsKey, &options_value)) {
@@ -67,7 +94,6 @@ Error* CapabilitiesParser::Parse() {
     }
   }
 
-  typedef Error* (CapabilitiesParser::*Parser)(const Value*);
   std::map<std::string, Parser> parser_map;
   if (legacy_options) {
     parser_map["chrome.binary"] = &CapabilitiesParser::ParseBinary;
@@ -78,7 +104,8 @@ Error* CapabilitiesParser::Parse() {
     parser_map["chrome.nativeEvents"] = &CapabilitiesParser::ParseNativeEvents;
     parser_map["chrome.profile"] = &CapabilitiesParser::ParseProfile;
     parser_map["chrome.switches"] = &CapabilitiesParser::ParseArgs;
-    parser_map["chrome.verbose"] = &CapabilitiesParser::ParseVerbose;
+    parser_map["chrome.noWebsiteTestingDefaults"] =
+        &CapabilitiesParser::ParseNoWebsiteTestingDefaults;
   } else {
     parser_map["args"] = &CapabilitiesParser::ParseArgs;
     parser_map["binary"] = &CapabilitiesParser::ParseBinary;
@@ -88,13 +115,16 @@ Error* CapabilitiesParser::Parse() {
     parser_map["loadAsync"] = &CapabilitiesParser::ParseLoadAsync;
     parser_map["nativeEvents"] = &CapabilitiesParser::ParseNativeEvents;
     parser_map["profile"] = &CapabilitiesParser::ParseProfile;
-    parser_map["verbose"] = &CapabilitiesParser::ParseVerbose;
+    parser_map["noWebsiteTestingDefaults"] =
+        &CapabilitiesParser::ParseNoWebsiteTestingDefaults;
   }
 
-  base::DictionaryValue::key_iterator key_iter = options->begin_keys();
+  DictionaryValue::key_iterator key_iter = options->begin_keys();
   for (; key_iter != options->end_keys(); ++key_iter) {
     if (parser_map.find(*key_iter) == parser_map.end()) {
-      LOG(WARNING) << "Ignoring unrecognized capability: " << *key_iter;
+      if (!legacy_options)
+        return new Error(kBadRequest,
+                         "Unrecognized chrome capability: " +  *key_iter);
       continue;
     }
     Value* option = NULL;
@@ -184,6 +214,31 @@ Error* CapabilitiesParser::ParseLoadAsync(const Value* option) {
   return NULL;
 }
 
+Error* CapabilitiesParser::ParseLoggingPrefs(const base::Value* option) {
+  const DictionaryValue* logging_prefs;
+  if (!option->GetAsDictionary(&logging_prefs))
+    return CreateBadInputError("loggingPrefs", Value::TYPE_DICTIONARY, option);
+
+  DictionaryValue::key_iterator key_iter = logging_prefs->begin_keys();
+  for (; key_iter != logging_prefs->end_keys(); ++key_iter) {
+    LogType log_type;
+    if (!LogType::FromString(*key_iter, &log_type))
+      continue;
+
+    Value* level_value;
+    logging_prefs->Get(*key_iter, &level_value);
+    int level;
+    if (!level_value->GetAsInteger(&level)) {
+      return CreateBadInputError(
+          std::string("loggingPrefs.") + *key_iter,
+          Value::TYPE_INTEGER,
+          level_value);
+    }
+    caps_->log_levels[log_type.type()] = static_cast<LogLevel>(level);
+  }
+  return NULL;
+}
+
 Error* CapabilitiesParser::ParseNativeEvents(const Value* option) {
   if (!option->GetAsBoolean(&caps_->native_events))
     return CreateBadInputError("nativeEvents", Value::TYPE_BOOLEAN, option);
@@ -202,9 +257,156 @@ Error* CapabilitiesParser::ParseProfile(const Value* option) {
   return NULL;
 }
 
-Error* CapabilitiesParser::ParseVerbose(const Value* option) {
-  if (!option->GetAsBoolean(&caps_->verbose))
-    return CreateBadInputError("verbose", Value::TYPE_BOOLEAN, option);
+Error* CapabilitiesParser::ParseProxy(const base::Value* option) {
+  const DictionaryValue* options;
+  if (!option->GetAsDictionary(&options))
+    return CreateBadInputError("proxy", Value::TYPE_DICTIONARY, option);
+
+  // Quick check of proxy capabilities.
+  std::set<std::string> proxy_options;
+  proxy_options.insert("autodetect");
+  proxy_options.insert("ftpProxy");
+  proxy_options.insert("httpProxy");
+  proxy_options.insert("noProxy");
+  proxy_options.insert("proxyType");
+  proxy_options.insert("proxyAutoconfigUrl");
+  proxy_options.insert("sslProxy");
+  proxy_options.insert("class");  // Created by BeanToJSONConverter.
+
+  DictionaryValue::key_iterator key_iter = options->begin_keys();
+  for (; key_iter != options->end_keys(); ++key_iter) {
+    if (proxy_options.find(*key_iter) == proxy_options.end()) {
+      logger_.Log(kInfoLogLevel, "Unrecognized proxy capability: " + *key_iter);
+    }
+  }
+
+  typedef Error* (CapabilitiesParser::*Parser)(const DictionaryValue*);
+  std::map<std::string, Parser> proxy_type_parser_map;
+  proxy_type_parser_map["autodetect"] =
+      &CapabilitiesParser::ParseProxyAutoDetect;
+  proxy_type_parser_map["pac"] =
+      &CapabilitiesParser::ParseProxyAutoconfigUrl;
+  proxy_type_parser_map["manual"] = &CapabilitiesParser::ParseProxyServers;
+  proxy_type_parser_map["direct"] = NULL;
+  proxy_type_parser_map["system"] = NULL;
+
+  Value* proxy_type_value;
+  if (!options->Get("proxyType", &proxy_type_value))
+    return new Error(kBadRequest, "Missing 'proxyType' capability.");
+
+  std::string proxy_type;
+  if (!proxy_type_value->GetAsString(&proxy_type))
+    return CreateBadInputError("proxyType", Value::TYPE_STRING,
+                               proxy_type_value);
+
+  proxy_type = StringToLowerASCII(proxy_type);
+  if (proxy_type_parser_map.find(proxy_type) == proxy_type_parser_map.end())
+    return new Error(kBadRequest, "Unrecognized 'proxyType': " + proxy_type);
+
+  if (proxy_type == "direct") {
+    caps_->command.AppendSwitch(switches::kNoProxyServer);
+  } else if (proxy_type == "system") {
+    // Chrome default.
+  } else {
+    Error* error = (this->*proxy_type_parser_map[proxy_type])(options);
+    if (error) {
+      error->AddDetails("Error occurred while processing 'proxyType': " +
+                        proxy_type);
+      return error;
+    }
+  }
+  return NULL;
+}
+
+Error* CapabilitiesParser::ParseProxyAutoDetect(
+    const DictionaryValue* options){
+  const char kProxyAutoDetectKey[] = "autodetect";
+  bool proxy_auto_detect = false;
+  if (!options->GetBoolean(kProxyAutoDetectKey, &proxy_auto_detect))
+    return CreateBadInputError(kProxyAutoDetectKey,
+                               Value::TYPE_BOOLEAN, options);
+  if (proxy_auto_detect)
+    caps_->command.AppendSwitch(switches::kProxyAutoDetect);
+  return NULL;
+}
+
+Error* CapabilitiesParser::ParseProxyAutoconfigUrl(
+    const DictionaryValue* options){
+  const char kProxyAutoconfigUrlKey[] = "proxyAutoconfigUrl";
+  CommandLine::StringType proxy_pac_url;
+  if (!options->GetString(kProxyAutoconfigUrlKey, &proxy_pac_url))
+    return CreateBadInputError(kProxyAutoconfigUrlKey,
+                               Value::TYPE_STRING, options);
+  caps_->command.AppendSwitchNative(switches::kProxyPacUrl, proxy_pac_url);
+  return NULL;
+}
+
+Error* CapabilitiesParser::ParseProxyServers(
+    const DictionaryValue* options) {
+  const char kNoProxy[] = "noProxy";
+  const char kFtpProxy[] = "ftpProxy";
+  const char kHttpProxy[] = "httpProxy";
+  const char kSslProxy[] = "sslProxy";
+
+  std::set<std::string> proxy_servers_options;
+  proxy_servers_options.insert(kFtpProxy);
+  proxy_servers_options.insert(kHttpProxy);
+  proxy_servers_options.insert(kSslProxy);
+
+  Error* error = NULL;
+  Value* option = NULL;
+  bool has_manual_settings = false;
+  if (options->Get(kNoProxy, &option) && !option->IsType(Value::TYPE_NULL)) {
+    error = ParseNoProxy(option);
+    if (error)
+      return error;
+    has_manual_settings = true;
+  }
+
+  std::vector<std::string> proxy_servers;
+  std::set<std::string>::const_iterator iter = proxy_servers_options.begin();
+  for (; iter != proxy_servers_options.end(); ++iter) {
+    if (options->Get(*iter, &option) && !option->IsType(Value::TYPE_NULL)) {
+      std::string value;
+      if (!option->GetAsString(&value))
+        return CreateBadInputError(*iter, Value::TYPE_STRING, option);
+      has_manual_settings = true;
+      // Converts into Chrome proxy scheme.
+      // Example: "http=localhost:9000;ftp=localhost:8000".
+      if (*iter == kFtpProxy)
+        value = "ftp=" + value;
+      if (*iter == kHttpProxy)
+        value = "http=" + value;
+      if (*iter == kSslProxy)
+        value = "https=" + value;
+      proxy_servers.push_back(value);
+    }
+  }
+
+  if (!has_manual_settings)
+    return new Error(kBadRequest, "proxyType is 'manual' but no manual "
+                                  "proxy capabilities were found.");
+
+  std::string proxy_server_value = JoinString(proxy_servers, ';');
+  caps_->command.AppendSwitchASCII(switches::kProxyServer, proxy_server_value);
+
+  return NULL;
+}
+
+Error* CapabilitiesParser::ParseNoProxy(const base::Value* option){
+  std::string proxy_bypass_list;
+  if (!option->GetAsString(&proxy_bypass_list))
+    return CreateBadInputError("noProxy", Value::TYPE_STRING, option);
+  if (!proxy_bypass_list.empty())
+    caps_->command.AppendSwitchASCII(switches::kProxyBypassList,
+                                     proxy_bypass_list);
+  return NULL;
+}
+
+Error* CapabilitiesParser::ParseNoWebsiteTestingDefaults(const Value* option) {
+  if (!option->GetAsBoolean(&caps_->no_website_testing_defaults))
+    return CreateBadInputError("noWebsiteTestingDefaults",
+                               Value::TYPE_BOOLEAN, option);
   return NULL;
 }
 

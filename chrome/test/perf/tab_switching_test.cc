@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -67,7 +68,7 @@ class TabSwitchingUITest : public UIPerfTest {
       std::string times;
       for (int i = 0; i < kNumCycles; ++i)
         base::StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
-      PrintResultList("times", "", label, times, "ms", important);
+      perf_test::PrintResultList("times", "", label, times, "ms", important);
   }
 
   void RunTabSwitchingUITest(const char* label, bool important) {
@@ -112,7 +113,7 @@ class TabSwitchingUITest : public UIPerfTest {
         log_has_been_dumped = file_util::ReadFileToString(log_file_name_,
                                                           &contents);
         if (!log_has_been_dumped)
-          base::PlatformThread::Sleep(100);
+          base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
       } while (!log_has_been_dumped && max_tries--);
       ASSERT_TRUE(log_has_been_dumped) << "Failed to read the log file";
 

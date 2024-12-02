@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,10 +16,13 @@
 #include "ppapi/c/ppb.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/c/ppb_var_array_buffer.h"
+#include "ppapi/c/ppb_websocket.h"
 #include "ppapi/c/ppp_input_event.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/ppp_messaging.h"
 #include "ppapi/c/ppp_mouse_lock.h"
+#include "native_client/src/shared/ppapi_proxy/ppp_instance_combined.h"
 #include "native_client/src/untrusted/irt/irt_ppapi.h"
 
 struct NaClSrpcChannel;
@@ -52,6 +55,8 @@ const void* GetBrowserInterfaceSafe(const char* interface_name);
 const PPB_Core* PPBCoreInterface();  // shared
 const PPB_Memory_Dev* PPBMemoryInterface();  // shared
 const PPB_Var* PPBVarInterface();  // shared
+const PPB_VarArrayBuffer* PPBVarArrayBufferInterface();  // shared
+const PPB_WebSocket* PPBWebSocketInterface();
 
 // Support for getting PPP_ plugin interfaces.
 // Safe version CHECK's for NULL.
@@ -61,7 +66,7 @@ const void* GetPluginInterface(const char* interface_name);
 const void* GetPluginInterfaceSafe(const char* interface_name);
 const PPP_Find_Dev* PPPFindInterface();
 const PPP_InputEvent* PPPInputEventInterface();
-const PPP_Instance* PPPInstanceInterface();
+PPP_Instance_Combined* PPPInstanceInterface();
 const PPP_Messaging* PPPMessagingInterface();
 const PPP_MouseLock* PPPMouseLockInterface();
 const PPP_Printing_Dev* PPPPrintingInterface();

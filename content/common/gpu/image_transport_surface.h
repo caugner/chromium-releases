@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/gl/gl_surface.h"
@@ -20,6 +21,7 @@
 #include "ui/gfx/surface/transport_dib.h"
 
 class GpuChannelManager;
+class GpuCommandBufferStub;
 
 struct GpuHostMsg_AcceleratedSurfaceNew_Params;
 struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
@@ -66,9 +68,7 @@ class ImageTransportSurface {
   // Creates the appropriate surface depending on the GL implementation.
   static scoped_refptr<gfx::GLSurface>
       CreateSurface(GpuChannelManager* manager,
-                    int32 render_view_id,
-                    int32 renderer_id,
-                    int32 command_buffer_id,
+                    GpuCommandBufferStub* stub,
                     gfx::PluginWindowHandle handle);
  private:
   DISALLOW_COPY_AND_ASSIGN(ImageTransportSurface);
@@ -79,9 +79,7 @@ class ImageTransportHelper : public IPC::Channel::Listener {
   // Takes weak pointers to objects that outlive the helper.
   ImageTransportHelper(ImageTransportSurface* surface,
                        GpuChannelManager* manager,
-                       int32 render_view_id,
-                       int32 renderer_id,
-                       int32 command_buffer_id,
+                       GpuCommandBufferStub* stub,
                        gfx::PluginWindowHandle handle);
   virtual ~ImageTransportHelper();
 
@@ -116,7 +114,7 @@ class ImageTransportHelper : public IPC::Channel::Listener {
   gpu::gles2::GLES2Decoder* Decoder();
 
   // IPC::Message handlers.
-  void OnNewSurfaceACK(uint64 surface_id, TransportDIB::Handle surface_handle);
+  void OnNewSurfaceACK(uint64 surface_handle, TransportDIB::Handle shm_handle);
   void OnBuffersSwappedACK();
   void OnPostSubBufferACK();
   void OnResizeViewACK();
@@ -131,9 +129,7 @@ class ImageTransportHelper : public IPC::Channel::Listener {
   ImageTransportSurface* surface_;
   GpuChannelManager* manager_;
 
-  int32 render_view_id_;
-  int32 renderer_id_;
-  int32 command_buffer_id_;
+  base::WeakPtr<GpuCommandBufferStub> stub_;
   int32 route_id_;
   gfx::PluginWindowHandle handle_;
 
@@ -147,19 +143,19 @@ class PassThroughImageTransportSurface
       public ImageTransportSurface {
  public:
   PassThroughImageTransportSurface(GpuChannelManager* manager,
-                                   int32 render_view_id,
-                                   int32 renderer_id,
-                                   int32 command_buffer_id,
+                                   GpuCommandBufferStub* stub,
                                    gfx::GLSurface* surface);
   virtual ~PassThroughImageTransportSurface();
 
   // GLSurface implementation.
   virtual bool Initialize() OVERRIDE;
   virtual void Destroy() OVERRIDE;
+  virtual bool SwapBuffers() OVERRIDE;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
 
   // ImageTransportSurface implementation.
   virtual void OnNewSurfaceACK(
-      uint64 surface_id, TransportDIB::Handle surface_handle) OVERRIDE;
+      uint64 surface_handle, TransportDIB::Handle shm_handle) OVERRIDE;
   virtual void OnBuffersSwappedACK() OVERRIDE;
   virtual void OnPostSubBufferACK() OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
@@ -167,6 +163,7 @@ class PassThroughImageTransportSurface
 
  private:
   scoped_ptr<ImageTransportHelper> helper_;
+  gfx::Size new_size_;
 
   DISALLOW_COPY_AND_ASSIGN(PassThroughImageTransportSurface);
 };

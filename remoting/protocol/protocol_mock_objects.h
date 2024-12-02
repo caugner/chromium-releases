@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "net/base/ip_endpoint.h"
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/connection_to_client.h"
@@ -48,6 +49,9 @@ class MockConnectionToClientEventHandler :
                                         Session::Error error));
   MOCK_METHOD2(OnSequenceNumberUpdated, void(ConnectionToClient* connection,
                                              int64 sequence_number));
+  MOCK_METHOD3(OnClientIpAddress, void(ConnectionToClient* connection,
+                                       const std::string& channel_name,
+                                       const net::IPEndPoint& end_point));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockConnectionToClientEventHandler);
@@ -103,6 +107,8 @@ class MockSession : public Session {
 
   MOCK_METHOD1(SetStateChangeCallback,
                void(const StateChangeCallback& callback));
+  MOCK_METHOD1(SetRouteChangeCallback,
+               void(const RouteChangeCallback& callback));
   MOCK_METHOD0(error, Session::Error());
   MOCK_METHOD2(CreateStreamChannel, void(
       const std::string& name, const StreamChannelCallback& callback));

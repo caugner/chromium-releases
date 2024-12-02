@@ -5,12 +5,12 @@
 #ifndef CHROME_BROWSER_PRERENDER_PRERENDER_TAB_HELPER_H_
 #define CHROME_BROWSER_PRERENDER_PRERENDER_TAB_HELPER_H_
 
-#include "content/browser/tab_contents/tab_contents_observer.h"
-
 #include "base/time.h"
+#include "base/memory/scoped_ptr.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "googleurl/src/gurl.h"
 
 class TabContentsWrapper;
-class GURL;
 
 namespace prerender {
 
@@ -18,12 +18,12 @@ class PrerenderManager;
 
 // PrerenderTabHelper is responsible for recording perceived pageload times
 // to compare PLT's with prerendering enabled and disabled.
-class PrerenderTabHelper : public TabContentsObserver {
+class PrerenderTabHelper : public content::WebContentsObserver {
  public:
   explicit PrerenderTabHelper(TabContentsWrapper* tab);
   virtual ~PrerenderTabHelper();
 
-  // TabContentsObserver implementation.
+  // content::WebContentsObserver implementation.
   virtual void ProvisionalChangeToMainFrameUrl(
       const GURL& url,
       const GURL& opener_url) OVERRIDE;

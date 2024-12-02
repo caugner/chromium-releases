@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,8 @@
 #include "net/url_request/url_request_test_util.h"
 #include "ui/base/events.h"
 #include "ui/base/ui_base_types.h"
+
+using base::TimeDelta;
 
 const std::string NOLISTENERS_HTML =
     "<html><head><title>nolisteners</title></head><body></body></html>";
@@ -105,12 +107,12 @@ class UnloadTest : public UITest {
   }
 
   void CheckTitle(const std::wstring& expected_title) {
-    const int kCheckDelayMs = 100;
-    for (int max_wait_time = TestTimeouts::action_max_timeout_ms();
-         max_wait_time > 0; max_wait_time -= kCheckDelayMs) {
+    const TimeDelta kCheckDelay = TimeDelta::FromMilliseconds(100);
+    for (TimeDelta max_wait_time = TestTimeouts::action_max_timeout();
+         max_wait_time > TimeDelta(); max_wait_time -= kCheckDelay) {
       if (expected_title == GetActiveTabTitle())
         break;
-      base::PlatformThread::Sleep(kCheckDelayMs);
+      base::PlatformThread::Sleep(kCheckDelay);
     }
 
     EXPECT_EQ(expected_title, GetActiveTabTitle());
@@ -232,7 +234,7 @@ TEST_F(UnloadTest, MAYBE_CrossSiteInfiniteUnloadAsyncInputEvent) {
   gfx::Rect bounds;
   ASSERT_TRUE(window->GetViewBounds(VIEW_ID_TAB_0, &bounds, false));
   ASSERT_TRUE(browser->SimulateDrag(bounds.CenterPoint(), bounds.CenterPoint(),
-                                    ui::EF_LEFT_BUTTON_DOWN, false));
+                                    ui::EF_LEFT_MOUSE_BUTTON, false));
 
   // The title should update before the timeout in CheckTitle.
   CheckTitle(L"Title Of Awesomeness");
@@ -304,7 +306,7 @@ TEST_F(UnloadTest, BrowserCloseBeforeUnloadCancel) {
 
   // There's no real graceful way to wait for something _not_ to happen, so
   // we just wait a short period.
-  base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
+  base::PlatformThread::Sleep(TestTimeouts::action_timeout());
 
   CloseBrowserAsync(browser.get());
   ClickModalDialogButton(ui::DIALOG_BUTTON_OK);
@@ -465,7 +467,7 @@ TEST_F(UnloadTest, MAYBE_BrowserCloseTabWhenOtherTabHasListener) {
   // Simulate a click to force user_gesture to true; if we don't, the resulting
   // popup will be constrained, which isn't what we want to test.
   ASSERT_TRUE(window->SimulateOSClick(tab_view_bounds.CenterPoint(),
-                                      ui::EF_LEFT_BUTTON_DOWN));
+                                      ui::EF_LEFT_MOUSE_BUTTON));
   ASSERT_TRUE(browser->WaitForTabCountToBecome(2));
 
   CheckTitle(L"popup");

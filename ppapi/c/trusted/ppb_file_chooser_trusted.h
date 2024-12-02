@@ -1,9 +1,11 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From trusted/ppb_file_chooser_trusted.idl modified Tue Oct 11 11:43:26 2011. */
+/* From trusted/ppb_file_chooser_trusted.idl,
+ *   modified Wed Jan  4 11:09:00 2012.
+ */
 
 #ifndef PPAPI_C_TRUSTED_PPB_FILE_CHOOSER_TRUSTED_H_
 #define PPAPI_C_TRUSTED_PPB_FILE_CHOOSER_TRUSTED_H_
@@ -28,7 +30,7 @@
  * @addtogroup Interfaces
  * @{
  */
-struct PPB_FileChooserTrusted {
+struct PPB_FileChooserTrusted_0_5 {
   /**
    * This function displays a previously created file chooser resource as a
    * dialog box, prompting the user to choose a file or files to open, or a
@@ -52,6 +54,8 @@ struct PPB_FileChooserTrusted {
                                     struct PP_Var suggested_file_name,
                                     struct PP_CompletionCallback callback);
 };
+
+typedef struct PPB_FileChooserTrusted_0_5 PPB_FileChooserTrusted;
 /**
  * @}
  */

@@ -17,12 +17,12 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -44,6 +44,9 @@
 #include "ui/views/controls/menu/submenu_view.h"
 #include "ui/views/widget/widget.h"
 
+using content::HostZoomMap;
+using content::UserMetricsAction;
+using content::WebContents;
 using ui::MenuModel;
 using views::CustomButton;
 using views::ImageButton;
@@ -504,7 +507,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
   void UpdateZoomControls() {
     bool enable_increment = false;
     bool enable_decrement = false;
-    TabContents* selected_tab = menu_->browser_->GetSelectedTabContents();
+    WebContents* selected_tab = menu_->browser_->GetSelectedWebContents();
     int zoom = 100;
     if (selected_tab)
       zoom = selected_tab->GetZoomPercent(&enable_increment, &enable_decrement);
@@ -525,10 +528,10 @@ class WrenchMenu::ZoomView : public WrenchMenuView,
 
     int max_w = 0;
 
-    TabContents* selected_tab = menu_->browser_->GetSelectedTabContents();
+    WebContents* selected_tab = menu_->browser_->GetSelectedWebContents();
     if (selected_tab) {
-      int min_percent = selected_tab->minimum_zoom_percent();
-      int max_percent = selected_tab->maximum_zoom_percent();
+      int min_percent = selected_tab->GetMinimumZoomPercent();
+      int max_percent = selected_tab->GetMaximumZoomPercent();
 
       int step = (max_percent - min_percent) / 10;
       for (int i = min_percent; i <= max_percent; i += step) {
@@ -602,7 +605,7 @@ void WrenchMenu::RunMenu(views::MenuButton* host) {
   gfx::Point screen_loc;
   views::View::ConvertPointToScreen(host, &screen_loc);
   gfx::Rect bounds(screen_loc, host->size());
-  UserMetrics::RecordAction(UserMetricsAction("ShowAppMenu"));
+  content::RecordAction(UserMetricsAction("ShowAppMenu"));
   if (menu_runner_->RunMenuAt(host->GetWidget(), host, bounds,
           MenuItemView::TOPRIGHT, views::MenuRunner::HAS_MNEMONICS) ==
       views::MenuRunner::MENU_DELETED)
@@ -856,13 +859,14 @@ MenuItemView* WrenchMenu::AppendMenuItem(MenuItemView* parent,
 
   MenuItemView* menu_item = parent->AppendMenuItemFromModel(model, index, id);
 
-  if (menu_item)
+  if (menu_item) {
     menu_item->SetVisible(model->IsVisibleAt(index));
 
-  if (menu_type == MenuModel::TYPE_COMMAND && model->HasIcons()) {
-    SkBitmap icon;
-    if (model->GetIconAt(index, &icon))
-      menu_item->SetIcon(icon);
+    if (menu_type == MenuModel::TYPE_COMMAND && model->HasIcons()) {
+      SkBitmap icon;
+      if (model->GetIconAt(index, &icon))
+        menu_item->SetIcon(icon);
+    }
   }
 
   return menu_item;

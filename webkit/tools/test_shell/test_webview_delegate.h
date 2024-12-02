@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/string16.h"
 #include "build/build_config.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
@@ -24,6 +25,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/plugins/npapi/webplugin_page_delegate.h"
 #include "webkit/tools/test_shell/mock_spellcheck.h"
@@ -88,6 +90,9 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
       const WebKit::WebPopupMenuInfo& info);
   virtual WebKit::WebStorageNamespace* createSessionStorageNamespace(
       unsigned quota);
+  virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D(
+      const WebKit::WebGraphicsContext3D::Attributes& attributes,
+      bool direct);
   virtual void didAddMessageToConsole(
       const WebKit::WebConsoleMessage& message,
       const WebKit::WebString& source_name, unsigned source_line);
@@ -344,7 +349,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   // Show a JavaScript alert as a popup message.
   // The caller should test whether we're in layout test mode and only
   // call this function when we really want a message to pop up.
-  void ShowJavaScriptAlert(const std::wstring& message);
+  void ShowJavaScriptAlert(const string16& message);
 
   // In the Mac code, this is called to trigger the end of a test after the
   // page has finished loading.  From here, we can generate the dump for the
@@ -369,7 +374,7 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   void UpdateSelectionClipboard(bool is_empty_selection);
 
   // Get a string suitable for dumping a frame to the console.
-  std::wstring GetFrameDescription(WebKit::WebFrame* webframe);
+  string16 GetFrameDescription(WebKit::WebFrame* webframe);
 
   // Causes navigation actions just printout the intended navigation instead
   // of taking you to the page. This is used for cases like mailto, where you

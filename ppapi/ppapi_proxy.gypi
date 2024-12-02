@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -10,6 +10,7 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../gpu/gpu.gyp:gles2_implementation',
         '../gpu/gpu.gyp:gpu_ipc',
         '../ipc/ipc.gyp:ipc',
         '../skia/skia.gyp:skia',
@@ -40,6 +41,8 @@
         'proxy/interface_list.h',
         'proxy/interface_proxy.cc',
         'proxy/interface_proxy.h',
+        'proxy/plugin_array_buffer_var.cc',
+        'proxy/plugin_array_buffer_var.h',
         'proxy/plugin_dispatcher.cc',
         'proxy/plugin_dispatcher.h',
         'proxy/plugin_globals.cc',
@@ -70,6 +73,8 @@
         'proxy/ppb_cursor_control_proxy.h',
         'proxy/ppb_file_chooser_proxy.cc',
         'proxy/ppb_file_chooser_proxy.h',
+        'proxy/ppb_file_io_proxy.cc',
+        'proxy/ppb_file_io_proxy.h',
         'proxy/ppb_file_ref_proxy.cc',
         'proxy/ppb_file_ref_proxy.h',
         'proxy/ppb_file_system_proxy.cc',
@@ -94,6 +99,8 @@
         'proxy/ppb_image_data_proxy.h',
         'proxy/ppb_instance_proxy.cc',
         'proxy/ppb_instance_proxy.h',
+        'proxy/ppb_message_loop_proxy.cc',
+        'proxy/ppb_message_loop_proxy.h',
         'proxy/ppb_pdf_proxy.cc',
         'proxy/ppb_pdf_proxy.h',
         'proxy/ppb_tcp_socket_private_proxy.cc',
@@ -110,8 +117,6 @@
         'proxy/ppb_url_response_info_proxy.h',
         'proxy/ppb_var_deprecated_proxy.cc',
         'proxy/ppb_var_deprecated_proxy.h',
-        'proxy/ppb_var_proxy.cc',
-        'proxy/ppb_var_proxy.h',
         'proxy/ppb_video_capture_proxy.cc',
         'proxy/ppb_video_capture_proxy.h',
         'proxy/ppb_video_decoder_proxy.cc',

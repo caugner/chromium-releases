@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,7 @@ class SlowConstructor {
  public:
   SlowConstructor() : some_int_(0) {
     // Sleep for 1 second to try to cause a race.
-    base::PlatformThread::Sleep(1000);
+    base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(1));
     ++constructed;
     some_int_ = 12;
   }
@@ -133,8 +133,7 @@ TEST(LazyInstanceTest, LeakyLazyInstance) {
   bool deleted2 = false;
   {
     base::ShadowingAtExitManager shadow;
-    static base::LazyInstance<DeleteLogger,
-                              base::LeakyLazyInstanceTraits<DeleteLogger> >
+    static base::LazyInstance<DeleteLogger>::Leaky
         test = LAZY_INSTANCE_INITIALIZER;
     test.Get().SetDeletedPtr(&deleted2);
   }

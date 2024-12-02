@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -13,6 +13,7 @@
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/core.h"
 #include "ppapi/cpp/dev/buffer_dev.h"
+#include "ppapi/cpp/dev/device_ref_dev.h"
 #include "ppapi/cpp/dev/directory_entry_dev.h"
 #include "ppapi/cpp/dev/directory_reader_dev.h"
 #include "ppapi/cpp/dev/file_chooser_dev.h"
@@ -22,6 +23,7 @@
 #include "ppapi/cpp/dev/ime_input_event_dev.h"
 #include "ppapi/cpp/dev/memory_dev.h"
 #include "ppapi/cpp/dev/printing_dev.h"
+#include "ppapi/cpp/dev/resource_array_dev.h"
 #include "ppapi/cpp/dev/scriptable_object_deprecated.h"
 #include "ppapi/cpp/dev/scrollbar_dev.h"
 #include "ppapi/cpp/dev/selection_dev.h"
@@ -29,7 +31,6 @@
 #include "ppapi/cpp/dev/transport_dev.h"
 #include "ppapi/cpp/dev/url_util_dev.h"
 #include "ppapi/cpp/dev/video_decoder_dev.h"
-#include "ppapi/cpp/dev/websocket_dev.h"
 #include "ppapi/cpp/dev/widget_client_dev.h"
 #include "ppapi/cpp/dev/widget_dev.h"
 #include "ppapi/cpp/dev/zoom_dev.h"
@@ -46,9 +47,6 @@
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 #include "ppapi/cpp/mouse_lock.h"
-#include "ppapi/cpp/non_thread_safe_ref_count.h"
-#include "ppapi/cpp/paint_aggregator.h"
-#include "ppapi/cpp/paint_manager.h"
 #include "ppapi/cpp/private/flash_fullscreen.h"
 #include "ppapi/cpp/private/instance_private.h"
 #include "ppapi/cpp/point.h"
@@ -59,5 +57,10 @@
 #include "ppapi/cpp/url_request_info.h"
 #include "ppapi/cpp/url_response_info.h"
 #include "ppapi/cpp/var.h"
+#include "ppapi/cpp/var_array_buffer.h"
+#include "ppapi/cpp/websocket.h"
+#include "ppapi/utility/graphics/paint_aggregator.h"
+#include "ppapi/utility/graphics/paint_manager.h"
+#include "ppapi/utility/non_thread_safe_ref_count.h"
 
 #endif  // PPAPI_TESTS_ALL_CPP_INCLUDES_H_

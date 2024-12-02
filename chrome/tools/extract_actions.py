@@ -29,7 +29,7 @@ import sys
 sys.path.insert(1, os.path.join(sys.path[0], '..', '..', 'tools', 'python'))
 from google import path_utils
 
-# Files that are known to use UserMetrics::RecordComputedAction(), which means
+# Files that are known to use content::RecordComputedAction(), which means
 # they require special handling code in this script.
 # To add a new file, add it to this list and add the appropriate logic to
 # generate the known actions to AddComputedActions() below.
@@ -224,13 +224,15 @@ def AddChromeOSActions(actions):
   actions.add('Cryptohome.PKCS11InitFail')
 
 def AddExtensionActions(actions):
-  """Add actions reported by extensions via chrome.experimental.metrics API.
+  """Add actions reported by extensions via chrome.metricsPrivate API.
 
   Arguments:
     actions: set of actions to add to.
   """
   # Actions sent by Chrome OS File Browser.
   actions.add('FileBrowser.CreateNewFolder')
+  actions.add('FileBrowser.PhotoEditor.Edit')
+  actions.add('FileBrowser.PhotoEditor.View')
 
 def GrepForActions(path, actions):
   """Grep a source file for calls to UserMetrics functions.
@@ -245,7 +247,7 @@ def GrepForActions(path, actions):
   # this should be on one line
   action_re = re.compile(r'[^a-zA-Z]UserMetricsAction\("([^"]*)')
   malformed_action_re = re.compile(r'[^a-zA-Z]UserMetricsAction\([^"]')
-  computed_action_re = re.compile(r'UserMetrics::RecordComputedAction')
+  computed_action_re = re.compile(r'RecordComputedAction')
   line_number = 0
   for line in open(path):
     line_number = line_number + 1
@@ -309,14 +311,21 @@ def GrepForWebUIActions(path, actions):
     path: path to the file
     actions: set of actions to add to
   """
-  parser = WebUIActionsParser(actions)
-  parser.feed(open(path).read())
-  parser.close()
+  try:
+    parser = WebUIActionsParser(actions)
+    parser.feed(open(path).read())
+  except Exception, e:
+    print "Error encountered for path %s" % path
+    raise e
+  finally:
+    parser.close()
 
 def WalkDirectory(root_path, actions, extensions, callback):
   for path, dirs, files in os.walk(root_path):
     if '.svn' in dirs:
       dirs.remove('.svn')
+    if '.git' in dirs:
+      dirs.remove('.git')
     for file in files:
       ext = os.path.splitext(file)[1]
       if ext in extensions:

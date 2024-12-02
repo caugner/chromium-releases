@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,10 +21,12 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -86,12 +88,12 @@ TabContentsWrapper* BrowserNavigatorTest::CreateTabContents() {
       browser()->profile(),
       NULL,
       MSG_ROUTING_NONE,
-      browser()->GetSelectedTabContents(),
+      browser()->GetSelectedWebContents(),
       NULL);
 }
 
 void BrowserNavigatorTest::RunSuppressTest(WindowOpenDisposition disposition) {
-  GURL old_url = browser()->GetSelectedTabContents()->GetURL();
+  GURL old_url = browser()->GetSelectedWebContents()->GetURL();
   browser::NavigateParams p(MakeNavigateParams());
   p.disposition = disposition;
   browser::Navigate(&p);
@@ -99,7 +101,7 @@ void BrowserNavigatorTest::RunSuppressTest(WindowOpenDisposition disposition) {
   // Nothing should have happened as a result of Navigate();
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(1u, BrowserList::size());
-  EXPECT_EQ(old_url, browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(old_url, browser()->GetSelectedWebContents()->GetURL());
 }
 
 void BrowserNavigatorTest::RunUseNonIncognitoWindowTest(const GURL& url) {
@@ -120,7 +122,7 @@ void BrowserNavigatorTest::RunUseNonIncognitoWindowTest(const GURL& url) {
   EXPECT_NE(incognito_browser, p.browser);
   EXPECT_EQ(browser(), p.browser);
   EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(url, browser()->GetSelectedWebContents()->GetURL());
 }
 
 void BrowserNavigatorTest::RunDoNothingIfIncognitoIsForcedTest(
@@ -146,7 +148,7 @@ void BrowserNavigatorTest::RunDoNothingIfIncognitoIsForcedTest(
   EXPECT_EQ(browser, p.browser);
   EXPECT_EQ(1, browser->tab_count());
   EXPECT_EQ(GURL(chrome::kAboutBlankURL),
-            browser->GetSelectedTabContents()->GetURL());
+            browser->GetSelectedWebContents()->GetURL());
 }
 
 void BrowserNavigatorTest::Observe(
@@ -170,7 +172,7 @@ namespace {
 // of the Browser remains the same and the current tab bears the loaded URL.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_CurrentTab) {
   ui_test_utils::NavigateToURL(browser(), GetGoogleURL());
-  EXPECT_EQ(GetGoogleURL(), browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(GetGoogleURL(), browser()->GetSelectedWebContents()->GetURL());
   // We should have one window with one tab.
   EXPECT_EQ(1u, BrowserList::size());
   EXPECT_EQ(1, browser()->tab_count());
@@ -291,11 +293,11 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 // tab count of the Browser increases and the selected tab shifts to the new
 // foreground tab.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_NewForegroundTab) {
-  TabContents* old_contents = browser()->GetSelectedTabContents();
+  WebContents* old_contents = browser()->GetSelectedWebContents();
   browser::NavigateParams p(MakeNavigateParams());
   p.disposition = NEW_FOREGROUND_TAB;
   browser::Navigate(&p);
-  EXPECT_NE(old_contents, browser()->GetSelectedTabContents());
+  EXPECT_NE(old_contents, browser()->GetSelectedWebContents());
   EXPECT_EQ(browser()->GetSelectedTabContentsWrapper(), p.target_contents);
   EXPECT_EQ(2, browser()->tab_count());
 }
@@ -303,11 +305,11 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_NewForegroundTab) {
 // This test verifies that when a navigation results in a background tab, the
 // tab count of the Browser increases but the selected tab remains the same.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_NewBackgroundTab) {
-  TabContents* old_contents = browser()->GetSelectedTabContents();
+  WebContents* old_contents = browser()->GetSelectedWebContents();
   browser::NavigateParams p(MakeNavigateParams());
   p.disposition = NEW_BACKGROUND_TAB;
   browser::Navigate(&p);
-  TabContents* new_contents = browser()->GetSelectedTabContents();
+  WebContents* new_contents = browser()->GetSelectedWebContents();
   // The selected tab should have remained unchanged, since the new tab was
   // opened in the background.
   EXPECT_EQ(old_contents, new_contents);
@@ -662,7 +664,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, DISABLED_TargetContents_Popup) {
   // All platforms should respect size however provided width > 400 (Mac has a
   // minimum window width of 400).
   EXPECT_EQ(p.window_bounds.size(),
-            p.target_contents->tab_contents()->view()->GetContainerSize());
+            p.target_contents->web_contents()->GetView()->GetContainerSize());
 
   // We should have two windows, the new popup and the browser() provided by the
   // framework.
@@ -698,7 +700,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Tabstrip_InsertAtIndex) {
 // the same result as navigating to a new foreground tab in the (only)
 // active browser. Tests are the same as for Disposition_NewForegroundTab.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, NullBrowser_NewForegroundTab) {
-  TabContents* old_contents = browser()->GetSelectedTabContents();
+  WebContents* old_contents = browser()->GetSelectedWebContents();
   // Navigate with a NULL browser.
   browser::NavigateParams p(MakeNavigateParams(NULL));
   p.disposition = NEW_FOREGROUND_TAB;
@@ -707,7 +709,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, NullBrowser_NewForegroundTab) {
 
   // Navigate() should have found browser() and create a new tab.
   EXPECT_EQ(browser(), p.browser);
-  EXPECT_NE(old_contents, browser()->GetSelectedTabContents());
+  EXPECT_NE(old_contents, browser()->GetSelectedWebContents());
   EXPECT_EQ(browser()->GetSelectedTabContentsWrapper(), p.target_contents);
   EXPECT_EQ(2, browser()->tab_count());
 }
@@ -777,7 +779,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(3, browser()->tab_count());
   EXPECT_EQ(2, browser()->active_index());
   EXPECT_EQ(GetSettingsAdvancedURL(),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 // This test verifies that constructing params with disposition = SINGLETON_TAB
@@ -810,7 +812,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(3, browser()->tab_count());
   EXPECT_EQ(1, browser()->active_index());
   EXPECT_EQ(GetSettingsAdvancedURL(),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 // This test verifies that constructing params with disposition = SINGLETON_TAB
@@ -843,7 +845,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(3, browser()->tab_count());
   EXPECT_EQ(1, browser()->active_index());
   EXPECT_EQ(GetSettingsPersonalURL(),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 // This test verifies that constructing params with disposition = SINGLETON_TAB
@@ -875,7 +877,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(3, browser()->tab_count());
   EXPECT_EQ(1, browser()->active_index());
   EXPECT_EQ(singleton_url1,
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 // This test verifies that constructing params with disposition = SINGLETON_TAB
@@ -906,7 +908,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(1, browser()->active_index());
   EXPECT_EQ(singleton_url_target,
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 // This test verifies that constructing params with disposition = SINGLETON_TAB
@@ -963,7 +965,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   EXPECT_EQ(1u, BrowserList::size());
   EXPECT_EQ(GURL("chrome://settings"),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 // Settings page is expected to always open in normal mode regardless
@@ -1013,7 +1015,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   GURL singleton_url(GetSettingsAdvancedURL());
   TabContentsWrapper* wrapper = browser()->AddSelectedTabWithURL(
       singleton_url, content::PAGE_TRANSITION_LINK);
-  TabContents* tab_contents = wrapper->tab_contents();
+  WebContents* web_contents = wrapper->web_contents();
 
   // We should have one browser with 2 tabs, the 2nd selected.
   EXPECT_EQ(1u, BrowserList::size());
@@ -1021,8 +1023,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   EXPECT_EQ(1, browser()->active_index());
 
   // Kill the singleton tab.
-  tab_contents->SetIsCrashed(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
-  EXPECT_TRUE(tab_contents->is_crashed());
+  web_contents->SetIsCrashed(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
+  EXPECT_TRUE(web_contents->IsCrashed());
 
   browser::NavigateParams p(MakeNavigateParams());
   p.disposition = SINGLETON_TAB;
@@ -1032,7 +1034,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   ui_test_utils::NavigateToURL(&p);
 
   // The tab should not be sad anymore.
-  EXPECT_FALSE(tab_contents->is_crashed());
+  EXPECT_FALSE(web_contents->IsCrashed());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1046,7 +1048,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1064,7 +1066,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1074,7 +1076,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   ui_test_utils::NavigateToURL(&p);
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
@@ -1085,14 +1087,14 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromPageToOptionsInNewTab) {
   browser::NavigateParams p(MakeNavigateParams());
   ui_test_utils::NavigateToURL(&p);
-  EXPECT_EQ(GetGoogleURL(), browser()->GetSelectedTabContents()->GetURL());
+  EXPECT_EQ(GetGoogleURL(), browser()->GetSelectedWebContents()->GetURL());
   EXPECT_EQ(1u, BrowserList::size());
   EXPECT_EQ(1, browser()->tab_count());
 
@@ -1105,7 +1107,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1131,7 +1133,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1145,7 +1147,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GetSettingsPersonalURL(),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 
   browser()->NewTab();
   EXPECT_EQ(2, browser()->tab_count());
@@ -1159,7 +1161,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GetSettingsPersonalURL(),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1189,7 +1191,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(2, browser()->tab_count());
   EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL().GetOrigin());
+            browser()->GetSelectedWebContents()->GetURL().GetOrigin());
 }
 
 // Tests that when a new tab is opened from the omnibox, the focus is moved from
@@ -1241,7 +1243,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUIHistoryURL),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1255,7 +1257,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUIBookmarksURL),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
@@ -1269,7 +1271,61 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   }
   EXPECT_EQ(1, browser()->tab_count());
   EXPECT_EQ(GURL(chrome::kChromeUIDownloadsURL),
-            browser()->GetSelectedTabContents()->GetURL());
+            browser()->GetSelectedWebContents()->GetURL());
+}
+
+// This test makes sure any link in a crashed panel page navigates to a tabbed
+// window.
+class PanelBrowserNavigatorTest : public BrowserNavigatorTest {
+ protected:
+  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+    command_line->AppendSwitch(switches::kEnablePanels);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(PanelBrowserNavigatorTest, NavigateFromCrashedPanel) {
+  GURL url("http://maps.google.com/#a");
+  GURL url2("http://maps.google.com/#b");
+
+  // Create a panel.
+  Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
+      "Test", gfx::Rect(100, 100), browser()->profile());
+
+  // Navigate to the page.
+  browser::NavigateParams p(MakeNavigateParams(panel_browser));
+  p.url = url;
+  p.disposition = CURRENT_TAB;
+  browser::Navigate(&p);
+
+  // Navigate() should have navigated in the existing panel window.
+  EXPECT_EQ(panel_browser, p.browser);
+
+  // We should now have two windows, the browser() provided by the framework and
+  // the panel window we opened earlier. The tabbed browser window has 1 tab.
+  EXPECT_EQ(2u, BrowserList::size());
+  EXPECT_EQ(1, browser()->tab_count());
+  EXPECT_EQ(1, panel_browser->tab_count());
+
+  // Kill the panel page.
+  WebContents* web_contents = panel_browser->GetSelectedWebContents();
+  web_contents->SetIsCrashed(base::TERMINATION_STATUS_PROCESS_CRASHED, -1);
+  EXPECT_TRUE(web_contents->IsCrashed());
+
+  // Navigate to the page.
+  browser::NavigateParams p2(MakeNavigateParams(panel_browser));
+  p2.source_contents = panel_browser->GetSelectedTabContentsWrapper();
+  p2.url = url2;
+  p2.disposition = CURRENT_TAB;
+  browser::Navigate(&p2);
+
+  // Navigate() should have opened a new tab in the existing tabbed window.
+  EXPECT_EQ(browser(), p2.browser);
+
+  // We should now have two windows, the browser() provided by the framework and
+  // the panel window we opened earlier. The tabbed browser window has 2 tabs.
+  EXPECT_EQ(2u, BrowserList::size());
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(1, panel_browser->tab_count());
 }
 
 } // namespace

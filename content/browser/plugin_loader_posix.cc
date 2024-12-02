@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@ PluginLoaderPosix::PluginLoaderPosix()
 
 void PluginLoaderPosix::LoadPlugins(
     scoped_refptr<base::MessageLoopProxy> target_loop,
-    const PluginService::GetPluginsCallback& callback) {
+    const content::PluginService::GetPluginsCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   callbacks_.push_back(PendingCallback(target_loop, callback));
@@ -44,15 +44,23 @@ bool PluginLoaderPosix::OnMessageReceived(const IPC::Message& message) {
 }
 
 void PluginLoaderPosix::OnProcessCrashed(int exit_code) {
-  canonical_list_.erase(canonical_list_.begin(),
-                        canonical_list_.begin() + next_load_index_ + 1);
+  if (next_load_index_ == canonical_list_.size()) {
+    // How this case occurs is unknown. See crbug.com/111935.
+    canonical_list_.clear();
+  } else {
+    canonical_list_.erase(canonical_list_.begin(),
+                          canonical_list_.begin() + next_load_index_ + 1);
+  }
+
   next_load_index_ = 0;
 
   LoadPluginsInternal();
 }
 
 bool PluginLoaderPosix::Send(IPC::Message* message) {
-  return process_host_->Send(message);
+  if (process_host_)
+    return process_host_->Send(message);
+  return false;
 }
 
 PluginLoaderPosix::~PluginLoaderPosix() {
@@ -67,11 +75,11 @@ void PluginLoaderPosix::GetPluginsToLoad() {
   next_load_index_ = 0;
 
   canonical_list_.clear();
-  PluginService::GetInstance()->plugin_list()->GetPluginPathsToLoad(
+  PluginServiceImpl::GetInstance()->GetPluginList()->GetPluginPathsToLoad(
       &canonical_list_);
 
   internal_plugins_.clear();
-  PluginService::GetInstance()->plugin_list()->GetInternalPlugins(
+  PluginServiceImpl::GetInstance()->GetPluginList()->GetInternalPlugins(
       &internal_plugins_);
 
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
@@ -94,7 +102,8 @@ void PluginLoaderPosix::LoadPluginsInternal() {
   if (load_start_time_.is_null())
     load_start_time_ = base::TimeTicks::Now();
 
-  process_host_ = new UtilityProcessHost(this, BrowserThread::IO);
+  process_host_ =
+      (new UtilityProcessHost(this, BrowserThread::IO))->AsWeakPtr();
   process_host_->set_no_sandbox(true);
 #if defined(OS_MACOSX)
   process_host_->set_child_flags(ChildProcessHost::CHILD_ALLOW_HEAP_EXECUTION);
@@ -151,7 +160,8 @@ bool PluginLoaderPosix::MaybeRunPendingCallbacks() {
   if (next_load_index_ < canonical_list_.size())
     return false;
 
-  PluginService::GetInstance()->plugin_list()->SetPlugins(loaded_plugins_);
+  PluginServiceImpl::GetInstance()->GetPluginList()->SetPlugins(
+      loaded_plugins_);
   for (std::vector<PendingCallback>::iterator it = callbacks_.begin();
        it != callbacks_.end();
        ++it) {
@@ -170,7 +180,7 @@ bool PluginLoaderPosix::MaybeRunPendingCallbacks() {
 
 PluginLoaderPosix::PendingCallback::PendingCallback(
     scoped_refptr<base::MessageLoopProxy> loop,
-    const PluginService::GetPluginsCallback& cb)
+    const content::PluginService::GetPluginsCallback& cb)
     : target_loop(loop),
       callback(cb) {
 }

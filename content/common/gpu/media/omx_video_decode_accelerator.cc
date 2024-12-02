@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,25 +50,25 @@ static bool AreOMXFunctionPointersInitialized() {
 // Maps h264-related Profile enum values to OMX_VIDEO_AVCPROFILETYPE values.
 static OMX_U32 MapH264ProfileToOMXAVCProfile(uint32 profile) {
   switch (profile) {
-    case media::VideoDecodeAccelerator::H264PROFILE_BASELINE:
+    case media::H264PROFILE_BASELINE:
       return OMX_VIDEO_AVCProfileBaseline;
-    case media::VideoDecodeAccelerator::H264PROFILE_MAIN:
+    case media::H264PROFILE_MAIN:
       return OMX_VIDEO_AVCProfileMain;
-    case media::VideoDecodeAccelerator::H264PROFILE_EXTENDED:
+    case media::H264PROFILE_EXTENDED:
       return OMX_VIDEO_AVCProfileExtended;
-    case media::VideoDecodeAccelerator::H264PROFILE_HIGH:
+    case media::H264PROFILE_HIGH:
       return OMX_VIDEO_AVCProfileHigh;
-    case media::VideoDecodeAccelerator::H264PROFILE_HIGH10PROFILE:
+    case media::H264PROFILE_HIGH10PROFILE:
       return OMX_VIDEO_AVCProfileHigh10;
-    case media::VideoDecodeAccelerator::H264PROFILE_HIGH422PROFILE:
+    case media::H264PROFILE_HIGH422PROFILE:
       return OMX_VIDEO_AVCProfileHigh422;
-    case media::VideoDecodeAccelerator::H264PROFILE_HIGH444PREDICTIVEPROFILE:
+    case media::H264PROFILE_HIGH444PREDICTIVEPROFILE:
       return OMX_VIDEO_AVCProfileHigh444;
     // Below enums don't have equivalent enum in Openmax.
-    case media::VideoDecodeAccelerator::H264PROFILE_SCALABLEBASELINE:
-    case media::VideoDecodeAccelerator::H264PROFILE_SCALABLEHIGH:
-    case media::VideoDecodeAccelerator::H264PROFILE_STEREOHIGH:
-    case media::VideoDecodeAccelerator::H264PROFILE_MULTIVIEWHIGH:
+    case media::H264PROFILE_SCALABLEBASELINE:
+    case media::H264PROFILE_SCALABLEHIGH:
+    case media::H264PROFILE_STEREOHIGH:
+    case media::H264PROFILE_MULTIVIEWHIGH:
       // Nvidia OMX video decoder requires the same resources (as that of the
       // High profile) in every profile higher to the Main profile.
       return OMX_VIDEO_AVCProfileHigh444;
@@ -144,7 +144,8 @@ static void InitParam(const OmxVideoDecodeAccelerator& dec, T* param) {
 bool OmxVideoDecodeAccelerator::Initialize(Profile profile) {
   DCHECK_EQ(message_loop_, MessageLoop::current());
 
-  RETURN_ON_FAILURE(profile >= H264PROFILE_MIN && profile <= H264PROFILE_MAX,
+  RETURN_ON_FAILURE((profile >= media::H264PROFILE_MIN &&
+                     profile <= media::H264PROFILE_MAX),
                     "Only h264 supported", INVALID_ARGUMENT, false);
   profile_ = MapH264ProfileToOMXAVCProfile(profile);
   RETURN_ON_FAILURE(profile_ != OMX_VIDEO_AVCProfileMax,
@@ -456,7 +457,9 @@ void OmxVideoDecodeAccelerator::Destroy() {
     ShutdownComponent();
     return;
   }
-  DCHECK_EQ(client_state_, OMX_StateExecuting);
+  DCHECK(client_state_ == OMX_StateExecuting ||
+         client_state_ == OMX_StateIdle ||
+         client_state_ == OMX_StatePause);
   current_state_change_ = DESTROYING;
   client_ = NULL;
   BeginTransitionToState(OMX_StateIdle);
@@ -571,7 +574,9 @@ void OmxVideoDecodeAccelerator::BusyLoopInDestroying() {
 }
 
 void OmxVideoDecodeAccelerator::OnReachedIdleInDestroying() {
-  DCHECK_EQ(client_state_, OMX_StateExecuting);
+  DCHECK(client_state_ == OMX_StateExecuting ||
+         client_state_ == OMX_StateIdle ||
+         client_state_ == OMX_StatePause);
   client_state_ = OMX_StateIdle;
 
   // Note that during the Executing -> Idle transition, the OMX spec guarantees
@@ -768,7 +773,8 @@ void OmxVideoDecodeAccelerator::FillBufferDoneTask(
   --output_buffers_at_component_;
 
   if (fake_output_buffers_.size() && fake_output_buffers_.count(buffer)) {
-    DCHECK_EQ(fake_output_buffers_.erase(buffer), 1U);
+    size_t erased = fake_output_buffers_.erase(buffer);
+    DCHECK_EQ(erased, 1U);
     OMX_ERRORTYPE result =
         OMX_FreeBuffer(component_handle_, output_port_, buffer);
     RETURN_ON_OMX_FAILURE(result, "OMX_FreeBuffer failed", PLATFORM_FAILURE,);
@@ -776,8 +782,13 @@ void OmxVideoDecodeAccelerator::FillBufferDoneTask(
   }
   DCHECK(!fake_output_buffers_.size());
 
+  // When the EOS picture is delivered back to us, notify the client and reuse
+  // the underlying picturebuffer.
   if (buffer->nFlags & OMX_BUFFERFLAG_EOS) {
-    // Avoid sending the (fake) EOS buffer to the client.
+    buffer->nFlags &= ~OMX_BUFFERFLAG_EOS;
+    OnReachedEOSInFlushing();
+    if (current_state_change_ != DESTROYING)
+      ReusePictureBuffer(picture_buffer_id);
     return;
   }
 
@@ -945,7 +956,7 @@ void OmxVideoDecodeAccelerator::EventHandlerCompleteTask(OMX_EVENTTYPE event,
         if (current_state_change_ == DESTROYING)
           return;
         DCHECK_EQ(current_state_change_, FLUSHING);
-        OnReachedEOSInFlushing();
+        // Do nothing; rely on the EOS picture delivery to notify the client.
       } else {
         RETURN_ON_FAILURE(false,
                           "Unexpected OMX_EventBufferFlag: "
@@ -1014,13 +1025,10 @@ OMX_ERRORTYPE OmxVideoDecodeAccelerator::FillBufferCallback(
 
 bool OmxVideoDecodeAccelerator::CanFillBuffer() {
   DCHECK_EQ(message_loop_, MessageLoop::current());
-  if (current_state_change_ == DESTROYING ||
-      current_state_change_ == ERRORING) {
-    return false;
-  }
-  return client_state_ == OMX_StateIdle ||
-      client_state_ == OMX_StateExecuting ||
-      client_state_ == OMX_StatePause;
+  const CurrentStateChange csc = current_state_change_;
+  const OMX_STATETYPE cs = client_state_;
+  return (csc != DESTROYING && csc != ERRORING) &&
+      (cs == OMX_StateIdle || cs == OMX_StateExecuting || cs == OMX_StatePause);
 }
 
 bool OmxVideoDecodeAccelerator::SendCommandToPort(

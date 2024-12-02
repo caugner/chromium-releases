@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -83,10 +83,10 @@ class StatusController {
   ClientToServerResponse* mutable_commit_response() {
     return &shared_.commit_response;
   }
-  const syncable::ModelTypeBitSet& updates_request_types() const {
+  const syncable::ModelTypeSet updates_request_types() const {
     return shared_.updates_request_types;
   }
-  void set_updates_request_types(const syncable::ModelTypeBitSet& value) {
+  void set_updates_request_types(syncable::ModelTypeSet value) {
     shared_.updates_request_types = value;
   }
   const ClientToServerResponse& updates_response() const {
@@ -138,9 +138,6 @@ class StatusController {
   }
 
   // Control parameters for sync cycles.
-  bool conflict_sets_built() const {
-    return shared_.control_params.conflict_sets_built;
-  }
   bool conflicts_resolved() const {
     return shared_.control_params.conflicts_resolved;
   }
@@ -217,25 +214,26 @@ class StatusController {
   void increment_num_consecutive_errors_by(int value);
   void set_num_server_changes_remaining(int64 changes_remaining);
   void set_invalid_store(bool invalid_store);
-  void set_syncer_stuck(bool syncer_stuck);
   void set_num_successful_bookmark_commits(int value);
   void increment_num_successful_commits();
   void increment_num_successful_bookmark_commits();
   void increment_num_updates_downloaded_by(int value);
   void increment_num_tombstone_updates_downloaded_by(int value);
-  void set_types_needing_local_migration(const syncable::ModelTypeSet& types);
+  void set_types_needing_local_migration(syncable::ModelTypeSet types);
   void set_unsynced_handles(const std::vector<int64>& unsynced_handles);
   void increment_num_local_overwrites();
   void increment_num_server_overwrites();
   void set_sync_protocol_error(const SyncProtocolError& error);
+  void set_last_download_updates_result(const SyncerError result);
+  void set_last_post_commit_result(const SyncerError result);
+  void set_last_process_commit_response_result(const SyncerError result);
 
   void set_commit_set(const OrderedCommitSet& commit_set);
-  void update_conflict_sets_built(bool built);
   void update_conflicts_resolved(bool resolved);
   void reset_conflicts_resolved();
   void set_items_committed();
 
-  void SetSyncInProgressAndUpdateStartTime(bool sync_in_progress);
+  void UpdateStartTime();
 
   void set_debug_info_sent();
 

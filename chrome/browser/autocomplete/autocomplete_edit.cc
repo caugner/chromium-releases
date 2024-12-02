@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/autocomplete/autocomplete_popup_view.h"
 #include "chrome/browser/autocomplete/keyword_provider.h"
 #include "chrome/browser/autocomplete/network_action_predictor.h"
+#include "chrome/browser/autocomplete/network_action_predictor_factory.h"
 #include "chrome/browser/autocomplete/search_provider.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/command_updater.h"
@@ -33,6 +35,7 @@
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -40,11 +43,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "googleurl/src/url_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+
+using content::UserMetricsAction;
 
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditController
@@ -215,8 +221,9 @@ void AutocompleteEditModel::OnChanged() {
 
   NetworkActionPredictor::Action recommended_action =
       NetworkActionPredictor::ACTION_NONE;
-  NetworkActionPredictor* network_action_predictor = user_input_in_progress() ?
-      profile_->GetNetworkActionPredictor() : NULL;
+  NetworkActionPredictor* network_action_predictor =
+      user_input_in_progress() ?
+      NetworkActionPredictorFactory::GetForProfile(profile_) : NULL;
   if (network_action_predictor) {
     network_action_predictor->RegisterTransitionalMatches(user_text_,
                                                           result());
@@ -230,9 +237,7 @@ void AutocompleteEditModel::OnChanged() {
         network_action_predictor->RecommendAction(user_text_, current_match);
   }
 
-  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.Action_" +
-                            prerender::GetOmniboxHistogramSuffix(),
-                            recommended_action,
+  UMA_HISTOGRAM_ENUMERATION("NetworkActionPredictor.Action", recommended_action,
                             NetworkActionPredictor::LAST_PREDICT_ACTION);
   string16 suggested_text;
 
@@ -388,6 +393,8 @@ void AutocompleteEditModel::SetInputInProgress(bool in_progress) {
     return;
 
   user_input_in_progress_ = in_progress;
+  if (user_input_in_progress_)
+    time_user_first_modified_omnibox_ = base::TimeTicks::Now();
   controller_->OnInputInProgress(in_progress);
 }
 
@@ -401,7 +408,7 @@ void AutocompleteEditModel::Revert() {
   view_->SetWindowTextAndCaretPos(permanent_text_,
                                   has_focus_ ? permanent_text_.length() : 0);
   NetworkActionPredictor* network_action_predictor =
-      profile_->GetNetworkActionPredictor();
+      NetworkActionPredictorFactory::GetForProfile(profile_);
   if (network_action_predictor)
     network_action_predictor->ClearTransitionalMatches();
 }
@@ -506,13 +513,37 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
   // We only care about cases where there is a selection (i.e. the popup is
   // open).
   if (popup_->IsOpen()) {
-    AutocompleteLog log(autocomplete_controller_->input().text(),
-                        autocomplete_controller_->input().type(),
-                        popup_->selected_line(), 0, result());
+    AutocompleteLog log(
+        autocomplete_controller_->input().text(),
+        autocomplete_controller_->input().type(),
+        popup_->selected_line(),
+        -1,  // don't yet know tab ID; set later if appropriate
+        base::TimeDelta::FromMilliseconds(-1),  // typing duration; usually
+                                                // over-written later
+        0,  // inline autocomplete length; possibly set later
+        result());
     if (index != AutocompletePopupModel::kNoMatch)
       log.selected_index = index;
     else if (!has_temporary_text_)
       log.inline_autocompleted_length = inline_autocomplete_text_.length();
+    if (disposition == CURRENT_TAB) {
+      // If we know the destination is being opened in the curren tab,
+      // we can easily get the tab ID.  (If it's being opened in a new
+      // tab, we don't know the tab ID yet.)
+      log.tab_id = controller_->GetTabContentsWrapper()->
+                       restore_tab_helper()->session_id().id();
+    }
+    if (user_input_in_progress_) {
+      // This case should happen every time except possibly in unit tests.
+      // If we somehow got into OpenMatch() by selecting an autocomplete
+      // match without going through user_input_in_progress_, that
+      // means we never properly set time_user_first_modified_omnibox_
+      // (because we didn't know the user started typing!).  In that
+      // case, leave the elapsed_time_since_user_first_modified_omnibox
+      // set to -1 ms.
+      log.elapsed_time_since_user_first_modified_omnibox =
+          base::TimeTicks::Now() - time_user_first_modified_omnibox_;
+    }
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
         content::Source<Profile>(profile_),
@@ -545,7 +576,7 @@ void AutocompleteEditModel::OpenMatch(const AutocompleteMatch& match,
     }
 
     if (template_url) {
-      UserMetrics::RecordAction(UserMetricsAction("AcceptedKeyword"));
+      content::RecordAction(UserMetricsAction("AcceptedKeyword"));
       template_url_service->IncrementUsageCount(template_url);
 
       if (match.transition == content::PAGE_TRANSITION_KEYWORD ||
@@ -604,7 +635,7 @@ bool AutocompleteEditModel::AcceptKeyword() {
                                // since the edit contents have disappeared.  It
                                // doesn't really matter, but we clear it to be
                                // consistent.
-  UserMetrics::RecordAction(UserMetricsAction("AcceptedKeywordHint"));
+  content::RecordAction(UserMetricsAction("AcceptedKeywordHint"));
   return true;
 }
 
@@ -1057,7 +1088,7 @@ void AutocompleteEditModel::DoPrerender(const AutocompleteMatch& match) {
   prerender::PrerenderManager* prerender_manager =
       prerender::PrerenderManagerFactory::GetForProfile(tab->profile());
   if (prerender_manager) {
-    RenderViewHost* current_host = tab->tab_contents()->render_view_host();
+    RenderViewHost* current_host = tab->web_contents()->GetRenderViewHost();
     prerender_manager->AddPrerenderFromOmnibox(
         match.destination_url, current_host->session_storage_namespace());
   }

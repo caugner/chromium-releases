@@ -71,6 +71,25 @@
                 'contrib/minizip/iowin32.c'
               ],
             }],
+            ['OS=="mac" or os_bsd==1 or OS=="android"', {
+              # Mac, Android and the BSDs don't have fopen64, ftello64, or
+              # fseeko64. We use fopen, ftell, and fseek instead on these
+              # systems.
+              'defines': [
+                'USE_FILE32API'
+              ],
+            }],
+            ['clang==1', {
+              'xcode_settings': {
+                'WARNING_CFLAGS': [
+                  # zlib uses `if ((a == b))` for some reason.
+                  '-Wno-parentheses-equality',
+                ],
+              },
+              'cflags': [
+                '-Wno-parentheses-equality',
+              ],
+            }],
           ],
         },
       ],
@@ -96,6 +115,14 @@
             'contrib/minizip/zip.h',
           ],
           'conditions': [
+            ['OS=="mac" or os_bsd==1 or OS=="android"', {
+              # Mac, Android and the BSDs don't have fopen64, ftello64, or
+              # fseeko64. We use fopen, ftell, and fseek instead on these
+              # systems.
+              'defines': [
+                'USE_FILE32API'
+              ],
+            }],
             ['OS=="android"', {
               'toolsets': ['target', 'host'],
             }],

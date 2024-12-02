@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #ifndef NDEBUG
 #include <set>
+#include <string>
 #endif
 
 class Profile;
@@ -69,15 +70,27 @@ class ProfileDependencyManager {
   ProfileDependencyManager();
   virtual ~ProfileDependencyManager();
 
+  // Ensures that all the factories have been created before building the
+  // dependency graph.
+  void AssertFactoriesBuilt();
+
   // Using the dependency graph defined in |edges_|, fills |destruction_order_|
   // so that Observe() can notify each ProfileKeyedServiceFactory in order.
-  void BuildDestructionOrder();
+  void BuildDestructionOrder(Profile* profile);
+
+#ifndef NDEBUG
+  // Creates a dot file with our dependency information.
+  std::string DumpGraphvizDependency();
+#endif
 
   std::vector<ProfileKeyedServiceFactory*> all_components_;
 
   EdgeMap edges_;
 
   std::vector<ProfileKeyedServiceFactory*> destruction_order_;
+
+  // Whether AssertFactoriesBuilt has been done.
+  bool built_factories_;
 
 #ifndef NDEBUG
   // A list of profile objects that have gone through the Shutdown()

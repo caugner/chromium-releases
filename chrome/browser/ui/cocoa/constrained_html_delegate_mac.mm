@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,13 +7,16 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_nsobject.h"
+#include "base/property_bag.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/browser/ui/webui/html_dialog_tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/gfx/size.h"
+
+using content::WebContents;
 
 class ConstrainedHtmlDelegateMac :
     public ConstrainedWindowMacDelegateCustomSheet,
@@ -22,10 +25,15 @@ class ConstrainedHtmlDelegateMac :
 
  public:
   ConstrainedHtmlDelegateMac(Profile* profile,
-                             HtmlDialogUIDelegate* delegate);
+                             HtmlDialogUIDelegate* delegate,
+                             HtmlDialogTabContentsDelegate* tab_delegate);
   ~ConstrainedHtmlDelegateMac() {
     if (release_tab_on_close_)
       ignore_result(tab_.release());
+  }
+
+  void set_window(ConstrainedWindow* window) {
+    constrained_window_ = window;
   }
 
   // ConstrainedWindowMacDelegateCustomSheet -----------------------------------
@@ -51,14 +59,11 @@ class ConstrainedHtmlDelegateMac :
   virtual void HandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE {}
 
-  void set_window(ConstrainedWindow* window) {
-    constrained_window_ = window;
-  }
-
  private:
   // Holds the HTML to be displayed in the sheet.
   scoped_ptr<TabContentsWrapper> tab_;
   HtmlDialogUIDelegate* html_delegate_;  // weak.
+  scoped_ptr<HtmlDialogTabContentsDelegate> override_tab_delegate_;
 
   // The constrained window that owns |this|. Saved here because it needs to be
   // closed in response to the WebUI OnDialogClose callback.
@@ -89,28 +94,34 @@ class ConstrainedHtmlDelegateMac :
 
 ConstrainedHtmlDelegateMac::ConstrainedHtmlDelegateMac(
   Profile* profile,
-  HtmlDialogUIDelegate* delegate)
+  HtmlDialogUIDelegate* delegate,
+  HtmlDialogTabContentsDelegate* tab_delegate)
   : HtmlDialogTabContentsDelegate(profile),
     html_delegate_(delegate),
     constrained_window_(NULL),
     closed_via_webui_(false),
     release_tab_on_close_(false) {
-  TabContents* tab_contents =
-    new TabContents(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
-  tab_.reset(new TabContentsWrapper(tab_contents));
-  tab_contents->set_delegate(this);
+  WebContents* web_contents = WebContents::Create(
+      profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
+  tab_.reset(new TabContentsWrapper(web_contents));
+  if (tab_delegate) {
+    override_tab_delegate_.reset(tab_delegate);
+    web_contents->SetDelegate(tab_delegate);
+  } else {
+    web_contents->SetDelegate(this);
+  }
 
   // Set |this| as a property on the tab contents so that the ConstrainedHtmlUI
   // can get a reference to |this|.
   ConstrainedHtmlUI::GetPropertyAccessor().SetProperty(
-      tab_contents->property_bag(), this);
+      web_contents->GetPropertyBag(), this);
 
-  tab_contents->controller().LoadURL(delegate->GetDialogContentURL(),
-                                     content::Referrer(),
-                                     content::PAGE_TRANSITION_START_PAGE,
-                                     std::string());
+  web_contents->GetController().LoadURL(delegate->GetDialogContentURL(),
+                                        content::Referrer(),
+                                        content::PAGE_TRANSITION_START_PAGE,
+                                        std::string());
 
-  // Create NSWindow to hold tab_contents in the constrained sheet:
+  // Create NSWindow to hold web_contents in the constrained sheet:
   gfx::Size size;
   delegate->GetDialogSize(&size);
   NSRect frame = NSMakeRect(0, 0, size.width(), size.height());
@@ -124,7 +135,7 @@ ConstrainedHtmlDelegateMac::ConstrainedHtmlDelegateMac(
                                     backing:NSBackingStoreBuffered
                                       defer:YES]);
 
-  [window.get() setContentView:tab_contents->GetNativeView()];
+  [window.get() setContentView:web_contents->GetNativeView()];
 
   // Set the custom sheet to point to the new window.
   ConstrainedWindowMacDelegateCustomSheet::init(
@@ -153,10 +164,11 @@ void ConstrainedHtmlDelegateMac::ReleaseTabContentsOnDialogClose() {
 ConstrainedHtmlUIDelegate* ConstrainedHtmlUI::CreateConstrainedHtmlDialog(
     Profile* profile,
     HtmlDialogUIDelegate* delegate,
+    HtmlDialogTabContentsDelegate* tab_delegate,
     TabContentsWrapper* wrapper) {
   // Deleted when ConstrainedHtmlDelegateMac::DeleteDelegate() runs.
   ConstrainedHtmlDelegateMac* constrained_delegate =
-      new ConstrainedHtmlDelegateMac(profile, delegate);
+      new ConstrainedHtmlDelegateMac(profile, delegate, tab_delegate);
   // Deleted when ConstrainedHtmlDelegateMac::OnDialogCloseFromWebUI() runs.
   ConstrainedWindow* constrained_window =
       new ConstrainedWindowMac(wrapper, constrained_delegate);

@@ -1,20 +1,27 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/shell/shell_content_renderer_client.h"
 
+#include "content/shell/shell_render_process_observer.h"
+#include "content/shell/shell_render_view_observer.h"
 #include "v8/include/v8.h"
 
 namespace content {
+
+ShellContentRendererClient::ShellContentRendererClient() {
+}
 
 ShellContentRendererClient::~ShellContentRendererClient() {
 }
 
 void ShellContentRendererClient::RenderThreadStarted() {
+  shell_observer_.reset(new ShellRenderProcessObserver());
 }
 
 void ShellContentRendererClient::RenderViewCreated(RenderView* render_view) {
+  new content::ShellRenderViewObserver(render_view);
 }
 
 void ShellContentRendererClient::SetNumberOfViews(int number_of_views) {
@@ -46,6 +53,20 @@ void ShellContentRendererClient::GetNavigationErrorStrings(
     const WebKit::WebURLError& error,
     std::string* error_html,
     string16* error_description) {
+}
+
+webkit_media::WebMediaPlayerImpl*
+ShellContentRendererClient::OverrideCreateWebMediaPlayer(
+    RenderView* render_view,
+    WebKit::WebFrame* frame,
+    WebKit::WebMediaPlayerClient* client,
+    base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
+    media::FilterCollection* collection,
+    WebKit::WebAudioSourceProvider* audio_source_provider,
+    media::MessageLoopFactory* message_loop_factory,
+    webkit_media::MediaStreamClient* media_stream_client,
+    media::MediaLog* media_log) {
+  return NULL;
 }
 
 bool ShellContentRendererClient::RunIdleHandlerWhenWidgetsHidden() {
@@ -119,10 +140,6 @@ bool ShellContentRendererClient::HandleSetCookieRequest(
 
 void ShellContentRendererClient::RegisterPPAPIInterfaceFactories(
     webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {
-}
-
-bool ShellContentRendererClient::AllowSocketAPI(const GURL& url) {
-  return false;
 }
 
 }  // namespace content

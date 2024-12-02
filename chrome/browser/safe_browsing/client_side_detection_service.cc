@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,13 +12,10 @@
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
-#include "base/task.h"
-#include "base/time.h"
 #include "base/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "chrome/common/net/http_return.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
@@ -47,12 +44,9 @@ const int ClientSideDetectionService::kMaxReportsPerInterval = 3;
 const int ClientSideDetectionService::kClientModelFetchIntervalMs = 3600 * 1000;
 const int ClientSideDetectionService::kInitialClientModelFetchDelayMs = 10000;
 
-const base::TimeDelta ClientSideDetectionService::kReportsInterval =
-    base::TimeDelta::FromDays(1);
-const base::TimeDelta ClientSideDetectionService::kNegativeCacheInterval =
-    base::TimeDelta::FromDays(1);
-const base::TimeDelta ClientSideDetectionService::kPositiveCacheInterval =
-    base::TimeDelta::FromMinutes(30);
+const int ClientSideDetectionService::kReportsIntervalDays = 1;
+const int ClientSideDetectionService::kNegativeCacheIntervalDays = 1;
+const int ClientSideDetectionService::kPositiveCacheIntervalMinutes = 30;
 
 const char ClientSideDetectionService::kClientReportPhishingUrl[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/phishing";
@@ -248,7 +242,7 @@ void ClientSideDetectionService::ScheduleFetchModel(int64 delay_ms) {
       FROM_HERE,
       base::Bind(&ClientSideDetectionService::StartFetchModel,
                  weak_factory_.GetWeakPtr()),
-      delay_ms);
+      base::TimeDelta::FromMilliseconds(delay_ms));
 }
 
 void ClientSideDetectionService::StartFetchModel() {
@@ -383,8 +377,7 @@ void ClientSideDetectionService::HandlePhishingVerdict(
     // Cache response, possibly flushing an old one.
     cache_[info->phishing_url] =
         make_linked_ptr(new CacheState(response.phishy(), base::Time::Now()));
-    is_phishing = (response.phishy() &&
-                   !IsFalsePositiveResponse(info->phishing_url, response));
+    is_phishing = response.phishy();
   } else {
     DLOG(ERROR) << "Unable to get the server verdict for URL: "
                 << info->phishing_url << " status: " << status.status() << " "
@@ -414,8 +407,10 @@ bool ClientSideDetectionService::GetValidCachedResult(const GURL& url,
   // We still need to check if the result is valid.
   const CacheState& cache_state = *it->second;
   if (cache_state.is_phishing ?
-      cache_state.timestamp > base::Time::Now() - kPositiveCacheInterval :
-      cache_state.timestamp > base::Time::Now() - kNegativeCacheInterval) {
+      cache_state.timestamp > base::Time::Now() -
+          base::TimeDelta::FromMinutes(kPositiveCacheIntervalMinutes) :
+      cache_state.timestamp > base::Time::Now() -
+          base::TimeDelta::FromDays(kNegativeCacheIntervalDays)) {
     *is_phishing = cache_state.is_phishing;
     return true;
   }
@@ -428,9 +423,11 @@ void ClientSideDetectionService::UpdateCache() {
   // could be used for this purpose even if we will not use the entry to
   // satisfy the request from the cache.
   base::TimeDelta positive_cache_interval =
-      std::max(kPositiveCacheInterval, kReportsInterval);
+      std::max(base::TimeDelta::FromMinutes(kPositiveCacheIntervalMinutes),
+               base::TimeDelta::FromDays(kReportsIntervalDays));
   base::TimeDelta negative_cache_interval =
-      std::max(kNegativeCacheInterval, kReportsInterval);
+      std::max(base::TimeDelta::FromDays(kNegativeCacheIntervalDays),
+               base::TimeDelta::FromDays(kReportsIntervalDays));
 
   // Remove elements from the cache that will no longer be used.
   for (PhishingCache::iterator it = cache_.begin(); it != cache_.end();) {
@@ -450,7 +447,8 @@ bool ClientSideDetectionService::OverReportLimit() {
 }
 
 int ClientSideDetectionService::GetNumReports() {
-  base::Time cutoff = base::Time::Now() - kReportsInterval;
+  base::Time cutoff =
+      base::Time::Now() - base::TimeDelta::FromDays(kReportsIntervalDays);
 
   // Erase items older than cutoff because we will never care about them again.
   while (!phishing_report_times_.empty() &&
@@ -533,51 +531,5 @@ bool ClientSideDetectionService::ModelHasValidHashIds(
     }
   }
   return true;
-}
-
-// static
-bool ClientSideDetectionService::IsFalsePositiveResponse(
-    const GURL& url,
-    const ClientPhishingResponse& response) {
-  if (!response.phishy() || response.whitelist_expression_size() == 0) {
-    return false;
-  }
-  // This whitelist is special.  A particular URL gets whitelisted if it
-  // matches any of the expressions on the whitelist or if any of the whitelist
-  // entries matches the URL.
-
-  std::string host, path, query;
-  safe_browsing_util::CanonicalizeUrl(url, &host, &path, &query);
-  std::string canonical_url_as_pattern = host + path + query;
-
-  std::vector<std::string> url_patterns;
-  safe_browsing_util::GeneratePatternsToCheck(url, &url_patterns);
-
-  for (int i = 0; i < response.whitelist_expression_size(); ++i) {
-    GURL whitelisted_url(std::string("http://") +
-                         response.whitelist_expression(i));
-    if (!whitelisted_url.is_valid()) {
-      UMA_HISTOGRAM_COUNTS("SBClientPhishing.InvalidWhitelistExpression", 1);
-      continue;  // Skip invalid whitelist expressions.
-    }
-    // First, we check whether the canonical URL matches any of the whitelisted
-    // expressions.
-    for (size_t j = 0; j < url_patterns.size(); ++j) {
-      if (url_patterns[j] == response.whitelist_expression(i)) {
-        return true;
-      }
-    }
-    // Second, we consider the canonical URL as an expression and we check
-    // whether any of the whitelist entries matches that expression.
-    std::vector<std::string> whitelist_patterns;
-    safe_browsing_util::GeneratePatternsToCheck(whitelisted_url,
-                                                &whitelist_patterns);
-    for (size_t j = 0; j < whitelist_patterns.size(); ++j) {
-      if (whitelist_patterns[j] == canonical_url_as_pattern) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 }  // namespace safe_browsing

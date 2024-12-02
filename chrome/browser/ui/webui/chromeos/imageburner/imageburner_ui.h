@@ -5,12 +5,11 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_IMAGEBURNER_IMAGEBURNER_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_IMAGEBURNER_IMAGEBURNER_UI_H_
 
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_ui_controller.h"
 
-class ImageBurnUI : public ChromeWebUI {
+class ImageBurnUI : public content::WebUIController {
  public:
-  explicit ImageBurnUI(TabContents* contents);
+  explicit ImageBurnUI(content::WebUI* web_ui);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ImageBurnUI);

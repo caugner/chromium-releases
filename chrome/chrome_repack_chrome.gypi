@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -7,7 +7,6 @@
     'pak_inputs': [
       '<(grit_out_dir)/browser_resources.pak',
       '<(grit_out_dir)/common_resources.pak',
-      '<(grit_out_dir)/default_plugin_resources/default_plugin_resources.pak',
       '<(grit_out_dir)/renderer_resources.pak',
       '<(grit_out_dir)/theme_resources.pak',
       '<(grit_out_dir)/theme_resources_standard.pak',
@@ -19,7 +18,7 @@
       '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
     ],
     'conditions': [
-      ['OS != "mac"', {
+      ['OS != "mac" or use_aura==1', {
         'pak_inputs': [
           '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
         ]

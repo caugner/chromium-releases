@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,9 @@
 
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/message_loop_helpers.h"
 #include "base/time.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/screen_locker_delegate.h"
@@ -23,6 +24,8 @@ class User;
 
 namespace test {
 class ScreenLockerTester;
+class ScreenLockerViewsTester;
+class WebUIScreenLockerTester;
 }  // namespace test
 
 // ScreenLocker creates a ScreenLockerDelegate which will display the lock UI.
@@ -36,6 +39,8 @@ class ScreenLocker : public LoginStatusConsumer {
   static ScreenLocker* default_screen_locker() {
     return screen_locker_;
   }
+
+  bool locked() const { return locked_; }
 
   // Initialize and show the screen locker.
   void Init();
@@ -70,10 +75,11 @@ class ScreenLocker : public LoginStatusConsumer {
   // button is blocked.
   void ShowErrorMessage(const string16& message, bool sign_out_only);
 
-#if defined(TOOLKIT_USES_GTK)
+  // Returns the screen locker's delegate.
+  ScreenLockerDelegate* delegate() const { return delegate_.get(); }
+
   // Returns the user to authenticate.
   const User& user() const { return user_; }
-#endif
 
   // Allow a LoginStatusConsumer to listen for
   // the same login events that ScreenLocker does.
@@ -90,20 +96,17 @@ class ScreenLocker : public LoginStatusConsumer {
   // Hide the screen locker.
   static void Hide();
 
-  // Queries the value of the webui lock screen flag.
-  static bool UseWebUILockScreen();
-
   // Notifies that PowerManager rejected UnlockScreen request.
   static void UnlockScreenFailed();
 
-#if defined(TOOLKIT_USES_GTK)
   // Returns the tester
   static test::ScreenLockerTester* GetTester();
-#endif
 
  private:
-  friend class DeleteTask<ScreenLocker>;
+  friend class base::DeleteHelper<ScreenLocker>;
   friend class test::ScreenLockerTester;
+  friend class test::ScreenLockerViewsTester;
+  friend class test::WebUIScreenLockerTester;
   friend class ScreenLockerDelegate;
 
   virtual ~ScreenLocker();

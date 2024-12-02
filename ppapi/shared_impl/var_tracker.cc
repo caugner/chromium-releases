@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,6 +100,7 @@ bool VarTracker::ReleaseVar(int32 var_id) {
     } else {
       // All other var types can just be released.
       DCHECK(info.track_with_no_reference_count == 0);
+      info.var->ResetVarID();
       live_vars_.erase(found);
     }
   }
@@ -128,6 +129,21 @@ VarTracker::VarMap::iterator VarTracker::GetLiveVar(int32 id) {
   return live_vars_.find(id);
 }
 
+int VarTracker::GetRefCountForObject(const PP_Var& plugin_object) {
+  VarMap::iterator found = GetLiveVar(plugin_object);
+  if (found == live_vars_.end())
+    return -1;
+  return found->second.ref_count;
+}
+
+int VarTracker::GetTrackedWithNoReferenceCountForObject(
+    const PP_Var& plugin_object) {
+  VarMap::iterator found = GetLiveVar(plugin_object);
+  if (found == live_vars_.end())
+    return -1;
+  return found->second.track_with_no_reference_count;
+}
+
 VarTracker::VarMap::iterator VarTracker::GetLiveVar(const PP_Var& var) {
   return live_vars_.find(static_cast<int32>(var.value.as_id));
 }
@@ -138,7 +154,25 @@ VarTracker::VarMap::const_iterator VarTracker::GetLiveVar(
 }
 
 bool VarTracker::IsVarTypeRefcounted(PP_VarType type) const {
-  return type == PP_VARTYPE_STRING || type == PP_VARTYPE_OBJECT;
+  return type >= PP_VARTYPE_STRING;
+}
+
+PP_Var VarTracker::MakeArrayBufferPPVar(uint32 size_in_bytes) {
+  scoped_refptr<ArrayBufferVar> array_buffer(CreateArrayBuffer(size_in_bytes));
+  if (!array_buffer)
+    return PP_MakeNull();
+  return array_buffer->GetPPVar();
+}
+
+std::vector<PP_Var> VarTracker::GetLiveVars() {
+  std::vector<PP_Var> var_vector;
+  var_vector.reserve(live_vars_.size());
+  for (VarMap::const_iterator iter = live_vars_.begin();
+       iter != live_vars_.end();
+       ++iter) {
+    var_vector.push_back(iter->second.var->GetPPVar());
+  }
+  return var_vector;
 }
 
 void VarTracker::TrackedObjectGettingOneRef(VarMap::const_iterator obj) {
@@ -154,6 +188,7 @@ bool VarTracker::DeleteObjectInfoIfNecessary(VarMap::iterator iter) {
   if (iter->second.ref_count != 0 ||
       iter->second.track_with_no_reference_count != 0)
     return false;  // Object still alive.
+  iter->second.var->ResetVarID();
   live_vars_.erase(iter);
   return true;
 }

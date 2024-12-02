@@ -1,18 +1,22 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef PPAPI_SHARED_IMPL_VAR_TRACKER_H_
 #define PPAPI_SHARED_IMPL_VAR_TRACKER_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
 
 namespace ppapi {
 
+class ArrayBufferVar;
 class Var;
 
 // Tracks non-POD (refcounted) var objects held by a plugin.
@@ -53,6 +57,22 @@ class PPAPI_SHARED_EXPORT VarTracker {
   // be deleted if there are no more refs to it.
   bool ReleaseVar(int32 var_id);
   bool ReleaseVar(const PP_Var& var);
+
+  // Create a new array buffer of size |size_in_bytes|. Return a PP_Var that
+  // that references it and has an initial reference-count of 1.
+  PP_Var MakeArrayBufferPPVar(uint32 size_in_bytes);
+
+  // Return a vector containing all PP_Vars that are in the tracker. This is
+  // to help implement PPB_Testing_Dev.GetLiveVars and should generally not be
+  // used in production code. The PP_Vars are returned in no particular order,
+  // and their reference counts are unaffected.
+  std::vector<PP_Var> GetLiveVars();
+
+  // Retrieves the internal reference counts for testing. Returns 0 if we
+  // know about the object but the corresponding value is 0, or -1 if the
+  // given object ID isn't in our map.
+  int GetRefCountForObject(const PP_Var& object);
+  int GetTrackedWithNoReferenceCountForObject(const PP_Var& object);
 
  protected:
   struct VarInfo {
@@ -125,6 +145,12 @@ class PPAPI_SHARED_EXPORT VarTracker {
 
   // Last assigned var ID.
   int32 last_var_id_;
+
+ private:
+  // Create and return a new ArrayBufferVar size_in_bytes bytes long. This is
+  // implemented by the Host and Plugin tracker separately, so that it can be
+  // a real WebKit ArrayBuffer on the host side.
+  virtual ArrayBufferVar* CreateArrayBuffer(uint32 size_in_bytes) = 0;
 
   DISALLOW_COPY_AND_ASSIGN(VarTracker);
 };

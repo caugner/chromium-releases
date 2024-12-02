@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,17 +10,18 @@
 #include <sstream>
 #include <string>
 
-#include "examples/multithreaded_input_events/custom_events.h"
-#include "examples/multithreaded_input_events/shared_queue.h"
-#include "examples/multithreaded_input_events/thread_safe_ref_count.h"
-
-// NaCl
+// PPAPI headers
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/point.h"
 #include "ppapi/cpp/var.h"
+#include "ppapi/utility/completion_callback_factory.h"
+
+#include "custom_events.h"
+#include "shared_queue.h"
+#include "thread_safe_ref_count.h"
 
 namespace event_queue {
 const char* const kDidChangeView = "DidChangeView";

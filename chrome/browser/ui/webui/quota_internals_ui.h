@@ -5,14 +5,11 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_QUOTA_INTERNALS_UI_H_
 #define CHROME_BROWSER_UI_WEBUI_QUOTA_INTERNALS_UI_H_
 #pragma once
+#include "content/public/browser/web_ui_controller.h"
 
-#include <string>
-
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
-
-class QuotaInternalsUI : public ChromeWebUI {
+class QuotaInternalsUI : public content::WebUIController {
  public:
-  explicit QuotaInternalsUI(TabContents* contents);
+  explicit QuotaInternalsUI(content::WebUI* web_ui);
   virtual ~QuotaInternalsUI() {}
  private:
   DISALLOW_COPY_AND_ASSIGN(QuotaInternalsUI);

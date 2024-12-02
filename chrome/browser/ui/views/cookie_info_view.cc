@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,6 @@
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
-#include "ui/views/controls/tree/tree_view.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 
@@ -58,24 +57,23 @@ CookieInfoView::~CookieInfoView() {
 void CookieInfoView::SetCookie(
     const std::string& domain,
     const net::CookieMonster::CanonicalCookie& cookie) {
-  name_value_field_->SetText(UTF8ToWide(cookie.Name()));
-  content_value_field_->SetText(UTF8ToWide(cookie.Value()));
-  domain_value_field_->SetText(UTF8ToWide(domain));
-  path_value_field_->SetText(UTF8ToWide(cookie.Path()));
+  name_value_field_->SetText(UTF8ToUTF16(cookie.Name()));
+  content_value_field_->SetText(UTF8ToUTF16(cookie.Value()));
+  domain_value_field_->SetText(UTF8ToUTF16(domain));
+  path_value_field_->SetText(UTF8ToUTF16(cookie.Path()));
   created_value_field_->SetText(
       base::TimeFormatFriendlyDateAndTime(cookie.CreationDate()));
 
-  std::wstring expire_text = cookie.DoesExpire() ?
+  string16 expire_text = cookie.DoesExpire() ?
       base::TimeFormatFriendlyDateAndTime(cookie.ExpiryDate()) :
-      UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_SESSION));
+      l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_SESSION);
 
   if (editable_expiration_date_) {
     expire_combo_values_.clear();
     if (cookie.DoesExpire())
       expire_combo_values_.push_back(expire_text);
-    expire_combo_values_.push_back(UTF16ToWide(
-        l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_SESSION)));
+    expire_combo_values_.push_back(
+        l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_SESSION));
     expires_value_combobox_->ModelChanged();
     expires_value_combobox_->SetSelectedItem(0);
     expires_value_combobox_->SetEnabled(true);
@@ -85,10 +83,8 @@ void CookieInfoView::SetCookie(
   }
 
   send_for_value_field_->SetText(cookie.IsSecure() ?
-      UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_SECURE)) :
-      UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_ANY)));
+      l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_SECURE) :
+      l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_ANY));
   EnableCookieDisplay(true);
   Layout();
 }
@@ -102,8 +98,8 @@ void CookieInfoView::SetCookieString(const GURL& url,
 
 
 void CookieInfoView::ClearCookieDisplay() {
-  std::wstring no_cookie_string =
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_NONESELECTED));
+  string16 no_cookie_string =
+      l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_NONESELECTED);
   name_value_field_->SetText(no_cookie_string);
   content_value_field_->SetText(no_cookie_string);
   domain_value_field_->SetText(no_cookie_string);
@@ -154,7 +150,7 @@ int CookieInfoView::GetItemCount() {
 }
 
 string16 CookieInfoView::GetItemAt(int index) {
-  return WideToUTF16Hack(expire_combo_values_[index]);
+  return expire_combo_values_[index];
 }
 
 void CookieInfoView::AddLabelRow(int layout_id, views::GridLayout* layout,
@@ -181,7 +177,11 @@ void CookieInfoView::Init() {
   // Ensure we don't run this more than once and leak memory.
   DCHECK(!name_label_);
 
+#if defined(USE_AURA) || !defined(OS_WIN)
+  SkColor border_color = SK_ColorGRAY;
+#else
   SkColor border_color = color_utils::GetSysSkColor(COLOR_3DSHADOW);
+#endif
   views::Border* border = views::Border::CreateSolidBorder(
       kCookieInfoViewBorderSize, border_color);
   set_border(border);
@@ -251,7 +251,11 @@ void CookieInfoView::Init() {
   }
 
   // Color these borderless text areas the same as the containing dialog.
+#if defined(USE_AURA) || !defined(OS_WIN)
+  SkColor text_area_background = SK_ColorWHITE;
+#else
   SkColor text_area_background = color_utils::GetSysSkColor(COLOR_3DFACE);
+#endif
   // Now that the Textfields are in the view hierarchy, we can initialize them.
   name_value_field_->SetReadOnly(true);
   name_value_field_->RemoveBorder();

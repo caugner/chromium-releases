@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,7 @@
 #include <ole2.h>
 #endif
 
-#include "ui/aura/desktop.h"
-#include "ui/aura/test/test_stacking_client.h"
+#include "ui/aura/root_window.h"
 
 namespace aura {
 namespace test {
@@ -21,10 +20,8 @@ AuraTestBase::AuraTestBase()
   OleInitialize(NULL);
 #endif
 
-  // TestStackingClient is owned by the desktop.
-  new TestStackingClient();
-  Desktop::GetInstance()->Show();
-  Desktop::GetInstance()->SetHostSize(gfx::Size(600, 600));
+  RootWindow::GetInstance()->Show();
+  RootWindow::GetInstance()->SetHostSize(gfx::Size(600, 600));
 }
 
 AuraTestBase::~AuraTestBase() {
@@ -40,14 +37,9 @@ AuraTestBase::~AuraTestBase() {
   // and these tasks if un-executed would upset Valgrind.
   RunAllPendingInMessageLoop();
 
-  // Ensure that we don't use the previously-allocated static Desktop object
+  // Ensure that we don't use the previously-allocated static RootWindow object
   // later -- on Linux, it holds a reference to our message loop's X connection.
-  aura::Desktop::DeleteInstance();
-}
-
-TestStackingClient* AuraTestBase::GetTestStackingClient() {
-  return static_cast<TestStackingClient*>(
-      aura::Desktop::GetInstance()->stacking_client());
+  aura::RootWindow::DeleteInstance();
 }
 
 void AuraTestBase::SetUp() {
@@ -61,8 +53,10 @@ void AuraTestBase::TearDown() {
 }
 
 void AuraTestBase::RunAllPendingInMessageLoop() {
+#if !defined(OS_MACOSX)
   message_loop_.RunAllPendingWithDispatcher(
-      Desktop::GetInstance()->GetDispatcher());
+      RootWindow::GetInstance()->GetDispatcher());
+#endif
 }
 
 }  // namespace test

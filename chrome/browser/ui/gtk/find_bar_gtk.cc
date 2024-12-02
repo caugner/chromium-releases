@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
+#include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
@@ -32,17 +34,18 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
+#include "ui/gfx/image/image.h"
 
 namespace {
 
@@ -341,7 +344,7 @@ void FindBarGtk::SetFocusAndSelection() {
   StoreOutsideFocus();
   gtk_widget_grab_focus(text_entry_);
   // Select all the text.
-  gtk_entry_select_region(GTK_ENTRY(text_entry_), 0, -1);
+  gtk_editable_select_region(GTK_EDITABLE(text_entry_), 0, -1);
 }
 
 void FindBarGtk::ClearResults(const FindNotificationDetails& results) {
@@ -390,7 +393,7 @@ void FindBarGtk::UpdateUIForFindResult(const FindNotificationDetails& result,
   std::string entry_text(gtk_entry_get_text(GTK_ENTRY(text_entry_)));
   if (entry_text != find_text_utf8) {
     SetFindText(find_text);
-    gtk_entry_select_region(GTK_ENTRY(text_entry_), 0, -1);
+    gtk_editable_select_region(GTK_EDITABLE(text_entry_), 0, -1);
   }
 
   if (!find_text.empty() && have_valid_range) {
@@ -422,8 +425,11 @@ gfx::Rect FindBarGtk::GetDialogPosition(gfx::Rect avoid_overlapping_rect) {
   // The height is not used.
   // At very low browser widths we can wind up with a negative |dialog_bounds|
   // width, so clamp it to 0.
+  GtkAllocation parent_allocation;
+  gtk_widget_get_allocation(gtk_widget_get_parent(widget()),
+                            &parent_allocation);
   gfx::Rect dialog_bounds = gfx::Rect(ltr ? 0 : 15, 0,
-      std::max(0, widget()->parent->allocation.width - (ltr ? 15 : 0)), 0);
+      std::max(0, parent_allocation.width - (ltr ? 15 : 0)), 0);
 
   GtkRequisition req;
   gtk_widget_size_request(container_, &req);
@@ -451,7 +457,7 @@ void FindBarGtk::RestoreSavedFocus() {
   if (focus_store_.widget())
     gtk_widget_grab_focus(focus_store_.widget());
   else
-    find_bar_controller_->tab_contents()->tab_contents()->Focus();
+    find_bar_controller_->tab_contents()->web_contents()->Focus();
 }
 
 FindBarTesting* FindBarGtk::GetFindBarTesting() {
@@ -531,7 +537,7 @@ void FindBarGtk::Observe(int type,
 
     gtk_misc_set_alignment(GTK_MISC(match_count_label_), 0.5, 1.0);
 
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button_->SetBackground(
         theme_service_->GetColor(ThemeService::COLOR_TAB_TEXT),
         rb.GetBitmapNamed(IDR_CLOSE_BAR),
@@ -575,7 +581,9 @@ string16 FindBarGtk::GetMatchCountText() {
 }
 
 int FindBarGtk::GetWidth() {
-  return container_->allocation.width;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(container_, &allocation);
+  return allocation.width;
 }
 
 void FindBarGtk::FindEntryTextInContents(bool forward_search) {
@@ -597,7 +605,8 @@ void FindBarGtk::FindEntryTextInContents(bool forward_search) {
     // Clearing the text box should also clear the prepopulate state so that
     // when we close and reopen the Find box it doesn't show the search we
     // just deleted.
-    FindBarState* find_bar_state = browser_->profile()->GetFindBarState();
+    FindBarState* find_bar_state = FindBarStateFactory::GetForProfile(
+        browser_->profile());
     find_bar_state->set_last_prepopulate_text(string16());
   }
 }
@@ -666,7 +675,8 @@ bool FindBarGtk::MaybeForwardKeyEventToRenderer(GdkEventKey* event) {
   if (!contents)
     return false;
 
-  RenderViewHost* render_view_host = contents->render_view_host();
+  RenderViewHost* render_view_host =
+      contents->web_contents()->GetRenderViewHost();
 
   // Make sure we don't have a text field element interfering with keyboard
   // input. Otherwise Up and Down arrow key strokes get eaten. "Nom Nom Nom".
@@ -729,7 +739,7 @@ void FindBarGtk::OnParentSet(GtkWidget* widget, GtkObject* old_parent,
   if (!widget->parent)
     return;
 
-  g_signal_connect(widget->parent, "set-floating-position",
+  g_signal_connect(gtk_widget_get_parent(widget), "set-floating-position",
                    G_CALLBACK(OnSetFloatingPosition), find_bar);
 }
 
@@ -810,6 +820,7 @@ void FindBarGtk::OnClicked(GtkWidget* button) {
 gboolean FindBarGtk::OnContentEventBoxExpose(GtkWidget* widget,
                                              GdkEventExpose* event,
                                              FindBarGtk* bar) {
+  TRACE_EVENT0("ui::gtk", "FindBarGtk::OnContentEventBoxExpose");
   if (bar->theme_service_->UsingNativeTheme()) {
     // Draw the text entry background around where we input stuff. Note the
     // decrement to |width|. We do this because some theme engines
@@ -830,6 +841,8 @@ gboolean FindBarGtk::OnContentEventBoxExpose(GtkWidget* widget,
 // Used to handle custom painting of |container_|.
 gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
                               FindBarGtk* bar) {
+  TRACE_EVENT0("ui::gtk", "FindBarGtk::OnExpose");
+
   GtkAllocation allocation;
   gtk_widget_get_allocation(widget, &allocation);
 
@@ -842,8 +855,9 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
                                                   mask_points.size(),
                                                   GDK_EVEN_ODD_RULE);
       // Reset the shape.
-      gdk_window_shape_combine_region(widget->window, NULL, 0, 0);
-      gdk_window_shape_combine_region(widget->window, mask_region, 0, 0);
+      GdkWindow* gdk_window = gtk_widget_get_window(widget);
+      gdk_window_shape_combine_region(gdk_window, NULL, 0, 0);
+      gdk_window_shape_combine_region(gdk_window, mask_region, 0, 0);
       gdk_region_destroy(mask_region);
 
       bar->container_width_ = allocation.width;
@@ -866,7 +880,8 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
     if (bar->container_width_ != allocation.width ||
         bar->container_height_ != allocation.height) {
       // Reset the shape.
-      gdk_window_shape_combine_region(widget->window, NULL, 0, 0);
+      gdk_window_shape_combine_region(gtk_widget_get_window(widget),
+                                      NULL, 0, 0);
       SetDialogShape(bar->container_);
 
       bar->container_width_ = allocation.width;
@@ -890,9 +905,9 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
     GtkAllocation border_allocation = bar->border_bin_->allocation;
 
     // Blit the left part of the background image once on the left.
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     gfx::CairoCachedSurface* background_left =
-        bar->theme_service_->GetRTLEnabledSurfaceNamed(
-        IDR_FIND_BOX_BACKGROUND_LEFT, widget);
+        rb.GetRTLEnabledImageNamed(IDR_FIND_BOX_BACKGROUND_LEFT).ToCairo();
     background_left->SetSource(cr, widget,
                                border_allocation.x, border_allocation.y);
     cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
@@ -901,8 +916,8 @@ gboolean FindBarGtk::OnExpose(GtkWidget* widget, GdkEventExpose* e,
     cairo_fill(cr);
 
     // Blit the center part of the background image in all the space between.
-    gfx::CairoCachedSurface* background = bar->theme_service_->GetSurfaceNamed(
-        IDR_FIND_BOX_BACKGROUND, widget);
+    gfx::CairoCachedSurface* background =
+        rb.GetNativeImageNamed(IDR_FIND_BOX_BACKGROUND).ToCairo();
     background->SetSource(cr, widget,
                           border_allocation.x + background_left->Width(),
                           border_allocation.y);

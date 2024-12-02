@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,13 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/threading/thread_local.h"
+#include "base/tracked_objects.h"
 
 namespace base {
 
 namespace {
 
-LazyInstance<ThreadLocalPointer<char>,
-             LeakyLazyInstanceTraits<ThreadLocalPointer<char> > >
+LazyInstance<ThreadLocalPointer<char> >::Leaky
     current_thread_name = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -48,6 +48,7 @@ void InitThreading() {
 // static
 void PlatformThread::SetName(const char* name) {
   current_thread_name.Pointer()->Set(const_cast<char*>(name));
+  tracked_objects::ThreadData::InitializeThreadContext(name);
 
   // pthread_setname_np is only available in 10.6 or later, so test
   // for it at runtime.

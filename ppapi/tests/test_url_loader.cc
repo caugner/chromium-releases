@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <string>
 
 #include "ppapi/c/dev/ppb_testing_dev.h"
-#include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppb_file_io.h"
 #include "ppapi/c/ppb_url_loader.h"
@@ -64,29 +63,21 @@ TestURLLoader::TestURLLoader(TestingInstance* instance)
 }
 
 bool TestURLLoader::Init() {
-  if (!InitTestingInterface()) {
+  if (!CheckTestingInterface()) {
     instance_->AppendError("Testing interface not available");
     return false;
   }
 
   const PPB_FileIO* file_io_interface = static_cast<const PPB_FileIO*>(
       pp::Module::Get()->GetBrowserInterface(PPB_FILEIO_INTERFACE));
-  if (testing_interface_->IsOutOfProcess() && file_io_interface) {
-    instance_->AppendError(
-        "FileIO interface is now supported by ppapi proxy: update this test!");
-  } else if (!testing_interface_->IsOutOfProcess() && !file_io_interface) {
+  if (!file_io_interface)
     instance_->AppendError("FileIO interface not available");
-  }
 
   file_io_trusted_interface_ = static_cast<const PPB_FileIOTrusted*>(
       pp::Module::Get()->GetBrowserInterface(PPB_FILEIOTRUSTED_INTERFACE));
   url_loader_trusted_interface_ = static_cast<const PPB_URLLoaderTrusted*>(
       pp::Module::Get()->GetBrowserInterface(PPB_URLLOADERTRUSTED_INTERFACE));
-  if  (testing_interface_->IsOutOfProcess() && file_io_trusted_interface_) {
-    instance_->AppendError(
-        "FileIOTrusted interface is now supported by ppapi proxy: "
-        "update this test!");
-  } else if (!testing_interface_->IsOutOfProcess()) {
+  if (!testing_interface_->IsOutOfProcess()) {
     // Trusted interfaces are not supported under NaCl.
 #if !(defined __native_client__)
     if (!file_io_trusted_interface_)
@@ -106,34 +97,27 @@ bool TestURLLoader::Init() {
 void TestURLLoader::RunTests(const std::string& filter) {
   RUN_TEST_FORCEASYNC_AND_NOT(BasicGET, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(BasicPOST, filter);
-  // FileIO interface is not yet supported by ppapi/proxy.
-  if (!testing_interface_->IsOutOfProcess()) {
-    RUN_TEST_FORCEASYNC_AND_NOT(BasicFilePOST, filter);
-    RUN_TEST_FORCEASYNC_AND_NOT(BasicFileRangePOST, filter);
-  }
+  RUN_TEST_FORCEASYNC_AND_NOT(BasicFilePOST, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(BasicFileRangePOST, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(CompoundBodyPOST, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(EmptyDataPOST, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(BinaryDataPOST, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(CustomRequestHeader, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(FailsBogusContentLength, filter);
-  // TODO(bbudge) Enable these tests for NaCl when we have a way to get
-  // the document URL. The PPAPI tests use PPB_URLUtil_Dev.
-#if !(defined __native_client__)
-  RUN_TEST_FORCEASYNC_AND_NOT(SameOriginRestriction, filter);
-  // Cross origin requests require the 'test_case.html.mock-http-headers'
-  // file to be in the same directory as 'test_case.html', so that the test
-  // server returns CORS response headers.
-  RUN_TEST_FORCEASYNC_AND_NOT(CrossOriginRequest, filter);
-#endif
-  RUN_TEST_FORCEASYNC_AND_NOT(JavascriptURLRestriction, filter);
-  RUN_TEST_FORCEASYNC_AND_NOT(MethodRestriction, filter);
-  RUN_TEST_FORCEASYNC_AND_NOT(HeaderRestriction, filter);
-  RUN_TEST_FORCEASYNC_AND_NOT(CustomReferrer, filter);
-  RUN_TEST_FORCEASYNC_AND_NOT(CustomContentTransferEncoding, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(StreamToFile, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedSameOriginRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedSameOriginRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedCrossOriginRequest, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedCrossOriginRequest, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedJavascriptURLRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedJavascriptURLRestriction, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(UntrustedHttpRequests, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(TrustedHttpRequests, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(FollowURLRedirect, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(AuditURLRedirect, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(AbortCalls, filter);
   RUN_TEST_FORCEASYNC_AND_NOT(UntendedLoad, filter);
+  RUN_TEST_FORCEASYNC_AND_NOT(PrefetchBufferThreshold, filter);
 }
 
 std::string TestURLLoader::ReadEntireFile(pp::FileIO* file_io,
@@ -262,29 +246,34 @@ int32_t TestURLLoader::PrepareFileForPost(
   return rv;
 }
 
-std::string TestURLLoader::GetReachableCrossOriginURL() {
-  // Get the document URL and use it to construct a URL that will be
-  // considered cross-origin by the WebKit access control code, and yet be
+std::string TestURLLoader::GetReachableAbsoluteURL(
+    const std::string& file_name) {
+  // Get the absolute page URL and replace the test case file name
+  // with the given one.
+  pp::Var document_url(
+      pp::Var::PassRef(),
+      testing_interface_->GetDocumentURL(instance_->pp_instance(),
+                                         NULL));
+  std::string url(document_url.AsString());
+  std::string old_name("test_case.html");
+  size_t index = url.find(old_name);
+  ASSERT_NE(index, std::string::npos);
+  url.replace(index, old_name.length(), file_name);
+  return url;
+}
+
+std::string TestURLLoader::GetReachableCrossOriginURL(
+    const std::string& file_name) {
+  // Get an absolute URL and use it to construct a URL that will be
+  // considered cross-origin by the CORS access control code, and yet be
   // reachable by the test server.
-  PP_URLComponents_Dev components;
-  pp::Var pp_document_url = pp::URLUtil_Dev::Get()->GetDocumentURL(
-      *instance_, &components);
-  std::string document_url = pp_document_url.AsString();
-  // Replace "127.0.0.1" with "localhost". Or vice versa.
-  bool changedHost = false;
-  if (document_url.find("127.0.0.1") != std::string::npos) {
-    document_url.replace(components.host.begin,
-                         components.host.len,
-                         "localhost");
-    changedHost = true;
-  } else if (document_url.find("localhost") != std::string::npos) {
-    document_url.replace(components.host.begin,
-                         components.host.len,
-                         "127.0.0.1");
-    changedHost = true;
-  }
-  ASSERT_TRUE(changedHost);
-  return document_url;
+  std::string url = GetReachableAbsoluteURL(file_name);
+  // Replace '127.0.0.1' with 'localhost'.
+  std::string host("127.0.0.1");
+  size_t index = url.find(host);
+  ASSERT_NE(index, std::string::npos);
+  url.replace(index, host.length(), "localhost");
+  return url;
 }
 
 int32_t TestURLLoader::OpenUntrusted(const std::string& method,
@@ -479,213 +468,249 @@ std::string TestURLLoader::TestStreamToFile() {
     return ReportError("URLLoader::FinishStreamingToFile", rv);
 
   // FileIO is not yet supported by ppapi/proxy.
+  pp::FileIO reader(instance_);
+  rv = reader.Open(body, PP_FILEOPENFLAG_READ, callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("FileIO::Open force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("FileIO::Open", rv);
+
+  std::string data;
+  std::string error = ReadEntireFile(&reader, &data);
+  if (!error.empty())
+    return error;
+
+  std::string expected_body = "hello\n";
+  if (data.size() != expected_body.size())
+    return "ReadEntireFile returned unexpected content length";
+  if (data != expected_body)
+    return "ReadEntireFile returned unexpected content";
+
+  // FileIOTrusted is not supported by NaCl or ppapi/proxy.
   if (!testing_interface_->IsOutOfProcess()) {
-    pp::FileIO reader(instance_);
-    rv = reader.Open(body, PP_FILEOPENFLAG_READ, callback);
-    if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
-      return ReportError("FileIO::Open force_async", rv);
-    if (rv == PP_OK_COMPLETIONPENDING)
-      rv = callback.WaitForResult();
-    if (rv != PP_OK)
-      return ReportError("FileIO::Open", rv);
-
-    std::string data;
-    std::string error = ReadEntireFile(&reader, &data);
-    if (!error.empty())
-      return error;
-
-    std::string expected_body = "hello\n";
-    if (data.size() != expected_body.size())
-      return "ReadEntireFile returned unexpected content length";
-    if (data != expected_body)
-      return "ReadEntireFile returned unexpected content";
-
-    // FileIOTrusted is not supported by NaCl or ppapi/proxy.
-    if (!testing_interface_->IsOutOfProcess()) {
 #if !(defined __native_client__)
-      int32_t file_descriptor = file_io_trusted_interface_->GetOSFileDescriptor(
-          reader.pp_resource());
-      if (file_descriptor < 0)
-        return "FileIO::GetOSFileDescriptor() returned a bad file descriptor.";
+    int32_t file_descriptor = file_io_trusted_interface_->GetOSFileDescriptor(
+        reader.pp_resource());
+    if (file_descriptor < 0)
+      return "FileIO::GetOSFileDescriptor() returned a bad file descriptor.";
 #endif
-    }
   }
   PASS();
 }
 
-// If a cross-origin request is not specified, the load should fail only for
-// untrusted loaders.
-std::string TestURLLoader::TestSameOriginRestriction() {
+// Untrusted, unintended cross-origin requests should fail.
+std::string TestURLLoader::TestUntrustedSameOriginRestriction() {
   pp::URLRequestInfo request(instance_);
-  std::string cross_origin_url = GetReachableCrossOriginURL();
+  std::string cross_origin_url = GetReachableCrossOriginURL("test_case.html");
   request.SetURL(cross_origin_url);
 
-  int32_t rv;
-  rv = OpenUntrusted(request);
+  int32_t rv = OpenUntrusted(request);
   if (rv != PP_ERROR_NOACCESS)
     return ReportError(
         "Untrusted, unintended cross-origin request restriction", rv);
-#if !(defined __native_client__)
-  rv = OpenTrusted(request);
-  if (rv != PP_OK)
-    return ReportError("Trusted cross-origin request", rv);
-#endif
 
   PASS();
 }
 
-// If a cross-origin request is specified, and the URL is reachable, the load
-// should succeed.
-std::string TestURLLoader::TestCrossOriginRequest() {
+// Trusted, unintended cross-origin requests should succeed.
+std::string TestURLLoader::TestTrustedSameOriginRestriction() {
   pp::URLRequestInfo request(instance_);
-  std::string cross_origin_url = GetReachableCrossOriginURL();
+  std::string cross_origin_url = GetReachableCrossOriginURL("test_case.html");
+  request.SetURL(cross_origin_url);
+
+  int32_t rv = OpenTrusted(request);
+  if (rv != PP_OK)
+    return ReportError("Trusted cross-origin request failed", rv);
+
+  PASS();
+}
+
+// Untrusted, intended cross-origin requests should use CORS and succeed.
+std::string TestURLLoader::TestUntrustedCrossOriginRequest() {
+  pp::URLRequestInfo request(instance_);
+  std::string cross_origin_url = GetReachableCrossOriginURL("test_case.html");
   request.SetURL(cross_origin_url);
   request.SetAllowCrossOriginRequests(true);
 
-  int32_t rv;
-  rv = OpenUntrusted(request);
+  int32_t rv = OpenUntrusted(request);
   if (rv != PP_OK)
     return ReportError(
-        "Untrusted, intended cross-origin request", rv);
-#if !(defined __native_client__)
-  rv = OpenTrusted(request);
-  if (rv != PP_OK)
-    return ReportError("Trusted cross-origin request", rv);
-#endif
+        "Untrusted, intended cross-origin request failed", rv);
 
   PASS();
 }
 
-// Javascript URLs are only reachable by trusted loaders.
-std::string TestURLLoader::TestJavascriptURLRestriction() {
+// Trusted, intended cross-origin requests should use CORS and succeed.
+std::string TestURLLoader::TestTrustedCrossOriginRequest() {
+  pp::URLRequestInfo request(instance_);
+  std::string cross_origin_url = GetReachableCrossOriginURL("test_case.html");
+  request.SetURL(cross_origin_url);
+  request.SetAllowCrossOriginRequests(true);
+
+  int32_t rv = OpenTrusted(request);
+  if (rv != PP_OK)
+    return ReportError("Trusted cross-origin request failed", rv);
+
+  PASS();
+}
+
+// Untrusted Javascript URLs requests should fail.
+std::string TestURLLoader::TestUntrustedJavascriptURLRestriction() {
   pp::URLRequestInfo request(instance_);
   request.SetURL("javascript:foo = bar");
 
-  int32_t rv;
-  rv = OpenUntrusted(request);
+  int32_t rv = OpenUntrusted(request);
   if (rv != PP_ERROR_NOACCESS)
     return ReportError(
-        "Untrusted Javascript URL request restriction", rv);
-#if !(defined __native_client__)
-  // TODO(bbudge) Fix Javascript URLs for trusted loaders.
-  // http://code.google.com/p/chromium/issues/detail?id=103062
-  // rv = OpenTrusted(request);
-  // if (rv == PP_ERROR_NOACCESS)
-  //  return ReportError(
-  //      "Trusted Javascript URL request", rv);
-#endif
+        "Untrusted Javascript URL request restriction failed", rv);
 
   PASS();
 }
 
-// HTTP methods are restricted only for untrusted loaders. Forbidden
-// methods are CONNECT, TRACE, and TRACK, and any string that is not a valid
-// token (containing special characters like CR, LF).
-// http://www.w3.org/TR/XMLHttpRequest/
-std::string TestURLLoader::TestMethodRestriction() {
-  ASSERT_EQ(OpenUntrusted("cOnNeCt", ""), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("tRaCk", ""), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("tRaCe", ""), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("POST\x0d\x0ax-csrf-token:\x20test1234", ""),
-                          PP_ERROR_NOACCESS);
-#if !(defined __native_client__)
-  ASSERT_EQ(OpenTrusted("cOnNeCt", ""), PP_OK);
-  ASSERT_EQ(OpenTrusted("tRaCk", ""), PP_OK);
-  ASSERT_EQ(OpenTrusted("tRaCe", ""), PP_OK);
-#endif
-
-  PASS();
-}
-
-// HTTP methods are restricted only for untrusted loaders. Try all headers
-// that are forbidden by http://www.w3.org/TR/XMLHttpRequest/.
-std::string TestURLLoader::TestHeaderRestriction() {
-  ASSERT_EQ(OpenUntrusted("GET", "Accept-Charset:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Accept-Encoding:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Connection:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Content-Length:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Cookie:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Cookie2:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted(
-      "GET", "Content-Transfer-Encoding:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Date:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Expect:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Host:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Keep-Alive:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Referer:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "TE:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Trailer:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Transfer-Encoding:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Upgrade:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "User-Agent:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Via:\n"), PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted(
-      "GET", "Proxy-Authorization: Basic dXNlcjpwYXNzd29yZA==:\n"),
-          PP_ERROR_NOACCESS);
-  ASSERT_EQ(OpenUntrusted("GET", "Sec-foo:\n"), PP_ERROR_NOACCESS);
-
-#if !(defined __native_client__)
-  ASSERT_EQ(OpenTrusted("GET", "Accept-Charset:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Accept-Encoding:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Connection:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Content-Length:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Cookie:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Cookie2:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted(
-      "GET", "Content-Transfer-Encoding:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Date:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Expect:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Host:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Keep-Alive:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Referer:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "TE:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Trailer:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Transfer-Encoding:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Upgrade:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "User-Agent:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Via:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted(
-      "GET", "Proxy-Authorization: Basic dXNlcjpwYXNzd29yZA==:\n"), PP_OK);
-  ASSERT_EQ(OpenTrusted("GET", "Sec-foo:\n"), PP_OK);
-#endif
-
-  PASS();
-}
-
-// Custom referrers are only allowed for trusted loaders.
-std::string TestURLLoader::TestCustomReferrer() {
+// Trusted Javascript URLs requests should succeed.
+std::string TestURLLoader::TestTrustedJavascriptURLRestriction() {
   pp::URLRequestInfo request(instance_);
-  request.SetCustomReferrerURL("http://www.google.com/");
+  request.SetURL("javascript:foo = bar");
 
-  int32_t rv;
-  rv = OpenUntrusted(request);
-  if (rv != PP_ERROR_NOACCESS)
-    return ReportError(
-        "Untrusted request with custom referrer restriction", rv);
-#if !(defined __native_client__)
-  rv = OpenTrusted(request);
-  if (rv != PP_OK)
-    return ReportError("Trusted request with custom referrer", rv);
-#endif
+  int32_t rv = OpenTrusted(request);
+  if (rv == PP_ERROR_NOACCESS)
+  return ReportError(
+      "Trusted Javascript URL request", rv);
+
   PASS();
 }
 
-// Custom transfer encodings are only allowed for trusted loaders.
-std::string TestURLLoader::TestCustomContentTransferEncoding() {
-  pp::URLRequestInfo request(instance_);
-  request.SetCustomContentTransferEncoding("foo");
+std::string TestURLLoader::TestUntrustedHttpRequests() {
+  // HTTP methods are restricted only for untrusted loaders. Forbidden
+  // methods are CONNECT, TRACE, and TRACK, and any string that is not a
+  // valid token (containing special characters like CR, LF).
+  // http://www.w3.org/TR/XMLHttpRequest/
+  {
+    ASSERT_EQ(OpenUntrusted("cOnNeCt", ""), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("tRaCk", ""), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("tRaCe", ""), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("POST\x0d\x0ax-csrf-token:\x20test1234", ""),
+                            PP_ERROR_NOACCESS);
+  }
+  // HTTP methods are restricted only for untrusted loaders. Try all headers
+  // that are forbidden by http://www.w3.org/TR/XMLHttpRequest/.
+  {
+    ASSERT_EQ(OpenUntrusted("GET", "Accept-Charset:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Accept-Encoding:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Connection:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Content-Length:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Cookie:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Cookie2:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted(
+        "GET", "Content-Transfer-Encoding:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Date:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Expect:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Host:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Keep-Alive:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Referer:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "TE:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Trailer:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted(
+        "GET", "Transfer-Encoding:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Upgrade:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "User-Agent:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Via:\n"), PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted(
+        "GET", "Proxy-Authorization: Basic dXNlcjpwYXNzd29yZA==:\n"),
+            PP_ERROR_NOACCESS);
+    ASSERT_EQ(OpenUntrusted("GET", "Sec-foo:\n"), PP_ERROR_NOACCESS);
+  }
+  // Untrusted requests with custom referrer should fail.
+  {
+    pp::URLRequestInfo request(instance_);
+    request.SetCustomReferrerURL("http://www.google.com/");
 
-  int32_t rv;
-  rv = OpenUntrusted(request);
-  if (rv != PP_ERROR_NOACCESS)
-    return ReportError(
-        "Untrusted request with content-transfer-encoding restriction", rv);
-#if !(defined __native_client__)
-  rv = OpenTrusted(request);
-  if (rv != PP_OK)
-    return ReportError("Trusted request with content-transfer-encoding", rv);
-#endif
+    int32_t rv = OpenUntrusted(request);
+    if (rv != PP_ERROR_NOACCESS)
+      return ReportError(
+          "Untrusted request with custom referrer restriction", rv);
+  }
+  // Untrusted requests with custom transfer encodings should fail.
+  {
+    pp::URLRequestInfo request(instance_);
+    request.SetCustomContentTransferEncoding("foo");
+
+    int32_t rv = OpenUntrusted(request);
+    if (rv != PP_ERROR_NOACCESS)
+      return ReportError(
+          "Untrusted request with content-transfer-encoding restriction", rv);
+  }
+
   PASS();
+}
+
+std::string TestURLLoader::TestTrustedHttpRequests() {
+  // Trusted requests can use restricted methods.
+  {
+    ASSERT_EQ(OpenTrusted("cOnNeCt", ""), PP_OK);
+    ASSERT_EQ(OpenTrusted("tRaCk", ""), PP_OK);
+    ASSERT_EQ(OpenTrusted("tRaCe", ""), PP_OK);
+  }
+  // Trusted requests can use restricted headers.
+  {
+    ASSERT_EQ(OpenTrusted("GET", "Accept-Charset:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Accept-Encoding:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Connection:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Content-Length:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Cookie:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Cookie2:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted(
+        "GET", "Content-Transfer-Encoding:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Date:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Expect:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Host:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Keep-Alive:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Referer:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "TE:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Trailer:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Transfer-Encoding:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Upgrade:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "User-Agent:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Via:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted(
+        "GET", "Proxy-Authorization: Basic dXNlcjpwYXNzd29yZA==:\n"), PP_OK);
+    ASSERT_EQ(OpenTrusted("GET", "Sec-foo:\n"), PP_OK);
+  }
+  // Trusted requests with custom referrer should succeed.
+  {
+    pp::URLRequestInfo request(instance_);
+    request.SetCustomReferrerURL("http://www.google.com/");
+
+    int32_t rv = OpenTrusted(request);
+    if (rv != PP_OK)
+      return ReportError("Trusted request with custom referrer", rv);
+  }
+  // Trusted requests with custom transfer encodings should succeed.
+  {
+    pp::URLRequestInfo request(instance_);
+    request.SetCustomContentTransferEncoding("foo");
+
+    int32_t rv = OpenTrusted(request);
+    if (rv != PP_OK)
+      return ReportError(
+          "Trusted request with content-transfer-encoding failed", rv);
+  }
+
+  PASS();
+}
+
+// This test should cause a redirect and ensure that the loader follows it.
+std::string TestURLLoader::TestFollowURLRedirect() {
+  pp::URLRequestInfo request(instance_);
+  // This prefix causes the test server to return a 301 redirect.
+  std::string redirect_prefix("/server-redirect?");
+  // We need an absolute path for the redirect to actually work.
+  std::string redirect_url =
+      GetReachableAbsoluteURL("test_url_loader_data/hello.txt");
+  request.SetURL(redirect_prefix.append(redirect_url));
+  return LoadAndCompareBody(request, "hello\n");
 }
 
 // This test should cause a redirect and ensure that the loader runs
@@ -693,7 +718,12 @@ std::string TestURLLoader::TestCustomContentTransferEncoding() {
 std::string TestURLLoader::TestAuditURLRedirect() {
   pp::URLRequestInfo request(instance_);
   // This path will cause the server to return a 301 redirect.
-  request.SetURL("/server-redirect?www.google.com");
+  // This prefix causes the test server to return a 301 redirect.
+  std::string redirect_prefix("/server-redirect?");
+  // We need an absolute path for the redirect to actually work.
+  std::string redirect_url =
+      GetReachableAbsoluteURL("test_url_loader_data/hello.txt");
+  request.SetURL(redirect_prefix.append(redirect_url));
   request.SetFollowRedirects(false);
 
   TestCompletionCallback callback(instance_->pp_instance(), force_async_);
@@ -715,8 +745,24 @@ std::string TestURLLoader::TestAuditURLRedirect() {
   int32_t status_code = response_info.GetStatusCode();
   if (status_code != 301)
     return "Response status should be 301";
-  if (response_info.GetRedirectURL().AsString() != "www.google.com")
-    return "Redirect URL should be www.google.com";
+
+  // Test that the paused loader can be resumed.
+  TestCompletionCallback redirect_callback(instance_->pp_instance(),
+                                           force_async_);
+  rv = loader.FollowRedirect(redirect_callback);
+  if (force_async_ && rv != PP_OK_COMPLETIONPENDING)
+    return ReportError("URLLoader::FollowRedirect force_async", rv);
+  if (rv == PP_OK_COMPLETIONPENDING)
+    rv = redirect_callback.WaitForResult();
+  if (rv != PP_OK)
+    return ReportError("URLLoader::FollowRedirect", rv);
+  std::string body;
+  std::string error = ReadEntireResponseBody(&loader, &body);
+  if (!error.empty())
+    return error;
+
+  if (body != "hello\n")
+    return "URLLoader::FollowRedirect failed";
 
   PASS();
 }
@@ -826,5 +872,37 @@ std::string TestURLLoader::TestUntendedLoad() {
   PASS();
 }
 
-// TODO(viettrungluu): Add tests for FollowRedirect,
-// Get{Upload,Download}Progress, Close (including abort tests if applicable).
+int32_t TestURLLoader::OpenWithPrefetchBufferThreshold(int32_t lower,
+                                                       int32_t upper) {
+  pp::URLRequestInfo request(instance_);
+  request.SetURL("test_url_loader_data/hello.txt");
+  request.SetPrefetchBufferLowerThreshold(lower);
+  request.SetPrefetchBufferUpperThreshold(upper);
+
+  return OpenUntrusted(request);
+}
+
+std::string TestURLLoader::TestPrefetchBufferThreshold() {
+  int32_t rv = OpenWithPrefetchBufferThreshold(-1, 1);
+  if (rv != PP_ERROR_FAILED) {
+    return ReportError("The prefetch limits contained a negative value but "
+                       "the URLLoader did not fail.", rv);
+  }
+
+  rv = OpenWithPrefetchBufferThreshold(0, 1);
+  if (rv != PP_OK) {
+    return ReportError("The prefetch buffer limits were legal values but "
+                       "the URLLoader failed.", rv);
+  }
+
+  rv = OpenWithPrefetchBufferThreshold(1000, 1);
+  if (rv != PP_ERROR_FAILED) {
+    return ReportError("The lower buffer value was higher than the upper but "
+                       "the URLLoader did not fail.", rv);
+  }
+
+  PASS();
+}
+
+// TODO(viettrungluu): Add tests for  Get{Upload,Download}Progress, Close
+// (including abort tests if applicable).

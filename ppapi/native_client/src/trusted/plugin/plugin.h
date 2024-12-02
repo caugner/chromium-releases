@@ -1,5 +1,5 @@
 // -*- c++ -*-
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,6 +33,7 @@
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/url_loader.h"
 #include "ppapi/cpp/var.h"
+#include "ppapi/cpp/view.h"
 
 struct NaClSrpcChannel;
 
@@ -84,7 +85,7 @@ class Plugin : public pp::InstancePrivate {
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
 
   // Handles view changes from the browser.
-  virtual void DidChangeView(const pp::Rect& position, const pp::Rect& clip);
+  virtual void DidChangeView(const pp::View& view);
 
   // Handles gaining or losing focus.
   virtual void DidChangeFocus(bool has_focus);
@@ -149,6 +150,7 @@ class Plugin : public pp::InstancePrivate {
   // Does not update nacl_module_origin().
   // Returns kInvalidNaClSubprocessId or the ID of the new helper NaCl module.
   NaClSubprocessId LoadHelperNaClModule(nacl::DescWrapper* wrapper,
+                                        const Manifest* manifest,
                                         ErrorInfo* error_info);
 
   // Returns the argument value for the specified key, or NULL if not found.
@@ -297,8 +299,13 @@ class Plugin : public pp::InstancePrivate {
   // Requests a URL asynchronously resulting in a call to pp_callback with
   // a PP_Error indicating status. On success an open file descriptor
   // corresponding to the url body is recorded for further lookup.
-  // This is used by SRPC-based StreamAsFile().
-  bool StreamAsFile(const nacl::string& url, PP_CompletionCallback pp_callback);
+  // permits_extension_urls determines whether a call to stream as file
+  // should be allowed to load URLs that are outside of the origin of the
+  // plugin.  This is used by, e.g., the pnacl coordinator, which loads
+  // llc, ld, and various object files from a chrome extension URL.
+  bool StreamAsFile(const nacl::string& url,
+                    bool permits_extension_urls,
+                    PP_CompletionCallback pp_callback);
   // Returns an open POSIX file descriptor retrieved by StreamAsFile()
   // or NACL_NO_FILE_DESC. The caller must take ownership of the descriptor.
   int32_t GetPOSIXFileDesc(const nacl::string& url);
@@ -320,12 +327,11 @@ class Plugin : public pp::InstancePrivate {
   const nacl::string& mime_type() const { return mime_type_; }
   // The default MIME type for the NaCl plugin.
   static const char* const kNaClMIMEType;
-  // Tests if the MIME type is not a NaCl MIME type.
-  bool IsForeignMIMEType() const;
   // Returns true if PPAPI Dev interfaces should be allowed.
   bool enable_dev_interfaces() { return enable_dev_interfaces_; }
 
   Manifest const* manifest() const { return manifest_.get(); }
+  const pp::URLUtil_Dev* url_util() const { return url_util_; }
 
   // Extracts the exit status from the (main) service runtime.
   int exit_status() const {
@@ -375,6 +381,8 @@ class Plugin : public pp::InstancePrivate {
   // This will fully initialize the |subprocess| if the load was successful.
   bool LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
                             NaClSubprocess* subprocess,
+                            const Manifest* manifest,
+                            bool should_report_uma,
                             ErrorInfo* error_info,
                             pp::CompletionCallback init_done_cb,
                             pp::CompletionCallback crash_cb);
@@ -450,6 +458,10 @@ class Plugin : public pp::InstancePrivate {
   // Determines the appropriate nexe for the sandbox and requests a load.
   void RequestNexeLoad();
 
+  // This NEXE is being used as a content type handler rather than directly by
+  // an HTML document.
+  bool NexeIsContentHandler() const;
+
   // Callback used when loading a URL for SRPC-based StreamAsFile().
   void UrlDidOpenForStreamAsFile(int32_t pp_error,
                                  FileDownloader*& url_downloader,
@@ -488,7 +500,7 @@ class Plugin : public pp::InstancePrivate {
   FileDownloader nexe_downloader_;
   pp::CompletionCallbackFactory<Plugin> callback_factory_;
 
-  PnaclCoordinator pnacl_;
+  nacl::scoped_ptr<PnaclCoordinator> pnacl_coordinator_;
 
   // The manifest dictionary.  Used for looking up resources to be loaded.
   nacl::scoped_ptr<Manifest> manifest_;
@@ -509,15 +521,14 @@ class Plugin : public pp::InstancePrivate {
   bool enable_dev_interfaces_;
 
   // If we get a DidChangeView event before the nexe is loaded, we store it and
-  // replay it to nexe after it's loaded.
-  bool replayDidChangeView;
-  pp::Rect replayDidChangeViewPosition;
-  pp::Rect replayDidChangeViewClip;
+  // replay it to nexe after it's loaded. We need to replay when this View
+  // resource is non-is_null().
+  pp::View view_to_replay_;
 
   // If we get a HandleDocumentLoad event before the nexe is loaded, we store
-  // it and replay it to nexe after it's loaded.
-  bool replayHandleDocumentLoad;
-  pp::URLLoader replayHandleDocumentLoadURLLoader;
+  // it and replay it to nexe after it's loaded. We need to replay when this
+  // URLLoader resource is non-is_null().
+  pp::URLLoader document_load_to_replay_;
 
   nacl::string mime_type_;
 

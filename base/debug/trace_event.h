@@ -1,6 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+// This header is designed to give you trace_event macros without specifying
+// how the events actually get collected and stored. If you need to expose trace
+// event to some other universe, you can copy-and-paste this file,
+// implement the TRACE_EVENT_API macros, and do any other necessary fixup for
+// the target platform. The end result is that multiple libraries can funnel
+// events through to a shared trace event collector.
 
 // Trace events are for tracking application performance and resource usage.
 // Macros are provided to track:
@@ -80,6 +87,9 @@
 // This indicates to the tracing UI that these counters should be displayed
 // in a single graph, as a summed area chart.
 //
+// Since counters are in a global namespace, you may want to disembiguate with a
+// unique ID, by using the TRACE_COUNTER_ID* variations.
+//
 // By default, trace collection is compiled in, but turned off at runtime.
 // Collecting trace data is the responsibility of the embedding
 // application. In Chrome's case, navigating to about:tracing will turn on
@@ -123,7 +133,7 @@
 // the static variable is safe, as they will be serialized by the lock and
 // multiple calls will return the same pointer to the category.
 //
-// Then the category.enabled flag is checked. This is a volatile bool, and
+// Then the category_enabled flag is checked. This is a unsigned char, and
 // not intended to be multithread safe. It optimizes access to AddTraceEvent
 // which is threadsafe internally via TraceLog::lock_. The enabled flag may
 // cause some threads to incorrectly call or skip calling AddTraceEvent near
@@ -144,39 +154,15 @@
 #define BASE_DEBUG_TRACE_EVENT_H_
 #pragma once
 
-#include "build/build_config.h"
-
 #include <string>
-#include <vector>
 
-#include "base/callback.h"
-#include "base/hash_tables.h"
-#include "base/memory/ref_counted_memory.h"
-#include "base/string_util.h"
-#include "base/synchronization/lock.h"
-#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
-#include "base/timer.h"
+#include "build/build_config.h"
+#include "base/debug/trace_event_impl.h"
 
 // By default, const char* argument values are assumed to have long-lived scope
 // and will not be copied. Use this macro to force a const char* to be copied.
-#define TRACE_STR_COPY(str) base::debug::TraceValue::StringWithCopy(str)
-
-// Older style trace macros with explicit id and extra data
-// Only these macros result in publishing data to ETW as currently implemented.
-#define TRACE_EVENT_BEGIN_ETW(name, id, extra) \
-    base::debug::TraceLog::AddTraceEventEtw( \
-        TRACE_EVENT_PHASE_BEGIN, \
-        name, reinterpret_cast<const void*>(id), extra)
-
-#define TRACE_EVENT_END_ETW(name, id, extra) \
-    base::debug::TraceLog::AddTraceEventEtw( \
-        TRACE_EVENT_PHASE_END, \
-        name, reinterpret_cast<const void*>(id), extra)
-
-#define TRACE_EVENT_INSTANT_ETW(name, id, extra) \
-    base::debug::TraceLog::AddTraceEventEtw( \
-        TRACE_EVENT_PHASE_INSTANT, \
-        name, reinterpret_cast<const void*>(id), extra)
+#define TRACE_STR_COPY(str) \
+    trace_event_internal::TraceStringWithCopy(str)
 
 // Records a pair of begin and end events called "name" for the current
 // scope, with 0, 1 or 2 associated arguments. If the category is not
@@ -184,12 +170,12 @@
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
 #define TRACE_EVENT0(category, name) \
-    TRACE_EVENT1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_SCOPED(category, name)
 #define TRACE_EVENT1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_SCOPED(category, name, arg1_name, arg1_val)
 #define TRACE_EVENT2(category, name, arg1_name, arg1_val, arg2_name, arg2_val) \
-    INTERNAL_TRACE_EVENT_ADD_SCOPED( \
-        category, name, arg1_name, arg1_val, arg2_name, arg2_val)
+    INTERNAL_TRACE_EVENT_ADD_SCOPED(category, name, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 
 // Same as TRACE_EVENT except that they are not included in official builds.
 #ifdef OFFICIAL_BUILD
@@ -226,25 +212,27 @@
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
 #define TRACE_EVENT_INSTANT0(category, name) \
-    TRACE_EVENT_INSTANT1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
+        category, name, TRACE_EVENT_FLAG_NONE)
 #define TRACE_EVENT_INSTANT1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_INSTANT2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
+        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_INSTANT2(category, name, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, arg1_name, arg1_val, arg2_name, arg2_val, \
-        TRACE_EVENT_FLAG_NONE)
+        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 #define TRACE_EVENT_COPY_INSTANT0(category, name) \
-    TRACE_EVENT_COPY_INSTANT1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
+        category, name, TRACE_EVENT_FLAG_COPY)
 #define TRACE_EVENT_COPY_INSTANT1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_COPY_INSTANT2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
+        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val)
 #define TRACE_EVENT_COPY_INSTANT2(category, name, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, \
-        arg1_name, base::debug::TraceValue::ForceCopy(arg1_val), \
-        arg2_name, base::debug::TraceValue::ForceCopy(arg2_val), \
-        TRACE_EVENT_FLAG_COPY)
+        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 
 // Records a single BEGIN event called "name" immediately, with 0, 1 or 2
 // associated arguments. If the category is not enabled, then this
@@ -252,50 +240,54 @@
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
 #define TRACE_EVENT_BEGIN0(category, name) \
-    TRACE_EVENT_BEGIN1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_BEGIN, \
+        category, name, TRACE_EVENT_FLAG_NONE)
 #define TRACE_EVENT_BEGIN1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_BEGIN2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_BEGIN, \
+        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_BEGIN2(category, name, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_BEGIN, \
-        category, name, arg1_name, arg1_val, arg2_name, arg2_val, \
-        TRACE_EVENT_FLAG_NONE)
+        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 #define TRACE_EVENT_COPY_BEGIN0(category, name) \
-    TRACE_EVENT_COPY_BEGIN1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_BEGIN, \
+        category, name, TRACE_EVENT_FLAG_COPY)
 #define TRACE_EVENT_COPY_BEGIN1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_COPY_BEGIN2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_BEGIN, \
+        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val)
 #define TRACE_EVENT_COPY_BEGIN2(category, name, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_BEGIN, \
-        category, name, \
-        arg1_name, base::debug::TraceValue::ForceCopy(arg1_val), \
-        arg2_name, base::debug::TraceValue::ForceCopy(arg2_val), \
-        TRACE_EVENT_FLAG_COPY)
+        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 
 // Records a single END event for "name" immediately. If the category
 // is not enabled, then this does nothing.
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
 #define TRACE_EVENT_END0(category, name) \
-    TRACE_EVENT_END1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_END, \
+        category, name, TRACE_EVENT_FLAG_NONE)
 #define TRACE_EVENT_END1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_END2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_END, \
+        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_END2(category, name, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_END, \
-        category, name, arg1_name, arg1_val, arg2_name, arg2_val, \
-        TRACE_EVENT_FLAG_NONE)
+        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 #define TRACE_EVENT_COPY_END0(category, name) \
-    TRACE_EVENT_COPY_END1(category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_END, \
+        category, name, TRACE_EVENT_FLAG_COPY)
 #define TRACE_EVENT_COPY_END1(category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_COPY_END2(category, name, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_END, \
+        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val)
 #define TRACE_EVENT_COPY_END2(category, name, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_END, \
-        category, name, \
-        arg1_name, base::debug::TraceValue::ForceCopy(arg1_val), \
-        arg2_name, base::debug::TraceValue::ForceCopy(arg2_val), \
-        TRACE_EVENT_FLAG_COPY)
+        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val, \
+        arg2_name, arg2_val)
 
 // Time threshold event:
 // Only record the event if the duration is greater than the specified
@@ -306,24 +298,28 @@
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
 #define TRACE_EVENT_IF_LONGER_THAN0(threshold_us, category, name) \
-    TRACE_EVENT_IF_LONGER_THAN1(threshold_us, category, name, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_SCOPED_IF_LONGER_THAN(threshold_us, category, name)
 #define TRACE_EVENT_IF_LONGER_THAN1( \
-        threshold_us, category, name, arg1_name, arg1_val) \
-    TRACE_EVENT_IF_LONGER_THAN2(threshold_us, category, name, \
-                           arg1_name, arg1_val, NULL, 0)
+    threshold_us, category, name, arg1_name, arg1_val) \
+    INTERNAL_TRACE_EVENT_ADD_SCOPED_IF_LONGER_THAN( \
+        threshold_us, category, name, arg1_name, arg1_val)
 #define TRACE_EVENT_IF_LONGER_THAN2( \
     threshold_us, category, name, arg1_name, arg1_val, arg2_name, arg2_val) \
-    INTERNAL_TRACE_EVENT_ADD_SCOPED_IF_LONGER_THAN(threshold_us, \
-        category, name, arg1_name, arg1_val, arg2_name, arg2_val)
+    INTERNAL_TRACE_EVENT_ADD_SCOPED_IF_LONGER_THAN( \
+        threshold_us, category, name, arg1_name, arg1_val, arg2_name, arg2_val)
 
 // Records the value of a counter called "name" immediately. Value
 // must be representable as a 32 bit integer.
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
 #define TRACE_COUNTER1(category, name, value) \
-    TRACE_COUNTER2(category, name, "value", value, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, TRACE_EVENT_FLAG_NONE, \
+        "value", static_cast<int>(value))
 #define TRACE_COPY_COUNTER1(category, name, value) \
-    TRACE_COPY_COUNTER2(category, name, "value", value, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, TRACE_EVENT_FLAG_COPY, \
+        "value", static_cast<int>(value))
 
 // Records the values of a multi-parted counter called "name" immediately.
 // The UI will treat value1 and value2 as parts of a whole, displaying their
@@ -332,16 +328,55 @@
 //   literals). They may not include " chars.
 #define TRACE_COUNTER2(category, name, value1_name, value1_val, \
         value2_name, value2_val) \
-    INTERNAL_TRACE_EVENT_ADD_COUNTER( \
-        category, name, value1_name, value1_val, value2_name, value2_val, \
-        TRACE_EVENT_FLAG_NONE)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, TRACE_EVENT_FLAG_NONE, \
+        value1_name, static_cast<int>(value1_val), \
+        value2_name, static_cast<int>(value2_val))
 #define TRACE_COPY_COUNTER2(category, name, value1_name, value1_val, \
         value2_name, value2_val) \
-    INTERNAL_TRACE_EVENT_ADD_COUNTER( \
-        category, name, \
-        value1_name, value1_val, \
-        value2_name, value2_val, \
-        TRACE_EVENT_FLAG_COPY)
+    INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, TRACE_EVENT_FLAG_COPY, \
+        value1_name, static_cast<int>(value1_val), \
+        value2_name, static_cast<int>(value2_val))
+
+// Records the value of a counter called "name" immediately. Value
+// must be representable as a 32 bit integer.
+// - category and name strings must have application lifetime (statics or
+//   literals). They may not include " chars.
+// - |id| is used to disambiguate counters with the same name. It must either
+//   be a pointer or an integer value up to 64 bits. If it's a pointer, the bits
+//   will be xored with a hash of the process ID so that the same pointer on
+//   two different processes will not collide.
+#define TRACE_COUNTER_ID1(category, name, id, value) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, id, TRACE_EVENT_FLAG_NONE, \
+        "value", static_cast<int>(value))
+#define TRACE_COPY_COUNTER_ID1(category, name, id, value) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, id, TRACE_EVENT_FLAG_COPY, \
+        "value", static_cast<int>(value))
+
+// Records the values of a multi-parted counter called "name" immediately.
+// The UI will treat value1 and value2 as parts of a whole, displaying their
+// values as a stacked-bar chart.
+// - category and name strings must have application lifetime (statics or
+//   literals). They may not include " chars.
+// - |id| is used to disambiguate counters with the same name. It must either
+//   be a pointer or an integer value up to 64 bits. If it's a pointer, the bits
+//   will be xored with a hash of the process ID so that the same pointer on
+//   two different processes will not collide.
+#define TRACE_COUNTER_ID2(category, name, id, value1_name, value1_val, \
+        value2_name, value2_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, id, TRACE_EVENT_FLAG_NONE, \
+        value1_name, static_cast<int>(value1_val), \
+        value2_name, static_cast<int>(value2_val))
+#define TRACE_COPY_COUNTER_ID2(category, name, id, value1_name, value1_val, \
+        value2_name, value2_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_COUNTER, \
+        category, name, id, TRACE_EVENT_FLAG_COPY, \
+        value1_name, static_cast<int>(value1_val), \
+        value2_name, static_cast<int>(value2_val))
 
 
 // Records a single START event called "name" immediately, with 0, 1 or 2
@@ -354,49 +389,90 @@
 //   will be xored with a hash of the process ID so that the same pointer on
 //   two different processes will not collide.
 #define TRACE_EVENT_START0(category, name, id) \
-    TRACE_EVENT_START1(category, name, id, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_START, \
+        category, name, id, TRACE_EVENT_FLAG_NONE)
 #define TRACE_EVENT_START1(category, name, id, arg1_name, arg1_val) \
-    TRACE_EVENT_START2(category, name, id, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_START, \
+        category, name, id, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_START2(category, name, id, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_START, \
-        category, name, id, arg1_name, arg1_val, arg2_name, arg2_val, \
-        TRACE_EVENT_FLAG_HAS_ID)
+        category, name, id, TRACE_EVENT_FLAG_NONE, \
+        arg1_name, arg1_val, arg2_name, arg2_val)
 #define TRACE_EVENT_COPY_START0(category, name, id) \
-    TRACE_EVENT_COPY_START1(category, name, id, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_START, \
+        category, name, id, TRACE_EVENT_FLAG_COPY)
 #define TRACE_EVENT_COPY_START1(category, name, id, arg1_name, arg1_val) \
-    TRACE_EVENT_COPY_START2(category, name, id, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_START, \
+        category, name, id, TRACE_EVENT_FLAG_COPY, \
+        arg1_name, arg1_val)
 #define TRACE_EVENT_COPY_START2(category, name, id, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_START, \
-        category, name, id, \
-        arg1_name, base::debug::TraceValue::ForceCopy(arg1_val), \
-        arg2_name, base::debug::TraceValue::ForceCopy(arg2_val), \
-        TRACE_EVENT_FLAG_HAS_ID | TRACE_EVENT_FLAG_COPY)
+        category, name, id, TRACE_EVENT_FLAG_COPY, \
+        arg1_name, arg1_val, arg2_name, arg2_val)
 
 // Records a single FINISH event for "name" immediately. If the category
 // is not enabled, then this does nothing.
 #define TRACE_EVENT_FINISH0(category, name, id) \
-    TRACE_EVENT_FINISH1(category, name, id, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_FINISH, \
+        category, name, id, TRACE_EVENT_FLAG_NONE)
 #define TRACE_EVENT_FINISH1(category, name, id, arg1_name, arg1_val) \
-    TRACE_EVENT_FINISH2(category, name, id, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_FINISH, \
+        category, name, id, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_FINISH2(category, name, id, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_FINISH, \
-        category, name, id, arg1_name, arg1_val, arg2_name, arg2_val, \
-        TRACE_EVENT_FLAG_HAS_ID)
+        category, name, id, TRACE_EVENT_FLAG_NONE, \
+        arg1_name, arg1_val, arg2_name, arg2_val)
 #define TRACE_EVENT_COPY_FINISH0(category, name, id) \
-    TRACE_EVENT_COPY_FINISH1(category, name, id, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_FINISH, \
+        category, name, id, TRACE_EVENT_FLAG_COPY)
 #define TRACE_EVENT_COPY_FINISH1(category, name, id, arg1_name, arg1_val) \
-    TRACE_EVENT_COPY_FINISH2(category, name, id, arg1_name, arg1_val, NULL, 0)
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_FINISH, \
+        category, name, id, TRACE_EVENT_FLAG_COPY, \
+        arg1_name, arg1_val)
 #define TRACE_EVENT_COPY_FINISH2(category, name, id, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_FINISH, \
-        category, name, id, \
-        arg1_name, base::debug::TraceValue::ForceCopy(arg1_val), \
-        arg2_name, base::debug::TraceValue::ForceCopy(arg2_val), \
-        TRACE_EVENT_FLAG_HAS_ID | TRACE_EVENT_FLAG_COPY)
+        category, name, id, TRACE_EVENT_FLAG_COPY, \
+        arg1_name, arg1_val, arg2_name, arg2_val)
 
+
+////////////////////////////////////////////////////////////////////////////////
+// Implementation specific tracing API definitions.
+
+// Get a pointer to the enabled state of the given trace category. Only
+// long-lived literal strings should be given as the category name. The returned
+// pointer can be held permanently in a local static for example. If the
+// unsigned char is non-zero, tracing is enabled. If tracing is enabled,
+// TRACE_EVENT_API_ADD_TRACE_EVENT can be called. It's OK if tracing is disabled
+// between the load of the tracing state and the call to
+// TRACE_EVENT_API_ADD_TRACE_EVENT, because this flag only provides an early out
+// for best performance when tracing is disabled.
+// const unsigned char*
+//     TRACE_EVENT_API_GET_CATEGORY_ENABLED(const char* category_name)
+#define TRACE_EVENT_API_GET_CATEGORY_ENABLED \
+    base::debug::TraceLog::GetCategoryEnabled
+
+// Add a trace event to the platform tracing system. Returns thresholdBeginId
+// for use in a corresponding end TRACE_EVENT_API_ADD_TRACE_EVENT call.
+// int TRACE_EVENT_API_ADD_TRACE_EVENT(
+//                    char phase,
+//                    const unsigned char* category_enabled,
+//                    const char* name,
+//                    unsigned long long id,
+//                    int num_args,
+//                    const char** arg_names,
+//                    const unsigned char* arg_types,
+//                    const unsigned long long* arg_values,
+//                    int threshold_begin_id,
+//                    long long threshold,
+//                    unsigned char flags)
+#define TRACE_EVENT_API_ADD_TRACE_EVENT \
+    base::debug::TraceLog::GetInstance()->AddTraceEvent
+
+////////////////////////////////////////////////////////////////////////////////
 
 // Implementation detail: trace event macros create temporary variables
 // to keep instrumentation overhead low. These macros give each temporary
@@ -411,50 +487,36 @@
 // Implementation detail: internal macro to create static category.
 // - ANNOTATE_BENIGN_RACE, see Thread Safety above.
 #define INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(category) \
-    static const base::debug::TraceCategory* \
-        INTERNAL_TRACE_EVENT_UID(catstatic) = NULL; \
+    static const unsigned char* INTERNAL_TRACE_EVENT_UID(catstatic) = NULL; \
     ANNOTATE_BENIGN_RACE(&INTERNAL_TRACE_EVENT_UID(catstatic), \
                          "trace_event category"); \
     if (!INTERNAL_TRACE_EVENT_UID(catstatic)) \
       INTERNAL_TRACE_EVENT_UID(catstatic) = \
-          base::debug::TraceLog::GetCategory(category);
+          TRACE_EVENT_API_GET_CATEGORY_ENABLED(category);
 
 // Implementation detail: internal macro to create static category and add
 // event if the category is enabled.
-#define INTERNAL_TRACE_EVENT_ADD( \
-      phase, category, name, arg1_name, arg1_val, arg2_name, arg2_val, flags) \
+#define INTERNAL_TRACE_EVENT_ADD(phase, category, name, flags, ...) \
     INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(category); \
-    if (INTERNAL_TRACE_EVENT_UID(catstatic)->enabled) { \
-      base::debug::TraceLog::GetInstance()->AddTraceEvent( \
-          phase, INTERNAL_TRACE_EVENT_UID(catstatic), \
-          name, 0, arg1_name, arg1_val, arg2_name, arg2_val, -1, 0, flags); \
-    }
-
-// Implementation detail: internal macro to create static category and
-// add the counter event if it is enabled.
-#define INTERNAL_TRACE_EVENT_ADD_COUNTER( \
-      category, name, arg1_name, arg1_val, arg2_name, arg2_val, flags) \
-    INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(category); \
-    if (INTERNAL_TRACE_EVENT_UID(catstatic)->enabled) { \
-      base::debug::TraceLog::GetInstance()->AddCounterEvent( \
-          INTERNAL_TRACE_EVENT_UID(catstatic), \
-          name, arg1_name, arg1_val, arg2_name, arg2_val, flags); \
+    if (*INTERNAL_TRACE_EVENT_UID(catstatic)) { \
+      trace_event_internal::AddTraceEvent( \
+          phase, INTERNAL_TRACE_EVENT_UID(catstatic), name, \
+          trace_event_internal::kNoEventId, flags, ##__VA_ARGS__); \
     }
 
 // Implementation detail: internal macro to create static category and add begin
 // event if the category is enabled. Also adds the end event when the scope
 // ends.
-#define INTERNAL_TRACE_EVENT_ADD_SCOPED( \
-      category, name, arg1_name, arg1_val, arg2_name, arg2_val) \
+#define INTERNAL_TRACE_EVENT_ADD_SCOPED(category, name, ...) \
     INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(category); \
-    base::debug::internal::TraceEndOnScopeClose \
+    trace_event_internal::TraceEndOnScopeClose \
         INTERNAL_TRACE_EVENT_UID(profileScope); \
-    if (INTERNAL_TRACE_EVENT_UID(catstatic)->enabled) { \
-      base::debug::TraceLog::GetInstance()->AddTraceEvent( \
+    if (*INTERNAL_TRACE_EVENT_UID(catstatic)) { \
+      trace_event_internal::AddTraceEvent( \
           TRACE_EVENT_PHASE_BEGIN, \
           INTERNAL_TRACE_EVENT_UID(catstatic), \
-          name, 0, arg1_name, arg1_val, arg2_name, arg2_val, -1, 0, \
-          TRACE_EVENT_FLAG_NONE); \
+          name, trace_event_internal::kNoEventId, \
+          TRACE_EVENT_FLAG_NONE, ##__VA_ARGS__); \
       INTERNAL_TRACE_EVENT_UID(profileScope).Initialize( \
           INTERNAL_TRACE_EVENT_UID(catstatic), name); \
     }
@@ -463,17 +525,17 @@
 // event if the category is enabled. Also adds the end event when the scope
 // ends. If the elapsed time is < threshold time, the begin/end pair is erased.
 #define INTERNAL_TRACE_EVENT_ADD_SCOPED_IF_LONGER_THAN(threshold, \
-      category, name, arg1_name, arg1_val, arg2_name, arg2_val) \
+        category, name, ...) \
     INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(category); \
-    base::debug::internal::TraceEndOnScopeCloseThreshold \
+    trace_event_internal::TraceEndOnScopeCloseThreshold \
         INTERNAL_TRACE_EVENT_UID(profileScope); \
-    if (INTERNAL_TRACE_EVENT_UID(catstatic)->enabled) { \
+    if (*INTERNAL_TRACE_EVENT_UID(catstatic)) { \
       int INTERNAL_TRACE_EVENT_UID(begin_event_id) = \
-        base::debug::TraceLog::GetInstance()->AddTraceEvent( \
+        trace_event_internal::AddTraceEvent( \
             TRACE_EVENT_PHASE_BEGIN, \
             INTERNAL_TRACE_EVENT_UID(catstatic), \
-            name, 0, arg1_name, arg1_val, arg2_name, arg2_val, -1, 0, \
-            TRACE_EVENT_FLAG_NONE); \
+            name, trace_event_internal::kNoEventId, \
+            TRACE_EVENT_FLAG_NONE, ##__VA_ARGS__); \
       INTERNAL_TRACE_EVENT_UID(profileScope).Initialize( \
           INTERNAL_TRACE_EVENT_UID(catstatic), name, \
           INTERNAL_TRACE_EVENT_UID(begin_event_id), threshold); \
@@ -481,446 +543,223 @@
 
 // Implementation detail: internal macro to create static category and add
 // event if the category is enabled.
-#define INTERNAL_TRACE_EVENT_ADD_WITH_ID(phase, category, name, id, \
-      arg1_name, arg1_val, arg2_name, arg2_val, flags) \
+#define INTERNAL_TRACE_EVENT_ADD_WITH_ID(phase, category, name, id, flags, \
+                                         ...) \
     INTERNAL_TRACE_EVENT_GET_CATEGORY_INFO(category); \
-    if (INTERNAL_TRACE_EVENT_UID(catstatic)->enabled) { \
-      base::debug::TraceLog::GetInstance()->AddTraceEvent( \
+    if (*INTERNAL_TRACE_EVENT_UID(catstatic)) { \
+      unsigned char trace_event_flags = flags | TRACE_EVENT_FLAG_HAS_ID; \
+      trace_event_internal::TraceID trace_event_trace_id( \
+          id, &trace_event_flags); \
+      trace_event_internal::AddTraceEvent( \
           phase, INTERNAL_TRACE_EVENT_UID(catstatic), \
-          name, id, arg1_name, arg1_val, arg2_name, arg2_val, -1, 0, flags); \
+          name, trace_event_trace_id.data(), trace_event_flags, \
+          ##__VA_ARGS__); \
     }
 
-template <typename Type>
-struct StaticMemorySingletonTraits;
-
-namespace base {
-
-class RefCountedString;
-
-namespace debug {
-
-// Categories allow enabling/disabling of streams of trace events
-struct TraceCategory {
-  const char* name;
-  volatile bool enabled;
-};
-
-const size_t kTraceMaxNumArgs = 2;
+// Notes regarding the following definitions:
+// New values can be added and propagated to third party libraries, but existing
+// definitions must never be changed, because third party libraries may use old
+// definitions.
 
 // Phase indicates the nature of an event entry. E.g. part of a begin/end pair.
-typedef char TraceEventPhase;
-#define TRACE_EVENT_PHASE_BEGIN     (base::debug::TraceEventPhase('B'))
-#define TRACE_EVENT_PHASE_END       (base::debug::TraceEventPhase('E'))
-#define TRACE_EVENT_PHASE_INSTANT   (base::debug::TraceEventPhase('I'))
-#define TRACE_EVENT_PHASE_START     (base::debug::TraceEventPhase('S'))
-#define TRACE_EVENT_PHASE_FINISH    (base::debug::TraceEventPhase('F'))
-#define TRACE_EVENT_PHASE_METADATA  (base::debug::TraceEventPhase('M'))
-#define TRACE_EVENT_PHASE_COUNTER   (base::debug::TraceEventPhase('C'))
+#define TRACE_EVENT_PHASE_BEGIN    ('B')
+#define TRACE_EVENT_PHASE_END      ('E')
+#define TRACE_EVENT_PHASE_INSTANT  ('I')
+#define TRACE_EVENT_PHASE_START    ('S')
+#define TRACE_EVENT_PHASE_FINISH   ('F')
+#define TRACE_EVENT_PHASE_METADATA ('M')
+#define TRACE_EVENT_PHASE_COUNTER  ('C')
 
-typedef uint8 TraceEventFlags;
-#define TRACE_EVENT_FLAG_NONE        (base::debug::TraceEventFlags(0))
-#define TRACE_EVENT_FLAG_COPY        (base::debug::TraceEventFlags(1<<0))
-#define TRACE_EVENT_FLAG_HAS_ID      (base::debug::TraceEventFlags(1<<1))
+// Flags for changing the behavior of TRACE_EVENT_API_ADD_TRACE_EVENT.
+#define TRACE_EVENT_FLAG_NONE        (static_cast<unsigned char>(0))
+#define TRACE_EVENT_FLAG_COPY        (static_cast<unsigned char>(1 << 0))
+#define TRACE_EVENT_FLAG_HAS_ID      (static_cast<unsigned char>(1 << 1))
+#define TRACE_EVENT_FLAG_MANGLE_ID   (static_cast<unsigned char>(1 << 2))
 
-// Simple union of values. This is much lighter weight than base::Value, which
-// requires dynamic allocation and a vtable. To keep the trace runtime overhead
-// low, we want constant size storage here.
-class BASE_EXPORT TraceValue {
- public:
-  enum Type {
-    TRACE_TYPE_UNDEFINED,
-    TRACE_TYPE_BOOL,
-    TRACE_TYPE_UINT,
-    TRACE_TYPE_INT,
-    TRACE_TYPE_DOUBLE,
-    TRACE_TYPE_POINTER,
-    TRACE_TYPE_STRING,
-    TRACE_TYPE_STATIC_STRING
-  };
+// Type values for identifying types in the TraceValue union.
+#define TRACE_VALUE_TYPE_BOOL         (static_cast<unsigned char>(1))
+#define TRACE_VALUE_TYPE_UINT         (static_cast<unsigned char>(2))
+#define TRACE_VALUE_TYPE_INT          (static_cast<unsigned char>(3))
+#define TRACE_VALUE_TYPE_DOUBLE       (static_cast<unsigned char>(4))
+#define TRACE_VALUE_TYPE_POINTER      (static_cast<unsigned char>(5))
+#define TRACE_VALUE_TYPE_STRING       (static_cast<unsigned char>(6))
+#define TRACE_VALUE_TYPE_COPY_STRING  (static_cast<unsigned char>(7))
 
-  TraceValue() : type_(TRACE_TYPE_UNDEFINED) {
-    value_.as_uint = 0ull;
-  }
-  TraceValue(bool rhs) : type_(TRACE_TYPE_BOOL) {
-    value_.as_bool = rhs;
-  }
-  TraceValue(uint64 rhs) : type_(TRACE_TYPE_UINT) {
-    value_.as_uint = rhs;
-  }
-  TraceValue(uint32 rhs) : type_(TRACE_TYPE_UINT) {
-    value_.as_uint = rhs;
-  }
-  TraceValue(uint16 rhs) : type_(TRACE_TYPE_UINT) {
-    value_.as_uint = rhs;
-  }
-  TraceValue(uint8 rhs) : type_(TRACE_TYPE_UINT) {
-    value_.as_uint = rhs;
-  }
-  TraceValue(int64 rhs) : type_(TRACE_TYPE_INT) {
-    value_.as_int = rhs;
-  }
-  TraceValue(int32 rhs) : type_(TRACE_TYPE_INT) {
-    value_.as_int = rhs;
-  }
-  TraceValue(int16 rhs) : type_(TRACE_TYPE_INT) {
-    value_.as_int = rhs;
-  }
-  TraceValue(int8 rhs) : type_(TRACE_TYPE_INT) {
-    value_.as_int = rhs;
-  }
-  TraceValue(double rhs) : type_(TRACE_TYPE_DOUBLE) {
-    value_.as_double = rhs;
-  }
-  TraceValue(const void* rhs) : type_(TRACE_TYPE_POINTER) {
-    value_.as_pointer = rhs;
-  }
-  TraceValue(const std::string& rhs) : type_(TRACE_TYPE_STRING) {
-    value_.as_string = rhs.c_str();
-  }
-  TraceValue(const char* rhs) : type_(TRACE_TYPE_STATIC_STRING) {
-    value_.as_string = rhs;
-  }
+namespace trace_event_internal {
 
-  static TraceValue StringWithCopy(const char* rhs) {
-    TraceValue value(rhs);
-    if (rhs)
-      value.type_ = TRACE_TYPE_STRING;
-    return value;
-  }
-
-  static TraceValue ForceCopy(const TraceValue& rhs) {
-    TraceValue value(rhs);
-    if (value.type_ == TRACE_TYPE_STATIC_STRING && value.as_string())
-      value.type_ = TRACE_TYPE_STRING;
-    return value;
-  }
-
-  bool is_string() const {
-    return type_ == TRACE_TYPE_STRING || type_ == TRACE_TYPE_STATIC_STRING;
-  }
-
-  void AppendAsJSON(std::string* out) const;
-
-  Type type() const {
-    return type_;
-  }
-  uint64 as_uint() const {
-    DCHECK_EQ(TRACE_TYPE_UINT, type_);
-    return value_.as_uint;
-  }
-  bool as_bool() const {
-    DCHECK_EQ(TRACE_TYPE_BOOL, type_);
-    return value_.as_bool;
-  }
-  int64 as_int() const {
-    DCHECK_EQ(TRACE_TYPE_INT, type_);
-    return value_.as_int;
-  }
-  double as_double() const {
-    DCHECK_EQ(TRACE_TYPE_DOUBLE, type_);
-    return value_.as_double;
-  }
-  const void* as_pointer() const {
-    DCHECK_EQ(TRACE_TYPE_POINTER, type_);
-    return value_.as_pointer;
-  }
-  const char* as_string() const {
-    DCHECK(is_string());
-    return value_.as_string;
-  }
-  const char** as_assignable_string() {
-    DCHECK_EQ(TRACE_TYPE_STRING, type_);
-    return &value_.as_string;
-  }
-
- private:
-  union Value {
-    bool as_bool;
-    uint64 as_uint;
-    int64 as_int;
-    double as_double;
-    const void* as_pointer;
-    const char* as_string;
-  };
-
-  Type type_;
-  Value value_;
-};
+// Specify these values when the corresponding argument of AddTraceEvent is not
+// used.
+const int kZeroNumArgs = 0;
+const int kNoThreshholdBeginId = -1;
+const long long kNoThresholdValue = 0;
+const unsigned long long kNoEventId = 0;
 
 // TraceID encapsulates an ID that can either be an integer or pointer. Pointers
 // are mangled with the Process ID so that they are unlikely to collide when the
 // same pointer is used on different processes.
-class BASE_EXPORT TraceID {
+class TraceID {
  public:
-  TraceID() : data_(0u) {}
-  TraceID(void* rhs);
-  TraceID(unsigned long long rhs) : data_(static_cast<uint64>(rhs)) {}
-  TraceID(unsigned long rhs) : data_(static_cast<uint64>(rhs)) {}
-  TraceID(unsigned int rhs) : data_(static_cast<uint64>(rhs)) {}
-  TraceID(long long rhs) : data_(static_cast<uint64>(rhs)) {}
-  TraceID(long rhs) : data_(static_cast<uint64>(rhs)) {}
-  TraceID(int rhs) : data_(static_cast<uint64>(rhs)) {}
+  explicit TraceID(const void* id, unsigned char* flags) :
+      data_(static_cast<unsigned long long>(
+          reinterpret_cast<unsigned long>(id))) {
+    *flags |= TRACE_EVENT_FLAG_MANGLE_ID;
+  }
+  explicit TraceID(unsigned long long id, unsigned char* flags) :
+      data_(id) { (void)flags; }
+  explicit TraceID(unsigned long id, unsigned char* flags) :
+      data_(id) { (void)flags; }
+  explicit TraceID(unsigned int id, unsigned char* flags) :
+      data_(id) { (void)flags; }
+  explicit TraceID(unsigned short id, unsigned char* flags) :
+      data_(id) { (void)flags; }
+  explicit TraceID(unsigned char id, unsigned char* flags) :
+      data_(id) { (void)flags; }
+  explicit TraceID(long long id, unsigned char* flags) :
+      data_(static_cast<unsigned long long>(id)) { (void)flags; }
+  explicit TraceID(long id, unsigned char* flags) :
+      data_(static_cast<unsigned long long>(id)) { (void)flags; }
+  explicit TraceID(int id, unsigned char* flags) :
+      data_(static_cast<unsigned long long>(id)) { (void)flags; }
+  explicit TraceID(short id, unsigned char* flags) :
+      data_(static_cast<unsigned long long>(id)) { (void)flags; }
+  explicit TraceID(signed char id, unsigned char* flags) :
+      data_(static_cast<unsigned long long>(id)) { (void)flags; }
 
-  uint64 data() const { return data_; }
+  unsigned long long data() const { return data_; }
 
  private:
-  uint64 data_;
+  unsigned long long data_;
 };
 
-// Output records are "Events" and can be obtained via the
-// OutputCallback whenever the tracing system decides to flush. This
-// can happen at any time, on any thread, or you can programatically
-// force it to happen.
-class BASE_EXPORT TraceEvent {
+// Simple union to store various types as unsigned long long.
+union TraceValueUnion {
+  bool as_bool;
+  unsigned long long as_uint;
+  long long as_int;
+  double as_double;
+  const void* as_pointer;
+  const char* as_string;
+};
+
+// Simple container for const char* that should be copied instead of retained.
+class TraceStringWithCopy {
  public:
-  TraceEvent();
-  TraceEvent(int thread_id,
-             TimeTicks timestamp,
-             TraceEventPhase phase,
-             const TraceCategory* category,
-             const char* name,
-             TraceID id,
-             const char* arg1_name, const TraceValue& arg1_val,
-             const char* arg2_name, const TraceValue& arg2_val,
-             TraceEventFlags flags);
-  ~TraceEvent();
-
-  static char GetPhaseChar(TraceEventPhase phase) {
-    return static_cast<char>(phase);
-  }
-
-  static TraceEventPhase GetPhase(const char* phase) {
-    return static_cast<TraceEventPhase>(*phase);
-  }
-
-  // Serialize event data to JSON
-  static void AppendEventsAsJSON(const std::vector<TraceEvent>& events,
-                                 size_t start,
-                                 size_t count,
-                                 std::string* out);
-  void AppendAsJSON(std::string* out) const;
-
-  TimeTicks timestamp() const { return timestamp_; }
-
-  // Exposed for unittesting:
-
-  const base::RefCountedString* parameter_copy_storage() const {
-    return parameter_copy_storage_.get();
-  }
-
-  const char* name() const { return name_; }
-
+  explicit TraceStringWithCopy(const char* str) : str_(str) {}
+  operator const char* () const { return str_; }
  private:
-  // Note: these are ordered by size (largest first) for optimal packing.
-  TimeTicks timestamp_;
-  // id_ can be used to store phase-specific data.
-  TraceID id_;
-  TraceValue arg_values_[kTraceMaxNumArgs];
-  const char* arg_names_[kTraceMaxNumArgs];
-  const TraceCategory* category_;
-  const char* name_;
-  scoped_refptr<base::RefCountedString> parameter_copy_storage_;
-  int thread_id_;
-  TraceEventPhase phase_;
-  TraceEventFlags flags_;
+  const char* str_;
 };
 
+// Define SetTraceValue for each allowed type. It stores the type and
+// value in the return arguments. This allows this API to avoid declaring any
+// structures so that it is portable to third_party libraries.
+#define INTERNAL_DECLARE_SET_TRACE_VALUE(actual_type, \
+                                         union_member, \
+                                         value_type_id) \
+    static inline void SetTraceValue(actual_type arg, \
+                                     unsigned char* type, \
+                                     unsigned long long* value) { \
+      TraceValueUnion type_value; \
+      type_value.union_member = arg; \
+      *type = value_type_id; \
+      *value = type_value.as_uint; \
+    }
+// Simpler form for int types that can be safely casted.
+#define INTERNAL_DECLARE_SET_TRACE_VALUE_INT(actual_type, \
+                                             value_type_id) \
+    static inline void SetTraceValue(actual_type arg, \
+                                     unsigned char* type, \
+                                     unsigned long long* value) { \
+      *type = value_type_id; \
+      *value = static_cast<unsigned long long>(arg); \
+    }
 
-// TraceResultBuffer collects and converts trace fragments returned by TraceLog
-// to JSON output.
-class BASE_EXPORT TraceResultBuffer {
- public:
-  typedef base::Callback<void(const std::string&)> OutputCallback;
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(unsigned long long, TRACE_VALUE_TYPE_UINT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(unsigned int, TRACE_VALUE_TYPE_UINT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(unsigned short, TRACE_VALUE_TYPE_UINT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(unsigned char, TRACE_VALUE_TYPE_UINT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(long long, TRACE_VALUE_TYPE_INT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(int, TRACE_VALUE_TYPE_INT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(short, TRACE_VALUE_TYPE_INT)
+INTERNAL_DECLARE_SET_TRACE_VALUE_INT(signed char, TRACE_VALUE_TYPE_INT)
+INTERNAL_DECLARE_SET_TRACE_VALUE(bool, as_bool, TRACE_VALUE_TYPE_BOOL)
+INTERNAL_DECLARE_SET_TRACE_VALUE(double, as_double, TRACE_VALUE_TYPE_DOUBLE)
+INTERNAL_DECLARE_SET_TRACE_VALUE(const void*, as_pointer,
+                                 TRACE_VALUE_TYPE_POINTER)
+INTERNAL_DECLARE_SET_TRACE_VALUE(const char*, as_string,
+                                 TRACE_VALUE_TYPE_STRING)
+INTERNAL_DECLARE_SET_TRACE_VALUE(const TraceStringWithCopy&, as_string,
+                                 TRACE_VALUE_TYPE_COPY_STRING)
 
-  // If you don't need to stream JSON chunks out efficiently, and just want to
-  // get a complete JSON string after calling Finish, use this struct to collect
-  // JSON trace output.
-  struct BASE_EXPORT SimpleOutput {
-    OutputCallback GetCallback();
-    void Append(const std::string& json_string);
+#undef INTERNAL_DECLARE_SET_TRACE_VALUE
+#undef INTERNAL_DECLARE_SET_TRACE_VALUE_INT
 
-    // Do what you want with the json_output_ string after calling
-    // TraceResultBuffer::Finish.
-    std::string json_output;
-  };
+// std::string version of SetTraceValue so that trace arguments can be strings.
+static inline void SetTraceValue(const std::string& arg,
+                                 unsigned char* type,
+                                 unsigned long long* value) {
+  TraceValueUnion type_value;
+  type_value.as_string = arg.c_str();
+  *type = TRACE_VALUE_TYPE_COPY_STRING;
+  *value = type_value.as_uint;
+}
 
-  TraceResultBuffer();
-  ~TraceResultBuffer();
+// These AddTraceEvent template functions are defined here instead of in the
+// macro, because the arg_values could be temporary objects, such as
+// std::string. In order to store pointers to the internal c_str and pass
+// through to the tracing API, the arg_values must live throughout
+// these procedures.
 
-  // Set callback. The callback will be called during Start with the initial
-  // JSON output and during AddFragment and Finish with following JSON output
-  // chunks. The callback target must live past the last calls to
-  // TraceResultBuffer::Start/AddFragment/Finish.
-  void SetOutputCallback(OutputCallback json_chunk_callback);
+static inline int AddTraceEvent(char phase,
+                                const unsigned char* category_enabled,
+                                const char* name,
+                                unsigned long long id,
+                                unsigned char flags) {
+  return TRACE_EVENT_API_ADD_TRACE_EVENT(
+      phase, category_enabled, name, id,
+      kZeroNumArgs, NULL, NULL, NULL,
+      kNoThreshholdBeginId, kNoThresholdValue, flags);
+}
 
-  // Start JSON output. This resets all internal state, so you can reuse
-  // the TraceResultBuffer by calling Start.
-  void Start();
+template<class ARG1_TYPE>
+static inline int AddTraceEvent(char phase,
+                                const unsigned char* category_enabled,
+                                const char* name,
+                                unsigned long long id,
+                                unsigned char flags,
+                                const char* arg1_name,
+                                const ARG1_TYPE& arg1_val) {
+  const int num_args = 1;
+  unsigned char arg_types[1];
+  unsigned long long arg_values[1];
+  SetTraceValue(arg1_val, &arg_types[0], &arg_values[0]);
+  return TRACE_EVENT_API_ADD_TRACE_EVENT(
+      phase, category_enabled, name, id,
+      num_args, &arg1_name, arg_types, arg_values,
+      kNoThreshholdBeginId, kNoThresholdValue, flags);
+}
 
-  // Call AddFragment 0 or more times to add trace fragments from TraceLog.
-  void AddFragment(const std::string& trace_fragment);
-
-  // When all fragments have been added, call Finish to complete the JSON
-  // formatted output.
-  void Finish();
-
- private:
-  OutputCallback output_callback_;
-  bool append_comma_;
-};
-
-
-class BASE_EXPORT TraceLog {
- public:
-  static TraceLog* GetInstance();
-
-  // Get set of known categories. This can change as new code paths are reached.
-  // The known categories are inserted into |categories|.
-  void GetKnownCategories(std::vector<std::string>* categories);
-
-  // Enable tracing for provided list of categories. If tracing is already
-  // enabled, this method does nothing -- changing categories during trace is
-  // not supported.
-  // If both included_categories and excluded_categories are empty,
-  //   all categories are traced.
-  // Else if included_categories is non-empty, only those are traced.
-  // Else if excluded_categories is non-empty, everything but those are traced.
-  // Wildcards * and ? are supported (see MatchPattern in string_util.h).
-  void SetEnabled(const std::vector<std::string>& included_categories,
-                  const std::vector<std::string>& excluded_categories);
-
-  // |categories| is a comma-delimited list of category wildcards.
-  // A category can have an optional '-' prefix to make it an excluded category.
-  // All the same rules apply above, so for example, having both included and
-  // excluded categories in the same list would not be supported.
-  //
-  // Example: SetEnabled("test_MyTest*");
-  // Example: SetEnabled("test_MyTest*,test_OtherStuff");
-  // Example: SetEnabled("-excluded_category1,-excluded_category2");
-  void SetEnabled(const std::string& categories);
-
-  // Retieves the categories set via a prior call to SetEnabled(). Only
-  // meaningful if |IsEnabled()| is true.
-  void GetEnabledTraceCategories(std::vector<std::string>* included_out,
-                                 std::vector<std::string>* excluded_out);
-
-  // Disable tracing for all categories.
-  void SetDisabled();
-  // Helper method to enable/disable tracing for all categories.
-  void SetEnabled(bool enabled);
-  bool IsEnabled() { return enabled_; }
-
-  float GetBufferPercentFull() const;
-
-  // When enough events are collected, they are handed (in bulk) to
-  // the output callback. If no callback is set, the output will be
-  // silently dropped. The callback must be thread safe. The string format is
-  // undefined. Use TraceResultBuffer to convert one or more trace strings to
-  // JSON.
-  typedef RefCountedData<std::string> RefCountedString;
-  typedef base::Callback<void(scoped_refptr<RefCountedString>)> OutputCallback;
-  void SetOutputCallback(const OutputCallback& cb);
-
-  // The trace buffer does not flush dynamically, so when it fills up,
-  // subsequent trace events will be dropped. This callback is generated when
-  // the trace buffer is full. The callback must be thread safe.
-  typedef base::Callback<void(void)> BufferFullCallback;
-  void SetBufferFullCallback(const BufferFullCallback& cb);
-
-  // Flushes all logged data to the callback.
-  void Flush();
-
-  // Called by TRACE_EVENT* macros, don't call this directly.
-  static const TraceCategory* GetCategory(const char* name);
-
-  // Called by TRACE_EVENT* macros, don't call this directly.
-  // Returns the index in the internal vector of the event if it was added, or
-  //         -1 if the event was not added.
-  // On end events, the return value of the begin event can be specified along
-  // with a threshold in microseconds. If the elapsed time between begin and end
-  // is less than the threshold, the begin/end event pair is dropped.
-  // If |copy| is set, |name|, |arg_name1| and |arg_name2| will be deep copied
-  // into the event; see "Memory scoping note" and TRACE_EVENT_COPY_XXX above.
-  int AddTraceEvent(TraceEventPhase phase,
-                    const TraceCategory* category,
-                    const char* name,
-                    TraceID id,
-                    const char* arg1_name, TraceValue arg1_val,
-                    const char* arg2_name, TraceValue arg2_val,
-                    int threshold_begin_id,
-                    int64 threshold,
-                    TraceEventFlags flags);
-  static void AddTraceEventEtw(TraceEventPhase phase,
-                               const char* name,
-                               const void* id,
-                               const char* extra);
-  static void AddTraceEventEtw(TraceEventPhase phase,
-                               const char* name,
-                               const void* id,
-                               const std::string& extra);
-
-  // A wrapper around AddTraceEvent used by TRACE_COUNTERx macros
-  // that allows only integer values for the counters.
-  int AddCounterEvent(const TraceCategory* category,
-                      const char* name,
-                      const char* arg1_name, int32 arg1_val,
-                      const char* arg2_name, int32 arg2_val,
-                      TraceEventFlags flags);
-
-  // Mangle |id| with a hash based on the process ID so that if |id| occurs on
-  // more than one process, it will not collide.
-  uint64 GetIntraProcessID(uint64 id) const { return id ^ process_id_hash_; }
-
-  int process_id() const { return process_id_; }
-
-  // Exposed for unittesting:
-
-  // Allows deleting our singleton instance.
-  static void DeleteForTesting();
-
-  // Allows resurrecting our singleton instance post-AtExit processing.
-  static void Resurrect();
-
-  // Allow tests to inspect TraceEvents.
-  size_t GetEventsSize() const { return logged_events_.size(); }
-  const TraceEvent& GetEventAt(size_t index) const {
-    DCHECK(index < logged_events_.size());
-    return logged_events_[index];
-  }
-
-  void SetProcessID(int process_id);
-
- private:
-  // This allows constructor and destructor to be private and usable only
-  // by the Singleton class.
-  friend struct StaticMemorySingletonTraits<TraceLog>;
-
-  TraceLog();
-  ~TraceLog();
-  const TraceCategory* GetCategoryInternal(const char* name);
-  void AddCurrentMetadataEvents();
-
-  // TODO(nduca): switch to per-thread trace buffers to reduce thread
-  // synchronization.
-  Lock lock_;
-  bool enabled_;
-  OutputCallback output_callback_;
-  BufferFullCallback buffer_full_callback_;
-  std::vector<TraceEvent> logged_events_;
-  std::vector<std::string> included_categories_;
-  std::vector<std::string> excluded_categories_;
-
-  base::hash_map<int, std::string> thread_names_;
-
-  // XORed with TraceID to make it unlikely to collide with other processes.
-  uint64 process_id_hash_;
-
-  int process_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(TraceLog);
-};
-
-namespace internal {
+template<class ARG1_TYPE, class ARG2_TYPE>
+static inline int AddTraceEvent(char phase,
+                                const unsigned char* category_enabled,
+                                const char* name,
+                                unsigned long long id,
+                                unsigned char flags,
+                                const char* arg1_name,
+                                const ARG1_TYPE& arg1_val,
+                                const char* arg2_name,
+                                const ARG2_TYPE& arg2_val) {
+  const int num_args = 2;
+  const char* arg_names[2] = { arg1_name, arg2_name };
+  unsigned char arg_types[2];
+  unsigned long long arg_values[2];
+  SetTraceValue(arg1_val, &arg_types[0], &arg_values[0]);
+  SetTraceValue(arg2_val, &arg_types[1], &arg_values[1]);
+  return TRACE_EVENT_API_ADD_TRACE_EVENT(
+      phase, category_enabled, name, id,
+      num_args, arg_names, arg_types, arg_values,
+      kNoThreshholdBeginId, kNoThresholdValue, flags);
+}
 
 // Used by TRACE_EVENTx macro. Do not use directly.
 class BASE_EXPORT TraceEndOnScopeClose {
@@ -932,7 +771,7 @@ class BASE_EXPORT TraceEndOnScopeClose {
       AddEventIfEnabled();
   }
 
-  void Initialize(const TraceCategory* category,
+  void Initialize(const unsigned char* category_enabled,
                   const char* name);
 
  private:
@@ -945,7 +784,7 @@ class BASE_EXPORT TraceEndOnScopeClose {
   // members of this class instead, compiler warnings occur about potential
   // uninitialized accesses.
   struct Data {
-    const TraceCategory* category;
+    const unsigned char* category_enabled;
     const char* name;
   };
   Data* p_data_;
@@ -964,10 +803,10 @@ class BASE_EXPORT TraceEndOnScopeCloseThreshold {
 
   // Called by macros only when tracing is enabled at the point when the begin
   // event is added.
-  void Initialize(const TraceCategory* category,
+  void Initialize(const unsigned char* category_enabled,
                   const char* name,
                   int threshold_begin_id,
-                  int64 threshold);
+                  long long threshold);
 
  private:
   // Add the end event if the category is still enabled.
@@ -979,8 +818,8 @@ class BASE_EXPORT TraceEndOnScopeCloseThreshold {
   // members of this class instead, compiler warnings occur about potential
   // uninitialized accesses.
   struct Data {
-    int64 threshold;
-    const TraceCategory* category;
+    long long threshold;
+    const unsigned char* category_enabled;
     const char* name;
     int threshold_begin_id;
   };
@@ -988,9 +827,6 @@ class BASE_EXPORT TraceEndOnScopeCloseThreshold {
   Data data_;
 };
 
-}  // namespace internal
-
-}  // namespace debug
-}  // namespace base
+}  // namespace trace_event_internal
 
 #endif  // BASE_DEBUG_TRACE_EVENT_H_

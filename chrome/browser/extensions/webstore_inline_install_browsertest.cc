@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,11 +16,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/mock_host_resolver.h"
+
+using content::WebContents;
 
 const char kWebstoreDomain[] = "cws.com";
 const char kAppDomain[] = "app.com";
@@ -71,7 +73,7 @@ class WebstoreInlineInstallTest : public InProcessBrowserTest {
     std::string script = StringPrintf("%s('%s')", test_function_name.c_str(),
         test_gallery_url_.c_str());
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-        browser()->GetSelectedTabContents()->render_view_host(), L"",
+        browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
         UTF8ToWide(script), &result));
     EXPECT_TRUE(result);
   }
@@ -80,7 +82,8 @@ class WebstoreInlineInstallTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, Install) {
-  SetExtensionInstallDialogAutoConfirmForTests(true);
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
 
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "install.html"));
@@ -94,7 +97,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, Install) {
 
 IN_PROC_BROWSER_TEST_F(
     WebstoreInlineInstallTest, InstallNotAllowedFromNonVerifiedDomains) {
-  SetExtensionInstallDialogAutoConfirmForTests(false);
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
   ui_test_utils::NavigateToURL(
       browser(),
       GenerateTestServerUrl(kNonAppDomain, "install_non_verified_domain.html"));
@@ -111,7 +115,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, FindLink) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, ArgumentValidation) {
-  SetExtensionInstallDialogAutoConfirmForTests(false);
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
   ui_test_utils::NavigateToURL(
       browser(), GenerateTestServerUrl(kAppDomain, "argument_validation.html"));
 
@@ -119,7 +124,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, ArgumentValidation) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, InstallNotSupported) {
-  SetExtensionInstallDialogAutoConfirmForTests(false);
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "cancel");
   ui_test_utils::NavigateToURL(
       browser(),
       GenerateTestServerUrl(kAppDomain, "install_not_supported.html"));
@@ -131,8 +137,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallTest, InstallNotSupported) {
   if (browser()->tabstrip_model()->count() == 1) {
     ui_test_utils::WaitForNewTab(browser());
   }
-  TabContents* tab_contents = browser()->GetSelectedTabContents();
-  EXPECT_EQ(GURL("http://cws.com/show-me-the-money"), tab_contents->GetURL());
+  WebContents* web_contents = browser()->GetSelectedWebContents();
+  EXPECT_EQ(GURL("http://cws.com/show-me-the-money"), web_contents->GetURL());
 }
 
 // The unpack failure test needs to use a different install .crx, which is
@@ -156,7 +162,8 @@ class WebstoreInlineInstallUnpackFailureTest
 };
 
 IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallUnpackFailureTest, Test) {
-  SetExtensionInstallDialogAutoConfirmForTests(true);
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests, "accept");
 
   ui_test_utils::NavigateToURL(browser(),
       GenerateTestServerUrl(kAppDomain, "install_unpack_failure.html"));

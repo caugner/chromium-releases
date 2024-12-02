@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,15 +12,18 @@
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::NavigationEntry;
+using content::WebContents;
 
 // TabDownloadState ------------------------------------------------------------
 
@@ -41,7 +44,7 @@ DownloadRequestLimiter::TabDownloadState::TabDownloadState(
   NavigationEntry* active_entry = originating_controller ?
       originating_controller->GetActiveEntry() : controller->GetActiveEntry();
   if (active_entry)
-    initial_page_host_ = active_entry->url().host();
+    initial_page_host_ = active_entry->GetURL().host();
 }
 
 DownloadRequestLimiter::TabDownloadState::~TabDownloadState() {
@@ -68,8 +71,8 @@ void DownloadRequestLimiter::TabDownloadState::OnUserGesture() {
 }
 
 void DownloadRequestLimiter::TabDownloadState::PromptUserForDownload(
-    TabContents* tab,
-    DownloadRequestLimiter::Callback* callback) {
+    WebContents* tab,
+    const DownloadRequestLimiter::Callback& callback) {
   callbacks_.push_back(callback);
 
   if (is_showing_prompt())
@@ -113,11 +116,11 @@ void DownloadRequestLimiter::TabDownloadState::Observe(
       // request. If this happens we may let a download through that we
       // shouldn't have. But this is rather rare, and it is difficult to get
       // 100% right, so we don't deal with it.
-      NavigationEntry* entry = controller_->pending_entry();
+      NavigationEntry* entry = controller_->GetPendingEntry();
       if (!entry)
         return;
 
-      if (content::PageTransitionIsRedirect(entry->transition_type())) {
+      if (content::PageTransitionIsRedirect(entry->GetTransitionType())) {
         // Redirects don't count.
         return;
       }
@@ -127,8 +130,8 @@ void DownloadRequestLimiter::TabDownloadState::Observe(
         // User has either allowed all downloads or canceled all downloads. Only
         // reset the download state if the user is navigating to a different
         // host (or host is empty).
-        if (!initial_page_host_.empty() && !entry->url().host().empty() &&
-            entry->url().host() == initial_page_host_) {
+        if (!initial_page_host_.empty() && !entry->GetURL().host().empty() &&
+            entry->GetURL().host() == initial_page_host_) {
           return;
         }
       }
@@ -152,7 +155,7 @@ void DownloadRequestLimiter::TabDownloadState::NotifyCallbacks(bool allow) {
   status_ = allow ?
       DownloadRequestLimiter::ALLOW_ALL_DOWNLOADS :
       DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED;
-  std::vector<DownloadRequestLimiter::Callback*> callbacks;
+  std::vector<DownloadRequestLimiter::Callback> callbacks;
   bool change_status = false;
 
   // Selectively send first few notifications only if number of downloads exceed
@@ -167,7 +170,7 @@ void DownloadRequestLimiter::TabDownloadState::NotifyCallbacks(bool allow) {
     }
     callbacks.swap(callbacks_);
   } else {
-    std::vector<DownloadRequestLimiter::Callback*>::iterator start, end;
+    std::vector<DownloadRequestLimiter::Callback>::iterator start, end;
     start = callbacks_.begin();
     end = callbacks_.begin() + kMaxDownloadsAtOnce;
     callbacks.assign(start, end);
@@ -194,15 +197,15 @@ DownloadRequestLimiter::~DownloadRequestLimiter() {
 }
 
 DownloadRequestLimiter::DownloadStatus
-    DownloadRequestLimiter::GetDownloadStatus(TabContents* tab) {
-  TabDownloadState* state = GetDownloadState(&tab->controller(), NULL, false);
+    DownloadRequestLimiter::GetDownloadStatus(WebContents* tab) {
+  TabDownloadState* state = GetDownloadState(&tab->GetController(), NULL, false);
   return state ? state->download_status() : ALLOW_ONE_DOWNLOAD;
 }
 
 void DownloadRequestLimiter::CanDownloadOnIOThread(int render_process_host_id,
                                                    int render_view_id,
                                                    int request_id,
-                                                   Callback* callback) {
+                                                   const Callback& callback) {
   // This is invoked on the IO thread. Schedule the task to run on the UI
   // thread so that we can query UI state.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -212,8 +215,9 @@ void DownloadRequestLimiter::CanDownloadOnIOThread(int render_process_host_id,
                  render_process_host_id, render_view_id, request_id, callback));
 }
 
-void DownloadRequestLimiter::OnUserGesture(TabContents* tab) {
-  TabDownloadState* state = GetDownloadState(&tab->controller(), NULL, false);
+void DownloadRequestLimiter::OnUserGesture(WebContents* tab) {
+  TabDownloadState* state =
+      GetDownloadState(&tab->GetController(), NULL, false);
   if (!state)
     return;
 
@@ -246,11 +250,11 @@ DownloadRequestLimiter::TabDownloadState* DownloadRequestLimiter::
 void DownloadRequestLimiter::CanDownload(int render_process_host_id,
                                          int render_view_id,
                                          int request_id,
-                                         Callback* callback) {
+                                         const Callback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  TabContents* originating_tab =
-      tab_util::GetTabContentsByID(render_process_host_id, render_view_id);
+  WebContents* originating_tab =
+      tab_util::GetWebContentsByID(render_process_host_id, render_view_id);
   if (!originating_tab) {
     // The tab was closed, don't allow the download.
     ScheduleNotification(callback, false);
@@ -266,13 +270,14 @@ void DownloadRequestLimiter::CanDownload(int render_process_host_id,
 void DownloadRequestLimiter::CanDownloadImpl(
     TabContentsWrapper* originating_tab,
     int request_id,
-    Callback* callback) {
+    const Callback& callback) {
   DCHECK(originating_tab);
 
   // FYI: Chrome Frame overrides CanDownload in ExternalTabContainer in order
   // to cancel the download operation in chrome and let the host browser
   // take care of it.
-  if (!originating_tab->tab_contents()->CanDownload(request_id)) {
+  WebContents* tab = originating_tab->web_contents();
+  if (tab->GetDelegate() && !tab->GetDelegate()->CanDownload(tab, request_id)) {
     ScheduleNotification(callback, false);
     return;
   }
@@ -286,8 +291,8 @@ void DownloadRequestLimiter::CanDownloadImpl(
   }
 
   TabDownloadState* state = GetDownloadState(
-      &effective_wrapper->tab_contents()->controller(),
-      &originating_tab->controller(), true);
+      &effective_wrapper->web_contents()->GetController(),
+      &tab->GetController(), true);
   switch (state->download_status()) {
     case ALLOW_ALL_DOWNLOADS:
       if (state->download_count() && !(state->download_count() %
@@ -307,7 +312,7 @@ void DownloadRequestLimiter::CanDownloadImpl(
       break;
 
     case PROMPT_BEFORE_DOWNLOAD:
-      state->PromptUserForDownload(effective_wrapper->tab_contents(), callback);
+      state->PromptUserForDownload(effective_wrapper->web_contents(), callback);
       state->increment_download_count();
       break;
 
@@ -316,20 +321,10 @@ void DownloadRequestLimiter::CanDownloadImpl(
   }
 }
 
-void DownloadRequestLimiter::ScheduleNotification(Callback* callback,
+void DownloadRequestLimiter::ScheduleNotification(const Callback& callback,
                                                   bool allow) {
   BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&DownloadRequestLimiter::NotifyCallback, this, callback,
-                 allow));
-}
-
-void DownloadRequestLimiter::NotifyCallback(Callback* callback, bool allow) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (allow)
-    callback->ContinueDownload();
-  else
-    callback->CancelDownload();
+      BrowserThread::IO, FROM_HERE, base::Bind(callback, allow));
 }
 
 void DownloadRequestLimiter::Remove(TabDownloadState* state) {

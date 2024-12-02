@@ -1,9 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/appcache/appcache_update_job.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -89,12 +91,13 @@ AppCacheUpdateJob::UrlToFetch::~UrlToFetch() {
 // data out to the disk cache.
 AppCacheUpdateJob::URLFetcher::URLFetcher(
     const GURL& url, FetchType fetch_type, AppCacheUpdateJob* job)
-    : url_(url), job_(job), fetch_type_(fetch_type), retry_503_attempts_(0),
+    : url_(url),
+      job_(job),
+      fetch_type_(fetch_type),
+      retry_503_attempts_(0),
       buffer_(new net::IOBuffer(kBufferSize)),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          request_(new net::URLRequest(url, this))),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          write_callback_(this, &URLFetcher::OnWriteComplete)) {
+          request_(new net::URLRequest(url, this))) {
 }
 
 AppCacheUpdateJob::URLFetcher::~URLFetcher() {
@@ -147,7 +150,9 @@ void AppCacheUpdateJob::URLFetcher::OnResponseStarted(
       scoped_refptr<HttpResponseInfoIOBuffer> io_buffer(
           new HttpResponseInfoIOBuffer(
               new net::HttpResponseInfo(request->response_info())));
-      response_writer_->WriteInfo(io_buffer, &write_callback_);
+      response_writer_->WriteInfo(
+          io_buffer,
+          base::Bind(&URLFetcher::OnWriteComplete, base::Unretained(this)));
     } else {
       ReadResponseData();
     }
@@ -236,7 +241,9 @@ bool AppCacheUpdateJob::URLFetcher::ConsumeResponseData(int bytes_read) {
     case URL_FETCH:
     case MASTER_ENTRY_FETCH:
       DCHECK(response_writer_.get());
-      response_writer_->WriteData(buffer_, bytes_read,  &write_callback_);
+      response_writer_->WriteData(
+          buffer_, bytes_read,
+          base::Bind(&URLFetcher::OnWriteComplete, base::Unretained(this)));
       return false;  // wait for async write completion to continue reading
     default:
       NOTREACHED();
@@ -285,21 +292,14 @@ bool AppCacheUpdateJob::URLFetcher::MaybeRetryRequest() {
 
 AppCacheUpdateJob::AppCacheUpdateJob(AppCacheService* service,
                                      AppCacheGroup* group)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
-      service_(service),
+    : service_(service),
       group_(group),
       update_type_(UNKNOWN_TYPE),
       internal_state_(FETCH_MANIFEST),
       master_entries_completed_(0),
       url_fetches_completed_(0),
       manifest_fetcher_(NULL),
-      stored_state_(UNSTORED),
-      ALLOW_THIS_IN_INITIALIZER_LIST(manifest_info_write_callback_(
-          this, &AppCacheUpdateJob::OnManifestInfoWriteComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(manifest_data_write_callback_(
-          this, &AppCacheUpdateJob::OnManifestDataWriteComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(manifest_data_read_callback_(
-          this, &AppCacheUpdateJob::OnManifestDataReadComplete)) {
+      stored_state_(UNSTORED) {
   DCHECK(group_);
   manifest_url_ = group_->manifest_url();
 }
@@ -552,7 +552,7 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLFetcher* fetcher) {
 
     // TODO(michaeln): Check for <html manifest=xxx>
     // See http://code.google.com/p/chromium/issues/detail?id=97930
-    // if (entry.IsMaster() && !entry.IsExplicit())
+    // if (entry.IsMaster() && !(entry.IsExplicit() || fallback || intercept))
     //   if (!manifestAttribute) skip it
 
     // Foreign entries will be detected during cache selection.
@@ -564,7 +564,7 @@ void AppCacheUpdateJob::HandleUrlFetchCompleted(URLFetcher* fetcher) {
     VLOG(1) << "Request status: " << request->status().status()
             << " error: " << request->status().error()
             << " response code: " << response_code;
-    if (entry.IsExplicit() || entry.IsFallback()) {
+    if (entry.IsExplicit() || entry.IsFallback() || entry.IsIntercept()) {
       if (response_code == 304 && fetcher->existing_entry().has_response_id()) {
         // Keep the existing response.
         entry.set_response_id(fetcher->existing_entry().response_id());
@@ -701,8 +701,10 @@ void AppCacheUpdateJob::HandleManifestRefetchCompleted(
       manifest_response_writer_.reset(CreateResponseWriter());
       scoped_refptr<HttpResponseInfoIOBuffer> io_buffer(
           new HttpResponseInfoIOBuffer(manifest_response_info_.release()));
-      manifest_response_writer_->WriteInfo(io_buffer,
-                                           &manifest_info_write_callback_);
+      manifest_response_writer_->WriteInfo(
+          io_buffer,
+          base::Bind(&AppCacheUpdateJob::OnManifestInfoWriteComplete,
+                     base::Unretained(this)));
     }
   } else {
     VLOG(1) << "Request status: " << request->status().status()
@@ -717,8 +719,10 @@ void AppCacheUpdateJob::OnManifestInfoWriteComplete(int result) {
   if (result > 0) {
     scoped_refptr<net::StringIOBuffer> io_buffer(
         new net::StringIOBuffer(manifest_data_));
-    manifest_response_writer_->WriteData(io_buffer, manifest_data_.length(),
-                                         &manifest_data_write_callback_);
+    manifest_response_writer_->WriteData(
+        io_buffer, manifest_data_.length(),
+        base::Bind(&AppCacheUpdateJob::OnManifestDataWriteComplete,
+                   base::Unretained(this)));
   } else {
     HandleCacheFailure("Failed to write the manifest headers to storage");
   }
@@ -845,15 +849,19 @@ void AppCacheUpdateJob::CheckIfManifestChanged() {
                                                 group_->group_id(),
                                                 entry->response_id()));
   read_manifest_buffer_ = new net::IOBuffer(kBufferSize);
-  manifest_response_reader_->ReadData(read_manifest_buffer_, kBufferSize,
-      &manifest_data_read_callback_);  // async read
+  manifest_response_reader_->ReadData(
+      read_manifest_buffer_, kBufferSize,
+      base::Bind(&AppCacheUpdateJob::OnManifestDataReadComplete,
+                 base::Unretained(this)));  // async read
 }
 
 void AppCacheUpdateJob::OnManifestDataReadComplete(int result) {
   if (result > 0) {
     loaded_manifest_data_.append(read_manifest_buffer_->data(), result);
-    manifest_response_reader_->ReadData(read_manifest_buffer_, kBufferSize,
-        &manifest_data_read_callback_);  // read more
+    manifest_response_reader_->ReadData(
+        read_manifest_buffer_, kBufferSize,
+        base::Bind(&AppCacheUpdateJob::OnManifestDataReadComplete,
+                   base::Unretained(this)));  // read more
   } else {
     read_manifest_buffer_ = NULL;
     manifest_response_reader_.reset();
@@ -869,14 +877,18 @@ void AppCacheUpdateJob::BuildUrlFileList(const Manifest& manifest) {
     AddUrlToFileList(GURL(*it), AppCacheEntry::EXPLICIT);
   }
 
-  // TODO(michaeln): Add resources from intercept namepsaces too.
-  // http://code.google.com/p/chromium/issues/detail?id=101565
+  const std::vector<Namespace>& intercepts =
+      manifest.intercept_namespaces;
+  for (std::vector<Namespace>::const_iterator it = intercepts.begin();
+       it != intercepts.end(); ++it) {
+     AddUrlToFileList(it->target_url, AppCacheEntry::INTERCEPT);
+  }
 
-  const std::vector<FallbackNamespace>& fallbacks =
+  const std::vector<Namespace>& fallbacks =
       manifest.fallback_namespaces;
-  for (std::vector<FallbackNamespace>::const_iterator it = fallbacks.begin();
+  for (std::vector<Namespace>::const_iterator it = fallbacks.begin();
        it != fallbacks.end(); ++it) {
-     AddUrlToFileList(it->second, AppCacheEntry::FALLBACK);
+     AddUrlToFileList(it->target_url, AppCacheEntry::FALLBACK);
   }
 
   // Add all master entries from newest complete cache.
@@ -964,9 +976,8 @@ bool AppCacheUpdateJob::ShouldSkipUrlFetch(const AppCacheEntry& entry) {
   // If the resource URL being processed was flagged as neither an
   // "explicit entry" nor or a "fallback entry", then the user agent
   // may skip this URL.
-  if (entry.IsExplicit() || entry.IsFallback()) {
+  if (entry.IsExplicit() || entry.IsFallback() || entry.IsIntercept())
     return false;
-  }
 
   // TODO(jennb): decide if entry should be skipped to expire it from cache
   return false;

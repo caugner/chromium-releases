@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,8 +96,7 @@ bool CrackFileSystemURL(const GURL& url, GURL* origin_url, FileSystemType* type,
   return true;
 }
 
-GURL GetFileSystemRootURI(
-    const GURL& origin_url, fileapi::FileSystemType type) {
+GURL GetFileSystemRootURI(const GURL& origin_url, FileSystemType type) {
   std::string path("filesystem:");
   path += origin_url.spec();
   switch (type) {
@@ -115,6 +114,13 @@ GURL GetFileSystemRootURI(
     return GURL();
   }
   return GURL(path);
+}
+
+std::string GetFileSystemName(const GURL& origin_url, FileSystemType type) {
+  std::string origin_identifier = GetOriginIdentifierFromURL(origin_url);
+  std::string type_string = GetFileSystemTypeString(type);
+  DCHECK(!type_string.empty());
+  return origin_identifier + ":" + type_string;
 }
 
 FileSystemType QuotaStorageTypeToFileSystemType(
@@ -160,6 +166,20 @@ GURL GetOriginURLFromIdentifier(const std::string& origin_identifier) {
       origin_identifier.find("file__") == 0)
     return GURL("file:///");
   return origin_url;
+}
+
+std::string GetFileSystemTypeString(FileSystemType type) {
+  switch (type) {
+    case kFileSystemTypeTemporary:
+      return fileapi::kTemporaryName;
+    case kFileSystemTypePersistent:
+      return fileapi::kPersistentName;
+    case kFileSystemTypeExternal:
+      return fileapi::kExternalName;
+    case kFileSystemTypeUnknown:
+    default:
+      return std::string();
+  }
 }
 
 }  // namespace fileapi

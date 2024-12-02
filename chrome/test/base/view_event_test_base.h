@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -56,7 +57,7 @@ class Size;
 //   // Schedule the mouse move at a location slightly different from where
 //   // you really want to move to.
 //   ui_controls::SendMouseMoveNotifyWhenDone(loc.x + 10, loc.y,
-//       NewRunnableMethod(this, YYY));
+//       base::Bind(&YYY, this));
 //   // Then use this to schedule another mouse move.
 //   ScheduleMouseMoveInBackground(loc.x, loc.y);
 
@@ -134,8 +135,7 @@ class ViewEventTestBase : public views::WidgetDelegate,
 
   MessageLoopForUI message_loop_;
 
-  // Method factory used for time-outs.
-  ScopedRunnableMethodFactory<ViewEventTestBase> method_factory_;
+  content::TestBrowserThread ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(ViewEventTestBase);
 };

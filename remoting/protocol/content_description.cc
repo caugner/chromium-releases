@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/string_number_conversions.h"
 #include "remoting/base/constants.h"
+#include "remoting/protocol/authenticator.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 
 using buzz::QName;
@@ -26,14 +27,13 @@ const char kDescriptionTag[] = "description";
 const char kControlTag[] = "control";
 const char kEventTag[] = "event";
 const char kVideoTag[] = "video";
-const char kResolutionTag[] = "initial-resolution";
-const char kAuthenticationTag[] = "authentication";
+const char kDeprecatedResolutionTag[] = "initial-resolution";
 
 const char kTransportAttr[] = "transport";
 const char kVersionAttr[] = "version";
 const char kCodecAttr[] = "codec";
-const char kWidthAttr[] = "width";
-const char kHeightAttr[] = "height";
+const char kDeprecatedWidthAttr[] = "width";
+const char kDeprecatedHeightAttr[] = "height";
 
 const char kStreamTransport[] = "stream";
 const char kDatagramTransport[] = "datagram";
@@ -146,10 +146,10 @@ bool ParseChannelConfig(const XmlElement* element, bool codec_required,
 }  // namespace
 
 ContentDescription::ContentDescription(
-    const CandidateSessionConfig* candidate_config,
-    const buzz::XmlElement* authenticator_message)
-    : candidate_config_(candidate_config),
-      authenticator_message_(authenticator_message) {
+    scoped_ptr<CandidateSessionConfig> config,
+    scoped_ptr<buzz::XmlElement> authenticator_message)
+    : candidate_config_(config.Pass()),
+      authenticator_message_(authenticator_message.Pass()) {
 }
 
 ContentDescription::~ContentDescription() { }
@@ -160,7 +160,6 @@ ContentDescription::~ContentDescription() { }
 //     <control transport="stream" version="1" />
 //     <event transport="datagram" version="1" />
 //     <video transport="srtp" codec="vp8" version="1" />
-//     <initial-resolution width="800" height="600" />
 //     <authentication>
 //      Message created by Authenticator implementation.
 //     </authentication>
@@ -187,19 +186,15 @@ XmlElement* ContentDescription::ToXml() const {
     root->AddElement(FormatChannelConfig(*it, kVideoTag));
   }
 
+  // Older endpoints require an initial-resolution tag, but otherwise ignore it.
   XmlElement* resolution_tag = new XmlElement(
-      QName(kChromotingXmlNamespace, kResolutionTag));
-  resolution_tag->AddAttr(QName(kDefaultNs, kWidthAttr),
-                          base::IntToString(
-                              config()->initial_resolution().width));
-  resolution_tag->AddAttr(QName(kDefaultNs, kHeightAttr),
-                          base::IntToString(
-                              config()->initial_resolution().height));
+      QName(kChromotingXmlNamespace, kDeprecatedResolutionTag));
+  resolution_tag->AddAttr(QName(kDefaultNs, kDeprecatedWidthAttr), "640");
+  resolution_tag->AddAttr(QName(kDefaultNs, kDeprecatedHeightAttr), "480");
   root->AddElement(resolution_tag);
 
   if (authenticator_message_.get()) {
-    DCHECK(authenticator_message_->Name() ==
-           QName(kChromotingXmlNamespace, kAuthenticationTag));
+    DCHECK(Authenticator::IsAuthenticatorMessage(authenticator_message_.get()));
     root->AddElement(new XmlElement(*authenticator_message_));
   }
 
@@ -247,32 +242,12 @@ ContentDescription* ContentDescription::ParseXml(
       child = child->NextNamed(video_tag);
     }
 
-    // <initial-resolution> tag.
-    child = element->FirstNamed(QName(kChromotingXmlNamespace, kResolutionTag));
-    if (!child)
-      return NULL; // Resolution must always be specified.
-    int width;
-    int height;
-    if (!base::StringToInt(child->Attr(QName(kDefaultNs, kWidthAttr)),
-                           &width) ||
-        !base::StringToInt(child->Attr(QName(kDefaultNs, kHeightAttr)),
-                           &height)) {
-      return NULL;
-    }
-    ScreenResolution resolution(width, height);
-    if (!resolution.IsValid())
-      return NULL;
-
-    *config->mutable_initial_resolution() = resolution;
-
     scoped_ptr<XmlElement> authenticator_message;
-    child = element->FirstNamed(QName(kChromotingXmlNamespace,
-                                      kAuthenticationTag));
+    child = Authenticator::FindAuthenticatorMessage(element);
     if (child)
       authenticator_message.reset(new XmlElement(*child));
 
-    return new ContentDescription(
-        config.release(), authenticator_message.release());
+    return new ContentDescription(config.Pass(), authenticator_message.Pass());
   }
   LOG(ERROR) << "Invalid description: " << element->Str();
   return NULL;

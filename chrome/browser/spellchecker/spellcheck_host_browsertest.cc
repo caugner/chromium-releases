@@ -1,17 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/path_service.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_host.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "googleurl/src/gurl.h"
 
 namespace {
@@ -56,7 +56,7 @@ IN_PROC_BROWSER_TEST_F(SpellCheckHostBrowserTest, DeleteCorruptedBDICT) {
 
   // Initialize the SpellCheckHost object with the corrupted BDICT file created
   // above. The SpellCheckHost object will send a BDICT_CORRUPTED event.
-  browser()->profile()->ReinitializeSpellCheckHost(false);
+  SpellCheckFactory::ReinitializeSpellCheckHost(browser()->profile(), false);
 
   // Check the received event. Also we check if Chrome has successfully deleted
   // the corrupted dictionary. We delete the corrupted dictionary to avoid

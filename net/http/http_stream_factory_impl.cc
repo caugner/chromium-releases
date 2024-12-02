@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,7 +37,8 @@ GURL UpgradeUrlToHttps(const GURL& original_url, int port) {
 
 HttpStreamFactoryImpl::HttpStreamFactoryImpl(HttpNetworkSession* session)
     : session_(session),
-      http_pipelined_host_pool_(this, NULL) {}
+      http_pipelined_host_pool_(this, NULL,
+                                session_->http_server_properties()) {}
 
 HttpStreamFactoryImpl::~HttpStreamFactoryImpl() {
   DCHECK(request_map_.empty());
@@ -71,13 +72,13 @@ HttpStreamRequest* HttpStreamFactoryImpl::RequestStream(
     alternate_request_info.url = alternate_url;
     alternate_job =
         new Job(this, session_, alternate_request_info, server_ssl_config,
-                proxy_ssl_config, net_log);
+                proxy_ssl_config, net_log.net_log());
     request->AttachJob(alternate_job);
     alternate_job->MarkAsAlternate(request_info.url);
   }
 
   Job* job = new Job(this, session_, request_info, server_ssl_config,
-                     proxy_ssl_config, net_log);
+                     proxy_ssl_config, net_log.net_log());
   request->AttachJob(job);
   if (alternate_job) {
     job->WaitFor(alternate_job);
@@ -97,8 +98,7 @@ void HttpStreamFactoryImpl::PreconnectStreams(
     int num_streams,
     const HttpRequestInfo& request_info,
     const SSLConfig& server_ssl_config,
-    const SSLConfig& proxy_ssl_config,
-    const BoundNetLog& net_log) {
+    const SSLConfig& proxy_ssl_config) {
   GURL alternate_url;
   bool has_alternate_protocol =
       GetAlternateProtocolRequestFor(request_info.url, &alternate_url);
@@ -107,11 +107,11 @@ void HttpStreamFactoryImpl::PreconnectStreams(
     HttpRequestInfo alternate_request_info = request_info;
     alternate_request_info.url = alternate_url;
     job = new Job(this, session_, alternate_request_info, server_ssl_config,
-                  proxy_ssl_config, net_log);
+                  proxy_ssl_config, session_->net_log());
     job->MarkAsAlternate(request_info.url);
   } else {
     job = new Job(this, session_, request_info, server_ssl_config,
-                  proxy_ssl_config, net_log);
+                  proxy_ssl_config, session_->net_log());
   }
   preconnect_job_set_.insert(job);
   job->Preconnect(num_streams);
@@ -124,6 +124,10 @@ void HttpStreamFactoryImpl::AddTLSIntolerantServer(const HostPortPair& server) {
 bool HttpStreamFactoryImpl::IsTLSIntolerantServer(
     const HostPortPair& server) const {
   return ContainsKey(tls_intolerant_servers_, server);
+}
+
+base::Value* HttpStreamFactoryImpl::PipelineInfoToValue() const {
+  return http_pipelined_host_pool_.PipelineInfoToValue();
 }
 
 bool HttpStreamFactoryImpl::GetAlternateProtocolRequestFor(
@@ -151,7 +155,7 @@ bool HttpStreamFactoryImpl::GetAlternateProtocolRequestFor(
   DCHECK_LE(NPN_SPDY_1, alternate.protocol);
   DCHECK_GT(NUM_ALTERNATE_PROTOCOLS, alternate.protocol);
 
-  if (alternate.protocol != NPN_SPDY_2)
+  if (alternate.protocol < NPN_SPDY_2)
     return false;
 
   // Some shared unix systems may have user home directories (like
@@ -189,8 +193,9 @@ void HttpStreamFactoryImpl::OnSpdySessionReady(
     const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     bool was_npn_negotiated,
+    SSLClientSocket::NextProto protocol_negotiated,
     bool using_spdy,
-    const NetLog::Source& source) {
+    const BoundNetLog& net_log) {
   const HostPortProxyPair& spdy_session_key =
       spdy_session->host_port_proxy_pair();
   while (!spdy_session->IsClosed()) {
@@ -205,8 +210,9 @@ void HttpStreamFactoryImpl::OnSpdySessionReady(
       break;
     Request* request = *spdy_session_request_map_[spdy_session_key].begin();
     request->Complete(was_npn_negotiated,
+                      protocol_negotiated,
                       using_spdy,
-                      source);
+                      net_log);
     bool use_relative_url = direct || request->url().SchemeIs("https");
     request->OnStreamReady(NULL, used_ssl_config, used_proxy_info,
                            new SpdyHttpStream(spdy_session, use_relative_url));
@@ -233,8 +239,9 @@ void HttpStreamFactoryImpl::OnHttpPipelinedHostHasAdditionalCapacity(
              origin))) {
     Request* request = *http_pipelining_request_map_[origin].begin();
     request->Complete(stream->was_npn_negotiated(),
+                      stream->protocol_negotiated(),
                       false,  // not using_spdy
-                      stream->source());
+                      stream->net_log());
     request->OnStreamReady(NULL,
                            stream->used_ssl_config(),
                            stream->used_proxy_info(),

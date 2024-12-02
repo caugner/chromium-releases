@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,9 +54,6 @@ class ExtensionAccessibilityEventRouter : public content::NotificationObserver {
   void OnTextChanged(const AccessibilityControlInfo* details);
   void OnMenuOpened(const AccessibilityMenuInfo* details);
   void OnMenuClosed(const AccessibilityMenuInfo* details);
-  void OnVolumeChanged(const AccessibilityVolumeInfo* details);
-  void OnScreenUnlocked(const ScreenUnlockedEventInfo* details);
-  void OnWokeUp(const WokeUpEventInfo* details);
 
   void DispatchEvent(Profile* profile,
                      const char* event_name,
@@ -88,6 +85,14 @@ class GetFocusedControlFunction : public SyncExtensionFunction {
   virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME(
       "experimental.accessibility.getFocusedControl")
+};
+
+// API function that returns alerts being shown on the give tab.
+class GetAlertsForTabFunction : public SyncExtensionFunction {
+  virtual ~GetAlertsForTabFunction() {}
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME(
+      "experimental.accessibility.getAlertsForTab")
 };
 
 #endif  // CHROME_BROWSER_ACCESSIBILITY_ACCESSIBILITY_EXTENSION_API_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ void BrowserAccessibility::DetachTree(
   parent_ = NULL;
 }
 
-void BrowserAccessibility::Initialize(
+void BrowserAccessibility::PreInitialize(
     BrowserAccessibilityManager* manager,
     BrowserAccessibility* parent,
     int32 child_id,
@@ -76,11 +76,7 @@ void BrowserAccessibility::Initialize(
   cell_ids_ = src.cell_ids;
   unique_cell_ids_ = src.unique_cell_ids;
 
-  Initialize();
-}
-
-void BrowserAccessibility::Initialize() {
-  instance_active_ = true;
+  PreInitialize();
 }
 
 void BrowserAccessibility::AddChild(BrowserAccessibility* child) {
@@ -133,8 +129,10 @@ gfx::Rect BrowserAccessibility::GetLocalBoundsRect() {
   BrowserAccessibility* root = manager_->GetRoot();
   int scroll_x = 0;
   int scroll_y = 0;
-  root->GetIntAttribute(WebAccessibility::ATTR_SCROLL_X, &scroll_x);
-  root->GetIntAttribute(WebAccessibility::ATTR_SCROLL_Y, &scroll_y);
+  if (!root->GetIntAttribute(WebAccessibility::ATTR_SCROLL_X, &scroll_x) ||
+      !root->GetIntAttribute(WebAccessibility::ATTR_SCROLL_Y, &scroll_y)) {
+    return bounds;
+  }
   bounds.Offset(-scroll_x, -scroll_y);
 
   return bounds;
@@ -163,98 +161,14 @@ BrowserAccessibility* BrowserAccessibility::BrowserAccessibilityForPoint(
   return this;
 }
 
-void BrowserAccessibility::ScrollToMakeVisible(const gfx::Rect& subfocus,
-                                               const gfx::Rect& focus,
-                                               const gfx::Rect& viewport) {
-  int scroll_x = 0;
-  int scroll_x_min = 0;
-  int scroll_x_max = 0;
-  int scroll_y = 0;
-  int scroll_y_min = 0;
-  int scroll_y_max = 0;
-  if (!GetIntAttribute(WebAccessibility::ATTR_SCROLL_X, &scroll_x) ||
-      !GetIntAttribute(WebAccessibility::ATTR_SCROLL_X_MIN, &scroll_x_min) ||
-      !GetIntAttribute(WebAccessibility::ATTR_SCROLL_X_MAX, &scroll_x_max) ||
-      !GetIntAttribute(WebAccessibility::ATTR_SCROLL_Y, &scroll_y) ||
-      !GetIntAttribute(WebAccessibility::ATTR_SCROLL_Y_MIN, &scroll_y_min) ||
-      !GetIntAttribute(WebAccessibility::ATTR_SCROLL_Y_MAX, &scroll_y_max)) {
-    return;
-  }
-
-  gfx::Rect final_viewport(0, 0, location_.width(), location_.height());
-  final_viewport.Intersect(viewport);
-
-  int new_scroll_x = ComputeBestScrollOffset(
-      scroll_x,
-      subfocus.x(), subfocus.right(),
-      focus.x(), focus.right(),
-      final_viewport.x(), final_viewport.right());
-  new_scroll_x = std::max(new_scroll_x, scroll_x_min);
-  new_scroll_x = std::min(new_scroll_x, scroll_x_max);
-
-  int new_scroll_y = ComputeBestScrollOffset(
-      scroll_y,
-      subfocus.y(), subfocus.bottom(),
-      focus.y(), focus.bottom(),
-      final_viewport.y(), final_viewport.bottom());
-  new_scroll_y = std::max(new_scroll_y, scroll_y_min);
-  new_scroll_y = std::min(new_scroll_y, scroll_y_max);
-
-  manager_->ChangeScrollPosition(*this, new_scroll_x, new_scroll_y);
-}
-
-// static
-int BrowserAccessibility::ComputeBestScrollOffset(
-    int current_scroll_offset,
-    int subfocus_min, int subfocus_max,
-    int focus_min, int focus_max,
-    int viewport_min, int viewport_max) {
-  int viewport_size = viewport_max - viewport_min;
-
-  // If the focus size is larger than the viewport size, shrink it in the
-  // direction of subfocus.
-  if (focus_max - focus_min > viewport_size) {
-    // Subfocus must be within focus:
-    subfocus_min = std::max(subfocus_min, focus_min);
-    subfocus_max = std::min(subfocus_max, focus_max);
-
-    // Subfocus must be no larger than the viewport size; favor top/left.
-    if (subfocus_max - subfocus_min > viewport_size)
-      subfocus_max = subfocus_min + viewport_size;
-
-    if (subfocus_min + viewport_size > focus_max) {
-      focus_min = focus_max - viewport_size;
-    } else {
-      focus_min = subfocus_min;
-      focus_max = subfocus_min + viewport_size;
-    }
-  }
-
-  // Exit now if the focus is already within the viewport.
-  if (focus_min - current_scroll_offset >= viewport_min &&
-      focus_max - current_scroll_offset <= viewport_max) {
-    return current_scroll_offset;
-  }
-
-  // Scroll left if we're too far to the right.
-  if (focus_max - current_scroll_offset > viewport_max)
-    return focus_max - viewport_max;
-
-  // Scroll right if we're too far to the left.
-  if (focus_min - current_scroll_offset < viewport_min)
-    return focus_min - viewport_min;
-
-  // This shouldn't happen.
-  NOTREACHED();
-  return current_scroll_offset;
-}
-
 void BrowserAccessibility::InternalAddReference() {
   ref_count_++;
 }
 
 void BrowserAccessibility::InternalReleaseReference(bool recursive) {
   DCHECK_GT(ref_count_, 0);
+  // It is a bug for ref_count_ to be gt 1 when |recursive| is true.
+  DCHECK(!recursive || ref_count_ == 1);
 
   if (recursive || ref_count_ == 1) {
     for (std::vector<BrowserAccessibility*>::iterator iter = children_.begin();
@@ -262,6 +176,10 @@ void BrowserAccessibility::InternalReleaseReference(bool recursive) {
          ++iter) {
       (*iter)->InternalReleaseReference(true);
     }
+    children_.clear();
+    // Force this to be the last ref. As the DCHECK above indicates, this
+    // should always be the case. Make it so defensively.
+    ref_count_ = 1;
   }
 
   ref_count_--;
@@ -269,13 +187,12 @@ void BrowserAccessibility::InternalReleaseReference(bool recursive) {
     // Allow the object to fire a TEXT_REMOVED notification.
     name_.clear();
     value_.clear();
-    SendNodeUpdateEvents();
+    PostInitialize();
 
     manager_->NotifyAccessibilityEvent(
         ViewHostMsg_AccEvent::OBJECT_HIDE, this);
 
     instance_active_ = false;
-    children_.clear();
     manager_->Remove(child_id_, renderer_id_);
     NativeReleaseReference();
   }
@@ -361,4 +278,8 @@ string16 BrowserAccessibility::GetTextRecursive() const {
   for (size_t i = 0; i < children_.size(); ++i)
     result += children_[i]->GetTextRecursive();
   return result;
+}
+
+void BrowserAccessibility::PreInitialize() {
+  instance_active_ = true;
 }

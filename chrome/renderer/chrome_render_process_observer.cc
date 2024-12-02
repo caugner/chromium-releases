@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,7 +56,7 @@ using content::RenderThread;
 
 namespace {
 
-static const unsigned int kCacheStatsDelayMS = 2000 /* milliseconds */;
+static const int kCacheStatsDelayMS = 2000;
 
 class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
  public:
@@ -75,7 +75,7 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
          FROM_HERE,
          base::Bind(&RendererResourceDelegate::InformHostOfCacheStats,
                     weak_factory_.GetWeakPtr()),
-         kCacheStatsDelayMS);
+         base::TimeDelta::FromMilliseconds(kCacheStatsDelayMS));
     }
 
     if (status.status() != net::URLRequestStatus::CANCELED ||
@@ -354,6 +354,8 @@ void ChromeRenderProcessObserver::OnGetV8HeapStats() {
 }
 
 void ChromeRenderProcessObserver::OnPurgeMemory() {
+  RenderThread::Get()->EnsureWebKitInitialized();
+
   // Clear the object cache (as much as possible; some live objects cannot be
   // freed).
   WebCache::clear();

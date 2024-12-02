@@ -1,11 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/client/plugin/chromoting_scriptable_object.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
+#include "base/string_split.h"
 // TODO(wez): Remove this when crbug.com/86353 is complete.
 #include "ppapi/cpp/private/var_private.h"
 #include "remoting/base/auth_token_util.h"
@@ -44,8 +46,7 @@ const char kRoundTripLatencyAttribute[] = "roundTripLatency";
 ChromotingScriptableObject::ChromotingScriptableObject(
     ChromotingInstance* instance, base::MessageLoopProxy* plugin_message_loop)
     : instance_(instance),
-      plugin_message_loop_(plugin_message_loop),
-      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
+      plugin_message_loop_(plugin_message_loop) {
 }
 
 ChromotingScriptableObject::~ChromotingScriptableObject() {
@@ -57,7 +58,7 @@ void ChromotingScriptableObject::Init() {
 
   // Plugin API version.
   // This should be incremented whenever the API interface changes.
-  AddAttribute(kApiVersionAttribute, Var(2));
+  AddAttribute(kApiVersionAttribute, Var(4));
 
   // This should be updated whenever we remove support for an older version
   // of the API.
@@ -103,9 +104,11 @@ void ChromotingScriptableObject::Init() {
 
   AddMethod("connect", &ChromotingScriptableObject::DoConnect);
   AddMethod("disconnect", &ChromotingScriptableObject::DoDisconnect);
-  AddMethod("setScaleToFit", &ChromotingScriptableObject::DoSetScaleToFit);
   AddMethod("onIq", &ChromotingScriptableObject::DoOnIq);
   AddMethod("releaseAllKeys", &ChromotingScriptableObject::DoReleaseAllKeys);
+
+  // Older versions of the web app expect a setScaleToFit method.
+  AddMethod("setScaleToFit", &ChromotingScriptableObject::DoNothing);
 }
 
 bool ChromotingScriptableObject::HasProperty(const Var& name, Var* exception) {
@@ -283,8 +286,8 @@ void ChromotingScriptableObject::AttachXmppProxy(PepperXmppProxy* xmpp_proxy) {
 
 void ChromotingScriptableObject::SendIq(const std::string& message_xml) {
   plugin_message_loop_->PostTask(
-      FROM_HERE, task_factory_.NewRunnableMethod(
-          &ChromotingScriptableObject::DoSendIq, message_xml));
+      FROM_HERE, base::Bind(
+          &ChromotingScriptableObject::DoSendIq, AsWeakPtr(), message_xml));
 }
 
 void ChromotingScriptableObject::AddAttribute(const std::string& name,
@@ -302,15 +305,16 @@ void ChromotingScriptableObject::AddMethod(const std::string& name,
 void ChromotingScriptableObject::SignalConnectionInfoChange(int status,
                                                             int error) {
   plugin_message_loop_->PostTask(
-      FROM_HERE, task_factory_.NewRunnableMethod(
+      FROM_HERE, base::Bind(
           &ChromotingScriptableObject::DoSignalConnectionInfoChange,
-          status, error));
+          AsWeakPtr(), status, error));
 }
 
 void ChromotingScriptableObject::SignalDesktopSizeChange() {
   plugin_message_loop_->PostTask(
-      FROM_HERE, task_factory_.NewRunnableMethod(
-          &ChromotingScriptableObject::DoSignalDesktopSizeChange));
+      FROM_HERE, base::Bind(
+          &ChromotingScriptableObject::DoSignalDesktopSizeChange,
+          AsWeakPtr()));
 }
 
 void ChromotingScriptableObject::DoSignalConnectionInfoChange(int status,
@@ -355,33 +359,75 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
   //   host_jid
   //   host_public_key
   //   client_jid
-  //   access_code (optional)
+  //   shared_secret
+  //   authentication_methods
+  //   authentication_tag
+  ClientConfig config;
+
   unsigned int arg = 0;
   if (!args[arg].is_string()) {
     *exception = Var("The host_jid must be a string.");
     return Var();
   }
-  std::string host_jid = args[arg++].AsString();
+  config.host_jid = args[arg++].AsString();
 
   if (!args[arg].is_string()) {
     *exception = Var("The host_public_key must be a string.");
     return Var();
   }
-  std::string host_public_key = args[arg++].AsString();
+  config.host_public_key = args[arg++].AsString();
 
   if (!args[arg].is_string()) {
     *exception = Var("The client_jid must be a string.");
     return Var();
   }
-  std::string client_jid = args[arg++].AsString();
+  config.local_jid = args[arg++].AsString();
 
-  std::string access_code;
+  if (!args[arg].is_string()) {
+    *exception = Var("The shared_secret must be a string.");
+    return Var();
+  }
+  config.shared_secret = args[arg++].AsString();
+
+  // Older versions of the webapp do not supply the following two
+  // parameters.
+
+  // By default use V1 authentication.
+  config.use_v1_authenticator = true;
   if (args.size() > arg) {
     if (!args[arg].is_string()) {
-      *exception = Var("The access code must be a string.");
+      *exception = Var("The authentication_methods must be a string.");
       return Var();
     }
-    access_code = args[arg++].AsString();
+
+    std::string as_string = args[arg++].AsString();
+    if (as_string == "v1_token") {
+      config.use_v1_authenticator = true;
+    } else {
+      config.use_v1_authenticator = false;
+
+      std::vector<std::string> auth_methods;
+      base::SplitString(as_string, ',', &auth_methods);
+      for (std::vector<std::string>::iterator it = auth_methods.begin();
+           it != auth_methods.end(); ++it) {
+        protocol::AuthenticationMethod authentication_method =
+            protocol::AuthenticationMethod::FromString(*it);
+        if (authentication_method.is_valid())
+          config.authentication_methods.push_back(authentication_method);
+      }
+      if (config.authentication_methods.empty()) {
+        *exception = Var("No valid authentication methods specified.");
+        return Var();
+      }
+    }
+  }
+
+  if (args.size() > arg) {
+    if (!args[arg].is_string()) {
+      *exception = Var("The authentication_tag must be a string.");
+      return Var();
+    }
+    config.authentication_tag = args[arg++].AsString();
   }
 
   if (args.size() != arg) {
@@ -390,13 +436,8 @@ Var ChromotingScriptableObject::DoConnect(const std::vector<Var>& args,
   }
 
   VLOG(1) << "Connecting to host. "
-          << "client_jid: " << client_jid << ", host_jid: " << host_jid
-          << ", access_code: " << access_code;
-  ClientConfig config;
-  config.local_jid = client_jid;
-  config.host_jid = host_jid;
-  config.host_public_key = host_public_key;
-  config.access_code = access_code;
+          << "client_jid: " << config.local_jid
+          << ", host_jid: " << config.host_jid;
   instance_->Connect(config);
 
   return Var();
@@ -409,20 +450,8 @@ Var ChromotingScriptableObject::DoDisconnect(const std::vector<Var>& args,
   return Var();
 }
 
-Var ChromotingScriptableObject::DoSetScaleToFit(const std::vector<Var>& args,
-                                                Var* exception) {
-  if (args.size() != 1) {
-    *exception = Var("Usage: setScaleToFit(scale_to_fit)");
-    return Var();
-  }
-
-  if (!args[0].is_bool()) {
-    *exception = Var("scale_to_fit must be a boolean.");
-    return Var();
-  }
-
-  VLOG(1) << "Setting scale-to-fit.";
-  instance_->SetScaleToFit(args[0].AsBool());
+Var ChromotingScriptableObject::DoNothing(const std::vector<Var>& args,
+                                          Var* exception) {
   return Var();
 }
 

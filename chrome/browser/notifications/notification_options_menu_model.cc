@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,7 @@
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -117,9 +117,11 @@ NotificationOptionsMenuModel::NotificationOptionsMenuModel(Balloon* balloon)
   const GURL& origin = notification.origin_url();
 
   if (origin.SchemeIs(chrome::kExtensionScheme)) {
-    ExtensionService* ext_service =
+    ExtensionService* extension_service =
         balloon_->profile()->GetExtensionService();
-    const Extension* extension = ext_service->GetExtensionByURL(origin);
+    const Extension* extension =
+        extension_service->extensions()->GetExtensionOrAppByURL(
+            ExtensionURLInfo(origin));
     // We get back no extension here when we show the notification after
     // the extension has crashed.
     if (extension) {
@@ -127,16 +129,18 @@ NotificationOptionsMenuModel::NotificationOptionsMenuModel(Balloon* balloon)
           IDS_EXTENSIONS_DISABLE);
       AddItem(kToggleExtensionCommand, disable_label);
     }
-  } else {
+  } else if (!notification.display_source().empty()) {
     const string16 disable_label = l10n_util::GetStringFUTF16(
         IDS_NOTIFICATION_BALLOON_REVOKE_MESSAGE,
         notification.display_source());
     AddItem(kTogglePermissionCommand, disable_label);
   }
 
-  const string16 settings_label = l10n_util::GetStringUTF16(
-      IDS_NOTIFICATIONS_SETTINGS_BUTTON);
-  AddItem(kOpenContentSettingsCommand, settings_label);
+  if (!notification.display_source().empty()) {
+    const string16 settings_label = l10n_util::GetStringUTF16(
+        IDS_NOTIFICATIONS_SETTINGS_BUTTON);
+    AddItem(kOpenContentSettingsCommand, settings_label);
+  }
 
   corner_menu_model_.reset(new CornerSelectionMenuModel(balloon));
   AddSubMenu(kCornerSelectionSubMenu,
@@ -165,12 +169,14 @@ string16 NotificationOptionsMenuModel::GetLabelForCommandId(int command_id)
     DesktopNotificationService* service =
         DesktopNotificationServiceFactory::GetForProfile(balloon_->profile());
     if (origin.SchemeIs(chrome::kExtensionScheme)) {
-      ExtensionService* ext_service =
+      ExtensionService* extension_service =
           balloon_->profile()->GetExtensionService();
-      const Extension* extension = ext_service->GetExtensionByURL(origin);
+      const Extension* extension =
+          extension_service->extensions()->GetExtensionOrAppByURL(
+              ExtensionURLInfo(origin));
       if (extension) {
         return l10n_util::GetStringUTF16(
-            ext_service->IsExtensionEnabled(extension->id()) ?
+            extension_service->IsExtensionEnabled(extension->id()) ?
                 IDS_EXTENSIONS_DISABLE :
                 IDS_EXTENSIONS_ENABLE);
       }
@@ -212,7 +218,7 @@ bool NotificationOptionsMenuModel::GetAcceleratorForCommandId(
 void NotificationOptionsMenuModel::ExecuteCommand(int command_id) {
   DesktopNotificationService* service =
       DesktopNotificationServiceFactory::GetForProfile(balloon_->profile());
-  ExtensionService* ext_service =
+  ExtensionService* extension_service =
       balloon_->profile()->GetExtensionService();
   const GURL& origin = balloon_->notification().origin_url();
   switch (command_id) {
@@ -223,13 +229,15 @@ void NotificationOptionsMenuModel::ExecuteCommand(int command_id) {
         service->GrantPermission(origin);
       break;
     case kToggleExtensionCommand: {
-      const Extension* extension = ext_service->GetExtensionByURL(origin);
+      const Extension* extension =
+          extension_service->extensions()->GetExtensionOrAppByURL(
+              ExtensionURLInfo(origin));
       if (extension) {
         const std::string& id = extension->id();
-        if (ext_service->IsExtensionEnabled(id))
-          ext_service->DisableExtension(id);
+        if (extension_service->IsExtensionEnabled(id))
+          extension_service->DisableExtension(id);
         else
-          ext_service->EnableExtension(id);
+          extension_service->EnableExtension(id);
       }
       break;
     }

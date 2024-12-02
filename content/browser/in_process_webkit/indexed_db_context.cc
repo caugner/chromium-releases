@@ -10,7 +10,6 @@
 #include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "base/string_util.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/in_process_webkit/indexed_db_quota_client.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
@@ -38,7 +37,7 @@ void GetAllOriginsAndPaths(
     const FilePath& indexeddb_path,
     std::vector<GURL>* origins,
     std::vector<FilePath>* file_paths) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   if (indexeddb_path.empty())
     return;
   file_util::FileEnumerator file_enumerator(indexeddb_path,
@@ -62,7 +61,7 @@ void ClearLocalState(
     const FilePath& indexeddb_path,
     bool clear_all_databases,
     scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   std::vector<GURL> origins;
   std::vector<FilePath> file_paths;
   GetAllOriginsAndPaths(indexeddb_path, &origins, &file_paths);
@@ -95,6 +94,7 @@ IndexedDBContext::IndexedDBContext(
     quota::QuotaManagerProxy* quota_manager_proxy,
     base::MessageLoopProxy* webkit_thread_loop)
     : clear_local_state_on_exit_(false),
+      save_session_state_(false),
       special_storage_policy_(special_storage_policy),
       quota_manager_proxy_(quota_manager_proxy) {
   if (!webkit_context->is_incognito())
@@ -108,10 +108,16 @@ IndexedDBContext::IndexedDBContext(
 
 IndexedDBContext::~IndexedDBContext() {
   WebKit::WebIDBFactory* factory = idb_factory_.release();
-  if (factory)
-    BrowserThread::DeleteSoon(BrowserThread::WEBKIT, FROM_HERE, factory);
+  if (factory) {
+    if (!BrowserThread::DeleteSoon(BrowserThread::WEBKIT_DEPRECATED,
+                                   FROM_HERE, factory))
+      delete factory;
+  }
 
   if (data_path_.empty())
+    return;
+
+  if (save_session_state_)
     return;
 
   bool has_session_only_databases =
@@ -119,20 +125,19 @@ IndexedDBContext::~IndexedDBContext() {
       special_storage_policy_->HasSessionOnlyOrigins();
 
   // Clearning only session-only databases, and there are none.
-  if (!clear_local_state_on_exit_ &&
-      !has_session_only_databases)
+  if (!clear_local_state_on_exit_ && !has_session_only_databases)
     return;
 
   // No WEBKIT thread here means we are running in a unit test where no clean
   // up is needed.
   BrowserThread::PostTask(
-      BrowserThread::WEBKIT, FROM_HERE,
+      BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
       base::Bind(&ClearLocalState, data_path_, clear_local_state_on_exit_,
                  special_storage_policy_));
 }
 
 WebIDBFactory* IndexedDBContext::GetIDBFactory() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   if (!idb_factory_.get()) {
     // Prime our cache of origins with existing databases so we can
     // detect when dbs are newly created.
@@ -143,7 +148,7 @@ WebIDBFactory* IndexedDBContext::GetIDBFactory() {
 }
 
 void IndexedDBContext::DeleteIndexedDBForOrigin(const GURL& origin_url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   if (data_path_.empty() || !IsInOriginSet(origin_url))
     return;
   // TODO(michaeln): When asked to delete an origin with open connections,
@@ -163,7 +168,7 @@ void IndexedDBContext::DeleteIndexedDBForOrigin(const GURL& origin_url) {
 }
 
 void IndexedDBContext::GetAllOrigins(std::vector<GURL>* origins) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   std::set<GURL>* origins_set = GetOriginSet();
   for (std::set<GURL>::const_iterator iter = origins_set->begin();
        iter != origins_set->end(); ++iter) {
@@ -293,20 +298,20 @@ void IndexedDBContext::GotUsageAndQuota(const GURL& origin_url,
     return;
   }
   BrowserThread::PostTask(
-      BrowserThread::WEBKIT, FROM_HERE,
+      BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
       base::Bind(&IndexedDBContext::GotUpdatedQuota, this, origin_url, usage,
                  quota));
 }
 
 void IndexedDBContext::GotUpdatedQuota(const GURL& origin_url, int64 usage,
                                        int64 quota) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
   space_available_map_[origin_url] = quota - usage;
 }
 
 void IndexedDBContext::QueryAvailableQuota(const GURL& origin_url) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT_DEPRECATED));
     if (quota_manager_proxy())
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,

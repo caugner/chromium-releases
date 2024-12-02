@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_piece.h"
@@ -33,9 +32,11 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
@@ -45,6 +46,8 @@
 #include "ui/base/resource/resource_bundle.h"
 
 using content::BrowserThread;
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -129,14 +132,12 @@ chromeos::CellularNetwork* GetCellularNetwork(
 // appears.
 class PortalFrameLoadObserver : public content::RenderViewHostObserver {
  public:
-  PortalFrameLoadObserver(RenderViewHost* host, WebUI* webui)
-      : content::RenderViewHostObserver(host), webui_(webui) {
-    DCHECK(webui_);
+  PortalFrameLoadObserver(const base::WeakPtr<MobileSetupUI>& parent,
+                          RenderViewHost* host)
+      : content::RenderViewHostObserver(host), parent_(parent) {
     Send(new ChromeViewMsg_StartFrameSniffer(routing_id(),
                                              UTF8ToUTF16("paymentForm")));
   }
-
-  virtual ~PortalFrameLoadObserver() {}
 
   // IPC::Channel::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) {
@@ -152,16 +153,23 @@ class PortalFrameLoadObserver : public content::RenderViewHostObserver {
 
  private:
   void OnFrameLoadError(int error) {
+    if (!parent_.get())
+      return;
+
     base::FundamentalValue result_value(error);
-    webui_->CallJavascriptFunction(
-        kJsPortalFrameLoadFailedCallback, result_value);
+    parent_->web_ui()->CallJavascriptFunction(kJsPortalFrameLoadFailedCallback,
+                                              result_value);
   }
 
   void OnFrameLoadCompleted() {
-    webui_->CallJavascriptFunction(kJsPortalFrameLoadCompletedCallback);
+    if (!parent_.get())
+      return;
+
+    parent_->web_ui()->CallJavascriptFunction(
+        kJsPortalFrameLoadCompletedCallback);
   }
 
-  WebUI* webui_;
+  base::WeakPtr<MobileSetupUI> parent_;
   DISALLOW_COPY_AND_ASSIGN(PortalFrameLoadObserver);
 };
 
@@ -219,11 +227,9 @@ class MobileSetupHandler
   virtual ~MobileSetupHandler();
 
   // Init work after Attach.
-  void Init(TabContents* contents);
   void StartActivationOnUIThread();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // NetworkLibrary::NetworkManagerObserver implementation.
@@ -297,15 +303,15 @@ class MobileSetupHandler
                    const std::string& error_description);
   // Prepares network devices for cellular activation process.
   void SetupActivationProcess(chromeos::CellularNetwork* network);
+  // Disables ethernet and wifi newtorks since they interefere with
+  // detection of restricted pool on cellular side.
+  void DisableOtherNetworks();
   // Resets network devices after cellular activation process.
   // |network| should be NULL if the activation process failed.
   void CompleteActivation(chromeos::CellularNetwork* network);
-  // Disables SSL certificate revocation checking mechanism. In the case
-  // where captive portal connection is the only one present, such revocation
-  // checks could prevent payment portal page from loading.
-  void DisableCertRevocationChecking();
-  // Reenables SSL certificate revocation checking mechanism.
-  void ReEnableCertRevocationChecking();
+  // Control routines for handling other types of connections during
+  // cellular activation.
+  void ReEnableOtherConnections();
   // Return error message for a given code.
   std::string GetErrorMessage(const std::string& code);
 
@@ -326,12 +332,13 @@ class MobileSetupHandler
   static const char* GetStateDescription(PlanActivationState state);
 
   scoped_refptr<CellularConfigDocument> cellular_config_;
-  TabContents* tab_contents_;
   // Internal handler state.
   PlanActivationState state_;
   std::string service_path_;
-  // Flags that controls if cert_checks needs to be restored
+  // Flags that control if wifi and ethernet connection needs to be restored
   // after the activation of cellular network.
+  bool reenable_wifi_;
+  bool reenable_ethernet_;
   bool reenable_cert_check_;
   bool evaluating_;
   // True if we think that another tab is already running activation.
@@ -488,9 +495,10 @@ void MobileSetupUIHTMLSource::StartDataRequest(const std::string& path,
 ////////////////////////////////////////////////////////////////////////////////
 MobileSetupHandler::MobileSetupHandler(const std::string& service_path)
     : cellular_config_(new CellularConfigDocument()),
-      tab_contents_(NULL),
       state_(PLAN_ACTIVATION_PAGE_LOADING),
       service_path_(service_path),
+      reenable_wifi_(false),
+      reenable_ethernet_(false),
       reenable_cert_check_(false),
       evaluating_(false),
       already_running_(false),
@@ -508,25 +516,17 @@ MobileSetupHandler::~MobileSetupHandler() {
   lib->RemoveObserverForAllNetworks(this);
   if (lib->IsLocked())
     lib->Unlock();
-  ReEnableCertRevocationChecking();
-}
-
-WebUIMessageHandler* MobileSetupHandler::Attach(WebUI* web_ui) {
-  return WebUIMessageHandler::Attach(web_ui);
-}
-
-void MobileSetupHandler::Init(TabContents* contents) {
-  tab_contents_ = contents;
+  ReEnableOtherConnections();
 }
 
 void MobileSetupHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(kJsApiStartActivation,
+  web_ui()->RegisterMessageCallback(kJsApiStartActivation,
       base::Bind(&MobileSetupHandler::HandleStartActivation,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(kJsApiSetTransactionStatus,
+  web_ui()->RegisterMessageCallback(kJsApiSetTransactionStatus,
       base::Bind(&MobileSetupHandler::HandleSetTransactionStatus,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(kJsApiPaymentPortalLoad,
+  web_ui()->RegisterMessageCallback(kJsApiPaymentPortalLoad,
       base::Bind(&MobileSetupHandler::HandlePaymentPortalLoad,
                  base::Unretained(this)));
 }
@@ -789,7 +789,7 @@ bool MobileSetupHandler::ConnectionTimeout() {
 
 void MobileSetupHandler::EvaluateCellularNetwork(
     chromeos::CellularNetwork* network) {
-  if (!web_ui_)
+  if (!web_ui())
     return;
 
   PlanActivationState new_state = state_;
@@ -912,6 +912,9 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     case PLAN_ACTIVATION_RECONNECTING_PAYMENT:
     case PLAN_ACTIVATION_RECONNECTING: {
       if (network->connected()) {
+        // Make sure other networks are not interfering with our detection of
+        // restricted pool.
+        DisableOtherNetworks();
         // Wait until the service shows up and gets activated.
         switch (network->activation_state()) {
           case chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED:
@@ -956,6 +959,9 @@ void MobileSetupHandler::EvaluateCellularNetwork(
     }
     case PLAN_ACTIVATION_RECONNECTING_OTASP: {
       if (network->connected()) {
+        // Make sure other networks are not interfering with our detection of
+        // restricted pool.
+        DisableOtherNetworks();
         // Wait until the service shows up and gets activated.
         switch (network->activation_state()) {
           case chromeos::ACTIVATION_STATE_PARTIALLY_ACTIVATED:
@@ -1125,7 +1131,7 @@ void MobileSetupHandler::CompleteActivation(
     network->SetAutoConnect(true);
   // Reactivate other types of connections if we have
   // shut them down previously.
-  ReEnableCertRevocationChecking();
+  ReEnableOtherConnections();
 }
 
 void MobileSetupHandler::UpdatePage(
@@ -1137,7 +1143,7 @@ void MobileSetupHandler::UpdatePage(
   device_dict.SetInteger("state", state_);
   if (error_description.length())
     device_dict.SetString("error", error_description);
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       kJsDeviceStatusChangedCallback, device_dict);
 }
 
@@ -1237,7 +1243,18 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
   }
 }
 
-void MobileSetupHandler::ReEnableCertRevocationChecking() {
+void MobileSetupHandler::ReEnableOtherConnections() {
+  chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
+      GetNetworkLibrary();
+  if (reenable_ethernet_) {
+    reenable_ethernet_ = false;
+    lib->EnableEthernetNetworkDevice(true);
+  }
+  if (reenable_wifi_) {
+    reenable_wifi_ = false;
+    lib->EnableWifiNetworkDevice(true);
+  }
+
   PrefService* prefs = g_browser_process->local_state();
   if (reenable_cert_check_) {
     prefs->SetBoolean(prefs::kCertRevocationCheckingEnabled,
@@ -1246,8 +1263,12 @@ void MobileSetupHandler::ReEnableCertRevocationChecking() {
   }
 }
 
-void MobileSetupHandler::DisableCertRevocationChecking() {
-  // Disable SSL cert checks since we might be performin activation in the
+void MobileSetupHandler::SetupActivationProcess(
+    chromeos::CellularNetwork* network) {
+  if (!network)
+    return;
+
+  // Disable SSL cert checks since we will be doing this in
   // restricted pool.
   PrefService* prefs = g_browser_process->local_state();
   if (!reenable_cert_check_ &&
@@ -1256,20 +1277,29 @@ void MobileSetupHandler::DisableCertRevocationChecking() {
     reenable_cert_check_ = true;
     prefs->SetBoolean(prefs::kCertRevocationCheckingEnabled, false);
   }
-}
 
-void MobileSetupHandler::SetupActivationProcess(
-    chromeos::CellularNetwork* network) {
-  if (!network)
-    return;
-
-  DisableCertRevocationChecking();
   chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
       GetNetworkLibrary();
   // Disable autoconnect to cellular network.
   network->SetAutoConnect(false);
 
+  // Prevent any other network interference.
+  DisableOtherNetworks();
   lib->Lock();
+}
+
+void MobileSetupHandler::DisableOtherNetworks() {
+  chromeos::NetworkLibrary* lib = chromeos::CrosLibrary::Get()->
+      GetNetworkLibrary();
+  // Disable ethernet and wifi.
+  if (lib->ethernet_enabled()) {
+    reenable_ethernet_ = true;
+    lib->EnableEthernetNetworkDevice(false);
+  }
+  if (lib->wifi_enabled()) {
+    reenable_wifi_ = true;
+    lib->EnableWifiNetworkDevice(false);
+  }
 }
 
 bool MobileSetupHandler::GotActivationError(
@@ -1361,22 +1391,20 @@ void MobileSetupHandler::StartActivationOnUIThread() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-MobileSetupUI::MobileSetupUI(TabContents* contents) : ChromeWebUI(contents) {
+MobileSetupUI::MobileSetupUI(content::WebUI* web_ui)
+    : WebUIController(web_ui) {
   chromeos::CellularNetwork* network = GetCellularNetwork();
   std::string service_path = network ? network->service_path() : std::string();
-  MobileSetupHandler* handler = new MobileSetupHandler(service_path);
-  AddMessageHandler((handler)->Attach(this));
-  handler->Init(contents);
+  web_ui->AddMessageHandler(new MobileSetupHandler(service_path));
   MobileSetupUIHTMLSource* html_source =
       new MobileSetupUIHTMLSource(service_path);
 
   // Set up the chrome://mobilesetup/ source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
 void MobileSetupUI::RenderViewCreated(RenderViewHost* host) {
-  ChromeWebUI::RenderViewCreated(host);
-  // Destroyed by the corresponding RenderViewHost.
-  new PortalFrameLoadObserver(host, tab_contents()->web_ui());
+  // Destroyed by the corresponding RenderViewHost
+  new PortalFrameLoadObserver(AsWeakPtr(), host);
 }

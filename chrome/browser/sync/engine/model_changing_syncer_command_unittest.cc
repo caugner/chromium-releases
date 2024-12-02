@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,18 +26,15 @@ class FakeModelChangingSyncerCommand : public ModelChangingSyncerCommand {
   }
 
  protected:
-  virtual bool HasCustomGroupsToChange() const OVERRIDE {
-    return false;
-  }
-
   virtual std::set<ModelSafeGroup> GetGroupsToChange(
       const sessions::SyncSession& session) const OVERRIDE {
     return session.GetEnabledGroups();
   }
 
-  virtual void ModelChangingExecuteImpl(
+  virtual SyncerError ModelChangingExecuteImpl(
       sessions::SyncSession* session) OVERRIDE {
     changed_groups_.insert(session->status_controller().group_restriction());
+    return SYNCER_OK;
   }
 
  private:

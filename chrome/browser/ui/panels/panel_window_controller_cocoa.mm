@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
@@ -23,8 +24,10 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/favicon_util.h"
+#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/throbber_view.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_bounds_animation.h"
 #include "chrome/browser/ui/panels/panel_browser_window_cocoa.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/panels/panel_settings_menu_model.h"
@@ -32,12 +35,14 @@
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/ui_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/mac/nsimage_cache.h"
+
+using content::WebContents;
 
 const int kMinimumWindowSize = 1;
 const double kBoundsAnimationSpeedPixelsPerSecond = 1000;
@@ -70,14 +75,13 @@ enum {
 
 - (id)initWithBrowserWindow:(PanelBrowserWindowCocoa*)window {
   NSString* nibpath =
-      [base::mac::MainAppBundle() pathForResource:@"Panel" ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"Panel" ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     windowShim_.reset(window);
     animateOnBoundsChange_ = YES;
   }
   contentsController_.reset(
-      [[TabContentsController alloc] initWithContents:nil
-                                             delegate:nil]);
+      [[TabContentsController alloc] initWithContents:nil]);
   return self;
 }
 
@@ -181,10 +185,10 @@ enum {
   // we always deactivate the controls here. If we're created as an active
   // panel, we'll get a NSWindowDidBecomeKeyNotification and reactivate the web
   // view properly. See crbug.com/97831 for more details.
-  TabContents* tab_contents = [contentsController_ tabContents];
+  WebContents* web_contents = [contentsController_ webContents];
   // RWHV may be NULL in unit tests.
-  if (tab_contents && tab_contents->GetRenderWidgetHostView())
-    tab_contents->GetRenderWidgetHostView()->SetActive(false);
+  if (web_contents && web_contents->GetRenderWidgetHostView())
+    web_contents->GetRenderWidgetHostView()->SetActive(false);
   [window setFrame:frame display:YES animate:YES];
 
   [self enableTabContentsViewAutosizing];
@@ -248,14 +252,14 @@ enum {
   [findBarCocoaController positionFindBarViewAtMaxY:maxY maxWidth:maxWidth];
 }
 
-- (void)tabInserted:(TabContents*)contents {
-  [contentsController_ changeTabContents:contents];
+- (void)tabInserted:(WebContents*)contents {
+  [contentsController_ changeWebContents:contents];
   DCHECK(![[contentsController_ view] isHidden]);
 }
 
-- (void)tabDetached:(TabContents*)contents {
-  DCHECK(contents == [contentsController_ tabContents]);
-  [contentsController_ changeTabContents:NULL];
+- (void)tabDetached:(WebContents*)contents {
+  DCHECK(contents == [contentsController_ webContents]);
+  [contentsController_ changeWebContents:nil];
   [[contentsController_ view] setHidden:YES];
 }
 
@@ -392,6 +396,10 @@ enum {
                    forView:button];
 }
 
+- (BOOL)isDraggable {
+  return windowShim_->panel()->draggable();
+}
+
 - (void)startDrag {
   animateOnBoundsChange_ = NO;
   windowShim_->panel()->manager()->StartDragging(windowShim_->panel());
@@ -467,7 +475,7 @@ enum {
       duration = 1.5;
     }
   }
-  [boundsAnimation_ setDuration: duration];
+  [boundsAnimation_ setDuration: PanelManager::AdjustTimeInterval(duration)];
   [boundsAnimation_ setFrameRate:0.0];
   [boundsAnimation_ setAnimationBlockingMode: NSAnimationNonblocking];
   [boundsAnimation_ startAnimation];
@@ -475,31 +483,8 @@ enum {
 
 - (float)animation:(NSAnimation*)animation
   valueForProgress:(NSAnimationProgress)progress {
-  if (!playingMinimizeAnimation_) {
-    // Cubic easing out.
-    float value = 1.0 - progress;
-    return 1.0 - value * value * value;
-  }
-
-  // Minimize animation:
-  // 1. Quickly (0 -> 0.15) make only titlebar visible.
-  // 2. Stay a little bit (0.15->0.6) in place, just showing titlebar.
-  // 3. Slowly minimize to thin strip (0.6->1.0)
-  const float kAnimationStopAfterQuickDecrease = 0.15;
-  const float kAnimationStopAfterShowingTitlebar = 0.6;
-  float value;
-  if (progress <= kAnimationStopAfterQuickDecrease) {
-      value = progress * animationStopToShowTitlebarOnly_ /
-              kAnimationStopAfterQuickDecrease;
-  } else if (progress <= kAnimationStopAfterShowingTitlebar) {
-      value = animationStopToShowTitlebarOnly_;
-  } else {
-      value = animationStopToShowTitlebarOnly_ +
-          (progress - kAnimationStopAfterShowingTitlebar) *
-          (1.0 - animationStopToShowTitlebarOnly_) /
-          (1.0 - kAnimationStopAfterShowingTitlebar);
-  }
-  return value;
+  return PanelBoundsAnimation::ComputeAnimationValue(
+      progress, playingMinimizeAnimation_, animationStopToShowTitlebarOnly_);
 }
 
 - (void)animationDidEnd:(NSAnimation*)animation {
@@ -558,8 +543,8 @@ enum {
   BrowserList::SetLastActive(windowShim_->browser());
 
   // We need to activate the controls (in the "WebView"). To do this, get the
-  // selected TabContents's RenderWidgetHostViewMac and tell it to activate.
-  if (TabContents* contents = [contentsController_ tabContents]) {
+  // selected TabContents's RenderWidgetHostView and tell it to activate.
+  if (WebContents* contents = [contentsController_ webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->SetActive(true);
   }
@@ -587,7 +572,7 @@ enum {
 
   // We need to deactivate the controls (in the "WebView"). To do this, get the
   // selected TabContents's RenderWidgetHostView and tell it to deactivate.
-  if (TabContents* contents = [contentsController_ tabContents]) {
+  if (WebContents* contents = [contentsController_ webContents]) {
     if (RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView())
       rwhv->SetActive(false);
   }

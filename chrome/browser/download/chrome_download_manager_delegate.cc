@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,23 +28,46 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/download/download_file.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_status_updater.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::DownloadFile;
+using content::DownloadId;
+using content::DownloadItem;
+using content::DownloadManager;
+using content::WebContents;
 using safe_browsing::DownloadProtectionService;
+
+namespace {
+
+// String pointer used for identifying safebrowing data associated with
+// a download item.
+static const char safe_browsing_id[] = "Safe Browsing ID";
+
+// The state of a safebrowsing check.
+struct SafeBrowsingState : public DownloadItem::ExternalData {
+  // If true the SafeBrowsing check is not done yet.
+  bool pending;
+  // The verdict that we got from calling CheckClientDownload.
+  safe_browsing::DownloadProtectionService::DownloadCheckResult verdict;
+};
+
+}
 
 ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
     : profile_(profile),
+      next_download_id_(0),
       download_prefs_(new DownloadPrefs(profile->GetPrefs())) {
 }
 
@@ -71,6 +94,14 @@ void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
 void ChromeDownloadManagerDelegate::Shutdown() {
   download_history_.reset();
   download_prefs_.reset();
+}
+
+DownloadId ChromeDownloadManagerDelegate::GetNextId() {
+  if (!profile_->IsOffTheRecord())
+    return DownloadId(this, next_download_id_++);
+
+  return profile_->GetOriginalProfile()->GetDownloadManager()->delegate()->
+      GetNextId();
 }
 
 bool ChromeDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
@@ -105,36 +136,25 @@ bool ChromeDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
 }
 
 void ChromeDownloadManagerDelegate::ChooseDownloadPath(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     const FilePath& suggested_path,
     void* data) {
   // Deletes itself.
   new DownloadFilePicker(
-      download_manager_, tab_contents, suggested_path, data);
+      download_manager_, web_contents, suggested_path, data);
 }
 
-bool ChromeDownloadManagerDelegate::OverrideIntermediatePath(
-    DownloadItem* item,
-    FilePath* intermediate_path) {
-  if (item->GetDangerType() != DownloadStateInfo::NOT_DANGEROUS) {
-    // The download might not be safe.  It's name is already set to an
-    // intermediate name, so no need to override.
-    return false;
-  }
-
-  // The download is a safe download.  We need to rename it to its intermediate
-  // '.crdownload' path.  The final name after user confirmation will be set
-  // from DownloadItem::OnDownloadCompleting.
-  *intermediate_path = download_util::GetCrDownloadPath(item->GetFullPath());
-  return true;
+FilePath ChromeDownloadManagerDelegate::GetIntermediatePath(
+    const FilePath& suggested_path) {
+  return download_util::GetCrDownloadPath(suggested_path);
 }
 
-TabContents* ChromeDownloadManagerDelegate::
-    GetAlternativeTabContentsToNotifyForDownload() {
+WebContents* ChromeDownloadManagerDelegate::
+    GetAlternativeWebContentsToNotifyForDownload() {
   // Start the download in the last active browser. This is not ideal but better
   // than fully hiding the download from the user.
   Browser* last_active = BrowserList::GetLastActiveWithProfile(profile_);
-  return last_active ? last_active->GetSelectedTabContents() : NULL;
+  return last_active ? last_active->GetSelectedWebContents() : NULL;
 }
 
 
@@ -153,29 +173,27 @@ bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
 bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
 #if defined(ENABLE_SAFE_BROWSING)
   // See if there is already a pending SafeBrowsing check for that download.
-  SafeBrowsingStateMap::iterator it = safe_browsing_state_.find(item->GetId());
-  if (it != safe_browsing_state_.end()) {
-    SafeBrowsingState state = it->second;
-    if (!state.pending) {
-      safe_browsing_state_.erase(it);
-    }
-    return !state.pending;
-  }
+  SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
+      item->GetExternalData(&safe_browsing_id));
+  if (state)
+    // Don't complete the download until we have an answer.
+    return !state->pending;
+
   // Begin the safe browsing download protection check.
   DownloadProtectionService* service = GetDownloadProtectionService();
   if (service) {
     VLOG(2) << __FUNCTION__ << "() Start SB download check for download = "
             << item->DebugString(false);
+    state = new SafeBrowsingState();
+    state->pending = true;
+    state->verdict = DownloadProtectionService::SAFE;
+    item->SetExternalData(&safe_browsing_id, state);
     service->CheckClientDownload(
         DownloadProtectionService::DownloadInfo::FromDownloadItem(*item),
         base::Bind(
             &ChromeDownloadManagerDelegate::CheckClientDownloadDone,
             this,
             item->GetId()));
-    SafeBrowsingState state;
-    state.pending = true;
-    state.verdict = DownloadProtectionService::SAFE;
-    safe_browsing_state_[item->GetId()] = state;
     return false;
   }
 #endif
@@ -214,10 +232,6 @@ bool ChromeDownloadManagerDelegate::GenerateFileHash() {
 #endif
 }
 
-void ChromeDownloadManagerDelegate::OnResponseCompleted(DownloadItem* item) {
-  // TODO(noelutz): remove this method from the delegate API.
-}
-
 void ChromeDownloadManagerDelegate::AddItemToPersistentStore(
     DownloadItem* item) {
   download_history_->AddEntry(item,
@@ -242,16 +256,16 @@ void ChromeDownloadManagerDelegate::RemoveItemFromPersistentStore(
 }
 
 void ChromeDownloadManagerDelegate::RemoveItemsFromPersistentStoreBetween(
-    const base::Time remove_begin,
-    const base::Time remove_end) {
+    base::Time remove_begin,
+    base::Time remove_end) {
   download_history_->RemoveEntriesBetween(remove_begin, remove_end);
 }
 
-void ChromeDownloadManagerDelegate::GetSaveDir(TabContents* tab_contents,
+void ChromeDownloadManagerDelegate::GetSaveDir(WebContents* web_contents,
                                                FilePath* website_save_dir,
                                                FilePath* download_save_dir) {
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents->browser_context());
+      Profile::FromBrowserContext(web_contents->GetBrowserContext());
   PrefService* prefs = profile->GetPrefs();
 
   // Check whether the preference has the preferred directory for saving file.
@@ -273,13 +287,15 @@ void ChromeDownloadManagerDelegate::GetSaveDir(TabContents* tab_contents,
 }
 
 void ChromeDownloadManagerDelegate::ChooseSavePath(
-    const base::WeakPtr<SavePackage>& save_package,
+    WebContents* web_contents,
     const FilePath& suggested_path,
-    bool can_save_as_complete) {
+    const FilePath::StringType& default_extension,
+    bool can_save_as_complete,
+    content::SaveFilePathPickedCallback callback) {
   // Deletes itself.
   new SavePackageFilePicker(
-      save_package, suggested_path, can_save_as_complete,
-      download_prefs_.get());
+      web_contents, suggested_path, default_extension, can_save_as_complete,
+      download_prefs_.get(), callback);
 }
 
 void ChromeDownloadManagerDelegate::DownloadProgressUpdated() {
@@ -331,10 +347,8 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
     int32 download_id,
     DownloadProtectionService::DownloadCheckResult result) {
   DownloadItem* item = download_manager_->GetActiveDownloadItem(download_id);
-  if (!item) {
-    safe_browsing_state_.erase(download_id);  // Just in case.
+  if (!item)
     return;
-  }
 
   VLOG(2) << __FUNCTION__ << "() download = " << item->DebugString(false)
           << " verdict = " << result;
@@ -344,13 +358,14 @@ void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
       item->GetSafetyState() == DownloadItem::SAFE)
     item->MarkContentDangerous();
 
-  SafeBrowsingStateMap::iterator it = safe_browsing_state_.find(item->GetId());
-  DCHECK(it != safe_browsing_state_.end() && it->second.pending);
-  if (it != safe_browsing_state_.end()) {
-    it->second.pending = false;
-    it->second.verdict = result;
+  SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
+      item->GetExternalData(&safe_browsing_id));
+  DCHECK(state);
+  if (state) {
+    state->pending = false;
+    state->verdict = result;
   }
-  download_manager_->MaybeCompleteDownload(item);
+  item->MaybeCompleteDownload();
 }
 
 // content::NotificationObserver implementation.
@@ -427,7 +442,7 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
   if (!state.prompt_user_for_save_location &&
       state.force_file_name.empty() &&
       IsDangerousFile(*download, state, visited_referrer_before)) {
-    state.danger = DownloadStateInfo::DANGEROUS_FILE;
+    state.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
   }
 
 #if defined(ENABLE_SAFE_BROWSING)
@@ -439,7 +454,7 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
     // TODO(noelutz): if the user changes the extension name in the UI to
     // something like .exe SafeBrowsing will currently *not* check if the
     // download is malicious.
-    state.danger = DownloadStateInfo::MAYBE_DANGEROUS_CONTENT;
+    state.danger = content::DOWNLOAD_DANGER_TYPE_MAYBE_DANGEROUS_CONTENT;
   }
 #endif
 
@@ -477,7 +492,7 @@ void ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists(
   }
 
   // If the download is possibly dangerous, we'll use a temporary name for it.
-  if (state.danger != DownloadStateInfo::NOT_DANGEROUS) {
+  if (state.danger != content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS) {
     state.target_name = FilePath(state.suggested_path).BaseName();
     // Create a temporary file to hold the file until the user approves its
     // download.
@@ -529,7 +544,7 @@ void ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists(
   // See: http://code.google.com/p/chromium/issues/detail?id=3662
   if (!state.prompt_user_for_save_location &&
       state.force_file_name.empty()) {
-    if (state.danger != DownloadStateInfo::NOT_DANGEROUS)
+    if (state.danger != content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS)
       file_util::WriteFile(state.suggested_path, "", 0);
     else
       file_util::WriteFile(download_util::GetCrDownloadPath(

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,10 @@
 #include "base/string_piece.h"
 #include "base/time.h"
 #include "net/base/net_export.h"
+
+namespace base {
+class DictionaryValue;
+}
 
 namespace net {
 
@@ -37,30 +41,33 @@ class NET_EXPORT CRLSet : public base::RefCountedThreadSafe<CRLSet> {
   static bool Parse(base::StringPiece data,
                     scoped_refptr<CRLSet>* out_crl_set);
 
-  // CheckCertificate returns the information contained in the set for a given
+  // CheckSPKI checks whether the given SPKI has been listed as blocked.
+  //   spki_hash: the SHA256 of the SubjectPublicKeyInfo of the certificate.
+  Result CheckSPKI(const base::StringPiece& spki_hash) const;
+
+  // CheckSerial returns the information contained in the set for a given
   // certificate:
   //   serial_number: the serial number of the certificate
   //   issuer_spki_hash: the SHA256 of the SubjectPublicKeyInfo of the CRL
   //       signer
-  //
-  // This does not check that the CRLSet is timely. See |next_update|.
-  Result CheckCertificate(
+  Result CheckSerial(
       const base::StringPiece& serial_number,
       const base::StringPiece& issuer_spki_hash) const;
 
   // ApplyDelta returns a new CRLSet in |out_crl_set| that is the result of
   // updating the current CRL set with the delta information in |delta_bytes|.
-  bool ApplyDelta(base::StringPiece delta_bytes,
+  bool ApplyDelta(const base::StringPiece& delta_bytes,
                   scoped_refptr<CRLSet>* out_crl_set);
 
-  // next_update returns the time at which a new CRLSet may be availible.
-  base::Time next_update() const;
+  // GetIsDeltaUpdate extracts the header from |bytes|, sets *is_delta to
+  // whether |bytes| is a delta CRL set or not and returns true. In the event
+  // of a parse error, it returns false.
+  static bool GetIsDeltaUpdate(const base::StringPiece& bytes, bool *is_delta);
 
-  // update_window returns the length of the update window. Once the
-  // |next_update| time has occured, the client should schedule a fetch,
-  // uniformly at random, within |update_window|. This aims to smooth the load
-  // on the server.
-  base::TimeDelta update_window() const;
+  // Serialize returns a string of bytes suitable for passing to Parse. Parsing
+  // and serializing a CRLSet is a lossless operation - the resulting bytes
+  // will be equal.
+  std::string Serialize() const;
 
   // sequence returns the sequence number of this CRL set. CRL sets generated
   // by the same source are given strictly monotonically increasing sequence
@@ -79,18 +86,20 @@ class NET_EXPORT CRLSet : public base::RefCountedThreadSafe<CRLSet> {
  private:
   CRLSet();
 
-  static CRLSet* CRLSetFromHeader(base::StringPiece header);
+  // CopyBlockedSPKIsFromHeader sets |blocked_spkis_| to the list of values
+  // from "BlockedSPKIs" in |header_dict|.
+  bool CopyBlockedSPKIsFromHeader(base::DictionaryValue* header_dict);
 
-  base::Time next_update_;
-  base::TimeDelta update_window_;
   uint32 sequence_;
-
   CRLList crls_;
   // crls_index_by_issuer_ maps from issuer SPKI hashes to the index in |crls_|
   // where the information for that issuer can be found. We have both |crls_|
   // and |crls_index_by_issuer_| because, when applying a delta update, we need
   // to identify a CRL by index.
   std::map<std::string, size_t> crls_index_by_issuer_;
+  // blocked_spkis_ contains the SHA256 hashes of SPKIs which are to be blocked
+  // no matter where in a certificate chain they might appear.
+  std::vector<std::string> blocked_spkis_;
 };
 
 }  // namespace net

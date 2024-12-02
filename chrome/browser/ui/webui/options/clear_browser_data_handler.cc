@@ -14,6 +14,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -29,7 +30,7 @@ ClearBrowserDataHandler::~ClearBrowserDataHandler() {
 
 void ClearBrowserDataHandler::Initialize() {
   clear_plugin_lso_data_enabled_.Init(prefs::kClearPluginLSODataEnabled,
-                                      Profile::FromWebUI(web_ui_)->GetPrefs(),
+                                      Profile::FromWebUI(web_ui())->GetPrefs(),
                                       NULL);
 }
 
@@ -86,14 +87,13 @@ void ClearBrowserDataHandler::GetLocalizedValues(
 
 void ClearBrowserDataHandler::RegisterMessages() {
   // Setup handlers specific to this panel.
-  DCHECK(web_ui_);
-  web_ui_->RegisterMessageCallback("performClearBrowserData",
+  web_ui()->RegisterMessageCallback("performClearBrowserData",
       base::Bind(&ClearBrowserDataHandler::HandleClearBrowserData,
                  base::Unretained(this)));
 }
 
 void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
   int remove_mask = 0;
@@ -107,7 +107,7 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
     int site_data_mask = BrowsingDataRemover::REMOVE_SITE_DATA;
     // Don't try to clear LSO data if it's not supported.
     if (!*clear_plugin_lso_data_enabled_)
-      site_data_mask &= ~BrowsingDataRemover::REMOVE_LSO_DATA;
+      site_data_mask &= ~BrowsingDataRemover::REMOVE_PLUGIN_DATA;
     remove_mask |= site_data_mask;
   }
   if (prefs->GetBoolean(prefs::kDeletePasswords))
@@ -118,8 +118,8 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
   int period_selected = prefs->GetInteger(prefs::kDeleteTimePeriod);
 
   base::FundamentalValue state(true);
-  web_ui_->CallJavascriptFunction("ClearBrowserDataOverlay.setClearingState",
-                                  state);
+  web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.setClearingState",
+                                   state);
 
   // If we are still observing a previous data remover, we need to stop
   // observing.
@@ -138,6 +138,5 @@ void ClearBrowserDataHandler::OnBrowsingDataRemoverDone() {
   // No need to remove ourselves as an observer as BrowsingDataRemover deletes
   // itself after we return.
   remover_ = NULL;
-  DCHECK(web_ui_);
-  web_ui_->CallJavascriptFunction("ClearBrowserDataOverlay.doneClearing");
+  web_ui()->CallJavascriptFunction("ClearBrowserDataOverlay.doneClearing");
 }

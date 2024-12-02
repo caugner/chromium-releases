@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <set>
 
 #include "base/callback.h"
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -15,17 +16,17 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/base_tab.h"
-#include "chrome/browser/ui/views/tabs/base_tab_strip.h"
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/dragged_tab_view.h"
 #include "chrome/browser/ui/views/tabs/native_view_photobooth.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
+#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/animation/animation.h"
@@ -36,12 +37,26 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/events/event.h"
+#include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(USE_AURA)
+#include "ash/shell.h"
+#include "chrome/browser/ui/views/tabs/tab_drag_controller2.h"
+#endif
+
+#if defined(OS_WIN)
+#include "chrome/browser/ui/views/tabs/tab_drag_controller2.h"
+#endif
 
 #if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>  // NOLINT
 #include <gdk/gdkkeysyms.h>  // NOLINT
 #endif
+
+using content::OpenURLParams;
+using content::UserMetricsAction;
+using content::WebContents;
 
 static const int kHorizontalMoveThreshold = 16;  // Pixels.
 
@@ -169,7 +184,7 @@ class DockView : public views::View {
 
 // Returns the the x-coordinate of |point| if the type of tabstrip is horizontal
 // otherwise returns the y-coordinate.
-int MajorAxisValue(const gfx::Point& point, BaseTabStrip* tabstrip) {
+int MajorAxisValue(const gfx::Point& point, TabStrip* tabstrip) {
   return point.x();
 }
 
@@ -320,6 +335,7 @@ DefaultTabDragController::~DefaultTabDragController() {
     instance_ = NULL;
 
   MessageLoopForUI::current()->RemoveObserver(this);
+
   // Need to delete the view here manually _before_ we reset the dragged
   // contents to NULL, otherwise if the view is animating to its destination
   // bounds, it won't be able to clean up properly since its cleanup routine
@@ -332,7 +348,7 @@ DefaultTabDragController::~DefaultTabDragController() {
 }
 
 void DefaultTabDragController::Init(
-    BaseTabStrip* source_tabstrip,
+    TabStrip* source_tabstrip,
     BaseTab* source_tab,
     const std::vector<BaseTab*>& tabs,
     const gfx::Point& mouse_offset,
@@ -371,15 +387,15 @@ void DefaultTabDragController::InitTabDragData(BaseTab* tab,
   drag_data->pinned = source_tabstrip_->IsTabPinned(tab);
   registrar_.Add(
       this,
-      content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-      content::Source<TabContents>(drag_data->contents->tab_contents()));
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+      content::Source<WebContents>(drag_data->contents->web_contents()));
 
   // We need to be the delegate so we receive messages about stuff, otherwise
   // our dragged TabContents may be replaced and subsequently
   // collected/destroyed while the drag is in process, leading to nasty crashes.
   drag_data->original_delegate =
-      drag_data->contents->tab_contents()->delegate();
-  drag_data->contents->tab_contents()->set_delegate(this);
+      drag_data->contents->web_contents()->GetDelegate();
+  drag_data->contents->web_contents()->SetDelegate(this);
 }
 
 void DefaultTabDragController::Drag() {
@@ -392,6 +408,11 @@ void DefaultTabDragController::Drag() {
     started_drag_ = true;
     SaveFocus();
     Attach(source_tabstrip_, gfx::Point());
+    // Redirect all mouse events to the TabStrip so that the tab that
+    // originated the drag can safely be deleted.
+    static_cast<views::internal::RootView*>(
+        source_tabstrip_->GetWidget()->GetRootView())->SetMouseHandler(
+        source_tabstrip_);
   }
 
   ContinueDragging();
@@ -408,8 +429,9 @@ bool DefaultTabDragController::GetStartedDrag() const {
 ///////////////////////////////////////////////////////////////////////////////
 // DefaultTabDragController, PageNavigator implementation:
 
-TabContents* DefaultTabDragController::OpenURLFromTab(TabContents* source,
-                                                  const OpenURLParams& params) {
+WebContents* DefaultTabDragController::OpenURLFromTab(
+    WebContents* source,
+    const OpenURLParams& params) {
   if (source_tab_drag_data()->original_delegate) {
     OpenURLParams forward_params = params;
     if (params.disposition == CURRENT_TAB)
@@ -422,16 +444,16 @@ TabContents* DefaultTabDragController::OpenURLFromTab(TabContents* source,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// DefaultTabDragController, TabContentsDelegate implementation:
+// DefaultTabDragController, content::WebContentsDelegate implementation:
 
-void DefaultTabDragController::NavigationStateChanged(const TabContents* source,
+void DefaultTabDragController::NavigationStateChanged(const WebContents* source,
                                                       unsigned changed_flags) {
   if (view_.get())
     view_->Update();
 }
 
-void DefaultTabDragController::AddNewContents(TabContents* source,
-                                              TabContents* new_contents,
+void DefaultTabDragController::AddNewContents(WebContents* source,
+                                              WebContents* new_contents,
                                               WindowOpenDisposition disposition,
                                               const gfx::Rect& initial_pos,
                                               bool user_gesture) {
@@ -445,7 +467,7 @@ void DefaultTabDragController::AddNewContents(TabContents* source,
   }
 }
 
-void DefaultTabDragController::LoadingStateChanged(TabContents* source) {
+void DefaultTabDragController::LoadingStateChanged(WebContents* source) {
   // It would be nice to respond to this message by changing the
   // screen shot in the dragged tab.
   if (view_.get())
@@ -471,13 +493,13 @@ void DefaultTabDragController::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK_EQ(type, content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
-  TabContents* destroyed_contents = content::Source<TabContents>(source).ptr();
+  DCHECK_EQ(type, content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
+  WebContents* destroyed_contents = content::Source<WebContents>(source).ptr();
   for (size_t i = 0; i < drag_data_.size(); ++i) {
-    if (drag_data_[i].contents->tab_contents() == destroyed_contents) {
+    if (drag_data_[i].contents->web_contents() == destroyed_contents) {
       // One of the tabs we're dragging has been destroyed. Cancel the drag.
-      if (destroyed_contents->delegate() == this)
-        destroyed_contents->set_delegate(NULL);
+      if (destroyed_contents->GetDelegate() == this)
+        destroyed_contents->SetDelegate(NULL);
       drag_data_[i].contents = NULL;
       drag_data_[i].original_delegate = NULL;
       EndDragImpl(TAB_DESTROYED);
@@ -631,9 +653,9 @@ void DefaultTabDragController::ContinueDragging() {
   // Determine whether or not we have dragged over a compatible TabStrip in
   // another browser window. If we have, we should attach to it and start
   // dragging within it.
-  BaseTabStrip* target_tabstrip = GetTabStripForPoint(screen_point);
+  TabStrip* target_tabstrip = GetTabStripForPoint(screen_point);
 #else
-  BaseTabStrip* target_tabstrip = source_tabstrip_;
+  TabStrip* target_tabstrip = source_tabstrip_;
 #endif
   if (target_tabstrip != attached_tabstrip_) {
     // Make sure we're fully detached from whatever TabStrip we're attached to
@@ -749,7 +771,7 @@ DockInfo DefaultTabDragController::GetDockInfoAtPoint(
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-BaseTabStrip* DefaultTabDragController::GetTabStripForPoint(
+TabStrip* DefaultTabDragController::GetTabStripForPoint(
     const gfx::Point& screen_point) {
   gfx::NativeView dragged_view = NULL;
   if (view_.get()) {
@@ -771,8 +793,7 @@ BaseTabStrip* DefaultTabDragController::GetTabStripForPoint(
 
   // This cast seems ugly, but the controller and the view are tighly coupled at
   // creation time, so it will be okay.
-  BaseTabStrip* other_tabstrip =
-      static_cast<BaseTabStrip*>(browser->tabstrip());
+  TabStrip* other_tabstrip = static_cast<TabStrip*>(browser->tabstrip());
 
   if (!other_tabstrip->controller()->IsCompatibleWith(source_tabstrip_))
     return NULL;
@@ -780,8 +801,8 @@ BaseTabStrip* DefaultTabDragController::GetTabStripForPoint(
 }
 #endif
 
-BaseTabStrip* DefaultTabDragController::GetTabStripIfItContains(
-    BaseTabStrip* tabstrip,
+TabStrip* DefaultTabDragController::GetTabStripIfItContains(
+    TabStrip* tabstrip,
     const gfx::Point& screen_point) const {
   static const int kVerticalDetachMagnetism = 15;
   // Make sure the specified screen point is actually within the bounds of the
@@ -801,7 +822,7 @@ BaseTabStrip* DefaultTabDragController::GetTabStripIfItContains(
   return NULL;
 }
 
-void DefaultTabDragController::Attach(BaseTabStrip* attached_tabstrip,
+void DefaultTabDragController::Attach(TabStrip* attached_tabstrip,
                                       const gfx::Point& screen_point) {
   DCHECK(!attached_tabstrip_);  // We should already have detached by the time
                                 // we get here.
@@ -823,12 +844,12 @@ void DefaultTabDragController::Attach(BaseTabStrip* attached_tabstrip,
     // Remove ourselves as the delegate now that the dragged TabContents is
     // being inserted back into a Browser.
     for (size_t i = 0; i < drag_data_.size(); ++i) {
-      drag_data_[i].contents->tab_contents()->set_delegate(NULL);
+      drag_data_[i].contents->web_contents()->SetDelegate(NULL);
       drag_data_[i].original_delegate = NULL;
     }
 
     // Return the TabContents' to normalcy.
-    source_dragged_contents()->tab_contents()->set_capturing_contents(false);
+    source_dragged_contents()->web_contents()->SetCapturingContents(false);
 
     // Inserting counts as a move. We don't want the tabs to jitter when the
     // user moves the tab immediately after attaching it.
@@ -883,7 +904,7 @@ void DefaultTabDragController::Attach(BaseTabStrip* attached_tabstrip,
 void DefaultTabDragController::Detach() {
   // Prevent the TabContents' HWND from being hidden by any of the model
   // operations performed during the drag.
-  source_dragged_contents()->tab_contents()->set_capturing_contents(true);
+  source_dragged_contents()->web_contents()->SetCapturingContents(true);
 
   // Calculate the drag bounds.
   std::vector<gfx::Rect> drag_bounds;
@@ -906,7 +927,7 @@ void DefaultTabDragController::Detach() {
     attached_model->DetachTabContentsAt(index);
 
     // Detaching resets the delegate, but we still want to be the delegate.
-    drag_data_[i].contents->tab_contents()->set_delegate(this);
+    drag_data_[i].contents->web_contents()->SetDelegate(this);
 
     // Detaching may end up deleting the tab, drop references to it.
     drag_data_[i].attached_tab = NULL;
@@ -933,7 +954,10 @@ void DefaultTabDragController::Detach() {
          i != drag_data_.rend(); ++i) {
       selection_model.DecrementFrom(i->source_model_index);
     }
-    attached_model->SetSelectionFromModel(selection_model);
+    // We may have cleared out the selection model. Only reset it if it contains
+    // something.
+    if (!selection_model.empty())
+      attached_model->SetSelectionFromModel(selection_model);
   }
 
   // Create the dragged view.
@@ -1021,7 +1045,7 @@ gfx::Point DefaultTabDragController::GetAttachedDragPoint(
 }
 
 std::vector<BaseTab*> DefaultTabDragController::GetTabsMatchingDraggedContents(
-    BaseTabStrip* tabstrip) {
+    TabStrip* tabstrip) {
   TabStripModel* model = GetModel(attached_tabstrip_);
   std::vector<BaseTab*> tabs;
   for (size_t i = 0; i < drag_data_.size(); ++i) {
@@ -1177,38 +1201,38 @@ void DefaultTabDragController::CompleteDrag() {
     if (dock_info_.type() != DockInfo::NONE) {
       switch (dock_info_.type()) {
         case DockInfo::LEFT_OF_WINDOW:
-          UserMetrics::RecordAction(UserMetricsAction("DockingWindow_Left"));
+          content::RecordAction(UserMetricsAction("DockingWindow_Left"));
           break;
 
         case DockInfo::RIGHT_OF_WINDOW:
-          UserMetrics::RecordAction(UserMetricsAction("DockingWindow_Right"));
+          content::RecordAction(UserMetricsAction("DockingWindow_Right"));
           break;
 
         case DockInfo::BOTTOM_OF_WINDOW:
-          UserMetrics::RecordAction(UserMetricsAction("DockingWindow_Bottom"));
+          content::RecordAction(UserMetricsAction("DockingWindow_Bottom"));
           break;
 
         case DockInfo::TOP_OF_WINDOW:
-          UserMetrics::RecordAction(UserMetricsAction("DockingWindow_Top"));
+          content::RecordAction(UserMetricsAction("DockingWindow_Top"));
           break;
 
         case DockInfo::MAXIMIZE:
-          UserMetrics::RecordAction(
+          content::RecordAction(
               UserMetricsAction("DockingWindow_Maximize"));
           break;
 
         case DockInfo::LEFT_HALF:
-          UserMetrics::RecordAction(
+          content::RecordAction(
               UserMetricsAction("DockingWindow_LeftHalf"));
           break;
 
         case DockInfo::RIGHT_HALF:
-          UserMetrics::RecordAction(
+          content::RecordAction(
               UserMetricsAction("DockingWindow_RightHalf"));
           break;
 
         case DockInfo::BOTTOM_HALF:
-          UserMetrics::RecordAction(
+          content::RecordAction(
               UserMetricsAction("DockingWindow_BottomHalf"));
           break;
 
@@ -1255,8 +1279,8 @@ void DefaultTabDragController::CompleteDrag() {
 void DefaultTabDragController::ResetDelegates() {
   for (size_t i = 0; i < drag_data_.size(); ++i) {
     if (drag_data_[i].contents &&
-        drag_data_[i].contents->tab_contents()->delegate() == this) {
-      drag_data_[i].contents->tab_contents()->set_delegate(
+        drag_data_[i].contents->web_contents()->GetDelegate() == this) {
+      drag_data_[i].contents->web_contents()->SetDelegate(
           drag_data_[i].original_delegate);
     }
   }
@@ -1273,10 +1297,10 @@ void DefaultTabDragController::CreateDraggedView(
   // TabContents.
   NativeViewPhotobooth* photobooth =
       NativeViewPhotobooth::Create(
-          source_dragged_contents()->tab_contents()->GetNativeView());
+          source_dragged_contents()->web_contents()->GetNativeView());
 
   gfx::Rect content_bounds;
-  source_dragged_contents()->tab_contents()->GetContainerBounds(
+  source_dragged_contents()->web_contents()->GetContainerBounds(
       &content_bounds);
 
   std::vector<views::View*> renderers;
@@ -1383,7 +1407,7 @@ void DefaultTabDragController::BringWindowUnderMouseToFront() {
 }
 
 TabStripModel* DefaultTabDragController::GetModel(
-    BaseTabStrip* tabstrip) const {
+    TabStrip* tabstrip) const {
   return static_cast<BrowserTabStripController*>(tabstrip->controller())->
       model();
 }
@@ -1398,14 +1422,33 @@ bool DefaultTabDragController::AreTabsConsecutive() {
   return true;
 }
 
+#if defined(USE_AURA) || defined(OS_WIN)
+static bool ShouldCreateTabDragController2() {
+#if defined(USE_AURA)
+  return !ash::Shell::GetInstance()->IsWindowModeCompact();
+#else
+  return CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kTabBrowserDragging);
+#endif
+}
+#endif
+
 // static
 TabDragController* TabDragController::Create(
-      BaseTabStrip* source_tabstrip,
+      TabStrip* source_tabstrip,
       BaseTab* source_tab,
       const std::vector<BaseTab*>& tabs,
       const gfx::Point& mouse_offset,
       int source_tab_offset,
       const TabStripSelectionModel& initial_selection_model) {
+#if defined(USE_AURA) || defined(OS_WIN)
+  if (ShouldCreateTabDragController2()) {
+    TabDragController2* controller = new TabDragController2;
+    controller->Init(source_tabstrip, source_tab, tabs, mouse_offset,
+                     source_tab_offset, initial_selection_model);
+    return controller;
+  }
+#endif
   DefaultTabDragController* controller = new DefaultTabDragController;
   controller->Init(source_tabstrip, source_tab, tabs, mouse_offset,
                    source_tab_offset, initial_selection_model);
@@ -1413,7 +1456,22 @@ TabDragController* TabDragController::Create(
 }
 
 // static
-bool TabDragController::IsAttachedTo(BaseTabStrip* tab_strip) {
-  return instance_ && instance_->active()&&
-      instance_->attached_tabstrip() == tab_strip;
+bool TabDragController::IsAttachedTo(TabStrip* tab_strip) {
+#if defined(USE_AURA) || defined(OS_WIN)
+  return TabDragController2::IsActiveAndAttachedTo(tab_strip) ||
+      (instance_ && instance_->active() &&
+       instance_->attached_tabstrip() == tab_strip);
+#else
+  return (instance_ && instance_->active() &&
+          instance_->attached_tabstrip() == tab_strip);
+#endif
+}
+
+// static
+bool TabDragController::IsActive() {
+#if defined(USE_AURA) || defined(OS_WIN)
+  return TabDragController2::IsActive() || (instance_ && instance_->active());
+#else
+  return instance_ && instance_->active();
+#endif
 }

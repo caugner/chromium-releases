@@ -12,13 +12,15 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/download/mhtml_generation_manager.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
+using content::WebContents;
 
 // Error messages.
 const char* const kFileTooBigError = "The MHTML file generated is too big.";
@@ -51,9 +53,9 @@ bool PageCaptureSaveAsMHTMLFunction::RunImpl() {
 
   AddRef();  // Balanced in ReturnFailure/ReturnSuccess()
 
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-                        &PageCaptureSaveAsMHTMLFunction::CreateTemporaryFile));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&PageCaptureSaveAsMHTMLFunction::CreateTemporaryFile, this));
   return true;
 }
 
@@ -82,10 +84,10 @@ bool PageCaptureSaveAsMHTMLFunction::OnMessageReceivedFromRenderView(
 void PageCaptureSaveAsMHTMLFunction::CreateTemporaryFile() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   bool success = file_util::CreateTemporaryFile(&mhtml_path_);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this,
-                        &PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated,
-                        success));
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated, this,
+                 success));
 }
 
 void PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated(bool success) {
@@ -102,8 +104,8 @@ void PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated(bool success) {
   mhtml_file_ = webkit_blob::DeletableFileReference::GetOrCreate(mhtml_path_,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
 
-  TabContents* tab_contents = GetTabContents();
-  if (!tab_contents) {
+  WebContents* web_contents = GetWebContents();
+  if (!web_contents) {
     ReturnFailure(kTabClosedError);
     return;
   }
@@ -112,7 +114,7 @@ void PageCaptureSaveAsMHTMLFunction::TemporaryFileCreated(bool success) {
       base::Bind(&PageCaptureSaveAsMHTMLFunction::MHTMLGenerated, this);
 
   g_browser_process->mhtml_generation_manager()->GenerateMHTML(
-      tab_contents, mhtml_path_, callback);
+      web_contents, mhtml_path_, callback);
 }
 
 void PageCaptureSaveAsMHTMLFunction::MHTMLGenerated(const FilePath& file_path,
@@ -144,8 +146,8 @@ void PageCaptureSaveAsMHTMLFunction::ReturnFailure(const std::string& error) {
 void PageCaptureSaveAsMHTMLFunction::ReturnSuccess(int64 file_size) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  TabContents* tab_contents = GetTabContents();
-  if (!tab_contents || !render_view_host()) {
+  WebContents* web_contents = GetWebContents();
+  if (!web_contents || !render_view_host()) {
     ReturnFailure(kTabClosedError);
     return;
   }
@@ -166,7 +168,7 @@ void PageCaptureSaveAsMHTMLFunction::ReturnSuccess(int64 file_size) {
   // blob file from being deleted).
 }
 
-TabContents* PageCaptureSaveAsMHTMLFunction::GetTabContents() {
+WebContents* PageCaptureSaveAsMHTMLFunction::GetWebContents() {
   Browser* browser = NULL;
   TabContentsWrapper* tab_contents_wrapper = NULL;
 
@@ -174,5 +176,5 @@ TabContents* PageCaptureSaveAsMHTMLFunction::GetTabContents() {
       &browser, NULL, &tab_contents_wrapper, NULL)) {
     return NULL;
   }
-  return tab_contents_wrapper->tab_contents();
+  return tab_contents_wrapper->web_contents();
 }

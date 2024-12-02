@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -94,6 +94,8 @@ cr.define('ntp4', function() {
   function onLoad() {
     cr.enablePlatformSpecificCSSRules();
 
+    measureNavDots();
+
     // Load the current theme colors.
     themeChanged();
 
@@ -110,6 +112,17 @@ cr.define('ntp4', function() {
                               localStrings.getString('mostvisited'),
                               false);
     chrome.send('getMostVisited');
+
+    if (templateData.isWebStoreExperimentEnabled) {
+      var webstoreLink = localStrings.getString('webStoreLink');
+      var url = appendParam(webstoreLink, 'utm_source', 'chrome-ntp-launcher');
+      $('chrome-web-store-href').href = url;
+
+      $('chrome-web-store-href').addEventListener('click',
+          onChromeWebStoreButtonClick);
+
+      $('footer-content').classList.add('enable-cws-experiment');
+    }
 
     if (localStrings.getString('login_status_message')) {
       loginBubble = new cr.ui.Bubble;
@@ -129,7 +142,6 @@ cr.define('ntp4', function() {
 
       var bubbleContent = $('login-status-bubble-contents');
       loginBubble.content = bubbleContent;
-      bubbleContent.hidden = false;
 
       // The anchor node won't be updated until updateLogin is called so don't
       // show the bubble yet.
@@ -145,13 +157,13 @@ cr.define('ntp4', function() {
 
       var bubbleContent = $('ntp4-intro-bubble-contents');
       infoBubble.content = bubbleContent;
-      bubbleContent.hidden = false;
 
       var learnMoreLink = infoBubble.querySelector('a');
       learnMoreLink.href = localStrings.getString('ntp4_intro_url');
       learnMoreLink.onclick = infoBubble.hide.bind(infoBubble);
 
       infoBubble.show();
+      chrome.send('introMessageSeen');
     }
 
     var serverpromo = localStrings.getString('serverpromo');
@@ -169,6 +181,34 @@ cr.define('ntp4', function() {
                   [rect.left, rect.top, rect.width, rect.height]);
     });
     chrome.send('initializeSyncLogin');
+  }
+
+  /**
+   * Launches the chrome web store app with the chrome-ntp-launcher
+   * source.
+   * @param {Event} e The click event.
+   */
+  function onChromeWebStoreButtonClick(e) {
+    chrome.send('recordAppLaunchByURL',
+                [encodeURIComponent(this.href),
+                 ntp4.APP_LAUNCH.NTP_WEBSTORE_FOOTER]);
+  }
+
+  /**
+   * Fills in an invisible div with the 'Most Visited' string so that
+   * its length may be measured and the nav dots sized accordingly.
+   */
+  function measureNavDots() {
+    var measuringDiv = $('fontMeasuringDiv');
+    measuringDiv.textContent = localStrings.getString('mostvisited');
+    var pxWidth = Math.max(measuringDiv.clientWidth * 1.15, 80);
+
+    var styleElement = document.createElement('style');
+    styleElement.type = 'text/css';
+    // max-width is used because if we run out of space, the nav dots will be
+    // shrunk.
+    styleElement.textContent = '.dot { max-width: ' + pxWidth + 'px; }';
+    document.querySelector('head').appendChild(styleElement);
   }
 
   // TODO(estade): rename newtab.css to new_tab_theme.css
@@ -337,40 +377,44 @@ cr.define('ntp4', function() {
   /**
    * Wrappers to forward the callback to corresponding PageListView member.
    */
-  function appAdded(appData, opt_highlight) {
-    newTabView.appAdded(appData, opt_highlight);
+  function appAdded() {
+    return newTabView.appAdded.apply(newTabView, arguments);
   }
 
-  function appRemoved(appData, isUninstall) {
-    newTabView.appRemoved(appData, isUninstall);
+  function appRemoved() {
+    return newTabView.appRemoved.apply(newTabView, arguments);
   }
 
-  function appsPrefChangeCallback(data) {
-    newTabView.appsPrefChangedCallback(data);
+  function appsPrefChangeCallback() {
+    return newTabView.appsPrefChangedCallback.apply(newTabView, arguments);
+  }
+
+  function appsReordered() {
+    return newTabView.appsReordered.apply(newTabView, arguments);
   }
 
   function enterRearrangeMode() {
-    newTabView.enterRearrangeMode();
+    return newTabView.enterRearrangeMode.apply(newTabView, arguments);
   }
 
-  function getAppsCallback(data) {
-    newTabView.getAppsCallback(data);
+  function getAppsCallback() {
+    return newTabView.getAppsCallback.apply(newTabView, arguments);
   }
 
-  function getAppsPageIndex(page) {
-    return newTabView.getAppsPageIndex(page);
+  function getAppsPageIndex() {
+    return newTabView.getAppsPageIndex.apply(newTabView, arguments);
   }
 
   function getCardSlider() {
     return newTabView.cardSlider;
   }
 
-  function leaveRearrangeMode(e) {
-    newTabView.leaveRearrangeMode(e);
+  function leaveRearrangeMode() {
+    return newTabView.leaveRearrangeMode.apply(newTabView, arguments);
   }
 
-  function saveAppPageName(appPage, name) {
-    newTabView.saveAppPageName(appPage, name);
+  function saveAppPageName() {
+    return newTabView.saveAppPageName.apply(newTabView, arguments);
   }
 
   function setAppToBeHighlighted(appId) {

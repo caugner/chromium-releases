@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/sync/glue/non_frontend_data_type_controller.h"
-#include "content/browser/cancelable_request.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/sync/glue/non_frontend_data_type_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
@@ -33,7 +33,8 @@ class TypedUrlDataTypeController : public NonFrontendDataTypeController,
  public:
   TypedUrlDataTypeController(
       ProfileSyncComponentsFactory* profile_sync_factory,
-      Profile* profile);
+      Profile* profile,
+      ProfileSyncService* sync_service);
   virtual ~TypedUrlDataTypeController();
 
   // NonFrontendDataTypeController implementation

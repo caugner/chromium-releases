@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,17 +52,24 @@ const char kChromeURLContentSecurityPolicyHeader[] =
     "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief "
     "'self' 'unsafe-eval'";
 
+// If you are inserting new exemptions into this list, then you have a bug.
+// It is not acceptable to disable content-security-policy on chrome:// pages
+// to permit functionality excluded by the above policy, such as inline script.
+// Instead, you must go back and change your WebUI page so that it is compliant
+// with the policy. This typically involves ensuring that all script is
+// delivered through the data manager backend.
 class ChromeURLContentSecurityPolicyExceptionSet
     : public std::set<std::string> {
  public:
   ChromeURLContentSecurityPolicyExceptionSet() : std::set<std::string>() {
+    // TODO(tsepez) whittle this list down to nothing.
     insert(chrome::kChromeUICloudPrintResourcesHost);
     insert(chrome::kChromeUICloudPrintSetupHost);
-    insert(chrome::kChromeUICreditsHost);
     insert(chrome::kChromeUIDevToolsHost);
     insert(chrome::kChromeUIDialogHost);
     insert(chrome::kChromeUIInputWindowDialogHost);
     insert(chrome::kChromeUINewTabHost);
+    insert(chrome::kChromeUITaskManagerHost);
 #if defined(OS_CHROMEOS)
     insert(chrome::kChromeUIMobileSetupHost);
     insert(chrome::kChromeUIOobeHost);
@@ -72,16 +79,13 @@ class ChromeURLContentSecurityPolicyExceptionSet
     insert(chrome::kChromeUISimUnlockHost);
     insert(chrome::kChromeUISystemInfoHost);
 #endif
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
     insert(chrome::kChromeUIKeyboardHost);
 #endif
 #if defined(OS_CHROMEOS) || defined(USE_AURA)
     insert(chrome::kChromeUICollectedCookiesHost);
     insert(chrome::kChromeUIHttpAuthHost);
-    insert(chrome::kChromeUIRepostFormWarningHost);
-#endif
-#if defined(USE_AURA)
-    insert(chrome::kChromeUIAppListHost);
+    insert(chrome::kChromeUITabModalConfirmDialogHost);
 #endif
   }
 };

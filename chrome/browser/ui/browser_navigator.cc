@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,14 +26,19 @@
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_url_handler.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "net/http/http_util.h"
+
+using content::GlobalRequestID;
+using content::WebContents;
 
 namespace {
 
@@ -242,24 +247,24 @@ Profile* GetSourceProfile(browser::NavigateParams* params,
   return params->browser->profile();
 }
 
-void LoadURLInContents(TabContents* target_contents,
+void LoadURLInContents(WebContents* target_contents,
                        const GURL& url,
                        browser::NavigateParams* params,
                        const std::string& extra_headers) {
   if (params->transferred_global_request_id != GlobalRequestID()) {
-    target_contents->controller().TransferURL(
+    target_contents->GetController().TransferURL(
         url,
         params->referrer,
         params->transition, extra_headers,
         params->transferred_global_request_id,
         params->is_renderer_initiated);
   } else if (params->is_renderer_initiated) {
-    target_contents->controller().LoadURLFromRenderer(
+    target_contents->GetController().LoadURLFromRenderer(
         url,
         params->referrer,
         params->transition,  extra_headers);
   } else {
-    target_contents->controller().LoadURL(
+    target_contents->GetController().LoadURL(
         url,
         params->referrer,
         params->transition,  extra_headers);
@@ -411,6 +416,15 @@ void Navigate(NavigateParams* params) {
             params->window_bounds);
   }
 
+  // Adjust disposition for the navigation happending in the sad page of the
+  // panel window.
+  if (params->source_contents &&
+      params->source_contents->web_contents()->IsCrashed() &&
+      params->disposition == CURRENT_TAB &&
+      params->browser->is_type_panel()) {
+    params->disposition = NEW_FOREGROUND_TAB;
+  }
+
   params->browser = GetBrowserForDisposition(params);
 
   if (!params->browser)
@@ -480,8 +494,8 @@ void Navigate(NavigateParams* params) {
     }
 
     if (params->disposition != CURRENT_TAB) {
-      TabContents* source_contents = params->source_contents ?
-          params->source_contents->tab_contents() : NULL;
+      WebContents* source_contents = params->source_contents ?
+          params->source_contents->web_contents() : NULL;
       params->target_contents =
           Browser::TabContentsFactory(
               params->browser->profile(),
@@ -501,7 +515,7 @@ void Navigate(NavigateParams* params) {
       // in the background, tell it that it's hidden.
       if ((params->tabstrip_add_types & TabStripModel::ADD_ACTIVE) == 0) {
         // TabStripModel::AddTabContents invokes HideContents if not foreground.
-        params->target_contents->tab_contents()->WasHidden();
+        params->target_contents->web_contents()->WasHidden();
       }
     } else {
       // ... otherwise if we're loading in the current tab, the target is the
@@ -511,8 +525,8 @@ void Navigate(NavigateParams* params) {
     }
 
     if (user_initiated) {
-      static_cast<RenderViewHostDelegate*>(params->target_contents->
-          tab_contents())->OnUserGesture();
+      params->target_contents->web_contents()->GetRenderViewHost()->
+          delegate()->OnUserGesture();
     }
 
     InitializeExtraHeaders(params, params->target_contents->profile(),
@@ -524,7 +538,7 @@ void Navigate(NavigateParams* params) {
       // Perform the actual navigation, tracking whether it came from the
       // renderer.
 
-      LoadURLInContents(params->target_contents->tab_contents(),
+      LoadURLInContents(params->target_contents->web_contents(),
                         url, params, extra_headers);
     }
   } else {
@@ -540,7 +554,7 @@ void Navigate(NavigateParams* params) {
       (params->disposition == NEW_FOREGROUND_TAB ||
        params->disposition == NEW_WINDOW) &&
       (params->tabstrip_add_types & TabStripModel::ADD_INHERIT_OPENER))
-    params->source_contents->tab_contents()->Focus();
+    params->source_contents->web_contents()->Focus();
 
   if (params->source_contents == params->target_contents) {
     // The navigation occurred in the source tab.
@@ -566,10 +580,10 @@ void Navigate(NavigateParams* params) {
   }
 
   if (singleton_index >= 0) {
-    TabContents* target = params->browser->GetTabContentsAt(singleton_index);
+    WebContents* target = params->browser->GetWebContentsAt(singleton_index);
 
-    if (target->is_crashed()) {
-      target->controller().Reload(true);
+    if (target->IsCrashed()) {
+      target->GetController().Reload(true);
     } else if (params->path_behavior == NavigateParams::IGNORE_AND_NAVIGATE &&
         target->GetURL() != params->url) {
       InitializeExtraHeaders(params, NULL, &extra_headers);
@@ -584,8 +598,8 @@ void Navigate(NavigateParams* params) {
   if (params->disposition != CURRENT_TAB) {
     content::NotificationService::current()->Notify(
         content::NOTIFICATION_TAB_ADDED,
-        content::Source<TabContentsDelegate>(params->browser),
-        content::Details<TabContents>(params->target_contents->tab_contents()));
+        content::Source<content::WebContentsDelegate>(params->browser),
+        content::Details<WebContents>(params->target_contents->web_contents()));
   }
 }
 
@@ -622,9 +636,9 @@ int GetIndexOfSingletonTab(browser::NavigateParams* params) {
       replacements.ClearQuery();
     }
 
-    if (CompareURLsWithReplacements(tab->tab_contents()->GetURL(),
+    if (CompareURLsWithReplacements(tab->web_contents()->GetURL(),
                                     params->url, replacements) ||
-        CompareURLsWithReplacements(tab->tab_contents()->GetURL(),
+        CompareURLsWithReplacements(tab->web_contents()->GetURL(),
                                     rewritten_url, replacements)) {
       params->target_contents = tab;
       return tab_index;
@@ -641,9 +655,32 @@ bool IsURLAllowedInIncognito(const GURL& url) {
 
   return !(url.scheme() == chrome::kChromeUIScheme &&
       (url.host() == chrome::kChromeUISettingsHost ||
+       url.host() == chrome::kChromeUISettingsFrameHost ||
        url.host() == chrome::kChromeUIExtensionsHost ||
        url.host() == chrome::kChromeUIBookmarksHost ||
        url.host() == chrome::kChromeUISyncPromoHost));
 }
+
+#if defined(OS_CHROMEOS) || defined(USE_AURA)
+// On Chrome desktop platforms (Aura, ChromeOS), if a popup window is larger
+// than this fraction of the screen, create a foreground tab instead.
+const float kPopupMaxWidthFactor = 0.5f;
+const float kPopupMaxHeightFactor = 0.6f;
+
+WindowOpenDisposition DispositionForPopupBounds(
+    const gfx::Rect& popup_bounds, int window_width, int window_height) {
+  // Check against scaled window bounds. Also check for width or height == 0,
+  // which would indicate a tab sized popup window.
+  int max_width = window_width * kPopupMaxWidthFactor;
+  int max_height = window_height * kPopupMaxHeightFactor;
+  if (popup_bounds.width() > max_width ||
+      popup_bounds.height() > max_height ||
+      popup_bounds.width() == 0 ||
+      popup_bounds.height() == 0) {
+    return NEW_FOREGROUND_TAB;
+  }
+  return NEW_POPUP;
+}
+#endif
 
 }  // namespace browser

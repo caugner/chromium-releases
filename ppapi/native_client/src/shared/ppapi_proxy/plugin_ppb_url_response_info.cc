@@ -1,6 +1,6 @@
-// Copyright 2011 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can
-// be found in the LICENSE file.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_url_response_info.h"
 
@@ -21,7 +21,7 @@ namespace ppapi_proxy {
 namespace {
 
 PP_Bool IsURLResponseInfo(PP_Resource resource) {
-  DebugPrintf("PPB_URLResponseInfo::IsURLResponseInfo: resource=%"NACL_PRIu32
+  DebugPrintf("PPB_URLResponseInfo::IsURLResponseInfo: resource=%"NACL_PRId32
               "\n", resource);
 
   int32_t success;
@@ -37,13 +37,13 @@ PP_Bool IsURLResponseInfo(PP_Resource resource) {
 }
 
 PP_Var GetProperty(PP_Resource response, PP_URLResponseProperty property) {
-  DebugPrintf("PPB_URLResponseInfo::GetProperty: response=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_URLResponseInfo::GetProperty: response=%"NACL_PRId32"\n",
               response);
   NaClSrpcChannel* channel = GetMainSrpcChannel();
 
   PP_Var value = PP_MakeUndefined();
-  nacl_abi_size_t value_size = kMaxVarSize;
-  nacl::scoped_array<char> value_bytes(new char[kMaxVarSize]);
+  nacl_abi_size_t value_size = kMaxReturnVarSize;
+  nacl::scoped_array<char> value_bytes(new char[value_size]);
 
   NaClSrpcError srpc_result =
       PpbURLResponseInfoRpcClient::PPB_URLResponseInfo_GetProperty(
@@ -56,12 +56,12 @@ PP_Var GetProperty(PP_Resource response, PP_URLResponseProperty property) {
               NaClSrpcErrorString(srpc_result));
 
   if (srpc_result == NACL_SRPC_RESULT_OK)
-    (void) DeserializeTo(channel, value_bytes.get(), value_size, 1, &value);
+    (void) DeserializeTo(value_bytes.get(), value_size, 1, &value);
   return value;
 }
 
 PP_Resource GetBodyAsFileRef(PP_Resource response) {
-  DebugPrintf("PPB_URLResponseInfo::GetBodyAsFileRef: response=%"NACL_PRIu32
+  DebugPrintf("PPB_URLResponseInfo::GetBodyAsFileRef: response=%"NACL_PRId32
               "\n", response);
 
   PP_Resource file_ref;

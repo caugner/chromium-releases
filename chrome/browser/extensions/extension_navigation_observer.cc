@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,13 @@
 
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
+
+using content::NavigationController;
+using content::NavigationEntry;
 
 ExtensionNavigationObserver::ExtensionNavigationObserver(Profile* profile)
     : profile_(profile) {
@@ -29,7 +33,7 @@ void ExtensionNavigationObserver::Observe(
   NavigationController* controller =
       content::Source<NavigationController>(source).ptr();
   if (!profile_->IsSameProfile(
-          Profile::FromBrowserContext(controller->browser_context())))
+          Profile::FromBrowserContext(controller->GetBrowserContext())))
     return;
 
   PromptToEnableExtensionIfNecessary(controller);
@@ -52,7 +56,8 @@ void ExtensionNavigationObserver::PromptToEnableExtensionIfNecessary(
 
   ExtensionService* extension_service = profile_->GetExtensionService();
   const Extension* extension =
-      extension_service->GetDisabledExtensionByWebExtent(nav_entry->url());
+      extension_service->disabled_extensions()->
+      GetExtensionOrAppByURL(ExtensionURLInfo(nav_entry->GetURL()));
   if (!extension)
     return;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,8 @@
 #if defined(TOOLKIT_USES_GTK)
 typedef struct _GdkPixbuf GdkPixbuf;
 #endif
+
+class SkBitmap;
 
 namespace gfx {
 
@@ -44,11 +46,17 @@ class UI_EXPORT CanvasSkia : public Canvas {
     TruncateFadeHeadAndTail,
   };
 
-  // Creates an empty Canvas. Callers must use initialize before using the
-  // canvas.
+  // Creates an empty canvas.
   CanvasSkia();
 
-  CanvasSkia(int width, int height, bool is_opaque);
+  // If this canvas is not opaque, it's explicitly cleared to transparent before
+  // being returned.
+  CanvasSkia(const gfx::Size& size, bool is_opaque);
+
+  // Constructs a canvas the size of the provided |bitmap|, and draws the
+  // bitmap into it.
+  CanvasSkia(const SkBitmap& bitmap, bool is_opaque);
+
   explicit CanvasSkia(SkCanvas* canvas);
 
   virtual ~CanvasSkia();
@@ -62,6 +70,10 @@ class UI_EXPORT CanvasSkia : public Canvas {
                             int* width, int* height,
                             int flags);
 
+  // Returns the number of horizontal pixels needed to display the specified
+  // |text| with |font|.
+  static int GetStringWidth(const string16& text, const gfx::Font& font);
+
   // Returns the default text alignment to be used when drawing text on a
   // gfx::CanvasSkia based on the directionality of the system locale language.
   // This function is used by gfx::Canvas::DrawStringInt when the text alignment
@@ -71,25 +83,21 @@ class UI_EXPORT CanvasSkia : public Canvas {
   // gfx::Canvas::TEXT_ALIGN_RIGHT.
   static int DefaultCanvasTextAlignment();
 
-#if defined(TOOLKIT_USES_GTK)
-  // Draw the pixbuf in its natural size at (x, y).
-  void DrawGdkPixbuf(GdkPixbuf* pixbuf, int x, int y);
-#endif
-
-#if defined(OS_WIN) || (defined(OS_POSIX) && !defined(OS_MACOSX))
   // Draws text with a 1-pixel halo around it of the given color.
   // On Windows, it allows ClearType to be drawn to an otherwise transparenct
   //   bitmap for drag images. Drag images have only 1-bit of transparency, so
   //   we don't do any fancy blurring.
   // On Linux, text with halo is created by stroking it with 2px |halo_color|
   //   then filling it with |text_color|.
+  // On Mac, NOTIMPLEMENTED.
+  //   TODO(dhollowa): Skia-native implementation is underway.  Cut over to
+  //   that when ready.  http::/crbug.com/109946
   void DrawStringWithHalo(const string16& text,
                           const gfx::Font& font,
                           const SkColor& text_color,
                           const SkColor& halo_color,
                           int x, int y, int w, int h,
                           int flags);
-#endif
 
   // Extracts a bitmap from the contents of this canvas.
   SkBitmap ExtractBitmap() const;
@@ -109,13 +117,11 @@ class UI_EXPORT CanvasSkia : public Canvas {
                         SkXfermode::Mode mode) OVERRIDE;
   virtual void FillRect(const gfx::Brush* brush,
                         const gfx::Rect& rect) OVERRIDE;
-  virtual void DrawRectInt(const SkColor& color,
-                           int x, int y, int w, int h) OVERRIDE;
-  virtual void DrawRectInt(const SkColor& color,
-                           int x, int y, int w, int h,
-                           SkXfermode::Mode mode) OVERRIDE;
-  virtual void DrawRectInt(int x, int y, int w, int h,
-                           const SkPaint& paint) OVERRIDE;
+  virtual void DrawRect(const gfx::Rect& rect, const SkColor& color) OVERRIDE;
+  virtual void DrawRect(const gfx::Rect& rect,
+                        const SkColor& color,
+                        SkXfermode::Mode mode) OVERRIDE;
+  virtual void DrawRect(const gfx::Rect& rect, const SkPaint& paint) OVERRIDE;
   virtual void DrawLineInt(const SkColor& color,
                            int x1, int y1,
                            int x2, int y2) OVERRIDE;
@@ -166,10 +172,7 @@ class UI_EXPORT CanvasSkia : public Canvas {
                             int dest_x, int dest_y, int w, int h) OVERRIDE;
   virtual gfx::NativeDrawingContext BeginPlatformPaint() OVERRIDE;
   virtual void EndPlatformPaint() OVERRIDE;
-#if !defined(OS_MACOSX)
   virtual void Transform(const ui::Transform& transform) OVERRIDE;
-#endif
-  virtual ui::TextureID GetTextureID() OVERRIDE;
   virtual CanvasSkia* AsCanvasSkia() OVERRIDE;
   virtual const CanvasSkia* AsCanvasSkia() const OVERRIDE;
   virtual SkCanvas* GetSkCanvas() OVERRIDE;

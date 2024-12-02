@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,22 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread.h"
+#include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "ui/base/x/x11_util_internal.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+
+#if defined(OS_FREEBSD)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#endif
 
 #if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
@@ -70,9 +78,18 @@ CachedPictFormats* get_cached_pict_formats() {
 const size_t kMaxCacheSize = 5;
 
 int DefaultX11ErrorHandler(Display* d, XErrorEvent* e) {
-  MessageLoop::current()->PostTask(
-       FROM_HERE,
-       base::Bind(&LogErrorEventDescription, d, *e));
+  if (MessageLoop::current()) {
+    MessageLoop::current()->PostTask(
+         FROM_HERE,
+         base::Bind(&LogErrorEventDescription, d, *e));
+  } else {
+    LOG(ERROR)
+        << "X Error detected: "
+        << "serial " << e->serial << ", "
+        << "error_code " << static_cast<int>(e->error_code) << ", "
+        << "request_code " << static_cast<int>(e->request_code) << ", "
+        << "minor_code " << static_cast<int>(e->minor_code);
+  }
   return 0;
 }
 
@@ -100,6 +117,39 @@ bool GetProperty(XID window, const std::string& property_name, long max_length,
                             num_items,
                             &remaining_bytes,
                             property);
+}
+
+// Converts ui::EventType to XKeyEvent state.
+unsigned int XKeyEventState(int flags) {
+  return
+      ((flags & ui::EF_SHIFT_DOWN) ? ShiftMask : 0) |
+      ((flags & ui::EF_CONTROL_DOWN) ? ControlMask : 0) |
+      ((flags & ui::EF_ALT_DOWN) ? Mod1Mask : 0) |
+      ((flags & ui::EF_CAPS_LOCK_DOWN) ? LockMask : 0);
+}
+
+// Converts EventType to XKeyEvent type.
+int XKeyEventType(ui::EventType type) {
+  switch (type) {
+    case ui::ET_KEY_PRESSED:
+      return KeyPress;
+    case ui::ET_KEY_RELEASED:
+      return KeyRelease;
+    default:
+      return 0;
+  }
+}
+
+// Converts KeyboardCode to XKeyEvent keycode.
+unsigned int XKeyEventKeyCode(ui::KeyboardCode key_code,
+                              int flags,
+                              Display* display) {
+  const int keysym = XKeysymForWindowsKeyCode(key_code,
+                                              flags & ui::EF_SHIFT_DOWN);
+  // Tests assume the keycode for XK_less is equal to the one of XK_comma,
+  // but XKeysymToKeycode returns 94 for XK_less while it returns 59 for
+  // XK_comma. Here we convert the value for XK_less to the value for XK_comma.
+  return (keysym == XK_less) ? 59 : XKeysymToKeycode(display, keysym);
 }
 
 // A process wide singleton that manages the usage of X cursors.
@@ -138,6 +188,36 @@ class XCursorCache {
   DISALLOW_COPY_AND_ASSIGN(XCursorCache);
 };
 
+// A singleton object that remembers remappings of mouse buttons.
+class XButtonMap {
+ public:
+  static XButtonMap* GetInstance() {
+    return Singleton<XButtonMap>::get();
+  }
+
+  void UpdateMapping() {
+    count_ = XGetPointerMapping(ui::GetXDisplay(), map_, arraysize(map_));
+  }
+
+  int GetMappedButton(int button) {
+    return button > 0 && button <= count_ ? map_[button - 1] : button;
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<XButtonMap>;
+
+  XButtonMap() {
+    UpdateMapping();
+  }
+
+  ~XButtonMap() {}
+
+  unsigned char map_[256];
+  int count_;
+
+  DISALLOW_COPY_AND_ASSIGN(XButtonMap);
+};
+
 }  // namespace
 
 bool XDisplayExists() {
@@ -154,6 +234,19 @@ static SharedMemorySupport DoQuerySharedMemorySupport(Display* dpy) {
   // Query the server's support for XSHM.
   if (!XShmQueryVersion(dpy, &dummy, &dummy, &pixmaps_supported))
     return SHARED_MEMORY_NONE;
+
+#if defined(OS_FREEBSD)
+  // On FreeBSD we can't access the shared memory after it was marked for
+  // deletion, unless this behaviour is explicitly enabled by the user.
+  // In case it's not enabled disable shared memory support.
+  int allow_removed;
+  size_t length = sizeof(allow_removed);
+
+  if ((sysctlbyname("kern.ipc.shm_allow_removed", &allow_removed, &length,
+      NULL, 0) < 0) || allow_removed < 1) {
+    return SHARED_MEMORY_NONE;
+  }
+#endif
 
   // Next we probe to see if shared memory will really work
   int shmkey = shmget(IPC_PRIVATE, 1, 0666);
@@ -234,7 +327,7 @@ bool GetCurrentDesktop(int* desktop) {
 
 #if defined(TOOLKIT_USES_GTK)
 XID GetX11WindowFromGtkWidget(GtkWidget* widget) {
-  return GDK_WINDOW_XID(widget->window);
+  return GDK_WINDOW_XID(gtk_widget_get_window(widget));
 }
 
 XID GetX11WindowFromGdkWindow(GdkWindow* window) {
@@ -422,11 +515,46 @@ bool GetStringProperty(
   return true;
 }
 
+bool SetIntProperty(XID window,
+                    const std::string& name,
+                    const std::string& type,
+                    int value) {
+  std::vector<int> values(1, value);
+  return SetIntArrayProperty(window, name, type, values);
+}
+
+bool SetIntArrayProperty(XID window,
+                         const std::string& name,
+                         const std::string& type,
+                         const std::vector<int>& value) {
+  DCHECK(!value.empty());
+  Atom name_atom = GetAtom(name.c_str());
+  Atom type_atom = GetAtom(type.c_str());
+
+  // XChangeProperty() expects values of type 32 to be longs.
+  scoped_array<long> data(new long[value.size()]);
+  for (size_t i = 0; i < value.size(); ++i)
+    data[i] = value[i];
+
+  gdk_error_trap_push();
+  XChangeProperty(ui::GetXDisplay(),
+                  window,
+                  name_atom,
+                  type_atom,
+                  32,  // size in bits of items in 'value'
+                  PropModeReplace,
+                  reinterpret_cast<const unsigned char*>(data.get()),
+                  value.size());  // num items
+  XSync(ui::GetXDisplay(), False);
+  return gdk_error_trap_pop() == 0;
+}
+
 Atom GetAtom(const char* name) {
 #if defined(TOOLKIT_USES_GTK)
   return gdk_x11_get_xatom_by_name_for_display(
       gdk_display_get_default(), name);
 #else
+  // TODO(derat): Cache atoms to avoid round-trips to the server.
   return XInternAtom(GetXDisplay(), name, false);
 #endif
 }
@@ -831,6 +959,48 @@ bool IsX11WindowFullScreen(XID window) {
   NOTIMPLEMENTED();
   return false;
 #endif
+}
+
+bool IsMotionEvent(XEvent* event) {
+  int type = event->type;
+  if (type == GenericEvent)
+    type = event->xgeneric.evtype;
+  return type == MotionNotify;
+}
+
+int GetMappedButton(int button) {
+  return XButtonMap::GetInstance()->GetMappedButton(button);
+}
+
+void UpdateButtonMap() {
+  XButtonMap::GetInstance()->UpdateMapping();
+}
+
+void InitXKeyEventForTesting(EventType type,
+                             KeyboardCode key_code,
+                             int flags,
+                             XEvent* event) {
+  CHECK(event);
+  Display* display = GetXDisplay();
+  XKeyEvent key_event;
+  key_event.type = XKeyEventType(type);
+  CHECK_NE(0, key_event.type);
+  key_event.serial = 0;
+  key_event.send_event = 0;
+  key_event.display = display;
+  key_event.time = 0;
+  key_event.window = 0;
+  key_event.root = 0;
+  key_event.subwindow = 0;
+  key_event.x = 0;
+  key_event.y = 0;
+  key_event.x_root = 0;
+  key_event.y_root = 0;
+  key_event.state = XKeyEventState(flags);
+  key_event.keycode = XKeyEventKeyCode(key_code, flags, display);
+  key_event.same_screen = 1;
+  event->type = key_event.type;
+  event->xkey = key_event;
 }
 
 // ----------------------------------------------------------------------------

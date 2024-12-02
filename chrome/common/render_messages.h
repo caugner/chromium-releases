@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,11 +72,12 @@ struct ChromeViewHostMsg_GetPluginInfo_Status {
 
 namespace IPC {
 
-#if defined(OS_POSIX) && !defined(USE_AURA)
+#if defined(OS_POSIX) && !defined(USE_AURA) && !defined(OS_ANDROID)
 
 // TODO(port): this shouldn't exist. However, the plugin stuff is really using
 // HWNDS (NativeView), and making Windows calls based on them. I've not figured
 // out the deal with plugins yet.
+// TODO(android): a gfx::NativeView is the same as a gfx::NativeWindow.
 template <>
 struct ParamTraits<gfx::NativeView> {
   typedef gfx::NativeView param_type;
@@ -95,7 +96,7 @@ struct ParamTraits<gfx::NativeView> {
   }
 };
 
-#endif  // defined(OS_POSIX) && !defined(USE_AURA)
+#endif  // defined(OS_POSIX) && !defined(USE_AURA) && !defined(OS_ANDROID)
 
 template <>
 struct ParamTraits<ContentSettingsPattern> {
@@ -130,6 +131,7 @@ IPC_STRUCT_TRAITS_BEGIN(ContentSettingsPattern::PatternParts)
   IPC_STRUCT_TRAITS_MEMBER(port)
   IPC_STRUCT_TRAITS_MEMBER(is_port_wildcard)
   IPC_STRUCT_TRAITS_MEMBER(path)
+  IPC_STRUCT_TRAITS_MEMBER(is_path_wildcard)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(ContentSettingPatternSource)
@@ -423,12 +425,18 @@ IPC_SYNC_MESSAGE_CONTROL4_3(ChromeViewHostMsg_GetPluginInfo,
                             webkit::WebPluginInfo /* plugin */,
                             std::string /* actual_mime_type */)
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
 // Tells the browser to search for a plug-in that can handle the given MIME
 // type. The result will be sent asynchronously to the routing ID
 // |placeholder_id|.
 IPC_MESSAGE_ROUTED2(ChromeViewHostMsg_FindMissingPlugin,
                     int /* placeholder_id */,
                     std::string /* mime_type */)
+
+// Notifies the browser that a missing plug-in placeholder has been removed, so
+// the corresponding MissingPluginHost can be deleted.
+IPC_MESSAGE_ROUTED1(ChromeViewHostMsg_RemoveMissingPluginHost,
+                    int /* placeholder_id */)
 
 // Notifies a missing plug-in placeholder that a plug-in with name |plugin_name|
 // has been found.
@@ -437,6 +445,25 @@ IPC_MESSAGE_ROUTED1(ChromeViewMsg_FoundMissingPlugin,
 
 // Notifies a missing plug-in placeholder that no plug-in has been found.
 IPC_MESSAGE_ROUTED0(ChromeViewMsg_DidNotFindMissingPlugin)
+
+// Notifies a missing plug-in placeholder that we have started downloading
+// the plug-in.
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_StartedDownloadingPlugin)
+
+// Notifies a missing plug-in placeholder that we have finished downloading
+// the plug-in.
+IPC_MESSAGE_ROUTED0(ChromeViewMsg_FinishedDownloadingPlugin)
+
+// Notifies a missing plug-in placeholder that there was an error downloading
+// the plug-in.
+IPC_MESSAGE_ROUTED1(ChromeViewMsg_ErrorDownloadingPlugin,
+                    std::string /* message */)
+#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+
+// Tells the browser to open chrome://plugins in a new tab. We use a separate
+// message because renderer processes aren't allowed to directly navigate to
+// chrome:// URLs.
+IPC_MESSAGE_ROUTED0(ChromeViewHostMsg_OpenAboutPlugins)
 
 // Specifies the URL as the first parameter (a wstring) and thumbnail as
 // binary data as the second parameter.

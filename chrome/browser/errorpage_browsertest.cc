@@ -8,12 +8,14 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/test_navigation_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/net/url_request_failed_dns_job.h"
 #include "content/browser/net/url_request_mock_http_job.h"
+#include "content/public/browser/web_contents.h"
+#include "content/test/test_navigation_observer.h"
 
 using content::BrowserThread;
+using content::NavigationController;
 
 class ErrorPageTest : public InProcessBrowserTest {
  public:
@@ -35,7 +37,7 @@ class ErrorPageTest : public InProcessBrowserTest {
                                     const std::string& expected_title,
                                     int num_navigations) {
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedTabContents(),
+        browser()->GetSelectedWebContents(),
         ASCIIToUTF16(expected_title));
 
     ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
@@ -76,12 +78,13 @@ class ErrorPageTest : public InProcessBrowserTest {
                                       int num_navigations,
                                       HistoryNavigationDirection direction) {
     ui_test_utils::TitleWatcher title_watcher(
-        browser()->GetSelectedTabContents(),
+        browser()->GetSelectedWebContents(),
         ASCIIToUTF16(expected_title));
 
     TestNavigationObserver test_navigation_observer(
-        content::Source<NavigationController>(
-            &browser()->GetSelectedTabContentsWrapper()->controller()),
+      content::Source<NavigationController>(
+            &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+                GetController()),
         NULL,
         num_navigations);
     if (direction == HISTORY_NAVIGATE_BACK) {
@@ -91,14 +94,23 @@ class ErrorPageTest : public InProcessBrowserTest {
     } else {
       FAIL();
     }
-    test_navigation_observer.WaitForObservation();
+    test_navigation_observer.WaitForObservation(
+        base::Bind(&ui_test_utils::RunMessageLoop),
+        base::Bind(&MessageLoop::Quit,
+                   base::Unretained(MessageLoopForUI::current())));
 
     EXPECT_EQ(title_watcher.WaitAndGetTitle(), ASCIIToUTF16(expected_title));
   }
 };
 
+// See crbug.com/109669
+#if defined(USE_AURA)
+#define MAYBE_DNSError_Basic FLAKY_DNSError_Basic
+#else
+#define MAYBE_DNSError_Basic DNSError_Basic
+#endif
 // Test that a DNS error occuring in the main frame redirects to an error page.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_Basic) {
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_Basic) {
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   // The first navigation should fail, and the second one should be the error
   // page.
@@ -114,9 +126,15 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack1) {
   GoBackAndWaitForTitle("Title Of Awesomeness", 1);
 }
 
+// See crbug.com/109669
+#if defined(USE_AURA)
+#define MAYBE_DNSError_GoBack2 FLAKY_DNSError_GoBack2
+#else
+#define MAYBE_DNSError_GoBack2 DNSError_GoBack2
+#endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2) {
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2) {
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
@@ -127,9 +145,15 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2) {
   GoBackAndWaitForTitle("Title Of Awesomeness", 1);
 }
 
+// See crbug.com/109669
+#if defined(USE_AURA)
+#define MAYBE_DNSError_GoBack2AndForward FLAKY_DNSError_GoBack2AndForward
+#else
+#define MAYBE_DNSError_GoBack2AndForward DNSError_GoBack2AndForward
+#endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2AndForward) {
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2AndForward) {
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title2.html"));
 
@@ -142,9 +166,15 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2AndForward) {
   GoForwardAndWaitForTitle("Mock Link Doctor", 2);
 }
 
+// See crbug.com/109669
+#if defined(USE_AURA)
+#define MAYBE_DNSError_GoBack2Forward2 FLAKY_DNSError_GoBack2Forward2
+#else
+#define MAYBE_DNSError_GoBack2Forward2 DNSError_GoBack2Forward2
+#endif
 // Test that a DNS error occuring in the main frame does not result in an
 // additional session history entry.
-IN_PROC_BROWSER_TEST_F(ErrorPageTest, DNSError_GoBack2Forward2) {
+IN_PROC_BROWSER_TEST_F(ErrorPageTest, MAYBE_DNSError_GoBack2Forward2) {
   GURL test_url(URLRequestFailedDnsJob::kTestUrl);
   NavigateToFileURL(FILE_PATH_LITERAL("title3.html"));
 

@@ -58,10 +58,11 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
-#include "content/browser/browser_message_filter.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_output_controller.h"
@@ -76,7 +77,7 @@ class ResourceContext;
 }  // namespace content
 
 class CONTENT_EXPORT AudioRendererHost
-    : public BrowserMessageFilter,
+    : public content::BrowserMessageFilter,
       public media::AudioOutputController::EventHandler {
  public:
   struct AudioEntry {
@@ -107,7 +108,7 @@ class CONTENT_EXPORT AudioRendererHost
   // Called from UI thread from the owner of this object.
   AudioRendererHost(const content::ResourceContext* resource_context);
 
-  // BrowserMessageFilter implementation.
+  // content::BrowserMessageFilter implementation.
   virtual void OnChannelClosing() OVERRIDE;
   virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
@@ -125,7 +126,7 @@ class CONTENT_EXPORT AudioRendererHost
  private:
   friend class AudioRendererHostTest;
   friend class content::BrowserThread;
-  friend class DeleteTask<AudioRendererHost>;
+  friend class base::DeleteHelper<AudioRendererHost>;
   friend class MockAudioRendererHost;
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, CreateMockStream);
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, MockStreamDataConversation);

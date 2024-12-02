@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,99 +6,91 @@
 #define CONTENT_BROWSER_DOWNLOAD_MOCK_DOWNLOAD_MANAGER_H_
 #pragma once
 
-#include "content/browser/download/download_manager.h"
-#include "content/browser/download/download_id.h"
-#include "content/browser/download/download_id_factory.h"
+#include "content/browser/download/download_request_handle.h"
+#include "content/browser/download/download_types.h"
+#include "content/public/browser/download_id.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/browser/download_query.h"
+#include "googleurl/src/gurl.h"
+#include "testing/gmock/include/gmock/gmock.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
-class DownloadStatusUpdater;
-class DownloadItem;
-
-class MockDownloadManager : public DownloadManager {
+class MockDownloadManager : public content::DownloadManager {
  public:
-  explicit MockDownloadManager(content::DownloadManagerDelegate* delegate,
-                               DownloadIdFactory* id_factory,
-                               DownloadStatusUpdater* updater);
+  MockDownloadManager();
   virtual ~MockDownloadManager();
 
   // DownloadManager:
-  virtual void Shutdown() OVERRIDE;
-  virtual void GetTemporaryDownloads(const FilePath& dir_path,
-                                     DownloadVector* result) OVERRIDE;
-  virtual void GetAllDownloads(const FilePath& dir_path,
-                               DownloadVector* result) OVERRIDE;
-  virtual void SearchDownloads(const string16& query,
-                               DownloadVector* result) OVERRIDE;
-  virtual bool Init(content::BrowserContext* browser_context) OVERRIDE;
-  virtual void StartDownload(int32 id) OVERRIDE;
-  virtual void UpdateDownload(int32 download_id, int64 bytes_so_far,
-                              int64 bytes_per_sec) OVERRIDE;
-  virtual void OnResponseCompleted(int32 download_id, int64 size,
-                                   const std::string& hash) OVERRIDE;
-  virtual void CancelDownload(int32 download_id) OVERRIDE;
-  virtual void OnDownloadInterrupted(int32 download_id, int64 size,
-                                     InterruptReason reason) OVERRIDE;
-  virtual void DownloadCancelledInternal(DownloadItem* download) OVERRIDE;
-  virtual void RemoveDownload(int64 download_handle) OVERRIDE;
-  virtual bool IsDownloadReadyForCompletion(DownloadItem* download) OVERRIDE;
-  virtual void MaybeCompleteDownload(DownloadItem* download) OVERRIDE;
-  virtual void OnDownloadRenamedToFinalName(int download_id,
-                                            const FilePath& full_path,
-                                            int uniquifier) OVERRIDE;
-  virtual int RemoveDownloadsBetween(const base::Time remove_begin,
-                                     const base::Time remove_end) OVERRIDE;
-  virtual int RemoveDownloads(const base::Time remove_begin) OVERRIDE;
-  virtual int RemoveAllDownloads() OVERRIDE;
-  virtual void DownloadCompleted(int32 download_id) OVERRIDE;
-  virtual void DownloadUrl(const GURL& url,
-                           const GURL& referrer,
-                           const std::string& referrer_encoding,
-                           TabContents* tab_contents) OVERRIDE;
-  virtual void DownloadUrlToFile(const GURL& url,
+  MOCK_METHOD0(Shutdown, void());
+  MOCK_METHOD2(GetTemporaryDownloads, void(const FilePath& dir_path,
+                                           DownloadVector* result));
+  MOCK_METHOD2(GetAllDownloads, void(const FilePath& dir_path,
+                                     DownloadVector* result));
+  MOCK_METHOD2(SearchByQuery, void(const content::DownloadQuery& query,
+                                   DownloadVector* results));
+  MOCK_METHOD2(SearchDownloads, void(const string16& query,
+                                     DownloadVector* result));
+  MOCK_METHOD1(Init, bool(content::BrowserContext* browser_context));
+  MOCK_METHOD1(StartDownload, void(int32 id));
+  MOCK_METHOD4(UpdateDownload, void(int32 download_id,
+                                    int64 bytes_so_far,
+                                    int64 bytes_per_sec,
+                                    const std::string& hash_state));
+  MOCK_METHOD3(OnResponseCompleted, void(int32 download_id,
+                                         int64 size,
+                                         const std::string& hash));
+  MOCK_METHOD1(CancelDownload, void(int32 download_id));
+  MOCK_METHOD4(OnDownloadInterrupted, void(int32 download_id,
+                                           int64 size,
+                                           const std::string& hash_state,
+                                           InterruptReason reason));
+  MOCK_METHOD3(OnDownloadRenamedToFinalName, void(int download_id,
+                                                  const FilePath& full_path,
+                                                  int uniquifier));
+  MOCK_METHOD2(RemoveDownloadsBetween, int(base::Time remove_begin,
+                                           base::Time remove_end));
+  MOCK_METHOD1(RemoveDownloads, int(base::Time remove_begin));
+  MOCK_METHOD0(RemoveAllDownloads, int());
+  MOCK_METHOD6(DownloadUrl, void(const GURL& url,
                                  const GURL& referrer,
                                  const std::string& referrer_encoding,
+                                 bool prefer_cache,
                                  const DownloadSaveInfo& save_info,
-                                 TabContents* tab_contents) OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual void OnPersistentStoreQueryComplete(
-      std::vector<DownloadPersistentStoreInfo>* entries) OVERRIDE;
-  virtual void OnItemAddedToPersistentStore(int32 download_id,
-                                            int64 db_handle) OVERRIDE;
-  virtual void ShowDownloadInBrowser(DownloadItem* download) OVERRIDE;
-  virtual int InProgressCount() const OVERRIDE;
-  virtual content::BrowserContext* BrowserContext() OVERRIDE;
-  virtual FilePath LastDownloadPath() OVERRIDE;
-  virtual void CreateDownloadItem(
+                                 content::WebContents* web_contents));
+  MOCK_METHOD1(AddObserver, void(Observer* observer));
+  MOCK_METHOD1(RemoveObserver, void(Observer* observer));
+  MOCK_METHOD1(OnPersistentStoreQueryComplete, void(
+      std::vector<DownloadPersistentStoreInfo>* entries));
+  MOCK_METHOD2(OnItemAddedToPersistentStore, void(int32 download_id,
+                                                  int64 db_handle));
+  MOCK_CONST_METHOD0(InProgressCount, int());
+  MOCK_CONST_METHOD0(GetBrowserContext, content::BrowserContext*());
+  MOCK_METHOD0(LastDownloadPath, FilePath());
+  MOCK_METHOD2(CreateDownloadItem, void(
       DownloadCreateInfo* info,
-      const DownloadRequestHandle& request_handle) OVERRIDE;
-  virtual void ClearLastDownloadPath() OVERRIDE;
-  virtual void FileSelected(const FilePath& path, void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE;
-  virtual void RestartDownload(int32 download_id) OVERRIDE;
-  virtual void MarkDownloadOpened(DownloadItem* download) OVERRIDE;
-  virtual void CheckForHistoryFilesRemoval() OVERRIDE;
-  virtual void CheckForFileRemoval(DownloadItem* download_item) OVERRIDE;
-  virtual void AssertQueueStateConsistent(DownloadItem* download) OVERRIDE;
-  virtual DownloadItem* GetDownloadItem(int id) OVERRIDE;
-  virtual void SavePageDownloadStarted(DownloadItem* download) OVERRIDE;
-  virtual void SavePageDownloadFinished(DownloadItem* download) OVERRIDE;
-  virtual DownloadItem* GetActiveDownloadItem(int id) OVERRIDE;
-  virtual content::DownloadManagerDelegate* delegate() const OVERRIDE;
-  virtual void SetDownloadManagerDelegate(
-      content::DownloadManagerDelegate* delegate) OVERRIDE;
-  virtual DownloadId GetNextId() OVERRIDE;
-  virtual void ContinueDownloadWithPath(DownloadItem* download,
-                                        const FilePath& chosen_file) OVERRIDE;
-  virtual DownloadItem* GetActiveDownload(int32 download_id) OVERRIDE;
-  virtual void SetFileManager(DownloadFileManager* file_manager) OVERRIDE;
-
- private:
-  content::DownloadManagerDelegate* delegate_;
-  DownloadIdFactory* id_factory_;
-  DownloadStatusUpdater* updater_;
-  DownloadFileManager* file_manager_;
-  std::map<int32, DownloadItem*> item_map_;
-  std::map<int32, DownloadItem*> inactive_item_map_;
+      const DownloadRequestHandle& request_handle));
+  MOCK_METHOD4(CreateSavePackageDownloadItem, content::DownloadItem*(
+      const FilePath& main_file_path,
+      const GURL& page_url,
+      bool is_otr,
+      content::DownloadItem::Observer* observer));
+  MOCK_METHOD0(ClearLastDownloadPath, void());
+  MOCK_METHOD2(FileSelected, void(const FilePath& path, void* params));
+  MOCK_METHOD1(FileSelectionCanceled, void(void* params));
+  MOCK_METHOD1(RestartDownload, void(int32 download_id));
+  MOCK_METHOD0(CheckForHistoryFilesRemoval, void());
+  MOCK_METHOD1(GetDownloadItem, content::DownloadItem*(int id));
+  MOCK_METHOD1(SavePageDownloadFinished, void(content::DownloadItem* download));
+  MOCK_METHOD1(GetActiveDownloadItem, content::DownloadItem*(int id));
+  MOCK_METHOD0(GenerateFileHash, bool());
+  MOCK_CONST_METHOD0(delegate, content::DownloadManagerDelegate*());
+  MOCK_METHOD1(SetDownloadManagerDelegate, void(
+      content::DownloadManagerDelegate* delegate));
+  MOCK_METHOD2(ContinueDownloadWithPath, void(content::DownloadItem* download,
+                                              const FilePath& chosen_file));
+  MOCK_METHOD1(GetActiveDownload, content::DownloadItem*(int32 download_id));
+  MOCK_METHOD1(SetFileManager, void(DownloadFileManager* file_manager));
 };
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_MOCK_DOWNLOAD_MANAGER_H_

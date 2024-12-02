@@ -29,7 +29,6 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/browser_process.h"
@@ -310,7 +309,7 @@ HistoryService::Handle HistoryService::QuerySegmentUsageSince(
                   from_time, max_result_count);
 }
 
-void HistoryService::SetOnBackendDestroyTask(Task* task) {
+void HistoryService::SetOnBackendDestroyTask(const base::Closure& task) {
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetOnBackendDestroyTask,
                     MessageLoop::current(), task);
 }
@@ -760,6 +759,12 @@ void HistoryService::NotifyProfileError(int backend_id,
 void HistoryService::DeleteURL(const GURL& url) {
   // We will update the visited links when we observe the delete notifications.
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::DeleteURL, url);
+}
+
+void HistoryService::DeleteURLsForTest(const std::vector<GURL>& urls) {
+  // We will update the visited links when we observe the delete
+  // notifications.
+  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::DeleteURLs, urls);
 }
 
 void HistoryService::ExpireHistoryBetween(

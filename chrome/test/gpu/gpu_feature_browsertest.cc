@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,38 +11,47 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/tracing.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/gpu/gpu_blacklist.h"
 #include "content/browser/gpu/gpu_data_manager.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/net_util.h"
 #include "ui/gfx/gl/gl_switches.h"
 
 namespace {
 
 typedef uint32 GpuResultFlags;
-#define EXPECT_NO_GPU_PROCESS         GpuResultFlags(0)
-// Expect GPU process to be created.
-#define EXPECT_GPU_PROCESS            GpuResultFlags(1<<0)
-// Expect num_contexts_ to be created (onscreen or offscreen).
-#define EXPECT_GPU_CONTEXTS           GpuResultFlags(1<<1)
+#define EXPECT_NO_GPU_PROCESS         GpuResultFlags(1<<0)
 // Expect a SwapBuffers to occur (see gles2_cmd_decoder.cc).
-#define EXPECT_GPU_SWAP_BUFFERS       GpuResultFlags(1<<2)
+#define EXPECT_GPU_SWAP_BUFFERS       GpuResultFlags(1<<1)
 
 class GpuFeatureTest : public InProcessBrowserTest {
  public:
-  GpuFeatureTest()
-      : num_contexts_(0),
-        num_offscreen_contexts_(0) {}
+  GpuFeatureTest() {}
+
+  virtual void SetUpInProcessBrowserTestFixture() {
+    FilePath test_dir;
+    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir));
+    gpu_test_dir_ = test_dir.AppendASCII("gpu");
+  }
 
   virtual void SetUpCommandLine(CommandLine* command_line) {
     // This enables DOM automation for tab contents.
     EnableDOMAutomation();
+
+    InProcessBrowserTest::SetUpCommandLine(command_line);
+
+    // Do not use mesa if real GPU is required.
+    if (!command_line->HasSwitch("enable-gpu")) {
 #if !defined(OS_MACOSX)
-    CHECK(!command_line->HasSwitch(switches::kUseGL)) <<
-        "kUseGL must not be set by test framework code!";
-    command_line->AppendSwitchASCII(switches::kUseGL, "osmesa");
+      CHECK(test_launcher_utils::OverrideGLImplementation(
+          command_line, gfx::kGLImplementationOSMesaName)) <<
+          "kUseGL must not be set by test framework code!";
 #endif
+    }
+    command_line->AppendSwitch(switches::kDisablePopupBlocking);
   }
 
   void SetupBlacklist(const std::string& json_blacklist) {
@@ -54,79 +63,73 @@ class GpuFeatureTest : public InProcessBrowserTest {
     GpuDataManager::GetInstance()->SetGpuBlacklist(blacklist);
   }
 
-  void RunTest(const FilePath& url, GpuResultFlags expectations) {
-    using namespace trace_analyzer;
-
+  // If expected_reply is NULL, we don't check the reply content.
+  void RunTest(const FilePath& url,
+               const char* expected_reply,
+               bool new_tab) {
     FilePath test_path;
-    PathService::Get(chrome::DIR_TEST_DATA, &test_path);
-    test_path = test_path.Append(FILE_PATH_LITERAL("gpu"));
-    test_path = test_path.Append(url);
-
+    test_path = gpu_test_dir_.Append(url);
     ASSERT_TRUE(file_util::PathExists(test_path))
         << "Missing test file: " << test_path.value();
 
+    ui_test_utils::DOMMessageQueue message_queue;
+    if (new_tab) {
+      ui_test_utils::NavigateToURLWithDisposition(
+          browser(), net::FilePathToFileURL(test_path),
+          NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_NONE);
+    } else {
+      ui_test_utils::NavigateToURL(
+          browser(), net::FilePathToFileURL(test_path));
+    }
+
+    std::string result;
+    // Wait for message indicating the test has finished running.
+    ASSERT_TRUE(message_queue.WaitForMessage(&result));
+    if (expected_reply)
+      EXPECT_STREQ(expected_reply, result.c_str());
+  }
+
+  void RunTest(const FilePath& url, GpuResultFlags expectations) {
+    using trace_analyzer::Query;
+    using trace_analyzer::TraceAnalyzer;
+
     ASSERT_TRUE(tracing::BeginTracing("test_gpu"));
 
-    ui_test_utils::DOMMessageQueue message_queue;
     // Have to use a new tab for the blacklist to work.
-    ui_test_utils::NavigateToURLWithDisposition(
-        browser(), net::FilePathToFileURL(test_path), NEW_FOREGROUND_TAB,
-        ui_test_utils::BROWSER_TEST_NONE);
-    // Wait for message indicating the test has finished running.
-    ASSERT_TRUE(message_queue.WaitForMessage(NULL));
+    RunTest(url, NULL, true);
 
     std::string json_events;
     ASSERT_TRUE(tracing::EndTracing(&json_events));
 
     scoped_ptr<TraceAnalyzer> analyzer(TraceAnalyzer::Create(json_events));
     analyzer->AssociateBeginEndEvents();
-    TraceAnalyzer::TraceEventVector events;
+    trace_analyzer::TraceEventVector events;
 
-    size_t num_gpu_processes = (expectations & EXPECT_GPU_PROCESS) ? 1 : 0;
-    analyzer->FindEvents(Query::MatchBeginName("OnGraphicsInfoCollected"),
-                         &events);
-    EXPECT_EQ(num_gpu_processes, events.size());
-
-    // Check for context creation if expected:
-    if (expectations & EXPECT_GPU_CONTEXTS) {
-      analyzer->FindEvents(
-          Query(EVENT_NAME) == Query::String("TryCreateGLContext"),
-          &events);
-      EXPECT_EQ(num_contexts_, events.size());
-      analyzer->FindEvents(
-          Query(EVENT_NAME) == Query::String("CreateGLContextSuccess"),
-          &events);
-      EXPECT_EQ(num_contexts_, events.size());
+    // This measurement is flaky, because the GPU process is sometimes
+    // started before the test (always with force-compositing-mode on CrOS).
+    if (expectations & EXPECT_NO_GPU_PROCESS) {
+      EXPECT_EQ(0u, analyzer->FindEvents(
+          Query::MatchBeginName("OnGraphicsInfoCollected"), &events));
     }
 
     // Check for swap buffers if expected:
     if (expectations & EXPECT_GPU_SWAP_BUFFERS) {
-      analyzer->FindEvents(
-          Query(EVENT_NAME) == Query::String("SwapBuffers"),
-          &events);
-      EXPECT_GT(events.size(), size_t(0));
+      EXPECT_GT(analyzer->FindEvents(Query::EventName() ==
+                                     Query::String("SwapBuffers"), &events),
+                size_t(0));
     }
   }
 
  protected:
-  size_t num_contexts_;
-  size_t num_offscreen_contexts_;
+  FilePath gpu_test_dir_;
 };
 
-#if defined(OS_CHROMEOS)
-// http://crbug.com/106259
-#define MAYBE_AcceleratedCompositingAllowed DISABLED_testSetBooleanPrefTriggers
-#else
-#define MAYBE_AcceleratedCompositingAllowed AcceleratedCompositingAllowed
-#endif
-IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MAYBE_AcceleratedCompositingAllowed) {
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, AcceleratedCompositingAllowed) {
   GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
   EXPECT_EQ(flags.flags(), 0u);
 
-  num_contexts_ = 1;
   const FilePath url(FILE_PATH_LITERAL("feature_compositing.html"));
-  RunTest(url, EXPECT_GPU_PROCESS | EXPECT_GPU_SWAP_BUFFERS |
-          EXPECT_GPU_CONTEXTS);
+  RunTest(url, EXPECT_GPU_SWAP_BUFFERS);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, AcceleratedCompositingBlocked) {
@@ -153,14 +156,26 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, AcceleratedCompositingBlocked) {
   RunTest(url, EXPECT_NO_GPU_PROCESS);
 }
 
-IN_PROC_BROWSER_TEST_F(GpuFeatureTest, FLAKY_WebGLAllowed) {
+class AcceleratedCompositingTest : public GpuFeatureTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    GpuFeatureTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(AcceleratedCompositingTest,
+                       AcceleratedCompositingDisabled) {
+  const FilePath url(FILE_PATH_LITERAL("feature_compositing.html"));
+  RunTest(url, EXPECT_NO_GPU_PROCESS);
+}
+
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, WebGLAllowed) {
   GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
   EXPECT_EQ(flags.flags(), 0u);
 
-  num_contexts_ = 2;
   const FilePath url(FILE_PATH_LITERAL("feature_webgl.html"));
-  RunTest(url, EXPECT_GPU_PROCESS | EXPECT_GPU_SWAP_BUFFERS |
-          EXPECT_GPU_CONTEXTS);
+  RunTest(url, EXPECT_GPU_SWAP_BUFFERS);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, WebGLBlocked) {
@@ -187,28 +202,87 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, WebGLBlocked) {
   RunTest(url, EXPECT_NO_GPU_PROCESS);
 }
 
-#if defined(OS_LINUX)
-// http://crbug.com/104142
-#define Canvas2DAllowed FLAKY_Canvas2DAllowed
-#endif
-IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DAllowed) {
+class WebGLTest : public GpuFeatureTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    GpuFeatureTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebGLTest, WebGLDisabled) {
+  const FilePath url(FILE_PATH_LITERAL("feature_webgl.html"));
+  RunTest(url, EXPECT_NO_GPU_PROCESS);
+}
+
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingAllowed) {
   GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
   EXPECT_EQ(flags.flags(), 0u);
 
-#if defined(OS_MACOSX)
-  // TODO(zmo): enabling Mac when skia backend is enabled.
-  const GpuResultFlags expectations = EXPECT_NO_GPU_PROCESS;
-#else
-  num_contexts_ = 2;
-  const GpuResultFlags expectations = EXPECT_GPU_PROCESS |
-                                      EXPECT_GPU_SWAP_BUFFERS |
-                                      EXPECT_GPU_CONTEXTS;
-#endif
-  const FilePath url(FILE_PATH_LITERAL("feature_canvas2d.html"));
-  RunTest(url, expectations);
+  // Multisampling is not supported if running on top of osmesa.
+  std::string use_gl = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      switches::kUseGL);
+  if (use_gl == gfx::kGLImplementationOSMesaName)
+    return;
+
+  const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
+  RunTest(url, "\"TRUE\"", true);
 }
 
-IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DBlocked) {
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingBlocked) {
+  const std::string json_blacklist =
+      "{\n"
+      "  \"name\": \"gpu blacklist\",\n"
+      "  \"version\": \"1.0\",\n"
+      "  \"entries\": [\n"
+      "    {\n"
+      "      \"id\": 1,\n"
+      "      \"blacklist\": [\n"
+      "        \"multisampling\"\n"
+      "      ]\n"
+      "    }\n"
+      "  ]\n"
+      "}";
+  SetupBlacklist(json_blacklist);
+  GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
+  EXPECT_EQ(
+      flags.flags(),
+      static_cast<uint32>(GpuFeatureFlags::kGpuFeatureMultisampling));
+
+  const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
+  RunTest(url, "\"FALSE\"", true);
+}
+
+class WebGLMultisamplingTest : public GpuFeatureTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    GpuFeatureTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kDisableGLMultisampling);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WebGLMultisamplingTest, MultisamplingDisabled) {
+  const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
+  RunTest(url, "\"FALSE\"", true);
+}
+
+class Canvas2DEnabledTest : public GpuFeatureTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    GpuFeatureTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableAccelerated2dCanvas);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(Canvas2DEnabledTest, Canvas2DAllowed) {
+  GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
+  EXPECT_EQ(flags.flags(), 0u);
+
+  const FilePath url(FILE_PATH_LITERAL("feature_canvas2d.html"));
+  RunTest(url, EXPECT_GPU_SWAP_BUFFERS);
+}
+
+IN_PROC_BROWSER_TEST_F(Canvas2DEnabledTest, Canvas2DBlocked) {
   const std::string json_blacklist =
       "{\n"
       "  \"name\": \"gpu blacklist\",\n"
@@ -230,6 +304,30 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DBlocked) {
 
   const FilePath url(FILE_PATH_LITERAL("feature_canvas2d.html"));
   RunTest(url, EXPECT_NO_GPU_PROCESS);
+}
+
+class Canvas2DDisabledTest : public GpuFeatureTest {
+ public:
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    GpuFeatureTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kDisableAccelerated2dCanvas);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(Canvas2DDisabledTest, Canvas2DDisabled) {
+  const FilePath url(FILE_PATH_LITERAL("feature_canvas2d.html"));
+  RunTest(url, EXPECT_NO_GPU_PROCESS);
+}
+
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest,
+                       CanOpenPopupAndRenderWithWebGLCanvas) {
+  const FilePath url(FILE_PATH_LITERAL("webgl_popup.html"));
+  RunTest(url, "\"SUCCESS\"", false);
+}
+
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, CanOpenPopupAndRenderWith2DCanvas) {
+  const FilePath url(FILE_PATH_LITERAL("canvas_popup.html"));
+  RunTest(url, "\"SUCCESS\"", false);
 }
 
 }  // namespace anonymous

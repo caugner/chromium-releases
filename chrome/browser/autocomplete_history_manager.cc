@@ -16,11 +16,13 @@
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "webkit/glue/form_data.h"
+#include "content/public/browser/web_contents.h"
+#include "webkit/forms/form_data.h"
 
-using webkit_glue::FormData;
-using webkit_glue::FormField;
+using base::StringPiece16;
+using content::WebContents;
+using webkit::forms::FormData;
+using webkit::forms::FormField;
 
 namespace {
 
@@ -63,26 +65,32 @@ bool IsSSN(const string16& text) {
     return false;
 
   int area;
-  if (!base::StringToInt(number_string.begin(),
-                         number_string.begin() + 3,
-                         &area))
+  if (!base::StringToInt(StringPiece16(number_string.begin(),
+                                       number_string.begin() + 3),
+                         &area)) {
     return false;
+  }
   if (area < 1 ||
       area == 666 ||
-      area >= 900)
+      area >= 900) {
     return false;
+  }
 
   int group;
-  if (!base::StringToInt(number_string.begin() + 3,
-                         number_string.begin() + 5,
-                         &group) || group == 0)
+  if (!base::StringToInt(StringPiece16(number_string.begin() + 3,
+                                       number_string.begin() + 5),
+                         &group)
+      || group == 0) {
     return false;
+  }
 
   int serial;
-  if (!base::StringToInt(number_string.begin() + 5,
-                         number_string.begin() + 9,
-                         &serial) || serial == 0)
+  if (!base::StringToInt(StringPiece16(number_string.begin() + 5,
+                                       number_string.begin() + 9),
+                         &serial)
+      || serial == 0) {
     return false;
+  }
 
   return true;
 }
@@ -100,12 +108,12 @@ bool IsTextField(const FormField& field) {
 }  // namespace
 
 AutocompleteHistoryManager::AutocompleteHistoryManager(
-    TabContents* tab_contents)
-    : TabContentsObserver(tab_contents),
+    WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
       pending_query_handle_(0),
       query_id_(0),
       external_delegate_(NULL) {
-  profile_ = Profile::FromBrowserContext(tab_contents->browser_context());
+  profile_ = Profile::FromBrowserContext(web_contents->GetBrowserContext());
   // May be NULL in unit tests.
   web_data_service_ = profile_->GetWebDataService(Profile::EXPLICIT_ACCESS);
   autofill_enabled_.Init(prefs::kAutofillEnabled, profile_->GetPrefs(), NULL);
@@ -225,14 +233,15 @@ void AutocompleteHistoryManager::SetExternalDelegate(
 }
 
 AutocompleteHistoryManager::AutocompleteHistoryManager(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     Profile* profile,
     WebDataService* wds)
-    : TabContentsObserver(tab_contents),
+    : content::WebContentsObserver(web_contents),
       profile_(profile),
       web_data_service_(wds),
       pending_query_handle_(0),
-      query_id_(0) {
+      query_id_(0),
+      external_delegate_(NULL) {
   autofill_enabled_.Init(
       prefs::kAutofillEnabled, profile_->GetPrefs(), NULL);
 }

@@ -10,6 +10,7 @@
 #include <sys/statvfs.h>
 
 #include "base/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/string_util.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
@@ -72,7 +73,7 @@ class DiskMountManagerImpl : public DiskMountManager {
         type,
         // When succeeds, OnMountCompleted will be called by
         // "MountCompleted" signal instead.
-        base::Bind(&DoNothing),
+        base::Bind(&base::DoNothing),
         base::Bind(&DiskMountManagerImpl::OnMountCompleted,
                    weak_ptr_factory_.GetWeakPtr(),
                    MOUNT_ERROR_INTERNAL,
@@ -87,7 +88,7 @@ class DiskMountManagerImpl : public DiskMountManager {
     cros_disks_client_->Unmount(mount_path,
                                 base::Bind(&DiskMountManagerImpl::OnUnmountPath,
                                            weak_ptr_factory_.GetWeakPtr()),
-                                base::Bind(&DoNothing));
+                                base::Bind(&base::DoNothing));
   }
 
   // DiskMountManager override.
@@ -219,7 +220,7 @@ class DiskMountManagerImpl : public DiskMountManager {
     cros_disks_client_->EnumerateAutoMountableDevices(
         base::Bind(&DiskMountManagerImpl::OnRequestMountInfo,
                    weak_ptr_factory_.GetWeakPtr()),
-        base::Bind(&DoNothing));
+        base::Bind(&base::DoNothing));
   }
 
   // DiskMountManager override.
@@ -395,7 +396,7 @@ class DiskMountManagerImpl : public DiskMountManager {
             devices[i],
             base::Bind(&DiskMountManagerImpl::OnGetDeviceProperties,
                        weak_ptr_factory_.GetWeakPtr()),
-            base::Bind(&DoNothing));
+            base::Bind(&base::DoNothing));
       }
     }
     // Search and remove disks that are no longer present.
@@ -412,7 +413,9 @@ class DiskMountManagerImpl : public DiskMountManager {
   }
 
   // Callback to handle mount event signals.
-  void OnMountEvent(MountEventType event, std::string device_path) {
+  void OnMountEvent(MountEventType event, const std::string& device_path_arg) {
+    // Take a copy of the argument so we can modify it below.
+    std::string device_path = device_path_arg;
     DiskMountManagerEventType type = MOUNT_DEVICE_ADDED;
     switch (event) {
       case DISK_ADDED: {
@@ -420,7 +423,7 @@ class DiskMountManagerImpl : public DiskMountManager {
             device_path,
             base::Bind(&DiskMountManagerImpl::OnGetDeviceProperties,
                        weak_ptr_factory_.GetWeakPtr()),
-            base::Bind(&DoNothing));
+            base::Bind(&base::DoNothing));
         return;
       }
       case DISK_REMOVED: {
@@ -522,10 +525,6 @@ class DiskMountManagerImpl : public DiskMountManager {
         return prefix;
     }
     return EmptyString();
-  }
-
-  // A function to be used as an empty callback.
-  static void DoNothing() {
   }
 
   // Mount event change observers.

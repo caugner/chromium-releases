@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,7 +58,7 @@ void PPBGetInterfaces() {
 
 int32_t BrowserPpp::InitializeModule(PP_Module module_id,
                                      PPB_GetInterface get_browser_interface) {
-  DebugPrintf("PPP_InitializeModule: module=%"NACL_PRIu32"\n", module_id);
+  DebugPrintf("PPP_InitializeModule: module=%"NACL_PRId32"\n", module_id);
   // Ask the browser for an interface which provides missing functions
   const PPB_NaCl_Private* ppb_nacl = reinterpret_cast<const PPB_NaCl_Private*>(
       get_browser_interface(PPB_NACL_PRIVATE_INTERFACE));
@@ -97,15 +97,12 @@ int32_t BrowserPpp::InitializeModule(PP_Module module_id,
   SetModuleIdForSrpcChannel(main_channel_, module_id);
   SetInstanceIdForSrpcChannel(main_channel_, plugin_->pp_instance());
   // Do the RPC.
-  int32_t browser_pid = static_cast<int32_t>(GETPID());
   int32_t pp_error;
   NaClSrpcError srpc_result =
       PppRpcClient::PPP_InitializeModule(main_channel_,
-                                         browser_pid,
                                          module_id,
                                          wrapper->desc(),
                                          service_string,
-                                         &plugin_pid_,
                                          &pp_error);
   DebugPrintf("PPP_InitializeModule: %s\n", NaClSrpcErrorString(srpc_result));
   is_nexe_alive_ = (srpc_result != NACL_SRPC_RESULT_INTERNAL);
@@ -163,6 +160,18 @@ const void* BrowserPpp::GetPluginInterface(const char* interface_name) {
   DebugPrintf("PPP_GetInterface('%s'): %s\n",
               interface_name, NaClSrpcErrorString(srpc_result));
   is_nexe_alive_ = (srpc_result != NACL_SRPC_RESULT_INTERNAL);
+
+  // Special case PPP_Instance versioning. The plugin side of the proxy
+  // converts Instance 1.1 to Instance 1.0 as needed, so we want to say here
+  // in the browser side that any time either 1.0 or 1.1 is supported, that
+  // we'll support 1.1.
+  if (srpc_result == NACL_SRPC_RESULT_OK && !exports_interface_name &&
+      strcmp(interface_name, PPP_INSTANCE_INTERFACE_1_1) == 0) {
+    srpc_result =
+        PppRpcClient::PPP_GetInterface(main_channel_,
+                                       PPP_INSTANCE_INTERFACE_1_0,
+                                       &exports_interface_name);
+  }
 
   const void* ppp_interface = NULL;
   if (srpc_result != NACL_SRPC_RESULT_OK || !exports_interface_name) {

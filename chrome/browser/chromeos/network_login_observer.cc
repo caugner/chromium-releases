@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,7 @@
 
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/login/background_view.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -28,10 +27,6 @@ NetworkLoginObserver::~NetworkLoginObserver() {
 }
 
 void NetworkLoginObserver::CreateModalPopup(views::WidgetDelegate* view) {
-#if defined(USE_AURA)
-  // TODO(saintlou): This needs to be done for Aura.
-  NOTIMPLEMENTED();
-#else
   Browser* browser = BrowserList::GetLastActive();
   if (browser && !browser->is_type_tabbed()) {
     browser = BrowserList::FindTabbedBrowser(browser->profile(), true);
@@ -43,12 +38,12 @@ void NetworkLoginObserver::CreateModalPopup(views::WidgetDelegate* view) {
     window->Show();
   } else {
     // Browser not found, so we should be in login/oobe screen.
-    BackgroundView* background_view = LoginUtils::Get()->GetBackgroundView();
-    if (background_view) {
-      background_view->CreateModalPopup(view);
-    }
+    views::Widget* window = browser::CreateViewsWindow(
+        BaseLoginDisplayHost::default_host()->GetNativeWindow(),
+        view, STYLE_GENERIC);
+    window->SetAlwaysOnTop(true);
+    window->Show();
   }
-#endif
 }
 
 void NetworkLoginObserver::OnNetworkManagerChanged(NetworkLibrary* cros) {

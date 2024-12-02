@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "unicode/uloc.h"
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
@@ -129,10 +130,14 @@ namespace chromeos {
 namespace input_method {
 
 // The implementation of InputMethodManager.
-class InputMethodManagerImpl : public HotkeyManager::Observer,
-                               public InputMethodManager,
-                               public content::NotificationObserver,
-                               public IBusController::Observer {
+class InputMethodManagerImpl
+    : public HotkeyManager::Observer,
+      public InputMethodManager,
+      public content::NotificationObserver,
+#if !defined(USE_VIRTUAL_KEYBOARD)
+      public CandidateWindowController::Observer,
+#endif
+      public IBusController::Observer {
  public:
   InputMethodManagerImpl()
       : ibus_controller_(IBusController::Create()),
@@ -143,7 +148,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
         shutting_down_(false),
         ibus_daemon_process_handle_(base::kNullProcessHandle),
         util_(ibus_controller_->GetSupportedInputMethods()),
-        xkeyboard_(util_) {
+        xkeyboard_(XKeyboard::Create(util_)) {
     // Observe APP_TERMINATING to stop input method daemon gracefully.
     // We should not use APP_EXITING here since logout might be canceled by
     // JavaScript after APP_EXITING is sent (crosbug.com/11055).
@@ -178,6 +183,10 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
   virtual ~InputMethodManagerImpl() {
     hotkey_manager_.RemoveObserver(this);
     ibus_controller_->RemoveObserver(this);
+#if !defined(USE_VIRTUAL_KEYBOARD)
+    if (candidate_window_controller_.get())
+      candidate_window_controller_->RemoveObserver(this);
+#endif
   }
 
   virtual void AddObserver(InputMethodManager::Observer* observer) {
@@ -186,6 +195,16 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
 
   virtual void RemoveObserver(InputMethodManager::Observer* observer) {
     observers_.RemoveObserver(observer);
+  }
+
+  virtual void AddCandidateWindowObserver(
+      InputMethodManager::CandidateWindowObserver* observer) {
+    candidate_window_observers_.AddObserver(observer);
+  }
+
+  virtual void RemoveCandidateWindowObserver(
+      InputMethodManager::CandidateWindowObserver* observer) {
+    candidate_window_observers_.RemoveObserver(observer);
   }
 
   virtual void AddPreLoginPreferenceObserver(
@@ -384,8 +403,11 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
       FlushImeConfig();
     }
 
-    // Stop input method process if necessary.
-    MaybeStopInputMethodDaemon(section, config_name, value);
+    if (section == language_prefs::kGeneralSectionName &&
+        config_name == language_prefs::kPreloadEnginesConfigName) {
+      // Stop input method process if necessary.
+      MaybeStopInputMethodDaemon();
+    }
     // Change the current keyboard layout if necessary.
     MaybeChangeCurrentKeyboardLayout(section, config_name, value);
     return pending_config_requests_.empty();
@@ -403,6 +425,9 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
     active_input_method_ids_.push_back(id);
     // TODO(yusukes): Call UpdateInputMethodSpecificHotkeys() here once IME
     // extension supports hotkeys.
+
+    // Ensure that the input method daemon is running.
+    StartInputMethodDaemon();
   }
 
   virtual void RemoveActiveIme(const std::string& id) {
@@ -416,6 +441,9 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
     extra_input_method_ids_.erase(id);
     // TODO(yusukes): Call UpdateInputMethodSpecificHotkeys() here once IME
     // extension supports hotkeys.
+
+    // Stop the IME daemon if needed.
+    MaybeStopInputMethodDaemon();
   }
 
   virtual bool GetExtraDescriptor(const std::string& id,
@@ -495,7 +523,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
   }
 
   virtual XKeyboard* GetXKeyboard() {
-    return &xkeyboard_;
+    return xkeyboard_.get();
   }
 
   virtual HotkeyManager* GetHotkeyManager() {
@@ -518,6 +546,18 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
         SwitchToInputMethod(event);
         break;
     }
+  }
+
+  virtual void CandidateWindowOpened() {
+    FOR_EACH_OBSERVER(InputMethodManager::CandidateWindowObserver,
+                      candidate_window_observers_,
+                      CandidateWindowOpened(this));
+  }
+
+  virtual void CandidateWindowClosed() {
+    FOR_EACH_OBSERVER(InputMethodManager::CandidateWindowObserver,
+                      candidate_window_observers_,
+                      CandidateWindowClosed(this));
   }
 
   virtual void SwitchToNextInputMethod() {
@@ -588,12 +628,9 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
 
   // Returns true if the given input method config value is a string list
   // that only contains an input method ID of a keyboard layout.
-  bool ContainOnlyKeyboardLayout(const ImeConfigValue& value) {
-    if (value.type != ImeConfigValue::kValueTypeStringList) {
-      return false;
-    }
-    for (size_t i = 0; i < value.string_list_value.size(); ++i) {
-      if (!InputMethodUtil::IsKeyboardLayout(value.string_list_value[i])) {
+  bool ContainOnlyKeyboardLayout(const std::vector<std::string>& value) {
+    for (size_t i = 0; i < value.size(); ++i) {
+      if (!InputMethodUtil::IsKeyboardLayout(value[i])) {
         return false;
       }
     }
@@ -615,7 +652,8 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
       // If there is only one input method which is a keyboard layout,
       // we don't start the input method processes.  When
       // |defer_ime_startup_| is true, we don't start it either.
-      if (ContainOnlyKeyboardLayout(value) || defer_ime_startup_) {
+      if (ContainOnlyKeyboardLayout(value.string_list_value) ||
+          defer_ime_startup_) {
         // Do not start the input method daemon.
         return;
       }
@@ -659,21 +697,17 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
   // Stops input method daemon based on the |enable_auto_ime_shutdown_| flag
   // and input method configuration being updated.
   // See also: MaybeStartInputMethodDaemon().
-  void MaybeStopInputMethodDaemon(const std::string& section,
-                                  const std::string& config_name,
-                                  const ImeConfigValue& value) {
+  void MaybeStopInputMethodDaemon() {
     // If there is only one input method which is a keyboard layout,
     // and |enable_auto_ime_shutdown_| is true, we'll stop the input
     // method daemon.
-    if (section == language_prefs::kGeneralSectionName &&
-        config_name == language_prefs::kPreloadEnginesConfigName &&
-        ContainOnlyKeyboardLayout(value) &&
+    if (ContainOnlyKeyboardLayout(active_input_method_ids_) &&
         enable_auto_ime_shutdown_) {
       if (StopInputMethodDaemon()) {
         // The process is killed. Change the current keyboard layout.
         // We shouldn't use SetCurrentKeyboardLayoutByName() here. See
         // comments at ChangeCurrentInputMethod() for details.
-        ChangeCurrentInputMethodFromId(value.string_list_value[0]);
+        ChangeCurrentInputMethodFromId(active_input_method_ids_[0]);
       }
     }
   }
@@ -917,7 +951,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
       current_input_method_ = new_input_method;
 
       // Change the keyboard layout to a preferred layout for the input method.
-      if (!xkeyboard_.SetCurrentKeyboardLayoutByName(
+      if (!xkeyboard_->SetCurrentKeyboardLayoutByName(
               current_input_method_.keyboard_layout())) {
         LOG(ERROR) << "Failed to change keyboard layout to "
                    << current_input_method_.keyboard_layout();
@@ -1102,7 +1136,9 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
 #if !defined(USE_VIRTUAL_KEYBOARD)
     if (!candidate_window_controller_.get()) {
       candidate_window_controller_.reset(new CandidateWindowController);
-      if (!candidate_window_controller_->Init()) {
+      if (candidate_window_controller_->Init()) {
+        candidate_window_controller_->AddObserver(this);
+      } else {
         LOG(WARNING) << "Failed to initialize the candidate window controller";
       }
     }
@@ -1178,6 +1214,8 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
       notification_registrar_.RemoveAll();
       StopInputMethodDaemon();
 #if !defined(USE_VIRTUAL_KEYBOARD)
+      if (candidate_window_controller_.get())
+        candidate_window_controller_->RemoveObserver(this);
       candidate_window_controller_.reset(NULL);
 #endif
     }
@@ -1298,6 +1336,8 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
   // allow allow callbacks when the input method status changes.
   scoped_ptr<IBusController> ibus_controller_;
   ObserverList<InputMethodManager::Observer> observers_;
+  ObserverList<InputMethodManager::CandidateWindowObserver>
+      candidate_window_observers_;
   ObserverList<PreferenceObserver> pre_login_preference_observers_;
   ObserverList<PreferenceObserver> post_login_preference_observers_;
   ObserverList<VirtualKeyboardObserver> virtual_keyboard_observers_;
@@ -1376,7 +1416,7 @@ class InputMethodManagerImpl : public HotkeyManager::Observer,
 
   // An object for switching XKB layouts and keyboard status like caps lock and
   // auto-repeat interval.
-  XKeyboard xkeyboard_;
+  scoped_ptr<XKeyboard> xkeyboard_;
 
   // An object which detects Control+space and Shift+Alt key presses.
   HotkeyManager hotkey_manager_;
@@ -1391,8 +1431,3 @@ InputMethodManager* InputMethodManager::GetInstance() {
 
 }  // namespace input_method
 }  // namespace chromeos
-
-// Allows InvokeLater without adding refcounting. This class is a Singleton and
-// won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(
-    chromeos::input_method::InputMethodManagerImpl);

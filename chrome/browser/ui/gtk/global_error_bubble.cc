@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/global_error.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/gtk/browser_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
@@ -38,19 +40,23 @@ const int kMessageLabelWidth = 250;
 
 }  // namespace
 
-GlobalErrorBubble::GlobalErrorBubble(Profile* profile,
-                                     GlobalError* error,
+GlobalErrorBubble::GlobalErrorBubble(Browser* browser,
+                                     const base::WeakPtr<GlobalError>& error,
                                      GtkWidget* anchor)
-    : bubble_(NULL),
+    : browser_(browser),
+      bubble_(NULL),
       error_(error) {
+  DCHECK(browser_);
+  DCHECK(error_);
   GtkWidget* content = gtk_vbox_new(FALSE, kInterLineSpacing);
   gtk_container_set_border_width(GTK_CONTAINER(content), kContentBorder);
   g_signal_connect(content, "destroy", G_CALLBACK(OnDestroyThunk), this);
 
-  GtkThemeService* theme_service = GtkThemeService::GetFrom(profile);
+  GtkThemeService* theme_service =
+      GtkThemeService::GetFrom(browser_->profile());
 
   int resource_id = error_->GetBubbleViewIconResourceID();
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   GdkPixbuf* pixbuf = rb.GetNativeImageNamed(resource_id).ToGdkPixbuf();
   GtkWidget* image_view = gtk_image_new_from_pixbuf(pixbuf);
 
@@ -119,7 +125,8 @@ GlobalErrorBubble::~GlobalErrorBubble() {
 
 void GlobalErrorBubble::BubbleClosing(BubbleGtk* bubble,
                                       bool closed_by_escape) {
-  error_->BubbleViewDidClose();
+  if (error_)
+    error_->BubbleViewDidClose(browser_);
 }
 
 void GlobalErrorBubble::OnDestroy(GtkWidget* sender) {
@@ -127,21 +134,29 @@ void GlobalErrorBubble::OnDestroy(GtkWidget* sender) {
 }
 
 void GlobalErrorBubble::OnAcceptButton(GtkWidget* sender) {
-  error_->BubbleViewAcceptButtonPressed();
+  if (error_)
+    error_->BubbleViewAcceptButtonPressed(browser_);
   bubble_->Close();
 }
 
 void GlobalErrorBubble::OnCancelButton(GtkWidget* sender) {
-  error_->BubbleViewCancelButtonPressed();
+  if (error_)
+    error_->BubbleViewCancelButtonPressed(browser_);
   bubble_->Close();
 }
 
-void GlobalError::ShowBubbleView(Browser* browser, GlobalError* error) {
+void GlobalErrorBubble::CloseBubbleView() {
+  bubble_->Close();
+}
+
+GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowBubbleView(
+    Browser* browser,
+    const base::WeakPtr<GlobalError>& error) {
   BrowserWindowGtk* browser_window =
       BrowserWindowGtk::GetBrowserWindowForNativeWindow(
           browser->window()->GetNativeHandle());
   GtkWidget* anchor = browser_window->GetToolbar()->GetAppMenuButton();
 
   // The bubble will be automatically deleted when it's closed.
-  new GlobalErrorBubble(browser->profile(), error, anchor);
+  return new GlobalErrorBubble(browser, error, anchor);
 }

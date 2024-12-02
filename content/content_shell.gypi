@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -19,6 +19,7 @@
         'content_plugin',
         'content_ppapi_plugin',
         'content_renderer',
+        'content_shell_resources',
         'content_utility',
         'content_worker',
         'content_resources.gyp:content_resources',
@@ -41,10 +42,10 @@
         '..',
       ],
       'sources': [
-        'browser/download/mock_download_manager_delegate.cc',
         'browser/tab_contents/tab_contents_view_win.cc',
         'browser/tab_contents/tab_contents_view_win.h',
-        'browser/tab_contents/tab_contents_view_win_delegate.h',
+        'shell/layout_test_controller_bindings.cc',
+        'shell/layout_test_controller_bindings.h',
         'shell/shell.cc',
         'shell/shell.h',
         'shell/shell_gtk.cc',
@@ -64,12 +65,24 @@
         'shell/shell_content_renderer_client.h',
         'shell/shell_content_utility_client.cc',
         'shell/shell_content_utility_client.h',
+        'shell/shell_devtools_delegate.cc',
+        'shell/shell_devtools_delegate.h',
         'shell/shell_download_manager_delegate.cc',
         'shell/shell_download_manager_delegate.h',
         'shell/shell_main_delegate.cc',
         'shell/shell_main_delegate.h',
+        'shell/shell_messages.cc',
+        'shell/shell_messages.h',
+        'shell/shell_render_process_observer.cc',
+        'shell/shell_render_process_observer.h',
+        'shell/shell_render_view_host_observer.cc',
+        'shell/shell_render_view_host_observer.h',
+        'shell/shell_render_view_observer.cc',
+        'shell/shell_render_view_observer.h',
         'shell/shell_resource_context.cc',
         'shell/shell_resource_context.h',
+        'shell/shell_switches.cc',
+        'shell/shell_switches.h',
         'shell/shell_url_request_context_getter.cc',
         'shell/shell_url_request_context_getter.h',
       ],
@@ -106,6 +119,77 @@
       ],
     },
     {
+      'target_name': 'content_shell_resources',
+      'type': 'none',
+      'variables': {
+        'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/content',
+      },
+      'actions': [
+        {
+          'action_name': 'content_shell_resources',
+          'variables': {
+            'grit_grd_file': 'shell/shell_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+      ],
+      'includes': [ '../build/grit_target.gypi' ],
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)',
+          'files': [
+            '<(SHARED_INTERMEDIATE_DIR)/content/shell_resources.pak'
+          ],
+        },
+      ],
+    },
+    {
+      # We build a minimal set of resources so WebKit in content_shell has
+      # access to necessary resources.
+      'target_name': 'content_shell_pak',
+      'type': 'none',
+      'dependencies': [
+        'browser/debugger/devtools_resources.gyp:devtools_resources',
+        'content_shell_resources',
+      ],
+      'variables': {
+        'repack_path': '<(DEPTH)/tools/grit/grit/format/repack.py',
+      },
+      'actions': [
+        {
+          'action_name': 'repack_content_shell_pack',
+          'variables': {
+            'pak_inputs': [
+              '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/content/shell_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.pak',
+            ],
+            'conditions': [
+              ['OS != "mac"', {
+                'pak_inputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.pak',
+                ]
+              }],
+            ],
+          },
+          'inputs': [
+            '<(repack_path)',
+            '<@(pak_inputs)',
+          ],
+          'outputs': [
+            '<(PRODUCT_DIR)/content_shell.pak',
+          ],
+          'action': ['python', '<(repack_path)', '<@(_outputs)',
+                     '<@(pak_inputs)'],
+        },
+      ],
+    },
+    {
       'target_name': 'content_shell',
       'type': 'executable',
       'defines!': ['CONTENT_IMPLEMENTATION'],
@@ -114,6 +198,7 @@
       },
       'dependencies': [
         'content_shell_lib',
+        'content_shell_pak',
       ],
       'include_dirs': [
         '..',
@@ -147,6 +232,11 @@
         ['OS == "win" or (toolkit_uses_gtk == 1 and selinux == 0)', {
           'dependencies': [
             '../sandbox/sandbox.gyp:sandbox',
+          ],
+        }],
+        ['toolkit_uses_gtk == 1', {
+          'dependencies': [
+            '<(DEPTH)/build/linux/system.gyp:gtk',
           ],
         }],
       ],

@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/tabs/default_tab_handler.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
+
+using content::SiteInstance;
 
 ////////////////////////////////////////////////////////////////////////////////
 // DefaultTabHandler, public:
@@ -18,7 +21,8 @@ DefaultTabHandler::DefaultTabHandler(TabHandlerDelegate* delegate)
 
 DefaultTabHandler::~DefaultTabHandler() {
   // The tab strip should not have any tabs at this point.
-  DCHECK(model_->empty());
+  if (!browser_shutdown::ShuttingDownWithoutClosingBrowsers())
+    DCHECK(model_->empty());
   model_->RemoveObserver(this);
 }
 

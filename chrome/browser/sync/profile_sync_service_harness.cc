@@ -1,11 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/profile_sync_service_harness.h"
 
-#include <stddef.h>
-#include <algorithm>
+#include <cstddef>
 #include <iterator>
 #include <ostream>
 #include <set>
@@ -13,17 +12,17 @@
 #include <vector>
 
 #include "base/base64.h"
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/sessions/session_state.h"
-#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 
 using browser_sync::sessions::SyncSessionSnapshot;
@@ -138,12 +137,7 @@ bool ProfileSyncServiceHarness::IsSyncAlreadySetup() {
 }
 
 bool ProfileSyncServiceHarness::SetupSync() {
-  syncable::ModelTypeSet synced_datatypes;
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-      i < syncable::MODEL_TYPE_COUNT; ++i) {
-    synced_datatypes.insert(syncable::ModelTypeFromInt(i));
-  }
-  bool result = SetupSync(synced_datatypes);
+  bool result = SetupSync(syncable::ModelTypeSet::All());
   if (result == false) {
     std::string status = GetServiceStatus();
     LOG(ERROR) << profile_debug_name_
@@ -155,9 +149,9 @@ bool ProfileSyncServiceHarness::SetupSync() {
 }
 
 bool ProfileSyncServiceHarness::SetupSync(
-    const syncable::ModelTypeSet& synced_datatypes) {
+    syncable::ModelTypeSet synced_datatypes) {
   // Initialize the sync client's profile sync service object.
-  service_ = profile_->GetProfileSyncService("");
+  service_ = profile_->GetProfileSyncService();
   if (service_ == NULL) {
     LOG(ERROR) << "SetupSync(): service_ is null.";
     return false;
@@ -180,8 +174,8 @@ bool ProfileSyncServiceHarness::SetupSync(
 
   // Choose the datatypes to be synced. If all datatypes are to be synced,
   // set sync_everything to true; otherwise, set it to false.
-  bool sync_everything = (synced_datatypes.size() ==
-      (syncable::MODEL_TYPE_COUNT - syncable::FIRST_REAL_MODEL_TYPE));
+  bool sync_everything =
+      synced_datatypes.Equals(syncable::ModelTypeSet::All());
   service()->OnUserChoseDatatypes(sync_everything, synced_datatypes);
 
   // Subscribe sync client to notifications from the backend migrator
@@ -199,7 +193,9 @@ bool ProfileSyncServiceHarness::SetupSync(
   }
 
   // Set our implicit passphrase.
-  service_->SetPassphrase(password_, false);
+  service_->SetPassphrase(password_,
+                          ProfileSyncService::IMPLICIT,
+                          ProfileSyncService::USER_PROVIDED);
 
   // Wait for initial sync cycle to be completed.
   DCHECK_EQ(wait_state_, WAITING_FOR_INITIAL_SYNC);
@@ -276,13 +272,6 @@ bool ProfileSyncServiceHarness::RunStateChangeMachine() {
       if (IsFullySynced()) {
         // The sync cycle we were waiting for is complete.
         SignalStateCompleteWithNextState(FULLY_SYNCED);
-        break;
-      }
-      if (service()->passphrase_required_reason() ==
-              sync_api::REASON_SET_PASSPHRASE_FAILED) {
-        // A passphrase is required for decryption and we don't have it. Do not
-        // wait any more.
-        SignalStateCompleteWithNextState(SET_PASSPHRASE_FAILED);
         break;
       }
       if (!GetStatus().server_reachable) {
@@ -454,29 +443,16 @@ void ProfileSyncServiceHarness::OnMigrationStateChange() {
   if (HasPendingBackendMigration()) {
     // Merge current pending migration types into
     // |pending_migration_types_|.
-    syncable::ModelTypeSet new_pending_migration_types =
+    pending_migration_types_.PutAll(
         service()->GetBackendMigratorForTest()->
-        GetPendingMigrationTypesForTest();
-    syncable::ModelTypeSet temp;
-    std::set_union(pending_migration_types_.begin(),
-                   pending_migration_types_.end(),
-                   new_pending_migration_types.begin(),
-                   new_pending_migration_types.end(),
-                   std::inserter(temp, temp.end()));
-    std::swap(pending_migration_types_, temp);
+            GetPendingMigrationTypesForTest());
     DVLOG(1) << profile_debug_name_ << ": new pending migration types "
              << syncable::ModelTypeSetToString(pending_migration_types_);
   } else {
     // Merge just-finished pending migration types into
     // |migration_types_|.
-    syncable::ModelTypeSet temp;
-    std::set_union(pending_migration_types_.begin(),
-                   pending_migration_types_.end(),
-                   migrated_types_.begin(),
-                   migrated_types_.end(),
-                   std::inserter(temp, temp.end()));
-    std::swap(migrated_types_, temp);
-    pending_migration_types_.clear();
+    migrated_types_.PutAll(pending_migration_types_);
+    pending_migration_types_.Clear();
     DVLOG(1) << profile_debug_name_ << ": new migrated types "
              << syncable::ModelTypeSetToString(migrated_types_);
   }
@@ -643,15 +619,12 @@ bool ProfileSyncServiceHarness::AwaitActionableError() {
 }
 
 bool ProfileSyncServiceHarness::AwaitMigration(
-    const syncable::ModelTypeSet& expected_migrated_types) {
+    syncable::ModelTypeSet expected_migrated_types) {
   DVLOG(1) << GetClientInfoString("AwaitMigration");
   DVLOG(1) << profile_debug_name_ << ": waiting until migration is done for "
-           << syncable::ModelTypeSetToString(expected_migrated_types);
+          << syncable::ModelTypeSetToString(expected_migrated_types);
   while (true) {
-    bool migration_finished =
-        std::includes(migrated_types_.begin(), migrated_types_.end(),
-                      expected_migrated_types.begin(),
-                      expected_migrated_types.end());
+    bool migration_finished = migrated_types_.HasAll(expected_migrated_types);
     DVLOG(1) << "Migrated types "
              << syncable::ModelTypeSetToString(migrated_types_)
              << (migration_finished ? " contains " : " does not contain ")
@@ -682,7 +655,14 @@ bool ProfileSyncServiceHarness::AwaitMigration(
                << " after migration finish is not WAITING_FOR_NOTHING";
       return false;
     }
-    if (!AwaitFullSyncCompletion(
+    // We must use AwaitDataSyncCompletion rather than the more common
+    // AwaitFullSyncCompletion.  As long as crbug.com/97780 is open, we will
+    // rely on self-notifications to ensure that timestamps are udpated, which
+    // allows AwaitFullSyncCompletion to return.  However, in some migration
+    // tests these notifications are completely disabled, so the timestamps do
+    // not get updated.  This is why we must use the less strict condition,
+    // AwaitDataSyncCompletion.
+    if (!AwaitDataSyncCompletion(
             "Config sync cycle after migration cycle")) {
       return false;
     }
@@ -766,7 +746,7 @@ bool ProfileSyncServiceHarness::AwaitStatusChangeWithTimeout(
       FROM_HERE,
       base::Bind(&StateChangeTimeoutEvent::Callback,
                  timeout_signal.get()),
-      timeout_milliseconds);
+      base::TimeDelta::FromMilliseconds(timeout_milliseconds));
   loop->Run();
   loop->SetNestableTasksAllowed(did_allow_nestable_tasks);
   if (timeout_signal->Abort()) {
@@ -793,9 +773,7 @@ bool ProfileSyncServiceHarness::IsDataSyncedImpl(
       GetStatus().notifications_enabled &&
       !service()->HasUnsyncedItems() &&
       !snap->has_more_to_sync &&
-      !HasPendingBackendMigration() &&
-      service()->passphrase_required_reason() !=
-        sync_api::REASON_SET_PASSPHRASE_FAILED;
+      !HasPendingBackendMigration();
 }
 
 bool ProfileSyncServiceHarness::IsDataSynced() {
@@ -845,28 +823,24 @@ bool ProfileSyncServiceHarness::MatchesOtherClient(
 
   // Only look for a match if we have at least one enabled datatype in
   // common with the partner client.
-  syncable::ModelTypeSet types, other_types, intersection_types;
-  service()->GetPreferredDataTypes(&types);
-  partner->service()->GetPreferredDataTypes(&other_types);
-  std::set_intersection(types.begin(), types.end(), other_types.begin(),
-                        other_types.end(),
-                        inserter(intersection_types,
-                                 intersection_types.begin()));
+  const syncable::ModelTypeSet common_types =
+      Intersection(service()->GetPreferredDataTypes(),
+                   partner->service()->GetPreferredDataTypes());
 
   DVLOG(2) << profile_debug_name_ << ", " << partner->profile_debug_name_
            << ": common types are "
-           << syncable::ModelTypeSetToString(intersection_types);
+           << syncable::ModelTypeSetToString(common_types);
 
-  if (!intersection_types.empty() && !partner->IsFullySynced()) {
+  if (!common_types.Empty() && !partner->IsFullySynced()) {
     DVLOG(2) << "non-empty common types and "
              << partner->profile_debug_name_ << " isn't synced";
     return false;
   }
 
-  for (syncable::ModelTypeSet::iterator i = intersection_types.begin();
-       i != intersection_types.end(); ++i) {
-    const std::string timestamp = GetUpdatedTimestamp(*i);
-    const std::string partner_timestamp = partner->GetUpdatedTimestamp(*i);
+  for (syncable::ModelTypeSet::Iterator i = common_types.First();
+       i.Good(); i.Inc()) {
+    const std::string timestamp = GetUpdatedTimestamp(i.Get());
+    const std::string partner_timestamp = partner->GetUpdatedTimestamp(i.Get());
     if (timestamp != partner_timestamp) {
       if (VLOG_IS_ON(2)) {
         std::string timestamp_base64, partner_timestamp_base64;
@@ -877,7 +851,7 @@ bool ProfileSyncServiceHarness::MatchesOtherClient(
                 partner_timestamp, &partner_timestamp_base64)) {
           NOTREACHED();
         }
-        DVLOG(2) << syncable::ModelTypeToString(*i) << ": "
+        DVLOG(2) << syncable::ModelTypeToString(i.Get()) << ": "
                  << profile_debug_name_ << " timestamp = "
                  << timestamp_base64 << ", "
                  << partner->profile_debug_name_
@@ -905,10 +879,8 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
       "EnableSyncForDatatype("
       + std::string(syncable::ModelTypeToString(datatype)) + ")");
 
-  syncable::ModelTypeSet synced_datatypes;
   if (wait_state_ == SYNC_DISABLED) {
-    synced_datatypes.insert(datatype);
-    return SetupSync(synced_datatypes);
+    return SetupSync(syncable::ModelTypeSet(datatype));
   }
 
   if (service() == NULL) {
@@ -916,18 +888,18 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
     return false;
   }
 
-  service()->GetPreferredDataTypes(&synced_datatypes);
-  syncable::ModelTypeSet::iterator it = synced_datatypes.find(datatype);
-  if (it != synced_datatypes.end()) {
+  syncable::ModelTypeSet synced_datatypes =
+      service()->GetPreferredDataTypes();
+  if (synced_datatypes.Has(datatype)) {
     DVLOG(1) << "EnableSyncForDatatype(): Sync already enabled for datatype "
              << syncable::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
     return true;
   }
 
-  synced_datatypes.insert(syncable::ModelTypeFromInt(datatype));
+  synced_datatypes.Put(syncable::ModelTypeFromInt(datatype));
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitFullSyncCompletion("Datatype configuration.")) {
+  if (AwaitDataSyncCompletion("Datatype configuration.")) {
     DVLOG(1) << "EnableSyncForDatatype(): Enabled sync for datatype "
              << syncable::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
@@ -944,22 +916,21 @@ bool ProfileSyncServiceHarness::DisableSyncForDatatype(
       "DisableSyncForDatatype("
       + std::string(syncable::ModelTypeToString(datatype)) + ")");
 
-  syncable::ModelTypeSet synced_datatypes;
   if (service() == NULL) {
     LOG(ERROR) << "DisableSyncForDatatype(): service() is null.";
     return false;
   }
 
-  service()->GetPreferredDataTypes(&synced_datatypes);
-  syncable::ModelTypeSet::iterator it = synced_datatypes.find(datatype);
-  if (it == synced_datatypes.end()) {
+  syncable::ModelTypeSet synced_datatypes =
+      service()->GetPreferredDataTypes();
+  if (!synced_datatypes.Has(datatype)) {
     DVLOG(1) << "DisableSyncForDatatype(): Sync already disabled for datatype "
              << syncable::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
     return true;
   }
 
-  synced_datatypes.erase(it);
+  synced_datatypes.Remove(datatype);
   service()->OnUserChoseDatatypes(false, synced_datatypes);
   if (AwaitFullSyncCompletion("Datatype reconfiguration.")) {
     DVLOG(1) << "DisableSyncForDatatype(): Disabled sync for datatype "
@@ -984,13 +955,7 @@ bool ProfileSyncServiceHarness::EnableSyncForAllDatatypes() {
     return false;
   }
 
-  syncable::ModelTypeSet synced_datatypes;
-  for (int i = syncable::FIRST_REAL_MODEL_TYPE;
-       i < syncable::MODEL_TYPE_COUNT;
-       ++i) {
-    synced_datatypes.insert(syncable::ModelTypeFromInt(i));
-  }
-  service()->OnUserChoseDatatypes(true, synced_datatypes);
+  service()->OnUserChoseDatatypes(true, syncable::ModelTypeSet::All());
   if (AwaitFullSyncCompletion("Datatype reconfiguration.")) {
     DVLOG(1) << "EnableSyncForAllDatatypes(): Enabled sync for all datatypes "
              << "on " << profile_debug_name_ << ".";
@@ -1066,20 +1031,19 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
 // encryption for individual types but for all.
 bool ProfileSyncServiceHarness::EnableEncryptionForType(
     syncable::ModelType type) {
-  syncable::ModelTypeSet encrypted_types;
-  service_->GetEncryptedDataTypes(&encrypted_types);
-  if (encrypted_types.count(type) > 0)
+  const syncable::ModelTypeSet encrypted_types =
+      service_->GetEncryptedDataTypes();
+  if (encrypted_types.Has(type))
     return true;
   service_->EnableEncryptEverything();
 
   // In order to kick off the encryption we have to reconfigure. Just grab the
   // currently synced types and use them.
-  syncable::ModelTypeSet synced_datatypes;
-  service_->GetPreferredDataTypes(&synced_datatypes);
-  bool sync_everything = (synced_datatypes.size() ==
-      (syncable::MODEL_TYPE_COUNT - syncable::FIRST_REAL_MODEL_TYPE));
-  service_->OnUserChoseDatatypes(sync_everything,
-                                 synced_datatypes);
+  const syncable::ModelTypeSet synced_datatypes =
+      service_->GetPreferredDataTypes();
+  bool sync_everything =
+      synced_datatypes.Equals(syncable::ModelTypeSet::All());
+  service_->OnUserChoseDatatypes(sync_everything, synced_datatypes);
 
   // Wait some time to let the enryption finish.
   return WaitForTypeEncryption(type);
@@ -1110,9 +1074,9 @@ bool ProfileSyncServiceHarness::WaitForTypeEncryption(
 }
 
 bool ProfileSyncServiceHarness::IsTypeEncrypted(syncable::ModelType type) {
-  syncable::ModelTypeSet encrypted_types;
-  service_->GetEncryptedDataTypes(&encrypted_types);
-  bool is_type_encrypted = (encrypted_types.count(type) != 0);
+  const syncable::ModelTypeSet encrypted_types =
+      service_->GetEncryptedDataTypes();
+  bool is_type_encrypted = service_->GetEncryptedDataTypes().Has(type);
   DVLOG(2) << syncable::ModelTypeToString(type) << " is "
            << (is_type_encrypted ? "" : "not ") << "encrypted; "
            << "encrypted types = "
@@ -1128,9 +1092,17 @@ bool ProfileSyncServiceHarness::IsTypeRunning(syncable::ModelType type) {
 }
 
 bool ProfileSyncServiceHarness::IsTypePreferred(syncable::ModelType type) {
-  syncable::ModelTypeSet synced_types;
-  service_->GetPreferredDataTypes(&synced_types);
-  return (synced_types.count(type) != 0);
+  return service_->GetPreferredDataTypes().Has(type);
+}
+
+size_t ProfileSyncServiceHarness::GetNumEntries() const {
+  return GetLastSessionSnapshot()->num_entries;
+}
+
+size_t ProfileSyncServiceHarness::GetNumDatatypes() const {
+  browser_sync::DataTypeController::StateMap state_map;
+  service_->GetDataTypeControllerStates(&state_map);
+  return state_map.size();
 }
 
 std::string ProfileSyncServiceHarness::GetServiceStatus() {

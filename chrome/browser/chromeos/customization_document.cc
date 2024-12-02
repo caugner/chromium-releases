@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,8 +68,6 @@ const int kMaxFetchRetries = 3;
 const int kRetriesDelayInSec = 2;
 
 }  // anonymous namespace
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::ServicesCustomizationDocument);
 
 namespace chromeos {
 
@@ -286,10 +284,11 @@ void ServicesCustomizationDocument::ReadFileInBackground(const FilePath& file) {
   std::string manifest;
   if (file_util::ReadFileToString(file, &manifest)) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        base::IgnoreReturn<bool>(base::Bind(
-            &ServicesCustomizationDocument::LoadManifestFromString,
-            base::Unretained(this),  // this class is a singleton.
-            manifest)));
+        base::Bind(
+           base::IgnoreResult(
+               &ServicesCustomizationDocument::LoadManifestFromString),
+           base::Unretained(this),  // this class is a singleton.
+           manifest));
   } else {
     VLOG(1) << "Failed to load services customization manifest from: "
             << file.value();

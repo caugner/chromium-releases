@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,34 +8,33 @@
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/chrome_view_type.h"
-#include "content/browser/browsing_instance.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/gfx/rect.h"
 
-////////////////
-// BackgroundContents
+using content::SiteInstance;
+using content::WebContents;
 
 BackgroundContents::BackgroundContents(SiteInstance* site_instance,
                                        int routing_id,
                                        Delegate* delegate)
     : delegate_(delegate) {
   profile_ = Profile::FromBrowserContext(
-      site_instance->browsing_instance()->browser_context());
+      site_instance->GetBrowserContext());
 
   // TODO(rafaelw): Implement correct session storage.
-  tab_contents_.reset(new TabContents(
+  web_contents_.reset(WebContents::Create(
       profile_, site_instance, routing_id, NULL, NULL));
-  tab_contents_->set_view_type(chrome::VIEW_TYPE_BACKGROUND_CONTENTS);
-  tab_contents_->set_delegate(this);
-  TabContentsObserver::Observe(tab_contents_.get());
+  web_contents_->SetViewType(chrome::VIEW_TYPE_BACKGROUND_CONTENTS);
+  web_contents_->SetDelegate(this);
+  content::WebContentsObserver::Observe(web_contents_.get());
 
   // Close ourselves when the application is shutting down.
   registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
@@ -55,7 +54,7 @@ BackgroundContents::BackgroundContents()
 }
 
 BackgroundContents::~BackgroundContents() {
-  if (!tab_contents_.get())   // Will be null for unit tests.
+  if (!web_contents_.get())   // Will be null for unit tests.
     return;
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
@@ -64,10 +63,10 @@ BackgroundContents::~BackgroundContents() {
 }
 
 const GURL& BackgroundContents::GetURL() const {
-  return tab_contents_.get() ? tab_contents_->GetURL() : GURL::EmptyGURL();
+  return web_contents_.get() ? web_contents_->GetURL() : GURL::EmptyGURL();
 }
 
-void BackgroundContents::CloseContents(TabContents* source) {
+void BackgroundContents::CloseContents(WebContents* source) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED,
       content::Source<Profile>(profile_),
@@ -79,7 +78,7 @@ bool BackgroundContents::ShouldSuppressDialogs() {
   return true;
 }
 
-void BackgroundContents::DidNavigateMainFramePostCommit(TabContents* tab) {
+void BackgroundContents::DidNavigateMainFramePostCommit(WebContents* tab) {
   // Note: because BackgroundContents are only available to extension apps,
   // navigation is limited to urls within the app's extent. This is enforced in
   // RenderView::decidePolicyForNavigation. If BackgroundContents become
@@ -94,12 +93,12 @@ void BackgroundContents::DidNavigateMainFramePostCommit(TabContents* tab) {
 }
 
 // Forward requests to add a new TabContents to our delegate.
-void BackgroundContents::AddNewContents(TabContents* source,
-                                        TabContents* new_contents,
+void BackgroundContents::AddNewContents(WebContents* source,
+                                        WebContents* new_contents,
                                         WindowOpenDisposition disposition,
                                         const gfx::Rect& initial_pos,
                                         bool user_gesture) {
-  delegate_->AddTabContents(
+  delegate_->AddWebContents(
       new_contents, disposition, initial_pos, user_gesture);
 }
 

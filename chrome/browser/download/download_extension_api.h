@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,20 +13,39 @@
 #include "base/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/string16.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/download/download_state_info.h"
+#include "content/public/browser/download_id.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
 
+class DownloadFileIconExtractor;
 class ResourceDispatcherHost;
 
 namespace content {
 class ResourceContext;
+class DownloadQuery;
 }
 
 // Functions in the chrome.experimental.downloads namespace facilitate
 // controlling downloads from extensions. See the full API doc at
 // http://goo.gl/6hO1n
+
+namespace download_extension_errors {
+
+// Errors that can be returned through chrome.extension.lastError.message.
+extern const char kGenericError[];
+extern const char kIconNotFoundError[];
+extern const char kInvalidDangerTypeError[];
+extern const char kInvalidFilterError[];
+extern const char kInvalidOperationError[];
+extern const char kInvalidOrderByError[];
+extern const char kInvalidQueryLimit[];
+extern const char kInvalidStateError[];
+extern const char kInvalidUrlError[];
+extern const char kNotImplementedError[];
+
+}  // namespace download_extension_errors
 
 class DownloadsFunctionInterface {
  public:
@@ -41,6 +60,7 @@ class DownloadsFunctionInterface {
     DOWNLOADS_FUNCTION_ACCEPT_DANGER = 7,
     DOWNLOADS_FUNCTION_SHOW = 8,
     DOWNLOADS_FUNCTION_DRAG = 9,
+    DOWNLOADS_FUNCTION_GET_FILE_ICON = 10,
     // Insert new values here, not at the beginning.
     DOWNLOADS_FUNCTION_LAST
   };
@@ -49,8 +69,9 @@ class DownloadsFunctionInterface {
   // Return true if args_ is well-formed, otherwise set error_ and return false.
   virtual bool ParseArgs() = 0;
 
-  // Implementation-specific logic. "Do the thing that you do."
-  virtual void RunInternal() = 0;
+  // Implementation-specific logic. "Do the thing that you do."  Should return
+  // true if the call succeeded and false otherwise.
+  virtual bool RunInternal() = 0;
 
   // Which subclass is this.
   virtual DownloadsFunctionName function() const = 0;
@@ -99,7 +120,7 @@ class DownloadsDownloadFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
   struct IOData {
@@ -119,8 +140,7 @@ class DownloadsDownloadFunction : public AsyncDownloadsFunction {
     int render_view_host_routing_id;
   };
   void BeginDownloadOnIOThread();
-  void OnStarted(DownloadId dl_id, net::Error error);
-  void RespondOnUIThread(int dl_id, net::Error error);
+  void OnStarted(content::DownloadId dl_id, net::Error error);
 
   scoped_ptr<IOData> iodata_;
 
@@ -135,9 +155,15 @@ class DownloadsSearchFunction : public SyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
+  bool ParseOrderBy(const base::Value& order_by_value);
+
+  scoped_ptr<content::DownloadQuery> query_;
+  int get_id_;
+  bool has_get_id_;
+
   DISALLOW_COPY_AND_ASSIGN(DownloadsSearchFunction);
 };
 
@@ -149,13 +175,14 @@ class DownloadsPauseFunction : public SyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
+  int download_id_;
   DISALLOW_COPY_AND_ASSIGN(DownloadsPauseFunction);
 };
 
-class DownloadsResumeFunction : public AsyncDownloadsFunction {
+class DownloadsResumeFunction : public SyncDownloadsFunction {
  public:
   DownloadsResumeFunction();
   virtual ~DownloadsResumeFunction();
@@ -163,13 +190,14 @@ class DownloadsResumeFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
+  int download_id_;
   DISALLOW_COPY_AND_ASSIGN(DownloadsResumeFunction);
 };
 
-class DownloadsCancelFunction : public AsyncDownloadsFunction {
+class DownloadsCancelFunction : public SyncDownloadsFunction {
  public:
   DownloadsCancelFunction();
   virtual ~DownloadsCancelFunction();
@@ -177,9 +205,10 @@ class DownloadsCancelFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
+  int download_id_;
   DISALLOW_COPY_AND_ASSIGN(DownloadsCancelFunction);
 };
 
@@ -191,7 +220,7 @@ class DownloadsEraseFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsEraseFunction);
@@ -205,7 +234,7 @@ class DownloadsSetDestinationFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsSetDestinationFunction);
@@ -219,7 +248,7 @@ class DownloadsAcceptDangerFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsAcceptDangerFunction);
@@ -233,7 +262,7 @@ class DownloadsShowFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsShowFunction);
@@ -247,13 +276,33 @@ class DownloadsDragFunction : public AsyncDownloadsFunction {
 
  protected:
   virtual bool ParseArgs() OVERRIDE;
-  virtual void RunInternal() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DownloadsDragFunction);
 };
 
-class ExtensionDownloadsEventRouter : public DownloadManager::Observer {
+class DownloadsGetFileIconFunction : public AsyncDownloadsFunction {
+ public:
+  DownloadsGetFileIconFunction();
+  virtual ~DownloadsGetFileIconFunction();
+  void SetIconExtractorForTesting(DownloadFileIconExtractor* extractor);
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.downloads.getFileIcon");
+
+ protected:
+  virtual bool ParseArgs() OVERRIDE;
+  virtual bool RunInternal() OVERRIDE;
+
+ private:
+  void OnIconURLExtracted(const std::string& url);
+  FilePath path_;
+  int icon_size_;
+  scoped_ptr<DownloadFileIconExtractor> icon_extractor_;
+  DISALLOW_COPY_AND_ASSIGN(DownloadsGetFileIconFunction);
+};
+
+class ExtensionDownloadsEventRouter
+    : public content::DownloadManager::Observer {
  public:
   explicit ExtensionDownloadsEventRouter(Profile* profile);
   virtual ~ExtensionDownloadsEventRouter();
@@ -262,12 +311,13 @@ class ExtensionDownloadsEventRouter : public DownloadManager::Observer {
   virtual void ManagerGoingDown() OVERRIDE;
 
  private:
+  void Init(content::DownloadManager* manager);
   void DispatchEvent(const char* event_name, base::Value* json_arg);
-  typedef base::hash_map<int, DownloadItem*> ItemMap;
+  typedef base::hash_map<int, content::DownloadItem*> ItemMap;
   typedef std::set<int> DownloadIdSet;
 
   Profile* profile_;
-  DownloadManager* manager_;
+  content::DownloadManager* manager_;
   DownloadIdSet downloads_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDownloadsEventRouter);

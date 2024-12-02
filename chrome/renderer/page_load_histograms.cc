@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,25 +47,51 @@ static URLPattern::SchemeMasks GetSupportedSchemeType(const GURL& url) {
   return static_cast<URLPattern::SchemeMasks>(0);
 }
 
-static void DumpWebTiming(const Time& navigation_start,
-                          const Time& load_event_start,
-                          const Time& load_event_end,
-                          DocumentState* document_state) {
-  if (navigation_start.is_null() ||
-      load_event_start.is_null() ||
-      load_event_end.is_null())
-    return;
+static void DumpPerformanceTiming(const WebPerformance& performance,
+                                  DocumentState* document_state) {
+  Time request = document_state->request_time();
+
+  Time navigation_start = Time::FromDoubleT(performance.navigationStart());
+  Time request_start = Time::FromDoubleT(performance.requestStart());
+  Time response_start = Time::FromDoubleT(performance.responseStart());
+  Time load_event_start = Time::FromDoubleT(performance.loadEventStart());
+  Time load_event_end = Time::FromDoubleT(performance.loadEventEnd());
+  Time begin = (request.is_null() ? navigation_start : request_start);
+
+  DCHECK(!navigation_start.is_null());
+  DCHECK(!request_start.is_null());
+  DCHECK(!response_start.is_null());
+  // TODO(dominich): Investigate conditions under which |load_event_start| and
+  // |load_event_end| may be NULL as in the non-PT_ case below. Examples in
+  // http://crbug.com/112006.
+  // DCHECK(!load_event_start.is_null());
+  // DCHECK(!load_event_end.is_null());
 
   if (document_state->web_timing_histograms_recorded())
     return;
   document_state->set_web_timing_histograms_recorded(true);
 
-  // TODO(tonyg): There are many new details we can record, add them after the
-  // basic metrics are evaluated.
   // TODO(simonjam): There is no way to distinguish between abandonment and
   // intentional Javascript navigation before the load event fires.
-  PLT_HISTOGRAM("PLT.NavStartToLoadStart", load_event_start - navigation_start);
-  PLT_HISTOGRAM("PLT.NavStartToLoadEnd", load_event_end - navigation_start);
+  // TODO(dominich): Load type breakdown
+  if (!load_event_start.is_null()) {
+    PLT_HISTOGRAM("PLT.PT_BeginToFinishDoc", load_event_start - begin);
+    PLT_HISTOGRAM("PLT.PT_CommitToFinishDoc",
+                  load_event_start - response_start);
+  }
+  if (!load_event_end.is_null()) {
+    PLT_HISTOGRAM("PLT.PT_BeginToFinish", load_event_end - begin);
+    PLT_HISTOGRAM("PLT.PT_CommitToFinish", load_event_end - response_start);
+    PLT_HISTOGRAM("PLT.PT_RequestToFinish", load_event_end - navigation_start);
+    PLT_HISTOGRAM("PLT.PT_StartToFinish", load_event_end - request_start);
+  }
+  if (!load_event_start.is_null() && !load_event_end.is_null()) {
+    PLT_HISTOGRAM("PLT.PT_FinishDocToFinish",
+                  load_event_end - load_event_start);
+  }
+  PLT_HISTOGRAM("PLT.PT_BeginToCommit", response_start - begin);
+  PLT_HISTOGRAM("PLT.PT_RequestToStart", request_start - navigation_start);
+  PLT_HISTOGRAM("PLT.PT_StartToCommit", response_start - request_start);
 }
 
 enum MissingStartType {
@@ -116,12 +142,7 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
   // TODO(tonyg, jar): We are in the process of vetting these metrics against
   // the existing ones. Once we understand any differences, we will standardize
   // on a single set of metrics.
-  const WebPerformance& performance = frame->performance();
-  Time navigation_start = Time::FromDoubleT(performance.navigationStart());
-  Time load_event_start = Time::FromDoubleT(performance.loadEventStart());
-  Time load_event_end = Time::FromDoubleT(performance.loadEventEnd());
-  DumpWebTiming(navigation_start, load_event_start, load_event_end,
-                document_state);
+  DumpPerformanceTiming(frame->performance(), document_state);
 
   // If we've already dumped, do nothing.
   // This simple bool works because we only dump for the main frame.
@@ -136,6 +157,8 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
   // possibly other cases like a very premature abandonment of the page.
   // The PLT.MissingStart histogram should help us troubleshoot and then we can
   // remove this.
+  Time navigation_start =
+      Time::FromDoubleT(frame->performance().navigationStart());
   int missing_start_type = 0;
   missing_start_type |= start.is_null() ? START_MISSING : 0;
   missing_start_type |= commit.is_null() ? COMMIT_MISSING : 0;
@@ -154,6 +177,9 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
 
   // TODO(tonyg, jar): We suspect a bug in abandonment counting, this temporary
   // histogram should help us to troubleshoot.
+  Time load_event_start =
+      Time::FromDoubleT(frame->performance().loadEventStart());
+  Time load_event_end = Time::FromDoubleT(frame->performance().loadEventEnd());
   int abandon_type = 0;
   abandon_type |= finish_doc.is_null() ? FINISH_DOC_MISSING : 0;
   abandon_type |= finish_all_loads.is_null() ? FINISH_ALL_LOADS_MISSING : 0;
@@ -313,10 +339,7 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
     }
   }
 
-  // Histograms to determine if content prefetching has an impact on PLT.
-  // TODO(gavinp): Right now the prerendering and the prefetching field trials
-  // are mixed together.  If we continue to launch prerender with
-  // link rel=prerender, then we should separate them.
+  // Histograms to determine if prefetch & prerender has an impact on PLT.
   static const bool prefetching_fieldtrial =
       base::FieldTrialList::TrialExists("Prefetch");
   if (prefetching_fieldtrial) {
@@ -344,6 +367,36 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
         begin_to_finish_doc);
     PLT_HISTOGRAM(base::FieldTrial::MakeName(
         "PLT.BeginToFinish", "Prefetch"),
+        begin_to_finish_all_loads);
+  }
+
+  static const bool prerendering_fieldtrial =
+      base::FieldTrialList::TrialExists("Prerender");
+  if (prerendering_fieldtrial) {
+    if (document_state->was_prefetcher()) {
+      PLT_HISTOGRAM(base::FieldTrial::MakeName(
+          "PLT.BeginToFinishDoc_ContentPrefetcher", "Prerender"),
+          begin_to_finish_doc);
+      PLT_HISTOGRAM(base::FieldTrial::MakeName(
+          "PLT.BeginToFinish_ContentPrefetcher", "Prerender"),
+          begin_to_finish_all_loads);
+    }
+    if (document_state->was_referred_by_prefetcher()) {
+      PLT_HISTOGRAM(base::FieldTrial::MakeName(
+          "PLT.BeginToFinishDoc_ContentPrefetcherReferrer", "Prerender"),
+          begin_to_finish_doc);
+      PLT_HISTOGRAM(base::FieldTrial::MakeName(
+          "PLT.BeginToFinish_ContentPrefetcherReferrer", "Prerender"),
+          begin_to_finish_all_loads);
+    }
+    UMA_HISTOGRAM_ENUMERATION(base::FieldTrial::MakeName(
+        "PLT.Abandoned", "Prerender"),
+        abandoned_page ? 1 : 0, 2);
+    PLT_HISTOGRAM(base::FieldTrial::MakeName(
+        "PLT.BeginToFinishDoc", "Prerender"),
+        begin_to_finish_doc);
+    PLT_HISTOGRAM(base::FieldTrial::MakeName(
+        "PLT.BeginToFinish", "Prerender"),
         begin_to_finish_all_loads);
   }
 

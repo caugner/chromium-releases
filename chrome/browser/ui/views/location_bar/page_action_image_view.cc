@@ -17,13 +17,14 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/notification_service_impl.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
+
+using content::WebContents;
 
 PageActionImageView::PageActionImageView(LocationBarView* owner,
                                          ExtensionAction* page_action)
@@ -184,7 +185,7 @@ void PageActionImageView::OnImageLoaded(
     owner_->UpdatePageActions();
 }
 
-void PageActionImageView::UpdateVisibility(TabContents* contents,
+void PageActionImageView::UpdateVisibility(WebContents* contents,
                                            const GURL& url) {
   // Save this off so we can pass it back to the extension when the action gets
   // executed. See PageActionImageView::OnMousePressed.

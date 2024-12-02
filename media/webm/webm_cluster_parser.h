@@ -25,6 +25,9 @@ class WebMClusterParser : public WebMParserClient {
                     base::TimeDelta video_default_duration);
   virtual ~WebMClusterParser();
 
+  // Resets the parser state so it can accept a new cluster.
+  void Reset();
+
   // Parses a WebM cluster element in |buf|.
   //
   // Returns -1 if the parse fails.
@@ -37,12 +40,9 @@ class WebMClusterParser : public WebMParserClient {
 
  private:
   // WebMParserClient methods.
-  virtual bool OnListStart(int id) OVERRIDE;
+  virtual WebMParserClient* OnListStart(int id) OVERRIDE;
   virtual bool OnListEnd(int id) OVERRIDE;
   virtual bool OnUInt(int id, int64 val) OVERRIDE;
-  virtual bool OnFloat(int id, double val) OVERRIDE;
-  virtual bool OnBinary(int id, const uint8* data, int size) OVERRIDE;
-  virtual bool OnString(int id, const std::string& str) OVERRIDE;
   virtual bool OnSimpleBlock(int track_num, int timecode, int flags,
                              const uint8* data, int size) OVERRIDE;
 
@@ -52,6 +52,8 @@ class WebMClusterParser : public WebMParserClient {
   base::TimeDelta audio_default_duration_;
   int video_track_num_;
   base::TimeDelta  video_default_duration_;
+
+  WebMListParser parser_;
 
   int64 last_block_timecode_;
 

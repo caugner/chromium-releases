@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -279,14 +279,6 @@ class TemplateURLService : public WebDataServiceConsumer,
 
   Profile* profile() const { return profile_; }
 
-  void SetSearchEngineDialogSlot(int slot) {
-    search_engine_dialog_chosen_slot_ = slot;
-  }
-
-  int GetSearchEngineDialogSlot() const {
-    return search_engine_dialog_chosen_slot_;
-  }
-
   // Returns a SyncData with a sync representation of the search engine data
   // from |turl|.
   static SyncData CreateSyncDataFromTemplateURL(const TemplateURL& turl);
@@ -507,6 +499,11 @@ class TemplateURLService : public WebDataServiceConsumer,
   // where old entries were being pushed to Sync without a sync_guid.
   void PatchMissingSyncGUIDs(std::vector<TemplateURL*>* template_urls);
 
+  // Overwrites |dst|'s synced fields with values from |sync_data|. This does
+  // commit |dst| to the TemplateURLService.
+  static void UpdateTemplateURLWithSyncData(TemplateURL* dst,
+                                            const SyncData& sync_data);
+
   content::NotificationRegistrar registrar_;
 
   // Mapping from keyword to the TemplateURL.
@@ -546,10 +543,6 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Once loaded, the default search provider.  This is a pointer to a
   // TemplateURL owned by template_urls_.
   const TemplateURL* default_search_provider_;
-
-  // Used for UX testing. Gives the slot in the search engine dialog that was
-  // chosen as the default search engine.
-  int search_engine_dialog_chosen_slot_;
 
   // The initial search provider extracted from preferences. This is only valid
   // if we haven't been loaded or loading failed.

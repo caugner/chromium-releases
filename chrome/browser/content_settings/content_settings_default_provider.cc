@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,13 +19,14 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -348,15 +349,6 @@ void DefaultProvider::GetSettingsFromDictionary(
               CONTENT_SETTING_ASK) {
     default_settings_[CONTENT_SETTINGS_TYPE_COOKIES].reset(
         Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
-  }
-
-  if (default_settings_[CONTENT_SETTINGS_TYPE_PLUGINS].get()) {
-    ContentSetting plugin_setting = ValueToContentSetting(
-        default_settings_[CONTENT_SETTINGS_TYPE_PLUGINS].get());
-    plugin_setting =
-        ClickToPlayFixup(CONTENT_SETTINGS_TYPE_PLUGINS, plugin_setting);
-    default_settings_[CONTENT_SETTINGS_TYPE_PLUGINS].reset(
-        Value::CreateIntegerValue(plugin_setting));
   }
 }
 

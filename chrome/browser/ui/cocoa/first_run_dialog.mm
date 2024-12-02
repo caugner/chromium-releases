@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/first_run_dialog.h"
 
 #include "base/bind.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/ref_counted.h"
 #import "base/memory/scoped_nsobject.h"
@@ -12,12 +13,10 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/shell_integration.h"
-#import "chrome/browser/ui/cocoa/search_engine_dialog_controller.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -71,17 +70,6 @@ void FirstRunShowBridge::ShowDialog() {
   MessageLoop::current()->QuitNow();
 }
 
-// Show the search engine selection dialog.
-void ShowSearchEngineSelectionDialog(Profile* profile,
-                                     bool randomize_search_engine_experiment) {
-  scoped_nsobject<SearchEngineDialogController> dialog(
-      [[SearchEngineDialogController alloc] init]);
-  [dialog.get() setProfile:profile];
-  [dialog.get() setRandomize:randomize_search_engine_experiment];
-
-  [dialog.get() showWindow:nil];
-}
-
 // Show the first run UI.
 void ShowFirstRun(Profile* profile) {
 #if defined(GOOGLE_CHROME_BUILD)
@@ -123,17 +111,17 @@ void ShowFirstRun(Profile* profile) {
   // We don't show the dialog in Chromium.
 #endif  // GOOGLE_CHROME_BUILD
 
-  FirstRun::CreateSentinel();
+  first_run::CreateSentinel();
 
   // Set preference to show first run bubble and welcome page.
-  // Don't display the minimal bubble if there is no default search provider.
+  // Only display the bubble if there is a default search provider.
   TemplateURLService* search_engines_model =
       TemplateURLServiceFactory::GetForProfile(profile);
   if (search_engines_model &&
       search_engines_model->GetDefaultSearchProvider()) {
-    FirstRun::SetShowFirstRunBubblePref(true);
+    first_run::SetShowFirstRunBubblePref(true);
   }
-  FirstRun::SetShowWelcomePagePref();
+  first_run::SetShowWelcomePagePref();
 }
 
 // True when the stats checkbox should be checked by default. This is only
@@ -147,15 +135,7 @@ bool StatsCheckboxDefault() {
 
 namespace first_run {
 
-void ShowFirstRunDialog(Profile* profile,
-                        bool randomize_search_engine_experiment) {
-  // If the default search is not managed via policy, ask the user to
-  // choose a default.
-  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(profile);
-  if (FirstRun::ShouldShowSearchEngineSelector(model)) {
-    ShowSearchEngineSelectionDialog(profile,
-                                    randomize_search_engine_experiment);
-  }
+void ShowFirstRunDialog(Profile* profile) {
   ShowFirstRun(profile);
 }
 
@@ -168,8 +148,8 @@ void ShowFirstRunDialog(Profile* profile,
 
 - (id)init {
   NSString* nibpath =
-      [base::mac::MainAppBundle() pathForResource:@"FirstRunDialog"
-                                          ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"FirstRunDialog"
+                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     // Bound to the dialog checkboxes.
     makeDefaultBrowser_ = ShellIntegration::CanSetAsDefaultBrowser();
@@ -299,9 +279,7 @@ void ShowFirstRunDialog(Profile* profile,
 }
 
 - (IBAction)learnMore:(id)sender {
-  GURL url = google_util::AppendGoogleLocaleParam(
-      GURL(chrome::kLearnMoreReportingURL));
-  NSString* urlStr = base::SysUTF8ToNSString(url.spec());;
+  NSString* urlStr = base::SysUTF8ToNSString(chrome::kLearnMoreReportingURL);
   NSURL* learnMoreUrl = [NSURL URLWithString:urlStr];
   [[NSWorkspace sharedWorkspace] openURL:learnMoreUrl];
 }

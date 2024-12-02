@@ -53,8 +53,9 @@ class URLRequestFileJob::AsyncResolver
     bool exists = file_util::GetFileInfo(file_path, &file_info);
     base::AutoLock locked(lock_);
     if (owner_loop_) {
-      owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-          this, &AsyncResolver::ReturnResults, exists, file_info));
+      owner_loop_->PostTask(
+          FROM_HERE,
+          base::Bind(&AsyncResolver::ReturnResults, this, exists, file_info));
     }
   }
 
@@ -86,8 +87,7 @@ URLRequestFileJob::URLRequestFileJob(URLRequest* request,
     : URLRequestJob(request),
       file_path_(file_path),
       is_directory_(false),
-      remaining_bytes_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      remaining_bytes_(0) {
 }
 
 // static
@@ -150,8 +150,10 @@ bool URLRequestFileJob::AccessDisabled(const FilePath& file_path) {
 void URLRequestFileJob::Start() {
   DCHECK(!async_resolver_);
   async_resolver_ = new AsyncResolver(this);
-  base::WorkerPool::PostTask(FROM_HERE, NewRunnableMethod(
-      async_resolver_.get(), &AsyncResolver::Resolve, file_path_), true);
+  base::WorkerPool::PostTask(
+      FROM_HERE,
+      base::Bind(&AsyncResolver::Resolve, async_resolver_.get(), file_path_),
+      true);
 }
 
 void URLRequestFileJob::Kill() {
@@ -163,7 +165,6 @@ void URLRequestFileJob::Kill() {
   }
 
   URLRequestJob::Kill();
-  method_factory_.RevokeAll();
 }
 
 bool URLRequestFileJob::ReadRawData(IOBuffer* dest, int dest_size,

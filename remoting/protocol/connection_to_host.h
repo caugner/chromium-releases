@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,12 @@
 
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/proto/internal.pb.h"
+#include "remoting/protocol/input_filter.h"
 #include "remoting/protocol/message_reader.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_manager.h"
@@ -31,6 +32,7 @@ class VideoPacket;
 
 namespace protocol {
 
+class Authenticator;
 class ClientControlDispatcher;
 class ClientEventDispatcher;
 class ClientStub;
@@ -40,16 +42,12 @@ class SessionConfig;
 class VideoReader;
 class VideoStub;
 
-class ConnectionToHost : public SignalStrategy::StatusObserver,
+class ConnectionToHost : public SignalStrategy::Listener,
                          public SessionManager::Listener {
  public:
   enum State {
     CONNECTING,
-    // TODO(sergeyu): Currently CONNECTED state is not used and state
-    // is set to AUTHENTICATED after we are connected. Remove it and
-    // renamed AUTHENTICATED to CONNECTED?
     CONNECTED,
-    AUTHENTICATED,
     FAILED,
     CLOSED,
   };
@@ -76,10 +74,10 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   virtual ~ConnectionToHost();
 
   virtual void Connect(scoped_refptr<XmppProxy> xmpp_proxy,
-                       const std::string& your_jid,
+                       const std::string& local_jid,
                        const std::string& host_jid,
                        const std::string& host_public_key,
-                       const std::string& access_code,
+                       scoped_ptr<Authenticator> authenticator,
                        HostEventCallback* event_callback,
                        ClientStub* client_stub,
                        VideoStub* video_stub);
@@ -90,15 +88,12 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
 
   virtual InputStub* input_stub();
 
-  virtual HostStub* host_stub();
-
   // SignalStrategy::StatusObserver interface.
-  virtual void OnStateChange(
-      SignalStrategy::StatusObserver::State state) OVERRIDE;
-  virtual void OnJidChange(const std::string& full_jid) OVERRIDE;
+  virtual void OnSignalStrategyStateChange(
+      SignalStrategy::State state) OVERRIDE;
 
   // SessionManager::Listener interface.
-  virtual void OnSessionManagerInitialized() OVERRIDE;
+  virtual void OnSessionManagerReady() OVERRIDE;
   virtual void OnIncomingSession(
       Session* session,
       SessionManager::IncomingSessionResponse* response) OVERRIDE;
@@ -110,10 +105,6 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   State state() const;
 
  private:
-  // Called on the jingle thread after we've successfully to XMPP server. Starts
-  // P2P connection to the host.
-  void InitSession();
-
   // Callback for |session_|.
   void OnSessionStateChange(Session::State state);
 
@@ -138,7 +129,7 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
 
   std::string host_jid_;
   std::string host_public_key_;
-  std::string access_code_;
+  scoped_ptr<Authenticator> authenticator_;
 
   HostEventCallback* event_callback_;
 
@@ -147,13 +138,13 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   VideoStub* video_stub_;
 
   scoped_ptr<SignalStrategy> signal_strategy_;
-  std::string local_jid_;
   scoped_ptr<SessionManager> session_manager_;
   scoped_ptr<Session> session_;
 
   scoped_ptr<VideoReader> video_reader_;
   scoped_ptr<ClientControlDispatcher> control_dispatcher_;
   scoped_ptr<ClientEventDispatcher> event_dispatcher_;
+  InputFilter event_forwarder_;
 
   // Internal state of the connection.
   State state_;

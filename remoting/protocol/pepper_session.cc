@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "remoting/protocol/jingle_messages.h"
 #include "remoting/protocol/pepper_session_manager.h"
 #include "remoting/protocol/pepper_stream_channel.h"
-#include "remoting/protocol/v1_client_channel_authenticator.h"
 #include "third_party/libjingle/source/talk/p2p/base/candidate.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 
@@ -50,6 +49,12 @@ void PepperSession::SetStateChangeCallback(
   state_change_callback_ = callback;
 }
 
+void PepperSession::SetRouteChangeCallback(
+    const RouteChangeCallback& callback) {
+  // This callback is not used on the client side yet.
+  NOTREACHED();
+}
+
 Session::Error PepperSession::error() {
   DCHECK(CalledOnValidThread());
   return error_;
@@ -57,16 +62,16 @@ Session::Error PepperSession::error() {
 
 void PepperSession::StartConnection(
     const std::string& peer_jid,
-    Authenticator* authenticator,
-    CandidateSessionConfig* config,
+    scoped_ptr<Authenticator> authenticator,
+    scoped_ptr<CandidateSessionConfig> config,
     const StateChangeCallback& state_change_callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(authenticator);
+  DCHECK(authenticator.get());
   DCHECK_EQ(authenticator->state(), Authenticator::MESSAGE_READY);
 
   peer_jid_ = peer_jid;
-  authenticator_.reset(authenticator);
-  candidate_config_.reset(config);
+  authenticator_ = authenticator.Pass();
+  candidate_config_ = config.Pass();
   state_change_callback_ = state_change_callback;
 
   // Generate random session ID. There are usually not more than 1
@@ -78,7 +83,7 @@ void PepperSession::StartConnection(
   // Send session-initiate message.
   JingleMessage message(peer_jid_, JingleMessage::SESSION_INITIATE,
                         session_id_);
-  message.from = session_manager_->local_jid_;
+  message.from = session_manager_->signal_strategy_->GetLocalJid();
   message.description.reset(
       new ContentDescription(candidate_config_->Clone(),
                              authenticator_->GetNextMessage()));
@@ -114,14 +119,14 @@ void PepperSession::CreateStreamChannel(
       const StreamChannelCallback& callback) {
   DCHECK(!channels_[name]);
 
-  ChannelAuthenticator* channel_authenticator =
+  scoped_ptr<ChannelAuthenticator> channel_authenticator =
       authenticator_->CreateChannelAuthenticator();
   PepperStreamChannel* channel = new PepperStreamChannel(
       this, name, callback);
   channels_[name] = channel;
   channel->Connect(session_manager_->pp_instance_,
                    session_manager_->transport_config_,
-                   channel_authenticator);
+                   channel_authenticator.Pass());
 }
 
 void PepperSession::CreateDatagramChannel(
@@ -163,7 +168,7 @@ void PepperSession::set_config(const SessionConfig& config) {
 void PepperSession::Close() {
   DCHECK(CalledOnValidThread());
 
-  if (state_ == CONNECTING || state_ == CONNECTED) {
+  if (state_ == CONNECTING || state_ == CONNECTED || state_ == AUTHENTICATED) {
     // Send session-terminate message.
     JingleMessage message(peer_jid_, JingleMessage::SESSION_TERMINATE,
                           session_id_);
@@ -188,6 +193,10 @@ void PepperSession::OnIncomingMessage(const JingleMessage& message,
   switch (message.action) {
     case JingleMessage::SESSION_ACCEPT:
       OnAccept(message, reply);
+      break;
+
+    case JingleMessage::SESSION_INFO:
+      OnSessionInfo(message, reply);
       break;
 
     case JingleMessage::TRANSPORT_INFO:
@@ -221,24 +230,43 @@ void PepperSession::OnAccept(const JingleMessage& message,
 
   DCHECK(authenticator_->state() == Authenticator::WAITING_MESSAGE);
   authenticator_->ProcessMessage(auth_message);
-  // Support for more than two auth message is not implemented yet.
-  DCHECK(authenticator_->state() != Authenticator::WAITING_MESSAGE &&
-         authenticator_->state() != Authenticator::MESSAGE_READY);
-
-  if (authenticator_->state() == Authenticator::REJECTED) {
-    OnError(AUTHENTICATION_FAILED);
-    return;
-  }
 
   if (!InitializeConfigFromDescription(message.description.get())) {
     OnError(INCOMPATIBLE_PROTOCOL);
     return;
   }
 
+  // In case there is transport information in the accept message.
+  ProcessTransportInfo(message);
+
   SetState(CONNECTED);
 
-   // In case there is transport information in the accept message.
-  ProcessTransportInfo(message);
+  // Process authentication.
+  if (authenticator_->state() == Authenticator::ACCEPTED) {
+    SetState(AUTHENTICATED);
+  } else {
+    ProcessAuthenticationStep();
+  }
+}
+
+void PepperSession::OnSessionInfo(const JingleMessage& message,
+                                  JingleMessageReply* reply) {
+  if (message.info.get() &&
+      Authenticator::IsAuthenticatorMessage(message.info.get())) {
+    if (state_ != CONNECTED ||
+        authenticator_->state() != Authenticator::WAITING_MESSAGE) {
+      LOG(WARNING) << "Received unexpected authenticator message "
+                   << message.info->Str();
+      *reply = JingleMessageReply(JingleMessageReply::UNEXPECTED_REQUEST);
+      OnError(INCOMPATIBLE_PROTOCOL);
+      return;
+    }
+
+    authenticator_->ProcessMessage(message.info.get());
+    ProcessAuthenticationStep();
+  } else {
+    *reply = JingleMessageReply(JingleMessageReply::UNSUPPORTED_INFO);
+  }
 }
 
 void PepperSession::ProcessTransportInfo(const JingleMessage& message) {
@@ -274,16 +302,21 @@ void PepperSession::OnTerminate(const JingleMessage& message,
     return;
   }
 
-  if (state_ == CONNECTED) {
-    if (message.reason == JingleMessage::GENERAL_ERROR) {
-      OnError(CHANNEL_CONNECTION_ERROR);
-    } else {
-      CloseInternal(false);
-    }
-    return;
+  if (state_ != CONNECTED && state_ != AUTHENTICATED) {
+    LOG(WARNING) << "Received unexpected session-terminate message.";
   }
 
-  LOG(WARNING) << "Received unexpected session-terminate message.";
+  if (message.reason == JingleMessage::SUCCESS) {
+    CloseInternal(false);
+  } else if (message.reason == JingleMessage::DECLINE) {
+    OnError(AUTHENTICATION_FAILED);
+  } else if (message.reason == JingleMessage::GENERAL_ERROR) {
+    OnError(CHANNEL_CONNECTION_ERROR);
+  } else if (message.reason == JingleMessage::INCOMPATIBLE_PARAMETERS) {
+    OnError(INCOMPATIBLE_PROTOCOL);
+  } else {
+    OnError(UNKNOWN_ERROR);
+  }
 }
 
 bool PepperSession::InitializeConfigFromDescription(
@@ -300,6 +333,45 @@ bool PepperSession::InitializeConfigFromDescription(
   }
 
   return true;
+}
+
+void PepperSession::ProcessAuthenticationStep() {
+  DCHECK_EQ(state_, CONNECTED);
+
+  if (authenticator_->state() == Authenticator::MESSAGE_READY) {
+    JingleMessage message(peer_jid_, JingleMessage::SESSION_INFO, session_id_);
+    message.info = authenticator_->GetNextMessage();
+    DCHECK(message.info.get());
+
+    session_info_request_.reset(session_manager_->iq_sender()->SendIq(
+        message.ToXml(), base::Bind(
+            &PepperSession::OnSessionInfoResponse,
+            base::Unretained(this))));
+  }
+  DCHECK_NE(authenticator_->state(), Authenticator::MESSAGE_READY);
+
+  if (authenticator_->state() == Authenticator::ACCEPTED) {
+    SetState(AUTHENTICATED);
+  } else if (authenticator_->state() == Authenticator::REJECTED) {
+    switch (authenticator_->rejection_reason()) {
+      case Authenticator::INVALID_CREDENTIALS:
+        OnError(AUTHENTICATION_FAILED);
+        break;
+      case Authenticator::PROTOCOL_ERROR:
+        OnError(INCOMPATIBLE_PROTOCOL);
+        break;
+    }
+  }
+}
+
+void PepperSession::OnSessionInfoResponse(const buzz::XmlElement* response) {
+  const std::string& type = response->Attr(buzz::QName("", "type"));
+  if (type != "result") {
+    LOG(ERROR) << "Received error in response to session-info message: \""
+               << response->Str()
+               << "\". Terminating the session.";
+    OnError(INCOMPATIBLE_PROTOCOL);
+  }
 }
 
 void PepperSession::AddLocalCandidate(const cricket::Candidate& candidate) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,8 @@
 
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/aura/client/window_drag_drop_delegate.h"
+#include "ui/aura/client/activation_delegate.h"
+#include "ui/aura/client/drag_drop_delegate.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/events.h"
 #include "ui/views/views_export.h"
@@ -28,7 +29,8 @@ class TooltipManagerAura;
 
 class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
                                       public aura::WindowDelegate,
-                                      public aura::WindowDragDropDelegate {
+                                      public aura::client::ActivationDelegate,
+                                      public aura::client::DragDropDelegate {
  public:
   explicit NativeWidgetAura(internal::NativeWidgetDelegate* delegate);
   virtual ~NativeWidgetAura();
@@ -53,7 +55,6 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void CalculateOffsetToAncestorWithLayer(
       gfx::Point* offset,
       ui::Layer** layer_parent) OVERRIDE;
-  virtual void ReorderLayers() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -76,7 +77,7 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
-  virtual void BecomeModal() OVERRIDE;
+  virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
   virtual gfx::Rect GetWindowScreenBounds() const OVERRIDE;
   virtual gfx::Rect GetClientAreaScreenBounds() const OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
@@ -116,6 +117,9 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
   virtual void SetInactiveRenderingDisabled(bool value) OVERRIDE;
+  virtual Widget::MoveLoopResult RunMoveLoop() OVERRIDE;
+  virtual void EndMoveLoop() OVERRIDE;
+  virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
 
   // Overridden from views::InputMethodDelegate:
   virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
@@ -131,17 +135,20 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
   virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE;
+  virtual ui::GestureStatus OnGestureEvent(aura::GestureEvent* event) OVERRIDE;
   virtual bool CanFocus() OVERRIDE;
-  virtual bool ShouldActivate(aura::Event* event) OVERRIDE;
-  virtual void OnActivated() OVERRIDE;
-  virtual void OnLostActive() OVERRIDE;
   virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
   virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
 
-  // Overridden from aura::WindowDragDropDelegate:
+  // Overridden from aura::client::ActivationDelegate:
+  virtual bool ShouldActivate(aura::Event* event) OVERRIDE;
+  virtual void OnActivated() OVERRIDE;
+  virtual void OnLostActive() OVERRIDE;
+
+  // Overridden from aura::client::DragDropDelegate:
   virtual void OnDragEntered(const aura::DropTargetEvent& event) OVERRIDE;
   virtual int OnDragUpdated(const aura::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
@@ -151,7 +158,7 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   internal::NativeWidgetDelegate* delegate() { return delegate_; }
 
  private:
-  class DesktopObserverImpl;
+  class ActiveWindowObserver;
 
   internal::NativeWidgetDelegate* delegate_;
 
@@ -169,9 +176,12 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
 
   gfx::NativeCursor cursor_;
 
+  // The saved window state for exiting full screen state.
+  int saved_window_state_;
+
   scoped_ptr<TooltipManagerAura> tooltip_manager_;
 
-  scoped_ptr<DesktopObserverImpl> desktop_observer_;
+  scoped_ptr<ActiveWindowObserver> active_window_observer_;
 
   scoped_ptr<DropHelper> drop_helper_;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,6 +67,17 @@ bool BrowserProxy::AppendTab(const GURL& tab_url) {
 
   sender_->Send(new AutomationMsg_AppendTab(handle_, tab_url,
                                             &append_tab_response));
+  return append_tab_response >= 0;
+}
+
+bool BrowserProxy::AppendBackgroundTab(const GURL& tab_url) {
+  if (!is_valid())
+    return false;
+
+  int append_tab_response = -1;
+
+  sender_->Send(new AutomationMsg_AppendBackgroundTab(handle_, tab_url,
+                                                      &append_tab_response));
   return append_tab_response >= 0;
 }
 
@@ -219,7 +230,8 @@ bool BrowserProxy::WaitForTabToBecomeActive(int tab,
   const TimeTicks start = TimeTicks::Now();
   const TimeDelta timeout = TimeDelta::FromMilliseconds(wait_timeout);
   while (TimeTicks::Now() - start < timeout) {
-    base::PlatformThread::Sleep(automation::kSleepTime);
+    base::PlatformThread::Sleep(
+        base::TimeDelta::FromMilliseconds(automation::kSleepTime));
     int active_tab;
     if (GetActiveTabIndex(&active_tab) && active_tab == tab)
       return true;

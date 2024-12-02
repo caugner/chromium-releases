@@ -50,14 +50,34 @@ def _KillAllEmulators():
       return
     time.sleep(1)
 
+
+class PortPool(object):
+  """Pool for emulator port starting position that changes over time."""
+  _port_min = 5554
+  _port_max = 5585
+  _port_current_index = 0
+
+  @classmethod
+  def port_range(cls):
+    """Return a range of valid ports for emulator use.
+
+    The port must be an even number between 5554 and 5584.  Sometimes
+    a killed emulator "hangs on" to a port long enough to prevent
+    relaunch.  This is especially true on slow machines (like a bot).
+    Cycling through a port start position helps make us resilient."""
+    ports = range(cls._port_min, cls._port_max, 2)
+    n = cls._port_current_index
+    cls._port_current_index = (n + 1) % len(ports)
+    return ports[n:] + ports[:n]
+
+
 def _GetAvailablePort():
   """Returns an available TCP port for the console."""
   used_ports = []
   emulators = android_commands.GetEmulators()
   for emulator in emulators:
     used_ports.append(emulator.split('-')[1])
-  # The port must be an even number between 5554 and 5584.
-  for port in range(5554, 5585, 2):
+  for port in PortPool.port_range():
     if str(port) not in used_ports:
       return port
 
@@ -81,14 +101,25 @@ class Emulator(object):
   # Signals we listen for to kill the emulator on
   _SIGNALS = (signal.SIGINT, signal.SIGHUP)
 
-  # Time to wait for an emulator launch, in seconds.
-  _EMULATOR_LAUNCH_TIMEOUT = 120
+  # Time to wait for an emulator launch, in seconds.  This includes
+  # the time to launch the emulator and a wait-for-device command.
+  _LAUNCH_TIMEOUT = 120
 
   # Timeout interval of wait-for-device command before bouncing to a a
   # process life check.
-  _EMULATOR_WFD_TIMEOUT = 5
+  _WAITFORDEVICE_TIMEOUT = 5
 
-  def __init__(self):
+  # Time to wait for a "wait for boot complete" (property set on device).
+  _WAITFORBOOT_TIMEOUT = 300
+
+  def __init__(self, fast_and_loose=False):
+    """Init an Emulator.
+
+    Args:
+      fast_and_loose: Loosen up the rules for reliable running for speed.
+        Intended for quick testing or re-testing.
+
+    """
     try:
       android_sdk_root = os.environ['ANDROID_SDK_ROOT']
     except KeyError:
@@ -98,6 +129,7 @@ class Emulator(object):
     self.emulator = os.path.join(android_sdk_root, 'tools', 'emulator')
     self.popen = None
     self.device = None
+    self.fast_and_loose = fast_and_loose
 
   def _DeviceName(self):
     """Return our device name."""
@@ -110,8 +142,10 @@ class Emulator(object):
     If fails, an exception will be raised.
     """
     _KillAllEmulators()  # just to be sure
+    if not self.fast_and_loose:
+      self._AggressiveImageCleanup()
     (self.device, port) = self._DeviceName()
-    self.popen = subprocess.Popen(args=[
+    emulator_command = [
         self.emulator,
         # Speed up emulator launch by 40%.  Really.
         '-no-boot-anim',
@@ -120,12 +154,39 @@ class Emulator(object):
         '-partition-size', '256',
         # Use a familiar name and port.
         '-avd', 'buildbot',
-        '-port', str(port)],
-        stderr=subprocess.STDOUT)
+        '-port', str(port)]
+    if not self.fast_and_loose:
+      emulator_command.extend([
+          # Wipe the data.  We've seen cases where an emulator
+          # gets 'stuck' if we don't do this (every thousand runs or
+          # so).
+          '-wipe-data',
+          ])
+    logging.info('Emulator launch command: %s', ' '.join(emulator_command))
+    self.popen = subprocess.Popen(args=emulator_command,
+                                  stderr=subprocess.STDOUT)
     self._InstallKillHandler()
     self._ConfirmLaunch()
 
-  def _ConfirmLaunch(self):
+  def _AggressiveImageCleanup(self):
+    """Aggressive cleanup of emulator images.
+
+    Experimentally it looks like our current emulator use on the bot
+    leaves image files around in /tmp/android-$USER.  If a "random"
+    name gets reused, we choke with a 'File exists' error.
+    TODO(jrg): is there a less hacky way to accomplish the same goal?
+    """
+    logging.info('Aggressive Image Cleanup')
+    emulator_imagedir = '/tmp/android-%s' % os.environ['USER']
+    if not os.path.exists(emulator_imagedir):
+      return
+    for image in os.listdir(emulator_imagedir):
+      full_name = os.path.join(emulator_imagedir, image)
+      if 'emulator' in full_name:
+        logging.info('Deleting emulator image %s', full_name)
+        os.unlink(full_name)
+
+  def _ConfirmLaunch(self, wait_for_boot=False):
     """Confirm the emulator launched properly.
 
     Loop on a wait-for-device with a very small timeout.  On each
@@ -137,26 +198,32 @@ class Emulator(object):
     seconds_waited = 0
     number_of_waits = 2  # Make sure we can wfd twice
     adb_cmd = "adb -s %s %s" % (self.device, 'wait-for-device')
-    while seconds_waited < self._EMULATOR_LAUNCH_TIMEOUT:
+    while seconds_waited < self._LAUNCH_TIMEOUT:
       try:
-        run_command.RunCommand(adb_cmd, timeout_time=self._EMULATOR_WFD_TIMEOUT,
+        run_command.RunCommand(adb_cmd,
+                               timeout_time=self._WAITFORDEVICE_TIMEOUT,
                                retry_count=1)
         number_of_waits -= 1
         if not number_of_waits:
           break
       except errors.WaitForResponseTimedOutError as e:
-        seconds_waited += self._EMULATOR_WFD_TIMEOUT
+        seconds_waited += self._WAITFORDEVICE_TIMEOUT
         adb_cmd = "adb -s %s %s" % (self.device, 'kill-server')
         run_command.RunCommand(adb_cmd)
       self.popen.poll()
       if self.popen.returncode != None:
         raise EmulatorLaunchException('EMULATOR DIED')
-    if seconds_waited >= self._EMULATOR_LAUNCH_TIMEOUT:
+    if seconds_waited >= self._LAUNCH_TIMEOUT:
       raise EmulatorLaunchException('TIMEOUT with wait-for-device')
     logging.info('Seconds waited on wait-for-device: %d', seconds_waited)
-    # Now that we checked for obvious problems, wait for a boot complete.
-    # Waiting for the package manager has been problematic.
-    a.Adb().WaitForBootComplete()
+    if wait_for_boot:
+      # Now that we checked for obvious problems, wait for a boot complete.
+      # Waiting for the package manager is sometimes problematic.
+      # TODO(jrg): for reasons I don't understand, sometimes this
+      # gives an "error: device not found" which is only fixed with an
+      # 'adb kill-server' command.  Fix.
+      a.Adb().SetTargetSerial(self.device)
+      a.Adb().WaitForBootComplete(self._WAITFORBOOT_TIMEOUT)
 
   def Shutdown(self):
     """Shuts down the process started by launch."""

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -87,14 +87,9 @@ chrome.fileBrowserPrivate = {
       throw new Error('Missing callback');
 
     var tasks =
-    [ { taskId: extensionId + '|upload-picasr',
-        title: 'Upload to Picasr',
-        regexp: /\.(jpe?g|gif|png|cr2?|tiff)$/i,
-        iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAOCAYAAAAmL5yKAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9sEEBcJA0AW6BUAAACdSURBVCjPzZExC4MwEIW/1L2U/gwHf1/3WrqIkz/PWVAoXdolRNLBJNhwiS6FPjguuZf3csnBL2HBLikNtSFmS3yIROUMWhKrHR2XNZiLa9tGkaqtDa4TjBX0yIf8+osLnT3BnKDIvddm/uCRE+fgDc7r4iBPJWAWDADQLh8Tt3neSAYKdAu8gc69L4rAN8v+Fk/3DrxcluD5mr/CB34jRiE3x1kcAAAAAElFTkSuQmCC'
-      },
-      { taskId: extensionId + '|upload-orcbook',
-        title: 'Upload to OrcBook',
-        regexp: /\.(jpe?g|png|cr2?|tiff)$/i,
+    [ { taskId: extensionId + '|play',
+        title: 'Play',
+        regexp: /\.(flac|m4a|mp3|oga|ogg|wav)$/i,
         iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAOCAYAAAAmL5yKAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9sEEBcOAw9XftIAAADFSURBVCjPrZKxCsIwEIa/FHFwsvYxROjSQXAoqLiIL+xgBtvZ91A6uOnQc2hT0zRqkR4c3P25+/PfJTCwLU6wEpgBWkDXuInDPSwF5r7mJIeNQFTnIiCeONpVdYlLoK9wEUhNg8+B9FDVaZcgCKAovjTXfvPJFwGZtKW60pt8bOGBzfLouemnFY/MAs8wDeEI4NzaybewBu4AysKVgrK0gfe5iB9vjdAUqQ/S1Y/R3IX9Zc1zxc7zxe2/0Iskt7AsG0hhx14W8XV43FgV4gAAAABJRU5ErkJggg=='
       },
       { taskId: extensionId + '|mount-archive',
@@ -105,7 +100,7 @@ chrome.fileBrowserPrivate = {
       {
         taskId: extensionId + '|gallery',
         title: 'View and Edit',
-        regexp: /\.(jpe?g|gif|png|cr2?|tiff|webp|bmp)$/i,
+        regexp: /\.(bmp|gif|jpe?g|png|webp|3gp|avi|m4v|mov|mp4|mpeg4?|mpg4?|ogm|ogv|ogx|webm)$/i,
         iconUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAOCAYAAAAmL5yKAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9sEEBcOAw9XftIAAADFSURBVCjPrZKxCsIwEIa/FHFwsvYxROjSQXAoqLiIL+xgBtvZ91A6uOnQc2hT0zRqkR4c3P25+/PfJTCwLU6wEpgBWkDXuInDPSwF5r7mJIeNQFTnIiCeONpVdYlLoK9wEUhNg8+B9FDVaZcgCKAovjTXfvPJFwGZtKW60pt8bOGBzfLouemnFY/MAs8wDeEI4NzaybewBu4AysKVgrK0gfe5iB9vjdAUqQ/S1Y/R3IX9Zc1zxc7zxe2/0Iskt7AsG0hhx14W8XV43FgV4gAAAABJRU5ErkJggg=='
       }
     ];
@@ -217,7 +212,7 @@ chrome.fileBrowserPrivate = {
       PARENT_DIRECTORY: 'Parent Directory',
 
       ROOT_DIRECTORY_LABEL: 'Files',
-      DOWNLOADS_DIRECTORY_LABEL: 'File Shelf',
+      CHROMEBOOK_DIRECTORY_LABEL: 'Chromebook',
       DOWNLOADS_DIRECTORY_WARNING: "&lt;strong&gt;Caution:&lt;/strong&gt; These files are temporary and may be automatically deleted to free up disk space.  &lt;a href='javascript://'&gt;Learn More&lt;/a&gt;",
       MEDIA_DIRECTORY_LABEL: 'External Storage',
       NAME_COLUMN_LABEL: 'Name',
@@ -242,6 +237,8 @@ chrome.fileBrowserPrivate = {
       IMAGE_DIMENSIONS: 'Image Dimensions',
       VOLUME_LABEL: 'Volume Label',
       READ_ONLY: 'Read Only',
+
+      PLAY_MEDIA: 'Play',
 
       MOUNT_ARCHIVE: 'Open archive',
       UNMOUNT_ARCHIVE: 'Close archive',
@@ -301,6 +298,9 @@ chrome.fileBrowserPrivate = {
       OPEN_LABEL: 'Open',
       SAVE_LABEL: 'Save',
       OK_LABEL: 'OK',
+      ERROR_VIEWING_FILE_TITLE: '$1',
+      ERROR_VIEWING_FILE: 'To view this file, convert it to a format that\'s ' +
+          'viewable on the web. For example, you can upload it to Google Docs.',
 
       DEFAULT_NEW_FOLDER_NAME: 'New Folder',
       MORE_FILES: 'Show all files',
@@ -311,7 +311,6 @@ chrome.fileBrowserPrivate = {
       SELECT_SAVEAS_FILE_TITLE: 'Save file as',
 
       COMPUTING_SELECTION: 'Computing selection...',
-      NOTHING_SELECTED: 'No files selected',
       ONE_FILE_SELECTED: 'One file selected, $1',
       ONE_DIRECTORY_SELECTED: 'One directory selected',
       MANY_FILES_SELECTED: '$1 files selected, $2',

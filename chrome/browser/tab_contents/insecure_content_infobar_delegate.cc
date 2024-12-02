@@ -8,10 +8,12 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::OpenURLParams;
 
 InsecureContentInfoBarDelegate::InsecureContentInfoBarDelegate(
     InfoBarTabHelper* infobar_helper,
@@ -78,7 +80,7 @@ string16 InsecureContentInfoBarDelegate::GetLinkText() const {
 
 bool InsecureContentInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  owner()->tab_contents()->OpenURL(OpenURLParams(
+  owner()->web_contents()->OpenURL(OpenURLParams(
       google_util::AppendGoogleLocaleParam(GURL(
       "https://www.google.com/support/chrome/bin/answer.py?answer=1342714")),
       content::Referrer(),

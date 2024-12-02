@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/cocoa/notifications/balloon_controller.h"
 
+#include "base/mac/bundle_locations.h"
 #import "base/mac/cocoa_protocols.h"
 #include "base/mac/mac_util.h"
 #import "base/memory/scoped_nsobject.h"
@@ -19,7 +20,7 @@
 #import "chrome/browser/ui/cocoa/notifications/balloon_view.h"
 #include "chrome/browser/ui/cocoa/notifications/balloon_view_host_mac.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -45,8 +46,8 @@ const int kRightMargin = 2;
 
 - (id)initWithBalloon:(Balloon*)balloon {
   NSString* nibpath =
-      [base::mac::MainAppBundle() pathForResource:@"Notification"
-                                          ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"Notification"
+                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibpath owner:self])) {
     balloon_ = balloon;
     [self initializeHost];
@@ -175,8 +176,8 @@ const int kRightMargin = 2;
 
 - (void)updateContents {
   DCHECK(htmlContents_.get()) << "BalloonView::Update called before Show";
-  if (htmlContents_->tab_contents()) {
-    htmlContents_->tab_contents()->controller().LoadURL(
+  if (htmlContents_->web_contents()) {
+    htmlContents_->web_contents()->GetController().LoadURL(
         balloon_->notification().content_url(), content::Referrer(),
         content::PAGE_TRANSITION_LINK, std::string());
   }

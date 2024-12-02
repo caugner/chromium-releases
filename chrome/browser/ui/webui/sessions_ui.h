@@ -6,13 +6,13 @@
 #define CHROME_BROWSER_UI_WEBUI_SESSIONS_UI_H_
 #pragma once
 
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 
 class RefCountedMemory;
 
-class SessionsUI : public ChromeWebUI {
+class SessionsUI : public content::WebUIController {
  public:
-  explicit SessionsUI(TabContents* contents);
+  explicit SessionsUI(content::WebUI* web_ui);
 
   static RefCountedMemory* GetFaviconResourceBytes();
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,9 +18,10 @@
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_service.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 namespace errors = extension_manifest_errors;
 
@@ -83,12 +84,13 @@ void InstalledLoader::Load(const ExtensionInfo& info, bool write_to_prefs) {
 
   // Once installed, non-unpacked extensions cannot change their IDs (e.g., by
   // updating the 'key' field in their manifest).
+  // TODO(jstritar): migrate preferences when unpacked extensions change IDs.
   if (extension &&
       extension->location() != Extension::LOAD &&
       info.extension_id != extension->id()) {
     error = errors::kCannotChangeExtensionID;
     extension = NULL;
-    UserMetrics::RecordAction(UserMetricsAction("Extensions.IDChangedError"));
+    content::RecordAction(UserMetricsAction("Extensions.IDChangedError"));
   }
 
   if (!extension) {
@@ -181,8 +183,8 @@ void InstalledLoader::LoadAllExtensions() {
   int theme_count = 0;
   int page_action_count = 0;
   int browser_action_count = 0;
-  const ExtensionList* extensions = extension_service_->extensions();
-  ExtensionList::const_iterator ex;
+  const ExtensionSet* extensions = extension_service_->extensions();
+  ExtensionSet::const_iterator ex;
   for (ex = extensions->begin(); ex != extensions->end(); ++ex) {
     Extension::Location location = (*ex)->location();
     Extension::Type type = (*ex)->GetType();
@@ -246,7 +248,7 @@ void InstalledLoader::LoadAllExtensions() {
       ++browser_action_count;
 
     extension_service_->RecordPermissionMessagesHistogram(
-        ex->get(), "Extensions.Permissions_Load");
+        *ex, "Extensions.Permissions_Load");
   }
   UMA_HISTOGRAM_COUNTS_100("Extensions.LoadApp",
                            app_user_count + app_external_count);

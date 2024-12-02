@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/ime/text_input_type.h"
@@ -37,11 +37,13 @@
 #endif
 
 #if defined(USE_AURA)
-#include "ui/aura/desktop.h"
-#include "ui/aura/desktop_observer.h"
-#include "ui/aura_shell/shell.h"
-#include "ui/aura_shell/shell_window_ids.h"
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/root_window_observer.h"
 #endif
+
+using content::WebContents;
 
 namespace {
 
@@ -51,7 +53,7 @@ const char kOnTextInputTypeChanged[] =
     "experimental.input.virtualKeyboard.onTextInputTypeChanged";
 
 // The default position of the keyboard widget should be at the bottom,
-// spanning the entire width of the desktop.
+// spanning the entire width of the root window.
 gfx::Rect GetKeyboardPosition(int height) {
   gfx::Rect area = gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point());
   return gfx::Rect(area.x(), area.y() + area.height() - height,
@@ -65,13 +67,13 @@ gfx::Rect GetKeyboardPosition(int height) {
 class KeyboardWidget
     : public views::Widget,
       public ui::AnimationDelegate,
-      public TabContentsObserver,
+      public content::WebContentsObserver,
       public ExtensionFunctionDispatcher::Delegate,
 #if defined(OS_CHROMEOS)
       public chromeos::input_method::InputMethodManager::VirtualKeyboardObserver,
 #endif
 #if defined(USE_AURA)
-      public aura::DesktopObserver,
+      public aura::RootWindowObserver,
 #endif
       public content::NotificationObserver,
       public views::Widget::Observer,
@@ -84,7 +86,7 @@ class KeyboardWidget
   // be sent to |widget|.
   void ShowKeyboardForWidget(views::Widget* widget);
 
-  // Updates the bounds to reflect the current screen/desktop bounds.
+  // Updates the bounds to reflect the current screen/root window bounds.
   void ResetBounds();
 
   // Overridden from views::Widget
@@ -108,7 +110,7 @@ class KeyboardWidget
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
 
-  // Overridden from TabContentsObserver.
+  // Overridden from content::WebContentsObserver.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
@@ -119,8 +121,7 @@ class KeyboardWidget
 
   // Overridden from ExtensionFunctionDispatcher::Delegate.
   virtual Browser* GetBrowser() OVERRIDE;
-  virtual gfx::NativeView GetNativeViewOfHost() OVERRIDE;
-  virtual TabContents* GetAssociatedTabContents() const OVERRIDE;
+  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
 #if defined(OS_CHROMEOS)
   // Overridden from input_method::InputMethodManager::VirtualKeyboardObserver.
@@ -131,8 +132,8 @@ class KeyboardWidget
 #endif
 
 #if defined(USE_AURA)
-  // Overridden from aura::DesktopObserver.
-  virtual void OnDesktopResized(const gfx::Size& new_size) OVERRIDE;
+  // Overridden from aura::RootWindowObserver.
+  virtual void OnRootWindowResized(const gfx::Size& new_size) OVERRIDE;
 #endif
 
   // Overridden from NotificationObserver.
@@ -185,21 +186,21 @@ KeyboardWidget::KeyboardWidget()
   params.bounds = GetKeyboardPosition(keyboard_height_);
   Init(params);
 #if defined(USE_AURA)
-  aura_shell::Shell::GetInstance()->GetContainer(
-      aura_shell::internal::kShellWindowId_MenusAndTooltipsContainer)->
+  ash::Shell::GetInstance()->GetContainer(
+      ash::internal::kShellWindowId_MenuAndTooltipContainer)->
       AddChild(GetNativeView());
 #endif
 
   // Setup the DOM view to host the keyboard.
   Profile* profile = ProfileManager::GetDefaultProfile();
-  dom_view_->Init(profile,
-      SiteInstance::CreateSiteInstanceForURL(profile, keyboard_url_));
+  dom_view_->Init(profile, SiteInstance::CreateForURL(profile, keyboard_url_));
   dom_view_->LoadURL(keyboard_url_);
   dom_view_->SetVisible(true);
   SetContentsView(dom_view_);
 
   // Setup observer so the events from the keyboard can be handled.
-  TabContentsObserver::Observe(dom_view_->dom_contents()->tab_contents());
+  content::WebContentsObserver::Observe(
+      dom_view_->dom_contents()->web_contents());
 
   // Initialize the animation.
   animation_.reset(new ui::SlideAnimation(this));
@@ -227,7 +228,7 @@ KeyboardWidget::KeyboardWidget()
 #endif
 
 #if defined(USE_AURA)
-  aura::Desktop::GetInstance()->AddObserver(this);
+  aura::RootWindow::GetInstance()->AddObserver(this);
 #endif
 }
 
@@ -242,7 +243,7 @@ KeyboardWidget::~KeyboardWidget() {
 #endif
 
 #if defined(USE_AURA)
-  aura::Desktop::GetInstance()->RemoveObserver(this);
+  aura::RootWindow::GetInstance()->RemoveObserver(this);
 #endif
   // TODO(sad): Do anything else?
 }
@@ -352,7 +353,7 @@ void KeyboardWidget::RenderViewGone(base::TerminationStatus status) {
 
 void KeyboardWidget::OnRequest(const ExtensionHostMsg_Request_Params& request) {
   extension_dispatcher_.Dispatch(request,
-      dom_view_->dom_contents()->tab_contents()->render_view_host());
+      dom_view_->dom_contents()->web_contents()->GetRenderViewHost());
 }
 
 void KeyboardWidget::TextInputTypeChanged(ui::TextInputType type,
@@ -404,7 +405,7 @@ void KeyboardWidget::TextInputTypeChanged(ui::TextInputType type,
 
   Profile* profile =
       Profile::FromBrowserContext(
-          dom_view_->dom_contents()->tab_contents()->browser_context());
+          dom_view_->dom_contents()->web_contents()->GetBrowserContext());
   profile->GetExtensionEventRouter()->DispatchEventToRenderers(
       kOnTextInputTypeChanged, json_args, NULL, GURL());
 
@@ -421,13 +422,9 @@ Browser* KeyboardWidget::GetBrowser() {
   return BrowserList::GetLastActive();
 }
 
-gfx::NativeView KeyboardWidget::GetNativeViewOfHost() {
-  return dom_view_->native_view();
-}
-
-TabContents* KeyboardWidget::GetAssociatedTabContents() const {
+content::WebContents* KeyboardWidget::GetAssociatedWebContents() const {
   return dom_view_->dom_contents() ?
-      dom_view_->dom_contents()->tab_contents() : NULL;
+      dom_view_->dom_contents()->web_contents() : NULL;
 }
 
 #if defined(OS_CHROMEOS)
@@ -442,7 +439,7 @@ void KeyboardWidget::VirtualKeyboardChanged(
 #endif
 
 #if defined(USE_AURA)
-void KeyboardWidget::OnDesktopResized(const gfx::Size& new_size) {
+void KeyboardWidget::OnRootWindowResized(const gfx::Size& new_size) {
   ResetBounds();
 }
 #endif

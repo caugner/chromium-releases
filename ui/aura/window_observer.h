@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,7 +46,16 @@ class AURA_EXPORT WindowObserver {
   // has changed.
   virtual void OnWindowStackingChanged(Window* window) {}
 
-  // Invoked when the Window has been destroyed (i.e. from its destructor).
+  // Invoked when a region of |window| is scheduled to be redrawn.
+  virtual void OnWindowPaintScheduled(Window* window,
+                                      const gfx::Rect& region) {}
+
+  // Invoked when the Window is being destroyed (i.e. from the start of its
+  // destructor). This is called before the window is removed from its parent.
+  virtual void OnWindowDestroying(Window* window) {}
+
+  // Invoked when the Window has been destroyed (i.e. at the end of its
+  // destructor). This is called after the window is removed from its parent.
   virtual void OnWindowDestroyed(Window* window) {}
 
  protected:

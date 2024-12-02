@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,17 @@
 
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/tab_contents/page_navigator.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/browser/page_navigator.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::DownloadItem;
+using content::OpenURLParams;
 
 DownloadShelfContextMenu::~DownloadShelfContextMenu() {}
 
@@ -28,9 +30,10 @@ ui::SimpleMenuModel* DownloadShelfContextMenu::GetMenuModel() {
   ui::SimpleMenuModel* model = NULL;
 
   if (download_item_->GetSafetyState() == DownloadItem::DANGEROUS) {
-    if (download_item_->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ||
+    if (download_item_->GetDangerType() ==
+            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
         download_item_->GetDangerType() ==
-            DownloadStateInfo::DANGEROUS_CONTENT) {
+            content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT) {
       model = GetMaliciousMenuModel();
     } else {
       NOTREACHED();
@@ -50,7 +53,7 @@ bool DownloadShelfContextMenu::IsCommandIdEnabled(int command_id) const {
       return download_item_->CanShowInFolder();
     case ALWAYS_OPEN_TYPE:
       return download_item_->CanOpenDownload() &&
-          !Extension::IsExtension(download_item_->GetStateInfo().target_name);
+          !Extension::IsExtension(download_item_->GetTargetName());
     case CANCEL:
       return download_item_->IsPartialDownload();
     case TOGGLE_PAUSE:
@@ -81,8 +84,8 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
       download_item_->OpenDownload();
       break;
     case ALWAYS_OPEN_TYPE: {
-      DownloadPrefs* prefs = DownloadPrefs::FromDownloadManager(
-          download_item_->GetDownloadManager());
+      DownloadPrefs* prefs = DownloadPrefs::FromBrowserContext(
+          download_item_->GetBrowserContext());
       FilePath path = download_item_->GetUserVerifiedFilePath();
       if (!IsCommandIdChecked(ALWAYS_OPEN_TYPE))
         prefs->EnableAutoOpenBasedOnExtension(path);
@@ -109,8 +112,7 @@ void DownloadShelfContextMenu::ExecuteCommand(int command_id) {
     case LEARN_MORE: {
       Browser* browser = BrowserList::GetLastActive();
       DCHECK(browser && browser->is_type_tabbed());
-      GURL learn_more_url(chrome::kDownloadScanningLearnMoreURL);
-      OpenURLParams params(google_util::AppendGoogleLocaleParam(learn_more_url),
+      OpenURLParams params(GURL(chrome::kDownloadScanningLearnMoreURL),
                            content::Referrer(), NEW_FOREGROUND_TAB,
                            content::PAGE_TRANSITION_TYPED, false);
       browser->OpenURL(params);

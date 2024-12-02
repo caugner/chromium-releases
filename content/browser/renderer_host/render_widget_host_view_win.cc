@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
 
 #include <algorithm>
+#include <peninputpanel_i.c>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -18,7 +19,6 @@
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
-#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/accessibility/browser_accessibility_win.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -32,6 +32,7 @@
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
@@ -97,6 +98,13 @@ const int kDestroyCompositorHostWindowDelay = 10000;
 // of the border area, in percentage of the corresponding dimension.
 const int kMouseLockBorderPercentage = 15;
 
+// We display the onscreen keyboard in the context of a WM_POINTERDOWN message.
+// This context is reset in a delayed task. Theory being that the page should
+// have enough time to change focus before this context is reset.
+// TODO(ananta)
+// Refine this.
+const int kPointerDownContextResetDelay = 200;
+
 // A callback function for EnumThreadWindows to enumerate and dismiss
 // any owned popup windows.
 BOOL CALLBACK DismissOwnedPopups(HWND window, LPARAM arg) {
@@ -121,15 +129,13 @@ void NotifyPluginProcessHostHelper(HWND window, HWND parent, int tries) {
   DWORD plugin_process_id;
   bool found_starting_plugin_process = false;
   GetWindowThreadProcessId(window, &plugin_process_id);
-  for (BrowserChildProcessHost::Iterator iter(content::PROCESS_TYPE_PLUGIN);
-       !iter.Done(); ++iter) {
-    PluginProcessHost* plugin = static_cast<PluginProcessHost*>(*iter);
-    if (!plugin->handle()) {
+  for (PluginProcessHostIterator iter; !iter.Done(); ++iter) {
+    if (!iter.GetData().handle) {
       found_starting_plugin_process = true;
       continue;
     }
-    if (base::GetProcId(plugin->handle()) == plugin_process_id) {
-      plugin->AddWindow(parent);
+    if (base::GetProcId(iter.GetData().handle) == plugin_process_id) {
+      iter->AddWindow(parent);
       return;
     }
   }
@@ -182,19 +188,17 @@ LRESULT CALLBACK PluginWrapperWindowProc(HWND window, unsigned int message,
   return ::DefWindowProc(window, message, wparam, lparam);
 }
 
-void SendToGpuProcessHost(int gpu_host_id, IPC::Message* message) {
+void SendToGpuProcessHost(int gpu_host_id, scoped_ptr<IPC::Message> message) {
   GpuProcessHost* gpu_process_host = GpuProcessHost::FromID(gpu_host_id);
-  if (!gpu_process_host) {
-    delete message;
+  if (!gpu_process_host)
     return;
-  }
 
-  gpu_process_host->Send(message);
+  gpu_process_host->Send(message.release());
 }
 
 void PostTaskOnIOThread(const tracked_objects::Location& from_here,
                         base::Closure task) {
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, task);
+  BrowserThread::PostTask(BrowserThread::IO, from_here, task);
 }
 
 bool DecodeZoomGesture(HWND hwnd, const GESTUREINFO& gi,
@@ -321,28 +325,55 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       composition_range_(ui::Range::InvalidRange()),
       ignore_next_lbutton_message_at_same_location(false),
       last_pointer_down_location_(0),
-      touch_state_(this) {
+      touch_state_(this),
+      pointer_down_context_(false),
+      focus_on_editable_field_(false),
+      received_focus_change_after_pointer_down_(false) {
   render_widget_host_->SetView(this);
   registrar_.Add(this,
                  content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
+                 content::NotificationService::AllBrowserContextsAndSources());
+  registrar_.Add(this,
+                 content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
                  content::NotificationService::AllBrowserContextsAndSources());
 }
 
 RenderWidgetHostViewWin::~RenderWidgetHostViewWin() {
   UnlockMouse();
   ResetTooltip();
-
-  if (accelerated_surface_)
-    accelerated_surface_->Destroy();
 }
 
 void RenderWidgetHostViewWin::CreateWnd(HWND parent) {
   // ATL function to create the window.
   Create(parent);
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    // MSDN recommends using the ITextInputPanel interface to display the on
+    // screen keyboard. This interface does not work predictably due to focus
+    // and activation bugs. We use the deprecated IPenInputPanel interface for
+    // now which works reliably with the caveat being that the keyboard cannot
+    // be closed via the system close menu. Esc or clicking elsewhere works.
+    // TODO(ananta): Revisit this.
+    virtual_keyboard_.CreateInstance(CLSID_PenInputPanel, NULL, CLSCTX_INPROC);
+    if (virtual_keyboard_) {
+      virtual_keyboard_->put_AttachedEditWindow(
+          reinterpret_cast<int>(m_hWnd));
+      virtual_keyboard_->put_DefaultPanel(PT_Keyboard);
+      virtual_keyboard_->put_Visible(VARIANT_FALSE);
+      virtual_keyboard_->put_AutoShow(VARIANT_FALSE);
+    } else {
+      NOTREACHED() << "Failed to create instance of pen input panel";
+    }
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewWin, RenderWidgetHostView implementation:
+
+void RenderWidgetHostViewWin::InitAsChild(
+    gfx::NativeView parent_view) {
+  parent_hwnd_ = parent_view;
+  CreateWnd(parent_view);
+}
 
 void RenderWidgetHostViewWin::InitAsPopup(
     RenderWidgetHostView* parent_host_view, const gfx::Rect& pos) {
@@ -425,6 +456,26 @@ gfx::NativeView RenderWidgetHostViewWin::GetNativeView() const {
 
 gfx::NativeViewId RenderWidgetHostViewWin::GetNativeViewId() const {
   return reinterpret_cast<gfx::NativeViewId>(m_hWnd);
+}
+
+gfx::NativeViewAccessible
+RenderWidgetHostViewWin::GetNativeViewAccessible() {
+  if (render_widget_host_ && !render_widget_host_->renderer_accessible()) {
+    // Attempt to detect screen readers by sending an event with our custom id.
+    NotifyWinEvent(EVENT_SYSTEM_ALERT, m_hWnd, kIdCustom, CHILDID_SELF);
+  }
+
+  if (!GetBrowserAccessibilityManager()) {
+    // Return busy document tree while renderer accessibility tree loads.
+    WebAccessibility::State busy_state =
+        static_cast<WebAccessibility::State>(1 << WebAccessibility::STATE_BUSY);
+    SetBrowserAccessibilityManager(
+        BrowserAccessibilityManager::CreateEmptyDocument(
+            m_hWnd, busy_state, this));
+  }
+
+  return GetBrowserAccessibilityManager()->GetRoot()->
+      toBrowserAccessibilityWin();
 }
 
 void RenderWidgetHostViewWin::MovePluginWindows(
@@ -583,8 +634,8 @@ void RenderWidgetHostViewWin::CleanupCompositorWindow() {
   BrowserThread::PostDelayedTask(
       BrowserThread::UI,
       FROM_HERE,
-      base::IgnoreReturn<BOOL>(
-          base::Bind(&::DestroyWindow, compositor_host_window_)),
+      base::Bind(base::IgnoreResult(&::DestroyWindow),
+                 compositor_host_window_),
       kDestroyCompositorHostWindowDelay);
 
   compositor_host_window_ = NULL;
@@ -857,6 +908,9 @@ void RenderWidgetHostViewWin::UnhandledWheelEvent(
     const WebKit::WebMouseWheelEvent& event) {
 }
 
+void RenderWidgetHostViewWin::ProcessTouchAck(bool processed) {
+}
+
 void RenderWidgetHostViewWin::SetHasHorizontalScrollbar(
     bool has_horizontal_scrollbar) {
 }
@@ -897,7 +951,6 @@ LRESULT RenderWidgetHostViewWin::OnCreate(CREATESTRUCT* create_struct) {
       }
     }
   }
-
   return 0;
 }
 
@@ -999,11 +1052,27 @@ void RenderWidgetHostViewWin::OnPaint(HDC unused_dc) {
 
     // Blit only the damaged regions from the backing store.
     DWORD data_size = GetRegionData(damage_region, 0, NULL);
-    scoped_array<char> region_data_buf(new char[data_size]);
-    RGNDATA* region_data = reinterpret_cast<RGNDATA*>(region_data_buf.get());
-    GetRegionData(damage_region, data_size, region_data);
+    scoped_array<char> region_data_buf;
+    RGNDATA* region_data = NULL;
+    RECT* region_rects = NULL;
 
-    RECT* region_rects = reinterpret_cast<RECT*>(region_data->Buffer);
+    if (data_size) {
+      region_data_buf.reset(new char[data_size]);
+      region_data = reinterpret_cast<RGNDATA*>(region_data_buf.get());
+      region_rects = reinterpret_cast<RECT*>(region_data->Buffer);
+      data_size = GetRegionData(damage_region, data_size, region_data);
+    }
+
+    if (!data_size) {
+      // Grabbing the damaged regions failed, fake with the whole rect.
+      data_size = sizeof(RGNDATAHEADER) + sizeof(RECT);
+      region_data_buf.reset(new char[data_size]);
+      region_data = reinterpret_cast<RGNDATA*>(region_data_buf.get());
+      region_rects = reinterpret_cast<RECT*>(region_data->Buffer);
+      region_data->rdh.nCount = 1;
+      region_rects[0] = damaged_rect.ToRECT();
+    }
+
     for (DWORD i = 0; i < region_data->rdh.nCount; ++i) {
       gfx::Rect paint_rect = bitmap_rect.Intersect(gfx::Rect(region_rects[i]));
       if (!paint_rect.IsEmpty()) {
@@ -1067,7 +1136,7 @@ void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
                                              CPaintDC* dc) {
   if (!background_.empty()) {
     gfx::Rect dirty_area(dirty_rect);
-    gfx::CanvasSkia canvas(dirty_area.width(), dirty_area.height(), true);
+    gfx::CanvasSkia canvas(dirty_area.size(), true);
     canvas.Translate(gfx::Point().Subtract(dirty_area.origin()));
 
     gfx::Rect dc_rect(dc->m_ps.rcPaint);
@@ -1097,21 +1166,26 @@ LRESULT RenderWidgetHostViewWin::OnSetCursor(HWND window, UINT hittest_code,
 }
 
 void RenderWidgetHostViewWin::OnSetFocus(HWND window) {
-  if (browser_accessibility_manager_.get())
-    browser_accessibility_manager_->GotFocus();
-  if (render_widget_host_) {
-    render_widget_host_->GotFocus();
-    render_widget_host_->SetActive(true);
-  }
+  if (!render_widget_host_)
+    return;
+
+  if (GetBrowserAccessibilityManager())
+    GetBrowserAccessibilityManager()->GotFocus();
+
+  render_widget_host_->GotFocus();
+  render_widget_host_->SetActive(true);
+
   if (touch_state_.ReleaseTouchPoints())
     render_widget_host_->ForwardTouchEvent(touch_state_.touch_event());
 }
 
 void RenderWidgetHostViewWin::OnKillFocus(HWND window) {
-  if (render_widget_host_) {
-    render_widget_host_->SetActive(false);
-    render_widget_host_->Blur();
-  }
+  if (!render_widget_host_)
+    return;
+
+  render_widget_host_->SetActive(false);
+  render_widget_host_->Blur();
+
   if (touch_state_.ReleaseTouchPoints())
     render_widget_host_->ForwardTouchEvent(touch_state_.touch_event());
 }
@@ -1830,12 +1904,12 @@ LRESULT RenderWidgetHostViewWin::OnGestureEvent(
 
 void RenderWidgetHostViewWin::OnAccessibilityNotifications(
     const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
-  if (!browser_accessibility_manager_.get()) {
-    browser_accessibility_manager_.reset(
+  if (!GetBrowserAccessibilityManager()) {
+    SetBrowserAccessibilityManager(
         BrowserAccessibilityManager::CreateEmptyDocument(
             m_hWnd, static_cast<WebAccessibility::State>(0), this));
   }
-  browser_accessibility_manager_->OnAccessibilityNotifications(params);
+  GetBrowserAccessibilityManager()->OnAccessibilityNotifications(params);
 }
 
 bool RenderWidgetHostViewWin::LockMouse() {
@@ -1889,21 +1963,30 @@ void RenderWidgetHostViewWin::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED);
+  DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_TERMINATED ||
+         type == content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE);
 
-  // Get the RenderProcessHost that posted this notification, and exit
-  // if it's not the one associated with this host view.
-  content::RenderProcessHost* render_process_host =
-      content::Source<content::RenderProcessHost>(source).ptr();
-  DCHECK(render_process_host);
-  if (!render_widget_host_ ||
-      render_process_host != render_widget_host_->process())
-    return;
+  if (type == content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE) {
+    if (pointer_down_context_)
+      received_focus_change_after_pointer_down_ = true;
+    focus_on_editable_field_ = *content::Details<bool>(details).ptr();
+    if (virtual_keyboard_)
+      DisplayOnScreenKeyboardIfNeeded();
+  } else {
+    // Get the RenderProcessHost that posted this notification, and exit
+    // if it's not the one associated with this host view.
+    content::RenderProcessHost* render_process_host =
+        content::Source<content::RenderProcessHost>(source).ptr();
+    DCHECK(render_process_host);
+    if (!render_widget_host_ ||
+        render_process_host != render_widget_host_->process())
+      return;
 
-  // If it was our RenderProcessHost that posted the notification,
-  // clear the BrowserAccessibilityManager, because the renderer is
-  // dead and any accessibility information we have is now stale.
-  browser_accessibility_manager_.reset(NULL);
+    // If it was our RenderProcessHost that posted the notification,
+    // clear the BrowserAccessibilityManager, because the renderer is
+    // dead and any accessibility information we have is now stale.
+    SetBrowserAccessibilityManager(NULL);
+  }
 }
 
 static void PaintCompositorHostWindow(HWND hWnd) {
@@ -1940,9 +2023,8 @@ static LRESULT CALLBACK CompositorHostWindowProc(HWND hWnd, UINT message,
 void RenderWidgetHostViewWin::ScheduleComposite() {
   // If we have a previous frame then present it immediately. Otherwise request
   // a new frame be composited.
-  if (accelerated_surface_.get()) {
-    accelerated_surface_->Present();
-  } else {
+  if (!accelerated_surface_.get() ||
+      !accelerated_surface_->Present(compositor_host_window_)) {
     if (render_widget_host_)
       render_widget_host_->ScheduleComposite();
   }
@@ -2037,6 +2119,11 @@ void RenderWidgetHostViewWin::OnAcceleratedCompositingStateChange() {
           SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
     }
   } else {
+    // Drop the backing store for the accelerated surface when the accelerated
+    // compositor is disabled. Otherwise, a flash of the last presented frame
+    // could appear when it is next enabled.
+    if (accelerated_surface_.get())
+      accelerated_surface_->Suspend();
     hide_compositor_window_at_next_paint_ = true;
   }
 }
@@ -2044,28 +2131,34 @@ void RenderWidgetHostViewWin::OnAcceleratedCompositingStateChange() {
 void RenderWidgetHostViewWin::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-  if (!accelerated_surface_.get() && compositor_host_window_) {
-    accelerated_surface_ = new AcceleratedSurface(compositor_host_window_);
-    accelerated_surface_->Initialize();
+  if (params.surface_handle) {
+    if (!accelerated_surface_.get() && compositor_host_window_) {
+      accelerated_surface_.reset(new AcceleratedSurface);
+    }
+
+    scoped_ptr<IPC::Message> message(
+        new AcceleratedSurfaceMsg_BuffersSwappedACK(params.route_id));
+    base::Closure acknowledge_task = base::Bind(
+        SendToGpuProcessHost,
+        gpu_host_id,
+        base::Passed(&message));
+
+    accelerated_surface_->AsyncPresentAndAcknowledge(
+        compositor_host_window_,
+        params.size,
+        params.surface_handle,
+        base::Bind(PostTaskOnIOThread,
+                   FROM_HERE,
+                   acknowledge_task));
+  } else {
+    RenderWidgetHost::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
   }
-
-  base::Closure acknowledge_task =
-      base::Bind(SendToGpuProcessHost,
-                 gpu_host_id,
-                 new AcceleratedSurfaceMsg_BuffersSwappedACK(params.route_id));
-
-  accelerated_surface_->AsyncPresentAndAcknowledge(
-      params.size,
-      params.surface_id,
-      base::Bind(PostTaskOnIOThread,
-                 FROM_HERE,
-                 acknowledge_task));
 }
 
 void RenderWidgetHostViewWin::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
-  NOTREACHED();
+  RenderWidgetHost::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
 }
 
 void RenderWidgetHostViewWin::SetAccessibilityFocus(int acc_obj_id) {
@@ -2082,13 +2175,20 @@ void RenderWidgetHostViewWin::AccessibilityDoDefaultAction(int acc_obj_id) {
   render_widget_host_->AccessibilityDoDefaultAction(acc_obj_id);
 }
 
-void RenderWidgetHostViewWin::AccessibilityChangeScrollPosition(
-    int acc_obj_id, int scroll_x, int scroll_y) {
+void RenderWidgetHostViewWin::AccessibilityScrollToMakeVisible(
+    int acc_obj_id, gfx::Rect subfocus) {
   if (!render_widget_host_)
     return;
 
-  render_widget_host_->AccessibilityChangeScrollPosition(
-      acc_obj_id, scroll_x, scroll_y);
+  render_widget_host_->AccessibilityScrollToMakeVisible(acc_obj_id, subfocus);
+}
+
+void RenderWidgetHostViewWin::AccessibilityScrollToPoint(
+    int acc_obj_id, gfx::Point point) {
+  if (!render_widget_host_)
+    return;
+
+  render_widget_host_->AccessibilityScrollToPoint(acc_obj_id, point);
 }
 
 void RenderWidgetHostViewWin::AccessibilitySetTextSelection(
@@ -2098,24 +2198,6 @@ void RenderWidgetHostViewWin::AccessibilitySetTextSelection(
 
   render_widget_host_->AccessibilitySetTextSelection(
       acc_obj_id, start_offset, end_offset);
-}
-
-IAccessible* RenderWidgetHostViewWin::GetIAccessible() {
-  if (render_widget_host_ && !render_widget_host_->renderer_accessible()) {
-    // Attempt to detect screen readers by sending an event with our custom id.
-    NotifyWinEvent(EVENT_SYSTEM_ALERT, m_hWnd, kIdCustom, CHILDID_SELF);
-  }
-
-  if (!browser_accessibility_manager_.get()) {
-    // Return busy document tree while renderer accessibility tree loads.
-    WebAccessibility::State busy_state =
-        static_cast<WebAccessibility::State>(1 << WebAccessibility::STATE_BUSY);
-    browser_accessibility_manager_.reset(
-        BrowserAccessibilityManager::CreateEmptyDocument(
-            m_hWnd, busy_state, this));
-  }
-
-  return browser_accessibility_manager_->GetRoot()->toBrowserAccessibilityWin();
 }
 
 LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
@@ -2135,7 +2217,7 @@ LRESULT RenderWidgetHostViewWin::OnGetObject(UINT message, WPARAM wparam,
     return static_cast<LRESULT>(0L);
   }
 
-  IAccessible* iaccessible = GetIAccessible();
+  IAccessible* iaccessible = GetNativeViewAccessible();
   if (iaccessible)
     return LresultFromObject(IID_IAccessible, wparam, iaccessible);
 
@@ -2176,6 +2258,12 @@ LRESULT RenderWidgetHostViewWin::OnPointerMessage(
     OnMouseEvent(WM_LBUTTONDOWN, MK_LBUTTON, lparam, handled);
     ignore_next_lbutton_message_at_same_location = true;
     last_pointer_down_location_ = lparam;
+    SetFocus();
+    pointer_down_context_ = true;
+    received_focus_change_after_pointer_down_ = false;
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        base::Bind(&RenderWidgetHostViewWin::ResetPointerDownContext,
+                   weak_factory_.GetWeakPtr()), kPointerDownContextResetDelay);
   } else if (message == WM_POINTERUP) {
     OnMouseEvent(WM_LBUTTONUP, MK_LBUTTON, lparam, handled);
   }
@@ -2493,4 +2581,34 @@ LRESULT RenderWidgetHostViewWin::OnReconvertString(RECONVERTSTRING* reconv) {
   // IMR_DOCUMENTFEED should return reconv, but some applications return
   // need_size.
   return reinterpret_cast<LRESULT>(reconv);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostView, public:
+
+// static
+RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
+    RenderWidgetHost* widget) {
+  return new RenderWidgetHostViewWin(widget);
+}
+
+void RenderWidgetHostViewWin::DisplayOnScreenKeyboardIfNeeded() {
+  if (focus_on_editable_field_) {
+    if (pointer_down_context_) {
+      virtual_keyboard_->put_Visible(VARIANT_TRUE);
+    }
+  } else {
+    virtual_keyboard_->put_Visible(VARIANT_FALSE);
+  }
+}
+
+void RenderWidgetHostViewWin::ResetPointerDownContext() {
+  // If the default focus on the page is on an edit field and we did not
+  // receive a focus change in the context of a pointer down message, it means
+  // that the pointer down message occurred on the edit field and we should
+  // display the on screen keyboard
+  if (!received_focus_change_after_pointer_down_ && virtual_keyboard_)
+    DisplayOnScreenKeyboardIfNeeded();
+  received_focus_change_after_pointer_down_ = false;
+  pointer_down_context_ = false;
 }

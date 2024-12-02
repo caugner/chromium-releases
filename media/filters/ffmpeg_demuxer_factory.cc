@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,11 @@
 namespace media {
 
 FFmpegDemuxerFactory::FFmpegDemuxerFactory(
-    DataSourceFactory* data_source_factory,
+    const scoped_refptr<DataSource>& data_source,
     MessageLoop* loop)
-    : data_source_factory_(data_source_factory), loop_(loop) {}
+    : data_source_(data_source),
+      loop_(loop) {
+}
 
 FFmpegDemuxerFactory::~FFmpegDemuxerFactory() {}
 
@@ -24,36 +26,18 @@ static void DemuxerInitDone(const DemuxerFactory::BuildCallback& cb,
     cb.Run(status, NULL);
     return;
   }
-  cb.Run(PIPELINE_OK, demuxer.get());
-}
-
-static void InitializeDemuxerBasedOnDataSourceStatus(
-    const DemuxerFactory::BuildCallback& cb,
-    MessageLoop* loop, bool local_source,
-    PipelineStatus status, DataSource* data_source) {
-  if (status != PIPELINE_OK) {
-    cb.Run(status, NULL);
-    return;
-  }
-  DCHECK(data_source);
-  scoped_refptr<FFmpegDemuxer> demuxer = new FFmpegDemuxer(loop, local_source);
-  demuxer->Initialize(
-      data_source,
-      base::Bind(&DemuxerInitDone, cb, demuxer));
+  cb.Run(PIPELINE_OK, demuxer);
 }
 
 void FFmpegDemuxerFactory::Build(const std::string& url,
                                  const BuildCallback& cb) {
   GURL gurl = GURL(url);
   bool local_source = !gurl.SchemeIs("http") && !gurl.SchemeIs("https");
-  data_source_factory_->Build(
-      url,
-      base::Bind(&InitializeDemuxerBasedOnDataSourceStatus,
-                 cb, loop_, local_source));
-}
+  scoped_refptr<FFmpegDemuxer> demuxer = new FFmpegDemuxer(loop_, local_source);
 
-DemuxerFactory* FFmpegDemuxerFactory::Clone() const {
-  return new FFmpegDemuxerFactory(data_source_factory_->Clone(), loop_);
+  demuxer->Initialize(
+      data_source_,
+      base::Bind(&DemuxerInitDone, cb, demuxer));
 }
 
 }  // namespace media

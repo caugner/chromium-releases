@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,20 +13,19 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
+#include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -74,8 +73,8 @@ FindBarView::FindBarView(FindBarHost* host)
       find_previous_button_(NULL),
       find_next_button_(NULL),
       close_button_(NULL),
-      background_(NULL),
-      background_left_(NULL) {
+      text_box_background_(NULL),
+      text_box_background_left_(NULL) {
   set_id(VIEW_ID_FIND_IN_PAGE);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
@@ -141,13 +140,19 @@ FindBarView::FindBarView(FindBarHost* host)
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   AddChildView(close_button_);
 
-  SetDialogBorderBitmaps(rb.GetBitmapNamed(IDR_FIND_DIALOG_LEFT),
-                         rb.GetBitmapNamed(IDR_FIND_DIALOG_MIDDLE),
-                         rb.GetBitmapNamed(IDR_FIND_DIALOG_RIGHT));
+  SetBackground(rb.GetBitmapNamed(IDR_FIND_DLG_LEFT_BACKGROUND),
+                rb.GetBitmapNamed(IDR_FIND_DLG_RIGHT_BACKGROUND));
+
+  SetBorder(IDR_FIND_DIALOG_LEFT, IDR_FIND_DIALOG_MIDDLE,
+            IDR_FIND_DIALOG_RIGHT);
+
+  preferred_height_ = rb.GetBitmapNamed(IDR_FIND_DIALOG_MIDDLE)->height();
 
   // Background images for the Find edit box.
-  background_ = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND);
-  background_left_ = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND_LEFT);
+  text_box_background_ = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND);
+  text_box_background_left_ = rb.GetBitmapNamed(IDR_FIND_BOX_BACKGROUND_LEFT);
+
+  EnableCanvasFlippingForRTLUI(true);
 }
 
 FindBarView::~FindBarView() {
@@ -220,18 +225,8 @@ void FindBarView::SetFocusAndSelection(bool select_all) {
 // FindBarView, views::View overrides:
 
 void FindBarView::OnPaint(gfx::Canvas* canvas) {
-  SkPaint paint;
-
-  gfx::Rect bounds = PaintOffsetToolbarBackground(canvas);
-
-  // Now flip the canvas for the rest of the graphics if in RTL mode.
-  canvas->Save();
-  if (base::i18n::IsRTL()) {
-    canvas->Translate(gfx::Point(width(), 0));
-    canvas->Scale(-1, 1);
-  }
-
-  PaintDialogBorder(canvas, bounds);
+  // Paint drop down bar border and background.
+  DropdownBarView::OnPaint(canvas);
 
   // Then we draw the background image for the Find Textfield. We start by
   // calculating the position of background images for the Find text box.
@@ -239,19 +234,17 @@ void FindBarView::OnPaint(gfx::Canvas* canvas) {
   gfx::Point back_button_origin = find_previous_button_->bounds().origin();
 
   // Draw the image to the left that creates a curved left edge for the box.
-  canvas->TileImageInt(*background_left_,
-      find_text_x - background_left_->width(), back_button_origin.y(),
-      background_left_->width(), background_left_->height());
+  canvas->TileImageInt(*text_box_background_left_,
+      find_text_x - text_box_background_left_->width(),
+      back_button_origin.y(), text_box_background_left_->width(),
+      text_box_background_left_->height());
 
   // Draw the top and bottom border for whole text box (encompasses both the
   // find_text_ edit box and the match_count_text_ label).
-  canvas->TileImageInt(*background_, find_text_x, back_button_origin.y(),
+  canvas->TileImageInt(*text_box_background_, find_text_x,
+                       back_button_origin.y(),
                        back_button_origin.x() - find_text_x,
-                       background_->height());
-
-  PaintAnimatingEdges(canvas, bounds);
-
-  canvas->Restore();
+                       text_box_background_->height());
 }
 
 void FindBarView::Layout() {
@@ -340,7 +333,7 @@ void FindBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
 
 gfx::Size FindBarView::GetPreferredSize() {
   gfx::Size prefsize = find_text_->GetPreferredSize();
-  prefsize.set_height(dialog_middle_->height());
+  prefsize.set_height(preferred_height_);
 
   // Add up all the preferred sizes and margins of the rest of the controls.
   prefsize.Enlarge(kMarginLeftOfCloseButton + kMarginRightOfCloseButton +
@@ -416,7 +409,8 @@ void FindBarView::ContentsChanged(views::Textfield* sender,
     // sent for a lot more things than just the user nulling out the search
     // terms. See http://crbug.com/45372.
     FindBarState* find_bar_state =
-        controller->tab_contents()->profile()->GetFindBarState();
+        FindBarStateFactory::GetForProfile(
+            controller->tab_contents()->profile());
     find_bar_state->set_last_prepopulate_text(string16());
   }
 }

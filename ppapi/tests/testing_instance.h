@@ -7,7 +7,7 @@
 
 #include <string>
 
-#include "ppapi/cpp/completion_callback.h"
+#include "ppapi/utility/completion_callback_factory.h"
 
 #if defined(__native_client__)
 #include "ppapi/cpp/instance.h"
@@ -48,7 +48,7 @@ pp::InstancePrivate {
 
   // pp::Instance override.
   virtual bool Init(uint32_t argc, const char* argn[], const char* argv[]);
-  virtual void DidChangeView(const pp::Rect& position, const pp::Rect& clip);
+  virtual void DidChangeView(const pp::View& view);
   virtual bool HandleInputEvent(const pp::InputEvent& event);
 
 #if !(defined __native_client__)
@@ -83,6 +83,12 @@ pp::InstancePrivate {
     return protocol_;
   }
 
+  // Posts a message to the test page to eval() the script.
+  void EvalScript(const std::string& script);
+
+  // Sets the given cookie in the current document.
+  void SetCookie(const std::string& name, const std::string& value);
+
  private:
   void ExecuteTests(int32_t unused);
 
@@ -110,9 +116,6 @@ pp::InstancePrivate {
   void LogHTML(const std::string& html);
 
   void ReportProgress(const std::string& progress_value);
-
-  // Sets the given cookie in the current document.
-  void SetCookie(const std::string& name, const std::string& value);
 
   pp::CompletionCallbackFactory<TestingInstance> callback_factory_;
 

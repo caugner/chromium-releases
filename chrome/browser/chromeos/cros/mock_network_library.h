@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,6 +82,9 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_CONST_METHOD1(FindRememberedNetworkByPath, Network*(const std::string&));
   MOCK_CONST_METHOD1(FindRememberedNetworkByUniqueId,
                      Network*(const std::string&));
+  MOCK_CONST_METHOD1(FindOncForNetwork,
+                     const base::DictionaryValue*(
+                         const std::string& unique_id));
   MOCK_CONST_METHOD1(GetDataPlans,
                      CellularDataPlanVector*(const std::string&));
   MOCK_CONST_METHOD1(GetSignificantDataPlan,
@@ -124,7 +127,7 @@ class MockNetworkLibrary : public NetworkLibrary {
   MOCK_METHOD1(ForgetNetwork, void(const std::string&));
   MOCK_METHOD2(SetNetworkProfile, void(const std::string&,
                                        NetworkProfileType));
-  MOCK_CONST_METHOD0(GetCellularHomeCarrierId, std::string(void));
+  MOCK_CONST_METHOD0(GetCellularHomeCarrierId, const std::string&(void));
 
   MOCK_CONST_METHOD0(ethernet_available, bool(void));
   MOCK_CONST_METHOD0(wifi_available, bool(void));
@@ -155,7 +158,10 @@ class MockNetworkLibrary : public NetworkLibrary {
                                                    HardwareAddressFormat));
   MOCK_METHOD1(SetIPConfig, void(const NetworkIPConfig&));
   MOCK_METHOD0(SwitchToPreferredNetwork, void(void));
-  MOCK_METHOD2(LoadOncNetworks, bool(const std::string&, const std::string&));
+  MOCK_METHOD4(LoadOncNetworks, bool(const std::string&,
+                                     const std::string&,
+                                     NetworkUIData::ONCSource,
+                                     std::string*));
   MOCK_METHOD2(SetActiveNetwork, bool(ConnectionType, const std::string&));
 };
 

@@ -1,33 +1,24 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
-#include "base/file_path.h"
-#include "base/file_util.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop_proxy.h"
-#include "base/path_service.h"
 #include "base/time.h"
-#include "base/test/test_timeouts.h"
-#include "crypto/nss_util.h"
-#include "crypto/rsa_private_key.h"
-#include "net/base/completion_callback.h"
-#include "net/base/io_buffer.h"
-#include "net/base/net_errors.h"
 #include "net/socket/socket.h"
 #include "net/socket/stream_socket.h"
 #include "remoting/base/constants.h"
-#include "remoting/protocol/auth_util.h"
 #include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/channel_authenticator.h"
+#include "remoting/protocol/connection_tester.h"
+#include "remoting/protocol/fake_authenticator.h"
 #include "remoting/protocol/jingle_session.h"
 #include "remoting/protocol/jingle_session_manager.h"
-#include "remoting/protocol/v1_authenticator.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/fake_signal_strategy.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/p2p/client/basicportallocator.h"
 
 using testing::_;
 using testing::AtMost;
@@ -36,18 +27,11 @@ using testing::DoAll;
 using testing::InSequence;
 using testing::Invoke;
 using testing::InvokeWithoutArgs;
+using testing::Mock;
 using testing::Return;
 using testing::SaveArg;
 using testing::SetArgumentPointee;
 using testing::WithArg;
-
-namespace remoting {
-namespace protocol {
-class JingleSessionTest;
-}  // namespace protocol
-}  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::protocol::JingleSessionTest);
 
 namespace remoting {
 namespace protocol {
@@ -58,39 +42,18 @@ namespace {
 // between messages (about 1 second for 100 messages).
 const int kMessageSize = 1024;
 const int kMessages = 100;
-const int kTestDataSize = kMessages * kMessageSize;
 const int kUdpWriteDelayMs = 10;
 const char kChannelName[] = "test_channel";
 
 const char kHostJid[] = "host1@gmail.com/123";
 const char kClientJid[] = "host2@gmail.com/321";
 
-const char kTestHostPublicKey[] =
-    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3nk/8ILc0JBqHgOS0UCOIl4m"
-    "0GUd2FIiZ/6Fc9D/iiyUgli+FIY5dwsrSoNJ87sYGifVDh8a5fdZNV5y58CcrapI5fJI"
-    "FpXviSW4g8d/t1gcZkoz1ppmjzbgXm6ckw9Td0yRD0cHu732Ijs+eo8wT0pt4KiHkbyR"
-    "iAvjrvkNDlfiEk7tiY7YzD9zTi3146GX6KLz5GQAd/3I8I5QW3ftF1s/m93AHuc383GZ"
-    "A78Oi+IbcJf/jJUZO119VNnRKGiPsf5GZIoHyXX8O5OUQk5soKdQPeK1FwWkeZu6fuXl"
-    "QoU12I6podD6xMFa/PA/xefMwcpmuWTRhcso9bp10zVFGQIDAQAB";
-
-const char kTestSharedSecret[] = "1234-1234-5678";
-const char kTestSharedSecretBad[] = "0000-0000-0001";
-
 void QuitCurrentThread() {
-  MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
-void OnTimeoutTerminateThread(bool* timeout) {
-  *timeout = true;
+ACTION(QuitThread) {
   QuitCurrentThread();
-}
-
-bool RunMessageLoopWithTimeout(int timeout_ms) {
-  bool timeout = false;
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(&OnTimeoutTerminateThread, &timeout), timeout_ms);
-  MessageLoop::current()->Run();
-  return !timeout;
 }
 
 ACTION_P(QuitThreadOnCounter, counter) {
@@ -102,7 +65,7 @@ ACTION_P(QuitThreadOnCounter, counter) {
 
 class MockSessionManagerListener : public SessionManager::Listener {
  public:
-  MOCK_METHOD0(OnSessionManagerInitialized, void());
+  MOCK_METHOD0(OnSessionManagerReady, void());
   MOCK_METHOD2(OnIncomingSession,
                void(Session*,
                     SessionManager::IncomingSessionResponse*));
@@ -113,122 +76,14 @@ class MockSessionCallback {
   MOCK_METHOD1(OnStateChange, void(Session::State));
 };
 
-class FakeChannelAuthenticator : public ChannelAuthenticator {
+class MockStreamChannelCallback {
  public:
-  FakeChannelAuthenticator(bool accept)
-      : accept_(accept) {
-  }
-  virtual ~FakeChannelAuthenticator() {}
-
-  virtual void SecureAndAuthenticate(
-      net::StreamSocket* socket, const DoneCallback& done_callback) OVERRIDE {
-    if (accept_) {
-      done_callback.Run(net::OK, socket);
-    } else {
-      delete socket;
-      done_callback.Run(net::ERR_FAILED, NULL);
-    }
-  }
-
- private:
-  bool accept_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeChannelAuthenticator);
+  MOCK_METHOD1(OnDone, void(net::StreamSocket* socket));
 };
 
-class FakeClientAuthenticator : public Authenticator {
+class MockDatagramChannelCallback {
  public:
-  FakeClientAuthenticator(bool accept, bool accept_channel)
-      : accept_(accept),
-        accept_channel_(accept_channel),
-        state_(MESSAGE_READY) {
-  }
-  virtual ~FakeClientAuthenticator() {}
-
-  virtual State state() const OVERRIDE {
-    return state_;
-  }
-
-  virtual void ProcessMessage(const buzz::XmlElement* message) OVERRIDE {
-    EXPECT_EQ(WAITING_MESSAGE, state_);
-    state_ = accept_ ? ACCEPTED : REJECTED;
-  }
-
-  virtual buzz::XmlElement* GetNextMessage() OVERRIDE {
-    EXPECT_EQ(MESSAGE_READY, state_);
-    state_ = WAITING_MESSAGE;
-    return new buzz::XmlElement(
-        buzz::QName(kChromotingXmlNamespace, "authentication"));
-  }
-
-  virtual ChannelAuthenticator* CreateChannelAuthenticator() const OVERRIDE {
-    return new FakeChannelAuthenticator(accept_channel_);
-  }
-
- protected:
-  bool accept_;
-  bool accept_channel_;
-  State state_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeClientAuthenticator);
-};
-
-class FakeHostAuthenticator : public Authenticator {
- public:
-  FakeHostAuthenticator(bool accept, bool accept_channel)
-      : accept_(accept),
-        accept_channel_(accept_channel),
-        state_(WAITING_MESSAGE) {
-  }
-  virtual ~FakeHostAuthenticator() {}
-
-  virtual State state() const OVERRIDE {
-    return state_;
-  }
-
-  virtual void ProcessMessage(const buzz::XmlElement* message) OVERRIDE {
-    EXPECT_EQ(WAITING_MESSAGE, state_);
-    state_ = MESSAGE_READY;
-  }
-
-  virtual buzz::XmlElement* GetNextMessage() OVERRIDE {
-    EXPECT_EQ(MESSAGE_READY, state_);
-    state_ = accept_ ? ACCEPTED : REJECTED;
-    return new buzz::XmlElement(
-        buzz::QName(kChromotingXmlNamespace, "authentication"));
-  }
-
-  virtual ChannelAuthenticator* CreateChannelAuthenticator() const OVERRIDE {
-    return new FakeChannelAuthenticator(accept_channel_);
-  }
-
- protected:
-  bool accept_;
-  bool accept_channel_;
-  State state_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeHostAuthenticator);
-};
-
-class FakeHostAuthenticatorFactory : public AuthenticatorFactory {
- public:
-  FakeHostAuthenticatorFactory(bool accept, bool accept_channel)
-      : accept_(accept),
-        accept_channel_(accept_channel) {
-  }
-  virtual ~FakeHostAuthenticatorFactory() {}
-
-  virtual Authenticator* CreateAuthenticator(
-      const std::string& remote_jid,
-      const buzz::XmlElement* first_message) OVERRIDE {
-    return new FakeHostAuthenticator(accept_, accept_channel_);
-  }
-
- private:
-  bool accept_;
-  bool accept_channel_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeHostAuthenticatorFactory);
+  MOCK_METHOD1(OnDone, void(net::Socket* socket));
 };
 
 }  // namespace
@@ -239,7 +94,7 @@ class JingleSessionTest : public testing::Test {
       : message_loop_(talk_base::Thread::Current()) {
   }
 
-  // Helper method to copy to set value of client_connection_.
+  // Helper method that handles OnIncomingSession().
   void SetHostSession(Session* session) {
     DCHECK(session);
     host_session_.reset(session);
@@ -260,66 +115,36 @@ class JingleSessionTest : public testing::Test {
   }
 
   void CloseSessions() {
-    if (host_session_.get()) {
-      host_session_->Close();
-      host_session_.reset();
-    }
-    if (client_session_.get()) {
-      client_session_->Close();
-      client_session_.reset();
-    }
+    host_socket_.reset();
+    client_socket_.reset();
+    host_session_.reset();
+    client_session_.reset();
   }
 
-  void CreateServerPair(bool use_fake_auth) {
-    FilePath certs_dir;
-    PathService::Get(base::DIR_SOURCE_ROOT, &certs_dir);
-    certs_dir = certs_dir.AppendASCII("net");
-    certs_dir = certs_dir.AppendASCII("data");
-    certs_dir = certs_dir.AppendASCII("ssl");
-    certs_dir = certs_dir.AppendASCII("certificates");
-
-    FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
-    std::string cert_der;
-    ASSERT_TRUE(file_util::ReadFileToString(cert_path, &cert_der));
-
-    FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
-    std::string key_string;
-    ASSERT_TRUE(file_util::ReadFileToString(key_path, &key_string));
-    std::vector<uint8> key_vector(
-        reinterpret_cast<const uint8*>(key_string.data()),
-        reinterpret_cast<const uint8*>(key_string.data() +
-                                       key_string.length()));
-    scoped_ptr<crypto::RSAPrivateKey> private_key(
-        crypto::RSAPrivateKey::CreateFromPrivateKeyInfo(key_vector));
-
+  void CreateSessionManagers(int auth_round_trips,
+                        FakeAuthenticator::Action auth_action) {
     host_signal_strategy_.reset(new FakeSignalStrategy(kHostJid));
     client_signal_strategy_.reset(new FakeSignalStrategy(kClientJid));
     FakeSignalStrategy::Connect(host_signal_strategy_.get(),
                                 client_signal_strategy_.get());
 
-    EXPECT_CALL(host_server_listener_, OnSessionManagerInitialized())
+    EXPECT_CALL(host_server_listener_, OnSessionManagerReady())
         .Times(1);
     host_server_.reset(new JingleSessionManager(
         base::MessageLoopProxy::current()));
-    host_server_->Init(
-        kHostJid, host_signal_strategy_.get(), &host_server_listener_, false);
+    host_server_->Init(host_signal_strategy_.get(), &host_server_listener_,
+                       NetworkSettings());
 
-    if (use_fake_auth) {
-      host_server_->set_authenticator_factory(
-          new FakeHostAuthenticatorFactory(true, false));
-    } else {
-      host_server_->set_authenticator_factory(
-          new V1HostAuthenticatorFactory(
-              cert_der, private_key.get(), kTestSharedSecret));
-    }
+    scoped_ptr<AuthenticatorFactory> factory(
+        new FakeHostAuthenticatorFactory(auth_round_trips, auth_action, true));
+    host_server_->set_authenticator_factory(factory.Pass());
 
-    EXPECT_CALL(client_server_listener_, OnSessionManagerInitialized())
+    EXPECT_CALL(client_server_listener_, OnSessionManagerReady())
         .Times(1);
     client_server_.reset(new JingleSessionManager(
         base::MessageLoopProxy::current()));
-    client_server_->Init(
-        kClientJid, client_signal_strategy_.get(),
-        &client_server_listener_, false);
+    client_server_->Init(client_signal_strategy_.get(),
+                         &client_server_listener_, NetworkSettings());
   }
 
   void CloseSessionManager() {
@@ -335,9 +160,9 @@ class JingleSessionTest : public testing::Test {
     client_signal_strategy_.reset();
   }
 
-  bool InitiateConnection(bool use_fake_auth) {
-    int not_connected_peers = 2;
-
+  void InitiateConnection(int auth_round_trips,
+                          FakeAuthenticator::Action auth_action,
+                          bool expect_fail) {
     EXPECT_CALL(host_server_listener_, OnIncomingSession(_, _))
         .WillOnce(DoAll(
             WithArg<0>(Invoke(
@@ -349,12 +174,16 @@ class JingleSessionTest : public testing::Test {
 
       EXPECT_CALL(host_connection_callback_,
                   OnStateChange(Session::CONNECTED))
-          .Times(1)
-          .WillOnce(QuitThreadOnCounter(&not_connected_peers));
-      // Expect that the connection will be closed eventually.
-      EXPECT_CALL(host_connection_callback_,
-                  OnStateChange(Session::CLOSED))
           .Times(AtMost(1));
+      if (expect_fail) {
+        EXPECT_CALL(host_connection_callback_,
+                    OnStateChange(Session::FAILED))
+            .Times(1);
+      } else {
+        EXPECT_CALL(host_connection_callback_,
+                    OnStateChange(Session::AUTHENTICATED))
+            .Times(1);
+      }
     }
 
     {
@@ -365,30 +194,75 @@ class JingleSessionTest : public testing::Test {
           .Times(1);
       EXPECT_CALL(client_connection_callback_,
                   OnStateChange(Session::CONNECTED))
-          .Times(1)
-          .WillOnce(QuitThreadOnCounter(&not_connected_peers));
+          .Times(AtMost(1));
+      if (expect_fail) {
+        EXPECT_CALL(client_connection_callback_,
+                    OnStateChange(Session::FAILED))
+            .Times(1);
+      } else {
+        EXPECT_CALL(client_connection_callback_,
+                    OnStateChange(Session::AUTHENTICATED))
+            .Times(1);
+      }
+    }
+
+    scoped_ptr<Authenticator> authenticator(new FakeAuthenticator(
+        FakeAuthenticator::CLIENT, auth_round_trips, auth_action, true));
+
+    client_session_ = client_server_->Connect(
+        kHostJid, authenticator.Pass(),
+        CandidateSessionConfig::CreateDefault(),
+        base::Bind(&MockSessionCallback::OnStateChange,
+                   base::Unretained(&client_connection_callback_)));
+
+    message_loop_.RunAllPending();
+
+    Mock::VerifyAndClearExpectations(&host_connection_callback_);
+    Mock::VerifyAndClearExpectations(&client_connection_callback_);
+
+    if (!expect_fail) {
+      // Expect that the connection will be closed eventually.
+      EXPECT_CALL(host_connection_callback_,
+                  OnStateChange(Session::CLOSED))
+          .Times(AtMost(1));
+    }
+
+    if (!expect_fail) {
       // Expect that the connection will be closed eventually.
       EXPECT_CALL(client_connection_callback_,
                   OnStateChange(Session::CLOSED))
           .Times(AtMost(1));
     }
-
-    Authenticator* authenticator;
-    if (use_fake_auth) {
-      authenticator = new FakeClientAuthenticator(true, true);
-    } else {
-      authenticator = new V1ClientAuthenticator(kClientJid, kTestSharedSecret);
-    }
-    client_session_.reset(client_server_->Connect(
-        kHostJid, authenticator,
-        CandidateSessionConfig::CreateDefault(),
-        base::Bind(&MockSessionCallback::OnStateChange,
-                   base::Unretained(&client_connection_callback_))));
-
-    return RunMessageLoopWithTimeout(TestTimeouts::action_max_timeout_ms());
   }
 
-  static void DoNothing() { }
+  void CreateChannel() {
+    MockStreamChannelCallback client_callback;
+    MockStreamChannelCallback host_callback;
+
+    client_session_->CreateStreamChannel(kChannelName, base::Bind(
+        &MockStreamChannelCallback::OnDone,
+        base::Unretained(&host_callback)));
+    host_session_->CreateStreamChannel(kChannelName, base::Bind(
+        &MockStreamChannelCallback::OnDone,
+        base::Unretained(&client_callback)));
+
+    int counter = 2;
+    net::StreamSocket* client_socket = NULL;
+    net::StreamSocket* host_socket = NULL;
+    EXPECT_CALL(client_callback, OnDone(_))
+        .WillOnce(DoAll(SaveArg<0>(&client_socket),
+                        QuitThreadOnCounter(&counter)));
+    EXPECT_CALL(host_callback, OnDone(_))
+        .WillOnce(DoAll(SaveArg<0>(&host_socket),
+                        QuitThreadOnCounter(&counter)));
+    message_loop_.Run();
+
+    ASSERT_TRUE(client_socket != NULL);
+    ASSERT_TRUE(host_socket != NULL);
+
+    client_socket_.reset(client_socket);
+    host_socket_.reset(host_socket);
+  }
 
   JingleThreadMessageLoop message_loop_;
 
@@ -404,389 +278,20 @@ class JingleSessionTest : public testing::Test {
   MockSessionCallback host_connection_callback_;
   scoped_ptr<Session> client_session_;
   MockSessionCallback client_connection_callback_;
-};
 
-class ChannelTesterBase : public base::RefCountedThreadSafe<ChannelTesterBase> {
- public:
-  ChannelTesterBase(Session* host_session,
-                    Session* client_session)
-      : host_session_(host_session),
-        client_session_(client_session),
-        done_(false) {
-  }
-
-  virtual ~ChannelTesterBase() { }
-
-  void Start() {
-    MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&ChannelTesterBase::DoStart, this));
-  }
-
-  bool WaitFinished() {
-    return RunMessageLoopWithTimeout(TestTimeouts::action_max_timeout_ms());
-  }
-
-  virtual void CheckResults() = 0;
-
- protected:
-  void DoStart() {
-    InitChannels();
-  }
-
-  virtual void InitChannels() = 0;
-
-  void Done() {
-    done_ = true;
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(&QuitCurrentThread));
-  }
-
-  virtual void InitBuffers() = 0;
-  virtual void DoWrite() = 0;
-  virtual void DoRead() = 0;
-
-  Session* host_session_;
-  Session* client_session_;
-  scoped_ptr<net::Socket> sockets_[2];
-  bool done_;
-};
-
-class TCPChannelTester : public ChannelTesterBase {
- public:
-  TCPChannelTester(Session* host_session,
-                   Session* client_session,
-                   int message_size,
-                   int message_count)
-      : ChannelTesterBase(host_session, client_session),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            write_cb_(this, &TCPChannelTester::OnWritten)),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            read_cb_(this, &TCPChannelTester::OnRead)),
-        write_errors_(0),
-        read_errors_(0),
-        message_size_(message_size),
-        message_count_(message_count),
-        test_data_size_(message_size * message_count) {
-  }
-
-  virtual ~TCPChannelTester() { }
-
-  virtual bool did_initialization_fail() {
-    return !sockets_[0].get() || !sockets_[1].get();
-  }
-
-  virtual void CheckResults() {
-    ASSERT_FALSE(did_initialization_fail());
-
-    EXPECT_EQ(0, write_errors_);
-    EXPECT_EQ(0, read_errors_);
-
-    ASSERT_EQ(test_data_size_, input_buffer_->offset());
-
-    output_buffer_->SetOffset(0);
-    ASSERT_EQ(test_data_size_, output_buffer_->size());
-
-    EXPECT_EQ(0, memcmp(output_buffer_->data(),
-                        input_buffer_->StartOfBuffer(), test_data_size_));
-  }
-
- protected:
-  virtual void InitChannels() OVERRIDE {
-    host_session_->CreateStreamChannel(
-        kChannelName,
-        base::Bind(&TCPChannelTester::OnChannelReady,
-                   base::Unretained(this), 0));
-    client_session_->CreateStreamChannel(
-        kChannelName,
-        base::Bind(&TCPChannelTester::OnChannelReady,
-                   base::Unretained(this), 1));
-  }
-
-  void OnChannelReady(int id, net::StreamSocket* socket) {
-    if (!socket) {
-      host_session_->CancelChannelCreation(kChannelName);
-      client_session_->CancelChannelCreation(kChannelName);
-      Done();
-      return;
-    }
-
-    DCHECK(id >= 0 && id < 2);
-    sockets_[id].reset(socket);
-
-    if (sockets_[0].get() && sockets_[1].get()) {
-      InitBuffers();
-      DoRead();
-      DoWrite();
-    }
-  }
-
-  virtual void InitBuffers() {
-    output_buffer_ = new net::DrainableIOBuffer(
-        new net::IOBuffer(test_data_size_), test_data_size_);
-    memset(output_buffer_->data(), 123, test_data_size_);
-
-    input_buffer_ = new net::GrowableIOBuffer();
-  }
-
-  virtual void DoWrite() {
-    int result = 1;
-    while (result > 0) {
-      if (output_buffer_->BytesRemaining() == 0)
-        break;
-      int bytes_to_write = std::min(output_buffer_->BytesRemaining(),
-                                    message_size_);
-      result = sockets_[0]->Write(output_buffer_, bytes_to_write, &write_cb_);
-      HandleWriteResult(result);
-    };
-  }
-
-  void OnWritten(int result) {
-    HandleWriteResult(result);
-    DoWrite();
-  }
-
-  void HandleWriteResult(int result) {
-    if (result <= 0 && result != net::ERR_IO_PENDING) {
-      LOG(ERROR) << "Received error " << result << " when trying to write";
-      write_errors_++;
-      Done();
-    } else if (result > 0) {
-      output_buffer_->DidConsume(result);
-    }
-  }
-
-  virtual void DoRead() {
-    int result = 1;
-    while (result > 0) {
-      input_buffer_->SetCapacity(input_buffer_->offset() + message_size_);
-      result = sockets_[1]->Read(input_buffer_, message_size_, &read_cb_);
-      HandleReadResult(result);
-    };
-  }
-
-  void OnRead(int result) {
-    HandleReadResult(result);
-    if (!done_)
-      DoRead();  // Don't try to read again when we are done reading.
-  }
-
-  void HandleReadResult(int result) {
-    if (result <= 0 && result != net::ERR_IO_PENDING) {
-      if (!done_) {
-        LOG(ERROR) << "Received error " << result << " when trying to read";
-        read_errors_++;
-        Done();
-      }
-    } else if (result > 0) {
-      // Allocate memory for the next read.
-      input_buffer_->set_offset(input_buffer_->offset() + result);
-      if (input_buffer_->offset() == test_data_size_)
-        Done();
-    }
-  }
-
-  scoped_refptr<net::DrainableIOBuffer> output_buffer_;
-  scoped_refptr<net::GrowableIOBuffer> input_buffer_;
-
-  net::OldCompletionCallbackImpl<TCPChannelTester> write_cb_;
-  net::OldCompletionCallbackImpl<TCPChannelTester> read_cb_;
-  int write_errors_;
-  int read_errors_;
-  int message_size_;
-  int message_count_;
-  int test_data_size_;
-};
-
-class ChannelSpeedTester : public TCPChannelTester {
- public:
-  ChannelSpeedTester(Session* host_session,
-                     Session* client_session,
-                     int message_size)
-      : TCPChannelTester(host_session, client_session, message_size, 1) {
-    CHECK(message_size >= 8);
-  }
-
-  virtual ~ChannelSpeedTester() { }
-
-  virtual void CheckResults() {
-  }
-
-  base::TimeDelta GetElapsedTime() {
-    return base::Time::Now() - start_time_;
-  }
-
- protected:
-  virtual void InitBuffers() {
-    TCPChannelTester::InitBuffers();
-
-    start_time_ = base::Time::Now();
-  }
-
-  base::Time start_time_;
-};
-
-class UDPChannelTester : public ChannelTesterBase {
- public:
-  UDPChannelTester(Session* host_session,
-                   Session* client_session)
-      : ChannelTesterBase(host_session, client_session),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            write_cb_(this, &UDPChannelTester::OnWritten)),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            read_cb_(this, &UDPChannelTester::OnRead)),
-        write_errors_(0),
-        read_errors_(0),
-        packets_sent_(0),
-        packets_received_(0),
-        broken_packets_(0) {
-  }
-
-  virtual ~UDPChannelTester() { }
-
-  virtual void CheckResults() {
-    EXPECT_EQ(0, write_errors_);
-    EXPECT_EQ(0, read_errors_);
-
-    EXPECT_EQ(0, broken_packets_);
-
-    // Verify that we've received at least one packet.
-    EXPECT_GT(packets_received_, 0);
-    LOG(INFO) << "Received " << packets_received_ << " packets out of "
-              << kMessages;
-  }
-
- protected:
-  virtual void InitChannels() OVERRIDE {
-    host_session_->CreateDatagramChannel(
-        kChannelName,
-        base::Bind(&UDPChannelTester::OnChannelReady,
-                   base::Unretained(this), 0));
-    client_session_->CreateDatagramChannel(
-        kChannelName,
-        base::Bind(&UDPChannelTester::OnChannelReady,
-                   base::Unretained(this), 1));
-  }
-
-  void OnChannelReady(int id, net::Socket* socket) {
-    ASSERT_TRUE(socket);
-    if (!socket) {
-      Done();
-      return;
-    }
-
-    DCHECK(id >= 0 && id < 2);
-    sockets_[id].reset(socket);
-
-    if (sockets_[0].get() && sockets_[1].get()) {
-      InitBuffers();
-      DoRead();
-      DoWrite();
-    }
-  }
-
-
-  virtual void InitBuffers() {
-  }
-
-  virtual void DoWrite() {
-    if (packets_sent_ >= kMessages) {
-      Done();
-      return;
-    }
-
-    scoped_refptr<net::IOBuffer> packet(new net::IOBuffer(kMessageSize));
-    memset(packet->data(), 123, kMessageSize);
-    sent_packets_[packets_sent_] = packet;
-    // Put index of this packet in the beginning of the packet body.
-    memcpy(packet->data(), &packets_sent_, sizeof(packets_sent_));
-
-    int result = sockets_[0]->Write(packet, kMessageSize, &write_cb_);
-    HandleWriteResult(result);
-  }
-
-  void OnWritten(int result) {
-    HandleWriteResult(result);
-  }
-
-  void HandleWriteResult(int result) {
-    if (result <= 0 && result != net::ERR_IO_PENDING) {
-      LOG(ERROR) << "Received error " << result << " when trying to write";
-      write_errors_++;
-      Done();
-    } else if (result > 0) {
-      EXPECT_EQ(kMessageSize, result);
-      packets_sent_++;
-      MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, base::Bind(&UDPChannelTester::DoWrite, this),
-          kUdpWriteDelayMs);
-    }
-  }
-
-  virtual void DoRead() {
-    int result = 1;
-    while (result > 0) {
-      int kReadSize = kMessageSize * 2;
-      read_buffer_ = new net::IOBuffer(kReadSize);
-
-      result = sockets_[1]->Read(read_buffer_, kReadSize, &read_cb_);
-      HandleReadResult(result);
-    };
-  }
-
-  void OnRead(int result) {
-    HandleReadResult(result);
-    DoRead();
-  }
-
-  void HandleReadResult(int result) {
-    if (result <= 0 && result != net::ERR_IO_PENDING) {
-      // Error will be received after the socket is closed.
-      if (!done_) {
-        LOG(ERROR) << "Received error " << result << " when trying to read";
-        read_errors_++;
-        Done();
-      }
-    } else if (result > 0) {
-      packets_received_++;
-      if (kMessageSize != result) {
-        // Invalid packet size;
-        broken_packets_++;
-      } else {
-        // Validate packet body.
-        int packet_id;
-        memcpy(&packet_id, read_buffer_->data(), sizeof(packet_id));
-        if (packet_id < 0 || packet_id >= kMessages) {
-          broken_packets_++;
-        } else {
-          if (memcmp(read_buffer_->data(), sent_packets_[packet_id]->data(),
-                     kMessageSize) != 0)
-            broken_packets_++;
-        }
-      }
-    }
-  }
-
- private:
-  scoped_refptr<net::IOBuffer> sent_packets_[kMessages];
-  scoped_refptr<net::IOBuffer> read_buffer_;
-
-  net::OldCompletionCallbackImpl<UDPChannelTester> write_cb_;
-  net::OldCompletionCallbackImpl<UDPChannelTester> read_cb_;
-  int write_errors_;
-  int read_errors_;
-  int packets_sent_;
-  int packets_received_;
-  int broken_packets_;
+  scoped_ptr<net::StreamSocket> client_socket_;
+  scoped_ptr<net::StreamSocket> host_socket_;
 };
 
 // Verify that we can create and destory server objects without a connection.
 TEST_F(JingleSessionTest, CreateAndDestoy) {
-  CreateServerPair(false);
+  CreateSessionManagers(1, FakeAuthenticator::ACCEPT);
 }
 
 // Verify that incoming session can be rejected, and that the status
-// of the connection is set to CLOSED in this case.
+// of the connection is set to FAILED in this case.
 TEST_F(JingleSessionTest, RejectConnection) {
-  CreateServerPair(false);
+  CreateSessionManagers(1, FakeAuthenticator::ACCEPT);
 
   // Reject incoming session.
   EXPECT_CALL(host_server_listener_, OnIncomingSession(_, _))
@@ -799,117 +304,140 @@ TEST_F(JingleSessionTest, RejectConnection) {
                 OnStateChange(Session::CONNECTING))
         .Times(1);
     EXPECT_CALL(client_connection_callback_,
-                OnStateChange(Session::CLOSED))
-        .Times(1)
-        .WillOnce(InvokeWithoutArgs(&QuitCurrentThread));
+                OnStateChange(Session::FAILED))
+        .Times(1);
   }
 
-  Authenticator* authenticator =
-      new V1ClientAuthenticator(kClientJid, kTestSharedSecretBad);
-  client_session_.reset(client_server_->Connect(
-      kHostJid, authenticator,
-      CandidateSessionConfig::CreateDefault(),
+  scoped_ptr<Authenticator> authenticator(new FakeAuthenticator(
+      FakeAuthenticator::CLIENT, 1, FakeAuthenticator::ACCEPT, true));
+  client_session_ = client_server_->Connect(
+      kHostJid, authenticator.Pass(), CandidateSessionConfig::CreateDefault(),
       base::Bind(&MockSessionCallback::OnStateChange,
-                 base::Unretained(&client_connection_callback_))));
+                 base::Unretained(&client_connection_callback_)));
 
-  ASSERT_TRUE(RunMessageLoopWithTimeout(TestTimeouts::action_max_timeout_ms()));
+  message_loop_.RunAllPending();
 }
 
-// Verify that we can connect two endpoints.
+// Verify that we can connect two endpoints with single-step authentication.
 TEST_F(JingleSessionTest, Connect) {
-  CreateServerPair(false);
-  ASSERT_TRUE(InitiateConnection(false));
+  CreateSessionManagers(1, FakeAuthenticator::ACCEPT);
+  InitiateConnection(1, FakeAuthenticator::ACCEPT, false);
 }
 
-// Verify that we can't connect two endpoints with mismatched secrets.
-TEST_F(JingleSessionTest, ConnectBadChannelAuth) {
-  CreateServerPair(true);
-  ASSERT_TRUE(InitiateConnection(true));
-  scoped_refptr<TCPChannelTester> tester(
-      new TCPChannelTester(host_session_.get(), client_session_.get(),
-                           kMessageSize, kMessages));
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  EXPECT_TRUE(tester->did_initialization_fail());
+// Verify that we can connect two endpoints with multi-step authentication.
+TEST_F(JingleSessionTest, ConnectWithMultistep) {
+  CreateSessionManagers(3, FakeAuthenticator::ACCEPT);
+  InitiateConnection(3, FakeAuthenticator::ACCEPT, false);
+}
 
-  CloseSessions();
+// Verify that connection is terminated when single-step auth fails.
+TEST_F(JingleSessionTest, ConnectWithBadAuth) {
+  CreateSessionManagers(1, FakeAuthenticator::REJECT);
+  InitiateConnection(1, FakeAuthenticator::ACCEPT, true);
+}
+
+// Verify that connection is terminated when multi-step auth fails.
+TEST_F(JingleSessionTest, ConnectWithBadMultistepAuth) {
+  CreateSessionManagers(3, FakeAuthenticator::REJECT);
+  InitiateConnection(3, FakeAuthenticator::ACCEPT, true);
+}
+
+TEST_F(JingleSessionTest, ConnectWithBadChannelAuth) {
+  CreateSessionManagers(1, FakeAuthenticator::REJECT_CHANNEL);
+  ASSERT_NO_FATAL_FAILURE(
+      InitiateConnection(1, FakeAuthenticator::ACCEPT, false));
+
+  MockStreamChannelCallback client_callback;
+  MockStreamChannelCallback host_callback;
+
+  client_session_->CreateStreamChannel(kChannelName, base::Bind(
+      &MockStreamChannelCallback::OnDone,
+      base::Unretained(&client_callback)));
+  host_session_->CreateStreamChannel(kChannelName, base::Bind(
+      &MockStreamChannelCallback::OnDone,
+      base::Unretained(&host_callback)));
+
+  EXPECT_CALL(client_callback, OnDone(_))
+      .Times(AtMost(1))
+      .WillOnce(DeleteArg<0>());
+  EXPECT_CALL(host_callback, OnDone(NULL))
+      .WillOnce(QuitThread());
+
+  message_loop_.Run();
+
+  client_session_->CancelChannelCreation(kChannelName);
+  host_session_->CancelChannelCreation(kChannelName);
 }
 
 // Verify that data can be transmitted over the event channel.
 TEST_F(JingleSessionTest, TestTcpChannel) {
-  CreateServerPair(false);
-  ASSERT_TRUE(InitiateConnection(false));
-  scoped_refptr<TCPChannelTester> tester(
-      new TCPChannelTester(host_session_.get(), client_session_.get(),
-                           kMessageSize, kMessages));
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  tester->CheckResults();
+  CreateSessionManagers(1, FakeAuthenticator::ACCEPT);
+  ASSERT_NO_FATAL_FAILURE(
+      InitiateConnection(1, FakeAuthenticator::ACCEPT, false));
 
-  // Connections must be closed while |tester| still exists.
-  CloseSessions();
+  ASSERT_NO_FATAL_FAILURE(CreateChannel());
+
+  StreamConnectionTester tester(host_socket_.get(), client_socket_.get(),
+                                kMessageSize, kMessages);
+  tester.Start();
+  message_loop_.Run();
+  tester.CheckResults();
+}
+
+// Verify that we can connect channels with multistep auth.
+TEST_F(JingleSessionTest, TestMultistepAuthTcpChannel) {
+  CreateSessionManagers(3, FakeAuthenticator::ACCEPT);
+  ASSERT_NO_FATAL_FAILURE(
+      InitiateConnection(3, FakeAuthenticator::ACCEPT, false));
+
+  ASSERT_NO_FATAL_FAILURE(CreateChannel());
+
+  StreamConnectionTester tester(host_socket_.get(), client_socket_.get(),
+                                kMessageSize, kMessages);
+  tester.Start();
+  message_loop_.Run();
+  tester.CheckResults();
 }
 
 // Verify that data can be transmitted over the video RTP channel.
 TEST_F(JingleSessionTest, TestUdpChannel) {
-  CreateServerPair(false);
-  ASSERT_TRUE(InitiateConnection(false));
-  scoped_refptr<UDPChannelTester> tester(
-      new UDPChannelTester(host_session_.get(), client_session_.get()));
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  tester->CheckResults();
+  CreateSessionManagers(1, FakeAuthenticator::ACCEPT);
+  ASSERT_NO_FATAL_FAILURE(
+      InitiateConnection(1, FakeAuthenticator::ACCEPT, false));
 
-  // Connections must be closed while |tester| still exists.
-  CloseSessions();
-}
+  MockDatagramChannelCallback client_callback;
+  MockDatagramChannelCallback host_callback;
 
-// Send packets of different size to get the latency for sending data
-// using sockets from JingleSession.
-TEST_F(JingleSessionTest, FLAKY_TestSpeed) {
-  CreateServerPair(false);
-  ASSERT_TRUE(InitiateConnection(false));
-  scoped_refptr<ChannelSpeedTester> tester;
+  int counter = 2;
+  net::Socket* client_socket = NULL;
+  net::Socket* host_socket = NULL;
+  EXPECT_CALL(client_callback, OnDone(_))
+      .WillOnce(DoAll(SaveArg<0>(&client_socket),
+                      QuitThreadOnCounter(&counter)));
+  EXPECT_CALL(host_callback, OnDone(_))
+      .WillOnce(DoAll(SaveArg<0>(&host_socket),
+                      QuitThreadOnCounter(&counter)));
 
-  tester = new ChannelSpeedTester(host_session_.get(),
-                                  client_session_.get(), 512);
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  LOG(INFO) << "Time for 512 bytes "
-            << tester->GetElapsedTime().InMilliseconds() << " ms.";
+  client_session_->CreateDatagramChannel(kChannelName, base::Bind(
+      &MockDatagramChannelCallback::OnDone,
+      base::Unretained(&host_callback)));
+  host_session_->CreateDatagramChannel(kChannelName, base::Bind(
+      &MockDatagramChannelCallback::OnDone,
+      base::Unretained(&client_callback)));
 
-  CloseSessions();
-  ASSERT_TRUE(InitiateConnection(false));
+  message_loop_.Run();
 
-  tester = new ChannelSpeedTester(host_session_.get(),
-                                  client_session_.get(), 1024);
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  LOG(INFO) << "Time for 1024 bytes "
-            << tester->GetElapsedTime().InMilliseconds() << " ms.";
+  scoped_ptr<net::Socket> client_socket_ptr(client_socket);
+  scoped_ptr<net::Socket> host_socket_ptr(host_socket);
 
-  CloseSessions();
-  ASSERT_TRUE(InitiateConnection(false));
+  ASSERT_TRUE(client_socket != NULL);
+  ASSERT_TRUE(host_socket != NULL);
 
-  tester = new ChannelSpeedTester(host_session_.get(),
-                                  client_session_.get(), 51200);
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  LOG(INFO) << "Time for 50k bytes "
-            << tester->GetElapsedTime().InMilliseconds() << " ms.";
-
-  CloseSessions();
-  ASSERT_TRUE(InitiateConnection(false));
-
-  tester = new ChannelSpeedTester(host_session_.get(),
-                                  client_session_.get(), 512000);
-  tester->Start();
-  ASSERT_TRUE(tester->WaitFinished());
-  LOG(INFO) << "Time for 500k bytes "
-            << tester->GetElapsedTime().InMilliseconds() << " ms.";
-
-  // Connections must be closed while |tester| still exists.
-  CloseSessions();
+  DatagramConnectionTester tester(
+      client_socket, host_socket, kMessageSize, kMessages, kUdpWriteDelayMs);
+  tester.Start();
+  message_loop_.Run();
+  tester.CheckResults();
 }
 
 }  // namespace protocol

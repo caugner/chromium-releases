@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,12 +19,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
+#include "content/browser/resource_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/speech_input_result.h"
 
 using content::BrowserThread;
-using namespace speech_input;
+using speech_input::SpeechRecognizer;
 
 namespace {
 
@@ -74,7 +75,6 @@ class SpeechInputExtensionManagerWrapper : public ProfileKeyedService {
 
   scoped_refptr<SpeechInputExtensionManager> manager_;
 };
-
 }
 
 // Factory for SpeechInputExtensionManagers as profile keyed services.
@@ -118,7 +118,8 @@ SpeechInputExtensionManagerWrapper*
 }
 
 SpeechInputExtensionManager::Factory::Factory()
-    : ProfileKeyedServiceFactory(ProfileDependencyManager::GetInstance()) {
+    : ProfileKeyedServiceFactory("SpeechInputExtensionManager",
+                                 ProfileDependencyManager::GetInstance()) {
 }
 
 SpeechInputExtensionManager::Factory::~Factory() {
@@ -151,7 +152,7 @@ SpeechInputExtensionManager::~SpeechInputExtensionManager() {
 
 SpeechInputExtensionManager* SpeechInputExtensionManager::GetForProfile(
     Profile* profile) {
-  SpeechInputExtensionManagerWrapper *wrapper =
+  SpeechInputExtensionManagerWrapper* wrapper =
       Factory::GetInstance()->GetForProfile(profile);
   if (!wrapper)
     return NULL;
@@ -462,7 +463,7 @@ void SpeechInputExtensionManager::DispatchError(
   // Used for errors that are also reported via the onError event.
   if (dispatch_event) {
     ListValue args;
-    DictionaryValue *js_error = new DictionaryValue();
+    DictionaryValue* js_error = new DictionaryValue();
     args.Append(js_error);
     js_error->SetString(kErrorCodeKey, error);
     std::string json_args;
@@ -546,12 +547,12 @@ void SpeechInputExtensionManager::StartOnIOThread(
 }
 
 bool SpeechInputExtensionManager::HasAudioInputDevices() {
-  return AudioManager::GetAudioManager()->HasAudioInputDevices();
+  return profile_->GetResourceContext().audio_manager()->HasAudioInputDevices();
 }
 
 bool SpeechInputExtensionManager::IsRecordingInProcess() {
   // Thread-safe query.
-  return AudioManager::GetAudioManager()->IsRecordingInProcess();
+  return profile_->GetResourceContext().audio_manager()->IsRecordingInProcess();
 }
 
 bool SpeechInputExtensionManager::IsRecording() {
@@ -565,7 +566,8 @@ void SpeechInputExtensionManager::StartRecording(
     bool filter_profanities) {
   DCHECK(!recognizer_);
   recognizer_ = new SpeechRecognizer(delegate, caller_id, language, grammar,
-      context_getter, filter_profanities, "", "");
+      context_getter, profile_->GetResourceContext().audio_manager(),
+      filter_profanities, "", "");
   recognizer_->StartRecording();
 }
 

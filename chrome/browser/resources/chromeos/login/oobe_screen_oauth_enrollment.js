@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,34 +39,50 @@ cr.define('oobe', function() {
     $('oauth-enrollment').showError(message, retry);
   };
 
+  /**
+   * Sets a progressing message and switches to the working screen.
+   * @param message {string} the progress message.
+   */
+
+  OAuthEnrollmentScreen.showWorking = function(message) {
+    $('oauth-enrollment').showWorking(message);
+  };
+
   OAuthEnrollmentScreen.prototype = {
     __proto__: HTMLDivElement.prototype,
 
     /**
      * URL to load in the sign in frame.
      */
-    signin_url_ : null,
+    signInUrl_: null,
+
+    /**
+     * Whether this is a manual or auto enrollment.
+     */
+    isAutoEnrollment_: false,
 
     /**
      * Enrollment steps with names and buttons to show.
      */
-    steps_ : [
-      { name: 'signin',
-        button: 'cancel' },
-      { name: 'working',
-        button: 'cancel' },
-      { name: 'error',
-        button: 'cancel' },
-      { name: 'success',
-        button: 'done',
-        focusButton: true },
-    ],
+    steps_: null,
+
+    /**
+     * Dialog to confirm that auto-enrollment should really be cancelled.
+     * This is only created the first time it's used.
+     */
+    confirmDialog_: null,
 
     /** @inheritDoc */
     decorate: function() {
-      $('oauth-enroll-error-retry').addEventListener('click', function() {
-        chrome.send('oauthEnrollRetry', []);
-      });
+      $('oauth-enroll-error-retry').addEventListener('click',
+                                                     this.doRetry_.bind(this));
+      $('oauth-enroll-cancel-auto-link').addEventListener(
+          'click',
+          this.confirmCancelAutoEnrollment_.bind(this));
+      var links = document.querySelectorAll('.oauth-enroll-explain-link');
+      for (var i = 0; i < links.length; i++) {
+        links[i].addEventListener('click', this.showStep.bind(this, 'explain'));
+      }
     },
 
     /**
@@ -89,9 +105,25 @@ cr.define('oobe', function() {
       cancelButton.textContent =
           localStrings.getString('oauthEnrollCancel');
       cancelButton.addEventListener('click', function(e) {
-        chrome.send('oauthEnrollClose', []);
+        chrome.send('oauthEnrollClose', ['cancel']);
       });
       buttons.push(cancelButton);
+
+      var tryAgainButton = this.ownerDocument.createElement('button');
+      tryAgainButton.id = 'oauth-enroll-try-again-button';
+      tryAgainButton.hidden = true;
+      tryAgainButton.textContent =
+          localStrings.getString('oauthEnrollRetry');
+      tryAgainButton.addEventListener('click', this.doRetry_.bind(this));
+      buttons.push(tryAgainButton);
+
+      var explainButton = this.ownerDocument.createElement('button');
+      explainButton.id = 'oauth-enroll-explain-button';
+      explainButton.hidden = true;
+      explainButton.textContent =
+          localStrings.getString('oauthEnrollExplainButton');
+      explainButton.addEventListener('click', this.doRetry_.bind(this));
+      buttons.push(explainButton);
 
       var doneButton = this.ownerDocument.createElement('button');
       doneButton.id = 'oauth-enroll-done-button';
@@ -99,7 +131,7 @@ cr.define('oobe', function() {
       doneButton.textContent =
           localStrings.getString('oauthEnrollDone');
       doneButton.addEventListener('click', function(e) {
-        chrome.send('oauthEnrollClose', []);
+        chrome.send('oauthEnrollClose', ['done']);
       });
       buttons.push(doneButton);
 
@@ -115,9 +147,40 @@ cr.define('oobe', function() {
       var url = data.signin_url;
       if (data.gaiaOrigin)
         url += '?gaiaOrigin=' + encodeURIComponent(data.gaiaOrigin);
-      this.signin_url_ = url;
+      if (data.test_email) {
+        url += '&test_email=' + encodeURIComponent(data.test_email);
+        url += '&test_password=' + encodeURIComponent(data.test_password);
+      }
+      this.signInUrl_ = url;
+      this.isAutoEnrollment_ = data.is_auto_enrollment;
+
       $('oauth-enroll-signin-frame').contentWindow.location.href =
-          this.signin_url_;
+          this.signInUrl_;
+
+      // The cancel button is not available during auto-enrollment.
+      var cancel = this.isAutoEnrollment_ ? null : 'cancel';
+      // During auto-enrollment the user must try again from the error screen.
+      var error_cancel = this.isAutoEnrollment_ ? 'try-again' : 'cancel';
+      this.steps_ = [
+        { name: 'signin',
+          button: cancel },
+        { name: 'working',
+          button: cancel },
+        { name: 'error',
+          button: error_cancel,
+          focusButton: this.isAutoEnrollment_ },
+        { name: 'explain',
+          button: 'explain',
+          focusButton: true },
+        { name: 'success',
+          button: 'done',
+          focusButton: true },
+      ];
+
+      var links = document.querySelectorAll('.oauth-enroll-explain-link');
+      for (var i = 0; i < links.length; i++)
+        links[i].hidden = !this.isAutoEnrollment_;
+
       this.showStep('signin');
     },
 
@@ -125,7 +188,8 @@ cr.define('oobe', function() {
      * Cancels enrollment and drops the user back to the login screen.
      */
     cancel: function() {
-      chrome.send('oauthEnrollClose', []);
+      if (!this.isAutoEnrollment_)
+        chrome.send('oauthEnrollClose', ['cancel']);
     },
 
     /**
@@ -135,12 +199,14 @@ cr.define('oobe', function() {
      */
     showStep: function(step) {
       $('oauth-enroll-cancel-button').hidden = true;
+      $('oauth-enroll-try-again-button').hidden = true;
+      $('oauth-enroll-explain-button').hidden = true;
       $('oauth-enroll-done-button').hidden = true;
       for (var i = 0; i < this.steps_.length; i++) {
         var theStep = this.steps_[i];
         var active = (theStep.name == step);
         $('oauth-enroll-step-' + theStep.name).hidden = !active;
-        if (active) {
+        if (active && theStep.button) {
           var button = $('oauth-enroll-' + theStep.button + '-button');
           button.hidden = false;
           if (theStep.focusButton)
@@ -156,8 +222,50 @@ cr.define('oobe', function() {
      */
     showError: function(message, retry) {
       $('oauth-enroll-error-message').textContent = message;
-      $('oauth-enroll-error-retry').hidden = !retry;
+      $('oauth-enroll-error-retry').hidden = !retry || this.isAutoEnrollment_;
       this.showStep('error');
+    },
+
+    /**
+     * Sets a progressing message and switches to the working screen.
+     * @param message {string} the progress message.
+     */
+    showWorking: function(message) {
+      $('oauth-enroll-working-message').textContent = message;
+      this.showStep('working');
+    },
+
+    /**
+     * Retries the enrollment process after an error occurred in a previous
+     * attempt. This goes to the C++ side through |chrome| first to clean up the
+     * profile, so that the next attempt is performed with a clean state.
+     */
+    doRetry_: function() {
+      chrome.send('oauthEnrollRetry', []);
+    },
+
+    /**
+     * Handler for cancellations of an enforced auto-enrollment.
+     */
+    confirmCancelAutoEnrollment_: function() {
+      if (!this.confirmDialog_) {
+        this.confirmDialog_ = new cr.ui.dialogs.ConfirmDialog(document.body);
+        this.confirmDialog_.setOkLabel(
+            localStrings.getString('oauthEnrollCancelAutoEnrollmentConfirm'));
+        this.confirmDialog_.setCancelLabel(
+            localStrings.getString('oauthEnrollCancelAutoEnrollmentGoBack'));
+        this.confirmDialog_.setInitialFocusOnCancel();
+      }
+      this.confirmDialog_.show(
+          localStrings.getString('oauthEnrollCancelAutoEnrollmentReally'),
+          this.onConfirmCancelAutoEnrollment_.bind(this));
+    },
+
+    /**
+     * Handler for confirmation of cancellation of auto-enrollment.
+     */
+    onConfirmCancelAutoEnrollment_: function() {
+      chrome.send('oauthEnrollClose', ['autocancel']);
     },
 
     /**
@@ -167,8 +275,8 @@ cr.define('oobe', function() {
      * @type {bool} whether the message comes from the signin frame.
      */
     isSigninMessage_: function(m) {
-      return this.signin_url_ != null &&
-          this.signin_url_.indexOf(m.origin) == 0 &&
+      return this.signInUrl_ != null &&
+          this.signInUrl_.indexOf(m.origin) == 0 &&
           m.source == $('oauth-enroll-signin-frame').contentWindow;
     },
 

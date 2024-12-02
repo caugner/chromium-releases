@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -351,8 +351,8 @@ bool CreateApplicationShortcutView::CanMaximize() const {
   return false;
 }
 
-bool CreateApplicationShortcutView::IsModal() const {
-  return true;
+ui::ModalType CreateApplicationShortcutView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 CreateApplicationShortcutView::GetWindowTitle() const {
@@ -376,9 +376,7 @@ bool CreateApplicationShortcutView::Accept() {
   shortcut_info_.create_in_quick_launch_bar = false;
 #endif
 
-  web_app::CreateShortcut(profile_->GetPath(),
-                          shortcut_info_,
-                          NULL);
+  web_app::CreateShortcut(profile_->GetPath(), shortcut_info_);
   return true;
 }
 
@@ -438,9 +436,9 @@ bool CreateUrlApplicationShortcutView::Accept() {
     return false;
 
   tab_contents_->extension_tab_helper()->SetAppIcon(shortcut_info_.favicon);
-  if (tab_contents_->tab_contents()->delegate()) {
-    tab_contents_->tab_contents()->delegate()->ConvertContentsToApplication(
-        tab_contents_->tab_contents());
+  if (tab_contents_->web_contents()->GetDelegate()) {
+    tab_contents_->web_contents()->GetDelegate()->ConvertContentsToApplication(
+        tab_contents_->web_contents());
   }
   return true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,9 @@
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/plugin_prefs.h"
+#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -29,9 +31,11 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/plugin_service.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/plugin_service.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -40,6 +44,9 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 
+using content::PluginService;
+using content::WebContents;
+using content::WebUIMessageHandler;
 using webkit::npapi::PluginGroup;
 using webkit::WebPluginInfo;
 
@@ -74,6 +81,7 @@ ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
                              IDS_PLUGINS_MIME_TYPES_FILE_EXTENSIONS);
   source->AddLocalizedString("disable", IDS_PLUGINS_DISABLE);
   source->AddLocalizedString("enable", IDS_PLUGINS_ENABLE);
+  source->AddLocalizedString("alwaysAllowed", IDS_EXCEPTIONS_ALLOW_BUTTON);
   source->AddLocalizedString("noPlugins", IDS_PLUGINS_NO_PLUGINS);
 
   source->set_json_path("strings.js");
@@ -117,7 +125,6 @@ class PluginsDOMHandler : public WebUIMessageHandler,
   virtual ~PluginsDOMHandler() {}
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // Callback for the "requestPluginsData" message.
@@ -131,6 +138,9 @@ class PluginsDOMHandler : public WebUIMessageHandler,
 
   // Calback for the "getShowDetails" message.
   void HandleGetShowDetails(const ListValue* args);
+
+  // Callback for the "setPluginAlwaysAllowed" message.
+  void HandleSetPluginAlwaysAllowed(const ListValue* args);
 
   // content::NotificationObserver method overrides
   virtual void Observe(int type,
@@ -159,8 +169,8 @@ PluginsDOMHandler::PluginsDOMHandler()
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
 }
 
-WebUIMessageHandler* PluginsDOMHandler::Attach(WebUI* web_ui) {
-  Profile* profile = Profile::FromWebUI(web_ui);
+void PluginsDOMHandler::RegisterMessages() {
+  Profile* profile = Profile::FromWebUI(web_ui());
 
   PrefService* prefs = profile->GetPrefs();
   show_details_.Init(prefs::kPluginsShowDetails, prefs, NULL);
@@ -169,20 +179,19 @@ WebUIMessageHandler* PluginsDOMHandler::Attach(WebUI* web_ui) {
                  chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
                  content::Source<Profile>(profile));
 
-  return WebUIMessageHandler::Attach(web_ui);
-}
-
-void PluginsDOMHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("requestPluginsData",
+  web_ui()->RegisterMessageCallback("requestPluginsData",
       base::Bind(&PluginsDOMHandler::HandleRequestPluginsData,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("enablePlugin",
+  web_ui()->RegisterMessageCallback("enablePlugin",
       base::Bind(&PluginsDOMHandler::HandleEnablePluginMessage,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("saveShowDetailsToPrefs",
+  web_ui()->RegisterMessageCallback("setPluginAlwaysAllowed",
+      base::Bind(&PluginsDOMHandler::HandleSetPluginAlwaysAllowed,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("saveShowDetailsToPrefs",
       base::Bind(&PluginsDOMHandler::HandleSaveShowDetailsToPrefs,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("getShowDetails",
+  web_ui()->RegisterMessageCallback("getShowDetails",
       base::Bind(&PluginsDOMHandler::HandleGetShowDetails,
                  base::Unretained(this)));
 }
@@ -192,24 +201,30 @@ void PluginsDOMHandler::HandleRequestPluginsData(const ListValue* args) {
 }
 
 void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
 
   // Be robust in accepting badness since plug-ins display HTML (hence
   // JavaScript).
-  if (args->GetSize() != 3)
+  if (args->GetSize() != 3) {
+    NOTREACHED();
     return;
+  }
 
   std::string enable_str;
   std::string is_group_str;
-  if (!args->GetString(1, &enable_str) || !args->GetString(2, &is_group_str))
+  if (!args->GetString(1, &enable_str) || !args->GetString(2, &is_group_str)) {
+    NOTREACHED();
     return;
+  }
   bool enable = enable_str == "true";
 
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
   if (is_group_str == "true") {
     string16 group_name;
-    if (!args->GetString(0, &group_name))
+    if (!args->GetString(0, &group_name)) {
+      NOTREACHED();
       return;
+    }
 
     plugin_prefs->EnablePluginGroup(enable, group_name);
     if (enable) {
@@ -225,8 +240,10 @@ void PluginsDOMHandler::HandleEnablePluginMessage(const ListValue* args) {
     }
   } else {
     FilePath::StringType file_path;
-    if (!args->GetString(0, &file_path))
+    if (!args->GetString(0, &file_path)) {
+      NOTREACHED();
       return;
+    }
     bool result = plugin_prefs->EnablePlugin(enable, FilePath(file_path));
     DCHECK(result);
   }
@@ -243,7 +260,35 @@ void PluginsDOMHandler::HandleSaveShowDetailsToPrefs(const ListValue* args) {
 
 void PluginsDOMHandler::HandleGetShowDetails(const ListValue* args) {
   base::FundamentalValue show_details(show_details_.GetValue());
-  web_ui_->CallJavascriptFunction("loadShowDetailsFromPrefs", show_details);
+  web_ui()->CallJavascriptFunction("loadShowDetailsFromPrefs", show_details);
+}
+
+void PluginsDOMHandler::HandleSetPluginAlwaysAllowed(const ListValue* args) {
+  // Be robust in the input parameters, but crash in a Debug build.
+  if (args->GetSize() != 2) {
+    NOTREACHED();
+    return;
+  }
+
+  std::string plugin;
+  bool allowed = false;
+  if (!args->GetString(0, &plugin) || !args->GetBoolean(1, &allowed)) {
+    NOTREACHED();
+    return;
+  }
+  Profile* profile = Profile::FromWebUI(web_ui());
+  profile->GetHostContentSettingsMap()->SetContentSetting(
+      ContentSettingsPattern::Wildcard(),
+      ContentSettingsPattern::Wildcard(),
+      CONTENT_SETTINGS_TYPE_PLUGINS,
+      plugin,
+      allowed ? CONTENT_SETTING_ALLOW : CONTENT_SETTING_DEFAULT);
+
+  // Keep track of the whitelist separately, so that we can distinguish plug-ins
+  // whitelisted by the user from automatically whitelisted ones.
+  DictionaryPrefUpdate update(profile->GetPrefs(),
+                              prefs::kContentSettingsPluginWhitelist);
+  update->SetBoolean(plugin, allowed);
 }
 
 void PluginsDOMHandler::Observe(int type,
@@ -263,14 +308,20 @@ void PluginsDOMHandler::LoadPlugins() {
 }
 
 void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
+  Profile* profile = Profile::FromWebUI(web_ui());
   PluginPrefs* plugin_prefs =
-      PluginPrefs::GetForProfile(Profile::FromWebUI(web_ui_));
+      PluginPrefs::GetForProfile(profile);
+
+  HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
+  ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
 
   // Construct DictionaryValues to return to the UI
   ListValue* plugin_groups_data = new ListValue();
   for (size_t i = 0; i < groups.size(); ++i) {
-    ListValue* plugin_files = new ListValue();
     const PluginGroup& group = groups[i];
+    if (group.IsEmpty())
+      continue;
+    ListValue* plugin_files = new ListValue();
     string16 group_name = group.GetGroupName();
     bool group_enabled = false;
     bool all_plugins_enabled_by_policy = true;
@@ -341,6 +392,7 @@ void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
 
     group_data->Set("plugin_files", plugin_files);
     group_data->SetString("name", group_name);
+    group_data->SetString("id", group.identifier());
     group_data->SetString("description", active_plugin->desc);
     group_data->SetString("version", active_plugin->version);
     group_data->SetBoolean("critical", group.IsVulnerable(*active_plugin));
@@ -358,11 +410,27 @@ void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
     }
     group_data->SetString("enabledMode", enabled_mode);
 
+    // TODO(bauerb): We should have a method on HostContentSettinsMap for this.
+    bool always_allowed = false;
+    ContentSettingsForOneType settings;
+    map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_PLUGINS,
+                               group.identifier(), &settings);
+    for (ContentSettingsForOneType::const_iterator it = settings.begin();
+         it != settings.end(); ++it) {
+      if (it->primary_pattern == wildcard &&
+          it->secondary_pattern == wildcard &&
+          it->setting == CONTENT_SETTING_ALLOW) {
+        always_allowed = true;
+        break;
+      }
+    }
+    group_data->SetBoolean("alwaysAllowed", always_allowed);
+
     plugin_groups_data->Append(group_data);
   }
   DictionaryValue results;
   results.Set("plugins", plugin_groups_data);
-  web_ui_->CallJavascriptFunction("returnPluginsData", results);
+  web_ui()->CallJavascriptFunction("returnPluginsData", results);
 }
 
 }  // namespace
@@ -373,15 +441,14 @@ void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-PluginsUI::PluginsUI(TabContents* contents) : ChromeWebUI(contents) {
-  AddMessageHandler((new PluginsDOMHandler())->Attach(this));
+PluginsUI::PluginsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
+  web_ui->AddMessageHandler(new PluginsDOMHandler());
 
   // Set up the chrome://plugins/ source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(
       CreatePluginsUIHTMLSource());
 }
-
 
 // static
 RefCountedMemory* PluginsUI::GetFaviconResourceBytes() {
@@ -397,4 +464,6 @@ void PluginsUI::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kPluginsShowSetReaderDefaultInfobar,
                              true,
                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterDictionaryPref(prefs::kContentSettingsPluginWhitelist,
+                                PrefService::SYNCABLE_PREF);
 }

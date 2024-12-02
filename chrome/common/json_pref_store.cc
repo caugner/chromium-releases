@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -169,6 +169,10 @@ void JsonPrefStore::RemoveObserver(PrefStore::Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
+size_t JsonPrefStore::NumberOfObservers() const {
+  return observers_.size();
+}
+
 bool JsonPrefStore::IsInitializationComplete() const {
   return initialized_;
 }
@@ -280,26 +284,6 @@ PersistentPrefStore::PrefReadError JsonPrefStore::ReadPrefs() {
   Value* value = FileThreadDeserializer::DoReading(path_, &error, &no_dir);
   OnFileRead(value, error, no_dir);
   return error;
-}
-
-bool JsonPrefStore::WritePrefs() {
-  std::string data;
-  if (!SerializeData(&data))
-    return false;
-
-  // Don't actually write prefs if we're read-only or don't have any pending
-  // writes.
-  // TODO(bauerb): Make callers of this method call CommitPendingWrite directly.
-  if (writer_.HasPendingWrite() && !read_only_)
-    writer_.WriteNow(data);
-
-  return true;
-}
-
-void JsonPrefStore::ScheduleWritePrefs() {
-  // Writing prefs should be scheduled automatically, so this is a no-op
-  // for now.
-  // TODO(bauerb): Remove calls to this method.
 }
 
 void JsonPrefStore::CommitPendingWrite() {

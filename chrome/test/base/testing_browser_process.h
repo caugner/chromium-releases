@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "content/browser/notification_service_impl.h"
 
 class BackgroundModeManager;
 class CRLSetFetcher;
@@ -26,6 +25,10 @@ class MHTMLGenerationManager;
 class NotificationUIManager;
 class PrefService;
 class WatchDogThread;
+
+namespace content {
+class NotificationService;
+}
 
 namespace policy {
 class BrowserPolicyConnector;
@@ -44,25 +47,16 @@ class TestingBrowserProcess : public BrowserProcess {
   TestingBrowserProcess();
   virtual ~TestingBrowserProcess();
 
+  virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual void EndSession() OVERRIDE;
-  virtual ResourceDispatcherHost* resource_dispatcher_host() OVERRIDE;
   virtual MetricsService* metrics_service() OVERRIDE;
   virtual IOThread* io_thread() OVERRIDE;
-
-  virtual base::Thread* file_thread() OVERRIDE;
-  virtual base::Thread* db_thread() OVERRIDE;
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
-
-#if defined(OS_CHROMEOS)
-  virtual base::Thread* web_socket_proxy_thread() OVERRIDE;
-#endif
-
   virtual ProfileManager* profile_manager() OVERRIDE;
   virtual PrefService* local_state() OVERRIDE;
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
   virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
-  virtual SidebarManager* sidebar_manager() OVERRIDE;
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
   virtual StatusTray* status_tray() OVERRIDE;
@@ -110,6 +104,7 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual MHTMLGenerationManager* mhtml_generation_manager() OVERRIDE;
   virtual ComponentUpdateService* component_updater() OVERRIDE;
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
+  virtual AudioManager* audio_manager() OVERRIDE;
 
   // Set the local state for tests. Consumer is responsible for cleaning it up
   // afterwards (using ScopedTestingLocalState, for example).
@@ -120,7 +115,7 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetBrowserPolicyConnector(policy::BrowserPolicyConnector* connector);
 
  private:
-  NotificationServiceImpl notification_service_;
+  scoped_ptr<content::NotificationService> notification_service_;
   unsigned int module_ref_count_;
   scoped_ptr<ui::Clipboard> clipboard_;
   std::string app_locale_;

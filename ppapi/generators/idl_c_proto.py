@@ -1,6 +1,5 @@
-#!/usr/bin/python
-#
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -498,9 +497,20 @@ class CGen(object):
     out = ''
     build_list = node.GetUniqueReleases(releases)
 
-    # Build the most recent one with comments
-    out = self.DefineStructInternals(node, build_list[-1],
-                                     include_version=False, comment=True)
+    if node.IsA('Interface'):
+      # Build the most recent one versioned, with comments
+      out = self.DefineStructInternals(node, build_list[-1],
+                                       include_version=True, comment=True)
+
+      # Define an unversioned typedef for the most recent version
+      out += '\ntypedef struct %s %s;\n' % (
+          self.GetStructName(node, build_list[-1], include_version=True),
+          self.GetStructName(node, build_list[-1], include_version=False))
+    else:
+      # Build the most recent one versioned, with comments
+      out = self.DefineStructInternals(node, build_list[-1],
+                                       include_version=False, comment=True)
+
 
     # Build the rest without comments and with the version number appended
     for rel in build_list[0:-1]:
@@ -524,7 +534,10 @@ class CGen(object):
 
   # Define a top level object.
   def Define(self, node, releases, tabs=0, prefix='', comment=False):
-    if not node.InReleases(releases):
+    # If this request does not match unique release, or if the release is not
+    # available (possibly deprecated) then skip.
+    unique = node.GetUniqueReleases(releases)
+    if not unique or not node.InReleases(releases):
       return ''
 
     self.LogEnter('Define %s tab=%d prefix="%s"' % (node,tabs,prefix))
@@ -644,3 +657,4 @@ def Main(args):
 
 if __name__ == '__main__':
   sys.exit(Main(sys.argv[1:]))
+

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,10 @@
 #define WEBKIT_PLUGINS_PPAPI_HOST_GLOBALS_H_
 
 #include "base/compiler_specific.h"
+#include "ppapi/shared_impl/callback_tracker.h"
 #include "ppapi/shared_impl/ppapi_globals.h"
+#include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/shared_impl/var_tracker.h"
-#include "webkit/plugins/ppapi/host_resource_tracker.h"
 #include "webkit/plugins/ppapi/host_var_tracker.h"
 #include "webkit/plugins/webkit_plugins_export.h"
 
@@ -21,24 +22,36 @@ class PluginModule;
 class HostGlobals : public ::ppapi::PpapiGlobals {
  public:
   HostGlobals();
+  HostGlobals(::ppapi::PpapiGlobals::ForTest);
   virtual ~HostGlobals();
 
   // Getter for the global singleton. Generally, you should use
   // PpapiGlobals::Get() when possible. Use this only when you need some
   // host-specific functionality.
-  inline static HostGlobals* Get() { return host_globals_; }
+  inline static HostGlobals* Get() {
+    DCHECK(PpapiGlobals::Get()->IsHostGlobals());
+    return static_cast<HostGlobals*>(PpapiGlobals::Get());
+  }
 
   // PpapiGlobals implementation.
   virtual ::ppapi::ResourceTracker* GetResourceTracker() OVERRIDE;
   virtual ::ppapi::VarTracker* GetVarTracker() OVERRIDE;
+  virtual ::ppapi::CallbackTracker* GetCallbackTrackerForInstance(
+      PP_Instance instance) OVERRIDE;
   virtual ::ppapi::FunctionGroupBase* GetFunctionAPI(
       PP_Instance inst,
       ::ppapi::ApiID id) OVERRIDE;
   virtual PP_Module GetModuleForInstance(PP_Instance instance) OVERRIDE;
+  virtual base::Lock* GetProxyLock() OVERRIDE;
+  virtual void LogWithSource(PP_Instance instance,
+                             PP_LogLevel_Dev level,
+                             const std::string& source,
+                             const std::string& value) OVERRIDE;
+  virtual void BroadcastLogWithSource(PP_Module module,
+                                      PP_LogLevel_Dev level,
+                                      const std::string& source,
+                                      const std::string& value) OVERRIDE;
 
-  HostResourceTracker* host_resource_tracker() {
-    return &host_resource_tracker_;
-  }
   HostVarTracker* host_var_tracker() {
     return &host_var_tracker_;
   }
@@ -75,12 +88,15 @@ class HostGlobals : public ::ppapi::PpapiGlobals {
   WEBKIT_PLUGINS_EXPORT PluginInstance* GetInstance(PP_Instance instance);
 
  private:
+  // PpapiGlobals overrides.
+  virtual bool IsHostGlobals() const OVERRIDE;
+
   // Per-instance data we track.
   struct InstanceData;
 
   WEBKIT_PLUGINS_EXPORT static HostGlobals* host_globals_;
 
-  HostResourceTracker host_resource_tracker_;
+  ::ppapi::ResourceTracker resource_tracker_;
   HostVarTracker host_var_tracker_;
 
   // Tracks all live instances and their associated data.

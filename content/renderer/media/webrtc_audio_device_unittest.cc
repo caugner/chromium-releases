@@ -25,7 +25,7 @@ using testing::StrEq;
 namespace {
 
 ACTION_P(QuitMessageLoop, loop_or_proxy) {
-  loop_or_proxy->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  loop_or_proxy->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 class AudioUtil : public AudioUtilInterface {
@@ -38,14 +38,20 @@ class AudioUtil : public AudioUtilInterface {
   virtual double GetAudioInputHardwareSampleRate() OVERRIDE {
     return media::GetAudioInputHardwareSampleRate();
   }
+  virtual uint32 GetAudioInputHardwareChannelCount() OVERRIDE {
+    return media::GetAudioInputHardwareChannelCount();
+  }
  private:
   DISALLOW_COPY_AND_ASSIGN(AudioUtil);
 };
 
 class AudioUtilNoHardware : public AudioUtilInterface {
  public:
-  AudioUtilNoHardware(double output_rate, double input_rate)
-    : output_rate_(output_rate), input_rate_(input_rate) {
+  AudioUtilNoHardware(double output_rate, double input_rate,
+                      uint32 input_channels)
+      : output_rate_(output_rate),
+        input_rate_(input_rate),
+        input_channels_(input_channels) {
   }
 
   virtual double GetAudioHardwareSampleRate() OVERRIDE {
@@ -54,10 +60,14 @@ class AudioUtilNoHardware : public AudioUtilInterface {
   virtual double GetAudioInputHardwareSampleRate() OVERRIDE {
     return input_rate_;
   }
+  virtual uint32 GetAudioInputHardwareChannelCount() OVERRIDE {
+    return input_channels_;
+  }
 
  private:
   double output_rate_;
   double input_rate_;
+  uint32 input_channels_;
   DISALLOW_COPY_AND_ASSIGN(AudioUtilNoHardware);
 };
 
@@ -82,7 +92,8 @@ bool HardwareSampleRatesAreValid() {
       static_cast<int>(audio_hardware::GetInputSampleRate());
   bool rates_are_valid =
       ((output_sample_rate == 44100 || output_sample_rate == 48000) &&
-       (input_sample_rate == 44100 || input_sample_rate == 48000));
+       (input_sample_rate == 44100 || input_sample_rate == 48000 ||
+        input_sample_rate == 16000 || input_sample_rate == 32000));
   DLOG_IF(WARNING, !rates_are_valid) << "Non-supported sample rate detected.";
   return rates_are_valid;
 }
@@ -107,6 +118,7 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
                        const int length,
                        const int sampling_freq,
                        const bool is_stereo) {
+    base::AutoLock auto_lock(lock_);
     channel_id_ = channel;
     type_ = type;
     packet_size_ = length;
@@ -118,11 +130,30 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
     }
   }
 
-  int channel_id() const { return channel_id_; }
-  int type() const { return type_; }
-  int packet_size() const { return packet_size_; }
-  int sample_rate() const { return sample_rate_; }
-  int channels() const { return channels_; }
+  int channel_id() const {
+    base::AutoLock auto_lock(lock_);
+    return channel_id_;
+  }
+
+  int type() const {
+    base::AutoLock auto_lock(lock_);
+    return type_;
+  }
+
+  int packet_size() const {
+    base::AutoLock auto_lock(lock_);
+    return packet_size_;
+  }
+
+  int sample_rate() const {
+    base::AutoLock auto_lock(lock_);
+    return sample_rate_;
+  }
+
+  int channels() const {
+    base::AutoLock auto_lock(lock_);
+    return channels_;
+  }
 
  private:
   base::WaitableEvent* event_;
@@ -131,48 +162,20 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
   int packet_size_;
   int sample_rate_;
   int channels_;
+  mutable base::Lock lock_;
   DISALLOW_COPY_AND_ASSIGN(WebRTCMediaProcessImpl);
 };
 
 }  // end namespace
 
-// Utility class to delete the AudioManager.
-// TODO(tommi): Remove when we've fixed issue 105249.
-class AutoAudioManagerCleanup {
- public:
-  AutoAudioManagerCleanup() {
-    // Log an error if a previous test didn't clean up the AudioManager.
-    if (DeleteAndResurrect()) {
-      LOG(ERROR)
-          << "AudioManager singleton was not cleaned up by some previous test!";
-    }
-  }
-  ~AutoAudioManagerCleanup() {
-    DeleteAndResurrect();
-  }
-
- private:
-  // Returns true iff the AudioManager existed and was deleted.
-  bool DeleteAndResurrect() {
-    if (AudioManager::SingletonExists()) {
-      AudioManager::Destroy(NULL);
-      AudioManager::Resurrect();
-      return true;
-    }
-    return false;
-  }
-
-  DISALLOW_COPY_AND_ASSIGN(AutoAudioManagerCleanup);
-};
-
 // Basic test that instantiates and initializes an instance of
 // WebRtcAudioDeviceImpl.
 TEST_F(WebRTCAudioDeviceTest, Construct) {
-  AutoAudioManagerCleanup audio_manager_cleanup;
-  AudioUtilNoHardware audio_util(48000.0, 48000.0);
+  AudioUtilNoHardware audio_util(48000.0, 48000.0, 1);
   SetAudioUtilCallback(&audio_util);
   scoped_refptr<WebRtcAudioDeviceImpl> audio_device(
       new WebRtcAudioDeviceImpl());
+
   audio_device->SetSessionId(1);
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
@@ -191,8 +194,6 @@ TEST_F(WebRTCAudioDeviceTest, Construct) {
 // verify that streaming starts correctly.
 // Disabled when running headless since the bots don't have the required config.
 TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
-  AutoAudioManagerCleanup audio_manager_cleanup;
-
   if (IsRunningHeadless())
     return;
 
@@ -265,8 +266,6 @@ TEST_F(WebRTCAudioDeviceTest, StartPlayout) {
 // that the audio capturing starts as it should.
 // Disabled when running headless since the bots don't have the required config.
 TEST_F(WebRTCAudioDeviceTest, StartRecording) {
-  AutoAudioManagerCleanup audio_manager_cleanup;
-
   if (IsRunningHeadless())
     return;
 
@@ -334,8 +333,6 @@ TEST_F(WebRTCAudioDeviceTest, StartRecording) {
 // Uses WebRtcAudioDeviceImpl to play a local wave file.
 // Disabled when running headless since the bots don't have the required config.
 TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
-  AutoAudioManagerCleanup audio_manager_cleanup;
-
   if (IsRunningHeadless())
     return;
 
@@ -382,11 +379,16 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
   EXPECT_EQ(0, file->StartPlayingFileLocally(ch, file_path.c_str(), false,
                                              webrtc::kFileFormatPcm16kHzFile));
 
+  // Play 2 seconds worth of audio and then quit.
   message_loop_.PostDelayedTask(FROM_HERE,
-                                new MessageLoop::QuitTask(),
-                                TestTimeouts::action_timeout_ms());
+                                MessageLoop::QuitClosure(),
+                                2000);
   message_loop_.Run();
 
+
+  EXPECT_EQ(0, base->StopSend(ch));
+  EXPECT_EQ(0, base->StopPlayout(ch));
+  EXPECT_EQ(0, base->DeleteChannel(ch));
   EXPECT_EQ(0, base->Terminate());
 }
 
@@ -399,8 +401,6 @@ TEST_F(WebRTCAudioDeviceTest, PlayLocalFile) {
 // TODO(henrika): improve quality by using a wideband codec, enabling noise-
 // suppressions and perhaps also the digital AGC.
 TEST_F(WebRTCAudioDeviceTest, FullDuplexAudio) {
-  AutoAudioManagerCleanup audio_manager_cleanup;
-
   if (IsRunningHeadless())
     return;
 
@@ -442,7 +442,7 @@ TEST_F(WebRTCAudioDeviceTest, FullDuplexAudio) {
 
   LOG(INFO) << ">> You should now be able to hear yourself in loopback...";
   message_loop_.PostDelayedTask(FROM_HERE,
-                                new MessageLoop::QuitTask(),
+                                MessageLoop::QuitClosure(),
                                 TestTimeouts::action_timeout_ms());
   message_loop_.Run();
 

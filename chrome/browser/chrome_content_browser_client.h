@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_H_
 #pragma once
 
+#include <set>
 #include <string>
 
 #include "base/compiler_specific.h"
@@ -15,26 +16,29 @@ namespace chrome {
 
 class ChromeContentBrowserClient : public content::ContentBrowserClient {
  public:
+  ChromeContentBrowserClient();
+  virtual ~ChromeContentBrowserClient();
+
   virtual content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) OVERRIDE;
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* widget) OVERRIDE;
-  virtual TabContentsView* CreateTabContentsView(
-      TabContents* tab_contents) OVERRIDE;
+  virtual content::WebContentsView* CreateWebContentsView(
+      content::WebContents* web_contents) OVERRIDE;
   virtual void RenderViewHostCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderProcessHostCreated(
       content::RenderProcessHost* host) OVERRIDE;
-  virtual void PluginProcessHostCreated(PluginProcessHost* host) OVERRIDE;
-  virtual content::WebUIFactory* GetWebUIFactory() OVERRIDE;
+  virtual content::WebUIControllerFactory* GetWebUIControllerFactory() OVERRIDE;
   virtual bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
                                        const GURL& effective_url) OVERRIDE;
   virtual GURL GetEffectiveURL(content::BrowserContext* browser_context,
                                const GURL& url) OVERRIDE;
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE;
+  virtual bool IsHandledURL(const GURL& url) OVERRIDE;
   virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
                               const GURL& url) OVERRIDE;
-  virtual void SiteInstanceGotProcess(SiteInstance* site_instance) OVERRIDE;
-  virtual void SiteInstanceDeleting(SiteInstance* site_instance) OVERRIDE;
+  virtual void SiteInstanceGotProcess(
+      content::SiteInstance* site_instance) OVERRIDE;
+  virtual void SiteInstanceDeleting(content::SiteInstance* site_instance)
+      OVERRIDE;
   virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
                                                 const GURL& new_url) OVERRIDE;
   virtual std::string GetCanonicalEncodingNameByAliasName(
@@ -119,12 +123,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       int render_process_id) OVERRIDE;
   virtual std::string GetWorkerProcessTitle(
       const GURL& url, const content::ResourceContext& context) OVERRIDE;
-  virtual ResourceDispatcherHost* GetResourceDispatcherHost() OVERRIDE;
+  virtual void ResourceDispatcherHostCreated() OVERRIDE;
   virtual ui::Clipboard* GetClipboard() OVERRIDE;
   virtual MHTMLGenerationManager* GetMHTMLGenerationManager() OVERRIDE;
   virtual net::NetLog* GetNetLog() OVERRIDE;
   virtual speech_input::SpeechInputManager* GetSpeechInputManager() OVERRIDE;
-  virtual AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
+  virtual content::AccessTokenStore* CreateAccessTokenStore() OVERRIDE;
   virtual bool IsFastShutdownPossible() OVERRIDE;
   virtual WebPreferences GetWebkitPrefs(RenderViewHost* rvh) OVERRIDE;
   virtual void UpdateInspectorSetting(RenderViewHost* rvh,
@@ -136,6 +140,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   virtual void ClearCookies(RenderViewHost* rvh) OVERRIDE;
   virtual FilePath GetDefaultDownloadDirectory() OVERRIDE;
   virtual std::string GetDefaultDownloadName() OVERRIDE;
+  virtual bool AllowSocketAPI(const GURL& url) OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;
@@ -148,6 +153,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       crypto::CryptoModuleBlockingPasswordDelegate* GetCryptoPasswordDelegate(
           const GURL& url) OVERRIDE;
 #endif
+
+ private:
+  // Set of origins that can use TCP/UDP private APIs from NaCl.
+  std::set<std::string> allowed_socket_origins_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClient);
 };
 
 }  // namespace chrome

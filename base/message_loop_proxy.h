@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
-#include "base/task.h"
+#include "base/message_loop_helpers.h"
 
 namespace tracked_objects {
 class Location;
@@ -32,32 +32,13 @@ class BASE_EXPORT MessageLoopProxy
                                         MessageLoopProxyTraits> {
  public:
   // These methods are the same as in message_loop.h, but are guaranteed to
-  // either post the Task to the MessageLoop (if it's still alive), or to
-  // delete the Task otherwise.
+  // either post the Task to the MessageLoop (if it's still alive), or the task
+  // is discarded.
   // They return true iff the thread existed and the task was posted.  Note that
   // even if the task is posted, there's no guarantee that it will run; for
   // example the target loop may already be quitting, or in the case of a
   // delayed task a Quit message may preempt it in the message loop queue.
   // Conversely, a return value of false is a guarantee the task will not run.
-  virtual bool PostTask(const tracked_objects::Location& from_here,
-                        Task* task) = 0;
-  virtual bool PostDelayedTask(const tracked_objects::Location& from_here,
-                               Task* task,
-                               int64 delay_ms) = 0;
-  virtual bool PostNonNestableTask(const tracked_objects::Location& from_here,
-                                   Task* task) = 0;
-  virtual bool PostNonNestableDelayedTask(
-      const tracked_objects::Location& from_here,
-      Task* task,
-      int64 delay_ms) = 0;
-
-  // TODO(ajwong): Remove the functions above once the Task -> Closure migration
-  // is complete.
-  //
-  // There are 2 sets of Post*Task functions, one which takes the older Task*
-  // function object representation, and one that takes the newer base::Closure.
-  // We have this overload to allow a staged transition between the two systems.
-  // Once the transition is done, the functions above should be deleted.
   virtual bool PostTask(const tracked_objects::Location& from_here,
                         const base::Closure& task) = 0;
   virtual bool PostDelayedTask(const tracked_objects::Location& from_here,
@@ -121,13 +102,15 @@ class BASE_EXPORT MessageLoopProxy
 
   template <class T>
   bool DeleteSoon(const tracked_objects::Location& from_here,
-                  T* object) {
-    return PostNonNestableTask(from_here, new DeleteTask<T>(object));
+                  const T* object) {
+    return subtle::DeleteHelperInternal<T, bool>::DeleteOnMessageLoop(
+        this, from_here, object);
   }
   template <class T>
   bool ReleaseSoon(const tracked_objects::Location& from_here,
                    T* object) {
-    return PostNonNestableTask(from_here, new ReleaseTask<T>(object));
+    return subtle::ReleaseHelperInternal<T, bool>::ReleaseOnMessageLoop(
+        this, from_here, object);
   }
 
   // Gets the MessageLoopProxy for the current message loop, creating one if
@@ -144,6 +127,16 @@ class BASE_EXPORT MessageLoopProxy
   // Called when the proxy is about to be deleted. Subclasses can override this
   // to provide deletion on specific threads.
   virtual void OnDestruct() const;
+
+ private:
+  template <class T, class R> friend class subtle::DeleteHelperInternal;
+  template <class T, class R> friend class subtle::ReleaseHelperInternal;
+  bool DeleteSoonInternal(const tracked_objects::Location& from_here,
+                          void(*deleter)(const void*),
+                          const void* object);
+  bool ReleaseSoonInternal(const tracked_objects::Location& from_here,
+                           void(*releaser)(const void*),
+                           const void* object);
 };
 
 struct MessageLoopProxyTraits {

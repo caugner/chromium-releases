@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,10 +54,8 @@ namespace content {
 
 namespace {
 
-double XEventTimeToWebEventTime(Time time) {
-  // Convert from time in ms to time in s.
-  return time / 1000.0;
-}
+// This matches Firefox behavior.
+const int kPixelsPerTick = 53;
 
 int EventFlagsToWebEventModifiers(int flags) {
   int modifiers = 0;
@@ -68,11 +66,11 @@ int EventFlagsToWebEventModifiers(int flags) {
   if (flags & ui::EF_ALT_DOWN)
     modifiers |= WebKit::WebInputEvent::AltKey;
   // TODO(beng): MetaKey/META_MASK
-  if (flags & ui::EF_LEFT_BUTTON_DOWN)
+  if (flags & ui::EF_LEFT_MOUSE_BUTTON)
     modifiers |= WebKit::WebInputEvent::LeftButtonDown;
-  if (flags & ui::EF_MIDDLE_BUTTON_DOWN)
+  if (flags & ui::EF_MIDDLE_MOUSE_BUTTON)
     modifiers |= WebKit::WebInputEvent::MiddleButtonDown;
-  if (flags & ui::EF_RIGHT_BUTTON_DOWN)
+  if (flags & ui::EF_RIGHT_MOUSE_BUTTON)
     modifiers |= WebKit::WebInputEvent::RightButtonDown;
   if (flags & ui::EF_CAPS_LOCK_DOWN)
     modifiers |= WebKit::WebInputEvent::CapsLockOn;
@@ -151,54 +149,6 @@ WebKit::WebUChar GetControlCharacter(int windows_key_code, bool shift) {
   return 0;
 }
 
-WebKit::WebMouseEvent::Button ButtonFromXButton(int button) {
-  switch (button) {
-    case 1:
-      return WebKit::WebMouseEvent::ButtonLeft;
-    case 2:
-      return WebKit::WebMouseEvent::ButtonMiddle;
-    case 3:
-      return WebKit::WebMouseEvent::ButtonRight;
-    default:
-      break;
-  }
-  return WebKit::WebMouseEvent::ButtonNone;
-}
-
-WebKit::WebMouseEvent::Button ButtonFromXState(int state) {
-  if (state & Button1MotionMask)
-    return WebKit::WebMouseEvent::ButtonLeft;
-  if (state & Button2MotionMask)
-    return WebKit::WebMouseEvent::ButtonMiddle;
-  if (state & Button3MotionMask)
-    return WebKit::WebMouseEvent::ButtonRight;
-  return WebKit::WebMouseEvent::ButtonNone;
-}
-
-// We have to count clicks (for double-clicks) manually.
-unsigned int g_num_clicks = 0;
-double g_last_click_time = 0.0;
-int g_last_click_x = 0;
-int g_last_click_y = 0;
-WebKit::WebMouseEvent::Button g_last_click_button =
-    WebKit::WebMouseEvent::ButtonNone;
-
-bool ShouldForgetPreviousClick(double time, int x, int y) {
-  const double double_click_time = 0.250;  // in seconds
-  const int double_click_distance = 5;
-  return (time - g_last_click_time) > double_click_time ||
-      std::abs(x - g_last_click_x) > double_click_distance ||
-      std::abs(y - g_last_click_y) > double_click_distance;
-}
-
-void ResetClickCountState() {
-  g_num_clicks = 0;
-  g_last_click_time = 0.0;
-  g_last_click_x = 0;
-  g_last_click_y = 0;
-  g_last_click_button = WebKit::WebMouseEvent::ButtonNone;
-}
-
 WebKit::WebTouchPoint::State TouchPointStateFromEvent(
     const aura::TouchEvent* event) {
   switch (event->type()) {
@@ -237,31 +187,20 @@ WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(aura::MouseEvent* event) {
   WebKit::WebMouseEvent webkit_event;
 
   webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
-  webkit_event.timeStampSeconds = event->time_stamp().ToDoubleT();
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
 
   webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
-  if (event->flags() & ui::EF_LEFT_BUTTON_DOWN)
+  if (event->flags() & ui::EF_LEFT_MOUSE_BUTTON)
     webkit_event.button = WebKit::WebMouseEvent::ButtonLeft;
-  if (event->flags() & ui::EF_MIDDLE_BUTTON_DOWN)
+  if (event->flags() & ui::EF_MIDDLE_MOUSE_BUTTON)
     webkit_event.button = WebKit::WebMouseEvent::ButtonMiddle;
-  if (event->flags() & ui::EF_RIGHT_BUTTON_DOWN)
+  if (event->flags() & ui::EF_RIGHT_MOUSE_BUTTON)
     webkit_event.button = WebKit::WebMouseEvent::ButtonRight;
 
   switch (event->type()) {
     case ui::ET_MOUSE_PRESSED:
       webkit_event.type = WebKit::WebInputEvent::MouseDown;
-      if (!ShouldForgetPreviousClick(event->time_stamp().ToDoubleT(),
-            event->location().x(), event->location().y()) &&
-          webkit_event.button == g_last_click_button) {
-        ++g_num_clicks;
-      } else {
-        g_num_clicks = 1;
-        g_last_click_time = event->time_stamp().ToDoubleT();
-        g_last_click_x = event->location().x();
-        g_last_click_y = event->location().y();
-        g_last_click_button = webkit_event.button;
-      }
-      webkit_event.clickCount = g_num_clicks;
+      webkit_event.clickCount = event->GetClickCount();
       break;
     case ui::ET_MOUSE_RELEASED:
       webkit_event.type = WebKit::WebInputEvent::MouseUp;
@@ -271,9 +210,6 @@ WebKit::WebMouseEvent MakeWebMouseEventFromAuraEvent(aura::MouseEvent* event) {
     case ui::ET_MOUSE_MOVED:
     case ui::ET_MOUSE_DRAGGED:
       webkit_event.type = WebKit::WebInputEvent::MouseMove;
-      if (ShouldForgetPreviousClick(event->time_stamp().ToDoubleT(),
-            event->location().x(), event->location().y()))
-        ResetClickCountState();
       break;
     default:
       NOTIMPLEMENTED() << "Received unexpected event: " << event->type();
@@ -290,9 +226,26 @@ WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
   webkit_event.type = WebKit::WebInputEvent::MouseWheel;
   webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
   webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
-  webkit_event.timeStampSeconds = event->time_stamp().ToDoubleT();
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
   webkit_event.deltaY = ui::GetMouseWheelOffset(event->native_event());
-  webkit_event.wheelTicksY = webkit_event.deltaY > 0 ? 1 : -1;
+  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
+
+  return webkit_event;
+}
+
+WebKit::WebMouseWheelEvent MakeWebMouseWheelEventFromAuraEvent(
+    aura::ScrollEvent* event) {
+  WebKit::WebMouseWheelEvent webkit_event;
+
+  webkit_event.type = WebKit::WebInputEvent::MouseWheel;
+  webkit_event.button = WebKit::WebMouseEvent::ButtonNone;
+  webkit_event.modifiers = EventFlagsToWebEventModifiers(event->flags());
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
+  webkit_event.hasPreciseScrollingDeltas = true;
+  webkit_event.deltaX = event->x_offset();
+  webkit_event.wheelTicksX = webkit_event.deltaX / kPixelsPerTick;
+  webkit_event.deltaY = event->y_offset();
+  webkit_event.wheelTicksY = webkit_event.deltaY / kPixelsPerTick;
 
   return webkit_event;
 }
@@ -303,8 +256,7 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   WebKit::WebKeyboardEvent webkit_event;
   XKeyEvent* native_key_event = &native_event->xkey;
 
-  webkit_event.timeStampSeconds =
-      XEventTimeToWebEventTime(native_key_event->time);
+  webkit_event.timeStampSeconds = event->time_stamp().InSecondsF();
   webkit_event.modifiers = XStateToWebEventModifiers(native_key_event->state);
 
   switch (native_event->type) {
@@ -328,7 +280,7 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   if (webkit_event.windowsKeyCode == ui::VKEY_RETURN)
     webkit_event.unmodifiedText[0] = '\r';
   else
-    webkit_event.unmodifiedText[0] = ui::DefaultSymbolFromXEvent(native_event);
+    webkit_event.unmodifiedText[0] = ui::GetCharacterFromXEvent(native_event);
 
   if (webkit_event.modifiers & WebKit::WebInputEvent::ControlKey) {
     webkit_event.text[0] =
@@ -344,6 +296,39 @@ WebKit::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
   // TODO: IsAutoRepeat/IsKeyPad?
 
   return webkit_event;
+}
+
+WebKit::WebGestureEvent MakeWebGestureEventFromAuraEvent(
+    aura::GestureEvent* event) {
+  WebKit::WebGestureEvent gesture_event;
+
+  switch (event->type()) {
+    case ui::ET_GESTURE_TAP:
+      gesture_event.type = WebKit::WebInputEvent::GestureTap;
+      break;
+    case ui::ET_GESTURE_TAP_DOWN:
+      gesture_event.type = WebKit::WebInputEvent::GestureTapDown;
+      break;
+    case ui::ET_GESTURE_DOUBLE_TAP:
+      gesture_event.type = WebKit::WebInputEvent::GestureDoubleTap;
+      break;
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+      gesture_event.type = WebKit::WebInputEvent::GestureScrollBegin;
+      break;
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+      gesture_event.type = WebKit::WebInputEvent::GestureScrollUpdate;
+      break;
+    case ui::ET_GESTURE_SCROLL_END:
+      gesture_event.type = WebKit::WebInputEvent::GestureScrollEnd;
+      break;
+    default:
+      NOTREACHED() << "Unknown gesture type: " << event->type();
+  }
+
+  gesture_event.deltaX = event->delta_x();
+  gesture_event.deltaY = event->delta_y();
+
+  return gesture_event;
 }
 
 WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
@@ -410,7 +395,8 @@ WebKit::WebTouchPoint* UpdateWebTouchEventFromAuraEvent(
 
   // Update the type of the touch event.
   web_event->type = TouchEventTypeFromEvent(event);
-  web_event->timeStampSeconds = event->time_stamp().ToDoubleT();
+  web_event->timeStampSeconds = event->time_stamp().InSecondsF();
+  web_event->modifiers = EventFlagsToWebEventModifiers(event->flags());
 
   return point;
 }

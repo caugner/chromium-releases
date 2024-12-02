@@ -1,8 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <cups/cups.h>
+#include <cups/ppd.h>
 
 #include <cstring>
 #include <string>
@@ -249,8 +250,7 @@ TEST(PrintSystemTaskProxyTest, DetectDuplexModeCUPS) {
   int printer_color_space_for_black = printing::UNKNOWN_COLOR_MODEL;
   int default_duplex_setting_value = printing::UNKNOWN_DUPLEX_MODE;
 
-  scoped_refptr<PrintSystemTaskProxy> test_proxy;
-  bool res = test_proxy->GetPrinterCapabilitiesCUPS(
+  bool res = PrintSystemTaskProxy::GetPrinterCapabilitiesCUPS(
       printer_info,
       "InvalidPrinter",
       &set_color_as_default,
@@ -277,8 +277,7 @@ TEST(PrintSystemTaskProxyTest, DetectNoDuplexModeCUPS) {
   int printer_color_space_for_black = printing::UNKNOWN_COLOR_MODEL;
   int default_duplex_setting_value = printing::UNKNOWN_DUPLEX_MODE;
 
-  scoped_refptr<PrintSystemTaskProxy> test_proxy;
-  bool res = test_proxy->GetPrinterCapabilitiesCUPS(
+  bool res = PrintSystemTaskProxy::GetPrinterCapabilitiesCUPS(
       printer_info,
       "InvalidPrinter",
       &set_color_as_default,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,16 @@
 
 #include "base/basictypes.h"
 #include "base/format_macros.h"
+#include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
+#include "base/string_number_conversions.h"
+#include "base/string_split.h"
+#include "base/third_party/icu/icu_utf.h"
+#include "chrome/common/automation_id.h"
+#include "chrome/test/automation/automation_json_requests.h"
 
 using base::DictionaryValue;
 using base::ListValue;
@@ -114,6 +120,65 @@ const char* GetJsonTypeName(Value::Type type) {
       return "list";
   }
   return "unknown";
+}
+
+std::string AutomationIdToString(const AutomationId& id) {
+  return base::StringPrintf("%d-%s", id.type(), id.id().c_str());
+}
+
+bool StringToAutomationId(const std::string& string_id, AutomationId* id) {
+  std::vector<std::string> split_id;
+  base::SplitString(string_id, '-', &split_id);
+  if (split_id.size() != 2)
+    return false;
+  int type;
+  if (!base::StringToInt(split_id[0], &type))
+    return false;
+  *id = AutomationId(static_cast<AutomationId::Type>(type), split_id[1]);
+  return true;
+}
+
+std::string WebViewIdToString(const WebViewId& view_id) {
+  return base::StringPrintf(
+      "%s%s",
+      view_id.old_style() ? "t" : "f",
+      AutomationIdToString(view_id.GetId()).c_str());
+}
+
+bool StringToWebViewId(const std::string& string_id, WebViewId* view_id) {
+  if (string_id.empty() || (string_id[0] != 'f' && string_id[0] != 't'))
+    return false;
+  bool old_style = string_id[0] == 't';
+  AutomationId id;
+  if (!StringToAutomationId(string_id.substr(1), &id))
+    return false;
+
+  if (old_style) {
+    int tab_id;
+    if (!base::StringToInt(id.id(), &tab_id))
+      return false;
+    *view_id = WebViewId::ForOldStyleTab(tab_id);
+  } else {
+    *view_id = WebViewId::ForView(id);
+  }
+  return true;
+}
+
+Error* FlattenStringArray(const ListValue* src, string16* dest) {
+  string16 keys;
+  for (size_t i = 0; i < src->GetSize(); ++i) {
+    string16 keys_list_part;
+    src->GetString(i, &keys_list_part);
+    for (size_t j = 0; j < keys_list_part.size(); ++j) {
+      if (CBU16_IS_SURROGATE(keys_list_part[j])) {
+        return new Error(kBadRequest,
+                         "ChromeDriver only supports characters in the BMP");
+      }
+    }
+    keys.append(keys_list_part);
+  }
+  *dest = keys;
+  return NULL;
 }
 
 ValueParser::ValueParser() { }

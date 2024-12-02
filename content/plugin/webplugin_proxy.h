@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #endif
 #include "base/memory/scoped_handle.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/shared_memory.h"
 #include "base/timer.h"
 #include "googleurl/src/gurl.h"
@@ -67,6 +68,7 @@ class WebPluginProxy : public webkit::npapi::WebPlugin {
 #if defined(OS_WIN)
   void SetWindowlessPumpEvent(HANDLE pump_messages_event);
   void ReparentPluginWindow(HWND window, HWND parent);
+  void ReportExecutableMemory(size_t size);
 #endif
 
   virtual void CancelResource(unsigned long id) OVERRIDE;

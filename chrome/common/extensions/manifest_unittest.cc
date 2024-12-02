@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,7 @@ const char* kNotThemeKeys[] = {
   keys::kOptionalPermissions,
   keys::kOptionsPage,
   keys::kBackground,
+  keys::kBackgroundPageLegacy,
   keys::kOfflineEnabled,
   keys::kMinimumChromeVersion,
   keys::kRequirements,
@@ -48,14 +49,14 @@ const char* kNotThemeKeys[] = {
   keys::kContentScripts,
   keys::kOmnibox,
   keys::kDevToolsPage,
-  keys::kSidebar,
   keys::kHomepageURL,
   keys::kContentSecurityPolicy,
   keys::kFileBrowserHandlers,
   keys::kIncognito,
   keys::kInputComponents,
   keys::kTtsEngine,
-  keys::kIntents
+  keys::kIntents,
+  keys::kWebAccessibleResources
 };
 
 // Keys that are not accessible by hosted apps.
@@ -67,14 +68,12 @@ const char* kNotHostedAppKeys[] = {
   keys::kContentScripts,
   keys::kOmnibox,
   keys::kDevToolsPage,
-  keys::kSidebar,
   keys::kHomepageURL,
   keys::kContentSecurityPolicy,
   keys::kFileBrowserHandlers,
   keys::kIncognito,
   keys::kInputComponents,
-  keys::kTtsEngine,
-  keys::kIntents
+  keys::kTtsEngine
 };
 
 // Keys not accessible by packaged aps.
@@ -93,8 +92,11 @@ const char* kNotPlatformAppKeys[] = {
   keys::kContentScripts,
   keys::kOmnibox,
   keys::kDevToolsPage,
-  keys::kSidebar,
   keys::kHomepageURL,
+  keys::kPlugins,
+  keys::kInputComponents,
+  keys::kTtsEngine,
+  keys::kFileBrowserHandlers
 };
 
 // Returns all the manifest keys not including those in |filtered| or kTypeKeys.
@@ -144,10 +146,11 @@ class ManifestTest : public testing::Test {
     // fail validation and are filtered out.
     DictionaryValue* value = manifest->value();
     for (size_t i = 0; i < restricted_keys_length; ++i) {
-      std::string error, str;
+      std::string str;
+      string16 error;
       value->Set(restricted_keys[i], Value::CreateStringValue(default_value_));
       EXPECT_FALSE(manifest->ValidateManifest(&error));
-      EXPECT_EQ(error, ExtensionErrorUtils::FormatErrorMessage(
+      EXPECT_EQ(error, ExtensionErrorUtils::FormatErrorMessageUTF16(
           errors::kFeatureNotAllowed, restricted_keys[i]));
       EXPECT_FALSE(manifest->GetString(restricted_keys[i], &str));
       EXPECT_TRUE(value->Remove(restricted_keys[i], NULL));
@@ -171,9 +174,9 @@ TEST_F(ManifestTest, Extension) {
     value->Set(*i, Value::CreateStringValue(default_value_));
 
   scoped_ptr<Manifest> manifest(new Manifest(value));
-  std::string error;
+  string16 error;
   EXPECT_TRUE(manifest->ValidateManifest(&error));
-  EXPECT_EQ("", error);
+  EXPECT_EQ(ASCIIToUTF16(""), error);
   AssertType(manifest.get(), Manifest::kTypeExtension);
 
   // Verify that all the extension keys are accessible.
@@ -206,9 +209,9 @@ TEST_F(ManifestTest, Theme) {
   value->Set(theme_key, Value::CreateStringValue(default_value_));
 
   scoped_ptr<Manifest> manifest(new Manifest(value));
-  std::string error;
+  string16 error;
   EXPECT_TRUE(manifest->ValidateManifest(&error));
-  EXPECT_EQ("", error);
+  EXPECT_EQ(ASCIIToUTF16(""), error);
   AssertType(manifest.get(), Manifest::kTypeTheme);
 
   // Verify that all the theme keys are accessible.
@@ -240,9 +243,9 @@ TEST_F(ManifestTest, PlatformApp) {
   value->Set(keys::kPlatformApp, Value::CreateBooleanValue(true));
 
   scoped_ptr<Manifest> manifest(new Manifest(value));
-  std::string error;
+  string16 error;
   EXPECT_TRUE(manifest->ValidateManifest(&error));
-  EXPECT_EQ("", error);
+  EXPECT_EQ(ASCIIToUTF16(""), error);
   AssertType(manifest.get(), Manifest::kTypePlatformApp);
 
   // Verify that all the platform app keys are accessible.
@@ -275,9 +278,9 @@ TEST_F(ManifestTest, HostedApp) {
   value->Set(keys::kWebURLs, Value::CreateStringValue(default_value_));
 
   scoped_ptr<Manifest> manifest(new Manifest(value));
-  std::string error;
+  string16 error;
   EXPECT_TRUE(manifest->ValidateManifest(&error));
-  EXPECT_EQ("", error);
+  EXPECT_EQ(ASCIIToUTF16(""), error);
   AssertType(manifest.get(), Manifest::kTypeHostedApp);
 
   // Verify that all the hosted app keys are accessible.
@@ -308,9 +311,9 @@ TEST_F(ManifestTest, PackagedApp) {
   value->Set(keys::kApp, Value::CreateStringValue(default_value_));
 
   scoped_ptr<Manifest> manifest(new Manifest(value));
-  std::string error;
+  string16 error;
   EXPECT_TRUE(manifest->ValidateManifest(&error));
-  EXPECT_EQ("", error);
+  EXPECT_EQ(ASCIIToUTF16(""), error);
   AssertType(manifest.get(), Manifest::kTypePackagedApp);
 
   // Verify that all the packaged app keys are accessible.

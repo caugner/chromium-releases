@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,9 +6,8 @@
 #include "base/command_line.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 
-#include "chrome/browser/ui/browser_window.h"
-#include "content/browser/browsing_instance.h"
 #include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/ui/browser_window.h"
 #if defined(OS_MACOSX)
 #include "chrome/browser/extensions/extension_host_mac.h"
 #endif
@@ -23,12 +22,18 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/renderer_preferences.h"
 
 using content::BrowserThread;
+using content::OpenURLParams;
+using content::Referrer;
+using content::SiteInstance;
 
 namespace {
 
@@ -54,10 +59,6 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details);
 
-  // Returns the extension for an URL, which can either be a chrome-extension
-  // URL or a web app URL.
-  const Extension* GetExtensionOrAppByURL(const GURL& url);
-
   // Returns true if the extension is allowed to run in incognito mode.
   bool IsIncognitoEnabled(const Extension* extension);
 
@@ -66,16 +67,15 @@ class IncognitoExtensionProcessManager : public ExtensionProcessManager {
 
 static void CreateBackgroundHostForExtensionLoad(
     ExtensionProcessManager* manager, const Extension* extension) {
-  // Start the process for the master page, if it exists and we're not lazy.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableLazyBackgroundPages) &&
-      extension->background_url().is_valid())
-    manager->CreateBackgroundHost(extension, extension->background_url());
+  if (extension->has_background_page() &&
+      extension->background_page_persists()) {
+    manager->CreateBackgroundHost(extension, extension->GetBackgroundURL());
+  }
 }
 
 static void CreateBackgroundHostsForProfileStartup(
-    ExtensionProcessManager* manager, const ExtensionList* extensions) {
-  for (ExtensionList::const_iterator extension = extensions->begin();
+    ExtensionProcessManager* manager, const ExtensionSet* extensions) {
+  for (ExtensionSet::const_iterator extension = extensions->begin();
        extension != extensions->end(); ++extension) {
     CreateBackgroundHostForExtensionLoad(manager, *extension);
   }
@@ -95,7 +95,7 @@ ExtensionProcessManager* ExtensionProcessManager::Create(Profile* profile) {
 }
 
 ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
-    : browsing_instance_(new BrowsingInstance(profile)) {
+    : site_instance_(SiteInstance::Create(profile)) {
   Profile* original_profile = profile->GetOriginalProfile();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
                  content::Source<Profile>(original_profile));
@@ -114,6 +114,22 @@ ExtensionProcessManager::ExtensionProcessManager(Profile* profile)
 ExtensionProcessManager::~ExtensionProcessManager() {
   CloseBackgroundHosts();
   DCHECK(background_hosts_.empty());
+}
+
+ExtensionHost* ExtensionProcessManager::CreateShellHost(
+    const Extension* extension,
+    const GURL& url) {
+  DCHECK(extension);
+  ExtensionHost* host = new ExtensionHost(extension,
+                                          GetSiteInstanceForURL(url),
+                                          url,
+                                          chrome::VIEW_TYPE_APP_SHELL);
+  host->CreateViewWithoutBrowser();
+  content::WebContents* host_contents = host->host_contents();
+  host_contents->GetMutableRendererPrefs()->browser_handles_all_requests = true;
+  host_contents->GetRenderViewHost()->SyncRendererPrefs();
+  OnExtensionHostCreated(host, false /* not a background host */);
+  return host;
 }
 
 ExtensionHost* ExtensionProcessManager::CreateViewHost(
@@ -142,11 +158,10 @@ ExtensionHost* ExtensionProcessManager::CreateViewHost(
   // A NULL browser may only be given for pop-up views.
   DCHECK(browser ||
          (!browser && view_type == chrome::VIEW_TYPE_EXTENSION_POPUP));
-  Profile* profile =
-      Profile::FromBrowserContext(browsing_instance_->browser_context());
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   if (service) {
-    const Extension* extension = service->GetExtensionByURL(url);
+    const Extension* extension =
+        service->extensions()->GetByID(url.host());
     if (extension)
       return CreateViewHost(extension, url, browser, view_type);
   }
@@ -211,15 +226,15 @@ void ExtensionProcessManager::OpenOptionsPage(const Extension* extension,
   // Force the options page to open in non-OTR window, because it won't be
   // able to save settings from OTR.
   if (!browser || browser->profile()->IsOffTheRecord()) {
-    Profile* profile =
-        Profile::FromBrowserContext(browsing_instance_->browser_context());
+    Profile* profile = GetProfile();
     browser = Browser::GetOrCreateTabbedBrowser(profile->GetOriginalProfile());
   }
 
-  browser->OpenURL(extension->options_url(), GURL(), SINGLETON_TAB,
-                   content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(extension->options_url(), Referrer(), SINGLETON_TAB,
+                       content::PAGE_TRANSITION_LINK, false);
+  browser->OpenURL(params);
   browser->window()->Show();
-  static_cast<RenderViewHostDelegate*>(browser->GetSelectedTabContents())->
+  browser->GetSelectedWebContents()->GetRenderViewHost()->delegate()->
       Activate();
 }
 
@@ -266,8 +281,9 @@ void ExtensionProcessManager::UnregisterRenderViewHost(
   all_extension_views_.erase(render_view_host);
 }
 
-SiteInstance* ExtensionProcessManager::GetSiteInstanceForURL(const GURL& url) {
-  return browsing_instance_->GetSiteInstanceForURL(url);
+SiteInstance* ExtensionProcessManager::GetSiteInstanceForURL(
+    const GURL& url) {
+  return site_instance_->GetRelatedSiteInstance(url);
 }
 
 bool ExtensionProcessManager::HasExtensionHost(ExtensionHost* host) const {
@@ -277,8 +293,7 @@ bool ExtensionProcessManager::HasExtensionHost(ExtensionHost* host) const {
 void ExtensionProcessManager::OnExtensionIdle(const std::string& extension_id) {
   ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
   if (host && !HasVisibleViews(extension_id)) {
-    Profile* profile =
-        Profile::FromBrowserContext(browsing_instance_->browser_context());
+    Profile* profile = GetProfile();
     if (!profile->GetExtensionEventRouter()->HasInFlightEvents(extension_id))
       CloseBackgroundHost(host);
   }
@@ -290,7 +305,7 @@ bool ExtensionProcessManager::HasVisibleViews(const std::string& extension_id) {
   for (std::set<RenderViewHost*>::const_iterator it = views.begin();
        it != views.end(); ++it) {
     const RenderViewHost* host = *it;
-    if (host->site_instance()->site().host() == extension_id &&
+    if (host->site_instance()->GetSite().host() == extension_id &&
         host->delegate()->GetRenderViewType() !=
         chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
       return true;
@@ -365,9 +380,13 @@ void ExtensionProcessManager::Observe(
   }
 }
 
+Profile* ExtensionProcessManager::GetProfile() const {
+  return Profile::FromBrowserContext(site_instance_->GetBrowserContext());
+}
+
 void ExtensionProcessManager::OnExtensionHostCreated(ExtensionHost* host,
                                                      bool is_background) {
-  DCHECK_EQ(browsing_instance_->browser_context(), host->profile());
+  DCHECK_EQ(site_instance_->GetBrowserContext(), host->profile());
 
   all_hosts_.insert(host);
   if (is_background)
@@ -439,31 +458,20 @@ void IncognitoExtensionProcessManager::CreateBackgroundHost(
 
 SiteInstance* IncognitoExtensionProcessManager::GetSiteInstanceForURL(
     const GURL& url) {
-  const Extension* extension = GetExtensionOrAppByURL(url);
-  if (!extension || extension->incognito_split_mode()) {
-    return ExtensionProcessManager::GetSiteInstanceForURL(url);
-  } else {
-    return original_manager_->GetSiteInstanceForURL(url);
+  ExtensionService* service = GetProfile()->GetExtensionService();
+  if (service) {
+    const Extension* extension = service->extensions()->GetExtensionOrAppByURL(
+        ExtensionURLInfo(url));
+    if (extension && !extension->incognito_split_mode())
+      return original_manager_->GetSiteInstanceForURL(url);
   }
-}
-
-const Extension* IncognitoExtensionProcessManager::GetExtensionOrAppByURL(
-    const GURL& url) {
-  Profile* profile =
-      Profile::FromBrowserContext(browsing_instance_->browser_context());
-  ExtensionService* service = profile->GetExtensionService();
-  if (!service)
-    return NULL;
-  return (url.SchemeIs(chrome::kExtensionScheme)) ?
-      service->GetExtensionByURL(url) : service->GetExtensionByWebExtent(url);
+  return ExtensionProcessManager::GetSiteInstanceForURL(url);
 }
 
 bool IncognitoExtensionProcessManager::IsIncognitoEnabled(
     const Extension* extension) {
   // Keep in sync with duplicate in extension_info_map.cc.
-  Profile* profile =
-      Profile::FromBrowserContext(browsing_instance_->browser_context());
-  ExtensionService* service = profile->GetExtensionService();
+  ExtensionService* service = GetProfile()->GetExtensionService();
   return service && service->IsIncognitoEnabled(extension->id());
 }
 
@@ -473,20 +481,15 @@ void IncognitoExtensionProcessManager::Observe(
     const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_WINDOW_READY: {
-      if (CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kEnableLazyBackgroundPages))
-        break;
       // We want to spawn our background hosts as soon as the user opens an
       // incognito window. Watch for new browsers and create the hosts if
       // it matches our profile.
       Browser* browser = content::Source<Browser>(source).ptr();
-      if (browser->profile() == browsing_instance_->browser_context()) {
+      if (browser->profile() == site_instance_->GetBrowserContext()) {
         // On Chrome OS, a login screen is implemented as a browser.
         // This browser has no extension service.  In this case,
         // service will be NULL.
-        Profile* profile =
-            Profile::FromBrowserContext(browsing_instance_->browser_context());
-        ExtensionService* service = profile->GetExtensionService();
+        ExtensionService* service = GetProfile()->GetExtensionService();
         if (service && service->is_ready())
           CreateBackgroundHostsForProfileStartup(this, service->extensions());
       }

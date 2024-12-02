@@ -10,10 +10,10 @@
 #include <string>
 
 #include "base/atomic_sequence_num.h"
-#include "base/callback_old.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/time.h"
-#include "content/browser/cancelable_request.h"
+#include "chrome/browser/cancelable_request.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -62,7 +62,7 @@ class BootTimesLoader
   } BootTimes;
 
   // Signature
-  typedef Callback2<Handle, BootTimes>::Type GetBootTimesCallback;
+  typedef base::Callback<void(Handle, BootTimes)> GetBootTimesCallback;
 
   typedef CancelableRequest<GetBootTimesCallback> GetBootTimesRequest;
 
@@ -71,7 +71,7 @@ class BootTimesLoader
   // Asynchronously requests the info.
   Handle GetBootTimes(
       CancelableRequestConsumerBase* consumer,
-      GetBootTimesCallback* callback);
+      const GetBootTimesCallback& callback);
 
   // Add a time marker for login. A timeline will be dumped to
   // /tmp/login-times-sent after login is done. If |send_to_uma| is true
@@ -120,7 +120,7 @@ class BootTimesLoader
    public:
     Backend() {}
 
-    void GetBootTimes(scoped_refptr<GetBootTimesRequest> request);
+    void GetBootTimes(const scoped_refptr<GetBootTimesRequest>& request);
 
    private:
     friend class base::RefCountedThreadSafe<Backend>;

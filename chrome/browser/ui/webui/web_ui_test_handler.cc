@@ -11,10 +11,11 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 
 WebUITestHandler::WebUITestHandler()
     : test_done_(false),
@@ -33,14 +34,14 @@ void WebUITestHandler::PreloadJavaScript(const string16& js_text,
 }
 
 void WebUITestHandler::RunJavaScript(const string16& js_text) {
-  web_ui_->tab_contents()->render_view_host()->ExecuteJavascriptInWebFrame(
+  web_ui()->GetWebContents()->GetRenderViewHost()->ExecuteJavascriptInWebFrame(
       string16(), js_text);
 }
 
 bool WebUITestHandler::RunJavaScriptTestWithResult(const string16& js_text) {
   test_succeeded_ = false;
   run_test_succeeded_ = false;
-  RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
+  RenderViewHost* rvh = web_ui()->GetWebContents()->GetRenderViewHost();
   content::NotificationRegistrar notification_registrar;
   notification_registrar.Add(
       this, content::NOTIFICATION_EXECUTE_JAVASCRIPT_RESULT,
@@ -50,7 +51,7 @@ bool WebUITestHandler::RunJavaScriptTestWithResult(const string16& js_text) {
 }
 
 void WebUITestHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("testResult",
+  web_ui()->RegisterMessageCallback("testResult",
       base::Bind(&WebUITestHandler::HandleTestResult, base::Unretained(this)));
 }
 

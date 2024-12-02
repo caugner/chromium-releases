@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,16 +11,21 @@
 #include "chrome/browser/tab_contents/link_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_fetcher.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "net/base/load_flags.h"
 #include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::NavigationController;
+using content::OpenURLParams;
+using content::Referrer;
 
 // AlternateNavInfoBarDelegate ------------------------------------------------
 
@@ -75,12 +80,14 @@ string16 AlternateNavInfoBarDelegate::GetLinkText() const {
 
 bool AlternateNavInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  owner()->tab_contents()->OpenURL(
-      alternate_nav_url_, GURL(), disposition,
+  OpenURLParams params(
+      alternate_nav_url_, Referrer(), disposition,
       // Pretend the user typed this URL, so that navigating to
       // it will be the default action when it's typed again in
       // the future.
-      content::PAGE_TRANSITION_TYPED);
+      content::PAGE_TRANSITION_TYPED,
+      false);
+  owner()->web_contents()->OpenURL(params);
 
   // We should always close, even if the navigation did not occur within this
   // TabContents.
@@ -120,9 +127,10 @@ void AlternateNavURLFetcher::Observe(
         delete this;
       } else if (!controller_) {
         // Start listening for the commit notification.
-        DCHECK(controller->pending_entry());
+        DCHECK(controller->GetPendingEntry());
         registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                       content::Source<NavigationController>(controller));
+                       content::Source<NavigationController>(
+                          controller));
         StartFetch(controller);
       }
       break;
@@ -131,7 +139,8 @@ void AlternateNavURLFetcher::Observe(
     case chrome::NOTIFICATION_INSTANT_COMMITTED: {
       // See above.
       NavigationController* controller =
-          &content::Source<TabContentsWrapper>(source)->controller();
+          &content::Source<TabContentsWrapper>(source)->
+              web_contents()->GetController();
       if (controller_ == controller) {
         delete this;
       } else if (!controller_) {
@@ -181,7 +190,8 @@ void AlternateNavURLFetcher::StartFetch(NavigationController* controller) {
   fetcher_.reset(content::URLFetcher::Create(
       GURL(alternate_nav_url_), content::URLFetcher::HEAD, this));
   fetcher_->SetRequestContext(
-      controller_->browser_context()->GetRequestContext());
+      controller_->GetBrowserContext()->GetRequestContext());
+  fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   fetcher_->Start();
 }
 
@@ -219,7 +229,7 @@ void AlternateNavURLFetcher::ShowInfobarIfPossible() {
 
   InfoBarTabHelper* infobar_helper =
       TabContentsWrapper::GetCurrentWrapperForContents(
-          controller_->tab_contents())->infobar_tab_helper();
+          controller_->GetWebContents())->infobar_tab_helper();
   infobar_helper->AddInfoBar(
       new AlternateNavInfoBarDelegate(infobar_helper, alternate_nav_url_));
   delete this;

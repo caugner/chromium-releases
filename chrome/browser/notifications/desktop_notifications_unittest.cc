@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,8 @@
 #include "content/public/common/show_desktop_notification_params.h"
 
 #if defined(USE_AURA)
-#include "ui/aura/desktop.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "ui/aura/root_window.h"
 #endif
 
 using content::BrowserThread;
@@ -89,9 +90,10 @@ DesktopNotificationsTest::~DesktopNotificationsTest() {
 
 void DesktopNotificationsTest::SetUp() {
 #if defined(USE_AURA)
+  WebKit::initialize(&webkit_platform_support_);
   // MockBalloonCollection retrieves information about the screen on creation.
   // So it is necessary to make sure the desktop gets created first.
-  aura::Desktop::GetInstance();
+  aura::RootWindow::GetInstance();
 #endif
 
   browser::RegisterLocalState(&local_state_);
@@ -107,6 +109,10 @@ void DesktopNotificationsTest::TearDown() {
   service_.reset(NULL);
   ui_manager_.reset(NULL);
   profile_.reset(NULL);
+#if defined(USE_AURA)
+  aura::RootWindow::DeleteInstance();
+  WebKit::shutdown();
+#endif
 }
 
 content::ShowDesktopNotificationHostMsgParams

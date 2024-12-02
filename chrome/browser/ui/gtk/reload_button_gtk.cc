@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
@@ -196,6 +197,7 @@ void ReloadButtonGtk::OnClicked(GtkWidget* /* sender */) {
 
 gboolean ReloadButtonGtk::OnExpose(GtkWidget* widget,
                                    GdkEventExpose* e) {
+  TRACE_EVENT0("ui::gtk", "ReloadButtonGtk::OnExpose");
   if (theme_service_ && theme_service_->UsingNativeTheme())
     return FALSE;
   return ((visible_mode_ == MODE_RELOAD) ? reload_ : stop_).OnExpose(
@@ -228,8 +230,9 @@ void ReloadButtonGtk::UpdateThemeButtons() {
 
   if (use_gtk) {
     gtk_widget_ensure_style(widget());
+    GtkStyle* style = gtk_widget_get_style(widget());
     GtkIconSet* icon_set = gtk_style_lookup_icon_set(
-        widget()->style,
+        style,
         (visible_mode_ == MODE_RELOAD) ? GTK_STOCK_REFRESH : GTK_STOCK_STOP);
     if (icon_set) {
       GtkStateType state = gtk_widget_get_state(widget());
@@ -238,7 +241,7 @@ void ReloadButtonGtk::UpdateThemeButtons() {
 
       GdkPixbuf* pixbuf = gtk_icon_set_render_icon(
           icon_set,
-          widget()->style,
+          style,
           gtk_widget_get_direction(widget()),
           state,
           GTK_ICON_SIZE_SMALL_TOOLBAR,

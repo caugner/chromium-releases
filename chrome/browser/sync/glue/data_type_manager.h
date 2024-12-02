@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
@@ -45,10 +44,12 @@ class DataTypeManager {
     PARTIAL_SUCCESS,     // Some data types had an error while starting up.
     ABORTED,             // Start was aborted by calling Stop() before
                          // all types were started.
+    RETRY,               // Download failed due to a transient error and it
+                         // is being retried.
     UNRECOVERABLE_ERROR  // We got an unrecoverable error during startup.
   };
 
-  typedef std::set<syncable::ModelType> TypeSet;
+  typedef syncable::ModelTypeSet TypeSet;
 
   // Note: |errors| is only filled when status is not OK.
   struct ConfigureResult {
@@ -81,10 +82,10 @@ class DataTypeManager {
   // Note that you may call Configure() while configuration is in
   // progress.  Configuration will be complete only when the
   // desired_types supplied in the last call to Configure is achieved.
-  virtual void Configure(const TypeSet& desired_types,
+  virtual void Configure(TypeSet desired_types,
                          sync_api::ConfigureReason reason) = 0;
 
-  virtual void ConfigureWithoutNigori(const TypeSet& desired_types,
+  virtual void ConfigureWithoutNigori(TypeSet desired_types,
       sync_api::ConfigureReason reason) = 0;
 
   // Synchronously stops all registered data types.  If called after

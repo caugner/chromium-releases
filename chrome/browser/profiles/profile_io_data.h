@@ -20,14 +20,13 @@
 #include "content/browser/resource_context.h"
 #include "net/base/cookie_monster.h"
 
+class AudioManager;
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
 class CookieSettings;
 class DesktopNotificationService;
-class DownloadIdFactory;
 class ExtensionInfoMap;
 class HostContentSettingsMap;
-class HostZoomMap;
 class IOThread;
 class Profile;
 class ProtocolHandlerRegistry;
@@ -43,7 +42,6 @@ class MediaStreamManager;
 
 namespace net {
 class CookieStore;
-class DnsCertProvenanceChecker;
 class FraudulentCertificateReporter;
 class HttpTransactionFactory;
 class OriginBoundCertService;
@@ -147,9 +145,10 @@ class ProfileIOData {
     std::string accept_charset;
     std::string referrer_charset;
     IOThread* io_thread;
+    scoped_refptr<AudioManager> audio_manager;
     scoped_refptr<HostContentSettingsMap> host_content_settings_map;
     scoped_refptr<CookieSettings> cookie_settings;
-    scoped_refptr<HostZoomMap> host_zoom_map;
+    scoped_refptr<content::HostZoomMap> host_zoom_map;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_refptr<net::CookieMonster::Delegate> cookie_monster_delegate;
     scoped_refptr<webkit_database::DatabaseTracker> database_tracker;
@@ -201,10 +200,6 @@ class ProfileIOData {
 
   net::NetworkDelegate* network_delegate() const {
     return network_delegate_.get();
-  }
-
-  net::DnsCertProvenanceChecker* dns_cert_checker() const {
-    return dns_cert_checker_.get();
   }
 
   net::FraudulentCertificateReporter* fraudulent_certificate_reporter() const {
@@ -281,7 +276,6 @@ class ProfileIOData {
       chrome_url_data_manager_backend_;
   mutable scoped_ptr<net::OriginBoundCertService> origin_bound_cert_service_;
   mutable scoped_ptr<net::NetworkDelegate> network_delegate_;
-  mutable scoped_ptr<net::DnsCertProvenanceChecker> dns_cert_checker_;
   mutable scoped_ptr<net::FraudulentCertificateReporter>
       fraudulent_certificate_reporter_;
   mutable scoped_ptr<net::ProxyService> proxy_service_;
@@ -294,8 +288,7 @@ class ProfileIOData {
   mutable scoped_refptr<ChromeBlobStorageContext> blob_storage_context_;
   mutable scoped_refptr<fileapi::FileSystemContext> file_system_context_;
   mutable scoped_refptr<quota::QuotaManager> quota_manager_;
-  mutable scoped_refptr<HostZoomMap> host_zoom_map_;
-  mutable scoped_refptr<DownloadIdFactory> download_id_factory_;
+  mutable scoped_refptr<content::HostZoomMap> host_zoom_map_;
   mutable scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
 
   // TODO(willchan): Remove from ResourceContext.

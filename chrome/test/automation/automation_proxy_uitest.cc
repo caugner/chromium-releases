@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -199,7 +199,7 @@ TEST_F(AutomationProxyVisibleTest, MAYBE_WindowGetViewBounds) {
     start.y = bounds.y() + bounds.height() / 2;
     end.x = start.x + 2 * bounds.width() / 3;
     end.y = start.y;
-    ASSERT_TRUE(browser->SimulateDrag(start, end, ui::EF_LEFT_BUTTON_DOWN));
+    ASSERT_TRUE(browser->SimulateDrag(start, end, ui::EF_LEFT_MOUSE_BUTTON));
 
     // Check to see that the drag event successfully swapped the two tabs.
     tab1 = browser->GetTab(0);
@@ -514,7 +514,13 @@ TEST_F(AutomationProxyTest, AcceleratorDownloads) {
   EXPECT_EQ(L"Downloads", GetActiveTabTitle());
 }
 
-TEST_F(AutomationProxyTest, AcceleratorExtensions) {
+// http://crbug.com/109642
+#if defined(OS_MACOSX)
+#define MAYBE_AcceleratorExtensions FLAKY_AcceleratorExtensions
+#else
+#define MAYBE_AcceleratorExtensions AcceleratorExtensions
+#endif
+TEST_F(AutomationProxyTest, MAYBE_AcceleratorExtensions) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
 
@@ -1505,7 +1511,7 @@ TEST_F(AutomationProxyTest5, TestLifetimeOfDomAutomationController) {
             tab->NavigateToURL(net::FilePathToFileURL(filename)));
 
   // Allow some time for the popup to show up and close.
-  base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
+  base::PlatformThread::Sleep(TestTimeouts::action_timeout());
 
   std::wstring expected(L"string");
   std::wstring jscript = CreateJSString(L"\"" + expected + L"\"");

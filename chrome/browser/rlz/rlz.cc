@@ -32,11 +32,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 
 using content::BrowserThread;
+using content::NavigationEntry;
 
 namespace {
 
@@ -306,9 +307,9 @@ void RLZTracker::Observe(int type,
       break;
     case content::NOTIFICATION_NAV_ENTRY_PENDING: {
       const NavigationEntry* entry =
-          content::Details<NavigationEntry>(details).ptr();
+          content::Details<content::NavigationEntry>(details).ptr();
       if (entry != NULL &&
-          ((entry->transition_type() &
+          ((entry->GetTransitionType() &
             content::PAGE_TRANSITION_HOME_PAGE) != 0)) {
         point = rlz_lib::CHROME_HOME_PAGE;
         record_used = &homepage_used_;
@@ -398,8 +399,8 @@ bool RLZTracker::ScheduleGetAccessPointRlz(rlz_lib::AccessPoint point) {
   string16* not_used = NULL;
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::IgnoreReturn<bool>(
-          base::Bind(&RLZTracker::GetAccessPointRlz, point, not_used)));
+      base::Bind(base::IgnoreResult(&RLZTracker::GetAccessPointRlz), point,
+                 not_used));
   return true;
 }
 

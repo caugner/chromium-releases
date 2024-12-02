@@ -43,6 +43,9 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   ~SSLClientSocketOpenSSL();
 
   const HostPortPair& host_and_port() const { return host_and_port_; }
+  const std::string& ssl_session_cache_shard() const {
+    return ssl_session_cache_shard_;
+  }
 
   // Callback from the SSL layer that indicates the remote server is requesting
   // a certificate for this client.
@@ -52,7 +55,7 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   int SelectNextProtoCallback(unsigned char** out, unsigned char* outlen,
                               const unsigned char* in, unsigned int inlen);
 
-  // SSLClientSocket methods:
+  // SSLClientSocket implementation.
   virtual void GetSSLInfo(SSLInfo* ssl_info);
   virtual void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
   virtual int ExportKeyingMaterial(const base::StringPiece& label,
@@ -62,8 +65,8 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   virtual NextProtoStatus GetNextProto(std::string* proto,
                                        std::string* server_protos);
 
-  // StreamSocket methods:
-  virtual int Connect(OldCompletionCallback* callback);
+  // StreamSocket implementation.
+  virtual int Connect(const CompletionCallback& callback);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
@@ -77,9 +80,11 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   virtual int64 NumBytesRead() const;
   virtual base::TimeDelta GetConnectTimeMicros() const;
 
-  // Socket methods:
-  virtual int Read(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
-  virtual int Write(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
+  // Socket implementation.
+  virtual int Read(IOBuffer* buf, int buf_len,
+                   const CompletionCallback& callback);
+  virtual int Write(IOBuffer* buf, int buf_len,
+                    const CompletionCallback& callback);
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
 
@@ -112,16 +117,14 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   void TransportWriteComplete(int result);
   void TransportReadComplete(int result);
 
-  OldCompletionCallbackImpl<SSLClientSocketOpenSSL> buffer_send_callback_;
-  OldCompletionCallbackImpl<SSLClientSocketOpenSSL> buffer_recv_callback_;
   bool transport_send_busy_;
   scoped_refptr<DrainableIOBuffer> send_buffer_;
   bool transport_recv_busy_;
   scoped_refptr<IOBuffer> recv_buffer_;
 
-  OldCompletionCallback* user_connect_callback_;
-  OldCompletionCallback* user_read_callback_;
-  OldCompletionCallback* user_write_callback_;
+  CompletionCallback user_connect_callback_;
+  CompletionCallback user_read_callback_;
+  CompletionCallback user_write_callback_;
 
   // Used by Read function.
   scoped_refptr<IOBuffer> user_read_buf_;
@@ -151,6 +154,10 @@ class SSLClientSocketOpenSSL : public SSLClientSocket {
   scoped_ptr<ClientSocketHandle> transport_;
   const HostPortPair host_and_port_;
   SSLConfig ssl_config_;
+  // ssl_session_cache_shard_ is an opaque string that partitions the SSL
+  // session cache. i.e. sessions created with one value will not attempt to
+  // resume on the socket with a different value.
+  const std::string ssl_session_cache_shard_;
 
   // Used for session cache diagnostics.
   bool trying_cached_session_;

@@ -24,11 +24,15 @@
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/page_zoom.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/widget/root_view.h"
+
+using content::NavigationController;
+using content::WebContents;
 
 namespace {
 
@@ -96,17 +100,17 @@ void AutomationProvider::WindowSimulateDrag(
       wparam_flags |= MK_SHIFT;
     if (flags & ui::EF_CONTROL_DOWN)
       wparam_flags |= MK_CONTROL;
-    if (flags & ui::EF_LEFT_BUTTON_DOWN) {
+    if (flags & ui::EF_LEFT_MOUSE_BUTTON) {
       wparam_flags |= MK_LBUTTON;
       down_message = WM_LBUTTONDOWN;
       up_message = WM_LBUTTONUP;
     }
-    if (flags & ui::EF_MIDDLE_BUTTON_DOWN) {
+    if (flags & ui::EF_MIDDLE_MOUSE_BUTTON) {
       wparam_flags |= MK_MBUTTON;
       down_message = WM_MBUTTONDOWN;
       up_message = WM_MBUTTONUP;
     }
-    if (flags & ui::EF_RIGHT_BUTTON_DOWN) {
+    if (flags & ui::EF_RIGHT_MOUSE_BUTTON) {
       wparam_flags |= MK_RBUTTON;
       down_message = WM_LBUTTONDOWN;
       up_message = WM_LBUTTONUP;
@@ -189,10 +193,10 @@ void AutomationProvider::CreateExternalTab(
       settings.route_all_top_level_navigations);
 
   if (AddExternalTab(external_tab_container)) {
-    TabContents* tab_contents = external_tab_container->tab_contents();
+    WebContents* web_contents = external_tab_container->web_contents();
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
-    *tab_window = tab_contents->GetNativeView();
+    *tab_window = web_contents->GetNativeView();
     *session_id = external_tab_container->tab_contents_wrapper()->
         restore_tab_helper()->session_id().id();
   } else {
@@ -205,9 +209,9 @@ void AutomationProvider::CreateExternalTab(
 bool AutomationProvider::AddExternalTab(ExternalTabContainer* external_tab) {
   DCHECK(external_tab != NULL);
 
-  TabContents* tab_contents = external_tab->tab_contents();
-  if (tab_contents) {
-    int tab_handle = tab_tracker_->Add(&tab_contents->controller());
+  WebContents* web_contents = external_tab->web_contents();
+  if (web_contents) {
+    int tab_handle = tab_tracker_->Add(&web_contents->GetController());
     external_tab->SetTabHandle(tab_handle);
     return true;
   }
@@ -235,12 +239,12 @@ void AutomationProvider::SetInitialFocus(const IPC::Message& message,
 }
 
 void AutomationProvider::PrintAsync(int tab_handle) {
-  TabContents* tab_contents = GetTabContentsForHandle(tab_handle, NULL);
-  if (!tab_contents)
+  WebContents* web_contents = GetWebContentsForHandle(tab_handle, NULL);
+  if (!web_contents)
     return;
 
   TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   wrapper->print_view_manager()->PrintNow();
 }
 
@@ -248,7 +252,7 @@ ExternalTabContainer* AutomationProvider::GetExternalTabForHandle(int handle) {
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     return ExternalTabContainer::GetContainerForTab(
-        tab->tab_contents()->GetNativeView());
+        tab->GetWebContents()->GetNativeView());
   }
 
   return NULL;
@@ -285,21 +289,22 @@ void AutomationProvider::OnTabReposition(
 
 void AutomationProvider::OnForwardContextMenuCommandToChrome(int tab_handle,
                                                              int command) {
-  if (tab_tracker_->ContainsHandle(tab_handle)) {
-    NavigationController* tab = tab_tracker_->GetResource(tab_handle);
-    if (!tab) {
-      NOTREACHED();
-      return;
-    }
+  if (!tab_tracker_->ContainsHandle(tab_handle))
+    return;
 
-    TabContents* tab_contents = tab->tab_contents();
-    if (!tab_contents || !tab_contents->delegate()) {
-      NOTREACHED();
-      return;
-    }
-
-    tab_contents->delegate()->ExecuteContextMenuCommand(command);
+  NavigationController* tab = tab_tracker_->GetResource(tab_handle);
+  if (!tab) {
+    NOTREACHED();
+    return;
   }
+
+  WebContents* web_contents = tab->GetWebContents();
+  if (!web_contents || !web_contents->GetDelegate()) {
+    NOTREACHED();
+    return;
+  }
+
+  web_contents->GetDelegate()->ExecuteContextMenuCommand(command);
 }
 
 void AutomationProvider::ConnectExternalTab(
@@ -328,7 +333,7 @@ void AutomationProvider::ConnectExternalTab(
     external_tab_container->Reinitialize(this,
                                          automation_resource_message_filter_,
                                          parent_window);
-    TabContents* tab_contents = external_tab_container->tab_contents();
+    WebContents* tab_contents = external_tab_container->web_contents();
     *tab_handle = external_tab_container->tab_handle();
     *tab_container_window = external_tab_container->GetNativeView();
     *tab_window = tab_contents->GetNativeView();
@@ -399,8 +404,8 @@ void AutomationProvider::OnRunUnloadHandlers(
 void AutomationProvider::OnSetZoomLevel(int handle, int zoom_level) {
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
-    if (tab->tab_contents() && tab->tab_contents()->render_view_host()) {
-      RenderViewHost* host = tab->tab_contents()->render_view_host();
+    if (tab->GetWebContents() && tab->GetWebContents()->GetRenderViewHost()) {
+      RenderViewHost* host = tab->GetWebContents()->GetRenderViewHost();
       content::PageZoom zoom = static_cast<content::PageZoom>(zoom_level);
       host->Zoom(zoom);
     }

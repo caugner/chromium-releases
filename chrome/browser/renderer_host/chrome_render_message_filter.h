@@ -11,9 +11,10 @@
 
 #include "base/file_path.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/common/content_settings.h"
+#include "base/message_loop_helpers.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/browser_message_filter.h"
+#include "chrome/common/content_settings.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
 class CookieSettings;
@@ -27,13 +28,13 @@ class URLRequestContextGetter;
 
 // This class filters out incoming Chrome-specific IPC messages for the renderer
 // process on the IPC thread.
-class ChromeRenderMessageFilter : public BrowserMessageFilter {
+class ChromeRenderMessageFilter : public content::BrowserMessageFilter {
  public:
   ChromeRenderMessageFilter(int render_process_id,
                             Profile* profile,
                             net::URLRequestContextGetter* request_context);
 
-  // BrowserMessageFilter methods:
+  // content::BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OverrideThreadForMessage(
@@ -42,7 +43,7 @@ class ChromeRenderMessageFilter : public BrowserMessageFilter {
 
  private:
   friend class content::BrowserThread;
-  friend class DeleteTask<ChromeRenderMessageFilter>;
+  friend class base::DeleteHelper<ChromeRenderMessageFilter>;
 
   virtual ~ChromeRenderMessageFilter();
 

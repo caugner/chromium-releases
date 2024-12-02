@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,17 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "media/audio/audio_buffers_state.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/simple_sources.h"
+
+namespace base {
+class WaitableEvent;
+}  // namespace base
 
 class MessageLoop;
 
@@ -22,8 +27,8 @@ class MessageLoop;
 // audio operations like play, pause, stop, etc. on a separate thread,
 // namely the audio controller thread.
 //
-// All the public methods of AudioOutputController are non-blocking except
-// close, the actual operations are performed on the audio controller thread.
+// All the public methods of AudioOutputController are non-blocking.
+// The actual operations are performed on the audio thread.
 //
 // Here is a state diagram for the AudioOutputController for default low
 // latency mode; in normal latency mode there is no "starting" or "paused when
@@ -52,6 +57,16 @@ class MessageLoop;
 // Low latency mode:
 //   In this mode a DataSource object is given to the AudioOutputController
 //   and AudioOutputController reads from it synchronously.
+//
+// The audio thread itself is owned by the AudioManager that the
+// AudioOutputController holds a reference to.  When performing tasks on the
+// audio thread, the controller must not add or release references to the
+// AudioManager or itself (since it in turn holds a reference to the manager),
+// for delayed tasks as it can slow down or even prevent normal shut down.
+// So, for tasks on the audio thread, the controller uses WeakPtr which enables
+// us to safely cancel pending polling tasks.
+// The owner of the audio thread, AudioManager, will take care of properly
+// shutting it down.
 //
 #include "media/base/media_export.h"
 
@@ -108,13 +123,12 @@ class MEDIA_EXPORT AudioOutputController
     virtual bool DataReady() = 0;
   };
 
-  virtual ~AudioOutputController();
-
   // Factory method for creating an AudioOutputController.
   // If successful, an audio controller thread is created. The audio device
   // will be created on the audio controller thread and when that is done
   // event handler will receive a OnCreated() call.
   static scoped_refptr<AudioOutputController> Create(
+      AudioManager* audio_manager,
       EventHandler* event_handler,
       const AudioParameters& params,
       // Soft limit for buffer capacity in this controller. This parameter
@@ -123,6 +137,7 @@ class MEDIA_EXPORT AudioOutputController
 
   // Factory method for creating a low latency audio stream.
   static scoped_refptr<AudioOutputController> CreateLowLatency(
+      AudioManager* audio_manager,
       EventHandler* event_handler,
       const AudioParameters& params,
       // External synchronous reader for audio controller.
@@ -181,12 +196,16 @@ class MEDIA_EXPORT AudioOutputController
     kError,
   };
 
+  friend class base::RefCountedThreadSafe<AudioOutputController>;
+  virtual ~AudioOutputController();
+
  private:
   // We are polling sync reader if data became available.
   static const int kPollNumAttempts;
   static const int kPollPauseInMilliseconds;
 
-  AudioOutputController(EventHandler* handler,
+  AudioOutputController(AudioManager* audio_manager,
+                        EventHandler* handler,
                         uint32 capacity, SyncReader* sync_reader);
 
   // The following methods are executed on the audio controller thread.
@@ -206,8 +225,10 @@ class MEDIA_EXPORT AudioOutputController
   void StartStream();
 
   // Helper method that stops, closes, and NULLs |*stream_|.
-  void StopCloseAndClearStream();
+  // Signals event when done if it is not NULL.
+  void DoStopCloseAndClearStream(base::WaitableEvent *done);
 
+  scoped_refptr<AudioManager> audio_manager_;
   // |handler_| may be called only if |state_| is not kClosed.
   EventHandler* handler_;
   AudioOutputStream* stream_;
@@ -233,15 +254,21 @@ class MEDIA_EXPORT AudioOutputController
   SyncReader* sync_reader_;
 
   // The message loop of audio thread that this object runs on.
-  MessageLoop* message_loop_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
 
   // When starting stream we wait for data to become available.
   // Number of times left.
   int number_polling_attempts_left_;
+
+  // Used to post delayed tasks to ourselves that we can cancel.
+  // We don't want the tasks to hold onto a reference as it will slow down
+  // shutdown and force it to wait for the most delayed task.
+  // Also, if we're shutting down, we do not want to poll for more data.
+  base::WeakPtrFactory<AudioOutputController> weak_this_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputController);
 };
 
 }  // namespace media
 
-#endif  //  MEDIA_AUDIO_AUDIO_OUTPUT_CONTROLLER_H_
+#endif  // MEDIA_AUDIO_AUDIO_OUTPUT_CONTROLLER_H_

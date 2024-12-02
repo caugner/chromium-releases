@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,10 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/pref_service_mock_builder.h"
 #include "chrome/browser/prefs/testing_pref_store.h"
+#include "chrome/browser/signin/signin_manager_fake.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service.h"
-#include "chrome/browser/sync/signin_manager.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -57,60 +58,75 @@ class MockSyncSetupHandler : public OptionsSyncSetupHandler {
   DISALLOW_COPY_AND_ASSIGN(MockSyncSetupHandler);
 };
 
-// A PSS subtype to inject.
-class ProfileSyncServiceForWizardTest : public ProfileSyncService {
+class SigninManagerMock : public FakeSigninManager {
  public:
-  ProfileSyncServiceForWizardTest(ProfileSyncComponentsFactory* factory,
-                                  Profile* profile)
-      : ProfileSyncService(factory, profile, new SigninManager(), ""),
-        user_cancelled_dialog_(false),
-        is_using_secondary_passphrase_(false),
-        encrypt_everything_(false) {
-    ResetTestStats();
-  }
+  SigninManagerMock() : auth_error_(AuthError::None()) {}
 
-  virtual ~ProfileSyncServiceForWizardTest() {}
-
-  virtual void OnUserSubmittedAuth(const std::string& username,
-                                   const std::string& password,
-                                   const std::string& captcha,
-                                   const std::string& access_code) {
+  virtual void StartSignIn(const std::string& username,
+                           const std::string& password,
+                           const std::string& token,
+                           const std::string& captcha) OVERRIDE {
+    FakeSigninManager::StartSignIn(username, password, token, captcha);
     username_ = username;
     password_ = password;
     captcha_ = captcha;
   }
 
-  virtual void OnUserChoseDatatypes(bool sync_everything,
-      const syncable::ModelTypeSet& chosen_types) {
+  virtual const AuthError& GetLoginAuthError() const OVERRIDE {
+    return auth_error_;
+  }
+
+  void ResetTestStats() {
+    username_.clear();
+    password_.clear();
+    captcha_.clear();
+  }
+
+  AuthError auth_error_;
+  std::string username_;
+  std::string password_;
+  std::string captcha_;
+};
+
+// A PSS subtype to inject.
+class ProfileSyncServiceForWizardTest : public ProfileSyncService {
+ public:
+  virtual ~ProfileSyncServiceForWizardTest() {}
+
+  static ProfileKeyedService* BuildManual(Profile* profile) {
+    return new ProfileSyncServiceForWizardTest(profile,
+        ProfileSyncService::MANUAL_START);
+  }
+
+  static ProfileKeyedService* BuildAuto(Profile* profile) {
+    return new ProfileSyncServiceForWizardTest(profile,
+        ProfileSyncService::AUTO_START);
+  }
+
+  virtual void OnUserChoseDatatypes(
+      bool sync_everything, syncable::ModelTypeSet chosen_types) OVERRIDE {
     user_chose_data_types_ = true;
     chosen_data_types_ = chosen_types;
   }
 
-  virtual void OnUserCancelledDialog() {
+  virtual void OnUserCancelledDialog() OVERRIDE {
     user_cancelled_dialog_ = true;
   }
 
   virtual void SetPassphrase(const std::string& passphrase,
-                             bool is_explicit) {
+                             PassphraseType type,
+                             PassphraseSource source) OVERRIDE {
     passphrase_ = passphrase;
   }
 
-  virtual string16 GetAuthenticatedUsername() const {
-    return UTF8ToUTF16(username_);
-  }
-
-  virtual bool IsUsingSecondaryPassphrase() const {
+  virtual bool IsUsingSecondaryPassphrase() const OVERRIDE {
     return is_using_secondary_passphrase_;
   }
 
-  void set_auth_state(const std::string& last_email,
-                      const AuthError& error) {
-    last_attempted_user_email_ = last_email;
-    last_auth_error_ = error;
-  }
-
   void set_last_auth_error(const AuthError& error) {
+    // Set the cached auth error in the SigninManager and ProfileSyncService.
     last_auth_error_ = error;
+    mock_signin_.auth_error_ = error;
   }
 
   void set_is_using_secondary_passphrase(bool secondary) {
@@ -122,11 +138,11 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
     passphrase_required_reason_ = reason;
   }
 
-  virtual bool sync_initialized() const {
+  virtual bool sync_initialized() const OVERRIDE {
     return true;
   }
 
-  virtual bool EncryptEverythingEnabled() const {
+  virtual bool EncryptEverythingEnabled() const OVERRIDE {
     return encrypt_everything_;
   }
 
@@ -135,21 +151,14 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   }
 
   void ResetTestStats() {
-    username_.clear();
-    password_.clear();
-    captcha_.clear();
+    mock_signin_.ResetTestStats();
     user_cancelled_dialog_ = false;
     user_chose_data_types_ = false;
     keep_everything_synced_ = false;
-    chosen_data_types_.clear();
+    chosen_data_types_.Clear();
   }
 
-  // Use this to have the service act as if it were running under CrOS.
-  void set_cros_mode() {
-    cros_user_ = kTestUser;
-  }
-
-  virtual void ShowSyncSetup(const std::string& sub_page) {
+  virtual void ShowSyncSetup(const std::string& sub_page) OVERRIDE {
     // Do Nothing.
   }
 
@@ -161,9 +170,7 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
     return &wizard_;
   }
 
-  std::string username_;
-  std::string password_;
-  std::string captcha_;
+  SigninManagerMock mock_signin_;
   bool user_cancelled_dialog_;
   bool user_chose_data_types_;
   bool keep_everything_synced_;
@@ -173,21 +180,17 @@ class ProfileSyncServiceForWizardTest : public ProfileSyncService {
   std::string passphrase_;
 
  private:
+  ProfileSyncServiceForWizardTest(Profile* profile,
+                                  ProfileSyncService::StartBehavior behavior)
+      : ProfileSyncService(NULL, profile, NULL, behavior),
+        user_cancelled_dialog_(false),
+        is_using_secondary_passphrase_(false),
+        encrypt_everything_(false) {
+    signin_ = &mock_signin_;
+    ResetTestStats();
+  }
+
   DISALLOW_COPY_AND_ASSIGN(ProfileSyncServiceForWizardTest);
-};
-
-class TestingProfileWithSyncService : public TestingProfile {
- public:
-  TestingProfileWithSyncService() {
-    sync_service_.reset(new ProfileSyncServiceForWizardTest(&factory_, this));
-  }
-
-  virtual ProfileSyncService* GetProfileSyncService() {
-    return sync_service_.get();
-  }
- private:
-  ProfileSyncComponentsFactoryMock factory_;
-  scoped_ptr<ProfileSyncService> sync_service_;
 };
 
 // TODO(jhawkins): Subclass Browser (specifically, ShowOptionsTab) and inject it
@@ -199,8 +202,14 @@ class SyncSetupWizardTest : public BrowserWithTestWindowTest {
         service_(NULL),
         flow_(NULL) {}
   virtual ~SyncSetupWizardTest() {}
+  virtual TestingProfile* BuildProfile() {
+    TestingProfile* profile = new TestingProfile();
+    ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(profile,
+        ProfileSyncServiceForWizardTest::BuildManual);
+    return profile;
+  }
   virtual void SetUp() {
-    set_profile(new TestingProfileWithSyncService());
+    set_profile(BuildProfile());
     profile()->CreateBookmarkModel(false);
     // Wait for the bookmarks model to load.
     profile()->BlockUntilBookmarkModelLoaded();
@@ -208,10 +217,10 @@ class SyncSetupWizardTest : public BrowserWithTestWindowTest {
     prefs->SetString(prefs::kGoogleServicesUsername, kTestUser);
 
     set_browser(new Browser(Browser::TYPE_TABBED, profile()));
-    browser()->set_window(window());
+    browser()->SetWindowForTesting(window());
     BrowserList::SetLastActive(browser());
     service_ = static_cast<ProfileSyncServiceForWizardTest*>(
-        profile()->GetProfileSyncService());
+        ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile()));
     wizard_ = service_->GetWizard();
   }
 
@@ -269,20 +278,21 @@ TEST_F(SyncSetupWizardTest, InitialStepLogin) {
   handler_.HandleSubmitAuth(&credentials);
   EXPECT_TRUE(wizard_->IsVisible());
   EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
-  EXPECT_EQ(kTestUser, service_->username_);
-  EXPECT_EQ(kTestPassword, service_->password_);
-  EXPECT_EQ(kTestCaptcha, service_->captcha_);
+  EXPECT_EQ(kTestUser, service_->mock_signin_.username_);
+  EXPECT_EQ(kTestPassword, service_->mock_signin_.password_);
+  EXPECT_EQ(kTestCaptcha, service_->mock_signin_.captcha_);
   EXPECT_FALSE(service_->user_cancelled_dialog_);
   service_->ResetTestStats();
 
   // Simulate failed credentials.
   AuthError invalid_gaia(AuthError::INVALID_GAIA_CREDENTIALS);
-  service_->set_auth_state(kTestUser, invalid_gaia);
+  flow_->last_attempted_user_email_ = kTestUser;
+  service_->set_last_auth_error(invalid_gaia);
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   EXPECT_TRUE(wizard_->IsVisible());
   EXPECT_EQ(SyncSetupWizard::GAIA_LOGIN, flow_->current_state_);
   DictionaryValue dialog_args;
-  SyncSetupFlow::GetArgsForGaiaLogin(service_, &dialog_args);
+  flow_->GetArgsForGaiaLogin(&dialog_args);
   EXPECT_EQ(4U, dialog_args.size());
   std::string actual_user;
   dialog_args.GetString("user", &actual_user);
@@ -290,14 +300,16 @@ TEST_F(SyncSetupWizardTest, InitialStepLogin) {
   int error = -1;
   dialog_args.GetInteger("error", &error);
   EXPECT_EQ(static_cast<int>(AuthError::INVALID_GAIA_CREDENTIALS), error);
-  service_->set_auth_state(kTestUser, AuthError::None());
+  flow_->last_attempted_user_email_ = kTestUser;
+  service_->set_last_auth_error(AuthError::None());
 
   // Simulate captcha.
   AuthError captcha_error(AuthError::FromCaptchaChallenge(
       std::string(), GURL(kTestCaptchaUrl), GURL()));
-  service_->set_auth_state(kTestUser, captcha_error);
+  flow_->last_attempted_user_email_ = kTestUser;
+  service_->set_last_auth_error(captcha_error);
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
-  SyncSetupFlow::GetArgsForGaiaLogin(service_, &dialog_args);
+  flow_->GetArgsForGaiaLogin(&dialog_args);
   EXPECT_EQ(4U, dialog_args.size());
   std::string captcha_url;
   dialog_args.GetString("captchaUrl", &captcha_url);
@@ -305,7 +317,8 @@ TEST_F(SyncSetupWizardTest, InitialStepLogin) {
   error = -1;
   dialog_args.GetInteger("error", &error);
   EXPECT_EQ(static_cast<int>(AuthError::CAPTCHA_REQUIRED), error);
-  service_->set_auth_state(kTestUser, AuthError::None());
+  flow_->last_attempted_user_email_ = kTestUser;
+  service_->set_last_auth_error(AuthError::None());
 
   // Simulate success.
   wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
@@ -342,15 +355,15 @@ TEST_F(SyncSetupWizardTest, ChooseDataTypesSetsPrefs) {
   // DONE state and closed the UI.
   EXPECT_FALSE(wizard_->IsVisible());
   EXPECT_FALSE(service_->keep_everything_synced_);
-  EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::BOOKMARKS));
-  EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::PREFERENCES));
-  EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::THEMES));
-  EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::PASSWORDS));
-  EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::AUTOFILL));
-  EXPECT_EQ(0U, service_->chosen_data_types_.count(syncable::EXTENSIONS));
-  EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::TYPED_URLS));
-  EXPECT_EQ(1U, service_->chosen_data_types_.count(syncable::APPS));
-  EXPECT_EQ(0U, service_->chosen_data_types_.count(
+  EXPECT_TRUE(service_->chosen_data_types_.Has(syncable::BOOKMARKS));
+  EXPECT_TRUE(service_->chosen_data_types_.Has(syncable::PREFERENCES));
+  EXPECT_FALSE(service_->chosen_data_types_.Has(syncable::THEMES));
+  EXPECT_FALSE(service_->chosen_data_types_.Has(syncable::PASSWORDS));
+  EXPECT_FALSE(service_->chosen_data_types_.Has(syncable::AUTOFILL));
+  EXPECT_FALSE(service_->chosen_data_types_.Has(syncable::EXTENSIONS));
+  EXPECT_TRUE(service_->chosen_data_types_.Has(syncable::TYPED_URLS));
+  EXPECT_TRUE(service_->chosen_data_types_.Has(syncable::APPS));
+  EXPECT_FALSE(service_->chosen_data_types_.Has(
       syncable::APP_NOTIFICATIONS));
 }
 
@@ -417,8 +430,8 @@ TEST_F(SyncSetupWizardTest, DialogCancelled) {
   CloseSetupUI();
   EXPECT_FALSE(wizard_->IsVisible());
   EXPECT_TRUE(service_->user_cancelled_dialog_);
-  EXPECT_EQ(std::string(), service_->username_);
-  EXPECT_EQ(std::string(), service_->password_);
+  EXPECT_EQ(std::string(), service_->mock_signin_.username_);
+  EXPECT_EQ(std::string(), service_->mock_signin_.password_);
 
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   AttachSyncSetupHandler();
@@ -428,8 +441,8 @@ TEST_F(SyncSetupWizardTest, DialogCancelled) {
   CloseSetupUI();
   EXPECT_FALSE(wizard_->IsVisible());
   EXPECT_TRUE(service_->user_cancelled_dialog_);
-  EXPECT_EQ(std::string(), service_->username_);
-  EXPECT_EQ(std::string(), service_->password_);
+  EXPECT_EQ(std::string(), service_->mock_signin_.username_);
+  EXPECT_EQ(std::string(), service_->mock_signin_.password_);
 }
 
 TEST_F(SyncSetupWizardTest, InvalidTransitions) {
@@ -510,12 +523,13 @@ TEST_F(SyncSetupWizardTest, DiscreteRunGaiaLogin) {
   EXPECT_EQ(SyncSetupWizard::GAIA_SUCCESS, flow_->end_state_);
 
   AuthError invalid_gaia(AuthError::INVALID_GAIA_CREDENTIALS);
-  service_->set_auth_state(kTestUser, invalid_gaia);
+  flow_->last_attempted_user_email_ = kTestUser;
+  service_->set_last_auth_error(invalid_gaia);
   wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
   EXPECT_TRUE(wizard_->IsVisible());
 
   DictionaryValue dialog_args;
-  SyncSetupFlow::GetArgsForGaiaLogin(service_, &dialog_args);
+  flow_->GetArgsForGaiaLogin(&dialog_args);
   EXPECT_EQ(4U, dialog_args.size());
   std::string actual_user;
   dialog_args.GetString("user", &actual_user);
@@ -523,37 +537,10 @@ TEST_F(SyncSetupWizardTest, DiscreteRunGaiaLogin) {
   int error = -1;
   dialog_args.GetInteger("error", &error);
   EXPECT_EQ(static_cast<int>(AuthError::INVALID_GAIA_CREDENTIALS), error);
-  service_->set_auth_state(kTestUser, AuthError::None());
+  flow_->last_attempted_user_email_ = kTestUser;
+  service_->set_last_auth_error(AuthError::None());
 
   wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
-}
-
-// Tests a scenario where sync is disabled on chrome os on startup due to
-// an auth error (application specific password is needed).
-TEST_F(SyncSetupWizardTest, CrosAuthSetup) {
-  service_->set_cros_mode();
-
-  wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
-
-  AttachSyncSetupHandler();
-  EXPECT_EQ(SyncSetupWizard::GAIA_SUCCESS, flow_->end_state_);
-
-  DictionaryValue dialog_args;
-  SyncSetupFlow::GetArgsForGaiaLogin(service_, &dialog_args);
-  EXPECT_EQ(4U, dialog_args.size());
-  std::string actual_user;
-  dialog_args.GetString("user", &actual_user);
-  EXPECT_EQ(kTestUser, actual_user);
-  int error = -1;
-  dialog_args.GetInteger("error", &error);
-  EXPECT_EQ(0, error);
-  bool editable = true;
-  dialog_args.GetBoolean("editable_user", &editable);
-  EXPECT_FALSE(editable);
-  wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
-  EXPECT_TRUE(service_->user_cancelled_dialog_);
-  EXPECT_TRUE(service_->profile()->GetPrefs()->GetBoolean(
-      prefs::kSyncHasSetupCompleted));
 }
 
 TEST_F(SyncSetupWizardTest, NonFatalError) {
@@ -620,4 +607,41 @@ TEST_F(SyncSetupWizardTest, NonFatalError) {
   EXPECT_EQ(SyncSetupWizard::DONE, flow_->end_state_);
   CloseSetupUI();
   EXPECT_FALSE(wizard_->IsVisible());
+}
+
+class SyncSetupWizardCrosTest : public SyncSetupWizardTest {
+ public:
+  virtual TestingProfile* BuildProfile() {
+    TestingProfile* profile = new TestingProfile();
+    ProfileSyncServiceFactory* f = ProfileSyncServiceFactory::GetInstance();
+    f->SetTestingFactory(profile, ProfileSyncServiceForWizardTest::BuildAuto);
+    f->GetForProfile(profile)->signin()->SetAuthenticatedUsername(kTestUser);
+    return profile;
+  }
+};
+
+// Tests a scenario where sync is disabled on chrome os on startup due to
+// an auth error (application specific password is needed).
+TEST_F(SyncSetupWizardCrosTest, CrosAuthSetup) {
+  wizard_->Step(SyncSetupWizard::GAIA_LOGIN);
+
+  AttachSyncSetupHandler();
+  EXPECT_EQ(SyncSetupWizard::GAIA_SUCCESS, flow_->end_state_);
+
+  DictionaryValue dialog_args;
+  flow_->GetArgsForGaiaLogin(&dialog_args);
+  EXPECT_EQ(4U, dialog_args.size());
+  std::string actual_user;
+  dialog_args.GetString("user", &actual_user);
+  EXPECT_EQ(kTestUser, actual_user);
+  int error = -1;
+  dialog_args.GetInteger("error", &error);
+  EXPECT_EQ(0, error);
+  bool editable = true;
+  dialog_args.GetBoolean("editable_user", &editable);
+  EXPECT_FALSE(editable);
+  wizard_->Step(SyncSetupWizard::GAIA_SUCCESS);
+  EXPECT_TRUE(service_->user_cancelled_dialog_);
+  EXPECT_TRUE(service_->profile()->GetPrefs()->GetBoolean(
+      prefs::kSyncHasSetupCompleted));
 }

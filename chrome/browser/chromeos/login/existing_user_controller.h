@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,14 @@
 
 #include <string>
 
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "base/task.h"
+#include "base/time.h"
 #include "base/timer.h"
-#include "chrome/browser/chromeos/login/captcha_view.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/login_performer.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
@@ -24,7 +25,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/gfx/rect.h"
 
 #if defined(TOOLKIT_USES_GTK)
@@ -47,7 +47,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
                                public content::NotificationObserver,
                                public LoginPerformer::Delegate,
                                public LoginUtils::Delegate,
-                               public CaptchaView::Delegate,
                                public PasswordChangedView::Delegate {
  public:
   // All UI initialization is deferred till Init() call.
@@ -61,6 +60,13 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Creates and shows login UI for known users.
   void Init(const UserList& users);
+
+  // Tells the controller to enter the Enterprise Enrollment screen when
+  // appropriate.
+  void DoAutoEnrollment();
+
+  // Tells the controller to resume a pending login.
+  void ResumeLogin();
 
   // LoginDisplay::Delegate: implementation
   virtual void CreateAccount() OVERRIDE;
@@ -113,12 +119,11 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void OnPasswordChangeDetected(
       const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
   virtual void WhiteListCheckFailed(const std::string& email) OVERRIDE;
+  virtual void OnOnlineChecked(
+      const std::string& username, bool success) OVERRIDE;
 
   // LoginUtils::Delegate implementation:
   virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
-
-  // CaptchaView::Delegate:
-  virtual void OnCaptchaEntered(const std::string& captcha) OVERRIDE;
 
   // PasswordChangedView::Delegate:
   virtual void RecoverEncryptedData(const std::string& old_password) OVERRIDE;
@@ -130,6 +135,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Returns corresponding native window.
   gfx::NativeWindow GetNativeWindow() const;
 
+  // Adds first-time login URLs.
+  void InitializeStartUrls() const;
+
   // Changes state of the status area. During login operation it's disabled.
   void SetStatusAreaEnabled(bool enable);
 
@@ -138,10 +146,23 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // provided by authenticator, it is not localized.
   void ShowError(int error_id, const std::string& details);
 
+  // Shows Gaia page because password change was detected.
+  void ShowGaiaPasswordChanged(const std::string& username);
+
   // Handles result of ownership check and starts enterprise enrollment if
   // applicable.
   void OnEnrollmentOwnershipCheckCompleted(OwnershipService::Status status,
                                            bool current_user_is_owner);
+
+  // Enters the enterprise enrollment screen. |forced| is true if this is the
+  // result of an auto-enrollment check, and the user shouldn't be able to
+  // easily cancel the enrollment. In that case, |user| is the user name that
+  // first logged in.
+  void ShowEnrollmentScreen(bool forced, const std::string& user);
+
+  // Invoked to complete login. Login might be suspended if auto-enrollment
+  // has to be performed, and will resume once auto-enrollment completes.
+  void CompleteLoginInternal(std::string username, std::string password);
 
   void set_login_performer_delegate(LoginPerformer::Delegate* d) {
     login_performer_delegate_.reset(d);
@@ -150,6 +171,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Passes owner user to cryptohomed. Called right before mounting a user.
   // Subsequent disk space control checks are invoked by cryptohomed timer.
   void SetOwnerUserInCryptohome();
+
+  // Updates the |login_display_| attached to this controller.
+  void UpdateLoginDisplay(const UserList& users);
 
   // Used to execute login operations.
   scoped_ptr<LoginPerformer> login_performer_;
@@ -205,6 +229,29 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // The displayed email for the next login attempt set by |SetDisplayEmail|.
   std::string display_email_;
+
+  // Whether offline login attempt failed.
+  bool offline_failed_;
+
+  // Whether login attempt is running.
+  bool is_login_in_progress_;
+
+  // Whether online login attempt succeeded.
+  std::string online_succeeded_for_;
+
+  // True if auto-enrollment should be performed before starting the user's
+  // session.
+  bool do_auto_enrollment_;
+
+  // The username used for auto-enrollment, if it was triggered.
+  std::string auto_enrollment_username_;
+
+  // Callback to invoke to resume login, after auto-enrollment has completed.
+  base::Closure resume_login_callback_;
+
+  // Time when the signin screen was first displayed. Used to measure the time
+  // from showing the screen until a successful login is performed.
+  base::Time time_init_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, NewUserLogin);
 

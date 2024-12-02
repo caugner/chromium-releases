@@ -5,6 +5,7 @@
 #include "net/http/http_cache.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -32,18 +33,27 @@ using base::Time;
 
 namespace {
 
-class DeleteCacheOldCompletionCallback : public TestOldCompletionCallback {
+class DeleteCacheCompletionCallback : public TestCompletionCallbackBase {
  public:
-  explicit DeleteCacheOldCompletionCallback(MockHttpCache* cache)
-      : cache_(cache) {}
-
-  virtual void RunWithParams(const Tuple1<int>& params) {
-    delete cache_;
-    TestOldCompletionCallback::RunWithParams(params);
+  explicit DeleteCacheCompletionCallback(MockHttpCache* cache)
+      : cache_(cache),
+        ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+            base::Bind(&DeleteCacheCompletionCallback::OnComplete,
+                       base::Unretained(this)))) {
   }
 
+  const net::CompletionCallback& callback() const { return callback_; }
+
  private:
+  void OnComplete(int result) {
+    delete cache_;
+    SetResult(result);
+  }
+
   MockHttpCache* cache_;
+  net::CompletionCallback callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeleteCacheCompletionCallback);
 };
 
 //-----------------------------------------------------------------------------
@@ -64,7 +74,7 @@ void RunTransactionTestWithRequestAndLog(net::HttpCache* cache,
                                          const MockHttpRequest& request,
                                          net::HttpResponseInfo* response_info,
                                          const net::BoundNetLog& net_log) {
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   // write to the cache
 
@@ -73,7 +83,7 @@ void RunTransactionTestWithRequestAndLog(net::HttpCache* cache,
   EXPECT_EQ(net::OK, rv);
   ASSERT_TRUE(trans.get());
 
-  rv = trans->Start(&request, &callback, net_log);
+  rv = trans->Start(&request, callback.callback(), net_log);
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::OK, rv);
@@ -344,8 +354,8 @@ void CreateTruncatedEntry(std::string raw_headers, MockHttpCache* cache) {
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(100));
   int len = static_cast<int>(base::strlcpy(buf->data(),
                                            "rg: 00-09 rg: 10-19 ", 100));
-  TestOldCompletionCallback cb;
-  int rv = entry->WriteData(1, 0, buf, len, &cb, true);
+  net::TestCompletionCallback cb;
+  int rv = entry->WriteData(1, 0, buf, len, cb.callback(), true);
   EXPECT_EQ(len, cb.GetResult(rv));
   entry->Close();
 }
@@ -372,7 +382,7 @@ struct Context {
   Context() : result(net::ERR_IO_PENDING) {}
 
   int result;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
   scoped_ptr<net::HttpTransaction> trans;
 };
 
@@ -395,9 +405,9 @@ TEST(HttpCache, GetBackend) {
   MockHttpCache cache(net::HttpCache::DefaultBackend::InMemory(0));
 
   disk_cache::Backend* backend;
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
   // This will lazily initialize the backend.
-  int rv = cache.http_cache()->GetBackend(&backend, &cb);
+  int rv = cache.http_cache()->GetBackend(&backend, cb.callback());
   EXPECT_EQ(net::OK, cb.GetResult(rv));
 }
 
@@ -493,7 +503,7 @@ TEST(HttpCache, SimpleGETWithDiskFailures2) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
   rv = c->callback.WaitForResult();
 
@@ -539,7 +549,7 @@ TEST(HttpCache, SimpleGETWithDiskFailures3) {
   EXPECT_EQ(net::OK, rv);
 
   MockHttpRequest request(kSimpleGET_Transaction);
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::ERR_CACHE_READ_FAILURE, c->callback.GetResult(rv));
 }
 
@@ -619,14 +629,14 @@ TEST(HttpCache, SimpleGET_LoadOnlyFromCache_Miss) {
   transaction.load_flags |= net::LOAD_ONLY_FROM_CACHE;
 
   MockHttpRequest request(transaction);
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = cache.http_cache()->CreateTransaction(&trans);
   EXPECT_EQ(net::OK, rv);
   ASSERT_TRUE(trans.get());
 
-  rv = trans->Start(&request, &callback, net::BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::ERR_CACHE_MISS, rv);
@@ -852,7 +862,8 @@ TEST(HttpCache, SimpleGET_ManyReaders) {
     EXPECT_EQ(net::OK, c->result);
     EXPECT_EQ(net::LOAD_STATE_IDLE, c->trans->GetLoadState());
 
-    c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        &request, c->callback.callback(), net::BoundNetLog());
   }
 
   // All requests are waiting for the active entry.
@@ -922,7 +933,8 @@ TEST(HttpCache, SimpleGET_RacingReaders) {
     if (i == 1 || i == 2)
       this_request = &reader_request;
 
-    c->result = c->trans->Start(this_request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        this_request, c->callback.callback(), net::BoundNetLog());
   }
 
   // Allow all requests to move from the Create queue to the active entry.
@@ -1006,7 +1018,8 @@ TEST(HttpCache, SimpleGET_DoomWithPending) {
     if (i == 3)
       this_request = &writer_request;
 
-    c->result = c->trans->Start(this_request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        this_request, c->callback.callback(), net::BoundNetLog());
   }
 
   // The first request should be a writer at this point, and the two subsequent
@@ -1049,7 +1062,8 @@ TEST(HttpCache, FastNoStoreGET_DoneWithPending) {
     c->result = cache.http_cache()->CreateTransaction(&c->trans);
     EXPECT_EQ(net::OK, c->result);
 
-    c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        &request, c->callback.callback(), net::BoundNetLog());
   }
 
   // Allow all requests to move from the Create queue to the active entry.
@@ -1095,7 +1109,8 @@ TEST(HttpCache, SimpleGET_ManyWriters_CancelFirst) {
     c->result = cache.http_cache()->CreateTransaction(&c->trans);
     EXPECT_EQ(net::OK, c->result);
 
-    c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        &request, c->callback.callback(), net::BoundNetLog());
   }
 
   // Allow all requests to move from the Create queue to the active entry.
@@ -1154,7 +1169,8 @@ TEST(HttpCache, SimpleGET_ManyWriters_CancelCreate) {
     c->result = cache.http_cache()->CreateTransaction(&c->trans);
     EXPECT_EQ(net::OK, c->result);
 
-    c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        &request, c->callback.callback(), net::BoundNetLog());
   }
 
   // The first request should be creating the disk cache entry and the others
@@ -1204,11 +1220,12 @@ TEST(HttpCache, SimpleGET_CancelCreate) {
   c->result = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, c->result);
 
-  c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  c->result = c->trans->Start(
+      &request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::ERR_IO_PENDING, c->result);
 
   // Release the reference that the mock disk cache keeps for this entry, so
-  // that we test that the http cache handles the cancelation correctly.
+  // that we test that the http cache handles the cancellation correctly.
   cache.disk_cache()->ReleaseAll();
   delete c;
 
@@ -1233,7 +1250,8 @@ TEST(HttpCache, SimpleGET_ManyWriters_BypassCache) {
     c->result = cache.http_cache()->CreateTransaction(&c->trans);
     EXPECT_EQ(net::OK, c->result);
 
-    c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        &request, c->callback.callback(), net::BoundNetLog());
   }
 
   // The first request should be deleting the disk cache entry and the others
@@ -1268,18 +1286,18 @@ TEST(HttpCache, SimpleGET_AbandonedCacheRead) {
   RunTransactionTest(cache.http_cache(), kSimpleGET_Transaction);
 
   MockHttpRequest request(kSimpleGET_Transaction);
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = cache.http_cache()->CreateTransaction(&trans);
   EXPECT_EQ(net::OK, rv);
-  rv = trans->Start(&request, &callback, net::BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::OK, rv);
 
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
-  rv = trans->Read(buf, 256, &callback);
+  rv = trans->Read(buf, 256, callback.callback());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
   // Test that destroying the transaction while it is reading from the cache
@@ -1309,7 +1327,8 @@ TEST(HttpCache, SimpleGET_ManyWriters_DeleteCache) {
     c->result = cache->http_cache()->CreateTransaction(&c->trans);
     EXPECT_EQ(net::OK, c->result);
 
-    c->result = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+    c->result = c->trans->Start(
+        &request, c->callback.callback(), net::BoundNetLog());
   }
 
   // The first request should be creating the disk cache entry and the others
@@ -1349,11 +1368,11 @@ TEST(HttpCache, SimpleGET_WaitForBackend) {
   }
 
   context_list[0]->result = context_list[0]->trans->Start(
-      &request0, &context_list[0]->callback, net::BoundNetLog());
+      &request0, context_list[0]->callback.callback(), net::BoundNetLog());
   context_list[1]->result = context_list[1]->trans->Start(
-      &request1, &context_list[1]->callback, net::BoundNetLog());
+      &request1, context_list[1]->callback.callback(), net::BoundNetLog());
   context_list[2]->result = context_list[2]->trans->Start(
-      &request2, &context_list[2]->callback, net::BoundNetLog());
+      &request2, context_list[2]->callback.callback(), net::BoundNetLog());
 
   // Just to make sure that everything is still pending.
   MessageLoop::current()->RunAllPending();
@@ -1395,11 +1414,11 @@ TEST(HttpCache, SimpleGET_WaitForBackend_CancelCreate) {
   }
 
   context_list[0]->result = context_list[0]->trans->Start(
-      &request0, &context_list[0]->callback, net::BoundNetLog());
+      &request0, context_list[0]->callback.callback(), net::BoundNetLog());
   context_list[1]->result = context_list[1]->trans->Start(
-      &request1, &context_list[1]->callback, net::BoundNetLog());
+      &request1, context_list[1]->callback.callback(), net::BoundNetLog());
   context_list[2]->result = context_list[2]->trans->Start(
-      &request2, &context_list[2]->callback, net::BoundNetLog());
+      &request2, context_list[2]->callback.callback(), net::BoundNetLog());
 
   // Just to make sure that everything is still pending.
   MessageLoop::current()->RunAllPending();
@@ -1439,7 +1458,7 @@ TEST(HttpCache, DeleteCacheWaitingForBackend) {
   c->result = cache->http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, c->result);
 
-  c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
 
   // Just to make sure that everything is still pending.
   MessageLoop::current()->RunAllPending();
@@ -1449,14 +1468,14 @@ TEST(HttpCache, DeleteCacheWaitingForBackend) {
 
   // We cannot call FinishCreation because the factory itself will go away with
   // the cache, so grab the callback and attempt to use it.
-  net::OldCompletionCallback* callback = factory->callback();
+  net::CompletionCallback callback = factory->callback();
   disk_cache::Backend** backend = factory->backend();
 
   cache.reset();
   MessageLoop::current()->RunAllPending();
 
   *backend = NULL;
-  callback->Run(net::ERR_ABORTED);
+  callback.Run(net::ERR_ABORTED);
 }
 
 // Tests that we can delete the cache while creating the backend, from within
@@ -1465,9 +1484,9 @@ TEST(HttpCache, DeleteCacheWaitingForBackend2) {
   MockBlockingBackendFactory* factory = new MockBlockingBackendFactory();
   MockHttpCache* cache = new MockHttpCache(factory);
 
-  DeleteCacheOldCompletionCallback cb(cache);
+  DeleteCacheCompletionCallback cb(cache);
   disk_cache::Backend* backend;
-  int rv = cache->http_cache()->GetBackend(&backend, &cb);
+  int rv = cache->http_cache()->GetBackend(&backend, cb.callback());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
   // Now let's queue a regular transaction
@@ -1477,11 +1496,11 @@ TEST(HttpCache, DeleteCacheWaitingForBackend2) {
   c->result = cache->http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, c->result);
 
-  c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
 
   // And another direct backend request.
-  TestOldCompletionCallback cb2;
-  rv = cache->http_cache()->GetBackend(&backend, &cb2);
+  net::TestCompletionCallback cb2;
+  rv = cache->http_cache()->GetBackend(&backend, cb2.callback());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
   // Just to make sure that everything is still pending.
@@ -2162,14 +2181,14 @@ TEST(HttpCache, SimplePOST_LoadOnlyFromCache_Miss) {
   transaction.load_flags |= net::LOAD_ONLY_FROM_CACHE;
 
   MockHttpRequest request(transaction);
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = cache.http_cache()->CreateTransaction(&trans);
   EXPECT_EQ(net::OK, rv);
   ASSERT_TRUE(trans.get());
 
-  rv = trans->Start(&request, &callback, net::BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::ERR_CACHE_MISS, rv);
@@ -2814,8 +2833,8 @@ TEST(HttpCache, GET_Previous206_NotSparse) {
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(500));
   int len = static_cast<int>(base::strlcpy(buf->data(),
                                            kRangeGET_TransactionOK.data, 500));
-  TestOldCompletionCallback cb;
-  int rv = entry->WriteData(1, 0, buf, len, &cb, true);
+  net::TestCompletionCallback cb;
+  int rv = entry->WriteData(1, 0, buf, len, cb.callback(), true);
   EXPECT_EQ(len, cb.GetResult(rv));
   entry->Close();
 
@@ -2858,8 +2877,8 @@ TEST(HttpCache, RangeGET_Previous206_NotSparse_2) {
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(500));
   int len = static_cast<int>(base::strlcpy(buf->data(),
                                            kRangeGET_TransactionOK.data, 500));
-  TestOldCompletionCallback cb;
-  int rv = entry->WriteData(1, 0, buf, len, &cb, true);
+  net::TestCompletionCallback cb;
+  int rv = entry->WriteData(1, 0, buf, len, cb.callback(), true);
   EXPECT_EQ(len, cb.GetResult(rv));
   entry->Close();
 
@@ -2900,8 +2919,8 @@ TEST(HttpCache, GET_Previous206_NotValidation) {
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(500));
   int len = static_cast<int>(base::strlcpy(buf->data(),
                                            kRangeGET_TransactionOK.data, 500));
-  TestOldCompletionCallback cb;
-  int rv = entry->WriteData(1, 0, buf, len, &cb, true);
+  net::TestCompletionCallback cb;
+  int rv = entry->WriteData(1, 0, buf, len, cb.callback(), true);
   EXPECT_EQ(len, cb.GetResult(rv));
   entry->Close();
 
@@ -3074,7 +3093,7 @@ TEST(HttpCache, RangeGET_Cancel) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
 
@@ -3084,7 +3103,7 @@ TEST(HttpCache, RangeGET_Cancel) {
 
   // Make sure that the entry has some data stored.
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(10));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
   EXPECT_EQ(buf->size(), rv);
@@ -3113,7 +3132,7 @@ TEST(HttpCache, RangeGET_Cancel2) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
 
@@ -3124,9 +3143,9 @@ TEST(HttpCache, RangeGET_Cancel2) {
   // Make sure that we revalidate the entry and read from the cache (a single
   // read will return while waiting for the network).
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(5));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   EXPECT_EQ(5, c->callback.GetResult(rv));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
   // Destroy the transaction before completing the read.
@@ -3158,7 +3177,7 @@ TEST(HttpCache, RangeGET_Cancel3) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
   rv = c->callback.WaitForResult();
 
@@ -3169,9 +3188,9 @@ TEST(HttpCache, RangeGET_Cancel3) {
   // Make sure that we revalidate the entry and read from the cache (a single
   // read will return while waiting for the network).
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(5));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   EXPECT_EQ(5, c->callback.GetResult(rv));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
   // Destroy the transaction before completing the read.
@@ -3185,7 +3204,7 @@ TEST(HttpCache, RangeGET_Cancel3) {
   rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
   MockDiskEntry::IgnoreCallbacks(true);
@@ -3298,8 +3317,8 @@ TEST(HttpCache, RangeGET_InvalidResponse3) {
   ASSERT_TRUE(cache.OpenBackendEntry(kRangeGET_TransactionOK.url, &en));
 
   int64 cached_start = 0;
-  TestOldCompletionCallback cb;
-  int rv = en->GetAvailableRange(40, 20, &cached_start, &cb);
+  net::TestCompletionCallback cb;
+  int rv = en->GetAvailableRange(40, 20, &cached_start, cb.callback());
   EXPECT_EQ(10, cb.GetResult(rv));
   EXPECT_EQ(50, cached_start);
   en->Close();
@@ -3460,14 +3479,14 @@ TEST(HttpCache, RangeGET_OK_LoadOnlyFromCache) {
   transaction.load_flags |= net::LOAD_ONLY_FROM_CACHE;
 
   MockHttpRequest request(transaction);
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = cache.http_cache()->CreateTransaction(&trans);
   EXPECT_EQ(net::OK, rv);
   ASSERT_TRUE(trans.get());
 
-  rv = trans->Start(&request, &callback, net::BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::ERR_CACHE_MISS, rv);
@@ -3544,7 +3563,7 @@ TEST(HttpCache, DoomOnDestruction) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     c->result = c->callback.WaitForResult();
 
@@ -3574,7 +3593,7 @@ TEST(HttpCache, DoomOnDestruction2) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
 
@@ -3584,7 +3603,7 @@ TEST(HttpCache, DoomOnDestruction2) {
 
   // Make sure that the entry has some data stored.
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(10));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
   EXPECT_EQ(buf->size(), rv);
@@ -3617,7 +3636,7 @@ TEST(HttpCache, DoomOnDestruction3) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
 
@@ -3627,7 +3646,7 @@ TEST(HttpCache, DoomOnDestruction3) {
 
   // Make sure that the entry has some data stored.
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(10));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
   EXPECT_EQ(buf->size(), rv);
@@ -3660,7 +3679,7 @@ TEST(HttpCache, SetTruncatedFlag) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
 
@@ -3670,13 +3689,13 @@ TEST(HttpCache, SetTruncatedFlag) {
 
   // Make sure that the entry has some data stored.
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(10));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   if (rv == net::ERR_IO_PENDING)
     rv = c->callback.WaitForResult();
   EXPECT_EQ(buf->size(), rv);
 
   // We want to cancel the request when the transaction is busy.
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   EXPECT_EQ(net::ERR_IO_PENDING, rv);
   EXPECT_FALSE(c->callback.have_result());
 
@@ -3720,12 +3739,12 @@ TEST(HttpCache, DontSetTruncatedFlag) {
   int rv = cache.http_cache()->CreateTransaction(&c->trans);
   EXPECT_EQ(net::OK, rv);
 
-  rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  rv = c->trans->Start(&request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::OK, c->callback.GetResult(rv));
 
   // Read everything.
   scoped_refptr<net::IOBufferWithSize> buf(new net::IOBufferWithSize(22));
-  rv = c->trans->Read(buf, buf->size(), &c->callback);
+  rv = c->trans->Read(buf, buf->size(), c->callback.callback());
   EXPECT_EQ(buf->size(), c->callback.GetResult(rv));
 
   // Destroy the transaction.
@@ -3851,7 +3870,8 @@ TEST(HttpCache, GET_IncompleteResource3) {
   EXPECT_EQ(net::OK, cache.http_cache()->CreateTransaction(&c->trans));
 
   MockHttpRequest request(transaction);
-  int rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  int rv = c->trans->Start(
+      &request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::OK, c->callback.GetResult(rv));
 
   // We should have checked with the server before finishing Start().
@@ -3921,14 +3941,15 @@ TEST(HttpCache, GET_CancelIncompleteResource) {
   Context* c = new Context();
   EXPECT_EQ(net::OK, cache.http_cache()->CreateTransaction(&c->trans));
 
-  int rv = c->trans->Start(&request, &c->callback, net::BoundNetLog());
+  int rv = c->trans->Start(
+      &request, c->callback.callback(), net::BoundNetLog());
   EXPECT_EQ(net::OK, c->callback.GetResult(rv));
 
   // Read 20 bytes from the cache, and 10 from the net.
   scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(100));
-  rv = c->trans->Read(buf, 20, &c->callback);
+  rv = c->trans->Read(buf, 20, c->callback.callback());
   EXPECT_EQ(20, c->callback.GetResult(rv));
-  rv = c->trans->Read(buf, 10, &c->callback);
+  rv = c->trans->Read(buf, 10, c->callback.callback());
   EXPECT_EQ(10, c->callback.GetResult(rv));
 
   // At this point, we are already reading so canceling the request should leave
@@ -4041,7 +4062,7 @@ TEST(HttpCache, CachedRedirect) {
   kTestTransaction.response_headers = "Location: http://www.bar.com/\n";
 
   MockHttpRequest request(kTestTransaction);
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   // write to the cache
   {
@@ -4050,7 +4071,7 @@ TEST(HttpCache, CachedRedirect) {
     EXPECT_EQ(net::OK, rv);
     ASSERT_TRUE(trans.get());
 
-    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
     if (rv == net::ERR_IO_PENDING)
       rv = callback.WaitForResult();
     ASSERT_EQ(net::OK, rv);
@@ -4078,7 +4099,7 @@ TEST(HttpCache, CachedRedirect) {
     EXPECT_EQ(net::OK, rv);
     ASSERT_TRUE(trans.get());
 
-    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
     if (rv == net::ERR_IO_PENDING)
       rv = callback.WaitForResult();
     ASSERT_EQ(net::OK, rv);
@@ -4196,14 +4217,14 @@ TEST(HttpCache, SimpleGET_SSLError) {
   transaction.load_flags |= net::LOAD_ONLY_FROM_CACHE;
 
   MockHttpRequest request(transaction);
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = cache.http_cache()->CreateTransaction(&trans);
   EXPECT_EQ(net::OK, rv);
   ASSERT_TRUE(trans.get());
 
-  rv = trans->Start(&request, &callback, net::BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::ERR_CACHE_MISS, rv);
@@ -4448,7 +4469,7 @@ TEST(HttpCache, ReadMetadata) {
 // of the stream.
 TEST(HttpCache, FilterCompletion) {
   MockHttpCache cache;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   {
     scoped_ptr<net::HttpTransaction> trans;
@@ -4456,11 +4477,11 @@ TEST(HttpCache, FilterCompletion) {
     EXPECT_EQ(net::OK, rv);
 
     MockHttpRequest request(kSimpleGET_Transaction);
-    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
     EXPECT_EQ(net::OK, callback.GetResult(rv));
 
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_GT(callback.GetResult(rv), 0);
 
     // Now make sure that the entry is preserved.
@@ -4481,7 +4502,7 @@ TEST(HttpCache, FilterCompletion) {
 // Tests that we stop cachining when told.
 TEST(HttpCache, StopCachingDeletesEntry) {
   MockHttpCache cache;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
   MockHttpRequest request(kSimpleGET_Transaction);
 
   {
@@ -4489,19 +4510,19 @@ TEST(HttpCache, StopCachingDeletesEntry) {
     int rv = cache.http_cache()->CreateTransaction(&trans);
     EXPECT_EQ(net::OK, rv);
 
-    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
     EXPECT_EQ(net::OK, callback.GetResult(rv));
 
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
-    rv = trans->Read(buf, 10, &callback);
+    rv = trans->Read(buf, 10, callback.callback());
     EXPECT_EQ(callback.GetResult(rv), 10);
 
     trans->StopCaching();
 
     // We should be able to keep reading.
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_GT(callback.GetResult(rv), 0);
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_EQ(callback.GetResult(rv), 0);
   }
 
@@ -4519,7 +4540,7 @@ TEST(HttpCache, StopCachingDeletesEntry) {
 // Tests that when we are told to stop caching we don't throw away valid data.
 TEST(HttpCache, StopCachingSavesEntry) {
   MockHttpCache cache;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
   MockHttpRequest request(kSimpleGET_Transaction);
 
   {
@@ -4534,19 +4555,19 @@ TEST(HttpCache, StopCachingSavesEntry) {
                                         "Content-Length: 42\n"
                                         "Etag: foo\n";
 
-    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
     EXPECT_EQ(net::OK, callback.GetResult(rv));
 
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
-    rv = trans->Read(buf, 10, &callback);
+    rv = trans->Read(buf, 10, callback.callback());
     EXPECT_EQ(callback.GetResult(rv), 10);
 
     trans->StopCaching();
 
     // We should be able to keep reading.
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_GT(callback.GetResult(rv), 0);
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_EQ(callback.GetResult(rv), 0);
 
     RemoveMockTransaction(&mock_transaction);
@@ -4565,7 +4586,7 @@ TEST(HttpCache, StopCachingSavesEntry) {
 // Tests that we handle truncated enries when StopCaching is called.
 TEST(HttpCache, StopCachingTruncatedEntry) {
   MockHttpCache cache;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
   MockHttpRequest request(kRangeGET_TransactionOK);
   request.extra_headers.Clear();
   request.extra_headers.AddHeaderFromString(EXTRA_HEADER);
@@ -4584,22 +4605,22 @@ TEST(HttpCache, StopCachingTruncatedEntry) {
     int rv = cache.http_cache()->CreateTransaction(&trans);
     EXPECT_EQ(net::OK, rv);
 
-    rv = trans->Start(&request, &callback, net::BoundNetLog());
+    rv = trans->Start(&request, callback.callback(), net::BoundNetLog());
     EXPECT_EQ(net::OK, callback.GetResult(rv));
 
     scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(256));
-    rv = trans->Read(buf, 10, &callback);
+    rv = trans->Read(buf, 10, callback.callback());
     EXPECT_EQ(callback.GetResult(rv), 10);
 
     // This is actually going to do nothing.
     trans->StopCaching();
 
     // We should be able to keep reading.
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_GT(callback.GetResult(rv), 0);
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_GT(callback.GetResult(rv), 0);
-    rv = trans->Read(buf, 256, &callback);
+    rv = trans->Read(buf, 256, callback.callback());
     EXPECT_EQ(callback.GetResult(rv), 0);
   }
 
@@ -4616,11 +4637,11 @@ TEST(HttpCache, StopCachingTruncatedEntry) {
   RemoveMockTransaction(&kRangeGET_TransactionOK);
 }
 
-// Tests that we detect truncated rersources from the net when there is
+// Tests that we detect truncated resources from the net when there is
 // a Content-Length header.
 TEST(HttpCache, TruncatedByContentLength) {
   MockHttpCache cache;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   MockTransaction transaction(kSimpleGET_Transaction);
   AddMockTransaction(&transaction);
@@ -4641,7 +4662,7 @@ TEST(HttpCache, TruncatedByContentLength) {
 // from the net.
 TEST(HttpCache, TruncatedByContentLength2) {
   MockHttpCache cache;
-  TestOldCompletionCallback callback;
+  net::TestCompletionCallback callback;
 
   MockTransaction transaction(kSimpleGET_Transaction);
   AddMockTransaction(&transaction);

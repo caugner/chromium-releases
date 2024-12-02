@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -39,11 +39,9 @@ class PppRpcServer {
   static void PPP_InitializeModule(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      int32_t pid,
       PP_Module module,
       NaClSrpcImcDescType upcall_channel_desc,
-      char* service_description,
-      int32_t* nacl_pid,
+      const char* service_description,
       int32_t* success);
   static void PPP_ShutdownModule(
       NaClSrpcRpc* rpc,
@@ -51,7 +49,7 @@ class PppRpcServer {
   static void PPP_GetInterface(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
-      char* interface_name,
+      const char* interface_name,
       int32_t* exports_interface_name);
 
  private:
@@ -136,9 +134,8 @@ class PppInstanceRpcServer {
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,
       PP_Instance instance,
-      nacl_abi_size_t position_bytes, int32_t* position,
-      nacl_abi_size_t clip_bytes, int32_t* clip,
-      int32_t is_fullscreen);
+      PP_Resource resource,
+      nacl_abi_size_t view_data_bytes, char* view_data);
   static void PPP_Instance_DidChangeFocus(
       NaClSrpcRpc* rpc,
       NaClSrpcClosure* done,

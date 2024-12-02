@@ -10,40 +10,29 @@
 #include "base/debug/trace_event.h"
 #include "base/message_loop.h"
 #include "base/time.h"
-#include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_bindings.h"
-#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gfx/gl/gl_fence.h"
 #include "ui/gfx/gl/gl_switches.h"
 
 using ::base::SharedMemory;
 
 namespace gpu {
+
 namespace {
-const uint64 kPollFencePeriod = 1;
+const int64 kRescheduleTimeOutDelay = 100;
 }
 
-GpuScheduler::GpuScheduler(CommandBuffer* command_buffer,
-                           gles2::GLES2Decoder* decoder,
-                           CommandParser* parser)
+GpuScheduler::GpuScheduler(
+    CommandBuffer* command_buffer,
+    AsyncAPIInterface* handler,
+    gles2::GLES2Decoder* decoder)
     : command_buffer_(command_buffer),
+      handler_(handler),
       decoder_(decoder),
-      parser_(parser),
-      unscheduled_count_(0) {
-  // Map the ring buffer and create the parser.
-  if (!parser) {
-    Buffer ring_buffer = command_buffer_->GetRingBuffer();
-    if (ring_buffer.ptr) {
-      parser_.reset(new CommandParser(ring_buffer.ptr,
-                                      ring_buffer.size,
-                                      0,
-                                      ring_buffer.size,
-                                      0,
-                                      decoder_));
-    } else {
-      parser_.reset(new CommandParser(NULL, 0, 0, 0, 0,
-                                      decoder_));
-    }
-  }
+      parser_(NULL),
+      unscheduled_count_(0),
+      rescheduled_count_(0),
+      reschedule_task_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 GpuScheduler::~GpuScheduler() {
@@ -52,41 +41,21 @@ GpuScheduler::~GpuScheduler() {
 void GpuScheduler::PutChanged() {
   TRACE_EVENT1("gpu", "GpuScheduler:PutChanged", "this", this);
 
-  DCHECK(IsScheduled());
-
   CommandBuffer::State state = command_buffer_->GetState();
+
+  // If there is no parser, exit.
+  if (!parser_.get()) {
+    DCHECK_EQ(state.get_offset, state.put_offset);
+    return;
+  }
+
   parser_->set_put(state.put_offset);
   if (state.error != error::kNoError)
     return;
 
   // Check that the GPU has passed all fences.
-  if (!unschedule_fences_.empty()) {
-    if (gfx::g_GL_NV_fence) {
-      while (!unschedule_fences_.empty()) {
-        if (glTestFenceNV(unschedule_fences_.front().fence)) {
-          glDeleteFencesNV(1, &unschedule_fences_.front().fence);
-          unschedule_fences_.front().task.Run();
-          unschedule_fences_.pop();
-        } else {
-          SetScheduled(false);
-          MessageLoop::current()->PostDelayedTask(
-              FROM_HERE,
-              base::Bind(&GpuScheduler::SetScheduled, AsWeakPtr(), true),
-              kPollFencePeriod);
-          return;
-        }
-      }
-    } else {
-      // Hopefully no recent drivers don't support GL_NV_fence and this will
-      // not happen in practice.
-      glFinish();
-
-      while (!unschedule_fences_.empty()) {
-        unschedule_fences_.front().task.Run();
-        unschedule_fences_.pop();
-      }
-    }
-  }
+  if (!PollUnscheduleFences())
+    return;
 
   // One of the unschedule fence tasks might have unscheduled us.
   if (!IsScheduled())
@@ -123,18 +92,50 @@ void GpuScheduler::SetScheduled(bool scheduled) {
                "new unscheduled_count_",
                unscheduled_count_ + (scheduled? -1 : 1));
   if (scheduled) {
-    --unscheduled_count_;
+    // If the scheduler was rescheduled after a timeout, ignore the subsequent
+    // calls to SetScheduled when they eventually arrive until they are all
+    // accounted for.
+    if (rescheduled_count_ > 0) {
+      --rescheduled_count_;
+      return;
+    } else {
+      --unscheduled_count_;
+    }
+
     DCHECK_GE(unscheduled_count_, 0);
 
-    if (unscheduled_count_ == 0 && !scheduled_callback_.is_null())
-      scheduled_callback_.Run();
+    if (unscheduled_count_ == 0) {
+      // When the scheduler transitions from the unscheduled to the scheduled
+      // state, cancel the task that would reschedule it after a timeout.
+      reschedule_task_factory_.InvalidateWeakPtrs();
+
+      if (!scheduled_callback_.is_null())
+        scheduled_callback_.Run();
+    }
   } else {
+    if (unscheduled_count_ == 0) {
+#if defined(OS_WIN)
+      // When the scheduler transitions from scheduled to unscheduled, post a
+      // delayed task that it will force it back into a scheduled state after a
+      // timeout.
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&GpuScheduler::RescheduleTimeOut,
+                     reschedule_task_factory_.GetWeakPtr()),
+          base::TimeDelta::FromMilliseconds(kRescheduleTimeOutDelay));
+#endif
+    }
+
     ++unscheduled_count_;
   }
 }
 
 bool GpuScheduler::IsScheduled() {
   return unscheduled_count_ == 0;
+}
+
+bool GpuScheduler::HasMoreWork() {
+  return !unschedule_fences_.empty();
 }
 
 void GpuScheduler::SetScheduledCallback(
@@ -148,6 +149,26 @@ Buffer GpuScheduler::GetSharedMemoryBuffer(int32 shm_id) {
 
 void GpuScheduler::set_token(int32 token) {
   command_buffer_->SetToken(token);
+}
+
+bool GpuScheduler::SetGetBuffer(int32 transfer_buffer_id) {
+  Buffer ring_buffer = command_buffer_->GetTransferBuffer(transfer_buffer_id);
+  if (!ring_buffer.ptr) {
+    return false;
+  }
+
+  if (!parser_.get()) {
+    parser_.reset(new CommandParser(handler_));
+  }
+
+  parser_->SetBuffer(
+      ring_buffer.ptr,
+      ring_buffer.size,
+      0,
+      ring_buffer.size);
+
+  SetGetOffset(0);
+  return true;
 }
 
 bool GpuScheduler::SetGetOffset(int32 offset) {
@@ -168,32 +189,48 @@ void GpuScheduler::SetCommandProcessedCallback(
 }
 
 void GpuScheduler::DeferToFence(base::Closure task) {
-  UnscheduleFence fence;
-
-  // What if either of these GL calls fails? TestFenceNV will return true and
-  // PutChanged will treat the fence as having been crossed and thereby not
-  // poll indefinately. See spec:
-  // http://www.opengl.org/registry/specs/NV/fence.txt
-  //
-  // What should happen if TestFenceNV is called for a name before SetFenceNV
-  // is called?
-  //     We generate an INVALID_OPERATION error, and return TRUE.
-  //     This follows the semantics for texture object names before
-  //     they are bound, in that they acquire their state upon binding.
-  //     We will arbitrarily return TRUE for consistency.
-  if (gfx::g_GL_NV_fence) {
-    glGenFencesNV(1, &fence.fence);
-    glSetFenceNV(fence.fence, GL_ALL_COMPLETED_NV);
-  }
-
-  glFlush();
-
-  fence.task = task;
-
-  unschedule_fences_.push(fence);
+  unschedule_fences_.push(make_linked_ptr(
+       new UnscheduleFence(gfx::GLFence::Create(), task)));
 }
 
-GpuScheduler::UnscheduleFence::UnscheduleFence() : fence(0) {
+bool GpuScheduler::PollUnscheduleFences() {
+  if (unschedule_fences_.empty())
+    return true;
+
+  if (unschedule_fences_.front()->fence.get()) {
+    while (!unschedule_fences_.empty()) {
+      if (unschedule_fences_.front()->fence->HasCompleted()) {
+        unschedule_fences_.front()->task.Run();
+        unschedule_fences_.pop();
+      } else {
+        return false;
+      }
+    }
+  } else {
+    glFinish();
+
+    while (!unschedule_fences_.empty()) {
+      unschedule_fences_.front()->task.Run();
+      unschedule_fences_.pop();
+    }
+  }
+
+  return true;
+}
+
+void GpuScheduler::RescheduleTimeOut() {
+  int new_count = unscheduled_count_ + rescheduled_count_;
+
+  rescheduled_count_ = 0;
+
+  while (unscheduled_count_)
+    SetScheduled(true);
+
+  rescheduled_count_ = new_count;
+}
+
+GpuScheduler::UnscheduleFence::UnscheduleFence(
+    gfx::GLFence* fence_, base::Closure task_): fence(fence_), task(task_) {
 }
 
 GpuScheduler::UnscheduleFence::~UnscheduleFence() {

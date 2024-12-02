@@ -13,12 +13,14 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/page_transition_types.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::WebContents;
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest()
     : ui_thread_(BrowserThread::UI, message_loop()),
@@ -28,6 +30,9 @@ BrowserWithTestWindowTest::BrowserWithTestWindowTest()
 #if defined(OS_WIN)
   OleInitialize(NULL);
 #endif
+#if defined(USE_AURA)
+  test_activation_client_.reset(new aura::test::TestActivationClient);
+#endif
 }
 
 void BrowserWithTestWindowTest::SetUp() {
@@ -36,7 +41,7 @@ void BrowserWithTestWindowTest::SetUp() {
   profile_.reset(CreateProfile());
   browser_.reset(new Browser(Browser::TYPE_TABBED, profile()));
   window_.reset(new TestBrowserWindow(browser()));
-  browser_->set_window(window_.get());
+  browser_->SetWindowForTesting(window_.get());
 }
 
 BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {
@@ -45,7 +50,7 @@ BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {
   DestroyBrowser();
   profile_.reset(NULL);
 
-  MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
 
 #if defined(OS_WIN)
@@ -54,9 +59,8 @@ BrowserWithTestWindowTest::~BrowserWithTestWindowTest() {
 }
 
 TestRenderViewHost* BrowserWithTestWindowTest::TestRenderViewHostForTab(
-    TabContents* tab_contents) {
-  return static_cast<TestRenderViewHost*>(
-      tab_contents->render_view_host());
+    WebContents* web_contents) {
+  return static_cast<TestRenderViewHost*>(web_contents->GetRenderViewHost());
 }
 
 void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
@@ -64,22 +68,19 @@ void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
   params.tabstrip_index = 0;
   params.disposition = NEW_FOREGROUND_TAB;
   browser::Navigate(&params);
-  CommitPendingLoad(&params.target_contents->controller());
+  CommitPendingLoad(&params.target_contents->web_contents()->GetController());
 }
 
 void BrowserWithTestWindowTest::CommitPendingLoad(
-    NavigationController* controller) {
-  if (!controller->pending_entry())
+  NavigationController* controller) {
+  if (!controller->GetPendingEntry())
     return;  // Nothing to commit.
 
   TestRenderViewHost* old_rvh =
-      TestRenderViewHostForTab(controller->tab_contents());
-  MockRenderProcessHost* mock_rph = static_cast<MockRenderProcessHost*>(
-    old_rvh->process());
+      TestRenderViewHostForTab(controller->GetWebContents());
 
-  TestRenderViewHost* pending_rvh = static_cast<TestRenderViewHost*>(
-      controller->tab_contents()->render_manager_for_testing()->
-      pending_render_view_host());
+  TestRenderViewHost* pending_rvh = TestRenderViewHost::GetPendingForController(
+      controller);
   if (pending_rvh) {
     // Simulate the ShouldClose_ACK that is received from the current renderer
     // for a cross-site navigation.
@@ -93,17 +94,17 @@ void BrowserWithTestWindowTest::CommitPendingLoad(
   // we need to send the preexisting page ID. We can tell these apart because
   // renavigations will have a pending_entry_index while new ones won't (they'll
   // just have a standalong pending_entry that isn't in the list already).
-  if (controller->pending_entry_index() >= 0) {
+  if (controller->GetPendingEntryIndex() >= 0) {
     test_rvh->SendNavigateWithTransition(
-        controller->pending_entry()->page_id(),
-        controller->pending_entry()->url(),
-        controller->pending_entry()->transition_type());
+        controller->GetPendingEntry()->GetPageID(),
+        controller->GetPendingEntry()->GetURL(),
+        controller->GetPendingEntry()->GetTransitionType());
   } else {
     test_rvh->SendNavigateWithTransition(
-        mock_rph->max_page_id() + 1,
-        controller->pending_entry()->url(),
-        controller->pending_entry()->transition_type());
-    mock_rph->UpdateMaxPageID(mock_rph->max_page_id() + 1);
+        controller->GetWebContents()->
+            GetMaxPageIDForSiteInstance(test_rvh->site_instance()) + 1,
+        controller->GetPendingEntry()->GetURL(),
+        controller->GetPendingEntry()->GetTransitionType());
   }
 
   // Simulate the SwapOut_ACK that fires if you commit a cross-site navigation
@@ -121,7 +122,8 @@ void BrowserWithTestWindowTest::NavigateAndCommit(
 }
 
 void BrowserWithTestWindowTest::NavigateAndCommitActiveTab(const GURL& url) {
-  NavigateAndCommit(&browser()->GetSelectedTabContents()->controller(), url);
+  NavigateAndCommit(&browser()->GetSelectedTabContentsWrapper()->
+      web_contents()->GetController(), url);
 }
 
 void BrowserWithTestWindowTest::DestroyBrowser() {

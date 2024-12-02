@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,11 +36,21 @@ try:
 except ImportError:
   import json
 
+from selenium.common.exceptions import NoSuchWindowException
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.command import Command
 from selenium.webdriver.remote.webdriver import WebDriver
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.support.ui import WebDriverWait
+
+
+def SkipIf(should_skip):
+  """Decorator which allows skipping individual test cases."""
+  if should_skip:
+    return lambda func: None
+  return lambda func: func
 
 
 class Request(urllib2.Request):
@@ -88,17 +98,17 @@ def SendRequest(url, method=None, data=None):
   return opener.open(request)
 
 
-class BasicTest(unittest.TestCase):
+class BasicTest(ChromeDriverTest):
   """Basic ChromeDriver tests."""
 
   def setUp(self):
-    self._server = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE).Launch()
+    self._server2 = ChromeDriverLauncher(self.GetDriverPath()).Launch()
 
   def tearDown(self):
-    self._server.Kill()
+    self._server2.Kill()
 
   def testShouldReturn403WhenSentAnUnknownCommandURL(self):
-    request_url = self._server.GetUrl() + '/foo'
+    request_url = self._server2.GetUrl() + '/foo'
     try:
       SendRequest(request_url, method='GET')
       self.fail('Should have raised a urllib.HTTPError for returned 403')
@@ -106,7 +116,7 @@ class BasicTest(unittest.TestCase):
       self.assertEquals(403, expected.code)
 
   def testShouldReturnHTTP405WhenSendingANonPostToTheSessionURL(self):
-    request_url = self._server.GetUrl() + '/session'
+    request_url = self._server2.GetUrl() + '/session'
     try:
       SendRequest(request_url, method='GET')
       self.fail('Should have raised a urllib.HTTPError for returned 405')
@@ -115,7 +125,7 @@ class BasicTest(unittest.TestCase):
       self.assertEquals('POST', expected.hdrs['Allow'])
 
   def testShouldGetA404WhenAttemptingToDeleteAnUnknownSession(self):
-    request_url = self._server.GetUrl() + '/session/unkown_session_id'
+    request_url = self._server2.GetUrl() + '/session/unkown_session_id'
     try:
       SendRequest(request_url, method='DELETE')
       self.fail('Should have raised a urllib.HTTPError for returned 404')
@@ -123,7 +133,7 @@ class BasicTest(unittest.TestCase):
       self.assertEquals(404, expected.code)
 
   def testShouldReturn204ForFaviconRequests(self):
-    request_url = self._server.GetUrl() + '/favicon.ico'
+    request_url = self._server2.GetUrl() + '/favicon.ico'
     # In python2.5, a 204 status code causes an exception.
     if sys.version_info[0:2] == (2, 5):
       try:
@@ -139,7 +149,7 @@ class BasicTest(unittest.TestCase):
         response.close()
 
   def testCreatingSessionShouldRedirectToCorrectURL(self):
-    request_url = self._server.GetUrl() + '/session'
+    request_url = self._server2.GetUrl() + '/session'
     response = SendRequest(request_url, method='POST',
                            data='{"desiredCapabilities": {}}')
     self.assertEquals(200, response.code)
@@ -156,11 +166,11 @@ class BasicTest(unittest.TestCase):
     self.assertEquals(data['sessionId'], url_parts[2])
 
 
-class WebserverTest(unittest.TestCase):
+class WebserverTest(ChromeDriverTest):
   """Tests the built-in ChromeDriver webserver."""
 
   def testShouldNotServeFilesByDefault(self):
-    server = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE).Launch()
+    server = ChromeDriverLauncher(self.GetDriverPath()).Launch()
     try:
       SendRequest(server.GetUrl(), method='GET')
       self.fail('Should have raised a urllib.HTTPError for returned 403')
@@ -170,7 +180,7 @@ class WebserverTest(unittest.TestCase):
       server.Kill()
 
   def testCanServeFiles(self):
-    launcher = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE,
+    launcher = ChromeDriverLauncher(self.GetDriverPath(),
                                     root_path=os.path.dirname(__file__))
     server = launcher.Launch()
     request_url = server.GetUrl() + '/' + os.path.basename(__file__)
@@ -274,21 +284,29 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
       f.close()
     capabilities = {'chrome.extensions': base64_extensions}
     driver = self.GetNewDriver(capabilities)
-    # Assert the extensions are installed.
-    driver.get('chrome://extensions/')
-    self.assertNotEqual(-1, driver.page_source.find('ExtTest1'))
-    self.assertNotEqual(-1, driver.page_source.find('ExtTest2'))
+    extension_names = [x.get_name() for x in driver.get_installed_extensions()]
+    self.assertEquals(2, len(extension_names))
+    self.assertTrue('ExtTest1' in extension_names)
+    self.assertTrue('ExtTest2' in extension_names)
     driver.quit()
 
+  def testUseWebsiteTestingDefaults(self):
+    """Test that chromedriver initializes options for website testing."""
+    driver = self.GetNewDriver()
+    driver.get(self.GetTestDataUrl() + '/content_setting_test.html')
+    driver.set_script_timeout(10)
+    # Will timeout if infobar appears.
+    driver.execute_async_script('waitForGeo(arguments[0])')
 
-class DetachProcessTest(unittest.TestCase):
+
+class DetachProcessTest(ChromeDriverTest):
 
   def setUp(self):
-    self._server = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE).Launch()
-    self._factory = ChromeDriverFactory(self._server)
+    self._server2 = ChromeDriverLauncher(self.GetDriverPath()).Launch()
+    self._factory2 = ChromeDriverFactory(self._server2)
 
   def tearDown(self):
-    self._server.Kill()
+    self._server2.Kill()
 
   # TODO(kkania): Remove this when Chrome 15 is stable.
   def testDetachProcess(self):
@@ -296,10 +314,10 @@ class DetachProcessTest(unittest.TestCase):
     # Chrome successfully in detached mode. There's not an easy way to know
     # if Chrome is shutting down due to the channel error when the client
     # disconnects.
-    driver = self._factory.GetNewDriver({'chrome.detach': True})
+    driver = self._factory2.GetNewDriver({'chrome.detach': True})
     driver.get('about:memory')
     pid = int(driver.find_elements_by_xpath('//*[@jscontent="pid"]')[0].text)
-    self._server.Kill()
+    self._server2.Kill()
     try:
       util.Kill(pid)
     except OSError:
@@ -501,6 +519,135 @@ class MouseTest(ChromeDriverTest):
     self.assertRaises(WebDriverException, elem.click)
 
 
+# crbug.com/109698: when running in xvfb, 2 extra mouse moves are received.
+@SkipIf(util.IsLinux())
+class MouseEventTest(ChromeDriverTest):
+  """Tests for checking the correctness of mouse events."""
+
+  def setUp(self):
+    super(MouseEventTest, self).setUp()
+    self._driver = self.GetNewDriver()
+    self._driver.command_executor._commands['_keys_'] = (
+        'POST', '/session/$sessionId/keys')
+    self._driver.execute('_keys_', {'value': [Keys.CONTROL, Keys.SHIFT]})
+    self._driver.get(self.GetTestDataUrl() + '/events.html')
+    self._divs = self._driver.find_elements_by_tag_name('div')
+
+  def _CheckEvent(self, event, event_type, mouse_button, x, y):
+    """Checks the given event properties.
+
+    This function expects the ctrl and shift keys to be pressed.
+    """
+    self.assertEquals(event_type, event['type'])
+    self.assertEquals(mouse_button, event['button'])
+    self.assertEquals(False, event['altKey'])
+    self.assertEquals(True, event['ctrlKey'])
+    self.assertEquals(True, event['shiftKey'])
+    self.assertEquals(x, event['x'])
+    self.assertEquals(y, event['y'])
+
+  def _GetElementMiddle(self, elem):
+    x = elem.location['x']
+    y = elem.location['y']
+    return (x + (elem.size['width'] + 1) / 2, y + (elem.size['height'] + 1) / 2)
+
+  def testMoveCommand(self):
+    x = self._divs[0].location['x']
+    y = self._divs[0].location['y']
+    center_x, center_y = self._GetElementMiddle(self._divs[0])
+
+    # Move to element.
+    ActionChains(self._driver).move_to_element(self._divs[0]).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(1, len(events))
+    self._CheckEvent(events[0], 'mousemove', 0, center_x, center_y)
+
+    # Move by offset.
+    ActionChains(self._driver).move_by_offset(1, 2).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(1, len(events))
+    self._CheckEvent(events[0], 'mousemove', 0, center_x + 1, center_y + 2)
+
+    # Move to element and offset.
+    ActionChains(self._driver).move_to_element_with_offset(
+        self._divs[0], 2, 1).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(1, len(events))
+    self._CheckEvent(events[0], 'mousemove', 0, x + 2, y + 1)
+
+  def testClickCommand(self):
+    center_x, center_y = self._GetElementMiddle(self._divs[0])
+
+    # Left click element.
+    ActionChains(self._driver).click(self._divs[0]).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(3, len(events))
+    self._CheckEvent(events[0], 'mousemove', 0, center_x, center_y)
+    self._CheckEvent(events[1], 'mousedown', 0, center_x, center_y)
+    self._CheckEvent(events[2], 'mouseup', 0, center_x, center_y)
+
+    # Left click.
+    ActionChains(self._driver).click(None).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(2, len(events))
+    self._CheckEvent(events[0], 'mousedown', 0, center_x, center_y)
+    self._CheckEvent(events[1], 'mouseup', 0, center_x, center_y)
+
+    # Right click.
+    ActionChains(self._driver).context_click(None).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(2, len(events))
+    self._CheckEvent(events[0], 'mousedown', 2, center_x, center_y)
+    self._CheckEvent(events[1], 'mouseup', 2, center_x, center_y)
+
+  def testButtonDownUpCommand(self):
+    center_x, center_y = self._GetElementMiddle(self._divs[0])
+    center_x2, center_y2 = self._GetElementMiddle(self._divs[1])
+
+    # Press and release element.
+    ActionChains(self._driver).click_and_hold(self._divs[0]).release(
+        self._divs[1]).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(4, len(events))
+    self._CheckEvent(events[0], 'mousemove', 0, center_x, center_y)
+    self._CheckEvent(events[1], 'mousedown', 0, center_x, center_y)
+    self._CheckEvent(events[2], 'mousemove', 0, center_x2, center_y2)
+    self._CheckEvent(events[3], 'mouseup', 0, center_x2, center_y2)
+
+    # Press and release.
+    ActionChains(self._driver).click_and_hold(None).release(None).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(2, len(events))
+    self._CheckEvent(events[0], 'mousedown', 0, center_x2, center_y2)
+    self._CheckEvent(events[1], 'mouseup', 0, center_x2, center_y2)
+
+  def testDoubleClickCommand(self):
+    center_x, center_y = self._GetElementMiddle(self._divs[0])
+
+    # Double click element.
+    ActionChains(self._driver).double_click(self._divs[0]).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(6, len(events))
+    self._CheckEvent(events[5], 'dblclick', 0, center_x, center_y)
+
+    # Double click.
+    ActionChains(self._driver).double_click(None).perform()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(5, len(events))
+    self._CheckEvent(events[4], 'dblclick', 0, center_x, center_y)
+
+  def testElementAPIClick(self):
+    center_x, center_y = self._GetElementMiddle(self._divs[0])
+
+    # Left click element.
+    self._divs[0].click()
+    events = self._driver.execute_script('return takeEvents()')
+    self.assertEquals(3, len(events))
+    self._CheckEvent(events[0], 'mousemove', 0, center_x, center_y)
+    self._CheckEvent(events[1], 'mousedown', 0, center_x, center_y)
+    self._CheckEvent(events[2], 'mouseup', 0, center_x, center_y)
+
+
 class TypingTest(ChromeDriverTest):
 
   def setUp(self):
@@ -574,18 +721,18 @@ class TypingTest(ChromeDriverTest):
     self.assertEquals('much more text', area_elem.get_attribute('value'))
 
 
-class UrlBaseTest(unittest.TestCase):
+class UrlBaseTest(ChromeDriverTest):
   """Tests that the server can be configured for a different URL base."""
 
   def setUp(self):
-    self._server = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE,
-                                        url_base='/wd/hub').Launch()
+    self._server2 = ChromeDriverLauncher(self.GetDriverPath(),
+                                         url_base='/wd/hub').Launch()
 
   def tearDown(self):
-    self._server.Kill()
+    self._server2.Kill()
 
   def testCreatingSessionShouldRedirectToCorrectURL(self):
-    request_url = self._server.GetUrl() + '/session'
+    request_url = self._server2.GetUrl() + '/session'
     response = SendRequest(request_url, method='POST',
                            data='{"desiredCapabilities":{}}')
     self.assertEquals(200, response.code)
@@ -628,32 +775,13 @@ class ElementEqualityTest(ChromeDriverTest):
     self.assertTrue(result['value'])
 
 
-class LoggingTest(unittest.TestCase):
+class LoggingTest(ChromeDriverTest):
 
-  def setUp(self):
-    self._server = ChromeDriverLauncher(test_paths.CHROMEDRIVER_EXE).Launch()
-    self._factory = ChromeDriverFactory(self._server)
-
-  def tearDown(self):
-    self._factory.QuitAll()
-    self._server.Kill()
-
-  def testNoVerboseLogging(self):
-    driver = self._factory.GetNewDriver()
-    url = self._factory.GetServer().GetUrl()
-    driver.execute_script('console.log("HI")')
+  def testLogging(self):
+    url = self.GetServer().GetUrl()
     req = SendRequest(url + '/log', method='GET')
     log = req.read()
-    self.assertTrue(':INFO:' not in log, ':INFO: in log: ' + log)
-
-  # crbug.com/94470
-  def DISABLED_testVerboseLogging(self):
-    driver = self._factory.GetNewDriver({'chrome.verbose': True})
-    url = self._factory.GetServer().GetUrl()
-    driver.execute_script('console.log("HI")')
-    req = SendRequest(url + '/log', method='GET')
-    log = req.read()
-    self.assertTrue(':INFO:' in log, ':INFO: not in log: ' + log)
+    self.assertTrue('INFO' in log, msg='INFO not in log: ' + log)
 
 
 class FileUploadControlTest(ChromeDriverTest):
@@ -751,6 +879,7 @@ class FrameSwitchingTest(ChromeDriverTest):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
     driver.get(self.GetTestDataUrl() + '/test_page.html')
     driver.execute_script('window.open("about:blank")')
+    old_window = driver.current_window_handle
     driver.close()
     driver.switch_to_window(driver.window_handles[0])
     self.assertEquals('about:blank', driver.current_url)
@@ -773,6 +902,7 @@ class FrameSwitchingTest(ChromeDriverTest):
       driver.switch_to_frame(i)
       self.assertEquals(str(i), driver.current_url.split('?')[-1])
       driver.switch_to_default_content()
+
 
 class AlertTest(ChromeDriverTest):
 
@@ -798,6 +928,18 @@ class AlertTest(ChromeDriverTest):
     driver.get(self.GetTestDataUrl() + '/alerts.html')
     self.assertRaises(WebDriverException, driver.execute_script, 'alert("ok")')
 
+  # See http://code.google.com/p/selenium/issues/detail?id=2671.
+  def testCanPerformJSBasedActionsThatCauseAlertsAtTheEnd(self):
+    driver = self.GetNewDriver()
+    driver.execute_script(
+        'var select = document.createElement("select");' +
+        'select.innerHTML = "<option>1</option><option>2</option>";' +
+        'select.addEventListener("change", function() { alert("hi"); });' +
+        'document.body.appendChild(select);')
+
+    # Shouldn't throw an exception, even though an alert appears mid-script.
+    driver.find_elements_by_tag_name('option')[-1].click()
+
   def testMustHandleAlertFirst(self):
     driver = self.GetNewDriver()
     driver.get(self.GetTestDataUrl() + '/alerts.html')
@@ -822,3 +964,139 @@ class AlertTest(ChromeDriverTest):
     driver.switch_to_frame('subframe')
     driver.execute_async_script('arguments[0](); window.alert("ok")')
     driver.switch_to_alert().accept()
+
+
+class WindowTest(ChromeDriverTest):
+  def testSizeAndPosition(self):
+    driver = self.GetNewDriver()
+
+    # TODO(kkania): Update the python bindings and get rid of these.
+    driver.command_executor._commands.update({
+        'getSize': ('GET', '/session/$sessionId/window/$windowHandle/size'),
+        'setSize': ('POST', '/session/$sessionId/window/$windowHandle/size'),
+        'getPos': ('GET', '/session/$sessionId/window/$windowHandle/position'),
+        'setPos': ('POST', '/session/$sessionId/window/$windowHandle/position')
+    })
+    def getSize(window='current'):
+      return driver.execute('getSize', {'windowHandle': window})['value']
+    def setSize(width, height, window='current'):
+      params = { 'windowHandle': window,
+                 'width': width,
+                 'height': height
+               }
+      return driver.execute('setSize', params)
+    def getPosition(window='current'):
+      return driver.execute('getPos', {'windowHandle': window})['value']
+    def setPosition(x, y, window='current'):
+      params = { 'windowHandle': window,
+                 'x': x,
+                 'y': y
+               }
+      return driver.execute('setPos', params)
+
+    # Test size.
+    size = getSize()
+    setSize(size['width'], size['height'])
+    self.assertEquals(size, getSize())
+    setSize(800, 600)
+    self.assertEquals(800, getSize()['width'])
+    self.assertEquals(600, getSize()['height'])
+    # Test position.
+    pos = getPosition()
+    setPosition(pos['x'], pos['y'])
+    self.assertEquals(pos, getPosition())
+    setPosition(100, 200)
+    self.assertEquals(100, getPosition()['x'])
+    self.assertEquals(200, getPosition()['y'])
+    # Test specifying window handle.
+    driver.execute_script(
+        'window.open("about:blank", "name", "height=200, width=200")')
+    windows = driver.window_handles
+    self.assertEquals(2, len(windows))
+    setSize(400, 300, windows[1])
+    self.assertEquals(400, getSize(windows[1])['width'])
+    self.assertEquals(300, getSize(windows[1])['height'])
+    self.assertNotEquals(getSize(windows[1]), getSize(windows[0]))
+    # Test specifying invalid handle.
+    invalid_handle = 'f1-120'
+    self.assertRaises(WebDriverException, setSize, 400, 300, invalid_handle)
+    self.assertRaises(NoSuchWindowException, getSize, invalid_handle)
+    self.assertRaises(NoSuchWindowException, setPosition, 1, 1, invalid_handle)
+    self.assertRaises(NoSuchWindowException, getPosition, invalid_handle)
+
+
+class ExtensionTest(ChromeDriverTest):
+
+  INFOBAR_BROWSER_ACTION_EXTENSION = test_paths.TEST_DATA_PATH + \
+      '/infobar_browser_action_extension'
+  PAGE_ACTION_EXTENSION = test_paths.TEST_DATA_PATH + \
+      '/page_action_extension'
+
+  def testExtensionInstallAndUninstall(self):
+    driver = self.GetNewDriver()
+    self.assertEquals(0, len(driver.get_installed_extensions()))
+    ext = driver.install_extension(self.PAGE_ACTION_EXTENSION)
+    extensions = driver.get_installed_extensions()
+    self.assertEquals(1, len(extensions))
+    self.assertEquals(ext.id, extensions[0].id)
+    ext.uninstall()
+    self.assertEquals(0, len(driver.get_installed_extensions()))
+
+  def testExtensionInfo(self):
+    driver = self.GetNewDriver()
+    ext = driver.install_extension(self.PAGE_ACTION_EXTENSION)
+    self.assertEquals('Page action extension', ext.get_name())
+    self.assertEquals('1.0', ext.get_version())
+    self.assertEquals(32, len(ext.id))
+    self.assertTrue(ext.is_enabled())
+    ext.set_enabled(True)
+    ext.set_enabled(False)
+    self.assertFalse(ext.is_enabled())
+    ext.set_enabled(True)
+    self.assertTrue(ext.is_enabled())
+
+  def _testExtensionView(self, driver, view_handle, extension):
+    """Tests that the given view supports basic WebDriver functionality."""
+    driver.switch_to_window(view_handle)
+    self.assertTrue(driver.execute_script('return true'))
+    checkbox = driver.find_element_by_id('checkbox')
+    checkbox.click()
+    self.assertTrue(checkbox.is_selected())
+    textfield = driver.find_element_by_id('textfield')
+    textfield.send_keys('test')
+    self.assertEquals('test', textfield.get_attribute('value'))
+    self.assertEquals('test', driver.title)
+    self.assertTrue(driver.current_url.endswith('view_checks.html'))
+    self.assertTrue('Should be in page source' in driver.page_source)
+    driver.close()
+    def is_view_closed(driver):
+      return len(filter(lambda view: view['handle'] == view_handle,
+                        extension._get_views())) == 0
+    WebDriverWait(driver, 10).until(is_view_closed)
+
+  # Mac extension infobars are currently broken: crbug.com/107573.
+  @SkipIf(util.IsMac())
+  def testInfobarView(self):
+    driver = self.GetNewDriver({'chrome.switches':
+                                ['enable-experimental-extension-apis']})
+    ext = driver.install_extension(self.INFOBAR_BROWSER_ACTION_EXTENSION)
+    driver.switch_to_window(ext.get_bg_page_handle())
+    driver.set_script_timeout(10)
+    driver.execute_async_script('waitForInfobar(arguments[0])')
+    self._testExtensionView(driver, ext.get_infobar_handles()[0], ext)
+
+  def testBrowserActionPopupView(self):
+    driver = self.GetNewDriver({'chrome.switches':
+                                ['enable-experimental-extension-apis']})
+    ext = driver.install_extension(self.INFOBAR_BROWSER_ACTION_EXTENSION)
+    ext.click_browser_action()
+    self._testExtensionView(driver, ext.get_popup_handle(), ext)
+
+  def testPageActionPopupView(self):
+    driver = self.GetNewDriver()
+    ext = driver.install_extension(self.PAGE_ACTION_EXTENSION)
+    def is_page_action_visible(driver):
+      return ext.is_page_action_visible()
+    WebDriverWait(driver, 10).until(is_page_action_visible)
+    ext.click_page_action()
+    self._testExtensionView(driver, ext.get_popup_handle(), ext)

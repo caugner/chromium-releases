@@ -1,6 +1,5 @@
-#!/usr/bin/python
-#
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/usr/bin/env python
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,14 +35,15 @@ def IsEquivelent(intext, outtext):
     outwords = outline.split()
 
     if not inwords or not outwords: return False
-    if inwords[0] != outwords[0] or inwords[0] != '/*': return False
+    if inwords[0] != outwords[0] or inwords[0] not in ('/*', '*'): return False
 
     # Neither the year, nor the modified date need an exact match
     if inwords[1] == 'Copyright':
       if inwords[4:] == outwords[4:]: continue
-    elif inwords[1] == 'From':
-      if inwords[0:4] == outwords[0:4]:
-        continue
+    elif inwords[1] == 'From': # Un-wrapped modified date.
+      if inwords[0:4] == outwords[0:4]: continue
+    elif inwords[1] == 'modified': # Wrapped modified date.
+      if inwords[0:2] == outwords[0:2]: continue
     return False
   return True
 
@@ -81,7 +81,7 @@ class IDLOutFile(object):
     outtext = ''.join(self.outlist)
     if not self.always_write:
       if os.path.isfile(filename):
-        intext = open(filename, 'r').read()
+        intext = open(filename, 'rb').read()
       else:
         intext = ''
 
@@ -106,7 +106,7 @@ class IDLOutFile(object):
         os.makedirs(basepath)
 
       if not GetOption('test'):
-        outfile = open(filename, 'w')
+        outfile = open(filename, 'wb')
         outfile.write(outtext)
         InfoOut.Log('Output %s written.' % self.filename)
       return True
@@ -118,6 +118,7 @@ class IDLOutFile(object):
       raise
 
     return False
+
 
 def TestFile(name, stringlist, force, update):
   errors = 0
@@ -154,8 +155,8 @@ def TestFile(name, stringlist, force, update):
       return 1
   return 0
 
-if __name__ == '__main__':
 
+def main():
   errors = 0
   stringlist = ['Test', 'Testing\n', 'Test']
   filename = 'outtest.txt'
@@ -172,5 +173,8 @@ if __name__ == '__main__':
   # Clean up file
   os.remove(filename)
   if not errors: InfoOut.Log('All tests pass.')
-  sys.exit(errors)
+  return errors
 
+
+if __name__ == '__main__':
+  sys.exit(main())

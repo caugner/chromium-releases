@@ -22,6 +22,11 @@ NetTestSuite::NetTestSuite(int argc, char** argv)
     : TestSuite(argc, argv) {
 }
 
+NetTestSuite::NetTestSuite(int argc, char** argv,
+                           bool create_at_exit_manager)
+    : TestSuite(argc, argv, create_at_exit_manager) {
+}
+
 NetTestSuite::~NetTestSuite() {}
 
 void NetTestSuite::Initialize() {
@@ -45,6 +50,10 @@ void NetTestSuite::Shutdown() {
 void NetTestSuite::InitializeTestThread() {
   network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
 
+  InitializeTestThreadNoNetworkChangeNotifier();
+}
+
+void NetTestSuite::InitializeTestThreadNoNetworkChangeNotifier() {
   host_resolver_proc_ = new net::RuleBasedHostResolverProc(NULL);
   scoped_host_resolver_proc_.Init(host_resolver_proc_.get());
   // In case any attempts are made to resolve host names, force them all to

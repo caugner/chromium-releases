@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,7 @@ PepperView::PepperView(ChromotingInstance* instance, ClientContext* context)
     flush_blocked_(false),
     is_static_fill_(false),
     static_fill_color_(0),
-    ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
+    ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 PepperView::~PepperView() {
@@ -61,7 +61,7 @@ bool PepperView::Initialize() {
 void PepperView::TearDown() {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  task_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void PepperView::Paint() {
@@ -110,7 +110,7 @@ void PepperView::SetHostSize(const SkISize& host_size) {
       host_size.width(), host_size.height());
 }
 
-void PepperView::PaintFrame(media::VideoFrame* frame, RectVector* rects) {
+void PepperView::PaintFrame(media::VideoFrame* frame, const SkRegion& region) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   SetHostSize(SkISize::Make(frame->width(), frame->height()));
@@ -124,8 +124,8 @@ void PepperView::PaintFrame(media::VideoFrame* frame, RectVector* rects) {
 
   // Copy updated regions to the backing store and then paint the regions.
   bool changes_made = false;
-  for (size_t i = 0; i < rects->size(); ++i)
-    changes_made |= PaintRect(frame, (*rects)[i]);
+  for (SkRegion::Iterator i(region); !i.done(); i.next())
+    changes_made |= PaintRect(frame, i.rect());
 
   if (changes_made)
     FlushGraphics(start_time);
@@ -178,8 +178,10 @@ void PepperView::BlankRect(pp::ImageData& image_data, const pp::Rect& rect) {
 }
 
 void PepperView::FlushGraphics(base::Time paint_start) {
-  scoped_ptr<Task> task(
-      task_factory_.NewRunnableMethod(&PepperView::OnPaintDone, paint_start));
+  scoped_ptr<base::Closure> task(
+      new base::Closure(
+          base::Bind(&PepperView::OnPaintDone, weak_factory_.GetWeakPtr(),
+                     paint_start)));
 
   // Flag needs to be set here in order to get a proper error code for Flush().
   // Otherwise Flush() will always return PP_OK_COMPLETIONPENDING and the error
@@ -188,7 +190,7 @@ void PepperView::FlushGraphics(base::Time paint_start) {
   // Note that we can also handle this by providing an actual callback which
   // takes the result code. Right now everything goes to the task that doesn't
   // result value.
-  pp::CompletionCallback pp_callback(&CompletionCallbackTaskAdapter,
+  pp::CompletionCallback pp_callback(&CompletionCallbackClosureAdapter,
                                      task.get(),
                                      PP_COMPLETIONCALLBACK_FLAG_OPTIONAL);
   int error = graphics2d_.Flush(pp_callback);
@@ -238,9 +240,6 @@ void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
       break;
 
     case protocol::ConnectionToHost::CONNECTED:
-      break;
-
-    case protocol::ConnectionToHost::AUTHENTICATED:
       UnsetSolidFill();
       scriptable_obj->SetConnectionStatus(
           ChromotingScriptableObject::STATUS_CONNECTED,
@@ -263,12 +262,12 @@ void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
   }
 }
 
-bool PepperView::SetPluginSize(const SkISize& plugin_size) {
-  if (plugin_size_ == plugin_size)
+bool PepperView::SetViewSize(const SkISize& view_size) {
+  if (view_size_ == view_size)
     return false;
-  plugin_size_ = plugin_size;
+  view_size_ = view_size;
 
-  pp::Size pp_size = pp::Size(plugin_size.width(), plugin_size.height());
+  pp::Size pp_size = pp::Size(view_size.width(), view_size.height());
 
   graphics2d_ = pp::Graphics2D(instance_, pp_size, true);
   if (!instance_->BindGraphics(graphics2d_)) {
@@ -276,14 +275,14 @@ bool PepperView::SetPluginSize(const SkISize& plugin_size) {
     return false;
   }
 
-  if (plugin_size.isEmpty())
+  if (view_size.isEmpty())
     return false;
 
   // Allocate the backing store to save the desktop image.
   if ((backing_store_.get() == NULL) ||
       (backing_store_->size() != pp_size)) {
     VLOG(1) << "Allocate backing store: "
-            << plugin_size.width() << " x " << plugin_size.height();
+            << view_size.width() << " x " << view_size.height();
     backing_store_.reset(
         new pp::ImageData(instance_, pp::ImageData::GetNativeImageDataFormat(),
                           pp_size, false));
@@ -291,22 +290,6 @@ bool PepperView::SetPluginSize(const SkISize& plugin_size) {
         << "Not enough memory for backing store.";
   }
   return true;
-}
-
-double PepperView::GetHorizontalScaleRatio() const {
-  if (instance_->DoScaling()) {
-    DCHECK(!host_size_.isEmpty());
-    return 1.0 * plugin_size_.width() / host_size_.width();
-  }
-  return 1.0;
-}
-
-double PepperView::GetVerticalScaleRatio() const {
-  if (instance_->DoScaling()) {
-    DCHECK(!host_size_.isEmpty());
-    return 1.0 * plugin_size_.height() / host_size_.height();
-  }
-  return 1.0;
 }
 
 void PepperView::AllocateFrame(media::VideoFrame::Format format,
@@ -330,13 +313,13 @@ void PepperView::ReleaseFrame(media::VideoFrame* frame) {
 }
 
 void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
-                                      RectVector* rects,
+                                      SkRegion* region,
                                       const base::Closure& done) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   // TODO(ajwong): Clean up this API to be async so we don't need to use a
   // member variable as a hack.
-  PaintFrame(frame, rects);
+  PaintFrame(frame, *region);
   done.Run();
 }
 

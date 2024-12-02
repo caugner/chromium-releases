@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,19 +16,28 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager_backend.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/url_constants.h"
-#include "content/public/browser/devtools_agent_host_registry.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/worker_host/worker_process_host.h"
-#include "content/browser/worker_host/worker_service.h"
-#include "content/browser/worker_host/worker_service_observer.h"
+#include "content/public/browser/child_process_data.h"
+#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/worker_service.h"
+#include "content/public/browser/worker_service_observer.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "content/public/common/process_type.h"
 #include "grit/generated_resources.h"
 #include "grit/workers_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::BrowserThread;
+using content::ChildProcessData;
 using content::DevToolsAgentHost;
 using content::DevToolsAgentHostRegistry;
+using content::WebContents;
+using content::WebUIMessageHandler;
+using content::WorkerService;
+using content::WorkerServiceObserver;
 
 static const char kWorkersDataFile[] = "workers_data.json";
 
@@ -44,15 +53,14 @@ static const char kPidField[]  = "pid";
 namespace {
 
 
-DictionaryValue* BuildWorkerData(
-    WorkerProcessHost* process,
+DictionaryValue* BuildWorkerData(const ChildProcessData& data,
     const WorkerProcessHost::WorkerInstance& instance) {
   DictionaryValue* worker_data = new DictionaryValue();
-  worker_data->SetInteger(kWorkerProcessHostIdField, process->id());
+  worker_data->SetInteger(kWorkerProcessHostIdField, data.id);
   worker_data->SetInteger(kWorkerRouteIdField, instance.worker_route_id());
   worker_data->SetString(kUrlField, instance.url().spec());
   worker_data->SetString(kNameField, instance.name());
-  worker_data->SetInteger(kPidField, base::GetProcId(process->handle()));
+  worker_data->SetInteger(kPidField, base::GetProcId(data.handle));
   return worker_data;
 }
 
@@ -87,13 +95,11 @@ void WorkersUIHTMLSource::StartDataRequest(const std::string& path,
 
 void WorkersUIHTMLSource::SendSharedWorkersData(int request_id) {
     ListValue workers_list;
-    BrowserChildProcessHost::Iterator iter(content::PROCESS_TYPE_WORKER);
-    for (; !iter.Done(); ++iter) {
-      WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
-      const WorkerProcessHost::Instances& instances = worker->instances();
+    for (WorkerProcessHostIterator iter; !iter.Done(); ++iter) {
+      const WorkerProcessHost::Instances& instances = iter->instances();
       for (WorkerProcessHost::Instances::const_iterator i = instances.begin();
            i != instances.end(); ++i) {
-         workers_list.Append(BuildWorkerData(worker, *i));
+         workers_list.Append(BuildWorkerData(iter.GetData(), *i));
       }
     }
 
@@ -120,10 +126,10 @@ class WorkersDOMHandler : public WebUIMessageHandler {
 };
 
 void WorkersDOMHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(kOpenDevToolsCommand,
+  web_ui()->RegisterMessageCallback(kOpenDevToolsCommand,
       base::Bind(&WorkersDOMHandler::HandleOpenDevTools,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(kTerminateWorkerCommand,
+  web_ui()->RegisterMessageCallback(kTerminateWorkerCommand,
       base::Bind(&WorkersDOMHandler::HandleTerminateWorker,
                  base::Unretained(this)));
 }
@@ -140,7 +146,7 @@ void WorkersDOMHandler::HandleOpenDevTools(const ListValue* args) {
                           &worker_process_host_id));
   CHECK(base::StringToInt(worker_route_id_str, &worker_route_id));
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   if (!profile)
     return;
   DevToolsAgentHost* agent_host =
@@ -151,11 +157,9 @@ void WorkersDOMHandler::HandleOpenDevTools(const ListValue* args) {
 }
 
 static void TerminateWorker(int worker_process_id, int worker_route_id) {
-  for (BrowserChildProcessHost::Iterator iter(content::PROCESS_TYPE_WORKER);
-       !iter.Done(); ++iter) {
-    if (iter->id() == worker_process_id) {
-      WorkerProcessHost* worker = static_cast<WorkerProcessHost*>(*iter);
-      worker->TerminateWorker(worker_route_id);
+  for (WorkerProcessHostIterator iter; !iter.Done(); ++iter) {
+      if (iter.GetData().id == worker_process_id) {
+      iter->TerminateWorker(worker_route_id);
       return;
     }
   }
@@ -209,14 +213,15 @@ class WorkersUI::WorkerCreationDestructionListener
       const WorkerProcessHost::WorkerInstance& instance) OVERRIDE {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        base::Bind(&WorkerCreationDestructionListener::NotifyWorkerCreated,
-                   this, base::Owned(BuildWorkerData(process, instance))));
+        base::Bind(
+            &WorkerCreationDestructionListener::NotifyWorkerCreated,
+            this, base::Owned(BuildWorkerData(process->GetData(), instance))));
   }
   virtual void WorkerDestroyed(
       WorkerProcessHost* process,
       int worker_route_id) OVERRIDE {
     DictionaryValue* worker_data = new DictionaryValue();
-    worker_data->SetInteger(kWorkerProcessHostIdField, process->id());
+    worker_data->SetInteger(kWorkerProcessHostIdField, process->GetData().id);
     worker_data->SetInteger(kWorkerRouteIdField, worker_route_id);
 
     BrowserThread::PostTask(
@@ -227,13 +232,17 @@ class WorkersUI::WorkerCreationDestructionListener
   virtual void WorkerContextStarted(WorkerProcessHost*, int) OVERRIDE {}
 
   void NotifyWorkerCreated(DictionaryValue* worker_data) {
-    if (workers_ui_)
-      workers_ui_->CallJavascriptFunction("workerCreated", *worker_data);
+    if (workers_ui_) {
+      workers_ui_->web_ui()->CallJavascriptFunction(
+          "workerCreated", *worker_data);
+    }
   }
 
   void NotifyWorkerDestroyed(DictionaryValue* worker_data) {
-    if (workers_ui_)
-      workers_ui_->CallJavascriptFunction("workerDestroyed", *worker_data);
+    if (workers_ui_) {
+      workers_ui_->web_ui()->CallJavascriptFunction(
+          "workerDestroyed", *worker_data);
+    }
   }
 
   void RegisterObserver() {
@@ -246,17 +255,15 @@ class WorkersUI::WorkerCreationDestructionListener
   WorkersUI* workers_ui_;
 };
 
-WorkersUI::WorkersUI(TabContents* contents)
-    : ChromeWebUI(contents),
+WorkersUI::WorkersUI(content::WebUI* web_ui)
+    : WebUIController(web_ui),
       observer_(new WorkerCreationDestructionListener(this)){
-  WorkersDOMHandler* handler = new WorkersDOMHandler();
-  AddMessageHandler(handler);
-  handler->Attach(this);
+  web_ui->AddMessageHandler(new WorkersDOMHandler());
 
   WorkersUIHTMLSource* html_source = new WorkersUIHTMLSource();
 
   // Set up the chrome://workers/ source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "chrome/common/autofill_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/web_contents.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -16,30 +18,33 @@ AutofillExternalDelegate::~AutofillExternalDelegate() {
 }
 
 AutofillExternalDelegate::AutofillExternalDelegate(
-    TabContentsWrapper* tab_contents_wrapper)
+    TabContentsWrapper* tab_contents_wrapper,
+    AutofillManager* autofill_manager)
     : tab_contents_wrapper_(tab_contents_wrapper),
+      autofill_manager_(autofill_manager),
       autofill_query_id_(0),
       display_warning_if_disabled_(false),
       has_shown_autofill_popup_for_current_edit_(false) {
 }
 
 void AutofillExternalDelegate::SelectAutofillSuggestionAtIndex(int listIndex) {
-  RenderViewHost* host = tab_contents_wrapper_->render_view_host();
+  RenderViewHost* host =
+      tab_contents_wrapper_->web_contents()->GetRenderViewHost();
   host->Send(new AutofillMsg_SelectAutofillSuggestionAtIndex(
                  host->routing_id(),
                  listIndex));
 }
 
 void AutofillExternalDelegate::OnQuery(int query_id,
-                                       const webkit_glue::FormData& form,
-                                       const webkit_glue::FormField& field,
+                                       const webkit::forms::FormData& form,
+                                       const webkit::forms::FormField& field,
                                        const gfx::Rect& bounds,
                                        bool display_warning_if_disabled) {
   autofill_query_field_ = field;
   display_warning_if_disabled_ = display_warning_if_disabled;
   autofill_query_id_ = query_id;
 
-  OnQueryPlatformSpecific(query_id, form, field);
+  OnQueryPlatformSpecific(query_id, form, field, bounds);
 }
 
 void AutofillExternalDelegate::DidEndTextFieldEditing() {
@@ -110,8 +115,7 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
 
   if (has_autofill_item) {
     // Append the 'Chrome Autofill options' menu item;
-    v.push_back(l10n_util::GetStringFUTF16(IDS_AUTOFILL_OPTIONS_POPUP,
-        WideToUTF16(chrome::kBrowserAppName)));
+    v.push_back(l10n_util::GetStringUTF16(IDS_AUTOFILL_OPTIONS_POPUP));
     l.push_back(string16());
     i.push_back(string16());
     ids.push_back(0);
@@ -132,7 +136,7 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
 // in an autofill_external_delegate_YOUROS.cc.  Currently there are
 // none, so all platforms use the default.
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(TOOLKIT_GTK)
 
 AutofillExternalDelegate* AutofillExternalDelegate::Create(
     TabContentsWrapper*, AutofillManager*) {

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_PUBLIC_CHILD_PROCESS_DATA_H_
-#define CONTENT_PUBLIC_CHILD_PROCESS_DATA_H_
+#ifndef CONTENT_PUBLIC_BROWSER_CHILD_PROCESS_DATA_H_
+#define CONTENT_PUBLIC_BROWSER_CHILD_PROCESS_DATA_H_
 #pragma once
 
 #include "base/process.h"
@@ -30,9 +30,11 @@ struct ChildProcessData {
   // The handle to the process.
   base::ProcessHandle handle;
 
-  ChildProcessData() : id(0), handle(base::kNullProcessHandle) {}
+  ChildProcessData(content::ProcessType type)
+    : type(type), id(0), handle(base::kNullProcessHandle) {
+}
 };
 
 }  // namespace content
 
-#endif  // CONTENT_PUBLIC_CHILD_PROCESS_DATA_H_
+#endif  // CONTENT_PUBLIC_BROWSER_CHILD_PROCESS_DATA_H_

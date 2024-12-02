@@ -15,7 +15,6 @@
 #include "base/memory/scoped_handle.h"
 #include "base/stack_container.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/timer.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -111,14 +110,13 @@ class ChromeFrameLaunchParams :  // NOLINT
                           const FilePath& profile_path,
                           const std::wstring& profile_name,
                           const std::wstring& language,
-                          const std::wstring& extra_arguments,
                           bool incognito, bool widget_mode,
                           bool route_all_top_level_navigations)
     : launch_timeout_(kCommandExecutionTimeout), url_(url),
       referrer_(referrer), profile_path_(profile_path),
       profile_name_(profile_name), language_(language),
-      extra_arguments_(extra_arguments), version_check_(true),
-      incognito_mode_(incognito), is_widget_mode_(widget_mode),
+      version_check_(true), incognito_mode_(incognito),
+      is_widget_mode_(widget_mode),
       route_all_top_level_navigations_(route_all_top_level_navigations) {
   }
 
@@ -161,10 +159,6 @@ class ChromeFrameLaunchParams :  // NOLINT
     return language_;
   }
 
-  const std::wstring& extra_arguments() const {
-    return extra_arguments_;
-  }
-
   bool version_check() const {
     return version_check_;
   }
@@ -197,7 +191,6 @@ class ChromeFrameLaunchParams :  // NOLINT
   FilePath profile_path_;
   std::wstring profile_name_;
   std::wstring language_;
-  std::wstring extra_arguments_;
   bool version_check_;
   bool incognito_mode_;
   bool is_widget_mode_;
@@ -208,7 +201,8 @@ class ChromeFrameLaunchParams :  // NOLINT
 };
 
 // Callback when chrome process launch is complete and automation handshake
-// (Hello message) is established.
+// (Hello message) is established.  All methods are invoked on the automation
+// proxy's worker thread.
 struct DECLSPEC_NOVTABLE LaunchDelegate {  // NOLINT
   virtual void LaunchComplete(ChromeFrameAutomationProxy* proxy,
                               AutomationLaunchResult result) = 0;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,19 +22,21 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
 
+using content::WebUIMessageHandler;
+
 namespace {
 
 // TODO(xiyuan): Localize this.
 const int kDialogWidth = 480;
-const int kDialogHeight = 470;
+const int kDialogHeight = 465;
 
 CookieTreeOriginNode* GetOriginNode(CookiesTreeModel* model,
                                     const std::string& node_path) {
@@ -100,9 +102,6 @@ void CollectedCookiesSource::StartDataRequest(const std::string& path,
   DictionaryValue localized_strings;
   localized_strings.SetString("title",
       l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_DIALOG_TITLE));
-
-  localized_strings.SetString("title",
-      l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_DIALOG_TITLE));
   localized_strings.SetString("allowedCookies",
       l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_ALLOWED_COOKIES_LABEL));
   localized_strings.SetString("blockButton",
@@ -150,6 +149,7 @@ void CollectedCookiesUIDelegate::Show(TabContentsWrapper* wrapper) {
   Profile* profile = wrapper->profile();
   ConstrainedHtmlUI::CreateConstrainedHtmlDialog(profile,
                                                  delegate,
+                                                 NULL,
                                                  wrapper);
 }
 
@@ -176,12 +176,12 @@ CollectedCookiesUIDelegate::CollectedCookiesUIDelegate(
 CollectedCookiesUIDelegate::~CollectedCookiesUIDelegate() {
 }
 
-bool CollectedCookiesUIDelegate::IsDialogModal() const {
-  return false;
+ui::ModalType CollectedCookiesUIDelegate::GetDialogModalType() const {
+  return ui::MODAL_TYPE_NONE;
 }
 
 string16 CollectedCookiesUIDelegate::GetDialogTitle() const {
-  return string16();
+  return l10n_util::GetStringUTF16(IDS_COLLECTED_COOKIES_DIALOG_TITLE);
 }
 
 GURL CollectedCookiesUIDelegate::GetDialogContentURL() const {
@@ -213,31 +213,31 @@ bool CollectedCookiesUIDelegate::ShouldShowDialogTitle() const {
 }
 
 void CollectedCookiesUIDelegate::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("BindCookiesTreeModel",
+  web_ui()->RegisterMessageCallback("BindCookiesTreeModel",
       base::Bind(&CollectedCookiesUIDelegate::BindCookiesTreeModel,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("Block",
+  web_ui()->RegisterMessageCallback("Block",
       base::Bind(&CollectedCookiesUIDelegate::Block,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("Allow",
+  web_ui()->RegisterMessageCallback("Allow",
       base::Bind(&CollectedCookiesUIDelegate::Allow,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("AllowThisSession",
+  web_ui()->RegisterMessageCallback("AllowThisSession",
       base::Bind(&CollectedCookiesUIDelegate::AllowThisSession,
                  base::Unretained(this)));
 
-  allowed_cookies_adapter_.Init(web_ui_);
-  blocked_cookies_adapter_.Init(web_ui_);
+  allowed_cookies_adapter_.Init(web_ui());
+  blocked_cookies_adapter_.Init(web_ui());
 }
 
 void CollectedCookiesUIDelegate::CloseDialog() {
-  if (!closed_ && web_ui_)
-    web_ui_->CallJavascriptFunction("closeDialog");
+  if (!closed_ && web_ui())
+    web_ui()->CallJavascriptFunction("closeDialog");
 }
 
 void CollectedCookiesUIDelegate::SetInfobarLabel(const std::string& text) {
   StringValue string(text);
-  web_ui_->CallJavascriptFunction("setInfobarLabel", string);
+  web_ui()->CallJavascriptFunction("setInfobarLabel", string);
 }
 
 void CollectedCookiesUIDelegate::AddContentException(

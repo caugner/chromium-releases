@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -169,20 +169,20 @@ void BufferedResourceLoader::Start(
       WebString::fromUTF8("identity;q=1, *;q=0"));
 
   // Check for our test WebURLLoader.
-  WebURLLoader* loader = NULL;
+  scoped_ptr<WebURLLoader> loader;
   if (test_loader_.get()) {
-    loader = test_loader_.release();
+    loader = test_loader_.Pass();
   } else {
     WebURLLoaderOptions options;
     options.allowCredentials = true;
     options.crossOriginRequestPolicy =
         WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
-    loader = frame->createAssociatedURLLoader(options);
+    loader.reset(frame->createAssociatedURLLoader(options));
   }
 
   // Start the resource loading.
   loader->loadAsynchronously(request, this);
-  active_loader_.reset(new ActiveLoader(this, loader));
+  active_loader_.reset(new ActiveLoader(loader.Pass()));
 }
 
 void BufferedResourceLoader::Stop() {
@@ -221,7 +221,12 @@ void BufferedResourceLoader::Read(
   read_size_ = read_size;
   read_buffer_ = buffer;
 
-  // If read position is beyond the instance size, we cannot read there.
+  // If we're attempting to read past the end of the file, return a zero
+  // indicating EOF.
+  //
+  // This can happen with callees that read in fixed-sized amounts for parsing
+  // or at the end of chunked 200 responses when we discover the actual length
+  // of the file.
   if (instance_size_ != kPositionNotSpecified &&
       instance_size_ <= read_position_) {
     DoneRead(0);
@@ -317,8 +322,9 @@ const GURL& BufferedResourceLoader::url() {
   return url_;
 }
 
-void BufferedResourceLoader::SetURLLoaderForTest(WebURLLoader* test_loader) {
-  test_loader_.reset(test_loader);
+void BufferedResourceLoader::SetURLLoaderForTest(
+    scoped_ptr<WebURLLoader> test_loader) {
+  test_loader_ = test_loader.Pass();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -353,7 +359,7 @@ void BufferedResourceLoader::didSendData(
 void BufferedResourceLoader::didReceiveResponse(
     WebURLLoader* loader,
     const WebURLResponse& response) {
-  VLOG(1) << "didReceiveResponse: " << response.httpStatusCode();
+  DVLOG(1) << "didReceiveResponse: " << response.httpStatusCode();
   DCHECK(active_loader_.get());
 
   // The loader may have been stopped and |start_callback| is destroyed.
@@ -418,7 +424,7 @@ void BufferedResourceLoader::didReceiveData(
     const char* data,
     int data_length,
     int encoded_data_length) {
-  VLOG(1) << "didReceiveData: " << data_length << " bytes";
+  DVLOG(1) << "didReceiveData: " << data_length << " bytes";
   DCHECK(active_loader_.get());
   DCHECK_GT(data_length, 0);
 
@@ -466,7 +472,7 @@ void BufferedResourceLoader::didReceiveCachedMetadata(
 void BufferedResourceLoader::didFinishLoading(
     WebURLLoader* loader,
     double finishTime) {
-  VLOG(1) << "didFinishLoading";
+  DVLOG(1) << "didFinishLoading";
   DCHECK(active_loader_.get());
 
   // We're done with the loader.
@@ -506,24 +512,27 @@ void BufferedResourceLoader::didFinishLoading(
 void BufferedResourceLoader::didFail(
     WebURLLoader* loader,
     const WebURLError& error) {
-  VLOG(1) << "didFail: " << error.reason;
+  DVLOG(1) << "didFail: reason=" << error.reason
+           << " isCancellation=" << error.isCancellation;
   DCHECK(active_loader_.get());
 
   // We don't need to continue loading after failure.
-  active_loader_->Cancel();
+  //
+  // Keep it alive until we exit this method so that |error| remains valid.
+  scoped_ptr<ActiveLoader> active_loader(active_loader_.release());
   NotifyNetworkEvent();
 
   // Don't leave start callbacks hanging around.
   if (!start_callback_.is_null()) {
     DCHECK(read_callback_.is_null())
         << "Shouldn't have a read callback during start";
-    DoneStart(error.reason);
+    DoneStart(net::ERR_FAILED);
     return;
   }
 
   // Don't leave read callbacks hanging around.
   if (HasPendingRead()) {
-    DoneRead(error.reason);
+    DoneRead(net::ERR_FAILED);
   }
 }
 

@@ -21,7 +21,8 @@ ResourceContext::ResourceContext()
       quota_manager_(NULL),
       host_zoom_map_(NULL),
       media_observer_(NULL),
-      media_stream_manager_(NULL) {
+      media_stream_manager_(NULL),
+      audio_manager_(NULL) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
@@ -153,17 +154,6 @@ void ResourceContext::set_media_observer(MediaObserver* media_observer) {
   media_observer_ = media_observer;
 }
 
-DownloadIdFactory* ResourceContext::download_id_factory() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  EnsureInitialized();
-  return download_id_factory_;
-}
-void ResourceContext::set_download_id_factory(
-    DownloadIdFactory* download_id_factory) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  download_id_factory_ = download_id_factory;
-}
-
 media_stream::MediaStreamManager*
 ResourceContext::media_stream_manager() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -175,6 +165,17 @@ void ResourceContext::set_media_stream_manager(
     media_stream::MediaStreamManager* media_stream_manager) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   media_stream_manager_ = media_stream_manager;
+}
+
+AudioManager* ResourceContext::audio_manager() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  EnsureInitialized();
+  return audio_manager_;
+}
+
+void ResourceContext::set_audio_manager(AudioManager* audio_manager) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  audio_manager_ = audio_manager;
 }
 
 }  // namespace content

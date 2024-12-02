@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -30,6 +30,9 @@
     {
       'target_name': 'ui_unittests',
       'type': 'executable',
+      'includes': [
+        'base/ime/ime_unittests.gypi',
+      ],
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
@@ -51,11 +54,12 @@
         'base/clipboard/clipboard_unittest.cc',
         'base/clipboard/custom_data_helper_unittest.cc',
         'base/cocoa/base_view_unittest.mm',
+        'base/cocoa/events_mac_unittest.mm',
         'base/gtk/gtk_expanded_container_unittest.cc',
         'base/gtk/gtk_im_context_util_unittest.cc',
-        'base/ime/character_composer_unittest.cc',
         'base/l10n/l10n_util_mac_unittest.mm',
         'base/l10n/l10n_util_unittest.cc',
+        'base/models/list_model_unittest.cc',
         'base/models/tree_node_iterator_unittest.cc',
         'base/models/tree_node_model_unittest.cc',
         'base/range/range_unittest.cc',
@@ -73,6 +77,7 @@
         'gfx/color_analysis_unittest.cc',
         'gfx/color_utils_unittest.cc',
         'gfx/font_unittest.cc',
+        'gfx/font_list_unittest.cc',
         'gfx/image/image_mac_unittest.mm',
         'gfx/image/image_unittest.cc',
         'gfx/image/image_unittest_util.h',
@@ -122,6 +127,11 @@
             ],
           },
         }],
+        ['OS == "linux"', {
+          'sources': [
+            'gfx/platform_font_pango_unittest.cc',
+          ],
+        }],
         ['OS == "linux" and toolkit_views==1', {
           'sources': [
             'base/x/events_x_unittest.cc',
@@ -160,7 +170,7 @@
             '../build/linux/system.gyp:gtk',
           ],
         }],
-        ['toolkit_views==1', {
+        ['toolkit_views==1 and OS!="mac"', {
           'sources': [
             'gfx/render_text_unittest.cc',
           ],
@@ -169,11 +179,6 @@
           'sources!': [
             'base/view_prop_unittest.cc',
             'gfx/screen_unittest.cc',
-          ],
-        }],
-        ['use_ibus != 1', {
-          'sources/': [
-            ['exclude', 'base/ime/character_composer_unittest.cc'],
           ],
         }],
       ],

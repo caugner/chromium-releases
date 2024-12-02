@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,8 +28,8 @@ class TwoClientSessionsSyncTest : public SyncTest {
 };
 
 static const char* kValidPassphrase = "passphrase!";
-static const char* kURL1 = "chrome://sync";
-static const char* kURL2 = "chrome://version";
+static const char* kURL1 = "http://127.0.0.1/bubba1";
+static const char* kURL2 = "http://127.0.0.1/bubba2";
 
 // TODO(zea): Test each individual session command we care about separately.
 // (as well as multi-window). We're currently only checking basic single-window/
@@ -142,8 +142,14 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, BothChanged) {
   ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, *client1_windows.Get()));
 }
 
+// Flaky on OSX (number of conflicting nodes is off). http://crbug.com/85294.
+#if defined(OS_MACOSX)
+#define MAYBE_FirstChangesAndSetsPassphrase FLAKY_FirstChangesAndSetsPassphrase
+#else
+#define MAYBE_FirstChangesAndSetsPassphrase FirstChangesAndSetsPassphrase
+#endif
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
-                       FirstChangesAndSetsPassphrase) {
+                       MAYBE_FirstChangesAndSetsPassphrase) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
@@ -154,7 +160,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
       client0_windows.GetMutable()));
 
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
-  GetClient(0)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(0)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(0)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseRequired());
@@ -166,7 +175,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
       GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
-  GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(1)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(1)->WaitForTypeEncryption(syncable::SESSIONS));
 
@@ -182,16 +194,26 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
 }
 
-// Flaky (number of conflicting nodes is off). http://crbug.com/89604.
+// Flaky on OSX (number of conflicting nodes is off). http://crbug.com/85294.
+#if defined(OS_MACOSX)
+#define MAYBE_FirstChangesWhileSecondWaitingForPassphrase \
+        FLAKY_FirstChangesWhileSecondWaitingForPassphrase
+#else
+#define MAYBE_FirstChangesWhileSecondWaitingForPassphrase \
+        FirstChangesWhileSecondWaitingForPassphrase
+#endif
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
-                       FLAKY_FirstChangesWhileSecondWaitingForPassphrase) {
+                       MAYBE_FirstChangesWhileSecondWaitingForPassphrase) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
   ASSERT_TRUE(CheckInitialState(1));
 
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
-  GetClient(0)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(0)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(0)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseRequired());
@@ -213,7 +235,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
       GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
-  GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(1)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(1)->WaitForTypeEncryption(syncable::SESSIONS));
 
@@ -237,7 +262,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(CheckInitialState(1));
 
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
-  GetClient(0)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(0)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(0)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseRequired());
@@ -256,27 +284,35 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
       client1_windows.GetMutable()));
 
   // At this point we enter the passphrase, triggering a resync, in which the
-  // local changes of client 1 get overwritten for now.
-  GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
+  // local changes of client 1 get sent to client 0.
+  GetClient(1)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(1)->WaitForTypeEncryption(syncable::SESSIONS));
+  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);
 
   ASSERT_TRUE(IsEncrypted(0, syncable::SESSIONS));
   ASSERT_TRUE(IsEncrypted(1, syncable::SESSIONS));
-  // The session data from client 1 got overwritten. As a result, client 0
-  // should have no foreign session data. TODO(zea): update this once bug 76596
-  // is resolved and we don't choose server wins on encryption conflicts.
   SyncedSessionVector sessions0;
   SyncedSessionVector sessions1;
-  ASSERT_FALSE(GetSessionData(0, &sessions0));
+  ASSERT_TRUE(GetSessionData(0, &sessions0));
   ASSERT_FALSE(GetSessionData(1, &sessions1));
 }
 
-// Flaky. http://crbug.com/85294
+// Flaky on OSX (number of conflicting nodes is off). http://crbug.com/85294.
+#if defined(OS_MACOSX)
+#define MAYBE_SecondChangesBeforeEncrAndPassphraseChange \
+        FLAKY_SecondChangesBeforeEncrAndPassphraseChange
+#else
+#define MAYBE_SecondChangesBeforeEncrAndPassphraseChange \
+        SecondChangesBeforeEncrAndPassphraseChange
+#endif
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
-                       FLAKY_SecondChangesBeforeEncrAndPassphraseChange) {
+                       MAYBE_SecondChangesBeforeEncrAndPassphraseChange) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
@@ -291,7 +327,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   // Turn encryption on client 0. Client 1's foreign will be encrypted with the
   // new passphrase and synced back. It will be unable to decrypt it yet.
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
-  GetClient(0)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(0)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(0)->AwaitPassphraseAccepted());
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseRequired());
@@ -305,7 +344,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
       num_conflicting_updates);  // The encrypted nodes.
 
   // At this point we enter the passphrase, triggering a resync.
-  GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(1)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(1)->WaitForTypeEncryption(syncable::SESSIONS));
 
@@ -321,14 +363,25 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, *client1_windows.Get()));
 }
 
+// Flaky on OSX (number of conflicting nodes is off). http://crbug.com/85294.
+#if defined(OS_MACOSX)
+#define MAYBE_BothChangeWithEncryptionAndPassphrase \
+        FLAKY_BothChangeWithEncryptionAndPassphrase
+#else
+#define MAYBE_BothChangeWithEncryptionAndPassphrase \
+        BothChangeWithEncryptionAndPassphrase
+#endif
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
-                       BothChangeWithEncryptionAndPassphrase) {
+                       MAYBE_BothChangeWithEncryptionAndPassphrase) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
   ASSERT_TRUE(CheckInitialState(1));
 
-  GetClient(0)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(0)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(0)->AwaitPassphraseAccepted());
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseRequired());
@@ -349,7 +402,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
       GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
-  GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
+  GetClient(1)->service()->SetPassphrase(
+      kValidPassphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseAccepted());
   ASSERT_FALSE(GetClient(1)->service()->IsPassphraseRequired());
   ASSERT_TRUE(GetClient(1)->WaitForTypeEncryption(syncable::SESSIONS));

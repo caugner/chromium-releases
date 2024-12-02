@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,8 +85,7 @@ uint64 WebClipboardImpl::sequenceNumber(Buffer buffer) {
 }
 
 bool WebClipboardImpl::isFormatAvailable(Format format, Buffer buffer) {
-  ui::Clipboard::FormatType format_type;
-  ui::Clipboard::Buffer buffer_type;
+  ui::Clipboard::Buffer buffer_type = ui::Clipboard::BUFFER_STANDARD;
 
   if (!ConvertBufferType(buffer, &buffer_type))
     return false;
@@ -98,22 +97,21 @@ bool WebClipboardImpl::isFormatAvailable(Format format, Buffer buffer) {
           client_->IsFormatAvailable(ui::Clipboard::GetPlainTextWFormatType(),
                                      buffer_type);
     case FormatHTML:
-      format_type = ui::Clipboard::GetHtmlFormatType();
-      break;
+      return client_->IsFormatAvailable(ui::Clipboard::GetHtmlFormatType(),
+                                        buffer_type);
     case FormatSmartPaste:
-      format_type = ui::Clipboard::GetWebKitSmartPasteFormatType();
-      break;
+      return client_->IsFormatAvailable(
+          ui::Clipboard::GetWebKitSmartPasteFormatType(), buffer_type);
     case FormatBookmark:
 #if defined(OS_WIN) || defined(OS_MACOSX)
-      format_type = ui::Clipboard::GetUrlWFormatType();
-      break;
+      return client_->IsFormatAvailable(ui::Clipboard::GetUrlWFormatType(),
+                                        buffer_type);
 #endif
     default:
       NOTREACHED();
-      return false;
   }
 
-  return client_->IsFormatAvailable(format_type, buffer_type);
+  return false;
 }
 
 WebVector<WebString> WebClipboardImpl::readAvailableTypes(
@@ -241,18 +239,22 @@ void WebClipboardImpl::writeImage(
 }
 
 void WebClipboardImpl::writeDataObject(const WebDragData& data) {
-  // TODO(dcheng): This actually results in a double clear of the clipboard.
-  // Once in WebKit, and once here when the clipboard writer goes out of scope.
-  // The same is true of the other WebClipboard::write* methods.
   ScopedClipboardWriterGlue scw(client_);
 
   WebDropData data_object(data);
   // TODO(dcheng): Properly support text/uri-list here.
   scw.WriteText(data_object.plain_text);
   scw.WriteHTML(data_object.text_html, "");
-  Pickle pickle;
-  ui::WriteCustomDataToPickle(data_object.custom_data, &pickle);
-  scw.WritePickledData(pickle, ui::Clipboard::GetWebCustomDataFormatType());
+  // If there is no custom data, avoid calling WritePickledData. This ensures
+  // that ScopedClipboardWriterGlue's dtor remains a no-op if the page didn't
+  // modify the DataTransfer object, which is important to avoid stomping on
+  // any clipboard contents written by extension functions such as
+  // chrome.experimental.bookmarkManager.copy.
+  if (!data_object.custom_data.empty()) {
+    Pickle pickle;
+    ui::WriteCustomDataToPickle(data_object.custom_data, &pickle);
+    scw.WritePickledData(pickle, ui::Clipboard::GetWebCustomDataFormatType());
+  }
 }
 
 bool WebClipboardImpl::ConvertBufferType(Buffer buffer,

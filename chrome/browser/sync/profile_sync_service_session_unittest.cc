@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,11 +14,9 @@
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
-#include "base/task.h"
 #include "base/time.h"
-#include "chrome/browser/sessions/session_service.h"
-#include "chrome/browser/sessions/session_service_factory.h"
-#include "chrome/browser/sessions/session_service_test_helper.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
@@ -42,6 +40,7 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/profile_mock.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -159,27 +158,22 @@ class ProfileSyncServiceSessionTest
   ProfileSyncServiceSessionTest()
       : io_thread_(BrowserThread::IO),
         window_bounds_(0, 1, 2, 3),
-        notified_of_update_(false) {}
+        notified_of_update_(false),
+        notified_of_refresh_(false) {}
   ProfileSyncService* sync_service() { return sync_service_.get(); }
 
   TestIdFactory* ids() { return sync_service_->id_factory(); }
 
  protected:
-  SessionService* service() { return helper_.service(); }
-
   virtual void SetUp() {
     // BrowserWithTestWindowTest implementation.
     BrowserWithTestWindowTest::SetUp();
     io_thread_.StartIOThread();
     profile()->CreateRequestContext();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    SessionService* session_service = new SessionService(temp_dir_.path());
-    helper_.set_service(session_service);
-    service()->SetWindowType(window_id_, Browser::TYPE_TABBED);
-    service()->SetWindowBounds(window_id_,
-                               window_bounds_,
-                               ui::SHOW_STATE_NORMAL);
     registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
+        content::NotificationService::AllSources());
+    registrar_.Add(this, chrome::NOTIFICATION_SYNC_REFRESH,
         content::NotificationService::AllSources());
   }
 
@@ -190,6 +184,9 @@ class ProfileSyncServiceSessionTest
       case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
         notified_of_update_ = true;
         break;
+      case chrome::NOTIFICATION_SYNC_REFRESH:
+        notified_of_refresh_ = true;
+        break;
       default:
         NOTREACHED();
         break;
@@ -197,11 +194,6 @@ class ProfileSyncServiceSessionTest
   }
 
   virtual void TearDown() {
-    if (SessionServiceFactory::GetForProfileIfExisting(profile()) == service())
-      helper_.ReleaseService(); // we transferred ownership to profile
-    else
-      helper_.set_service(NULL);
-    SessionServiceFactory::SetForTestProfile(profile(), NULL);
     sync_service_.reset();
     profile()->ResetRequestContext();
 
@@ -223,9 +215,17 @@ class ProfileSyncServiceSessionTest
                         bool will_fail_association) {
     if (sync_service_.get())
       return false;
+    SigninManager* signin = SigninManagerFactory::GetForProfile(profile());
+    signin->SetAuthenticatedUsername("test_user");
+    ProfileSyncComponentsFactoryMock* factory =
+        new ProfileSyncComponentsFactoryMock();
     sync_service_.reset(new TestProfileSyncService(
-        &factory_, profile(), "test user", false, callback));
-    SessionServiceFactory::SetForTestProfile(profile(), helper_.service());
+        factory,
+        profile(),
+        signin,
+        ProfileSyncService::AUTO_START,
+        false,
+        callback));
 
     // Register the session data type.
     model_associator_ =
@@ -234,13 +234,13 @@ class ProfileSyncServiceSessionTest
     change_processor_ = new SessionChangeProcessor(
         sync_service_.get(), model_associator_,
         true /* setup_for_test */);
-    EXPECT_CALL(factory_, CreateSessionSyncComponents(_, _)).
+    EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
-    EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
         WillOnce(ReturnNewDataTypeManager());
     sync_service_->RegisterDataTypeController(
-        new SessionDataTypeController(&factory_,
+        new SessionDataTypeController(factory,
                                       profile(),
                                       sync_service_.get()));
     profile()->GetTokenService()->IssueAuthTokenForTest(
@@ -253,14 +253,13 @@ class ProfileSyncServiceSessionTest
   content::TestBrowserThread io_thread_;
   // Path used in testing.
   ScopedTempDir temp_dir_;
-  SessionServiceTestHelper helper_;
   SessionModelAssociator* model_associator_;
   SessionChangeProcessor* change_processor_;
   SessionID window_id_;
-  ProfileSyncComponentsFactoryMock factory_;
   scoped_ptr<TestProfileSyncService> sync_service_;
   const gfx::Rect window_bounds_;
   bool notified_of_update_;
+  bool notified_of_refresh_;
   content::NotificationRegistrar registrar_;
 };
 
@@ -293,7 +292,6 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
   CreateRootHelper create_root(this);
   ASSERT_TRUE(StartSyncService(create_root.callback(), false));
   ASSERT_TRUE(create_root.success());
-  ASSERT_EQ(model_associator_->GetSessionService(), helper_.service());
 
   // Check that the DataTypeController associated the models.
   bool has_nodes;
@@ -352,15 +350,15 @@ TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
   SessionModelAssociator::TabLinksMap::iterator iter = tab_map.begin();
   ASSERT_EQ(2, iter->second.tab()->GetEntryCount());
   ASSERT_EQ(GURL("http://foo/1"), iter->second.tab()->
-          GetEntryAtIndex(0)->virtual_url());
+          GetEntryAtIndex(0)->GetVirtualURL());
   ASSERT_EQ(GURL("http://foo/2"), iter->second.tab()->
-          GetEntryAtIndex(1)->virtual_url());
+          GetEntryAtIndex(1)->GetVirtualURL());
   iter++;
   ASSERT_EQ(2, iter->second.tab()->GetEntryCount());
   ASSERT_EQ(GURL("http://bar/1"), iter->second.tab()->
-      GetEntryAtIndex(0)->virtual_url());
+      GetEntryAtIndex(0)->GetVirtualURL());
   ASSERT_EQ(GURL("http://bar/2"), iter->second.tab()->
-      GetEntryAtIndex(1)->virtual_url());
+      GetEntryAtIndex(1)->GetVirtualURL());
 }
 
 // Test that we fail on a failed model association.
@@ -906,6 +904,92 @@ TEST_F(ProfileSyncServiceSessionTest, StaleSessionRefresh) {
   std::vector<std::vector<SessionID::id_type> > session_reference;
   session_reference.push_back(tab_list1);
   VerifySyncedSession(tag, session_reference, *(foreign_sessions[0]));
+}
+
+// Test that tabs with nothing but "chrome://*" and "file://*" navigations are
+// not be synced.
+TEST_F(ProfileSyncServiceSessionTest, ValidTabs) {
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
+
+  AddTab(browser(), GURL("chrome://bla1/"));
+  NavigateAndCommitActiveTab(GURL("chrome://bla2"));
+  AddTab(browser(), GURL("file://bla3/"));
+  AddTab(browser(), GURL("bla://bla"));
+  // Note: chrome://newtab has special handling which crashes in unit tests.
+
+  // Get the tabs for this machine. Only the bla:// url should be synced.
+  SessionModelAssociator::TabLinksMap tab_map = model_associator_->tab_map_;
+  ASSERT_EQ(1U, tab_map.size());
+  SessionModelAssociator::TabLinksMap::iterator iter = tab_map.begin();
+  ASSERT_EQ(1, iter->second.tab()->GetEntryCount());
+  ASSERT_EQ(GURL("bla://bla"), iter->second.tab()->
+      GetEntryAtIndex(0)->GetVirtualURL());
+}
+
+// Verify that AttemptSessionsDataRefresh triggers the NOTIFICATION_SYNC_REFRESH
+// notification.
+// TODO(zea): Once we can have unit tests that are able to open to the NTP,
+// test that the NTP/#opentabs URL triggers a refresh as well (but only when
+// it is the active tab).
+TEST_F(ProfileSyncServiceSessionTest, SessionsRefresh) {
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
+
+  // Empty, so returns false.
+  std::vector<const SyncedSession*> foreign_sessions;
+  ASSERT_FALSE(model_associator_->GetAllForeignSessions(&foreign_sessions));
+  ASSERT_FALSE(notified_of_refresh_);
+  model_associator_->AttemptSessionsDataRefresh();
+  ASSERT_TRUE(notified_of_refresh_);
+
+  // Nothing should have changed since we don't have unapplied data.
+  ASSERT_FALSE(model_associator_->GetAllForeignSessions(&foreign_sessions));
+}
+
+// Ensure model association associates the pre-existing tabs.
+TEST_F(ProfileSyncServiceSessionTest, ExistingTabs) {
+  AddTab(browser(), GURL("http://foo1"));
+  NavigateAndCommitActiveTab(GURL("http://foo2"));
+  AddTab(browser(), GURL("http://bar1"));
+  NavigateAndCommitActiveTab(GURL("http://bar2"));
+
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
+  bool has_nodes;
+  ASSERT_TRUE(model_associator_->SyncModelHasUserCreatedNodes(&has_nodes));
+  ASSERT_TRUE(has_nodes);
+
+  std::string machine_tag = model_associator_->GetCurrentMachineTag();
+  int64 sync_id = model_associator_->GetSyncIdFromSessionTag(machine_tag);
+  ASSERT_NE(sync_api::kInvalidId, sync_id);
+
+  // Check that this machine's data is not included in the foreign windows.
+  std::vector<const SyncedSession*> foreign_sessions;
+  ASSERT_FALSE(model_associator_->GetAllForeignSessions(&foreign_sessions));
+  ASSERT_EQ(foreign_sessions.size(), 0U);
+
+  // Get the tabs for this machine from the node and check that they were
+  // filled.
+  SessionModelAssociator::TabLinksMap tab_map = model_associator_->tab_map_;
+  ASSERT_EQ(2U, tab_map.size());
+  // Tabs are ordered by sessionid in tab_map, so should be able to traverse
+  // the tree based on order of tabs created
+  SessionModelAssociator::TabLinksMap::iterator iter = tab_map.begin();
+  ASSERT_EQ(2, iter->second.tab()->GetEntryCount());
+  ASSERT_EQ(GURL("http://foo1"), iter->second.tab()->
+          GetEntryAtIndex(0)->GetVirtualURL());
+  ASSERT_EQ(GURL("http://foo2"), iter->second.tab()->
+          GetEntryAtIndex(1)->GetVirtualURL());
+  iter++;
+  ASSERT_EQ(2, iter->second.tab()->GetEntryCount());
+  ASSERT_EQ(GURL("http://bar1"), iter->second.tab()->
+      GetEntryAtIndex(0)->GetVirtualURL());
+  ASSERT_EQ(GURL("http://bar2"), iter->second.tab()->
+      GetEntryAtIndex(1)->GetVirtualURL());
 }
 
 }  // namespace browser_sync

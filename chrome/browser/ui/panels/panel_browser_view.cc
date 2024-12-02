@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,61 +7,28 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_bounds_animation.h"
 #include "chrome/browser/ui/panels/panel_browser_frame_view.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
-#include "chrome/browser/ui/panels/panel_overflow_strip.h"
-#include "chrome/browser/ui/panels/panel_strip.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/task_manager_dialog.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
 
-namespace {
-// This value is experimental and subjective.
-const int kSetBoundsAnimationMs = 180;
-const int kSetBoundsAnimationMinimizeMs = 1500;
+using content::WebContents;
 
+namespace {
 // The threshold to differentiate the short click and long click.
 const int kShortClickThresholdMs = 200;
 
 // Delay before click-to-minimize is allowed after the attention has been
 // cleared.
 const int kSuspendMinimizeOnClickIntervalMs = 500;
-
-}
-
-double PanelSlideAnimation::GetCurrentValue() const {
-  double progress = ui::SlideAnimation::GetCurrentValue();
-  if (!for_minimize_) {
-    // Cubic easing out.
-    float value = 1.0 - progress;
-    return 1.0 - value * value * value;
-  }
-
-  // Minimize animation:
-  // 1. Quickly (0 -> 0.15) make only titlebar visible.
-  // 2. Stay a little bit (0.15->0.6) in place, just showing titlebar.
-  // 3. Slowly minimize to thin strip (0.6->1.0)
-  const double kAnimationStopAfterQuickDecrease = 0.15;
-  const double kAnimationStopAfterShowingTitlebar = 0.6;
-  double value;
-  if (progress <= kAnimationStopAfterQuickDecrease) {
-      value = progress * animation_stop_to_show_titlebar_ /
-          kAnimationStopAfterQuickDecrease;
-  } else if (progress <= kAnimationStopAfterShowingTitlebar) {
-      value = animation_stop_to_show_titlebar_;
-  } else {
-      value = animation_stop_to_show_titlebar_ +
-          (progress - kAnimationStopAfterShowingTitlebar) *
-          (1.0 - animation_stop_to_show_titlebar_) /
-          (1.0 - kAnimationStopAfterShowingTitlebar);
-  }
-  return value;
 }
 
 NativePanel* Panel::CreateNativePanel(Browser* browser, Panel* panel,
@@ -98,6 +65,16 @@ void PanelBrowserView::Init() {
 
   GetWidget()->non_client_view()->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+}
+
+void PanelBrowserView::Show() {
+  if (!panel_->manager()->is_full_screen())
+    BrowserView::Show();
+}
+
+void PanelBrowserView::ShowInactive() {
+  if (!panel_->manager()->is_full_screen())
+    BrowserView::ShowInactive();
 }
 
 void PanelBrowserView::Close() {
@@ -150,15 +127,6 @@ void PanelBrowserView::SetBoundsInternal(const gfx::Rect& new_bounds,
   if (bounds_ == new_bounds)
     return;
 
-  // TODO(jianli): this is just a temporary hack to check if we need to show
-  // or hide the panel app icon in the taskbar. http://crbug.com/106227
-  int panel_strip_area_left =
-      panel()->manager()->panel_strip()->display_area().x();
-  bool app_icon_shown = bounds_.x() >= panel_strip_area_left;
-  bool app_icon_to_show = new_bounds.x() >= panel_strip_area_left;
-  if (app_icon_shown != app_icon_to_show)
-    ShowOrHidePanelAppIcon(app_icon_to_show);
-
   bounds_ = new_bounds;
 
   // No animation if the panel is being dragged.
@@ -169,32 +137,18 @@ void PanelBrowserView::SetBoundsInternal(const gfx::Rect& new_bounds,
 
   animation_start_bounds_ = GetBounds();
 
-  // Detect animation that happens when expansion state is set to MINIMIZED
-  // and there is relatively big portion of the panel to hide from view.
-  // Initialize animation differently in this case, using fast-pause-slow
-  // method, see below for more details.
-  double animation_stop_to_show_titlebar = 0;
-  bool for_minimize = false;
-  int duration = kSetBoundsAnimationMs;
-  if (panel_->expansion_state() == Panel::MINIMIZED) {
-    animation_stop_to_show_titlebar =
-        1.0 - static_cast<double>((TitleOnlyHeight() - new_bounds.height())) /
-        (GetBounds().height() - new_bounds.height());
-    if (animation_stop_to_show_titlebar > 0.7) {  // Relatively big movement.
-      for_minimize = true;
-      duration = kSetBoundsAnimationMinimizeMs;
-    }
-  }
-
-  bounds_animator_.reset(new PanelSlideAnimation(
-      this, for_minimize, animation_stop_to_show_titlebar));
-  bounds_animator_->SetSlideDuration(duration);
-  bounds_animator_->Show();
+  bounds_animator_.reset(new PanelBoundsAnimation(
+      this, panel(), animation_start_bounds_, new_bounds));
+  bounds_animator_->Start();
 }
 
 void PanelBrowserView::UpdateTitleBar() {
   ::BrowserView::UpdateTitleBar();
   GetFrameView()->UpdateTitleBar();
+}
+
+bool PanelBrowserView::IsPanel() const {
+  return true;
 }
 
 bool PanelBrowserView::GetSavedWindowPlacement(
@@ -226,13 +180,28 @@ void PanelBrowserView::OnWidgetActivationChanged(views::Widget* widget,
   GetFrameView()->OnFocusChanged(focused);
 
   if (focused_) {
-    // Expand the panel if needed.
+    // Expand the panel if needed. Do NOT expand a TITLE_ONLY panel
+    // otherwise it will be impossible to drag a title without
+    // expanding it.
     if (panel_->expansion_state() == Panel::MINIMIZED)
       panel_->SetExpansionState(Panel::EXPANDED);
 
-    // Clear the attention state if needed.
-    if (is_drawing_attention_)
-      StopDrawingAttention();
+    if (is_drawing_attention_) {
+      DrawAttention(false);
+
+      // Restore the panel from title-only mode here. Could not do this in the
+      // code above.
+      if (panel_->expansion_state() == Panel::TITLE_ONLY)
+        panel_->SetExpansionState(Panel::EXPANDED);
+
+      // This function is called per one of the following user interactions:
+      // 1) clicking on the title-bar
+      // 2) clicking on the client area
+      // 3) switching to the panel via keyboard
+      // For case 1, we do not want the expanded panel to be minimized since the
+      // user clicks on it to mean to clear the attention.
+      attention_cleared_time_ = base::TimeTicks::Now();
+    }
   }
 
   content::NotificationService::current()->Notify(
@@ -335,8 +304,7 @@ void PanelBrowserView::ShowTaskManagerForPanel() {
   TaskManagerDialog::Show();
 #else
   // Uses WebUI TaskManager when swiches is set. It is beta feature.
-  if (CommandLine::ForCurrentProcess()
-        ->HasSwitch(switches::kEnableWebUITaskManager)) {
+  if (chrome_web_ui::IsMoreWebUI()) {
     TaskManagerDialog::Show();
   } else {
     ShowTaskManager();
@@ -352,8 +320,8 @@ void PanelBrowserView::NotifyPanelOnUserChangedTheme() {
   UserChangedTheme();
 }
 
-void PanelBrowserView::PanelTabContentsFocused(TabContents* tab_contents) {
-  TabContentsFocused(tab_contents);
+void PanelBrowserView::PanelWebContentsFocused(WebContents* contents) {
+  WebContentsFocused(contents);
 }
 
 void PanelBrowserView::PanelCut() {
@@ -368,42 +336,15 @@ void PanelBrowserView::PanelPaste() {
   Paste();
 }
 
-void PanelBrowserView::DrawAttention() {
-  // Don't draw attention for active panel.
-  if (is_drawing_attention_ || focused_)
+void PanelBrowserView::DrawAttention(bool draw_attention) {
+  if (is_drawing_attention_ == draw_attention)
     return;
-  is_drawing_attention_ = true;
-
-  // Bring up the titlebar to get people's attention.
-  if (panel_->expansion_state() == Panel::MINIMIZED)
-    panel_->SetExpansionState(Panel::TITLE_ONLY);
-
+  is_drawing_attention_ = draw_attention;
   GetFrameView()->SchedulePaint();
 }
 
 bool PanelBrowserView::IsDrawingAttention() const {
   return is_drawing_attention_;
-}
-
-void PanelBrowserView::StopDrawingAttention() {
-  if (!is_drawing_attention_)
-    return;
-  is_drawing_attention_ = false;
-
-  // This function is called from OnWidgetActivationChanged to clear the
-  // attention, per one of the following user interactions:
-  // 1) clicking on the title-bar
-  // 2) clicking on the client area
-  // 3) switching to the panel via keyboard
-  // For case 1, we do not want the expanded panel to be minimized since the
-  // user clicks on it to mean to clear the attention.
-  attention_cleared_time_ = base::TimeTicks::Now();
-
-  // Restore the panel.
-  if (panel_->expansion_state() == Panel::TITLE_ONLY)
-    panel_->SetExpansionState(Panel::EXPANDED);
-
-  GetFrameView()->SchedulePaint();
 }
 
 bool PanelBrowserView::PreHandlePanelKeyboardEvent(
@@ -413,11 +354,13 @@ bool PanelBrowserView::PreHandlePanelKeyboardEvent(
 }
 
 void PanelBrowserView::FullScreenModeChanged(bool is_full_screen) {
-  // TODO(prasadt): Enable this code.
-  // if (is_full_screen)
-  //   HideThePanel.
-  // else
-  //   ShowThePanel.
+  if (is_full_screen) {
+    if (frame()->IsVisible()) {
+        frame()->Hide();
+    }
+  } else {
+    ShowInactive();
+  }
 }
 
 void PanelBrowserView::HandlePanelKeyboardEvent(
@@ -484,8 +427,7 @@ bool PanelBrowserView::OnTitlebarMouseDragged(const gfx::Point& location) {
   if (!mouse_pressed_)
     return false;
 
-  // Dragging is not supported for overflow panel.
-  if (panel_->expansion_state() == Panel::IN_OVERFLOW)
+  if (!panel_->draggable())
     return true;
 
   gfx::Point last_mouse_location = mouse_location_;
@@ -528,12 +470,6 @@ bool PanelBrowserView::OnTitlebarMouseReleased() {
   if (mouse_dragging_state_ != NO_DRAGGING)
     return true;
 
-  // If the panel is in overflow, move it to the normal strip.
-  if (panel_->expansion_state() == Panel::IN_OVERFLOW) {
-    panel_->MoveOutOfOverflow();
-    return true;
-  }
-
   // Do not minimize the panel when we just clear the attention state. This is
   // a hack to prevent the panel from being minimized when the user clicks on
   // the title-bar to clear the attention.
@@ -543,7 +479,7 @@ bool PanelBrowserView::OnTitlebarMouseReleased() {
     return true;
   }
 
-  // Do not minimize the panel if it is long click.
+  // Ignore long clicks. Treated as a canceled click to be consistent with Mac.
   if (base::TimeTicks::Now() - mouse_pressed_time_ >
       base::TimeDelta::FromMilliseconds(kShortClickThresholdMs))
     return true;
@@ -572,12 +508,12 @@ bool PanelBrowserView::EndDragging(bool cancelled) {
   return true;
 }
 
-void PanelBrowserView::ShowOrHidePanelAppIcon(bool show) {
+void PanelBrowserView::SetPanelAppIconVisibility(bool visible) {
 #if defined(OS_WIN) && !defined(USE_AURA)
   gfx::NativeWindow native_window = GetNativeHandle();
   ::ShowWindow(native_window, SW_HIDE);
   int style = ::GetWindowLong(native_window, GWL_EXSTYLE);
-  if (show)
+  if (visible)
     style &= (~WS_EX_TOOLWINDOW);
   else
     style |= WS_EX_TOOLWINDOW;

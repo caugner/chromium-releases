@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,18 @@
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/download/download_item_model.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/download/download_item_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/download/download_stats.h"
-#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -69,6 +69,8 @@ static const int kShelfAnimationDurationMs = 120;
 // other app and return to chrome with the download shelf still open.
 static const int kNotifyOnExitTimeMS = 5000;
 
+using content::DownloadItem;
+
 namespace {
 
 // Sets size->width() to view's preferred width + size->width().s
@@ -95,7 +97,6 @@ DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
   mouse_watcher_.set_notify_on_exit_time_ms(kNotifyOnExitTimeMS);
   set_id(VIEW_ID_DOWNLOAD_SHELF);
   parent->AddChildView(this);
-  Show();
 }
 
 DownloadShelfView::~DownloadShelfView() {
@@ -104,8 +105,6 @@ DownloadShelfView::~DownloadShelfView() {
 
 void DownloadShelfView::AddDownloadView(DownloadItemView* view) {
   mouse_watcher_.Stop();
-
-  Show();
 
   DCHECK(view);
   download_views_.push_back(view);
@@ -117,7 +116,7 @@ void DownloadShelfView::AddDownloadView(DownloadItemView* view) {
   new_item_animation_->Show();
 }
 
-void DownloadShelfView::AddDownload(BaseDownloadItemModel* download_model) {
+void DownloadShelfView::DoAddDownload(BaseDownloadItemModel* download_model) {
   DownloadItemView* view = new DownloadItemView(
       download_model->download(), this, download_model);
   AddDownloadView(view);
@@ -390,17 +389,17 @@ bool DownloadShelfView::IsClosing() const {
   return shelf_animation_->IsClosing();
 }
 
-void DownloadShelfView::Show() {
+void DownloadShelfView::DoShow() {
   shelf_animation_->Show();
 }
 
-void DownloadShelfView::Close() {
+void DownloadShelfView::DoClose() {
   int num_in_progress = 0;
   for (size_t i = 0; i < download_views_.size(); ++i) {
     if (download_views_[i]->download()->IsInProgress())
       ++num_in_progress;
   }
-  download_stats::RecordShelfClose(
+  download_util::RecordShelfClose(
       download_views_.size(), num_in_progress, auto_closed_);
   parent_->SetDownloadShelfVisible(false);
   shelf_animation_->Hide();
@@ -412,6 +411,10 @@ Browser* DownloadShelfView::browser() const {
 }
 
 void DownloadShelfView::Closed() {
+  // Don't remove completed downloads if the shelf is just being auto-hidden
+  // rather than explicitly closed by the user.
+  if (is_hidden())
+    return;
   // When the close animation is complete, remove all completed downloads.
   size_t i = 0;
   while (i < download_views_.size()) {

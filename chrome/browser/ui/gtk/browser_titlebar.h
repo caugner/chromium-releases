@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -29,6 +29,10 @@ class GtkThemeService;
 class MenuGtk;
 class PopupPageMenuModel;
 class TabContents;
+
+namespace content {
+class WebContents;
+}
 
 class BrowserTitlebar : public content::NotificationObserver,
                         public ui::ActiveWindowWatcherXObserver,
@@ -62,14 +66,26 @@ class BrowserTitlebar : public content::NotificationObserver,
   void UpdateTitleAndIcon();
 
   // Called by the browser asking us to update the loading throbber.
-  // |tab_contents| is the tab that is associated with the window throbber.
-  // |tab_contents| can be null.
-  void UpdateThrobber(TabContents* tab_contents);
+  // |web_contents| is the tab that is associated with the window throbber.
+  // |web_contents| can be null.
+  void UpdateThrobber(content::WebContents* web_contents);
 
   // On Windows, right clicking in the titlebar background brings up the system
   // menu.  There's no such thing on linux, so we just show the menu items we
   // add to the menu.
   void ShowContextMenu(GdkEventButton* event);
+
+  // When a panel slides into a new position and the cursor is on the close
+  // button, the close button does not become clickable. The gtk_widget_show()
+  // call on panel_wrench_button_ in OnEnterNotify on window_ prevents the
+  // close_button_ from getting the enter-notify-event, making it unclickable.
+  // This creates a bad experience when a user has multiple panels of the same
+  // size (which is typical) and tries closing them all by repeatedly clicking
+  // in the same place on the screen.
+  //
+  // Opened a gtk bug for this -
+  //   https://bugzilla.gnome.org/show_bug.cgi?id=667841
+  void SendEnterNotifyToCloseButtonIfUnderMouse();
 
   AvatarMenuButtonGtk* avatar_button() { return avatar_button_.get(); }
 

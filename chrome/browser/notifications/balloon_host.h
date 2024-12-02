@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,21 +12,20 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class Balloon;
 class Browser;
+
+namespace content {
 class SiteInstance;
+};
 
-namespace IPC {
-class Message;
-}
-
-class BalloonHost : public TabContentsDelegate,
-                    public TabContentsObserver,
+class BalloonHost : public content::WebContentsDelegate,
+                    public content::WebContentsObserver,
                     public ExtensionFunctionDispatcher::Delegate {
  public:
   explicit BalloonHost(Balloon* balloon);
@@ -39,12 +38,11 @@ class BalloonHost : public TabContentsDelegate,
 
   // ExtensionFunctionDispatcher::Delegate overrides.
   virtual Browser* GetBrowser() OVERRIDE;
-  virtual gfx::NativeView GetNativeViewOfHost() OVERRIDE;
-  virtual TabContents* GetAssociatedTabContents() const OVERRIDE;
+  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
   const string16& GetSource() const;
 
-  TabContents* tab_contents() const { return tab_contents_.get(); }
+  content::WebContents* web_contents() const { return web_contents_.get(); }
 
   // Enable Web UI. This has to be called before renderer is created.
   void EnableWebUI();
@@ -55,16 +53,21 @@ class BalloonHost : public TabContentsDelegate,
  protected:
   virtual ~BalloonHost();
 
-  scoped_ptr<TabContents> tab_contents_;
+  scoped_ptr<content::WebContents> web_contents_;
 
  private:
-  // TabContentsDelegate implementation:
-  virtual void CloseContents(TabContents* source) OVERRIDE;
+  // content::WebContentsDelegate implementation:
+  virtual void CloseContents(content::WebContents* source) OVERRIDE;
   virtual void HandleMouseDown() OVERRIDE;
-  virtual void UpdatePreferredSize(TabContents* source,
+  virtual void UpdatePreferredSize(content::WebContents* source,
                                    const gfx::Size& pref_size) OVERRIDE;
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
+                              WindowOpenDisposition disposition,
+                              const gfx::Rect& initial_pos,
+                              bool user_gesture) OVERRIDE;
 
-  // TabContentsObserver implementation:
+  // content::WebContentsObserver implementation:
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewReady() OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
@@ -89,7 +92,7 @@ class BalloonHost : public TabContentsDelegate,
   bool should_notify_on_disconnect_;
 
   // Site instance for the balloon/profile, to be used for opening new links.
-  scoped_refptr<SiteInstance> site_instance_;
+  scoped_refptr<content::SiteInstance> site_instance_;
 
   // A flag to enable Web UI.
   bool enable_web_ui_;

@@ -36,6 +36,9 @@ const GURL kFallbackTestUrl("http://blah/fallback_namespace/longer/test");
 const GURL kOnlineNamespace("http://blah/online_namespace");
 const GURL kOnlineNamespaceWithinFallback(
     "http://blah/fallback_namespace/online/");
+const GURL kInterceptNamespace("http://blah/intercept_namespace/");
+const GURL kInterceptNamespace2("http://blah/intercept_namespace/longer/");
+const GURL kInterceptTestUrl("http://blah/intercept_namespace/longer/test");
 const GURL kOrigin(kManifestUrl.GetOrigin());
 
 const int kManifestEntryIdOffset = 100;
@@ -92,13 +95,13 @@ class AppCacheStorageImplTest : public testing::Test {
     }
 
     void OnMainResponseFound(const GURL& url, const AppCacheEntry& entry,
-                             const GURL& fallback_url,
+                             const GURL& namespace_entry_url,
                              const AppCacheEntry& fallback_entry,
                              int64 cache_id, int64 group_id,
                              const GURL& manifest_url) {
       found_url_ = url;
       found_entry_ = entry;
-      found_fallback_url_ = fallback_url;
+      found_namespace_entry_url_ = namespace_entry_url;
       found_fallback_entry_ = fallback_entry;
       found_cache_id_ = cache_id;
       found_group_id_ = group_id;
@@ -118,7 +121,7 @@ class AppCacheStorageImplTest : public testing::Test {
     bool obsoleted_success_;
     GURL found_url_;
     AppCacheEntry found_entry_;
-    GURL found_fallback_url_;
+    GURL found_namespace_entry_url_;
     AppCacheEntry found_fallback_entry_;
     int64 found_cache_id_;
     int64 found_group_id_;
@@ -199,37 +202,27 @@ class AppCacheStorageImplTest : public testing::Test {
     scoped_refptr<MockQuotaManager> mock_manager_;
   };
 
-  // Helper class run a test on our io_thread. The io_thread
-  // is spun up once and reused for all tests.
   template <class Method>
-  class WrapperTask : public Task {
-   public:
-    WrapperTask(AppCacheStorageImplTest* test, Method method)
-        : test_(test), method_(method) {
-    }
+  void RunMethod(Method method) {
+    (this->*method)();
+  }
 
-    virtual void Run() OVERRIDE {
-      test_->SetUpTest();
+  // Helper callback to run a test on our io_thread. The io_thread is spun up
+  // once and reused for all tests.
+  template <class Method>
+  void MethodWrapper(Method method) {
+    SetUpTest();
 
-      // Ensure InitTask execution prior to conducting a test.
-      test_->FlushDbThreadTasks();
+    // Ensure InitTask execution prior to conducting a test.
+    FlushDbThreadTasks();
 
-      // We also have to wait for InitTask completion call to be performed
-      // on the IO thread prior to running the test. Its guaranteed to be
-      // queued by this time.
-      MessageLoop::current()->PostTask(
-          FROM_HERE, base::Bind(&RunMethod, test_, method_));
-    }
-
-    static void RunMethod(AppCacheStorageImplTest* test, Method method) {
-      (test->*method)();
-    }
-
-   private:
-    AppCacheStorageImplTest* test_;
-    Method method_;
-  };
-
+    // We also have to wait for InitTask completion call to be performed
+    // on the IO thread prior to running the test. Its guaranteed to be
+    // queued by this time.
+    MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(&AppCacheStorageImplTest::RunMethod<Method>,
+                              base::Unretained(this), method));
+  }
 
   static void SetUpTestCase() {
     io_thread.reset(new base::Thread("AppCacheTest.IOThread"));
@@ -254,7 +247,8 @@ class AppCacheStorageImplTest : public testing::Test {
   void RunTestOnIOThread(Method method) {
     test_finished_event_ .reset(new base::WaitableEvent(false, false));
     io_thread->message_loop()->PostTask(
-        FROM_HERE, new WrapperTask<Method>(this, method));
+        FROM_HERE, base::Bind(&AppCacheStorageImplTest::MethodWrapper<Method>,
+                              base::Unretained(this), method));
     test_finished_event_->Wait();
   }
 
@@ -668,13 +662,12 @@ class AppCacheStorageImplTest : public testing::Test {
     entry_record.url = kEntryUrl;
     EXPECT_TRUE(database()->InsertEntry(&entry_record));
 
-    AppCacheDatabase::FallbackNameSpaceRecord fallback_namespace_record;
+    AppCacheDatabase::NamespaceRecord fallback_namespace_record;
     fallback_namespace_record.cache_id = 1;
-    fallback_namespace_record.fallback_entry_url = kEntryUrl;
+    fallback_namespace_record.target_url = kEntryUrl;
     fallback_namespace_record.namespace_url = kFallbackNamespace;
     fallback_namespace_record.origin = kManifestUrl.GetOrigin();
-    EXPECT_TRUE(
-        database()->InsertFallbackNameSpace(&fallback_namespace_record));
+    EXPECT_TRUE(database()->InsertNamespace(&fallback_namespace_record));
 
     AppCacheDatabase::OnlineWhiteListRecord online_whitelist_record;
     online_whitelist_record.cache_id = 1;
@@ -702,8 +695,10 @@ class AppCacheStorageImplTest : public testing::Test {
     std::vector<AppCacheDatabase::EntryRecord> entry_records;
     database()->FindEntriesForCache(1, &entry_records);
     EXPECT_TRUE(entry_records.empty());
-    std::vector<AppCacheDatabase::FallbackNameSpaceRecord> fallback_records;
-    database()->FindFallbackNameSpacesForCache(1, &fallback_records);
+    std::vector<AppCacheDatabase::NamespaceRecord> intercept_records;
+    std::vector<AppCacheDatabase::NamespaceRecord> fallback_records;
+    database()->FindNamespacesForCache(
+        1, &intercept_records, &fallback_records);
     EXPECT_TRUE(fallback_records.empty());
     std::vector<AppCacheDatabase::OnlineWhiteListRecord> whitelist_records;
     database()->FindOnlineWhiteListForCache(1, &whitelist_records);
@@ -812,7 +807,7 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(kNoCacheId, delegate()->found_cache_id_);
     EXPECT_EQ(kNoResponseId, delegate()->found_entry_.response_id());
     EXPECT_EQ(kNoResponseId, delegate()->found_fallback_entry_.response_id());
-    EXPECT_TRUE(delegate()->found_fallback_url_.is_empty());
+    EXPECT_TRUE(delegate()->found_namespace_entry_url_.is_empty());
     EXPECT_EQ(0, delegate()->found_entry_.types());
     EXPECT_EQ(0, delegate()->found_fallback_entry_.types());
     TestFinished();
@@ -889,26 +884,27 @@ class AppCacheStorageImplTest : public testing::Test {
     cache_->AddEntry(kEntryUrl, AppCacheEntry(AppCacheEntry::FALLBACK, 1));
     cache_->AddEntry(kEntryUrl2, AppCacheEntry(AppCacheEntry::FALLBACK, 2));
     cache_->fallback_namespaces_.push_back(
-        FallbackNamespace(kFallbackNamespace2, kEntryUrl2));
+        Namespace(FALLBACK_NAMESPACE, kFallbackNamespace2, kEntryUrl2));
     cache_->fallback_namespaces_.push_back(
-        FallbackNamespace(kFallbackNamespace, kEntryUrl));
+        Namespace(FALLBACK_NAMESPACE, kFallbackNamespace, kEntryUrl));
     AppCacheDatabase::CacheRecord cache_record;
     std::vector<AppCacheDatabase::EntryRecord> entries;
-    std::vector<AppCacheDatabase::FallbackNameSpaceRecord> fallbacks;
+    std::vector<AppCacheDatabase::NamespaceRecord> intercepts;
+    std::vector<AppCacheDatabase::NamespaceRecord> fallbacks;
     std::vector<AppCacheDatabase::OnlineWhiteListRecord> whitelists;
     cache_->ToDatabaseRecords(group_,
-        &cache_record, &entries, &fallbacks, &whitelists);
+        &cache_record, &entries, &intercepts, &fallbacks, &whitelists);
 
     std::vector<AppCacheDatabase::EntryRecord>::const_iterator iter =
         entries.begin();
     while (iter != entries.end()) {
-      // MakeCacheAndGroup has inserted  the default entry record already
+      // MakeCacheAndGroup has inserted the default entry record already.
       if (iter->url != kDefaultEntryUrl)
         EXPECT_TRUE(database()->InsertEntry(&(*iter)));
       ++iter;
     }
 
-    EXPECT_TRUE(database()->InsertFallbackNameSpaceRecords(fallbacks));
+    EXPECT_TRUE(database()->InsertNamespaceRecords(fallbacks));
     EXPECT_TRUE(database()->InsertOnlineWhiteListRecords(whitelists));
     if (drop_from_working_set) {
       EXPECT_TRUE(cache_->HasOneRef());
@@ -930,11 +926,79 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(2, delegate()->found_group_id_);
     EXPECT_FALSE(delegate()->found_entry_.has_response_id());
     EXPECT_EQ(2, delegate()->found_fallback_entry_.response_id());
-    EXPECT_EQ(kEntryUrl2, delegate()->found_fallback_url_);
+    EXPECT_EQ(kEntryUrl2, delegate()->found_namespace_entry_url_);
     EXPECT_TRUE(delegate()->found_fallback_entry_.IsFallback());
     TestFinished();
   }
 
+  // BasicFindMainInterceptResponse  -------------------------------
+
+  void BasicFindMainInterceptResponseInDatabase() {
+    BasicFindMainInterceptResponse(true);
+  }
+
+  void BasicFindMainInterceptResponseInWorkingSet() {
+    BasicFindMainInterceptResponse(false);
+  }
+
+  void BasicFindMainInterceptResponse(bool drop_from_working_set) {
+    PushNextTask(base::Bind(
+        &AppCacheStorageImplTest::Verify_BasicFindMainInterceptResponse,
+        base::Unretained(this)));
+
+    // Setup some preconditions. Create a complete cache with an
+    // intercept namespace and entry.
+    MakeCacheAndGroup(kManifestUrl, 2, 1, true);
+    cache_->AddEntry(kEntryUrl, AppCacheEntry(AppCacheEntry::INTERCEPT, 1));
+    cache_->AddEntry(kEntryUrl2, AppCacheEntry(AppCacheEntry::INTERCEPT, 2));
+    cache_->intercept_namespaces_.push_back(
+        Namespace(INTERCEPT_NAMESPACE, kInterceptNamespace2, kEntryUrl2));
+    cache_->intercept_namespaces_.push_back(
+        Namespace(INTERCEPT_NAMESPACE, kInterceptNamespace, kEntryUrl));
+    AppCacheDatabase::CacheRecord cache_record;
+    std::vector<AppCacheDatabase::EntryRecord> entries;
+    std::vector<AppCacheDatabase::NamespaceRecord> intercepts;
+    std::vector<AppCacheDatabase::NamespaceRecord> fallbacks;
+    std::vector<AppCacheDatabase::OnlineWhiteListRecord> whitelists;
+    cache_->ToDatabaseRecords(group_,
+        &cache_record, &entries, &intercepts, &fallbacks, &whitelists);
+
+    std::vector<AppCacheDatabase::EntryRecord>::const_iterator iter =
+        entries.begin();
+    while (iter != entries.end()) {
+      // MakeCacheAndGroup has inserted  the default entry record already
+      if (iter->url != kDefaultEntryUrl)
+        EXPECT_TRUE(database()->InsertEntry(&(*iter)));
+      ++iter;
+    }
+
+    EXPECT_TRUE(database()->InsertNamespaceRecords(intercepts));
+    EXPECT_TRUE(database()->InsertOnlineWhiteListRecords(whitelists));
+    if (drop_from_working_set) {
+      EXPECT_TRUE(cache_->HasOneRef());
+      cache_ = NULL;
+      EXPECT_TRUE(group_->HasOneRef());
+      group_ = NULL;
+    }
+
+    // Conduct the test. The test url is in both intercept namespaces,
+    // but should match the longer of the two.
+    storage()->FindResponseForMainRequest(
+        kInterceptTestUrl, GURL(), delegate());
+    EXPECT_NE(kInterceptTestUrl, delegate()->found_url_);
+  }
+
+  void Verify_BasicFindMainInterceptResponse() {
+    EXPECT_EQ(kInterceptTestUrl, delegate()->found_url_);
+    EXPECT_EQ(kManifestUrl, delegate()->found_manifest_url_);
+    EXPECT_EQ(1, delegate()->found_cache_id_);
+    EXPECT_EQ(2, delegate()->found_group_id_);
+    EXPECT_EQ(2, delegate()->found_entry_.response_id());
+    EXPECT_TRUE(delegate()->found_entry_.IsIntercept());
+    EXPECT_EQ(kEntryUrl2, delegate()->found_namespace_entry_url_);
+    EXPECT_FALSE(delegate()->found_fallback_entry_.has_response_id());
+    TestFinished();
+  }
   // FindMainResponseWithMultipleHits  -------------------------------
 
   void FindMainResponseWithMultipleHits() {
@@ -988,15 +1052,14 @@ class AppCacheStorageImplTest : public testing::Test {
     cache_->AddEntry(
         entry_record.url,
         AppCacheEntry(entry_record.flags, entry_record.response_id));
-    AppCacheDatabase::FallbackNameSpaceRecord fallback_namespace_record;
+    AppCacheDatabase::NamespaceRecord fallback_namespace_record;
     fallback_namespace_record.cache_id = id;
-    fallback_namespace_record.fallback_entry_url = entry_record.url;
+    fallback_namespace_record.target_url = entry_record.url;
     fallback_namespace_record.namespace_url = kFallbackNamespace;
     fallback_namespace_record.origin = manifest_url.GetOrigin();
-    EXPECT_TRUE(
-        database()->InsertFallbackNameSpace(&fallback_namespace_record));
+    EXPECT_TRUE(database()->InsertNamespace(&fallback_namespace_record));
     cache_->fallback_namespaces_.push_back(
-        FallbackNamespace(kFallbackNamespace, kEntryUrl2));
+        Namespace(FALLBACK_NAMESPACE, kFallbackNamespace, kEntryUrl2));
   }
 
   void Verify_FindMainResponseWithMultipleHits() {
@@ -1063,7 +1126,7 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(3 + kFallbackEntryIdOffset,
               delegate()->found_fallback_entry_.response_id());
     EXPECT_TRUE(delegate()->found_fallback_entry_.IsFallback());
-    EXPECT_EQ(kEntryUrl2, delegate()->found_fallback_url_);
+    EXPECT_EQ(kEntryUrl2, delegate()->found_namespace_entry_url_);
 
     // Conduct another test preferring kManifestUrl2 that hits the fallback.
     delegate_.reset(new MockStorageDelegate(this));
@@ -1084,7 +1147,7 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(2 + kFallbackEntryIdOffset,
               delegate()->found_fallback_entry_.response_id());
     EXPECT_TRUE(delegate()->found_fallback_entry_.IsFallback());
-    EXPECT_EQ(kEntryUrl2, delegate()->found_fallback_url_);
+    EXPECT_EQ(kEntryUrl2, delegate()->found_namespace_entry_url_);
 
     TestFinished();
   }
@@ -1109,7 +1172,7 @@ class AppCacheStorageImplTest : public testing::Test {
     cache_->online_whitelist_namespaces_.push_back(kOnlineNamespace);
     cache_->AddEntry(kEntryUrl2, AppCacheEntry(AppCacheEntry::FALLBACK, 2));
     cache_->fallback_namespaces_.push_back(
-        FallbackNamespace(kFallbackNamespace, kEntryUrl2));
+        Namespace(FALLBACK_NAMESPACE, kFallbackNamespace, kEntryUrl2));
     cache_->online_whitelist_namespaces_.push_back(kOnlineNamespace);
     cache_->online_whitelist_namespaces_.push_back(
         kOnlineNamespaceWithinFallback);
@@ -1124,13 +1187,12 @@ class AppCacheStorageImplTest : public testing::Test {
     whitelist_record.cache_id = 1;
     whitelist_record.namespace_url = kOnlineNamespace;
     EXPECT_TRUE(database()->InsertOnlineWhiteList(&whitelist_record));
-    AppCacheDatabase::FallbackNameSpaceRecord fallback_namespace_record;
+    AppCacheDatabase::NamespaceRecord fallback_namespace_record;
     fallback_namespace_record.cache_id = 1;
-    fallback_namespace_record.fallback_entry_url = kEntryUrl2;
+    fallback_namespace_record.target_url = kEntryUrl2;
     fallback_namespace_record.namespace_url = kFallbackNamespace;
     fallback_namespace_record.origin = kManifestUrl.GetOrigin();
-    EXPECT_TRUE(
-        database()->InsertFallbackNameSpace(&fallback_namespace_record));
+    EXPECT_TRUE(database()->InsertNamespace(&fallback_namespace_record));
     whitelist_record.cache_id = 1;
     whitelist_record.namespace_url = kOnlineNamespaceWithinFallback;
     EXPECT_TRUE(database()->InsertOnlineWhiteList(&whitelist_record));
@@ -1152,7 +1214,7 @@ class AppCacheStorageImplTest : public testing::Test {
     EXPECT_EQ(0, delegate()->found_group_id_);
     EXPECT_EQ(kNoResponseId, delegate()->found_entry_.response_id());
     EXPECT_EQ(kNoResponseId, delegate()->found_fallback_entry_.response_id());
-    EXPECT_TRUE(delegate()->found_fallback_url_.is_empty());
+    EXPECT_TRUE(delegate()->found_namespace_entry_url_.is_empty());
     EXPECT_EQ(0, delegate()->found_entry_.types());
     EXPECT_EQ(0, delegate()->found_fallback_entry_.types());
 
@@ -1318,6 +1380,16 @@ TEST_F(AppCacheStorageImplTest, BasicFindMainFallbackResponseInDatabase) {
 TEST_F(AppCacheStorageImplTest, BasicFindMainFallbackResponseInWorkingSet) {
   RunTestOnIOThread(
       &AppCacheStorageImplTest::BasicFindMainFallbackResponseInWorkingSet);
+}
+
+TEST_F(AppCacheStorageImplTest, BasicFindMainInterceptResponseInDatabase) {
+  RunTestOnIOThread(
+      &AppCacheStorageImplTest::BasicFindMainInterceptResponseInDatabase);
+}
+
+TEST_F(AppCacheStorageImplTest, BasicFindMainInterceptResponseInWorkingSet) {
+  RunTestOnIOThread(
+      &AppCacheStorageImplTest::BasicFindMainInterceptResponseInWorkingSet);
 }
 
 TEST_F(AppCacheStorageImplTest, FindMainResponseWithMultipleHits) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/process.h"
-#include "base/task.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "ipc/ipc_channel_proxy.h"
@@ -131,6 +130,8 @@ class ServiceProcessControl : public IPC::Channel::Sender,
   };
 
   friend class MockServiceProcessControl;
+  friend class CloudPrintProxyPolicyStartupTest;
+
   ServiceProcessControl();
   virtual ~ServiceProcessControl();
 
@@ -146,6 +147,9 @@ class ServiceProcessControl : public IPC::Channel::Sender,
 
   // Used internally to connect to the service process.
   void ConnectInternal();
+
+  // Takes ownership of the pointer. Split out for testing.
+  void SetChannel(IPC::ChannelProxy* channel);
 
   static void RunAllTasksHelper(TaskList* task_list);
 

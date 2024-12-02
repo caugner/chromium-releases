@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,19 +13,19 @@
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/process_type.h"
+#include "content/public/common/referrer.h"
 #include "net/base/load_states.h"
 #include "net/url_request/url_request.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 #include "webkit/glue/resource_type.h"
 
-class CrossSiteResourceHandler;
 class ResourceDispatcherHost;
-class ResourceDispatcherHostLoginDelegate;
 class ResourceHandler;
 class SSLClientAuthHandler;
 
 namespace content {
+class CrossSiteResourceHandler;
 class ResourceContext;
+class ResourceDispatcherHostLoginDelegate;
 }
 
 namespace webkit_blob {
@@ -60,23 +60,24 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
 
   // Top-level ResourceHandler servicing this request.
   ResourceHandler* resource_handler() { return resource_handler_.get(); }
+  void set_resource_handler(ResourceHandler* resource_handler);
 
   // CrossSiteResourceHandler for this request, if it is a cross-site request.
   // (NULL otherwise.) This handler is part of the chain of ResourceHandlers
   // pointed to by resource_handler, and is not owned by this class.
-  CrossSiteResourceHandler* cross_site_handler() {
+  content::CrossSiteResourceHandler* cross_site_handler() {
     return cross_site_handler_;
   }
-  void set_cross_site_handler(CrossSiteResourceHandler* h) {
+  void set_cross_site_handler(content::CrossSiteResourceHandler* h) {
     cross_site_handler_ = h;
   }
 
   // Pointer to the login delegate, or NULL if there is none for this request.
-  ResourceDispatcherHostLoginDelegate* login_delegate() const {
+  content::ResourceDispatcherHostLoginDelegate* login_delegate() const {
     return login_delegate_.get();
   }
   CONTENT_EXPORT void set_login_delegate(
-      ResourceDispatcherHostLoginDelegate* ld);
+      content::ResourceDispatcherHostLoginDelegate* ld);
 
   // Pointer to the SSL auth, or NULL if there is none for this request.
   SSLClientAuthHandler* ssl_client_auth_handler() const {
@@ -222,8 +223,11 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
   void set_paused_read_bytes(int bytes) { paused_read_bytes_ = bytes; }
 
   scoped_refptr<ResourceHandler> resource_handler_;
-  CrossSiteResourceHandler* cross_site_handler_;  // Non-owning, may be NULL.
-  scoped_refptr<ResourceDispatcherHostLoginDelegate> login_delegate_;
+
+  // Non-owning, may be NULL.
+  content::CrossSiteResourceHandler* cross_site_handler_;
+
+  scoped_refptr<content::ResourceDispatcherHostLoginDelegate> login_delegate_;
   scoped_refptr<SSLClientAuthHandler> ssl_client_auth_handler_;
   content::ProcessType process_type_;
   int child_id_;

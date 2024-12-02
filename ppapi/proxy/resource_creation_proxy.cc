@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "ppapi/proxy/ppb_buffer_proxy.h"
 #include "ppapi/proxy/ppb_broker_proxy.h"
 #include "ppapi/proxy/ppb_file_chooser_proxy.h"
+#include "ppapi/proxy/ppb_file_io_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
@@ -29,12 +30,13 @@
 #include "ppapi/proxy/ppb_video_capture_proxy.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/shared_impl/api_id.h"
-#include "ppapi/shared_impl/audio_config_impl.h"
-#include "ppapi/shared_impl/font_impl.h"
 #include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/shared_impl/host_resource.h"
-#include "ppapi/shared_impl/input_event_impl.h"
-#include "ppapi/shared_impl/url_request_info_impl.h"
+#include "ppapi/shared_impl/ppb_audio_config_shared.h"
+#include "ppapi/shared_impl/ppb_input_event_shared.h"
+#include "ppapi/shared_impl/ppb_resource_array_shared.h"
+#include "ppapi/shared_impl/ppb_url_request_info_shared.h"
+#include "ppapi/shared_impl/private/ppb_font_shared.h"
 #include "ppapi/shared_impl/var.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_image_data_api.h"
@@ -73,7 +75,7 @@ PP_Resource ResourceCreationProxy::CreateAudioConfig(
     PP_Instance instance,
     PP_AudioSampleRate sample_rate,
     uint32_t sample_frame_count) {
-  return AudioConfigImpl::CreateAsProxy(
+  return PPB_AudioConfig_Shared::CreateAsProxy(
       instance, sample_rate, sample_frame_count);
 }
 
@@ -122,8 +124,7 @@ PP_Resource ResourceCreationProxy::CreateFileChooser(
 }
 
 PP_Resource ResourceCreationProxy::CreateFileIO(PP_Instance instance) {
-  NOTIMPLEMENTED();  // Not proxied yet.
-  return 0;
+  return PPB_FileIO_Proxy::CreateProxyResource(instance);
 }
 
 PP_Resource ResourceCreationProxy::CreateFileRef(PP_Resource file_system,
@@ -151,10 +152,12 @@ PP_Resource ResourceCreationProxy::CreateFlashNetConnector(
 PP_Resource ResourceCreationProxy::CreateFontObject(
     PP_Instance instance,
     const PP_FontDescription_Dev* description) {
-  if (!ppapi::FontImpl::IsPPFontDescriptionValid(*description))
+  PluginDispatcher* dispatcher =
+      PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
     return 0;
-  return (new Font(HostResource::MakeInstanceOnly(instance), *description))->
-      GetReference();
+  return PPB_Font_Shared::CreateAsProxy(instance, *description,
+                                        dispatcher->preferences());
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
@@ -184,7 +187,7 @@ PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
       type != PP_INPUTEVENT_TYPE_KEYUP &&
       type != PP_INPUTEVENT_TYPE_CHAR)
     return 0;
-  ppapi::InputEventData data;
+  InputEventData data;
   data.event_type = type;
   data.event_time_stamp = time_stamp;
   data.event_modifiers = modifiers;
@@ -196,8 +199,8 @@ PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
     data.character_text = text_str->value();
   }
 
-  return (new InputEventImpl(InputEventImpl::InitAsProxy(),
-                             instance, data))->GetReference();
+  return (new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+                                    instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
@@ -216,7 +219,7 @@ PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
       type != PP_INPUTEVENT_TYPE_MOUSELEAVE)
     return 0;
 
-  ppapi::InputEventData data;
+  InputEventData data;
   data.event_type = type;
   data.event_time_stamp = time_stamp;
   data.event_modifiers = modifiers;
@@ -225,8 +228,8 @@ PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
   data.mouse_click_count = click_count;
   data.mouse_movement = *mouse_movement;
 
-  return (new InputEventImpl(InputEventImpl::InitAsProxy(),
-                             instance, data))->GetReference();
+  return (new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+                                    instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateGraphics3D(
@@ -244,6 +247,15 @@ PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
   // Not proxied. The raw creation function is used only in the implementation
   // of the proxy on the host side.
   return 0;
+}
+
+PP_Resource ResourceCreationProxy::CreateResourceArray(
+    PP_Instance instance,
+    const PP_Resource elements[],
+    uint32_t size) {
+  PPB_ResourceArray_Shared* object = new PPB_ResourceArray_Shared(
+      PPB_ResourceArray_Shared::InitAsProxy(), instance, elements, size);
+  return object->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateScrollbar(PP_Instance instance,
@@ -276,7 +288,7 @@ PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
 PP_Resource ResourceCreationProxy::CreateURLRequestInfo(
     PP_Instance instance,
     const PPB_URLRequestInfo_Data& data) {
-  return (new URLRequestInfoImpl(
+  return (new PPB_URLRequestInfo_Shared(
       HostResource::MakeInstanceOnly(instance), data))->GetReference();
 }
 
@@ -311,7 +323,7 @@ PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
     const PP_FloatPoint* wheel_delta,
     const PP_FloatPoint* wheel_ticks,
     PP_Bool scroll_by_page) {
-  ppapi::InputEventData data;
+  InputEventData data;
   data.event_type = PP_INPUTEVENT_TYPE_WHEEL;
   data.event_time_stamp = time_stamp;
   data.event_modifiers = modifiers;
@@ -319,8 +331,8 @@ PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
   data.wheel_ticks = *wheel_ticks;
   data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
 
-  return (new InputEventImpl(InputEventImpl::InitAsProxy(),
-                             instance, data))->GetReference();
+  return (new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+                                    instance, data))->GetReference();
 }
 
 bool ResourceCreationProxy::Send(IPC::Message* msg) {

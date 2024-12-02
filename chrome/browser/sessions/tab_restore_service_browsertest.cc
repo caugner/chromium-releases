@@ -1,25 +1,27 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/sessions/session_types.h"
-#include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
+#include "chrome/browser/sessions/session_service.h"
+#include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/chrome_render_view_test.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/test/render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 
 typedef TabRestoreService::Tab Tab;
+
+using content::NavigationEntry;
 
 // Create subclass that overrides TimeNow so that we can control the time used
 // for closed tabs and windows.
@@ -51,13 +53,14 @@ class TabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
  protected:
   // testing::Test overrides
   virtual void SetUp() {
+    WebKit::initialize(&webkit_platform_support_);
     ChromeRenderViewHostTestHarness::SetUp();
     time_factory_ = new TabRestoreTimeFactory();
     service_.reset(new TabRestoreService(profile(), time_factory_));
-    WebKit::initialize(&webkit_platform_support_);
   }
 
   virtual void TearDown() {
+    service_->Shutdown();
     service_.reset();
     delete time_factory_;
     ChromeRenderViewHostTestHarness::TearDown();
@@ -81,6 +84,7 @@ class TabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
   void RecreateService() {
     // Must set service to null first so that it is destroyed before the new
     // one is created.
+    service_->Shutdown();
     service_.reset();
     service_.reset(new TabRestoreService(profile(), time_factory_));
     service_->LoadTabsFromLastSession();
@@ -99,9 +103,9 @@ class TabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
     session_service->SetSelectedTabInWindow(window_id, 0);
     if (pinned)
       session_service->SetPinnedState(window_id, tab_id, true);
-    NavigationEntry entry;
-    entry.set_url(url1_);
-    session_service->UpdateTabNavigation(window_id, tab_id, 0, entry);
+    scoped_ptr<NavigationEntry> entry(NavigationEntry::Create());;
+    entry->SetURL(url1_);
+    session_service->UpdateTabNavigation(window_id, tab_id, 0, *entry.get());
   }
 
   // Creates a SessionService and assigns it to the Profile. The SessionService
@@ -180,40 +184,6 @@ TEST_F(TabRestoreServiceTest, DontCreateEmptyTab) {
   EXPECT_TRUE(service_->entries().empty());
 }
 
-// Make sure TabRestoreService doesn't create an entry for print preview tab.
-TEST_F(TabRestoreServiceTest, DontRestorePrintPreviewTab) {
-  AddThreeNavigations();
-
-  // Navigate to a print preview tab.
-  GURL printPreviewURL(chrome::kChromeUIPrintURL);
-  NavigateAndCommit(printPreviewURL);
-  EXPECT_EQ(printPreviewURL, contents()->GetURL());
-  EXPECT_EQ(4, controller().entry_count());
-
-  // Have the service record the tab.
-  service_->CreateHistoricalTab(&controller(), -1);
-
-  // Recreate the service and have it load the tabs.
-  RecreateService();
-
-  // One entry should be created.
-  ASSERT_EQ(1U, service_->entries().size());
-
-  // And verify the entry.
-  TabRestoreService::Entry* entry = service_->entries().front();
-  ASSERT_EQ(TabRestoreService::TAB, entry->type);
-  Tab* tab = static_cast<Tab*>(entry);
-  EXPECT_FALSE(tab->pinned);
-
-  // Verify that print preview tab is not restored.
-  ASSERT_EQ(3U, tab->navigations.size());
-  EXPECT_NE(printPreviewURL, tab->navigations[0].virtual_url());
-  EXPECT_NE(printPreviewURL, tab->navigations[1].virtual_url());
-  EXPECT_NE(printPreviewURL, tab->navigations[2].virtual_url());
-  EXPECT_EQ(time_factory_->TimeNow().ToInternalValue(),
-            tab->timestamp.ToInternalValue());
-}
-
 // Tests restoring a single tab.
 TEST_F(TabRestoreServiceTest, Restore) {
   AddThreeNavigations();
@@ -282,9 +252,9 @@ TEST_F(TabRestoreServiceTest, RestorePinnedAndApp) {
 // Make sure we persist entries to disk that have post data.
 TEST_F(TabRestoreServiceTest, DontPersistPostData) {
   AddThreeNavigations();
-  controller().GetEntryAtIndex(0)->set_has_post_data(true);
-  controller().GetEntryAtIndex(1)->set_has_post_data(true);
-  controller().GetEntryAtIndex(2)->set_has_post_data(true);
+  controller().GetEntryAtIndex(0)->SetHasPostData(true);
+  controller().GetEntryAtIndex(1)->SetHasPostData(true);
+  controller().GetEntryAtIndex(2)->SetHasPostData(true);
 
   // Have the service record the tab.
   service_->CreateHistoricalTab(&controller(), -1);

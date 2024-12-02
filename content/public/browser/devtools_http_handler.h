@@ -19,6 +19,10 @@ class DevToolsHttpHandlerDelegate;
 // this browser.
 class DevToolsHttpHandler {
  public:
+  // Returns frontend resource id for the given resource |name|.
+  CONTENT_EXPORT static int GetFrontendResourceId(
+      const std::string& name);
+
   // Takes ownership over |delegate|.
   CONTENT_EXPORT static DevToolsHttpHandler* Start(
       const std::string& ip,
@@ -27,6 +31,7 @@ class DevToolsHttpHandler {
       DevToolsHttpHandlerDelegate* delegate);
 
   // Called from the main thread in order to stop protocol handler.
+  // Automatically destroys the handler instance.
   virtual void Stop() = 0;
 
  protected:

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/string16.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/ime/input_method_delegate.h"
 #include "ui/views/widget/native_widget.h"
@@ -97,7 +98,6 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   // See description in View for details.
   virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
                                                   ui::Layer** layer_parent) = 0;
-  virtual void ReorderLayers() = 0;
 
   // Notifies the NativeWidget that a view was removed from the Widget's view
   // hierarchy.
@@ -158,8 +158,10 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) = 0;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) = 0;
 
-  // Makes the NativeWindow modal.
-  virtual void BecomeModal() = 0;
+  // Initializes the modal type of the window to |modal_type|. Called from
+  // NativeWidgetDelegate::OnNativeWidgetCreated() before the widget is
+  // initially parented.
+  virtual void InitModalType(ui::ModalType modal_type) = 0;
 
   // See method documentation in Widget.
   virtual gfx::Rect GetWindowScreenBounds() const = 0;
@@ -202,6 +204,9 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget,
   virtual void FocusNativeView(gfx::NativeView native_view) = 0;
   virtual gfx::Rect GetWorkAreaBoundsInScreen() const = 0;
   virtual void SetInactiveRenderingDisabled(bool value) = 0;
+  virtual Widget::MoveLoopResult RunMoveLoop() = 0;
+  virtual void EndMoveLoop() = 0;
+  virtual void SetVisibilityChangedAnimationsEnabled(bool value) = 0;
 
   // Overridden from NativeWidget:
   virtual internal::NativeWidgetPrivate* AsNativeWidgetPrivate() OVERRIDE;

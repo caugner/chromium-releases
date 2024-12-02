@@ -27,9 +27,11 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/gpu/gpu_data_manager.h"
-#include "content/browser/plugin_service.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/plugin_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -41,6 +43,11 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
+
+using content::PluginService;
+using content::UserMetricsAction;
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -160,7 +167,7 @@ FlashDOMHandler::~FlashDOMHandler() {
 }
 
 void FlashDOMHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("requestFlashInfo",
+  web_ui()->RegisterMessageCallback("requestFlashInfo",
       base::Bind(&FlashDOMHandler::HandleRequestFlashInfo,
                  base::Unretained(this)));
 }
@@ -264,7 +271,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
     AddPair(list, ASCIIToUTF16("Flash plugin"), "Disabled");
   } else {
     PluginPrefs* plugin_prefs =
-        PluginPrefs::GetForProfile(Profile::FromWebUI(web_ui_));
+        PluginPrefs::GetForProfile(Profile::FromWebUI(web_ui()));
     for (size_t i = 0; i < info_array.size(); ++i) {
       if (plugin_prefs->IsPluginEnabled(info_array[i])) {
         flash_version = info_array[i].version + ASCIIToUTF16(" ") +
@@ -350,7 +357,7 @@ void FlashDOMHandler::MaybeRespondToPage() {
 
   DictionaryValue flashInfo;
   flashInfo.Set("flashInfo", list);
-  web_ui_->CallJavascriptFunction("returnFlashInfo", flashInfo);
+  web_ui()->CallJavascriptFunction("returnFlashInfo", flashInfo);
 }
 
 }  // namespace
@@ -361,14 +368,14 @@ void FlashDOMHandler::MaybeRespondToPage() {
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-FlashUI::FlashUI(TabContents* contents) : ChromeWebUI(contents) {
-  UserMetrics::RecordAction(
+FlashUI::FlashUI(content::WebUI* web_ui) : WebUIController(web_ui) {
+  content::RecordAction(
       UserMetricsAction("ViewAboutFlash"));
 
-  AddMessageHandler((new FlashDOMHandler())->Attach(this));
+  web_ui->AddMessageHandler(new FlashDOMHandler());
 
   // Set up the about:flash source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(CreateFlashUIHTMLSource());
 }
 

@@ -96,7 +96,7 @@ void DetectFirefoxProfiles(std::vector<importer::SourceProfile*>* profiles) {
 void DetectGoogleToolbarProfiles(
     std::vector<importer::SourceProfile*>* profiles,
     scoped_refptr<net::URLRequestContextGetter> request_context_getter) {
-  if (FirstRun::IsChromeFirstRun())
+  if (first_run::IsChromeFirstRun())
     return;
 
   importer::SourceProfile* google_toolbar = new importer::SourceProfile;
@@ -127,7 +127,8 @@ void ImporterList::DetectSourceProfiles(
   observer_ = observer;
   is_observed_ = true;
 
-  BrowserThread::GetCurrentThreadIdentifier(&source_thread_id_);
+  bool res = BrowserThread::GetCurrentThreadIdentifier(&source_thread_id_);
+  DCHECK(res);
 
   BrowserThread::PostTask(
       BrowserThread::FILE,

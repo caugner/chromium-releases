@@ -58,11 +58,8 @@ COMPILE_ASSERT(sizeof(SOCKS4ServerResponse) == kReadHeaderSize,
 SOCKSClientSocket::SOCKSClientSocket(ClientSocketHandle* transport_socket,
                                      const HostResolver::RequestInfo& req_info,
                                      HostResolver* host_resolver)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_(this, &SOCKSClientSocket::OnIOComplete)),
-      transport_(transport_socket),
+    : transport_(transport_socket),
       next_state_(STATE_NONE),
-      user_callback_(NULL),
       completed_handshake_(false),
       bytes_sent_(0),
       bytes_received_(0),
@@ -74,11 +71,8 @@ SOCKSClientSocket::SOCKSClientSocket(ClientSocketHandle* transport_socket,
 SOCKSClientSocket::SOCKSClientSocket(StreamSocket* transport_socket,
                                      const HostResolver::RequestInfo& req_info,
                                      HostResolver* host_resolver)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_(this, &SOCKSClientSocket::OnIOComplete)),
-      transport_(new ClientSocketHandle()),
+    : transport_(new ClientSocketHandle()),
       next_state_(STATE_NONE),
-      user_callback_(NULL),
       completed_handshake_(false),
       bytes_sent_(0),
       bytes_received_(0),
@@ -92,11 +86,11 @@ SOCKSClientSocket::~SOCKSClientSocket() {
   Disconnect();
 }
 
-int SOCKSClientSocket::Connect(OldCompletionCallback* callback) {
+int SOCKSClientSocket::Connect(const CompletionCallback& callback) {
   DCHECK(transport_.get());
   DCHECK(transport_->socket());
   DCHECK_EQ(STATE_NONE, next_state_);
-  DCHECK(!user_callback_);
+  DCHECK(user_callback_.is_null());
 
   // If already connected, then just return OK.
   if (completed_handshake_)
@@ -123,7 +117,7 @@ void SOCKSClientSocket::Disconnect() {
   // Reset other states to make sure they aren't mistakenly used later.
   // These are the states initialized by Connect().
   next_state_ = STATE_NONE;
-  user_callback_ = NULL;
+  user_callback_.Reset();
 }
 
 bool SOCKSClientSocket::IsConnected() const {
@@ -190,10 +184,10 @@ base::TimeDelta SOCKSClientSocket::GetConnectTimeMicros() const {
 // Read is called by the transport layer above to read. This can only be done
 // if the SOCKS handshake is complete.
 int SOCKSClientSocket::Read(IOBuffer* buf, int buf_len,
-                            OldCompletionCallback* callback) {
+                            const CompletionCallback& callback) {
   DCHECK(completed_handshake_);
   DCHECK_EQ(STATE_NONE, next_state_);
-  DCHECK(!user_callback_);
+  DCHECK(user_callback_.is_null());
 
   return transport_->socket()->Read(buf, buf_len, callback);
 }
@@ -201,10 +195,10 @@ int SOCKSClientSocket::Read(IOBuffer* buf, int buf_len,
 // Write is called by the transport layer. This can only be done if the
 // SOCKS handshake is complete.
 int SOCKSClientSocket::Write(IOBuffer* buf, int buf_len,
-                             OldCompletionCallback* callback) {
+                             const CompletionCallback& callback) {
   DCHECK(completed_handshake_);
   DCHECK_EQ(STATE_NONE, next_state_);
-  DCHECK(!user_callback_);
+  DCHECK(user_callback_.is_null());
 
   return transport_->socket()->Write(buf, buf_len, callback);
 }
@@ -219,14 +213,14 @@ bool SOCKSClientSocket::SetSendBufferSize(int32 size) {
 
 void SOCKSClientSocket::DoCallback(int result) {
   DCHECK_NE(ERR_IO_PENDING, result);
-  DCHECK(user_callback_);
+  DCHECK(!user_callback_.is_null());
 
   // Since Run() may result in Read being called,
   // clear user_callback_ up front.
-  OldCompletionCallback* c = user_callback_;
-  user_callback_ = NULL;
+  CompletionCallback c = user_callback_;
+  user_callback_.Reset();
   DVLOG(1) << "Finished setting up SOCKS handshake";
-  c->Run(result);
+  c.Run(result);
 }
 
 void SOCKSClientSocket::OnIOComplete(int result) {
@@ -341,8 +335,9 @@ int SOCKSClientSocket::DoHandshakeWrite() {
   handshake_buf_ = new IOBuffer(handshake_buf_len);
   memcpy(handshake_buf_->data(), &buffer_[bytes_sent_],
          handshake_buf_len);
-  return transport_->socket()->Write(handshake_buf_, handshake_buf_len,
-                                     &io_callback_);
+  return transport_->socket()->Write(
+      handshake_buf_, handshake_buf_len,
+      base::Bind(&SOCKSClientSocket::OnIOComplete, base::Unretained(this)));
 }
 
 int SOCKSClientSocket::DoHandshakeWriteComplete(int result) {
@@ -375,7 +370,8 @@ int SOCKSClientSocket::DoHandshakeRead() {
   int handshake_buf_len = kReadHeaderSize - bytes_received_;
   handshake_buf_ = new IOBuffer(handshake_buf_len);
   return transport_->socket()->Read(handshake_buf_, handshake_buf_len,
-                                    &io_callback_);
+                                    base::Bind(&SOCKSClientSocket::OnIOComplete,
+                                               base::Unretained(this)));
 }
 
 int SOCKSClientSocket::DoHandshakeReadComplete(int result) {

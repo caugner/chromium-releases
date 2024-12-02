@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,21 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/dialog_style.h"
+#include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 HungRendererDialog* g_instance = NULL;
@@ -34,24 +40,29 @@ const int kHungRendererDialogHeight = 200;
 
 namespace browser {
 
-void ShowHungRendererDialog(TabContents* contents) {
-#if defined(OS_CHROMEOS) || defined(USE_AURA)
+void ShowHungRendererDialog(WebContents* contents) {
+  // TODO(jhawkins): move this into a non-webui location.
+#if defined(USE_AURA)
+  ShowNativeHungRendererDialog(contents);
+#elif defined(OS_CHROMEOS)
   HungRendererDialog::ShowHungRendererDialog(contents);
 #else
   // TODO(rbyers): Remove IsMoreWebUI check once we decide for sure which
   // platforms will use the WebUI version of this dialog.
-  if (ChromeWebUI::IsMoreWebUI())
+  if (chrome_web_ui::IsMoreWebUI())
     HungRendererDialog::ShowHungRendererDialog(contents);
   else
     ShowNativeHungRendererDialog(contents);
 #endif
 }
 
-void HideHungRendererDialog(TabContents* contents) {
-#if defined(OS_CHROMEOS) || defined(USE_AURA)
+void HideHungRendererDialog(WebContents* contents) {
+#if defined(USE_AURA)
+  HideNativeHungRendererDialog(contents);
+#elif defined(OS_CHROMEOS)
   HungRendererDialog::HideHungRendererDialog(contents);
 #else
-  if (ChromeWebUI::IsMoreWebUI())
+  if (chrome_web_ui::IsMoreWebUI())
     HungRendererDialog::HideHungRendererDialog(contents);
   else
     HideNativeHungRendererDialog(contents);
@@ -63,34 +74,33 @@ void HideHungRendererDialog(TabContents* contents) {
 ////////////////////////////////////////////////////////////////////////////////
 // HungRendererDialog public static methods
 
-void HungRendererDialog::ShowHungRendererDialog(TabContents* contents) {
+void HungRendererDialog::ShowHungRendererDialog(WebContents* contents) {
   ShowHungRendererDialogInternal(contents, true);
 }
 
-void HungRendererDialog::HideHungRendererDialog(TabContents* contents) {
+void HungRendererDialog::HideHungRendererDialog(WebContents* contents) {
   if (!logging::DialogsAreSuppressed() && g_instance)
     g_instance->HideDialog(contents);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HungRendererDialog::TabContentsObserverImpl
+// HungRendererDialog::WebContentsObserverImpl
 
-HungRendererDialog::TabContentsObserverImpl::TabContentsObserverImpl(
+HungRendererDialog::WebContentsObserverImpl::WebContentsObserverImpl(
     HungRendererDialog* dialog,
-    TabContents* contents)
-    : TabContentsObserver(contents),
-      contents_(contents),
+    WebContents* contents)
+    : content::WebContentsObserver(contents),
       dialog_(dialog) {
 }
 
-void HungRendererDialog::TabContentsObserverImpl::RenderViewGone(
+void HungRendererDialog::WebContentsObserverImpl::RenderViewGone(
     base::TerminationStatus status) {
-  dialog_->HideDialog(contents_);
+  dialog_->HideDialog(web_contents());
 }
 
-void HungRendererDialog::TabContentsObserverImpl::TabContentsDestroyed(
-    TabContents* tab) {
-  dialog_->HideDialog(contents_);
+void HungRendererDialog::WebContentsObserverImpl::WebContentsDestroyed(
+    WebContents* tab) {
+  dialog_->HideDialog(tab);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -106,7 +116,7 @@ HungRendererDialog::HungRendererDialog(bool is_enabled)
 HungRendererDialog::~HungRendererDialog() {
 }
 
-void HungRendererDialog::ShowHungRendererDialogInternal(TabContents* contents,
+void HungRendererDialog::ShowHungRendererDialogInternal(WebContents* contents,
                                                         bool is_enabled) {
   if (!logging::DialogsAreSuppressed()) {
     if (g_instance)
@@ -116,19 +126,19 @@ void HungRendererDialog::ShowHungRendererDialogInternal(TabContents* contents,
   }
 }
 
-void HungRendererDialog::ShowDialog(TabContents* contents) {
+void HungRendererDialog::ShowDialog(WebContents* contents) {
   DCHECK(contents);
   contents_ = contents;
   Browser* browser = BrowserList::GetLastActive();
   DCHECK(browser);
   handler_ = new HungRendererDialogHandler(contents_);
   window_ = browser->BrowserShowHtmlDialog(this, NULL, STYLE_GENERIC);
-  contents_observer_.reset(new TabContentsObserverImpl(this, contents_));
+  contents_observer_.reset(new WebContentsObserverImpl(this, contents_));
 }
 
-void HungRendererDialog::HideDialog(TabContents* contents) {
+void HungRendererDialog::HideDialog(WebContents* contents) {
   DCHECK(contents);
-  // Don't close the dialog if it's a TabContents for some other renderer.
+  // Don't close the dialog if it's a WebContents for some other renderer.
   if (contents_ && contents_->GetRenderProcessHost() !=
       contents->GetRenderProcessHost())
     return;
@@ -141,8 +151,8 @@ void HungRendererDialog::HideDialog(TabContents* contents) {
   handler_->CloseDialog();
 }
 
-bool HungRendererDialog::IsDialogModal() const {
-  return false;
+ui::ModalType HungRendererDialog::GetDialogModalType() const {
+  return ui::MODAL_TYPE_NONE;
 }
 
 string16 HungRendererDialog::GetDialogTitle() const {
@@ -185,16 +195,16 @@ void HungRendererDialog::OnDialogClosed(const std::string& json_retval) {
     } else {
       // No indication from the user that it is ok to kill anything. Just wait.
       // Start waiting again for responsiveness.
-      if (contents_ && contents_->render_view_host())
-        contents_->render_view_host()->RestartHangMonitorTimeout();
+      if (contents_ && contents_->GetRenderViewHost())
+        contents_->GetRenderViewHost()->RestartHangMonitorTimeout();
     }
   }
   g_instance = NULL;
   delete this;
 }
 
-void HungRendererDialog::OnCloseContents(TabContents* source,
-                     bool* out_close_dialog) {
+void HungRendererDialog::OnCloseContents(WebContents* source,
+                                         bool* out_close_dialog) {
   NOTIMPLEMENTED();
 }
 
@@ -206,17 +216,16 @@ bool HungRendererDialog::ShouldShowDialogTitle() const {
 // HungRendererDialogHandler methods
 
 HungRendererDialogHandler::HungRendererDialogHandler(
-    TabContents* contents)
+    WebContents* contents)
   : contents_(contents) {
 }
 
 void HungRendererDialogHandler::CloseDialog() {
-  DCHECK(web_ui_);
-  static_cast<HtmlDialogUI*>(web_ui_)->CloseDialog(NULL);
+  static_cast<HtmlDialogUI*>(web_ui()->GetController())->CloseDialog(NULL);
 }
 
 void HungRendererDialogHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("requestTabContentsList",
+  web_ui()->RegisterMessageCallback("requestTabContentsList",
       base::Bind(&HungRendererDialogHandler::RequestTabContentsList,
                  base::Unretained(this)));
 }
@@ -225,19 +234,19 @@ void HungRendererDialogHandler::RequestTabContentsList(
     const base::ListValue* args) {
   ListValue tab_contents_list;
   for (TabContentsIterator it; !it.done(); ++it) {
-    if (it->tab_contents()->GetRenderProcessHost() ==
+    if (it->web_contents()->GetRenderProcessHost() ==
         contents_->GetRenderProcessHost()) {
-      string16 title = it->tab_contents()->GetTitle();
+      string16 title = it->web_contents()->GetTitle();
       if (title.empty())
-        title = TabContentsWrapper::GetDefaultTitle();
+        title = CoreTabHelper::GetDefaultTitle();
       // Add details for |url| and |title|.
       DictionaryValue* dict = new DictionaryValue();
-      dict->SetString("url", it->tab_contents()->GetURL().spec());
+      dict->SetString("url", it->web_contents()->GetURL().spec());
       dict->SetString("title", title);
       tab_contents_list.Append(dict);
     }
   }
   // Send list of tab contents details to javascript.
-  web_ui_->CallJavascriptFunction("hungRendererDialog.setTabContentsList",
-                                  tab_contents_list);
+  web_ui()->CallJavascriptFunction("hungRendererDialog.setTabContentsList",
+                                   tab_contents_list);
 }

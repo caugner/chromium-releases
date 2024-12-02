@@ -4,13 +4,15 @@
 
 #include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
 
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 
+using content::NavigationEntry;
 
 TabContentsWrapperSyncedTabDelegate::TabContentsWrapperSyncedTabDelegate(
     TabContentsWrapper* tab_contents_wrapper)
@@ -27,7 +29,7 @@ SessionID::id_type TabContentsWrapperSyncedTabDelegate::GetSessionId() const {
 }
 
 bool TabContentsWrapperSyncedTabDelegate::IsBeingDestroyed() const {
-  return tab_contents_wrapper_->tab_contents()->is_being_destroyed();
+  return tab_contents_wrapper_->web_contents()->IsBeingDestroyed();
 }
 
 Profile* TabContentsWrapperSyncedTabDelegate::profile() const {
@@ -46,26 +48,31 @@ const std::string& TabContentsWrapperSyncedTabDelegate::GetExtensionAppId()
 }
 
 int TabContentsWrapperSyncedTabDelegate::GetCurrentEntryIndex() const {
-  return tab_contents_wrapper_->controller().GetCurrentEntryIndex();
+  return tab_contents_wrapper_->web_contents()->GetController().
+      GetCurrentEntryIndex();
 }
 
 int TabContentsWrapperSyncedTabDelegate::GetEntryCount() const {
-  return tab_contents_wrapper_->controller().entry_count();
+  return tab_contents_wrapper_->web_contents()->GetController().GetEntryCount();
 }
 
 int TabContentsWrapperSyncedTabDelegate::GetPendingEntryIndex() const {
-  return tab_contents_wrapper_->controller().pending_entry_index();
+  return tab_contents_wrapper_->web_contents()->GetController().
+      GetPendingEntryIndex();
 }
 
 NavigationEntry* TabContentsWrapperSyncedTabDelegate::GetPendingEntry() const {
-  return tab_contents_wrapper_->controller().pending_entry();
+  return
+      tab_contents_wrapper_->web_contents()->GetController().GetPendingEntry();
 }
 
 NavigationEntry* TabContentsWrapperSyncedTabDelegate::GetEntryAtIndex(int i)
     const {
-  return tab_contents_wrapper_->controller().GetEntryAtIndex(i);
+  return
+      tab_contents_wrapper_->web_contents()->GetController().GetEntryAtIndex(i);
 }
 
 NavigationEntry* TabContentsWrapperSyncedTabDelegate::GetActiveEntry() const {
-  return tab_contents_wrapper_->controller().GetActiveEntry();
+  return
+      tab_contents_wrapper_->web_contents()->GetController().GetActiveEntry();
 }
