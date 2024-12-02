@@ -4,6 +4,7 @@
 """Definitions of builders in the tryserver.chromium.linux builder group."""
 
 load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
 load("//lib/builders.star", "goma", "os")
 load("//lib/try.star", "try_")
 load("//lib/consoles.star", "consoles")
@@ -64,22 +65,6 @@ try_.builder(
         ],
     ),
     os = os.LINUX_BIONIC,
-)
-
-try_.builder(
-    name = "cast-binary-size",
-    builderless = True,
-    executable = "recipe:binary_size_cast_trybot",
-    properties = {
-        "$build/binary_size": {
-            "analyze_targets": [
-                "//chromecast:cast_shell",
-            ],
-            "compile_targets": [
-                "cast_shell",
-            ],
-        },
-    },
 )
 
 try_.builder(
@@ -325,17 +310,20 @@ try_.compilator_builder(
     main_list_view = "try",
 )
 
-try_.builder(
-    name = "linux-rel-reclient",
-    branch_selector = branches.STANDARD_MILESTONE,
+# crbug.com/1270571: Experimental bot to test pre-warming
+try_.orchestrator_builder(
+    name = "linux-rel-warmed",
+    compilator = "linux-rel-warmed-compilator",
     main_list_view = "try",
-    reclient_jobs = 150,
-    goma_backend = None,
-    reclient_instance = "rbe-chromium-gvisor-shadow",
-    tryjob = try_.job(
-        experiment_percentage = 10,
-    ),
     use_clang_coverage = True,
+    coverage_test_types = ["unit", "overall"],
+)
+
+# crbug.com/1270571: Experimental bot to test pre-warming
+try_.compilator_builder(
+    name = "linux-rel-warmed-compilator",
+    main_list_view = "try",
+    builder_cache_name = "linux_rel_warmed_compilator_warmed_cache",
 )
 
 try_.builder(
@@ -447,6 +435,11 @@ try_.builder(
 try_.builder(
     name = "linux_chromium_compile_dbg_ng",
     branch_selector = branches.STANDARD_MILESTONE,
+    mirrors = ["ci/Linux Builder (dbg)"],
+    try_settings = builder_config.try_settings(
+        include_all_triggered_testers = True,
+        is_compile_only = True,
+    ),
     builderless = not settings.is_main,
     caches = [
         swarming.cache(
@@ -466,6 +459,10 @@ try_.builder(
 try_.builder(
     name = "linux_chromium_dbg_ng",
     branch_selector = branches.STANDARD_MILESTONE,
+    mirrors = [
+        "ci/Linux Builder (dbg)",
+        "Linux Tests (dbg)(1)",
+    ],
     caches = [
         swarming.cache(
             name = "builder",
