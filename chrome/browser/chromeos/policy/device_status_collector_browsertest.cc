@@ -44,6 +44,10 @@
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "policy/proto/device_management_backend.pb.h"
+#include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/mount_points.h"
+#include "storage/common/fileapi/file_system_mount_option.h"
+#include "storage/common/fileapi/file_system_types.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -61,6 +65,7 @@ namespace {
 const int64 kMillisecondsPerDay = Time::kMicrosecondsPerDay / 1000;
 const char kKioskAccountId[] = "kiosk_user@localhost";
 const char kKioskAppId[] = "kiosk_app_id";
+const char kExternalMountPoint[] = "/a/b/c";
 
 scoped_ptr<content::Geoposition> mock_position_to_return_next;
 
@@ -92,13 +97,13 @@ class TestingDeviceStatusCollector : public policy::DeviceStatusCollector {
       const policy::DeviceStatusCollector::LocationUpdateRequester&
           location_update_requester,
       const policy::DeviceStatusCollector::VolumeInfoFetcher&
-          volume_info_fetcher)
-      : policy::DeviceStatusCollector(
-          local_state,
-          provider,
-          location_update_requester,
-          volume_info_fetcher) {
-
+          volume_info_fetcher,
+      const policy::DeviceStatusCollector::CPUStatisticsFetcher& cpu_fetcher)
+      : policy::DeviceStatusCollector(local_state,
+                                      provider,
+                                      location_update_requester,
+                                      volume_info_fetcher,
+                                      cpu_fetcher) {
     // Set the baseline time to a fixed value (1 AM) to prevent test flakiness
     // due to a single activity period spanning two days.
     SetBaselineTime(Time::Now().LocalMidnight() + TimeDelta::FromHours(1));
@@ -123,16 +128,6 @@ class TestingDeviceStatusCollector : public policy::DeviceStatusCollector {
     baseline_offset_periods_ = 0;
   }
 
-  void set_mock_cpu_usage(double total_cpu_usage, int num_processors) {
-    std::vector<double> usage;
-    for (int i = 0; i < num_processors; ++i)
-      usage.push_back(total_cpu_usage / num_processors);
-
-    mock_cpu_usage_ = usage;
-
-    RefreshSampleResourceUsage();
-  }
-
   void set_kiosk_account(scoped_ptr<policy::DeviceLocalAccount> account) {
     kiosk_account_ = account.Pass();
   }
@@ -151,10 +146,8 @@ class TestingDeviceStatusCollector : public policy::DeviceStatusCollector {
   }
 
   void RefreshSampleResourceUsage() {
-    // Refresh our samples. Sample more than kMaxHardwareSamples times to
-    // make sure that the code correctly caps the number of cached samples.
-    for (int i = 0; i < static_cast<int>(kMaxResourceUsageSamples + 1); ++i)
-      SampleResourceUsage();
+    SampleHardwareStatus();
+    content::BrowserThread::GetBlockingPool()->FlushForTesting();
   }
 
  protected:
@@ -171,18 +164,12 @@ class TestingDeviceStatusCollector : public policy::DeviceStatusCollector {
         TimeDelta::FromSeconds(poll_interval * baseline_offset_periods_++);
   }
 
-  std::vector<double> GetPerProcessCPUUsage() override {
-    return mock_cpu_usage_;
-  }
-
  private:
   // Baseline time for the fake times returned from GetCurrentTime().
   Time baseline_time_;
 
   // The number of simulated periods since the baseline time.
   int baseline_offset_periods_;
-
-  std::vector<double> mock_cpu_usage_;
 
   scoped_ptr<policy::DeviceLocalAccount> kiosk_account_;
 };
@@ -195,6 +182,15 @@ int64 GetActiveMilliseconds(em::DeviceStatusReportRequest& status) {
     active_milliseconds += status.active_period(i).active_duration();
   }
   return active_milliseconds;
+}
+
+// Mock CPUStatisticsFetcher used to return an empty set of statistics.
+std::string GetEmptyCPUStatistics() {
+  return std::string();
+}
+
+std::string GetFakeCPUStatistics(const std::string& fake) {
+  return fake;
 }
 
 // Mock VolumeInfoFetcher used to return empty VolumeInfo, to avoid warnings
@@ -261,6 +257,19 @@ class DeviceStatusCollectorTest : public testing::Test {
     EXPECT_CALL(*mock_disk_mount_manager, mount_points())
         .WillRepeatedly(ReturnRef(mount_point_map_));
 
+    // Setup a fake file system that should show up in mount points.
+    storage::ExternalMountPoints::GetSystemInstance()->RevokeAllFileSystems();
+    storage::ExternalMountPoints::GetSystemInstance()->RegisterFileSystem(
+        "c", storage::kFileSystemTypeNativeLocal,
+        storage::FileSystemMountOption(),
+        base::FilePath(FILE_PATH_LITERAL(kExternalMountPoint)));
+
+    // Just verify that we are properly setting the mount points.
+    std::vector<storage::MountPoints::MountPointInfo> external_mount_points;
+    storage::ExternalMountPoints::GetSystemInstance()->AddMountPointInfosTo(
+        &external_mount_points);
+    EXPECT_FALSE(external_mount_points.empty());
+
     // DiskMountManager takes ownership of the MockDiskMountManager.
     DiskMountManager::InitializeForTesting(mock_disk_mount_manager.release());
     TestingDeviceStatusCollector::RegisterPrefs(prefs_.registry());
@@ -274,7 +283,8 @@ class DeviceStatusCollectorTest : public testing::Test {
         cros_settings_->RemoveSettingsProvider(device_settings_provider_));
     cros_settings_->AddSettingsProvider(&stub_settings_provider_);
 
-  RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo));
+    RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo),
+                           base::Bind(&GetEmptyCPUStatistics));
   }
 
   void AddMountPoint(const std::string& mount_point) {
@@ -289,6 +299,7 @@ class DeviceStatusCollectorTest : public testing::Test {
     // Finish pending tasks.
     content::BrowserThread::GetBlockingPool()->FlushForTesting();
     message_loop_.RunUntilIdle();
+    storage::ExternalMountPoints::GetSystemInstance()->RevokeAllFileSystems();
     DiskMountManager::Shutdown();
 
     // Restore the real DeviceSettingsProvider.
@@ -303,15 +314,13 @@ class DeviceStatusCollectorTest : public testing::Test {
   }
 
   void RestartStatusCollector(
-      const policy::DeviceStatusCollector::VolumeInfoFetcher& fetcher) {
+      const policy::DeviceStatusCollector::VolumeInfoFetcher& volume_info,
+      const policy::DeviceStatusCollector::CPUStatisticsFetcher& cpu_stats) {
     policy::DeviceStatusCollector::LocationUpdateRequester callback =
         base::Bind(&MockPositionUpdateRequester);
     std::vector<em::VolumeInfo> expected_volume_info;
-    status_collector_.reset(
-        new TestingDeviceStatusCollector(&prefs_,
-                                         &fake_statistics_provider_,
-                                         callback,
-                                         fetcher));
+    status_collector_.reset(new TestingDeviceStatusCollector(
+        &prefs_, &fake_statistics_provider_, callback, volume_info, cpu_stats));
   }
 
   void GetStatus() {
@@ -480,7 +489,8 @@ TEST_F(DeviceStatusCollectorTest, StateKeptInPref) {
   // Process the list a second time after restarting the collector. It should be
   // able to count the active periods found by the original collector, because
   // the results are stored in a pref.
-  RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo));
+  RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo),
+                         base::Bind(&GetEmptyCPUStatistics));
   status_collector_->Simulate(test_states,
                               sizeof(test_states) / sizeof(ui::IdleState));
 
@@ -730,7 +740,8 @@ TEST_F(DeviceStatusCollectorTest, Location) {
   // Restart the status collector. Check that the last known location has been
   // retrieved from local state without requesting a geolocation update.
   SetMockPositionToReturnNext(valid_fix);
-  RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo));
+  RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo),
+                         base::Bind(&GetEmptyCPUStatistics));
   CheckThatAValidLocationIsReported();
   EXPECT_TRUE(mock_position_to_return_next.get());
 
@@ -795,17 +806,21 @@ TEST_F(DeviceStatusCollectorTest, TestVolumeInfo) {
   for (const auto& mount_info :
            DiskMountManager::GetInstance()->mount_points()) {
     expected_mount_points.push_back(mount_info.first);
+  }
+  expected_mount_points.push_back(kExternalMountPoint);
+
+  for (const std::string& mount_point : expected_mount_points) {
     em::VolumeInfo info;
-    info.set_volume_id(mount_info.first);
+    info.set_volume_id(mount_point);
     // Just put unique numbers in for storage_total/free.
     info.set_storage_total(size++);
     info.set_storage_free(size++);
     expected_volume_info.push_back(info);
   }
-
   EXPECT_FALSE(expected_volume_info.empty());
 
-  RestartStatusCollector(base::Bind(&GetFakeVolumeInfo, expected_volume_info));
+  RestartStatusCollector(base::Bind(&GetFakeVolumeInfo, expected_volume_info),
+                         base::Bind(&GetEmptyCPUStatistics));
   message_loop_.RunUntilIdle();
 
   GetStatus();
@@ -834,7 +849,14 @@ TEST_F(DeviceStatusCollectorTest, TestVolumeInfo) {
 }
 
 TEST_F(DeviceStatusCollectorTest, TestAvailableMemory) {
-  status_collector_->RefreshSampleResourceUsage();
+  // Refresh our samples. Sample more than kMaxHardwareSamples times to
+  // make sure that the code correctly caps the number of cached samples.
+  for (int i = 0; i < static_cast<int>(
+                          DeviceStatusCollector::kMaxResourceUsageSamples + 1);
+       ++i) {
+    status_collector_->RefreshSampleResourceUsage();
+    message_loop_.RunUntilIdle();
+  }
   GetStatus();
   EXPECT_EQ(static_cast<int>(DeviceStatusCollector::kMaxResourceUsageSamples),
             status_.system_ram_free().size());
@@ -845,23 +867,39 @@ TEST_F(DeviceStatusCollectorTest, TestAvailableMemory) {
 }
 
 TEST_F(DeviceStatusCollectorTest, TestCPUSamples) {
-  // Mock 100% CPU usage and 2 processors.
-  const int full_cpu_usage = 100;
-  status_collector_->set_mock_cpu_usage(full_cpu_usage, 2);
+  // Mock 100% CPU usage.
+  std::string full_cpu_usage("cpu  500 0 500 0 0 0 0");
+  RestartStatusCollector(base::Bind(&GetEmptyVolumeInfo),
+                         base::Bind(&GetFakeCPUStatistics, full_cpu_usage));
+  message_loop_.RunUntilIdle();
   GetStatus();
-  EXPECT_EQ(static_cast<int>(DeviceStatusCollector::kMaxResourceUsageSamples),
-            status_.cpu_utilization_pct().size());
-  for (const auto utilization : status_.cpu_utilization_pct())
-    EXPECT_EQ(full_cpu_usage, utilization);
+  ASSERT_EQ(1, status_.cpu_utilization_pct().size());
+  EXPECT_EQ(100, status_.cpu_utilization_pct(0));
 
-  // Now set CPU usage to 0.
-  const int idle_cpu_usage = 0;
-  status_collector_->set_mock_cpu_usage(idle_cpu_usage, 2);
+  // Now sample CPU usage again (active usage counters will not increase
+  // so should show 0% cpu usage).
+  status_collector_->RefreshSampleResourceUsage();
+  message_loop_.RunUntilIdle();
   GetStatus();
+  ASSERT_EQ(2, status_.cpu_utilization_pct().size());
+  EXPECT_EQ(0, status_.cpu_utilization_pct(1));
+
+  // Now store a bunch of 0% cpu usage and make sure we cap the max number of
+  // samples.
+  for (int i = 0;
+       i < static_cast<int>(DeviceStatusCollector::kMaxResourceUsageSamples);
+       ++i) {
+    status_collector_->RefreshSampleResourceUsage();
+    message_loop_.RunUntilIdle();
+  }
+  GetStatus();
+
+  // Should not be more than kMaxResourceUsageSamples, and they should all show
+  // the CPU is idle.
   EXPECT_EQ(static_cast<int>(DeviceStatusCollector::kMaxResourceUsageSamples),
             status_.cpu_utilization_pct().size());
   for (const auto utilization : status_.cpu_utilization_pct())
-    EXPECT_EQ(idle_cpu_usage, utilization);
+    EXPECT_EQ(0, utilization);
 
   // Turning off hardware reporting should not report CPU utilization.
   cros_settings_->SetBoolean(chromeos::kReportDeviceHardwareStatus, false);

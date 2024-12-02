@@ -19,7 +19,6 @@ struct QuicAckFrame;
 class QuicConnection;
 class QuicConnectionVisitorInterface;
 class QuicPacketCreator;
-class ReceiveAlgorithmInterface;
 class SendAlgorithmInterface;
 
 namespace test {
@@ -34,7 +33,6 @@ class SimpleQuicFramer {
   ~SimpleQuicFramer();
 
   bool ProcessPacket(const QuicEncryptedPacket& packet);
-  bool ProcessPacket(const QuicPacket& packet);
   void Reset();
 
   const QuicPacketHeader& header() const;
@@ -48,7 +46,6 @@ class SimpleQuicFramer {
   const std::vector<QuicStreamFrame>& stream_frames() const;
   const QuicFecData& fec_data() const;
   const QuicVersionNegotiationPacket* version_negotiation_packet() const;
-  const QuicPublicResetPacket* public_reset_packet() const;
 
   QuicFramer* framer();
 

@@ -25,6 +25,8 @@
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/login/auth/chrome_login_performer.h"
+#include "chrome/browser/chromeos/login/easy_unlock/bootstrap_user_context_initializer.h"
+#include "chrome/browser/chromeos/login/easy_unlock/bootstrap_user_flow.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
@@ -41,7 +43,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/device_disabling_manager.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
-#include "chrome/browser/ui/ash/accessibility/automation_manager_ash.h"
+#include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -587,9 +589,16 @@ void ExistingUserController::OnAuthSuccess(const UserContext& user_context) {
 
   StopPublicSessionAutoLoginTimer();
 
+  // Truth table of |has_auth_cookies|:
+  //                          Regular        SAML
+  //  /ServiceLogin              T            T
+  //  /ChromeOsEmbeddedSetup     F            T
+  //  Bootstrap experiment       F            N/A
   const bool has_auth_cookies =
       login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION &&
-      user_context.GetAuthCode().empty();
+      (user_context.GetAuthCode().empty() ||
+       user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITH_SAML) &&
+      user_context.GetAuthFlow() != UserContext::AUTH_FLOW_EASY_BOOTSTRAP;
 
   // LoginPerformer instance will delete itself in case of successful auth.
   login_performer_->set_delegate(NULL);
@@ -690,7 +699,10 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
     ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
   }
 
-  login_display_->ShowSigninUI(email);
+  if (StartupUtils::IsWebviewSigninEnabled())
+    login_display_->ShowSigninUI("");
+  else
+    login_display_->ShowSigninUI(email);
 
   if (auth_status_consumer_) {
     auth_status_consumer_->OnAuthFailure(
@@ -979,7 +991,7 @@ void ExistingUserController::ShowGaiaPasswordChanged(
 
 void ExistingUserController::SendAccessibilityAlert(
     const std::string& alert_text) {
-  AutomationManagerAsh::GetInstance()->HandleAlert(
+  AutomationManagerAura::GetInstance()->HandleAlert(
       ProfileHelper::GetSigninProfile(), alert_text);
 }
 
@@ -1109,6 +1121,17 @@ void ExistingUserController::DoCompleteLogin(const UserContext& user_context) {
   }
 
   host_->OnCompleteLogin();
+
+  if (user_context.GetAuthFlow() == UserContext::AUTH_FLOW_EASY_BOOTSTRAP) {
+    bootstrap_user_context_initializer_.reset(
+        new BootstrapUserContextInitializer());
+    bootstrap_user_context_initializer_->Start(
+        user_context.GetAuthCode(),
+        base::Bind(&ExistingUserController::OnBootstrapUserContextInitialized,
+                   weak_factory_.GetWeakPtr()));
+    return;
+  }
+
   PerformLogin(user_context, LoginPerformer::AUTH_MODE_EXTENSION);
 }
 
@@ -1164,6 +1187,26 @@ void ExistingUserController::DoLogin(const UserContext& user_context,
 
   PerformPreLoginActions(user_context);
   PerformLogin(user_context, LoginPerformer::AUTH_MODE_INTERNAL);
+}
+
+void ExistingUserController::OnBootstrapUserContextInitialized(
+    bool success,
+    const UserContext& user_context) {
+  if (!success) {
+    LOG(ERROR) << "Easy bootstrap failed.";
+    OnAuthFailure(AuthFailure(AuthFailure::NETWORK_AUTH_FAILED));
+    return;
+  }
+
+  // Setting a customized login user flow to perform additional initializations
+  // for bootstrap after the user session is started.
+  ChromeUserManager::Get()->SetUserFlow(
+      user_context.GetUserID(),
+      new BootstrapUserFlow(
+          user_context,
+          bootstrap_user_context_initializer_->random_key_used()));
+
+  PerformLogin(user_context, LoginPerformer::AUTH_MODE_EXTENSION);
 }
 
 }  // namespace chromeos

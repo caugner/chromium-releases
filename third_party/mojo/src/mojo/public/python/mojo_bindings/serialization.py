@@ -152,6 +152,10 @@ class Serialization(object):
     version_struct = self._GetStruct(version)
     entitities = version_struct.unpack_from(context.data, HEADER_STRUCT.size)
     filtered_groups = self._GetGroups(version)
+    if ((version <= self.version and
+         size != version_struct.size + HEADER_STRUCT.size) or
+        size < version_struct.size + HEADER_STRUCT.size):
+      raise DeserializationException('Struct size in incorrect.')
     position = HEADER_STRUCT.size
     for (group, value) in zip(filtered_groups, entitities):
       position = position + NeededPaddingForAlignment(position,
@@ -168,11 +172,14 @@ def NeededPaddingForAlignment(value, alignment=8):
 
 
 def _GetVersion(groups):
-  return sum([len(x.descriptors) for x in groups])
+  if not len(groups):
+    return 0
+  return max([x.GetMaxVersion() for x in groups])
 
 
 def _FilterGroups(groups, version):
-  return [group for group in groups if group.GetVersion() < version]
+  return [group.Filter(version) for
+          group in groups if group.GetMinVersion() <= version]
 
 
 def _GetStruct(groups):

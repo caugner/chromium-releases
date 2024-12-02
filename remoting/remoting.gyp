@@ -4,27 +4,6 @@
 
 {
   'variables': {
-    'chromium_code': 1,
-
-    # Set this to run the jscompile checks after building the webapp.
-    'run_jscompile%': 1,
-
-    # Set this to enable cast mode on the android client.
-    'enable_cast%': 0,
-
-    'variables': {
-      'conditions': [
-        # Enable the multi-process host on Windows by default.
-        ['OS=="win"', {
-          'remoting_multi_process%': 1,
-        }, {
-          'remoting_multi_process%': 0,
-        }],
-      ],
-    },
-
-    'remoting_multi_process%': '<(remoting_multi_process)',
-    'remoting_rdp_session%': 1,
 
     'branding_path': '../remoting/branding_<(branding)',
 
@@ -41,14 +20,9 @@
         # The IDs are not random to avoid rebuilding host when it's not
         # necessary.
         'daemon_controller_clsid':
-            '<!(python -c "import uuid; print uuid.uuid5(uuid.UUID(\'655bd819-c08c-4b04-80c2-f160739ff6ef\'), \'<(version_full)\')")',
+            '<!(python -c "import uuid; print uuid.uuid5(uuid.UUID(\'<(daemon_controller_guid)\'), \'<(version_full)\')")',
         'rdp_desktop_session_clsid':
-            '<!(python -c "import uuid; print uuid.uuid5(uuid.UUID(\'6a7699f0-ee43-43e7-aa30-a6738f9bd470\'), \'<(version_full)\')")',
-
-        # Java is not available on Windows bots, so we need to disable
-        # JScompile checks.
-        'run_jscompile': 0,
-
+            '<!(python -c "import uuid; print uuid.uuid5(uuid.UUID(\'<(rdp_desktop_session_guid)\'), \'<(version_full)\')")',
       }],
     ],
   },
@@ -61,6 +35,7 @@
     'remoting_host_srcs.gypi',
     'remoting_key_tester.gypi',
     'remoting_locales.gypi',
+    'remoting_options.gypi',
     'remoting_srcs.gypi',
     'remoting_test.gypi',
     'remoting_version.gypi',
@@ -213,7 +188,7 @@
     },  # end of target 'remoting_resources'
 
     {
-      # GN version: //remoting/base
+      # GN version: //remoting/base and //remoting/codec
       'target_name': 'remoting_base',
       'type': 'static_library',
       'variables': { 'enable_wexit_time_destructors': 1, },
@@ -245,6 +220,7 @@
       'hard_dependency': 1,
       'sources': [
         '<@(remoting_base_sources)',
+        '<@(remoting_codec_sources)',
       ],
     },  # end of target 'remoting_base'
 
@@ -259,6 +235,7 @@
         '../jingle/jingle.gyp:jingle_glue',
         '../jingle/jingle.gyp:notifier',
         '../net/net.gyp:net',
+        '../third_party/expat/expat.gyp:expat',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         'remoting_base',
       ],

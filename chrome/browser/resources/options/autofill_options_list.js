@@ -2,6 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * @typedef {{
+ *   guid: string,
+ *   label: string,
+ *   sublabel: string,
+ *   isLocal: boolean,
+ *   isCached: boolean
+ * }}
+ * @see chrome/browser/ui/webui/options/autofill_options_handler.cc
+ */
+var AutofillEntityMetadata;
+
 cr.define('options.autofillOptions', function() {
   /** @const */ var DeletableItem = options.DeletableItem;
   /** @const */ var DeletableItemList = options.DeletableItemList;
@@ -11,13 +23,14 @@ cr.define('options.autofillOptions', function() {
   /**
    * @return {!HTMLButtonElement}
    */
-  function AutofillEditProfileButton(guid, edit) {
+  function AutofillEditProfileButton(edit) {
     var editButtonEl = /** @type {HTMLButtonElement} */(
         document.createElement('button'));
-    editButtonEl.className = 'list-inline-button custom-appearance';
+    editButtonEl.className =
+        'list-inline-button hide-until-hover custom-appearance';
     editButtonEl.textContent =
         loadTimeData.getString('autofillEditProfileButton');
-    editButtonEl.onclick = function(e) { edit(guid); };
+    editButtonEl.onclick = edit;
 
     editButtonEl.onmousedown = function(e) {
       // Don't select the row when clicking the button.
@@ -29,17 +42,26 @@ cr.define('options.autofillOptions', function() {
     return editButtonEl;
   }
 
+  /** @return {!Element} */
+  function CreateGoogleAccountLabel() {
+    var label = document.createElement('div');
+    label.className = 'deemphasized hides-on-hover';
+    label.textContent = loadTimeData.getString('autofillFromGoogleAccount');
+    return label;
+  }
+
   /**
    * Creates a new address list item.
-   * @param {Array} entry An array of the form [guid, label].
    * @constructor
+   * @param {AutofillEntityMetadata} metadata Details about an address profile.
    * @extends {options.DeletableItem}
+   * @see chrome/browser/ui/webui/options/autofill_options_handler.cc
    */
-  function AddressListItem(entry) {
+  function AddressListItem(metadata) {
     var el = cr.doc.createElement('div');
-    el.guid = entry[0];
-    el.label = entry[1];
     el.__proto__ = AddressListItem.prototype;
+    /** @private */
+    el.metadata_ = metadata;
     el.decorate();
 
     return el;
@@ -52,33 +74,52 @@ cr.define('options.autofillOptions', function() {
     decorate: function() {
       DeletableItem.prototype.decorate.call(this);
 
-      // The stored label.
       var label = this.ownerDocument.createElement('div');
       label.className = 'autofill-list-item';
-      label.textContent = this.label;
+      label.textContent = this.metadata_.label;
       this.contentElement.appendChild(label);
 
+      var sublabel = this.ownerDocument.createElement('div');
+      sublabel.className = 'deemphasized';
+      sublabel.textContent = this.metadata_.sublabel;
+      this.contentElement.appendChild(sublabel);
+
+      if (!this.metadata_.isLocal) {
+        this.deletable = false;
+        this.contentElement.appendChild(CreateGoogleAccountLabel());
+      }
+
       // The 'Edit' button.
+      var metadata = this.metadata_;
       var editButtonEl = AutofillEditProfileButton(
-        this.guid,
-        AutofillOptions.loadAddressEditor);
+          AddressListItem.prototype.loadAddressEditor.bind(this));
       this.contentElement.appendChild(editButtonEl);
+    },
+
+    /**
+     * For local Autofill data, this function causes the AutofillOptionsHandler
+     * to call showEditAddressOverlay(). For Wallet data, the user is
+     * redirected to the Wallet web interface.
+     */
+    loadAddressEditor: function() {
+      if (this.metadata_.isLocal)
+        chrome.send('loadAddressEditor', [this.metadata_.guid]);
+      else
+        window.open(loadTimeData.getString('manageWalletAddressesUrl'));
     },
   };
 
   /**
    * Creates a new credit card list item.
-   * @param {Array} entry An array of the form [guid, label, icon].
+   * @param {AutofillEntityMetadata} metadata Details about a credit card.
    * @constructor
    * @extends {options.DeletableItem}
    */
-  function CreditCardListItem(entry) {
+  function CreditCardListItem(metadata) {
     var el = cr.doc.createElement('div');
-    el.guid = entry[0];
-    el.label = entry[1];
-    el.icon = entry[2];
-    el.description = entry[3];
     el.__proto__ = CreditCardListItem.prototype;
+    /** @private */
+    el.metadata_ = metadata;
     el.decorate();
 
     return el;
@@ -91,23 +132,53 @@ cr.define('options.autofillOptions', function() {
     decorate: function() {
       DeletableItem.prototype.decorate.call(this);
 
-      // The stored label.
       var label = this.ownerDocument.createElement('div');
       label.className = 'autofill-list-item';
-      label.textContent = this.label;
+      label.textContent = this.metadata_.label;
       this.contentElement.appendChild(label);
 
-      // The credit card icon.
-      var icon = this.ownerDocument.createElement('img');
-      icon.src = this.icon;
-      icon.alt = this.description;
-      this.contentElement.appendChild(icon);
+      var sublabel = this.ownerDocument.createElement('div');
+      sublabel.className = 'deemphasized';
+      sublabel.textContent = this.metadata_.sublabel;
+      this.contentElement.appendChild(sublabel);
+
+      if (!this.metadata_.isLocal) {
+        this.deletable = false;
+        this.contentElement.appendChild(CreateGoogleAccountLabel());
+      }
+
+      var guid = this.metadata_.guid;
+      if (this.metadata_.isCached) {
+        var localCopyText = this.ownerDocument.createElement('span');
+        localCopyText.className = 'hide-until-hover deemphasized';
+        localCopyText.textContent =
+            loadTimeData.getString('autofillDescribeLocalCopy');
+        this.contentElement.appendChild(localCopyText);
+
+        var clearLocalCopyButton = AutofillEditProfileButton(
+            function() { chrome.send('clearLocalCardCopy', [guid]); });
+        clearLocalCopyButton.textContent =
+            loadTimeData.getString('autofillClearLocalCopyButton');
+        this.contentElement.appendChild(clearLocalCopyButton);
+      }
 
       // The 'Edit' button.
+      var metadata = this.metadata_;
       var editButtonEl = AutofillEditProfileButton(
-        this.guid,
-        AutofillOptions.loadCreditCardEditor);
+          CreditCardListItem.prototype.loadCreditCardEditor.bind(this));
       this.contentElement.appendChild(editButtonEl);
+    },
+
+    /**
+     * For local Autofill data, this function causes the AutofillOptionsHandler
+     * to call showEditCreditCardOverlay(). For Wallet data, the user is
+     * redirected to the Wallet web interface.
+     */
+    loadCreditCardEditor: function() {
+      if (this.metadata_.isLocal)
+        chrome.send('loadCreditCardEditor', [this.metadata_.guid]);
+      else
+        window.open(loadTimeData.getString('manageWalletPaymentMethodsUrl'));
     },
   };
 
@@ -362,20 +433,20 @@ cr.define('options.autofillOptions', function() {
 
     /** @override */
     activateItemAtIndex: function(index) {
-      AutofillOptions.loadAddressEditor(this.dataModel.item(index)[0]);
+      this.getListItemByIndex(index).loadAddressEditor();
     },
 
     /**
      * @override
-     * @param {Array} entry
+     * @param {AutofillEntityMetadata} metadata
      */
-    createItem: function(entry) {
-      return new AddressListItem(entry);
+    createItem: function(metadata) {
+      return new AddressListItem(metadata);
     },
 
     /** @override */
     deleteItemAtIndex: function(index) {
-      AutofillOptions.removeData(this.dataModel.item(index)[0],
+      AutofillOptions.removeData(this.dataModel.item(index).guid,
                                  'Options_AutofillAddressDeleted');
     },
   };
@@ -396,20 +467,20 @@ cr.define('options.autofillOptions', function() {
 
     /** @override */
     activateItemAtIndex: function(index) {
-      AutofillOptions.loadCreditCardEditor(this.dataModel.item(index)[0]);
+      this.getListItemByIndex(index).loadCreditCardEditor();
     },
 
     /**
      * @override
-     * @param {Array} entry
+     * @param {AutofillEntityMetadata} metadata
      */
-    createItem: function(entry) {
-      return new CreditCardListItem(entry);
+    createItem: function(metadata) {
+      return new CreditCardListItem(metadata);
     },
 
     /** @override */
     deleteItemAtIndex: function(index) {
-      AutofillOptions.removeData(this.dataModel.item(index)[0],
+      AutofillOptions.removeData(this.dataModel.item(index).guid,
                                  'Options_AutofillCreditCardDeleted');
     },
   };

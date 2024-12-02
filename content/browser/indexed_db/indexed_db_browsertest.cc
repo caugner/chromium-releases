@@ -125,7 +125,7 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
           base::Bind(&IndexedDBBrowserTest::SetTempQuota, bytes, qm));
       return;
     }
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     qm->SetTemporaryGlobalOverrideQuota(bytes, storage::QuotaCallback());
     // Don't return until the quota has been set.
     scoped_refptr<base::ThreadTestHelper> helper(new base::ThreadTestHelper(
@@ -150,6 +150,22 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
     return disk_usage_;
   }
 
+  virtual int RequestBlobFileCount() {
+    PostTaskAndReplyWithResult(
+        GetContext()->TaskRunner(), FROM_HERE,
+        base::Bind(&IndexedDBContextImpl::GetOriginBlobFileCount, GetContext(),
+                   GURL("file:///")),
+        base::Bind(&IndexedDBBrowserTest::DidGetBlobFileCount, this));
+    scoped_refptr<base::ThreadTestHelper> helper(
+        new base::ThreadTestHelper(BrowserMainLoop::GetInstance()
+                                       ->indexed_db_thread()
+                                       ->message_loop_proxy()));
+    EXPECT_TRUE(helper->Run());
+    // Wait for DidGetBlobFileCount to be called.
+    base::MessageLoop::current()->RunUntilIdle();
+    return blob_file_count_;
+  }
+
  private:
   static MockBrowserTestIndexedDBClassFactory* GetTestClassFactory() {
     static ::base::LazyInstance<MockBrowserTestIndexedDBClassFactory>::Leaky
@@ -165,7 +181,10 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
     disk_usage_ = bytes;
   }
 
+  virtual void DidGetBlobFileCount(int count) { blob_file_count_ = count; }
+
   int64 disk_usage_;
+  int blob_file_count_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBBrowserTest);
 };
@@ -405,8 +424,30 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CanDeleteWhenOverQuotaTest) {
   SimpleTest(GetTestUrl("indexeddb", "delete_over_quota.html"));
 }
 
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, EmptyBlob) {
+  // First delete all IDB's for the test origin
+  GetContext()->TaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&IndexedDBContextImpl::DeleteForOrigin,
+                            GetContext(), GURL("file:///")));
+  EXPECT_EQ(0, RequestBlobFileCount());  // Start with no blob files.
+  const GURL test_url = GetTestUrl("indexeddb", "empty_blob.html");
+  // For some reason Android's futimes fails (EPERM) in this test. Do not assert
+  // file times on Android, but do so on other platforms. crbug.com/467247
+  // TODO(cmumford): Figure out why this is the case and fix if possible.
+#if defined(OS_ANDROID)
+  SimpleTest(GURL(test_url.spec() + "#ignoreTimes"));
+#else
+  SimpleTest(GURL(test_url.spec()));
+#endif
+  // Test stores one blob and one file to disk, so expect two files.
+  EXPECT_EQ(2, RequestBlobFileCount());
+}
+
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, BlobDidAck) {
   SimpleTest(GetTestUrl("indexeddb", "blob_did_ack.html"));
+  // Wait for idle so that the blob ack has time to be received/processed by
+  // the browser process.
+  base::MessageLoop::current()->RunUntilIdle();
   content::ChromeBlobStorageContext* blob_context =
       ChromeBlobStorageContext::GetFor(
           shell()->web_contents()->GetBrowserContext());
@@ -415,6 +456,9 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, BlobDidAck) {
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, BlobDidAckPrefetch) {
   SimpleTest(GetTestUrl("indexeddb", "blob_did_ack_prefetch.html"));
+  // Wait for idle so that the blob ack has time to be received/processed by
+  // the browser process.
+  base::MessageLoop::current()->RunUntilIdle();
   content::ChromeBlobStorageContext* blob_context =
       ChromeBlobStorageContext::GetFor(
           shell()->web_contents()->GetBrowserContext());

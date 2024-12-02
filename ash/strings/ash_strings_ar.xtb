@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">إضافة حساب لـ <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">تم تعطيل لوحة المفاتيح على الشاشة</translation>
 <translation id="1057289296854808272">تشغيل التناوب (انقر هنا للتغيير)</translation>
+<translation id="5548285847212963613">يمكن أن تساعد الإضافة &quot; <ph name="EXTENSION_NAME"/> &quot;على الاتصال بهذه الشبكة.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> و<ph name="MINUTE"/></translation>
 <translation id="30155388420722288">زر التدفق</translation>
 <translation id="7904094684485781019">لقد حظر مشرف هذا الحساب إمكانية الدخول المتعدد.</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">جارٍ الخروج من الجلسة</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">نعم</translation>
+<translation id="4804818685124855865">قطع الاتصال</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">الخروج</translation>
 <translation id="2391579633712104609">180 درجة</translation>
@@ -130,7 +132,6 @@
 <translation id="2761704814324807722">علبة الحالة، والوقت <ph name="TIME"/>، و<ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">قفل</translation>
 <translation id="2805756323405976993">تطبيقات</translation>
-<translation id="2313845391432982560">يمكن أن تهيّأ الإضافة &quot;<ph name="EXTENSION_NAME"/>&quot; هذه الشبكة.</translation>
 <translation id="2872961005593481000">إيقاف التشغيل</translation>
 <translation id="3433830597744061105">إدارة الحسابات</translation>
 <translation id="742594950370306541">الكاميرا قيد الاستخدام.</translation>

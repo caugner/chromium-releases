@@ -317,7 +317,7 @@ Mosaic.prototype.animatedScrollTo = function(targetPosition) {
       this.scrollLeft = newScrollLeft;
 
     if (step === 0 || this.scrollLeft !== newScrollLeft) {
-      this.scrollAnimation_ = null;
+      this.scrollAnimation_ = 0;
       // Release the hovering lock after a safe delay to avoid hovering
       // a tile because of altering |this.scrollLeft|.
       setTimeout(function() {
@@ -547,7 +547,7 @@ Mosaic.prototype.onContentChange_ = function(event) {
   if (!this.tiles_)
     return;
 
-  if (!event.metadata)
+  if (!event.thumbnailChanged)
     return; // Thumbnail unchanged, nothing to do.
 
   var index = this.dataModel_.indexOf(event.item);
@@ -2054,7 +2054,6 @@ Mosaic.Tile.prototype.markUnloaded = function() {
  * target dimensions using metadata.
  */
 Mosaic.Tile.prototype.init = function() {
-  var metadata = this.getItem().getMetadata();
   this.markUnloaded();
   this.left_ = null;  // Mark as not laid out.
 
@@ -2065,7 +2064,7 @@ Mosaic.Tile.prototype.init = function() {
   this.thumbnailLoader_ = new ThumbnailLoader(
       this.getItem().getEntry(),
       ThumbnailLoader.LoaderType.CANVAS,
-      metadata,
+      this.getItem().getThumbnailMetadataItem(),
       undefined,  // Media type.
       [
         ThumbnailLoader.LoadTarget.EXTERNAL_METADATA,
@@ -2079,7 +2078,7 @@ Mosaic.Tile.prototype.init = function() {
     this.thumbnailPreloader_ = new ThumbnailLoader(
         this.getItem().getEntry(),
         ThumbnailLoader.LoaderType.CANVAS,
-        metadata,
+        this.getItem().getThumbnailMetadataItem(),
         undefined,  // Media type.
         [
           ThumbnailLoader.LoadTarget.CONTENT_METADATA
@@ -2095,15 +2094,12 @@ Mosaic.Tile.prototype.init = function() {
   // extracted from headers. For Drive files, it is received via the Drive API.
   // If the dimensions are not available, then the fallback dimensions will be
   // used (same as for the generic icon).
+  var metadataItem = this.getItem().getMetadataItem();
   var width;
   var height;
-  if (metadata.media && metadata.media.width) {
-    width = metadata.media.width;
-    height = metadata.media.height;
-  } else if (metadata.external && metadata.external.imageWidth &&
-             metadata.external.imageHeight) {
-    width = metadata.external.imageWidth;
-    height = metadata.external.imageHeight;
+  if (metadataItem.imageWidth && metadataItem.imageHeight) {
+    width = metadataItem.imageWidth;
+    height = metadataItem.imageHeight;
   } else {
     // No dimensions in metadata, then use the generic dimensions.
     width = Mosaic.Tile.GENERIC_ICON_SIZE;

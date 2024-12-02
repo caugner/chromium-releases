@@ -130,11 +130,14 @@ browserTest.pass = function() {
 };
 
 /**
- * @param {string} id
+ * @param {string} id The id or the selector of the element.
  * @return {void}
  */
 browserTest.clickOnControl = function(id) {
   var element = document.getElementById(id);
+  if (!element) {
+    element = document.querySelector(id);
+  }
   browserTest.expect(element, 'No such element: ' + id);
   element.click();
 };
@@ -190,11 +193,15 @@ browserTest.onUIMode = function(expectedMode, opt_timeout) {
  */
 browserTest.connectMe2Me = function() {
   var AppMode = remoting.AppMode;
-  browserTest.clickOnControl('this-host-connect');
-  return browserTest.onUIMode(AppMode.CLIENT_HOST_NEEDS_UPGRADE).then(
-    function() {
+  // The one second timeout is necessary because the click handler of
+  // 'this-host-connect' is registered asynchronously.
+  return base.Promise.sleep(1000).then(function() {
+      browserTest.clickOnControl('local-host-connect-button');
+    }).then(function(){
+      return browserTest.onUIMode(AppMode.CLIENT_HOST_NEEDS_UPGRADE);
+    }).then(function() {
       // On fulfilled.
-      browserTest.clickOnControl('host-needs-update-connect-button');
+      browserTest.clickOnControl('#host-needs-update-dialog .connect-button');
     }, function() {
       // On time out.
       return Promise.resolve();
@@ -210,13 +217,12 @@ browserTest.disconnect = function() {
   var AppMode = remoting.AppMode;
   var finishedMode = AppMode.CLIENT_SESSION_FINISHED_ME2ME;
   var finishedButton = 'client-finished-me2me-button';
-  if (remoting.desktopConnectedView.getMode() ==
-      remoting.DesktopConnectedView.Mode.IT2ME) {
+  if (remoting.app.getConnectionMode() === remoting.Application.Mode.IT2ME) {
     finishedMode = AppMode.CLIENT_SESSION_FINISHED_IT2ME;
     finishedButton = 'client-finished-it2me-button';
   }
 
-  remoting.disconnect();
+  remoting.app.disconnect();
 
   return browserTest.onUIMode(finishedMode).then(function() {
     browserTest.clickOnControl(finishedButton);
@@ -241,8 +247,8 @@ browserTest.enterPIN = function(pin, opt_expectError) {
   }).then(function() {
     if (opt_expectError) {
       return browserTest.expectConnectionError(
-          remoting.DesktopConnectedView.Mode.ME2ME,
-          remoting.Error.INVALID_ACCESS_CODE);
+          remoting.Application.Mode.ME2ME,
+          [remoting.Error.Tag.INVALID_ACCESS_CODE]);
     } else {
       return browserTest.expectConnected();
     }
@@ -250,24 +256,24 @@ browserTest.enterPIN = function(pin, opt_expectError) {
 };
 
 /**
- * @param {remoting.DesktopConnectedView.Mode} connectionMode
- * @param {string} errorTag
+ * @param {remoting.Application.Mode} connectionMode
+ * @param {Array<remoting.Error.Tag>} errorTags
  * @return {Promise}
  */
-browserTest.expectConnectionError = function(connectionMode, errorTag) {
+browserTest.expectConnectionError = function(connectionMode, errorTags) {
   var AppMode = remoting.AppMode;
   var Timeout = browserTest.Timeout;
 
   var finishButton = 'client-finished-me2me-button';
-  var failureMode = AppMode.CLIENT_CONNECT_FAILED_ME2ME;
 
-  if (connectionMode == remoting.DesktopConnectedView.Mode.IT2ME) {
-    failureMode = AppMode.CLIENT_CONNECT_FAILED_IT2ME;
+  if (connectionMode == remoting.Application.Mode.IT2ME) {
     finishButton = 'client-finished-it2me-button';
   }
 
   var onConnected = browserTest.onUIMode(AppMode.IN_SESSION, Timeout.NONE);
-  var onFailure = browserTest.onUIMode(failureMode);
+  var onFailure = Promise.race([
+      browserTest.onUIMode(AppMode.CLIENT_CONNECT_FAILED_ME2ME),
+      browserTest.onUIMode(AppMode.CLIENT_CONNECT_FAILED_IT2ME)]);
 
   onConnected = onConnected.then(function() {
     return Promise.reject(
@@ -278,12 +284,14 @@ browserTest.expectConnectionError = function(connectionMode, errorTag) {
     /** @type {Element} */
     var errorDiv = document.getElementById('connect-error-message');
     var actual = errorDiv.innerText;
-    var expected = l10n.getTranslationOrError(errorTag);
+    var expected = errorTags.map(function(/** string */errorTag) {
+      return l10n.getTranslationOrError(errorTag);
+    });
     browserTest.clickOnControl(finishButton);
 
-    if (actual != expected) {
-      return Promise.reject('Unexpected failure. actual:' + actual +
-                     ' expected:' + expected);
+    if (expected.indexOf(actual) === -1) {
+      return Promise.reject('Unexpected failure. actual: ' + actual +
+                            ' expected: ' + expected.join(','));
     }
   });
 
@@ -313,7 +321,7 @@ browserTest.expectConnected = function() {
  * @param {base.EventSource} eventSource
  * @param {string} event
  * @param {number} timeoutMs
- * @param {?string} opt_expectedData
+ * @param {*=} opt_expectedData
  * @return {Promise}
  */
 browserTest.expectEvent = function(eventSource, event, timeoutMs,
@@ -383,7 +391,7 @@ browserTest.setupPIN = function(newPin) {
 };
 
 /**
- * @return {Promise}
+ * @return {Promise<boolean>}
  */
 browserTest.isLocalHostStarted = function() {
   return new Promise(function(resolve) {
@@ -404,11 +412,11 @@ browserTest.ensureHostStartedWithPIN = function(pin) {
       function(started){
         if (!started) {
           console.log('browserTest: Enabling remote connection.');
-          browserTest.clickOnControl('start-daemon');
+          browserTest.clickOnControl('.start-daemon');
         } else {
           console.log('browserTest: Changing the PIN of the host to: ' +
               pin + '.');
-          browserTest.clickOnControl('change-daemon-pin');
+          browserTest.clickOnControl('.change-daemon-pin');
         }
         return browserTest.setupPIN(pin);
       });

@@ -4,17 +4,22 @@
 
 import datetime
 import logging
+import os
 import random
 import shutil
-import os
 import sys
 import tempfile
 
-from telemetry import value as value_module
 from telemetry.timeline import trace_data as trace_data_module
+from telemetry.core import util
 from telemetry.util import cloud_storage
 from telemetry.util import file_handle
-import telemetry.web_components # pylint: disable=W0611
+from telemetry import value as value_module
+
+# Bring in tv module for transforming raw trace to html form.
+util.AddDirToPythonPath(
+    util.GetChromiumSrcDir(), 'third_party', 'trace-viewer')
+
 from trace_viewer.build import trace2html
 
 class TraceValue(value_module.Value):
@@ -28,7 +33,7 @@ class TraceValue(value_module.Value):
     """
     super(TraceValue, self).__init__(
         page, name='trace', units='', important=important,
-        description=description)
+        description=description, tir_label=None)
     self._temp_file = self._GetTempFileHandle(trace_data)
     self._cloud_url = None
     self._serialized_file_handle = None

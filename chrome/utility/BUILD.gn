@@ -30,12 +30,8 @@ static_library("utility") {
     "//chrome/common",
   ]
 
-  if (is_android) {
-    if (use_seccomp_bpf) {
-      deps += [ "//sandbox/linux:seccomp_bpf" ]
-      defines += [ "USE_SECCOMP_BPF" ]
-    }
-  } else {
+  if (!is_android) {
+    deps += [ "//net:net_utility_services" ]
     sources +=
         rebase_path(gypi_values.chrome_utility_importer_sources, ".", "..")
   }
@@ -52,6 +48,11 @@ static_library("utility") {
         rebase_path(gypi_values.chrome_utility_extensions_sources, ".", "..")
     sources +=
         rebase_path(gypi_values.chrome_utility_shared_media_sources, ".", "..")
+
+    # Prevent wininet from loading in the renderer. http://crbug.com/460679
+    if (is_win) {
+      ldflags = [ "/DELAYLOAD:wininet.dll" ]
+    }
 
     if (is_win || is_mac) {
       sources +=

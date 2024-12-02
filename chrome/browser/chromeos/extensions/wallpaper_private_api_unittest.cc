@@ -12,6 +12,7 @@
 #include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager_chromeos.h"
 #include "ui/aura/test/test_windows.h"
@@ -69,6 +70,7 @@ class TestRestoreFunction
 
 TEST_F(WallpaperPrivateApiUnittest, HideAndRestoreWindows) {
   fake_user_manager()->AddUser(kTestAccount1);
+  scoped_ptr<aura::Window> window4(CreateTestWindowInShellWithId(4));
   scoped_ptr<aura::Window> window3(CreateTestWindowInShellWithId(3));
   scoped_ptr<aura::Window> window2(CreateTestWindowInShellWithId(2));
   scoped_ptr<aura::Window> window1(CreateTestWindowInShellWithId(1));
@@ -78,6 +80,7 @@ TEST_F(WallpaperPrivateApiUnittest, HideAndRestoreWindows) {
   ash::wm::WindowState* window1_state = ash::wm::GetWindowState(window1.get());
   ash::wm::WindowState* window2_state = ash::wm::GetWindowState(window2.get());
   ash::wm::WindowState* window3_state = ash::wm::GetWindowState(window3.get());
+  ash::wm::WindowState* window4_state = ash::wm::GetWindowState(window4.get());
 
   window3_state->Minimize();
   window1_state->Maximize();
@@ -87,6 +90,7 @@ TEST_F(WallpaperPrivateApiUnittest, HideAndRestoreWindows) {
   EXPECT_FALSE(window1_state->IsMinimized());
   EXPECT_FALSE(window2_state->IsMinimized());
   EXPECT_TRUE(window3_state->IsMinimized());
+  EXPECT_FALSE(window4_state->IsMinimized());
 
   // We then activate window 0 (i.e. wallpaper picker) and call the minimize
   // function.
@@ -101,6 +105,11 @@ TEST_F(WallpaperPrivateApiUnittest, HideAndRestoreWindows) {
   EXPECT_TRUE(window1_state->IsMinimized());
   EXPECT_TRUE(window2_state->IsMinimized());
   EXPECT_TRUE(window3_state->IsMinimized());
+  EXPECT_TRUE(window4_state->IsMinimized());
+
+  // Activates window 4 and then minimizes it.
+  window4_state->Activate();
+  window4_state->Minimize();
 
   // Then we destroy window 0 and call the restore function.
   window0.reset();
@@ -109,10 +118,12 @@ TEST_F(WallpaperPrivateApiUnittest, HideAndRestoreWindows) {
   EXPECT_TRUE(restore_function->RunAsync());
 
   // Windows 1 and 2 should no longer be minimized. Window 1 should again
-  // be maximized. Window 3 should still be minimized.
+  // be maximized. Window 3 should still be minimized. Window 4 should remain
+  // minimized since user interacted with it while wallpaper picker was open.
   EXPECT_TRUE(window1_state->IsMaximized());
   EXPECT_FALSE(window2_state->IsMinimized());
   EXPECT_TRUE(window3_state->IsMinimized());
+  EXPECT_TRUE(window4_state->IsMinimized());
 }
 
 // Test for multiple calls to |MinimizeInactiveWindows| before call
@@ -203,6 +214,7 @@ class WallpaperPrivateApiMultiUserUnittest
 
 void WallpaperPrivateApiMultiUserUnittest::SetUp() {
   AshTestBase::SetUp();
+  WallpaperManager::Initialize();
   session_state_delegate_ =
       static_cast<ash::test::TestSessionStateDelegate*> (
           ash::Shell::GetInstance()->session_state_delegate());
@@ -213,6 +225,7 @@ void WallpaperPrivateApiMultiUserUnittest::SetUp() {
 void WallpaperPrivateApiMultiUserUnittest::TearDown() {
   chrome::MultiUserWindowManager::DeleteInstance();
   AshTestBase::TearDown();
+  WallpaperManager::Shutdown();
 }
 
 void WallpaperPrivateApiMultiUserUnittest::SetUpMultiUserWindowManager(

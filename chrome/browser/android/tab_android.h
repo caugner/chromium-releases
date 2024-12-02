@@ -11,12 +11,12 @@
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/favicon/favicon_tab_helper_observer.h"
 #include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "components/favicon/core/favicon_driver_observer.h"
 #include "components/sessions/session_id.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -53,7 +53,7 @@ class TabAndroid : public CoreTabHelperDelegate,
                    public InstantServiceObserver,
                    public SearchTabHelperDelegate,
                    public content::NotificationObserver,
-                   public FaviconTabHelperObserver {
+                   public favicon::FaviconDriverObserver {
  public:
   // A Java counterpart will be generated for this enum.
   // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser
@@ -109,7 +109,7 @@ class TabAndroid : public CoreTabHelperDelegate,
   void SetWindowSessionID(SessionID::id_type window_id);
   void SetSyncId(int sync_id);
 
-  virtual void HandlePopupNavigation(chrome::NavigateParams* params);
+  void HandlePopupNavigation(chrome::NavigateParams* params);
 
   bool HasPrerenderedUrl(GURL gurl);
 
@@ -137,33 +137,31 @@ class TabAndroid : public CoreTabHelperDelegate,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
-  // FaviconTabHelperObserver -----------------------------------------------
+  // favicon::FaviconDriverObserver -------------------------------------------
   void OnFaviconAvailable(const gfx::Image& image) override;
 
   // Methods called from Java via JNI -----------------------------------------
 
-  virtual void Destroy(JNIEnv* env, jobject obj);
-  virtual void InitWebContents(JNIEnv* env,
-                               jobject obj,
-                               jboolean incognito,
-                               jobject jcontent_view_core,
-                               jobject jweb_contents_delegate,
-                               jobject jcontext_menu_populator);
-  virtual void DestroyWebContents(JNIEnv* env,
-                                  jobject obj,
-                                  jboolean delete_native);
+  void Destroy(JNIEnv* env, jobject obj);
+  void InitWebContents(JNIEnv* env,
+                       jobject obj,
+                       jboolean incognito,
+                       jobject jcontent_view_core,
+                       jobject jweb_contents_delegate,
+                       jobject jcontext_menu_populator);
+  void DestroyWebContents(JNIEnv* env, jobject obj, jboolean delete_native);
   base::android::ScopedJavaLocalRef<jobject> GetProfileAndroid(JNIEnv* env,
                                                                jobject obj);
-  virtual TabLoadStatus LoadUrl(JNIEnv* env,
-                                jobject obj,
-                                jstring url,
-                                jstring j_extra_headers,
-                                jbyteArray j_post_data,
-                                jint page_transition,
-                                jstring j_referrer_url,
-                                jint referrer_policy,
-                                jboolean is_renderer_initiated,
-                                jlong intent_received_timestamp);
+  TabLoadStatus LoadUrl(JNIEnv* env,
+                        jobject obj,
+                        jstring url,
+                        jstring j_extra_headers,
+                        jbyteArray j_post_data,
+                        jint page_transition,
+                        jstring j_referrer_url,
+                        jint referrer_policy,
+                        jboolean is_renderer_initiated,
+                        jlong intent_received_timestamp);
   void SetActiveNavigationEntryTitleForUrl(JNIEnv* env,
                                            jobject obj,
                                            jstring jurl,
@@ -210,6 +208,8 @@ class TabAndroid : public CoreTabHelperDelegate,
   void DetachOverlayContentViewCore(JNIEnv* env,
                                     jobject obj,
                                     jobject jcontent_view_core);
+
+  bool HasPrerenderedUrl(JNIEnv* env, jobject obj, jstring url);
 
   // Register the Tab's native methods through JNI.
   static bool RegisterTabAndroid(JNIEnv* env);

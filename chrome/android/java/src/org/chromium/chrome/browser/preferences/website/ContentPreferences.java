@@ -7,39 +7,35 @@ package org.chromium.chrome.browser.preferences.website;
 import android.os.Build;
 import android.os.Bundle;
 import android.preference.Preference;
-import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceFragment;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ContentSettingsType;
-import org.chromium.chrome.browser.preferences.ChromeBaseCheckBoxPreference;
 import org.chromium.chrome.browser.preferences.LocationSettings;
-import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The fragment displayed on Settings -> Content settings.
+ * The fragment displayed on Settings -> Site Settings.
  */
 public class ContentPreferences extends PreferenceFragment
-        implements OnPreferenceChangeListener, OnPreferenceClickListener {
-    // The keys for each category shown on the Content Settings page.
+        implements OnPreferenceClickListener {
+    // The keys for each category shown on the Site Settings page.
     static final String ALL_SITES_KEY = "website_settings";
     static final String COOKIES_KEY = "cookies";
+    static final String FULLSCREEN_KEY = "fullscreen";
     static final String LOCATION_KEY = "device_location";
     static final String CAMERA_AND_MIC_KEY = "use_camera_or_mic";
-    static final String JAVASCRIPT_KEY = "enable_javascript";
+    static final String JAVASCRIPT_KEY = "javascript";
     static final String BLOCK_POPUPS_KEY = "block_popups";
     static final String PUSH_NOTIFICATIONS_KEY = "push_notifications";
     static final String POPUPS_KEY = "popups";
     static final String PROTECTED_CONTENT_KEY = "protected_content";
     static final String TRANSLATE_KEY = "translate";
     static final String STORAGE_KEY = "use_storage";
-
-    private ManagedPreferenceDelegate mManagedPreferenceDelegate;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -51,27 +47,20 @@ public class ContentPreferences extends PreferenceFragment
             getPreferenceScreen().removePreference(findPreference(PROTECTED_CONTENT_KEY));
         }
 
-        // Set up the checkbox preferences.
-        List<String> checkBoxPreferences = new ArrayList<String>();
-        checkBoxPreferences.add(JAVASCRIPT_KEY);
-
-        for (String prefName : checkBoxPreferences) {
-            Preference p = findPreference(prefName);
-            p.setOnPreferenceChangeListener(this);
-        }
-
-        mManagedPreferenceDelegate = createManagedPreferenceDelegate();
-
         updatePreferenceStates();
     }
 
     private int keyToContentSettingsType(String key) {
         if (COOKIES_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_COOKIES;
+        } else if (FULLSCREEN_KEY.equals(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_FULLSCREEN;
         } else if (LOCATION_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION;
         } else if (CAMERA_AND_MIC_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM;
+        } else if (JAVASCRIPT_KEY.equals(key)) {
+            return ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT;
         } else if (PUSH_NOTIFICATIONS_KEY.equals(key)) {
             return ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS;
         } else if (POPUPS_KEY.equals(key)) {
@@ -91,12 +80,6 @@ public class ContentPreferences extends PreferenceFragment
             setTranslateStateSummary(translatePref);
         }
 
-        // JavaScript preference.
-        ChromeBaseCheckBoxPreference javascriptPref =
-                (ChromeBaseCheckBoxPreference) findPreference(JAVASCRIPT_KEY);
-        javascriptPref.setChecked(prefServiceBridge.javaScriptEnabled());
-        javascriptPref.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
-
         // Preferences that navigate to Website Settings.
         List<String> websitePrefs = new ArrayList<String>();
         websitePrefs.add(LOCATION_KEY);
@@ -105,6 +88,8 @@ public class ContentPreferences extends PreferenceFragment
         }
         websitePrefs.add(COOKIES_KEY);
         websitePrefs.add(CAMERA_AND_MIC_KEY);
+        websitePrefs.add(FULLSCREEN_KEY);
+        websitePrefs.add(JAVASCRIPT_KEY);
         websitePrefs.add(PUSH_NOTIFICATIONS_KEY);
         websitePrefs.add(POPUPS_KEY);
         // Initialize the summary and icon for all preferences that have an
@@ -116,9 +101,11 @@ public class ContentPreferences extends PreferenceFragment
                     Website.PermissionDataEntry.getPermissionDataEntry(type);
             boolean checked = false;
             if (LOCATION_KEY.equals(p.getKey())) {
-                checked = LocationSettings.areAllLocationSettingsEnabled();
+                checked = LocationSettings.getInstance().areAllLocationSettingsEnabled();
             } else if (CAMERA_AND_MIC_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isCameraMicEnabled();
+            } else if (JAVASCRIPT_KEY.equals(prefName)) {
+                checked = PrefServiceBridge.getInstance().javaScriptEnabled();
             } else if (PROTECTED_CONTENT_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().isProtectedMediaIdentifierEnabled();
             } else if (COOKIES_KEY.equals(prefName)) {
@@ -127,6 +114,8 @@ public class ContentPreferences extends PreferenceFragment
                 checked = PrefServiceBridge.getInstance().isPushNotificationsEnabled();
             } else if (POPUPS_KEY.equals(prefName)) {
                 checked = PrefServiceBridge.getInstance().popupsEnabled();
+            } else if (FULLSCREEN_KEY.equals(prefName)) {
+                checked = PrefServiceBridge.getInstance().isFullscreenAllowed();
             }
             p.setTitle(entry.titleResourceId);
             if (COOKIES_KEY.equals(prefName) && checked
@@ -167,35 +156,10 @@ public class ContentPreferences extends PreferenceFragment
         return false;
     }
 
-    // OnPreferenceChangeListener:
-
-    @Override
-    public boolean onPreferenceChange(Preference preference, Object newValue) {
-        if (!preference.isEnabled()) return false;
-
-        String key = preference.getKey();
-        if (JAVASCRIPT_KEY.equals(key)) {
-            PrefServiceBridge.getInstance().setJavaScriptEnabled((boolean) newValue);
-        }
-        return true;
-    }
-
     private void setTranslateStateSummary(Preference translatePref) {
         boolean translateEnabled = PrefServiceBridge.getInstance().isTranslateEnabled();
         translatePref.setSummary(translateEnabled
                 ? R.string.website_settings_category_ask
                 : R.string.website_settings_category_blocked);
-    }
-
-    private ManagedPreferenceDelegate createManagedPreferenceDelegate() {
-        return new ManagedPreferenceDelegate() {
-            @Override
-            public boolean isPreferenceControlledByPolicy(Preference preference) {
-                if (JAVASCRIPT_KEY.equals(preference.getKey())) {
-                    return PrefServiceBridge.getInstance().javaScriptManaged();
-                }
-                return false;
-            }
-        };
     }
 }

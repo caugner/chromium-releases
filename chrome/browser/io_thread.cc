@@ -14,7 +14,6 @@
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/user_metrics.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
@@ -49,6 +48,7 @@
 #include "content/public/browser/cookie_store_factory.h"
 #include "net/base/host_mapping_rules.h"
 #include "net/base/net_util.h"
+#include "net/base/sdch_manager.h"
 #include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_proc.h"
@@ -134,10 +134,9 @@ const char kQuicFieldTrialHttpsEnabledGroupName[] = "HttpsEnabled";
 //  eventual SPDY/4 deployment.
 const char kSpdyFieldTrialName[] = "SPDY";
 const char kSpdyFieldTrialHoldbackGroupNamePrefix[] = "SpdyDisabled";
-const char kSpdyFieldTrialHoldbackControlGroupName[] = "Control";
 const char kSpdyFieldTrialSpdy31GroupNamePrefix[] = "Spdy31Enabled";
 const char kSpdyFieldTrialSpdy4GroupNamePrefix[] = "Spdy4Enabled";
-const char kSpdyFieldTrialSpdy4ControlGroupName[] = "Spdy4Control";
+const char kSpdyFieldTrialParametrizedPrefix[] = "Parametrized";
 
 // Field trial for Cache-Control: stale-while-revalidate directive.
 const char kStaleWhileRevalidateFieldTrialName[] = "StaleWhileRevalidate";
@@ -255,10 +254,6 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
 net::URLRequestContext*
 ConstructSystemRequestContext(IOThread::Globals* globals,
                               net::NetLog* net_log) {
-  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "454983 ConstructSystemRequestContext"));
   net::URLRequestContext* context = new SystemURLRequestContext;
   context->set_net_log(net_log);
   context->set_host_resolver(globals->host_resolver.get());
@@ -318,11 +313,99 @@ bool IsCertificateTransparencyRequiredForEV(
     const base::CommandLine& command_line) {
   const std::string group_name =
       base::FieldTrialList::FindFullName("CTRequiredForEVTrial");
-
-  if (command_line.HasSwitch(switches::kRequireCTForEV))
-    return true;
+  if (command_line.HasSwitch(
+        switches::kDisableCertificateTransparencyRequirementForEV))
+    return false;
 
   return group_name == "RequirementEnforced";
+}
+
+// Parse kUseSpdy command line flag options, which may contain the following:
+//
+//   "off"                      : Disables SPDY support entirely.
+//   "ssl"                      : Forces SPDY for all HTTPS requests.
+//   "no-ssl"                   : Forces SPDY for all HTTP requests.
+//   "no-ping"                  : Disables SPDY ping connection testing.
+//   "exclude=<host>"           : Disables SPDY support for the host <host>.
+//   "no-compress"              : Disables SPDY header compression.
+//   "no-alt-protocols          : Disables alternate protocol support.
+//   "force-alt-protocols       : Forces an alternate protocol of SPDY/3
+//                                on port 443.
+//   "single-domain"            : Forces all spdy traffic to a single domain.
+//   "init-max-streams=<limit>" : Specifies the maximum number of concurrent
+//                                streams for a SPDY session, unless the
+//                                specifies a different value via SETTINGS.
+void ConfigureSpdyGlobalsFromUseSpdyArgument(const std::string& mode,
+                                             IOThread::Globals* globals) {
+  static const char kOff[] = "off";
+  static const char kSSL[] = "ssl";
+  static const char kDisableSSL[] = "no-ssl";
+  static const char kDisablePing[] = "no-ping";
+  static const char kExclude[] = "exclude";  // Hosts to exclude
+  static const char kDisableCompression[] = "no-compress";
+  static const char kDisableAltProtocols[] = "no-alt-protocols";
+  static const char kSingleDomain[] = "single-domain";
+
+  static const char kInitialMaxConcurrentStreams[] = "init-max-streams";
+
+  std::vector<std::string> spdy_options;
+  base::SplitString(mode, ',', &spdy_options);
+
+  for (const std::string& element : spdy_options) {
+    std::vector<std::string> name_value;
+    base::SplitString(element, '=', &name_value);
+    const std::string& option =
+        name_value.size() > 0 ? name_value[0] : std::string();
+    const std::string value =
+        name_value.size() > 1 ? name_value[1] : std::string();
+
+    if (option == kOff) {
+      net::HttpStreamFactory::set_spdy_enabled(false);
+      continue;
+    }
+    if (option == kDisableSSL) {
+      globals->spdy_default_protocol.set(net::kProtoSPDY31);
+      globals->force_spdy_over_ssl.set(false);
+      globals->force_spdy_always.set(true);
+      continue;
+    }
+    if (option == kSSL) {
+      globals->spdy_default_protocol.set(net::kProtoSPDY31);
+      globals->force_spdy_over_ssl.set(true);
+      globals->force_spdy_always.set(true);
+      continue;
+    }
+    if (option == kDisablePing) {
+      globals->enable_spdy_ping_based_connection_checking.set(false);
+      continue;
+    }
+    if (option == kExclude) {
+      globals->forced_spdy_exclusions.insert(
+          net::HostPortPair::FromURL(GURL(value)));
+      continue;
+    }
+    if (option == kDisableCompression) {
+      globals->enable_spdy_compression.set(false);
+      continue;
+    }
+    if (option == kDisableAltProtocols) {
+      globals->use_alternate_protocols.set(false);
+      continue;
+    }
+    if (option == kSingleDomain) {
+      DVLOG(1) << "FORCING SINGLE DOMAIN";
+      globals->force_spdy_single_domain.set(true);
+      continue;
+    }
+    if (option == kInitialMaxConcurrentStreams) {
+      int streams;
+      if (base::StringToInt(value, &streams)) {
+        globals->initial_max_spdy_concurrent_streams.set(streams);
+        continue;
+      }
+    }
+    LOG(DFATAL) << "Unrecognized spdy option: " << option;
+  }
 }
 
 }  // namespace
@@ -440,7 +523,6 @@ SystemRequestContextLeakChecker::~SystemRequestContextLeakChecker() {
 
 IOThread::Globals::Globals()
     : system_request_context_leak_checker(this),
-      enable_ssl_connect_job_waiting(false),
       ignore_certificate_errors(false),
       use_stale_while_revalidate(false),
       testing_fixed_http_port(0),
@@ -463,6 +545,7 @@ IOThread::IOThread(
 #endif
       globals_(NULL),
       is_spdy_disabled_by_policy_(false),
+      is_quic_allowed_by_policy_(true),
       creation_time_(base::TimeTicks::Now()),
       weak_factory_(this) {
   auth_schemes_ = local_state->GetString(prefs::kAuthSchemes);
@@ -510,6 +593,12 @@ IOThread::IOThread(
   is_spdy_disabled_by_policy_ = policy_service->GetPolicies(
       policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string())).Get(
           policy::key::kDisableSpdy) != NULL;
+
+  const base::Value* value = policy_service->GetPolicies(
+      policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME,
+      std::string())).GetValue(policy::key::kQuicAllowed);
+  if (value)
+    value->GetAsBoolean(&is_quic_allowed_by_policy_);
 #endif  // ENABLE_CONFIGURATION_POLICY
 
   BrowserThread::SetDelegate(BrowserThread::IO, this);
@@ -562,6 +651,10 @@ void IOThread::Init() {
 }
 
 void IOThread::InitAsync() {
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("466432 IOThread::InitAsync::Start"));
   TRACE_EVENT0("startup", "IOThread::InitAsync");
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -569,6 +662,11 @@ void IOThread::InitAsync() {
   net::SetMessageLoopForNSSHttpIO();
 #endif
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CommandLineForCurrentProcess"));
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
 
@@ -589,21 +687,38 @@ void IOThread::InitAsync() {
       extension_event_router_forwarder_;
 #endif
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::ChromeNetworkDelegate"));
   scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate(
       new ChromeNetworkDelegate(extension_event_router_forwarder(),
                                 &system_enable_referrers_));
-
-  if (command_line.HasSwitch(switches::kEnableClientHints))
-    chrome_network_delegate->SetEnableClientHints();
 
 #if defined(ENABLE_EXTENSIONS)
   if (command_line.HasSwitch(switches::kDisableExtensionsHttpThrottling))
     chrome_network_delegate->NeverThrottleRequests();
 #endif
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateGlobalHostResolver"));
   globals_->system_network_delegate = chrome_network_delegate.Pass();
   globals_->host_resolver = CreateGlobalHostResolver(net_log_);
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::UpdateDnsClientEnabled::Start"));
   UpdateDnsClientEnabled();
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile6(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::UpdateDnsClientEnabled::End"));
 #if defined(OS_CHROMEOS)
   // Creates a CertVerifyProc that doesn't allow any profile-provided certs.
   globals_->cert_verifier.reset(new net::MultiThreadedCertVerifier(
@@ -615,11 +730,26 @@ void IOThread::InitAsync() {
 
   globals_->transport_security_state.reset(new net::TransportSecurityState());
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile7(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateMultiLogVerifier"));
   net::MultiLogCTVerifier* ct_verifier = new net::MultiLogCTVerifier();
   globals_->cert_transparency_verifier.reset(ct_verifier);
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile8(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateLogVerifiers::Start"));
   // Add built-in logs
   ct_verifier->AddLogs(net::ct::CreateLogVerifiersForKnownLogs());
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile9(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateLogVerifiers::End"));
 
   // Add logs from command line
   if (command_line.HasSwitch(switches::kCertificateTransparencyLog)) {
@@ -647,6 +777,11 @@ void IOThread::InitAsync() {
     }
   }
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile10(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CertPolicyEnforcer"));
   net::CertPolicyEnforcer* policy_enforcer = NULL;
   policy_enforcer = new net::CertPolicyEnforcer(
       IsCertificateTransparencyRequiredForEV(command_line));
@@ -661,8 +796,18 @@ void IOThread::InitAsync() {
   globals_->proxy_script_fetcher_proxy_service.reset(
       net::ProxyService::CreateDirectWithNetLog(net_log_));
   // In-memory cookie store.
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile11(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateCookieStore::Start"));
   globals_->system_cookie_store =
         content::CreateCookieStore(content::CookieStoreConfig());
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile12(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateCookieStore::End"));
   // In-memory channel ID store.
   globals_->system_channel_id_service.reset(
       new net::ChannelIDService(
@@ -678,8 +823,6 @@ void IOThread::InitAsync() {
         command_line.GetSwitchValueASCII(switches::kHostRules));
     TRACE_EVENT_END0("startup", "IOThread::InitAsync:SetRulesFromString");
   }
-  if (command_line.HasSwitch(switches::kEnableSSLConnectJobWaiting))
-    globals_->enable_ssl_connect_job_waiting = true;
   if (command_line.HasSwitch(switches::kIgnoreCertificateErrors))
     globals_->ignore_certificate_errors = true;
   globals_->use_stale_while_revalidate =
@@ -697,6 +840,11 @@ void IOThread::InitAsync() {
           switches::kEnableUserAlternateProtocolPorts)) {
     globals_->enable_user_alternate_protocol_ports = true;
   }
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile13(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::InitializeNetworkOptions"));
   InitializeNetworkOptions(command_line);
 
   net::HttpNetworkSession::Params session_params;
@@ -705,14 +853,30 @@ void IOThread::InitAsync() {
   session_params.proxy_service =
       globals_->proxy_script_fetcher_proxy_service.get();
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile14(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::HttpNetorkSession::Start"));
   TRACE_EVENT_BEGIN0("startup", "IOThread::InitAsync:HttpNetworkSession");
   scoped_refptr<net::HttpNetworkSession> network_session(
       new net::HttpNetworkSession(session_params));
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile15(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::HttpNetorkSession::End"));
   globals_->proxy_script_fetcher_http_transaction_factory
       .reset(new net::HttpNetworkLayer(network_session.get()));
   TRACE_EVENT_END0("startup", "IOThread::InitAsync:HttpNetworkSession");
   scoped_ptr<net::URLRequestJobFactoryImpl> job_factory(
       new net::URLRequestJobFactoryImpl());
+
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile16(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::SetProtocolHandler"));
   job_factory->SetProtocolHandler(url::kDataScheme,
                                   new net::DataProtocolHandler());
   job_factory->SetProtocolHandler(
@@ -797,31 +961,16 @@ void IOThread::InitializeNetworkOptions(const base::CommandLine& command_line) {
     if (trial)
       trial->Disable();
   } else {
-    if (command_line.HasSwitch(switches::kTrustedSpdyProxy)) {
-      globals_->trusted_spdy_proxy.set(
-          command_line.GetSwitchValueASCII(switches::kTrustedSpdyProxy));
+    std::string group = base::FieldTrialList::FindFullName(kSpdyFieldTrialName);
+    VariationParameters params;
+    if (!variations::GetVariationParams(kSpdyFieldTrialName, &params)) {
+      params.clear();
     }
-    if (command_line.HasSwitch(switches::kIgnoreUrlFetcherCertRequests))
-      net::URLFetcher::SetIgnoreCertificateRequests(true);
-
-    if (command_line.HasSwitch(switches::kUseSpdy)) {
-      std::string spdy_mode =
-          command_line.GetSwitchValueASCII(switches::kUseSpdy);
-      EnableSpdy(spdy_mode);
-    } else if (command_line.HasSwitch(switches::kEnableSpdy4)) {
-      globals_->next_protos = net::NextProtosSpdy4Http2();
-      globals_->use_alternate_protocols.set(true);
-    } else if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
-      globals_->next_protos = net::NextProtosHttpOnly();
-      globals_->use_alternate_protocols.set(false);
-    } else {
-      // No SPDY command-line flags have been specified. Examine trial groups.
-      ConfigureSpdyFromTrial(
-          base::FieldTrialList::FindFullName(kSpdyFieldTrialName), globals_);
-    }
+    ConfigureSpdyGlobals(command_line, group, params, globals_);
   }
 
   ConfigureTCPFastOpen(command_line);
+  ConfigureSdch();
 
   // TODO(rch): Make the client socket factory a per-network session
   // instance, constructed from a NetworkSession::Params, to allow us
@@ -841,96 +990,112 @@ void IOThread::ConfigureTCPFastOpen(const base::CommandLine& command_line) {
   net::CheckSupportAndMaybeEnableTCPFastOpen(always_enable_if_supported);
 }
 
-void IOThread::ConfigureSpdyFromTrial(base::StringPiece spdy_trial_group,
-                                      Globals* globals) {
-  if (spdy_trial_group.starts_with(kSpdyFieldTrialHoldbackGroupNamePrefix)) {
-    // TODO(jgraettinger): Use net::NextProtosHttpOnly() instead?
-    net::HttpStreamFactory::set_spdy_enabled(false);
-  } else if (spdy_trial_group == kSpdyFieldTrialHoldbackControlGroupName) {
-    // Use the current SPDY default (SPDY/3.1).
-    globals->next_protos = net::NextProtosSpdy31();
-    globals->use_alternate_protocols.set(true);
-  } else if (spdy_trial_group.starts_with(
-                 kSpdyFieldTrialSpdy31GroupNamePrefix)) {
-    globals->next_protos = net::NextProtosSpdy31();
-    globals->use_alternate_protocols.set(true);
-  } else if (spdy_trial_group.starts_with(
-                 kSpdyFieldTrialSpdy4GroupNamePrefix)) {
-    globals->next_protos = net::NextProtosSpdy4Http2();
-    globals->use_alternate_protocols.set(true);
-  } else if (spdy_trial_group == kSpdyFieldTrialSpdy4ControlGroupName) {
-    // This control group is pinned at SPDY/3.1.
-    globals->next_protos = net::NextProtosSpdy31();
-    globals->use_alternate_protocols.set(true);
-  } else {
-    // By default, enable HTTP/2.
-    globals->next_protos = net::NextProtosSpdy4Http2();
-    globals->use_alternate_protocols.set(true);
+void IOThread::ConfigureSdch() {
+  // Check SDCH field trial.  Default is now that everything is enabled,
+  // so provide options for disabling HTTPS or all of SDCH.
+  const char kSdchFieldTrialName[] = "SDCH";
+  const char kEnabledHttpOnlyGroupName[] = "EnabledHttpOnly";
+  const char kDisabledAllGroupName[] = "DisabledAll";
+
+  // Store in a string on return to keep underlying storage for
+  // StringPiece stable.
+  std::string sdch_trial_group_string =
+      base::FieldTrialList::FindFullName(kSdchFieldTrialName);
+  base::StringPiece sdch_trial_group(sdch_trial_group_string);
+  if (sdch_trial_group.starts_with(kEnabledHttpOnlyGroupName)) {
+    net::SdchManager::EnableSdchSupport(true);
+    net::SdchManager::EnableSecureSchemeSupport(false);
+  } else if (sdch_trial_group.starts_with(kDisabledAllGroupName)) {
+    net::SdchManager::EnableSdchSupport(false);
   }
 }
 
-void IOThread::EnableSpdy(const std::string& mode) {
-  static const char kOff[] = "off";
-  static const char kSSL[] = "ssl";
-  static const char kDisableSSL[] = "no-ssl";
-  static const char kDisablePing[] = "no-ping";
-  static const char kExclude[] = "exclude";  // Hosts to exclude
-  static const char kDisableCompression[] = "no-compress";
-  static const char kDisableAltProtocols[] = "no-alt-protocols";
-  static const char kForceAltProtocols[] = "force-alt-protocols";
-  static const char kSingleDomain[] = "single-domain";
-
-  static const char kInitialMaxConcurrentStreams[] = "init-max-streams";
-
-  std::vector<std::string> spdy_options;
-  base::SplitString(mode, ',', &spdy_options);
-
-  for (std::vector<std::string>::iterator it = spdy_options.begin();
-       it != spdy_options.end(); ++it) {
-    const std::string& element = *it;
-    std::vector<std::string> name_value;
-    base::SplitString(element, '=', &name_value);
-    const std::string& option =
-        name_value.size() > 0 ? name_value[0] : std::string();
-    const std::string value =
-        name_value.size() > 1 ? name_value[1] : std::string();
-
-    if (option == kOff) {
-      net::HttpStreamFactory::set_spdy_enabled(false);
-    } else if (option == kDisableSSL) {
-      globals_->spdy_default_protocol.set(net::kProtoSPDY31);
-      globals_->force_spdy_over_ssl.set(false);
-      globals_->force_spdy_always.set(true);
-    } else if (option == kSSL) {
-      globals_->spdy_default_protocol.set(net::kProtoSPDY31);
-      globals_->force_spdy_over_ssl.set(true);
-      globals_->force_spdy_always.set(true);
-    } else if (option == kDisablePing) {
-      globals_->enable_spdy_ping_based_connection_checking.set(false);
-    } else if (option == kExclude) {
-      globals_->forced_spdy_exclusions.insert(
-          net::HostPortPair::FromURL(GURL(value)));
-    } else if (option == kDisableCompression) {
-      globals_->enable_spdy_compression.set(false);
-    } else if (option == kDisableAltProtocols) {
-      globals_->use_alternate_protocols.set(false);
-    } else if (option == kForceAltProtocols) {
-      net::AlternateProtocolInfo pair(443, net::NPN_SPDY_3, 1);
-      base::RecordAction(base::UserMetricsAction("Net.ForceAlternateProtocol"));
-      net::HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
-    } else if (option == kSingleDomain) {
-      DVLOG(1) << "FORCING SINGLE DOMAIN";
-      globals_->force_spdy_single_domain.set(true);
-    } else if (option == kInitialMaxConcurrentStreams) {
-      int streams;
-      if (base::StringToInt(value, &streams))
-        globals_->initial_max_spdy_concurrent_streams.set(streams);
-    } else if (option.empty() && it == spdy_options.begin()) {
-      continue;
-    } else {
-      LOG(DFATAL) << "Unrecognized spdy option: " << option;
-    }
+// static
+void IOThread::ConfigureSpdyGlobals(
+    const base::CommandLine& command_line,
+    base::StringPiece spdy_trial_group,
+    const VariationParameters& spdy_trial_params,
+    IOThread::Globals* globals) {
+  if (command_line.HasSwitch(switches::kTrustedSpdyProxy)) {
+    globals->trusted_spdy_proxy.set(
+        command_line.GetSwitchValueASCII(switches::kTrustedSpdyProxy));
   }
+  if (command_line.HasSwitch(switches::kIgnoreUrlFetcherCertRequests))
+    net::URLFetcher::SetIgnoreCertificateRequests(true);
+
+  if (command_line.HasSwitch(switches::kUseSpdy)) {
+    std::string spdy_mode =
+        command_line.GetSwitchValueASCII(switches::kUseSpdy);
+    ConfigureSpdyGlobalsFromUseSpdyArgument(spdy_mode, globals);
+    return;
+  }
+
+  globals->next_protos.clear();
+  globals->next_protos.push_back(net::kProtoHTTP11);
+  bool enable_quic = false;
+  globals->enable_quic.CopyToIfSet(&enable_quic);
+  if (enable_quic) {
+    globals->next_protos.push_back(net::kProtoQUIC1SPDY3);
+  }
+
+  if (command_line.HasSwitch(switches::kEnableSpdy4)) {
+    globals->next_protos.push_back(net::kProtoSPDY31);
+    globals->next_protos.push_back(net::kProtoSPDY4_14);
+    globals->next_protos.push_back(net::kProtoSPDY4);
+    globals->use_alternate_protocols.set(true);
+    return;
+  }
+  if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
+    globals->use_alternate_protocols.set(false);
+    return;
+  }
+
+  // No SPDY command-line flags have been specified. Examine trial groups.
+  if (spdy_trial_group.starts_with(kSpdyFieldTrialHoldbackGroupNamePrefix)) {
+    net::HttpStreamFactory::set_spdy_enabled(false);
+    return;
+  }
+  if (spdy_trial_group.starts_with(kSpdyFieldTrialSpdy31GroupNamePrefix)) {
+    globals->next_protos.push_back(net::kProtoSPDY31);
+    globals->use_alternate_protocols.set(true);
+    return;
+  }
+  if (spdy_trial_group.starts_with(kSpdyFieldTrialSpdy4GroupNamePrefix)) {
+    globals->next_protos.push_back(net::kProtoSPDY31);
+    globals->next_protos.push_back(net::kProtoSPDY4_14);
+    globals->next_protos.push_back(net::kProtoSPDY4);
+    globals->use_alternate_protocols.set(true);
+    return;
+  }
+  if (spdy_trial_group.starts_with(kSpdyFieldTrialParametrizedPrefix)) {
+    bool spdy_enabled = false;
+    if (LowerCaseEqualsASCII(
+            GetVariationParam(spdy_trial_params, "enable_spdy31"), "true")) {
+      globals->next_protos.push_back(net::kProtoSPDY31);
+      spdy_enabled = true;
+    }
+    if (LowerCaseEqualsASCII(
+            GetVariationParam(spdy_trial_params, "enable_http2_14"), "true")) {
+      globals->next_protos.push_back(net::kProtoSPDY4_14);
+      spdy_enabled = true;
+    }
+    if (LowerCaseEqualsASCII(
+            GetVariationParam(spdy_trial_params, "enable_http2"), "true")) {
+      globals->next_protos.push_back(net::kProtoSPDY4);
+      spdy_enabled = true;
+    }
+    // TODO(bnc): HttpStreamFactory::spdy_enabled_ is redundant with
+    // globals->next_protos, can it be eliminated?
+    net::HttpStreamFactory::set_spdy_enabled(spdy_enabled);
+    globals->use_alternate_protocols.set(true);
+    return;
+  }
+
+  // By default, enable HTTP/2.
+  globals->next_protos.push_back(net::kProtoSPDY31);
+  globals->next_protos.push_back(net::kProtoSPDY4_14);
+  globals->next_protos.push_back(net::kProtoSPDY4);
+  globals->use_alternate_protocols.set(true);
 }
 
 // static
@@ -988,10 +1153,6 @@ void IOThread::ClearHostCache() {
 
 void IOThread::InitializeNetworkSessionParams(
     net::HttpNetworkSession::Params* params) {
-  // TODO(michaeln): Remove ScopedTracker below once crbug.com/454983 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "454983 IOThread::InitializeNetworkSessionParams"));
   InitializeNetworkSessionParamsFromGlobals(*globals_, params);
 }
 
@@ -1010,8 +1171,6 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       globals.http_server_properties->GetWeakPtr();
   params->network_delegate = globals.system_network_delegate.get();
   params->host_mapping_rules = globals.host_mapping_rules.get();
-  params->enable_ssl_connect_job_waiting =
-      globals.enable_ssl_connect_job_waiting;
   params->ignore_certificate_errors = globals.ignore_certificate_errors;
   params->use_stale_while_revalidate = globals.use_stale_while_revalidate;
   params->testing_fixed_http_port = globals.testing_fixed_http_port;
@@ -1045,16 +1204,20 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->quic_always_require_handshake_confirmation);
   globals.quic_disable_connection_pooling.CopyToIfSet(
       &params->quic_disable_connection_pooling);
-  globals.quic_load_server_info_timeout_ms.CopyToIfSet(
-      &params->quic_load_server_info_timeout_ms);
   globals.quic_load_server_info_timeout_srtt_multiplier.CopyToIfSet(
       &params->quic_load_server_info_timeout_srtt_multiplier);
-  globals.quic_enable_truncated_connection_ids.CopyToIfSet(
-      &params->quic_enable_truncated_connection_ids);
   globals.quic_enable_connection_racing.CopyToIfSet(
       &params->quic_enable_connection_racing);
+  globals.quic_enable_non_blocking_io.CopyToIfSet(
+      &params->quic_enable_non_blocking_io);
   globals.quic_disable_disk_cache.CopyToIfSet(
       &params->quic_disable_disk_cache);
+  globals.quic_max_number_of_lossy_connections.CopyToIfSet(
+      &params->quic_max_number_of_lossy_connections);
+  globals.quic_packet_loss_threshold.CopyToIfSet(
+      &params->quic_packet_loss_threshold);
+  globals.quic_socket_receive_buffer_size.CopyToIfSet(
+      &params->quic_socket_receive_buffer_size);
   globals.enable_quic_port_selection.CopyToIfSet(
       &params->enable_quic_port_selection);
   globals.quic_max_packet_length.CopyToIfSet(&params->quic_max_packet_length);
@@ -1126,16 +1289,9 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   system_params.net_log = net_log_;
   system_params.proxy_service = globals_->system_proxy_service.get();
 
-  {
-    // TODO(michaeln): Remove after crbug.com/454983 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "454983 IOThread::InitSystemRequestContextOnIOThread"
-            ".HttpNetworkSession"));
-    globals_->system_http_transaction_factory.reset(
-        new net::HttpNetworkLayer(
-            new net::HttpNetworkSession(system_params)));
-  }
+  globals_->system_http_transaction_factory.reset(
+      new net::HttpNetworkLayer(
+          new net::HttpNetworkSession(system_params)));
   globals_->system_url_request_job_factory.reset(
       new net::URLRequestJobFactoryImpl());
   globals_->system_request_context.reset(
@@ -1161,7 +1317,8 @@ void IOThread::ConfigureQuic(const base::CommandLine& command_line) {
     params.clear();
   }
 
-  ConfigureQuicGlobals(command_line, group, params, globals_);
+  ConfigureQuicGlobals(command_line, group, params, is_quic_allowed_by_policy_,
+                       globals_);
 }
 
 // static
@@ -1169,22 +1326,22 @@ void IOThread::ConfigureQuicGlobals(
     const base::CommandLine& command_line,
     base::StringPiece quic_trial_group,
     const VariationParameters& quic_trial_params,
+    bool quic_allowed_by_policy,
     IOThread::Globals* globals) {
-  bool enable_quic = ShouldEnableQuic(command_line, quic_trial_group);
+  bool enable_quic = ShouldEnableQuic(command_line, quic_trial_group,
+                                      quic_allowed_by_policy);
   globals->enable_quic.set(enable_quic);
-  bool enable_quic_for_proxies = ShouldEnableQuicForProxies(command_line,
-                                                            quic_trial_group);
+  bool enable_quic_for_proxies = ShouldEnableQuicForProxies(
+      command_line, quic_trial_group, quic_allowed_by_policy);
   globals->enable_quic_for_proxies.set(enable_quic_for_proxies);
   if (enable_quic) {
     globals->quic_always_require_handshake_confirmation.set(
         ShouldQuicAlwaysRequireHandshakeConfirmation(quic_trial_params));
     globals->quic_disable_connection_pooling.set(
         ShouldQuicDisableConnectionPooling(quic_trial_params));
-    int load_server_info_timeout_ms =
-        GetQuicLoadServerInfoTimeout(quic_trial_params);
-    if (load_server_info_timeout_ms != 0) {
-      globals->quic_load_server_info_timeout_ms.set(
-          load_server_info_timeout_ms);
+    int receive_buffer_size = GetQuicSocketReceiveBufferSize(quic_trial_params);
+    if (receive_buffer_size != 0) {
+      globals->quic_socket_receive_buffer_size.set(receive_buffer_size);
     }
     float load_server_info_timeout_srtt_multiplier =
         GetQuicLoadServerInfoTimeoutSrttMultiplier(quic_trial_params);
@@ -1192,12 +1349,21 @@ void IOThread::ConfigureQuicGlobals(
       globals->quic_load_server_info_timeout_srtt_multiplier.set(
           load_server_info_timeout_srtt_multiplier);
     }
-    globals->quic_enable_truncated_connection_ids.set(
-        ShouldQuicEnableTruncatedConnectionIds(quic_trial_params));
     globals->quic_enable_connection_racing.set(
         ShouldQuicEnableConnectionRacing(quic_trial_params));
+    globals->quic_enable_non_blocking_io.set(
+        ShouldQuicEnableNonBlockingIO(quic_trial_params));
     globals->quic_disable_disk_cache.set(
         ShouldQuicDisableDiskCache(quic_trial_params));
+    int max_number_of_lossy_connections = GetQuicMaxNumberOfLossyConnections(
+        quic_trial_params);
+    if (max_number_of_lossy_connections != 0) {
+      globals->quic_max_number_of_lossy_connections.set(
+          max_number_of_lossy_connections);
+    }
+    float packet_loss_threshold = GetQuicPacketLossThreshold(quic_trial_params);
+    if (packet_loss_threshold != 0)
+      globals->quic_packet_loss_threshold.set(packet_loss_threshold);
     globals->enable_quic_port_selection.set(
         ShouldEnableQuicPortSelection(command_line));
     globals->quic_connection_options =
@@ -1247,8 +1413,9 @@ void IOThread::ConfigureQuicGlobals(
 }
 
 bool IOThread::ShouldEnableQuic(const base::CommandLine& command_line,
-                                base::StringPiece quic_trial_group) {
-  if (command_line.HasSwitch(switches::kDisableQuic))
+                                base::StringPiece quic_trial_group,
+                                bool quic_allowed_by_policy) {
+  if (command_line.HasSwitch(switches::kDisableQuic) || !quic_allowed_by_policy)
     return false;
 
   if (command_line.HasSwitch(switches::kEnableQuic))
@@ -1260,8 +1427,10 @@ bool IOThread::ShouldEnableQuic(const base::CommandLine& command_line,
 
 // static
 bool IOThread::ShouldEnableQuicForProxies(const base::CommandLine& command_line,
-                                          base::StringPiece quic_trial_group) {
-  return ShouldEnableQuic(command_line, quic_trial_group) ||
+                                          base::StringPiece quic_trial_group,
+                                          bool quic_allowed_by_policy) {
+  return ShouldEnableQuic(
+      command_line, quic_trial_group, quic_allowed_by_policy) ||
       ShouldEnableQuicForDataReductionProxy();
 }
 
@@ -1363,18 +1532,6 @@ bool IOThread::ShouldQuicDisableConnectionPooling(
 }
 
 // static
-int IOThread::GetQuicLoadServerInfoTimeout(
-    const VariationParameters& quic_trial_params) {
-  int value;
-  if (base::StringToInt(GetVariationParam(quic_trial_params,
-                                          "load_server_info_timeout"),
-                        &value)) {
-    return value;
-  }
-  return 0;
-}
-
-// static
 float IOThread::GetQuicLoadServerInfoTimeoutSrttMultiplier(
     const VariationParameters& quic_trial_params) {
   double value;
@@ -1387,14 +1544,6 @@ float IOThread::GetQuicLoadServerInfoTimeoutSrttMultiplier(
 }
 
 // static
-bool IOThread::ShouldQuicEnableTruncatedConnectionIds(
-    const VariationParameters& quic_trial_params) {
-  return LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "enable_truncated_connection_ids"),
-      "true");
-}
-
-// static
 bool IOThread::ShouldQuicEnableConnectionRacing(
     const VariationParameters& quic_trial_params) {
   return LowerCaseEqualsASCII(
@@ -1403,10 +1552,54 @@ bool IOThread::ShouldQuicEnableConnectionRacing(
 }
 
 // static
+bool IOThread::ShouldQuicEnableNonBlockingIO(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "enable_non_blocking_io"),
+      "true");
+}
+
+// static
 bool IOThread::ShouldQuicDisableDiskCache(
     const VariationParameters& quic_trial_params) {
   return LowerCaseEqualsASCII(
       GetVariationParam(quic_trial_params, "disable_disk_cache"), "true");
+}
+
+// static
+int IOThread::GetQuicMaxNumberOfLossyConnections(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(GetVariationParam(quic_trial_params,
+                                          "max_number_of_lossy_connections"),
+                        &value)) {
+    return value;
+  }
+  return 0;
+}
+
+// static
+float IOThread::GetQuicPacketLossThreshold(
+    const VariationParameters& quic_trial_params) {
+  double value;
+  if (base::StringToDouble(GetVariationParam(quic_trial_params,
+                                             "packet_loss_threshold"),
+                           &value)) {
+    return (float)value;
+  }
+  return 0.0f;
+}
+
+// static
+int IOThread::GetQuicSocketReceiveBufferSize(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(GetVariationParam(quic_trial_params,
+                                          "receive_buffer_size"),
+                        &value)) {
+    return value;
+  }
+  return 0;
 }
 
 // static

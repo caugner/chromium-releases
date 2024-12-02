@@ -11,6 +11,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/platform_thread.h"
+#include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/form_structure.h"
+#include "components/autofill/core/common/form_data_predictions.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
@@ -57,7 +60,7 @@ void ReportMetrics(bool password_manager_enabled,
   ran_once = true;
 
   PasswordStore* store = client->GetPasswordStore();
-  // May be NULL in tests.
+  // May be null in tests.
   if (store) {
     store->ReportMetrics(client->GetSyncUsername(),
                          client->IsPasswordSyncEnabled(
@@ -112,9 +115,6 @@ bool IsSignupForm(const PasswordForm& form) {
 }
 
 }  // namespace
-
-const char PasswordManager::kOtherPossibleUsernamesExperiment[] =
-    "PasswordManagerOtherPossibleUsernames";
 
 // static
 void PasswordManager::RegisterProfilePrefs(
@@ -219,8 +219,7 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
   }
 
   // No password to save? Then don't.
-  if ((form.new_password_element.empty() && form.password_value.empty()) ||
-      (!form.new_password_element.empty() && form.new_password_value.empty())) {
+  if (PasswordFormManager::PasswordToSave(form).empty()) {
     RecordFailure(EMPTY_PASSWORD, form.origin, logger.get());
     return;
   }
@@ -233,7 +232,6 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
   // Below, "matching" is in DoesManage-sense and "not ready" in
   // !HasCompletedMatching sense. We keep track of such PasswordFormManager
   // instances for UMA.
-  bool has_found_matching_managers_which_were_not_ready = false;
   for (ScopedVector<PasswordFormManager>::iterator iter =
            pending_login_managers_.begin();
        iter != pending_login_managers_.end(); ++iter) {
@@ -242,14 +240,11 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
     if (result == PasswordFormManager::RESULT_NO_MATCH)
       continue;
 
-    if ((*iter)->IsIgnorableChangePasswordForm(form)) {
+    (*iter)->SetSubmittedForm(form);
+
+    if ((*iter)->is_ignorable_change_password_form()) {
       if (logger)
         logger->LogMessage(Logger::STRING_CHANGE_PASSWORD_FORM);
-      continue;
-    }
-
-    if (!(*iter)->HasCompletedMatching()) {
-      has_found_matching_managers_which_were_not_ready = true;
       continue;
     }
 
@@ -294,22 +289,8 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
     // |manager|.
     manager.reset(*matched_manager_it);
     pending_login_managers_.weak_erase(matched_manager_it);
-  } else if (has_found_matching_managers_which_were_not_ready) {
-    // We found some managers, but none finished matching yet. The user has
-    // tried to submit credentials before we had time to even find matching
-    // results for the given form and autofill. If this is the case, we just
-    // give up.
-    RecordFailure(MATCHING_NOT_COMPLETE, form.origin, logger.get());
-    return;
   } else {
     RecordFailure(NO_MATCHING_FORM, form.origin, logger.get());
-    return;
-  }
-
-  // Also get out of here if the user told us to 'never remember' passwords for
-  // this form.
-  if (manager->IsBlacklisted()) {
-    RecordFailure(FORM_BLACKLISTED, form.origin, logger.get());
     return;
   }
 
@@ -369,10 +350,6 @@ void PasswordManager::RecordFailure(ProvisionalSaveFailure failure,
         "PasswordManager.ProvisionalSaveFailure_" + group_name,
         failure,
         MAX_FAILURE_VALUE);
-  }
-  if (failure == NO_MATCHING_FORM &&
-      client_->ShouldAskUserToSubmitURL(form_origin)) {
-    client_->AskUserAndMaybeReportURL(form_origin);
   }
 
   if (logger) {
@@ -523,6 +500,26 @@ void PasswordManager::OnPasswordFormsRendered(
     return;
   }
 
+  if (!provisional_save_manager_->HasCompletedMatching()) {
+    // We have a provisional save manager, but it didn't finish matching yet.
+    // We just give up.
+    RecordFailure(MATCHING_NOT_COMPLETE,
+                  provisional_save_manager_->observed_form().origin,
+                  logger.get());
+    provisional_save_manager_.reset();
+    return;
+  }
+
+  // Also get out of here if the user told us to 'never remember' passwords for
+  // this form.
+  if (provisional_save_manager_->IsBlacklisted()) {
+    RecordFailure(FORM_BLACKLISTED,
+                  provisional_save_manager_->observed_form().origin,
+                  logger.get());
+    provisional_save_manager_.reset();
+    return;
+  }
+
   DCHECK(IsSavingEnabledForCurrentPage());
 
   // If the server throws an internal error, access denied page, page not
@@ -642,40 +639,8 @@ void PasswordManager::AskUserOrSavePassword() {
   }
 }
 
-void PasswordManager::PossiblyInitializeUsernamesExperiment(
-    const PasswordFormMap& best_matches) const {
-  if (base::FieldTrialList::Find(kOtherPossibleUsernamesExperiment))
-    return;
-
-  bool other_possible_usernames_exist = false;
-  for (autofill::PasswordFormMap::const_iterator it = best_matches.begin();
-       it != best_matches.end(); ++it) {
-    if (!it->second->other_possible_usernames.empty()) {
-      other_possible_usernames_exist = true;
-      break;
-    }
-  }
-
-  if (!other_possible_usernames_exist)
-    return;
-
-  const base::FieldTrial::Probability kDivisor = 100;
-  scoped_refptr<base::FieldTrial> trial(
-      base::FieldTrialList::FactoryGetFieldTrial(
-          kOtherPossibleUsernamesExperiment,
-          kDivisor,
-          "Disabled",
-          2013, 12, 31,
-          base::FieldTrial::ONE_TIME_RANDOMIZED,
-          NULL));
-  base::FieldTrial::Probability enabled_probability =
-      client_->GetProbabilityForExperiment(kOtherPossibleUsernamesExperiment);
-  trial->AppendGroup("Enabled", enabled_probability);
-}
-
 bool PasswordManager::OtherPossibleUsernamesEnabled() const {
-  return base::FieldTrialList::FindFullName(
-             kOtherPossibleUsernamesExperiment) == "Enabled";
+  return false;
 }
 
 void PasswordManager::Autofill(password_manager::PasswordManagerDriver* driver,
@@ -683,8 +648,6 @@ void PasswordManager::Autofill(password_manager::PasswordManagerDriver* driver,
                                const PasswordFormMap& best_matches,
                                const PasswordForm& preferred_match,
                                bool wait_for_username) const {
-  PossiblyInitializeUsernamesExperiment(best_matches);
-
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
   if (client_->IsLoggingActive()) {
     logger.reset(new BrowserSavePasswordProgressLogger(client_));
@@ -720,6 +683,26 @@ void PasswordManager::Autofill(password_manager::PasswordManagerDriver* driver,
   }
 
   client_->PasswordWasAutofilled(best_matches);
+}
+
+void PasswordManager::ProcessAutofillPredictions(
+    password_manager::PasswordManagerDriver* driver,
+    const std::vector<autofill::FormStructure*>& forms) {
+  // Leave only forms that contain fields that are useful for password manager.
+  std::map<autofill::FormData, autofill::FormFieldData> predictions;
+  for (autofill::FormStructure* form : forms) {
+    for (std::vector<autofill::AutofillField*>::const_iterator field =
+             form->begin();
+         field != form->end(); ++field) {
+      if ((*field)->server_type() == autofill::USERNAME ||
+          (*field)->server_type() == autofill::USERNAME_AND_EMAIL_ADDRESS) {
+        predictions[form->ToFormData()] = *(*field);
+      }
+    }
+  }
+  if (predictions.empty())
+    return;
+  driver->AutofillDataReceived(predictions);
 }
 
 }  // namespace password_manager

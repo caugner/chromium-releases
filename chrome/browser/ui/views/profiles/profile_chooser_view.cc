@@ -43,6 +43,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -257,11 +258,10 @@ class EditableProfilePhoto : public views::LabelButton {
     views::LabelButton::OnPaint(canvas);
   }
 
-  void PaintChildren(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) override {
+  void PaintChildren(const ui::PaintContext& context) override {
     // Display any children (the "change photo" overlay) as a circle.
-    canvas->ClipPath(circular_mask_, true);
-    View::PaintChildren(canvas, cull_set);
+    context.canvas()->ClipPath(circular_mask_, true);
+    View::PaintChildren(context);
   }
 
  private:
@@ -495,10 +495,10 @@ void ProfileChooserView::ShowBubble(
     views::BubbleBorder::BubbleAlignment border_alignment,
     Browser* browser) {
   // Don't start creating the view if it would be an empty fast user switcher.
-  // This is the case when there is 0 or 1 profiles (the current one).  It has
-  // to happen here to prevent the view system from creating an empty container.
+  // It has to happen here to prevent the view system from creating an empty
+  // container.
   if (view_mode == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER &&
-      g_browser_process->profile_manager()->GetNumberOfProfiles() <= 1) {
+      profiles::HasProfileSwitchTargets(browser->profile())) {
     return;
   }
 
@@ -1279,9 +1279,7 @@ views::View* ProfileChooserView::CreateOtherProfilesView(
   views::View* view = new views::View();
   views::GridLayout* layout = CreateSingleColumnLayout(view, kFixedMenuWidth);
 
-  int num_avatars_to_show = avatars_to_show.size();
-  for (int i = 0; i < num_avatars_to_show; ++i) {
-    const size_t index = avatars_to_show[i];
+  for (size_t index : avatars_to_show) {
     const AvatarMenu::Item& item = avatar_menu_->GetItemAt(index);
     const int kSmallImageSide = 32;
 
@@ -1292,12 +1290,20 @@ views::View* ProfileChooserView::CreateOtherProfilesView(
     AvatarMenu::GetImageForMenuButton(
         item.profile_path, &item_icon, &is_rectangle);
 
+    base::string16 title = item.name;
+    if (item.legacy_supervised) {
+      title = l10n_util::GetStringFUTF16(IDS_SUPERVISED_USER_NEW_AVATAR_LABEL,
+                                         title);
+    } else if (item.child_account) {
+      title = l10n_util::GetStringFUTF16(IDS_CHILD_AVATAR_LABEL, title);
+    }
+
     gfx::Image image = profiles::GetSizedAvatarIcon(
         item_icon, true, kSmallImageSide, kSmallImageSide);
 
     views::LabelButton* button = new BackgroundColorHoverButton(
         this,
-        item.name,
+        title,
         *image.ToImageSkia());
     open_other_profile_indexes_map_[button] = index;
 

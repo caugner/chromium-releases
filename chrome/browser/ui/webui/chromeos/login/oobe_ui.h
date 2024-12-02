@@ -110,7 +110,7 @@ class OobeUI : public OobeDisplay,
   KioskEnableScreenActor* GetKioskEnableScreenActor() override;
   TermsOfServiceScreenActor* GetTermsOfServiceScreenActor() override;
   UserImageView* GetUserImageView() override;
-  NetworkErrorView* GetNetworkErrorView() override;
+  ErrorScreen* GetErrorScreen() override;
   WrongHWIDScreenActor* GetWrongHWIDScreenActor() override;
   AutoEnrollmentCheckScreenActor* GetAutoEnrollmentCheckScreenActor() override;
   SupervisedUserCreationScreenHandler* GetSupervisedUserCreationScreenActor()

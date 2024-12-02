@@ -28,12 +28,6 @@ component("base") {
     "accelerators/platform_accelerator_cocoa.mm",
     "android/ui_base_jni_registrar.cc",
     "android/ui_base_jni_registrar.h",
-    "android/view_android.cc",
-    "android/view_android.h",
-    "android/window_android.cc",
-    "android/window_android.h",
-    "android/window_android_compositor.h",
-    "android/window_android_observer.h",
     "base_window.cc",
     "base_window.h",
     "clipboard/clipboard.cc",
@@ -156,6 +150,10 @@ component("base") {
     "idle/idle_linux.cc",
     "idle/idle_mac.mm",
     "idle/idle_win.cc",
+    "ios/cru_context_menu_controller.h",
+    "ios/cru_context_menu_controller.mm",
+    "ios/cru_context_menu_holder.h",
+    "ios/cru_context_menu_holder.mm",
     "l10n/formatter.cc",
     "l10n/formatter.h",
     "l10n/l10n_font_util.cc",
@@ -416,10 +414,9 @@ component("base") {
       "cursor/cursor_loader_win.h",
     ]
     deps += [ "//third_party/wtl" ]
-    cflags = [
-      "/wd4324",  # Structure was padded due to __declspec(align()), which is
-                  # uninteresting.
-    ]
+    cflags = [ "/wd4324" ]  # Structure was padded due to __declspec(align()), which is
+                            # uninteresting.
+
     ldflags = [
       "/DELAYLOAD:d2d1.dll",
       "/DELAYLOAD:d3d10_1.dll",
@@ -534,13 +531,10 @@ component("base") {
     deps += [
       "//cc",
       ":ui_base_jni_headers",
+      "//ui/android:ui_java",
     ]
 
     libs += [ "jnigraphics" ]
-  }
-
-  if (is_android && is_android_webview_build) {
-    deps += [ "//ui/android:ui_java" ]
   }
 
   if (is_android && !use_aura) {
@@ -618,8 +612,6 @@ if (is_android) {
       "../android/java/src/org/chromium/ui/base/ResourceBundle.java",
       "../android/java/src/org/chromium/ui/base/SelectFileDialog.java",
       "../android/java/src/org/chromium/ui/base/TouchDevice.java",
-      "../android/java/src/org/chromium/ui/base/ViewAndroid.java",
-      "../android/java/src/org/chromium/ui/base/WindowAndroid.java",
     ]
     jni_package = "base"
   }
@@ -628,6 +620,7 @@ if (is_android) {
 # GYP version: ui/base/ui_base_tests.gyp:ui_base_unittests
 test("ui_base_unittests") {
   sources = [
+    "ios/cru_context_menu_controller_unittest.mm",
     "l10n/l10n_util_mac_unittest.mm",
     "l10n/l10n_util_unittest.cc",
     "l10n/l10n_util_win_unittest.cc",

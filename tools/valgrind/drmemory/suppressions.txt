@@ -481,7 +481,6 @@ KERNELBASE.dll!CreateNamedPipeW
 ipc.dll!IPC::Channel::ChannelImpl::CreatePipe
 ipc.dll!IPC::Channel::ChannelImpl::ChannelImpl
 ipc.dll!IPC::Channel::Channel
-ipc.dll!IPC::ChannelProxy::Context::CreateChannel
 
 HANDLE LEAK
 name=http://crbug.com/371942
@@ -710,7 +709,7 @@ HANDLE LEAK
 name=http://crbug.com/449989
 system call NtOpenProcess
 KERNELBASE.dll!OpenProcess
-base.dll!base::Process::OpenWithExtraPriviles
+base.dll!base::Process::OpenWithExtraPrivileges
 content.dll!content::BrowserMessageFilter::Internal::OnChannelConnected
 
 UNADDRESSABLE ACCESS
@@ -742,3 +741,28 @@ drmemorylib.dll!replace_operator_delete
 *!content::ContentMainRunnerImpl::Run
 *!content::ContentMain
 *!content::LaunchTests
+
+UNINITIALIZED READ
+name=http://crbug.com/463204
+skia.dll!_ltod3
+skia.dll!SkPaint::measure_text
+skia.dll!SkPaint::measureText
+content.dll!content::DoPreSandboxWarmupForTypeface
+content.dll!content::`anonymous namespace'::WarmupDirectWrite
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/463261
+...
+blink_web.dll!blink::WebFrameWidgetImpl::selectionBounds
+...
+content.dll!content::RenderWidget::UpdateSelectionBounds
+content.dll!content::RenderWidget::willBeginCompositorFrame
+cc.dll!base::internal::InvokeHelper<>::MakeItSo
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/473197
+*!blink::WebURLResponse::url
+*!content::ManifestManager::OnManifestFetchComplete
+*!base::internal::InvokeHelper<>::MakeItSo
+*!base::internal::Invoker<>::Run
+*!content::ManifestFetcher::OnLoadComplete

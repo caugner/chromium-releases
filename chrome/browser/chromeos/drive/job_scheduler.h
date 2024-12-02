@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_CHROMEOS_DRIVE_JOB_SCHEDULER_H_
 #define CHROME_BROWSER_CHROMEOS_DRIVE_JOB_SCHEDULER_H_
 
+#include <string>
 #include <vector>
 
 #include "base/id_map.h"
@@ -141,6 +142,7 @@ class JobScheduler
                       const std::string& new_title,
                       const base::Time& last_modified,
                       const base::Time& last_viewed_by_me,
+                      const google_apis::drive::Properties& properties,
                       const ClientContext& context,
                       const google_apis::FileResourceCallback& callback);
 
@@ -157,12 +159,11 @@ class JobScheduler
       const google_apis::EntryActionCallback& callback);
 
   // Adds a AddNewDirectory operation to the queue.
-  void AddNewDirectory(
-      const std::string& parent_resource_id,
-      const std::string& directory_title,
-      const DriveServiceInterface::AddNewDirectoryOptions& options,
-      const ClientContext& context,
-      const google_apis::FileResourceCallback& callback);
+  void AddNewDirectory(const std::string& parent_resource_id,
+                       const std::string& directory_title,
+                       const AddNewDirectoryOptions& options,
+                       const ClientContext& context,
+                       const google_apis::FileResourceCallback& callback);
 
   // Adds a DownloadFile operation to the queue.
   // The first two arguments |virtual_path| and |expected_file_size| are used
@@ -183,19 +184,18 @@ class JobScheduler
                      const base::FilePath& local_file_path,
                      const std::string& title,
                      const std::string& content_type,
-                     const DriveUploader::UploadNewFileOptions& options,
+                     const UploadNewFileOptions& options,
                      const ClientContext& context,
                      const google_apis::FileResourceCallback& callback);
 
   // Adds an UploadExistingFile operation to the queue.
-  void UploadExistingFile(
-      const std::string& resource_id,
-      const base::FilePath& drive_file_path,
-      const base::FilePath& local_file_path,
-      const std::string& content_type,
-      const DriveUploader::UploadExistingFileOptions& options,
-      const ClientContext& context,
-      const google_apis::FileResourceCallback& callback);
+  void UploadExistingFile(const std::string& resource_id,
+                          const base::FilePath& drive_file_path,
+                          const base::FilePath& local_file_path,
+                          const std::string& content_type,
+                          const UploadExistingFileOptions& options,
+                          const ClientContext& context,
+                          const google_apis::FileResourceCallback& callback);
 
   // Adds AddPermission operation to the queue. |callback| must not be null.
   void AddPermission(const std::string& resource_id,
@@ -343,6 +343,11 @@ class JobScheduler
   // net::NetworkChangeNotifier::ConnectionTypeObserver override.
   void OnConnectionTypeChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
+
+  // Updates total_bytes in JobInfo.
+  void OnGotFileSizeForJob(JobID job_id,
+                           const std::string& histogram_name,
+                           int64* size);
 
   // Get the type of queue the specified job should be put in.
   QueueType GetJobQueueType(JobType type);

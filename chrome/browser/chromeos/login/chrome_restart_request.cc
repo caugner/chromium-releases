@@ -90,14 +90,14 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kDisablePanelFitting,
     ::switches::kDisableSeccompFilterSandbox,
     ::switches::kDisableSetuidSandbox,
+    ::switches::kDisableSurfaces,
     ::switches::kDisableTextBlobs,
-    ::switches::kDisableThreadedGpuRasterization,
     ::switches::kDisableThreadedScrolling,
     ::switches::kDisableTouchDragDrop,
     ::switches::kDisableTouchEditing,
     ::switches::kEnableBeginFrameScheduling,
     ::switches::kEnableBlinkFeatures,
-    ::switches::kEnablePreferCompositingToLCDText,
+    ::switches::kEnableCompositorAnimationTimelines,
     ::switches::kEnableDelegatedRenderer,
     ::switches::kDisableDisplayList2dCanvas,
     ::switches::kEnableDisplayList2dCanvas,
@@ -111,9 +111,9 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableLowResTiling,
     ::switches::kEnableOneCopy,
     ::switches::kEnablePinch,
+    ::switches::kEnablePreferCompositingToLCDText,
     ::switches::kEnablePluginPlaceholderShadowDom,
     ::switches::kEnableSlimmingPaint,
-    ::switches::kEnableThreadedGpuRasterization,
     ::switches::kEnableTouchDragDrop,
     ::switches::kEnableTouchEditing,
     ::switches::kEnableViewport,
@@ -145,11 +145,11 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kTouchDevices,
     ::switches::kTouchEvents,
     ::switches::kUIDisableThreadedCompositing,
+    ::switches::kUIEnableCompositorAnimationTimelines,
     ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
     ::switches::kUseCras,
 #endif
-    ::switches::kUseDiscardableMemory,
     ::switches::kUseGL,
     ::switches::kUseNormalPriorityForTileTaskWorkerThreads,
     ::switches::kUserDataDir,
@@ -188,6 +188,7 @@ std::string DeriveCommandLine(const GURL& start_url,
     cc::switches::kDisableThreadedAnimation,
     cc::switches::kEnableGpuBenchmarking,
     cc::switches::kEnablePinchVirtualViewport,
+    cc::switches::kEnablePropertyTreeVerification,
     cc::switches::kEnableMainFrameBeforeActivation,
     cc::switches::kMaxTilesForInterestArea,
     cc::switches::kMaxUnusedResourceMemoryUsagePercentage,
@@ -212,7 +213,6 @@ std::string DeriveCommandLine(const GURL& start_url,
     chromeos::switches::kNaturalScrollDefault,
     chromeos::switches::kSystemInDevMode,
     policy::switches::kDeviceManagementUrl,
-    ::switches::kEnableWebkitTextSubpixelPositioning,
     wm::switches::kWindowAnimationsDisabled,
   };
   command_line->CopySwitchesFrom(base_command_line,
@@ -325,7 +325,7 @@ void ChromeRestartRequest::Start() {
 }
 
 void ChromeRestartRequest::RestartJob() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   DBusThreadManager::Get()->GetSessionManagerClient()->RestartJob(
       pid_, command_line_);
@@ -363,7 +363,7 @@ std::string GetOffTheRecordCommandLine(
 }
 
 void RestartChrome(const std::string& command_line) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BootTimesRecorder::Get()->set_restart_requested();
 
   static bool restart_requested = false;

@@ -18,21 +18,21 @@ cycling all pages.
 import collections
 import os
 
+from telemetry.core import util
+from telemetry.page import page_test
+from telemetry.value import scalar
+
 from metrics import cpu
 from metrics import keychain_metric
 from metrics import memory
 from metrics import power
 from metrics import speedindex
-from telemetry.core import util
-from telemetry.page import page_test
-from telemetry.value import scalar
 
 
 class PageCycler(page_test.PageTest):
   def __init__(self, page_repeat, pageset_repeat, cold_load_percent=50,
                report_speed_index=False, clear_cache_before_each_run=False):
     super(PageCycler, self).__init__(
-        action_name_to_run='RunPageInteractions',
         clear_cache_before_each_run=clear_cache_before_each_run)
 
     with open(os.path.join(os.path.dirname(__file__),
@@ -61,8 +61,6 @@ class PageCycler(page_test.PageTest):
           (int(pageset_repeat) - 1) * (100 - cold_load_percent) / 100)
       number_warm_runs = number_warm_pageset_runs * page_repeat
       self._cold_run_start_index = number_warm_runs + page_repeat
-      self._discard_first_result = (not cold_load_percent or
-                                    self._discard_first_result)
     else:
       self._cold_run_start_index = pageset_repeat * page_repeat
 

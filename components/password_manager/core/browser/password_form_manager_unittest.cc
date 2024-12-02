@@ -129,7 +129,7 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
 class TestPasswordManager : public PasswordManager {
  public:
   explicit TestPasswordManager(TestPasswordManagerClient* client)
-      : PasswordManager(client) {}
+      : PasswordManager(client), wait_for_username_(false) {}
 
   void Autofill(password_manager::PasswordManagerDriver* driver,
                 const autofill::PasswordForm& form_for_autofill,
@@ -137,15 +137,21 @@ class TestPasswordManager : public PasswordManager {
                 const autofill::PasswordForm& preferred_match,
                 bool wait_for_username) const override {
     best_matches_ = best_matches;
+    wait_for_username_ = wait_for_username;
   }
 
   const autofill::PasswordFormMap& GetLatestBestMatches() {
     return best_matches_;
   }
 
+  bool GetLatestWaitForUsername() { return wait_for_username_; }
+
  private:
   // Marked mutable to get around constness of Autofill().
+  // TODO(vabr): This should be rewritten as a mock of PasswordManager, and the
+  // interesting arguments should be saved via GMock actions instead.
   mutable autofill::PasswordFormMap best_matches_;
+  mutable bool wait_for_username_;
 };
 
 }  // namespace
@@ -219,12 +225,6 @@ class PasswordFormManagerTest : public testing::Test {
     p->preferred_match_ = match;
   }
 
-  void SimulateFetchMatchingLoginsFromPasswordStore(
-      PasswordFormManager* manager) {
-    // Just need to update the internal states.
-    manager->state_ = PasswordFormManager::MATCHING_PHASE;
-  }
-
   void SanitizePossibleUsernames(PasswordFormManager* p, PasswordForm* form) {
     p->SanitizePossibleUsernames(form);
   }
@@ -260,7 +260,7 @@ class PasswordFormManagerTest : public testing::Test {
     form_to_save.username_value = result[0]->username_value;
     form_to_save.password_value = result[0]->password_value;
 
-    SimulateFetchMatchingLoginsFromPasswordStore(&form_manager);
+    form_manager.SimulateFetchMatchingLoginsFromPasswordStore();
     form_manager.OnGetPasswordStoreResults(result.Pass());
 
     if (field_type) {
@@ -300,7 +300,7 @@ class PasswordFormManagerTest : public testing::Test {
 };
 
 TEST_F(PasswordFormManagerTest, TestNewLogin) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
   SimulateMatchingPhase(&manager, RESULT_NO_MATCH);
 
@@ -362,7 +362,7 @@ TEST_F(PasswordFormManagerTest, TestNewLogin) {
 // saving PSL-matched credentials should no longer apply.
 TEST_F(PasswordFormManagerTest,
        OverriddenPSLMatchedCredentialsNotMarkedAsPSLMatched) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   // The suggestion needs to be PSL-matched.
@@ -405,6 +405,8 @@ TEST_F(PasswordFormManagerTest, PSLMatchedCredentialsMetadataUpdated) {
   expected_saved_form.other_possible_usernames.clear();
   expected_saved_form.form_data = saved_match()->form_data;
   expected_saved_form.origin = saved_match()->origin;
+  expected_saved_form.original_signon_realm =
+      saved_match()->original_signon_realm;
   PasswordForm actual_saved_form;
 
   EXPECT_CALL(*(client_with_store.mock_driver()->mock_autofill_manager()),
@@ -423,8 +425,9 @@ TEST_F(PasswordFormManagerTest, TestNewLoginFromNewPasswordElement) {
   // Add a new password field to the test form. The PasswordFormManager should
   // save the password from this field, instead of the current password field.
   observed_form()->new_password_element = ASCIIToUTF16("NewPasswd");
+  observed_form()->username_marked_by_site = true;
 
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
   SimulateMatchingPhase(&manager, RESULT_NO_MATCH);
 
@@ -462,7 +465,7 @@ TEST_F(PasswordFormManagerTest, TestNewLoginFromNewPasswordElement) {
 TEST_F(PasswordFormManagerTest, TestUpdatePassword) {
   // Create a PasswordFormManager with observed_form, as if we just
   // saw this form and need to find matching logins.
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   SimulateMatchingPhase(&manager, RESULT_MATCH_FOUND);
@@ -511,7 +514,7 @@ TEST_F(PasswordFormManagerTest, TestUpdatePasswordFromNewPasswordElement) {
   saved_match()->submit_element.clear();
 
   TestPasswordManagerClient client_with_store(mock_store());
-  PasswordFormManager manager(NULL, &client_with_store,
+  PasswordFormManager manager(nullptr, &client_with_store,
                               client_with_store.driver(), *observed_form(),
                               false);
   SimulateMatchingPhase(&manager, RESULT_MATCH_FOUND);
@@ -553,7 +556,7 @@ TEST_F(PasswordFormManagerTest, TestUpdatePasswordFromNewPasswordElement) {
 }
 
 TEST_F(PasswordFormManagerTest, TestIgnoreResult) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   // Make sure we don't match a PasswordForm if it was originally saved on
@@ -573,7 +576,7 @@ TEST_F(PasswordFormManagerTest, TestIgnoreResult) {
 }
 
 TEST_F(PasswordFormManagerTest, TestEmptyAction) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   saved_match()->action = GURL();
@@ -591,7 +594,7 @@ TEST_F(PasswordFormManagerTest, TestEmptyAction) {
 }
 
 TEST_F(PasswordFormManagerTest, TestUpdateAction) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   SimulateMatchingPhase(&manager, RESULT_MATCH_FOUND);
@@ -610,7 +613,7 @@ TEST_F(PasswordFormManagerTest, TestUpdateAction) {
 }
 
 TEST_F(PasswordFormManagerTest, TestDynamicAction) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   SimulateMatchingPhase(&manager, RESULT_NO_MATCH);
@@ -710,44 +713,47 @@ TEST_F(PasswordFormManagerTest, TestValidForms) {
   new_credentials.new_password_value = ASCIIToUTF16("test1new");
 
   // Form with both username_element and password_element.
-  PasswordFormManager manager1(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager1(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager1, RESULT_NO_MATCH);
   EXPECT_TRUE(manager1.HasValidPasswordForm());
 
   // Form with username_element, password_element, and new_password_element.
-  PasswordFormManager manager2(NULL, NULL, kNoDriver, new_credentials, false);
+  PasswordFormManager manager2(nullptr, nullptr, kNoDriver, new_credentials,
+                               false);
   SimulateMatchingPhase(&manager2, RESULT_NO_MATCH);
   EXPECT_TRUE(manager2.HasValidPasswordForm());
 
   // Form with username_element and only new_password_element.
   new_credentials.password_element.clear();
-  PasswordFormManager manager3(NULL, NULL, kNoDriver, new_credentials, false);
+  PasswordFormManager manager3(nullptr, nullptr, kNoDriver, new_credentials,
+                               false);
   SimulateMatchingPhase(&manager3, RESULT_NO_MATCH);
   EXPECT_TRUE(manager3.HasValidPasswordForm());
 
   // Form without a username_element but with a password_element.
   credentials.username_element.clear();
-  PasswordFormManager manager4(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager4(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager4, RESULT_NO_MATCH);
   EXPECT_TRUE(manager4.HasValidPasswordForm());
 
   // Form without a username_element but with a new_password_element.
   new_credentials.username_element.clear();
-  PasswordFormManager manager5(NULL, NULL, kNoDriver, new_credentials, false);
+  PasswordFormManager manager5(nullptr, nullptr, kNoDriver, new_credentials,
+                               false);
   SimulateMatchingPhase(&manager5, RESULT_NO_MATCH);
   EXPECT_TRUE(manager5.HasValidPasswordForm());
 
   // Form without a password_element but with a username_element.
   credentials.username_element = saved_match()->username_element;
   credentials.password_element.clear();
-  PasswordFormManager manager6(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager6(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager6, RESULT_NO_MATCH);
   EXPECT_FALSE(manager6.HasValidPasswordForm());
 
   // Form with neither a password_element nor a username_element.
   credentials.username_element.clear();
   credentials.password_element.clear();
-  PasswordFormManager manager7(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager7(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager7, RESULT_NO_MATCH);
   EXPECT_FALSE(manager7.HasValidPasswordForm());
 }
@@ -760,27 +766,27 @@ TEST_F(PasswordFormManagerTest, TestValidFormsBasic) {
   credentials.password_value = saved_match()->password_value;
 
   // Form with both username_element and password_element.
-  PasswordFormManager manager1(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager1(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager1, RESULT_NO_MATCH);
   EXPECT_TRUE(manager1.HasValidPasswordForm());
 
   // Form without a username_element but with a password_element.
   credentials.username_element.clear();
-  PasswordFormManager manager2(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager2(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager2, RESULT_NO_MATCH);
   EXPECT_TRUE(manager2.HasValidPasswordForm());
 
   // Form without a password_element but with a username_element.
   credentials.username_element = saved_match()->username_element;
   credentials.password_element.clear();
-  PasswordFormManager manager3(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager3(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager3, RESULT_NO_MATCH);
   EXPECT_TRUE(manager3.HasValidPasswordForm());
 
   // Form with neither a password_element nor a username_element.
   credentials.username_element.clear();
   credentials.password_element.clear();
-  PasswordFormManager manager4(NULL, NULL, kNoDriver, credentials, false);
+  PasswordFormManager manager4(nullptr, nullptr, kNoDriver, credentials, false);
   SimulateMatchingPhase(&manager4, RESULT_NO_MATCH);
   EXPECT_TRUE(manager4.HasValidPasswordForm());
 }
@@ -795,7 +801,7 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
   // "not blacklisted" message.
   EXPECT_CALL(*(client()->mock_driver()), AllowPasswordGenerationForForm(_))
       .Times(1);
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager_no_creds);
+  manager_no_creds.SimulateFetchMatchingLoginsFromPasswordStore();
   manager_no_creds.OnGetPasswordStoreResults(ScopedVector<PasswordForm>());
   Mock::VerifyAndClearExpectations(client()->mock_driver());
 
@@ -806,7 +812,7 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
       &password_manager, client(), client()->driver(), *observed_form(), false);
   EXPECT_CALL(*(client()->mock_driver()), AllowPasswordGenerationForForm(_))
       .Times(1);
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager_creds);
+  manager_creds.SimulateFetchMatchingLoginsFromPasswordStore();
   ScopedVector<PasswordForm> simulated_results;
   simulated_results.push_back(CreateSavedMatch(false));
   manager_creds.OnGetPasswordStoreResults(simulated_results.Pass());
@@ -822,7 +828,7 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
       &password_manager, client(), client()->driver(), signup_form, false);
   EXPECT_CALL(*(client()->mock_driver()), AllowPasswordGenerationForForm(_))
       .Times(1);
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager_dropped_creds);
+  manager_dropped_creds.SimulateFetchMatchingLoginsFromPasswordStore();
   simulated_results.push_back(CreateSavedMatch(false));
   manager_dropped_creds.OnGetPasswordStoreResults(simulated_results.Pass());
   Mock::VerifyAndClearExpectations(client()->mock_driver());
@@ -834,7 +840,7 @@ TEST_F(PasswordFormManagerTest, TestSendNotBlacklistedMessage) {
       &password_manager, client(), client()->driver(), *observed_form(), false);
   EXPECT_CALL(*(client()->mock_driver()), AllowPasswordGenerationForForm(_))
       .Times(0);
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager_blacklisted);
+  manager_blacklisted.SimulateFetchMatchingLoginsFromPasswordStore();
   simulated_results.push_back(CreateSavedMatch(true));
   manager_blacklisted.OnGetPasswordStoreResults(simulated_results.Pass());
   Mock::VerifyAndClearExpectations(client()->mock_driver());
@@ -856,7 +862,7 @@ TEST_F(PasswordFormManagerTest, TestForceInclusionOfGeneratedPasswords) {
   simulated_results[1]->username_value = ASCIIToUTF16("other@gmail.com");
   simulated_results[1]->password_element = ASCIIToUTF16("signup_password");
   simulated_results[1]->username_element = ASCIIToUTF16("signup_username");
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager_match);
+  manager_match.SimulateFetchMatchingLoginsFromPasswordStore();
   manager_match.OnGetPasswordStoreResults(simulated_results.Pass());
   EXPECT_EQ(1u, password_manager.GetLatestBestMatches().size());
 
@@ -873,13 +879,13 @@ TEST_F(PasswordFormManagerTest, TestForceInclusionOfGeneratedPasswords) {
   simulated_results[1]->password_element = ASCIIToUTF16("signup_password");
   simulated_results[1]->username_element = ASCIIToUTF16("signup_username");
   simulated_results[1]->type = PasswordForm::TYPE_GENERATED;
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager_no_match);
+  manager_no_match.SimulateFetchMatchingLoginsFromPasswordStore();
   manager_no_match.OnGetPasswordStoreResults(simulated_results.Pass());
   EXPECT_EQ(2u, password_manager.GetLatestBestMatches().size());
 }
 
 TEST_F(PasswordFormManagerTest, TestSanitizePossibleUsernames) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
   PasswordForm credentials(*observed_form());
   credentials.other_possible_usernames.push_back(ASCIIToUTF16("543-43-1234"));
@@ -999,7 +1005,7 @@ TEST_F(PasswordFormManagerTest, TestScoringPublicSuffixMatch) {
       GURL("http://accounts.google.com/a/ServiceLoginAuth2");
   simulated_results[1]->action =
       GURL("http://accounts.google.com/a/ServiceLogin2");
-  SimulateFetchMatchingLoginsFromPasswordStore(&manager);
+  manager.SimulateFetchMatchingLoginsFromPasswordStore();
   manager.OnGetPasswordStoreResults(simulated_results.Pass());
   EXPECT_EQ(1u, password_manager.GetLatestBestMatches().size());
   EXPECT_EQ("", password_manager.GetLatestBestMatches()
@@ -1007,8 +1013,34 @@ TEST_F(PasswordFormManagerTest, TestScoringPublicSuffixMatch) {
                     ->second->original_signon_realm);
 }
 
+TEST_F(PasswordFormManagerTest, AndroidCredentialsAreAutofilled) {
+  EXPECT_CALL(*(client()->mock_driver()), AllowPasswordGenerationForForm(_));
+
+  TestPasswordManager password_manager(client());
+  PasswordFormManager manager(&password_manager, client(), client()->driver(),
+                              *observed_form(), false);
+
+  // Although Android-based credentials are treated similarly to PSL-matched
+  // credentials in most respects, they should be autofilled as opposed to be
+  // filled on username-select.
+  ScopedVector<PasswordForm> simulated_results;
+  simulated_results.push_back(new PasswordForm());
+  simulated_results[0]->signon_realm = observed_form()->signon_realm;
+  simulated_results[0]->original_signon_realm =
+      "android://hash@com.google.android";
+  simulated_results[0]->origin = observed_form()->origin;
+  simulated_results[0]->username_value = saved_match()->username_value;
+  simulated_results[0]->password_value = saved_match()->password_value;
+
+  manager.SimulateFetchMatchingLoginsFromPasswordStore();
+  manager.OnGetPasswordStoreResults(simulated_results.Pass());
+
+  EXPECT_EQ(1u, password_manager.GetLatestBestMatches().size());
+  EXPECT_FALSE(password_manager.GetLatestWaitForUsername());
+}
+
 TEST_F(PasswordFormManagerTest, InvalidActionURLsDoNotMatch) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   PasswordForm invalid_action_form(*observed_form());
@@ -1022,7 +1054,7 @@ TEST_F(PasswordFormManagerTest, InvalidActionURLsDoNotMatch) {
                 PasswordFormManager::RESULT_ACTION_MATCH);
   // Then when the observed form has an invalid URL:
   PasswordForm valid_action_form(*observed_form());
-  PasswordFormManager invalid_manager(NULL, client(), kNoDriver,
+  PasswordFormManager invalid_manager(nullptr, client(), kNoDriver,
                                       invalid_action_form, false);
   EXPECT_EQ(0,
             invalid_manager.DoesManage(valid_action_form) &
@@ -1030,7 +1062,7 @@ TEST_F(PasswordFormManagerTest, InvalidActionURLsDoNotMatch) {
 }
 
 TEST_F(PasswordFormManagerTest, EmptyActionURLsDoNotMatchNonEmpty) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   PasswordForm empty_action_form(*observed_form());
@@ -1043,7 +1075,7 @@ TEST_F(PasswordFormManagerTest, EmptyActionURLsDoNotMatchNonEmpty) {
                 PasswordFormManager::RESULT_ACTION_MATCH);
   // Then when the observed form has an empty URL:
   PasswordForm valid_action_form(*observed_form());
-  PasswordFormManager empty_action_manager(NULL, client(), kNoDriver,
+  PasswordFormManager empty_action_manager(nullptr, client(), kNoDriver,
                                            empty_action_form, false);
   EXPECT_EQ(0,
             empty_action_manager.DoesManage(valid_action_form) &
@@ -1051,7 +1083,7 @@ TEST_F(PasswordFormManagerTest, EmptyActionURLsDoNotMatchNonEmpty) {
 }
 
 TEST_F(PasswordFormManagerTest, NonHTMLFormsDoNotMatchHTMLForms) {
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   ASSERT_EQ(PasswordForm::SCHEME_HTML, observed_form()->scheme);
@@ -1070,7 +1102,7 @@ TEST_F(PasswordFormManagerTest, NonHTMLFormsDoNotMatchHTMLForms) {
 
 TEST_F(PasswordFormManagerTest, OriginCheck_HostsMatchExactly) {
   // Host part of origins must match exactly, not just by prefix.
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   PasswordForm form_longer_host(*observed_form());
@@ -1083,7 +1115,7 @@ TEST_F(PasswordFormManagerTest, OriginCheck_HostsMatchExactly) {
 TEST_F(PasswordFormManagerTest, OriginCheck_MoreSecureSchemePathsMatchPrefix) {
   // If the URL scheme of the observed form is HTTP, and the compared form is
   // HTTPS, then the compared form can extend the path.
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   PasswordForm form_longer_path(*observed_form());
@@ -1096,7 +1128,7 @@ TEST_F(PasswordFormManagerTest,
        OriginCheck_NotMoreSecureSchemePathsMatchExactly) {
   // If the origin URL scheme of the compared form is not more secure than that
   // of the observed form, then the paths must match exactly.
-  PasswordFormManager manager(NULL, client(), kNoDriver, *observed_form(),
+  PasswordFormManager manager(nullptr, client(), kNoDriver, *observed_form(),
                               false);
 
   PasswordForm form_longer_path(*observed_form());
@@ -1107,7 +1139,7 @@ TEST_F(PasswordFormManagerTest,
 
   PasswordForm secure_observed_form(*observed_form());
   secure_observed_form.origin = GURL("https://accounts.google.com/a/LoginAuth");
-  PasswordFormManager secure_manager(NULL, client(), kNoDriver,
+  PasswordFormManager secure_manager(nullptr, client(), kNoDriver,
                                      secure_observed_form, true);
   // Also for HTTPS in the observed form, and HTTP in the compared form, an
   // exact path match is expected.
@@ -1380,6 +1412,112 @@ TEST_F(PasswordFormManagerTest, PreferredMatchIsUpToDate) {
   // Make sure to access all fields of preferred_match; this way if it was
   // deleted, ASAN might notice it.
   PasswordForm dummy(*form_manager.preferred_match());
+}
+
+TEST_F(PasswordFormManagerTest,
+       IsIngnorableChangePasswordForm_MatchingUsernameAndPassword) {
+  observed_form()->new_password_element =
+      base::ASCIIToUTF16("new_password_field");
+
+  TestPasswordManagerClient client_with_store(mock_store());
+  PasswordFormManager manager(nullptr, &client_with_store,
+                              client_with_store.driver(), *observed_form(),
+                              false);
+  SimulateMatchingPhase(&manager, RESULT_MATCH_FOUND);
+
+  // The user submits a password on a change-password form, which does not use
+  // the "autocomplete=username" mark-up (therefore Chrome had to guess what is
+  // the username), but the user-typed credentials match something already
+  // stored (which confirms that the guess was right).
+  PasswordForm credentials(*observed_form());
+  credentials.username_value = saved_match()->username_value;
+  credentials.password_value = saved_match()->password_value;
+  credentials.new_password_value = ASCIIToUTF16("NewPassword");
+
+  manager.SetSubmittedForm(credentials);
+  EXPECT_FALSE(manager.is_ignorable_change_password_form());
+}
+
+TEST_F(PasswordFormManagerTest,
+       IsIngnorableChangePasswordForm_NotMatchingPassword) {
+  TestPasswordManagerClient client_with_store(mock_store());
+  PasswordFormManager manager(nullptr, &client_with_store,
+                              client_with_store.driver(), *observed_form(),
+                              false);
+  SimulateMatchingPhase(&manager, RESULT_MATCH_FOUND);
+
+  // The user submits a password on a change-password form, which does not use
+  // the "autocomplete=username" mark-up (therefore Chrome had to guess what is
+  // the username), and the user-typed password do not match anything already
+  // stored. There is not much confidence in the guess being right, so the
+  // password should not be stored.
+  saved_match()->password_value = ASCIIToUTF16("DifferentPassword");
+  saved_match()->new_password_element =
+      base::ASCIIToUTF16("new_password_field");
+  saved_match()->new_password_value = base::ASCIIToUTF16("new_pwd");
+  manager.SetSubmittedForm(*saved_match());
+  EXPECT_TRUE(manager.is_ignorable_change_password_form());
+}
+
+TEST_F(PasswordFormManagerTest,
+       IsIngnorableChangePasswordForm_NotMatchingUsername) {
+  TestPasswordManagerClient client_with_store(mock_store());
+  PasswordFormManager manager(nullptr, &client_with_store,
+                              client_with_store.driver(), *observed_form(),
+                              false);
+  SimulateMatchingPhase(&manager, RESULT_MATCH_FOUND);
+
+  // The user submits a password on a change-password form, which does not use
+  // the "autocomplete=username" mark-up (therefore Chrome had to guess what is
+  // the username), and the user-typed username does not match anything already
+  // stored. There is not much confidence in the guess being right, so the
+  // password should not be stored.
+  saved_match()->username_value = ASCIIToUTF16("DifferentUsername");
+  saved_match()->new_password_element =
+      base::ASCIIToUTF16("new_password_field");
+  saved_match()->new_password_value = base::ASCIIToUTF16("new_pwd");
+  manager.SetSubmittedForm(*saved_match());
+  EXPECT_TRUE(manager.is_ignorable_change_password_form());
+}
+
+TEST_F(PasswordFormManagerTest, PasswordToSave_NoElements) {
+  PasswordForm form;
+  EXPECT_TRUE(PasswordFormManager::PasswordToSave(form).empty());
+}
+
+TEST_F(PasswordFormManagerTest, PasswordToSave_NoNewElement) {
+  PasswordForm form;
+  form.password_element = base::ASCIIToUTF16("pwd");
+  base::string16 kValue = base::ASCIIToUTF16("val");
+  form.password_value = kValue;
+  EXPECT_EQ(kValue, PasswordFormManager::PasswordToSave(form));
+}
+
+TEST_F(PasswordFormManagerTest, PasswordToSave_NoOldElement) {
+  PasswordForm form;
+  form.new_password_element = base::ASCIIToUTF16("new_pwd");
+  base::string16 kNewValue = base::ASCIIToUTF16("new_val");
+  form.new_password_value = kNewValue;
+  EXPECT_EQ(kNewValue, PasswordFormManager::PasswordToSave(form));
+}
+
+TEST_F(PasswordFormManagerTest, PasswordToSave_BothButNoNewValue) {
+  PasswordForm form;
+  form.password_element = base::ASCIIToUTF16("pwd");
+  form.new_password_element = base::ASCIIToUTF16("new_pwd");
+  base::string16 kValue = base::ASCIIToUTF16("val");
+  form.password_value = kValue;
+  EXPECT_EQ(kValue, PasswordFormManager::PasswordToSave(form));
+}
+
+TEST_F(PasswordFormManagerTest, PasswordToSave_NewValue) {
+  PasswordForm form;
+  form.password_element = base::ASCIIToUTF16("pwd");
+  form.new_password_element = base::ASCIIToUTF16("new_pwd");
+  form.password_value = base::ASCIIToUTF16("val");
+  base::string16 kNewValue = base::ASCIIToUTF16("new_val");
+  form.new_password_value = kNewValue;
+  EXPECT_EQ(kNewValue, PasswordFormManager::PasswordToSave(form));
 }
 
 }  // namespace password_manager

@@ -42,8 +42,7 @@ class ZoomChangedWatcher : public ZoomObserver {
   ZoomChangedWatcher(
       content::WebContents* web_contents,
       const ZoomController::ZoomChangedEventData& expected_event_data)
-      : web_contents_(web_contents),
-        expected_event_data_(expected_event_data),
+      : expected_event_data_(expected_event_data),
         message_loop_runner_(new content::MessageLoopRunner) {
     ZoomController::FromWebContents(web_contents)->AddObserver(this);
   }
@@ -58,7 +57,6 @@ class ZoomChangedWatcher : public ZoomObserver {
   }
 
  private:
-  content::WebContents* web_contents_;
   ZoomController::ZoomChangedEventData expected_event_data_;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
@@ -138,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, OnPreferenceChanged) {
       new_default_zoom_level,
       new_default_zoom_level,
       ZoomController::ZOOM_MODE_DEFAULT,
-      true);
+      false);
   ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
   // TODO(wjmaclean): Convert this to call partition-specific zoom level prefs
   // when they become available.
@@ -232,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, Observe) {
       new_zoom_level,
       new_zoom_level,
       ZoomController::ZOOM_MODE_DEFAULT,
-      true);  // We have a non-empty host, so this will be 'true'.
+      false);  // The ZoomController did not initiate, so this will be 'false'.
   ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
 
   content::HostZoomMap* host_zoom_map =
@@ -240,6 +238,28 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, Observe) {
           web_contents->GetBrowserContext());
 
   host_zoom_map->SetZoomLevelForHost("about:blank", new_zoom_level);
+  zoom_change_watcher.Wait();
+}
+
+IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, ObserveDisabledModeEvent) {
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  ZoomController* zoom_controller =
+      ZoomController::FromWebContents(web_contents);
+
+  double default_zoom_level = zoom_controller->GetDefaultZoomLevel();
+  double new_zoom_level = default_zoom_level + 1.0;
+  zoom_controller->SetZoomLevel(new_zoom_level);
+
+  ZoomController::ZoomChangedEventData zoom_change_data(
+      web_contents,
+      new_zoom_level,
+      default_zoom_level,
+      ZoomController::ZOOM_MODE_DISABLED,
+      true);
+  ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
+  zoom_controller->SetZoomMode(ZoomController::ZOOM_MODE_DISABLED);
   zoom_change_watcher.Wait();
 }
 

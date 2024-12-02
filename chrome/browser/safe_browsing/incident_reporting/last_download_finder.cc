@@ -13,13 +13,13 @@
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/download_protection_util.h"
 #include "components/history/core/browser/download_constants.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -227,8 +227,9 @@ void LastDownloadFinder::OnMetadataQuery(
   } else {
     // Search history since no metadata was found.
     iter->second = WAITING_FOR_HISTORY;
-    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile, ServiceAccessType::IMPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile, ServiceAccessType::IMPLICIT_ACCESS);
     // No history service is returned for profiles that do not save history.
     if (!history_service) {
       RemoveProfileAndReportIfDone(iter);
@@ -321,9 +322,9 @@ void LastDownloadFinder::Observe(int type,
 }
 
 void LastDownloadFinder::OnHistoryServiceLoaded(
-    HistoryService* history_service) {
+    history::HistoryService* history_service) {
   for (const auto& pair : profile_states_) {
-    HistoryService* hs = HistoryServiceFactory::GetForProfileIfExists(
+    history::HistoryService* hs = HistoryServiceFactory::GetForProfileIfExists(
         pair.first, ServiceAccessType::EXPLICIT_ACCESS);
     if (hs == history_service) {
       // Start the query in the history service if the finder was waiting for
@@ -340,7 +341,7 @@ void LastDownloadFinder::OnHistoryServiceLoaded(
 }
 
 void LastDownloadFinder::HistoryServiceBeingDeleted(
-    HistoryService* history_service) {
+    history::HistoryService* history_service) {
   history_service_observer_.Remove(history_service);
 }
 

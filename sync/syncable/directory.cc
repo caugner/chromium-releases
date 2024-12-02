@@ -77,7 +77,8 @@ Directory::SaveChangesSnapshot::~SaveChangesSnapshot() {
 
 Directory::Kernel::Kernel(
     const std::string& name,
-    const KernelLoadInfo& info, DirectoryChangeDelegate* delegate,
+    const KernelLoadInfo& info,
+    DirectoryChangeDelegate* delegate,
     const WeakHandle<TransactionObserver>& transaction_observer)
     : next_write_transaction_id(0),
       name(name),
@@ -178,15 +179,17 @@ DirOpenResult Directory::OpenImpl(
 
   // Avoids mem leaks on failure.  Harmlessly deletes the empty hash map after
   // the swap in the success case.
-  STLValueDeleter<Directory::MetahandlesMap> deleter(&tmp_handles_map);
+  STLValueDeleter<MetahandlesMap> deleter(&tmp_handles_map);
 
   JournalIndex delete_journals;
+  MetahandleSet metahandles_to_purge;
 
-  DirOpenResult result =
-      store_->Load(&tmp_handles_map, &delete_journals, &info);
+  DirOpenResult result = store_->Load(&tmp_handles_map, &delete_journals,
+                                      &metahandles_to_purge, &info);
   if (OPENED != result)
     return result;
 
+  DCHECK(!kernel_);
   kernel_ = new Kernel(name, info, delegate, transaction_observer);
   delete_journal_.reset(new DeleteJournal(&delete_journals));
   InitializeIndices(&tmp_handles_map);
@@ -195,6 +198,8 @@ DirOpenResult Directory::OpenImpl(
   // prevent local ID reuse in the case of an early crash.  See the comments in
   // TakeSnapshotForSaveChanges() or crbug.com/142987 for more information.
   kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
+
+  kernel_->metahandles_to_purge.swap(metahandles_to_purge);
   if (!SaveChanges())
     return FAILED_INITIAL_WRITE;
 
@@ -334,7 +339,7 @@ int Directory::GetPositionIndex(
     BaseTransaction* trans,
     EntryKernel* kernel) const {
   const OrderedChildSet* siblings =
-      kernel_->parent_child_index.GetChildren(kernel->ref(PARENT_ID));
+      kernel_->parent_child_index.GetSiblings(kernel);
 
   OrderedChildSet::const_iterator it = siblings->find(kernel);
   return std::distance(siblings->begin(), it);
@@ -1226,14 +1231,18 @@ bool Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
     int64 base_version = e.GetBaseVersion();
     int64 server_version = e.GetServerVersion();
     bool using_unique_client_tag = !e.GetUniqueClientTag().empty();
-    bool is_type_root_folder =
-        parentid.IsRoot() &&
-        e.GetUniqueServerTag() == ModelTypeToRootTag(e.GetModelType());
     if (CHANGES_VERSION == base_version || 0 == base_version) {
+      ModelType model_type = e.GetModelType();
+      bool is_client_creatable_type_root_folder =
+          parentid.IsRoot() &&
+          IsTypeWithClientGeneratedRoot(model_type) &&
+          e.GetUniqueServerTag() == ModelTypeToRootTag(model_type);
       if (e.GetIsUnappliedUpdate()) {
         // Must be a new item, or a de-duplicated unique client tag
+        // that was created both locally and remotely, or a type root folder
         // that was created both locally and remotely.
-        if (!(using_unique_client_tag || is_type_root_folder)) {
+        if (!(using_unique_client_tag ||
+              is_client_creatable_type_root_folder)) {
           if (!SyncAssert(e.GetIsDel(), FROM_HERE,
                           "The entry should have been deleted.", trans))
             return false;
@@ -1252,8 +1261,8 @@ bool Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
                           trans))
             return false;
         }
-        if (is_type_root_folder) {
-          // This must be a locally created type root folder
+        if (is_client_creatable_type_root_folder) {
+          // This must be a locally created type root folder.
           if (!SyncAssert(
                   !e.GetIsUnsynced(), FROM_HERE,
                   "Locally created type root folders should not be unsynced.",
@@ -1356,13 +1365,11 @@ syncable::Id Directory::GetPredecessorId(EntryKernel* e) {
   ScopedKernelLock lock(this);
 
   DCHECK(ParentChildIndex::ShouldInclude(e));
-  const OrderedChildSet* children =
-      kernel_->parent_child_index.GetChildren(e->ref(PARENT_ID));
-  DCHECK(children && !children->empty());
-  OrderedChildSet::const_iterator i = children->find(e);
-  DCHECK(i != children->end());
+  const OrderedChildSet* siblings = kernel_->parent_child_index.GetSiblings(e);
+  OrderedChildSet::const_iterator i = siblings->find(e);
+  DCHECK(i != siblings->end());
 
-  if (i == children->begin()) {
+  if (i == siblings->begin()) {
     return Id();
   } else {
     i--;
@@ -1374,14 +1381,12 @@ syncable::Id Directory::GetSuccessorId(EntryKernel* e) {
   ScopedKernelLock lock(this);
 
   DCHECK(ParentChildIndex::ShouldInclude(e));
-  const OrderedChildSet* children =
-      kernel_->parent_child_index.GetChildren(e->ref(PARENT_ID));
-  DCHECK(children && !children->empty());
-  OrderedChildSet::const_iterator i = children->find(e);
-  DCHECK(i != children->end());
+  const OrderedChildSet* siblings = kernel_->parent_child_index.GetSiblings(e);
+  OrderedChildSet::const_iterator i = siblings->find(e);
+  DCHECK(i != siblings->end());
 
   i++;
-  if (i == children->end()) {
+  if (i == siblings->end()) {
     return Id();
   } else {
     return (*i)->ref(ID);
@@ -1494,13 +1499,13 @@ void Directory::UnmarkDirtyEntry(WriteTransaction* trans, Entry* entry) {
 
 void Directory::GetAttachmentIdsToUpload(BaseTransaction* trans,
                                          ModelType type,
-                                         AttachmentIdSet* id_set) {
+                                         AttachmentIdList* ids) {
   // TODO(maniscalco): Maintain an index by ModelType and rewrite this method to
   // use it.  The approach below is likely very expensive because it iterates
   // all entries (bug 415199).
   DCHECK(trans);
-  DCHECK(id_set);
-  id_set->clear();
+  DCHECK(ids);
+  ids->clear();
   AttachmentIdSet on_server_id_set;
   AttachmentIdSet not_on_server_id_set;
   std::vector<int64> metahandles;
@@ -1539,11 +1544,17 @@ void Directory::GetAttachmentIdsToUpload(BaseTransaction* trans,
   // return.
   //
   // TODO(maniscalco): Eliminate redundant metadata storage (bug 415203).
-  std::set_difference(not_on_server_id_set.begin(),
-                      not_on_server_id_set.end(),
-                      on_server_id_set.begin(),
-                      on_server_id_set.end(),
-                      std::inserter(*id_set, id_set->end()));
+  std::set_difference(not_on_server_id_set.begin(), not_on_server_id_set.end(),
+                      on_server_id_set.begin(), on_server_id_set.end(),
+                      std::back_inserter(*ids));
+}
+
+Directory::Kernel* Directory::kernel() {
+  return kernel_;
+}
+
+const Directory::Kernel* Directory::kernel() const {
+  return kernel_;
 }
 
 }  // namespace syncable

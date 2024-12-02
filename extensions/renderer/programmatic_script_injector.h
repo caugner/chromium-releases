@@ -47,8 +47,9 @@ class ProgrammaticScriptInjector : public ScriptInjector {
       UserScript::RunLocation run_location) const override;
   std::vector<std::string> GetCssSources(
       UserScript::RunLocation run_location) const override;
+  void GetRunInfo(ScriptsRunInfo* scripts_run_info,
+                  UserScript::RunLocation run_location) const override;
   void OnInjectionComplete(scoped_ptr<base::ListValue> execution_results,
-                           ScriptsRunInfo* scripts_run_info,
                            UserScript::RunLocation run_location) override;
   void OnWillNotInject(InjectFailureReason reason) override;
 
@@ -64,6 +65,11 @@ class ProgrammaticScriptInjector : public ScriptInjector {
 
   // The url of the frame into which we are injecting.
   GURL url_;
+
+  // The URL of the frame's origin. This is usually identical to |url_|, but
+  // could be different for e.g. about:blank URLs. Do not use this value to make
+  // security decisions, to avoid race conditions (e.g. due to navigation).
+  GURL effective_url_;
 
   // The RenderView to which we send the response upon completion.
   content::RenderView* render_view_;

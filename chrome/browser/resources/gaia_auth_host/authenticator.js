@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+<include src="saml_handler.js">
+
 /**
  * @fileoverview An UI component to authenciate to Chrome. The component hosts
  * IdP web pages in a webview. A client who is interested in monitoring
@@ -9,6 +11,7 @@
  * cr.login.GaiaAuthHost.Listener as defined in this file. After initialization,
  * call {@code load} to start the authentication flow.
  */
+
 cr.define('cr.login', function() {
   'use strict';
 
@@ -21,9 +24,11 @@ cr.define('cr.login', function() {
       'chrome-extension://mfffpogegjflfpflabcdkioaeobkgjik/success.html';
   var SIGN_IN_HEADER = 'google-accounts-signin';
   var EMBEDDED_FORM_HEADER = 'google-accounts-embedded';
-  var SAML_HEADER = 'google-accounts-saml';
   var LOCATION_HEADER = 'location';
+  var SET_COOKIE_HEADER = 'set-cookie';
+  var OAUTH_CODE_COOKIE = 'oauth_code';
   var SERVICE_ID = 'chromeoslogin';
+  var EMBEDDED_SETUP_CHROMEOS_ENDPOINT = 'embedded/setup/chromeos';
 
   /**
    * The source URL parameter for the constrained signin flow.
@@ -56,14 +61,27 @@ cr.define('cr.login', function() {
    * @const
    */
   var SUPPORTED_PARAMS = [
-    'gaiaUrl',       // Gaia url to use;
-    'gaiaPath',      // Gaia path to use without a leading slash;
-    'hl',            // Language code for the user interface;
-    'email',         // Pre-fill the email field in Gaia UI;
-    'service',       // Name of Gaia service;
-    'continueUrl',   // Continue url to use;
-    'frameUrl',      // Initial frame URL to use. If empty defaults to gaiaUrl.
-    'constrained'    // Whether the extension is loaded in a constrained window;
+    'gaiaId',           // Obfuscated GAIA ID to skip the email prompt page
+                        // during the re-auth flow.
+    'gaiaUrl',          // Gaia url to use.
+    'gaiaPath',         // Gaia path to use without a leading slash.
+    'hl',               // Language code for the user interface.
+    'email',            // Pre-fill the email field in Gaia UI.
+    'service',          // Name of Gaia service.
+    'continueUrl',      // Continue url to use.
+    'frameUrl',         // Initial frame URL to use. If empty defaults to
+                        // gaiaUrl.
+    'constrained',      // Whether the extension is loaded in a constrained
+                        // window.
+    'clientId',         // Chrome client id.
+    'needPassword',     // Whether the host is interested in getting a password.
+                        // If this set to |false|, |confirmPasswordCallback| is
+                        // not called before dispatching |authCopleted|.
+                        // Default is |true|.
+    'flow',             // One of 'default', 'enterprise', or 'theftprotection'.
+    'enterpriseDomain', // Domain in which hosting device is (or should be)
+                        // enrolled.
+    'emailDomain'       // Value used to prefill domain for email.
   ];
 
   /**
@@ -82,7 +100,7 @@ cr.define('cr.login', function() {
     this.sessionIndex_ = null;
     this.chooseWhatToSync_ = false;
     this.skipForNow_ = false;
-    this.authFlow_ = AuthFlow.DEFAULT;
+    this.authFlow = AuthFlow.DEFAULT;
     this.loaded_ = false;
     this.idpOrigin_ = null;
     this.continueUrl_ = null;
@@ -90,12 +108,35 @@ cr.define('cr.login', function() {
     this.initialFrameUrl_ = null;
     this.reloadUrl_ = null;
     this.trusted_ = true;
+    this.oauth_code_ = null;
 
-    this.webview_.addEventListener('drop', this.onDrop_.bind(this));
+    this.samlHandler_ = new cr.login.SamlHandler(this.webview_);
+    this.confirmPasswordCallback = null;
+    this.noPasswordCallback = null;
+    this.insecureContentBlockedCallback = null;
+    this.samlApiUsedCallback = null;
+    this.missingGaiaInfoCallback = null;
+    this.needPassword = true;
+    this.samlHandler_.addEventListener(
+        'insecureContentBlocked',
+        this.onInsecureContentBlocked_.bind(this));
+    this.samlHandler_.addEventListener(
+        'authPageLoaded',
+        this.onAuthPageLoaded_.bind(this));
+    Object.defineProperty(this, 'authDomain', {
+      get: (function() {
+        return this.samlHandler_.authDomain;
+      }).bind(this),
+      enumerable: true
+    });
+
+    this.webview_.addEventListener('droplink', this.onDropLink_.bind(this));
     this.webview_.addEventListener(
         'newwindow', this.onNewWindow_.bind(this));
     this.webview_.addEventListener(
         'contentload', this.onContentLoad_.bind(this));
+    this.webview_.addEventListener(
+        'loadabort', this.onLoadAbort_.bind(this));
     this.webview_.addEventListener(
         'loadstop', this.onLoadStop_.bind(this));
     this.webview_.addEventListener(
@@ -106,7 +147,7 @@ cr.define('cr.login', function() {
         ['responseHeaders']);
     this.webview_.request.onHeadersReceived.addListener(
         this.onHeadersReceived_.bind(this),
-        {urls: ['<all_urls>'], types: ['main_frame']},
+        {urls: ['<all_urls>'], types: ['main_frame', 'xmlhttprequest']},
         ['responseHeaders']);
     window.addEventListener(
         'message', this.onMessageFromWebview_.bind(this), false);
@@ -116,9 +157,25 @@ cr.define('cr.login', function() {
         'popstate', this.onPopState_.bind(this), false);
   }
 
-  // TODO(guohui,xiyuan): no need to inherit EventTarget once we deprecate the
-  // old event-based signin flow.
   Authenticator.prototype = Object.create(cr.EventTarget.prototype);
+
+  /**
+   * Reinitializes authentication parameters so that a failed login attempt
+   * would not result in an infinite loop.
+   */
+  Authenticator.prototype.clearCredentials_ = function() {
+    this.email_ = null;
+    this.gaiaId_ = null;
+    this.password_ = null;
+    this.oauth_code_ = null;
+    this.chooseWhatToSync_ = false;
+    this.skipForNow_ = false;
+    this.sessionIndex_ = null;
+    this.trusted_ = true;
+    this.authFlow = AuthFlow.DEFAULT;
+    this.samlHandler_.reset();
+    this.loaded_ = false;
+  };
 
   /**
    * Loads the authenticator component with the given parameters.
@@ -126,49 +183,71 @@ cr.define('cr.login', function() {
    * @param {Object} data Parameters for the authorization flow.
    */
   Authenticator.prototype.load = function(authMode, data) {
+    this.clearCredentials_();
     this.idpOrigin_ = data.gaiaUrl || IDP_ORIGIN;
     this.continueUrl_ = data.continueUrl || CONTINUE_URL;
     this.continueUrlWithoutParams_ =
         this.continueUrl_.substring(0, this.continueUrl_.indexOf('?')) ||
         this.continueUrl_;
     this.isConstrainedWindow_ = data.constrained == '1';
+    this.isNewGaiaFlowChromeOS = data.isNewGaiaFlowChromeOS;
 
     this.initialFrameUrl_ = this.constructInitialFrameUrl_(data);
     this.reloadUrl_ = data.frameUrl || this.initialFrameUrl_;
-    this.authFlow_ = AuthFlow.DEFAULT;
+    // Don't block insecure content for desktop flow because it lands on
+    // http. Otherwise, block insecure content as long as gaia is https.
+    this.samlHandler_.blockInsecureContent = authMode != AuthMode.DESKTOP &&
+        this.idpOrigin_.indexOf('https://') == 0;
+    this.needPassword = !('needPassword' in data) || data.needPassword;
+
+    if (this.isNewGaiaFlowChromeOS) {
+      this.webview_.contextMenus.onShow.addListener(function(e) {
+        e.preventDefault();
+      });
+    }
 
     this.webview_.src = this.reloadUrl_;
-
-    this.loaded_ = false;
   };
 
   /**
    * Reloads the authenticator component.
    */
   Authenticator.prototype.reload = function() {
+    this.clearCredentials_();
     this.webview_.src = this.reloadUrl_;
-    this.authFlow_ = AuthFlow.DEFAULT;
-    this.loaded_ = false;
-  };
-
-  /**
-   * Set focus in Gaia on default input.
-   */
-  Authenticator.prototype.setFocus = function() {
-    this.onFocus_();
   };
 
   Authenticator.prototype.constructInitialFrameUrl_ = function(data) {
-    var url = this.idpOrigin_ + (data.gaiaPath || IDP_PATH);
+    var path = data.gaiaPath;
+    if (!path && this.isNewGaiaFlowChromeOS)
+      path = EMBEDDED_SETUP_CHROMEOS_ENDPOINT;
+    if (!path)
+      path = IDP_PATH;
+    var url = this.idpOrigin_ + path;
 
-    url = appendParam(url, 'continue', this.continueUrl_);
-    url = appendParam(url, 'service', data.service || SERVICE_ID);
+    if (this.isNewGaiaFlowChromeOS) {
+      if (data.chromeType)
+        url = appendParam(url, 'chrometype', data.chromeType);
+      if (data.clientId)
+        url = appendParam(url, 'client_id', data.clientId);
+      if (data.enterpriseDomain)
+        url = appendParam(url, 'manageddomain', data.enterpriseDomain);
+    } else {
+      url = appendParam(url, 'continue', this.continueUrl_);
+      url = appendParam(url, 'service', data.service || SERVICE_ID);
+    }
     if (data.hl)
       url = appendParam(url, 'hl', data.hl);
+    if (data.gaiaId)
+      url = appendParam(url, 'user_id', data.gaiaId);
     if (data.email)
       url = appendParam(url, 'Email', data.email);
     if (this.isConstrainedWindow_)
       url = appendParam(url, 'source', CONSTRAINED_FLOW_SOURCE);
+    if (data.flow)
+      url = appendParam(url, 'flow', data.flow);
+    if (data.emailDomain)
+      url = appendParam(url, 'emaildomain', data.emailDomain);
     return url;
   };
 
@@ -183,7 +262,7 @@ cr.define('cr.login', function() {
       if (currentUrl.indexOf('ntp=1') >= 0)
         this.skipForNow_ = true;
 
-      this.onAuthCompleted_();
+      this.maybeCompleteAuth_();
       return;
     }
 
@@ -208,7 +287,6 @@ cr.define('cr.login', function() {
     }
 
     this.updateHistoryState_(currentUrl);
-
   };
 
   /**
@@ -221,7 +299,7 @@ cr.define('cr.login', function() {
     if (history.state && history.state.url != url)
       history.pushState({url: url}, '');
     else
-      history.replaceState({url: url});
+      history.replaceState({url: url}, '');
   };
 
   /**
@@ -231,16 +309,6 @@ cr.define('cr.login', function() {
    */
   Authenticator.prototype.onFocus_ = function(e) {
     this.webview_.focus();
-    var currentUrl = this.webview_.src;
-    if (currentUrl.lastIndexOf(this.idpOrigin_) == 0) {
-      var msg = {
-        'method': 'focusready'
-      };
-      // TODO(rsorokin): Get rid of this check once issue crbug.com/456118 is
-      // fixed.
-      if (this.webview_.contentWindow)
-        this.webview_.contentWindow.postMessage(msg, currentUrl);
-    }
   };
 
   /**
@@ -281,13 +349,18 @@ cr.define('cr.login', function() {
         this.email_ = signinDetails['email'].slice(1, -1);
         this.gaiaId_ = signinDetails['obfuscatedid'].slice(1, -1);
         this.sessionIndex_ = signinDetails['sessionindex'];
-      } else if (headerName == SAML_HEADER) {
-        this.authFlow_ = AuthFlow.SAML;
       } else if (headerName == LOCATION_HEADER) {
         // If the "choose what to sync" checkbox was clicked, then the continue
         // URL will contain a source=3 field.
         var location = decodeURIComponent(header.value);
         this.chooseWhatToSync_ = !!location.match(/(\?|&)source=3($|&)/);
+      } else if (
+          this.isNewGaiaFlowChromeOS && headerName == SET_COOKIE_HEADER) {
+        var headerValue = header.value;
+        if (headerValue.indexOf(OAUTH_CODE_COOKIE + '=', 0) == 0) {
+          this.oauth_code_ =
+              headerValue.substring(OAUTH_CODE_COOKIE.length + 1).split(';')[0];
+        }
       }
     }
   };
@@ -298,8 +371,16 @@ cr.define('cr.login', function() {
    * @private
    */
   Authenticator.prototype.onMessageFromWebview_ = function(e) {
+    if (!this.isWebviewEvent_(e))
+      return;
+
     // The event origin does not have a trailing slash.
     if (e.origin != this.idpOrigin_.substring(0, this.idpOrigin_.length - 1)) {
+      return;
+    }
+
+    // Gaia messages must be an object with 'method' property.
+    if (typeof e.data != 'object' || !e.data.hasOwnProperty('method')) {
       return;
     }
 
@@ -308,7 +389,80 @@ cr.define('cr.login', function() {
       this.email_ = msg.email;
       this.password_ = msg.password;
       this.chooseWhatToSync_ = msg.chooseWhatToSync;
+    } else if (msg.method == 'dialogShown') {
+      this.dispatchEvent(new Event('dialogShown'));
+    } else if (msg.method == 'dialogHidden') {
+      this.dispatchEvent(new Event('dialogHidden'));
+    } else if (msg.method == 'backButton') {
+      this.dispatchEvent(new CustomEvent('backButton', {detail: msg.show}));
+    } else {
+      console.warn('Unrecognized message from GAIA: ' + msg.method);
     }
+  };
+
+  /**
+   * Invoked by the hosting page to verify the Saml password.
+   */
+  Authenticator.prototype.verifyConfirmedPassword = function(password) {
+    if (!this.samlHandler_.verifyConfirmedPassword(password)) {
+      // Invoke confirm password callback asynchronously because the
+      // verification was based on messages and caller (GaiaSigninScreen)
+      // does not expect it to be called immediately.
+      // TODO(xiyuan): Change to synchronous call when iframe based code
+      // is removed.
+      var invokeConfirmPassword = (function() {
+        this.confirmPasswordCallback(this.samlHandler_.scrapedPasswordCount);
+      }).bind(this);
+      window.setTimeout(invokeConfirmPassword, 0);
+      return;
+    }
+
+    this.password_ = password;
+    this.onAuthCompleted_();
+  };
+
+  /**
+   * Check Saml flow and start password confirmation flow if needed. Otherwise,
+   * continue with auto completion.
+   * @private
+   */
+  Authenticator.prototype.maybeCompleteAuth_ = function() {
+    var missingGaiaInfo = !this.email_ || !this.gaiaId_ || !this.sessionIndex_;
+    if (missingGaiaInfo && !this.skipForNow_) {
+      if (this.missingGaiaInfoCallback)
+        this.missingGaiaInfoCallback();
+
+      this.webview_.src = this.initialFrameUrl_;
+      return;
+    }
+
+    if (this.authFlow != AuthFlow.SAML) {
+      this.onAuthCompleted_();
+      return;
+    }
+
+    if (this.samlHandler_.samlApiUsed) {
+      if (this.samlApiUsedCallback) {
+        this.samlApiUsedCallback();
+      }
+      this.password_ = this.samlHandler_.apiPasswordBytes;
+    } else if (this.samlHandler_.scrapedPasswordCount == 0) {
+      if (this.noPasswordCallback) {
+        this.noPasswordCallback(this.email_);
+      } else {
+        console.error('Authenticator: No password scraped for SAML.');
+      }
+      return;
+    } else if (this.needPassword) {
+      if (this.confirmPasswordCallback) {
+        // Confirm scraped password. The flow follows in
+        // verifyConfirmedPassword.
+        this.confirmPasswordCallback(this.samlHandler_.scrapedPasswordCount);
+        return;
+      }
+    }
+
+    this.onAuthCompleted_();
   };
 
   /**
@@ -316,18 +470,16 @@ cr.define('cr.login', function() {
    * @private
    */
   Authenticator.prototype.onAuthCompleted_ = function() {
-    if (!this.email_ && !this.skipForNow_) {
-      this.webview_.src = this.initialFrameUrl_;
-      return;
-    }
-
+    assert(this.skipForNow_ ||
+           (this.email_ && this.gaiaId_ && this.sessionIndex_));
     this.dispatchEvent(
         new CustomEvent('authCompleted',
           // TODO(rsorokin): get rid of the stub values.
                         {detail: {email: this.email_ || '',
                                   gaiaId: this.gaiaId_ || '',
                                   password: this.password_ || '',
-                                  usingSAML: this.authFlow_ == AuthFlow.SAML,
+                                  authCode: this.oauth_code_,
+                                  usingSAML: this.authFlow == AuthFlow.SAML,
                                   chooseWhatToSync: this.chooseWhatToSync_,
                                   skipForNow: this.skipForNow_,
                                   sessionIndex: this.sessionIndex_ || '',
@@ -335,13 +487,39 @@ cr.define('cr.login', function() {
   };
 
   /**
-   * Invoked at the drop phase of a drag-and-drop operation on the webview.
+   * Invoked when |samlHandler_| fires 'insecureContentBlocked' event.
    * @private
    */
-  Authenticator.prototype.onDrop_ = function(e) {
-    var url = e.dataTransfer.getData('url');
-    if (url)
-      this.dispatchEvent(new CustomEvent('dropLink', {detail: url}));
+  Authenticator.prototype.onInsecureContentBlocked_ = function(e) {
+    if (this.insecureContentBlockedCallback) {
+      this.insecureContentBlockedCallback(e.detail.url);
+    } else {
+      console.error('Authenticator: Insecure content blocked.');
+    }
+  };
+
+  /**
+   * Invoked when |samlHandler_| fires 'authPageLoaded' event.
+   * @private
+   */
+  Authenticator.prototype.onAuthPageLoaded_ = function(e) {
+    if (!e.detail.isSAMLPage)
+      return;
+
+    if (this.authFlow != AuthFlow.SAML) {
+      this.authFlow = AuthFlow.SAML;
+    } else {
+      // Force an authFlowChanged event to update UI with updated auth doamin.
+      cr.dispatchPropertyChange(this, 'authFlow');
+    }
+  };
+
+  /**
+   * Invoked when a link is dropped on the webview.
+   * @private
+   */
+  Authenticator.prototype.onDropLink_ = function(e) {
+    this.dispatchEvent(new CustomEvent('dropLink', {detail: e.url}));
   };
 
   /**
@@ -357,6 +535,14 @@ cr.define('cr.login', function() {
    * @private
    */
   Authenticator.prototype.onContentLoad_ = function(e) {
+    if (this.isConstrainedWindow_) {
+      // Signin content in constrained windows should not zoom. Isolate the
+      // webview from the zooming of other webviews using the 'per-view' zoom
+      // mode, and then set it to 100% zoom.
+      this.webview_.setZoomMode('per-view');
+      this.webview_.setZoom(1);
+    }
+
     // Posts a message to IdP pages to initiate communication.
     var currentUrl = this.webview_.src;
     if (currentUrl.lastIndexOf(this.idpOrigin_) == 0) {
@@ -368,14 +554,25 @@ cr.define('cr.login', function() {
   };
 
   /**
+   * Invoked when the webview fails loading a page.
+   * @private
+   */
+  Authenticator.prototype.onLoadAbort_ = function(e) {
+    this.dispatchEvent(new CustomEvent('loadAbort',
+        {detail: {error: e.reason,
+                  src: this.webview_.src}}));
+  };
+
+  /**
    * Invoked when the webview finishes loading a page.
    * @private
    */
   Authenticator.prototype.onLoadStop_ = function(e) {
     if (!this.loaded_) {
       this.loaded_ = true;
-      this.webview_.focus();
       this.dispatchEvent(new Event('ready'));
+      // Focus webview after dispatching event when webview is already visible.
+      this.webview_.focus();
     }
   };
 
@@ -384,15 +581,29 @@ cr.define('cr.login', function() {
    * @private
    */
   Authenticator.prototype.onLoadCommit_ = function(e) {
-    var currentUrl = e.url;
-
-    // TODO(rsorokin): temporary solution. Need to wait for oauth_code in
-    // headers.
-    if (currentUrl.indexOf('#close', 0) != -1) {
+    if (this.oauth_code_) {
       this.skipForNow_ = true;
-      this.onAuthCompleted_();
+      this.maybeCompleteAuth_();
     }
   };
+
+  /**
+   * Returns |true| if event |e| was sent from the hosted webview.
+   * @private
+   */
+  Authenticator.prototype.isWebviewEvent_ = function(e) {
+    // Note: <webview> prints error message to console if |contentWindow| is not
+    // defined.
+    // TODO(dzhioev): remove the message. http://crbug.com/469522
+    var webviewWindow = this.webview_.contentWindow;
+    return !!webviewWindow && webviewWindow === e.source;
+  };
+
+  /**
+   * The current auth flow of the hosted auth page.
+   * @type {AuthFlow}
+   */
+  cr.defineProperty(Authenticator, 'authFlow');
 
   Authenticator.AuthFlow = AuthFlow;
   Authenticator.AuthMode = AuthMode;
@@ -401,6 +612,7 @@ cr.define('cr.login', function() {
   return {
     // TODO(guohui, xiyuan): Rename GaiaAuthHost to Authenticator once the old
     // iframe-based flow is deprecated.
-    GaiaAuthHost: Authenticator
+    GaiaAuthHost: Authenticator,
+    Authenticator: Authenticator
   };
 });

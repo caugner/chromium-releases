@@ -1,6 +1,17 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
   "add_to_personal_dictionary": {
     "message": "Toevoegen aan persoonlijk woordenboek"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
   },
   "advanced": {
     "message": "Geavanceerd"
@@ -2616,7 +2627,7 @@
     "message": "Je kunt geen handschrift gebruiken omdat het netwerk niet beschikbaar is."
   },
   "handwriting_privacy_info": {
-    "message": "Uw invoer wordt verzonden naar een Google-server om de tekst te herkennen"
+    "message": "Je invoer wordt naar servers van Google verzonden om de tekst te herkennen."
   },
   "hide_keyboard": {
     "message": "toetsenbord verbergen"
@@ -2634,7 +2645,7 @@
     "message": "Correctie negeren voor"
   },
   "ignore_correction_short": {
-    "message": "Ignore correction"
+    "message": "Correctie negeren"
   },
   "il_heb_settings_page": {
     "message": "Pagina met instellingen voor Hebreeuws toetsenbord"
@@ -3000,10 +3011,10 @@
     "message": "Koreaanse toetsenbordindeling"
   },
   "korean_settings_page": {
-    "message": "Pagina met instellingen voor Koreaans"
+    "message": "Pagina met instellingen voor Koreaanse invoermethode"
   },
   "korean_syllable_input": {
-    "message": "Hangul \u00e9\u00e9n voor \u00e9\u00e9n invoeren"
+    "message": "Voer \u00e9\u00e9n lettergreep per keer in"
   },
   "latam_spa_settings_page": {
     "message": "Pagina met instellingen voor Latijns-Amerikaans toetsenbord (Spaans)"
@@ -3105,7 +3116,7 @@
     "message": "Dropdown-menu met suggesties weergeven met Backspace"
   },
   "show_hangul_candidate": {
-    "message": "Hangul-suggesties weergeven"
+    "message": "Kandidaten weergeven in Hangul-modus"
   },
   "shrink_candidates": {
     "message": "kandidatenlijst verkleinen"
@@ -3147,7 +3158,7 @@
     "message": "Tab"
   },
   "touch_keyboard": {
-    "message": "Toetsenbord met aanraakfunctionaliteit"
+    "message": "Schermtoetsenbord"
   },
   "tr_tur_settings_page": {
     "message": "Pagina met instellingen voor Turks toetsenbord"
@@ -3300,7 +3311,7 @@
     "message": "Spraak"
   },
   "voice_privacy_info": {
-    "message": "Je stem wordt naar een Google-server verzonden om de tekst te herkennen"
+    "message": "Je gesproken invoer wordt naar servers van Google verzonden om de tekst te herkennen."
   },
   "voice_turn_off": {
     "message": "tool voor spraakinvoer uitschakelen"

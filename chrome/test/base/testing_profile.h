@@ -6,6 +6,8 @@
 #define CHROME_TEST_BASE_TESTING_PROFILE_H_
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
@@ -215,6 +217,8 @@ class TestingProfile : public Profile {
   // to provide an OffTheRecordProfileImpl instance.
   void SetOffTheRecordProfile(scoped_ptr<Profile> profile);
 
+  void SetSupervisedUserId(const std::string& id);
+
   // content::BrowserContext
   base::FilePath GetPath() const override;
   scoped_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
@@ -233,6 +237,7 @@ class TestingProfile : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
+  content::PermissionManager* GetPermissionManager() override;
 
   TestingProfile* AsTestingProfile() override;
 
@@ -276,6 +281,7 @@ class TestingProfile : public Profile {
 
   PrefService* GetPrefs() override;
   const PrefService* GetPrefs() const override;
+  chrome::ChromeZoomLevelPrefs* GetZoomLevelPrefs() override;
 
   net::URLRequestContextGetter* GetMediaRequestContext() override;
   net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(

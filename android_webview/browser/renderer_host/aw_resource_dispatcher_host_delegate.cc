@@ -24,6 +24,7 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_status.h"
 #include "url/url_constants.h"
 
 using android_webview::AwContentsIoThreadClient;
@@ -92,7 +93,7 @@ IoThreadClientThrottle::IoThreadClientThrottle(int render_process_id,
       request_(request) { }
 
 IoThreadClientThrottle::~IoThreadClientThrottle() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   g_webview_resource_dispatcher_host_delegate.Get().
       RemovePendingThrottleOnIoThread(this);
 }
@@ -102,7 +103,7 @@ const char* IoThreadClientThrottle::GetNameForLogging() const {
 }
 
 void IoThreadClientThrottle::WillStartRequest(bool* defer) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (render_frame_id_ < 1)
     return;
   DCHECK(render_process_id_);
@@ -129,7 +130,7 @@ void IoThreadClientThrottle::WillRedirectRequest(
 
 void IoThreadClientThrottle::OnIoThreadClientReady(int new_render_process_id,
                                                    int new_render_frame_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!MaybeBlockRequest()) {
     controller()->Resume();
@@ -228,9 +229,12 @@ void AwResourceDispatcherHostDelegate::RequestBeginning(
   // We allow intercepting only navigations within main frames. This
   // is used to post onPageStarted. We handle shouldOverrideUrlLoading
   // via a sync IPC.
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME)
+  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
     throttles->push_back(InterceptNavigationDelegate::CreateThrottleFor(
         request));
+  } else {
+    InterceptNavigationDelegate::UpdateUserGestureCarryoverInfo(request);
+  }
 }
 
 void AwResourceDispatcherHostDelegate::OnRequestRedirected(
@@ -239,6 +243,23 @@ void AwResourceDispatcherHostDelegate::OnRequestRedirected(
     content::ResourceContext* resource_context,
     content::ResourceResponse* response) {
   AddExtraHeadersIfNeeded(request, resource_context);
+}
+
+void AwResourceDispatcherHostDelegate::RequestComplete(
+    net::URLRequest* request) {
+  if (request && !request->status().is_success()) {
+    const content::ResourceRequestInfo* request_info =
+        content::ResourceRequestInfo::ForRequest(request);
+    scoped_ptr<AwContentsIoThreadClient> io_client =
+        AwContentsIoThreadClient::FromID(request_info->GetChildID(),
+                                         request_info->GetRenderFrameID());
+    if (io_client) {
+      io_client->OnReceivedError(request);
+    } else {
+      DLOG(WARNING) << "io_client is null, onReceivedError dropped for " <<
+          request->url();
+    }
+  }
 }
 
 
@@ -335,7 +356,7 @@ void AwResourceDispatcherHostDelegate::OnResponseStarted(
 
 void AwResourceDispatcherHostDelegate::RemovePendingThrottleOnIoThread(
     IoThreadClientThrottle* throttle) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   PendingThrottleMap::iterator it = pending_throttles_.find(
       FrameRouteIDPair(throttle->render_process_id(),
                        throttle->render_frame_id()));
@@ -373,7 +394,7 @@ void AwResourceDispatcherHostDelegate::AddPendingThrottleOnIoThread(
     int render_process_id,
     int render_frame_id_id,
     IoThreadClientThrottle* pending_throttle) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   pending_throttles_.insert(
       std::pair<FrameRouteIDPair, IoThreadClientThrottle*>(
           FrameRouteIDPair(render_process_id, render_frame_id_id),
@@ -383,7 +404,7 @@ void AwResourceDispatcherHostDelegate::AddPendingThrottleOnIoThread(
 void AwResourceDispatcherHostDelegate::OnIoThreadClientReadyInternal(
     int new_render_process_id,
     int new_render_frame_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   PendingThrottleMap::iterator it = pending_throttles_.find(
       FrameRouteIDPair(new_render_process_id, new_render_frame_id));
 

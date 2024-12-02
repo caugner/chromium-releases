@@ -15,8 +15,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_observer.h"
-#include "chrome/browser/chromeos/drive/job_list.h"
 #include "chrome/browser/chromeos/drive/sync_client.h"
+#include "chrome/browser/chromeos/extensions/file_manager/device_event_router.h"
+#include "chrome/browser/chromeos/extensions/file_manager/job_event_router.h"
 #include "chrome/browser/chromeos/file_manager/file_watcher.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/volume_manager.h"
@@ -46,17 +47,14 @@ class FileChange;
 }
 
 namespace file_manager {
-class DeviceEventRouter;
 
 // Monitors changes in disk mounts, network connection state and preferences
 // affecting File Manager. Dispatches appropriate File Browser events.
 class EventRouter : public KeyedService,
                     public chromeos::NetworkStateHandlerObserver,
                     public drive::FileSystemObserver,
-                    public drive::JobListObserver,
                     public drive::DriveServiceObserver,
-                    public VolumeManagerObserver,
-                    public content::NotificationObserver {
+                    public VolumeManagerObserver {
  public:
   typedef base::Callback<void(const base::FilePath& virtual_path,
                               const drive::FileChange* list,
@@ -113,12 +111,6 @@ class EventRouter : public KeyedService,
   // chromeos::NetworkStateHandlerObserver overrides.
   void DefaultNetworkChanged(const chromeos::NetworkState* network) override;
 
-  // drive::JobListObserver overrides.
-  void OnJobAdded(const drive::JobInfo& job_info) override;
-  void OnJobUpdated(const drive::JobInfo& job_info) override;
-  void OnJobDone(const drive::JobInfo& job_info,
-                 drive::FileError error) override;
-
   // drive::DriveServiceObserver overrides.
   void OnRefreshTokenInvalid() override;
   void OnReadyToSendRequests() override;
@@ -137,16 +129,11 @@ class EventRouter : public KeyedService,
   void OnDeviceAdded(const std::string& device_path) override;
   void OnDeviceRemoved(const std::string& device_path) override;
   void OnVolumeMounted(chromeos::MountError error_code,
-                       const VolumeInfo& volume_info) override;
+                       const Volume& volume) override;
   void OnVolumeUnmounted(chromeos::MountError error_code,
-                         const VolumeInfo& volume_info) override;
+                         const Volume& volume) override;
   void OnFormatStarted(const std::string& device_path, bool success) override;
   void OnFormatCompleted(const std::string& device_path, bool success) override;
-
-  // content::NotificationObserver overrides.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
 
   // Set custom dispatch directory change event implementation for testing.
   void SetDispatchDirectoryChangeEventImplForTesting(
@@ -195,22 +182,13 @@ class EventRouter : public KeyedService,
   void DispatchMountCompletedEvent(
       extensions::api::file_manager_private::MountCompletedEventType event_type,
       chromeos::MountError error,
-      const VolumeInfo& volume_info);
+      const Volume& volume);
 
   // If needed, opens a file manager window for the removable device mounted at
   // |mount_path|. Disk.mount_path() is empty, since it is being filled out
   // after calling notifying observers by DiskMountManager.
   void ShowRemovableDeviceInFileManager(VolumeType type,
                                         const base::FilePath& mount_path);
-
-  // Manages the list of currently active Drive file transfer jobs.
-  struct DriveJobInfoWithStatus {
-    DriveJobInfoWithStatus();
-    DriveJobInfoWithStatus(const drive::JobInfo& info,
-                           const std::string& status);
-    drive::JobInfo job_info;
-    std::string status;
-  };
 
   // Sends onFileTransferUpdate event right now if |immediate| is set. Otherwise
   // it refrains from sending for a short while, and after that it sends the
@@ -227,18 +205,14 @@ class EventRouter : public KeyedService,
   // This is used for implementing ScheduledDriveFileTransferEvent().
   void SendDriveFileTransferEvent();
 
-  std::map<drive::JobID, DriveJobInfoWithStatus> drive_jobs_;
-  scoped_ptr<DriveJobInfoWithStatus> drive_job_info_for_scheduled_event_;
   base::Time last_copy_progress_event_;
-  base::Time next_send_file_transfer_event_;
 
   WatcherMap file_watchers_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
   Profile* profile_;
 
-  content::NotificationRegistrar notification_registrar_;
-
   scoped_ptr<DeviceEventRouter> device_event_router_;
+  scoped_ptr<JobEventRouter> job_event_router_;
 
   DispatchDirectoryChangeEventImplCallback
       dispatch_directory_change_event_impl_;

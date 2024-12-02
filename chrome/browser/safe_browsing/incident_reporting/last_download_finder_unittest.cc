@@ -15,8 +15,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
-#include "chrome/browser/history/content_visit_delegate.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -28,12 +26,14 @@
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/history/content/browser/content_visit_delegate.h"
 #include "components/history/content/browser/download_constants_utils.h"
 #include "components/history/content/browser/history_database_helper.h"
 #include "components/history/core/browser/download_constants.h"
 #include "components/history/core/browser/download_row.h"
 #include "components/history/core/browser/history_constants.h"
 #include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -55,9 +55,9 @@ KeyedService* BuildHistoryService(content::BrowserContext* context) {
     return NULL;
   }
 
-  HistoryService* history_service =
-      new HistoryService(ChromeHistoryClientFactory::GetForProfile(profile),
-                         scoped_ptr<history::VisitDelegate>());
+  history::HistoryService* history_service = new history::HistoryService(
+      ChromeHistoryClientFactory::GetForProfile(profile),
+      scoped_ptr<history::VisitDelegate>());
   if (history_service->Init(
           profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
           history::HistoryDatabaseParamsForPath(profile->GetPath()))) {
@@ -83,8 +83,9 @@ class LastDownloadFinderTest : public testing::Test {
   // download to its history.
   void CreateProfileWithDownload() {
     TestingProfile* profile = CreateProfile(SAFE_BROWSING_OPT_IN);
-    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile, ServiceAccessType::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS);
     history_service->CreateDownload(
         CreateTestDownloadRow(),
         base::Bind(&LastDownloadFinderTest::OnDownloadCreated,
@@ -171,8 +172,9 @@ class LastDownloadFinderTest : public testing::Test {
   void AddDownload(Profile* profile, const history::DownloadRow& download) {
     base::RunLoop run_loop;
 
-    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile, ServiceAccessType::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS);
     history_service->CreateDownload(
         download,
         base::Bind(&LastDownloadFinderTest::ContinueOnDownloadCreated,

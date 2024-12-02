@@ -14,10 +14,12 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
 
 using autofill::PasswordForm;
 using base::UTF8ToUTF16;
 using base::UTF16ToUTF8;
+using namespace password_manager::metrics_util;
 
 namespace {
 const char kEmptyString[] = "";
@@ -91,11 +93,6 @@ namespace {
 const char kLibsecretAppString[] = "chrome";
 
 // Schema is analagous to the fields in PasswordForm.
-// TODO(gcasto): Adding 'form_data' would be nice, but we would need to
-// serialize in a way that is guaranteed to not have any embedded NULLs. Pickle
-// doesn't make this guarantee, so we just don't serialize this field. Since
-// it's only used to crowd source data collection it doesn't matter that much
-// if it's not available on this platform.
 const SecretSchema kLibsecretSchema = {
     "chrome_libsecret_password_schema",
     // We have to use SECRET_SCHEMA_DONT_MATCH_NAME in order to get old
@@ -121,6 +118,7 @@ const SecretSchema kLibsecretSchema = {
      {"federation_url", SECRET_SCHEMA_ATTRIBUTE_STRING},
      {"skip_zero_click", SECRET_SCHEMA_ATTRIBUTE_INTEGER},
      {"generation_upload_status", SECRET_SCHEMA_ATTRIBUTE_INTEGER},
+     {"form_data", SECRET_SCHEMA_ATTRIBUTE_STRING},
      // This field is always "chrome-profile_id" so that we can search for it.
      {"application", SECRET_SCHEMA_ATTRIBUTE_STRING},
      {nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING}}};
@@ -194,7 +192,14 @@ scoped_ptr<PasswordForm> FormOutOfAttributes(GHashTable* attrs) {
   form->generation_upload_status =
       static_cast<PasswordForm::GenerationUploadStatus>(
           GetUintFromAttributes(attrs, "generation_upload_status"));
-
+  base::StringPiece encoded_form_data =
+      GetStringFromAttributes(attrs, "form_data");
+  if (!encoded_form_data.empty()) {
+    bool success = DeserializeFormDataFromBase64String(encoded_form_data,
+                                                       &form->form_data);
+    FormDeserializationStatus status = success ? GNOME_SUCCESS : GNOME_FAILURE;
+    LogFormDataDeserializationStatus(status);
+  }
   return form.Pass();
 }
 
@@ -237,6 +242,14 @@ void LibsecretAttributesBuilder::Append(const std::string& name,
 
 void LibsecretAttributesBuilder::Append(const std::string& name, int64 value) {
   Append(name, base::Int64ToString(value));
+}
+
+// Generates a profile-specific app string based on profile_id_.
+std::string GetProfileSpecificAppString(LocalProfileId id) {
+  // Originally, the application string was always just "chrome" and used only
+  // so that we had *something* to search for since GNOME Keyring won't search
+  // for nothing. Now we use it to distinguish passwords for different profiles.
+  return base::StringPrintf("%s-%d", kLibsecretAppString, id);
 }
 
 }  // namespace
@@ -283,8 +296,8 @@ password_manager::PasswordStoreChangeList NativeBackendLibsecret::AddLogin(
   // element, and signon_realm first, remove that, and then add the new entry.
   // We'd add the new one first, and then delete the original, but then the
   // delete might actually delete the newly-added entry!
-  ScopedVector<autofill::PasswordForm> forms;
-  AddUpdateLoginSearch(form, SEARCH_USE_SUBMIT, &forms);
+  ScopedVector<autofill::PasswordForm> forms =
+      AddUpdateLoginSearch(form, SEARCH_USE_SUBMIT);
   password_manager::PasswordStoreChangeList changes;
   if (forms.size() > 0) {
     if (forms.size() > 1) {
@@ -316,8 +329,8 @@ bool NativeBackendLibsecret::UpdateLogin(
   DCHECK(changes);
   changes->clear();
 
-  ScopedVector<autofill::PasswordForm> forms;
-  AddUpdateLoginSearch(form, SEARCH_IGNORE_SUBMIT, &forms);
+  ScopedVector<autofill::PasswordForm> forms =
+      AddUpdateLoginSearch(form, SEARCH_IGNORE_SUBMIT);
 
   bool removed = false;
   for (size_t i = 0; i < forms.size(); ++i) {
@@ -378,10 +391,10 @@ bool NativeBackendLibsecret::GetLogins(
   return GetLoginsList(&form, ALL_LOGINS, forms);
 }
 
-void NativeBackendLibsecret::AddUpdateLoginSearch(
+ScopedVector<autofill::PasswordForm>
+NativeBackendLibsecret::AddUpdateLoginSearch(
     const autofill::PasswordForm& lookup_form,
-    AddUpdateLoginSearchOptions options,
-    ScopedVector<autofill::PasswordForm>* forms) {
+    AddUpdateLoginSearchOptions options) {
   LibsecretAttributesBuilder attrs;
   attrs.Append("origin_url", lookup_form.origin.spec());
   attrs.Append("username_element", UTF16ToUTF8(lookup_form.username_element));
@@ -403,10 +416,10 @@ void NativeBackendLibsecret::AddUpdateLoginSearch(
     g_error_free(error);
     if (found)
       g_list_free(found);
-    return;
+    return ScopedVector<autofill::PasswordForm>();
   }
 
-  ConvertFormList(found, &lookup_form, forms);
+  return ConvertFormList(found, &lookup_form);
 }
 
 bool NativeBackendLibsecret::RawAddLogin(const PasswordForm& form) {
@@ -416,6 +429,8 @@ bool NativeBackendLibsecret::RawAddLogin(const PasswordForm& form) {
   if (!date_created)
     date_created = base::Time::Now().ToInternalValue();
   int64 date_synced = form.date_synced.ToInternalValue();
+  std::string form_data;
+  SerializeFormDataToBase64String(form.form_data, &form_data);
   GError* error = nullptr;
   secret_password_store_sync(
       &kLibsecretSchema,
@@ -444,6 +459,7 @@ bool NativeBackendLibsecret::RawAddLogin(const PasswordForm& form) {
       "federation_url", form.federation_url.spec().c_str(),
       "skip_zero_click", form.skip_zero_click,
       "generation_upload_status", form.generation_upload_status,
+      "form_data", form_data.c_str(),
       "application", app_string_.c_str(), nullptr);
 
   if (error) {
@@ -492,12 +508,8 @@ bool NativeBackendLibsecret::GetLoginsList(
     return false;
   }
 
-  return ConvertFormList(found, lookup_form, forms);
-}
-
-bool NativeBackendLibsecret::GetAllLogins(
-    ScopedVector<autofill::PasswordForm>* forms) {
-  return GetLoginsList(nullptr, ALL_LOGINS, forms);
+  *forms = ConvertFormList(found, lookup_form);
+  return true;
 }
 
 bool NativeBackendLibsecret::GetLoginsBetween(
@@ -505,8 +517,9 @@ bool NativeBackendLibsecret::GetLoginsBetween(
     base::Time get_end,
     TimestampToCompare date_to_compare,
     ScopedVector<autofill::PasswordForm>* forms) {
+  forms->clear();
   ScopedVector<autofill::PasswordForm> all_forms;
-  if (!GetAllLogins(&all_forms))
+  if (!GetLoginsList(nullptr, ALL_LOGINS, &all_forms))
     return false;
 
   base::Time autofill::PasswordForm::*date_member =
@@ -547,10 +560,10 @@ bool NativeBackendLibsecret::RemoveLoginsBetween(
   return ok;
 }
 
-bool NativeBackendLibsecret::ConvertFormList(
+ScopedVector<autofill::PasswordForm> NativeBackendLibsecret::ConvertFormList(
     GList* found,
-    const PasswordForm* lookup_form,
-    ScopedVector<autofill::PasswordForm>* forms) {
+    const PasswordForm* lookup_form) {
+  ScopedVector<autofill::PasswordForm> forms;
   password_manager::PSLDomainMatchMetric psl_domain_match_metric =
       password_manager::PSL_DOMAIN_MATCH_NONE;
   GError* error = nullptr;
@@ -588,7 +601,7 @@ bool NativeBackendLibsecret::ConvertFormList(
       } else {
         VLOG(1) << "Unable to access password from list element!";
       }
-      forms->push_back(form.release());
+      forms.push_back(form.release());
     } else {
       VLOG(1) << "Could not initialize PasswordForm from attributes!";
     }
@@ -606,13 +619,5 @@ bool NativeBackendLibsecret::ConvertFormList(
         password_manager::PSL_DOMAIN_MATCH_COUNT);
   }
   g_list_free(found);
-  return true;
-}
-
-std::string NativeBackendLibsecret::GetProfileSpecificAppString(
-    LocalProfileId id) {
-  // Originally, the application string was always just "chrome" and used only
-  // so that we had *something* to search for since GNOME Keyring won't search
-  // for nothing. Now we use it to distinguish passwords for different profiles.
-  return base::StringPrintf("%s-%d", kLibsecretAppString, id);
+  return forms.Pass();
 }

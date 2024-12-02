@@ -5,16 +5,13 @@
 // This module implements a wrapper for a guestview that manages its
 // creation, attaching, and destruction.
 
+var CreateEvent = require('guestViewEvents').CreateEvent;
 var EventBindings = require('event_bindings');
 var GuestViewInternal =
     require('binding').Binding.create('guestViewInternal').generate();
 var GuestViewInternalNatives = requireNative('guest_view_internal');
 
 // Events.
-var CreateEvent = function(name) {
-  var eventOpts = {supportsListeners: true, supportsFilters: true};
-  return new EventBindings.Event(name, undefined, eventOpts);
-};
 var ResizeEvent = CreateEvent('guestViewInternal.onResize');
 
 // Possible states.
@@ -30,7 +27,7 @@ var ERROR_MSG_NOT_ATTACHED = 'The guest is not attached.';
 var ERROR_MSG_NOT_CREATED = 'The guest has not been created.';
 
 // Properties.
-var PROPERTY_ON_RESIZE = 'onResize';
+var PROPERTY_ON_RESIZE = 'onresize';
 
 // Contains and hides the internal implementation details of |GuestView|,
 // including maintaining its state and enforcing the proper usage of its API
@@ -55,7 +52,7 @@ function GuestViewImpl(guestView, viewType, guestInstanceId) {
 
 // Sets up the onResize property on the GuestView.
 GuestViewImpl.prototype.setupOnResize = function() {
-  Object.defineProperty(this.guestView, PROPERTY_ON_RESIZE, {
+  $Object.defineProperty(this.guestView, PROPERTY_ON_RESIZE, {
     get: function() {
       return this[PROPERTY_ON_RESIZE];
     }.bind(this),
@@ -69,7 +66,7 @@ GuestViewImpl.prototype.setupOnResize = function() {
     if (!this[PROPERTY_ON_RESIZE]) {
       return;
     }
-    this[PROPERTY_ON_RESIZE](e.oldWidth, e.oldHeight, e.newWidth, e.newHeight);
+    this[PROPERTY_ON_RESIZE](e);
   }.bind(this);
 };
 
@@ -146,21 +143,13 @@ GuestViewImpl.prototype.attachImpl = function(
   // callback, handle potential attaching failure, register an automatic detach,
   // and advance the queue.
   var callbackWrapper = function(callback, contentWindow) {
-    this.contentWindow = contentWindow;
-
     // Check if attaching failed.
-    if (this.contentWindow === null) {
+    if (!contentWindow) {
       this.state = GUEST_STATE_CREATED;
+      this.internalInstanceId = 0;
     } else {
-      // Detach automatically when the container is destroyed.
-      GuestViewInternalNatives.RegisterDestructionCallback(internalInstanceId,
-                                                           function() {
-        if (this.state == GUEST_STATE_ATTACHED) {
-          this.contentWindow = null;
-          this.internalInstanceId = 0;
-          this.state = GUEST_STATE_CREATED;
-        }
-      }.bind(this));
+      // Only update the contentWindow if attaching is successful.
+      this.contentWindow = contentWindow;
     }
 
     this.handleCallback(callback);
@@ -174,6 +163,18 @@ GuestViewImpl.prototype.attachImpl = function(
 
   this.internalInstanceId = internalInstanceId;
   this.state = GUEST_STATE_ATTACHED;
+
+  // Detach automatically when the container is destroyed.
+  GuestViewInternalNatives.RegisterDestructionCallback(internalInstanceId,
+                                                       function() {
+    if (this.state != GUEST_STATE_ATTACHED ||
+        this.internalInstanceId != internalInstanceId) {
+      return;
+    }
+
+    this.internalInstanceId = 0;
+    this.state = GUEST_STATE_CREATED;
+  }.bind(this));
 };
 
 // Internal implementation of create().
@@ -187,12 +188,15 @@ GuestViewImpl.prototype.createImpl = function(createParams, callback) {
   // Callback wrapper function to store the guestInstanceId from the
   // createGuest() callback, handle potential creation failure, and advance the
   // queue.
-  var callbackWrapper = function(callback, guestInstanceId) {
-    this.id = guestInstanceId;
+  var callbackWrapper = function(callback, guestInfo) {
+    this.id = guestInfo.id;
+    this.contentWindow =
+        GuestViewInternalNatives.GetContentWindow(guestInfo.contentWindowId);
 
     // Check if creation failed.
     if (this.id === 0) {
       this.state = GUEST_STATE_START;
+      this.contentWindow = null;
     }
 
     ResizeEvent.addListener(this.callOnResize, {instanceId: this.id});
@@ -250,7 +254,6 @@ GuestViewImpl.prototype.detachImpl = function(callback) {
       this.internalInstanceId,
       this.handleCallback.bind(this, callback));
 
-  this.contentWindow = null;
   this.internalInstanceId = 0;
   this.state = GUEST_STATE_CREATED;
 };

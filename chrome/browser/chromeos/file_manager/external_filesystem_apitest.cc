@@ -224,9 +224,7 @@ scoped_ptr<google_apis::FileResource> AddDirectoryToDriveService(
   google_apis::DriveApiErrorCode error = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> entry;
   fake_drive_service->AddNewDirectory(
-      parent_resource_id,
-      title,
-      drive::DriveServiceInterface::AddNewDirectoryOptions(),
+      parent_resource_id, title, drive::AddNewDirectoryOptions(),
       google_apis::test_util::CreateCopyResultCallback(&error, &entry));
   base::RunLoop().RunUntilIdle();
   if (error != google_apis::HTTP_CREATED)
@@ -452,8 +450,10 @@ class LocalFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
                                          storage::kFileSystemTypeNativeLocal,
                                          storage::FileSystemMountOption(),
                                          mount_point_dir_));
-    VolumeManager::Get(browser()->profile())->AddVolumeInfoForTesting(
-        mount_point_dir_, VOLUME_TYPE_TESTING, chromeos::DEVICE_TYPE_UNKNOWN);
+    VolumeManager::Get(browser()->profile())
+        ->AddVolumeForTesting(mount_point_dir_, VOLUME_TYPE_TESTING,
+                              chromeos::DEVICE_TYPE_UNKNOWN,
+                              false /* read_only */);
   }
 
  private:
@@ -483,8 +483,10 @@ class RestrictedFileSystemExtensionApiTest
                                  storage::kFileSystemTypeRestrictedNativeLocal,
                                  storage::FileSystemMountOption(),
                                  mount_point_dir_));
-    VolumeManager::Get(browser()->profile())->AddVolumeInfoForTesting(
-        mount_point_dir_, VOLUME_TYPE_TESTING, chromeos::DEVICE_TYPE_UNKNOWN);
+    VolumeManager::Get(browser()->profile())
+        ->AddVolumeForTesting(mount_point_dir_, VOLUME_TYPE_TESTING,
+                              chromeos::DEVICE_TYPE_UNKNOWN,
+                              true /* read_only */);
   }
 
  private:
@@ -529,6 +531,13 @@ class DriveFileSystemExtensionApiTest : public FileSystemExtensionApiTestBase {
   // DriveIntegrationService factory function for this test.
   drive::DriveIntegrationService* CreateDriveIntegrationService(
       Profile* profile) {
+    // Ignore signin profile.
+    if (profile->GetPath() == chromeos::ProfileHelper::GetSigninProfileDir())
+      return NULL;
+
+    // DriveFileSystemExtensionApiTest doesn't expect that several user profiles
+    // could exist simultaneously.
+    DCHECK(fake_drive_service_ == NULL);
     fake_drive_service_ = new drive::FakeDriveService;
     fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
@@ -676,9 +685,9 @@ class LocalAndDriveFileSystemExtensionApiTest
                                          storage::FileSystemMountOption(),
                                          local_mount_point_dir_));
     VolumeManager::Get(browser()->profile())
-        ->AddVolumeInfoForTesting(local_mount_point_dir_,
-                                  VOLUME_TYPE_TESTING,
-                                  chromeos::DEVICE_TYPE_UNKNOWN);
+        ->AddVolumeForTesting(local_mount_point_dir_, VOLUME_TYPE_TESTING,
+                              chromeos::DEVICE_TYPE_UNKNOWN,
+                              false /* read_only */);
     test_util::WaitUntilDriveMountPointIsAdded(browser()->profile());
   }
 

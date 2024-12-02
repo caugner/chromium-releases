@@ -27,6 +27,13 @@
 namespace ui {
 namespace {
 
+class FakeReflector : public Reflector {
+ public:
+  FakeReflector() {}
+  ~FakeReflector() override {}
+  void OnMirroringCompositorResized() override {}
+};
+
 // An OutputSurface implementation that directly draws and swaps to an actual
 // GL surface.
 class DirectOutputSurface : public cc::OutputSurface {
@@ -81,9 +88,7 @@ InProcessContextFactory::~InProcessContextFactory() {
 }
 
 void InProcessContextFactory::CreateOutputSurface(
-    base::WeakPtr<Compositor> compositor,
-    bool software_fallback) {
-  DCHECK(!software_fallback);
+    base::WeakPtr<Compositor> compositor) {
   gpu::gles2::ContextCreationAttribHelper attribs;
   attribs.alpha_size = 8;
   attribs.blue_size = 8;
@@ -134,14 +139,14 @@ void InProcessContextFactory::CreateOutputSurface(
   }
 }
 
-scoped_refptr<Reflector> InProcessContextFactory::CreateReflector(
-    Compositor* mirroed_compositor,
+scoped_ptr<Reflector> InProcessContextFactory::CreateReflector(
+    Compositor* mirrored_compositor,
     Layer* mirroring_layer) {
-  return new Reflector();
+  return make_scoped_ptr(new FakeReflector);
 }
 
-void InProcessContextFactory::RemoveReflector(
-    scoped_refptr<Reflector> reflector) {}
+void InProcessContextFactory::RemoveReflector(Reflector* reflector) {
+}
 
 scoped_refptr<cc::ContextProvider>
 InProcessContextFactory::SharedMainThreadContextProvider() {
@@ -170,6 +175,10 @@ bool InProcessContextFactory::DoesCreateTestContexts() {
   return context_factory_for_test_;
 }
 
+uint32 InProcessContextFactory::GetImageTextureTarget() {
+  return GL_TEXTURE_2D;
+}
+
 cc::SharedBitmapManager* InProcessContextFactory::GetSharedBitmapManager() {
   return &shared_bitmap_manager_;
 }
@@ -179,10 +188,8 @@ InProcessContextFactory::GetGpuMemoryBufferManager() {
   return &gpu_memory_buffer_manager_;
 }
 
-base::MessageLoopProxy* InProcessContextFactory::GetCompositorMessageLoop() {
-  if (!compositor_thread_)
-    return NULL;
-  return compositor_thread_->message_loop_proxy().get();
+cc::TaskGraphRunner* InProcessContextFactory::GetTaskGraphRunner() {
+  return &task_graph_runner_;
 }
 
 scoped_ptr<cc::SurfaceIdAllocator>

@@ -16,8 +16,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
-import org.chromium.chrome.browser.invalidation.InvalidationServiceFactory;
-import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.sync.internal_api.pub.PassphraseType;
 import org.chromium.sync.internal_api.pub.base.ModelType;
 
@@ -55,7 +53,7 @@ public class ProfileSyncService {
     @VisibleForTesting
     public static final String SESSION_TAG_PREFIX = "session_sync";
 
-    private static ProfileSyncService sSyncSetupManager;
+    private static ProfileSyncService sProfileSyncService;
 
     @VisibleForTesting
     protected final Context mContext;
@@ -78,16 +76,21 @@ public class ProfileSyncService {
     @SuppressFBWarnings("LI_LAZY_INIT")
     public static ProfileSyncService get(Context context) {
         ThreadUtils.assertOnUiThread();
-        if (sSyncSetupManager == null) {
-            sSyncSetupManager = new ProfileSyncService(context);
+        if (sProfileSyncService == null) {
+            sProfileSyncService = new ProfileSyncService(context);
         }
-        return sSyncSetupManager;
+        return sProfileSyncService;
+    }
+
+    @VisibleForTesting
+    public static void overrideForTests(ProfileSyncService profileSyncService) {
+        sProfileSyncService = profileSyncService;
     }
 
     /**
      * This is called pretty early in our application. Avoid any blocking operations here.
      */
-    private ProfileSyncService(Context context) {
+    protected ProfileSyncService(Context context) {
         ThreadUtils.assertOnUiThread();
         // We should store the application context, as we outlive any activity which may create us.
         mContext = context.getApplicationContext();
@@ -137,15 +140,6 @@ public class ProfileSyncService {
         // Notify listeners right away that the sync state has changed (native side does not do
         // this)
         syncStateChanged();
-    }
-
-    // TODO(maxbogue): Remove once downstream use is removed. See http://crbug.com/259559.
-    // Callers should use InvalidationService.requestSyncFromNativeChromeForAllTypes() instead.
-    @Deprecated
-    public void requestSyncFromNativeChromeForAllTypes() {
-        ThreadUtils.assertOnUiThread();
-        InvalidationServiceFactory.getForProfile(Profile.getLastUsedProfile())
-                .requestSyncFromNativeChromeForAllTypes();
     }
 
     public String querySyncStatus() {
@@ -359,6 +353,9 @@ public class ProfileSyncService {
         }
         if ((modelTypeSelection & ModelTypeSelection.AUTOFILL_PROFILE) != 0) {
             syncTypes.add(ModelType.AUTOFILL_PROFILE);
+        }
+        if ((modelTypeSelection & ModelTypeSelection.AUTOFILL_WALLET) != 0) {
+            syncTypes.add(ModelType.AUTOFILL_WALLET);
         }
         if ((modelTypeSelection & ModelTypeSelection.BOOKMARK) != 0) {
             syncTypes.add(ModelType.BOOKMARK);

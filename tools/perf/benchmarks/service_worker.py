@@ -6,14 +6,15 @@ import collections
 import page_sets
 import re
 
-from measurements import timeline_controller
-from metrics import speedindex
 from telemetry import benchmark
 from telemetry.core import util
 from telemetry.page import page_test
 from telemetry.timeline import async_slice as async_slice_module
 from telemetry.timeline import slice as slice_module
 from telemetry.value import scalar
+
+from measurements import timeline_controller
+from metrics import speedindex
 
 
 class _ServiceWorkerTimelineMetric(object):
@@ -86,8 +87,7 @@ class _ServiceWorkerMeasurement(page_test.PageTest):
   """Measure Speed Index and TRACE_EVENTs"""
 
   def __init__(self):
-    super(_ServiceWorkerMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_ServiceWorkerMeasurement, self).__init__()
     self._timeline_controller = timeline_controller.TimelineController()
     self._speed_index = speedindex.SpeedIndexMetric()
     self._page_open_times = collections.defaultdict(int)
@@ -139,8 +139,7 @@ class _ServiceWorkerMicroBenchmarkMeasurement(page_test.PageTest):
   """Measure JS land values and TRACE_EVENTs"""
 
   def __init__(self):
-    super(_ServiceWorkerMicroBenchmarkMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_ServiceWorkerMicroBenchmarkMeasurement, self).__init__()
     self._timeline_controller = timeline_controller.TimelineController()
 
   def CustomizeBrowserOptions(self, options):
@@ -174,8 +173,6 @@ class _ServiceWorkerMicroBenchmarkMeasurement(page_test.PageTest):
         browser_process, 'IOThread', filter_text , results)
 
 
-# TODO(simonhatch): Temporarily disabling (http://crbug.com/433943)
-@benchmark.Disabled
 class ServiceWorkerPerfTest(benchmark.Benchmark):
   """Performance test on public applications using ServiceWorker"""
   test = _ServiceWorkerMeasurement
@@ -187,7 +184,8 @@ class ServiceWorkerPerfTest(benchmark.Benchmark):
 
 
 # Disabled due to redness on the tree. crbug.com/442752
-@benchmark.Disabled
+# TODO(horo): Enable after the reference build newer than M39 will be rolled.
+@benchmark.Disabled('reference')
 class ServiceWorkerMicroBenchmarkPerfTest(benchmark.Benchmark):
   """This test measures the performance of pages using ServiceWorker.
 

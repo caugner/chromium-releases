@@ -15,6 +15,9 @@
         android:orientation="vertical"
         android:focusableInTouchMode="true" >
 
+        <!-- EditText views in FloatLabelLayout require both hint and contentDescription to be set
+             to work correctly for accessibility because FloatLabelLayout sometimes clear hint. -->
+        <!--suppress ContentDescription -->
         <LinearLayout
             style="@style/PreferenceScreenLayout"
             android:layout_width="match_parent"
@@ -61,8 +64,7 @@
                     android:imeOptions="flagNoExtractUi"
                     android:inputType="phone"
                     android:singleLine="true"
-                    android:hint="@string/autofill_profile_editor_phone_number"
-                    android:contentDescription="@string/autofill_profile_editor_phone_number" />
+                    android:hint="@string/autofill_profile_editor_phone_number" />
             </org.chromium.chrome.browser.widget.FloatLabelLayout>
 
             <org.chromium.chrome.browser.widget.FloatLabelLayout
@@ -76,8 +78,7 @@
                     android:imeOptions="flagNoExtractUi"
                     android:inputType="textEmailAddress"
                     android:singleLine="true"
-                    android:hint="@string/autofill_profile_editor_email_address"
-                    android:contentDescription="@string/autofill_profile_editor_email_address" />
+                    android:hint="@string/autofill_profile_editor_email_address" />
             </org.chromium.chrome.browser.widget.FloatLabelLayout>
 
         </LinearLayout>

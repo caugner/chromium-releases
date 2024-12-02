@@ -16,7 +16,7 @@
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -676,7 +676,7 @@ TEST_F(SyncApiTest, GetTotalNodeCountMultipleChildren) {
 TEST_F(SyncApiTest, AttachmentLinking) {
   // Add an entry with an attachment.
   std::string tag1("some tag");
-  syncer::AttachmentId attachment_id(syncer::AttachmentId::Create());
+  syncer::AttachmentId attachment_id(syncer::AttachmentId::Create(0, 0));
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   *record->mutable_id() = attachment_id.GetProto();
@@ -955,7 +955,7 @@ class SyncManagerTest : public testing::Test,
   }
 
   void PumpLoop() {
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetJsEventHandler(const WeakHandle<JsEventHandler>& event_handler) {
@@ -2896,6 +2896,39 @@ TEST_F(SyncManagerChangeProcessingTest, AddBookmarks) {
   EXPECT_LT(folder_change_pos, child_change_pos);
 }
 
+// Test creation of a preferences (with implicit parent Id)
+TEST_F(SyncManagerChangeProcessingTest, AddPreferences) {
+  int64 item1_id = kInvalidId;
+  int64 item2_id = kInvalidId;
+
+  // Create two preferences.
+  {
+    syncable::WriteTransaction trans(FROM_HERE, syncable::SYNCER,
+                                     share()->directory.get());
+
+    syncable::MutableEntry item1(&trans, syncable::CREATE, PREFERENCES,
+                                 "test_item_1");
+    ASSERT_TRUE(item1.good());
+    SetNodeProperties(&item1);
+    item1_id = item1.GetMetahandle();
+
+    // Need at least two items to ensure hitting all possible codepaths in
+    // ChangeReorderBuffer::Traversal::ExpandToInclude.
+    syncable::MutableEntry item2(&trans, syncable::CREATE, PREFERENCES,
+                                 "test_item_2");
+    ASSERT_TRUE(item2.good());
+    SetNodeProperties(&item2);
+    item2_id = item2.GetMetahandle();
+  }
+
+  // The closing of the above scope will delete the transaction.  Its processed
+  // changes should be waiting for us in a member of the test harness.
+  EXPECT_EQ(2UL, GetChangeListSize());
+
+  FindChangeInList(item1_id, ChangeRecord::ACTION_ADD);
+  FindChangeInList(item2_id, ChangeRecord::ACTION_ADD);
+}
+
 // Test moving a bookmark into an empty folder.
 TEST_F(SyncManagerChangeProcessingTest, MoveBookmarkIntoEmptyFolder) {
   int64 type_root = GetIdForDataType(BOOKMARKS);
@@ -3112,7 +3145,7 @@ TEST_F(SyncManagerChangeProcessingTest, AttachmentMetadataOnlyChanges) {
         FROM_HERE, syncable::SYNCER, share()->directory.get());
     syncable::MutableEntry article(&trans, syncable::GET_BY_HANDLE, article_id);
     sync_pb::AttachmentMetadata metadata;
-    *metadata.add_record()->mutable_id() = CreateAttachmentIdProto();
+    *metadata.add_record()->mutable_id() = CreateAttachmentIdProto(0, 0);
     article.PutAttachmentMetadata(metadata);
   }
   ASSERT_EQ(1UL, GetChangeListSize());
@@ -3126,7 +3159,7 @@ TEST_F(SyncManagerChangeProcessingTest, AttachmentMetadataOnlyChanges) {
         FROM_HERE, syncable::SYNCER, share()->directory.get());
     syncable::MutableEntry article(&trans, syncable::GET_BY_HANDLE, article_id);
     sync_pb::AttachmentMetadata metadata = article.GetAttachmentMetadata();
-    *metadata.add_record()->mutable_id() = CreateAttachmentIdProto();
+    *metadata.add_record()->mutable_id() = CreateAttachmentIdProto(0, 0);
     article.PutAttachmentMetadata(metadata);
   }
   ASSERT_EQ(1UL, GetChangeListSize());

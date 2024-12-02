@@ -40,6 +40,7 @@ extern const char kChromeUIEditSearchEngineDialogURL[];
 extern const char kChromeUIExtensionIconURL[];
 extern const char kChromeUIExtensionsFrameURL[];
 extern const char kChromeUIExtensionsURL[];
+extern const char kChromeUIFallbackIconURL[];
 extern const char kChromeUIFaviconURL[];
 extern const char kChromeUIFeedbackURL[];
 extern const char kChromeUIFlagsURL[];
@@ -53,6 +54,7 @@ extern const char kChromeUIInspectURL[];
 extern const char kChromeUIInstantURL[];
 extern const char kChromeUIInterstitialURL[];
 extern const char kChromeUIInvalidationsURL[];
+extern const char kChromeUILargeIconURL[];
 extern const char kChromeUIMemoryRedirectURL[];
 extern const char kChromeUIMemoryURL[];
 extern const char kChromeUIMetroFlowURL[];
@@ -177,6 +179,7 @@ extern const char kChromeUIEditSearchEngineDialogHost[];
 extern const char kChromeUIExtensionIconHost[];
 extern const char kChromeUIExtensionsFrameHost[];
 extern const char kChromeUIExtensionsHost[];
+extern const char kChromeUIFallbackIconHost[];
 extern const char kChromeUIFaviconHost[];
 extern const char kChromeUIFeedbackHost[];
 extern const char kChromeUIFlagsHost[];
@@ -193,6 +196,7 @@ extern const char kChromeUIInstantHost[];
 extern const char kChromeUIInterstitialHost[];
 extern const char kChromeUIInvalidationsHost[];
 extern const char kChromeUIKillHost[];
+extern const char kChromeUILargeIconHost[];
 extern const char kChromeUILocalStateHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryInternalsHost[];
@@ -277,6 +281,7 @@ extern const char kChromeUIMobileSetupHost[];
 extern const char kChromeUINetworkHost[];
 extern const char kChromeUINfcDebugHost[];
 extern const char kChromeUIOobeHost[];
+extern const char kChromeUIOobeMdHost[];
 extern const char kChromeUIOSCreditsHost[];
 extern const char kChromeUIPowerHost[];
 extern const char kChromeUIProxySettingsHost[];
@@ -406,9 +411,6 @@ extern const char kKillReasonURL[];
 
 // "Learn more" URL for the Privacy section under Options.
 extern const char kPrivacyLearnMoreURL[];
-
-// Help URL for the Rappor setting.
-extern const char kRapporLearnMoreURL[];
 
 // "Learn more" URL for the "Do not track" setting in the privacy section.
 extern const char kDoNotTrackLearnMoreURL[];

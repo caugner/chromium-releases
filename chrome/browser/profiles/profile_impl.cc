@@ -44,6 +44,8 @@
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
+#include "chrome/browser/permissions/permission_manager.h"
+#include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
@@ -60,10 +62,10 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/push_messaging/push_messaging_service_factory.h"
+#include "chrome/browser/push_messaging/push_messaging_service_impl.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
-#include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
-#include "chrome/browser/services/gcm/push_messaging_service_impl.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
@@ -143,6 +145,7 @@
 #endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/content_settings/content_settings_supervised_provider.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
@@ -475,7 +478,7 @@ ProfileImpl::ProfileImpl(
   BrowserContextDependencyManager::GetInstance()->
       RegisterProfilePrefsForServices(this, pref_registry_.get());
 
-  SupervisedUserSettingsService* supervised_user_settings = NULL;
+  SupervisedUserSettingsService* supervised_user_settings = nullptr;
 #if defined(ENABLE_SUPERVISED_USERS)
   supervised_user_settings =
       SupervisedUserSettingsServiceFactory::GetForProfile(this);
@@ -525,6 +528,8 @@ ProfileImpl::ProfileImpl(
 
 void ProfileImpl::DoFinalInit() {
   TRACE_EVENT0("browser", "ProfileImpl::DoFinalInit")
+  SCOPED_UMA_HISTOGRAM_TIMER("Profile.ProfileImplDoFinalInit");
+
   PrefService* prefs = GetPrefs();
   pref_change_registrar_.Init(prefs);
   pref_change_registrar_.Add(
@@ -616,10 +621,6 @@ void ProfileImpl::DoFinalInit() {
   extensions_cookie_path =
       extensions_cookie_path.Append(chrome::kExtensionsCookieFilename);
 
-  base::FilePath infinite_cache_path = GetPath();
-  infinite_cache_path =
-      infinite_cache_path.Append(FILE_PATH_LITERAL("Infinite Cache"));
-
 #if defined(OS_ANDROID)
   SessionStartupPref::Type startup_pref_type =
       SessionStartupPref::GetDefaultStartupType();
@@ -640,8 +641,8 @@ void ProfileImpl::DoFinalInit() {
 
   io_data_.Init(cookie_path, channel_id_path, cache_path,
                 cache_max_size, media_cache_path, media_cache_max_size,
-                extensions_cookie_path, GetPath(), infinite_cache_path,
-                predictor_, session_cookie_mode, GetSpecialStoragePolicy(),
+                extensions_cookie_path, GetPath(), predictor_,
+                session_cookie_mode, GetSpecialStoragePolicy(),
                 CreateDomainReliabilityMonitor(local_state));
 
 #if defined(ENABLE_PLUGINS)
@@ -679,11 +680,13 @@ void ProfileImpl::DoFinalInit() {
     delegate_->OnProfileCreated(this, true, IsNewProfile());
   }
 
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CREATED,
-      content::Source<Profile>(this),
-      content::NotificationService::NoDetails());
-
+  {
+    SCOPED_UMA_HISTOGRAM_TIMER("Profile.NotifyProfileCreatedTime");
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_PROFILE_CREATED,
+        content::Source<Profile>(this),
+        content::NotificationService::NoDetails());
+  }
 #if !defined(OS_CHROMEOS)
   // Listen for bookmark model load, to bootstrap the sync service.
   // On CrOS sync service will be initialized after sign in.
@@ -691,7 +694,7 @@ void ProfileImpl::DoFinalInit() {
   model->AddObserver(new BookmarkModelLoadedObserver(this));
 #endif
 
-  gcm::PushMessagingServiceImpl::InitializeForProfile(this);
+  PushMessagingServiceImpl::InitializeForProfile(this);
 
 #if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_IOS)
   signin_ui_util::InitializePrefsForProfile(this);
@@ -851,11 +854,10 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
     return;
   }
 
-  // TODO(mirandac): remove migration code after 6 months (crbug.com/69995).
+  // Migrate obsolete prefs.
   if (g_browser_process->local_state())
-    chrome::MigrateBrowserPrefs(this, g_browser_process->local_state());
-  // TODO(ivankr): remove cleanup code eventually (crbug.com/165672).
-  chrome::MigrateUserPrefs(this);
+    chrome::MigrateObsoleteBrowserPrefs(this, g_browser_process->local_state());
+  chrome::MigrateObsoleteProfilePrefs(this);
 
   // |kSessionExitType| was added after |kSessionExitedCleanly|. If the pref
   // value is empty fallback to checking for |kSessionExitedCleanly|.
@@ -884,8 +886,11 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
 
   g_browser_process->profile_manager()->InitProfileUserPrefs(this);
 
-  BrowserContextDependencyManager::GetInstance()->CreateBrowserContextServices(
-      this);
+  {
+    SCOPED_UMA_HISTOGRAM_TIMER("Profile.CreateBrowserContextServicesTime");
+    BrowserContextDependencyManager::GetInstance()->
+      CreateBrowserContextServices(this);
+  }
 
   DCHECK(!net_pref_observer_);
   {
@@ -920,10 +925,6 @@ void ProfileImpl::SetExitType(ExitType exit_type) {
   if (exit_type == EXIT_CRASHED || current_exit_type == EXIT_CRASHED) {
     prefs_->SetString(prefs::kSessionExitType,
                       ExitTypeToSessionTypePrefValue(exit_type));
-
-    // NOTE: If you change what thread this writes on, be sure and update
-    // chrome::SessionEnding().
-    prefs_->CommitPendingWrite();
   }
 }
 
@@ -1041,6 +1042,15 @@ HostContentSettingsMap* ProfileImpl::GetHostContentSettingsMap() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), false);
+#if defined(ENABLE_SUPERVISED_USERS)
+  SupervisedUserSettingsService* supervised_user_settings =
+      SupervisedUserSettingsServiceFactory::GetForProfile(this);
+    scoped_ptr<content_settings::SupervisedProvider> supervised_provider(
+        new content_settings::SupervisedProvider(supervised_user_settings));
+    host_content_settings_map_->RegisterProvider(
+        HostContentSettingsMap::SUPERVISED_PROVIDER,
+        supervised_provider.Pass());
+#endif
   }
   return host_content_settings_map_.get();
 }
@@ -1067,12 +1077,17 @@ storage::SpecialStoragePolicy* ProfileImpl::GetSpecialStoragePolicy() {
 }
 
 content::PushMessagingService* ProfileImpl::GetPushMessagingService() {
-  return gcm::GCMProfileServiceFactory::GetForProfile(
-      this)->push_messaging_service();
+  return PushMessagingServiceFactory::GetForProfile(this);
 }
 
 content::SSLHostStateDelegate* ProfileImpl::GetSSLHostStateDelegate() {
   return ChromeSSLHostStateDelegateFactory::GetForProfile(this);
+}
+
+// TODO(mlamouri): we should all these BrowserContext implementation to Profile
+// instead of repeating them inside all Profile implementations.
+content::PermissionManager* ProfileImpl::GetPermissionManager() {
+  return PermissionManagerFactory::GetForProfile(this);
 }
 
 bool ProfileImpl::IsSameProfile(Profile* profile) {

@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">Een account toevoegen voor <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Schermtoetsenbord uitgeschakeld</translation>
 <translation id="1057289296854808272">Rotatie aan (Tik hier om te wijzigen)</translation>
+<translation id="5548285847212963613">Met de extensie '<ph name="EXTENSION_NAME"/>' kun je verbinding maken met dit netwerk.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> en <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Overloopknop</translation>
 <translation id="7904094684485781019">De beheerder van dit account heeft toegang tot meerdere accounts niet toegestaan.</translation>
@@ -61,6 +62,7 @@ Druk op Shift + Alt om te schakelen.j</translation>
 <translation id="1723752762323179280">Sessie sluiten</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Ja</translation>
+<translation id="4804818685124855865">Verbinding verbreken</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Uitloggen</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@ Druk op Shift + Alt om te schakelen.</translation>
 <translation id="2761704814324807722">Statusvak, tijd <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Vergrendelen</translation>
 <translation id="2805756323405976993">Apps</translation>
-<translation id="2313845391432982560">De extensie <ph name="EXTENSION_NAME"/> kan dit netwerk configureren.</translation>
 <translation id="2872961005593481000">Afsluiten</translation>
 <translation id="3433830597744061105">Accounts beheren</translation>
 <translation id="742594950370306541">Camera is in gebruik.</translation>

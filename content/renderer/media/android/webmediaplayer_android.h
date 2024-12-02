@@ -58,6 +58,7 @@ struct MailboxHolder;
 
 namespace media {
 class CdmContext;
+class CdmFactory;
 class MediaLog;
 class MediaPermission;
 class WebContentDecryptionModuleImpl;
@@ -89,7 +90,7 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
       blink::WebMediaPlayerClient* client,
       base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
       RendererMediaPlayerManager* player_manager,
-      RendererCdmManager* cdm_manager,
+      media::CdmFactory* cdm_factory,
       media::MediaPermission* media_permission,
       blink::WebContentDecryptionModule* initial_cdm,
       scoped_refptr<StreamTextureFactory> factory,
@@ -130,10 +131,18 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
                      unsigned char alpha,
                      SkXfermode::Mode mode);
 
+  // TODO(dshwang): remove |level|. crbug.com/443151
   virtual bool copyVideoTextureToPlatformTexture(
       blink::WebGraphicsContext3D* web_graphics_context,
       unsigned int texture,
       unsigned int level,
+      unsigned int internal_format,
+      unsigned int type,
+      bool premultiply_alpha,
+      bool flip_y);
+  virtual bool copyVideoTextureToPlatformTexture(
+      blink::WebGraphicsContext3D* web_graphics_context,
+      unsigned int texture,
       unsigned int internal_format,
       unsigned int type,
       bool premultiply_alpha,
@@ -255,8 +264,12 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
 
   void OnMediaSourceOpened(blink::WebMediaSource* web_media_source);
 
-  void OnEncryptedMediaInitData(const std::string& init_data_type,
+  void OnEncryptedMediaInitData(media::EmeInitDataType init_data_type,
                                 const std::vector<uint8>& init_data);
+
+  // Called when a decoder detects that the key needed to decrypt the stream
+  // is not available.
+  void OnWaitingForDecryptionKey();
 
  protected:
   // Helper method to update the playing state.
@@ -384,10 +397,9 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
   // Owned by RenderFrameImpl.
   RendererMediaPlayerManager* const player_manager_;
 
-  // Delegates EME calls to the browser process. Owned by RenderFrameImpl.
-  // TODO(xhwang): Remove |cdm_manager_| when prefixed EME is deprecated. See
+  // TODO(xhwang): Remove |cdm_factory_| when prefixed EME is deprecated. See
   // http://crbug.com/249976
-  RendererCdmManager* const cdm_manager_;
+  media::CdmFactory* const cdm_factory_;
 
   media::MediaPermission* media_permission_;
 
@@ -469,9 +481,9 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
   // has been selected.
   std::string current_key_system_;
 
-  // Temporary for EME v0.1. In the future the init data type should be passed
-  // through GenerateKeyRequest() directly from WebKit.
-  std::string init_data_type_;
+  // Temporary for EME v0.1. Not needed for unprefixed EME, and can be removed
+  // when prefixed EME is removed.
+  media::EmeInitDataType init_data_type_;
 
   // Manages decryption keys and decrypts encrypted frames.
   scoped_ptr<media::ProxyDecryptor> proxy_decryptor_;

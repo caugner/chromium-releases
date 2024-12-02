@@ -26,9 +26,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using autofill::PasswordForm;
-using password_manager::ContainsSamePasswordForms;
 using password_manager::PasswordStoreChange;
 using password_manager::PasswordStoreChangeList;
+using password_manager::UnorderedPasswordFormElementsAre;
 using testing::ElementsAreArray;
 using testing::IsEmpty;
 
@@ -80,17 +80,36 @@ class FailingBackend : public PasswordStoreX::NativeBackend {
     return false;
   }
 
+  // Use this as a landmine to check whether results of failed Get*Logins calls
+  // get ignored.
+  static ScopedVector<autofill::PasswordForm> CreateTrashForms() {
+    ScopedVector<autofill::PasswordForm> forms;
+    PasswordForm trash;
+    trash.username_element = base::ASCIIToUTF16("trash u. element");
+    trash.username_value = base::ASCIIToUTF16("trash u. value");
+    trash.password_element = base::ASCIIToUTF16("trash p. element");
+    trash.password_value = base::ASCIIToUTF16("trash p. value");
+    for (size_t i = 0; i < 3; ++i) {
+      trash.origin = GURL(base::StringPrintf("http://trash%zu.com", i));
+      forms.push_back(new PasswordForm(trash));
+    }
+    return forms.Pass();
+  }
+
   bool GetLogins(const PasswordForm& form,
                  ScopedVector<autofill::PasswordForm>* forms) override {
+    *forms = CreateTrashForms();
     return false;
   }
 
   bool GetAutofillableLogins(
       ScopedVector<autofill::PasswordForm>* forms) override {
+    *forms = CreateTrashForms();
     return false;
   }
   bool GetBlacklistLogins(
       ScopedVector<autofill::PasswordForm>* forms) override {
+    *forms = CreateTrashForms();
     return false;
   }
 };
@@ -207,9 +226,9 @@ void LoginDatabaseQueryCallback(password_manager::LoginDatabase* login_db,
                                 MockLoginDatabaseReturn* mock_return) {
   ScopedVector<autofill::PasswordForm> forms;
   if (autofillable)
-    login_db->GetAutofillableLogins(&forms);
+    EXPECT_TRUE(login_db->GetAutofillableLogins(&forms));
   else
-    login_db->GetBlacklistLogins(&forms);
+    EXPECT_TRUE(login_db->GetBlacklistLogins(&forms));
   mock_return->OnLoginDatabaseQueryDone(forms.get());
 }
 
@@ -232,8 +251,8 @@ void InitExpectedForms(bool autofillable,
         L"submit_element",
         L"username_element",
         L"password_element",
-        autofillable ? L"username_value" : NULL,
-        autofillable ? L"password_value" : NULL,
+        autofillable ? L"username_value" : nullptr,
+        autofillable ? L"password_value" : nullptr,
         autofillable,
         false,
         static_cast<double>(i + 1)};
@@ -273,7 +292,7 @@ class PasswordStoreXTest : public testing::TestWithParam<BackendType> {
       case WORKING_BACKEND:
         return new MockBackend();
       default:
-        return NULL;
+        return nullptr;
     }
   }
 
@@ -398,17 +417,19 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
   MockPasswordStoreConsumer consumer;
 
   // The autofillable forms should have been migrated to the native backend.
-  EXPECT_CALL(consumer,
-              OnGetPasswordStoreResultsConstRef(
-                  ContainsSamePasswordForms(expected_autofillable.get())));
+  EXPECT_CALL(
+      consumer,
+      OnGetPasswordStoreResultsConstRef(
+          UnorderedPasswordFormElementsAre(expected_autofillable.get())));
 
   store->GetAutofillableLogins(&consumer);
   base::RunLoop().RunUntilIdle();
 
   // The blacklisted forms should have been migrated to the native backend.
-  EXPECT_CALL(consumer,
-              OnGetPasswordStoreResultsConstRef(
-                  ContainsSamePasswordForms(expected_blacklisted.get())));
+  EXPECT_CALL(
+      consumer,
+      OnGetPasswordStoreResultsConstRef(
+          UnorderedPasswordFormElementsAre(expected_blacklisted.get())));
 
   store->GetBlacklistLogins(&consumer);
   base::RunLoop().RunUntilIdle();
@@ -420,8 +441,9 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
     EXPECT_CALL(ld_return, OnLoginDatabaseQueryDone(IsEmpty()));
   } else {
     // The autofillable logins should still be in the login DB.
-    EXPECT_CALL(ld_return, OnLoginDatabaseQueryDone(ContainsSamePasswordForms(
-                               expected_autofillable.get())));
+    EXPECT_CALL(ld_return,
+                OnLoginDatabaseQueryDone(UnorderedPasswordFormElementsAre(
+                    expected_autofillable.get())));
   }
 
   LoginDatabaseQueryCallback(store->login_db(), true, &ld_return);
@@ -434,8 +456,9 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
     EXPECT_CALL(ld_return, OnLoginDatabaseQueryDone(IsEmpty()));
   } else {
     // The blacklisted logins should still be in the login DB.
-    EXPECT_CALL(ld_return, OnLoginDatabaseQueryDone(ContainsSamePasswordForms(
-                               expected_blacklisted.get())));
+    EXPECT_CALL(ld_return,
+                OnLoginDatabaseQueryDone(UnorderedPasswordFormElementsAre(
+                    expected_blacklisted.get())));
   }
 
   LoginDatabaseQueryCallback(store->login_db(), false, &ld_return);

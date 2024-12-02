@@ -68,10 +68,10 @@ function ListContainer(element, table, grid) {
    * @type {!HTMLElement}
    * @const
    */
-  this.spinner = queryRequiredElement(element, '.spinner-layer');
+  this.spinner = queryRequiredElement(element, '.loading-indicator');
 
   /**
-   * @type {cr.ui.ArrayDataModel}
+   * @type {FileListModel}
    */
   this.dataModel = null;
 
@@ -87,11 +87,9 @@ function ListContainer(element, table, grid) {
 
   /**
    * Data model which is used as a placefolder in inactive file list.
-   * @type {!cr.ui.ArrayDataModel}
-   * @const
-   * @private
+   * @type {FileListModel}
    */
-  this.emptyDataModel_ = new cr.ui.ArrayDataModel([]);
+  this.emptyDataModel = null;
 
   /**
    * Selection model which is used as a placefolder in inactive file list.
@@ -204,6 +202,12 @@ ListContainer.prototype.setCurrentListType = function(listType) {
 
   this.startBatchUpdates();
   this.currentListType = listType;
+
+  this.element.classList.toggle(
+      'list-view', listType === ListContainer.ListType.DETAIL);
+  this.element.classList.toggle(
+      'thumbnail-view', listType === ListContainer.ListType.THUMBNAIL);
+
   // TODO(dzvorygin): style.display and dataModel setting order shouldn't
   // cause any UI bugs. Currently, the only right way is first to set display
   // style and only then set dataModel.
@@ -219,7 +223,7 @@ ListContainer.prototype.setCurrentListType = function(listType) {
       this.grid.hidden = true;
       this.grid.selectionModel = this.emptySelectionModel_;
       this.grid.setListThumbnailLoader(null);
-      this.grid.dataModel = this.emptyDataModel_;
+      this.grid.dataModel = this.emptyDataModel;
       break;
 
     case ListContainer.ListType.THUMBNAIL:
@@ -230,7 +234,7 @@ ListContainer.prototype.setCurrentListType = function(listType) {
       this.table.hidden = true;
       this.table.selectionModel = this.emptySelectionModel_;
       this.table.setListThumbnailLoader(null);
-      this.table.dataModel = this.emptyDataModel_;
+      this.table.dataModel = this.emptyDataModel;
       break;
 
     default:

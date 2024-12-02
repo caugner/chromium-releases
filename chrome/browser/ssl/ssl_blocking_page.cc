@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ssl/ssl_blocking_page.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/build_time.h"
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_service.h"
 #include "base/process/launch.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -20,16 +24,21 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/interstitials/security_interstitial_metrics_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/ssl/ssl_error_classification.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -65,6 +74,7 @@
 using base::ASCIIToUTF16;
 using base::TimeTicks;
 using content::InterstitialPage;
+using content::InterstitialPageDelegate;
 using content::NavigationController;
 using content::NavigationEntry;
 
@@ -117,6 +127,7 @@ void RecordSSLExpirationPageEventState(bool expired_but_previously_allowed,
 }
 
 void LaunchDateAndTimeSettings() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
   // The code for each OS is completely separate, in order to avoid bugs like
   // https://crbug.com/430877 .
 #if defined(OS_ANDROID)
@@ -212,17 +223,20 @@ bool IsErrorDueToBadClock(const base::Time& now, int error) {
 }  // namespace
 
 // static
-const void* SSLBlockingPage::kTypeForTesting =
+InterstitialPageDelegate::TypeID SSLBlockingPage::kTypeForTesting =
     &SSLBlockingPage::kTypeForTesting;
 
 // Note that we always create a navigation entry with SSL errors.
 // No error happening loading a sub-resource triggers an interstitial so far.
-SSLBlockingPage::SSLBlockingPage(content::WebContents* web_contents,
-                                 int cert_error,
-                                 const net::SSLInfo& ssl_info,
-                                 const GURL& request_url,
-                                 int options_mask,
-                                 const base::Callback<void(bool)>& callback)
+SSLBlockingPage::SSLBlockingPage(
+    content::WebContents* web_contents,
+    int cert_error,
+    const net::SSLInfo& ssl_info,
+    const GURL& request_url,
+    int options_mask,
+    const base::Time& time_triggered,
+    SafeBrowsingUIManager* safe_browsing_ui_manager,
+    const base::Callback<void(bool)>& callback)
     : SecurityInterstitialPage(web_contents, request_url),
       callback_(callback),
       cert_error_(cert_error),
@@ -231,28 +245,30 @@ SSLBlockingPage::SSLBlockingPage(content::WebContents* web_contents,
       danger_overridable_(true),
       strict_enforcement_((options_mask & STRICT_ENFORCEMENT) != 0),
       expired_but_previously_allowed_(
-          (options_mask & EXPIRED_BUT_PREVIOUSLY_ALLOWED) != 0) {
+          (options_mask & EXPIRED_BUT_PREVIOUSLY_ALLOWED) != 0),
+      time_triggered_(time_triggered),
+      safe_browsing_ui_manager_(safe_browsing_ui_manager) {
   interstitial_reason_ =
-      IsErrorDueToBadClock(base::Time::NowFromSystemTime(), cert_error_) ?
+      IsErrorDueToBadClock(time_triggered_, cert_error_) ?
       SSL_REASON_BAD_CLOCK : SSL_REASON_SSL;
 
   // We collapse the Rappor metric name to just "ssl" so we don't leak
   // the "overridable" bit.  We skip Rappor altogether for bad clocks.
   // This must be done after calculating |interstitial_reason_| above.
-  metrics_helper_.reset(new SecurityInterstitialMetricsHelper(
+  set_metrics_helper(new SecurityInterstitialMetricsHelper(
       web_contents, request_url, GetUmaHistogramPrefix(), kSSLRapporPrefix,
       (interstitial_reason_ == SSL_REASON_BAD_CLOCK
            ? SecurityInterstitialMetricsHelper::SKIP_RAPPOR
            : SecurityInterstitialMetricsHelper::REPORT_RAPPOR),
       GetSamplingEventName()));
 
-  metrics_helper_->RecordUserDecision(SecurityInterstitialMetricsHelper::SHOW);
-  metrics_helper_->RecordUserInteraction(
+  metrics_helper()->RecordUserDecision(SecurityInterstitialMetricsHelper::SHOW);
+  metrics_helper()->RecordUserInteraction(
       SecurityInterstitialMetricsHelper::TOTAL_VISITS);
 
   ssl_error_classification_.reset(new SSLErrorClassification(
       web_contents,
-      base::Time::NowFromSystemTime(),
+      time_triggered_,
       request_url,
       cert_error_,
       *ssl_info_.cert.get()));
@@ -266,7 +282,7 @@ bool SSLBlockingPage::ShouldCreateNewNavigation() const {
   return true;
 }
 
-const void* SSLBlockingPage::GetTypeForTesting() const {
+InterstitialPageDelegate::TypeID SSLBlockingPage::GetTypeForTesting() const {
   return SSLBlockingPage::kTypeForTesting;
 }
 
@@ -279,7 +295,7 @@ SSLBlockingPage::~SSLBlockingPage() {
   if (!callback_.is_null()) {
     // The page is closed without the user having chosen what to do, default to
     // deny.
-    metrics_helper_->RecordUserDecision(
+    metrics_helper()->RecordUserDecision(
         SecurityInterstitialMetricsHelper::DONT_PROCEED);
     RecordSSLExpirationPageEventState(
         expired_but_previously_allowed_, false, overridable_);
@@ -295,7 +311,6 @@ void SSLBlockingPage::PopulateInterstitialStrings(
   load_time_data->SetString("type", "SSL");
 
   // Shared UI configuration for all SSL interstitials.
-  base::Time now = base::Time::NowFromSystemTime();
   load_time_data->SetString("errorCode", net::ErrorToString(cert_error_));
   load_time_data->SetString(
       "openDetails",
@@ -321,9 +336,10 @@ void SSLBlockingPage::PopulateInterstitialStrings(
     // case.
     danger_overridable_ = false;
 
-    int heading_string = SSLErrorClassification::IsUserClockInTheFuture(now) ?
-                              IDS_SSL_V2_CLOCK_AHEAD_HEADING :
-                              IDS_SSL_V2_CLOCK_BEHIND_HEADING;
+    int heading_string =
+        SSLErrorClassification::IsUserClockInTheFuture(time_triggered_) ?
+        IDS_SSL_V2_CLOCK_AHEAD_HEADING :
+        IDS_SSL_V2_CLOCK_BEHIND_HEADING;
 
     load_time_data->SetString(
         "tabTitle",
@@ -331,11 +347,12 @@ void SSLBlockingPage::PopulateInterstitialStrings(
     load_time_data->SetString(
         "heading",
         l10n_util::GetStringUTF16(heading_string));
-    load_time_data->SetString("primaryParagraph",
-                              l10n_util::GetStringFUTF16(
-                                  IDS_SSL_V2_CLOCK_PRIMARY_PARAGRAPH ,
-                                  url,
-                                  base::TimeFormatFriendlyDateAndTime(now)));
+    load_time_data->SetString(
+        "primaryParagraph",
+        l10n_util::GetStringFUTF16(
+            IDS_SSL_V2_CLOCK_PRIMARY_PARAGRAPH,
+            url,
+            base::TimeFormatFriendlyDateAndTime(time_triggered_)));
 
     load_time_data->SetString(
         "primaryButtonText",
@@ -426,10 +443,40 @@ void SSLBlockingPage::PopulateInterstitialStrings(
       "expirationDate",
       base::TimeFormatShortDate(ssl_info_.cert->valid_expiry()));
   load_time_data->SetString(
-      "currentDate", base::TimeFormatShortDate(now));
+      "currentDate", base::TimeFormatShortDate(time_triggered_));
   std::vector<std::string> encoded_chain;
-  ssl_info_.cert->GetPEMEncodedChain(&encoded_chain);
-  load_time_data->SetString("pem", JoinString(encoded_chain, std::string()));
+  ssl_info_.cert->GetPEMEncodedChain(
+      &encoded_chain);
+  load_time_data->SetString(
+      "pem", JoinString(encoded_chain, std::string()));
+
+  PopulateExtendedReportingOption(load_time_data);
+}
+
+void SSLBlockingPage::PopulateExtendedReportingOption(
+    base::DictionaryValue* load_time_data) {
+  // Only show the checkbox if not off-the-record and if the
+  // command-line option is set.
+  const bool show = !web_contents()->GetBrowserContext()->IsOffTheRecord() &&
+                    base::CommandLine::ForCurrentProcess()->HasSwitch(
+                        switches::kEnableInvalidCertCollection);
+
+  load_time_data->SetBoolean(interstitials::kDisplayCheckBox, show);
+  if (!show)
+    return;
+
+  load_time_data->SetBoolean(
+      interstitials::kBoxChecked,
+      IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingEnabled));
+
+  const std::string privacy_link = base::StringPrintf(
+      interstitials::kPrivacyLinkHtml, CMD_OPEN_REPORTING_PRIVACY,
+      l10n_util::GetStringUTF8(IDS_SAFE_BROWSING_PRIVACY_POLICY_PAGE).c_str());
+
+  load_time_data->SetString(
+      interstitials::kOptInLink,
+      l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MALWARE_REPORTING_AGREE,
+                                 base::UTF8ToUTF16(privacy_link)));
 }
 
 void SSLBlockingPage::OverrideEntry(NavigationEntry* entry) {
@@ -444,10 +491,20 @@ void SSLBlockingPage::OverrideEntry(NavigationEntry* entry) {
   entry->GetSSL().security_bits = ssl_info_.security_bits;
 }
 
-// This handles the commands sent from the interstitial JavaScript. They are
-// defined in chrome/browser/resources/ssl/ssl_errors_common.js.
+void SSLBlockingPage::SetCertificateReportCallbackForTesting(
+    const base::Closure& callback) {
+  certificate_report_callback_for_testing_ = callback;
+}
+
+// This handles the commands sent from the interstitial JavaScript.
 // DO NOT reorder or change this logic without also changing the JavaScript!
 void SSLBlockingPage::CommandReceived(const std::string& command) {
+  if (command == "\"pageLoadComplete\"") {
+    // content::WaitForRenderFrameReady sends this message when the page
+    // load completes. Ignore it.
+    return;
+  }
+
   int cmd = 0;
   bool retval = base::StringToInt(command, &cmd);
   DCHECK(retval);
@@ -462,20 +519,21 @@ void SSLBlockingPage::CommandReceived(const std::string& command) {
       }
       break;
     }
-    case CMD_MORE: {
-      metrics_helper_->RecordUserInteraction(
+    case CMD_DO_REPORT: {
+      SetReportingPreference(true);
+      break;
+    }
+    case CMD_DONT_REPORT: {
+      SetReportingPreference(false);
+      break;
+    }
+    case CMD_SHOW_MORE_SECTION: {
+      metrics_helper()->RecordUserInteraction(
           SecurityInterstitialMetricsHelper::SHOW_ADVANCED);
       break;
     }
-    case CMD_RELOAD: {
-      metrics_helper_->RecordUserInteraction(
-          SecurityInterstitialMetricsHelper::RELOAD);
-      // The interstitial can't refresh itself.
-      web_contents()->GetController().Reload(true);
-      break;
-    }
-    case CMD_HELP: {
-      metrics_helper_->RecordUserInteraction(
+    case CMD_OPEN_HELP_CENTER: {
+      metrics_helper()->RecordUserInteraction(
           SecurityInterstitialMetricsHelper::SHOW_LEARN_MORE);
       content::NavigationController::LoadURLParams help_page_params(
           google_util::AppendGoogleLocaleParam(
@@ -483,15 +541,26 @@ void SSLBlockingPage::CommandReceived(const std::string& command) {
       web_contents()->GetController().LoadURLWithParams(help_page_params);
       break;
     }
-    case CMD_CLOCK: {
-      metrics_helper_->RecordUserInteraction(
-          SecurityInterstitialMetricsHelper::OPEN_TIME_SETTINGS);
-      LaunchDateAndTimeSettings();
+    case CMD_RELOAD: {
+      metrics_helper()->RecordUserInteraction(
+          SecurityInterstitialMetricsHelper::RELOAD);
+      // The interstitial can't refresh itself.
+      web_contents()->GetController().Reload(true);
       break;
     }
-    default: {
-      NOTREACHED();
+    case CMD_OPEN_DATE_SETTINGS: {
+      metrics_helper()->RecordUserInteraction(
+          SecurityInterstitialMetricsHelper::OPEN_TIME_SETTINGS);
+      content::BrowserThread::PostTask(content::BrowserThread::FILE, FROM_HERE,
+                                       base::Bind(&LaunchDateAndTimeSettings));
+      break;
     }
+    case CMD_OPEN_REPORTING_PRIVACY:
+      OpenExtendedReportingPrivacyPolicy();
+      break;
+    case CMD_OPEN_DIAGNOSTIC:
+      // Google doesn't currently have a transparency report for SSL.
+      NOTREACHED() << "Unexpected command: " << command;
   }
 }
 
@@ -504,8 +573,13 @@ void SSLBlockingPage::OverrideRendererPrefs(
 }
 
 void SSLBlockingPage::OnProceed() {
-  metrics_helper_->RecordUserDecision(
+  metrics_helper()->RecordUserDecision(
       SecurityInterstitialMetricsHelper::PROCEED);
+
+  // Finish collecting information about invalid certificates, if the
+  // user opted in to.
+  FinishCertCollection();
+
   RecordSSLExpirationPageEventState(
       expired_but_previously_allowed_, true, overridable_);
   // Accepting the certificate resumes the loading of the page.
@@ -513,8 +587,13 @@ void SSLBlockingPage::OnProceed() {
 }
 
 void SSLBlockingPage::OnDontProceed() {
-  metrics_helper_->RecordUserDecision(
+  metrics_helper()->RecordUserDecision(
       SecurityInterstitialMetricsHelper::DONT_PROCEED);
+
+  // Finish collecting information about invalid certificates, if the
+  // user opted in to.
+  FinishCertCollection();
+
   RecordSSLExpirationPageEventState(
       expired_but_previously_allowed_, false, overridable_);
   NotifyDenyCertificate();
@@ -560,6 +639,32 @@ std::string SSLBlockingPage::GetSamplingEventName() const {
     event_name.append(kEventNotOverridable);
   event_name.append(net::ErrorToString(cert_error_));
   return event_name;
+}
+
+void SSLBlockingPage::FinishCertCollection() {
+  base::ScopedClosureRunner scoped_callback(
+      certificate_report_callback_for_testing_);
+
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableInvalidCertCollection) ||
+      web_contents()->GetBrowserContext()->IsOffTheRecord()) {
+    return;
+  }
+
+  const bool enabled =
+      IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingEnabled);
+
+  if (!enabled)
+    return;
+
+  metrics_helper()->RecordUserInteraction(
+      SecurityInterstitialMetricsHelper::EXTENDED_REPORTING_IS_ENABLED);
+
+  if (certificate_report_callback_for_testing_.is_null())
+    scoped_callback.Reset(base::Bind(&base::DoNothing));
+
+  safe_browsing_ui_manager_->ReportInvalidCertificateChain(
+      request_url().host(), ssl_info_, scoped_callback.Release());
 }
 
 // static

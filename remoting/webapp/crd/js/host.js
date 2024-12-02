@@ -17,17 +17,16 @@ var remoting = remoting || {};
 'use strict';
 
 /**
- * Note that the object has more fields than are detailed below--these
- * are just the ones that we refer to directly.
+ * @param {!string} hostId
  *
  * TODO(kelvinp):Make fields private and expose them via getters.
  * @constructor
  */
-remoting.Host = function() {
+remoting.Host = function(hostId) {
+  /** @const {string} */
+  this.hostId = hostId;
   /** @type {string} */
   this.hostName = '';
-  /** @type {string} */
-  this.hostId = '';
   /** @type {string} */
   this.status = '';
   /** @type {string} */
@@ -43,16 +42,16 @@ remoting.Host = function() {
   /** @type {string} */
   this.hostOfflineReason = '';
   /** @type {remoting.Host.Options} */
-  this.options = new remoting.Host.Options(this.hostId);
+  this.options = new remoting.Host.Options(hostId);
 };
 
 /**
  * @constructor
- * @param {string} hostId
+ * @param {!string} hostId
  * @struct
  */
 remoting.Host.Options = function(hostId) {
-  /** @private */
+  /** @private @const */
   this.hostId_ = hostId;
   /** @type {boolean} */
   this.shrinkToFit = true;
@@ -62,6 +61,8 @@ remoting.Host.Options = function(hostId) {
   this.remapKeys = '';
   /** @type {number} */
   this.desktopScale = 1;
+  /** @type {remoting.PairingInfo} */
+  this.pairingInfo = {clientId: '', sharedSecret: ''};
 };
 
 remoting.Host.Options.prototype.save = function() {
@@ -84,10 +85,13 @@ remoting.Host.Options.prototype.load = function() {
       // TODO(kelvinp): Uses a separate host options for app-remoting that
       // hardcodes resizeToClient to true.
       that.resizeToClient =
-          getBooleanAttr(options, 'resizeToClient', true);
-      that.shrinkToFit = getBooleanAttr(options, 'shrinkToFit', true);
-      that.desktopScale = getNumberAttr(options, 'desktopScale', 1);
-      that.remapKeys = getStringAttr(options, 'remapKeys', '');
+          base.getBooleanAttr(options, 'resizeToClient', true);
+      that.shrinkToFit = base.getBooleanAttr(options, 'shrinkToFit', true);
+      that.desktopScale = base.getNumberAttr(options, 'desktopScale', 1);
+      that.remapKeys = base.getStringAttr(options, 'remapKeys', '');
+      that.pairingInfo =
+          /** @type {remoting.PairingInfo} */ (
+              base.getObjectAttr(options, 'pairingInfo', that.pairingInfo));
     });
 };
 

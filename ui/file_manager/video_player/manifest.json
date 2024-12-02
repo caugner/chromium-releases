@@ -19,8 +19,10 @@
   "permissions": [
     "commandLinePrivate",
     "fileSystem",
-    "fileBrowserHandler",
     "fileManagerPrivate",
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
     "fullscreen",
     "mediaPlayerPrivate",
     "metricsPrivate",

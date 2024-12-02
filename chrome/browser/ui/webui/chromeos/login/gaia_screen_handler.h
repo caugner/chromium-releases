@@ -38,7 +38,7 @@ struct GaiaContext {
   // True if password was changed for the current user.
   bool password_changed;
 
-  // True if user pods can be displyed.
+  // True if user pods can be displayed.
   bool show_users;
 
   // Whether Gaia should be loaded in offline mode.
@@ -47,14 +47,14 @@ struct GaiaContext {
   // True if user list is non-empty.
   bool has_users;
 
-  // Email of current user.
+  // Email of the current user.
   std::string email;
+
+  // GAIA ID of the current user.
+  std::string gaia_id;
 
   // Whether consumer management enrollment is in progress.
   bool is_enrolling_consumer_management;
-
-  // True if embedded_signin is enabled.
-  bool embedded_signin_enabled;
 };
 
 // A class that handles WebUI hooks in Gaia screen.
@@ -81,12 +81,6 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // not loading right now.
   void ReloadGaia(bool force_reload);
 
-  // Reload gaia with embedded signin frame.
-  void SwitchToEmbeddedSignin();
-
-  // Cancel embedded signin for the next load.
-  void CancelEmbeddedSignin();
-
   // Decides whether an auth extension should be pre-loaded. If it should,
   // pre-loads it.
   void MaybePreloadAuthExtension();
@@ -109,10 +103,13 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   // WebUI message handlers.
   void HandleFrameLoadingCompleted(int status);
+  void HandleWebviewLoadAborted(const std::string& error_reason_str);
   void HandleCompleteAuthentication(const std::string& gaia_id,
                                     const std::string& email,
                                     const std::string& password,
-                                    const std::string& auth_code);
+                                    const std::string& auth_code,
+                                    bool using_saml);
+  void HandleCompleteAuthenticationAuthCodeOnly(const std::string& auth_code);
   void HandleCompleteLogin(const std::string& gaia_id,
                            const std::string& typed_email,
                            const std::string& password,
@@ -124,7 +121,7 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   void HandleGaiaUIReady();
 
-  void HandleSwitchToFullTab();
+  void HandleToggleEasyBootstrap();
 
   void HandleToggleWebviewSignin();
 
@@ -249,8 +246,8 @@ class GaiaScreenHandler : public BaseScreenHandler {
   std::string test_pass_;
   bool test_expects_complete_login_;
 
-  // True if user pressed shortcut to enable embedded signin.
-  bool embedded_signin_enabled_by_shortcut_;
+  // True if Easy bootstrap is enabled.
+  bool use_easy_bootstrap_;
 
   // Non-owning ptr to SigninScreenHandler instance. Should not be used
   // in dtor.

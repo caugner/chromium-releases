@@ -94,18 +94,16 @@ const content::MediaStreamDevice* FindDeviceWithId(
 // This is a short-term solution to grant camera and/or microphone access to
 // extensions:
 // 1. Virtual keyboard extension.
-// 2. Google Voice Search Hotword extension.
-// 3. Flutter gesture recognition extension.
-// 4. TODO(smus): Airbender experiment 1.
-// 5. TODO(smus): Airbender experiment 2.
-// 6. Hotwording component extension.
-// 7. XKB input method component extension.
-// 8. M17n/T13n/CJK input method component extension.
+// 2. Flutter gesture recognition extension.
+// 3. TODO(smus): Airbender experiment 1.
+// 4. TODO(smus): Airbender experiment 2.
+// 5. Hotwording component extension.
+// 6. XKB input method component extension.
+// 7. M17n/T13n/CJK input method component extension.
 // Once http://crbug.com/292856 is fixed, remove this whitelist.
 bool IsMediaRequestWhitelistedForExtension(
     const extensions::Extension* extension) {
   return extension->id() == "mppnpdlheglhdfmldimlhpnegondlapf" ||
-      extension->id() == "bepbmhgboaologfdajaanbcjmnhjmhfn" ||
       extension->id() == "jokbpnebhdcladagohdnfgjcpejggllo" ||
       extension->id() == "clffjmdilanldobdnedchkdbofoimcgb" ||
       extension->id() == "nnckehldicaciogcbchegobnafnjkcne" ||
@@ -397,8 +395,15 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   }
 #endif
 
-  if (CheckAllowAllMediaStreamContentForOrigin(profile, security_origin))
+  ContentSettingsType contentSettingsType =
+      type == content::MEDIA_DEVICE_AUDIO_CAPTURE
+          ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
+          : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
+
+  if (CheckAllowAllMediaStreamContentForOrigin(
+          profile, security_origin, contentSettingsType)) {
     return true;
+  }
 
   const char* policy_name = type == content::MEDIA_DEVICE_AUDIO_CAPTURE
                                 ? prefs::kAudioCaptureAllowed
@@ -417,9 +422,7 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   if (profile->GetHostContentSettingsMap()->GetContentSetting(
           security_origin,
           security_origin,
-          type == content::MEDIA_DEVICE_AUDIO_CAPTURE
-              ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
-              : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+          contentSettingsType,
           NO_RESOURCE_IDENTIFIER) == CONTENT_SETTING_ALLOW) {
     return true;
   }
@@ -438,8 +441,15 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
 
-  if (CheckAllowAllMediaStreamContentForOrigin(profile, security_origin))
+  ContentSettingsType contentSettingsType =
+      type == content::MEDIA_DEVICE_AUDIO_CAPTURE
+          ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
+          : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA;
+
+  if (CheckAllowAllMediaStreamContentForOrigin(
+          profile, security_origin, contentSettingsType)) {
     return true;
+  }
 
   const char* policy_name = type == content::MEDIA_DEVICE_AUDIO_CAPTURE
                                 ? prefs::kAudioCaptureAllowed
@@ -458,9 +468,7 @@ bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
   if (profile->GetHostContentSettingsMap()->GetContentSetting(
           security_origin,
           security_origin,
-          type == content::MEDIA_DEVICE_AUDIO_CAPTURE
-              ? CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
-              : CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+          contentSettingsType,
           NO_RESOURCE_IDENTIFIER) == CONTENT_SETTING_ALLOW) {
     return true;
   }

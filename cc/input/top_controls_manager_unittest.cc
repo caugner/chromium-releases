@@ -5,7 +5,9 @@
 #include "cc/input/top_controls_manager.h"
 
 #include <algorithm>
+#include <cmath>
 
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "cc/input/top_controls_manager_client.h"
@@ -13,6 +15,7 @@
 #include "cc/test/fake_impl_proxy.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/frame_time.h"
@@ -26,7 +29,7 @@ class MockTopControlsManagerClient : public TopControlsManagerClient {
   MockTopControlsManagerClient(float top_controls_height,
                                float top_controls_show_threshold,
                                float top_controls_hide_threshold)
-      : host_impl_(&proxy_, &shared_bitmap_manager_),
+      : host_impl_(&proxy_, &shared_bitmap_manager_, &task_graph_runner_),
         redraw_needed_(false),
         update_draw_properties_needed_(false),
         top_controls_shown_ratio_(1.f),
@@ -51,6 +54,9 @@ class MockTopControlsManagerClient : public TopControlsManagerClient {
   float TopControlsHeight() const override { return top_controls_height_; }
 
   void SetCurrentTopControlsShownRatio(float ratio) override {
+    ASSERT_FALSE(std::isnan(ratio));
+    ASSERT_FALSE(ratio == std::numeric_limits<float>::infinity());
+    ASSERT_FALSE(ratio == -std::numeric_limits<float>::infinity());
     ratio = std::max(ratio, 0.f);
     ratio = std::min(ratio, 1.f);
     top_controls_shown_ratio_ = ratio;
@@ -78,6 +84,7 @@ class MockTopControlsManagerClient : public TopControlsManagerClient {
  private:
   FakeImplProxy proxy_;
   TestSharedBitmapManager shared_bitmap_manager_;
+  TestTaskGraphRunner task_graph_runner_;
   FakeLayerTreeHostImpl host_impl_;
   scoped_ptr<LayerTreeImpl> active_tree_;
   scoped_ptr<LayerImpl> root_scroll_layer_;
@@ -445,6 +452,21 @@ TEST(TopControlsManagerTest, ShrinkingHeightKeepsTopControlsHidden) {
   EXPECT_FLOAT_EQ(0.f, manager->ControlsTopOffset());
   EXPECT_FLOAT_EQ(0.f, manager->ContentTopOffset());
 }
+
+TEST(TopControlsManagerTest, ScrollByWithZeroHeightControlsIsNoop) {
+  MockTopControlsManagerClient client(0.f, 0.5f, 0.5f);
+  TopControlsManager* manager = client.manager();
+  manager->UpdateTopControlsState(BOTH, BOTH, false);
+
+  manager->ScrollBegin();
+  gfx::Vector2dF pending = manager->ScrollBy(gfx::Vector2dF(0.f, 20.f));
+  EXPECT_FLOAT_EQ(20.f, pending.y());
+  EXPECT_FLOAT_EQ(0.f, manager->ControlsTopOffset());
+  EXPECT_FLOAT_EQ(0.f, manager->ContentTopOffset());
+  EXPECT_FLOAT_EQ(1.f, client.CurrentTopControlsShownRatio());
+  manager->ScrollEnd();
+}
+
 
 }  // namespace
 }  // namespace cc

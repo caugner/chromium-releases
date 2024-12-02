@@ -4,21 +4,27 @@
 
 part of bindings;
 
+class ProxyCloseException {
+  final String message;
+  ProxyCloseException(this.message);
+  String toString() => message;
+}
+
 abstract class Proxy extends core.MojoEventStreamListener {
   Map<int, Completer> _completerMap;
   int _nextId = 0;
 
-  Proxy(core.MojoMessagePipeEndpoint endpoint) :
-      _completerMap = {},
-      super(endpoint);
+  Proxy.fromEndpoint(core.MojoMessagePipeEndpoint endpoint)
+      : _completerMap = {},
+        super.fromEndpoint(endpoint);
 
-  Proxy.fromHandle(core.MojoHandle handle) :
-      _completerMap = {},
-      super.fromHandle(handle);
+  Proxy.fromHandle(core.MojoHandle handle)
+      : _completerMap = {},
+        super.fromHandle(handle);
 
-  Proxy.unbound() :
-      _completerMap = {},
-      super.unbound();
+  Proxy.unbound()
+      : _completerMap = {},
+        super.unbound();
 
   void handleResponse(ServiceMessage reader);
 
@@ -40,6 +46,15 @@ abstract class Proxy extends core.MojoEventStreamListener {
     throw 'Unexpected write signal in proxy.';
   }
 
+  @override
+  Future close({bool nodefer: false}) {
+    for (var completer in _completerMap.values) {
+      completer.completeError(new ProxyCloseException('Proxy closed'));
+    }
+    _completerMap.clear();
+    return super.close(nodefer: nodefer);
+  }
+
   void sendMessage(Struct message, int name) {
     if (!isOpen) {
       listen();
@@ -47,15 +62,13 @@ abstract class Proxy extends core.MojoEventStreamListener {
     var header = new MessageHeader(name);
     var serviceMessage = message.serializeWithHeader(header);
     endpoint.write(serviceMessage.buffer,
-                   serviceMessage.buffer.lengthInBytes,
-                   serviceMessage.handles);
+        serviceMessage.buffer.lengthInBytes, serviceMessage.handles);
     if (!endpoint.status.isOk) {
-      throw "message pipe write failed";
+      throw "message pipe write failed - ${endpoint.status}";
     }
   }
 
-  Future sendMessageWithRequestId(
-      Struct message, int name, int id, int flags) {
+  Future sendMessageWithRequestId(Struct message, int name, int id, int flags) {
     if (!isOpen) {
       listen();
     }
@@ -66,10 +79,9 @@ abstract class Proxy extends core.MojoEventStreamListener {
     var header = new MessageHeader.withRequestId(name, flags, id);
     var serviceMessage = message.serializeWithHeader(header);
     endpoint.write(serviceMessage.buffer,
-                   serviceMessage.buffer.lengthInBytes,
-                   serviceMessage.handles);
+        serviceMessage.buffer.lengthInBytes, serviceMessage.handles);
     if (!endpoint.status.isOk) {
-      throw "message pipe write failed";
+      throw "message pipe write failed - ${endpoint.status}";
     }
 
     var completer = new Completer();
@@ -79,4 +91,15 @@ abstract class Proxy extends core.MojoEventStreamListener {
 
   // Need a getter for this for access in subclasses.
   Map<int, Completer> get completerMap => _completerMap;
+
+  String toString() {
+    var superString = super.toString();
+    return "Proxy(${superString})";
+  }
+}
+
+// Generated Proxy classes implement this interface.
+abstract class ProxyBase {
+  final Proxy impl = null;
+  final String name = null;
 }

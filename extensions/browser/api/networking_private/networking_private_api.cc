@@ -200,6 +200,35 @@ void NetworkingPrivateCreateNetworkFunction::Failure(const std::string& error) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateForgetNetworkFunction
+
+NetworkingPrivateForgetNetworkFunction::
+    ~NetworkingPrivateForgetNetworkFunction() {
+}
+
+bool NetworkingPrivateForgetNetworkFunction::RunAsync() {
+  scoped_ptr<private_api::ForgetNetwork::Params> params =
+      private_api::ForgetNetwork::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  GetDelegate(browser_context())
+      ->ForgetNetwork(
+          params->network_guid,
+          base::Bind(&NetworkingPrivateForgetNetworkFunction::Success, this),
+          base::Bind(&NetworkingPrivateForgetNetworkFunction::Failure, this));
+  return true;
+}
+
+void NetworkingPrivateForgetNetworkFunction::Success() {
+  SendResponse(true);
+}
+
+void NetworkingPrivateForgetNetworkFunction::Failure(const std::string& error) {
+  error_ = error;
+  SendResponse(false);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // NetworkingPrivateGetNetworksFunction
 
 NetworkingPrivateGetNetworksFunction::~NetworkingPrivateGetNetworksFunction() {
@@ -412,6 +441,35 @@ void NetworkingPrivateStartDisconnectFunction::Success() {
 
 void NetworkingPrivateStartDisconnectFunction::Failure(
     const std::string& error) {
+  error_ = error;
+  SendResponse(false);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NetworkingPrivateStartActivateFunction
+
+NetworkingPrivateStartActivateFunction::
+    ~NetworkingPrivateStartActivateFunction() {
+}
+
+bool NetworkingPrivateStartActivateFunction::RunAsync() {
+  scoped_ptr<private_api::StartActivate::Params> params =
+      private_api::StartActivate::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  GetDelegate(browser_context())
+      ->StartActivate(
+          params->network_guid, params->carrier ? *params->carrier : "",
+          base::Bind(&NetworkingPrivateStartActivateFunction::Success, this),
+          base::Bind(&NetworkingPrivateStartActivateFunction::Failure, this));
+  return true;
+}
+
+void NetworkingPrivateStartActivateFunction::Success() {
+  SendResponse(true);
+}
+
+void NetworkingPrivateStartActivateFunction::Failure(const std::string& error) {
   error_ = error;
   SendResponse(false);
 }

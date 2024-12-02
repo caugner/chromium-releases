@@ -85,9 +85,6 @@ class WorkAreaWatcherObserver;
   // to it.
   IBOutlet NSMenu* helpMenu_;
 
-  // Indicates wheter an NSPopover is currently being shown.
-  BOOL hasPopover_;
-
   // If we are expecting a workspace change in response to a reopen
   // event, the time we got the event. A null time otherwise.
   base::TimeTicks reopenTime_;
@@ -114,6 +111,12 @@ class WorkAreaWatcherObserver;
 
 @property(readonly, nonatomic) BOOL startupComplete;
 @property(readonly, nonatomic) Profile* lastProfile;
+
+// Helper method used to update the "Signin" menu item in the main menu and the
+// wrench menu to reflect the current signed in state.
++ (void)updateSigninItem:(id)signinItem
+              shouldShow:(BOOL)showSigninMenuItem
+          currentProfile:(Profile*)profile;
 
 - (void)didEndMainMessageLoop;
 

@@ -21,7 +21,6 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_resource_throttle.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -78,10 +77,6 @@
 
 #if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_resource_throttle.h"
-#endif
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-#include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #endif
 
 #if defined(USE_SYSTEM_PROTOBUF)
@@ -301,14 +296,13 @@ void AppendComponentUpdaterThrottles(
 
 }  // namespace
 
-ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate(
-    prerender::PrerenderTracker* prerender_tracker)
+ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate()
     : download_request_limiter_(g_browser_process->download_request_limiter()),
-      safe_browsing_(g_browser_process->safe_browsing_service()),
+      safe_browsing_(g_browser_process->safe_browsing_service())
 #if defined(ENABLE_EXTENSIONS)
-      user_script_listener_(new extensions::UserScriptListener()),
+      , user_script_listener_(new extensions::UserScriptListener())
 #endif
-      prerender_tracker_(prerender_tracker) {
+      {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -373,9 +367,13 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
 #if defined(OS_ANDROID)
   // TODO(davidben): This is insufficient to integrate with prerender properly.
   // https://crbug.com/370595
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME && !is_prerendering) {
-    throttles->push_back(
-        InterceptNavigationDelegate::CreateThrottleFor(request));
+  if (!is_prerendering) {
+    if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
+      throttles->push_back(
+          InterceptNavigationDelegate::CreateThrottleFor(request));
+    } else {
+      InterceptNavigationDelegate::UpdateUserGestureCarryoverInfo(request);
+    }
   }
 #else
   if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
@@ -440,10 +438,6 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
                       &headers);
     request->SetExtraRequestHeaders(headers);
   }
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  AppendChromeSyncGaiaHeader(request, resource_context);
-#endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (io_data->policy_header_helper())
@@ -595,28 +589,6 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
   }
 }
 
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-void ChromeResourceDispatcherHostDelegate::AppendChromeSyncGaiaHeader(
-    net::URLRequest* request,
-    content::ResourceContext* resource_context) {
-  static const char kAllowChromeSignIn[] = "Allow-Chrome-SignIn";
-
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
-  OneClickSigninHelper::Offer offer =
-      OneClickSigninHelper::CanOfferOnIOThread(request, io_data);
-  switch (offer) {
-    case OneClickSigninHelper::CAN_OFFER:
-      request->SetExtraRequestHeaderByName(kAllowChromeSignIn, "1", false);
-      break;
-    case OneClickSigninHelper::DONT_OFFER:
-      request->RemoveRequestHeaderByName(kAllowChromeSignIn);
-      break;
-    case OneClickSigninHelper::IGNORE_REQUEST:
-      break;
-  }
-}
-#endif
-
 bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
     const GURL& url, const std::string& mime_type) {
 #if defined(ENABLE_EXTENSIONS)
@@ -642,8 +614,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldInterceptResourceAsStream(
   std::vector<std::string> whitelist = MimeTypesHandler::GetMIMETypeWhitelist();
   // Go through the white-listed extensions and try to use them to intercept
   // the URL request.
-  for (size_t i = 0; i < whitelist.size(); ++i) {
-    const char* extension_id = whitelist[i].c_str();
+  for (const std::string& extension_id : whitelist) {
     const Extension* extension =
         extension_info_map->extensions().GetByID(extension_id);
     // The white-listed extension may not be installed, so we have to NULL check
@@ -705,15 +676,6 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // See if the response contains the Google-Accounts-SignIn header.  If so,
-  // then the user has just finished signing in, and the server is allowing the
-  // browser to suggest connecting the user's profile to the account.
-  OneClickSigninHelper::ShowInfoBarIfPossible(request, io_data,
-                                              info->GetChildID(),
-                                              info->GetRouteID());
-#endif
-
   // See if the response contains the X-Chrome-Manage-Accounts header. If so
   // show the profile avatar bubble so that user can complete signin/out action
   // the native UI.
@@ -762,16 +724,6 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // See if the response contains the Google-Accounts-SignIn header.  If so,
-  // then the user has just finished signing in, and the server is allowing the
-  // browser to suggest connecting the user's profile to the account.
-  OneClickSigninHelper::ShowInfoBarIfPossible(request, io_data,
-                                              info->GetChildID(),
-                                              info->GetRouteID());
-  AppendChromeSyncGaiaHeader(request, resource_context);
-#endif
 
   // In the Mirror world, Chrome should append a X-Chrome-Connected header to
   // all Gaia requests from a connected profile so Gaia could return a 204

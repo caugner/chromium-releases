@@ -42,6 +42,7 @@ cr.define('options', function() {
    */
   function ContentSettings() {
     this.activeNavTab = null;
+    this.pluginsAllowOptionDisabled = false;
     Page.call(this, 'content',
               loadTimeData.getString('contentSettingsPageTabTitle'),
               'content-settings-page');
@@ -170,6 +171,10 @@ cr.define('options', function() {
         indicators[i].handlePrefChange(event);
       }
     }
+
+    if (this.pluginsAllowOptionDisabled) {
+      $('plugins-allow-radio').disabled = true;
+    }
   };
 
   /**
@@ -293,11 +298,11 @@ cr.define('options', function() {
   };
 
   /**
-   * Shows/hides the whole Web MIDI settings.
-   * @param {boolean} show Wether to show the whole Web MIDI settings.
+   * Disable the 'allow' option in the Plugins section.
    */
-  ContentSettings.showExperimentalWebMIDISettings = function(show) {
-    $('experimental-web-midi-settings').hidden = !show;
+  ContentSettings.disablePluginsAllowOption = function() {
+    this.pluginsAllowOptionDisabled = true;
+    $('plugins-allow-radio').disabled = true;
   };
 
   /**

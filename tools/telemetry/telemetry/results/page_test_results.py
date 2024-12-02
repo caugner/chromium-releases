@@ -11,10 +11,10 @@ import random
 import sys
 import traceback
 
-from telemetry import value as value_module
-from telemetry.results import page_run
 from telemetry.results import progress_reporter as progress_reporter_module
+from telemetry.results import user_story_run
 from telemetry.util import cloud_storage
+from telemetry import value as value_module
 from telemetry.value import failure
 from telemetry.value import skip
 from telemetry.value import trace
@@ -23,7 +23,7 @@ from telemetry.value import trace
 class PageTestResults(object):
   def __init__(self, output_stream=None, output_formatters=None,
                progress_reporter=None, trace_tag='', output_dir=None,
-               value_can_be_added_predicate=lambda v: True):
+               value_can_be_added_predicate=lambda v, is_first: True):
     """
     Args:
       output_stream: The output stream to use to write test results.
@@ -36,8 +36,10 @@ class PageTestResults(object):
           used for buildbot.
       output_dir: A string specified the directory where to store the test
           artifacts, e.g: trace, videos,...
-      value_can_be_added_predicate: A function that takes an value.Value
-          instance as input. It returns True if the value can be added to the
+      value_can_be_added_predicate: A function that takes two arguments:
+          a value.Value instance (except value.FailureValue & value.SkipValue)
+          and a boolean (True when the value is part of the first result for
+          the user story). It returns True if the value can be added to the
           test results and False otherwise.
     """
     # TODO(chrishenry): Figure out if trace_tag is still necessary.
@@ -55,6 +57,7 @@ class PageTestResults(object):
 
     self._current_page_run = None
     self._all_page_runs = []
+    self._all_user_stories = set()
     self._representative_value_for_each_value_name = {}
     self._all_summary_values = []
     self._serialized_trace_file_ids_to_paths = {}
@@ -94,7 +97,7 @@ class PageTestResults(object):
   @property
   def current_page(self):
     assert self._current_page_run, 'Not currently running test.'
-    return self._current_page_run.page
+    return self._current_page_run.user_story
 
   @property
   def current_page_run(self):
@@ -108,7 +111,7 @@ class PageTestResults(object):
   @property
   def pages_that_succeeded(self):
     """Returns the set of pages that succeeded."""
-    pages = set(run.page for run in self.all_page_runs)
+    pages = set(run.user_story for run in self.all_page_runs)
     pages.difference_update(self.pages_that_failed)
     return pages
 
@@ -118,7 +121,7 @@ class PageTestResults(object):
     failed_pages = set()
     for run in self.all_page_runs:
       if run.failed:
-        failed_pages.add(run.page)
+        failed_pages.add(run.user_story)
     return failed_pages
 
   @property
@@ -150,26 +153,28 @@ class PageTestResults(object):
 
   def WillRunPage(self, page):
     assert not self._current_page_run, 'Did not call DidRunPage.'
-    self._current_page_run = page_run.PageRun(page)
+    self._current_page_run = user_story_run.UserStoryRun(page)
     self._progress_reporter.WillRunPage(self)
 
-  def DidRunPage(self, page, discard_run=False):  # pylint: disable=W0613
+  def DidRunPage(self, page):  # pylint: disable=W0613
     """
     Args:
       page: The current page under test.
-      discard_run: Whether to discard the entire run and all of its
-          associated results.
     """
     assert self._current_page_run, 'Did not call WillRunPage.'
     self._progress_reporter.DidRunPage(self)
-    if not discard_run:
-      self._all_page_runs.append(self._current_page_run)
+    self._all_page_runs.append(self._current_page_run)
+    self._all_user_stories.add(self._current_page_run.user_story)
     self._current_page_run = None
 
   def AddValue(self, value):
     assert self._current_page_run, 'Not currently running test.'
     self._ValidateValue(value)
-    if not self._value_can_be_added_predicate(value):
+    is_first_result = (
+      self._current_page_run.user_story not in self._all_user_stories)
+    if not (isinstance(value, skip.SkipValue) or
+            isinstance(value, failure.FailureValue) or
+            self._value_can_be_added_predicate(value, is_first_result)):
       return
     # TODO(eakuefner/chrishenry): Add only one skip per pagerun assert here
     self._current_page_run.AddValue(value)

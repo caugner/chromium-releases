@@ -3,6 +3,35 @@
 # found in the LICENSE file.
 {
   'conditions': [
+    ['use_x11==0', {
+      'variables': {
+        'command': [
+          '../testing/test_env.py',
+          '<(PRODUCT_DIR)/content_browsertests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
+        ],
+      },
+    }],
+    ['use_x11==1', {
+      'variables': {
+        'command': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)',
+          '<(PRODUCT_DIR)/content_browsertests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
+        ],
+        'files': [
+          '../testing/xvfb.py',
+          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+        ],
+      },
+    }],
     ['OS=="android"', {
       'variables': {
         'files': [
@@ -35,29 +64,17 @@
     }],
     ['OS=="linux"', {
       'variables': {
-        'command': [
-          '../testing/xvfb.py',
-          '<(PRODUCT_DIR)',
-          '<(PRODUCT_DIR)/content_browsertests<(EXECUTABLE_SUFFIX)',
-          '--test-launcher-bot-mode',
-          '--asan=<(asan)',
-          '--lsan=<(lsan)',
-          '--msan=<(msan)',
-          '--tsan=<(tsan)',
-        ],
         'files': [
-          '../testing/xvfb.py',
           '<(PRODUCT_DIR)/content_shell.pak',
           '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
-          '<(PRODUCT_DIR)/libppapi_tests.so',
         ],
       },
     }],
-    ['OS=="linux" and use_ozone==0', {
+    ['OS=="linux" and enable_plugins==1', {
       'variables': {
         'files': [
-          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+          '<(PRODUCT_DIR)/libppapi_tests.so',
         ],
       },
     }],
@@ -100,19 +117,6 @@
         ],
       },
     }],
-    ['OS=="mac" or OS=="win"', {
-      'variables': {
-        'command': [
-          '../testing/test_env.py',
-          '<(PRODUCT_DIR)/content_browsertests<(EXECUTABLE_SUFFIX)',
-          '--test-launcher-bot-mode',
-          '--asan=<(asan)',
-          '--lsan=<(lsan)',
-          '--msan=<(msan)',
-          '--tsan=<(tsan)',
-        ],
-      },
-    }],
     ['OS=="win"', {
       'variables': {
         'files': [
@@ -143,5 +147,6 @@
   'includes': [
     '../base/base.isolate',
     '../gin/v8.isolate',
+    '../third_party/angle/angle.isolate',
   ],
 }

@@ -71,7 +71,8 @@ class BuildArchiveTest(unittest.TestCase):
     archive = fetch_build.FullBuildArchive()
     archive._platform = 'android'
     self.assertEqual('chromium-android', archive.BucketName())
-    self.assertEqual('android_main_rel/full-build-linux_1234567890abcdef.zip',
+    self.assertEqual(
+        'android_main_rel/full-build-linux_1234567890abcdef.zip',
         archive.FilePath('1234567890abcdef'))
 
   def test_FullBuildArchive_Linux_BuilderName(self):
@@ -165,6 +166,16 @@ class BuildArchiveTest(unittest.TestCase):
     archive = fetch_build.PerfBuildArchive()
     archive._platform = 'mac'
     self.assertEqual(14400, archive.GetBuilderBuildTime())
+
+  def test_GetBuildBotUrl_Perf(self):
+    self.assertEqual(
+        fetch_build.PERF_TRY_SERVER_URL,
+        fetch_build.GetBuildBotUrl(fetch_build.PERF_BUILDER))
+
+  def test_GetBuildBotUrl_full(self):
+    self.assertEqual(
+        fetch_build.LINUX_TRY_SERVER_URL,
+        fetch_build.GetBuildBotUrl(fetch_build.FULL_BUILDER))
 
 
 class UnzipTest(unittest.TestCase):

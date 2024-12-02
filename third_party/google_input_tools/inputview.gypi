@@ -6,6 +6,7 @@
 {
   'variables': {
     'inputview_sources': [
+      'src/chrome/os/common.js',
       'src/chrome/os/datasource.js',
       'src/chrome/os/inputview/adapter.js',
       'src/chrome/os/inputview/candidatesinfo.js',
@@ -38,6 +39,7 @@
       'src/chrome/os/inputview/elements/content/emojikey.js',
       'src/chrome/os/inputview/elements/content/emojiview.js',
       'src/chrome/os/inputview/elements/content/enswitcherkey.js',
+      'src/chrome/os/inputview/elements/content/enterkey.js',
       'src/chrome/os/inputview/elements/content/expandedcandidateview.js',
       'src/chrome/os/inputview/elements/content/functionalkey.js',
       'src/chrome/os/inputview/elements/content/gaussianestimator.js',
@@ -86,6 +88,12 @@
       'src/chrome/os/inputview/inputtoolcode.js',
       'src/chrome/os/inputview/keyboardcontainer.js',
       'src/chrome/os/inputview/layouts/compactspacerow.js',
+      'src/chrome/os/inputview/layouts/material/compactspacerow.js',
+      'src/chrome/os/inputview/layouts/material/rowsof101.js',
+      'src/chrome/os/inputview/layouts/material/rowsof102.js',
+      'src/chrome/os/inputview/layouts/material/rowsofcompact.js',
+      'src/chrome/os/inputview/layouts/material/spacerow.js',
+      'src/chrome/os/inputview/layouts/material/util.js',
       'src/chrome/os/inputview/layouts/rowsof101.js',
       'src/chrome/os/inputview/layouts/rowsof102.js',
       'src/chrome/os/inputview/layouts/rowsofcompact.js',
@@ -114,6 +122,7 @@
       'src/chrome/os/message/contexttype.js',
       'src/chrome/os/message/event.js',
       'src/chrome/os/message/name.js',
+      'src/chrome/os/message/source.js',
       'src/chrome/os/message/type.js',
       'src/chrome/os/sounds/soundcontroller.js',
       'src/chrome/os/sounds/sounds.js',

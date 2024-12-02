@@ -38,9 +38,6 @@
       'shell/test/shell_test_launcher_delegate.h',
       'shell/test/shell_tests_main.cc',
     ],
-    'extensions_browsertests_sources_chromeos': [
-      'browser/api/vpn_provider/vpn_provider_apitest.cc',
-    ],
     'extensions_unittests_sources': [
       'browser/api/alarms/alarms_api_unittest.cc',
       'browser/api/api_resource_manager_unittest.cc',
@@ -88,6 +85,7 @@
       'browser/image_loader_unittest.cc',
       'browser/info_map_unittest.cc',
       'browser/lazy_background_task_queue_unittest.cc',
+      'browser/load_monitoring_extension_host_queue_unittest.cc',
       'browser/management_policy_unittest.cc',
       'browser/mojo/keep_alive_impl_unittest.cc',
       'browser/mojo/stash_backend_unittest.cc',
@@ -152,6 +150,7 @@
       'renderer/script_context_set_unittest.cc',
       'renderer/script_context_unittest.cc',
       'renderer/utils_unittest.cc',
+      'shell/browser/shell_web_contents_modal_dialog_manager.cc',
       'test/extensions_unittests_main.cc',
       'utility/unpacker_unittest.cc',
     ],

@@ -216,7 +216,12 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
     @Feature({"AndroidWebView"})
     public void testOnShowCustomViewTransfersHolePunchingSurfaceForVideoInsideDiv()
             throws Throwable {
-        VideoSurfaceViewUtils.forceUseVideoHoleSurfaceView();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                mTestContainerView.getAwContents().getSettings().setForceVideoOverlayForTests(true);
+            }
+        });
 
         loadTestPage(VIDEO_INSIDE_DIV_TEST_URL);
         assertFalse(DOMUtils.isFullscreen(getWebContentsOnUiThread()));
@@ -245,7 +250,12 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
     @Feature({"AndroidWebView"})
     public void testOnShowCustomViewRemovesHolePunchingSurfaceForVideo()
             throws Throwable {
-        VideoSurfaceViewUtils.forceUseVideoHoleSurfaceView();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                mTestContainerView.getAwContents().getSettings().setForceVideoOverlayForTests(true);
+            }
+        });
 
         loadTestPage(VIDEO_TEST_URL);
         assertFalse(DOMUtils.isFullscreen(getWebContentsOnUiThread()));
@@ -529,6 +539,8 @@ public class AwContentsClientFullScreenTest extends AwTestBase {
     private void loadTestPage(String videoTestUrl) throws Exception {
         loadUrlSync(mTestContainerView.getAwContents(),
                 mContentsClient.getOnPageFinishedHelper(), videoTestUrl);
+        // As we are loading a non-trivial page, let's wait until we have something displayed.
+        waitForVisualStateCallback(mTestContainerView.getAwContents());
     }
 
     private WebContents getWebContentsOnUiThread() {

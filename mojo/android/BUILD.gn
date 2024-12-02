@@ -85,7 +85,6 @@ android_library("mojo_javatests") {
     "javatests/src/org/chromium/mojo/bindings/ValidationTest.java",
     "javatests/src/org/chromium/mojo/bindings/ValidationTestUtil.java",
     "javatests/src/org/chromium/mojo/bindings/ValidationTestUtilTest.java",
-    "javatests/src/org/chromium/mojo/bindings/test/mojom/mojo/IntegrationTestInterface2TestHelper.java",
     "javatests/src/org/chromium/mojo/system/impl/CoreImplTest.java",
   ]
 
@@ -103,9 +102,9 @@ shared_library("mojo_java_unittests") {
   testonly = true
 
   sources = [
+    "javatests/init_library.cc",
     "javatests/mojo_test_case.cc",
     "javatests/mojo_test_case.h",
-    "javatests/init_library.cc",
     "javatests/validation_test_util.cc",
     "javatests/validation_test_util.h",
   ]

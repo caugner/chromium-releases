@@ -15,16 +15,16 @@ var remoting = remoting || {};
  * @implements {remoting.SignalStrategy}
  */
 remoting.WcsAdapter = function() {
-  /** @type {?function(remoting.SignalStrategy.State):void} @private */
+  /** @private {?function(remoting.SignalStrategy.State):void} */
   this.onStateChangedCallback_ = null;
-  /** @type {?function(Element):void} @private */
+  /** @private {?function(Element):void} */
   this.onIncomingStanzaCallback_ = null;
   /** @private */
   this.state_ = remoting.SignalStrategy.State.NOT_CONNECTED;
   /** @private */
   this.jid_ = '';
   /** @private */
-  this.error_ = remoting.Error.NONE;
+  this.error_ = remoting.Error.none();
 };
 
 /**
@@ -62,7 +62,7 @@ remoting.WcsAdapter.prototype.getState = function() {
   return this.state_;
 };
 
-/** @return {remoting.Error} Error when in FAILED state. */
+/** @return {!remoting.Error} Error when in FAILED state. */
 remoting.WcsAdapter.prototype.getError = function() {
   return this.error_;
 };
@@ -137,7 +137,7 @@ remoting.WcsAdapter.prototype.onIncomingStanza_ = function(stanza) {
   }
 };
 
-/** @param {remoting.Error} error */
+/** @param {!remoting.Error} error */
 remoting.WcsAdapter.prototype.onError_ = function(error) {
   this.error_ = error;
   this.setState_(remoting.SignalStrategy.State.FAILED);

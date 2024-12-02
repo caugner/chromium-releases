@@ -163,20 +163,36 @@ public abstract class WebsitePreferenceBridge {
         list.add(new VoiceAndVideoCaptureInfo(origin, embedder));
     }
 
-    public static List<PopupExceptionInfo> getPopupExceptionInfo() {
-        List<PrefServiceBridge.PopupExceptionInfo> origins =
-                PrefServiceBridge.getInstance().getPopupExceptions();
-        List<PopupExceptionInfo> infos = new ArrayList<PopupExceptionInfo>();
-        boolean managedOnly = PrefServiceBridge.getInstance().isPopupsManaged();
-        if (origins != null) {
-            for (PrefServiceBridge.PopupExceptionInfo exception : origins) {
-                if (!managedOnly || exception.getSource().equals("policy")) {
-                    infos.add(
-                            new PopupExceptionInfo(exception.getPattern(), exception.getSetting()));
-                }
+    public static List<JavaScriptExceptionInfo> getJavaScriptExceptionInfo() {
+        List<JavaScriptExceptionInfo> exceptions =
+                PrefServiceBridge.getInstance().getJavaScriptExceptions();
+        if (!PrefServiceBridge.getInstance().javaScriptManaged()) {
+            return exceptions;
+        }
+
+        List<JavaScriptExceptionInfo> managedExceptions = new ArrayList<JavaScriptExceptionInfo>();
+        for (JavaScriptExceptionInfo exception : exceptions) {
+            if (exception.getSource().equals("policy")) {
+                managedExceptions.add(exception);
             }
         }
-        return infos;
+        return managedExceptions;
+    }
+
+    public static List<PopupExceptionInfo> getPopupExceptionInfo() {
+        List<PopupExceptionInfo> exceptions =
+                PrefServiceBridge.getInstance().getPopupExceptions();
+        if (!PrefServiceBridge.getInstance().isPopupsManaged()) {
+            return exceptions;
+        }
+
+        List<PopupExceptionInfo> managedExceptions = new ArrayList<PopupExceptionInfo>();
+        for (PopupExceptionInfo exception : exceptions) {
+            if (exception.getSource().equals("policy")) {
+                managedExceptions.add(exception);
+            }
+        }
+        return managedExceptions;
     }
 
     public static void fetchLocalStorageInfo(LocalStorageInfoReadyCallback callback) {
@@ -187,9 +203,28 @@ public abstract class WebsitePreferenceBridge {
         nativeFetchStorageInfo(callback);
     }
 
+    /**
+     * Get a list of stored fullscreen information.
+     */
+    public static List<FullscreenInfo> getFullscreenInfo() {
+        boolean managedOnly = PrefServiceBridge.getInstance().isFullscreenManaged();
+        ArrayList<FullscreenInfo> list = new ArrayList<FullscreenInfo>();
+        nativeGetFullscreenOrigins(list, managedOnly);
+        return list;
+    }
+
+    /**
+     * Inserts fullscreen information into a list.
+     */
+    @CalledByNative
+    private static void insertFullscreenInfoIntoList(
+            ArrayList<FullscreenInfo> list, String origin, String embedder) {
+        list.add(new FullscreenInfo(origin, embedder));
+    }
+
     private static native void nativeGetGeolocationOrigins(Object list, boolean managedOnly);
     static native int nativeGetGeolocationSettingForOrigin(String origin, String embedder);
-    static native void nativeSetGeolocationSettingForOrigin(String origin, String embedder,
+    public static native void nativeSetGeolocationSettingForOrigin(String origin, String embedder,
             int value);
     private static native void nativeGetMidiOrigins(Object list);
     static native int nativeGetMidiSettingForOrigin(String origin, String embedder);
@@ -220,4 +255,9 @@ public abstract class WebsitePreferenceBridge {
     static native void nativeClearStorageData(String origin, int type, Object callback);
     private static native void nativeFetchLocalStorageInfo(Object callback);
     private static native void nativeFetchStorageInfo(Object callback);
+    static native boolean nativeIsContentSettingsPatternValid(String pattern);
+    private static native void nativeGetFullscreenOrigins(Object list, boolean managedOnly);
+    static native int nativeGetFullscreenSettingForOrigin(String origin, String embedder);
+    static native void nativeSetFullscreenSettingForOrigin(String origin, String embedder,
+            int value);
 }

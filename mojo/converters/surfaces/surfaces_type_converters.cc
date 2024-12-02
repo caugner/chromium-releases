@@ -18,7 +18,7 @@
 #include "cc/quads/yuv_video_draw_quad.h"
 #include "cc/surfaces/surface_id_allocator.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
-#include "mojo/converters/transform/transform_converters.h"
+#include "mojo/converters/transform/transform_type_converters.h"
 
 namespace mojo {
 
@@ -174,7 +174,8 @@ bool ConvertDrawQuad(const QuadPtr& input,
                        input->visible_rect.To<gfx::Rect>(),
                        input->needs_blending,
                        yuv_state->tex_coord_rect.To<gfx::RectF>(),
-                       gfx::Size(),  // TODO(jamesr): texture size
+                       gfx::Size(),  // TODO(jamesr): ya texture size
+                       gfx::Size(),  // TODO(jamesr): uv texture size
                        yuv_state->y_plane_resource_id,
                        yuv_state->u_plane_resource_id,
                        yuv_state->v_plane_resource_id,

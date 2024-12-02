@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "mojo/public/cpp/application/application_connection.h"
+#include "mojo/public/cpp/application/application_delegate.h"
 #include "mojo/public/cpp/application/lib/service_connector.h"
 #include "mojo/public/cpp/application/lib/service_registry.h"
 #include "mojo/public/cpp/system/core.h"
@@ -14,8 +15,6 @@
 #include "mojo/public/interfaces/application/shell.mojom.h"
 
 namespace mojo {
-
-class ApplicationDelegate;
 
 // Utility class for communicating with the Shell, and providing Services
 // to clients.
@@ -52,17 +51,28 @@ class ApplicationDelegate;
 //
 class ApplicationImpl : public Application {
  public:
+  // Does not take ownership of |delegate|, which must remain valid for the
+  // lifetime of ApplicationImpl.
   ApplicationImpl(ApplicationDelegate* delegate,
                   InterfaceRequest<Application> request);
   ~ApplicationImpl() override;
 
+  // The Mojo shell. This will return a valid pointer after Initialize() has
+  // been invoked. It will remain valid until UnbindConnections() is invoked or
+  // the ApplicationImpl is destroyed.
   Shell* shell() const { return shell_.get(); }
+
+  const std::string& url() const { return url_; }
 
   // Returns any initial configuration arguments, passed by the Shell.
   const std::vector<std::string>& args() const { return args_; }
   bool HasArg(const std::string& arg) const;
 
-  // Establishes a new connection to an application. Caller does not own.
+  // Requests a new connection to an application. Returns a pointer to the
+  // connection if the connection is permitted by this application's delegate,
+  // or nullptr otherwise. Caller does not take ownership. The pointer remains
+  // valid until an error occurs on the connection with the Shell, or until the
+  // ApplicationImpl is destroyed, whichever occurs first.
   ApplicationConnection* ConnectToApplication(const String& application_url);
 
   // Connect to application identified by |application_url| and connect to the
@@ -74,7 +84,9 @@ class ApplicationImpl : public Application {
   }
 
   // Application implementation.
-  void Initialize(ShellPtr shell, Array<String> args) override;
+  void Initialize(ShellPtr shell,
+                  Array<String> args,
+                  const mojo::String& url) override;
 
   // Block until the Application is initialized, if it is not already.
   void WaitForInitialize();
@@ -94,6 +106,7 @@ class ApplicationImpl : public Application {
   void ClearConnections();
 
   void OnShellError() {
+    delegate_->Quit();
     ClearConnections();
     Terminate();
   }
@@ -101,7 +114,8 @@ class ApplicationImpl : public Application {
   // Application implementation.
   void AcceptConnection(const String& requestor_url,
                         InterfaceRequest<ServiceProvider> services,
-                        ServiceProviderPtr exposed_services) override;
+                        ServiceProviderPtr exposed_services,
+                        const String& url) override;
 
   void RequestQuit() override;
 
@@ -113,6 +127,7 @@ class ApplicationImpl : public Application {
   Binding<Application> binding_;
   ShellPtr shell_;
   ShellPtrWatcher* shell_watch_;
+  std::string url_;
   std::vector<std::string> args_;
 
   MOJO_DISALLOW_COPY_AND_ASSIGN(ApplicationImpl);

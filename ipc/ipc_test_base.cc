@@ -142,8 +142,9 @@ bool IPCTestBase::StartClient() {
 bool IPCTestBase::WaitForClientShutdown() {
   DCHECK(client_process_.IsValid());
 
-  bool rv = base::WaitForSingleProcess(client_process_.Handle(),
-                                       base::TimeDelta::FromSeconds(5));
+  int exit_code;
+  bool rv = client_process_.WaitForExitWithTimeout(
+      base::TimeDelta::FromSeconds(5), &exit_code);
   client_process_.Close();
   return rv;
 }
@@ -152,12 +153,12 @@ IPC::ChannelHandle IPCTestBase::GetTestChannelHandle() {
   return GetChannelName(test_client_name_);
 }
 
-scoped_refptr<base::TaskRunner> IPCTestBase::task_runner() {
+scoped_refptr<base::SequencedTaskRunner> IPCTestBase::task_runner() {
   return message_loop_->message_loop_proxy();
 }
 
 scoped_ptr<IPC::ChannelFactory> IPCTestBase::CreateChannelFactory(
     const IPC::ChannelHandle& handle,
-    base::TaskRunner* runner) {
+    base::SequencedTaskRunner* runner) {
   return IPC::ChannelFactory::Create(handle, IPC::Channel::MODE_SERVER);
 }

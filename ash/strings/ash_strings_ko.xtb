@@ -3,6 +3,7 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/>님의 계정 추가</translation>
 <translation id="1270290102613614947">터치 키보드 사용 중지됨</translation>
 <translation id="1057289296854808272">회전 사용(변경하려면 여기를 탭)</translation>
+<translation id="5548285847212963613">확장 프로그램('<ph name="EXTENSION_NAME"/>')을 사용하여 이 네트워크에 연결할 수 있습니다.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/>시간 <ph name="MINUTE"/>분</translation>
 <translation id="30155388420722288">오버플로 버튼</translation>
 <translation id="7904094684485781019">이 계정의 관리자가 멀티 로그인을 허용하지 않습니다.</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">세션 종료</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/>(HDMI/DP)</translation>
 <translation id="1426410128494586442">예</translation>
+<translation id="4804818685124855865">연결 해제</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">로그아웃</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@
 <translation id="2761704814324807722">상태 표시줄, 시간 <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">잠금</translation>
 <translation id="2805756323405976993">앱</translation>
-<translation id="2313845391432982560">'<ph name="EXTENSION_NAME"/>' 확장 프로그램에서 이 네트워크를 구성할 수 있습니다.</translation>
 <translation id="2872961005593481000">종료</translation>
 <translation id="3433830597744061105">계정 관리</translation>
 <translation id="742594950370306541">카메라가 사용 중입니다.</translation>

@@ -34,6 +34,7 @@
 #include "chrome/browser/chromeos/login/chrome_restart_request.h"
 #include "chrome/browser/chromeos/login/demo_mode/demo_app_launcher.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
+#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
@@ -65,12 +66,13 @@
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "chromeos/cert_loader.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
@@ -99,6 +101,10 @@
 namespace chromeos {
 
 namespace {
+
+// Milliseconds until we timeout our attempt to fetch flags from the child
+// account service.
+static const int kFlagsFetchingLoginTimeoutMs = 1000;
 
 // ChromeVox tutorial URL (used in place of "getting started" url when
 // accessibility is enabled).
@@ -325,7 +331,9 @@ UserSessionManager::UserSessionManager()
       session_restore_strategy_(
           OAuth2LoginManager::RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN),
       running_easy_unlock_key_ops_(false),
-      should_launch_browser_(true) {
+      should_launch_browser_(true),
+      waiting_for_child_account_status_(false),
+      weak_factory_(this) {
   net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
   user_manager::UserManager::Get()->AddSessionStateObserver(this);
 }
@@ -779,17 +787,38 @@ void UserSessionManager::OnProfilePrepared(Profile* profile,
   RestorePendingUserSessions();
 }
 
+void UserSessionManager::ChildAccountStatusReceivedCallback(Profile* profile) {
+  StopChildStatusObserving(profile);
+}
+
+void UserSessionManager::StopChildStatusObserving(Profile* profile) {
+  if (!waiting_for_child_account_status_ &&
+      !SessionStartupPref::TypeIsManaged(profile->GetPrefs())) {
+    InitializeStartUrls();
+  }
+  waiting_for_child_account_status_ = false;
+}
+
 void UserSessionManager::CreateUserSession(const UserContext& user_context,
                                            bool has_auth_cookies) {
   user_context_ = user_context;
   has_auth_cookies_ = has_auth_cookies;
   InitSessionRestoreStrategy();
+  StoreUserContextDataBeforeProfileIsCreated();
 }
 
 void UserSessionManager::PreStartSession() {
   // Switch log file as soon as possible.
   if (base::SysInfo::IsRunningOnChromeOS())
     logging::RedirectChromeLogging(*(base::CommandLine::ForCurrentProcess()));
+}
+
+void UserSessionManager::StoreUserContextDataBeforeProfileIsCreated() {
+  // Store obfuscated GAIA ID.
+  if (!user_context_.GetGaiaID().empty()) {
+    user_manager::UserManager::Get()->UpdateGaiaID(user_context_.GetUserID(),
+                                                   user_context_.GetGaiaID());
+  }
 }
 
 void UserSessionManager::StartCrosSession() {
@@ -955,8 +984,8 @@ void UserSessionManager::UserProfileInitialized(Profile* profile,
     const bool transfer_auth_cookies_and_channel_ids_on_first_login =
         has_auth_cookies_;
     ProfileAuthData::Transfer(
-        authenticator_->authentication_context(),
-        profile,
+        GetAuthRequestContext(),
+        profile->GetRequestContext(),
         transfer_auth_cookies_and_channel_ids_on_first_login,
         transfer_saml_auth_cookies_on_subsequent_login,
         base::Bind(&UserSessionManager::CompleteProfileCreateAfterAuthTransfer,
@@ -1042,13 +1071,16 @@ void UserSessionManager::ActivateWizard(const std::string& screen_name) {
 }
 
 void UserSessionManager::InitializeStartUrls() const {
+  // Child account status should be known by the time of this call.
   std::vector<std::string> start_urls;
 
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+
   bool can_show_getstarted_guide =
       user_manager->GetActiveUser()->GetType() ==
           user_manager::USER_TYPE_REGULAR &&
       !user_manager->IsCurrentUserNonCryptohomeDataEphemeral();
+
   // Skip the default first-run behavior for public accounts.
   if (!user_manager->IsLoggedInAsPublicAccount()) {
     if (AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
@@ -1080,6 +1112,16 @@ void UserSessionManager::InitializeStartUrls() const {
 }
 
 bool UserSessionManager::InitializeUserSession(Profile* profile) {
+  ChildAccountService* child_service =
+      ChildAccountServiceFactory::GetForProfile(profile);
+  child_service->AddChildStatusReceivedCallback(
+      base::Bind(&UserSessionManager::ChildAccountStatusReceivedCallback,
+                 weak_factory_.GetWeakPtr(), profile));
+  base::MessageLoopProxy::current()->PostDelayedTask(
+      FROM_HERE, base::Bind(&UserSessionManager::StopChildStatusObserving,
+                            weak_factory_.GetWeakPtr(), profile),
+      base::TimeDelta::FromMilliseconds(kFlagsFetchingLoginTimeoutMs));
+
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
 
   // Kiosk apps has their own session initialization pipeline.
@@ -1098,8 +1140,12 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
     if (user_manager->IsCurrentUserNew() && !skip_post_login_screens) {
       // Don't specify start URLs if the administrator has configured the start
       // URLs via policy.
-      if (!SessionStartupPref::TypeIsManaged(profile->GetPrefs()))
-        InitializeStartUrls();
+      if (!SessionStartupPref::TypeIsManaged(profile->GetPrefs())) {
+        if (child_service->IsChildAccountStatusKnown())
+          InitializeStartUrls();
+        else
+          waiting_for_child_account_status_ = true;
+      }
 
       // Mark the device as registered., i.e. the second part of OOBE as
       // completed.
@@ -1122,8 +1168,8 @@ void UserSessionManager::InitSessionRestoreStrategy() {
   // Are we in kiosk app mode?
   if (in_app_mode) {
     if (command_line->HasSwitch(::switches::kAppModeOAuth2Token)) {
-      oauth2_refresh_token_ = command_line->GetSwitchValueASCII(
-          ::switches::kAppModeOAuth2Token);
+      user_context_.SetRefreshToken(command_line->GetSwitchValueASCII(
+          ::switches::kAppModeOAuth2Token));
     }
 
     if (command_line->HasSwitch(::switches::kAppModeAuthCode)) {
@@ -1132,22 +1178,15 @@ void UserSessionManager::InitSessionRestoreStrategy() {
     }
 
     DCHECK(!has_auth_cookies_);
-    if (!user_context_.GetAuthCode().empty()) {
-      session_restore_strategy_ = OAuth2LoginManager::RESTORE_FROM_AUTH_CODE;
-    } else if (!oauth2_refresh_token_.empty()) {
-      session_restore_strategy_ =
-          OAuth2LoginManager::RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN;
-    } else {
-      session_restore_strategy_ =
-          OAuth2LoginManager::RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN;
-    }
-    return;
   }
 
   if (has_auth_cookies_) {
     session_restore_strategy_ = OAuth2LoginManager::RESTORE_FROM_COOKIE_JAR;
   } else if (!user_context_.GetAuthCode().empty()) {
     session_restore_strategy_ = OAuth2LoginManager::RESTORE_FROM_AUTH_CODE;
+  } else if (!user_context_.GetRefreshToken().empty()) {
+    session_restore_strategy_ =
+        OAuth2LoginManager::RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN;
   } else {
     session_restore_strategy_ =
         OAuth2LoginManager::RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN;
@@ -1174,27 +1213,10 @@ void UserSessionManager::RestoreAuthSessionImpl(
   OAuth2LoginManager* login_manager =
       OAuth2LoginManagerFactory::GetInstance()->GetForProfile(profile);
   login_manager->AddObserver(this);
-  net::URLRequestContextGetter* auth_request_context = NULL;
 
-  if (StartupUtils::IsWebviewSigninEnabled()) {
-    // Webview uses different partition storage than iframe. We need to get
-    // cookies from the right storage for url request to get auth token into
-    // session.
-    GURL oobe_url(chrome::kChromeUIOobeURL);
-    GURL guest_url(std::string(content::kGuestScheme) +
-                   url::kStandardSchemeSeparator + oobe_url.GetContent());
-    content::StoragePartition* partition =
-        content::BrowserContext::GetStoragePartitionForSite(
-            ProfileHelper::GetSigninProfile(), guest_url);
-    auth_request_context = partition->GetURLRequestContext();
-  } else if (authenticator_.get() && authenticator_->authentication_context()) {
-    auth_request_context =
-        authenticator_->authentication_context()->GetRequestContext();
-  }
-
-  login_manager->RestoreSession(auth_request_context, session_restore_strategy_,
-                                oauth2_refresh_token_,
-                                user_context_.GetAuthCode());
+  login_manager->RestoreSession(
+      GetAuthRequestContext(), session_restore_strategy_,
+      user_context_.GetRefreshToken(), user_context_.GetAuthCode());
 }
 
 void UserSessionManager::InitRlzImpl(Profile* profile, bool disabled) {
@@ -1379,6 +1401,22 @@ void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
       user_context, *device_list,
       base::Bind(&UserSessionManager::OnEasyUnlockKeyOpsFinished, AsWeakPtr(),
                  user_context.GetUserID()));
+}
+
+net::URLRequestContextGetter*
+UserSessionManager::GetAuthRequestContext() const {
+  net::URLRequestContextGetter* auth_request_context = NULL;
+
+  if (StartupUtils::IsWebviewSigninEnabled()) {
+    // Webview uses different partition storage than iframe. We need to get
+    // cookies from the right storage for url request to get auth token into
+    // session.
+    auth_request_context = login::GetSigninPartition()->GetURLRequestContext();
+  } else if (authenticator_.get() && authenticator_->authentication_context()) {
+    auth_request_context =
+        authenticator_->authentication_context()->GetRequestContext();
+  }
+  return auth_request_context;
 }
 
 void UserSessionManager::AttemptRestart(Profile* profile) {

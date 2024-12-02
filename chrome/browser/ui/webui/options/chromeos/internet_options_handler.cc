@@ -14,6 +14,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/chromeos/net/onc_utils.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/options/network_property_ui_data.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
 #include "chrome/browser/chromeos/ui/choose_mobile_network_dialog.h"
@@ -48,15 +50,21 @@
 #include "chromeos/network/onc/onc_translator.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/onc/onc_constants.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/ui_chromeos_resources.h"
+#include "extensions/browser/api/vpn_provider/vpn_service.h"
+#include "extensions/browser/api/vpn_provider/vpn_service_factory.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/extension_set.h"
+#include "extensions/common/permissions/api_permission.h"
+#include "extensions/common/permissions/permissions_data.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/chromeos/network/network_connect.h"
-#include "ui/chromeos/network/network_icon.h"
-#include "ui/gfx/image/image_skia.h"
+#include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
 
 namespace chromeos {
 namespace options {
@@ -70,16 +78,12 @@ const char kNetworkDataKey[] = "networkData";
 
 // Keys for the network description dictionary passed to the web ui. Make sure
 // to keep the strings in sync with what the JavaScript side uses.
-const char kNetworkInfoKeyIconURL[] = "iconURL";
 const char kNetworkInfoKeyPolicyManaged[] = "policyManaged";
 
 // Functions we call in JavaScript.
+const char kSetVPNProvidersFunction[] = "options.VPNProviders.setProviders";
 const char kRefreshNetworkDataFunction[] =
     "options.network.NetworkList.refreshNetworkData";
-const char kSetDefaultNetworkIconsFunction[] =
-    "options.network.NetworkList.setDefaultNetworkIcons";
-const char kGetManagedPropertiesResultFunction[] =
-    "options.internet.DetailsInternetPage.getManagedPropertiesResult";
 const char kUpdateConnectionDataFunction[] =
     "options.internet.DetailsInternetPage.updateConnectionData";
 const char kUpdateCarrierFunction[] =
@@ -93,21 +97,18 @@ const char kSimOperationMessage[] = "simOperation";
 
 // TODO(stevenjb): Replace these with the matching networkingPrivate methods.
 // crbug.com/279351.
-const char kDisableNetworkTypeMessage[] = "disableNetworkType";
-const char kEnableNetworkTypeMessage[] = "enableNetworkType";
-const char kGetManagedPropertiesMessage[] = "getManagedProperties";
-const char kRequestNetworkScanMessage[] = "requestNetworkScan";
 const char kStartConnectMessage[] = "startConnect";
-const char kStartDisconnectMessage[] = "startDisconnect";
-const char kSetPropertiesMessage[] = "setProperties";
 
-// TODO(stevenjb): Add these to networkingPrivate.
-const char kRemoveNetworkMessage[] = "removeNetwork";
+// TODO(stevenjb): Deprecate this once we handle events in the JS.
+const char kSetNetworkGuidMessage[] = "setNetworkGuid";
 
 // TODO(stevenjb): Deprecate these and integrate with settings Web UI.
-const char kAddConnectionMessage[] = "addConnection";
+const char kAddVPNConnectionMessage[] = "addVPNConnection";
+const char kAddNonVPNConnectionMessage[] = "addNonVPNConnection";
 const char kConfigureNetworkMessage[] = "configureNetwork";
 const char kActivateNetworkMessage[] = "activateNetwork";
+
+const char kLoadVPNProviders[] = "loadVPNProviders";
 
 // These are strings used to communicate with JavaScript.
 const char kTagCellularAvailable[] = "cellularAvailable";
@@ -121,6 +122,8 @@ const char kTagSimOpConfigure[] = "configure";
 const char kTagSimOpSetLocked[] = "setLocked";
 const char kTagSimOpSetUnlocked[] = "setUnlocked";
 const char kTagSimOpUnlock[] = "unlock";
+const char kTagVPNProviderName[] = "name";
+const char kTagVPNProviderExtensionID[] = "extensionID";
 const char kTagVpnList[] = "vpnList";
 const char kTagWifiAvailable[] = "wifiAvailable";
 const char kTagWifiEnabled[] = "wifiEnabled";
@@ -130,8 +133,6 @@ const char kTagWiredList[] = "wiredList";
 const char kTagWirelessList[] = "wirelessList";
 
 // Pseudo-ONC chrome specific properties appended to the ONC dictionary.
-const char kNetworkInfoKeyServicePath[] = "servicePath";
-const char kTagErrorMessage[] = "errorMessage";
 const char kTagShowViewAccountButton[] = "showViewAccountButton";
 
 void ShillError(const std::string& function,
@@ -151,12 +152,18 @@ const NetworkState* GetNetworkState(const std::string& service_path) {
       GetNetworkState(service_path);
 }
 
-// Builds a dictionary with network information and an icon used for the
-// NetworkList on the settings page. Ownership of the returned pointer is
-// transferred to the caller.
+std::string ServicePathFromGuid(const std::string& guid) {
+  const NetworkState* network =
+      NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
+          guid);
+  return network ? network->path() : "";
+}
+
+// Builds a dictionary with network information for the NetworkList on the
+// settings page. Ownership of the returned pointer is transferred to the
+// caller. TODO(stevenjb): Replace with calls to networkingPrivate.getNetworks.
 base::DictionaryValue* BuildNetworkDictionary(
     const NetworkState* network,
-    float icon_scale_factor,
     const PrefService* profile_prefs) {
   scoped_ptr<base::DictionaryValue> network_info =
       network_util::TranslateNetworkStateToONC(network);
@@ -164,12 +171,6 @@ base::DictionaryValue* BuildNetworkDictionary(
   bool has_policy = onc::HasPolicyForNetwork(
       profile_prefs, g_browser_process->local_state(), *network);
   network_info->SetBoolean(kNetworkInfoKeyPolicyManaged, has_policy);
-
-  std::string icon_url = ui::network_icon::GetImageUrlForNetwork(
-      network, ui::network_icon::ICON_TYPE_LIST, icon_scale_factor);
-
-  network_info->SetString(kNetworkInfoKeyIconURL, icon_url);
-  network_info->SetString(kNetworkInfoKeyServicePath, network->path());
 
   return network_info.release();
 }
@@ -216,10 +217,37 @@ bool ShowViewAccountButton(const NetworkState* cellular) {
   return true;
 }
 
+bool IsVPNProvider(const extensions::Extension* extension) {
+  return extension->permissions_data()->HasAPIPermission(
+      extensions::APIPermission::kVpnProvider);
+}
+
+Profile* GetProfileForPrimaryUser() {
+  return chromeos::ProfileHelper::Get()->GetProfileByUser(
+      user_manager::UserManager::Get()->GetPrimaryUser());
+}
+
+extensions::ExtensionRegistry* GetExtensionRegistryForPrimaryUser() {
+  return extensions::ExtensionRegistry::Get(GetProfileForPrimaryUser());
+}
+
+scoped_ptr<base::DictionaryValue> BuildVPNProviderDictionary(
+    const std::string& name,
+    const std::string& third_party_provider_extension_id) {
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
+  dict->SetString(kTagVPNProviderName, name);
+  if (!third_party_provider_extension_id.empty()) {
+    dict->SetString(kTagVPNProviderExtensionID,
+                    third_party_provider_extension_id);
+  }
+  return dict.Pass();
+}
+
 }  // namespace
 
 InternetOptionsHandler::InternetOptionsHandler()
     : weak_factory_(this) {
+  GetExtensionRegistryForPrimaryUser()->AddObserver(this);
   NetworkHandler::Get()->network_state_handler()->AddObserver(this, FROM_HERE);
 }
 
@@ -228,6 +256,7 @@ InternetOptionsHandler::~InternetOptionsHandler() {
     NetworkHandler::Get()->network_state_handler()->RemoveObserver(
         this, FROM_HERE);
   }
+  GetExtensionRegistryForPrimaryUser()->RemoveObserver(this);
 }
 
 void InternetOptionsHandler::GetLocalizedValues(
@@ -252,25 +281,17 @@ void InternetOptionsHandler::GetLocalizedValues(
 }
 
 void InternetOptionsHandler::InitializePage() {
-  base::DictionaryValue dictionary;
-  dictionary.SetString(::onc::network_type::kCellular,
-      GetIconDataUrl(IDR_AURA_UBER_TRAY_NETWORK_BARS_DARK));
-  dictionary.SetString(::onc::network_type::kWiFi,
-      GetIconDataUrl(IDR_AURA_UBER_TRAY_NETWORK_ARCS_DARK));
-  dictionary.SetString(::onc::network_type::kVPN,
-      GetIconDataUrl(IDR_AURA_UBER_TRAY_NETWORK_VPN));
-  web_ui()->CallJavascriptFunction(kSetDefaultNetworkIconsFunction,
-                                   dictionary);
+  UpdateVPNProviders();
   NetworkHandler::Get()->network_state_handler()->RequestScan();
   RefreshNetworkData();
 }
 
 void InternetOptionsHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback(kAddConnectionMessage,
-      base::Bind(&InternetOptionsHandler::AddConnection,
+  web_ui()->RegisterMessageCallback(kAddVPNConnectionMessage,
+      base::Bind(&InternetOptionsHandler::AddVPNConnection,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kRemoveNetworkMessage,
-      base::Bind(&InternetOptionsHandler::RemoveNetwork,
+  web_ui()->RegisterMessageCallback(kAddNonVPNConnectionMessage,
+      base::Bind(&InternetOptionsHandler::AddNonVPNConnection,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kConfigureNetworkMessage,
       base::Bind(&InternetOptionsHandler::ConfigureNetwork,
@@ -287,41 +308,53 @@ void InternetOptionsHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kSimOperationMessage,
       base::Bind(&InternetOptionsHandler::SimOperationCallback,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      kLoadVPNProviders,
+      base::Bind(&InternetOptionsHandler::LoadVPNProvidersCallback,
+                 base::Unretained(this)));
+
+  web_ui()->RegisterMessageCallback(kSetNetworkGuidMessage,
+      base::Bind(&InternetOptionsHandler::SetNetworkGuidCallback,
+                 base::Unretained(this)));
 
   // networkingPrivate methods
-  web_ui()->RegisterMessageCallback(kDisableNetworkTypeMessage,
-      base::Bind(&InternetOptionsHandler::DisableNetworkTypeCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kEnableNetworkTypeMessage,
-      base::Bind(&InternetOptionsHandler::EnableNetworkTypeCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kGetManagedPropertiesMessage,
-      base::Bind(&InternetOptionsHandler::GetManagedPropertiesCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kRequestNetworkScanMessage,
-      base::Bind(&InternetOptionsHandler::RequestNetworkScanCallback,
-                 base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kStartConnectMessage,
       base::Bind(&InternetOptionsHandler::StartConnectCallback,
                  base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kStartDisconnectMessage,
-      base::Bind(&InternetOptionsHandler::StartDisconnectCallback,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kSetPropertiesMessage,
-      base::Bind(&InternetOptionsHandler::SetPropertiesCallback,
-                 base::Unretained(this)));
+}
+
+void InternetOptionsHandler::OnExtensionLoaded(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension) {
+  if (IsVPNProvider(extension))
+    UpdateVPNProviders();
+}
+
+void InternetOptionsHandler::OnExtensionUnloaded(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UnloadedExtensionInfo::Reason reason) {
+  if (IsVPNProvider(extension))
+    UpdateVPNProviders();
+}
+
+void InternetOptionsHandler::OnShutdown(
+    extensions::ExtensionRegistry* registry) {
+  registry->RemoveObserver(this);
 }
 
 void InternetOptionsHandler::ShowMorePlanInfoCallback(
     const base::ListValue* args) {
   if (!web_ui())
     return;
-  std::string service_path;
-  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+  std::string guid;
+  if (args->GetSize() != 1 || !args->GetString(0, &guid)) {
     NOTREACHED();
     return;
   }
-  ui::NetworkConnect::Get()->ShowMobileSetup(service_path);
+  std::string service_path = ServicePathFromGuid(guid);
+  if (!service_path.empty())
+    ui::NetworkConnect::Get()->ShowMobileSetup(service_path);
 }
 
 void InternetOptionsHandler::CarrierStatusCallback() {
@@ -331,7 +364,7 @@ void InternetOptionsHandler::CarrierStatusCallback() {
   if (device && (device->carrier() == shill::kCarrierSprint)) {
     const NetworkState* network =
         handler->FirstNetworkByType(NetworkTypePattern::Cellular());
-    if (network && network->path() == details_path_) {
+    if (network && network->guid() == details_guid_) {
       ui::NetworkConnect::Get()->ActivateCellular(network->path());
       UpdateConnectionData(network->path());
     }
@@ -340,11 +373,8 @@ void InternetOptionsHandler::CarrierStatusCallback() {
 }
 
 void InternetOptionsHandler::SetCarrierCallback(const base::ListValue* args) {
-  std::string service_path;
   std::string carrier;
-  if (args->GetSize() != 2 ||
-      !args->GetString(0, &service_path) ||
-      !args->GetString(1, &carrier)) {
+  if (args->GetSize() != 1 || !args->GetString(1, &carrier)) {
     NOTREACHED();
     return;
   }
@@ -395,89 +425,55 @@ void InternetOptionsHandler::SimOperationCallback(const base::ListValue* args) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// TODO(stevenjb): Deprecate this once events are handled in the JS.
+
+void InternetOptionsHandler::SetNetworkGuidCallback(
+    const base::ListValue* args) {
+  std::string guid;
+  if (args->GetSize() != 1 || !args->GetString(0, &guid)) {
+    NOTREACHED();
+    return;
+  }
+  details_guid_ = guid;
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
 // networkingPrivate implementation methods. TODO(stevenjb): Use the
 // networkingPrivate API directly in the settings JS and deprecate these
 // methods. crbug.com/279351.
 
-void InternetOptionsHandler::DisableNetworkTypeCallback(
-    const base::ListValue* args) {
-  std::string type;
-  if (!args->GetString(0, &type)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->network_state_handler()->SetTechnologyEnabled(
-      chromeos::onc::NetworkTypePatternFromOncType(type), false,
-      base::Bind(&ShillError, "DisableNetworkType"));
-}
-
-void InternetOptionsHandler::EnableNetworkTypeCallback(
-    const base::ListValue* args) {
-  std::string type;
-  if (!args->GetString(0, &type)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->network_state_handler()->SetTechnologyEnabled(
-      chromeos::onc::NetworkTypePatternFromOncType(type), true,
-      base::Bind(&ShillError, "EnableNetworkType"));
-}
-
-void InternetOptionsHandler::GetManagedPropertiesCallback(
-    const base::ListValue* args) {
-  std::string service_path;
-  if (!args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  // This is only ever called to provide properties for the details page, so
-  // set |details_path_| (used by the NetworkState observers) here.
-  details_path_ = service_path;
-  NetworkHandler::Get()
-      ->managed_network_configuration_handler()
-      ->GetManagedProperties(
-          LoginState::Get()->primary_user_hash(), service_path,
-          base::Bind(&InternetOptionsHandler::GetManagedPropertiesResult,
-                     weak_factory_.GetWeakPtr(),
-                     kGetManagedPropertiesResultFunction),
-          base::Bind(&ShillError, "GetManagedProperties"));
-}
-
-void InternetOptionsHandler::RequestNetworkScanCallback(
-    const base::ListValue* args) {
-  NetworkHandler::Get()->network_state_handler()->RequestScan();
-}
-
 void InternetOptionsHandler::StartConnectCallback(const base::ListValue* args) {
-  std::string service_path;
-  if (!args->GetString(0, &service_path)) {
+  std::string guid;
+  if (!args->GetString(0, &guid)) {
     NOTREACHED();
     return;
   }
-  ui::NetworkConnect::Get()->ConnectToNetwork(service_path);
-}
-
-void InternetOptionsHandler::StartDisconnectCallback(
-    const base::ListValue* args) {
-  std::string service_path;
-  if (!args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->network_connection_handler()->DisconnectNetwork(
-      service_path,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "StartDisconnectCallback"));
+  std::string service_path = ServicePathFromGuid(guid);
+  if (!service_path.empty())
+    ui::NetworkConnect::Get()->ConnectToNetwork(service_path);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-std::string InternetOptionsHandler::GetIconDataUrl(int resource_id) const {
-  gfx::ImageSkia* icon =
-      ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
-  gfx::ImageSkiaRep image_rep = icon->GetRepresentation(
-      web_ui()->GetDeviceScaleFactor());
-  return webui::GetBitmapDataUrl(image_rep.sk_bitmap());
+void InternetOptionsHandler::UpdateVPNProviders() {
+  extensions::ExtensionRegistry* const registry =
+      GetExtensionRegistryForPrimaryUser();
+
+  base::ListValue vpn_providers;
+  const extensions::ExtensionSet& extensions = registry->enabled_extensions();
+  for (const auto& extension : extensions) {
+    if (IsVPNProvider(extension.get())) {
+      vpn_providers.Append(BuildVPNProviderDictionary(
+                               extension->name(), extension->id()).release());
+    }
+  }
+  // Add the built-in OpenVPN/L2TP provider.
+  vpn_providers.Append(
+      BuildVPNProviderDictionary(
+          l10n_util::GetStringUTF8(IDS_NETWORK_VPN_BUILT_IN_PROVIDER),
+          std::string() /* third_party_provider_extension_id */).release());
+  web_ui()->CallJavascriptFunction(kSetVPNProvidersFunction, vpn_providers);
 }
 
 void InternetOptionsHandler::RefreshNetworkData() {
@@ -502,17 +498,8 @@ void InternetOptionsHandler::GetManagedPropertiesResult(
     const std::string& service_path,
     const base::DictionaryValue& onc_properties) {
   scoped_ptr<base::DictionaryValue> dictionary(onc_properties.DeepCopy());
-  // Add service path for now.
-  dictionary->SetString(kNetworkInfoKeyServicePath, service_path);
-
   const NetworkState* network = GetNetworkState(service_path);
   if (network) {
-    // Add a Chrome specific translated error message. TODO(stevenjb): Figure
-    // out a more robust way to track errors. Service.Error is transient so we
-    // use NetworkState.error() which accurately tracks the "last" error.
-    dictionary->SetString(kTagErrorMessage,
-                          ui::NetworkConnect::Get()->GetShillErrorString(
-                              network->error(), service_path));
     // Add additional non-ONC cellular properties to inform the UI.
     if (network->type() == shill::kTypeCellular) {
       dictionary->SetBoolean(kTagShowViewAccountButton,
@@ -542,7 +529,7 @@ void InternetOptionsHandler::NetworkConnectionStateChanged(
     const NetworkState* network) {
   if (!web_ui())
     return;
-  if (network->path() == details_path_)
+  if (network->guid() == details_guid_)
     UpdateConnectionData(network->path());
 }
 
@@ -551,7 +538,7 @@ void InternetOptionsHandler::NetworkPropertiesUpdated(
   if (!web_ui())
     return;
   RefreshNetworkData();
-  if (network->path() == details_path_)
+  if (network->guid() == details_guid_)
     UpdateConnectionData(network->path());
 }
 
@@ -564,39 +551,39 @@ void InternetOptionsHandler::DevicePropertiesUpdated(
   const NetworkState* network =
       NetworkHandler::Get()->network_state_handler()->FirstNetworkByType(
           NetworkTypePattern::Cellular());
-  if (network && network->path() == details_path_)
+  if (network && network->path() == details_guid_)
     UpdateConnectionData(network->path());
-}
-
-void InternetOptionsHandler::SetPropertiesCallback(
-    const base::ListValue* args) {
-  std::string service_path;
-  const base::DictionaryValue* properties;
-  if (args->GetSize() < 2 ||
-      !args->GetString(0, &service_path) ||
-      !args->GetDictionary(1, &properties)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()->managed_network_configuration_handler()->SetProperties(
-      service_path, *properties,
-      base::Bind(&base::DoNothing),
-      base::Bind(&ShillError, "SetProperties"));
 }
 
 gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
   return web_ui()->GetWebContents()->GetTopLevelNativeWindow();
 }
 
-float InternetOptionsHandler::GetScaleFactor() const {
-  return web_ui()->GetDeviceScaleFactor();
-}
-
 const PrefService* InternetOptionsHandler::GetPrefs() const {
   return Profile::FromWebUI(web_ui())->GetPrefs();
 }
 
-void InternetOptionsHandler::AddConnection(const base::ListValue* args) {
+
+void InternetOptionsHandler::AddVPNConnection(const base::ListValue* args) {
+  if (args->empty()) {
+    // Show the "add network" dialog for the built-in OpenVPN/L2TP provider.
+    NetworkConfigView::ShowForType(shill::kTypeVPN, GetNativeWindow());
+    return;
+  }
+
+  std::string extension_id;
+  if (args->GetSize() != 1 || !args->GetString(0, &extension_id)) {
+    NOTREACHED();
+    return;
+  }
+
+  // Request that the third-party VPN provider identified by |provider_id|
+  // show its "add network" dialog.
+  chromeos::VpnServiceFactory::GetForBrowserContext(
+      GetProfileForPrimaryUser())->SendShowAddDialogToExtension(extension_id);
+}
+
+void InternetOptionsHandler::AddNonVPNConnection(const base::ListValue* args) {
   std::string onc_type;
   if (args->GetSize() != 1 || !args->GetString(0, &onc_type)) {
     NOTREACHED();
@@ -604,8 +591,6 @@ void InternetOptionsHandler::AddConnection(const base::ListValue* args) {
   }
   if (onc_type == ::onc::network_type::kWiFi) {
     NetworkConfigView::ShowForType(shill::kTypeWifi, GetNativeWindow());
-  } else if (onc_type == ::onc::network_type::kVPN) {
-    NetworkConfigView::ShowForType(shill::kTypeVPN, GetNativeWindow());
   } else if (onc_type == ::onc::network_type::kCellular) {
     ChooseMobileNetworkDialog::ShowDialog(GetNativeWindow());
   } else {
@@ -614,33 +599,46 @@ void InternetOptionsHandler::AddConnection(const base::ListValue* args) {
 }
 
 void InternetOptionsHandler::ConfigureNetwork(const base::ListValue* args) {
-  std::string service_path;
-  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+  std::string guid;
+  if (args->GetSize() != 1 || !args->GetString(0, &guid)) {
     NOTREACHED();
     return;
   }
+  const std::string service_path = ServicePathFromGuid(guid);
+  if (service_path.empty())
+    return;
+
+  const NetworkState* network = GetNetworkState(service_path);
+  if (!network)
+    return;
+
+  if (network->type() == shill::kTypeVPN &&
+      network->vpn_provider_type() == shill::kProviderThirdPartyVpn) {
+    // Request that the third-party VPN provider used by the |network| show a
+    // configuration dialog for it.
+    VpnServiceFactory::GetForBrowserContext(GetProfileForPrimaryUser())
+        ->SendShowConfigureDialogToExtension(
+            network->third_party_vpn_provider_extension_id(), network->name());
+    return;
+  }
+
   NetworkConfigView::Show(service_path, GetNativeWindow());
 }
 
 void InternetOptionsHandler::ActivateNetwork(const base::ListValue* args) {
-  std::string service_path;
-  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
+  std::string guid;
+  if (args->GetSize() != 1 || !args->GetString(0, &guid)) {
     NOTREACHED();
     return;
   }
-  ui::NetworkConnect::Get()->ActivateCellular(service_path);
+  std::string service_path = ServicePathFromGuid(guid);
+  if (!service_path.empty())
+    ui::NetworkConnect::Get()->ActivateCellular(service_path);
 }
 
-void InternetOptionsHandler::RemoveNetwork(const base::ListValue* args) {
-  std::string service_path;
-  if (args->GetSize() != 1 || !args->GetString(0, &service_path)) {
-    NOTREACHED();
-    return;
-  }
-  NetworkHandler::Get()
-      ->managed_network_configuration_handler()
-      ->RemoveConfiguration(service_path, base::Bind(&base::DoNothing),
-                            base::Bind(&ShillError, "RemoveNetwork"));
+void InternetOptionsHandler::LoadVPNProvidersCallback(
+    const base::ListValue* args) {
+  UpdateVPNProviders();
 }
 
 base::ListValue* InternetOptionsHandler::GetWiredList() {
@@ -649,7 +647,7 @@ base::ListValue* InternetOptionsHandler::GetWiredList() {
       FirstNetworkByType(NetworkTypePattern::Ethernet());
   if (!network)
     return list;
-  list->Append(BuildNetworkDictionary(network, GetScaleFactor(), GetPrefs()));
+  list->Append(BuildNetworkDictionary(network, GetPrefs()));
   return list;
 }
 
@@ -661,7 +659,7 @@ base::ListValue* InternetOptionsHandler::GetWirelessList() {
       NetworkTypePattern::Wireless(), &networks);
   for (NetworkStateHandler::NetworkStateList::const_iterator iter =
            networks.begin(); iter != networks.end(); ++iter) {
-    list->Append(BuildNetworkDictionary(*iter, GetScaleFactor(), GetPrefs()));
+    list->Append(BuildNetworkDictionary(*iter, GetPrefs()));
   }
 
   return list;
@@ -675,7 +673,7 @@ base::ListValue* InternetOptionsHandler::GetVPNList() {
       NetworkTypePattern::VPN(), &networks);
   for (NetworkStateHandler::NetworkStateList::const_iterator iter =
            networks.begin(); iter != networks.end(); ++iter) {
-    list->Append(BuildNetworkDictionary(*iter, GetScaleFactor(), GetPrefs()));
+    list->Append(BuildNetworkDictionary(*iter, GetPrefs()));
   }
 
   return list;
@@ -695,12 +693,10 @@ base::ListValue* InternetOptionsHandler::GetRememberedList() {
            networks.begin(); iter != networks.end(); ++iter) {
     const NetworkState* network = *iter;
     if (network->type() != shill::kTypeWifi &&
-        network->type() != shill::kTypeVPN)
+        network->type() != shill::kTypeVPN) {
       continue;
-    list->Append(
-        BuildNetworkDictionary(network,
-                               web_ui()->GetDeviceScaleFactor(),
-                               Profile::FromWebUI(web_ui())->GetPrefs()));
+    }
+    list->Append(BuildNetworkDictionary(network, GetPrefs()));
   }
 
   return list;

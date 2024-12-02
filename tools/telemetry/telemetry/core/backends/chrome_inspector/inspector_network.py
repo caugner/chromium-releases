@@ -3,7 +3,7 @@
 # found in the LICENSE file.
 import logging
 
-from telemetry.core import util
+from telemetry.core import exceptions
 
 
 class InspectorNetworkException(Exception):
@@ -143,8 +143,7 @@ class InspectorNetwork(object):
     self.ClearResponseData()
     self._inspector_websocket.RegisterDomain(
         'Network',
-        self._OnNetworkNotification,
-        self._OnClose)
+        self._OnNetworkNotification)
     request = {
         'method': 'Network.enable'
         }
@@ -189,7 +188,7 @@ class InspectorNetwork(object):
               'requestId': request_id,
               }
           }, timeout)
-    except util.TimeoutException:
+    except exceptions.TimeoutException:
       logging.warning('Timeout during fetching body for %s' % request_id)
       return None, False
     if 'error' in res:
@@ -198,9 +197,6 @@ class InspectorNetwork(object):
 
   def HTTPResponseServedFromCache(self, request_id):
     return request_id and request_id in self._served_from_cache
-
-  def _OnClose(self):
-    pass
 
   @property
   def timeline_recorder(self):

@@ -280,7 +280,7 @@ void FakeDriveService::AddApp(const std::string& app_id,
   ReplaceSubstringsAfterOffset(
       &app_json, 0, "$Removable", is_removable ? "true" : "false");
 
-  JSONStringValueSerializer json(app_json);
+  JSONStringValueDeserializer json(app_json);
   std::string error_message;
   scoped_ptr<base::Value> value(json.Deserialize(NULL, &error_message));
   CHECK_EQ(base::Value::TYPE_DICTIONARY, value->GetType());
@@ -1770,6 +1770,14 @@ google_apis::CancelCallback FakeDriveService::AddPermission(
 
   NOTREACHED();
   return CancelCallback();
+}
+
+scoped_ptr<BatchRequestConfiguratorInterface>
+FakeDriveService::StartBatchRequest() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  NOTREACHED();
+  return scoped_ptr<BatchRequestConfiguratorInterface>();
 }
 
 void FakeDriveService::NotifyObservers() {

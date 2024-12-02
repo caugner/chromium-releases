@@ -440,6 +440,9 @@ PDFViewer.prototype = {
       });
       while (this.delayedScriptingMessages_.length > 0)
         this.handleScriptingMessage(this.delayedScriptingMessages_.shift());
+
+      if (this.isMaterial_)
+        this.uiManager_.hideUiAfterTimeout();
     }
   },
 

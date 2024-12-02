@@ -121,8 +121,14 @@ class PersonalDataManager : public KeyedService,
   // status can be changed.
   void UpdateServerCreditCard(const CreditCard& credit_card);
 
+  // Resets the card for |guid| to the masked state.
+  void ResetFullServerCard(const std::string& guid);
+
   // Resets all unmasked cards to the masked state.
   void ResetFullServerCards();
+
+  // Deletes all server profiles and cards (both masked and unmasked).
+  void ClearAllServerData();
 
   // Returns the credit card with the specified |guid|, or NULL if there is
   // no credit card with the specified |guid|.
@@ -147,6 +153,9 @@ class PersonalDataManager : public KeyedService,
   virtual const std::vector<CreditCard*>& GetLocalCreditCards() const;
   // Returns all credit cards, server and local.
   virtual const std::vector<CreditCard*>& GetCreditCards() const;
+
+  // Returns true if there is some data synced from Wallet.
+  bool HasServerData() const;
 
   // Loads profiles that can suggest data for |type|. |field_contents| is the
   // part the user has already typed. |field_is_autofilled| is true if the field
@@ -372,6 +381,9 @@ class PersonalDataManager : public KeyedService,
 
   // An observer to listen for changes to prefs::kAutofillEnabled.
   scoped_ptr<BooleanPrefMember> enabled_pref_;
+
+  // An observer to listen for changes to prefs::kAutofillWalletImportEnabled.
+  scoped_ptr<BooleanPrefMember> wallet_enabled_pref_;
 
   DISALLOW_COPY_AND_ASSIGN(PersonalDataManager);
 };

@@ -11,10 +11,12 @@ cr.define('hotword', function() {
  * shutdown.
  *
  * @param {boolean} loggingEnabled Whether audio logging is enabled.
+ * @param {boolean} hotwordStream Whether the audio input stream is from a
+ *     hotword stream.
  * @constructor
  * @extends {cr.EventTarget}
  */
-function NaClManager(loggingEnabled) {
+function NaClManager(loggingEnabled, hotwordStream) {
   /**
    * Current state of this manager.
    * @private {hotword.NaClManager.ManagerState_}
@@ -68,6 +70,12 @@ function NaClManager(loggingEnabled) {
    * @private {boolean}
    */
   this.loggingEnabled_ = loggingEnabled;
+
+  /**
+   * Whether the audio input stream is from a hotword stream.
+   * @private {boolean}
+   */
+  this.hotwordStream_ = hotwordStream;
 
   /**
    * Audio log of X seconds before hotword triggered.
@@ -432,6 +440,13 @@ NaClManager.prototype.handleRequestModel_ = function() {
         hotword.constants.NaClPlugin.LOG + ':' +
         hotword.constants.AUDIO_LOG_SECONDS);
   }
+
+  // If the audio stream is from a hotword stream, tell the plugin.
+  if (this.hotwordStream_) {
+    this.sendDataToPlugin_(
+        hotword.constants.NaClPlugin.DSP + ':' +
+        hotword.constants.HOTWORD_STREAM_TIMEOUT_SECONDS);
+  }
 };
 
 /**
@@ -508,6 +523,21 @@ NaClManager.prototype.handleStopped_ = function() {
 };
 
 /**
+ * Handle a TIMEOUT message from the plugin.
+ * The plugin sends this message when it thinks the stream is from a DSP and
+ * a hotword wasn't detected within a timeout period after arrival of the first
+ * audio samples.
+ * @private
+ */
+NaClManager.prototype.handleTimeout_ = function() {
+  if (this.recognizerState_ != ManagerState_.RUNNING) {
+    return;
+  }
+  this.recognizerState_ = ManagerState_.STOPPED;
+  this.dispatchEvent(new Event(hotword.constants.Event.TIMEOUT));
+};
+
+/**
  * Handle a SPEAKER_MODEL_SAVED message from the plugin.
  * The plugin sends this message after writing the model to a file.
  * @private
@@ -548,6 +578,9 @@ NaClManager.prototype.handlePluginMessage_ = function(msg) {
         break;
       case hotword.constants.NaClPlugin.STOPPED:
         this.handleStopped_();
+        break;
+      case hotword.constants.NaClPlugin.TIMEOUT:
+        this.handleTimeout_();
         break;
       case hotword.constants.NaClPlugin.SPEAKER_MODEL_SAVED:
         this.handleSpeakerModelSaved_();

@@ -147,12 +147,13 @@ SpaceKey.prototype.getCharacter = function() {
  * @param {boolean} visible True to set title visible.
  */
 SpaceKey.prototype.updateTitle = function(title, visible) {
-  if (this.textElem) {
-    this.text = title;
-    goog.dom.setTextContent(this.textElem, visible ? title : '');
-    goog.dom.classlist.add(this.textElem,
-        i18n.input.chrome.inputview.Css.TITLE);
+  if (this.iconCss_) {
+    return;
   }
+  this.text = title;
+  goog.dom.setTextContent(this.wrapper_, visible ? title : '');
+  goog.dom.classlist.add(this.wrapper_,
+      i18n.input.chrome.inputview.Css.TITLE);
 };
 
 
@@ -184,7 +185,7 @@ SpaceKey.prototype.resize = function(width, height) {
 
   goog.style.setSize(this.wrapper_, width, SpaceKey.HEIGHT);
   // Positions the wrapper in the middle.
-  this.wrapper_.style.top = (height - SpaceKey.HEIGHT) / 2 + 'px';
+  this.wrapper_.style.top = (this.availableHeight - SpaceKey.HEIGHT) / 2 + 'px';
 };
 
 });  // goog.scope

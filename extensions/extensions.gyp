@@ -53,6 +53,7 @@
         '../device/usb/usb.gyp:device_usb',
         '../ipc/ipc.gyp:ipc',
         '../net/net.gyp:net',
+        '../third_party/icu/icu.gyp:icuuc',
         '../third_party/re2/re2.gyp:re2',
         '../ui/base/ui_base.gyp:ui_base',
         '../ui/gfx/gfx.gyp:gfx_geometry',
@@ -194,11 +195,6 @@
             '<@(extensions_browser_sources_linux_nonchromeos)',
           ],
         }],
-        ['OS != "linux"', {
-          'sources': [
-            '<@(extensions_browser_sources_nonlinux)',
-          ]
-        }],
       ],
       # Disable c4267 warnings until we fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
@@ -293,6 +289,7 @@
           'action_name': 'repack_extensions_shell_and_test_pak',
           'variables': {
             'pak_inputs': [
+              '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_image_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/app/strings/content_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',

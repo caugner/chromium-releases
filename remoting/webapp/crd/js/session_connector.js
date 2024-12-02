@@ -18,12 +18,6 @@ var remoting = remoting || {};
 remoting.SessionConnector = function() {};
 
 /**
- * Reset the per-connection state so that the object can be re-used for a
- * second connection. Note the none of the shared WCS state is reset.
- */
-remoting.SessionConnector.prototype.reset = function() {};
-
-/**
  * Initiate a Me2Me connection.
  *
  * @param {remoting.Host} host The Me2Me host to which to connect.
@@ -74,13 +68,15 @@ remoting.SessionConnector.prototype.updatePairingInfo =
     function(clientId, sharedSecret) {};
 
 /**
- * Initiate an IT2Me connection.
+ * Initiates a remote connection.
  *
- * @param {string} accessCode The access code as entered by the user.
+ * @param {remoting.Application.Mode} mode
+ * @param {remoting.Host} host
+ * @param {remoting.CredentialsProvider} credentialsProvider
  * @return {void} Nothing.
  */
-remoting.SessionConnector.prototype.connectIT2Me =
-    function(accessCode) {};
+remoting.SessionConnector.prototype.connect =
+    function(mode, host, credentialsProvider) {};
 
 /**
  * Reconnect a closed connection.
@@ -95,19 +91,22 @@ remoting.SessionConnector.prototype.reconnect = function() {};
 remoting.SessionConnector.prototype.cancel = function() {};
 
 /**
- * Get the connection mode (Me2Me or IT2Me)
- *
- * @return {remoting.DesktopConnectedView.Mode}
- */
-remoting.SessionConnector.prototype.getConnectionMode = function() {};
-
-/**
  * Get host ID.
  *
  * @return {string}
  */
 remoting.SessionConnector.prototype.getHostId = function() {};
 
+/**
+ * @param {remoting.ProtocolExtension} extension
+ */
+remoting.SessionConnector.prototype.registerProtocolExtension =
+    function(extension) {};
+
+/**
+ * Closes the session and removes the plugin element.
+ */
+remoting.SessionConnector.prototype.closeSession = function() {};
 
 /**
  * @interface
@@ -116,26 +115,18 @@ remoting.SessionConnectorFactory = function() {};
 
 /**
  * @param {HTMLElement} clientContainer Container element for the client view.
- * @param {function(remoting.ClientSession):void} onConnected Callback on
+ * @param {function(remoting.ConnectionInfo):void} onConnected Callback on
  *     success.
- * @param {function(remoting.Error):void} onError Callback on error.
- * @param {function(string, string):boolean} onExtensionMessage The handler for
- *     protocol extension messages. Returns true if a message is recognized;
- *     false otherwise.
- * @param {function(remoting.Error):void} onConnectionFailed Callback for when
+ * @param {function(!remoting.Error):void} onError Callback on error.
+ * @param {function(!remoting.Error):void} onConnectionFailed Callback for when
  *     the connection fails.
  * @param {Array<string>} requiredCapabilities Connector capabilities
  *     required by this application.
- * @param {string} defaultRemapKeys The default set of key mappings to use
- *     in the client session.
  * @return {remoting.SessionConnector}
  */
 remoting.SessionConnectorFactory.prototype.createConnector =
-    // TODO(garykac): Can onExtensionMessage be removed from here? It's only
-    // needed to pass to the ClientSession. Investigate why ClientSession
-    // needs this.
-    function(clientContainer, onConnected, onError, onExtensionMessage,
-             onConnectionFailed, requiredCapabilities, defaultRemapKeys) {};
+    function(clientContainer, onConnected, onError,
+             onConnectionFailed, requiredCapabilities) {};
 
 /**
  * @type {remoting.SessionConnectorFactory}

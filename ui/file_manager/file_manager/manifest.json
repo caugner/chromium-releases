@@ -27,11 +27,15 @@
     "echoPrivate",
     "fileBrowserHandler",
     "fileManagerPrivate",
+    {
+      "fileSystem": ["requestFileSystem", "write"]
+    },
     "fullscreen",
     "https://*.googleusercontent.com/",
     "https://docs.google.com/",
     "https://drive.google.com/",
     "https://www.google-analytics.com/",
+    "management",
     "mediaPlayerPrivate",
     "metricsPrivate",
     "notifications",
@@ -156,8 +160,8 @@
     "foreground/js/metadata/function_parallel.js",
     "foreground/js/metadata/function_sequence.js",
     "foreground/js/metadata/id3_parser.js",
+    "foreground/js/metadata/image_orientation.js",
     "foreground/js/metadata/image_parsers.js",
-    "foreground/js/metadata/metadata_cache.js",
     "foreground/js/metadata/metadata_dispatcher.js",
     "foreground/js/metadata/metadata_parser.js",
     "foreground/js/metadata/mpeg_parser.js"

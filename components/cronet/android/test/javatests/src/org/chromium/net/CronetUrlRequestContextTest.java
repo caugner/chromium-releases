@@ -4,6 +4,8 @@
 
 package org.chromium.net;
 
+import android.content.Context;
+import android.content.ContextWrapper;
 import android.os.ConditionVariable;
 import android.os.Handler;
 import android.os.Looper;
@@ -292,18 +294,24 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
     @SmallTest
     @Feature({"Cronet"})
     public void testNetLog() throws Exception {
-        mActivity = launchCronetTestApp();
-        File directory = new File(PathUtils.getDataDirectory(
-                getInstrumentation().getTargetContext()));
+        Context context = getInstrumentation().getTargetContext();
+        File directory = new File(PathUtils.getDataDirectory(context));
         File file = File.createTempFile("cronet", "json", directory);
-        mActivity.mUrlRequestContext.startNetLogToFile(file.getPath());
+        CronetUrlRequestContext requestContext = new CronetUrlRequestContext(
+                context,
+                new UrlRequestContextConfig().setLibraryName("cronet_tests"));
+        // Start NetLog immediately after the request context is created to make
+        // sure that the call won't crash the app even when the native request
+        // context is not fully initialized. See crbug.com/470196.
+        requestContext.startNetLogToFile(file.getPath());
+
         // Start a request.
         TestUrlRequestListener listener = new TestUrlRequestListener();
-        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+        UrlRequest request = requestContext.createRequest(
                 TEST_URL, listener, listener.getExecutor());
-        urlRequest.start();
+        request.start();
         listener.blockForDone();
-        mActivity.mUrlRequestContext.stopNetLog();
+        requestContext.stopNetLog();
         assertTrue(file.exists());
         assertTrue(file.length() != 0);
         assertTrue(file.delete());
@@ -518,8 +526,7 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         // Shutdown original context and create another that uses the same cache.
         mActivity.mUrlRequestContext.shutdown();
         mActivity.mUrlRequestContext = mActivity.mUrlRequestContext.createContext(
-                getInstrumentation().getTargetContext().getApplicationContext(),
-                config);
+                getInstrumentation().getTargetContext(), config);
         checkRequestCaching(url, true);
     }
 
@@ -593,5 +600,23 @@ public class CronetUrlRequestContextTest extends CronetTestBase {
         thread2.join();
         assertEquals(200, thread1.mListener.mResponseInfo.getHttpStatusCode());
         assertEquals(404, thread2.mListener.mResponseInfo.getHttpStatusCode());
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testInitDifferentContexts() throws Exception {
+        // Test that concurrently instantiating Cronet context's upon various
+        // different versions of the same Android Context does not cause crashes
+        // like crbug.com/453845
+        mActivity = launchCronetTestApp();
+        CronetUrlRequestContext firstContext =
+                new CronetUrlRequestContext(mActivity, mActivity.getContextConfig());
+        CronetUrlRequestContext secondContext = new CronetUrlRequestContext(
+                mActivity.getApplicationContext(), mActivity.getContextConfig());
+        CronetUrlRequestContext thirdContext = new CronetUrlRequestContext(
+                new ContextWrapper(mActivity), mActivity.getContextConfig());
+        firstContext.shutdown();
+        secondContext.shutdown();
+        thirdContext.shutdown();
     }
 }

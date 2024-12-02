@@ -8,6 +8,7 @@
     'user_manager_shared_sources': [
       'user_manager/empty_user_info.cc',
       'user_manager/empty_user_info.h',
+      'user_manager/user_id.h',
       'user_manager/user_info.cc',
       'user_manager/user_info.h',
       'user_manager/user_info_impl.cc',

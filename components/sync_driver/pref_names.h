@@ -10,9 +10,6 @@ namespace sync_driver {
 
 namespace prefs {
 
-extern const char kEnhancedBookmarksExperimentEnabled[];
-extern const char kEnhancedBookmarksExtensionId[];
-
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncHasAuthError[];
 extern const char kSyncHasSetupCompleted[];
@@ -56,8 +53,6 @@ extern const char kSyncSuppressStart[];
 extern const char kSyncUsingSecondaryPassphrase[];
 extern const char kSyncEncryptionBootstrapToken[];
 extern const char kSyncKeystoreEncryptionBootstrapToken[];
-
-extern const char kSyncAcknowledgedSyncTypes[];
 
 extern const char kSyncSessionsGUID[];
 

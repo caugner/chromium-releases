@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/time/time.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 
 class Profile;
@@ -48,8 +49,14 @@ class ProfileMetrics {
   };
 
   enum ProfileDelete {
-    DELETE_PROFILE_SETTINGS = 0,  // Delete profile from settings page.
-    DELETE_PROFILE_USER_MANAGER,  // Delete profile from User Manager.
+    // Delete profile from settings page.
+    DELETE_PROFILE_SETTINGS = 0,
+    // Delete profile from User Manager.
+    DELETE_PROFILE_USER_MANAGER,
+    // Show the delete profile warning in the User Manager.
+    DELETE_PROFILE_USER_MANAGER_SHOW_WARNING,
+    // Show the delete profile warning in the Settings page.
+    DELETE_PROFILE_SETTINGS_SHOW_WARNING,
     NUM_DELETE_PROFILE_METRICS
   };
 
@@ -208,6 +215,11 @@ class ProfileMetrics {
                                       ProfileCounts* counts);
 
   static void LogNumberOfProfileSwitches();
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  // Update OS level tracking of profile counts.
+  static void UpdateReportedOSProfileStatistics(size_t active, size_t signedin);
+#endif
+
   static void LogNumberOfProfiles(ProfileManager* manager);
   static void LogProfileAddNewUser(ProfileAdd metric);
   static void LogProfileAvatarSelection(size_t icon_index);
@@ -226,6 +238,7 @@ class ProfileMetrics {
   static void LogProfileNewAvatarMenuSignin(ProfileNewAvatarMenuSignin metric);
   static void LogProfileNewAvatarMenuUpgrade(
       ProfileNewAvatarMenuUpgrade metric);
+  static void LogTimeToOpenUserManager(const base::TimeDelta& time_to_open);
 
 #if defined(OS_ANDROID)
   static void LogProfileAndroidAccountManagementMenu(

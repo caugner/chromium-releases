@@ -212,12 +212,12 @@ cr.define('options.internet', function() {
      * is included in the URL.
      */
     showNetworkDetails_: function() {
-      var servicePath = parseQueryParams(window.location).servicePath;
-      if (!servicePath || !servicePath.length)
+      var guid = parseQueryParams(window.location).guid;
+      if (!guid || !guid.length)
         return;
-      // TODO(stevenjb): chrome.networkingPrivate.getManagedProperties
-      // with initializeDetailsPage as the callback.
-      chrome.send('getManagedProperties', [servicePath]);
+      chrome.send('loadVPNProviders');
+      chrome.networkingPrivate.getManagedProperties(
+          guid, DetailsInternetPage.initializeDetailsPage);
     },
 
     /**
@@ -251,7 +251,7 @@ cr.define('options.internet', function() {
 
       $('view-account-details').addEventListener('click', function(event) {
         chrome.send('showMorePlanInfo',
-                    [DetailsInternetPage.getInstance().servicePath_]);
+                    [DetailsInternetPage.getInstance().onc_.guid()]);
         PageManager.closeOverlay();
       });
 
@@ -757,7 +757,9 @@ cr.define('options.internet', function() {
     populateHeader_: function() {
       var onc = this.onc_;
 
-      $('network-details-title').textContent = onc.getTranslatedValue('Name');
+      $('network-details-title').textContent =
+          this.networkTitle_ || onc.getTranslatedValue('Name');
+
       var connectionState = onc.getActiveValue('ConnectionState');
       var connectionStateString = onc.getTranslatedValue('ConnectionState');
       $('network-details-subtitle-status').textContent = connectionStateString;
@@ -908,8 +910,8 @@ cr.define('options.internet', function() {
       // Set an ONC object with just the APN values.
       var oncData = new OncData({});
       oncData.setProperty('Cellular.APN', activeApn);
-      // TODO(stevenjb): chrome.networkingPrivate.setProperties
-      chrome.send('setProperties', [this.servicePath_, oncData.getData()]);
+      chrome.networkingPrivate.setProperties(this.onc_.guid(),
+                                             oncData.getData());
     },
 
     /**
@@ -1054,8 +1056,7 @@ cr.define('options.internet', function() {
     var carrierSelector = $('select-carrier');
     var carrier = carrierSelector[carrierSelector.selectedIndex].textContent;
     DetailsInternetPage.showCarrierChangeSpinner(true);
-    chrome.send('setCarrier', [
-      DetailsInternetPage.getInstance().servicePath_, carrier]);
+    chrome.send('setCarrier', [carrier]);
   };
 
   /**
@@ -1134,8 +1135,8 @@ cr.define('options.internet', function() {
       sendChromeMetricsAction('Options_NetworkConnectToWifi');
     else if (detailsPage.type_ == 'VPN')
       sendChromeMetricsAction('Options_NetworkConnectToVPN');
-    // TODO(stevenjb): chrome.networkingPrivate.disableNetworkType
-    chrome.send('startConnect', [detailsPage.servicePath_]);
+    // TODO(stevenjb): chrome.networkingPrivate.startConnect
+    chrome.send('startConnect', [detailsPage.onc_.guid()]);
     PageManager.closeOverlay();
   };
 
@@ -1145,21 +1146,20 @@ cr.define('options.internet', function() {
       sendChromeMetricsAction('Options_NetworkDisconnectWifi');
     else if (detailsPage.type_ == 'VPN')
       sendChromeMetricsAction('Options_NetworkDisconnectVPN');
-    // TODO(stevenjb): chrome.networkingPrivate.startDisconnect
-    chrome.send('startDisconnect', [detailsPage.servicePath_]);
+    chrome.networkingPrivate.startDisconnect(detailsPage.onc_.guid());
     PageManager.closeOverlay();
   };
 
   DetailsInternetPage.configureNetwork = function() {
     var detailsPage = DetailsInternetPage.getInstance();
-    chrome.send('configureNetwork', [detailsPage.servicePath_]);
+    chrome.send('configureNetwork', [detailsPage.onc_.guid()]);
     PageManager.closeOverlay();
   };
 
   DetailsInternetPage.activateFromDetails = function() {
     var detailsPage = DetailsInternetPage.getInstance();
     if (detailsPage.type_ == 'Cellular') {
-      chrome.send('activateNetwork', [detailsPage.servicePath_]);
+      chrome.send('activateNetwork', [detailsPage.onc_.guid()]);
     }
     PageManager.closeOverlay();
   };
@@ -1171,7 +1171,6 @@ cr.define('options.internet', function() {
   DetailsInternetPage.setDetails = function() {
     var detailsPage = DetailsInternetPage.getInstance();
     var type = detailsPage.type_;
-    var servicePath = detailsPage.servicePath_;
     var oncData = new OncData({});
     var autoConnectCheckboxId = '';
     if (type == 'WiFi') {
@@ -1189,8 +1188,12 @@ cr.define('options.internet', function() {
     } else if (type == 'Cellular') {
       autoConnectCheckboxId = 'auto-connect-network-cellular';
     } else if (type == 'VPN') {
-      oncData.setProperty('VPN.Host', $('inet-server-hostname').value);
-      autoConnectCheckboxId = 'auto-connect-network-vpn';
+      var providerType = detailsPage.onc_.getActiveValue('VPN.Type');
+      if (providerType != 'ThirdPartyVPN') {
+        oncData.setProperty('VPN.Type', providerType);
+        oncData.setProperty('VPN.Host', $('inet-server-hostname').value);
+        autoConnectCheckboxId = 'auto-connect-network-vpn';
+      }
     }
     if (autoConnectCheckboxId != '') {
       var autoConnectCheckbox =
@@ -1220,8 +1223,7 @@ cr.define('options.internet', function() {
     var data = oncData.getData();
     if (Object.keys(data).length > 0) {
       // TODO(stevenjb): Only set changed properties.
-      // TODO(stevenjb): chrome.networkingPrivate.setProperties
-      chrome.send('setProperties', [servicePath, data]);
+      chrome.networkingPrivate.setProperties(detailsPage.onc_.guid(), data);
     }
 
     PageManager.closeOverlay();
@@ -1274,7 +1276,7 @@ cr.define('options.internet', function() {
     if (!detailsPage.visible)
       return;
 
-    if (oncData.servicePath != detailsPage.servicePath_)
+    if (oncData.GUID != detailsPage.onc_.guid())
       return;
 
     // Update our cached data object.
@@ -1286,17 +1288,6 @@ cr.define('options.internet', function() {
   };
 
   /**
-   * Method called from Chrome in response to getManagedProperties.
-   * We only use this when we want to call initializeDetailsPage.
-   * TODO(stevenjb): Eliminate when we switch to networkingPrivate
-   * (initializeDetailsPage will be provided as the callback).
-   * @param {Object} oncData Dictionary of ONC properties.
-   */
-  DetailsInternetPage.getManagedPropertiesResult = function(oncData) {
-    DetailsInternetPage.initializeDetailsPage(oncData);
-  };
-
-  /**
    * Initializes the details page with the provided ONC data.
    * @param {Object} oncData Dictionary of ONC properties.
    */
@@ -1304,16 +1295,28 @@ cr.define('options.internet', function() {
     var onc = new OncData(oncData);
 
     var detailsPage = DetailsInternetPage.getInstance();
-    detailsPage.servicePath_ = oncData.servicePath;
     detailsPage.onc_ = onc;
     var type = onc.getActiveValue('Type');
     detailsPage.type_ = type;
 
     sendShowDetailsMetrics(type, onc.getActiveValue('ConnectionState'));
 
+    if (type == 'VPN') {
+      // Cache the dialog title, which will contain the provider name in the
+      // case of a third-party VPN provider. This caching is important as the
+      // provider may go away while the details dialog is being shown, causing
+      // subsequent updates to be unable to determine the correct title.
+      detailsPage.networkTitle_ = options.VPNProviders.formatNetworkName(onc);
+    } else {
+      delete detailsPage.networkTitle_;
+    }
+
     detailsPage.populateHeader_();
     detailsPage.updateConnectionButtonVisibilty_();
     detailsPage.updateDetails_();
+
+    // Inform chrome which network to pass events for in InternetOptionsHandler.
+    chrome.send('setNetworkGuid', [detailsPage.onc_.guid()]);
 
     // TODO(stevenjb): Some of the setup below should be moved to
     // updateDetails_() so that updates are reflected in the UI.
@@ -1323,7 +1326,7 @@ cr.define('options.internet', function() {
     if (remembered) {
       detailsPage.showProxy_ = true;
       // Inform Chrome which network to use for proxy configuration.
-      chrome.send('selectNetwork', [detailsPage.servicePath_]);
+      chrome.send('selectNetwork', [detailsPage.onc_.guid()]);
     } else {
       detailsPage.showProxy_ = false;
     }
@@ -1588,13 +1591,13 @@ cr.define('options.internet', function() {
       if (currentCarrierIndex == -1)
         $('service-name').textContent = networkName;
 
+      // TODO(stevenjb): Ideally many of these should be localized.
       $('network-technology').textContent =
           onc.getActiveValue('Cellular.NetworkTechnology');
       $('roaming-state').textContent =
           onc.getTranslatedValue('Cellular.RoamingState');
       $('cellular-restricted-connectivity').textContent = restrictedString;
-      // 'errorMessage' is a non ONC property added by Chrome.
-      $('error-state').textContent = onc.getActiveValue('errorMessage');
+      $('error-state').textContent = onc.getActiveValue('ErrorState');
       $('manufacturer').textContent =
           onc.getActiveValue('Cellular.Manufacturer');
       $('model-id').textContent = onc.getActiveValue('Cellular.ModelID');
@@ -1639,33 +1642,50 @@ cr.define('options.internet', function() {
       $('auto-connect-network-cellular').disabled = false;
     } else if (type == 'VPN') {
       OptionsPage.showTab($('vpn-nav-tab'));
+      var providerType = onc.getActiveValue('VPN.Type');
+      var isThirdPartyVPN = providerType == 'ThirdPartyVPN';
+      $('vpn-tab').classList.toggle('third-party-vpn-provider',
+                                    isThirdPartyVPN);
+
       $('inet-service-name').textContent = networkName;
       $('inet-provider-type').textContent =
           onc.getTranslatedValue('VPN.Type');
-      var providerType = onc.getActiveValue('VPN.Type');
-      var usernameKey;
-      if (providerType == 'OpenVPN')
-        usernameKey = 'VPN.OpenVPN.Username';
-      else if (providerType == 'L2TP-IPsec')
-        usernameKey = 'VPN.L2TP.Username';
 
-      if (usernameKey) {
-        $('inet-username').parentElement.hidden = false;
-        $('inet-username').textContent = onc.getActiveValue(usernameKey);
+      if (isThirdPartyVPN) {
+        $('inet-provider-name').textContent = '';
+        var extensionID = onc.getActiveValue('VPN.ThirdPartyVPN.ExtensionID');
+        var providers = options.VPNProviders.getProviders();
+        for (var i = 0; i < providers.length; ++i) {
+          if (extensionID == providers[i].extensionID) {
+            $('inet-provider-name').textContent = providers[i].name;
+            break;
+          }
+        }
       } else {
-        $('inet-username').parentElement.hidden = true;
+        var usernameKey;
+        if (providerType == 'OpenVPN')
+          usernameKey = 'VPN.OpenVPN.Username';
+        else if (providerType == 'L2TP-IPsec')
+          usernameKey = 'VPN.L2TP.Username';
+
+        if (usernameKey) {
+          $('inet-username').parentElement.hidden = false;
+          $('inet-username').textContent = onc.getActiveValue(usernameKey);
+        } else {
+          $('inet-username').parentElement.hidden = true;
+        }
+        var inetServerHostname = $('inet-server-hostname');
+        inetServerHostname.value = onc.getActiveValue('VPN.Host');
+        inetServerHostname.resetHandler = function() {
+          PageManager.hideBubble();
+          var recommended = onc.getRecommendedValue('VPN.Host');
+          if (recommended != undefined)
+            inetServerHostname.value = recommended;
+        };
+        $('auto-connect-network-vpn').checked =
+            onc.getActiveValue('VPN.AutoConnect');
+        $('auto-connect-network-vpn').disabled = false;
       }
-      var inetServerHostname = $('inet-server-hostname');
-      inetServerHostname.value = onc.getActiveValue('VPN.Host');
-      inetServerHostname.resetHandler = function() {
-        PageManager.hideBubble();
-        var recommended = onc.getRecommendedValue('VPN.Host');
-        if (recommended != undefined)
-          inetServerHostname.value = recommended;
-      };
-      $('auto-connect-network-vpn').checked =
-          onc.getActiveValue('VPN.AutoConnect');
-      $('auto-connect-network-vpn').disabled = false;
     } else {
       OptionsPage.showTab($('internet-nav-tab'));
     }

@@ -315,7 +315,7 @@ bool IsExtensionIdle(const std::string& extension_id,
     if (site_instance && site_instance->HasProcess())
       return false;
 
-    if (!process_manager->GetRenderViewHostsForExtension(id).empty())
+    if (!process_manager->GetRenderFrameHostsForExtension(id).empty())
       return false;
   }
   return true;
@@ -386,6 +386,10 @@ const gfx::ImageSkia& GetDefaultExtensionIcon() {
 bool IsNewBookmarkAppsEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNewBookmarkApps);
+}
+
+bool IsExtensionSupervised(const Extension* extension, Profile* profile) {
+  return extension->was_installed_by_custodian() && profile->IsSupervised();
 }
 
 }  // namespace util

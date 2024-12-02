@@ -4,9 +4,11 @@
 
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
 
+#include "base/command_line.h"
 #include "base/metrics/histogram_samples.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/passwords/manage_passwords_test.h"
+#include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
@@ -17,6 +19,7 @@
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/common/content_switches.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -190,11 +193,12 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest,
   SetupAutomaticPassword();
   EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
   ManagePasswordsBubbleView::CloseBubble();
+  content::RunAllPendingInMessageLoop();
   // Re-opening should count as manual.
   ExecuteManagePasswordsCommand();
   EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
 
- scoped_ptr<base::HistogramSamples> samples(
+  scoped_ptr<base::HistogramSamples> samples(
       GetSamples(kDisplayDispositionMetric));
   EXPECT_EQ(
       1,
@@ -238,6 +242,15 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, CloseOnKey) {
   EXPECT_TRUE(web_contents->GetRenderViewHost()->IsFocusedElementEditable());
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_K,
       false, false, false, false));
+  EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, CloseOnChangedState) {
+  SetupPendingPassword();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+  // User navigated very fast and landed on another page with an autofilled
+  // password. The save password bubble should disappear.
+  SetupManagingPasswords();
   EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
 }
 
@@ -291,4 +304,89 @@ IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, ChooseCredential) {
       Field(&password_manager::CredentialInfo::type,
             password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY)));
   ManagePasswordsBubbleView::CloseBubble();
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, ChooseCredentialNoFocus) {
+  GURL origin("https://example.com");
+  ScopedVector<autofill::PasswordForm> local_credentials;
+  test_form()->origin = origin;
+  test_form()->display_name = base::ASCIIToUTF16("Peter");
+  test_form()->username_value = base::ASCIIToUTF16("pet12@gmail.com");
+  local_credentials.push_back(new autofill::PasswordForm(*test_form()));
+  ScopedVector<autofill::PasswordForm> federated_credentials;
+
+  // Open another window with focus.
+  Browser* focused_window = CreateBrowser(browser()->profile());
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(focused_window));
+  content::RunAllPendingInMessageLoop();
+
+  EXPECT_FALSE(browser()->window()->IsActive());
+  SetupChooseCredentials(local_credentials.Pass(), federated_credentials.Pass(),
+                         origin);
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, AutoSignin) {
+  // The switch enables the new UI.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableCredentialManagerAPI);
+  ScopedVector<autofill::PasswordForm> local_credentials;
+  test_form()->origin = GURL("https://example.com");
+  test_form()->display_name = base::ASCIIToUTF16("Peter");
+  test_form()->username_value = base::ASCIIToUTF16("pet12@gmail.com");
+  GURL avatar_url("https://google.com/avatar.png");
+  test_form()->avatar_url = avatar_url;
+  local_credentials.push_back(new autofill::PasswordForm(*test_form()));
+
+  // Prepare to capture the network request.
+  TestURLFetcherCallback url_callback;
+  net::FakeURLFetcherFactory factory(
+      NULL,
+      base::Bind(&TestURLFetcherCallback::CreateURLFetcher,
+                 base::Unretained(&url_callback)));
+  factory.SetFakeResponse(avatar_url, std::string(), net::HTTP_OK,
+                          net::URLRequestStatus::FAILED);
+  EXPECT_CALL(url_callback, OnRequestDone(avatar_url));
+
+  SetupAutoSignin(local_credentials.Pass());
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+  ::testing::Mock::VerifyAndClearExpectations(&url_callback);
+
+  ManagePasswordsBubbleView::CloseBubble();
+  EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
+  content::RunAllPendingInMessageLoop();
+
+  // Open the bubble to manage accounts.
+  EXPECT_EQ(password_manager::ui::MANAGE_STATE, GetController()->state());
+  EXPECT_CALL(url_callback, OnRequestDone(avatar_url));
+  ManagePasswordsBubbleView::ShowBubble(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        ManagePasswordsBubble::USER_ACTION);
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+}
+
+IN_PROC_BROWSER_TEST_F(ManagePasswordsBubbleViewTest, AutoSigninNoFocus) {
+  ScopedVector<autofill::PasswordForm> local_credentials;
+  test_form()->origin = GURL("https://example.com");;
+  test_form()->display_name = base::ASCIIToUTF16("Peter");
+  test_form()->username_value = base::ASCIIToUTF16("pet12@gmail.com");
+  local_credentials.push_back(new autofill::PasswordForm(*test_form()));
+
+  // Open another window with focus.
+  Browser* focused_window = CreateBrowser(browser()->profile());
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(focused_window));
+  content::RunAllPendingInMessageLoop();
+
+  EXPECT_FALSE(browser()->window()->IsActive());
+  ManagePasswordsBubbleView::set_auto_signin_toast_timeout(0);
+  SetupAutoSignin(local_credentials.Pass());
+  content::RunAllPendingInMessageLoop();
+  EXPECT_TRUE(ManagePasswordsBubbleView::IsShowing());
+
+  // Bring the first window back. The toast closes by timeout.
+  focused_window->window()->Close();
+  browser()->window()->Activate();
+  content::RunAllPendingInMessageLoop();
+  EXPECT_TRUE(browser()->window()->IsActive());
+  EXPECT_FALSE(ManagePasswordsBubbleView::IsShowing());
 }

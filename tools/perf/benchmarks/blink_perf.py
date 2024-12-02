@@ -5,8 +5,8 @@
 import os
 
 from telemetry import benchmark
-from telemetry import page as page_module
 from telemetry.core import util
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import list_of_scalar_values
@@ -64,8 +64,7 @@ def CreatePageSetFromPath(path, skipped_file):
 class _BlinkPerfMeasurement(page_test.PageTest):
   """Tuns a blink performance test and reports the results."""
   def __init__(self):
-    super(_BlinkPerfMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_BlinkPerfMeasurement, self).__init__()
     with open(os.path.join(os.path.dirname(__file__),
                            'blink_perf.js'), 'r') as f:
       self._blink_perf_js = f.read()
@@ -208,6 +207,7 @@ class BlinkPerfEvents(benchmark.Benchmark):
     return CreatePageSetFromPath(path, SKIPPED_FILE)
 
 
+@benchmark.Disabled('win8')  # http://crbug.com/462350
 class BlinkPerfLayout(benchmark.Benchmark):
   tag = 'layout'
   test = _BlinkPerfMeasurement

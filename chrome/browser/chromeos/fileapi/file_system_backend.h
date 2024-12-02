@@ -10,10 +10,10 @@
 
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "storage/browser/fileapi/file_system_backend.h"
 #include "storage/browser/fileapi/task_runner_bound_observer_list.h"
-#include "storage/browser/quota/special_storage_policy.h"
 #include "storage/common/fileapi/file_system_types.h"
 
 namespace storage {
@@ -73,7 +73,6 @@ class FileSystemBackend : public storage::ExternalFileSystemBackend {
       FileSystemBackendDelegate* drive_delegate,
       FileSystemBackendDelegate* file_system_provider_delegate,
       FileSystemBackendDelegate* mtp_delegate,
-      scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy,
       scoped_refptr<storage::ExternalMountPoints> mount_points,
       storage::ExternalMountPoints* system_mount_points);
   ~FileSystemBackend() override;
@@ -128,17 +127,19 @@ class FileSystemBackend : public storage::ExternalFileSystemBackend {
   // storage::ExternalFileSystemBackend overrides.
   bool IsAccessAllowed(const storage::FileSystemURL& url) const override;
   std::vector<base::FilePath> GetRootDirectories() const override;
-  void GrantFullAccessToExtension(const std::string& extension_id) override;
   void GrantFileAccessToExtension(const std::string& extension_id,
                                   const base::FilePath& virtual_path) override;
   void RevokeAccessForExtension(const std::string& extension_id) override;
   bool GetVirtualPath(const base::FilePath& filesystem_path,
-                      base::FilePath* virtual_path) override;
-  void GetRedirectURLForContents(const storage::FileSystemURL& url,
-                                 const storage::URLCallback& callback) override;
+                      base::FilePath* virtual_path) const override;
+  void GetRedirectURLForContents(
+      const storage::FileSystemURL& url,
+      const storage::URLCallback& callback) const override;
+  storage::FileSystemURL CreateInternalURL(
+      storage::FileSystemContext* context,
+      const base::FilePath& entry_path) const override;
 
  private:
-  scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
   scoped_ptr<FileAccessPermissions> file_access_permissions_;
   scoped_ptr<storage::AsyncFileUtil> local_file_util_;
 

@@ -4,14 +4,13 @@
 
 #include "chrome/browser/lifetime/application_lifetime.h"
 
-#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/process/kill.h"
+#include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -50,6 +49,10 @@
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
 #include "components/browser_watcher/exit_funnel_win.h"
+#endif
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
 #endif
 
 namespace chrome {
@@ -306,7 +309,7 @@ void SessionEnding() {
   // termination as soon as it hides or destroys its windows. Since any
   // execution past that point will be non-deterministically cut short, we
   // might as well put ourselves out of that misery deterministically.
-  base::KillProcess(base::GetCurrentProcessHandle(), 0, false);
+  base::Process::Current().Terminate(0, false);
 }
 
 void IncrementKeepAliveCount() {

@@ -387,7 +387,7 @@ void RemoteDesktopBrowserTest::DisconnectMe2Me() {
 
   ASSERT_TRUE(RemoteDesktopBrowserTest::IsSessionConnected());
 
-  ExecuteScript("remoting.disconnect();");
+  ExecuteScript("remoting.app.disconnect();");
 
   EXPECT_TRUE(HtmlElementVisible("client-dialog"));
   EXPECT_TRUE(HtmlElementVisible("client-reconnect-button"));
@@ -557,13 +557,13 @@ void RemoteDesktopBrowserTest::ConnectToLocalHost(bool remember_pin) {
 
   // Verify that the local host is online.
   ASSERT_TRUE(ExecuteScriptAndExtractBool(
-      "remoting.hostList.localHost_.hostName && "
-      "remoting.hostList.localHost_.hostId && "
-      "remoting.hostList.localHost_.status && "
-      "remoting.hostList.localHost_.status == 'ONLINE'"));
+      "remoting.hostList.localHostSection_.host_.hostName && "
+      "remoting.hostList.localHostSection_.host_.hostId && "
+      "remoting.hostList.localHostSection_.host_.status && "
+      "remoting.hostList.localHostSection_.host_.status == 'ONLINE'"));
 
   // Connect.
-  ClickOnControl("this-host-connect");
+  ClickOnControl("local-host-connect-button");
 
   // Enter the pin # passed in from the command line.
   EnterPin(me2me_pin(), remember_pin);
@@ -676,11 +676,6 @@ void RemoteDesktopBrowserTest::ParseCommandLine() {
     // One and only one of these two arguments should be provided.
     ASSERT_NE(webapp_crx_.empty(), webapp_unpacked_.empty());
   }
-
-  // Run with "enable-web-based-signin" flag to enforce web-based sign-in,
-  // rather than inline signin. This ensures we use the same authentication
-  // page, regardless of whether we are testing the v1 or v2 web-app.
-  command_line->AppendSwitch(switches::kEnableWebBasedSignin);
 
   // Enable experimental extensions; this is to allow adding the LG extensions
   command_line->AppendSwitch(
@@ -828,7 +823,8 @@ void RemoteDesktopBrowserTest::WaitForConnection() {
 bool RemoteDesktopBrowserTest::IsLocalHostReady() {
   // TODO(weitaosu): Instead of polling, can we register a callback to
   // remoting.hostList.setLocalHost_?
-  return ExecuteScriptAndExtractBool("remoting.hostList.localHost_ != null");
+  return ExecuteScriptAndExtractBool(
+      "remoting.hostList.localHostSection_.host_ != null");
 }
 
 bool RemoteDesktopBrowserTest::IsHostListReady() {

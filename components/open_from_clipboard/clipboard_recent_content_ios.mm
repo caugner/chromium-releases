@@ -11,6 +11,7 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/sys_info.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -99,25 +100,27 @@ bool ClipboardRecentContentIOS::GetRecentURLFromClipboard(GURL* url) const {
 }
 
 void ClipboardRecentContentIOS::PasteboardChanged() {
-  if ([UIPasteboard generalPasteboard].changeCount !=
-      lastPasteboardChangeCount_) {
-    urlFromPasteboardCache_ = URLFromPasteboard();
-    if (!urlFromPasteboardCache_.is_empty()) {
-      base::RecordAction(
-          base::UserMetricsAction("MobileOmniboxClipboardChanged"));
-    }
-    lastPasteboardChangeDate_.reset([[NSDate date] retain]);
-    lastPasteboardChangeCount_ = [UIPasteboard generalPasteboard].changeCount;
-    SaveToUserDefaults();
+  urlFromPasteboardCache_ = URLFromPasteboard();
+  if (!urlFromPasteboardCache_.is_empty()) {
+    base::RecordAction(
+        base::UserMetricsAction("MobileOmniboxClipboardChanged"));
   }
+  lastPasteboardChangeDate_.reset([[NSDate date] retain]);
+  lastPasteboardChangeCount_ = [UIPasteboard generalPasteboard].changeCount;
+  SaveToUserDefaults();
 }
 
 ClipboardRecentContentIOS::ClipboardRecentContentIOS()
     : ClipboardRecentContent() {
   urlFromPasteboardCache_ = URLFromPasteboard();
   LoadFromUserDefaults();
-  if ([UIPasteboard generalPasteboard].changeCount !=
-      lastPasteboardChangeCount_) {
+  // The pasteboard's changeCount is reset to zero when the device is restarted.
+  // This means that even if |changeCount| hasn't changed, the pasteboard
+  // content could have changed. In order to avoid missing pasteboard changes,
+  // the changeCount is reset if the device has restarted.
+  NSInteger changeCount = [UIPasteboard generalPasteboard].changeCount;
+  if (changeCount != lastPasteboardChangeCount_ ||
+      DeviceRestartedSincePasteboardChanged()) {
     PasteboardChanged();
   }
   notificationBridge_.reset(
@@ -159,4 +162,11 @@ void ClipboardRecentContentIOS::SaveToUserDefaults() {
                                              forKey:kPasteboardChangeCountKey];
   [[NSUserDefaults standardUserDefaults] setObject:lastPasteboardChangeDate_
                                             forKey:kPasteboardChangeDateKey];
+}
+
+bool ClipboardRecentContentIOS::DeviceRestartedSincePasteboardChanged() {
+  int64 secondsSincePasteboardChange =
+      -static_cast<int64>([lastPasteboardChangeDate_ timeIntervalSinceNow]);
+  int64 secondsSinceLastDeviceRestart = base::SysInfo::Uptime() / 1000;
+  return secondsSincePasteboardChange > secondsSinceLastDeviceRestart;
 }

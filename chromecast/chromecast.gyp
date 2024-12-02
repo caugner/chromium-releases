@@ -26,6 +26,14 @@
     ],
   },
   'targets': [
+    # Public API target for OEM partners to replace shlibs.
+    {
+      'target_name': 'cast_public_api',
+      'type': '<(component)',
+      'sources': [
+        'public/chromecast_export.h',
+      ],
+    },
     # TODO(gunsch): Remove this fake target once it's either added or no
     # longer referenced from internal code.
     {'target_name': 'cast_media_audio', 'type': 'none'},
@@ -37,6 +45,8 @@
         '../base/base.gyp:base',
       ],
       'sources': [
+        'base/cast_paths.cc',
+        'base/cast_paths.h',
         'base/metrics/cast_histograms.h',
         'base/metrics/cast_metrics_helper.cc',
         'base/metrics/cast_metrics_helper.h',
@@ -60,7 +70,7 @@
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            '<(cast_internal_gyp):crash_internal',
+            'internal/chromecast_internal.gyp:crash_internal',
           ],
         }, {
           'sources': [
@@ -77,10 +87,22 @@
         'net/connectivity_checker.h',
         'net/net_switches.cc',
         'net/net_switches.h',
-        'net/network_change_notifier_cast.cc',
-        'net/network_change_notifier_cast.h',
-        'net/network_change_notifier_factory_cast.cc',
-        'net/network_change_notifier_factory_cast.h',
+      ],
+    },
+    {
+      'target_name': 'cast_ozone',
+      'type': '<(component)',
+      'sources': [
+        'ozone/gpu_platform_support_cast.cc',
+        'ozone/gpu_platform_support_cast.h',
+        'ozone/ozone_platform_cast.cc',
+        'ozone/ozone_platform_cast.h',
+        'ozone/platform_window_cast.cc',
+        'ozone/platform_window_cast.h',
+        'ozone/surface_factory_cast.cc',
+        'ozone/surface_factory_cast.h',
+        'ozone/surface_ozone_egl_cast.cc',
+        'ozone/surface_ozone_egl_cast.h',
       ],
     },
     {
@@ -119,6 +141,7 @@
           'variables': {
             'pak_inputs': [
               '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_image_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/chromecast/shell_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/app/resources/content_resources_100_percent.pak',
@@ -178,7 +201,7 @@
         '../components/components.gyp:metrics_net',
         '../components/components.gyp:metrics_profiler',
         '../content/content.gyp:content',
-        '../content/content.gyp:content_app_browser',
+        '../content/content.gyp:content_app_both',
         '../skia/skia.gyp:skia',
         '../third_party/WebKit/public/blink.gyp:blink',
         '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
@@ -202,6 +225,8 @@
         'browser/cast_http_user_agent_settings.h',
         'browser/cast_network_delegate.cc',
         'browser/cast_network_delegate.h',
+        'browser/cast_permission_manager.cc',
+        'browser/cast_permission_manager.h',
         'browser/cast_resource_dispatcher_host_delegate.cc',
         'browser/cast_resource_dispatcher_host_delegate.h',
         'browser/devtools/cast_dev_tools_delegate.cc',
@@ -225,12 +250,13 @@
         'browser/url_request_context_factory.h',
         'common/cast_content_client.cc',
         'common/cast_content_client.h',
-        'common/cast_paths.cc',
-        'common/cast_paths.h',
         'common/cast_resource_delegate.cc',
         'common/cast_resource_delegate.h',
         'common/chromecast_switches.cc',
         'common/chromecast_switches.h',
+        'common/media/cast_messages.h',
+        'common/media/cast_message_generator.cc',
+        'common/media/cast_message_generator.h',
         'common/platform_client_auth.h',
         'common/pref_names.cc',
         'common/pref_names.h',
@@ -242,18 +268,19 @@
         'renderer/cast_render_process_observer.h',
         'renderer/key_systems_cast.cc',
         'renderer/key_systems_cast.h',
+        'renderer/media/capabilities_message_filter.cc',
+        'renderer/media/capabilities_message_filter.h',
       ],
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            '<(cast_internal_gyp):cast_shell_internal',
+            'internal/chromecast_internal.gyp:cast_shell_internal',
           ],
         }, {
           'sources': [
             'browser/cast_content_browser_client_simple.cc',
             'browser/cast_network_delegate_simple.cc',
             'browser/devtools/remote_debugging_server_simple.cc',
-            'browser/media/cast_browser_cdm_factory_simple.cc',
             'browser/metrics/platform_metrics_providers_simple.cc',
             'browser/pref_service_helper_simple.cc',
             'common/platform_client_auth_simple.cc',
@@ -268,6 +295,7 @@
               ],
             }, {
               'sources': [
+                'browser/media/cast_browser_cdm_factory_simple.cc',
                 'browser/service/cast_service_simple.cc',
                 'browser/service/cast_service_simple.h',
               ],
@@ -357,7 +385,6 @@
             '../breakpad/breakpad.gyp:breakpad_client',
             '../components/components.gyp:breakpad_host',
             '../components/components.gyp:crash_component',
-            '../content/content.gyp:content_app_browser',
             '../content/content.gyp:content',
             '../skia/skia.gyp:skia',
             '../ui/gfx/gfx.gyp:gfx',
@@ -387,7 +414,7 @@
           'conditions': [
             ['chromecast_branding=="Chrome"', {
               'dependencies': [
-                '<(cast_internal_gyp):cast_shell_android_internal'
+                'internal/chromecast_internal.gyp:cast_shell_android_internal'
               ],
             }, {
               'sources': [
@@ -500,8 +527,8 @@
             'common/media/shared_memory_chunk.h',
             'renderer/media/audio_pipeline_proxy.cc',
             'renderer/media/audio_pipeline_proxy.h',
-            'renderer/media/cma_media_renderer_factory.cc',
-            'renderer/media/cma_media_renderer_factory.h',
+            'renderer/media/chromecast_media_renderer_factory.cc',
+            'renderer/media/chromecast_media_renderer_factory.h',
             'renderer/media/cma_message_filter_proxy.cc',
             'renderer/media/cma_message_filter_proxy.h',
             'renderer/media/media_channel_proxy.cc',
@@ -519,6 +546,7 @@
           'target_name': 'cast_shell_core',
           'type': '<(component)',
           'dependencies': [
+            'cast_ozone',
             'cast_shell_media',
             'cast_shell_common',
             'media/media.gyp:cast_media',
@@ -527,7 +555,7 @@
           'conditions': [
             ['chromecast_branding=="Chrome"', {
               'dependencies': [
-                '<(cast_internal_gyp):cast_gfx_internal',
+                'internal/chromecast_internal.gyp:cast_gfx_internal',
               ],
             }, {
               'dependencies': [

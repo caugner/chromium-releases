@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/toolbar/test_toolbar_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/ui/zoom/page_zoom.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/test/test_utils.h"
 
@@ -78,6 +79,16 @@ class ZoomDecorationTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(ZoomDecorationTest, BubbleAtDefaultZoom) {
   ZoomDecoration* zoom_decoration = GetZoomDecoration();
 
+  // TODO(wjmaclean): This shouldn't be necessary, but at present this test
+  // assumes the various Zoom() calls do not invoke a notification
+  // bubble, which prior to https://codereview.chromium.org/940673002/
+  // was accomplished by not showing the bubble for inactive windows.
+  // Since we now need to be able to show the zoom bubble as a notification
+  // on non-active pages, this test should be revised to account for
+  // these notifications.
+  ui_zoom::ZoomController::FromWebContents(
+      GetLocationBar()->GetWebContents())->SetShowsNotificationBubble(false);
+
   // Zoom in and reset.
   EXPECT_FALSE(zoom_decoration->IsVisible());
   Zoom(content::PAGE_ZOOM_IN);
@@ -94,6 +105,32 @@ IN_PROC_BROWSER_TEST_F(ZoomDecorationTest, BubbleAtDefaultZoom) {
 
   // Hide bubble and verify the decoration is hidden.
   zoom_decoration->CloseBubble();
+  EXPECT_FALSE(zoom_decoration->IsVisible());
+}
+
+// Regression test for https://crbug.com/462482.
+IN_PROC_BROWSER_TEST_F(ZoomDecorationTest, IconRemainsVisibleAfterBubble) {
+  ZoomDecoration* zoom_decoration = GetZoomDecoration();
+
+  // See comment in BubbleAtDefaultZoom regarding this next line.
+  ui_zoom::ZoomController::FromWebContents(
+      GetLocationBar()->GetWebContents())->SetShowsNotificationBubble(false);
+
+  // Zoom in to turn on decoration icon.
+  EXPECT_FALSE(zoom_decoration->IsVisible());
+  Zoom(content::PAGE_ZOOM_IN);
+  EXPECT_TRUE(zoom_decoration->IsVisible());
+
+  // Show zoom bubble, verify decoration icon remains visible.
+  zoom_decoration->ShowBubble(/* auto_close = */false);
+  EXPECT_TRUE(zoom_decoration->IsVisible());
+
+  // Close bubble and verify the decoration is still visible.
+  zoom_decoration->CloseBubble();
+  EXPECT_TRUE(zoom_decoration->IsVisible());
+
+  // Verify the decoration does go away when we expect it to.
+  Zoom(content::PAGE_ZOOM_RESET);
   EXPECT_FALSE(zoom_decoration->IsVisible());
 }
 

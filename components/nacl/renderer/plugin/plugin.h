@@ -99,7 +99,6 @@ class Plugin : public pp::Instance {
   nacl::DescWrapperFactory* wrapper_factory() const { return wrapper_factory_; }
 
   const PPB_NaCl_Private* nacl_interface() const { return nacl_interface_; }
-  pp::UMAPrivate& uma_interface() { return uma_interface_; }
 
  private:
   NACL_DISALLOW_COPY_AND_ASSIGN(Plugin);
@@ -110,10 +109,6 @@ class Plugin : public pp::Instance {
   // Shuts down socket connection, service runtime, and receive thread,
   // in this order, for the main nacl subprocess.
   void ShutDownSubprocesses();
-
-  // Histogram helper functions, internal to Plugin so they can use
-  // uma_interface_ normally.
-  void HistogramTimeSmall(const std::string& name, int64_t ms);
 
   // Loads and starts a helper (e.g. llc, ld) NaCl module.
   // Only to be used from a background (non-main) thread for the PNaCl

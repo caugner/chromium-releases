@@ -74,8 +74,7 @@ const char* kKnownDisplayTypes[] = {
   OobeUI::kLoginDisplay,
   OobeUI::kLockDisplay,
   OobeUI::kUserAddingDisplay,
-  OobeUI::kAppLaunchSplashDisplay,
-  OobeUI::kNewOobeDisplay
+  OobeUI::kAppLaunchSplashDisplay
 };
 
 const char kStringsJSPath[] = "strings.js";
@@ -90,24 +89,10 @@ const char kEnrollmentHTMLPath[] = "enrollment.html";
 const char kEnrollmentCSSPath[] = "enrollment.css";
 const char kEnrollmentJSPath[] = "enrollment.js";
 
-content::WebUIDataSource* CreateNewOobeUIDataSource(
-    const base::DictionaryValue& localized_strings) {
-  content::WebUIDataSource* source =
-      content::WebUIDataSource::Create(chrome::kChromeUIOobeHost);
-  source->AddLocalizedStrings(localized_strings);
-  source->SetJsonPath(kStringsJSPath);
-  source->SetDefaultResource(IDR_NEW_OOBE_HTML);
-  source->AddResourcePath(kOobeJSPath, IDR_NEW_OOBE_JS);
-  return source;
-}
-
 // Creates a WebUIDataSource for chrome://oobe
 content::WebUIDataSource* CreateOobeUIDataSource(
     const base::DictionaryValue& localized_strings,
     const std::string& display_type) {
-  if (display_type == OobeUI::kNewOobeDisplay) {
-    return CreateNewOobeUIDataSource(localized_strings);
-  }
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIOobeHost);
   source->AddLocalizedStrings(localized_strings);
@@ -131,9 +116,18 @@ content::WebUIDataSource* CreateOobeUIDataSource(
       IDR_GAIA_AUTH_AUTHENTICATOR_JS : IDR_GAIA_AUTH_HOST_JS);
 
   // Serve deferred resources.
-  source->AddResourcePath(kEnrollmentHTMLPath, IDR_OOBE_ENROLLMENT_HTML);
-  source->AddResourcePath(kEnrollmentCSSPath, IDR_OOBE_ENROLLMENT_CSS);
-  source->AddResourcePath(kEnrollmentJSPath, IDR_OOBE_ENROLLMENT_JS);
+  source->AddResourcePath(kEnrollmentHTMLPath,
+                          is_webview_signin_enabled
+                              ? IDR_OOBE_ENROLLMENT_WEBVIEW_HTML
+                              : IDR_OOBE_ENROLLMENT_HTML);
+  source->AddResourcePath(kEnrollmentCSSPath,
+                          is_webview_signin_enabled
+                              ? IDR_OOBE_ENROLLMENT_WEBVIEW_CSS
+                              : IDR_OOBE_ENROLLMENT_CSS);
+  source->AddResourcePath(kEnrollmentJSPath,
+                          is_webview_signin_enabled
+                              ? IDR_OOBE_ENROLLMENT_WEBVIEW_JS
+                              : IDR_OOBE_ENROLLMENT_JS);
 
   if (display_type == OobeUI::kOobeDisplay) {
     source->AddResourcePath(kCustomElementsHTMLPath, IDR_CUSTOM_ELEMENTS_HTML);
@@ -168,7 +162,6 @@ const char OobeUI::kLoginDisplay[] = "login";
 const char OobeUI::kLockDisplay[] = "lock";
 const char OobeUI::kUserAddingDisplay[] = "user-adding";
 const char OobeUI::kAppLaunchSplashDisplay[] = "app-launch-splash";
-const char OobeUI::kNewOobeDisplay[] = "new-oobe";
 
 // static
 const char OobeUI::kScreenOobeHIDDetection[] = "hid-detection";
@@ -243,7 +236,7 @@ OobeUI::OobeUI(content::WebUI* web_ui, const GURL& url)
   AddScreenHandler(update_screen_handler_);
   network_dropdown_handler_->AddObserver(update_screen_handler_);
 
-  if (display_type_ == kOobeDisplay || display_type_ == kNewOobeDisplay) {
+  if (display_type_ == kOobeDisplay) {
     NetworkScreenHandler* network_screen_handler =
         new NetworkScreenHandler(core_handler_);
     network_view_ = network_screen_handler;
@@ -297,18 +290,8 @@ OobeUI::OobeUI(content::WebUI* web_ui, const GURL& url)
   error_screen_handler_ = new ErrorScreenHandler();
   AddScreenHandler(error_screen_handler_);
 
-  // Initialize ErrorScreen if it hasn't initialized so that NetworkErrorModel
-  // is binded properly.
-  NetworkErrorModel* network_error_model = nullptr;
-  if (WizardController::default_controller()) {
-    network_error_model = static_cast<NetworkErrorModel*>(
-        WizardController::default_controller()->GetScreen(
-            WizardController::kErrorScreenName));
-    CHECK(network_error_model);
-  } else {
-    error_screen_.reset(new ErrorScreen(nullptr, error_screen_handler_));
-    network_error_model = error_screen_.get();
-  }
+  error_screen_.reset(new ErrorScreen(nullptr, error_screen_handler_));
+  NetworkErrorModel* network_error_model = error_screen_.get();
 
   EnrollmentScreenHandler* enrollment_screen_handler =
       new EnrollmentScreenHandler(network_state_informer_, network_error_model);
@@ -471,8 +454,8 @@ UserImageView* OobeUI::GetUserImageView() {
   return user_image_view_;
 }
 
-NetworkErrorView* OobeUI::GetNetworkErrorView() {
-  return error_screen_handler_;
+ErrorScreen* OobeUI::GetErrorScreen() {
+  return error_screen_.get();
 }
 
 SupervisedUserCreationScreenHandler*

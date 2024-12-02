@@ -45,6 +45,11 @@ public class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public boolean hasWebViewClient() {
+        return true;
+    }
+
+    @Override
     public boolean shouldOverrideUrlLoading(String url) {
         return false;
     }
@@ -108,6 +113,11 @@ public class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public void showFileChooser(ValueCallback<String[]> uploadFilePathsCallback,
+            FileChooserParamsImpl fileChooserParams) {
+    }
+
+    @Override
     public void onGeolocationPermissionsShowPrompt(String origin,
             GeolocationPermissions.Callback callback) {
     }
@@ -159,7 +169,19 @@ public class NullContentsClient extends AwContentsClient {
     }
 
     @Override
+    public void onPageCommitVisible(String url) {
+    }
+
+    @Override
     public void onReceivedError(int errorCode, String description, String failingUrl) {
+    }
+
+    @Override
+    public void onReceivedError2(AwWebResourceRequest request, AwWebResourceError error) {
+    }
+
+    @Override
+    public void onReceivedHttpError(AwWebResourceRequest request, AwWebResourceResponse response) {
     }
 
     @Override

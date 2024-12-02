@@ -218,7 +218,7 @@ def RunTelemetryTests(options, step_name, run_tests_path):
   args = ['--browser', 'android-chrome-shell']
   devices = android_commands.GetAttachedDevices()
   if devices:
-    args = args + ['--device', devices[0]]
+    args = args + ['--device', 'android']
   bb_annotations.PrintNamedStep(step_name)
   RunCmd([run_tests_path] + args)
 
@@ -466,6 +466,8 @@ def ProvisionDevices(options):
     provision_cmd.append('--auto-reconnect')
   if options.skip_wipe:
     provision_cmd.append('--skip-wipe')
+  if options.disable_location:
+    provision_cmd.append('--disable-location')
   RunCmd(provision_cmd, halt_on_failure=True)
 
 
@@ -713,6 +715,8 @@ def GetDeviceStepsOptParser():
       help='Push script to device which restarts adbd on disconnections.')
   parser.add_option('--skip-wipe', action='store_true',
                     help='Do not wipe devices during provisioning.')
+  parser.add_option('--disable-location', action='store_true',
+                    help='Disable location settings.')
   parser.add_option(
       '--logcat-dump-output',
       help='The logcat dump output will be "tee"-ed into this file')

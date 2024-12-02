@@ -9,6 +9,7 @@
 #include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/common/api/guest_view_internal.h"
+#include "extensions/common/guest_view/guest_view_constants.h"
 #include "extensions/common/permissions/permissions_data.h"
 
 namespace guest_view_internal = extensions::core_api::guest_view_internal;
@@ -33,9 +34,8 @@ bool GuestViewInternalCreateGuestFunction::RunAsync() {
       base::Bind(&GuestViewInternalCreateGuestFunction::CreateGuestCallback,
                  this);
 
-  content::WebContents* owner_web_contents =
-      content::WebContents::FromRenderViewHost(render_view_host());
-  if (!owner_web_contents) {
+  content::WebContents* sender_web_contents = GetSenderWebContents();
+  if (!sender_web_contents) {
     error_ = "Guest views can only be embedded in web content";
     return false;
   }
@@ -45,7 +45,7 @@ bool GuestViewInternalCreateGuestFunction::RunAsync() {
   create_params->SetBoolean(guestview::kElementSizeIsLogical, true);
 
   guest_view_manager->CreateGuest(view_type,
-                                  owner_web_contents,
+                                  sender_web_contents,
                                   *create_params,
                                   callback);
   return true;
@@ -54,11 +54,16 @@ bool GuestViewInternalCreateGuestFunction::RunAsync() {
 void GuestViewInternalCreateGuestFunction::CreateGuestCallback(
     content::WebContents* guest_web_contents) {
   int guest_instance_id = 0;
+  int content_window_id = MSG_ROUTING_NONE;
   if (guest_web_contents) {
     GuestViewBase* guest = GuestViewBase::FromWebContents(guest_web_contents);
     guest_instance_id = guest->guest_instance_id();
+    content_window_id = guest->proxy_routing_id();
   }
-  SetResult(new base::FundamentalValue(guest_instance_id));
+  scoped_ptr<base::DictionaryValue> return_params(new base::DictionaryValue());
+  return_params->SetInteger(guestview::kID, guest_instance_id);
+  return_params->SetInteger(guestview::kContentWindowID, content_window_id);
+  SetResult(return_params.release());
   SendResponse(true);
 }
 

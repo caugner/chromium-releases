@@ -3,7 +3,19 @@
 # found in the LICENSE file.
 {
   'conditions': [
-    ['OS=="linux"', {
+    ['use_x11==0', {
+      'variables': {
+        'command': [
+          '../testing/test_env.py',
+          '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
+          '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
+        ],
+      },
+    }],
+    ['use_x11==1', {
       'variables': {
         'command': [
           '../testing/xvfb.py',
@@ -11,22 +23,21 @@
           '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
-          '--lsan=<(lsan)',
           '--msan=<(msan)',
           '--tsan=<(tsan)',
         ],
         'files': [
           '../testing/xvfb.py',
-          '<(PRODUCT_DIR)/libclearkeycdm.so',
-          '<(PRODUCT_DIR)/libclearkeycdmadapter.so',
-          '<(PRODUCT_DIR)/libppapi_tests.so',
+          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
         ],
       },
     }],
-    ['OS=="linux" and use_ozone==0', {
+    ['OS=="linux"', {
       'variables': {
         'files': [
-          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+          '<(PRODUCT_DIR)/libclearkeycdm.so',
+          '<(PRODUCT_DIR)/libclearkeycdmadapter.so',
+          '<(PRODUCT_DIR)/libppapi_tests.so',
         ],
       },
     }],
@@ -60,6 +71,9 @@
           '<(PRODUCT_DIR)/peerconnection_server<(EXECUTABLE_SUFFIX)',
           '<(PRODUCT_DIR)/pseudo_locales/',
           '<(PRODUCT_DIR)/pyproto/',
+          # TODO(jam): above is directory for GYP. GN uses:
+          #'<(SHARED_INTERMEDIATE_DIR)/google/',
+          #'<(SHARED_INTERMEDIATE_DIR)/policy/proto/',
           '<(PRODUCT_DIR)/remoting/unittests/',
           '<(PRODUCT_DIR)/test_case.html',
           '<(PRODUCT_DIR)/test_case.html.mock-http-headers',
@@ -165,19 +179,6 @@
           '<(PRODUCT_DIR)/plugins/npapi_test_plugin.plugin/',
           '<(PRODUCT_DIR)/plugins/test_netscape_plugin.plugin/',
           '<(PRODUCT_DIR)/ppapi_tests.plugin/Contents/MacOS/ppapi_tests',
-        ],
-      },
-    }],
-    ['OS=="mac" or OS=="win"', {
-      'variables': {
-        'command': [
-          '../testing/test_env.py',
-          '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
-          '--test-launcher-bot-mode',
-          '--asan=<(asan)',
-          '--lsan=<(lsan)',
-          '--msan=<(msan)',
-          '--tsan=<(tsan)',
         ],
       },
     }],

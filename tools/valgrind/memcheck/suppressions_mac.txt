@@ -94,6 +94,14 @@
    fun:__CFRunLoopRun
    ...
 }
+{
+   # See also http://openradar.appspot.com/20698633
+   bug_481286
+   Memcheck:Leak
+   ...
+   fun:_ZN8Security13PluginSession6mallocEm
+   fun:_Z20CL_extractCSSMKeyNSSRK33cssm_x509_subject_public_key_infoRN8Security9AllocatorEPK11DecodedCert
+}
 # Intentional leaks in AppKit, for an OS-level cache. Only appear on the first
 # run of each reboot.  See also issues 105525, 257276, 340847.
 {
@@ -270,4 +278,13 @@
    ...
    fun:_ZN4base3mac30PathForFrameworkBundleResourceEPK10__CFString
    fun:_ZN3gin13IsolateHolder14LoadV8SnapshotEv
+}
+{
+   bug_464850
+   Memcheck:Uninitialized
+   fun:_ZN2v88internal9ExitFrame23GetStateForFramePointerEPhPNS0_10StackFrame5StateE
+   fun:_ZN2v88internal18StackFrameIterator5ResetEPNS0_14ThreadLocalTopE
+   fun:_ZN2v88internal18StackFrameIteratorC2EPNS0_7IsolateE
+   fun:_ZN2v88internal18StackFrameIteratorC1EPNS0_7IsolateE
+   fun:_ZN2v88internal7Isolate11FindHandlerEv
 }

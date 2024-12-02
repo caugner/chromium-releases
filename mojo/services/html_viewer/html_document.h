@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "mojo/services/html_viewer/ax_provider_impl.h"
+#include "mojo/services/html_viewer/touch_handler.h"
 #include "mojo/services/network/public/interfaces/url_loader.mojom.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
 #include "third_party/WebKit/public/web/WebSandboxFlags.h"
@@ -30,6 +31,7 @@ class MessageLoopProxy;
 }
 
 namespace media {
+class CdmFactory;
 class MediaPermission;
 class WebEncryptedMediaClientImpl;
 }
@@ -64,48 +66,53 @@ class HTMLDocument : public blink::WebViewClient,
                mojo::URLResponsePtr response,
                mojo::Shell* shell,
                scoped_refptr<base::MessageLoopProxy> compositor_thread,
-               WebMediaPlayerFactory* web_media_player_factory);
-  virtual ~HTMLDocument();
+               WebMediaPlayerFactory* web_media_player_factory,
+               bool is_headless);
+  ~HTMLDocument() override;
 
  private:
+  // Updates the size and scale factor of the webview and related classes from
+  // |root_|.
+  void UpdateWebviewSizeFromViewSize();
+
   // WebViewClient methods:
-  virtual blink::WebStorageNamespace* createSessionStorageNamespace();
+  blink::WebStorageNamespace* createSessionStorageNamespace() override;
 
   // WebWidgetClient methods:
-  virtual void initializeLayerTreeView();
-  virtual blink::WebLayerTreeView* layerTreeView();
+  void initializeLayerTreeView() override;
+  blink::WebLayerTreeView* layerTreeView() override;
 
   // WebFrameClient methods:
   virtual blink::WebMediaPlayer* createMediaPlayer(
       blink::WebLocalFrame* frame,
       const blink::WebURL& url,
       blink::WebMediaPlayerClient* client);
-  virtual blink::WebMediaPlayer* createMediaPlayer(
+  blink::WebMediaPlayer* createMediaPlayer(
       blink::WebLocalFrame* frame,
       const blink::WebURL& url,
       blink::WebMediaPlayerClient* client,
-      blink::WebContentDecryptionModule* initial_cdm);
-  virtual blink::WebFrame* createChildFrame(
+      blink::WebContentDecryptionModule* initial_cdm) override;
+  blink::WebFrame* createChildFrame(
       blink::WebLocalFrame* parent,
       const blink::WebString& frameName,
-      blink::WebSandboxFlags sandboxFlags);
-  virtual void frameDetached(blink::WebFrame*);
-  virtual blink::WebCookieJar* cookieJar(blink::WebLocalFrame* frame);
-  virtual blink::WebNavigationPolicy decidePolicyForNavigation(
+      blink::WebSandboxFlags sandboxFlags) override;
+  void frameDetached(blink::WebFrame*) override;
+  blink::WebCookieJar* cookieJar(blink::WebLocalFrame* frame) override;
+  blink::WebNavigationPolicy decidePolicyForNavigation(
       blink::WebLocalFrame* frame,
       blink::WebDataSource::ExtraData* data,
       const blink::WebURLRequest& request,
       blink::WebNavigationType nav_type,
       blink::WebNavigationPolicy default_policy,
-      bool isRedirect);
-  virtual void didAddMessageToConsole(const blink::WebConsoleMessage& message,
-                                      const blink::WebString& source_name,
-                                      unsigned source_line,
-                                      const blink::WebString& stack_trace);
-  virtual void didNavigateWithinPage(blink::WebLocalFrame* frame,
-                                     const blink::WebHistoryItem& history_item,
-                                     blink::WebHistoryCommitType commit_type);
-  virtual blink::WebEncryptedMediaClient* encryptedMediaClient();
+      bool isRedirect) override;
+  void didAddMessageToConsole(const blink::WebConsoleMessage& message,
+                              const blink::WebString& source_name,
+                              unsigned source_line,
+                              const blink::WebString& stack_trace) override;
+  void didNavigateWithinPage(blink::WebLocalFrame* frame,
+                             const blink::WebHistoryItem& history_item,
+                             blink::WebHistoryCommitType commit_type) override;
+  blink::WebEncryptedMediaClient* encryptedMediaClient() override;
 
   // ViewManagerDelegate methods:
   void OnEmbed(mojo::View* root,
@@ -126,6 +133,9 @@ class HTMLDocument : public blink::WebViewClient,
 
   void Load(mojo::URLResponsePtr response);
 
+  media::MediaPermission* GetMediaPermission();
+  media::CdmFactory* GetCdmFactory();
+
   mojo::URLResponsePtr response_;
   mojo::ServiceProviderImpl exported_services_;
   mojo::ServiceProviderPtr embedder_service_provider_;
@@ -140,10 +150,19 @@ class HTMLDocument : public blink::WebViewClient,
 
   // EncryptedMediaClient attached to this frame; lazily initialized.
   scoped_ptr<media::WebEncryptedMediaClientImpl> web_encrypted_media_client_;
+
   scoped_ptr<media::MediaPermission> media_permission_;
+  scoped_ptr<media::CdmFactory> cdm_factory_;
 
   // HTMLDocument owns these pointers.
   std::set<AxProviderImpl*> ax_provider_impls_;
+
+  // Set if the content will never be displayed.
+  bool is_headless_;
+
+  scoped_ptr<TouchHandler> touch_handler_;
+
+  float device_pixel_ratio_;
 
   DISALLOW_COPY_AND_ASSIGN(HTMLDocument);
 };

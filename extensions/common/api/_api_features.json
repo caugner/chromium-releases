@@ -116,7 +116,6 @@
     "contexts": ["blessed_extension"]
   },
   "documentScan": {
-    "platforms": ["chromeos"],
     "dependencies": ["permission:documentScan"],
     "contexts": ["blessed_extension"]
   },
@@ -173,10 +172,19 @@
     "dependencies": ["permission:idle"],
     "contexts": ["blessed_extension"]
   },
-  "management": {
+  "management": [{
     "dependencies": ["permission:management"],
-    "contexts": ["blessed_extension"]
-  },
+    "contexts": ["blessed_extension"],
+    "default_parent": true
+  }, {
+    "channel": "stable",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://extensions/*",
+      "chrome://extensions-frame/*",
+      "chrome://chrome/extensions/*"
+    ]
+  }],
   "management.getPermissionWarningsByManifest": {
     "dependencies": [],
     "channel": "stable",
@@ -215,7 +223,9 @@
     "channel": "stable",
     "contexts": ["webui"],
     "matches": [
-      "chrome://network/*"
+      "chrome://network/*",
+      "chrome://settings/*",
+      "chrome://settings-frame/*"
     ]
   }],
   "power": {
@@ -394,24 +404,6 @@
     "internal": true,
     "contexts": ["webui"],
     "matches": ["chrome://chrome-signin/*", "chrome://oobe/*"]
-  }],
-  "webViewExperimentalInternal": [{
-    "internal": true,
-    "channel": "dev",
-    "contexts": ["blessed_extension"],
-    "dependencies": ["permission:webview"]
-  },
-  {
-    "internal": true,
-    "channel": "stable",
-    "contexts": ["blessed_extension"],
-    "dependencies": ["permission:webview"],
-    "whitelist": [
-      "8C3741E3AF0B93B6E8E0DDD499BB0B74839EA578",
-      "E703483CEF33DEC18B4B6DD84B5C776FB9182BDB",
-      "1A26E32DE447A17CBE5E9750CDBA78F58539B39C",
-      "59048028102D7B4C681DBC7BC6CD980C3DC66DA3"
-    ]
   }],
   "webViewInternal": [{
     "internal": true,

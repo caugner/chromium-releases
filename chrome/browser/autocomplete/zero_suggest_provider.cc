@@ -99,7 +99,7 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
       input.type() == metrics::OmniboxInputType::INVALID)
     return;
 
-  Stop(true);
+  Stop(true, false);
   field_trial_triggered_ = false;
   field_trial_triggered_in_session_ = false;
   results_from_cache_ = false;
@@ -146,7 +146,8 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
   Run(suggest_url);
 }
 
-void ZeroSuggestProvider::Stop(bool clear_cached_results) {
+void ZeroSuggestProvider::Stop(bool clear_cached_results,
+                               bool due_to_user_inactivity) {
   if (fetcher_)
     LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_INVALIDATED);
   fetcher_.reset();
@@ -161,6 +162,7 @@ void ZeroSuggestProvider::Stop(bool clear_cached_results) {
     results_.suggest_results.clear();
     results_.navigation_results.clear();
     current_query_.clear();
+    most_visited_urls_.clear();
   }
 }
 
@@ -176,7 +178,9 @@ void ZeroSuggestProvider::DeleteMatch(const AutocompleteMatch& match) {
 
 void ZeroSuggestProvider::AddProviderInfo(ProvidersInfo* provider_info) const {
   BaseSearchProvider::AddProviderInfo(provider_info);
-  if (!results_.suggest_results.empty() || !results_.navigation_results.empty())
+  if (!results_.suggest_results.empty() ||
+      !results_.navigation_results.empty() ||
+      !most_visited_urls_.empty())
     provider_info->back().set_times_returned_results_in_session(1);
 }
 

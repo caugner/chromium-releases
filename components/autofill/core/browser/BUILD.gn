@@ -2,19 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-if (is_android) {
-  import("//build/config/android/config.gni")
-  autofill_enable_sync = !is_android_webview_build
-} else {
-  autofill_enable_sync = true
-}
-
-config("autofill_browser_config") {
-  if (autofill_enable_sync) {
-    defines = [ "AUTOFILL_ENABLE_SYNC" ]
-  }
-}
-
 # GYP version: components/autofill.gyp:autofill_regexes
 action("regexes") {
   visibility = [ "//components/autofill/*" ]
@@ -56,6 +43,8 @@ static_library("browser") {
     "autofill_download_manager.cc",
     "autofill_download_manager.h",
     "autofill_driver.h",
+    "autofill_experiments.cc",
+    "autofill_experiments.h",
     "autofill_external_delegate.cc",
     "autofill_external_delegate.h",
     "autofill_field.cc",
@@ -91,6 +80,9 @@ static_library("browser") {
     "credit_card.h",
     "credit_card_field.cc",
     "credit_card_field.h",
+    "detail_input.cc",
+    "detail_input.h",
+    "dialog_section.h",
     "email_field.cc",
     "email_field.h",
     "field_types.h",
@@ -115,6 +107,8 @@ static_library("browser") {
     "phone_number_i18n.cc",
     "phone_number_i18n.h",
     "popup_item_ids.h",
+    "server_field_types_util.cc",
+    "server_field_types_util.h",
     "state_names.cc",
     "state_names.h",
     "suggestion.cc",
@@ -147,6 +141,11 @@ static_library("browser") {
   # Compile the generated regex file.
   sources += get_target_outputs(":regexes")
 
+  # Controls whether Wallet cards can be saved to the local instance of chrome.
+  if (!is_desktop_linux) {
+    defines = [ "ENABLE_SAVE_WALLET_CARDS_LOCALLY" ]
+  }
+
   deps = [
     ":regexes",
     "//base",
@@ -158,12 +157,14 @@ static_library("browser") {
     "//components/os_crypt",
     "//components/pref_registry",
     "//components/resources",
+    "//components/signin/core/common",
     "//components/strings",
     "//components/webdata/common",
     "//google_apis",
     "//net",
     "//skia",
     "//sql",
+    "//sync",
     "//third_party/fips181",
     "//third_party/icu",
     "//third_party/libaddressinput:util",
@@ -176,20 +177,6 @@ static_library("browser") {
   ]
 
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
-  public_configs = [ ":autofill_browser_config" ]
-
-  if (autofill_enable_sync) {
-    deps += [ "//sync" ]
-  } else {
-    sources -= [
-      "webdata/autocomplete_syncable_service.cc",
-      "webdata/autocomplete_syncable_service.h",
-      "webdata/autofill_profile_syncable_service.cc",
-      "webdata/autofill_profile_syncable_service.h",
-      "webdata/autofill_wallet_syncable_service.cc",
-      "webdata/autofill_wallet_syncable_service.h",
-    ]
-  }
 }
 
 static_library("test_support") {
@@ -220,6 +207,7 @@ static_library("test_support") {
     "//components/autofill/core/common",
     "//components/os_crypt",
     "//components/pref_registry",
+    "//components/rappor",
     "//skia",
     "//testing/gtest",
   ]
@@ -269,6 +257,7 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/autofill/core/common",
     "//components/os_crypt",
+    "//components/rappor:test_support",
     "//components/resources",
     "//components/strings",
     "//components/webdata/common",

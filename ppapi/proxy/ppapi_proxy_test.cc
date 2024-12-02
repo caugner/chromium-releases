@@ -65,8 +65,7 @@ PPB_Proxy_Private ppb_proxy_private = {
 ObserverList<ProxyTestHarnessBase> get_interface_handlers_;
 
 const void* MockGetInterface(const char* name) {
-  ObserverList<ProxyTestHarnessBase>::Iterator it =
-      get_interface_handlers_;
+  ObserverList<ProxyTestHarnessBase>::Iterator it(&get_interface_handlers_);
   while (ProxyTestHarnessBase* observer = it.GetNext()) {
     const void* interface = observer->GetInterface(name);
     if (interface)
@@ -164,7 +163,7 @@ Dispatcher* PluginProxyTestHarness::GetDispatcher() {
 
 void PluginProxyTestHarness::SetUpHarness() {
   // These must be first since the dispatcher set-up uses them.
-  CreatePluginGlobals();
+  CreatePluginGlobals(nullptr /* ipc_task_runner */);
   // Some of the methods called during set-up check that the lock is held.
   ProxyAutoLock lock;
 
@@ -191,7 +190,8 @@ void PluginProxyTestHarness::SetUpHarnessWithChannel(
     base::WaitableEvent* shutdown_event,
     bool is_client) {
   // These must be first since the dispatcher set-up uses them.
-  CreatePluginGlobals();
+  scoped_refptr<base::TaskRunner> ipc_task_runner(ipc_message_loop);
+  CreatePluginGlobals(ipc_message_loop);
   // Some of the methods called during set-up check that the lock is held.
   ProxyAutoLock lock;
 
@@ -224,12 +224,14 @@ void PluginProxyTestHarness::TearDownHarness() {
   plugin_globals_.reset();
 }
 
-void PluginProxyTestHarness::CreatePluginGlobals() {
+void PluginProxyTestHarness::CreatePluginGlobals(
+    const scoped_refptr<base::TaskRunner>& ipc_task_runner) {
   if (globals_config_ == PER_THREAD_GLOBALS) {
-    plugin_globals_.reset(new PluginGlobals(PpapiGlobals::PerThreadForTest()));
+    plugin_globals_.reset(new PluginGlobals(PpapiGlobals::PerThreadForTest(),
+                                            ipc_task_runner));
     PpapiGlobals::SetPpapiGlobalsOnThreadForTest(GetGlobals());
   } else {
-    plugin_globals_.reset(new PluginGlobals());
+    plugin_globals_.reset(new PluginGlobals(ipc_task_runner));
   }
 }
 

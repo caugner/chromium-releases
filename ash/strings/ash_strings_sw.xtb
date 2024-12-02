@@ -3,6 +3,7 @@
 <translation id="6895424601869865703">Ongeza akaunti ya <ph name="GIVEN_NAME"/></translation>
 <translation id="1270290102613614947">Kibodi ya skrini imezimwa</translation>
 <translation id="1057289296854808272">Mzunguko umewashwa (Gonga hapa ili ubadilishe)</translation>
+<translation id="5548285847212963613">Kiendelezi &quot;<ph name="EXTENSION_NAME"/>&quot; kinaweza kusaidia kuunganisha kwenye mtandao huu.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> na <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Kitufe Jalizi</translation>
 <translation id="7904094684485781019">Msimamizi wa akaunti hii ameondoa uwezo wa kuingia katika akaunti nyingi kwa wakati mmoja</translation>
@@ -61,6 +62,7 @@ Bonyeza Shift + Alt ili kubadilisha.</translation>
 <translation id="1723752762323179280">Inaondoka kwenye Kipindi</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">Ndio</translation>
+<translation id="4804818685124855865">Tenganisha</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">Ondoka</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@ Bonyeza Shift + Alt ili kubadili.</translation>
 <translation id="2761704814324807722">Treya ya hali, saa <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Funga</translation>
 <translation id="2805756323405976993">Programu</translation>
-<translation id="2313845391432982560">Kiendelezi &quot;<ph name="EXTENSION_NAME"/>&quot; kinaweza kusanidi mtandao huu.</translation>
 <translation id="2872961005593481000">Zima</translation>
 <translation id="3433830597744061105">Simamia akaunti</translation>
 <translation id="742594950370306541">Kamera inatumika.</translation>

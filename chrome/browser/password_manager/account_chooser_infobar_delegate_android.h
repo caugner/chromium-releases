@@ -29,8 +29,14 @@ class AccountChooserInfoBarDelegateAndroid : public infobars::InfoBarDelegate {
 
   ~AccountChooserInfoBarDelegateAndroid() override;
 
-  const ScopedVector<autofill::PasswordForm>& local_credentials_forms() const {
-    return ui_controller_->local_credentials_forms();
+  const std::vector<const autofill::PasswordForm*>&
+  local_credentials_forms() const {
+    return ui_controller_->GetCurrentForms();
+  }
+
+  const std::vector<const autofill::PasswordForm*>&
+  federated_credentials_forms() const {
+    return ui_controller_->GetFederatedForms();
   }
 
   void ChooseCredential(size_t credential_index,

@@ -3,6 +3,7 @@
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> के लिए नया खाता जोड़ें</translation>
 <translation id="1270290102613614947">ऑन-स्‍क्रीन कीबोर्ड अक्षम है</translation>
 <translation id="1057289296854808272">घूर्णन चालू (बदलने के लिए यहां टैप करें)</translation>
+<translation id="5548285847212963613">&quot;<ph name="EXTENSION_NAME"/>&quot; एक्‍सटेंशन इस नेटवर्क से कनेक्‍ट करने में सहायता कर सकता है.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> और <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">ओवरफ़्लो बटन</translation>
 <translation id="7904094684485781019">इस खाते के व्यवस्थापक ने एकाधिक प्रवेश को अस्वीकार कर दिया है.</translation>
@@ -61,6 +62,7 @@
 <translation id="1723752762323179280">सत्र से निकल रहा है</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME"/> (HDMI/DP)</translation>
 <translation id="1426410128494586442">हां</translation>
+<translation id="4804818685124855865">डिस्कनेक्ट करें</translation>
 <translation id="2963773877003373896">mod3</translation>
 <translation id="5222676887888702881">प्रस्थान करें</translation>
 <translation id="2391579633712104609">180°</translation>
@@ -130,7 +132,6 @@
 <translation id="2761704814324807722">स्थिति ट्रे, समय <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">लॉक करें</translation>
 <translation id="2805756323405976993">ऐप्स</translation>
-<translation id="2313845391432982560">एक्‍सटेंशन &quot;<ph name="EXTENSION_NAME"/>&quot; इस नेटवर्क को कॉन्‍फ़िगर कर सकता है.</translation>
 <translation id="2872961005593481000">शट डाउन करें</translation>
 <translation id="3433830597744061105">खाते प्रबंधित करें</translation>
 <translation id="742594950370306541">कैमरे का उपयोग हो रहा है.</translation>

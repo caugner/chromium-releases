@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/process/kill.h"
+#include "base/process/process.h"
 #include "base/process/process_info.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -32,6 +32,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/installer/util/wmi.h"
+#include "components/browser_watcher/exit_funnel_win.h"
 #include "content/public/common/result_codes.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -193,6 +194,14 @@ bool ShouldLaunchInWindows8ImmersiveMode(const base::FilePath& user_data_dir) {
   return false;
 }
 
+bool DisplayShouldKillMessageBox() {
+  return chrome::ShowMessageBox(
+             NULL, l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+             l10n_util::GetStringUTF16(IDS_BROWSER_HUNGBROWSER_MESSAGE),
+             chrome::MESSAGE_BOX_TYPE_QUESTION) !=
+         chrome::MESSAGE_BOX_RESULT_NO;
+}
+
 }  // namespace
 
 // Microsoft's Softricity virtualization breaks the sandbox processes.
@@ -230,8 +239,11 @@ ProcessSingleton::ProcessSingleton(
     const base::FilePath& user_data_dir,
     const NotificationCallback& notification_callback)
     : notification_callback_(notification_callback),
-      is_virtualized_(false), lock_file_(INVALID_HANDLE_VALUE),
-      user_data_dir_(user_data_dir) {
+      is_virtualized_(false),
+      lock_file_(INVALID_HANDLE_VALUE),
+      user_data_dir_(user_data_dir),
+      should_kill_remote_process_callback_(
+          base::Bind(&DisplayShouldKillMessageBox)) {
 }
 
 ProcessSingleton::~ProcessSingleton() {
@@ -256,7 +268,9 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
       remote_window_ = NULL;
       return PROCESS_NONE;
     case chrome::NOTIFY_WINDOW_HUNG:
-      remote_window_ = NULL;
+      // Record a hung rendezvous event in this process' exit funnel.
+      browser_watcher::ExitFunnel::RecordSingleEvent(
+          chrome::kBrowserExitCodesRegistryPath, L"RendezvousToHungBrowser");
       break;
   }
 
@@ -266,6 +280,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
     remote_window_ = NULL;
     return PROCESS_NONE;
   }
+  base::Process process = base::Process::Open(process_id);
 
   // The window is hung. Scan for every window to find a visible one.
   bool visible_window = false;
@@ -274,18 +289,18 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
                       reinterpret_cast<LPARAM>(&visible_window));
 
   // If there is a visible browser window, ask the user before killing it.
-  if (visible_window &&
-      chrome::ShowMessageBox(
-          NULL,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
-          l10n_util::GetStringUTF16(IDS_BROWSER_HUNGBROWSER_MESSAGE),
-          chrome::MESSAGE_BOX_TYPE_QUESTION) == chrome::MESSAGE_BOX_RESULT_NO) {
+  if (visible_window && !should_kill_remote_process_callback_.Run()) {
     // The user denied. Quit silently.
     return PROCESS_NOTIFIED;
   }
 
+  // Record the termination event in the hung process' exit funnel.
+  browser_watcher::ExitFunnel funnel;
+  if (funnel.Init(chrome::kBrowserExitCodesRegistryPath, process.Handle()))
+    funnel.RecordEvent(L"HungBrowserTerminated");
+
   // Time to take action. Kill the browser process.
-  base::KillProcessById(process_id, content::RESULT_CODE_HUNG, true);
+  process.Terminate(content::RESULT_CODE_HUNG, true);
   remote_window_ = NULL;
   return PROCESS_NONE;
 }
@@ -426,4 +441,9 @@ bool ProcessSingleton::Create() {
 }
 
 void ProcessSingleton::Cleanup() {
+}
+
+void ProcessSingleton::OverrideShouldKillRemoteProcessCallbackForTesting(
+    const ShouldKillRemoteProcessCallback& display_dialog_callback) {
+  should_kill_remote_process_callback_ = display_dialog_callback;
 }

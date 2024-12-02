@@ -21,9 +21,12 @@ import org.chromium.chrome.browser.tabmodel.TabModel;
  * the Activity is dead when it occurs.
  */
 public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implements DocumentTabModel {
-    public OffTheRecordDocumentTabModel(OffTheRecordTabModelDelegate tabModelCreator,
+    private final ActivityDelegate mActivityDelegate;
+
+    public OffTheRecordDocumentTabModel(OffTheRecordTabModelDelegate offTheRecordDelegate,
             ActivityDelegate delegate) {
-        super(tabModelCreator);
+        super(offTheRecordDelegate);
+        mActivityDelegate = delegate;
         if (delegate.getTasksFromRecents(true).size() > 0) {
             ensureTabModelImpl();
         }
@@ -37,7 +40,7 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     @Override
     protected void destroyIncognitoIfNecessary() {
         super.destroyIncognitoIfNecessary();
-        if (!isDocumentTabModelImplCreated()) {
+        if (!mActivityDelegate.isIncognitoDocumentAccessibleToUser()) {
             IncognitoNotificationManager.dismissIncognitoNotification();
         }
     }
@@ -108,12 +111,6 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     }
 
     @Override
-    public void addTab(Tab tab) {
-        ensureTabModelImpl();
-        getDelegateDocumentTabModel().addTab(tab);
-    }
-
-    @Override
     public void addTab(Intent intent, Tab tab) {
         ensureTabModelImpl();
         getDelegateDocumentTabModel().addTab(intent, tab);
@@ -149,7 +146,7 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
 
     @Override
     public boolean setLastShownId(int id) {
-        ensureTabModelImpl();
+        if (!isDocumentTabModelImplCreated()) return false;
         return getDelegateDocumentTabModel().setLastShownId(id);
     }
 

@@ -1,4 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="zh-CN">
+<translation id="2705212601509139398">此网站使用的 Chromium 内嵌框架插件即将不受支持。请卸载该插件，然后下载一款兼容的浏览器。</translation>
 <translation id="6676384891291319759">访问互联网</translation>
 <translation id="8586442755830160949">版权所有<ph name="YEAR"/> The Chromium Authors。保留所有权利。</translation>
 <translation id="6373523479360886564">确定要卸载 Chromium 吗？</translation>
@@ -82,7 +83,6 @@
 <translation id="3296368748942286671">关闭 Chromium 后继续运行后台应用</translation>
 <translation id="473775607612524610">更新</translation>
 <translation id="5466153949126434691">Chromium会自动更新，因此您使用的始终都是最新版本。更新内容下载完毕后，Chromium会重新启动，然后您就可以开始使用了。</translation>
-<translation id="7707841053049645517">此网站使用的 Chromium 内嵌框架插件很快将不受支持。请卸载该插件，然后升级到新型浏览器。</translation>
 <translation id="3656661827369545115">启动计算机时自动启动Chromium</translation>
 <translation id="2241627712206172106">如果您与亲朋好友共用计算机，他们将能够使用单独的帐户进行浏览，并可随心所欲地设置Chromium。</translation>
 <translation id="1763864636252898013">此服务器无法证明它是<ph name="DOMAIN"/>；您设备的操作系统不信任其安全证书。出现此问题的原因可能是配置有误或您的连接被拦截了。</translation>
@@ -104,6 +104,7 @@
 <translation id="5358375970380395591">您目前登录的帐户是一个托管帐户，该帐户的管理员将能够控制您的 Chromium 个人资料。您的 Chromium 数据（例如您的应用、书签、历史记录、密码和其他设置）将永远与 <ph name="USER_NAME"/> 相关联。您可以通过 Google 帐户信息中心删除这些数据，但无法将这些数据与其他帐户相关联。<ph name="LEARN_MORE"/></translation>
 <translation id="9036189287518468038">Chromium 应用启动器</translation>
 <translation id="5563479599352954471">触摸一下即可启动搜索</translation>
+<translation id="3256316712990552818">已复制到 Chromium</translation>
 <translation id="8493179195440786826">Chromium版本太旧</translation>
 <translation id="911206726377975832">同时删除您的浏览数据吗？</translation>
 <translation id="95514773681268843"><ph name="DOMAIN"/> 要求您必须先阅读并接受以下服务条款，才能使用此设备。这些条款不会扩大、修改或限制 Chromium 操作系统条款。</translation>
@@ -118,7 +119,6 @@
 <translation id="4365115785552740256">Chromium 的诞生离不开 <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> 开放源代码项目以及其他<ph name="BEGIN_LINK_OSS"/>开放源代码软件<ph name="END_LINK_OSS"/>。</translation>
 <translation id="9190841055450128916">Chromium (mDNS-In)</translation>
 <translation id="4987820182225656817">访客使用Chromium不会留下任何痕迹。</translation>
-<translation id="2216475571518225820">此网站使用的 Chromium 内嵌框架插件很快将不受支持。请卸载该插件，然后下载兼容的浏览器。</translation>
 <translation id="3487263810738775861">某个扩展程序更改了Chromium启动后显示的页面。</translation>
 <translation id="5877064549588274448">版本已更改。请重新启动设备来应用这些变更。</translation>
 <translation id="7549178288319965365">关于 Chromium 操作系统</translation>
@@ -185,6 +185,7 @@
 <translation id="811857857463334932">此计算机将不再接收Chromium更新，因为其硬件不再受支持。</translation>
 <translation id="2910007522516064972">关于 Chromium(&amp;C)</translation>
 <translation id="8453117565092476964">安装程序归档损坏或无效。请重新下载 Chromium。</translation>
+<translation id="2558641060352364164">此网站使用的 Chromium 内嵌框架插件即将不受支持。请卸载该插件，然后升级到新型浏览器。</translation>
 <translation id="3889543394854987837">点击您的姓名即可打开Chromium并开始浏览。</translation>
 <translation id="3130323860337406239">Chromium 正在使用您的麦克风。</translation>
 <translation id="7196020411877309443">为何会出现这个窗口？</translation>

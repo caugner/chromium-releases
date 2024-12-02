@@ -20,6 +20,7 @@
 #include "cc/layers/video_layer.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/media/android/renderer_demuxer_android.h"
 #include "content/renderer/media/android/renderer_media_player_manager.h"
@@ -27,6 +28,7 @@
 #include "content/renderer/media/crypto/renderer_cdm_manager.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
+#include "content/renderer/render_view_impl.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
@@ -45,6 +47,7 @@
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
+#include "third_party/WebKit/public/platform/WebEncryptedMediaTypes.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3DProvider.h"
 #include "third_party/WebKit/public/platform/WebMediaPlayerClient.h"
 #include "third_party/WebKit/public/platform/WebString.h"
@@ -146,7 +149,7 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
     blink::WebMediaPlayerClient* client,
     base::WeakPtr<media::WebMediaPlayerDelegate> delegate,
     RendererMediaPlayerManager* player_manager,
-    RendererCdmManager* cdm_manager,
+    media::CdmFactory* cdm_factory,
     media::MediaPermission* media_permission,
     blink::WebContentDecryptionModule* initial_cdm,
     scoped_refptr<StreamTextureFactory> factory,
@@ -163,7 +166,7 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       seeking_(false),
       did_loading_progress_(false),
       player_manager_(player_manager),
-      cdm_manager_(cdm_manager),
+      cdm_factory_(cdm_factory),
       media_permission_(media_permission),
       network_state_(WebMediaPlayer::NetworkStateEmpty),
       ready_state_(WebMediaPlayer::ReadyStateHaveNothing),
@@ -185,13 +188,14 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
       player_type_(MEDIA_PLAYER_TYPE_URL),
       is_remote_(false),
       media_log_(media_log),
+      init_data_type_(media::EmeInitDataType::UNKNOWN),
       cdm_context_(NULL),
       allow_stored_credentials_(false),
       is_local_resource_(false),
       interpolator_(&default_tick_clock_),
       weak_factory_(this) {
   DCHECK(player_manager_);
-  DCHECK(cdm_manager_);
+  DCHECK(cdm_factory_);
 
   DCHECK(main_thread_checker_.CalledOnValidThread());
   stream_texture_factory_->AddObserver(this);
@@ -199,9 +203,11 @@ WebMediaPlayerAndroid::WebMediaPlayerAndroid(
   player_id_ = player_manager_->RegisterMediaPlayer(this);
 
 #if defined(VIDEO_HOLE)
-  force_use_overlay_embedded_video_ =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kForceUseOverlayEmbeddedVideo);
+  const RendererPreferences& prefs =
+      static_cast<RenderFrameImpl*>(render_frame())
+          ->render_view()
+          ->renderer_preferences();
+  force_use_overlay_embedded_video_ = prefs.use_view_overlay_for_all_video;
   if (force_use_overlay_embedded_video_ ||
     player_manager_->ShouldUseVideoOverlayForEmbeddedEncryptedVideo()) {
     // Defer stream texture creation until we are sure it's necessary.
@@ -300,6 +306,8 @@ void WebMediaPlayerAndroid::load(LoadType load_type,
           base::Bind(&WebMediaPlayerAndroid::UpdateNetworkState,
                      weak_factory_.GetWeakPtr()),
           base::Bind(&WebMediaPlayerAndroid::OnDurationChanged,
+                     weak_factory_.GetWeakPtr()),
+          base::Bind(&WebMediaPlayerAndroid::OnWaitingForDecryptionKey,
                      weak_factory_.GetWeakPtr()));
       InitializePlayer(url_, frame_->document().firstPartyForCookies(),
                        true, demuxer_client_id);
@@ -628,6 +636,18 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
     unsigned int type,
     bool premultiply_alpha,
     bool flip_y) {
+  return copyVideoTextureToPlatformTexture(web_graphics_context, texture,
+                                           internal_format, type,
+                                           premultiply_alpha, flip_y);
+}
+
+bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
+    blink::WebGraphicsContext3D* web_graphics_context,
+    unsigned int texture,
+    unsigned int internal_format,
+    unsigned int type,
+    bool premultiply_alpha,
+    bool flip_y) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   // Don't allow clients to copy an encrypted video frame.
   if (needs_external_surface_)
@@ -664,9 +684,8 @@ bool WebMediaPlayerAndroid::copyVideoTextureToPlatformTexture(
   // flip_y==true means to reverse the video orientation while
   // flip_y==false means to keep the intrinsic orientation.
   web_graphics_context->pixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, flip_y);
-  web_graphics_context->copyTextureCHROMIUM(GL_TEXTURE_2D, src_texture,
-                                            texture, level, internal_format,
-                                            type);
+  web_graphics_context->copyTextureCHROMIUM(GL_TEXTURE_2D, src_texture, texture,
+                                            0, internal_format, type);
   web_graphics_context->pixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, false);
   web_graphics_context->pixelStorei(GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM,
                                     false);
@@ -1103,7 +1122,7 @@ void WebMediaPlayerAndroid::DrawRemotePlaybackText(
 
   SkPaint paint;
   paint.setAntiAlias(true);
-  paint.setFilterLevel(SkPaint::kHigh_FilterLevel);
+  paint.setFilterQuality(kHigh_SkFilterQuality);
   paint.setColor(SK_ColorWHITE);
   paint.setTypeface(SkTypeface::CreateFromName("sans", SkTypeface::kBold));
   paint.setTextSize(kTextSize);
@@ -1488,13 +1507,13 @@ WebMediaPlayer::MediaKeyException WebMediaPlayerAndroid::generateKeyRequest(
 
 // Guess the type of |init_data|. This is only used to handle some corner cases
 // so we keep it as simple as possible without breaking major use cases.
-static std::string GuessInitDataType(const unsigned char* init_data,
-                                     unsigned init_data_length) {
+static media::EmeInitDataType GuessInitDataType(const unsigned char* init_data,
+                                                unsigned init_data_length) {
   // Most WebM files use KeyId of 16 bytes. CENC init data is always >16 bytes.
   if (init_data_length == 16)
-    return "webm";
+    return media::EmeInitDataType::WEBM;
 
-  return "cenc";
+  return media::EmeInitDataType::CENC;
 }
 
 // TODO(xhwang): Report an error when there is encrypted stream but EME is
@@ -1522,8 +1541,7 @@ WebMediaPlayerAndroid::GenerateKeyRequestInternal(
     }
 
     GURL security_origin(frame_->document().securityOrigin().toString());
-    RenderCdmFactory cdm_factory(cdm_manager_);
-    if (!proxy_decryptor_->InitializeCDM(&cdm_factory, key_system,
+    if (!proxy_decryptor_->InitializeCDM(cdm_factory_, key_system,
                                          security_origin)) {
       return WebMediaPlayer::MediaKeyExceptionKeySystemNotSupported;
     }
@@ -1539,8 +1557,8 @@ WebMediaPlayerAndroid::GenerateKeyRequestInternal(
     return WebMediaPlayer::MediaKeyExceptionInvalidPlayerState;
   }
 
-  std::string init_data_type = init_data_type_;
-  if (init_data_type.empty())
+  media::EmeInitDataType init_data_type = init_data_type_;
+  if (init_data_type == media::EmeInitDataType::UNKNOWN)
     init_data_type = GuessInitDataType(init_data, init_data_length);
 
   // TODO(xhwang): We assume all streams are from the same container (thus have
@@ -1722,7 +1740,7 @@ void WebMediaPlayerAndroid::OnMediaSourceOpened(
 }
 
 void WebMediaPlayerAndroid::OnEncryptedMediaInitData(
-    const std::string& init_data_type,
+    media::EmeInitDataType init_data_type,
     const std::vector<uint8>& init_data) {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
@@ -1734,16 +1752,24 @@ void WebMediaPlayerAndroid::OnEncryptedMediaInitData(
 
   UMA_HISTOGRAM_COUNTS(kMediaEme + std::string("NeedKey"), 1);
 
-  DCHECK(!init_data_type.empty());
-  DLOG_IF(WARNING,
-          !init_data_type_.empty() && init_data_type != init_data_type_)
+  DCHECK(init_data_type != media::EmeInitDataType::UNKNOWN);
+  DLOG_IF(WARNING, init_data_type_ != media::EmeInitDataType::UNKNOWN &&
+                       init_data_type != init_data_type_)
       << "Mixed init data type not supported. The new type is ignored.";
-  if (init_data_type_.empty())
+  if (init_data_type_ == media::EmeInitDataType::UNKNOWN)
     init_data_type_ = init_data_type;
 
-  const uint8* init_data_ptr = init_data.empty() ? NULL : &init_data[0];
-  client_->encrypted(WebString::fromUTF8(init_data_type), init_data_ptr,
-                     init_data.size());
+  client_->encrypted(ConvertToWebInitDataType(init_data_type),
+                     vector_as_array(&init_data), init_data.size());
+}
+
+void WebMediaPlayerAndroid::OnWaitingForDecryptionKey() {
+  client_->didBlockPlaybackWaitingForKey();
+
+  // TODO(jrummell): didResumePlaybackBlockedForKey() should only be called
+  // when a key has been successfully added (e.g. OnSessionKeysChange() with
+  // |has_additional_usable_key| = true). http://crbug.com/461903
+  client_->didResumePlaybackBlockedForKey();
 }
 
 void WebMediaPlayerAndroid::SetCdmInternal(

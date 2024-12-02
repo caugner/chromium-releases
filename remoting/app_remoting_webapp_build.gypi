@@ -6,27 +6,10 @@
   'includes': [
     'remoting_version.gypi',
     'remoting_locales.gypi',
+    'remoting_options.gypi',
     'remoting_webapp_files.gypi',
     'app_remoting_webapp_files.gypi',
   ],
-
-  'variables': {
-    'chromium_code': 1,
-
-    'run_jscompile%': 0,
-
-    # The ar_service_environment variable is used to define the target
-    # environment for the app being built.
-    # The allowed values are dev, test, staging, and prod.
-    'conditions': [
-      ['buildtype == "Dev"', {
-        'ar_service_environment%': 'dev',
-      }, {  # buildtype != 'Dev'
-        # Non-dev build must have this set to 'prod'.
-        'ar_service_environment': 'prod',
-      }],
-    ],  # conditions
-  },  # end of variables
 
   'target_defaults': {
     'type': 'none',
@@ -57,7 +40,9 @@
       ],
       'ar_generated_html_files': [
         '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/main.html',
+        '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/message_window.html',
         '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/wcs_sandbox.html',
+        '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/feedback_consent.html',
       ],
       'ar_webapp_files': [
         '<@(ar_app_specific_files)',
@@ -183,10 +168,43 @@
           'python', '<(DEPTH)/remoting/webapp/build-html.py',
           '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/wcs_sandbox.html',
           '<(remoting_webapp_template_wcs_sandbox)',
+          '--js',
+          '<@(remoting_webapp_wcs_sandbox_html_all_js_files)',
+        ],
+      },
+      {
+        'action_name': 'Build ">(ar_app_name)" message_window.html',
+        'inputs': [
+          '<(DEPTH)/remoting/webapp/build-html.py',
+          '<(remoting_webapp_template_message_window)',
+        ],
+        'outputs': [
+          '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/message_window.html',
+        ],
+        'action': [
+          'python', '<(DEPTH)/remoting/webapp/build-html.py',
+          '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/message_window.html',
+          '<(remoting_webapp_template_message_window)',
+          '--js', '<@(remoting_webapp_message_window_html_all_js_files)',
+        ],
+      },
+      {
+        'action_name': 'Build ">(ar_app_name)" feedback_consent.html',
+        'inputs': [
+          '<(DEPTH)/remoting/webapp/build-html.py',
+          '<(ar_feedback_consent_template)',
+        ],
+        'outputs': [
+          '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/feedback_consent.html',
+        ],
+        'action': [
+          'python', '<(DEPTH)/remoting/webapp/build-html.py',
+          '<(SHARED_INTERMEDIATE_DIR)/>(_target_name)/feedback_consent.html',
+          '<(ar_feedback_consent_template)',
           '--template-dir',
           '<(DEPTH)/remoting',
           '--js',
-          '<@(remoting_webapp_wcs_sandbox_html_js_files)',
+          '<@(ar_feedback_consent_html_all_js_files)',
         ],
       },
     ],  # actions

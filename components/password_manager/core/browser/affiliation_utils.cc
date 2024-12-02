@@ -55,7 +55,7 @@ bool CanonicalizeWebFacetURI(const std::string& input_uri,
   url::StdStringCanonOutput canonical_output(canonical_uri);
 
   bool canonicalization_succeeded = url::CanonicalizeStandardURL(
-      input_uri.c_str(), input_uri.size(), input_parsed, NULL,
+      input_uri.c_str(), input_uri.size(), input_parsed, nullptr,
       &canonical_output, &canonical_parsed);
   canonical_output.Complete();
 
@@ -209,26 +209,26 @@ FacetURI FacetURI::FromCanonicalSpec(const std::string& canonical_spec) {
 }
 
 bool FacetURI::operator==(const FacetURI& other) const {
-  DCHECK(is_valid_);
-  DCHECK(other.is_valid_);
+  DCHECK(is_empty() || is_valid());
+  DCHECK(other.is_empty() || other.is_valid());
   return canonical_spec_ == other.canonical_spec_;
 }
 
 bool FacetURI::operator!=(const FacetURI& other) const {
-  DCHECK(is_valid_);
-  DCHECK(other.is_valid_);
+  DCHECK(is_empty() || is_valid());
+  DCHECK(other.is_empty() || other.is_valid());
   return canonical_spec_ != other.canonical_spec_;
 }
 
 bool FacetURI::operator<(const FacetURI& other) const {
-  DCHECK(is_valid_);
-  DCHECK(other.is_valid_);
+  DCHECK(is_empty() || is_valid());
+  DCHECK(other.is_empty() || other.is_valid());
   return canonical_spec_ < other.canonical_spec_;
 }
 
 bool FacetURI::operator>(const FacetURI& other) const {
-  DCHECK(is_valid_);
-  DCHECK(other.is_valid_);
+  DCHECK(is_empty() || is_valid());
+  DCHECK(other.is_empty() || other.is_valid());
   return canonical_spec_ > other.canonical_spec_;
 }
 

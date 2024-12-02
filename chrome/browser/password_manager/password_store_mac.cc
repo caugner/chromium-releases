@@ -422,6 +422,7 @@ bool FillPasswordFormFromKeychainItem(const AppleKeychain& keychain,
   if (password_manager::IsValidAndroidFacetURI(server)) {
     form->signon_realm = server;
     form->origin = GURL();
+    form->ssl_valid = true;
   } else {
     form->origin = URLFromComponents(form->ssl_valid, server, port, path);
     // TODO(stuartmorgan): Handle proxies, which need a different signon_realm
@@ -437,8 +438,10 @@ bool FillPasswordFormFromKeychainItem(const AppleKeychain& keychain,
 bool FormsMatchForMerge(const PasswordForm& form_a,
                         const PasswordForm& form_b,
                         FormMatchStrictness strictness) {
-  // We never merge blacklist entries between our store and the keychain.
-  if (form_a.blacklisted_by_user || form_b.blacklisted_by_user) {
+  // We never merge blacklist entries between our store and the Keychain,
+  // and federated logins should not be stored in the Keychain at all.
+  if (form_a.blacklisted_by_user || form_b.blacklisted_by_user ||
+      !form_a.federation_url.is_empty() || !form_b.federation_url.is_empty()) {
     return false;
   }
   bool equal_realm = form_a.signon_realm == form_b.signon_realm;
@@ -450,35 +453,38 @@ bool FormsMatchForMerge(const PasswordForm& form_a,
          form_a.username_value == form_b.username_value;
 }
 
-// Moves entries from |forms| that are blacklist entries into |blacklist|.
-void ExtractBlacklistForms(ScopedVector<autofill::PasswordForm>* forms,
-                           ScopedVector<autofill::PasswordForm>* blacklist) {
-  blacklist->reserve(blacklist->size() + forms->size());
-  ScopedVector<autofill::PasswordForm> non_blacklist;
-  // Move forms in either |non_blacklist| or |blacklist|, depending on whether
-  // they are blacklisted by the user.
-  MoveAllFormsOut(forms, [&non_blacklist, blacklist](
-                             scoped_ptr<autofill::PasswordForm> form) {
-    if (form->blacklisted_by_user)
-      blacklist->push_back(form.release());
-    else
-      non_blacklist.push_back(form.release());
-  });
-  forms->swap(non_blacklist);
+// Moves entries from |forms| that represent either blacklisted or federated
+// logins into |extracted|. These two types are stored only in the LoginDatabase
+// and do not have corresponding Keychain entries.
+void ExtractNonKeychainForms(ScopedVector<autofill::PasswordForm>* forms,
+                             ScopedVector<autofill::PasswordForm>* extracted) {
+  extracted->reserve(extracted->size() + forms->size());
+  ScopedVector<autofill::PasswordForm> remaining;
+  MoveAllFormsOut(
+      forms, [&remaining, extracted](scoped_ptr<autofill::PasswordForm> form) {
+        if (form->blacklisted_by_user || !form->federation_url.is_empty())
+          extracted->push_back(form.Pass());
+        else
+          remaining.push_back(form.Pass());
+      });
+  forms->swap(remaining);
 }
 
 // Takes |keychain_forms| and |database_forms| and moves the following 2 types
-// of forms to |merged_forms|: (1) blacklisted |database_forms|, (2)
-// |database_forms| which have a corresponding entry in |keychain_forms|. The
-// database forms of type (2) have their password value updated from the
+// of forms to |merged_forms|:
+//   (1) |database_forms| that by principle never have a corresponding Keychain
+//       entry (viz., blacklisted and federated logins),
+//   (2) |database_forms| which should have and do have a corresponding entry in
+//       |keychain_forms|.
+// The database forms of type (2) have their password value updated from the
 // corresponding keychain form, and all the keychain forms corresponding to some
 // database form are removed from |keychain_forms| and deleted.
 void MergePasswordForms(ScopedVector<autofill::PasswordForm>* keychain_forms,
                         ScopedVector<autofill::PasswordForm>* database_forms,
                         ScopedVector<autofill::PasswordForm>* merged_forms) {
-  // Pull out the database blacklist items, since they are used as-is rather
-  // than being merged with keychain forms.
-  ExtractBlacklistForms(database_forms, merged_forms);
+  // Pull out the database blacklist items and federated logins, since they are
+  // used as-is rather than being merged with keychain forms.
+  ExtractNonKeychainForms(database_forms, merged_forms);
 
   // Merge the normal entries.
   ScopedVector<autofill::PasswordForm> unused_database_forms;
@@ -684,6 +690,8 @@ bool MacKeychainPasswordFormAdapter::HasPasswordExactlyMatchingForm(
 
 bool MacKeychainPasswordFormAdapter::HasPasswordsMergeableWithForm(
     const PasswordForm& query_form) {
+  if (!query_form.federation_url.is_empty())
+    return false;
   std::string username = base::UTF16ToUTF8(query_form.username_value);
   std::vector<SecKeychainItemRef> matches =
       MatchingKeychainItems(query_form.signon_realm, query_form.scheme,
@@ -808,11 +816,15 @@ SecKeychainItemRef MacKeychainPasswordFormAdapter::KeychainItemForForm(
     const PasswordForm& form) {
   // We don't store blacklist entries in the keychain, so the answer to "what
   // Keychain item goes with this form" is always "nothing" for blacklists.
-  if (form.blacklisted_by_user) {
+  // Same goes for federated logins.
+  if (form.blacklisted_by_user || !form.federation_url.is_empty()) {
     return NULL;
   }
 
-  std::string path = form.origin.path();
+  std::string path;
+  // Path doesn't make sense for Android app credentials.
+  if (!password_manager::IsValidAndroidFacetURI(form.signon_realm))
+    path = form.origin.path();
   std::string username = base::UTF16ToUTF8(form.username_value);
   std::vector<SecKeychainItemRef> matches = MatchingKeychainItems(
       form.signon_realm, form.scheme, path.c_str(), username.c_str());
@@ -1062,11 +1074,11 @@ ScopedVector<autofill::PasswordForm> PasswordStoreMac::FillMatchingLogins(
   chrome::ScopedSecKeychainSetUserInteractionAllowed user_interaction_allowed(
       prompt_policy == ALLOW_PROMPT);
 
-  if (!login_metadata_db_)
-    return ScopedVector<autofill::PasswordForm>();
-
   ScopedVector<PasswordForm> database_forms;
-  login_metadata_db_->GetLogins(form, &database_forms);
+  if (!login_metadata_db_ ||
+      !login_metadata_db_->GetLogins(form, &database_forms)) {
+    return ScopedVector<autofill::PasswordForm>();
+  }
 
   // Let's gather all signon realms we want to match with keychain entries.
   std::set<std::string> realm_set;
@@ -1096,8 +1108,8 @@ ScopedVector<autofill::PasswordForm> PasswordStoreMac::FillMatchingLogins(
   // Strip any blacklist entries out of the unused Keychain array, then take
   // all the entries that are left (which we can use as imported passwords).
   ScopedVector<PasswordForm> keychain_blacklist_forms;
-  internal_keychain_helpers::ExtractBlacklistForms(&keychain_forms,
-                                                   &keychain_blacklist_forms);
+  internal_keychain_helpers::ExtractNonKeychainForms(&keychain_forms,
+                                                     &keychain_blacklist_forms);
   AppendSecondToFirst(&matched_forms, &keychain_forms);
 
   if (!database_forms.empty()) {
@@ -1110,21 +1122,24 @@ ScopedVector<autofill::PasswordForm> PasswordStoreMac::FillMatchingLogins(
 
 void PasswordStoreMac::GetBlacklistLoginsImpl(
     scoped_ptr<PasswordStore::GetLoginsRequest> request) {
-  ScopedVector<autofill::PasswordForm> obtained_forms;
-  FillBlacklistLogins(&obtained_forms);
+  ScopedVector<PasswordForm> obtained_forms;
+  if (!FillBlacklistLogins(&obtained_forms))
+    obtained_forms.clear();
   request->NotifyConsumerWithResults(obtained_forms.Pass());
 }
 
 void PasswordStoreMac::GetAutofillableLoginsImpl(
     scoped_ptr<PasswordStore::GetLoginsRequest> request) {
-  ScopedVector<autofill::PasswordForm> obtained_forms;
-  FillAutofillableLogins(&obtained_forms);
+  ScopedVector<PasswordForm> obtained_forms;
+  if (!FillAutofillableLogins(&obtained_forms))
+    obtained_forms.clear();
   request->NotifyConsumerWithResults(obtained_forms.Pass());
 }
 
 bool PasswordStoreMac::FillAutofillableLogins(
-    ScopedVector<autofill::PasswordForm>* forms) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+    ScopedVector<PasswordForm>* forms) {
+  DCHECK_EQ(thread_->message_loop(), base::MessageLoop::current());
+  forms->clear();
 
   ScopedVector<PasswordForm> database_forms;
   if (!login_metadata_db_ ||
@@ -1142,16 +1157,14 @@ bool PasswordStoreMac::FillAutofillableLogins(
   return true;
 }
 
-bool PasswordStoreMac::FillBlacklistLogins(
-    ScopedVector<autofill::PasswordForm>* forms) {
-  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+bool PasswordStoreMac::FillBlacklistLogins(ScopedVector<PasswordForm>* forms) {
+  DCHECK_EQ(thread_->message_loop(), base::MessageLoop::current());
   return login_metadata_db_ && login_metadata_db_->GetBlacklistLogins(forms);
 }
 
 bool PasswordStoreMac::AddToKeychainIfNecessary(const PasswordForm& form) {
-  if (form.blacklisted_by_user) {
+  if (form.blacklisted_by_user || !form.federation_url.is_empty())
     return true;
-  }
   MacKeychainPasswordFormAdapter keychainAdapter(keychain_.get());
   return keychainAdapter.AddPassword(form);
 }
@@ -1161,7 +1174,8 @@ bool PasswordStoreMac::DatabaseHasFormMatchingKeychainForm(
   DCHECK(login_metadata_db_);
   bool has_match = false;
   ScopedVector<autofill::PasswordForm> database_forms;
-  login_metadata_db_->GetLogins(form, &database_forms);
+  if (!login_metadata_db_->GetLogins(form, &database_forms))
+    return false;
   for (const autofill::PasswordForm* db_form : database_forms) {
     // Below we filter out forms with non-empty original_signon_realm, because
     // those signal fuzzy matches, and we are only interested in exact ones.
@@ -1204,7 +1218,8 @@ void PasswordStoreMac::CleanOrphanedForms(
   DCHECK(login_metadata_db_);
 
   ScopedVector<autofill::PasswordForm> database_forms;
-  login_metadata_db_->GetAutofillableLogins(&database_forms);
+  if (!login_metadata_db_->GetAutofillableLogins(&database_forms))
+    return;
 
   // Filter forms with corresponding Keychain entry out of |database_forms|.
   ScopedVector<PasswordForm> forms_with_keychain_entry;

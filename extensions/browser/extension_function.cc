@@ -404,7 +404,7 @@ void ExtensionFunction::SendResponseImpl(bool success) {
   if (!results_)
     results_.reset(new base::ListValue());
 
-  response_callback_.Run(type, *results_, GetError());
+  response_callback_.Run(type, *results_, GetError(), histogram_value());
 }
 
 void ExtensionFunction::OnRespondingLater(ResponseValue value) {
@@ -456,6 +456,11 @@ content::WebContents* UIThreadExtensionFunction::GetAssociatedWebContents() {
     web_contents = dispatcher()->delegate()->GetAssociatedWebContents();
 
   return web_contents;
+}
+
+content::WebContents* UIThreadExtensionFunction::GetSenderWebContents() {
+  return render_view_host_ ?
+      content::WebContents::FromRenderViewHost(render_view_host_) : nullptr;
 }
 
 void UIThreadExtensionFunction::SendResponse(bool success) {

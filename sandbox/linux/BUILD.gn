@@ -126,6 +126,9 @@ source_set("sandbox_linux_unittests_sources") {
       "services/namespace_sandbox_unittest.cc",
       "services/namespace_utils_unittest.cc",
     ]
+
+    # For credentials_unittest.cc
+    configs += [ "//build/config/linux:libcap" ]
   }
 }
 
@@ -168,6 +171,8 @@ component("seccomp_bpf") {
     "bpf_dsl/syscall_set.cc",
     "bpf_dsl/syscall_set.h",
     "bpf_dsl/trap_registry.h",
+    "bpf_dsl/verifier.cc",
+    "bpf_dsl/verifier.h",
     "seccomp-bpf/die.cc",
     "seccomp-bpf/die.h",
     "seccomp-bpf/errorcode.cc",
@@ -178,8 +183,6 @@ component("seccomp_bpf") {
     "seccomp-bpf/syscall.h",
     "seccomp-bpf/trap.cc",
     "seccomp-bpf/trap.h",
-    "seccomp-bpf/verifier.cc",
-    "seccomp-bpf/verifier.h",
   ]
   defines = [ "SANDBOX_IMPLEMENTATION" ]
 
@@ -265,6 +268,10 @@ component("sandbox_services") {
 
   defines = [ "SANDBOX_IMPLEMENTATION" ]
 
+  deps = [
+    "//base",
+  ]
+
   if (compile_credentials) {
     sources += [
       "services/credentials.cc",
@@ -275,13 +282,8 @@ component("sandbox_services") {
       "services/namespace_utils.h",
     ]
 
-    # For capabilities.cc.
-    configs += [ "//build/config/linux:libcap" ]
+    deps += [ ":sandbox_services_headers" ]
   }
-
-  deps = [
-    "//base",
-  ]
 }
 
 source_set("sandbox_services_headers") {
@@ -314,12 +316,12 @@ source_set("libc_urandom_override") {
 if (compile_suid_client) {
   component("suid_sandbox_client") {
     sources = [
-      "suid/common/sandbox.h",
-      "suid/common/suid_unsafe_environment_variables.h",
       "suid/client/setuid_sandbox_client.cc",
       "suid/client/setuid_sandbox_client.h",
       "suid/client/setuid_sandbox_host.cc",
       "suid/client/setuid_sandbox_host.h",
+      "suid/common/sandbox.h",
+      "suid/common/suid_unsafe_environment_variables.h",
     ]
     defines = [ "SANDBOX_IMPLEMENTATION" ]
 

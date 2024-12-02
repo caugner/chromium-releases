@@ -309,20 +309,22 @@ public class ImeAdapter {
     }
 
     public boolean dispatchKeyEvent(KeyEvent event) {
-        // Physical keyboards have their events come through here instead of
-        // AdapterInputConnection.
         if (mInputConnection != null) {
             return mInputConnection.sendKeyEvent(event);
         }
-        return translateAndSendNativeEvents(event, 0);
+        return translateAndSendNativeEvents(event);
     }
 
     private int shouldSendKeyEventWithKeyCode(String text) {
         if (text.length() != 1) return COMPOSITION_KEY_CODE;
 
-        if (text.equals("\n")) return KeyEvent.KEYCODE_ENTER;
-        else if (text.equals("\t")) return KeyEvent.KEYCODE_TAB;
-        else return COMPOSITION_KEY_CODE;
+        if (text.equals("\n")) {
+            return KeyEvent.KEYCODE_ENTER;
+        } else if (text.equals("\t")) {
+            return KeyEvent.KEYCODE_TAB;
+        } else {
+            return COMPOSITION_KEY_CODE;
+        }
     }
 
     /**
@@ -365,12 +367,14 @@ public class ImeAdapter {
         }
 
         // The content has grown in length: assume the last character is the key that caused it.
-        if (newtext.length() > oldtext.length() && newtext.startsWith(oldtext))
+        if (newtext.length() > oldtext.length() && newtext.startsWith(oldtext)) {
             return androidKeyEventForCharacter(newtext.charAt(newtext.length() - 1));
+        }
 
         // The content has shrunk in length: assume that backspace was pressed.
-        if (oldtext.length() > newtext.length() && oldtext.startsWith(newtext))
+        if (oldtext.length() > newtext.length() && oldtext.startsWith(newtext)) {
             return new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL);
+        }
 
         // The content is unchanged or has undergone a complex change (i.e. not a simple tail
         // modification) so return an unknown key-code.
@@ -383,11 +387,11 @@ public class ImeAdapter {
         translateAndSendNativeEvents(new KeyEvent(eventTime, eventTime,
                 KeyEvent.ACTION_DOWN, keyCode, 0, 0,
                 KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                flags), 0);
+                flags));
         translateAndSendNativeEvents(new KeyEvent(SystemClock.uptimeMillis(), eventTime,
                 KeyEvent.ACTION_UP, keyCode, 0, 0,
                 KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                flags), 0);
+                flags));
     }
 
     // Calls from Java to C++
@@ -422,17 +426,14 @@ public class ImeAdapter {
             // composition below.
             if (keyCode > 0 && isCommit && mLastComposeText == null && textStr.length() == 1) {
                 mLastSyntheticKeyCode = keyCode;
-                return translateAndSendNativeEvents(keyEvent, 0)
+                return translateAndSendNativeEvents(keyEvent)
                         && translateAndSendNativeEvents(
-                                KeyEvent.changeAction(keyEvent, KeyEvent.ACTION_UP), 0);
+                                KeyEvent.changeAction(keyEvent, KeyEvent.ACTION_UP));
             }
 
-            // If we do not have autocomplete=off, then always send compose events rather than a
-            // guessed keyCode. This addresses http://crbug.com/422685 .
-            if ((mTextInputFlags & WebTextInputFlags.AutocompleteOff) == 0) {
-                keyCode = COMPOSITION_KEY_CODE;
-                modifiers = 0;
-            }
+            // Always send compose events. This is a quick fix for http://crbug.com/476497.
+            keyCode = COMPOSITION_KEY_CODE;
+            modifiers = 0;
 
             // When typing, there is no issue sending KeyDown and KeyUp events around the
             // composition event because those key events do nothing (other than call JS
@@ -482,7 +483,7 @@ public class ImeAdapter {
         nativeFinishComposingText(mNativeImeAdapterAndroid);
     }
 
-    boolean translateAndSendNativeEvents(KeyEvent event, int accentChar) {
+    boolean translateAndSendNativeEvents(KeyEvent event) {
         if (mNativeImeAdapterAndroid == 0) return false;
 
         int action = event.getAction();
@@ -500,11 +501,9 @@ public class ImeAdapter {
             return false;
         }
         mViewEmbedder.onImeEvent();
-        int unicodeChar = AdapterInputConnection.maybeAddAccentToCharacter(
-                accentChar, event.getUnicodeChar());
         return nativeSendKeyEvent(mNativeImeAdapterAndroid, event, event.getAction(),
                 getModifiers(event.getMetaState()), event.getEventTime(), event.getKeyCode(),
-                             /*isSystemKey=*/false, unicodeChar);
+                             /*isSystemKey=*/false, event.getUnicodeChar());
     }
 
     boolean sendSyntheticKeyEvent(int eventType, long timestampMs, int keyCode, int modifiers,

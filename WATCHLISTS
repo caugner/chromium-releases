@@ -81,6 +81,11 @@
         '|content/common/gpu/client/' \
         '|webkit/common/gpu/'
     },
+    'auto_bisect': {
+      'filepath': 'tools/run-bisect-perf-regression.py'\
+                  '|tools/run-perf-test.cfg'\
+                  '|tools/auto_bisect/'
+    },
     'autofill': {
       'filepath': 'chrome/browser/autofill/|'\
                   'chrome/browser/resources/options/autofill_|'\
@@ -102,6 +107,9 @@
     },
     'automation': {
       'filepath': 'chrome/browser/automation/|chrome/test/automation/',
+    },
+    'background_sync': {
+      'filepath': 'background_sync',
     },
     'base': {
       'filepath': '^base/',
@@ -160,6 +168,9 @@
     'bubble': {
       'filepath': 'ui/views/bubble/|'\
                   'chrome/browser/ui/views/bubble/',
+    },
+    'cache_storage': {
+      'filepath': 'cache_storage',
     },
     'cast': {
       'filepath': 'media/cast/'\
@@ -426,8 +437,9 @@
       'filepath': 'content/common/sandbox.*linux.cc',
     },
     'md_settings': {
-      'filepath': 'ui/webui/resources/cr_element|'\
-                  'chrome/browser/resources/md_settings/',
+      'filepath': 'ui/webui/resources/cr_element'\
+                  '|chrome/browser/resources/md_settings/'\
+                  '|chrome/browser/resources/settings/',
     },
     'media': {
       'filepath': 'media/|third_party/(ffmpeg|openmax)/|webmediaplayer|'\
@@ -441,6 +453,13 @@
                   '|chrome/test/data/extensions/api_test/media_galleries/'\
                   '|chrome/utility/itunes*'\
                   '|chrome/utility/picasa*',
+    },
+    'media_router': {
+      'filepath': 'chrome/browser/media/router/*' \
+                  '|chrome/app/theme/*/common/media_router*' \
+                  '|chrome/browser/resources/media_router/' \
+                  '|chrome/browser/ui/webui/media_router/' \
+                  '|chrome/test/media_router/',
     },
     'message_loop': {
       'filepath': 'base/message_'
@@ -460,7 +479,10 @@
     },
     'metrics_xml_files': {
       # Subscribe to this to watch for changes to histograms.xml.
-      'filepath': 'tools/metrics/.*\.xml$'
+      'filepath': 'tools/metrics/.*\.xml$',
+    },
+    'midi': {
+      'filepath': 'midi',
     },
     'mojo': {
       'filepath': 'mojo',
@@ -497,9 +519,19 @@
         'chrome/browser/resources/net_internals/|' \
         'chrome/browser/ui/webui/net_internals/'
     },
+    'netinfo': {
+      'filepath': 'netinfo',
+    },
     'notifications': {
       'filepath': 'chrome/browser/extensions/api/notifications/|' \
         'chrome/browser/notifications/|' \
+        'chrome/test/data/notifications/|' \
+        'content/browser/notifications/|' \
+        'content/child/notifications/|' \
+        'content/common/platform_notification|' \
+        'content/public/browser/platform_notification|' \
+        'content/public/common/platform_notification|' \
+        'content/renderer/notification_|' \
         'ui/message_center/'
     },
     'npapi_headers': {
@@ -563,13 +595,17 @@
     'prerender': {
       'filepath': 'prerender'
     },
+    'push_messaging': {
+      'filepath': 'push_messaging'
+    },
     'pyauto': {
       'filepath': 'chrome/test/pyautolib' \
                   '|chrome/test/functional' \
                   '|chrome/browser/automation/automation_provider_json'
     },
     'remoting': {
-      'filepath': 'remoting/',
+      'filepath': 'remoting/' \
+                  '|testing/chromoting'
     },
     'rlz_id': {
       'filepath' :'rlz/lib/machine_id.cc|'\
@@ -594,9 +630,6 @@
     },
     'search': {
       'filepath': 'chrome/browser/ui/search/',
-    },
-    'sessions': {
-      'filepath': 'chrome/browser/sessions/',
     },
     'service_worker': {
       'filepath': 'content/(browser|renderer|child|common)/service_worker/',
@@ -786,6 +819,14 @@
                   '|chrome/browser/chromeos/wm_' \
                   '|ui/base/x/'
     },
+    'zoom': {
+      'filepath': 'chrome/browser/ui/zoom/' \
+                  '|components/ui/zoom/' \
+                  '|content/browser/host_zoom_*' \
+                  '|content/browser/storage_partition_impl*' \
+                  '|content/public/browser/host_zoom_map.h' \
+                  '|content/public/browser/storage_partition.h'
+    },
   },
 
   'WATCHLISTS': {
@@ -806,8 +847,10 @@
     'android_media': ['avayvod+watch@chromium.org'],
     'android_tab': ['avayvod+watch@chromium.org', 'dtrainor@chromium.org'],
     'android_webview': ['android-webview-reviews@chromium.org'],
-    'app_list': ['tfarina@chromium.org', 'chrome-apps-syd-reviews@chromium.org'],
-    'app_shortcuts': ['chrome-apps-syd-reviews@chromium.org'],
+    'app_list': ['tfarina@chromium.org',
+                 'mgiuca@chromium.org',
+                 'tapted@chromium.org'],
+    'app_shortcuts': ['mgiuca@chromium.org', 'tapted@chromium.org'],
     'appcache': ['michaeln@chromium.org'],
     'apps': ['tfarina@chromium.org', 'chromium-apps-reviews@chromium.org'],
     'ash': ['sadrul@chromium.org',
@@ -819,9 +862,11 @@
                         'piman+watch@chromium.org',
                         'sievers+watch@chromium.org',
                         'kalyan.kondapally@intel.com'],
+    'auto_bisect': ['auto-bisect-reviews@chromium.org'],
     'autofill': ['estade+watch@chromium.org',
                  'rouslan+autofillwatch@chromium.org'],
     'automation': ['robertshield@chromium.org'],
+    'background_sync': ['jkarlin+watch@chromium.org'],
     'base': ['erikwright+watch@chromium.org'],
     'base_allocator': ['dmikurube@chromium.org',
                        'wfh+watch@chromium.org'],
@@ -837,6 +882,7 @@
     'browser_resources': ['arv+watch@chromium.org'],
     'browsing_data': ['markusheintz@chromium.org'],
     'bubble': ['alicet@chromium.org', 'msw+watch@chromium.org'],
+    'cache_storage': ['jkarlin+watch@chromium.org'],
     'cast': ['avayvod+watch@chromium.org',
              'hclam+watch@chromium.org',
              'hguihot+watch@chromium.org',
@@ -943,9 +989,11 @@
     'media': ['feature-media-reviews@chromium.org'],
     'media_galleries': ['gbillock@chromium.org', 'thestig@chromium.org',
                         'tommycli@chromium.org', 'vandebo@chromium.org'],
+    'media_router': ['media-router+watch@chromium.org'],
     'message_loop': ['sadrul@chromium.org'],
     'metrics': ['asvitkine+watch@chromium.org'],
     'metrics_xml_files': ['asvitkine+watch@chromium.org'],
+    'midi': ['toyoshim+midi@chromium.org'],
     'mojo': ['aa@chromium.org',
              'abarth@chromium.org',
              'ben+mojo@chromium.org',
@@ -959,6 +1007,7 @@
     'navigation': ['creis+watch@chromium.org', 'nasko+codewatch@chromium.org'],
     'net': ['cbentzel+watch@chromium.org'],
     'net_error_list': ['mmenke@chromium.org'],
+    'netinfo': ['jkarlin+watch@chromium.org'],
     'net_log': ['mmenke@chromium.org', 'eroman@chromium.org'],
     'notifications': ['peter+watch@chromium.org',
                       'mlamouri+watch-notifications@chromium.org'],
@@ -984,8 +1033,8 @@
     'predictors': ['shishir+watch@chromium.org'],
     'prepopulated_engines': ['vasilii+watch@chromium.org'],
     'prerender': ['cbentzel+watch@chromium.org', 'tburkard+watch@chromium.org',
-                  'jkarlin+watch@chromium.org', 'gavinp+prer@chromium.org',
-                  'davidben+watch@chromium.org'],
+                  'gavinp+prer@chromium.org', 'davidben+watch@chromium.org'],
+    'push_messaging': ['peter+watch@chromium.org', 'johnme+watch@chromium.org'],
     'pyauto': ['anantha@chromium.org',
                'dyu@chromium.org',
                'dennisjeffrey@chromium.org'],
@@ -996,7 +1045,6 @@
     'safe_browsing': ['grt+watch@chromium.org'],
     'sandbox': ['rickyz+watch@chromium.org'],
     'scheduler': ['scheduler-bugs@chromium.org'],
-    'sessions': ['marja+watch@chromium.org'],
     'service_worker': ['tzik@chromium.org',
                        'kinuko+serviceworker@chromium.org',
                        'nhiroki@chromium.org',
@@ -1013,6 +1061,7 @@
     'sync': ['tim+watch@chromium.org',
              'maniscalco+watch@chromium.org',
              'maxbogue+watch@chromium.org',
+             'plaree+watch@chromium.org',
              'pvalenzuela+watch@chromium.org',
              'zea+watch@chromium.org'],
     'syncfs': ['kinuko+fileapi@chromium.org',
@@ -1030,10 +1079,10 @@
                   'suzhe@chromium.org',
                   'yusukes+watch@chromium.org',
                   'nona+watch@chromium.org',
-                  'yukishiino+watch@chromium.org'],
+                  'shuchen+watch@chromium.org'],
     'textinput_chromeos': ['yusukes+watch@chromium.org',
                            'nona+watch@chromium.org',
-                           'yukishiino+watch@chromium.org'],
+                           'shuchen+watch@chromium.org'],
     'timers': ['chirantan+watch@chromium.org'],
     'tools_emacs': ['dhollowa+watch@chromium.org'],
     'tracing': ['tracing+reviews@chromium.org', 'wfh+watch@chromium.org'],
@@ -1058,5 +1107,6 @@
     'x11': ['derat+watch@chromium.org',
             'sadrul@chromium.org',
             'yusukes+watch@chromium.org'],
+    'zoom': ['wjmaclean@chromium.org'],
   },
 }

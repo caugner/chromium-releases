@@ -253,8 +253,7 @@ bool WebKitTestController::PrepareForLayoutTest(
       ShellContentBrowserClient::Get()->browser_context();
   if (test_url.spec().find("compositing/") != std::string::npos)
     is_compositing_test_ = true;
-  initial_size_ = gfx::Size(
-      Shell::kDefaultTestWindowWidthDip, Shell::kDefaultTestWindowHeightDip);
+  initial_size_ = Shell::GetShellDefaultSize();
   // The W3C SVG layout tests use a different size than the other layout tests.
   if (test_url.spec().find("W3C-SVG-1.1") != std::string::npos)
     initial_size_ = gfx::Size(kTestSVGWindowWidthDip, kTestSVGWindowHeightDip);
@@ -516,6 +515,7 @@ void WebKitTestController::OnTestFinished() {
     printer_->PrintImageFooter();
   RenderViewHost* render_view_host =
       main_window_->web_contents()->GetRenderViewHost();
+  main_window_->web_contents()->ExitFullscreen();
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(base::IgnoreResult(&WebKitTestController::Send),
@@ -593,8 +593,7 @@ void WebKitTestController::OnShowDevTools(const std::string& settings,
     devtools_frontend_ = LayoutTestDevToolsFrontend::Show(
         main_window_->web_contents(), settings, frontend_url);
   } else {
-    devtools_frontend_->ReuseFrontend(
-        main_window_->web_contents(), settings, frontend_url);
+    devtools_frontend_->ReuseFrontend(settings, frontend_url);
   }
   devtools_frontend_->Activate();
   devtools_frontend_->Focus();

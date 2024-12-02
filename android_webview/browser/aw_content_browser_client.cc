@@ -6,7 +6,6 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
-#include "android_webview/browser/aw_browser_permission_request_delegate.h"
 #include "android_webview/browser/aw_contents_client_bridge_base.h"
 #include "android_webview/browser/aw_contents_io_thread_client.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
@@ -28,7 +27,8 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
-#include "content/public/browser/permission_type.h"
+#include "content/public/browser/client_certificate_delegate.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -101,7 +101,7 @@ void AwContentsMessageFilter::OnShouldOverrideUrlLoading(
     int render_frame_id,
     const base::string16& url,
     bool* ignore_navigation) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   *ignore_navigation = false;
   AwContentsClientBridgeBase* client =
       AwContentsClientBridgeBase::FromID(process_id_, render_frame_id);
@@ -139,7 +139,7 @@ class AwAccessTokenStore : public content::AccessTokenStore {
   DISALLOW_COPY_AND_ASSIGN(AwAccessTokenStore);
 };
 
-}  // namespace
+}  // anonymous namespace
 
 std::string AwContentBrowserClient::GetAcceptLangsImpl() {
   // Start with the currnet locale.
@@ -361,90 +361,13 @@ void AwContentBrowserClient::AllowCertificateError(
 }
 
 void AwContentBrowserClient::SelectClientCertificate(
-      int render_process_id,
-      int render_frame_id,
-      net::SSLCertRequestInfo* cert_request_info,
-      const base::Callback<void(net::X509Certificate*)>& callback) {
+    content::WebContents* web_contents,
+    net::SSLCertRequestInfo* cert_request_info,
+    scoped_ptr<content::ClientCertificateDelegate> delegate) {
   AwContentsClientBridgeBase* client =
-      AwContentsClientBridgeBase::FromID(render_process_id, render_frame_id);
-  if (client) {
-    client->SelectClientCertificate(cert_request_info, callback);
-  } else {
-    callback.Run(NULL);
-  }
-}
-
-void AwContentBrowserClient::RequestPermission(
-    content::PermissionType permission,
-    content::WebContents* web_contents,
-    int bridge_id,
-    const GURL& requesting_frame,
-    bool user_gesture,
-    const base::Callback<void(bool)>& result_callback) {
-  int render_process_id = web_contents->GetRenderProcessHost()->GetID();
-  int render_view_id = web_contents->GetRenderViewHost()->GetRoutingID();
-  GURL origin = requesting_frame.GetOrigin();
-  AwBrowserPermissionRequestDelegate* delegate =
-      AwBrowserPermissionRequestDelegate::FromID(render_process_id,
-                                                 render_view_id);
-  switch (permission) {
-    case content::PERMISSION_GEOLOCATION:
-      if (!delegate) {
-        DVLOG(0) << "Dropping GeolocationPermission request";
-        result_callback.Run(false);
-        return;
-      }
-      delegate->RequestGeolocationPermission(origin, result_callback);
-      break;
-    case content::PERMISSION_PROTECTED_MEDIA_IDENTIFIER:
-      if (!delegate) {
-        DVLOG(0) << "Dropping ProtectedMediaIdentifierPermission request";
-        result_callback.Run(false);
-        return;
-      }
-      delegate->RequestProtectedMediaIdentifierPermission(origin,
-                                                          result_callback);
-      break;
-    case content::PERMISSION_MIDI_SYSEX:
-    case content::PERMISSION_NOTIFICATIONS:
-    case content::PERMISSION_PUSH_MESSAGING:
-      NOTIMPLEMENTED() << "RequestPermission not implemented for "
-                       << permission;
-      break;
-    case content::PERMISSION_NUM:
-      NOTREACHED() << "Invalid RequestPermission for " << permission;
-      break;
-  }
-}
-
-void AwContentBrowserClient::CancelPermissionRequest(
-    content::PermissionType permission,
-    content::WebContents* web_contents,
-    int bridge_id,
-    const GURL& origin) {
-  int render_process_id = web_contents->GetRenderProcessHost()->GetID();
-  int render_view_id = web_contents->GetRenderViewHost()->GetRoutingID();
-  AwBrowserPermissionRequestDelegate* delegate =
-      AwBrowserPermissionRequestDelegate::FromID(render_process_id,
-                                                 render_view_id);
-  if (!delegate)
-    return;
-  switch (permission) {
-    case content::PERMISSION_GEOLOCATION:
-      delegate->CancelGeolocationPermissionRequests(origin);
-      break;
-    case content::PERMISSION_PROTECTED_MEDIA_IDENTIFIER:
-      delegate->CancelProtectedMediaIdentifierPermissionRequests(origin);
-      break;
-    case content::PERMISSION_MIDI_SYSEX:
-    case content::PERMISSION_NOTIFICATIONS:
-    case content::PERMISSION_PUSH_MESSAGING:
-      NOTIMPLEMENTED() << "CancelPermission not implemented for " << permission;
-      break;
-    case content::PERMISSION_NUM:
-      NOTREACHED() << "Invalid CancelPermission for " << permission;
-      break;
-  }
+      AwContentsClientBridgeBase::FromWebContents(web_contents);
+  if (client)
+    client->SelectClientCertificate(cert_request_info, delegate.Pass());
 }
 
 bool AwContentBrowserClient::CanCreateWindow(
@@ -493,12 +416,12 @@ bool AwContentBrowserClient::IsFastShutdownPossible() {
   return false;
 }
 
-void AwContentBrowserClient::ClearCache(content::RenderViewHost* rvh) {
-  RemoveHttpDiskCache(rvh->GetProcess()->GetBrowserContext(),
-                      rvh->GetProcess()->GetID());
+void AwContentBrowserClient::ClearCache(content::RenderFrameHost* rfh) {
+  RemoveHttpDiskCache(rfh->GetProcess()->GetBrowserContext(),
+                      rfh->GetProcess()->GetID());
 }
 
-void AwContentBrowserClient::ClearCookies(content::RenderViewHost* rvh) {
+void AwContentBrowserClient::ClearCookies(content::RenderFrameHost* rfh) {
   // TODO(boliu): Implement.
   NOTIMPLEMENTED();
 }

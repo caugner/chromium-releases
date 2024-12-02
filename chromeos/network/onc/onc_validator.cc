@@ -5,7 +5,6 @@
 #include "chromeos/network/onc/onc_validator.h"
 
 #include <algorithm>
-#include <string>
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
@@ -13,7 +12,6 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chromeos/network/onc/onc_signature.h"
-#include "components/onc/onc_constants.h"
 
 namespace chromeos {
 namespace onc {
@@ -124,6 +122,8 @@ scoped_ptr<base::DictionaryValue> Validator::MapObject(
       valid = ValidateIPsec(repaired.get());
     } else if (&signature == &kOpenVPNSignature) {
       valid = ValidateOpenVPN(repaired.get());
+    } else if (&signature == &kThirdPartyVPNSignature) {
+      valid = ValidateThirdPartyVPN(repaired.get());
     } else if (&signature == &kVerifyX509Signature) {
       valid = ValidateVerifyX509(repaired.get());
     } else if (&signature == &kCertificatePatternSignature) {
@@ -685,7 +685,8 @@ bool Validator::ValidateWiFi(base::DictionaryValue* result) {
 bool Validator::ValidateVPN(base::DictionaryValue* result) {
   using namespace ::onc::vpn;
 
-  const char* const kValidTypes[] = {kIPsec, kTypeL2TP_IPsec, kOpenVPN};
+  const char* const kValidTypes[] = {
+      kIPsec, kTypeL2TP_IPsec, kOpenVPN, kThirdPartyVpn};
   const std::vector<const char*> valid_types(toVector(kValidTypes));
   if (FieldExistsAndHasNoValidValue(*result, ::onc::vpn::kType, valid_types))
     return false;
@@ -700,6 +701,8 @@ bool Validator::ValidateVPN(base::DictionaryValue* result) {
   } else if (type == kTypeL2TP_IPsec) {
     all_required_exist &=
         RequireField(*result, kIPsec) && RequireField(*result, kL2TP);
+  } else if (type == kThirdPartyVpn) {
+    all_required_exist &= RequireField(*result, kThirdPartyVpn);
   }
 
   return !error_on_missing_field_ || all_required_exist;
@@ -800,6 +803,13 @@ bool Validator::ValidateOpenVPN(base::DictionaryValue* result) {
 
   bool all_required_exist =
       RequireField(*result, ::onc::client_cert::kClientCertType);
+
+  return !error_on_missing_field_ || all_required_exist;
+}
+
+bool Validator::ValidateThirdPartyVPN(base::DictionaryValue* result) {
+  const bool all_required_exist =
+      RequireField(*result, ::onc::third_party_vpn::kExtensionID);
 
   return !error_on_missing_field_ || all_required_exist;
 }

@@ -6,7 +6,8 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
@@ -68,9 +69,10 @@ void MarkProxiesAsBadUntil(
 namespace data_reduction_proxy {
 
 DataReductionProxyBypassProtocol::DataReductionProxyBypassProtocol(
-    DataReductionProxyParams* params, DataReductionProxyEventStore* event_store)
-    : params_(params), event_store_(event_store) {
-  DCHECK(params_);
+    DataReductionProxyConfig* config,
+    DataReductionProxyEventStore* event_store)
+    : config_(config), event_store_(event_store) {
+  DCHECK(config_);
   DCHECK(event_store_);
   net::NetworkChangeNotifier::AddIPAddressObserver(this);
 }
@@ -90,13 +92,29 @@ bool DataReductionProxyBypassProtocol::MaybeBypassProxyAndPrepareToRetry(
 
   // Empty implies either that the request was served from cache or that
   // request was served directly from the origin.
+  // TODO(sclittle): Add UMA to confirm that the |proxy_server| is never empty
+  // when the response has the Data Reduction Proxy via header.
   if (request->proxy_server().IsEmpty())
     return false;
 
   DataReductionProxyTypeInfo data_reduction_proxy_type_info;
-  if (!params_->WasDataReductionProxyUsed(
-          request, &data_reduction_proxy_type_info)) {
-    return false;
+  if (!config_->WasDataReductionProxyUsed(request,
+                                          &data_reduction_proxy_type_info)) {
+    if (!HasDataReductionProxyViaHeader(response_headers, nullptr))
+      return false;
+
+    // If the |proxy_server| doesn't match any of the currently configured Data
+    // Reduction Proxies, but it still has the Data Reduction Proxy via header,
+    // then apply the bypass logic regardless.
+    // TODO(sclittle): Add UMA to record how often this occurs, and remove this
+    // workaround once http://crbug.com/476610 is fixed.
+    data_reduction_proxy_type_info.proxy_servers.first = net::ProxyServer(
+        net::ProxyServer::SCHEME_HTTPS, request->proxy_server());
+    data_reduction_proxy_type_info.proxy_servers.second = net::ProxyServer(
+        net::ProxyServer::SCHEME_HTTP, request->proxy_server());
+    data_reduction_proxy_type_info.is_alternative = false;
+    data_reduction_proxy_type_info.is_fallback = false;
+    data_reduction_proxy_type_info.is_ssl = request->url().SchemeIsSecure();
   }
   // TODO(bengr): Implement bypass for CONNECT tunnel.
   if (data_reduction_proxy_type_info.is_ssl)
@@ -111,14 +129,14 @@ bool DataReductionProxyBypassProtocol::MaybeBypassProxyAndPrepareToRetry(
   // via header, so detect and report cases where the via header is missing.
   const net::ProxyServer& second =
       data_reduction_proxy_type_info.proxy_servers.second;
-  DataReductionProxyUsageStats::DetectAndRecordMissingViaHeaderResponseCode(
+  DataReductionProxyBypassStats::DetectAndRecordMissingViaHeaderResponseCode(
       second.is_valid() && !second.host_port_pair().IsEmpty(),
       response_headers);
 
   if (DataReductionProxyParams::
           IsIncludedInRelaxMissingViaHeaderOtherBypassFieldTrial() &&
       HasDataReductionProxyViaHeader(response_headers, NULL)) {
-    DCHECK(params_->IsDataReductionProxy(request->proxy_server(), NULL));
+    DCHECK(config_->IsDataReductionProxy(request->proxy_server(), NULL));
     via_header_producing_proxies_.insert(request->proxy_server());
   }
 
@@ -164,11 +182,10 @@ bool DataReductionProxyBypassProtocol::MaybeBypassProxyAndPrepareToRetry(
       data_reduction_proxy_type_info.proxy_servers.first;
 
   // Only record UMA if the proxy isn't already on the retry list.
-  if (!params_->IsProxyBypassed(
-          request->context()->proxy_service()->proxy_retry_info(),
-          proxy_server,
+  if (!config_->IsProxyBypassed(
+          request->context()->proxy_service()->proxy_retry_info(), proxy_server,
           NULL)) {
-    DataReductionProxyUsageStats::RecordDataReductionProxyBypassInfo(
+    DataReductionProxyBypassStats::RecordDataReductionProxyBypassInfo(
         second.is_valid() && !second.host_port_pair().IsEmpty(),
         data_reduction_proxy_info.bypass_all,
         proxy_server,
@@ -186,10 +203,9 @@ bool DataReductionProxyBypassProtocol::MaybeBypassProxyAndPrepareToRetry(
                           net::LOAD_BYPASS_PROXY);
   }
 
-  // Only retry idempotent methods.
-  if (!IsRequestIdempotent(request))
-    return false;
-  return true;
+  // Retry if block-once was specified or if method is idempotent.
+  return  bypass_type == BYPASS_EVENT_TYPE_CURRENT ||
+      IsRequestIdempotent(request);
 }
 
 // static

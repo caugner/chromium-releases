@@ -14,6 +14,7 @@
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/safe_browsing/chunk.pb.h"
 #include "chrome/browser/safe_browsing/safe_browsing_store_file.h"
@@ -253,6 +254,8 @@ class ScopedLogMessageIgnorer {
 
 class SafeBrowsingDatabaseTest : public PlatformTest {
  public:
+  SafeBrowsingDatabaseTest() : task_runner_(new base::TestSimpleTaskRunner) {}
+
   void SetUp() override {
     PlatformTest::SetUp();
 
@@ -273,31 +276,37 @@ class SafeBrowsingDatabaseTest : public PlatformTest {
   // Reloads the |database_| in a new SafeBrowsingDatabaseNew object with all
   // stores enabled.
   void ResetAndReloadFullDatabase() {
-    SafeBrowsingStoreFile* browse_store = new SafeBrowsingStoreFile();
-    SafeBrowsingStoreFile* download_store = new SafeBrowsingStoreFile();
-    SafeBrowsingStoreFile* csd_whitelist_store = new SafeBrowsingStoreFile();
+    SafeBrowsingStoreFile* browse_store =
+        new SafeBrowsingStoreFile(task_runner_);
+    SafeBrowsingStoreFile* download_store =
+        new SafeBrowsingStoreFile(task_runner_);
+    SafeBrowsingStoreFile* csd_whitelist_store =
+        new SafeBrowsingStoreFile(task_runner_);
     SafeBrowsingStoreFile* download_whitelist_store =
-        new SafeBrowsingStoreFile();
+        new SafeBrowsingStoreFile(task_runner_);
     SafeBrowsingStoreFile* inclusion_whitelist_store =
-        new SafeBrowsingStoreFile();
+        new SafeBrowsingStoreFile(task_runner_);
     SafeBrowsingStoreFile* extension_blacklist_store =
-        new SafeBrowsingStoreFile();
+        new SafeBrowsingStoreFile(task_runner_);
     SafeBrowsingStoreFile* side_effect_free_whitelist_store =
-        new SafeBrowsingStoreFile();
-    SafeBrowsingStoreFile* ip_blacklist_store = new SafeBrowsingStoreFile();
+        new SafeBrowsingStoreFile(task_runner_);
+    SafeBrowsingStoreFile* ip_blacklist_store =
+        new SafeBrowsingStoreFile(task_runner_);
     SafeBrowsingStoreFile* unwanted_software_store =
-        new SafeBrowsingStoreFile();
-    database_.reset(
-        new SafeBrowsingDatabaseNew(browse_store,
-                                    download_store,
-                                    csd_whitelist_store,
-                                    download_whitelist_store,
-                                    inclusion_whitelist_store,
-                                    extension_blacklist_store,
-                                    side_effect_free_whitelist_store,
-                                    ip_blacklist_store,
-                                    unwanted_software_store));
+        new SafeBrowsingStoreFile(task_runner_);
+    database_.reset(new SafeBrowsingDatabaseNew(
+        task_runner_, browse_store, download_store, csd_whitelist_store,
+        download_whitelist_store, inclusion_whitelist_store,
+        extension_blacklist_store, side_effect_free_whitelist_store,
+        ip_blacklist_store, unwanted_software_store));
     database_->Init(database_filename_);
+  }
+
+  bool ContainsDownloadUrl(const std::vector<GURL>& urls,
+                           std::vector<SBPrefix>* prefix_hits) {
+    std::vector<SBPrefix> prefixes;
+    SafeBrowsingDatabase::GetDownloadUrlPrefixes(urls, &prefixes);
+    return database_->ContainsDownloadUrlPrefixes(prefixes, prefix_hits);
   }
 
   void GetListsInfo(std::vector<SBListChunkRanges>* lists) {
@@ -330,6 +339,7 @@ class SafeBrowsingDatabaseTest : public PlatformTest {
   // Utility function for setting up the database for the caching test.
   void PopulateDatabaseForCacheTest();
 
+  scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
   scoped_ptr<SafeBrowsingDatabaseNew> database_;
   base::FilePath database_filename_;
   base::ScopedTempDir temp_dir_;
@@ -1115,9 +1125,9 @@ TEST_F(SafeBrowsingDatabaseTest, DISABLED_FileCorruptionHandling) {
   // file-backed.
   database_.reset();
   base::MessageLoop loop;
-  SafeBrowsingStoreFile* store = new SafeBrowsingStoreFile();
-  database_.reset(new SafeBrowsingDatabaseNew(store, NULL, NULL, NULL, NULL,
-                                              NULL, NULL, NULL, NULL));
+  SafeBrowsingStoreFile* store = new SafeBrowsingStoreFile(task_runner_);
+  database_.reset(new SafeBrowsingDatabaseNew(
+      task_runner_, store, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL));
   database_->Init(database_filename_);
 
   // This will cause an empty database to be created.
@@ -1171,7 +1181,7 @@ TEST_F(SafeBrowsingDatabaseTest, DISABLED_FileCorruptionHandling) {
 }
 
 // Checks database reading and writing.
-TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
+TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrlPrefixes) {
   const char kEvil1Url1[] = "www.evil1.com/download1/";
   const char kEvil1Url2[] = "www.evil1.com/download2.html";
 
@@ -1188,37 +1198,37 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
   std::vector<GURL> urls(1);
 
   urls[0] = GURL(std::string("http://") + kEvil1Url1);
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url1), prefix_hits[0]);
 
   urls[0] = GURL(std::string("http://") + kEvil1Url2);
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url2), prefix_hits[0]);
 
   urls[0] = GURL(std::string("https://") + kEvil1Url2);
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url2), prefix_hits[0]);
 
   urls[0] = GURL(std::string("ftp://") + kEvil1Url2);
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url2), prefix_hits[0]);
 
   urls[0] = GURL("http://www.randomevil.com");
-  EXPECT_FALSE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_FALSE(ContainsDownloadUrl(urls, &prefix_hits));
 
   // Should match with query args stripped.
   urls[0] = GURL(std::string("http://") + kEvil1Url2 + "?blah");
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url2), prefix_hits[0]);
 
   // Should match with extra path stuff and query args stripped.
   urls[0] = GURL(std::string("http://") + kEvil1Url1 + "foo/bar?blah");
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url1), prefix_hits[0]);
 
@@ -1226,7 +1236,7 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
   urls.clear();
   urls.push_back(GURL(std::string("http://") + kEvil1Url1));
   urls.push_back(GURL("http://www.randomevil.com"));
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url1), prefix_hits[0]);
 
@@ -1235,7 +1245,7 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
   urls.push_back(GURL("http://www.randomevil.com"));
   urls.push_back(GURL(std::string("http://") + kEvil1Url1));
   urls.push_back(GURL("http://www.randomevil2.com"));
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url1), prefix_hits[0]);
 
@@ -1243,7 +1253,7 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
   urls.clear();
   urls.push_back(GURL("http://www.randomevil.com"));
   urls.push_back(GURL(std::string("http://") + kEvil1Url1));
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(1U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url1), prefix_hits[0]);
 
@@ -1251,7 +1261,7 @@ TEST_F(SafeBrowsingDatabaseTest, ContainsDownloadUrl) {
   urls.clear();
   urls.push_back(GURL(std::string("http://") + kEvil1Url1));
   urls.push_back(GURL(std::string("https://") + kEvil1Url2));
-  EXPECT_TRUE(database_->ContainsDownloadUrl(urls, &prefix_hits));
+  EXPECT_TRUE(ContainsDownloadUrl(urls, &prefix_hits));
   ASSERT_EQ(2U, prefix_hits.size());
   EXPECT_EQ(SBPrefixForString(kEvil1Url1), prefix_hits[0]);
   EXPECT_EQ(SBPrefixForString(kEvil1Url2), prefix_hits[1]);
@@ -1290,9 +1300,9 @@ TEST_F(SafeBrowsingDatabaseTest, Whitelists) {
   };
 
   // If the whitelist is disabled everything should match the whitelist.
-  database_.reset(new SafeBrowsingDatabaseNew(new SafeBrowsingStoreFile(), NULL,
-                                              NULL, NULL, NULL, NULL, NULL,
-                                              NULL, NULL));
+  database_.reset(new SafeBrowsingDatabaseNew(
+      task_runner_, new SafeBrowsingStoreFile(task_runner_), NULL, NULL, NULL,
+      NULL, NULL, NULL, NULL, NULL));
   database_->Init(database_filename_);
   for (const auto& test_case : kTestCases) {
     SCOPED_TRACE(std::string("Tested list at fault => ") +

@@ -9,7 +9,7 @@ from page_sets import key_mobile_sites_pages
 
 def _IssueMarkerAndScroll(action_runner):
   interaction = action_runner.BeginGestureInteraction(
-      'ScrollAction', is_smooth=True)
+      'ScrollAction')
   action_runner.ScrollPage()
   interaction.End()
 
@@ -40,16 +40,46 @@ class KeyMobileSitesSmoothPage(page_module.Page):
     _IssueMarkerAndScroll(action_runner)
 
 
+class LinkedInSmoothPage(key_mobile_sites_pages.LinkedInPage):
+
+  def __init__(self, page_set):
+    super(LinkedInSmoothPage, self).__init__(page_set=page_set)
+
+  # Linkedin has expensive shader compilation so it can benefit from shader
+  # cache from reload.
+  def RunNavigateSteps(self, action_runner):
+    super(LinkedInSmoothPage, self).RunNavigateSteps(action_runner)
+    action_runner.ScrollPage()
+    action_runner.ReloadPage()
+    super(LinkedInSmoothPage, self).RunNavigateSteps(action_runner)
+
+
+class WowwikiSmoothPage(KeyMobileSitesSmoothPage):
+  """Why: Mobile wiki."""
+  def __init__(self, page_set):
+    super(WowwikiSmoothPage, self).__init__(
+      url='http://www.wowwiki.com/World_of_Warcraft:_Mists_of_Pandaria',
+      page_set=page_set)
+
+  # Wowwiki has expensive shader compilation so it can benefit from shader
+  # cache from reload.
+  def RunNavigateSteps(self, action_runner):
+    super(WowwikiSmoothPage, self).RunNavigateSteps(action_runner)
+    action_runner.ScrollPage()
+    action_runner.ReloadPage()
+    super(WowwikiSmoothPage, self).RunNavigateSteps(action_runner)
+
+
 class GmailSmoothPage(key_mobile_sites_pages.GmailPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(element_function=(
         'document.getElementById("views").childNodes[1].firstChild'))
     interaction.End()
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(element_function=(
         'document.getElementById("views").childNodes[1].firstChild'))
     interaction.End()
@@ -59,7 +89,7 @@ class GroupClonedSmoothPage(key_mobile_sites_pages.GroupClonedPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage(
         distance_expr='''
             Math.max(0, 1250 + document.getElementById("element-19")
@@ -75,7 +105,7 @@ class GroupClonedListImagesPage(
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage(
         distance_expr='''
             Math.max(0, 1250 +
@@ -89,7 +119,7 @@ class GoogleNewsMobile2SmoothPage(
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(
         element_function='document.getElementById(":5")',
         distance_expr='''
@@ -104,7 +134,7 @@ class AmazonNicolasCageSmoothPage(
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(
         selector='#search',
         distance_expr='document.body.scrollHeight - window.innerHeight')
@@ -129,13 +159,16 @@ class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
       key_mobile_sites_pages.CnnArticlePage,
       key_mobile_sites_pages.FacebookPage,
       key_mobile_sites_pages.YoutubeMobilePage,
-      key_mobile_sites_pages.LinkedInPage,
       key_mobile_sites_pages.YahooAnswersPage,
       key_mobile_sites_pages.GoogleNewsMobilePage,
     ]
     for page_class in predefined_page_classes:
       self.AddUserStory(
         _CreatePageClassWithSmoothInteractions(page_class)(self))
+
+    self.AddUserStory(
+      _CreatePageClassWithSmoothInteractions(LinkedInSmoothPage)(self))
+    self.AddUserStory(WowwikiSmoothPage(self))
 
     # Add pages with custom page interaction logic.
 
@@ -243,8 +276,6 @@ class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
       # Why: #1 Alexa recreation
       # pylint: disable=line-too-long
       'http://www.booking.com/searchresults.html?src=searchresults&latitude=65.0500&longitude=25.4667',
-      # Why: #1 Alexa sports
-      'http://sports.yahoo.com/',
       # Why: Top tech blog
       'http://techcrunch.com',
       # Why: #6 Alexa sports
@@ -253,8 +284,6 @@ class KeyMobileSitesSmoothPageSet(page_set_module.PageSet):
       'http://www.sfgate.com/',
       # Why: Non-latin character set
       'http://worldjournal.com/',
-      # Why: Mobile wiki
-      'http://www.wowwiki.com/World_of_Warcraft:_Mists_of_Pandaria',
       # Why: #15 Alexa news
       'http://online.wsj.com/home-page',
       # Why: Image-heavy mobile site

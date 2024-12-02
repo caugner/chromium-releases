@@ -23,7 +23,7 @@ public class CardUnmaskBridge implements CardUnmaskPromptDelegate {
 
     public CardUnmaskBridge(long nativeCardUnmaskPromptViewAndroid, String title,
             String instructions, int iconId, boolean shouldRequestExpirationDate,
-            boolean defaultToStoringLocally, WindowAndroid windowAndroid) {
+            boolean canStoreLocally, boolean defaultToStoringLocally, WindowAndroid windowAndroid) {
         mNativeCardUnmaskPromptViewAndroid = nativeCardUnmaskPromptViewAndroid;
         Activity activity = windowAndroid.getActivity().get();
         if (activity == null) {
@@ -39,16 +39,17 @@ public class CardUnmaskBridge implements CardUnmaskPromptDelegate {
         } else {
             mCardUnmaskPrompt = new CardUnmaskPrompt(activity, this, title, instructions,
                     ResourceId.mapToDrawableId(iconId), shouldRequestExpirationDate,
-                    defaultToStoringLocally);
+                    canStoreLocally, defaultToStoringLocally);
         }
     }
 
     @CalledByNative
     private static CardUnmaskBridge create(long nativeUnmaskPrompt, String title,
             String instructions, int iconId, boolean shouldRequestExpirationDate,
-            boolean defaultToStoringLocally, WindowAndroid windowAndroid) {
+            boolean canStoreLocally, boolean defaultToStoringLocally, WindowAndroid windowAndroid) {
         return new CardUnmaskBridge(nativeUnmaskPrompt, title, instructions, iconId,
-                shouldRequestExpirationDate, defaultToStoringLocally, windowAndroid);
+                shouldRequestExpirationDate, canStoreLocally, defaultToStoringLocally,
+                windowAndroid);
     }
 
     @Override
@@ -92,10 +93,14 @@ public class CardUnmaskBridge implements CardUnmaskPromptDelegate {
 
     /**
      * Indicate that verification failed, allow user to retry.
+     * @param errorMessage The error to display, or null to signal success.
+     * @param allowRetry If there was an error, indicates whether to allow another attempt.
      */
     @CalledByNative
-    private void verificationFinished(boolean success) {
-        if (mCardUnmaskPrompt != null) mCardUnmaskPrompt.verificationFinished(success);
+    private void verificationFinished(String errorMessage, boolean allowRetry) {
+        if (mCardUnmaskPrompt != null) {
+            mCardUnmaskPrompt.verificationFinished(errorMessage, allowRetry);
+        }
     }
 
     private native void nativePromptDismissed(long nativeCardUnmaskPromptViewAndroid);

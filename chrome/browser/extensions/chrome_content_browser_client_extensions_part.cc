@@ -259,11 +259,8 @@ ChromeContentBrowserClientExtensionsPart::ShouldTryToUseExistingProcessHost(
       GetLoadedProfiles();
   for (size_t i = 0; i < profiles.size(); ++i) {
     ProcessManager* epm = ProcessManager::Get(profiles[i]);
-    for (ProcessManager::const_iterator iter = epm->background_hosts().begin();
-         iter != epm->background_hosts().end(); ++iter) {
-      const ExtensionHost* host = *iter;
+    for (extensions::ExtensionHost* host : epm->background_hosts())
       process_ids.insert(host->render_process_host()->GetID());
-    }
   }
 
   return (process_ids.size() >
@@ -371,20 +368,6 @@ bool ChromeContentBrowserClientExtensionsPart::ShouldAllowOpenURL(
     }
   }
   return false;
-}
-
-// static
-void ChromeContentBrowserClientExtensionsPart::SetSigninProcess(
-    content::SiteInstance* site_instance) {
-  Profile* profile =
-      Profile::FromBrowserContext(site_instance->GetBrowserContext());
-  DCHECK(profile);
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&InfoMap::SetSigninProcess,
-                 ExtensionSystem::Get(profile)->info_map(),
-                 site_instance->GetProcess()->GetID()));
 }
 
 void ChromeContentBrowserClientExtensionsPart::RenderProcessWillLaunch(

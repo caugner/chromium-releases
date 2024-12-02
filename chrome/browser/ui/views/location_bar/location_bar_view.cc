@@ -74,6 +74,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/events/event.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
@@ -1217,20 +1218,10 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
   // inner shadow which should be drawn over the contents.
 }
 
-void LocationBarView::PaintChildren(gfx::Canvas* canvas,
-                                    const views::CullSet& cull_set) {
-  // Paint all the children except for the omnibox itself, which may need to be
-  // clipped if it's animating in.
-  for (int i = 0, count = child_count(); i < count; ++i) {
-    views::View* child = child_at(i);
-    if (!child->layer() && (child != omnibox_view_))
-      child->Paint(canvas, cull_set);
-  }
+void LocationBarView::PaintChildren(const ui::PaintContext& context) {
+  View::PaintChildren(context);
 
-  {
-    gfx::ScopedCanvas scoped_canvas(canvas);
-    omnibox_view_->Paint(canvas, cull_set);
-  }
+  gfx::Canvas* canvas = context.canvas();
 
   // For non-InstantExtendedAPI cases, if necessary, show focus rect. As we need
   // the focus rect to appear on top of children we paint here rather than

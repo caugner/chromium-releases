@@ -183,6 +183,7 @@ class RemoteDeviceEnvironment(environment.Environment):
     os.environ['APPURIFY_API_PROTO'] = self._api_protocol
     os.environ['APPURIFY_API_HOST'] = self._api_address
     os.environ['APPURIFY_API_PORT'] = self._api_port
+    os.environ['APPURIFY_STATUS_BASE_URL'] = 'none'
     self._GetAccessToken()
     if self._trigger:
       self._SelectDevice()
@@ -285,12 +286,22 @@ class RemoteDeviceEnvironment(environment.Environment):
       return 0
 
     logging.critical('Available %s Devices:', self._device_type)
-    logging.critical('  %s %s %s', 'OS'.ljust(7),
-                     'Device Name'.ljust(20), '# Available')
+    logging.critical(
+        '  %s %s %s %s %s',
+        'OS'.ljust(10),
+        'Device Name'.ljust(30),
+        'Available'.ljust(10),
+        'Busy'.ljust(10),
+        'All'.ljust(10))
     devices = (d for d in device_list if d['os_name'] == self._device_type)
     for d in sorted(devices, compare_devices):
-      logging.critical('  %s %s %s', d['os_version'].ljust(7),
-                       d['name'].ljust(20), d['available_devices_count'])
+      logging.critical(
+          '  %s %s %s %s %s',
+          d['os_version'].ljust(10),
+          d['name'].ljust(30),
+          str(d['available_devices_count']).ljust(10),
+          str(d['busy_devices_count']).ljust(10),
+          str(d['all_devices_count']).ljust(10))
 
   def _GetDeviceList(self):
     with appurify_sanitized.SanitizeLogging(self._verbose_count,
@@ -302,7 +313,8 @@ class RemoteDeviceEnvironment(environment.Environment):
 
   def _NoDeviceFound(self):
     self._PrintAvailableDevices(self._GetDeviceList())
-    raise remote_device_helper.RemoteDeviceError('No device found.')
+    raise remote_device_helper.RemoteDeviceError(
+        'No device found.', is_infra_error=True)
 
   @property
   def collect(self):

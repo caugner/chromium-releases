@@ -140,7 +140,7 @@
           },  
           {
             "title": "DevTools Extensions API",
-            "href": "/devtools/docs/integrating",
+            "href": "/extensions/devtools",
             "items": [
               {
                 "title": "Sample DevTools Extensions",
@@ -170,7 +170,7 @@
               },
               {
                 "title": "Tip-of-tree (Unstable)",
-                "href": "/devtools/docs/protocol/tot/index"
+                "href": "https://chromedevtools.github.io/debugger-protocol-viewer/"
               },
               {
                 "title": "Version 1.0",
@@ -373,6 +373,20 @@
             "href": "/apps/chrome_apps_on_mobile"
           },
           {
+            "title": "Run Android Apps on Chrome OS",
+            "href": "/apps/getstarted_arc",
+            "items": [
+              {
+                "title": "Getting Started With ARC",
+                "href": "/apps/getstarted_arc"
+              },
+              {
+                "title": "Enable Play Services in Your ARC App",
+                "href": "/apps/arc_playservices"
+              }
+            ]
+          },
+          {
             "title": "Samples",
             "href": "/apps/samples"
           },
@@ -391,6 +405,10 @@
               {
                 "title": "Storing Data",
                 "href": "/apps/app_storage"
+              },
+              {
+                "title": "Managing Offline Storage",
+                "href": "/apps/offline_storage"
               },
               {
                 "title": "Keep Users Informed",
@@ -495,6 +513,10 @@
               {
                 "title": "Webview Tag",
                 "href": "/apps/tags/webview"
+              },
+              {
+                "title": "Appview Tag",
+                "href": "/apps/tags/appview"
               },
               {
                 "title": "Web APIs",

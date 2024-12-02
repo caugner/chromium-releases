@@ -70,6 +70,10 @@ IdentityProvider* AwAutofillClient::GetIdentityProvider() {
   return nullptr;
 }
 
+rappor::RapporService* AwAutofillClient::GetRapporService() {
+  return nullptr;
+}
+
 autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
   return nullptr;
 }
@@ -156,7 +160,7 @@ bool AwAutofillClient::IsAutocompleteEnabled() {
   return GetSaveFormData();
 }
 
-void AwAutofillClient::DetectAccountCreationForms(
+void AwAutofillClient::PropagateAutofillPredictions(
     content::RenderFrameHost* rfh,
     const std::vector<autofill::FormStructure*>& forms) {
 
@@ -199,7 +203,7 @@ void AwAutofillClient::ShowUnmaskPrompt(
   NOTIMPLEMENTED();
 }
 
-void AwAutofillClient::OnUnmaskVerificationResult(bool success) {
+void AwAutofillClient::OnUnmaskVerificationResult(GetRealPanResult result) {
   NOTIMPLEMENTED();
 }
 

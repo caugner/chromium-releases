@@ -63,14 +63,11 @@ char kTSanDefaultSuppressions[] =
 
 // http://crbug.com/158922
 "race:third_party/libvpx/source/libvpx/vp8/encoder/*\n"
+"race:third_party/libvpx/source/libvpx/vp9/encoder/*\n"
 
 // http://crbug.com/189177
 "race:thread_manager\n"
 "race:v8::Locker::Initialize\n"
-
-// http://crbug.com/223352
-"race:uprv_malloc_54\n"
-"race:uprv_realloc_54\n"
 
 // http://crbug.com/239359
 "race:media::TestInputCallback::OnData\n"
@@ -131,14 +128,8 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/268941
 "race:tracked_objects::ThreadData::tls_index_\n"
 
-// http://crbug.com/270037
-"race:gLibCleanupFunctions\n"
-
 // http://crbug.com/272095
 "race:base::g_top_manager\n"
-
-// http://crbug.com/272987
-"race:webrtc::MediaStreamTrack<webrtc::AudioTrackInterface>::set_enabled\n"
 
 // http://crbug.com/273047
 "race:base::*::g_lazy_tls_ptr\n"
@@ -251,9 +242,6 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/364006
 "race:gfx::ImageFamily::~ImageFamily\n"
 
-// http://crbug.com/364014
-"race:WTF::Latin1Encoding()::globalLatin1Encoding\n"
-
 // https://code.google.com/p/v8/issues/detail?id=3143
 "race:v8::internal::FLAG_track_double_fields\n"
 
@@ -300,9 +288,6 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/425057
 "deadlock:webrtc::ViEChannelManagerScoped::ViEChannelManagerScoped\n"
 
-// https://crbug.com/433993
-"deadlock:content::WebRtcAudioDeviceImpl\n"
-
 // http://crbug.com/417193
 // Suppressing both AudioContext.{cpp,h}.
 "race:modules/webaudio/AudioContext\n"
@@ -327,9 +312,6 @@ char kTSanDefaultSuppressions[] =
 
 // https://crbug.com/459429
 "race:randomnessPid\n"
-
-// https://crbug.com/460243
-"race:IPC::ChannelMojoHost::OnClientLaunched\n"
 
 // https://crbug.com/454655
 "race:content::BrowserTestBase::PostTaskToInProcessRendererAndWait\n"

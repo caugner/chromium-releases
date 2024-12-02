@@ -810,20 +810,78 @@ public class CronetUrlRequestTest extends CronetTestBase {
 
     @SmallTest
     @Feature({"Cronet"})
-    public void testUploadChunkedNotSupported() throws Exception {
+    public void testUploadChunked() throws Exception {
         TestUrlRequestListener listener = new TestUrlRequestListener();
         UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
-                NativeTestServer.getRedirectToEchoBody(), listener, listener.getExecutor());
+                NativeTestServer.getEchoBodyURL(), listener, listener.getExecutor());
 
         TestUploadDataProvider dataProvider = new TestUploadDataProvider(
                 TestUploadDataProvider.SuccessCallbackMode.SYNC, listener.getExecutor());
+        dataProvider.addRead("test hello".getBytes());
         dataProvider.setChunked(true);
-        try {
-            urlRequest.setUploadDataProvider(dataProvider, listener.getExecutor());
-            fail("Exception not thrown");
-        } catch (IllegalArgumentException e) {
-            assertEquals("Chunked uploads not supported.", e.getMessage());
-        }
+        urlRequest.setUploadDataProvider(dataProvider, listener.getExecutor());
+        urlRequest.addHeader("Content-Type", "useless/string");
+
+        assertEquals(-1, dataProvider.getLength());
+
+        urlRequest.start();
+        listener.blockForDone();
+
+        // 1 read call for one data chunk.
+        assertEquals(1, dataProvider.getNumReadCalls());
+        assertEquals("test hello", listener.mResponseAsString);
+    }
+
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testUploadChunkedLastReadZeroLengthBody() throws Exception {
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                NativeTestServer.getEchoBodyURL(), listener, listener.getExecutor());
+
+        TestUploadDataProvider dataProvider = new TestUploadDataProvider(
+                TestUploadDataProvider.SuccessCallbackMode.SYNC, listener.getExecutor());
+        // Add 3 reads. The last read has a 0-length body.
+        dataProvider.addRead("hello there".getBytes());
+        dataProvider.addRead("!".getBytes());
+        dataProvider.addRead("".getBytes());
+        dataProvider.setChunked(true);
+        urlRequest.setUploadDataProvider(dataProvider, listener.getExecutor());
+        urlRequest.addHeader("Content-Type", "useless/string");
+
+        assertEquals(-1, dataProvider.getLength());
+
+        urlRequest.start();
+        listener.blockForDone();
+
+        // 2 read call for the first two data chunks, and 1 for final chunk.
+        assertEquals(3, dataProvider.getNumReadCalls());
+        assertEquals("hello there!", listener.mResponseAsString);
+    }
+
+    // Test where an upload fails without ever initializing the
+    // UploadDataStream, because it can't connect to the server.
+    @SmallTest
+    @Feature({"Cronet"})
+    public void testUploadFailsWithoutInitializingStream() throws Exception {
+        TestUrlRequestListener listener = new TestUrlRequestListener();
+        UrlRequest urlRequest = mActivity.mUrlRequestContext.createRequest(
+                NativeTestServer.getEchoBodyURL(), listener, listener.getExecutor());
+        // Shut down the test server, so connecting to it fails.  Note that
+        // calling shutdown again during teardown is safe.
+        NativeTestServer.shutdownNativeTestServer();
+
+        TestUploadDataProvider dataProvider = new TestUploadDataProvider(
+                TestUploadDataProvider.SuccessCallbackMode.SYNC, listener.getExecutor());
+        dataProvider.addRead("test".getBytes());
+        urlRequest.setUploadDataProvider(dataProvider, listener.getExecutor());
+        urlRequest.addHeader("Content-Type", "useless/string");
+        urlRequest.start();
+        listener.blockForDone();
+
+        assertNull(listener.mResponseInfo);
+        assertEquals("Exception in CronetUrlRequest: net::ERR_CONNECTION_REFUSED",
+                listener.mError.getMessage());
     }
 
     private void throwOrCancel(FailureType failureType, ResponseStep failureStep,

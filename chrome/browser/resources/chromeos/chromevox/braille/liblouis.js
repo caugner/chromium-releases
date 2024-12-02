@@ -50,6 +50,13 @@ cvox.LibLouis = function(nmfPath, opt_tablesDir) {
 
 
 /**
+ * Set to {@code true} to enable debug logging of RPC messages.
+ * @type {boolean}
+ */
+cvox.LibLouis.DEBUG = false;
+
+
+/**
  * Attaches the Native Client wrapper to the DOM as a child of the provided
  * element, assumed to already be in the document.
  * @param {!Element} elem Desired parent element of the instance.
@@ -145,7 +152,7 @@ cvox.LibLouis.prototype.rpc_ =
   message['message_id'] = messageId;
   message['command'] = command;
   var json = JSON.stringify(message);
-  if (goog.DEBUG) {
+  if (cvox.LibLouis.DEBUG) {
     window.console.debug('RPC -> ' + json);
   }
   this.embedElement_.postMessage(json);
@@ -180,7 +187,7 @@ cvox.LibLouis.prototype.onInstanceError_ = function(e) {
  * @private
  */
 cvox.LibLouis.prototype.onInstanceMessage_ = function(e) {
-  if (goog.DEBUG) {
+  if (cvox.LibLouis.DEBUG) {
     window.console.debug('RPC <- ' + e.data);
   }
   var message = /** @type {!Object} */ (JSON.parse(e.data));
@@ -235,6 +242,7 @@ cvox.LibLouis.Translator = function(instance, tableNames) {
 cvox.LibLouis.Translator.prototype.translate = function(text, callback) {
   if (!this.instance_.isAttached()) {
     callback(null /*cells*/, null /*textToBraille*/, null /*brailleToText*/);
+    return;
   }
   var message = { 'table_names': this.tableNames_, 'text': text };
   this.instance_.rpc_('Translate', message, function(reply) {
@@ -268,6 +276,7 @@ cvox.LibLouis.Translator.prototype.backTranslate =
     function(cells, callback) {
   if (!this.instance_.isAttached()) {
     callback(null /*text*/);
+    return;
   }
   if (cells.byteLength == 0) {
     // liblouis doesn't handle empty input, so handle that trivially

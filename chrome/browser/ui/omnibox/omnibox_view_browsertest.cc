@@ -14,7 +14,6 @@
 #include "chrome/browser/autocomplete/history_quick_provider.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -35,6 +34,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/omnibox/autocomplete_input.h"
 #include "components/omnibox/autocomplete_match.h"
@@ -146,7 +146,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
   OmniboxViewTest() : observer_(this) {}
 
   // history::HisoryServiceObserver
-  void OnHistoryServiceLoaded(HistoryService* history_service) override {
+  void OnHistoryServiceLoaded(
+      history::HistoryService* history_service) override {
     base::MessageLoop::current()->Quit();
   }
 
@@ -289,8 +290,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
 
   void AddHistoryEntry(const TestHistoryEntry& entry, const Time& time) {
     Profile* profile = browser()->profile();
-    HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-        profile, ServiceAccessType::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS);
     ASSERT_TRUE(history_service);
 
     if (!history_service->BackendLoaded()) {
@@ -314,8 +316,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
       bookmarks::AddIfNotBookmarked(bookmark_model, url, base::string16());
     // Wait at least for the AddPageWithDetails() call to finish.
     {
-      ScopedObserver<HistoryService, history::HistoryServiceObserver> observer(
-          this);
+      ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
+          observer(this);
       observer.Add(history_service);
       content::RunMessageLoop();
       // We don't want to return until all observers have processed this
@@ -363,13 +365,13 @@ class OmniboxViewTest : public InProcessBrowserTest,
     base::MessageLoop::current()->Quit();
   }
 
-  void OnURLsModified(HistoryService* history_service,
+  void OnURLsModified(history::HistoryService* history_service,
                       const history::URLRows& changed_urls) override {
     base::MessageLoop::current()->Quit();
   }
 
  private:
-  ScopedObserver<HistoryService, OmniboxViewTest> observer_;
+  ScopedObserver<history::HistoryService, OmniboxViewTest> observer_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewTest);
 };
@@ -1370,7 +1372,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_TabTraverseResultsTest) {
 
 // http://crbug.com/133347
 #if defined(OS_LINUX)
-#define MAYBE_PersistKeywordModeOnTabSwitch DISABLED_PersistKeywordModeOnTabSwitch
+#define MAYBE_PersistKeywordModeOnTabSwitch \
+    DISABLED_PersistKeywordModeOnTabSwitch
 #else
 #define MAYBE_PersistKeywordModeOnTabSwitch PersistKeywordModeOnTabSwitch
 #endif
@@ -1405,9 +1408,11 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest,
 
 // http://crbug.com/133355
 #if defined(OS_LINUX)
-#define MAYBE_CtrlKeyPressedWithInlineAutocompleteTest DISABLED_CtrlKeyPressedWithInlineAutocompleteTest
+#define MAYBE_CtrlKeyPressedWithInlineAutocompleteTest \
+    DISABLED_CtrlKeyPressedWithInlineAutocompleteTest
 #else
-#define MAYBE_CtrlKeyPressedWithInlineAutocompleteTest CtrlKeyPressedWithInlineAutocompleteTest
+#define MAYBE_CtrlKeyPressedWithInlineAutocompleteTest \
+    CtrlKeyPressedWithInlineAutocompleteTest
 #endif
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewTest,

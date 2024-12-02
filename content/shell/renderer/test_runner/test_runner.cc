@@ -13,7 +13,7 @@
 #include "content/shell/renderer/test_runner/mock_credential_manager_client.h"
 #include "content/shell/renderer/test_runner/mock_web_speech_recognizer.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
-#include "content/shell/renderer/test_runner/web_permissions.h"
+#include "content/shell/renderer/test_runner/web_content_settings.h"
 #include "content/shell/renderer/test_runner/web_test_delegate.h"
 #include "content/shell/renderer/test_runner/web_test_proxy.h"
 #include "gin/arguments.h"
@@ -40,6 +40,7 @@
 #include "third_party/WebKit/public/web/WebGraphicsContext.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebKit.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebMIDIClientMock.h"
 #include "third_party/WebKit/public/web/WebPageOverlay.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
@@ -187,6 +188,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   bool HasCustomPageSizeStyle(int page_index);
   void ForceRedSelectionColors();
   void InjectStyleSheet(const std::string& source_code, bool all_frames);
+  void InsertStyleSheet(const std::string& source_code);
   bool FindString(const std::string& search_text,
                   const std::vector<std::string>& options_array);
   std::string SelectionAsMarkup();
@@ -209,7 +211,6 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                               double dischargingTime,
                               double level);
   void ResetBatteryStatus();
-  void SetMockScreenAvailability(bool available);
   void DidAcquirePointerLock();
   void DidNotAcquirePointerLock();
   void DidLosePointerLock();
@@ -262,6 +263,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetUseMockTheme(bool use);
   void WaitUntilExternalURLLoad();
   void DumpDragImage();
+  void DumpNavigationPolicy();
   void ShowWebInspector(gin::Arguments* args);
   void CloseWebInspector();
   bool IsChooserShown();
@@ -394,6 +396,7 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("forceRedSelectionColors",
                  &TestRunnerBindings::ForceRedSelectionColors)
       .SetMethod("injectStyleSheet", &TestRunnerBindings::InjectStyleSheet)
+      .SetMethod("insertStyleSheet", &TestRunnerBindings::InsertStyleSheet)
       .SetMethod("findString", &TestRunnerBindings::FindString)
       .SetMethod("selectionAsMarkup", &TestRunnerBindings::SelectionAsMarkup)
       .SetMethod("setTextSubpixelPositioning",
@@ -417,8 +420,6 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("didChangeBatteryStatus",
                  &TestRunnerBindings::DidChangeBatteryStatus)
       .SetMethod("resetBatteryStatus", &TestRunnerBindings::ResetBatteryStatus)
-      .SetMethod("setMockScreenAvailability",
-                 &TestRunnerBindings::SetMockScreenAvailability)
       .SetMethod("didAcquirePointerLock",
                  &TestRunnerBindings::DidAcquirePointerLock)
       .SetMethod("didNotAcquirePointerLock",
@@ -503,6 +504,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("waitUntilExternalURLLoad",
                  &TestRunnerBindings::WaitUntilExternalURLLoad)
       .SetMethod("dumpDragImage", &TestRunnerBindings::DumpDragImage)
+      .SetMethod("dumpNavigationPolicy",
+                 &TestRunnerBindings::DumpNavigationPolicy)
       .SetMethod("showWebInspector", &TestRunnerBindings::ShowWebInspector)
       .SetMethod("closeWebInspector", &TestRunnerBindings::CloseWebInspector)
       .SetMethod("isChooserShown", &TestRunnerBindings::IsChooserShown)
@@ -800,6 +803,11 @@ void TestRunnerBindings::InjectStyleSheet(const std::string& source_code,
     runner_->InjectStyleSheet(source_code, all_frames);
 }
 
+void TestRunnerBindings::InsertStyleSheet(const std::string& source_code) {
+  if (runner_)
+    runner_->InsertStyleSheet(source_code);
+}
+
 bool TestRunnerBindings::FindString(
     const std::string& search_text,
     const std::vector<std::string>& options_array) {
@@ -972,11 +980,6 @@ void TestRunnerBindings::DidChangeBatteryStatus(bool charging,
 void TestRunnerBindings::ResetBatteryStatus() {
   if (runner_)
     runner_->ResetBatteryStatus();
-}
-
-void TestRunnerBindings::SetMockScreenAvailability(bool available) {
-  if (runner_)
-    runner_->SetMockScreenAvailability(available);
 }
 
 void TestRunnerBindings::DidAcquirePointerLock() {
@@ -1243,6 +1246,11 @@ void TestRunnerBindings::WaitUntilExternalURLLoad() {
 void TestRunnerBindings::DumpDragImage() {
   if (runner_)
     runner_->DumpDragImage();
+}
+
+void TestRunnerBindings::DumpNavigationPolicy() {
+  if (runner_)
+    runner_->DumpNavigationPolicy();
 }
 
 void TestRunnerBindings::ShowWebInspector(gin::Arguments* args) {
@@ -1583,7 +1591,7 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       delegate_(nullptr),
       web_view_(nullptr),
       page_overlay_(nullptr),
-      web_permissions_(new WebPermissions()),
+      web_content_settings_(new WebContentSettings()),
       weak_factory_(this) {}
 
 TestRunner::~TestRunner() {}
@@ -1594,7 +1602,7 @@ void TestRunner::Install(WebFrame* frame) {
 
 void TestRunner::SetDelegate(WebTestDelegate* delegate) {
   delegate_ = delegate;
-  web_permissions_->SetDelegate(delegate);
+  web_content_settings_->SetDelegate(delegate);
 }
 
 void TestRunner::SetWebView(WebView* webView, WebTestProxyBase* proxy) {
@@ -1649,7 +1657,6 @@ void TestRunner::Reset() {
     delegate_->ResetScreenOrientation();
     delegate_->SetBluetoothMockDataSet("");
     delegate_->ClearGeofencingMockProvider();
-    delegate_->ResetPresentationService();
     ResetBatteryStatus();
     ResetDeviceLight();
   }
@@ -1678,6 +1685,7 @@ void TestRunner::Reset() {
   dump_back_forward_list_ = false;
   dump_selection_rect_ = false;
   dump_drag_image_ = false;
+  dump_navigation_policy_ = false;
   test_repaint_ = false;
   sweep_horizontally_ = false;
   is_printing_ = false;
@@ -1695,7 +1703,7 @@ void TestRunner::Reset() {
   web_history_item_count_ = 0;
   intercept_post_message_ = false;
 
-  web_permissions_->Reset();
+  web_content_settings_->Reset();
 
   use_mock_theme_ = true;
   pointer_locked_ = false;
@@ -1833,8 +1841,8 @@ bool TestRunner::shouldDumpResourceResponseMIMETypes() const {
   return test_is_running_ && dump_resource_reqponse_mime_types_;
 }
 
-WebPermissionClient* TestRunner::GetWebPermissions() const {
-  return web_permissions_.get();
+WebContentSettingsClient* TestRunner::GetWebContentSettings() const {
+  return web_content_settings_.get();
 }
 
 bool TestRunner::shouldDumpStatusCallbacks() const {
@@ -1950,6 +1958,10 @@ void TestRunner::setToolTipText(const WebString& text) {
 
 bool TestRunner::shouldDumpDragImage() {
   return dump_drag_image_;
+}
+
+bool TestRunner::shouldDumpNavigationPolicy() const {
+  return dump_navigation_policy_;
 }
 
 bool TestRunner::midiAccessorResult() {
@@ -2270,6 +2282,11 @@ void TestRunner::InjectStyleSheet(const std::string& source_code,
                  : WebView::InjectStyleInTopFrameOnly);
 }
 
+void TestRunner::InsertStyleSheet(const std::string& source_code) {
+  WebLocalFrame::frameForCurrentContext()->document().insertStyleSheet(
+      WebString::fromUTF8(source_code));
+}
+
 bool TestRunner::FindString(const std::string& search_text,
                             const std::vector<std::string>& options_array) {
   WebFindOptions find_options;
@@ -2470,10 +2487,6 @@ void TestRunner::ResetBatteryStatus() {
   delegate_->DidChangeBatteryStatus(status);
 }
 
-void TestRunner::SetMockScreenAvailability(bool available) {
-  delegate_->SetScreenAvailability(available);
-}
-
 void TestRunner::DidAcquirePointerLock() {
   DidAcquirePointerLockInternal();
 }
@@ -2667,35 +2680,35 @@ void TestRunner::DumpResourceResponseMIMETypes() {
 }
 
 void TestRunner::SetImagesAllowed(bool allowed) {
-  web_permissions_->SetImagesAllowed(allowed);
+  web_content_settings_->SetImagesAllowed(allowed);
 }
 
 void TestRunner::SetMediaAllowed(bool allowed) {
-  web_permissions_->SetMediaAllowed(allowed);
+  web_content_settings_->SetMediaAllowed(allowed);
 }
 
 void TestRunner::SetScriptsAllowed(bool allowed) {
-  web_permissions_->SetScriptsAllowed(allowed);
+  web_content_settings_->SetScriptsAllowed(allowed);
 }
 
 void TestRunner::SetStorageAllowed(bool allowed) {
-  web_permissions_->SetStorageAllowed(allowed);
+  web_content_settings_->SetStorageAllowed(allowed);
 }
 
 void TestRunner::SetPluginsAllowed(bool allowed) {
-  web_permissions_->SetPluginsAllowed(allowed);
+  web_content_settings_->SetPluginsAllowed(allowed);
 }
 
 void TestRunner::SetAllowDisplayOfInsecureContent(bool allowed) {
-  web_permissions_->SetDisplayingInsecureContentAllowed(allowed);
+  web_content_settings_->SetDisplayingInsecureContentAllowed(allowed);
 }
 
 void TestRunner::SetAllowRunningOfInsecureContent(bool allowed) {
-  web_permissions_->SetRunningInsecureContentAllowed(allowed);
+  web_content_settings_->SetRunningInsecureContentAllowed(allowed);
 }
 
 void TestRunner::DumpPermissionClientCallbacks() {
-  web_permissions_->SetDumpCallbacks(true);
+  web_content_settings_->SetDumpCallbacks(true);
 }
 
 void TestRunner::DumpWindowStatusChanges() {
@@ -2755,6 +2768,10 @@ void TestRunner::WaitUntilExternalURLLoad() {
 void TestRunner::DumpDragImage() {
   DumpAsTextWithPixelResults();
   dump_drag_image_ = true;
+}
+
+void TestRunner::DumpNavigationPolicy() {
+  dump_navigation_policy_ = true;
 }
 
 void TestRunner::CloseWebInspector() {

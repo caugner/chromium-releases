@@ -4,8 +4,8 @@
 import json
 import os
 
-from telemetry.page.page_set import PageSet
 from telemetry.page.page import Page
+from telemetry.page.page_set import PageSet
 
 
 __location__ = os.path.realpath(
@@ -23,7 +23,7 @@ class Alexa1To10000Page(Page):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage()
     interaction.End()
 

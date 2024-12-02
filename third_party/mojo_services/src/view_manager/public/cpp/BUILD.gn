@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("../../../mojo_sdk_root.gni")
+import("//build/module_args/mojo.gni")
 import("$mojo_sdk_root/mojo/public/mojo_sdk.gni")
 
 mojo_sdk_source_set("cpp") {
@@ -21,6 +21,7 @@ mojo_sdk_source_set("cpp") {
     "view_manager.h",
     "view_manager_client_factory.h",
     "view_manager_context.h",
+    "view_manager_delegate.cc",
     "view_manager_delegate.h",
     "view_observer.h",
     "view_property.h",
@@ -45,6 +46,7 @@ mojo_sdk_source_set("cpp") {
     "mojo/public/c/gles2:headers",
     "mojo/public/cpp/application",
     "mojo/public/cpp/bindings:bindings",
+    "mojo/public/cpp/system",
     "mojo/public/interfaces/application",
   ]
 }

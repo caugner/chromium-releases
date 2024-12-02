@@ -62,7 +62,8 @@ class MediaSourceDelegate : public media::DemuxerHost {
           encrypted_media_init_data_cb,
       const media::SetDecryptorReadyCB& set_decryptor_ready_cb,
       const UpdateNetworkStateCB& update_network_state_cb,
-      const DurationChangeCB& duration_change_cb);
+      const DurationChangeCB& duration_change_cb,
+      const base::Closure& waiting_for_decryption_key_cb);
 
   blink::WebTimeRanges Buffered() const;
   size_t DecodedFrameCount() const;
@@ -137,7 +138,7 @@ class MediaSourceDelegate : public media::DemuxerHost {
   void FinishResettingDecryptingDemuxerStreams();
 
   void OnDemuxerOpened();
-  void OnEncryptedMediaInitData(const std::string& init_data_type,
+  void OnEncryptedMediaInitData(media::EmeInitDataType init_data_type,
                                 const std::vector<uint8>& init_data);
   void NotifyDemuxerReady();
 
@@ -198,10 +199,7 @@ class MediaSourceDelegate : public media::DemuxerHost {
 
   MediaSourceOpenedCB media_source_opened_cb_;
   media::Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb_;
-
-  // Temporary for EME v0.1. In the future the init data type should be passed
-  // through GenerateKeyRequest() directly from WebKit.
-  std::string init_data_type_;
+  base::Closure waiting_for_decryption_key_cb_;
 
   // Lock used to serialize access for |seeking_|.
   mutable base::Lock seeking_lock_;

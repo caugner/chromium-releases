@@ -202,10 +202,13 @@ bool AppendMirrorRequestHeaderIfPossible(
     int route_id) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
 
-  if (io_data->IsOffTheRecord() ||
-      io_data->google_services_username()->GetValue().empty()) {
+  if (io_data->IsOffTheRecord())
     return false;
-  }
+
+  std::string account_id(io_data->google_services_account_id()->GetValue());
+
+  if (account_id.empty())
+    return false;
 
   // If signin cookies are not allowed, don't add the header.
   if (!ChromeSigninClient::SettingsAllowSigninCookies(
@@ -214,7 +217,7 @@ bool AppendMirrorRequestHeaderIfPossible(
   }
 
   // Only set the header for Drive and Gaia always, and other Google properties
-  // if new-profile-management is enabled.
+  // if account consistency is enabled.
   // Vasquette, which is integrated with most Google properties, needs the
   // header to redirect certain user actions to Chrome native UI. Drive and Gaia
   // need the header to tell if the current user is connected. The drive path is
@@ -224,7 +227,6 @@ bool AppendMirrorRequestHeaderIfPossible(
   GURL origin(url.GetOrigin());
   bool is_enable_account_consistency = switches::IsEnableAccountConsistency();
   bool is_google_url =
-      !switches::IsEnableWebBasedSignin() &&
       is_enable_account_consistency &&
       (google_util::IsGoogleDomainUrl(
            url,
@@ -252,12 +254,10 @@ bool AppendMirrorRequestHeaderIfPossible(
     return false;
 #endif // !OS_ANDROID && !OS_IOS
 
-  std::string account_id(io_data->google_services_account_id()->GetValue());
-
   int profile_mode_mask = PROFILE_MODE_DEFAULT;
   if (io_data->incognito_availibility()->GetValue() ==
           IncognitoModePrefs::DISABLED ||
-      IncognitoModePrefs::ArePlatformParentalControlsEnabledCached()) {
+      IncognitoModePrefs::ArePlatformParentalControlsEnabled()) {
     profile_mode_mask |= PROFILE_MODE_INCOGNITO_DISABLED;
   }
 

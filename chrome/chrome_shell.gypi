@@ -19,7 +19,7 @@
         '../base/base.gyp:base',
         'chrome_android_core',
         'chrome.gyp:browser_ui',
-        '../content/content.gyp:content_app_browser',
+        '../content/content.gyp:content_app_both',
       ],
       'direct_dependent_settings': {
         'ldflags': [
@@ -48,6 +48,7 @@
       'target_name': 'libchromeshell',
       'type': 'shared_library',
       'sources': [
+        'android/shell/chrome_shell_entry_point.cc',
         'android/shell/chrome_main_delegate_chrome_shell_android.cc',
         'android/shell/chrome_main_delegate_chrome_shell_android.h',
       ],
@@ -65,11 +66,13 @@
       'target_name': 'libchromesyncshell',
       'type': 'shared_library',
       'sources': [
+        'android/shell/chrome_shell_entry_point.cc',
         'android/sync_shell/chrome_main_delegate_chrome_sync_shell_android.cc',
         'android/sync_shell/chrome_main_delegate_chrome_sync_shell_android.h',
       ],
       'dependencies': [
         'libchromeshell_base',
+        '../sync/sync.gyp:sync_core',
         '../sync/sync.gyp:test_support_sync_fake_server_android',
       ],
     },

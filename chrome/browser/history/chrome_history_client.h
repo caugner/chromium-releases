@@ -8,7 +8,6 @@
 #include "base/macros.h"
 #include "components/history/core/browser/history_client.h"
 
-class HistoryService;
 class Profile;
 
 namespace bookmarks {
@@ -26,8 +25,18 @@ class ChromeHistoryClient : public history::HistoryClient {
   void BlockUntilBookmarksLoaded() override;
   bool IsBookmarked(const GURL& url) override;
   void GetBookmarks(std::vector<history::URLAndTitle>* bookmarks) override;
+  bool CanAddURL(const GURL& url) override;
   void NotifyProfileError(sql::InitStatus init_status) override;
   bool ShouldReportDatabaseError() override;
+#if defined(OS_ANDROID)
+  void OnHistoryBackendInitialized(
+      history::HistoryBackend* history_backend,
+      history::HistoryDatabase* history_database,
+      history::ThumbnailDatabase* thumbnail_database,
+      const base::FilePath& history_dir) override;
+  void OnHistoryBackendDestroyed(history::HistoryBackend* history_backend,
+                                 const base::FilePath& history_dir) override;
+#endif
 
   // KeyedService:
   void Shutdown() override;

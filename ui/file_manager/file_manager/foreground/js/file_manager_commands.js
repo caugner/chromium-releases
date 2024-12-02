@@ -3,12 +3,20 @@
 // found in the LICENSE file.
 
 /**
- * TODO(dzvorygin): Here we use this hack, since 'hidden' is standard
- * attribute and we can't use it's setter as usual.
+ * Sets 'hidden' property of a cr.ui.Command instance and dispatches
+ * 'hiddenChange' event manually so that associated cr.ui.MenuItem can handle
+ * the event.
+ * TODO(fukino): Remove this workaround when crbug.com/481941 is fixed.
+ *
  * @param {boolean} value New value of hidden property.
  */
 cr.ui.Command.prototype.setHidden = function(value) {
-  this.__lookupSetter__('hidden').call(this, value);
+  if (value === this.hidden)
+    return;
+
+  var oldValue = this.hidden;
+  this.hidden = value;
+  cr.dispatchPropertyChange(this, 'hidden', value, oldValue);
 };
 
 /**
@@ -77,10 +85,13 @@ CommandUtil.getCommandEntry = function(element) {
  * @private
  */
 CommandUtil.getEntryFromNavigationModelItem_ = function(item) {
-  if (item.isVolume)
-    return item.volumeInfo.displayRoot;
-  if (item.isShortcut)
-    return item.entry;
+  switch (item.type) {
+    case NavigationModelItemType.VOLUME:
+      return /** @type {!NavigationModelVolumeItem} */ (
+          item).volumeInfo.displayRoot;
+    case NavigationModelItemType.SHORTCUT:
+      return /** @type {!NavigationModelShortcutItem} */ (item).entry;
+  }
   return null;
 };
 
@@ -133,7 +144,7 @@ CommandUtil.getPinTargetEntries = function() {
     hasDirectory = hasDirectory || entry.isDirectory;
     if (!entry || hasDirectory)
       return false;
-    var metadata = fileManager.getFileSystemMetadata().getCache(
+    var metadata = fileManager.getMetadataModel().getCache(
         [entry], ['hosted', 'pinned'])[0];
     if (metadata.hosted)
       return false;
@@ -552,6 +563,23 @@ CommandHandler.COMMANDS_['new-window'] = /** @type {Command} */ ({
   }
 });
 
+CommandHandler.COMMANDS_['toggle-hidden-files'] = /** @type {Command} */ ({
+  /**
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager FileManager to use.
+   */
+  execute: function(event, fileManager) {
+    var isFilterHiddenOn = !fileManager.fileFilter.isFilterHiddenOn();
+    fileManager.fileFilter.setFilterHidden(isFilterHiddenOn);
+    event.command.checked = /* is show hidden files */!isFilterHiddenOn;
+  },
+  /**
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager FileManager to use.
+   */
+  canExecute: CommandUtil.canExecuteAlways
+});
+
 /**
  * Toggles drive sync settings.
  * @type {Command}
@@ -892,7 +920,7 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
       return;
     var currentEntry;
     var error = false;
-    var fileSystemMetadata = fileManager.getFileSystemMetadata();
+    var metadataModel = fileManager.getMetadataModel();
     var steps = {
       // Pick an entry and pin it.
       start: function() {
@@ -911,14 +939,14 @@ CommandHandler.COMMANDS_['toggle-pinned'] = /** @type {Command} */ ({
         // Convert to boolean.
         error = !!chrome.runtime.lastError;
         if (error && pin) {
-          fileSystemMetadata.get([currentEntry], ['size']).then(
+          metadataModel.get([currentEntry], ['size']).then(
               function(results) {
                 steps.showError(results[0].size);
               });
           return;
         }
-        fileSystemMetadata.notifyEntriesChanged([currentEntry]);
-        fileSystemMetadata.get([currentEntry], ['pinned']).then(steps.updateUI);
+        metadataModel.notifyEntriesChanged([currentEntry]);
+        metadataModel.get([currentEntry], ['pinned']).then(steps.updateUI);
       },
 
       // Update the user interface according to the cache state.
@@ -983,7 +1011,7 @@ CommandHandler.COMMANDS_['zip-selection'] = /** @type {Command} */ ({
       return;
     var selectionEntries = fileManager.getSelection().entries;
     fileManager.fileOperationManager_.zipSelection(
-        dirEntry, selectionEntries);
+        /** @type {!DirectoryEntry} */ (dirEntry), selectionEntries);
   },
   /**
    * @param {!Event} event Command event.
@@ -1017,7 +1045,7 @@ CommandHandler.COMMANDS_['share'] = /** @type {Command} */ ({
     }
     // Add the overlapped class to prevent the applicaiton window from
     // captureing mouse events.
-    fileManager.ui.shareDialog.show(entries[0], function(result) {
+    fileManager.ui.shareDialog.showEntry(entries[0], function(result) {
       if (result == ShareDialog.Result.NETWORK_ERROR)
         fileManager.ui.errorDialog.show(str('SHARE_ERROR'), null, null, null);
     }.bind(this));
@@ -1219,6 +1247,27 @@ CommandHandler.COMMANDS_['inspect-background'] = /** @type {Command} */ ({
    */
   execute: function(event, fileManager) {
     chrome.fileManagerPrivate.openInspector('background');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+});
+
+/**
+ * Shows a suggest dialog with new services to be added to the left nav.
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['add-new-services'] = /** @type {Command} */ ({
+  /**
+   * @param {!Event} event Command event.
+   * @param {!FileManager} fileManager FileManager to use.
+   */
+  execute: function(event, fileManager) {
+    fileManager.ui.suggestAppsDialog.showProviders(
+        function(result, itemId) {
+          // If a new provider is installed, then launch it so the configuration
+          // dialog is shown (if it's available).
+          if (result === SuggestAppsDialog.Result.INSTALL_SUCCESSFUL)
+            chrome.management.launchApp(assert(itemId), function() {});
+        });
   },
   canExecute: CommandUtil.canExecuteAlways
 });

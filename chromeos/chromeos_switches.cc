@@ -13,6 +13,12 @@
 namespace chromeos {
 namespace switches {
 
+// Allows remote attestation (RA) in dev mode for testing purpose. Usually RA
+// is disabled in dev mode because it will always fail. However, there are cases
+// in testing where we do want to go through the permission flow even in dev
+// mode. This can be enabled by this flag.
+const char kAllowRAInDevMode[] = "allow-ra-in-dev-mode";
+
 // Path for app's OEM manifest file.
 const char kAppOemManifestFile[] = "app-mode-oem-manifest";
 
@@ -98,6 +104,10 @@ const char kDisableWakeOnWifi[] = "disable-wake-on-wifi";
 const char kDisableNetworkPortalNotification[] =
     "disable-network-portal-notification";
 
+// EAFE url and path to use for Easy bootstrapping.
+const char kEafeUrl[] = "eafe-url";
+const char kEafePath[] = "eafe-path";
+
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[] = "enable-carrier-switching";
 
@@ -108,16 +118,12 @@ const char kEnableConsumerManagement[] = "enable-consumer-management";
 // If this switch is set, the device cannot be remotely disabled by its owner.
 const char kDisableDeviceDisabling[] = "disable-device-disabling";
 
-// If this switch is set, Chrome OS login screen uses |EmbeddedSignin| endpoint
-// of GAIA.
-const char kEnableEmbeddedSignin[] = "enable-embedded-signin";
-
 // If this switch is set, the new Korean IME will be available in
 // chrome://settings/languages.
 const char kEnableNewKoreanIme[] = "enable-new-korean-ime";
 
-// If this switch is set, the input view keyboard will be in materia design.
-const char kEnableNewMDInputView[] = "enable-new-md-input-view";
+// If this switch is set, the input view keyboard will disable materia design.
+const char kDisableNewMDInputView[] = "disable-new-md-input-view";
 
 // If this switch is set, the options for suggestions as typing on physical
 // keyboard will be enabled.
@@ -134,6 +140,9 @@ const char kDisableVoiceInput[] = "disable-voice-input";
 
 // Enabled sharing assets for installed default apps.
 const char kEnableExtensionAssetsSharing[]  = "enable-extension-assets-sharing";
+
+// Enables mtp write support.
+const char kEnableMtpWriteSupport[] = "enable-mtp-write-support";
 
 // Enables notifications about captive portals in session.
 const char kEnableNetworkPortalNotification[] =
@@ -261,6 +270,7 @@ const char kPowerStub[] = "power-stub";
 // Overrides network stub behavior. By default, ethernet, wifi and vpn are
 // enabled, and transitions occur instantaneously. Multiple options can be
 // comma separated (no spaces). Note: all options are in the format 'foo=x'.
+// Values are case sensitive and based on Shill names in service_constants.h.
 // See FakeShillManagerClient::SetInitialNetworkState for implementation.
 // Examples:
 //  'clear=1' - Clears all default configurations
@@ -270,6 +280,7 @@ const char kPowerStub[] = "power-stub";
 //  'wifi=none' - Wifi is unavailable
 //  'wifi=portal' - Wifi connection will be in Portal state
 //  'cellular=1' - Cellular is initially connected
+//  'cellular=LTE' - Cellular is initially connected, technology is LTE
 //  'interactive=3' - Interactive mode, connect/scan/etc requests take 3 secs
 const char kShillStub[] = "shill-stub";
 
@@ -294,16 +305,15 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
 
+// Enables testing Metronome client with a periodic timer.
+const char kTestMetronomeTimer[] = "test-metronome-timer";
+
 // Disable memory pressure checks on ChromeOS.
 const char kDisableMemoryPressureSystemChromeOS[] =
     "disable-memory-pressure-chromeos";
 
 // Enables waking the device based on the receipt of some network packets.
 const char kWakeOnPackets[] = "wake-on-packets";
-
-// Specifies the path for GAIA endpoint. The default value is
-// "ServiceLogin?skipvpage=true&sarp=1&rm=hide".
-const char kGaiaEndpointChromeOS[] = "gaia-endpoint-chromeos";
 
 // Screenshot testing: specifies the directory where the golden screenshots are
 // stored.
@@ -312,13 +322,28 @@ const char kGoldenScreenshotsDir[] = "golden-screenshots-dir";
 // Screenshot testing: specifies the directoru where artifacts will be stored.
 const char kArtifactsDir[] = "artifacts-dir";
 
-// Bypass proxy for captive portal authorization.
-const char kEnableCaptivePortalBypassProxy[] =
-    "enable-captive-portal-bypass-proxy";
+// Disable bypass proxy for captive portal authorization.
+const char kDisableCaptivePortalBypassProxy[] =
+    "disable-captive-portal-bypass-proxy";
 
 // Disable automatic timezone update.
 const char kDisableTimeZoneTrackingOption[] =
     "disable-timezone-tracking-option";
+
+// Enable OAuth token validation on sign in screen.
+const char kEnableOAuthTokenHandlers[] = "enable-oauth-token-handlers";
+
+// Disable new GAIA sign-in flow.
+const char kDisableWebviewSigninFlow[] = "disable-webview-signin-flow";
+
+// Enable Chrome OS firewall hole-punching for Chrome Apps.
+const char kEnableFirewallHolePunching[] = "enable-firewall-hole-punching";
+
+// Enables searching for an app that supports a plugged in USB printer. When a
+// user plugs in USB printer, they are shown a notification offering to search
+// Chroem Web Store for an app that has printerProvider permission and can
+// handle the plugged in printer.
+const char kEnablePrinterAppSearch[] = "enable-printer-app-search";
 
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);

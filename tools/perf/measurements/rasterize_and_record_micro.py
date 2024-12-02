@@ -5,7 +5,7 @@
 import sys
 import time
 
-from telemetry.core.util import TimeoutException
+from telemetry.core import exceptions
 from telemetry.page import page_test
 from telemetry.value import scalar
 
@@ -13,7 +13,7 @@ from telemetry.value import scalar
 class RasterizeAndRecordMicro(page_test.PageTest):
   def __init__(self, start_wait_time=2, rasterize_repeat=100, record_repeat=100,
                timeout=120, report_detailed_results=False):
-    super(RasterizeAndRecordMicro, self).__init__('')
+    super(RasterizeAndRecordMicro, self).__init__()
     self._chrome_branch_number = None
     self._start_wait_time = start_wait_time
     self._rasterize_repeat = rasterize_repeat
@@ -31,7 +31,7 @@ class RasterizeAndRecordMicro(page_test.PageTest):
   def ValidateAndMeasurePage(self, page, tab, results):
     try:
       tab.WaitForDocumentReadyStateToBeComplete()
-    except TimeoutException:
+    except exceptions.TimeoutException:
       pass
     time.sleep(self._start_wait_time)
 

@@ -11,6 +11,7 @@
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/managed_network_configuration_handler.h"
+#include "chromeos/network/network_activation_handler.h"
 #include "chromeos/network/network_connection_handler.h"
 #include "chromeos/network/network_device_handler.h"
 #include "chromeos/network/network_event_log.h"
@@ -202,6 +203,21 @@ void NetworkingPrivateChromeOS::CreateNetwork(
       base::Bind(&NetworkHandlerFailureCallback, failure_callback));
 }
 
+void NetworkingPrivateChromeOS::ForgetNetwork(
+    const std::string& guid,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback) {
+  std::string service_path, error;
+  if (!GetServicePathFromGuid(guid, &service_path, &error)) {
+    failure_callback.Run(error);
+    return;
+  }
+
+  GetManagedConfigurationHandler()->RemoveConfiguration(
+      service_path, success_callback,
+      base::Bind(&NetworkHandlerFailureCallback, failure_callback));
+}
+
 void NetworkingPrivateChromeOS::GetNetworks(
     const std::string& network_type,
     bool configured_only,
@@ -246,6 +262,22 @@ void NetworkingPrivateChromeOS::StartDisconnect(
 
   NetworkHandler::Get()->network_connection_handler()->DisconnectNetwork(
       service_path, success_callback,
+      base::Bind(&NetworkHandlerFailureCallback, failure_callback));
+}
+
+void NetworkingPrivateChromeOS::StartActivate(
+    const std::string& guid,
+    const std::string& carrier,
+    const VoidCallback& success_callback,
+    const FailureCallback& failure_callback) {
+  std::string service_path, error;
+  if (!GetServicePathFromGuid(guid, &service_path, &error)) {
+    failure_callback.Run(error);
+    return;
+  }
+
+  NetworkHandler::Get()->network_activation_handler()->Activate(
+      service_path, carrier, success_callback,
       base::Bind(&NetworkHandlerFailureCallback, failure_callback));
 }
 

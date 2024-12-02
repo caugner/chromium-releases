@@ -19,12 +19,22 @@ class CardUnmaskDelegate {
 
     // User input data.
     base::string16 cvc;
+
+    // Two digit month.
     base::string16 exp_month;
+
+    // Four digit year.
     base::string16 exp_year;
+
+    // State of "copy to this device" checkbox.
     bool should_store_pan;
 
     // Risk fingerprint.
     std::string risk_data;
+
+    // Whether we're providing the alternative "risk advisory data" in risk_data
+    // (as opposed to the normal browser fingerprint).
+    bool providing_risk_advisory_data = false;
   };
 
   // Called when the user has attempted a verification. Prompt is still

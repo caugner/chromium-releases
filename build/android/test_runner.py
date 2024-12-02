@@ -44,6 +44,7 @@ from pylib.results import report_results
 from pylib.uiautomator import setup as uiautomator_setup
 from pylib.uiautomator import test_options as uiautomator_test_options
 from pylib.utils import apk_helper
+from pylib.utils import base_error
 from pylib.utils import reraiser_thread
 from pylib.utils import run_tests_helper
 
@@ -767,7 +768,13 @@ def _RunUIAutomatorTests(args, devices):
 def _RunJUnitTests(args):
   """Subcommand of RunTestsCommand which runs junit tests."""
   runner_factory, tests = junit_setup.Setup(args)
-  _, exit_code = junit_dispatcher.RunTests(tests, runner_factory)
+  results, exit_code = junit_dispatcher.RunTests(tests, runner_factory)
+
+  report_results.LogFull(
+      results=results,
+      test_type='JUnit',
+      test_package=args.test_suite)
+
   return exit_code
 
 
@@ -957,7 +964,7 @@ def RunTestsInPlatformMode(args, parser):
           json_results.GenerateJsonResultsFile(
               results, args.json_results_file)
 
-  return 0 if results.DidRunPass() else 1
+  return 0 if results.DidRunPass() else constants.ERROR_EXIT_CODE
 
 
 CommandConfigTuple = collections.namedtuple(
@@ -1013,7 +1020,18 @@ def main():
     config.add_options_func(subparser)
 
   args = parser.parse_args()
-  return RunTestsCommand(args, parser)
+
+  try:
+    return RunTestsCommand(args, parser)
+  except base_error.BaseError as e:
+    logging.exception('Error occurred.')
+    if e.is_infra_error:
+      return constants.INFRA_EXIT_CODE
+    else:
+      return constants.ERROR_EXIT_CODE
+  except: # pylint: disable=W0702
+    logging.exception('Unrecognized error occurred.')
+    return constants.ERROR_EXIT_CODE
 
 
 if __name__ == '__main__':

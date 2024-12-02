@@ -7,6 +7,8 @@
     # itself, virtually all targets using it has to include icu. The only
     # exception is the Windows sandbox (?).
     '../third_party/icu/icu.isolate',
+    # Sanitizer-instrumented third-party libraries (if enabled).
+    '../third_party/instrumented_libraries/instrumented_libraries.isolate',
   ],
   'conditions': [
     ['use_custom_libcxx==1', {
@@ -16,17 +18,18 @@
         ],
       },
     }],
-    ['use_instrumented_libraries==1', {
-      'variables': {
-        'files': [
-          '<(PRODUCT_DIR)/instrumented_libraries/',
-        ],
-      },
-    }],
     ['OS=="mac" and asan==1', {
       'variables': {
         'files': [
           '<(PRODUCT_DIR)/libclang_rt.asan_osx_dynamic.dylib',
+        ],
+      },
+    }],
+    ['OS=="win"', {
+      # Required for base/stack_trace_win.cc to symbolize correctly.
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/dbghelp.dll',
         ],
       },
     }],
@@ -50,13 +53,6 @@
         'files': [
           '../tools/valgrind/asan/',
           '../third_party/llvm-build/Release+Asserts/bin/llvm-symbolizer<(EXECUTABLE_SUFFIX)',
-        ],
-      },
-    }],
-    ['lsan==1', {
-      'variables': {
-        'files': [
-          '../tools/lsan/suppressions.txt',
         ],
       },
     }],

@@ -19,10 +19,12 @@
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/hit_test.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/compositor/test/in_process_context_factory.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/skia_util.h"
 #include "ui/gl/gl_surface.h"
 
 #if defined(USE_X11)
@@ -61,8 +63,17 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   }
   bool CanFocus() override { return true; }
   void OnCaptureLost() override {}
-  void OnPaint(gfx::Canvas* canvas) override {
+  void OnPaint(const ui::PaintContext& context) override {
+    gfx::Canvas* canvas = context.canvas();
     canvas->DrawColor(color_, SkXfermode::kSrc_Mode);
+    gfx::Rect r;
+    canvas->GetClipBounds(&r);
+    // Fill with a non-solid color so that the compositor will exercise its
+    // texture upload path.
+    while (!r.IsEmpty()) {
+      r.Inset(2, 2);
+      canvas->FillRect(r, color_, SkXfermode::kXor_Mode);
+    }
   }
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
   void OnWindowDestroying(aura::Window* window) override {}
@@ -147,7 +158,7 @@ int DemoMain() {
   DemoWindowDelegate window_delegate1(SK_ColorBLUE);
   aura::Window window1(&window_delegate1);
   window1.set_id(1);
-  window1.Init(aura::WINDOW_LAYER_TEXTURED);
+  window1.Init(ui::LAYER_TEXTURED);
   window1.SetBounds(gfx::Rect(100, 100, 400, 400));
   window1.Show();
   aura::client::ParentWindowWithContext(&window1, host->window(), gfx::Rect());
@@ -155,7 +166,7 @@ int DemoMain() {
   DemoWindowDelegate window_delegate2(SK_ColorRED);
   aura::Window window2(&window_delegate2);
   window2.set_id(2);
-  window2.Init(aura::WINDOW_LAYER_TEXTURED);
+  window2.Init(ui::LAYER_TEXTURED);
   window2.SetBounds(gfx::Rect(200, 200, 350, 350));
   window2.Show();
   aura::client::ParentWindowWithContext(&window2, host->window(), gfx::Rect());
@@ -163,7 +174,7 @@ int DemoMain() {
   DemoWindowDelegate window_delegate3(SK_ColorGREEN);
   aura::Window window3(&window_delegate3);
   window3.set_id(3);
-  window3.Init(aura::WINDOW_LAYER_TEXTURED);
+  window3.Init(ui::LAYER_TEXTURED);
   window3.SetBounds(gfx::Rect(10, 10, 50, 50));
   window3.Show();
   window2.AddChild(&window3);

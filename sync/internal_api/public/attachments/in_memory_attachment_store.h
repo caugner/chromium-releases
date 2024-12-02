@@ -10,6 +10,7 @@
 #include "sync/api/attachments/attachment.h"
 #include "sync/api/attachments/attachment_id.h"
 #include "sync/api/attachments/attachment_store.h"
+#include "sync/api/attachments/attachment_store_backend.h"
 #include "sync/base/sync_export.h"
 
 namespace base {
@@ -32,18 +33,33 @@ class SYNC_EXPORT InMemoryAttachmentStore : public AttachmentStoreBackend,
   void Init(const AttachmentStore::InitCallback& callback) override;
   void Read(const AttachmentIdList& ids,
             const AttachmentStore::ReadCallback& callback) override;
-  void Write(const AttachmentList& attachments,
+  void Write(AttachmentStore::Component component,
+             const AttachmentList& attachments,
              const AttachmentStore::WriteCallback& callback) override;
-  void Drop(const AttachmentIdList& ids,
-            const AttachmentStore::DropCallback& callback) override;
+  void SetReference(AttachmentStore::Component component,
+                    const AttachmentIdList& ids) override;
+  void DropReference(AttachmentStore::Component component,
+                     const AttachmentIdList& ids,
+                     const AttachmentStore::DropCallback& callback) override;
   void ReadMetadata(
       const AttachmentIdList& ids,
       const AttachmentStore::ReadMetadataCallback& callback) override;
   void ReadAllMetadata(
+      AttachmentStore::Component component,
       const AttachmentStore::ReadMetadataCallback& callback) override;
 
  private:
-  AttachmentMap attachments_;
+  struct AttachmentEntry {
+    AttachmentEntry(const Attachment& attachment,
+                    AttachmentStore::Component initial_reference_component);
+    ~AttachmentEntry();
+
+    Attachment attachment;
+    std::set<AttachmentStore::Component> components;
+  };
+
+  typedef std::map<AttachmentId, AttachmentEntry> AttachmentEntryMap;
+  AttachmentEntryMap attachments_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryAttachmentStore);
 };

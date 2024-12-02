@@ -45,6 +45,12 @@ function SearchBox(element, searchButton, noResultMessage) {
   this.inputElement = /** @type {!HTMLInputElement} */ (
       element.querySelector('input'));
 
+  /**
+   * Clear button of the search box.
+   * @private {!Element}
+   */
+  this.clearButton_ = assert(element.querySelector('.clear'));
+
   // Register events.
   this.inputElement.addEventListener('input', this.onInput_.bind(this));
   this.inputElement.addEventListener('keydown', this.onKeyDown_.bind(this));
@@ -60,6 +66,9 @@ function SearchBox(element, searchButton, noResultMessage) {
   this.searchButton.addEventListener(
       'click',
       this.onSearchButtonClick_.bind(this));
+  this.clearButton_.addEventListener(
+      'click',
+      this.onClearButtonClick_.bind(this));
   var dispatchItemSelect =
       cr.dispatchSimpleEvent.bind(cr, this, SearchBox.EventType.ITEM_SELECT);
   this.autocompleteList.handleEnterKeydown = dispatchItemSelect;
@@ -194,8 +203,8 @@ SearchBox.prototype.onInput_ = function() {
  */
 SearchBox.prototype.onFocus_ = function() {
   this.element.classList.toggle('has-cursor', true);
-  this.inputElement.tabIndex = '99';  // See: go/filesapp-tabindex.
   this.autocompleteList.attachToInput(this.inputElement);
+  this.updateStyles_();
 };
 
 /**
@@ -204,8 +213,8 @@ SearchBox.prototype.onFocus_ = function() {
  */
 SearchBox.prototype.onBlur_ = function() {
   this.element.classList.toggle('has-cursor', false);
-  this.inputElement.tabIndex = '-1';
   this.autocompleteList.detach();
+  this.updateStyles_();
 };
 
 /**
@@ -216,8 +225,10 @@ SearchBox.prototype.onBlur_ = function() {
 SearchBox.prototype.onKeyDown_ = function(event) {
   event = /** @type {KeyboardEvent} */ (event);
   // Handle only Esc key now.
-  if (event.keyCode != 27 || this.inputElement.value)
+  if (event.keyIdentifier != 'U+001B' /* Esc */ || this.inputElement.value)
     return;
+
+  this.inputElement.tabIndex = '-1';  // Focus to default element after blur.
   this.inputElement.blur();
 };
 
@@ -248,8 +259,13 @@ SearchBox.prototype.onDragEnd_ = function() {
  * @private
  */
 SearchBox.prototype.updateStyles_ = function() {
-  this.element.classList.toggle('has-text',
-                                !!this.inputElement.value);
+  var hasText = !!this.inputElement.value;
+  this.element.classList.toggle('has-text', hasText);
+  var hasFocusOnInput = this.element.classList.contains('has-cursor');
+
+  // See go/filesapp-tabindex for tabindexes.
+  this.inputElement.tabIndex = (hasText || hasFocusOnInput) ? '13' : '-1';
+  this.searchButton.tabIndex = (hasText || hasFocusOnInput) ? '-1' : '12';
 };
 
 /**
@@ -257,4 +273,12 @@ SearchBox.prototype.updateStyles_ = function() {
  */
 SearchBox.prototype.onSearchButtonClick_ = function() {
   this.inputElement.focus();
+};
+
+/**
+ * @private
+ */
+SearchBox.prototype.onClearButtonClick_ = function() {
+  this.inputElement.value = '';
+  this.onInput_();
 };
