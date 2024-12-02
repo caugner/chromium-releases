@@ -36,7 +36,6 @@ consoles.list_view(
 
 try_.builder(
     name = "linux-win-cross-rel",
-    description_html = "Linux to Windows cross compile.",
     mirrors = ["ci/linux-win-cross-rel"],
     gn_args = gn_args.config(
         configs = [
@@ -63,7 +62,6 @@ try_.builder(
 
 try_.builder(
     name = "win-arm64-clobber-rel",
-    description_html = "Chromium snapshot archive builder for win-arm64",
     mirrors = [
         "ci/win-arm64-archive-rel",
     ],
@@ -122,6 +120,7 @@ try_.builder(
     experiments = {
         # crbug/940930
         "chromium.enable_cleandead": 100,
+        "chromium.use_per_builder_build_dir_name": 100,
     },
     main_list_view = "try",
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
@@ -155,6 +154,8 @@ try_.orchestrator_builder(
         "chromium.compilator_can_outlive_parent": 100,
         # crbug/940930
         "chromium.enable_cleandead": 100,
+        # b/346598710
+        "chromium.luci_analysis_v2": 100,
     },
     main_list_view = "try",
     # TODO (crbug.com/1372179): Use orchestrator pool once overloaded test pools
@@ -467,6 +468,8 @@ try_.gpu.optional_tests_builder(
             "remoteexec",
             "minimal_symbols",
             "dcheck_always_on",
+            "win",
+            "x64",
         ],
     ),
     os = os.WINDOWS_DEFAULT,

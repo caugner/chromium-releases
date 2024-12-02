@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "base/callback_list.h"
@@ -43,6 +44,10 @@ namespace user_manager {
 // Feature that removes legacy supervised users.
 BASE_DECLARE_FEATURE(kRemoveLegacySupervisedUsersOnStartup);
 
+// Feature that removes deprecated ARC kiosk users.
+USER_MANAGER_EXPORT
+BASE_DECLARE_FEATURE(kRemoveDeprecatedArcKioskUsersOnStartup);
+
 // Base implementation of the UserManager interface.
 class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
  public:
@@ -71,6 +76,25 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
     kMaxValue = kLSUDeleted
   };
 
+  // These enum values represent a deprecated ARC kiosk user's status on the
+  // sign in screen.
+  // TODO(b/355590943): Remove once all ARC kiosk users are deleted in the wild.
+  // ARC Kiosk has been deprecated and removed in m126. However, the accounts
+  // still exist on the devices if configured prior to m126, but hidden. These
+  // values are logged to UMA. Entries should not be renumbered and numeric
+  // values should never be reused. Please keep in sync with
+  // "DeprecatedArcKioskUserStatus" in src/tools/metrics/histograms/enums.xml.
+  enum class DeprecatedArcKioskUserStatus {
+    // ARC kiosk hidden on login screen. Expect this count to decline to zero
+    // over
+    // time.
+    kHidden = 0,
+    // Attempted to delete cryptohome. Expect this count to decline to zero
+    // over time.
+    kDeleted = 1,
+    kMaxValue = kDeleted
+  };
+
   // Delegate interface to inject //chrome/* dependency.
   // In case you need to extend this, please consider to minimize the
   // responsibility, because it means to depend more things on //chrome/*
@@ -87,6 +111,10 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
     // Returns whether user session restore is in progress.
     virtual bool IsUserSessionRestoreInProgress() = 0;
+
+    // Returns UserType for the DeviceLocalAccount of the given `email`.
+    virtual std::optional<UserType> GetDeviceLocalAccountUserType(
+        std::string_view email) = 0;
 
     // Verifies the Profile's state for the given `user` on login.
     virtual void CheckProfileOnLogin(const User& user) = 0;
@@ -113,6 +141,11 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // Histogram for tracking the number of deprecated legacy supervised user
   // cryptohomes remaining in the wild.
   static const char kLegacySupervisedUsersHistogramName[];
+
+  // Histogram for tracking the number of deprecated ARC kiosk user
+  // cryptohomes remaining in the wild.
+  // TODO(b/355590943): clean up once there is no ARC kiosk records.
+  static const char kDeprecatedArcKioskUsersHistogramName[];
 
   // Registers UserManagerBase preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -162,6 +195,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
                             const std::string& display_email) override;
   UserType GetUserType(const AccountId& account_id) override;
   void SaveUserType(const User* user) override;
+  void SetUserUsingSaml(const AccountId& account_id,
+                        bool using_saml,
+                        bool using_saml_principals_api) override;
   std::optional<std::string> GetOwnerEmail() override;
   void RecordOwner(const AccountId& owner) override;
   void UpdateUserAccountData(const AccountId& account_id,
@@ -256,14 +292,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // equals to active_user_, active_user_ is reset to NULL.
   virtual void DeleteUser(User* user);
 
-  // Loads |users_| from Local State if the list has not been loaded yet.
-  // Subsequent calls have no effect. Must be called on the UI thread.
-  virtual void EnsureUsersLoaded();
-
   // Loads device local accounts from the Local state and fills in
   // |device_local_accounts_set|.
-  virtual void LoadDeviceLocalAccounts(
-      std::set<AccountId>* device_local_accounts_set) = 0;
+  void LoadDeviceLocalAccounts(std::set<AccountId>* device_local_accounts_set);
 
   // Notifies observers that active user has changed.
   void NotifyActiveUserChanged(User* active_user);
@@ -351,9 +382,9 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   UserList lru_logged_in_users_;
 
  private:
-  // Stages of loading user list from preferences. Some methods can have
-  // different behavior depending on stage.
-  enum UserLoadStage { STAGE_NOT_LOADED = 0, STAGE_LOADING, STAGE_LOADED };
+  // Loads |users_| from Local State if the list has not been loaded yet.
+  // Subsequent calls have no effect. Must be called on the UI thread.
+  void EnsureUsersLoaded();
 
   // Returns a list of users who have logged into this device previously.
   // Same as GetUsers but used if you need to modify User from that list.
@@ -413,6 +444,11 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
   void RemoveLegacySupervisedUser(const AccountId& account_id);
 
+  // Returns true if |account_id| is a deprecated ARC kiosk account.
+  // TODO(b/355590943): Check if it is not used anymore and remove it.
+  bool IsDeprecatedArcKioskAccountId(const AccountId& account_id) const;
+  void RemoveDeprecatedArcKioskUser(const AccountId& account_id);
+
   std::unique_ptr<Delegate> delegate_;
 
   // TaskRunner for UI thread.
@@ -425,9 +461,6 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
 
   // Handles multi-user sign-in policy.
   MultiUserSignInPolicyController multi_user_sign_in_policy_controller_;
-
-  // Indicates stage of loading user from prefs.
-  UserLoadStage user_loading_stage_ = STAGE_NOT_LOADED;
 
   // Cached flag of whether the currently logged-in user existed before this
   // login.

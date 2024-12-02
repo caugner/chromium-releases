@@ -21,24 +21,18 @@ BASE_FEATURE(kAutofillPasswordUserPerceptionSurvey,
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 #if BUILDFLAG(IS_WIN)
-BASE_FEATURE(kAuthenticateUsingNewWindowsHelloApi,
-             "AuthenticateUsingNewWindowsHelloApi",
+BASE_FEATURE(kAuthenticateUsingUserConsentVerifierInteropApi,
+             "AuthenticateUsingUserConsentVerifierInteropApi",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kAuthenticateUsingUserConsentVerifierApi,
+             "AuthenticateUsingUserConsentVerifierApi",
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
 BASE_FEATURE(kBiometricTouchToFill,
              "BiometricTouchToFill",
              base::FEATURE_DISABLED_BY_DEFAULT);
-
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)  // Desktop
-BASE_FEATURE(kButterOnDesktopFollowup,
-             "ButterOnDesktopFollowup",
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 BASE_FEATURE(kClearUndecryptablePasswords,
              "ClearUndecryptablePasswords",
@@ -67,12 +61,15 @@ BASE_FEATURE(kFillOnAccountSelect,
 #if BUILDFLAG(IS_IOS)
 BASE_FEATURE(kIOSPasswordSignInUff,
              "IOSPasswordSignInUff",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kIosDetectUsernameInUff,
              "IosSaveUsernameInUff",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kIOSProactivePasswordGenerationBottomSheet,
+             "kIOSProactivePasswordGenerationBottomSheet",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // IS_IOS
 
 BASE_FEATURE(kLocalStateEnterprisePasswordHashes,
@@ -84,22 +81,6 @@ BASE_FEATURE(kPasswordGenerationExperiment,
              "PasswordGenerationExperiment",
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
-
-BASE_FEATURE(kPasswordManagerEnableReceiverService,
-             "PasswordManagerEnableReceiverService",
-#if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#else
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_ANDROID)
-
-BASE_FEATURE(kPasswordManagerEnableSenderService,
-             "PasswordManagerEnableSenderService",
-#if BUILDFLAG(IS_ANDROID)
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#else
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_ANDROID)
 
 BASE_FEATURE(kPasswordManagerLogToTerminal,
              "PasswordManagerLogToTerminal",
@@ -124,10 +105,6 @@ BASE_FEATURE(kScreenlockReauthPromoCard,
              "ScreenlockReauthPromoCard",
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-
-BASE_FEATURE(kSharedPasswordNotificationUI,
-             "SharedPasswordNotificationUI",
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSkipUndecryptablePasswords,
              "SkipUndecryptablePasswords",
@@ -168,6 +145,10 @@ BASE_FEATURE(kUnifiedPasswordManagerSyncOnlyInGMSCore,
              "UnifiedPasswordManagerSyncOnlyInGMSCore",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kClearLoginDatabaseForAllMigratedUPMUsers,
+             "ClearLoginDatabaseForAllMigratedUPMUsers",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kClearLoginDatabaseForUPMUsers,
              "ClearLoginDatabaseForUPMUsers",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -206,5 +187,9 @@ BASE_FEATURE(kUsernameFirstFlowWithIntermediateValuesPredictions,
 BASE_FEATURE(kUsernameFirstFlowWithIntermediateValuesVoting,
              "UsernameFirstFlowWithIntermediateValuesVoting",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kUseAsyncOsCryptInLoginDatabase,
+             "UseAsyncOsCryptInLoginDatabase",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace password_manager::features

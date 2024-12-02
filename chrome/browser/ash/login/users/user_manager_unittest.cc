@@ -37,8 +37,10 @@
 #include "chrome/test/base/fake_profile_manager.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
+#include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
 #include "chromeos/ash/components/cryptohome/system_salt_getter.h"
 #include "chromeos/ash/components/dbus/concierge/concierge_client.h"
+#include "chromeos/ash/components/dbus/userdataauth/fake_userdataauth_client.h"
 #include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
 #include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "chromeos/ash/components/system/fake_statistics_provider.h"
@@ -48,6 +50,7 @@
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_manager_base.h"
 #include "components/user_manager/user_manager_pref_names.h"
 #include "components/user_manager/user_names.h"
 #include "content/public/common/content_switches.h"
@@ -170,6 +173,10 @@ class UserManagerTest : public testing::Test {
 
   void TearDown() override {
     wallpaper_controller_client_.reset();
+    user_image_manager_registry_.reset();
+    if (user_manager_) {
+      user_manager_->Destroy();
+    }
 
     // Shut down the DeviceSettingsService.
     DeviceSettingsService::Get()->UnsetSessionManager();
@@ -208,10 +215,17 @@ class UserManagerTest : public testing::Test {
     // it subscribes UserManager singleton.
     wallpaper_controller_client_.reset();
     user_image_manager_registry_.reset();
-    user_manager_.Reset(ChromeUserManagerImpl::CreateChromeUserManager());
+    if (user_manager_) {
+      user_manager_->Destroy();
+      user_manager_.reset();
+    }
+    user_manager_ = ChromeUserManagerImpl::CreateChromeUserManager();
     user_image_manager_registry_ =
-        std::make_unique<ash::UserImageManagerRegistry>(user_manager_.Get());
-
+        std::make_unique<ash::UserImageManagerRegistry>(user_manager_.get());
+    // Initialize `UserManager` after `UserImageManagerRegistry` creation to
+    // follow initialization order in
+    // `BrowserProcessPlatformPart::InitializeUserManager()`
+    user_manager_->Initialize();
     wallpaper_controller_client_ = std::make_unique<
         WallpaperControllerClientImpl>(
         std::make_unique<wallpaper_handlers::TestWallpaperFetcherDelegate>());
@@ -244,8 +258,7 @@ class UserManagerTest : public testing::Test {
                 .Set(kAccountsPrefDeviceLocalAccountsKeyKioskAppId, ""))));
   }
 
-  // Should be used to setup device local accounts of `TYPE_PUBLIC_SESSION` and
-  // `TYPE_SAML_PUBLIC_SESSION` types.
+  // Should be used to setup device local accounts of `TYPE_PUBLIC_SESSION`.
   void SetDeviceLocalPublicAccount(
       const std::string& account_id,
       policy::DeviceLocalAccountType type,
@@ -262,7 +275,8 @@ class UserManagerTest : public testing::Test {
   }
 
   void SetUpArcKioskAccountPersistentPrefs() {
-    const std::string email = std::string("test@") + kArcKioskDomain;
+    const std::string email =
+        std::string("test@") + user_manager::kArcKioskDomain;
 
     SetKioskAccountPrefs(policy::DeviceLocalAccount::EphemeralMode::kDisable,
                          /* account_id= */ email, /* type=kArcKiosk */ 2);
@@ -312,7 +326,7 @@ class UserManagerTest : public testing::Test {
   // local_state_ should be destructed after ProfileManager.
   std::unique_ptr<ScopedTestingLocalState> local_state_;
 
-  user_manager::TypedScopedUserManager<ChromeUserManagerImpl> user_manager_;
+  std::unique_ptr<ChromeUserManagerImpl> user_manager_;
   std::unique_ptr<ash::UserImageManagerRegistry> user_image_manager_registry_;
   base::ScopedTempDir temp_dir_;
 };
@@ -406,25 +420,6 @@ TEST_F(UserManagerTest, IsEphemeralAccountIdTrueForPublicAccountId) {
   const AccountId public_accout_id = CreateDeviceLocalAccountId(
       kDeviceLocalAccountId, policy::DeviceLocalAccountType::kPublicSession);
   EXPECT_TRUE(IsEphemeralAccountId(public_accout_id));
-}
-
-// Tests that `IsEphemeralAccountId(account_id)` returns true when `account_id`
-// is a SAML public account id.
-TEST_F(UserManagerTest, IsEphemeralAccountIdTrueForSamlPublicAccountId) {
-  // Set all ephemeral related policies to `false` to make sure that policies
-  // don't affect ephemeral mode of the SAML public account.
-  SetDeviceSettings(
-      /* ephemeral_users_enabled= */ false,
-      /* owner= */ kOwnerAccountId.GetUserEmail());
-  SetDeviceLocalPublicAccount(
-      kDeviceLocalAccountId, policy::DeviceLocalAccountType::kSamlPublicSession,
-      policy::DeviceLocalAccount::EphemeralMode::kDisable);
-  RetrieveTrustedDevicePolicies();
-
-  const AccountId saml_public_accout_id = CreateDeviceLocalAccountId(
-      kDeviceLocalAccountId,
-      policy::DeviceLocalAccountType::kSamlPublicSession);
-  EXPECT_TRUE(IsEphemeralAccountId(saml_public_accout_id));
 }
 
 // Tests that `UserManager` correctly parses device-wide ephemeral users policy
@@ -545,33 +540,37 @@ TEST_F(UserManagerTest, DoNotSaveKioskAccountsToKRegularUsersPref) {
 }
 
 TEST_F(UserManagerTest, RemoveUser) {
-  auto user_manager = ChromeUserManagerImpl::CreateChromeUserManager();
-
   // Create owner account and login in.
-  user_manager->UserLoggedIn(kOwnerAccountId, kOwnerAccountId.GetUserEmail(),
-                             false /* browser_restart */, false /* is_child */);
+  user_manager_->UserLoggedIn(kOwnerAccountId, kOwnerAccountId.GetUserEmail(),
+                              false /* browser_restart */,
+                              false /* is_child */);
 
   // Create non-owner account  and login in.
-  user_manager->UserLoggedIn(kAccountId0, kAccountId0.GetUserEmail(),
-                             false /* browser_restart */, false /* is_child */);
+  user_manager_->UserLoggedIn(kAccountId0, kAccountId0.GetUserEmail(),
+                              false /* browser_restart */,
+                              false /* is_child */);
 
-  ASSERT_EQ(2U, user_manager->GetUsers().size());
+  ASSERT_EQ(2U, user_manager_->GetUsers().size());
 
   // Removing logged-in account is unacceptable.
-  user_manager->RemoveUser(kAccountId0,
-                           user_manager::UserRemovalReason::UNKNOWN);
-  EXPECT_EQ(2U, user_manager->GetUsers().size());
+  user_manager_->RemoveUser(kAccountId0,
+                            user_manager::UserRemovalReason::UNKNOWN);
+  EXPECT_EQ(2U, user_manager_->GetUsers().size());
 
   // Recreate the user manager to log out all accounts.
-  user_manager = ChromeUserManagerImpl::CreateChromeUserManager();
+  ResetUserManager();
+
   UserManagerObserverTest observer_test;
-  user_manager->AddObserver(&observer_test);
-  ASSERT_EQ(2U, user_manager->GetUsers().size());
-  ASSERT_EQ(0U, user_manager->GetLoggedInUsers().size());
+  base::ScopedObservation<user_manager::UserManager,
+                          user_manager::UserManager::Observer>
+      observation{&observer_test};
+  observation.Observe(user_manager_.get());
+  ASSERT_EQ(2U, user_manager_->GetUsers().size());
+  ASSERT_EQ(0U, user_manager_->GetLoggedInUsers().size());
 
   // Get a pointer to the user that will be removed.
   user_manager::User* user_to_remove = nullptr;
-  for (user_manager::User* user : user_manager->GetUsers()) {
+  for (user_manager::User* user : user_manager_->GetUsers()) {
     if (user->GetAccountId() == kAccountId0) {
       user_to_remove = user;
       break;
@@ -582,19 +581,19 @@ TEST_F(UserManagerTest, RemoveUser) {
 
   // Pass the account id of the user to be removed from the user list to verify
   // that a reference to the account id will not be used after user removal.
-  user_manager->RemoveUser(kAccountId0,
-                           user_manager::UserRemovalReason::UNKNOWN);
+  user_manager_->RemoveUser(kAccountId0,
+                            user_manager::UserRemovalReason::UNKNOWN);
   EXPECT_EQ(1, observer_test.OnUserToBeRemovedCallCount());
   EXPECT_EQ(1, observer_test.OnUserRemovedCallCount());
-  EXPECT_EQ(1U, user_manager->GetUsers().size());
+  EXPECT_EQ(1U, user_manager_->GetUsers().size());
 
   // Removing owner account is unacceptable.
   observer_test.ResetCallCounts();
-  user_manager->RemoveUser(kOwnerAccountId,
-                           user_manager::UserRemovalReason::UNKNOWN);
+  user_manager_->RemoveUser(kOwnerAccountId,
+                            user_manager::UserRemovalReason::UNKNOWN);
   EXPECT_EQ(0, observer_test.OnUserToBeRemovedCallCount());
   EXPECT_EQ(0, observer_test.OnUserRemovedCallCount());
-  EXPECT_EQ(1U, user_manager->GetUsers().size());
+  EXPECT_EQ(1U, user_manager_->GetUsers().size());
 }
 
 TEST_F(UserManagerTest, RemoveRegularUsersExceptOwnerFromList) {
@@ -725,10 +724,10 @@ TEST_F(UserManagerTest, RemoveDeprecatedArcKioskAccountOnStartUpByDefault) {
   EXPECT_EQ(0U, GetArcKioskAccountsWithSavedDataCount());
   EXPECT_EQ(0U, GetKnownUsersCount());
   histogram_tester.ExpectTotalCount(
-      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName, 1);
+      user_manager::UserManagerBase::kDeprecatedArcKioskUsersHistogramName, 1);
   histogram_tester.ExpectBucketCount(
-      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName,
-      ChromeUserManagerImpl::DeprecatedArcKioskUserStatus::kDeleted,
+      user_manager::UserManagerBase::kDeprecatedArcKioskUsersHistogramName,
+      user_manager::UserManagerBase::DeprecatedArcKioskUserStatus::kDeleted,
       /* expected_count= */ 1);
 }
 
@@ -736,7 +735,7 @@ TEST_F(UserManagerTest,
        HideDeprecatedArcKioskAccountOnStartUpWhenTheFeatureDisabled) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndDisableFeature(
-      kRemoveDeprecatedArcKioskUsersOnStartup);
+      user_manager::kRemoveDeprecatedArcKioskUsersOnStartup);
 
   base::HistogramTester histogram_tester;
   SetUpArcKioskAccountPersistentPrefs();
@@ -747,10 +746,10 @@ TEST_F(UserManagerTest,
   // The ARC kiosk user has not been removed, just hidden.
   EXPECT_EQ(1U, GetKnownUsersCount());
   histogram_tester.ExpectTotalCount(
-      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName, 1);
+      user_manager::UserManagerBase::kDeprecatedArcKioskUsersHistogramName, 1);
   histogram_tester.ExpectBucketCount(
-      ChromeUserManagerImpl::kDeprecatedArcKioskUsersHistogramName,
-      ChromeUserManagerImpl::DeprecatedArcKioskUserStatus::kHidden,
+      user_manager::UserManagerBase::kDeprecatedArcKioskUsersHistogramName,
+      user_manager::UserManagerBase::DeprecatedArcKioskUserStatus::kHidden,
       /* expected_count= */ 1);
 }
 

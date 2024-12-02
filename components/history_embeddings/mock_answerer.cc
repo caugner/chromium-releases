@@ -4,6 +4,9 @@
 
 #include "components/history_embeddings/mock_answerer.h"
 
+#include "base/task/sequenced_task_runner.h"
+#include "components/optimization_guide/proto/features/history_answer.pb.h"
+
 namespace history_embeddings {
 
 MockAnswerer::MockAnswerer() = default;
@@ -16,9 +19,13 @@ int64_t MockAnswerer::GetModelVersion() {
 void MockAnswerer::ComputeAnswer(std::string query,
                                  Context context,
                                  ComputeAnswerCallback callback) {
-  std::move(callback).Run({ComputeAnswerStatus::SUCCESS, query,
-                           std::string("This is the answer to query '") +
-                               query + std::string("'.")});
+  optimization_guide::proto::Answer answer;
+  answer.set_text(std::string("This is the answer to query '") + query +
+                  std::string("'."));
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback),
+                                AnswererResult{ComputeAnswerStatus::SUCCESS,
+                                               query, answer}));
 }
 
 }  // namespace history_embeddings

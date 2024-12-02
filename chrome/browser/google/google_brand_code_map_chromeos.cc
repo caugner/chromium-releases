@@ -4,7 +4,7 @@
 
 #include "chrome/browser/google/google_brand_code_map_chromeos.h"
 
-#include "base/containers/flat_map.h"
+#include "base/containers/fixed_flat_map.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/notreached.h"
@@ -12,17 +12,18 @@
 namespace google_brand {
 namespace chromeos {
 
-std::string GetRlzBrandCode(
-    const std::string& static_brand_code,
+std::string_view GetRlzBrandCode(
+    std::string_view static_brand_code,
     std::optional<policy::MarketSegment> market_segment) {
   struct BrandCodeValueEntry {
-    const char* unenrolled_brand_code;
-    const char* education_enrolled_brand_code;
-    const char* enterprise_enrolled_brand_code;
+    std::string_view unenrolled_brand_code;
+    std::string_view education_enrolled_brand_code;
+    std::string_view enterprise_enrolled_brand_code;
   };
-  static const base::NoDestructor<
-      base::flat_map<std::string, BrandCodeValueEntry>>
-      kBrandCodeMap({{"ACAC", {"CFZM", "BEUH", "GUTN"}},
+  static constexpr auto kBrandCodeMap =
+      base::MakeFixedFlatMap<std::string_view, BrandCodeValueEntry>(
+          // clang-format off
+                    {{"ACAC", {"CFZM", "BEUH", "GUTN"}},
                      {"ACAG", {"KSOU", "MUHR", "YYJR"}},
                      {"ACAH", {"KEFG", "RYNH", "HHAZ"}},
                      {"ACAI", {"BKWQ", "CMVE", "VNFQ"}},
@@ -135,6 +136,7 @@ std::string GetRlzBrandCode(
                      {"DGSC", {"YDED", "SBBD", "LJJT"}},
                      {"DHAS", {"KEDN", "LUZR", "MHFN"}},
                      {"DHMM", {"SBQZ", "UCTV", "ALYT"}},
+                     {"DHUL", {"SJRJ", "VNLH", "HOWS"}},
                      {"DISZ", {"PPAR", "VCPW", "NJKK"}},
                      {"DJBB", {"ZLXN", "WQCE", "ASCQ"}},
                      {"DKJM", {"VRGL", "PZYF", "VBTW"}},
@@ -149,6 +151,7 @@ std::string GetRlzBrandCode(
                      {"DUYG", {"TXYR", "CTVK", "MOYF"}},
                      {"DVUG", {"HJHV", "KPAH", "DCQS"}},
                      {"DWCY", {"ZJQH", "JLCB", "QOAI"}},
+                     {"DWSH", {"MGOR", "DWKX", "FBNY"}},
                      {"DXVL", {"EBBY", "NMQL", "GTHA"}},
                      {"DXZT", {"WNSK", "WNDA", "DZWQ"}},
                      {"DYHT", {"YPAH", "NUKA", "EULJ"}},
@@ -256,6 +259,7 @@ std::string GetRlzBrandCode(
                      {"HYZI", {"YBVF", "EUST", "WJVV"}},
                      {"HZJP", {"NWKF", "TACX", "BMJF"}},
                      {"ICHZ", {"GGSN", "QSFP", "GDTQ"}},
+                     {"IEIH", {"RESV", "BSXZ", "YTPA"}},
                      {"IGDX", {"YSMS", "MWLQ", "AQQG"}},
                      {"IGRW", {"FORO", "KHEK", "BREP"}},
                      {"IHOS", {"SSNJ", "WIBC", "EVPF"}},
@@ -274,6 +278,7 @@ std::string GetRlzBrandCode(
                      {"JFZB", {"PFDC", "XJDX", "CPXX"}},
                      {"JGVE", {"DBVB", "YATF", "XFBR"}},
                      {"JICX", {"GUZK", "TIZA", "HTUW"}},
+                     {"JJEX", {"OYNP", "TJDC", "PHNS"}},
                      {"JLGJ", {"HAZJ", "KSWW", "QCYN"}},
                      {"JLOF", {"IWFR", "CJHY", "DOPK"}},
                      {"JLRH", {"SAMJ", "GLJZ", "SKTN"}},
@@ -465,6 +470,7 @@ std::string GetRlzBrandCode(
                      {"PKSA", {"RZEK", "JANU", "JMRA"}},
                      {"PKZD", {"LVUZ", "XEKM", "YTDF"}},
                      {"PLKQ", {"EXXM", "LBZT", "SPDN"}},
+                     {"PNYR", {"NFJG", "INHI", "EPWN"}},
                      {"POKY", {"HPKI", "GYCL", "ODAM"}},
                      {"PORH", {"MYTI", "ILNP", "OKLK"}},
                      {"PRYU", {"QFZV", "TZXL", "EPRT"}},
@@ -538,6 +544,7 @@ std::string GetRlzBrandCode(
                      {"SHAN", {"OERN", "XNHK", "GVYX"}},
                      {"SHIW", {"WIIA", "NSEZ", "JNNE"}},
                      {"SKIW", {"CLPF", "OTYY", "ZJVP"}},
+                     {"SKZO", {"XAEJ", "LVTG", "NZEQ"}},
                      {"SMAC", {"FDEX", "ZFXY", "DJMW"}},
                      {"SMAD", {"AADC", "URZK", "UBVE"}},
                      {"SMAE", {"SUUV", "QXWL", "LYKX"}},
@@ -593,7 +600,9 @@ std::string GetRlzBrandCode(
                      {"UGCB", {"OFRA", "PZBT", "HYKB"}},
                      {"UGDD", {"SCMD", "LRWA", "NTRL"}},
                      {"UIST", {"PONZ", "WCLO", "LRCQ"}},
+                     {"UIUB", {"TQTC", "XTMH", "YYPG"}},
                      {"ULCL", {"RSMW", "BZPJ", "TJHA"}},
+                     {"ULTK", {"PFYD", "GJSB", "AXWT"}},
                      {"UMAU", {"FKAK", "JCTZ", "GDUU"}},
                      {"UPPG", {"HYSS", "KHZT", "QQZJ"}},
                      {"UPWS", {"ORJS", "ODPG", "KEZI"}},
@@ -639,6 +648,7 @@ std::string GetRlzBrandCode(
                      {"WPBT", {"VUKV", "DLTH", "CQBD"}},
                      {"WPFB", {"JOSR", "MHKH", "OHJH"}},
                      {"WPKT", {"NAPI", "TQRX", "DBBS"}},
+                     {"WTXQ", {"NPCP", "DIOS", "DSTX"}},
                      {"WVRW", {"GJGN", "QQFA", "AGVP"}},
                      {"WWTI", {"GZHX", "JHGD", "ZDGL"}},
                      {"WXZG", {"IUGR", "JOEE", "PTHY"}},
@@ -657,6 +667,7 @@ std::string GetRlzBrandCode(
                      {"XLUK", {"ARRX", "SCBM", "TIWT"}},
                      {"XOGA", {"BIWO", "JPWZ", "YYDG"}},
                      {"XOKS", {"DEVR", "YKLR", "QYBF"}},
+                     {"XQOC", {"AENH", "AQRJ", "MMYS"}},
                      {"XVLV", {"QUHD", "SXRE", "XIEA"}},
                      {"XVTK", {"TMUU", "BTWW", "THQH"}},
                      {"XVYQ", {"UAVB", "OEMI", "VQVK"}},
@@ -721,14 +732,17 @@ std::string GetRlzBrandCode(
                      {"ZZAD", {"KSTH", "CBJY", "TSID"}},
                      {"ZZAF", {"OTWH", "RRNB", "VNXA"}},
                      {"ZZTB", {"MXQT", "JUUX", "FMFR"}}});
+  // clang-format on
 
-  const auto it = kBrandCodeMap->find(static_brand_code);
-  if (it == kBrandCodeMap->end())
+  const auto it = kBrandCodeMap.find(static_brand_code);
+  if (it == kBrandCodeMap.end()) {
     return static_brand_code;
+  }
   const auto& entry = it->second;
   // An empty value indicates the device is not enrolled.
-  if (!market_segment.has_value())
+  if (!market_segment.has_value()) {
     return entry.unenrolled_brand_code;
+  }
 
   switch (market_segment.value()) {
     case policy::MarketSegment::EDUCATION:

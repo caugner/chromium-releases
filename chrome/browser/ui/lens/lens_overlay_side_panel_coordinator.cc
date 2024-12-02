@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/tabs/public/tab_interface.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_content_proxy.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
+#include "chrome/browser/ui/views/side_panel/side_panel_enums.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_registry.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_util.h"
@@ -106,6 +107,12 @@ void LensOverlaySidePanelCoordinator::RegisterEntryAndShow() {
   GetSidePanelUI(lens_overlay_controller_)
       ->Show(SidePanelEntry::Id::kLensOverlayResults);
   lens_overlay_controller_->NotifyResultsPanelOpened();
+}
+
+void LensOverlaySidePanelCoordinator::OnEntryWillHide(
+    SidePanelEntry* entry,
+    SidePanelEntryHideReason reason) {
+  lens_overlay_controller_->OnSidePanelWillHide(reason);
 }
 
 void LensOverlaySidePanelCoordinator::OnEntryHidden(SidePanelEntry* entry) {
@@ -215,8 +222,8 @@ void LensOverlaySidePanelCoordinator::DidStartNavigation(
     navigation_handle->SetSilentlyIgnoreErrors();
     lens_overlay_controller_->GetTabInterface()
         ->GetBrowserWindowInterface()
-        ->OpenURL(navigation_handle->GetURL(),
-                  WindowOpenDisposition::NEW_FOREGROUND_TAB);
+        ->OpenGURL(navigation_handle->GetURL(),
+                   WindowOpenDisposition::NEW_FOREGROUND_TAB);
     return;
   }
 
@@ -252,7 +259,7 @@ void LensOverlaySidePanelCoordinator::OpenURLInBrowser(
     const content::OpenURLParams& params) {
   lens_overlay_controller_->GetTabInterface()
       ->GetBrowserWindowInterface()
-      ->OpenURL(params.url, params.disposition);
+      ->OpenURL(params, /*navigation_handle_callback=*/{});
 }
 
 void LensOverlaySidePanelCoordinator::RegisterEntry() {

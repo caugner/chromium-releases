@@ -354,7 +354,7 @@ bool ShouldBlockAccessToPath(const base::FilePath& path,
   base::FilePath check_path;
   if (base::FeatureList::IsEnabled(
           features::kFileSystemAccessSymbolicLinkCheck)) {
-    // `NormalizeFilePath()` is called to perform normalization. It
+    // `base::NormalizeFilePath()` is called to perform normalization. It
     // will resolve any file path elements like symbolic links or junctions by
     // returning the target file path.
     //
@@ -722,7 +722,8 @@ class ChromeFileSystemAccessPermissionContext::PermissionGrantImpl
 
     // Drop fullscreen mode so that the user sees the URL bar.
     base::ScopedClosureRunner fullscreen_block =
-        web_contents->ForSecurityDropFullscreen();
+        web_contents->ForSecurityDropFullscreen(
+            /*display_id=*/display::kInvalidDisplayId);
 
     if (context_->IsEligibleToUpgradePermissionRequestToRestorePrompt(
             origin_, path_, handle_type_, user_action_, type_)) {
@@ -2663,6 +2664,11 @@ ChromeFileSystemAccessPermissionContext::
       ->SetStatus(PermissionStatus::GRANTED,
                   PersistedPermissionOptions::kUpdatePersistedPermission);
   return grant;
+}
+
+void ChromeFileSystemAccessPermissionContext::Shutdown() {
+  FlushScheduledSaveSettingsCalls();
+  permissions::ObjectPermissionContextBase::Shutdown();
 }
 
 bool ChromeFileSystemAccessPermissionContext::
