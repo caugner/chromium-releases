@@ -27,6 +27,11 @@ consoles.list_view(
 try_.builder(
     name = "dawn-linux-x64-deps-rel",
     branch_selector = branches.STANDARD_MILESTONE,
+    mirrors = [
+        "ci/Dawn Linux x64 DEPS Builder",
+        "ci/Dawn Linux x64 DEPS Release (Intel UHD 630)",
+        "ci/Dawn Linux x64 DEPS Release (NVIDIA)",
+    ],
     main_list_view = "try",
     tryjob = try_.job(
         location_regexp = [
@@ -51,6 +56,11 @@ try_.builder(
 try_.builder(
     name = "dawn-mac-x64-deps-rel",
     branch_selector = branches.DESKTOP_EXTENDED_STABLE_MILESTONE,
+    mirrors = [
+        "ci/Dawn Mac x64 DEPS Builder",
+        "ci/Dawn Mac x64 DEPS Release (AMD)",
+        "ci/Dawn Mac x64 DEPS Release (Intel)",
+    ],
     main_list_view = "try",
     os = os.MAC_ANY,
     tryjob = try_.job(
@@ -76,6 +86,11 @@ try_.builder(
 try_.builder(
     name = "dawn-win10-x64-deps-rel",
     branch_selector = branches.DESKTOP_EXTENDED_STABLE_MILESTONE,
+    mirrors = [
+        "ci/Dawn Win10 x64 DEPS Builder",
+        "ci/Dawn Win10 x64 DEPS Release (Intel HD 630)",
+        "ci/Dawn Win10 x64 DEPS Release (NVIDIA)",
+    ],
     main_list_view = "try",
     os = os.WINDOWS_ANY,
     tryjob = try_.job(
@@ -130,6 +145,11 @@ try_.builder(
 
 try_.builder(
     name = "linux-dawn-rel",
+    mirrors = [
+        "ci/Dawn Linux x64 Builder",
+        "ci/Dawn Linux x64 Release (Intel UHD 630)",
+        "ci/Dawn Linux x64 Release (NVIDIA)",
+    ],
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
