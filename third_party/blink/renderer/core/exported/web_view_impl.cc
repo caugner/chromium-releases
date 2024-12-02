@@ -469,7 +469,7 @@ WebView* WebView::Create(
     bool is_hidden,
     bool is_prerendering,
     bool is_inside_portal,
-    absl::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
+    std::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
         fenced_frame_mode,
     bool compositing_enabled,
     bool widgets_never_composited,
@@ -478,8 +478,9 @@ WebView* WebView::Create(
         page_handle,
     scheduler::WebAgentGroupScheduler& agent_group_scheduler,
     const SessionStorageNamespaceId& session_storage_namespace_id,
-    absl::optional<SkColor> page_base_background_color,
-    const BrowsingContextGroupInfo& browsing_context_group_info) {
+    std::optional<SkColor> page_base_background_color,
+    const BrowsingContextGroupInfo& browsing_context_group_info,
+    const ColorProviderColorMaps* color_provider_colors) {
   return WebViewImpl::Create(
       client,
       is_hidden ? mojom::blink::PageVisibilityState::kHidden
@@ -487,7 +488,8 @@ WebView* WebView::Create(
       is_prerendering, is_inside_portal, fenced_frame_mode, compositing_enabled,
       widgets_never_composited, To<WebViewImpl>(opener), std::move(page_handle),
       agent_group_scheduler, session_storage_namespace_id,
-      std::move(page_base_background_color), browsing_context_group_info);
+      std::move(page_base_background_color), browsing_context_group_info,
+      color_provider_colors);
 }
 
 WebViewImpl* WebViewImpl::Create(
@@ -495,7 +497,7 @@ WebViewImpl* WebViewImpl::Create(
     mojom::blink::PageVisibilityState visibility,
     bool is_prerendering,
     bool is_inside_portal,
-    absl::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
+    std::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
         fenced_frame_mode,
     bool compositing_enabled,
     bool widgets_never_composited,
@@ -503,18 +505,15 @@ WebViewImpl* WebViewImpl::Create(
     mojo::PendingAssociatedReceiver<mojom::blink::PageBroadcast> page_handle,
     blink::scheduler::WebAgentGroupScheduler& agent_group_scheduler,
     const SessionStorageNamespaceId& session_storage_namespace_id,
-    absl::optional<SkColor> page_base_background_color,
-    const BrowsingContextGroupInfo& browsing_context_group_info) {
-  // Take a self-reference for WebViewImpl that is released by calling Close(),
-  // then return a raw pointer to the caller.
-  auto web_view = base::AdoptRef(new WebViewImpl(
+    std::optional<SkColor> page_base_background_color,
+    const BrowsingContextGroupInfo& browsing_context_group_info,
+    const ColorProviderColorMaps* color_provider_colors) {
+  return new WebViewImpl(
       client, visibility, is_prerendering, is_inside_portal, fenced_frame_mode,
       compositing_enabled, widgets_never_composited, opener,
       std::move(page_handle), agent_group_scheduler,
       session_storage_namespace_id, std::move(page_base_background_color),
-      browsing_context_group_info));
-  web_view->AddRef();
-  return web_view.get();
+      browsing_context_group_info, color_provider_colors);
 }
 
 size_t WebView::GetWebViewCount() {
@@ -569,7 +568,7 @@ WebViewImpl::WebViewImpl(
     mojom::blink::PageVisibilityState visibility,
     bool is_prerendering,
     bool is_inside_portal,
-    absl::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
+    std::optional<blink::FencedFrame::DeprecatedFencedFrameMode>
         fenced_frame_mode,
     bool does_composite,
     bool widgets_never_composited,
@@ -577,8 +576,9 @@ WebViewImpl::WebViewImpl(
     mojo::PendingAssociatedReceiver<mojom::blink::PageBroadcast> page_handle,
     blink::scheduler::WebAgentGroupScheduler& agent_group_scheduler,
     const SessionStorageNamespaceId& session_storage_namespace_id,
-    absl::optional<SkColor> page_base_background_color,
-    const BrowsingContextGroupInfo& browsing_context_group_info)
+    std::optional<SkColor> page_base_background_color,
+    const BrowsingContextGroupInfo& browsing_context_group_info,
+    const ColorProviderColorMaps* color_provider_colors)
     : widgets_never_composited_(widgets_never_composited),
       web_view_client_(client),
       chrome_client_(MakeGarbageCollected<ChromeClientImpl>(this)),
@@ -604,10 +604,10 @@ WebViewImpl::WebViewImpl(
   }
   if (!web_view_client_)
     DCHECK(!does_composite_);
-  page_ = Page::CreateOrdinary(*chrome_client_,
-                               opener ? opener->GetPage() : nullptr,
-                               agent_group_scheduler.GetAgentGroupScheduler(),
-                               browsing_context_group_info);
+  page_ = Page::CreateOrdinary(
+      *chrome_client_, opener ? opener->GetPage() : nullptr,
+      agent_group_scheduler.GetAgentGroupScheduler(),
+      browsing_context_group_info, color_provider_colors);
   CoreInitializer::GetInstance().ProvideModulesToPage(
       *page_, session_storage_namespace_id_);
 
@@ -1166,7 +1166,7 @@ void WebViewImpl::Close() {
   for (auto& observer : observers_)
     observer.WebViewDestroyed();
 
-  Release();  // Balances a reference acquired in WebView::Create
+  delete this;
 }
 
 gfx::Size WebViewImpl::Size() {
@@ -1408,7 +1408,7 @@ void WebViewImpl::Resize(const gfx::Size& new_size) {
 }
 
 void WebViewImpl::SetScreenOrientationOverrideForTesting(
-    absl::optional<display::mojom::blink::ScreenOrientation> orientation) {
+    std::optional<display::mojom::blink::ScreenOrientation> orientation) {
   screen_orientation_override_ = orientation;
 
   // Since we updated the override value, notify all widgets.
@@ -1424,10 +1424,14 @@ void WebViewImpl::SetScreenOrientationOverrideForTesting(
 
 void WebViewImpl::SetWindowRectSynchronouslyForTesting(
     const gfx::Rect& new_window_rect) {
+  // We need to call UpdateScreenRects to ensure the 'move' event is enqueued.
+  // TODO(jfernandez): Ideally updating the window rect should do that
+  // automatically.
+  web_widget_->UpdateScreenRects(new_window_rect, new_window_rect);
   web_widget_->SetWindowRectSynchronouslyForTesting(new_window_rect);
 }
 
-absl::optional<display::mojom::blink::ScreenOrientation>
+std::optional<display::mojom::blink::ScreenOrientation>
 WebViewImpl::ScreenOrientationOverride() {
   return screen_orientation_override_;
 }
@@ -1558,8 +1562,8 @@ void WebView::ApplyWebPreferences(const web_pref::WebPreferences& prefs,
 
   settings->SetHideScrollbars(prefs.hide_scrollbars);
 
-  RuntimeEnabledFeatures::SetWebKitScrollbarStylingEnabled(
-      prefs.enable_webkit_scrollbar_styling);
+  settings->SetPrefersDefaultScrollbarStyles(
+      prefs.prefers_default_scrollbar_styles);
 
   // Enable gpu-accelerated 2d canvas if requested on the command line.
   RuntimeEnabledFeatures::SetAccelerated2dCanvasEnabled(
@@ -1756,6 +1760,8 @@ void WebView::ApplyWebPreferences(const web_pref::WebPreferences& prefs,
       prefs.require_transient_activation_for_get_display_media);
   settings->SetRequireTransientActivationForShowFileOrDirectoryPicker(
       prefs.require_transient_activation_for_show_file_or_directory_picker);
+  settings->SetRequireTransientActivationForHtmlFullscreen(
+      prefs.require_transient_activation_for_html_fullscreen);
   settings->SetViewportEnabled(prefs.viewport_enabled);
   settings->SetViewportMetaEnabled(prefs.viewport_meta_enabled);
   settings->SetViewportStyle(prefs.viewport_style);
@@ -1792,6 +1798,8 @@ void WebView::ApplyWebPreferences(const web_pref::WebPreferences& prefs,
   settings->SetTouchDragEndContextMenu(prefs.touch_dragend_context_menu);
   settings->SetWebXRImmersiveArAllowed(prefs.webxr_immersive_ar_allowed);
   settings->SetModalContextMenu(prefs.modal_context_menu);
+  settings->SetRequireTransientActivationAndAuthorizationForSubAppsAPIs(
+      prefs.subapps_apis_require_user_gesture_and_authorization);
 
 #if BUILDFLAG(IS_MAC)
   web_view_impl->SetMaximumLegibleScale(
@@ -3288,7 +3296,7 @@ Color WebViewImpl::BaseBackgroundColor() const {
   return Color::kWhite;
 }
 
-void WebViewImpl::SetPageBaseBackgroundColor(absl::optional<SkColor> color) {
+void WebViewImpl::SetPageBaseBackgroundColor(std::optional<SkColor> color) {
   SkColor new_color = color.value_or(SK_ColorWHITE);
   if (page_base_background_color_ == new_color)
     return;
@@ -3311,7 +3319,7 @@ void WebViewImpl::SetBaseBackgroundColorOverrideTransparent(
 }
 
 void WebViewImpl::SetBaseBackgroundColorOverrideForInspector(
-    absl::optional<SkColor> optional_color) {
+    std::optional<SkColor> optional_color) {
   if (base_background_color_override_for_inspector_ == optional_color)
     return;
   base_background_color_override_for_inspector_ = optional_color;
@@ -3512,7 +3520,7 @@ void WebViewImpl::SetHistoryOffsetAndLength(int32_t history_offset,
 
 void WebViewImpl::SetHistoryListFromNavigation(
     int32_t history_offset,
-    absl::optional<int32_t> history_length) {
+    std::optional<int32_t> history_length) {
   if (!history_length.has_value()) {
     history_list_offset_ = history_offset;
     return;
@@ -3732,7 +3740,7 @@ void WebViewImpl::TextAutosizerPageInfoChanged(
 }
 
 void WebViewImpl::SetBackgroundColorOverrideForFullscreenController(
-    absl::optional<SkColor> optional_color) {
+    std::optional<SkColor> optional_color) {
   DCHECK(does_composite_);
 
   background_color_override_for_fullscreen_controller_ = optional_color;
@@ -3982,11 +3990,6 @@ void WebViewImpl::SetDeviceColorSpaceForTesting(
   web_widget_->SetDeviceColorSpaceForTesting(color_space);
 }
 
-void WebViewImpl::SetColorProviders(
-    const ColorProviderColorMaps& color_provider_colors) {
-  UpdateColorProviders(color_provider_colors);
-}
-
 const SessionStorageNamespaceId& WebViewImpl::GetSessionStorageNamespaceId() {
   CHECK(!session_storage_namespace_id_.empty());
   return session_storage_namespace_id_;
@@ -4041,7 +4044,7 @@ void WebViewImpl::MojoDisconnected() {
 
 void WebViewImpl::CreateRemoteMainFrame(
     const RemoteFrameToken& frame_token,
-    const absl::optional<FrameToken>& opener_frame_token,
+    const std::optional<FrameToken>& opener_frame_token,
     mojom::blink::FrameReplicationStatePtr replicated_state,
     bool is_loading,
     const base::UnguessableToken& devtools_frame_token,

@@ -201,10 +201,10 @@ WebContentsDelegate::GetProtocolHandlerSecurityLevel(RenderFrameHost*) {
   return blink::ProtocolHandlerSecurityLevel::kStrict;
 }
 
-void WebContentsDelegate::RequestToLockMouse(WebContents* web_contents,
+void WebContentsDelegate::RequestPointerLock(WebContents* web_contents,
                                              bool user_gesture,
                                              bool last_unlocked_by_target) {
-  web_contents->GotResponseToLockMouseRequest(
+  web_contents->GotResponseToPointerLockRequest(
       blink::mojom::PointerLockResult::kUnknownError);
 }
 
@@ -401,10 +401,6 @@ base::WeakPtr<WebContentsDelegate> WebContentsDelegate::GetDelegateWeakPtr() {
 }
 
 bool WebContentsDelegate::IsPrivileged() {
-  return false;
-}
-
-bool WebContentsDelegate::IsInPreviewMode() const {
   return false;
 }
 

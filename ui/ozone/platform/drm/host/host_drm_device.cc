@@ -273,8 +273,9 @@ void HostDrmDevice::GpuSetGammaAdjustment(
 bool HostDrmDevice::GpuSetColorMatrix(int64_t display_id,
                                       const std::vector<float>& color_matrix) {
   DCHECK_CALLED_ON_VALID_THREAD(on_ui_thread_);
-  if (!IsConnected())
+  if (!IsConnected()) {
     return false;
+  }
 
   drm_device_->SetColorMatrix(display_id, color_matrix);
   return true;
@@ -285,8 +286,9 @@ bool HostDrmDevice::GpuSetGammaCorrection(
     const display::GammaCurve& degamma_lut,
     const display::GammaCurve& gamma_lut) {
   DCHECK_CALLED_ON_VALID_THREAD(on_ui_thread_);
-  if (!IsConnected())
+  if (!IsConnected()) {
     return false;
+  }
 
   drm_device_->SetGammaCorrection(display_id, degamma_lut, gamma_lut);
   return true;

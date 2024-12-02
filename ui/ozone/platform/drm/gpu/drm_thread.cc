@@ -295,7 +295,7 @@ void DrmThread::SetWindowBounds(gfx::AcceleratedWidget widget,
 
 void DrmThread::SetCursor(gfx::AcceleratedWidget widget,
                           const std::vector<SkBitmap>& bitmaps,
-                          const absl::optional<gfx::Point>& location,
+                          const std::optional<gfx::Point>& location,
                           base::TimeDelta frame_delay) {
   TRACE_EVENT0("drm", "DrmThread::SetCursor");
   screen_manager_->GetWindow(widget)->SetCursor(bitmaps, location, frame_delay);
@@ -518,19 +518,6 @@ void DrmThread::ProcessPendingTasks() {
   }
 
   pending_tasks_.clear();
-}
-
-void DrmThread::SetColorSpace(gfx::AcceleratedWidget widget,
-                              const gfx::ColorSpace& color_space) {
-  DCHECK(screen_manager_->GetWindow(widget));
-  HardwareDisplayController* controller =
-      screen_manager_->GetWindow(widget)->GetController();
-  if (!controller)
-    return;
-
-  const auto& crtc_controllers = controller->crtc_controllers();
-  for (const auto& crtc_controller : crtc_controllers)
-    display_manager_->SetColorSpace(crtc_controller->crtc(), color_space);
 }
 
 }  // namespace ui
