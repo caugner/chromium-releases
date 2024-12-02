@@ -404,12 +404,6 @@ class TabListMediator {
                                         .indexOf(toTab);
 
             RecordUserAction.record("MobileTabSwitched." + mComponentName);
-            if (PriceTrackingUtilities.isTrackPricesOnTabsEnabled()
-                    && TabSwitcherCoordinator.COMPONENT_NAME.equals(mComponentName)) {
-                RecordUserAction.record("Commerce.TabGridSwitched."
-                        + (ShoppingPersistedTabData.hasPriceDrop(toTab) ? "HasPriceDrop"
-                                                                        : "NoPriceDrop"));
-            }
             if (TabUiFeatureUtilities.isConditionalTabStripEnabled()) {
                 assert fromFilterIndex != toFilterIndex;
                 RecordHistogram.recordSparseHistogram("Tabs.TabOffsetOfSwitch." + mComponentName,
@@ -1666,9 +1660,12 @@ class TabListMediator {
                 mModel.get(index).model.set(
                         TabProperties.SHOPPING_PERSISTED_TAB_DATA_FETCHER, null);
             }
-            if (StoreTrackingUtilities.isStoreHoursOnTabsEnabled()) {
+            if (StoreTrackingUtilities.isStoreHoursOnTabsEnabled()
+                    && isUngroupedTab(pseudoTab.getId())) {
                 mModel.get(index).model.set(TabProperties.STORE_PERSISTED_TAB_DATA_FETCHER,
                         new StorePersistedTabDataFetcher(pseudoTab.getTab()));
+            } else {
+                mModel.get(index).model.set(TabProperties.STORE_PERSISTED_TAB_DATA_FETCHER, null);
             }
         } else {
             mModel.get(index).model.set(TabProperties.SHOPPING_PERSISTED_TAB_DATA_FETCHER, null);

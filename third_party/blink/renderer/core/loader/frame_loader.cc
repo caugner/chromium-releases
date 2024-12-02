@@ -450,22 +450,27 @@ void FrameLoader::DidFinishSameDocumentNavigation(
   TakeObjectSnapshot();
 }
 
-WebFrameLoadType FrameLoader::DetermineFrameLoadType(
+WebFrameLoadType FrameLoader::HandleInitialEmptyDocumentReplacementIfNeeded(
     const KURL& url,
     WebFrameLoadType frame_load_type) {
-  // TODO(dgozman): this method is rewriting the load type, which makes it hard
-  // to reason about various navigations and their desired load type. We should
-  // untangle it and detect the load type at the proper place. See, for example,
-  // location.assign() block below.
-  // Achieving that is complicated due to similar conditions in many places
-  // both in the renderer and in the browser.
+  // Converts navigations from the initial empty document to do replacement if
+  // needed.
   if (frame_load_type == WebFrameLoadType::kStandard ||
       frame_load_type == WebFrameLoadType::kReplaceCurrentItem) {
     if (frame_->Tree().Parent() &&
         empty_document_status_ == EmptyDocumentStatus::kOnlyEmpty) {
+      // Subframe navigations from the initial empty document should always do
+      // replacement.
       return WebFrameLoadType::kReplaceCurrentItem;
     }
     if (!frame_->Tree().Parent() && !Client()->BackForwardLength()) {
+      // For main frames, currently only empty-URL navigations will be converted
+      // to do replacement. Note that this will cause the navigation to be
+      // ignored in the browser side, so no NavigationEntry will be added.
+      // TODO(https://crbug.com/1215096, https://crbug.com/524208): Make the
+      // main frame case follow the behavior of subframes (always replace when
+      // navigating from the initial empty document), and that a NavigationEntry
+      // will always be created.
       if (Opener() && url.IsEmpty())
         return WebFrameLoadType::kReplaceCurrentItem;
       return WebFrameLoadType::kStandard;
@@ -626,8 +631,8 @@ void FrameLoader::StartNavigation(FrameLoadRequest& request,
     return;
   }
 
-  frame_load_type =
-      DetermineFrameLoadType(resource_request.Url(), frame_load_type);
+  frame_load_type = HandleInitialEmptyDocumentReplacementIfNeeded(
+      resource_request.Url(), frame_load_type);
 
   bool same_document_navigation =
       request.GetNavigationPolicy() == kNavigationPolicyCurrentTab &&
@@ -940,9 +945,6 @@ void FrameLoader::CommitNavigation(
   if (frame_owner)
     frame_owner->CancelPendingLazyLoad();
 
-  navigation_params->frame_load_type = DetermineFrameLoadType(
-      navigation_params->url, navigation_params->frame_load_type);
-
   // Note: we might actually classify this navigation as same document
   // right here in the following circumstances:
   // - the loader has already committed a navigation and notified the browser
@@ -1083,6 +1085,8 @@ void FrameLoader::StopAllLoaders(bool abort_client) {
   }
 
   frame_->GetDocument()->CancelParsing();
+  if (auto* app_history = AppHistory::appHistory(*frame_->DomWindow()))
+    app_history->InformAboutCanceledNavigation();
   if (document_loader_)
     document_loader_->StopLoading();
   if (abort_client)

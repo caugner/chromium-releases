@@ -58,6 +58,7 @@ import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.widget.animation.CancelAwareAnimatorListener;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.externalauth.ExternalAuthUtils;
+import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.components.signin.AccountManagerFacadeProvider;
@@ -939,7 +940,7 @@ class LocationBarMediator
         // of whether it is branded or not.
         if (isUrlBarFocused()) {
             return ChromeColors.getDefaultThemeColor(
-                    mContext.getResources(), mLocationBarDataProvider.isIncognito());
+                    mContext, mLocationBarDataProvider.isIncognito());
         } else {
             return mLocationBarDataProvider.getPrimaryColor();
         }
@@ -1014,10 +1015,25 @@ class LocationBarMediator
     }
 
     private boolean shouldShowLensButton() {
-        if (mIsTablet && mShouldShowButtonsWhenUnfocused) {
-            return mNativeInitialized && (mUrlHasFocus || mIsUrlFocusChangeInProgress)
-                    && isLensOnOmniboxEnabled();
+        // When this method is called on UI inflation, return false as the native is not ready.
+        if (!mNativeInitialized) {
+            return false;
         }
+        // When this method is called after native initialized, check omnibox conditions and Lens
+        // eligibility.
+        if (mIsTablet && mShouldShowButtonsWhenUnfocused) {
+            return (mUrlHasFocus || mIsUrlFocusChangeInProgress) && isLensOnOmniboxEnabled();
+        }
+
+        // Never show Lens in the old search widget page context.
+        // This widget must guarantee consistent feature set regardless of search engine choice or
+        // other aspects that may not be met by Lens.
+        LocationBarDataProvider dataProvider = getLocationBarDataProvider();
+        if (dataProvider.getPageClassification(dataProvider.isIncognito())
+                == PageClassification.ANDROID_SEARCH_WIDGET_VALUE) {
+            return false;
+        }
+
         return !shouldShowDeleteButton()
                 && (mUrlHasFocus || mIsUrlFocusChangeInProgress || mUrlFocusChangeFraction > 0f
                         || mShouldShowLensButtonWhenUnfocused)
@@ -1128,6 +1144,8 @@ class LocationBarMediator
         sLastCachedIsLensOnOmniboxEnabled = Boolean.valueOf(isLensEnabled(LensEntryPoint.OMNIBOX));
         updateButtonVisibility();
         updateSearchEngineStatusIconShownState();
+        // Update the visuals to use correct incognito colors.
+        mUrlCoordinator.setIncognitoColorsEnabled(mLocationBarDataProvider.isIncognito());
     }
 
     @Override
