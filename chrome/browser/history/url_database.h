@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/history/history_types.h"
-#include "chrome/browser/template_url.h"
+#include "chrome/browser/search_engines/template_url.h"
 
 // Temporary until DBCloseScoper moves elsewhere.
 #include "chrome/common/sqlite_compiled_statement.h"
@@ -230,7 +230,7 @@ class URLDatabase {
   bool MigrateFromVersion11ToVersion12();
 
  protected:
-  friend VisitDatabase;
+  friend class VisitDatabase;
 
   // See HISTORY_URL_ROW_FIELDS below.
   static const char kURLRowFields[];
@@ -306,4 +306,3 @@ class URLDatabase {
 }  // history
 
 #endif  // CHROME_BROWSER_HISTORY_URL_DATABASE_H__
-

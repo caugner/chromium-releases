@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "chrome/views/view.h"
 
-namespace ChromeViews {
+namespace views {
 
 // LayoutElement ------------------------------------------------------
 
@@ -21,7 +21,7 @@ class LayoutElement {
   template <class T>
   static void ResetSizes(std::vector<T*>* elements) {
     // Reset the layout width of each column.
-    for (std::vector<T*>::iterator i = elements->begin();
+    for (typename std::vector<T*>::iterator i = elements->begin();
          i != elements->end(); ++i) {
       (*i)->ResetSize();
     }
@@ -33,7 +33,7 @@ class LayoutElement {
   static void CalculateLocationsFromSize(std::vector<T*>* elements) {
     // Reset the layout width of each column.
     int location = 0;
-    for (std::vector<T*>::iterator i = elements->begin();
+    for (typename std::vector<T*>::iterator i = elements->begin();
          i != elements->end(); ++i) {
       (*i)->SetLocation(location);
       location += (*i)->Size();
@@ -50,7 +50,7 @@ class LayoutElement {
 
     float total_percent = 0;
     int resize_count = 0;
-    for (std::vector<T*>::iterator i = elements->begin();
+    for (typename std::vector<T*>::iterator i = elements->begin();
          i != elements->end(); ++i) {
       total_percent += (*i)->ResizePercent();
       resize_count++;
@@ -61,7 +61,7 @@ class LayoutElement {
     }
     int remaining = delta;
     int resized = resize_count;
-    for (std::vector<T*>::iterator i = elements->begin();
+    for (typename std::vector<T*>::iterator i = elements->begin();
          i != elements->end(); ++i) {
       T* element = *i;
       if (element->ResizePercent() > 0) {
@@ -317,8 +317,8 @@ struct ViewState {
   View* const view;
   const int start_col;
   const int start_row;
-  const int row_span;
   const int col_span;
+  const int row_span;
   const GridLayout::Alignment h_align;
   const GridLayout::Alignment v_align;
 
@@ -571,21 +571,20 @@ void ColumnSet::ResetColumnXCoordinates() {
 }
 
 void ColumnSet::CalculateSize() {
-  CSize pref;
+  gfx::Size pref;
   // Reset the preferred and remaining sizes.
   for (std::vector<ViewState*>::iterator i = view_states_.begin();
        i != view_states_.end(); ++i) {
     ViewState* view_state = *i;
-    pref.cx = pref.cy = 0;
     if (!view_state->pref_width_fixed || !view_state->pref_height_fixed) {
-      view_state->view->GetPreferredSize(&pref);
+      pref = view_state->view->GetPreferredSize();
       if (!view_state->pref_width_fixed)
-        view_state->pref_width = pref.cx;
+        view_state->pref_width = pref.width();
       if (!view_state->pref_height_fixed)
-        view_state->pref_height = pref.cy;
+        view_state->pref_height = pref.height();
     }
-    view_state->remaining_width = pref.cx;
-    view_state->remaining_height = pref.cy;
+    view_state->remaining_width = pref.width();
+    view_state->remaining_height = pref.height();
   }
 
   // Let layout element reset the sizes for us.
@@ -764,7 +763,7 @@ void GridLayout::Layout(View* host) {
   DCHECK(host_ == host);
   // SizeRowsAndColumns sets the size and location of each row/column, but
   // not of the views.
-  CSize pref;
+  gfx::Size pref;
   SizeRowsAndColumns(true, host_->width(), host_->height(), &pref);
 
   // Size each view.
@@ -789,23 +788,25 @@ void GridLayout::Layout(View* host) {
   }
 }
 
-void GridLayout::GetPreferredSize(View* host, CSize* out) {
+gfx::Size GridLayout::GetPreferredSize(View* host) {
   DCHECK(host_ == host);
-  SizeRowsAndColumns(false, 0, 0, out);
+  gfx::Size out;
+  SizeRowsAndColumns(false, 0, 0, &out);
+  return out;
 }
 
 int GridLayout::GetPreferredHeightForWidth(View* host, int width) {
   DCHECK(host_ == host);
-  CSize pref;
+  gfx::Size pref;
   SizeRowsAndColumns(false, width, 0, &pref);
-  return pref.cy;
+  return pref.height();
 }
 
 void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
-                                    CSize* pref) {
+                                    gfx::Size* pref) {
   // Make sure the master columns have been calculated.
   CalculateMasterColumnsIfNecessary();
-  pref->cx = pref->cy = 0;
+  pref->SetSize(0, 0);
   if (rows_.empty())
     return;
 
@@ -821,9 +822,9 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
       // And reset the x coordinates.
       (*i)->ResetColumnXCoordinates();
     }
-    pref->cx = std::max(static_cast<int>(pref->cx), (*i)->LayoutWidth());
+    pref->set_width(std::max(pref->width(), (*i)->LayoutWidth()));
   }
-  pref->cx += left_inset_ + right_inset_;
+  pref->set_width(pref->width() + left_inset_ + right_inset_);
 
   // Reset the height of each row.
   LayoutElement::ResetSizes(&rows_);
@@ -878,13 +879,13 @@ void GridLayout::SizeRowsAndColumns(bool layout, int width, int height,
   LayoutElement::CalculateLocationsFromSize(&rows_);
 
   // We now know the preferred height, set it here.
-  pref->cy = rows_[rows_.size() - 1]->Location() +
-             rows_[rows_.size() - 1]->Size() + top_inset_ + bottom_inset_;
+  pref->set_height(rows_[rows_.size() - 1]->Location() +
+             rows_[rows_.size() - 1]->Size() + top_inset_ + bottom_inset_);
 
-  if (layout && height != pref->cy) {
+  if (layout && height != pref->height()) {
     // We're doing a layout, and the height differs from the preferred height,
     // divy up the extra space.
-    LayoutElement::DistributeDelta(height - pref->cy, &rows_);
+    LayoutElement::DistributeDelta(height - pref->height(), &rows_);
 
     // Reset y locations.
     LayoutElement::CalculateLocationsFromSize(&rows_);
@@ -1009,5 +1010,4 @@ ColumnSet* GridLayout::GetLastValidColumnSet() {
   return NULL;
 }
 
-} // namespace
-
+}  // namespace views

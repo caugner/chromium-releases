@@ -34,11 +34,16 @@
 
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
+#include "base/time.h"
 #include "base/thread.h"
 #include "base/waitable_event.h"
 #include "net/base/cookie_monster.h"
+#include "net/base/io_buffer.h"
+#include "net/base/load_flags.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data.h"
+#include "net/http/http_response_headers.h"
+#include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_shell_request_context.h"
@@ -97,6 +102,9 @@ struct RequestParams {
   scoped_refptr<net::UploadData> upload;
 };
 
+// The interval for calls to RequestProxy::MaybeUpdateUploadProgress
+static const int kUpdateUploadProgressIntervalMsec = 100;
+
 // The RequestProxy does most of its work on the IO thread.  The Start and
 // Cancel methods are proxied over to the IO thread, where an URLRequest object
 // is instantiated.
@@ -104,7 +112,9 @@ class RequestProxy : public URLRequest::Delegate,
                      public base::RefCountedThreadSafe<RequestProxy> {
  public:
   // Takes ownership of the params.
-  RequestProxy() {
+  RequestProxy()
+      : buf_(new net::IOBuffer(kDataSize)),
+        last_upload_position_(0) {
   }
 
   virtual ~RequestProxy() {
@@ -143,9 +153,10 @@ class RequestProxy : public URLRequest::Delegate,
       peer_->OnReceivedRedirect(new_url);
   }
 
-  void NotifyReceivedResponse(const ResourceLoaderBridge::ResponseInfo& info) {
+  void NotifyReceivedResponse(const ResourceLoaderBridge::ResponseInfo& info,
+                              bool content_filtered) {
     if (peer_)
-      peer_->OnReceivedResponse(info);
+      peer_->OnReceivedResponse(info, content_filtered);
   }
 
   void NotifyReceivedData(int bytes_read) {
@@ -154,7 +165,7 @@ class RequestProxy : public URLRequest::Delegate,
 
     // Make a local copy of buf_, since AsyncReadData reuses it.
     scoped_array<char> buf_copy(new char[bytes_read]);
-    memcpy(buf_copy.get(), buf_, bytes_read);
+    memcpy(buf_copy.get(), buf_->data(), bytes_read);
 
     // Continue reading more data into buf_
     // Note: Doing this before notifying our peer ensures our load events get
@@ -169,11 +180,17 @@ class RequestProxy : public URLRequest::Delegate,
     peer_->OnReceivedData(buf_copy.get(), bytes_read);
   }
 
-  void NotifyCompletedRequest(const URLRequestStatus& status) {
+  void NotifyCompletedRequest(const URLRequestStatus& status,
+                              const std::string& security_info) {
     if (peer_) {
-      peer_->OnCompletedRequest(status);
+      peer_->OnCompletedRequest(status, security_info);
       DropPeer();  // ensure no further notifications
     }
+  }
+
+  void NotifyUploadProgress(uint64 position, uint64 size) {
+    if (peer_)
+      peer_->OnUploadProgress(position, size);
   }
 
   // --------------------------------------------------------------------------
@@ -190,6 +207,13 @@ class RequestProxy : public URLRequest::Delegate,
     request_->set_upload(params->upload.get());
     request_->set_context(request_context);
     request_->Start();
+
+    if (request_->has_upload() &&
+        params->load_flags & net::LOAD_ENABLE_UPLOAD_PROGRESS) {
+      upload_progress_timer_.Start(
+          base::TimeDelta::FromMilliseconds(kUpdateUploadProgressIntervalMsec),
+          this, &RequestProxy::MaybeUpdateUploadProgress);
+    }
 
     delete params;
   }
@@ -210,7 +234,7 @@ class RequestProxy : public URLRequest::Delegate,
 
     if (request_->status().is_success()) {
       int bytes_read;
-      if (request_->Read(buf_, sizeof(buf_), &bytes_read) && bytes_read) {
+      if (request_->Read(buf_, kDataSize, &bytes_read) && bytes_read) {
         OnReceivedData(bytes_read);
       } else if (!request_->status().is_io_pending()) {
         Done();
@@ -231,9 +255,10 @@ class RequestProxy : public URLRequest::Delegate,
   }
 
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info) {
+      const ResourceLoaderBridge::ResponseInfo& info,
+      bool content_filtered) {
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &RequestProxy::NotifyReceivedResponse, info));
+        this, &RequestProxy::NotifyReceivedResponse, info, content_filtered));
   }
 
   virtual void OnReceivedData(int bytes_read) {
@@ -241,9 +266,10 @@ class RequestProxy : public URLRequest::Delegate,
         this, &RequestProxy::NotifyReceivedData, bytes_read));
   }
 
-  virtual void OnCompletedRequest(const URLRequestStatus& status) {
+  virtual void OnCompletedRequest(const URLRequestStatus& status,
+                                  const std::string& security_info) {
     owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &RequestProxy::NotifyCompletedRequest, status));
+        this, &RequestProxy::NotifyCompletedRequest, status, security_info));
   }
 
   // --------------------------------------------------------------------------
@@ -263,7 +289,8 @@ class RequestProxy : public URLRequest::Delegate,
       info.headers = request->response_headers();
       request->GetMimeType(&info.mime_type);
       request->GetCharset(&info.charset);
-      OnReceivedResponse(info);
+      info.content_length = request->GetExpectedContentSize();
+      OnReceivedResponse(info, false);
       AsyncReadData();  // start reading
     } else {
       Done();
@@ -282,9 +309,40 @@ class RequestProxy : public URLRequest::Delegate,
   // Helpers and data:
 
   void Done() {
+    if (upload_progress_timer_.IsRunning()) {
+      MaybeUpdateUploadProgress();
+      upload_progress_timer_.Stop();
+    }
     DCHECK(request_.get());
-    OnCompletedRequest(request_->status());
+    OnCompletedRequest(request_->status(), std::string());
     request_.reset();  // destroy on the io thread
+  }
+
+  // Called on the IO thread.
+  void MaybeUpdateUploadProgress() {
+    uint64 size = request_->get_upload()->GetContentLength();
+    uint64 position = request_->GetUploadProgress();
+    if (position == last_upload_position_)
+      return;  // no progress made since last time
+
+    const uint64 kHalfPercentIncrements = 200;
+    const base::TimeDelta kOneSecond = base::TimeDelta::FromMilliseconds(1000);
+
+    uint64 amt_since_last = position - last_upload_position_;
+    base::TimeDelta time_since_last = base::TimeTicks::Now() -
+                                      last_upload_ticks_;
+
+    bool is_finished = (size == position);
+    bool enough_new_progress = (amt_since_last > (size /
+                                                  kHalfPercentIncrements));
+    bool too_much_time_passed = time_since_last > kOneSecond;
+
+    if (is_finished || enough_new_progress || too_much_time_passed) {
+      owner_loop_->PostTask(FROM_HERE, NewRunnableMethod(
+          this, &RequestProxy::NotifyUploadProgress, position, size));
+      last_upload_ticks_ = base::TimeTicks::Now();
+      last_upload_position_ = position;
+    }
   }
 
   scoped_ptr<URLRequest> request_;
@@ -293,7 +351,7 @@ class RequestProxy : public URLRequest::Delegate,
   static const int kDataSize = 16*1024;
 
   // read buffer for async IO
-  char buf_[kDataSize];
+  scoped_refptr<net::IOBuffer> buf_;
 
   MessageLoop* owner_loop_;
 
@@ -301,6 +359,13 @@ class RequestProxy : public URLRequest::Delegate,
   // not manage its lifetime, and we may only access it from the owner's
   // message loop (owner_loop_).
   ResourceLoaderBridge::Peer* peer_;
+
+  // Timer used to pull upload progress info.
+  base::RepeatingTimer<RequestProxy> upload_progress_timer_;
+
+  // Info used to determine whether or not to send an upload progress update.
+  uint64 last_upload_position_;
+  base::TimeTicks last_upload_ticks_;
 };
 
 //-----------------------------------------------------------------------------
@@ -324,16 +389,18 @@ class SyncRequestProxy : public RequestProxy {
   }
 
   virtual void OnReceivedResponse(
-      const ResourceLoaderBridge::ResponseInfo& info) {
+      const ResourceLoaderBridge::ResponseInfo& info,
+      bool content_filtered) {
     *static_cast<ResourceLoaderBridge::ResponseInfo*>(result_) = info;
   }
 
   virtual void OnReceivedData(int bytes_read) {
-    result_->data.append(buf_, bytes_read);
+    result_->data.append(buf_->data(), bytes_read);
     AsyncReadData();  // read more (may recurse)
   }
 
-  virtual void OnCompletedRequest(const URLRequestStatus& status) {
+  virtual void OnCompletedRequest(const URLRequestStatus& status,
+                                  const std::string& security_info) {
     result_->status = status;
     event_.Signal();
   }
@@ -477,48 +544,37 @@ namespace webkit_glue {
 
 // factory function
 ResourceLoaderBridge* ResourceLoaderBridge::Create(
-    WebFrame* webframe,
     const std::string& method,
     const GURL& url,
     const GURL& policy_url,
     const GURL& referrer,
+    const std::string& frame_origin,
+    const std::string& main_frame_origin,
     const std::string& headers,
     int load_flags,
-    int origin_pid,
+    int requestor_pid,
     ResourceType::Type request_type,
-    bool mixed_contents) {
-  return new ResourceLoaderBridgeImpl(method, url, policy_url, referrer,
-                                      headers, load_flags);
+    int routing_id) {
+  return new ResourceLoaderBridgeImpl(method, url, policy_url,
+                                      referrer, headers, load_flags);
 }
 
-void SetCookie(const GURL& url, const GURL& policy_url,
-               const std::string& cookie) {
-  // Proxy to IO thread to synchronize w/ network loading.
+// Issue the proxy resolve request on the io thread, and wait
+// for the result.
+bool FindProxyForUrl(const GURL& url, std::string* proxy_list) {
+  DCHECK(request_context);
 
-  if (!EnsureIOThread()) {
-    NOTREACHED();
-    return;
+  scoped_refptr<net::SyncProxyServiceHelper> sync_proxy_service(
+      new net::SyncProxyServiceHelper(io_thread->message_loop(),
+      request_context->proxy_service()));
+
+  net::ProxyInfo proxy_info;
+  int rv = sync_proxy_service->ResolveProxy(url, &proxy_info);
+  if (rv == net::OK) {
+    *proxy_list = proxy_info.ToPacString();
   }
 
-  scoped_refptr<CookieSetter> cookie_setter = new CookieSetter();
-  io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      cookie_setter.get(), &CookieSetter::Set, url, cookie));
-}
-
-std::string GetCookies(const GURL& url, const GURL& policy_url) {
-  // Proxy to IO thread to synchronize w/ network loading
-
-  if (!EnsureIOThread()) {
-    NOTREACHED();
-    return std::string();
-  }
-
-  scoped_refptr<CookieGetter> getter = new CookieGetter();
-
-  io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      getter.get(), &CookieGetter::Get, url));
-
-  return getter->GetResult();
+  return rv == net::OK;
 }
 
 }  // namespace webkit_glue
@@ -549,3 +605,33 @@ void SimpleResourceLoaderBridge::Shutdown() {
   }
 }
 
+void SimpleResourceLoaderBridge::SetCookie(
+    const GURL& url, const GURL& policy_url, const std::string& cookie) {
+  // Proxy to IO thread to synchronize w/ network loading.
+
+  if (!EnsureIOThread()) {
+    NOTREACHED();
+    return;
+  }
+
+  scoped_refptr<CookieSetter> cookie_setter = new CookieSetter();
+  io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+      cookie_setter.get(), &CookieSetter::Set, url, cookie));
+}
+
+std::string SimpleResourceLoaderBridge::GetCookies(
+    const GURL& url, const GURL& policy_url) {
+  // Proxy to IO thread to synchronize w/ network loading
+
+  if (!EnsureIOThread()) {
+    NOTREACHED();
+    return std::string();
+  }
+
+  scoped_refptr<CookieGetter> getter = new CookieGetter();
+
+  io_thread->message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+      getter.get(), &CookieGetter::Get, url));
+
+  return getter->GetResult();
+}

@@ -15,10 +15,10 @@
 #include "tools/memory_watcher/call_stack.h"
 #include "tools/memory_watcher/preamble_patcher.h"
 
-static StatsCounter mem_in_use(L"MemoryInUse.Bytes");
-static StatsCounter mem_in_use_blocks(L"MemoryInUse.Blocks");
-static StatsCounter mem_in_use_allocs(L"MemoryInUse.Allocs");
-static StatsCounter mem_in_use_frees(L"MemoryInUse.Frees");
+static StatsCounter mem_in_use("MemoryInUse.Bytes");
+static StatsCounter mem_in_use_blocks("MemoryInUse.Blocks");
+static StatsCounter mem_in_use_allocs("MemoryInUse.Allocs");
+static StatsCounter mem_in_use_frees("MemoryInUse.Frees");
 
 // ---------------------------------------------------------------------
 
@@ -99,7 +99,7 @@ void MemoryWatcher::OnTrack(HANDLE heap, int32 id, int32 size) {
 
     AutoLock lock(block_map_lock_);
 
-    // Ideally, we'd like to verify that the block being added 
+    // Ideally, we'd like to verify that the block being added
     // here is not already in our list of tracked blocks.  However,
     // the lookup in our hash table is expensive and slows us too
     // much.  Uncomment this line if you think you need it.
@@ -175,7 +175,7 @@ void MemoryWatcher::OnUntrack(HANDLE heap, int32 id, int32 size) {
 void MemoryWatcher::SetLogName(char* log_name) {
   if (!log_name)
     return;
-  
+
   log_name_ = log_name;
 }
 
@@ -204,5 +204,3 @@ void MemoryWatcher::DumpLeaks() {
   fprintf(file_, "Total Bytes:  %d\n", block_map_size_);
   CloseLogFile();
 }
-
-

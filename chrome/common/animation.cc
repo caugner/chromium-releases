@@ -5,6 +5,8 @@
 #include "base/message_loop.h"
 #include "chrome/common/animation.h"
 
+using base::TimeDelta;
+
 Animation::Animation(int frame_rate,
                      AnimationDelegate* delegate)
   : animating_(false),
@@ -95,7 +97,7 @@ void Animation::SetDuration(int duration) {
   current_iteration_ = 0;
 }
 
-void Animation::Run() {
+void Animation::Step() {
   state_ = static_cast<double>(++current_iteration_) / iteration_count_;
 
   if (state_ >= 1.0)
@@ -109,10 +111,13 @@ void Animation::Run() {
     Stop();
 }
 
+void Animation::Run() {
+  Step();
+}
+
 int Animation::CalculateInterval(int frame_rate) {
   int timer_interval = 1000 / frame_rate;
   if (timer_interval < 10)
     timer_interval = 10;
   return timer_interval;
 }
-

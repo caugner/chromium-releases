@@ -2,21 +2,42 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
+#include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/l10n_util.h"
+#include "chrome/common/stl_util-inl.h"
+#if !defined(OS_MACOSX)
 #include "chrome/test/data/resource.h"
+#endif
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/platform_test.h"
 #include "unicode/locid.h"
 
 namespace {
 
-class L10nUtilTest: public testing::Test {
+class StringWrapper {
+ public:
+  explicit StringWrapper(const std::wstring& string) : string_(string) {}
+  const std::wstring& string() const { return string_; }
+
+ private:
+  std::wstring string_;
+
+  DISALLOW_COPY_AND_ASSIGN(StringWrapper);
 };
 
-TEST(L10nUtilTest, GetString) {
+}  // namespace
+
+class L10nUtilTest : public PlatformTest {
+};
+
+#if defined(OS_WIN)
+TEST_F(L10nUtilTest, GetString) {
   std::wstring s = l10n_util::GetString(IDS_SIMPLE);
   EXPECT_EQ(std::wstring(L"Hello World!"), s);
 
@@ -26,8 +47,9 @@ TEST(L10nUtilTest, GetString) {
   s = l10n_util::GetStringF(IDS_PLACEHOLDERS_2, 20);
   EXPECT_EQ(std::wstring(L"You owe me $20."), s);
 }
+#endif  // defined(OS_WIN)
 
-TEST(L10nUtilTest, TruncateString) {
+TEST_F(L10nUtilTest, TruncateString) {
   std::wstring string(L"foooooey    bxxxar baz");
 
   // Make sure it doesn't modify the string if length > string length.
@@ -61,7 +83,13 @@ void SetICUDefaultLocale(const std::wstring& locale_string) {
   EXPECT_TRUE(U_SUCCESS(error_code));
 }
 
-TEST(L10nUtilTest, GetAppLocale) {
+#if defined(OS_WIN) || defined(OS_LINUX)
+// We are disabling this test on MacOS because GetApplicationLocale() as an
+// API isn't something that we'll easily be able to unit test in this manner.
+// The meaning of that API, on the Mac, is "the locale used by Cocoa's main
+// nib file", which clearly can't be stubbed by a test app that doesn't use
+// Cocoa.
+TEST_F(L10nUtilTest, GetAppLocale) {
   // Use a temporary locale dir so we don't have to actually build the locale
   // dlls for this test.
   std::wstring orig_locale_dir;
@@ -72,20 +100,27 @@ TEST(L10nUtilTest, GetAppLocale) {
   PathService::Override(chrome::DIR_LOCALES, new_locale_dir);
   // Make fake locale files.
   const wchar_t* filenames[] = {
-    L"en-US.dll",
-    L"en-GB.dll",
-    L"fr.dll",
-    L"es-419.dll",
-    L"es.dll",
-    L"zh-TW.dll",
-    L"zh-CN.dll",
-    L"he.dll",
-    L"fil.dll",
-    L"nb.dll",
+    L"en-US",
+    L"en-GB",
+    L"fr",
+    L"es-419",
+    L"es",
+    L"zh-TW",
+    L"zh-CN",
+    L"he",
+    L"fil",
+    L"nb",
   };
+
+#if defined(OS_WIN)
+  static const wchar_t kLocaleFileExtension[] = L".dll";
+#elif defined(OS_POSIX)
+  static const wchar_t kLocaleFileExtension[] = L".pak";
+#endif
   for (size_t i = 0; i < arraysize(filenames); ++i) {
     std::wstring filename = new_locale_dir;
     file_util::AppendToPath(&filename, filenames[i]);
+    filename += kLocaleFileExtension;
     file_util::WriteFile(filename, "", 0);
   }
 
@@ -151,6 +186,193 @@ TEST(L10nUtilTest, GetAppLocale) {
   UErrorCode error_code = U_ZERO_ERROR;
   Locale::setDefault(locale, error_code);
 }
+#endif
 
+TEST_F(L10nUtilTest, SortStringsUsingFunction) {
+  std::vector<StringWrapper*> strings;
+  strings.push_back(new StringWrapper(L"C"));
+  strings.push_back(new StringWrapper(L"d"));
+  strings.push_back(new StringWrapper(L"b"));
+  strings.push_back(new StringWrapper(L"a"));
+  l10n_util::SortStringsUsingMethod(L"en-US", &strings, &StringWrapper::string);
+  ASSERT_TRUE(L"a" == strings[0]->string());
+  ASSERT_TRUE(L"b" == strings[1]->string());
+  ASSERT_TRUE(L"C" == strings[2]->string());
+  ASSERT_TRUE(L"d" == strings[3]->string());
+  STLDeleteElements(&strings);
 }
 
+TEST_F(L10nUtilTest, GetFirstStrongCharacterDirection) {
+  // Test pure LTR string.
+  std::wstring string(L"foo bar");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type L.
+  string.assign(L"foo \x05d0 bar");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type R.
+  string.assign(L"\x05d0 foo bar");
+  EXPECT_EQ(l10n_util::RIGHT_TO_LEFT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string which starts with a character with weak directionality
+  // and in which the first character with strong directionality is a character
+  // with type L.
+  string.assign(L"!foo \x05d0 bar");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string which starts with a character with weak directionality
+  // and in which the first character with strong directionality is a character
+  // with type R.
+  string.assign(L",\x05d0 foo bar");
+  EXPECT_EQ(l10n_util::RIGHT_TO_LEFT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type LRE.
+  string.assign(L"\x202a \x05d0 foo  bar");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type LRO.
+  string.assign(L"\x202d \x05d0 foo  bar");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type RLE.
+  string.assign(L"\x202b foo \x05d0 bar");
+  EXPECT_EQ(l10n_util::RIGHT_TO_LEFT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type RLO.
+  string.assign(L"\x202e foo \x05d0 bar");
+  EXPECT_EQ(l10n_util::RIGHT_TO_LEFT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test bidi string in which the first character with strong directionality
+  // is a character with type AL.
+  string.assign(L"\x0622 foo \x05d0 bar");
+  EXPECT_EQ(l10n_util::RIGHT_TO_LEFT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test a string without strong directionality characters.
+  string.assign(L",!.{}");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test empty string.
+  string.assign(L"");
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+  // Test characters in non-BMP (e.g. Phoenician letters. Please refer to
+  // http://demo.icu-project.org/icu-bin/ubrowse?scr=151&b=10910 for more
+  // information).
+#if defined(WCHAR_T_IS_UTF32)
+  string.assign(L" ! \x10910" L"abc 123");
+#elif defined(WCHAR_T_IS_UTF16)
+  string.assign(L" ! \xd802\xdd10" L"abc 123");
+#else
+#error wchar_t should be either UTF-16 or UTF-32
+#endif
+  EXPECT_EQ(l10n_util::RIGHT_TO_LEFT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+
+#if defined(WCHAR_T_IS_UTF32)
+  string.assign(L" ! \x10401" L"abc 123");
+#elif defined(WCHAR_T_IS_UTF16)
+  string.assign(L" ! \xd801\xdc01" L"abc 123");
+#else
+#error wchar_t should be either UTF-16 or UTF-32
+#endif
+  EXPECT_EQ(l10n_util::LEFT_TO_RIGHT,
+            l10n_util::GetFirstStrongCharacterDirection(string));
+}
+
+typedef struct {
+  std::wstring path;
+  std::wstring wrapped_path;
+} PathAndWrappedPath;
+
+TEST_F(L10nUtilTest, WrapPathWithLTRFormatting) {
+  std::wstring kSeparator;
+  kSeparator.push_back(static_cast<wchar_t>(FilePath::kSeparators[0]));
+  const PathAndWrappedPath test_data[] = {
+    // Test common path, such as "c:\foo\bar".
+    { L"c:" + kSeparator + L"foo" + kSeparator + L"bar",
+      L"\x202a"L"c:" + kSeparator + L"\x200e"L"foo" + kSeparator +
+      L"\x200e"L"bar\x202c"
+    },
+    // Test path with file name, such as "c:\foo\bar\test.jpg".
+    { L"c:" + kSeparator + L"foo" + kSeparator + L"bar" + kSeparator +
+      L"test.jpg",
+      L"\x202a"L"c:" + kSeparator + L"\x200e"L"foo" + kSeparator +
+      L"\x200e"L"bar" + kSeparator + L"\x200e"L"test.jpg\x202c"
+    },
+    // Test path ending with punctuation, such as "c:\(foo)\bar.".
+    { L"c:" + kSeparator + L"(foo)" + kSeparator + L"bar.",
+      L"\x202a"L"c:" + kSeparator + L"\x200e"L"(foo)" + kSeparator +
+      L"\x200e"L"bar.\x202c"
+    },
+    // Test path ending with separator, such as "c:\foo\bar\".
+    { L"c:" + kSeparator + L"foo" + kSeparator + L"bar" + kSeparator,
+      L"\x202a"L"c:" + kSeparator + L"\x200e"L"foo" + kSeparator +
+      L"\x200e"L"bar" + kSeparator + L"\x200e\x202c"
+    },
+    // Test path with RTL character.
+    { L"c:" + kSeparator + L"\x05d0",
+      L"\x202a"L"c:" + kSeparator + L"\x200e\x05d0\x202c",
+    },
+    // Test path with 2 level RTL directory names.
+    { L"c:" + kSeparator + L"\x05d0" + kSeparator + L"\x0622",
+      L"\x202a"L"c:" + kSeparator + L"\x200e\x05d0" + kSeparator +
+      L"\x200e\x0622\x202c",
+    },
+    // Test path with mixed RTL/LTR directory names and ending with punctuation.
+    { L"c:" + kSeparator + L"\x05d0" + kSeparator + L"\x0622" + kSeparator +
+      L"(foo)" + kSeparator + L"b.a.r.",
+      L"\x202a"L"c:" + kSeparator + L"\x200e\x05d0" + kSeparator +
+      L"\x200e\x0622" + kSeparator + L"\x200e"L"(foo)" + kSeparator +
+      L"\x200e"L"b.a.r.\x202c",
+    },
+    // Test path without driver name, such as "/foo/bar/test/jpg".
+    { kSeparator + L"foo" + kSeparator + L"bar" + kSeparator + L"test.jpg",
+      L"\x202a" + kSeparator + L"foo" + kSeparator + L"\x200e" + L"bar" +
+      kSeparator + L"\x200e" + L"test.jpg" + L"\x202c"
+    },
+    // Test path start with current directory, such as "./foo".
+    { L"." + kSeparator + L"foo",
+      L"\x202a"L"." + kSeparator + L"\x200e" + L"foo" + L"\x202c"
+    },
+    // Test path start with parent directory, such as "../foo/bar.jpg".
+    { L".." + kSeparator + L"foo" + kSeparator + L"bar.jpg",
+      L"\x202a"L".." + kSeparator + L"\x200e" + L"foo" + kSeparator +
+      L"\x200e" + L"bar.jpg" + L"\x202c"
+    },
+    // Test absolute path, such as "//foo/bar.jpg".
+    { kSeparator + kSeparator + L"foo" + kSeparator + L"bar.jpg",
+      L"\x202a" + kSeparator + kSeparator + L"\x200e"L"foo" + kSeparator +
+      L"\x200e"L"bar.jpg" + L"\x202c"
+    },
+    // Test empty path.
+    { L"",
+      L"\x202a\x202c"
+    }
+  };
+  for (unsigned int i = 0; i < arraysize(test_data); ++i) {
+    string16 localized_file_path_string;
+    FilePath path = FilePath::FromWStringHack(test_data[i].path);
+    l10n_util::WrapPathWithLTRFormatting(path, &localized_file_path_string);
+    std::wstring wrapped_path = UTF16ToWide(localized_file_path_string);
+    EXPECT_EQ(wrapped_path, test_data[i].wrapped_path);
+  }
+}

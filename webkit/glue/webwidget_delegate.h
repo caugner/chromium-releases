@@ -20,7 +20,7 @@ struct WebPluginGeometry;
 class WebWidgetDelegate {
  public:
   // Returns the view in which the WebWidget is embedded.
-  virtual gfx::ViewHandle GetContainingWindow(WebWidget* webwidget) = 0;
+  virtual gfx::NativeViewId GetContainingView(WebWidget* webwidget) = 0;
 
   // Called when a region of the WebWidget needs to be re-painted.
   virtual void DidInvalidateRect(WebWidget* webwidget, const gfx::Rect& rect) = 0;
@@ -50,7 +50,7 @@ class WebWidgetDelegate {
   // it no longer receives keyboard events.
   virtual void Blur(WebWidget* webwidget) = 0;
 
-  virtual void SetCursor(WebWidget* webwidget, 
+  virtual void SetCursor(WebWidget* webwidget,
                          const WebCursor& cursor) = 0;
   // Returns the rectangle of the WebWidget in screen coordinates.
   virtual void GetWindowRect(WebWidget* webwidget, gfx::Rect* rect) = 0;
@@ -63,8 +63,13 @@ class WebWidgetDelegate {
   // synchronously?
   virtual void SetWindowRect(WebWidget* webwidget, const gfx::Rect& rect) = 0;
 
-  // Returns the rectangle of the window in which this WebWidget is embeded in.
+  // Returns the rectangle of the window in which this WebWidget is embeded.
   virtual void GetRootWindowRect(WebWidget* webwidget, gfx::Rect* rect) = 0;
+
+  // Returns the resizer rectangle of the window this WebWidget is in. This
+  // is used on Mac to determine if a scrollbar is over the in-window resize
+  // area at the bottom right corner.
+  virtual void GetRootWindowResizerRect(WebWidget* webwidget, gfx::Rect* rect) = 0;
 
   // Keeps track of the necessary window move for a plugin window that resulted
   // from a scroll operation.  That way, all plugin windows can be moved at the
@@ -78,6 +83,9 @@ class WebWidgetDelegate {
   // Owners depend on the delegates living as long as they do, so we ref them.
   virtual void AddRef() = 0;
   virtual void Release() = 0;
+
+  // Returns true if the widget is in a background tab.
+  virtual bool IsHidden() = 0;
 
   WebWidgetDelegate() { }
   virtual ~WebWidgetDelegate() { }

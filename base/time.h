@@ -25,13 +25,14 @@
 #include <time.h>
 
 #include "base/basictypes.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 #if defined(OS_WIN)
 // For FILETIME in FromFileTime, until it moves to a new converter class.
 // See TODO(iyengar) below.
 #include <windows.h>
 #endif
+
+namespace base {
 
 class Time;
 class TimeTicks;
@@ -340,6 +341,38 @@ inline Time TimeDelta::operator+(Time t) const {
   return Time(t.us_ + delta_);
 }
 
+// Inline the TimeDelta factory methods, for fast TimeDelta construction.
+
+// static
+inline TimeDelta TimeDelta::FromDays(int64 days) {
+  return TimeDelta(days * Time::kMicrosecondsPerDay);
+}
+
+// static
+inline TimeDelta TimeDelta::FromHours(int64 hours) {
+  return TimeDelta(hours * Time::kMicrosecondsPerHour);
+}
+
+// static
+inline TimeDelta TimeDelta::FromMinutes(int64 minutes) {
+  return TimeDelta(minutes * Time::kMicrosecondsPerMinute);
+}
+
+// static
+inline TimeDelta TimeDelta::FromSeconds(int64 secs) {
+  return TimeDelta(secs * Time::kMicrosecondsPerSecond);
+}
+
+// static
+inline TimeDelta TimeDelta::FromMilliseconds(int64 ms) {
+  return TimeDelta(ms * Time::kMicrosecondsPerMillisecond);
+}
+
+// static
+inline TimeDelta TimeDelta::FromMicroseconds(int64 us) {
+  return TimeDelta(us);
+}
+
 // TimeTicks ------------------------------------------------------------------
 
 class TimeTicks {
@@ -348,15 +381,15 @@ class TimeTicks {
   }
 
   // Platform-dependent tick count representing "right now."
-  // The resolution of this clock is ~1-5ms.  Resolution varies depending
+  // The resolution of this clock is ~1-15ms.  Resolution varies depending
   // on hardware/operating system configuration.
   static TimeTicks Now();
 
-  // Returns a platform-dependent high-resolution tick count. IT IS BROKEN ON
-  // SOME HARDWARE and is designed to be used for profiling and perf testing
-  // only (see the impl for more information).
-  static TimeTicks UnreliableHighResNow();
-
+  // Returns a platform-dependent high-resolution tick count. Implementation
+  // is hardware dependent and may or may not return sub-millisecond
+  // resolution.  THIS CALL IS GENERALLY MUCH MORE EXPENSIVE THAN Now() AND
+  // SHOULD ONLY BE USED WHEN IT IS REALLY NEEDED.
+  static TimeTicks HighResNow();
 
   // Returns true if this object has not been initialized.
   bool is_null() const {
@@ -437,5 +470,7 @@ class TimeTicks {
 inline TimeTicks TimeDelta::operator+(TimeTicks t) const {
   return TimeTicks(t.ticks_ + delta_);
 }
+
+}  // namespace base
 
 #endif  // BASE_TIME_H_

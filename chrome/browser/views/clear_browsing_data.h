@@ -5,19 +5,18 @@
 #ifndef CHROME_BROWSER_VIEWS_CLEAR_BROWSING_DATA_H__
 #define CHROME_BROWSER_VIEWS_CLEAR_BROWSING_DATA_H__
 
-#include "base/time.h"
 #include "chrome/browser/browsing_data_remover.h"
-#include "chrome/views/combo_box.h"
-#include "chrome/views/dialog_delegate.h"
-#include "chrome/views/label.h"
-#include "chrome/views/native_button.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/controls/combo_box.h"
+#include "chrome/views/controls/label.h"
 #include "chrome/views/view.h"
+#include "chrome/views/window/dialog_delegate.h"
 
-namespace ChromeViews {
-  class CheckBox;
-  class Label;
-  class Throbber;
-  class Window;
+namespace views {
+class CheckBox;
+class Label;
+class Throbber;
+class Window;
 }
 
 class Profile;
@@ -30,10 +29,11 @@ class MessageLoop;
 // etc).
 //
 ////////////////////////////////////////////////////////////////////////////////
-class ClearBrowsingDataView : public ChromeViews::View,
-                              public ChromeViews::DialogDelegate,
-                              public ChromeViews::ComboBox::Model,
-                              public ChromeViews::NativeButton::Listener,
+class ClearBrowsingDataView : public views::View,
+                              public views::DialogDelegate,
+                              public views::ComboBox::Model,
+                              public views::NativeButton::Listener,
+                              public views::ComboBox::Listener,
                               public BrowsingDataRemover::Observer {
  public:
   explicit ClearBrowsingDataView(Profile* profile);
@@ -42,14 +42,14 @@ class ClearBrowsingDataView : public ChromeViews::View,
   // Initialize the controls on the dialog.
   void Init();
 
-  // Overridden from ChromeViews::View:
-  virtual void GetPreferredSize(CSize *out);
+  // Overridden from views::View:
+  virtual gfx::Size GetPreferredSize();
   virtual void Layout();
   void ViewHierarchyChanged(bool is_add,
-                            ChromeViews::View* parent,
-                            ChromeViews::View* child);
+                            views::View* parent,
+                            views::View* child);
 
-  // Overridden from ChromeViews::DialogDelegate:
+  // Overridden from views::DialogDelegate:
   virtual std::wstring GetDialogButtonLabel(DialogButton button) const;
   virtual bool IsDialogButtonEnabled(DialogButton button) const;
   virtual bool CanResize() const;
@@ -59,18 +59,22 @@ class ClearBrowsingDataView : public ChromeViews::View,
   virtual bool IsModal() const;
   virtual std::wstring GetWindowTitle() const;
   virtual bool Accept();
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
-  // Overridden from ChromeViews::ComboBox::Model:
-  virtual int GetItemCount(ChromeViews::ComboBox* source);
-  virtual std::wstring GetItemAt(ChromeViews::ComboBox* source, int index);
+  // Overridden from views::ComboBox::Model:
+  virtual int GetItemCount(views::ComboBox* source);
+  virtual std::wstring GetItemAt(views::ComboBox* source, int index);
 
-  // Overridden from ChromeViews::NativeButton::Listener:
-  virtual void ButtonPressed(ChromeViews::NativeButton* sender);
+  // Overridden from views::NativeButton::Listener:
+  virtual void ButtonPressed(views::NativeButton* sender);
+
+   // Overridden from views::ComboBox::Listener:
+  virtual void ItemChanged(views::ComboBox* sender, int prev_index,
+                           int new_index);
 
  private:
   // Adds a new check-box as a child to the view.
-  ChromeViews::CheckBox* AddCheckbox(const std::wstring& text, bool checked);
+  views::CheckBox* AddCheckbox(const std::wstring& text, bool checked);
 
   // Sets the controls on the UI to be enabled/disabled depending on whether we
   // have a delete operation in progress or not.
@@ -84,17 +88,18 @@ class ClearBrowsingDataView : public ChromeViews::View,
   virtual void OnBrowsingDataRemoverDone();
 
   // UI elements we add to the parent view.
-  scoped_ptr<ChromeViews::Throbber> throbber_;
-  ChromeViews::Label status_label_;
+  scoped_ptr<views::Throbber> throbber_;
+  views::Label status_label_;
   // Other UI elements.
-  ChromeViews::Label* delete_all_label_;
-  ChromeViews::CheckBox* del_history_checkbox_;
-  ChromeViews::CheckBox* del_downloads_checkbox_;
-  ChromeViews::CheckBox* del_cache_checkbox_;
-  ChromeViews::CheckBox* del_cookies_checkbox_;
-  ChromeViews::CheckBox* del_passwords_checkbox_;
-  ChromeViews::Label* time_period_label_;
-  ChromeViews::ComboBox* time_period_combobox_;
+  views::Label* delete_all_label_;
+  views::CheckBox* del_history_checkbox_;
+  views::CheckBox* del_downloads_checkbox_;
+  views::CheckBox* del_cache_checkbox_;
+  views::CheckBox* del_cookies_checkbox_;
+  views::CheckBox* del_passwords_checkbox_;
+  views::CheckBox* del_form_data_checkbox_;
+  views::Label* time_period_label_;
+  views::ComboBox* time_period_combobox_;
 
   // Used to signal enabled/disabled state for controls in the UI.
   bool delete_in_progress_;

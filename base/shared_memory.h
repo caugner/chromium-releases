@@ -5,8 +5,19 @@
 #ifndef BASE_SHARED_MEMORY_H_
 #define BASE_SHARED_MEMORY_H_
 
+#include "build/build_config.h"
+
+#if defined(OS_POSIX)
+#include <sys/types.h>
+#include <semaphore.h>
+#include "base/file_descriptor_posix.h"
+#endif
+#include <string>
+
 #include "base/basictypes.h"
-#include "base/process_util.h"
+#include "base/process.h"
+
+namespace base {
 
 // SharedMemoryHandle is a platform specific type which represents
 // the underlying OS handle to a shared memory segment.
@@ -14,9 +25,13 @@
 typedef HANDLE SharedMemoryHandle;
 typedef HANDLE SharedMemoryLock;
 #elif defined(OS_POSIX)
-#include <semaphore.h>
-typedef int SharedMemoryHandle;
-typedef sem_t* SharedMemoryLock;
+// A SharedMemoryId is sufficient to identify a given shared memory segment on a
+// system, but insufficient to map it.
+typedef FileDescriptor SharedMemoryHandle;
+typedef ino_t SharedMemoryId;
+// On POSIX, the lock is implemented as a lockf() on the mapped file,
+// so no additional member (or definition of SharedMemoryLock) is
+// needed.
 #endif
 
 // Platform abstraction for shared memory.  Provides a C++ wrapper
@@ -34,23 +49,36 @@ class SharedMemory {
   // shared memory file that was created by a remote process and not shared
   // to the current process.
   SharedMemory(SharedMemoryHandle handle, bool read_only,
-      ProcessHandle process);
+      base::ProcessHandle process);
 
   // Destructor.  Will close any open files.
   ~SharedMemory();
+
+  // Return true iff the given handle is valid (i.e. not the distingished
+  // invalid value; NULL for a HANDLE and -1 for a file descriptor)
+  static bool IsHandleValid(const SharedMemoryHandle& handle);
+
+  // Return invalid handle (see comment above for exact definition).
+  static SharedMemoryHandle NULLHandle();
 
   // Creates or opens a shared memory segment based on a name.
   // If read_only is true, opens the memory as read-only.
   // If open_existing is true, and the shared memory already exists,
   // opens the existing shared memory and ignores the size parameter.
+  // If name is the empty string, use a unique name.
   // Returns true on success, false on failure.
-  bool Create(const std::wstring &name, bool read_only, bool open_existing,
-      size_t size);
+  bool Create(const std::wstring& name, bool read_only, bool open_existing,
+              size_t size);
+
+  // Deletes resources associated with a shared memory segment based on name.
+  // Not all platforms require this call.
+  bool Delete(const std::wstring& name);
 
   // Opens a shared memory segment based on a name.
   // If read_only is true, opens for read-only access.
+  // If name is the empty string, use a unique name.
   // Returns true on success, false on failure.
-  bool Open(const std::wstring &name, bool read_only);
+  bool Open(const std::wstring& name, bool read_only);
 
   // Maps the shared memory into the caller's address space.
   // Returns true on success, false otherwise.  The memory address
@@ -76,7 +104,15 @@ class SharedMemory {
   // Get access to the underlying OS handle for this segment.
   // Use of this handle for anything other than an opaque
   // identifier is not portable.
-  SharedMemoryHandle handle() const { return mapped_file_; }
+  SharedMemoryHandle handle() const;
+
+#if defined(OS_POSIX)
+  // Return a unique identifier for this shared memory segment. Inode numbers
+  // are technically only unique to a single filesystem. However, we always
+  // allocate shared memory backing files from the same directory, so will end
+  // up on the same filesystem.
+  SharedMemoryId id() const { return inode_; }
+#endif
 
   // Closes the open shared memory segment.
   // It is safe to call Close repeatedly.
@@ -88,8 +124,8 @@ class SharedMemory {
   // file.  new_handle is an ouput parameter to receive
   // the handle for use in the remote process.
   // Returns true on success, false otherwise.
-  bool ShareToProcess(ProcessHandle process,
-      SharedMemoryHandle *new_handle) {
+  bool ShareToProcess(base::ProcessHandle process,
+                      SharedMemoryHandle* new_handle) {
     return ShareToProcessCommon(process, new_handle, false);
   }
 
@@ -97,14 +133,22 @@ class SharedMemory {
   //   bool ok = ShareToProcess(process, new_handle);
   //   Close();
   //   return ok;
+  // Note that the memory is unmapped by calling this method, regardless of the
+  // return value.
   bool GiveToProcess(ProcessHandle process,
-      SharedMemoryHandle *new_handle) {
+                     SharedMemoryHandle* new_handle) {
     return ShareToProcessCommon(process, new_handle, true);
   }
 
   // Lock the shared memory.
   // This is a cross-process lock which may be recursively
   // locked by the same thread.
+  // TODO(port):
+  // WARNING: on POSIX the lock only works across processes, not
+  // across threads.  2 threads in the same process can both grab the
+  // lock at the same time.  There are several solutions for this
+  // (futex, lockf+anon_semaphore) but none are both clean and common
+  // across Mac and Linux.
   void Lock();
 
   // Release the shared memory lock.
@@ -112,17 +156,29 @@ class SharedMemory {
 
  private:
 #if defined(OS_POSIX)
-  bool CreateOrOpen(const std::wstring &name, int posix_flags);
+  bool CreateOrOpen(const std::wstring &name, int posix_flags, size_t size);
+  bool FilenameForMemoryName(const std::wstring &memname,
+                             std::wstring *filename);
+  void LockOrUnlockCommon(int function);
+
 #endif
   bool ShareToProcessCommon(ProcessHandle process,
-      SharedMemoryHandle *new_handle, bool close_self);
+                            SharedMemoryHandle* new_handle,
+                            bool close_self);
 
   std::wstring       name_;
-  SharedMemoryHandle mapped_file_;
+#if defined(OS_WIN)
+  HANDLE             mapped_file_;
+#elif defined(OS_POSIX)
+  int                mapped_file_;
+  ino_t              inode_;
+#endif
   void*              memory_;
   bool               read_only_;
   size_t             max_size_;
+#if !defined(OS_POSIX)
   SharedMemoryLock   lock_;
+#endif
 
   DISALLOW_EVIL_CONSTRUCTORS(SharedMemory);
 };
@@ -145,6 +201,6 @@ class SharedMemoryAutoLock {
   DISALLOW_EVIL_CONSTRUCTORS(SharedMemoryAutoLock);
 };
 
+}  // namespace base
 
 #endif  // BASE_SHARED_MEMORY_H_
-

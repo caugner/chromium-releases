@@ -28,7 +28,9 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "base/message_loop.h"
+#include "base/ref_counted.h"
 #include "base/test_suite.h"
+#include "net/base/host_resolver_unittest.h"
 
 class NetTestSuite : public TestSuite {
  public:
@@ -37,6 +39,13 @@ class NetTestSuite : public TestSuite {
 
   virtual void Initialize() {
     TestSuite::Initialize();
+
+    host_mapper_ = new net::RuleBasedHostMapper();
+    scoped_host_mapper_.Init(host_mapper_.get());
+    // In case any attempts are made to resolve host names, force them all to
+    // be mapped to localhost.  This prevents DNS queries from being sent in
+    // the process of running these unit tests.
+    host_mapper_->AddRule("*", "127.0.0.1");
 
     message_loop_.reset(new MessageLoopForIO());
   }
@@ -51,6 +60,8 @@ class NetTestSuite : public TestSuite {
 
  private:
   scoped_ptr<MessageLoop> message_loop_;
+  scoped_refptr<net::RuleBasedHostMapper> host_mapper_;
+  net::ScopedHostMapper scoped_host_mapper_;
 };
 
 int main(int argc, char** argv) {

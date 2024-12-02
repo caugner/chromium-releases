@@ -5,33 +5,59 @@
 #ifndef NET_URL_REQUEST_URL_REQUEST_UNITTEST_H_
 #define NET_URL_REQUEST_URL_REQUEST_UNITTEST_H_
 
+#include <stdlib.h>
+
 #include <sstream>
 #include <string>
+#include <vector>
 
+#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/time.h"
 #include "base/waitable_event.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/ssl_test_util.h"
 #include "net/http/http_network_layer.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_context.h"
+#include "net/proxy/proxy_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "googleurl/src/url_util.h"
 
-const int kDefaultPort = 1337;
+const int kHTTPDefaultPort = 1337;
+const int kFTPDefaultPort = 1338;
+
 const std::string kDefaultHostName("localhost");
+
+using base::TimeDelta;
 
 // This URLRequestContext does not use a local cache.
 class TestURLRequestContext : public URLRequestContext {
  public:
   TestURLRequestContext() {
-    http_transaction_factory_ = net::HttpNetworkLayer::CreateFactory(NULL);
+    proxy_service_ = net::ProxyService::CreateNull();
+    http_transaction_factory_ =
+        net::HttpNetworkLayer::CreateFactory(proxy_service_);
+  }
+
+  explicit TestURLRequestContext(const std::string& proxy) {
+    net::ProxyInfo proxy_info;
+    proxy_info.UseNamedProxy(proxy);
+    proxy_service_ = net::ProxyService::Create(&proxy_info);
+    http_transaction_factory_ =
+        net::HttpNetworkLayer::CreateFactory(proxy_service_);
   }
 
   virtual ~TestURLRequestContext() {
     delete http_transaction_factory_;
+    delete proxy_service_;
   }
 };
 
@@ -47,7 +73,8 @@ class TestDelegate : public URLRequest::Delegate {
         received_bytes_count_(0),
         received_redirect_count_(0),
         received_data_before_response_(false),
-        request_failed_(false) {
+        request_failed_(false),
+        buf_(new net::IOBuffer(kBufferSize)) {
   }
 
   virtual void OnReceivedRedirect(URLRequest* request, const GURL& new_url) {
@@ -72,7 +99,7 @@ class TestDelegate : public URLRequest::Delegate {
     } else {
       // Initiate the first read.
       int bytes_read = 0;
-      if (request->Read(buf_, sizeof(buf_), &bytes_read))
+      if (request->Read(buf_, kBufferSize, &bytes_read))
         OnReadCompleted(request, bytes_read);
       else if (!request->status().is_io_pending())
         OnResponseCompleted(request);
@@ -94,15 +121,15 @@ class TestDelegate : public URLRequest::Delegate {
       received_bytes_count_ += bytes_read;
 
       // consume the data
-      data_received_.append(buf_, bytes_read);
+      data_received_.append(buf_->data(), bytes_read);
     }
 
     // If it was not end of stream, request to read more.
     if (request->status().is_success() && bytes_read > 0) {
       bytes_read = 0;
-      while (request->Read(buf_, sizeof(buf_), &bytes_read)) {
+      while (request->Read(buf_, kBufferSize, &bytes_read)) {
         if (bytes_read > 0) {
-          data_received_.append(buf_, bytes_read);
+          data_received_.append(buf_->data(), bytes_read);
           received_bytes_count_ += bytes_read;
         } else {
           break;
@@ -158,6 +185,7 @@ class TestDelegate : public URLRequest::Delegate {
   bool request_failed() const { return request_failed_; }
 
  private:
+  static const int kBufferSize = 4096;
   // options for controlling behavior
   bool cancel_in_rr_;
   bool cancel_in_rs_;
@@ -177,31 +205,29 @@ class TestDelegate : public URLRequest::Delegate {
   std::string data_received_;
 
   // our read buffer
-  char buf_[4096];
+  scoped_refptr<net::IOBuffer> buf_;
 };
 
-// This object bounds the lifetime of an external python-based HTTP server
+// This object bounds the lifetime of an external python-based HTTP/FTP server
 // that can provide various responses useful for testing.
-class TestServer : public process_util::ProcessFilter {
+class BaseTestServer : public base::RefCounted<BaseTestServer> {
+ protected:
+  BaseTestServer() { }
+
  public:
-  TestServer(const std::wstring& document_root)
-      : process_handle_(NULL),
-        is_shutdown_(true) {
-    Init(kDefaultHostName, kDefaultPort, document_root, std::wstring());
+
+  // Used with e.g. HTTPTestServer::SendQuit()
+  bool WaitToFinish(int milliseconds) {
+    return launcher_.WaitToFinish(milliseconds);
   }
 
-  virtual ~TestServer() {
-    Shutdown();
+  bool Stop() {
+    return launcher_.Stop();
   }
 
-  // Implementation of ProcessFilter
-  virtual bool Includes(uint32 pid, uint32 parent_pid) const {
-    // This function may be called after Shutdown(), in which process_handle_ is
-    // set to NULL. Since no process handle is set, it can't be included in the
-    // filter.
-    if (!process_handle_)
-      return false;
-    return pid == process_util::GetProcId(process_handle_);
+  GURL TestServerPage(const std::string& base_address,
+      const std::string& path) {
+    return GURL(base_address + path);
   }
 
   GURL TestServerPage(const std::string& path) {
@@ -209,138 +235,57 @@ class TestServer : public process_util::ProcessFilter {
   }
 
   GURL TestServerPageW(const std::wstring& path) {
-    return GURL(UTF8ToWide(base_address_) + path);
+    return GURL(base_address_ + WideToUTF8(path));
   }
 
-  // A subclass may wish to send the request in a different manner
-  virtual bool MakeGETRequest(const std::string& page_name) {
-    const GURL& url = TestServerPage(page_name);
+  virtual bool MakeGETRequest(const std::string& page_name) = 0;
 
-    // Spin up a background thread for this request so that we have access to
-    // an IO message loop, and in cases where this thread already has an IO
-    // message loop, we also want to avoid spinning a nested message loop.
-    
-    SyncTestDelegate d;
-    {
-      base::Thread io_thread("MakeGETRequest");
-      base::Thread::Options options;
-      options.message_loop_type = MessageLoop::TYPE_IO;
-      io_thread.StartWithOptions(options);
-      io_thread.message_loop()->PostTask(FROM_HERE, NewRunnableFunction(
-          &TestServer::StartGETRequest, url, &d));
-      d.Wait();
-    }
-    return d.did_succeed();
+  std::wstring GetDataDirectory() {
+    return launcher_.GetDocumentRootPath().ToWStringHack();
   }
 
  protected:
-  struct ManualInit {};
-
-  // Used by subclasses that need to defer initialization until they are fully
-  // constructed.  The subclass should call Init once it is ready (usually in
-  // its constructor).
-  TestServer(ManualInit)
-      : process_handle_(NULL),
-        is_shutdown_(true) {
+  bool Start(net::TestServerLauncher::Protocol protocol,
+             const std::string& host_name, int port,
+             const FilePath& document_root,
+             const FilePath& cert_path) {
+    std::string blank;
+    return Start(protocol, host_name, port, document_root, cert_path,
+                 blank, blank);
   }
 
-  virtual std::string scheme() { return std::string("http"); }
+  bool Start(net::TestServerLauncher::Protocol protocol,
+             const std::string& host_name, int port,
+             const FilePath& document_root,
+             const FilePath& cert_path,
+             const std::string& url_user,
+             const std::string& url_password) {
+    if (!launcher_.Start(protocol,
+        host_name, port, document_root, cert_path))
+      return false;
 
-  // This is in a separate function so that we can have assertions and so that
-  // subclasses can call this later.
-  void Init(const std::string& host_name, int port,
-            const std::wstring& document_root,
-            const std::wstring& cert_path) {
-    std::stringstream ss;
-    std::string port_str;
-    ss << port ? port : kDefaultPort;
-    ss >> port_str;
-    base_address_ = scheme() + "://" + host_name + ":" + port_str + "/";
+    std::string scheme;
+    if (protocol == net::TestServerLauncher::ProtoFTP)
+      scheme = "ftp";
+    else
+      scheme = "http";
+    if (!cert_path.empty())
+      scheme.push_back('s');
 
-    std::wstring testserver_path;
-    ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &testserver_path));
-    file_util::AppendToPath(&testserver_path, L"net");
-    file_util::AppendToPath(&testserver_path, L"tools");
-    file_util::AppendToPath(&testserver_path, L"testserver");
-    file_util::AppendToPath(&testserver_path, L"testserver.py");
-
-    ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &python_runtime_));
-    file_util::AppendToPath(&python_runtime_, L"third_party");
-    file_util::AppendToPath(&python_runtime_, L"python_24");
-    file_util::AppendToPath(&python_runtime_, L"python.exe");
-
-    std::wstring test_data_directory;
-    PathService::Get(base::DIR_SOURCE_ROOT, &test_data_directory);
-    std::wstring normalized_document_root = document_root;
-    std::replace(normalized_document_root.begin(),
-                 normalized_document_root.end(),
-                 L'/', file_util::kPathSeparator);
-    file_util::AppendToPath(&test_data_directory, normalized_document_root);
-
-    std::wstring command_line =
-        L"\"" + python_runtime_ + L"\" " + L"\"" + testserver_path +
-        L"\" --port=" + UTF8ToWide(port_str) + L" --data-dir=\"" +
-        test_data_directory + L"\"";
-    if (!cert_path.empty()) {
-      command_line.append(L" --https=\"");
-      command_line.append(cert_path);
-      command_line.append(L"\"");
+    std::string port_str = IntToString(port);
+    if (url_user.empty()) {
+      base_address_ = scheme + "://" + host_name + ":" + port_str + "/";
+    } else {
+      if (url_password.empty())
+        base_address_ = scheme + "://" + url_user + "@" +
+            host_name + ":" + port_str + "/";
+      else
+        base_address_ = scheme + "://" + url_user + ":" + url_password +
+            "@" + host_name + ":" + port_str + "/";
     }
-
-    ASSERT_TRUE(
-        process_util::LaunchApp(command_line, false, true, &process_handle_)) <<
-        "Failed to launch " << command_line;
-
-    // Verify that the webserver is actually started.
-    // Otherwise tests can fail if they run faster than Python can start.
-    int retries = 10;
-    bool success;
-    while ((success = MakeGETRequest("hello.html")) == false && retries > 0) {
-      retries--;
-      ::Sleep(500);
-    }
-    ASSERT_TRUE(success) << "Webserver not starting properly.";
-
-    is_shutdown_ = false;
+    return true;
   }
 
-  void Shutdown() {
-    if (is_shutdown_)
-      return;
-
-    // here we append the time to avoid problems where the kill page
-    // is being cached rather than being executed on the server
-    std::ostringstream page_name;
-    page_name << "kill?" << GetTickCount();
-    int retry_count = 5;
-    while (retry_count > 0) {
-      bool r = MakeGETRequest(page_name.str());
-      // BUG #1048625 causes the kill GET to fail.  For now we just retry.
-      // Once the bug is fixed, we should remove the while loop and put back
-      // the following DCHECK.
-      // DCHECK(r);
-      if (r)
-        break;
-      retry_count--;
-    }
-    // Make sure we were successfull in stopping the testserver.
-    DCHECK(retry_count > 0);
-
-    if (process_handle_) {
-      CloseHandle(process_handle_);
-      process_handle_ = NULL;
-    }
-
-    // Make sure we don't leave any stray testserver processes laying around.
-    std::wstring testserver_name =
-        file_util::GetFilenameFromPath(python_runtime_);
-    process_util::CleanupProcesses(testserver_name, 10000, 1, this);
-    EXPECT_EQ(0, process_util::GetProcessCount(testserver_name, this));
-
-    is_shutdown_ = true;
-  }
-
- private:
   // Used by MakeGETRequest to implement sync load behavior.
   class SyncTestDelegate : public TestDelegate {
    public:
@@ -351,13 +296,78 @@ class TestServer : public process_util::ProcessFilter {
       success_ = request->status().is_success();
       event_.Signal();
     }
-    void Wait() { event_.Wait(); }
+    bool Wait(int64 secs) {
+      TimeDelta td = TimeDelta::FromSeconds(secs);
+      if (event_.TimedWait(td))
+        return true;
+      return false;
+    }
     bool did_succeed() const { return success_; }
    private:
     base::WaitableEvent event_;
     bool success_;
     DISALLOW_COPY_AND_ASSIGN(SyncTestDelegate);
   };
+
+  net::TestServerLauncher launcher_;
+  std::string base_address_;
+};
+
+
+// HTTP
+class HTTPTestServer : public BaseTestServer {
+ protected:
+  explicit HTTPTestServer() : loop_(NULL) {
+  }
+
+ public:
+  // Creates and returns a new HTTPTestServer. If |loop| is non-null, requests
+  // are serviced on it, otherwise a new thread and message loop are created.
+  static scoped_refptr<HTTPTestServer> CreateServer(
+      const std::wstring& document_root,
+      MessageLoop* loop) {
+    scoped_refptr<HTTPTestServer> test_server = new HTTPTestServer();
+    test_server->loop_ = loop;
+    FilePath no_cert;
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
+                            kDefaultHostName, kHTTPDefaultPort,
+                            docroot, no_cert)) {
+      return NULL;
+    }
+    return test_server;
+  }
+
+  // A subclass may wish to send the request in a different manner
+  virtual bool MakeGETRequest(const std::string& page_name) {
+    const GURL& url = TestServerPage(page_name);
+
+    // Spin up a background thread for this request so that we have access to
+    // an IO message loop, and in cases where this thread already has an IO
+    // message loop, we also want to avoid spinning a nested message loop.
+    SyncTestDelegate d;
+    {
+      MessageLoop* loop = loop_;
+      scoped_ptr<base::Thread> io_thread;
+
+      if (!loop) {
+        io_thread.reset(new base::Thread("MakeGETRequest"));
+        base::Thread::Options options;
+        options.message_loop_type = MessageLoop::TYPE_IO;
+        io_thread->StartWithOptions(options);
+        loop = io_thread->message_loop();
+      }
+      loop->PostTask(FROM_HERE, NewRunnableFunction(
+            &HTTPTestServer::StartGETRequest, url, &d));
+
+      // Build bot wait for only 300 seconds we should ensure wait do not take
+      // more than 300 seconds
+      if (!d.Wait(250))
+        return false;
+    }
+    return d.did_succeed();
+  }
+
   static void StartGETRequest(const GURL& url, URLRequest::Delegate* delegate) {
     URLRequest* request = new URLRequest(url, delegate);
     request->set_context(new TestURLRequestContext());
@@ -366,22 +376,158 @@ class TestServer : public process_util::ProcessFilter {
     EXPECT_TRUE(request->is_pending());
   }
 
-  std::string base_address_;
-  std::wstring python_runtime_;
-  HANDLE process_handle_;
-  bool is_shutdown_;
-};
-
-class HTTPSTestServer : public TestServer {
- public:
-   HTTPSTestServer(const std::string& host_name, int port,
-                   const std::wstring& document_root,
-                   const std::wstring& cert_path) : TestServer(ManualInit()) {
-    Init(host_name, port, document_root, cert_path);
+  // Some tests use browser javascript to fetch a 'kill' url that causes
+  // the server to exit by itself (rather than letting TestServerLauncher's
+  // destructor kill it).
+  // This method does the same thing so we can unit test that mechanism.
+  // You can then use WaitToFinish() to sleep until the server terminates.
+  void SendQuit() {
+    // Append the time to avoid problems where the kill page
+    // is being cached rather than being executed on the server
+    std::string page_name = StringPrintf("kill?%u",
+        static_cast<int>(base::Time::Now().ToInternalValue()));
+    int retry_count = 5;
+    while (retry_count > 0) {
+      bool r = MakeGETRequest(page_name);
+      // BUG #1048625 causes the kill GET to fail.  For now we just retry.
+      // Once the bug is fixed, we should remove the while loop and put back
+      // the following DCHECK.
+      // DCHECK(r);
+      if (r)
+        break;
+      retry_count--;
+    }
+    // Make sure we were successful in stopping the testserver.
+    DCHECK(retry_count > 0);
   }
 
-  virtual std::string scheme() { return std::string("https"); }
+  virtual std::string scheme() { return "http"; }
+
+ private:
+  // If non-null a background thread isn't created and instead this message loop
+  // is used.
+  MessageLoop* loop_;
+};
+
+class HTTPSTestServer : public HTTPTestServer {
+ protected:
+  explicit HTTPSTestServer() {
+  }
+
+ public:
+  // Create a server with a valid certificate
+  // TODO(dkegel): HTTPSTestServer should not require an instance to specify
+  // stock test certificates
+  static scoped_refptr<HTTPSTestServer> CreateGoodServer(
+      const std::wstring& document_root) {
+    scoped_refptr<HTTPSTestServer> test_server = new HTTPSTestServer();
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    FilePath certpath = test_server->launcher_.GetOKCertPath();
+    if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
+        net::TestServerLauncher::kHostName,
+        net::TestServerLauncher::kOKHTTPSPort,
+        docroot, certpath)) {
+      return NULL;
+    }
+    return test_server;
+  }
+
+  // Create a server with an up to date certificate for the wrong hostname
+  // for this host
+  static scoped_refptr<HTTPSTestServer> CreateMismatchedServer(
+      const std::wstring& document_root) {
+    scoped_refptr<HTTPSTestServer> test_server = new HTTPSTestServer();
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    FilePath certpath = test_server->launcher_.GetOKCertPath();
+    if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
+        net::TestServerLauncher::kMismatchedHostName,
+        net::TestServerLauncher::kOKHTTPSPort,
+        docroot, certpath)) {
+      return NULL;
+    }
+    return test_server;
+  }
+
+  // Create a server with an expired certificate
+  static scoped_refptr<HTTPSTestServer> CreateExpiredServer(
+      const std::wstring& document_root) {
+    HTTPSTestServer* test_server = new HTTPSTestServer();
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    FilePath certpath = test_server->launcher_.GetExpiredCertPath();
+    if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
+        net::TestServerLauncher::kHostName,
+        net::TestServerLauncher::kBadHTTPSPort,
+        docroot, certpath)) {
+      return NULL;
+    }
+    return test_server;
+  }
+
+  // Create a server with an arbitrary certificate
+  static scoped_refptr<HTTPSTestServer> CreateServer(
+      const std::string& host_name, int port,
+      const std::wstring& document_root,
+      const std::wstring& cert_path) {
+    scoped_refptr<HTTPSTestServer> test_server = new HTTPSTestServer();
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    FilePath certpath = FilePath::FromWStringHack(cert_path);
+    if (!test_server->Start(net::TestServerLauncher::ProtoHTTP,
+        host_name, port, docroot, certpath)) {
+      return NULL;
+    }
+    return test_server;
+  }
+
+  virtual ~HTTPSTestServer() {
+  }
+
+ protected:
+  std::wstring cert_path_;
+};
+
+
+class FTPTestServer : public BaseTestServer {
+ public:
+  FTPTestServer() {
+  }
+
+  static scoped_refptr<FTPTestServer> CreateServer(
+      const std::wstring& document_root) {
+    std::string blank;
+    return CreateServer(document_root, blank, blank);
+  }
+
+  static scoped_refptr<FTPTestServer> CreateServer(
+      const std::wstring& document_root,
+      const std::string& url_user,
+      const std::string& url_password) {
+    scoped_refptr<FTPTestServer> test_server = new FTPTestServer();
+    FilePath docroot = FilePath::FromWStringHack(document_root);
+    FilePath no_cert;
+    if (!test_server->Start(net::TestServerLauncher::ProtoFTP,
+        kDefaultHostName, kFTPDefaultPort, docroot, no_cert,
+        url_user, url_password)) {
+      return NULL;
+    }
+    return test_server;
+  }
+
+  virtual bool MakeGETRequest(const std::string& page_name) {
+    const GURL& url = TestServerPage(base_address_, page_name);
+    TestDelegate d;
+    URLRequest request(url, &d);
+    request.set_context(new TestURLRequestContext());
+    request.set_method("GET");
+    request.Start();
+    EXPECT_TRUE(request.is_pending());
+
+    MessageLoop::current()->Run();
+    if (request.is_pending())
+      return false;
+
+    return true;
+  }
+
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_UNITTEST_H_
-

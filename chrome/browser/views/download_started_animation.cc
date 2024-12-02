@@ -4,10 +4,11 @@
 
 #include "chrome/browser/views/download_started_animation.h"
 
-#include "chrome/app/theme/theme_resources.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/views/hwnd_view_container.h"
+#include "chrome/views/widget/widget_win.h"
+#include "grit/theme_resources.h"
 
 // How long to spend moving downwards and fading out after waiting.
 static const int kMoveTimeMs = 600;
@@ -36,23 +37,27 @@ DownloadStartedAnimation::DownloadStartedAnimation(TabContents* tab_contents)
   if (tab_contents_bounds_.height() < kDownloadImage->height())
     return;
 
-  NotificationService::current()->AddObserver(this, NOTIFY_TAB_CONTENTS_HIDDEN,
+  NotificationService::current()->AddObserver(
+      this,
+      NotificationType::TAB_CONTENTS_HIDDEN,
       Source<TabContents>(tab_contents_));
-  NotificationService::current()->AddObserver(this,
-      NOTIFY_TAB_CONTENTS_DESTROYED, Source<TabContents>(tab_contents_));
+  NotificationService::current()->AddObserver(
+      this,
+      NotificationType::TAB_CONTENTS_DESTROYED,
+      Source<TabContents>(tab_contents_));
 
   SetImage(kDownloadImage);
 
   gfx::Rect rc(0, 0, 0, 0);
-  popup_ = new ChromeViews::HWNDViewContainer;
+  popup_ = new views::WidgetWin;
   popup_->set_window_style(WS_POPUP);
   popup_->set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW |
                               WS_EX_TRANSPARENT);
   popup_->SetLayeredAlpha(0x00);
-  popup_->Init(tab_contents_->GetContainerHWND(), rc, false);
+  popup_->Init(tab_contents_->GetNativeView(), rc, false);
   popup_->SetContentsView(this);
   Reposition();
-  popup_->ShowWindow(SW_SHOWNOACTIVATE);
+  popup_->Show();
 
   Start();
 }
@@ -63,22 +68,27 @@ void DownloadStartedAnimation::Reposition() {
 
   // Align the image with the bottom left of the web contents (so that it
   // points to the newly created download).
-  CSize size;
-  GetPreferredSize(&size);
-  popup_->MoveWindow(tab_contents_bounds_.x(),
-                     static_cast<int>(tab_contents_bounds_.bottom() - size.cy -
-                     size.cy * (1 - GetCurrentValue())),
-                     size.cx, size.cy);
+  gfx::Size size = GetPreferredSize();
+  popup_->MoveWindow(
+      tab_contents_bounds_.x(),
+      static_cast<int>(tab_contents_bounds_.bottom() -
+          size.height() - size.height() * (1 - GetCurrentValue())),
+      size.width(),
+      size.height());
 }
 
 void DownloadStartedAnimation::Close() {
   if (!tab_contents_)
     return;
 
-  NotificationService::current()->RemoveObserver(this,
-      NOTIFY_TAB_CONTENTS_HIDDEN, Source<TabContents>(tab_contents_));
-  NotificationService::current()->RemoveObserver(this,
-      NOTIFY_TAB_CONTENTS_DESTROYED, Source<TabContents>(tab_contents_));
+  NotificationService::current()->RemoveObserver(
+      this,
+      NotificationType::TAB_CONTENTS_HIDDEN,
+      Source<TabContents>(tab_contents_));
+  NotificationService::current()->RemoveObserver(
+      this,
+      NotificationType::TAB_CONTENTS_DESTROYED,
+      Source<TabContents>(tab_contents_));
   tab_contents_ = NULL;
   popup_->Close();
 }
@@ -105,4 +115,3 @@ void DownloadStartedAnimation::Observe(NotificationType type,
                                        const NotificationDetails& details) {
   Close();
 }
-

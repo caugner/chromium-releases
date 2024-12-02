@@ -6,7 +6,7 @@
 #define BASE_REF_COUNTED_H_
 
 #include "base/atomic_ref_count.h"
-#include "base/basictypes.h"
+#include "base/thread_collision_warner.h"
 
 namespace base {
 
@@ -27,6 +27,8 @@ class RefCountedBase {
 #ifndef NDEBUG
   bool in_dtor_;
 #endif
+
+  DFAKE_MUTEX(add_release_);
 
   DISALLOW_COPY_AND_ASSIGN(RefCountedBase);
 };
@@ -106,7 +108,21 @@ class RefCountedThreadSafe : public subtle::RefCountedThreadSafeBase {
     }
   }
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(RefCountedThreadSafe<T>);
+};
+
+//
+// A wrapper for some piece of data so we can place other things in
+// scoped_refptrs<>.
+//
+template<typename T>
+class RefCountedData : public base::RefCounted< base::RefCountedData<T> > {
+ public:
+  RefCountedData() : data() {}
+  RefCountedData(const T& in_value) : data(in_value) {}
+
+  T data;
 };
 
 }  // namespace base
@@ -208,9 +224,8 @@ class scoped_refptr {
     swap(&r.ptr_);
   }
 
- private:
+ protected:
   T* ptr_;
 };
 
 #endif  // BASE_REF_COUNTED_H_
-

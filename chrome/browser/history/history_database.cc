@@ -8,17 +8,15 @@
 #include <set>
 
 #include "base/string_util.h"
-
-// Only needed for migration.
-#include "base/file_util.h"
-#include "chrome/browser/history/text_database_manager.h"
+#include "chrome/common/sqlite_utils.h"
 
 namespace history {
 
 namespace {
 
 // Current version number.
-const int kCurrentVersionNumber = 16;
+static const int kCurrentVersionNumber = 16;
+static const int kCompatibleVersionNumber = 16;
 
 }  // namespace
 
@@ -30,13 +28,12 @@ HistoryDatabase::HistoryDatabase()
 HistoryDatabase::~HistoryDatabase() {
 }
 
-InitStatus HistoryDatabase::Init(const std::wstring& history_name,
-                                 const std::wstring& bookmarks_path) {
-  // Open the history database, using the narrow version of open indicates to
-  // sqlite that we want the database to be in UTF-8 if it doesn't already
-  // exist.
+InitStatus HistoryDatabase::Init(const FilePath& history_name,
+                                 const FilePath& bookmarks_path) {
+  // OpenSqliteDb uses the narrow version of open, indicating to sqlite that we
+  // want the database to be in UTF-8 if it doesn't already exist.
   DCHECK(!db_) << "Already initialized!";
-  if (sqlite3_open(WideToUTF8(history_name).c_str(), &db_) != SQLITE_OK)
+  if (OpenSqliteDb(history_name, &db_) != SQLITE_OK)
     return INIT_FAILURE;
   statement_cache_ = new SqliteStatementCache;
   DBCloseScoper scoper(&db_, &statement_cache_);
@@ -66,7 +63,8 @@ InitStatus HistoryDatabase::Init(const std::wstring& history_name,
   // Create the tables and indices.
   // NOTE: If you add something here, also add it to
   //       RecreateAllButStarAndURLTables.
-  if (!meta_table_.Init(std::string(), kCurrentVersionNumber, db_))
+  if (!meta_table_.Init(std::string(), kCurrentVersionNumber,
+                        kCompatibleVersionNumber, db_))
     return INIT_FAILURE;
   if (!CreateURLTable(false) || !InitVisitTable() ||
       !InitKeywordSearchTermsTable() || !InitDownloadTable() ||
@@ -197,10 +195,12 @@ SqliteStatementCache& HistoryDatabase::GetStatementCache() {
 // Migration -------------------------------------------------------------------
 
 InitStatus HistoryDatabase::EnsureCurrentVersion(
-    const std::wstring& tmp_bookmarks_path) {
+    const FilePath& tmp_bookmarks_path) {
   // We can't read databases newer than we were designed for.
-  if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber)
+  if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber) {
+    LOG(WARNING) << "History database is too new.";
     return INIT_TOO_NEW;
+  }
 
   // NOTICE: If you are changing structures for things shared with the archived
   // history file like URLs, visits, or downloads, that will need migration as
@@ -208,22 +208,24 @@ InitStatus HistoryDatabase::EnsureCurrentVersion(
   // in the corresponding file (url_database.cc, etc.) and called from here and
   // from the archived_database.cc.
 
-  // When the version is too old, we just try to continue anyway, there should
-  // not be a released product that makes a database too old for us to handle.
   int cur_version = meta_table_.GetVersionNumber();
 
   // Put migration code here
 
   if (cur_version == 15) {
-    if (!MigrateBookmarksToFile(tmp_bookmarks_path))
+    if (!MigrateBookmarksToFile(tmp_bookmarks_path) ||
+        !DropStarredIDFromURLs()) {
+      LOG(WARNING) << "Unable to update history database to version 16.";
       return INIT_FAILURE;
-    if (!DropStarredIDFromURLs())
-      return INIT_FAILURE;
-    cur_version = 16;
+    }
+    ++cur_version;
     meta_table_.SetVersionNumber(cur_version);
-    meta_table_.SetCompatibleVersionNumber(cur_version);
+    meta_table_.SetCompatibleVersionNumber(
+        std::min(cur_version, kCompatibleVersionNumber));
   }
 
+  // When the version is too old, we just try to continue anyway, there should
+  // not be a released product that makes a database too old for us to handle.
   LOG_IF(WARNING, cur_version < kCurrentVersionNumber) <<
       "History database version " << cur_version << " is too old to handle.";
 
@@ -231,4 +233,3 @@ InitStatus HistoryDatabase::EnsureCurrentVersion(
 }
 
 }  // namespace history
-

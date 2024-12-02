@@ -5,17 +5,18 @@
 #include "config.h"
 #include <string>
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "HistoryItem.h"
 #include "PlatformString.h"
 #include "ResourceRequest.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 #undef LOG
 
 #include "webkit/glue/glue_serialize.h"
 
 #include "base/pickle.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "webkit/glue/glue_util.h"
 #include "webkit/glue/webkit_glue.h"
@@ -156,7 +157,7 @@ inline String ReadString(const SerializeObject* obj) {
   // In version 2, the length field was the length in UChars.
   // In version 1 and 3 it is the length in bytes.
   int bytes = ((obj->version == 2) ? length * sizeof(UChar) : length);
-  
+
   const void* data;
   if (!ReadBytes(obj, &data, bytes))
     return String();
@@ -200,12 +201,12 @@ static void WriteFormData(const FormData* form_data, SerializeObject* obj) {
   }
 }
 
-static FormData* ReadFormData(const SerializeObject* obj) {
+static PassRefPtr<FormData> ReadFormData(const SerializeObject* obj) {
   int num_elements = ReadInteger(obj);
   if (num_elements == 0)
     return NULL;
 
-  FormData* form_data = new FormData();
+  RefPtr<FormData> form_data = FormData::create();
 
   for (int i = 0; i < num_elements; ++i) {
     int type = ReadInteger(obj);
@@ -219,7 +220,7 @@ static FormData* ReadFormData(const SerializeObject* obj) {
     }
   }
 
-  return form_data;
+  return form_data.release();
 }
 
 // Writes the HistoryItem data into the SerializeObject object for
@@ -242,14 +243,14 @@ static void WriteHistoryItem(const HistoryItem* item, SerializeObject* obj) {
   WriteInteger(item->scrollPoint().y(), obj);
   WriteBoolean(item->isTargetItem(), obj);
   WriteInteger(item->visitCount(), obj);
-  WriteString(item->rssFeedReferrer(), obj);
+  WriteString(item->referrer(), obj);
 
   WriteStringVector(item->documentState(), obj);
 
   // No access to formData through a const HistoryItem = lame.
   WriteFormData(const_cast<HistoryItem*>(item)->formData(), obj);
   WriteString(item->formContentType(), obj);
-  WriteString(item->formReferrer(), obj);
+  WriteString(item->referrer(), obj);
 
   // Subitems
   WriteInteger(static_cast<int>(item->children().size()), obj);
@@ -259,14 +260,14 @@ static void WriteHistoryItem(const HistoryItem* item, SerializeObject* obj) {
 
 // Creates a new HistoryItem tree based on the serialized string.
 // Assumes the data is in the format returned by WriteHistoryItem.
-static HistoryItem* ReadHistoryItem(const SerializeObject* obj) {
+static PassRefPtr<HistoryItem> ReadHistoryItem(const SerializeObject* obj) {
   // See note in WriteHistoryItem. on this.
   obj->version = ReadInteger(obj);
 
   if (obj->version > kVersion)
     return NULL;
 
-  HistoryItem* item = new HistoryItem();
+  RefPtr<HistoryItem> item = HistoryItem::create();
 
   item->setURLString(ReadString(obj));
   item->setOriginalURLString(ReadString(obj));
@@ -280,7 +281,7 @@ static HistoryItem* ReadHistoryItem(const SerializeObject* obj) {
   item->setScrollPoint(IntPoint(x, y));
   item->setIsTargetItem(ReadBoolean(obj));
   item->setVisitCount(ReadInteger(obj));
-  item->setRSSFeedReferrer(ReadString(obj));
+  item->setReferrer(ReadString(obj));
 
   Vector<String> document_state;
   ReadStringVector(obj, &document_state);
@@ -302,7 +303,7 @@ static HistoryItem* ReadHistoryItem(const SerializeObject* obj) {
   for (int i = 0; i < num_children; ++i)
     item->addChildItem(ReadHistoryItem(obj));
 
-  return item;
+  return item.release();
 }
 
 // Serialize a HistoryItem to a string, using our JSON Value serializer.
@@ -351,11 +352,11 @@ void HistoryItemToVersionedString(PassRefPtr<HistoryItem> item, int version,
 }
 
 std::string CreateHistoryStateForURL(const GURL& url) {
-  RefPtr<HistoryItem> item(new HistoryItem(GURLToKURL(url), String()));
+  // TODO(eseide): We probably should be passing a list visit time other than 0
+  RefPtr<HistoryItem> item(HistoryItem::create(GURLToKURL(url), String(), 0));
   std::string data;
   HistoryItemToString(item, &data);
   return data;
 }
 
 }  // namespace webkit_glue
-

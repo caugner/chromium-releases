@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008 The SCons Foundation
+# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 The SCons Foundation
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -21,11 +21,16 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-__revision__ = "src/engine/SCons/cpp.py 3424 2008/09/15 11:22:20 scons"
+__revision__ = "src/engine/SCons/cpp.py 3897 2009/01/13 06:45:54 scons"
 
 __doc__ = """
 SCons C Pre-Processor module
 """
+
+# TODO(1.5):  remove this import
+# This module doesn't use anything from SCons by name, but we import SCons
+# here to pull in zip() from the SCons.compat layer for early Pythons.
+import SCons
 
 import os
 import re

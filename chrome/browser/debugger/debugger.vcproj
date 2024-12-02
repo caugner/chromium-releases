@@ -142,11 +142,15 @@
 			</File>
 		</Filter>
 		<File
-			RelativePath=".\debugger_contents.cc"
+			RelativePath=".\debugger_host.h"
 			>
 		</File>
 		<File
-			RelativePath=".\debugger_contents.h"
+			RelativePath=".\debugger_host_impl.cpp"
+			>
+		</File>
+		<File
+			RelativePath=".\debugger_host_impl.h"
 			>
 		</File>
 		<File
@@ -178,10 +182,6 @@
 			>
 		</File>
 		<File
-			RelativePath=".\resources\debugger_resources.h"
-			>
-		</File>
-		<File
 			RelativePath=".\debugger_view.cc"
 			>
 		</File>
@@ -203,6 +203,38 @@
 		</File>
 		<File
 			RelativePath=".\debugger_wrapper.h"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_client_host.h"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_manager.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_manager.h"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_view.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_view.h"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_window.h"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_window_win.cc"
+			>
+		</File>
+		<File
+			RelativePath=".\devtools_window_win.h"
 			>
 		</File>
 	</Files>

@@ -2,51 +2,114 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
 #include <windows.h>
 #include <objidl.h>
 #include <mlang.h>
+#endif
 
 #include "chrome/renderer/render_process.h"
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/histogram.h"
-#include "chrome/browser/net/dns_global.h"  // TODO(jar): DNS calls should be renderer specific, not including browser.
+#include "base/path_service.h"
+#include "base/sys_info.h"
+// TODO(jar): DNS calls should be renderer specific, not including browser.
+#include "chrome/browser/net/dns_global.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/ipc_channel.h"
 #include "chrome/common/ipc_message_utils.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/transport_dib.h"
 #include "chrome/renderer/render_view.h"
 #include "webkit/glue/webkit_glue.h"
 
+// Attempts to load FFmpeg before engaging the sandbox.  Returns true if all
+// libraries were loaded successfully, false otherwise.
+static bool LoadFFmpeg() {
+#if defined(OS_WIN)
+  int path_keys[] = {
+    chrome::FILE_LIBAVCODEC,
+    chrome::FILE_LIBAVFORMAT,
+    chrome::FILE_LIBAVUTIL
+  };
+  HMODULE libs[arraysize(path_keys)] = {NULL};
+  for (size_t i = 0; i < arraysize(path_keys); ++i) {
+    std::wstring path;
+    if (!PathService::Get(path_keys[i], &path))
+      break;
+    libs[i] = LoadLibrary(path.c_str());
+    if (!libs[i])
+      break;
+  }
+
+  // Check that we loaded all libraries successfully.
+  if (libs[arraysize(libs)-1])
+    return true;
+
+  // Free any loaded libraries if we weren't successful.
+  for (size_t i = 0; i < arraysize(libs) && libs[i] != NULL; ++i) {
+    FreeLibrary(libs[i]);
+  }
+  return false;
+#else
+  // TODO(port): Need to handle loading FFmpeg on non-Windows platforms.
+  NOTIMPLEMENTED();
+  return false;
+#endif
+}
+
 //-----------------------------------------------------------------------------
 
-IMLangFontLink2* RenderProcess::lang_font_link_ = NULL;
-bool RenderProcess::load_plugins_in_process_ = false;
-
-//-----------------------------------------------------------------------------
+RenderProcess::RenderProcess()
+    : ChildProcess(new RenderThread()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
+          base::TimeDelta::FromSeconds(5),
+          this, &RenderProcess::ClearTransportDIBCache)),
+      sequence_number_(0) {
+  Init();
+}
 
 RenderProcess::RenderProcess(const std::wstring& channel_name)
-    : render_thread_(channel_name),
-#pragma warning(suppress: 4355)  // Okay to pass "this" here.
-      clearer_factory_(this) {
-  for (int i = 0; i < arraysize(shared_mem_cache_); ++i)
-    shared_mem_cache_[i] = NULL;
+    : ChildProcess(new RenderThread(channel_name)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(shared_mem_cache_cleaner_(
+          base::TimeDelta::FromSeconds(5),
+          this, &RenderProcess::ClearTransportDIBCache)),
+      sequence_number_(0) {
+  Init();
 }
 
 RenderProcess::~RenderProcess() {
+  // TODO(port)
+  // Try and limit what we pull in for our non-Win unit test bundle
+#ifndef NDEBUG
+  // log important leaked objects
+  webkit_glue::CheckForLeaks();
+#endif
+
+  GetShutDownEvent()->Signal();
+
   // We need to stop the RenderThread as the clearer_factory_
   // member could be in use while the object itself is destroyed,
   // as a result of the containing RenderProcess object being destroyed.
   // This race condition causes a crash when the renderer process is shutting
   // down.
-  render_thread_.Stop();
-  ClearSharedMemCache();
+  child_thread()->Stop();
+  ClearTransportDIBCache();
 }
 
-// static
-bool RenderProcess::GlobalInit(const std::wstring &channel_name) {
+void RenderProcess::Init() {
+  in_process_plugins_ = InProcessPlugins();
+  for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i)
+    shared_mem_cache_[i] = NULL;
+
+#if defined(OS_WIN)
   // HACK:  See http://b/issue?id=1024307 for rationale.
   if (GetModuleHandle(L"LPK.DLL") == NULL) {
     // Makes sure lpk.dll is loaded by gdi32 to make sure ExtTextOut() works
@@ -61,22 +124,13 @@ bool RenderProcess::GlobalInit(const std::wstring &channel_name) {
       gdi_init_lpk(0);
     }
   }
+#endif
 
-  InitializeLangFontLink();
-
-  CommandLine command_line;
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
     webkit_glue::SetJavaScriptFlags(
       command_line.GetSwitchValue(switches::kJavaScriptFlags));
   }
-  if (command_line.HasSwitch(switches::kPlaybackMode) ||
-      command_line.HasSwitch(switches::kRecordMode)) {
-      webkit_glue::SetRecordPlaybackMode(true);
-  }
-
-  if (command_line.HasSwitch(switches::kInProcessPlugins) ||
-      command_line.HasSwitch(switches::kSingleProcess))
-    load_plugins_in_process_ = true;
 
   if (command_line.HasSwitch(switches::kEnableWatchdog)) {
     // TODO(JAR): Need to implement renderer IO msgloop watchdog.
@@ -86,160 +140,149 @@ bool RenderProcess::GlobalInit(const std::wstring &channel_name) {
     StatisticsRecorder::set_dump_on_exit(true);
   }
 
-  ChildProcessFactory<RenderProcess> factory;
-  return ChildProcess::GlobalInit(channel_name, &factory);
-}
-
-// static
-void RenderProcess::GlobalCleanup() {
-  ChildProcess::GlobalCleanup();
-  ReleaseLangFontLink();
-}
-
-// static
-void RenderProcess::InitializeLangFontLink() {
-  // TODO(hbono): http://b/1072298 Experimentally commented out this code to
-  // prevent registry leaks caused by this IMLangFontLink2 interface.
-  // If you find any font-rendering regressions. Please feel free to blame me.
-#ifdef USE_IMLANGFONTLINK2
-  IMultiLanguage* multi_language = NULL;
-  lang_font_link_ = NULL;
-  if (S_OK != CoCreateInstance(CLSID_CMultiLanguage,
-                               0,
-                               CLSCTX_ALL,
-                               IID_IMultiLanguage,
-                               reinterpret_cast<void**>(&multi_language))) {
-    DLOG(ERROR) << "Cannot CoCreate CMultiLanguage";
-  } else {
-    if (S_OK != multi_language->QueryInterface(IID_IMLangFontLink2,
-        reinterpret_cast<void**>(&lang_font_link_))) {
-      DLOG(ERROR) << "Cannot query LangFontLink2 interface";
-    }
+  if (command_line.HasSwitch(switches::kEnableVideo) && LoadFFmpeg()) {
+    webkit_glue::SetMediaPlayerAvailable(true);
   }
+}
 
-  if (multi_language)
-    multi_language->Release();
+bool RenderProcess::InProcessPlugins() {
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  return command_line.HasSwitch(switches::kInProcessPlugins) ||
+         command_line.HasSwitch(switches::kSingleProcess);
+}
+
+// -----------------------------------------------------------------------------
+// Platform specific code for dealing with bitmap transport...
+
+// -----------------------------------------------------------------------------
+// Create a platform canvas object which renders into the given transport
+// memory.
+// -----------------------------------------------------------------------------
+static skia::PlatformCanvas* CanvasFromTransportDIB(
+    TransportDIB* dib, const gfx::Rect& rect) {
+#if defined(OS_WIN)
+  return new skia::PlatformCanvas(rect.width(), rect.height(), true,
+                                  dib->handle());
+#elif defined(OS_LINUX) || defined(OS_MACOSX)
+  return new skia::PlatformCanvas(rect.width(), rect.height(), true,
+                                  reinterpret_cast<uint8_t*>(dib->memory()));
 #endif
 }
 
-// static
-void RenderProcess::ReleaseLangFontLink() {
-  // TODO(hbono): http://b/1072298 Experimentally commented out this code to
-  // prevent registry leaks caused by this IMLangFontLink2 interface.
-  // If you find any font-rendering regressions. Please feel free to blame me.
-#ifdef USE_IMLANGFONTLINK2
-  if (lang_font_link_)
-    lang_font_link_->Release();
+TransportDIB* RenderProcess::CreateTransportDIB(size_t size) {
+#if defined(OS_WIN) || defined(OS_LINUX)
+  // Windows and Linux create transport DIBs inside the renderer
+  return TransportDIB::Create(size, sequence_number_++);
+#elif defined(OS_MACOSX)  // defined(OS_WIN) || defined(OS_LINUX)
+  // Mac creates transport DIBs in the browser, so we need to do a sync IPC to
+  // get one.
+  TransportDIB::Handle handle;
+  IPC::Message* msg = new ViewHostMsg_AllocTransportDIB(size, &handle);
+  if (!child_thread()->Send(msg))
+    return NULL;
+  if (handle.fd < 0)
+    return NULL;
+  return TransportDIB::Map(handle);
+#endif  // defined(OS_MACOSX)
+}
+
+void RenderProcess::FreeTransportDIB(TransportDIB* dib) {
+  if (!dib)
+    return;
+
+#if defined(OS_MACOSX)
+  // On Mac we need to tell the browser that it can drop a reference to the
+  // shared memory.
+  IPC::Message* msg = new ViewHostMsg_FreeTransportDIB(dib->id());
+  child_thread()->Send(msg);
 #endif
+
+  delete dib;
 }
 
-// static
-IMLangFontLink2* RenderProcess::GetLangFontLink() {
-  return lang_font_link_;
-}
+// -----------------------------------------------------------------------------
 
-// static
-bool RenderProcess::ShouldLoadPluginsInProcess() {
-  return load_plugins_in_process_;
-}
 
-// static
-SharedMemory* RenderProcess::AllocSharedMemory(size_t size) {
-  self()->clearer_factory_.RevokeAll();
+skia::PlatformCanvas* RenderProcess::GetDrawingCanvas(
+    TransportDIB** memory, const gfx::Rect& rect) {
+  const size_t stride = skia::PlatformCanvas::StrideForWidth(rect.width());
+  const size_t size = stride * rect.height();
 
-  SharedMemory* mem = self()->GetSharedMemFromCache(size);
-  if (mem)
-    return mem;
-
-  // Round-up size to allocation granularity
-  SYSTEM_INFO info;
-  GetSystemInfo(&info);
-
-  size = size / info.dwAllocationGranularity + 1;
-  size = size * info.dwAllocationGranularity;
-
-  mem = new SharedMemory();
-  if (!mem)
-    return NULL;
-  if (!mem->Create(L"", false, true, size)) {
-    delete mem;
-    return NULL;
+  if (!GetTransportDIBFromCache(memory, size)) {
+    *memory = CreateTransportDIB(size);
+    if (!*memory)
+      return false;
   }
 
-  return mem;
+  return CanvasFromTransportDIB(*memory, rect);
 }
 
-// static
-void RenderProcess::FreeSharedMemory(SharedMemory* mem) {
-  if (self()->PutSharedMemInCache(mem)) {
-    self()->ScheduleCacheClearer();
+void RenderProcess::ReleaseTransportDIB(TransportDIB* mem) {
+  if (PutSharedMemInCache(mem)) {
+    shared_mem_cache_cleaner_.Reset();
     return;
   }
-  DeleteSharedMem(mem);
+
+  FreeTransportDIB(mem);
 }
 
-// static
-void RenderProcess::DeleteSharedMem(SharedMemory* mem) {
-  delete mem;
-}
-
-SharedMemory* RenderProcess::GetSharedMemFromCache(size_t size) {
+bool RenderProcess::GetTransportDIBFromCache(TransportDIB** mem,
+                                             size_t size) {
   // look for a cached object that is suitable for the requested size.
-  for (int i = 0; i < arraysize(shared_mem_cache_); ++i) {
-    SharedMemory* mem = shared_mem_cache_[i];
-    if (mem && mem->max_size() >= size) {
+  for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i) {
+    if (shared_mem_cache_[i] &&
+        size <= shared_mem_cache_[i]->size()) {
+      *mem = shared_mem_cache_[i];
       shared_mem_cache_[i] = NULL;
-      return mem;
+      return true;
     }
   }
-  return NULL;
-}
 
-bool RenderProcess::PutSharedMemInCache(SharedMemory* mem) {
-  // simple algorithm:
-  //  - look for an empty slot to store mem, or
-  //  - if full, then replace any existing cache entry that is smaller than the
-  //    given shared memory object.
-  for (int i = 0; i < arraysize(shared_mem_cache_); ++i) {
-    if (!shared_mem_cache_[i]) {
-      shared_mem_cache_[i] = mem;
-      return true;
-    }
-  }
-  for (int i = 0; i < arraysize(shared_mem_cache_); ++i) {
-    SharedMemory* cached_mem = shared_mem_cache_[i];
-    if (cached_mem->max_size() < mem->max_size()) {
-      shared_mem_cache_[i] = mem;
-      DeleteSharedMem(cached_mem);
-      return true;
-    }
-  }
   return false;
 }
 
-void RenderProcess::ClearSharedMemCache() {
-  for (int i = 0; i < arraysize(shared_mem_cache_); ++i) {
+int RenderProcess::FindFreeCacheSlot(size_t size) {
+  // simple algorithm:
+  //  - look for an empty slot to store mem, or
+  //  - if full, then replace smallest entry which is smaller than |size|
+  for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i) {
+    if (shared_mem_cache_[i] == NULL)
+      return i;
+  }
+
+  size_t smallest_size = size;
+  int smallest_index = -1;
+
+  for (size_t i = 1; i < arraysize(shared_mem_cache_); ++i) {
+    const size_t entry_size = shared_mem_cache_[i]->size();
+    if (entry_size < smallest_size) {
+      smallest_size = entry_size;
+      smallest_index = i;
+    }
+  }
+
+  if (smallest_index != -1) {
+    FreeTransportDIB(shared_mem_cache_[smallest_index]);
+    shared_mem_cache_[smallest_index] = NULL;
+  }
+
+  return smallest_index;
+}
+
+bool RenderProcess::PutSharedMemInCache(TransportDIB* mem) {
+  const int slot = FindFreeCacheSlot(mem->size());
+  if (slot == -1)
+    return false;
+
+  shared_mem_cache_[slot] = mem;
+  return true;
+}
+
+void RenderProcess::ClearTransportDIBCache() {
+  for (size_t i = 0; i < arraysize(shared_mem_cache_); ++i) {
     if (shared_mem_cache_[i]) {
-      DeleteSharedMem(shared_mem_cache_[i]);
+      FreeTransportDIB(shared_mem_cache_[i]);
       shared_mem_cache_[i] = NULL;
     }
   }
 }
-
-void RenderProcess::ScheduleCacheClearer() {
-  // If we already have a deferred clearer, then revoke it so we effectively
-  // delay cache clearing until idle for our desired interval.
-  clearer_factory_.RevokeAll();
-
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      clearer_factory_.NewRunnableMethod(&RenderProcess::ClearSharedMemCache),
-      5000 /* 5 seconds */);
-}
-
-void RenderProcess::Cleanup() {
-#ifndef NDEBUG
-  // log important leaked objects
-  webkit_glue::CheckForLeaks();
-#endif
-}
-

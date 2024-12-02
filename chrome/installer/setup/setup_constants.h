@@ -9,8 +9,6 @@
 
 namespace installer {
 
-extern const wchar_t kChromeOldExe[];
-extern const wchar_t kChromeNewExe[];
 extern const wchar_t kWowHelperExe[];
 extern const wchar_t kDictionaries[];
 extern const wchar_t kChromeArchive[];
@@ -21,10 +19,7 @@ extern const wchar_t kChromeCompressedPatchArchivePrefix[];
 extern const wchar_t kInstallSourceDir[];
 extern const wchar_t kInstallSourceChromeDir[];
 
-extern const wchar_t kInstallerDir[];
-
 extern const wchar_t kMediaPlayerRegPath[];
 }  // namespace installer
 
 #endif  // CHROME_INSTALLER_SETUP_SETUP_CONSTANTS_H__
-

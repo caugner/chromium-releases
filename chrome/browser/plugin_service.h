@@ -5,14 +5,16 @@
 // This class responds to requests from renderers for the list of plugins, and
 // also a proxy object for plugin instances.
 
-#ifndef CHROME_BROWSER_PLUGIN_SERVICE_H__
-#define CHROME_BROWSER_PLUGIN_SERVICE_H__
+#ifndef CHROME_BROWSER_PLUGIN_SERVICE_H_
+#define CHROME_BROWSER_PLUGIN_SERVICE_H_
 
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/lock.h"
+#include "base/ref_counted.h"
+#include "base/singleton.h"
 #include "chrome/browser/browser_process.h"
 #include "webkit/glue/webplugin.h"
 
@@ -20,6 +22,7 @@ namespace IPC {
 class Message;
 }
 
+class MessageLoop;
 class PluginProcessHost;
 class URLRequestContext;
 class ResourceDispatcherHost;
@@ -32,13 +35,6 @@ class PluginService {
   // Returns the PluginService singleton.
   static PluginService* GetInstance();
 
-  // Creates the PluginService object, but doesn't actually build the plugin
-  // list yet.  It's generated lazily.
-  // Note: don't call these directly - use GetInstance() above.  They are public
-  // so Singleton can access them.
-  PluginService();
-  ~PluginService();
-
   // Gets the list of available plugins.
   void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins);
 
@@ -48,8 +44,13 @@ class PluginService {
 
   // Sets/gets the data directory that Chrome plugins should use to store
   // persistent data.
-  void SetChromePluginDataDir(const std::wstring& data_dir);
-  const std::wstring& GetChromePluginDataDir();
+  void SetChromePluginDataDir(const FilePath& data_dir);
+  const FilePath& GetChromePluginDataDir();
+
+  // Add an extra plugin directory to scan when we actually do the loading.
+  // This will force a refresh of the plugin list the next time plugins are
+  // requested.
+  void AddExtraPluginDir(const FilePath& plugin_dir);
 
   // Gets the browser's UI locale.
   const std::wstring& GetUILocale();
@@ -57,13 +58,13 @@ class PluginService {
   // Returns the plugin process host corresponding to the plugin process that
   // has been started by this service. Returns NULL if no process has been
   // started.
-  PluginProcessHost* FindPluginProcess(const std::wstring& dll);
+  PluginProcessHost* FindPluginProcess(const FilePath& plugin_path);
 
   // Returns the plugin process host corresponding to the plugin process that
   // has been started by this service. This will start a process to host the
-  // 'dll' if needed. If the process fails to start, the return value is NULL.
-  // Must be called on the IO thread.
-  PluginProcessHost* FindOrStartPluginProcess(const std::wstring& dll,
+  // 'plugin_path' if needed. If the process fails to start, the return value
+  // is NULL. Must be called on the IO thread.
+  PluginProcessHost* FindOrStartPluginProcess(const FilePath& plugin_path,
                                               const std::string& clsid);
 
   // Opens a channel to a plugin process for the given mime type, starting
@@ -76,23 +77,16 @@ class PluginService {
                            const std::wstring& locale,
                            IPC::Message* reply_msg);
 
-  // A PluginProcessHost object calls this before its process is shut down.
-  void OnPluginProcessIsShuttingDown(PluginProcessHost* host);
-
-  // A PluginProcessHost object calls this after its process has exited. This
-  // call deletes the host instance.
-  void OnPluginProcessExited(PluginProcessHost* host);
-
   bool HavePluginFor(const std::string& mime_type, bool allow_wildcard);
 
-  std::wstring GetPluginPath(const GURL& url,
-                             const std::string& mime_type,
-                             const std::string& clsid,
-                             std::string* actual_mime_type);
+  FilePath GetPluginPath(const GURL& url,
+                         const std::string& mime_type,
+                         const std::string& clsid,
+                         std::string* actual_mime_type);
 
-  // Get plugin info by matching full dll path.
-  bool GetPluginInfoByDllPath(const std::wstring& dll_path,
-                              WebPluginInfo* info);
+  // Get plugin info by matching full path.
+  bool GetPluginInfoByPath(const FilePath& plugin_path,
+                           WebPluginInfo* info);
 
   // Returns true if the plugin's mime-type supports a given mime-type.
   // Checks for absolute matching and wildcards.  mime-types should be in
@@ -112,16 +106,18 @@ class PluginService {
   void Shutdown();
 
  private:
-  friend class PluginProcessHostIterator;
+  friend struct DefaultSingletonTraits<PluginService>;
 
-  // Removes a host from the plugin_hosts collection
-  void RemoveHost(PluginProcessHost* host);
+  // Creates the PluginService object, but doesn't actually build the plugin
+  // list yet.  It's generated lazily.
+  PluginService();
+  ~PluginService();
 
   // Shutdown handler which executes in the context of the IO thread.
   void OnShutdown();
 
-  // mapping between plugin dll path and PluginProcessHost
-  typedef base::hash_map<std::wstring, PluginProcessHost*> PluginMap;
+  // mapping between plugin path and PluginProcessHost
+  typedef base::hash_map<FilePath, PluginProcessHost*> PluginMap;
   PluginMap plugin_hosts_;
 
   // The main thread's message loop.
@@ -131,7 +127,7 @@ class PluginService {
   ResourceDispatcherHost* resource_dispatcher_host_;
 
   // The data directory that Chrome plugins should use to store persistent data.
-  std::wstring chrome_plugin_data_dir_;
+  FilePath chrome_plugin_data_dir_;
 
   // The browser's UI locale.
   const std::wstring ui_locale_;
@@ -141,8 +137,7 @@ class PluginService {
   Lock lock_;
 
   // Handles plugin process shutdown.
-  class ShutdownHandler :
-      public base::RefCountedThreadSafe<ShutdownHandler> {
+  class ShutdownHandler : public base::RefCountedThreadSafe<ShutdownHandler> {
    public:
      ShutdownHandler() {}
      ~ShutdownHandler() {}
@@ -152,65 +147,16 @@ class PluginService {
      void InitiateShutdown();
 
    private:
-     // Shutdown handler which runs on the io thread.
-     void OnShutdown();
+    // Shutdown handler which runs on the io thread.
+    void OnShutdown();
 
-     DISALLOW_EVIL_CONSTRUCTORS(ShutdownHandler);
+    DISALLOW_COPY_AND_ASSIGN(ShutdownHandler);
   };
 
   friend class ShutdownHandler;
   scoped_refptr<ShutdownHandler> plugin_shutdown_handler_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PluginService);
+  DISALLOW_COPY_AND_ASSIGN(PluginService);
 };
 
-// The PluginProcessHostIterator allows to iterate through all the
-// PluginProcessHosts. Note that this should be done from the IO thread and that
-// the iterator should not be kept around as it may be invalidated on
-// subsequent event processing in the event loop.
-class PluginProcessHostIterator {
- public:
-  PluginProcessHostIterator();
-  PluginProcessHostIterator(const PluginProcessHostIterator& instance);
-
-  PluginProcessHostIterator& operator=(
-      const PluginProcessHostIterator& instance) {
-      iterator_ = instance.iterator_;
-  }
-
-  const PluginProcessHost* operator->() const {
-    return iterator_->second;
-  }
-
-  const PluginProcessHost* operator*() const {
-    return iterator_->second;
-  }
-
-  const PluginProcessHost* operator++() { // ++preincrement
-    ++iterator_;
-    if (iterator_ == end_)
-      return NULL;
-    else
-      return iterator_->second;
-  }
-
-  const PluginProcessHost* operator++(int) { // postincrement++
-    const PluginProcessHost* r;
-    if (iterator_ == end_)
-      r = NULL;
-    else
-      r = iterator_->second;
-    iterator_++;
-    return r;
-  }
-
-  bool Done() {
-    return (iterator_ == end_);
-  }
-
- private:
-  PluginService::PluginMap::const_iterator iterator_;
-  PluginService::PluginMap::const_iterator end_;
-};
-
-#endif  // CHROME_BROWSER_PLUGIN_SERVICE_H__
+#endif  // CHROME_BROWSER_PLUGIN_SERVICE_H_

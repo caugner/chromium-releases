@@ -5,14 +5,15 @@
 #ifndef CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H__
 #define CHROME_BROWSER_VIEWS_OPTIONS_COOKIES_VIEW_H__
 
-#include "chrome/views/dialog_delegate.h"
-#include "chrome/views/native_button.h"
-#include "chrome/views/table_view.h"
-#include "chrome/views/text_field.h"
+#include "base/task.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/controls/table/table_view.h"
+#include "chrome/views/controls/text_field.h"
 #include "chrome/views/view.h"
-#include "chrome/views/window.h"
+#include "chrome/views/window/dialog_delegate.h"
+#include "chrome/views/window/window.h"
 
-namespace ChromeViews {
+namespace views {
 class Label;
 }
 class CookieInfoView;
@@ -21,11 +22,11 @@ class CookiesTableView;
 class Profile;
 class Timer;
 
-class CookiesView : public ChromeViews::View,
-                    public ChromeViews::DialogDelegate,
-                    public ChromeViews::NativeButton::Listener,
-                    public ChromeViews::TableViewObserver,
-                    public ChromeViews::TextField::Controller {
+class CookiesView : public views::View,
+                    public views::DialogDelegate,
+                    public views::NativeButton::Listener,
+                    public views::TableViewObserver,
+                    public views::TextField::Controller {
  public:
   // Show the Cookies Window, creating one if necessary.
   static void ShowCookiesWindow(Profile* profile);
@@ -35,38 +36,42 @@ class CookiesView : public ChromeViews::View,
   // Updates the display to show only the search results.
   void UpdateSearchResults();
 
-  // ChromeViews::NativeButton::Listener implementation:
-  virtual void ButtonPressed(ChromeViews::NativeButton* sender);
+  // views::NativeButton::Listener implementation:
+  virtual void ButtonPressed(views::NativeButton* sender);
 
-  // ChromeViews::TableViewObserver implementation:
+  // views::TableViewObserver implementation:
   virtual void OnSelectionChanged();
 
-  // ChromeViews::TextField::Controller implementation:
-  virtual void ContentsChanged(ChromeViews::TextField* sender,
+  // Invoked when the user presses the delete key. Deletes the selected
+  // cookies.
+  virtual void OnTableViewDelete(views::TableView* table_view);
+
+  // views::TextField::Controller implementation:
+  virtual void ContentsChanged(views::TextField* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(ChromeViews::TextField* sender,
+  virtual void HandleKeystroke(views::TextField* sender,
                                UINT message, TCHAR key, UINT repeat_count,
                                UINT flags);
 
-  // ChromeViews::WindowDelegate implementation:
+  // views::WindowDelegate implementation:
   virtual int GetDialogButtons() const { return DIALOGBUTTON_CANCEL; }
-  virtual ChromeViews::View* GetInitiallyFocusedView() const {
+  virtual views::View* GetInitiallyFocusedView() {
       return search_field_;
   }
   virtual bool CanResize() const { return true; }
   virtual std::wstring GetWindowTitle() const;
   virtual void WindowClosing();
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
-  // ChromeViews::View overrides:
+  // views::View overrides:
   virtual void Layout();
-  virtual void GetPreferredSize(CSize* out);
+  virtual gfx::Size GetPreferredSize();
 
  protected:
-  // ChromeViews::View overrides:
+  // views::View overrides:
   virtual void ViewHierarchyChanged(bool is_add,
-                                    ChromeViews::View* parent,
-                                    ChromeViews::View* child);
+                                    views::View* parent,
+                                    views::View* child);
 
  private:
   // Use the static factory method to show.
@@ -82,14 +87,14 @@ class CookiesView : public ChromeViews::View,
   void UpdateForEmptyState();
 
   // Assorted dialog controls
-  ChromeViews::Label* search_label_;
-  ChromeViews::TextField* search_field_;
-  ChromeViews::NativeButton* clear_search_button_;
-  ChromeViews::Label* description_label_;
+  views::Label* search_label_;
+  views::TextField* search_field_;
+  views::NativeButton* clear_search_button_;
+  views::Label* description_label_;
   CookiesTableView* cookies_table_;
   CookieInfoView* info_view_;
-  ChromeViews::NativeButton* remove_button_;
-  ChromeViews::NativeButton* remove_all_button_;
+  views::NativeButton* remove_button_;
+  views::NativeButton* remove_all_button_;
 
   // The Cookies Table model
   scoped_ptr<CookiesTableModel> cookies_table_model_;
@@ -104,10 +109,9 @@ class CookiesView : public ChromeViews::View,
 
   // Our containing window. If this is non-NULL there is a visible Cookies
   // window somewhere.
-  static ChromeViews::Window* instance_;
+  static views::Window* instance_;
 
   DISALLOW_EVIL_CONSTRUCTORS(CookiesView);
 };
 
 #endif  // #ifndef CHROME_BROWSER_VIEWS_OPTIONS_GENERAL_PAGE_VIEW_H__
-

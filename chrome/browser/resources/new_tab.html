@@ -1,3 +1,4 @@
+<!DOCTYPE HTML>
 <html id="t" jsvalues="dir:textdirection;firstview:firstview">
 <!--
  This page is optimized for perceived performance. Our enemies are the time
@@ -31,6 +32,51 @@ var unprocessedData = {
 }
 
 var renderFunctionsDefined = false;
+
+// TODO(glen): Merge into common file used by this and history.
+var localStrings;
+
+///////////////////////////////////////////////////////////////////////////////
+// localStrings:
+/**
+ * We get strings into the page by using JSTemplate to populate some elements
+ * with localized content, then reading the content of those elements into
+ * this global strings object.
+ * @param {Node} node The DOM node containing all our strings.
+ */
+function LocalStrings(node) {
+  this.strings_ = {};
+  
+  var children = node.childNodes;
+  for (var i = 0, child; child = children[i]; i++) {
+    var id = child.id;
+    if (id) {
+      this.strings_[id] = child.innerHTML;
+    }
+  }
+}
+
+/**
+ * Gets a localized string by its id.
+ * @param {string} s The id of the string we want
+ * @return {string} The localized string
+ */
+LocalStrings.prototype.getString = function(s) {
+  return (s in this.strings_) ? this.strings_[s] : '';
+}
+
+/**
+ * Returns a formatted localized string (where all %s contents are replaced 
+ * by the second argument).
+ * @param {string} s The id of the string we want
+ * @param {string} d The string to include in the formatted string
+ * @return {string} The formatted string.
+ */
+LocalStrings.prototype.formatString = function(s, d) {
+  return (s in this.strings_) ? this.strings_[s].replace(/\%s/, d) : '';
+}
+
+function $(o) {return document.getElementById(o);}
 
 /**
  * If the functions that can render content are defined, render
@@ -81,6 +127,16 @@ function recentlyClosedTabs(data) {
   processData();
 }
 
+function resizeP13N(new_height) {
+   var childf = document.getElementById('p13n');
+   if (new_height < 1) {
+     childf.style.display = "none";
+     return;
+   }
+   childf.height = new_height; 
+   childf.style.display = "block";
+}
+
 chrome.send("getMostVisited");
 chrome.send("getMostSearched");
 chrome.send("getRecentlyBookmarked");
@@ -124,6 +180,7 @@ function handleDOMContentLoaded() {
 logEvent('log start');
 </script>
 <head>
+<meta charset="utf-8">
 <title jscontent="title"></title>
 <style type="text/css">
 body {
@@ -144,9 +201,6 @@ html[firstview='true'] #main.visible {
   margin-left:auto;
   margin-right:auto;
   margin-top:10px;
-}
-td {
-  font-size:84%;
 }
 form {
   padding: 0;
@@ -181,7 +235,7 @@ html[dir='rtl'] #mostvisited td {
   -webkit-transition:all 0.12s;
 }
 .thumbnail-title {
-  background-image:url(chrome-resource://favicon/);
+  background-image:url(chrome-ui://favicon/);
   display:block;
   background-repeat:no-repeat;
   background-size:16px;
@@ -198,6 +252,7 @@ html[dir='rtl'] .thumbnail-title {
   background-position:right;
   padding-left:0px;
   padding-right:22px;
+  text-align:right;
 }
 .thumbnail {
   width:195px;
@@ -236,6 +291,40 @@ a.thumbnail {
   text-overflow: ellipsis;
   text-decoration:underline;
 }
+.recent-window-container {
+  line-height:16px;
+  display:block;
+  margin:3px 0px 3px 0px;
+}
+.recent-window-container img {
+  margin:0 3px -2px 3px;
+}
+.recent-window-hover-container {
+  position:absolute;
+  border:1px solid #999;
+  -webkit-box-shadow: 5px 5px 10px #ccc;
+  background-color:white;
+  width: 157px;
+  left: 20px;
+  white-space:nowrap;
+  opacity:.9;
+}
+.recent-window-hover-container .recent-bookmark {
+  text-decoration:none;
+  text-overflow:ellipsis;
+  overflow:hidden;
+  margin: 3px 0 0 5px;
+}
+.recently-closed-window-link {
+  'text-decoration:none';
+}
+.recently-closed-window-link:hover {
+  cursor:pointer;
+}
+.recently-close-window-text {
+  text-decoration:underline;
+}
+
 html[dir='rtl'] .recent-bookmark {
   background-position:right;
   padding-left:0px;
@@ -250,7 +339,6 @@ a.manage {
   color:#77c;
   margin-left: 5px;
   margin-right: 5px;
-  font-size:84%;
   line-height:19pt;
   text-decoration:underline;
 }
@@ -269,8 +357,14 @@ html[dir='rtl'] #managesearcheslink {
 #recentlyBookmarked {
   background-color:#e1ecfe;
 }
-#recentlyClosedTabs {
-  background-color:#fff1a8;
+html[dir='rtl'] #recentlyBookmarkedContainer {
+  text-align:right;
+}
+#recentlyClosedContainer {
+  position:relative;
+}
+html[dir='rtl'] #recentlyClosedContainer {
+  text-align:right;
 }
 #searches input {
   border:1px solid #7f9db9;
@@ -278,12 +372,13 @@ html[dir='rtl'] #managesearcheslink {
   background-position:4px center;
   padding-left: 23px;
   min-height:24px;
-  width:206px;
+  width:182px;
   margin-bottom:8px;
   display:block;
 }
 html[dir='rtl'] #searches input {
   background-position: right;
+  padding-left:0px;
   padding-right: 23px;
 }
 #searches input.hint {
@@ -297,6 +392,9 @@ html[dir='rtl'] #searches input {
 </style>
 </head>
 <body onload="logEvent('body onload fired');">
+<div id="l10n" style="display:none;">
+  <span id="closedwindow" jscontent="closedwindow">Window</span>
+</div>
 <script>
 // We apply the size class here so that we don't trigger layout animations onload.
 handleWindowResize();
@@ -355,15 +453,18 @@ document.addEventListener('DOMContentLoaded', handleDOMContentLoaded);
   </td>
   <td valign="top" width="230">
     <div align="right">
-        <img src="../../app/theme/%DISTRIBUTION%/product_logo.png" 
+        <img src="../../app/theme/%DISTRIBUTION%/product_logo.png"
              width="145" height="52" style="padding-bottom:8px;" />
     </div>
+    <iframe id="p13n" frameborder="0" width="100%" scrolling="no" height="0"
+            jsdisplay="p13nsrc" style="display:none;"
+            jsvalues="src:p13nsrc"></iframe>
     <div id="searches" class="sidebar">
       <div class="section-title" jscontent="searches"></div>
       <form onsubmit="chrome.send('searchHistoryPage', [this.search.value]); return false;">
         <input type="text" class="hint"
                name="search"
-               style="background-image:url(chrome-resource://favicon/);"
+               style="background-image:url(chrome-ui://favicon/);"
                jsvalues="value:searchhistory"
                onfocus="handleInputFocus.apply(this);"
                onblur="handleInputBlur.apply(this);" />
@@ -377,7 +478,7 @@ document.addEventListener('DOMContentLoaded', handleDOMContentLoaded);
     </div>
 
     <div id="recentlyClosedTabs" class="sidebar" style="display:none">
-      <div class="section-title" jscontent="closedtabs"></div>
+      <div class="section-title" jscontent="recentlyclosed"></div>
       <div id="recentlyClosedContainer"></div>
     </div>
   </td>
@@ -396,33 +497,70 @@ function DOM(elem, attrs) {
   return elem;
 }
 
+/**
+ * Partially applies this function to a particular 'this object' and zero or
+ * more arguments. The result is a new function with some arguments of the first
+ * function pre-filled and the value of |this| 'pre-specified'.<br><br>
+ *
+ * Remaining arguments specified at call-time are appended to the pre-
+ * specified ones.<br><br>
+ *
+ * @param {Function} fn A function to partially apply.
+ * @param {Object} selfObj Specifies the object which |this| should point to
+ *     when the function is run.
+ * @param {Object} var_args Additional arguments that are partially
+ *     applied to the function.
+ *
+ * @return {!Function} A partially-applied form of the function bind() was
+ *     invoked as a method of. 
+ */
+function bind(fn, selfObj, var_args) {
+  var boundArgs = Array.prototype.slice.call(arguments, 2);
+  return function() {
+    var args = Array.prototype.slice.call(arguments);
+    args.unshift.apply(args, boundArgs);
+    return fn.apply(selfObj, args);
+  }
+}
+
 /* Return the DOM element for a "most visited" entry.
-   |page| should be an object with "title" and "url" fields. */
-function makeMostVisitedDOM(page) {
+   |page| should be an object with "title", "url", and "direction" fields. */
+function makeMostVisitedDOM(page, number) {
   /* The HTML we want looks like this:
     <a class="most-visited-item" href="URL" title="gmail.com">
-      <div class="thumbnail-title" style="background-image:url(faviconurl);">gmail.com</div>
+      <div class="thumbnail-title" 
+           style="background-image:url(faviconurl);direction:ltr">gmail.com</div>
       <img class="thumbnail" style="background-image:url(thumbnailurl);" />
     </a>
   */
   var root;
   if (page.url) {
-    root = DOM('a', {href:page.url, title:page.title});
+    root = DOM('a', {href:page.url, 
+                     title:page.title});
+    root.addEventListener("mousedown", function(event) {
+        chrome.send("metrics", ["NTP_MostVisited" + number])
+        }, false);
   } else {
     // Something went wrong; don't make it clickable.
     root = DOM('span');
   }
-  
 
   /* Create the thumbnail */
   var img_thumbnail = DOM('img', {className:'thumbnail'});
   img_thumbnail.setAttribute('onload', "logEvent('image loaded');");
-  img_thumbnail.src = 'chrome-resource://thumb/' + page.url;
+  img_thumbnail.src = 'chrome-ui://thumb/' + page.url;
 
   /* Create the title */
   var div_title = DOM('div', {className:'thumbnail-title'});
   div_title.style.backgroundImage =
-      'url("chrome-resource://favicon/' + page.url + '")';
+      'url("chrome-ui://favicon/' + page.url + '")';
+  /* Set the title's directionality independently of the overall page
+     directionality. We need to do this since a purely LTR title should always
+     have it's direction set as ltr. We only set the title direction to rtl if
+     it contains a strong RTL character. Please refer to http://crbug.com/5926
+     for more information.
+  */
+  div_title.style.direction = page.direction;
   if (page.title) {
     div_title.appendChild(document.createTextNode(page.title));
   } else {
@@ -437,7 +575,8 @@ function makeMostVisitedDOM(page) {
 }
 
 /* This function is called by the browser with the most visited pages list.
-   |pages| is a list of page objects, which have url and title attributes. */
+   |pages| is a list of page objects, which have url, title, and direction
+   attributes. */
 function renderMostVisitedPages(pages) {
   logEvent('renderMostVisitedPages called: ' + pages.length);
 
@@ -463,7 +602,7 @@ function renderMostVisitedPages(pages) {
       rows[rowNum] = DOM('tr', {});
     }
 
-    var dom = makeMostVisitedDOM(page);
+    var dom = makeMostVisitedDOM(page, i);
 
     var cell = DOM('td');
     cell.appendChild(dom);
@@ -485,7 +624,7 @@ function makeSearchURL(url) {
   /* The HTML we want looks like this:
      <form>
      <input type="text" class="hint"
-            style="background-image:url(chrome-resource://favicon/"+url+");"
+            style="background-image:url(chrome-ui://favicon/"+url+");"
             value="Search Wikipedia"
             onfocus="handleInputFocus();"
             onblur="handleInputBlur();" />
@@ -498,10 +637,10 @@ function makeSearchURL(url) {
 
   if (url.favIconURL) {
     input.style.backgroundImage =
-      'url("chrome-resource://favicon/iconurl/' + url.favIconURL + '")';
+      'url("chrome-ui://favicon/iconurl/' + url.favIconURL + '")';
   } else {
     input.style.backgroundImage =
-      'url("chrome-resource://favicon/http://' + url.short_name + '")';
+      'url("chrome-ui://favicon/http://' + url.short_name + '")';
   }
 
   input.onfocus = handleInputFocus;
@@ -534,8 +673,8 @@ function renderSearchURLs(urls) {
 }
 
 /* This function is called by the browser when the list of recently bookmarked
-   URLs is available.  |entries| is a list of objects with title and url
-   attributes. */
+   URLs is available.  |entries| is a list of objects with title, url, and
+   direction attributes. */
 function renderRecentlyBookmarked(entries) {
   logEvent('renderRecentlyBookmarked called: ' + entries.length);
   var section   = document.getElementById('recentlyBookmarked');
@@ -549,9 +688,18 @@ function renderRecentlyBookmarked(entries) {
   if (entries.length > 0) {
     section.style.display = 'block';
     for (var i = 0, entry = entries[0]; entry = entries[i]; ++i) {
-      var link = DOM('a', {href: entry.url, className:'recent-bookmark', title:entry.title});
+      var link = DOM('a', {href: entry.url, 
+                           className:'recent-bookmark', 
+                           title:entry.title});
+      link.addEventListener("mousedown", function(event) {
+          chrome.send("metrics", ["NTP_Bookmark" + i])
+          }, false);
       link.style.backgroundImage =
-          'url("chrome-resource://favicon/' + entry.url + '")';
+          'url("chrome-ui://favicon/' + entry.url + '")';
+      /* Set the bookmark title's directionality independently of the page, see
+         comment about setting div_title.style.direction above for details.
+      */
+      link.style.direction = entry.direction;
       link.appendChild(document.createTextNode(entry.title));
       container.appendChild(link);
     }
@@ -577,25 +725,164 @@ function renderRecentlyClosedTabs(entries) {
     section.style.display = 'block';
 
     for (var i = 0; entry = entries[i]; ++i) {
-      var link = DOM('a', {href:entry.url, className:'recent-bookmark', title:entry.title});
+      var link;
+      
+      if (entry.type == "tab") {
+        // Closed tab.
+        link = createRecentBookmark('a', entry);
+        container.appendChild(link);
+      } else {
+        // Closed window.
+        var linkSpanContainer = DOM('div', { className: 'recent-window-container'});
+
+        var linkSpan = DOM('span');
+        linkSpan.appendChild(document.createTextNode(" ("));
+        for (var windowIndex = 0; windowIndex < entry.tabs.length; windowIndex++) {
+          var tab = entry.tabs[windowIndex];
+          var tabImg = DOM('img', {
+              src:'url("chrome-ui://favicon/' + tab.url + '")', 
+              width:16, 
+              height:16});
+          tabImg.onmousedown = function() { return false; }
+          linkSpan.appendChild(tabImg);
+        }
+        linkSpan.appendChild(document.createTextNode(")"));
+
+        link = DOM('span', { className: 'recently-closed-window-link' } );
+        windowSpan = DOM('span', {className: 'recently-close-window-text'});
+        windowSpan.appendChild(
+            document.createTextNode(localStrings.getString('closedwindow')));
+        link.appendChild(windowSpan);
+        link.appendChild(linkSpan);
+        linkSpanContainer.appendChild(link);
+        container.appendChild(linkSpanContainer);
+        
+        // The card takes care of appending itself to the DOM, so no need to
+        // keep a reference to it.
+        new RecentlyClosedHoverCard(linkSpanContainer, entry);
+      }
 
       link.onclick = function(sessionId) {
         return function() {
+          chrome.send("metrics", ["NTP_TabRestored" + i]);
           /* This is a hack because chrome.send is hardcoded to only
              accept arrays of strings. */
           chrome.send('reopenTab', [sessionId.toString()]);
           return false;
         }
       }(entry.sessionId);
-
-      link.style.backgroundImage = 'url("chrome-resource://favicon/' + entry.url + '")';
-      link.appendChild(document.createTextNode(entry.title));
-      container.appendChild(link);
     }
   }
 
   logEvent('renderRecentlyClosedTabs done');
 }
+
+/**
+ * Creates an item to go in the recent bookmarks or recently closed lists.
+ *
+ * @param {String} tagName Tagname for the DOM element to create.
+ * @param {Object} data Object with title, url, and direction to popuplate the element.
+ *
+ * @return {Node} The element containing the bookmark.
+ */
+function createRecentBookmark(tagName, data) {
+  var link = DOM(tagName, {className:'recent-bookmark', title:data.title});
+  if (tagName == 'a')
+    link.href = data.url;
+  link.style.backgroundImage = 'url("chrome-ui://favicon/' + data.url + '")';
+  /* Set the title's directionality independently of the page, see comment
+     about setting div_title.style.direction above for details.
+  */
+  link.style.direction = data.direction;
+  link.appendChild(document.createTextNode(data.title));
+  return link;
+}
+
+/**
+ * A hover card for windows in the recently closed list to show more details.
+ *
+ * @param {Node} target The element the hover card is for.
+ * @param {Object} data Object containing all the data for the card.
+ */
+function RecentlyClosedHoverCard(target, data) {
+  this.target_ = target;
+  this.data_ = data;
+  this.target_.onmouseover = bind(this.setShowTimeout_, this);
+  this.target_.onmouseout = bind(this.setHideTimeout_, this);
+}
+
+/** Timeout set when closing the card. */
+RecentlyClosedHoverCard.closeTimeout_;
+
+/** Timeout set when opening the card. */
+RecentlyClosedHoverCard.openTimeout_;
+
+/**
+ * Clears the timer for hiding the card.
+ */
+RecentlyClosedHoverCard.clearHideTimeout_ = function() {
+  clearTimeout(RecentlyClosedHoverCard.closeTimeout_);
+};
+
+/**
+ * Clears the timer for opening the card.
+ */
+RecentlyClosedHoverCard.clearOpenTimeout_ = function() {
+  clearTimeout(RecentlyClosedHoverCard.openTimeout_);
+};
+
+/**
+ * Creates and shows the card.
+ */
+RecentlyClosedHoverCard.prototype.show_ = function() {
+  if (!this.container_) {
+    this.container_ = DOM('div', {className: 'recent-window-hover-container'});
+    for (var i = 0; i < this.data_.tabs.length; i++) {
+      var tab = this.data_.tabs[i];
+      var item = createRecentBookmark('span', tab);
+      this.container_.appendChild(item);
+    }
+    this.target_.parentNode.insertBefore(this.container_,
+        this.target_.nextSibling);
+    this.container_.onmouseover = RecentlyClosedHoverCard.clearHideTimeout_;
+    this.container_.onmouseout = bind(this.setHideTimeout_, this);
+  }
+  this.container_.style.display = '';
+};
+
+/**
+ * Hides the card.
+ */
+RecentlyClosedHoverCard.prototype.hide_ = function() {
+  this.container_.style.display = 'none';
+};
+
+/**
+ * Clears any open timers and sets the open timer.
+ * If the card is already showing then we only need to clear
+ * the hide timer.
+ */
+RecentlyClosedHoverCard.prototype.setShowTimeout_ = function() {
+  if (this.container && this.container_.style.display != 'none') {
+    // If we're already showing the hovercard, make sure we don't hide it again
+    // onmouseover.
+    RecentlyClosedHoverCard.clearHideTimeout_();
+    return;
+  }
+
+  RecentlyClosedHoverCard.clearOpenTimeout_();
+  RecentlyClosedHoverCard.openTimeout_ = 
+      setTimeout(bind(this.show_, this), 200);
+};
+
+/**
+ * Clears the open timer and sets the close one.
+ */
+RecentlyClosedHoverCard.prototype.setHideTimeout_ = function() {
+  RecentlyClosedHoverCard.clearOpenTimeout_();
+  RecentlyClosedHoverCard.closeTimeout_ = 
+      setTimeout(bind(this.hide_, this), 200);
+};
 
 function viewLog() {
   var lines = [];
@@ -611,6 +898,8 @@ function viewLog() {
 }
 
 logEvent('end of second script block');
+
+localStrings = new LocalStrings($('l10n'));
 
 // We've got all the JS we need, render any unprocessed data.
 renderFunctionsDefined = true;

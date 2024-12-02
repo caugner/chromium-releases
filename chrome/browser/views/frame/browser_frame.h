@@ -2,61 +2,93 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_H_
-#define CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_H_
+#ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_
+#define CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_
 
-class BrowserView2;
-namespace ChromeViews {
-class Window;
-}
-namespace gfx {
-class Rect;
-}
+#include "chrome/views/window/window_win.h"
+
+class AeroGlassNonClientView;
+class BrowserView;
+class NonClientFrameView;
 class TabStrip;
+
+// A specialization of the NonClientFrameView object that provides additional
+// Browser-specific methods.
+class BrowserNonClientFrameView : public views::NonClientFrameView {
+ public:
+  BrowserNonClientFrameView() : NonClientFrameView() {}
+  virtual ~BrowserNonClientFrameView() {}
+
+  // Returns the bounds within which the TabStrip should be laid out.
+  virtual gfx::Rect GetBoundsForTabStrip(TabStrip* tabstrip) const = 0;
+
+  // Updates the throbber.
+  virtual void UpdateThrobber(bool running) = 0;
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrame
 //
-//  BrowserFrame is an interface that represents a top level browser window
-//  frame. Implementations of this interface exist to supply the browser window
-//  for specific environments, e.g. Vista with Aero Glass enabled.
+//  BrowserFrame is a WindowWin subclass that provides the window frame for the
+//  Chrome browser window.
 //
-class BrowserFrame {
+class BrowserFrame : public views::WindowWin {
  public:
-  // TODO(beng): We should _not_ have to expose this method here... it's only
-  //             because BrowserView2 needs it to implement BrowserWindow
-  //             because we're doing popup setup in browser.cc when we
-  //             shouldn't be...
-  virtual gfx::Rect GetWindowBoundsForClientBounds(
-      const gfx::Rect& client_bounds) = 0;
+  explicit BrowserFrame(BrowserView* browser_view);
+  virtual ~BrowserFrame();
 
-  // Sizes the frame assuming the contents view's bounds are as specified.
-  virtual void SizeToContents(const gfx::Rect& contents_bounds) = 0;
+  // Initialize the frame. Creates the Window.
+  void Init();
 
-  // Returns the bounds that should be used to size and position the specified
-  // TabStrip. The coordinate system is that of the window's client area.
-  virtual gfx::Rect GetBoundsForTabStrip(TabStrip* tabstrip) const = 0;
+  // Determine the distance of the left edge of the minimize button from the
+  // left edge of the window. Used in our Non-Client View's Layout.
+  int GetMinimizeButtonOffset() const;
 
-  // Returns the ChromeViews::Window associated with this frame.
-  virtual ChromeViews::Window* GetWindow() = 0;
+  // Retrieves the bounds, in non-client view coordinates for the specified
+  // TabStrip.
+  gfx::Rect GetBoundsForTabStrip(TabStrip* tabstrip) const;
 
-  enum FrameType {
-    FRAMETYPE_OPAQUE,
-    FRAMETYPE_AERO_GLASS
-  };
+  // Tells the frame to update the throbber.
+  void UpdateThrobber(bool running);
 
-  // Returns the FrameType that should be constructed given the current system
-  // settings.
-  static FrameType GetActiveFrameType();
+  BrowserView* browser_view() const { return browser_view_; }
 
-  // Creates a BrowserFrame instance for the specified FrameType and
-  // BrowserView.
-  static BrowserFrame* CreateForBrowserView(FrameType type,
-                                            BrowserView2* browser_view,
-                                            const gfx::Rect& bounds,
-                                            int show_command);
+ protected:
+  // Overridden from views::WidgetWin:
+  virtual bool AcceleratorPressed(views::Accelerator* accelerator);
+  virtual bool GetAccelerator(int cmd_id, views::Accelerator* accelerator);
+  virtual void OnEnterSizeMove();
+  virtual void OnEndSession(BOOL ending, UINT logoff);
+  virtual void OnInitMenuPopup(HMENU menu, UINT position, BOOL is_system_menu);
+  virtual LRESULT OnMouseActivate(HWND window,
+                                  UINT hittest_code,
+                                  UINT message);
+  virtual void OnMove(const CPoint& point);
+  virtual void OnMoving(UINT param, const RECT* new_bounds);
+  virtual LRESULT OnNCActivate(BOOL active);
+  virtual LRESULT OnNCCalcSize(BOOL mode, LPARAM l_param);
+  virtual LRESULT OnNCHitTest(const CPoint& pt);
 
+  // Overridden from views::Window:
+  virtual int GetShowState() const;
+  virtual bool IsAppWindow() const { return true; }
+  virtual views::NonClientFrameView* CreateFrameViewForWindow();
+  virtual void UpdateFrameAfterFrameChange();
+  virtual views::RootView* CreateRootView();
+
+ private:
+  // Updates the DWM with the frame bounds.
+  void UpdateDWMFrame();
+
+  // The BrowserView is our ClientView. This is a pointer to it.
+  BrowserView* browser_view_;
+
+  // A pointer to our NonClientFrameView as a BrowserNonClientFrameView.
+  BrowserNonClientFrameView* browser_frame_view_;
+
+  bool frame_initialized_;
+
+  DISALLOW_EVIL_CONSTRUCTORS(BrowserFrame);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_H_
-
+#endif  // #ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_FRAME_

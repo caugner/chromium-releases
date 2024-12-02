@@ -5,13 +5,14 @@
 #include "chrome/browser/views/tabs/tab.h"
 
 #include "base/gfx/size.h"
-#include "chrome/views/view_container.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/path.h"
+#include "chrome/common/l10n_util.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/views/chrome_menu.h"
-#include "chrome/views/tooltip_manager.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/menu/chrome_menu.h"
+#include "chrome/views/widget/tooltip_manager.h"
+#include "chrome/views/widget/widget.h"
+#include "grit/generated_resources.h"
 
 const std::string Tab::kTabClassName = "browser/tabs/Tab";
 
@@ -19,12 +20,12 @@ static const SkScalar kTabCapWidth = 15;
 static const SkScalar kTabTopCurveWidth = 4;
 static const SkScalar kTabBottomCurveWidth = 3;
 
-class TabContextMenuController : public ChromeViews::MenuDelegate {
+class Tab::ContextMenuController : public views::MenuDelegate {
  public:
-  explicit TabContextMenuController(Tab* tab)
+  explicit ContextMenuController(Tab* tab)
       : tab_(tab),
         last_command_(TabStripModel::CommandFirst) {
-    menu_.reset(new ChromeViews::MenuItemView(this));
+    menu_.reset(new views::MenuItemView(this));
     menu_->AppendMenuItemWithLabel(TabStripModel::CommandNewTab,
                                    l10n_util::GetString(IDS_TAB_CXMENU_NEWTAB));
     menu_->AppendSeparator();
@@ -47,25 +48,32 @@ class TabContextMenuController : public ChromeViews::MenuDelegate {
         TabStripModel::CommandCloseTabsOpenedBy,
         l10n_util::GetString(IDS_TAB_CXMENU_CLOSETABSOPENEDBY));
   }
-  virtual ~TabContextMenuController() {
-    tab_->delegate()->StopAllHighlighting();
-  }
 
   void RunMenuAt(int x, int y) {
-    menu_->RunMenuAt(tab_->GetViewContainer()->GetHWND(),
-                     gfx::Rect(x, y, 0, 0), ChromeViews::MenuItemView::TOPLEFT,
-                     true);
+    menu_->RunMenuAt(tab_->GetWidget()->GetNativeView(), gfx::Rect(x, y, 0, 0),
+                     views::MenuItemView::TOPLEFT, true);
+    if (tab_)
+      tab_->ContextMenuClosed();
+    delete this;
+  }
+
+  void Cancel() {
+    tab_ = NULL;
+    menu_->Cancel();
   }
 
  private:
-  // ChromeViews::MenuDelegate implementation:
+  virtual ~ContextMenuController() {
+  }
+
+  // views::MenuDelegate implementation:
   virtual bool IsCommandEnabled(int id) const {
     // The MenuItemView used to contain the contents of the Context Menu itself
     // has a command id of 0, and it will check to see if it's enabled for
     // some reason during its construction. The TabStripModel can't handle
     // command indices it doesn't know about, so we need to filter this out
     // here.
-    if (id == 0)
+    if (id == 0 || !tab_)
       return false;
     return tab_->delegate()->IsCommandEnabledForTab(
         static_cast<TabStripModel::ContextMenuCommand>(id),
@@ -73,12 +81,18 @@ class TabContextMenuController : public ChromeViews::MenuDelegate {
   }
 
   virtual void ExecuteCommand(int id) {
+    if (!tab_)
+      return;
+
     tab_->delegate()->ExecuteCommandForTab(
         static_cast<TabStripModel::ContextMenuCommand>(id),
         tab_);
   }
 
-  virtual void SelectionChanged(ChromeViews::MenuItemView* menu) {
+  virtual void SelectionChanged(views::MenuItemView* menu) {
+    if (!tab_)
+      return;
+
     TabStripModel::ContextMenuCommand command =
         static_cast<TabStripModel::ContextMenuCommand>(menu->GetCommand());
     tab_->delegate()->StopHighlightTabsForCommand(last_command_, tab_);
@@ -88,16 +102,17 @@ class TabContextMenuController : public ChromeViews::MenuDelegate {
 
  private:
   // The context menu.
-  scoped_ptr<ChromeViews::MenuItemView> menu_;
+  scoped_ptr<views::MenuItemView> menu_;
 
-  // The Tab the context menu was brought up for.
+  // The Tab the context menu was brought up for. Set to NULL when the menu
+  // is canceled.
   Tab* tab_;
 
   // The last command that was selected, so that we can start/stop highlighting
   // appropriately as the user moves through the menu.
   TabStripModel::ContextMenuCommand last_command_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(TabContextMenuController);
+  DISALLOW_COPY_AND_ASSIGN(ContextMenuController);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -106,14 +121,21 @@ class TabContextMenuController : public ChromeViews::MenuDelegate {
 Tab::Tab(TabDelegate* delegate)
     : TabRenderer(),
       delegate_(delegate),
-      closing_(false) {
-  close_button()->SetListener(this, 0);
+      closing_(false),
+      menu_controller_(NULL) {
   close_button()->SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_CLOSE));
   close_button()->SetAnimationDuration(0);
   SetContextMenuController(this);
 }
 
 Tab::~Tab() {
+  if (menu_controller_) {
+    // The menu is showing. Close the menu.
+    menu_controller_->Cancel();
+
+    // Invoke this so that we hide the highlight.
+    ContextMenuClosed();
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -124,7 +146,7 @@ bool Tab::IsSelected() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Tab, ChromeViews::View overrides:
+// Tab, views::View overrides:
 
 bool Tab::HasHitTestMask() const {
   return true;
@@ -134,8 +156,8 @@ void Tab::GetHitTestMask(gfx::Path* mask) const {
   MakePathForTab(mask);
 }
 
-bool Tab::OnMousePressed(const ChromeViews::MouseEvent& event) {
-  if (event.IsOnlyLeftMouseButton()) {
+bool Tab::OnMousePressed(const views::MouseEvent& event) {
+  if (event.IsLeftMouseButton()) {
     // Store whether or not we were selected just now... we only want to be
     // able to drag foreground tabs, so we don't start dragging the tab if
     // it was in the background.
@@ -147,17 +169,24 @@ bool Tab::OnMousePressed(const ChromeViews::MouseEvent& event) {
   return true;
 }
 
-bool Tab::OnMouseDragged(const ChromeViews::MouseEvent& event) {
+bool Tab::OnMouseDragged(const views::MouseEvent& event) {
   delegate_->ContinueDrag(event);
   return true;
 }
 
-void Tab::OnMouseReleased(const ChromeViews::MouseEvent& event,
-                          bool canceled) {
+void Tab::OnMouseReleased(const views::MouseEvent& event, bool canceled) {
   // Notify the drag helper that we're done with any potential drag operations.
   // Clean up the drag helper, which is re-created on the next mouse press.
-  delegate_->EndDrag(canceled);
-  if (event.IsMiddleMouseButton())
+  // In some cases, ending the drag will schedule the tab for destruction; if
+  // so, bail immediately, since our members are already dead and we shouldn't
+  // do anything else except drop the tab where it is.
+  if (delegate_->EndDrag(canceled))
+    return;
+
+  // Close tab on middle click, but only if the button is released over the tab
+  // (normal windows behavior is to discard presses of a UI element where the
+  // releases happen off the element).
+  if (event.IsMiddleMouseButton() && HitTest(event.location()))
     delegate_->CloseTab(this);
 }
 
@@ -177,7 +206,7 @@ bool Tab::GetTooltipText(int x, int y, std::wstring* tooltip) {
 bool Tab::GetTooltipTextOrigin(int x, int y, CPoint* origin) {
   ChromeFont font;
   origin->x = title_bounds().x() + 10;
-  origin->y = -ChromeViews::TooltipManager::GetTooltipHeight() - 4;
+  origin->y = -views::TooltipManager::GetTooltipHeight() - 4;
   return true;
 }
 
@@ -195,19 +224,21 @@ bool Tab::GetAccessibleName(std::wstring* name) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Tab, ChromeViews::ContextMenuController implementation:
+// Tab, views::ContextMenuController implementation:
 
-void Tab::ShowContextMenu(ChromeViews::View* source, int x, int y,
+void Tab::ShowContextMenu(views::View* source, int x, int y,
                           bool is_mouse_gesture) {
-  TabContextMenuController controller(this);
-  controller.RunMenuAt(x, y);
+  if (menu_controller_)
+    return;
+  menu_controller_ = new ContextMenuController(this);
+  menu_controller_->RunMenuAt(x, y);
+  // ContextMenuController takes care of deleting itself.
 }
 
-
 ///////////////////////////////////////////////////////////////////////////////
-// ChromeViews::BaseButton::ButtonListener implementation:
+// views::ButtonListener implementation:
 
-void Tab::ButtonPressed(ChromeViews::BaseButton* sender) {
+void Tab::ButtonPressed(views::Button* sender) {
   if (sender == close_button())
     delegate_->CloseTab(this);
 }
@@ -239,4 +270,9 @@ void Tab::MakePathForTab(gfx::Path* path) const {
   // Close out the path.
   path->lineTo(0, h);
   path->close();
+}
+
+void Tab::ContextMenuClosed() {
+  delegate()->StopAllHighlighting();
+  menu_controller_ = NULL;
 }

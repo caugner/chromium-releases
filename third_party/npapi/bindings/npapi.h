@@ -103,6 +103,17 @@
 #	endif /* XP_WIN */
 #endif /* _WINDOWS */
 
+// BEGIN GOOGLE MODIFICATIONS
+// On Linux and Mac, be sure to set Mozilla-specific macros.
+#if defined(OS_LINUX)
+#define XP_UNIX 1
+#elif defined(OS_MACOSX)
+#ifndef XP_MACOSX
+#define XP_MACOSX 1
+#endif
+#endif
+// END GOOGLE MODIFICATIONS
+
 #ifdef __MWERKS__
 #	define _declspec __declspec
 #	ifdef __INTEL__
@@ -524,6 +535,15 @@ typedef struct _NPPrint
     NPEmbedPrint embedPrint; /* if mode is NP_EMBED */
   } print;
 } NPPrint;
+
+// BEGIN GOOGLE MODIFICATIONS
+#ifdef XP_MACOSX
+typedef struct _NPNSMenu NPNSMenu;
+typedef NPNSMenu NPMenu;
+#else
+typedef void * NPMenu;
+#endif
+// END GOOGLE MODIFICATIONS
 
 #ifdef XP_MACOSX
 typedef EventRecord	NPEvent;

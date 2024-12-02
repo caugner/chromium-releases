@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // TextInputController is bound to window.textInputController in Javascript
-// when test_shell is running noninteractively.  Layout tests use it to
+// when test_shell is running in layout test mode.  Layout tests use it to
 // exercise various corners of text input.
 //
 // Mac equivalent: WebKit/WebKitTools/DumpRenderTree/TextInputController.{h,m}
@@ -47,4 +47,3 @@ class TextInputController : public CppBoundClass {
 };
 
 #endif // WEBKIT_TOOLS_TEST_SHELL_TEXT_INPUT_CONTROLLER_H__
-

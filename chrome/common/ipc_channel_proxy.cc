@@ -18,7 +18,9 @@ ChannelProxy::Context::Context(Channel::Listener* listener,
     : listener_message_loop_(MessageLoop::current()),
       listener_(listener),
       ipc_message_loop_(ipc_message_loop),
-      channel_(NULL) {
+      channel_(NULL),
+      peer_pid_(0),
+      channel_connected_called_(false) {
   if (filter)
     filters_.push_back(filter);
 }
@@ -52,26 +54,29 @@ bool ChannelProxy::Context::TryFilters(const Message& message) {
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnMessageReceived(const Message& message) {
   // First give a chance to the filters to process this message.
-  if (TryFilters(message))
-    return;
+  if (!TryFilters(message))
+    OnMessageReceivedNoFilter(message);
+}
 
+// Called on the IPC::Channel thread
+void ChannelProxy::Context::OnMessageReceivedNoFilter(const Message& message) {
   // NOTE: This code relies on the listener's message loop not going away while
   // this thread is active.  That should be a reasonable assumption, but it
   // feels risky.  We may want to invent some more indirect way of referring to
   // a MessageLoop if this becomes a problem.
-
   listener_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
       this, &Context::OnDispatchMessage, message));
 }
 
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnChannelConnected(int32 peer_pid) {
+  peer_pid_ = peer_pid;
   for (size_t i = 0; i < filters_.size(); ++i)
     filters_[i]->OnChannelConnected(peer_pid);
 
   // See above comment about using listener_message_loop_ here.
   listener_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &Context::OnDispatchConnected, peer_pid));
+      this, &Context::OnDispatchConnected));
 }
 
 // Called on the IPC::Channel thread
@@ -82,7 +87,7 @@ void ChannelProxy::Context::OnChannelError() {
 }
 
 // Called on the IPC::Channel thread
-void ChannelProxy::Context::OnOpenChannel() {
+void ChannelProxy::Context::OnChannelOpened() {
   DCHECK(channel_ != NULL);
 
   // Assume a reference to ourselves on behalf of this thread.  This reference
@@ -99,7 +104,7 @@ void ChannelProxy::Context::OnOpenChannel() {
 }
 
 // Called on the IPC::Channel thread
-void ChannelProxy::Context::OnCloseChannel() {
+void ChannelProxy::Context::OnChannelClosed() {
   // It's okay for IPC::ChannelProxy::Close to be called more than once, which
   // would result in this branch being taken.
   if (!channel_)
@@ -158,6 +163,8 @@ void ChannelProxy::Context::OnDispatchMessage(const Message& message) {
   if (!listener_)
     return;
 
+  OnDispatchConnected();
+
 #ifdef IPC_MESSAGE_LOG_ENABLED
   Logging* logger = Logging::current();
   if (message.type() == IPC_LOGGING_ID) {
@@ -178,9 +185,13 @@ void ChannelProxy::Context::OnDispatchMessage(const Message& message) {
 }
 
 // Called on the listener's thread
-void ChannelProxy::Context::OnDispatchConnected(int32 peer_pid) {
+void ChannelProxy::Context::OnDispatchConnected() {
+  if (channel_connected_called_)
+    return;
+
+  channel_connected_called_ = true;
   if (listener_)
-    listener_->OnChannelConnected(peer_pid);
+    listener_->OnChannelConnected(peer_pid_);
 }
 
 // Called on the listener's thread
@@ -214,28 +225,37 @@ void ChannelProxy::Init(const std::wstring& channel_id, Channel::Mode mode,
     // to connect and get an error since the pipe doesn't exist yet.
     context_->CreateChannel(channel_id, mode);
   } else {
+#if defined(OS_POSIX)
+    // TODO(playmobil): On POSIX, IPC::Channel uses a socketpair(), one side of
+    // which needs to be mapped into the child process' address space.
+    // To know the value of the client side FD we need to have already
+    // created a socketpair which currently occurs in IPC::Channel's
+    // constructor.
+    // If we lazilly construct the IPC::Channel then the caller has no way
+    // of knowing the FD #.
+    //
+    // We can solve this either by having the Channel's creation launch the
+    // subprocess itself or by creating the socketpair() externally.
+    NOTIMPLEMENTED();
+#endif  // defined(OS_POSIX)
     context_->ipc_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
         context_.get(), &Context::CreateChannel, channel_id, mode));
   }
 
   // complete initialization on the background thread
   context_->ipc_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      context_.get(), &Context::OnOpenChannel));
+      context_.get(), &Context::OnChannelOpened));
 }
 
 void ChannelProxy::Close() {
   // Clear the backpointer to the listener so that any pending calls to
   // Context::OnDispatchMessage or OnDispatchError will be ignored.  It is
   // possible that the channel could be closed while it is receiving messages!
-  context_->clear();
+  context_->Clear();
 
-  if (MessageLoop::current() == context_->ipc_message_loop()) {
-    // We're being destructed on the IPC thread, so no need to use the message
-    // loop as it might go away.
-    context_->OnCloseChannel();
-  } else {
+  if (context_->ipc_message_loop()) {
     context_->ipc_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-        context_.get(), &Context::OnCloseChannel));
+        context_.get(), &Context::OnChannelClosed));
   }
 }
 
@@ -262,7 +282,24 @@ void ChannelProxy::RemoveFilter(MessageFilter* filter) {
       context_.get(), &Context::OnRemoveFilter, filter));
 }
 
+#if defined(OS_POSIX)
+// See the TODO regarding lazy initialization of the channel in
+// ChannelProxy::Init().
+// We assume that IPC::Channel::GetClientFileDescriptorMapping() is thread-safe.
+void ChannelProxy::GetClientFileDescriptorMapping(int *src_fd, int *dest_fd) {
+  Channel *channel = context_.get()->channel_;
+  DCHECK(channel); // Channel must have been created first.
+  channel->GetClientFileDescriptorMapping(src_fd, dest_fd);
+}
+
+// We assume that IP::Channel::OnClientConnected() is thread-safe.
+void ChannelProxy::OnClientConnected() {
+  Channel *channel = context_.get()->channel_;
+  DCHECK(channel); // Channel must have been created first.
+  channel->OnClientConnected();
+}
+#endif
+
 //-----------------------------------------------------------------------------
 
 }  // namespace IPC
-

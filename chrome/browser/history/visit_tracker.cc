@@ -4,15 +4,13 @@
 
 #include "chrome/browser/history/visit_tracker.h"
 
-#include "base/logging.h"
-
 namespace history {
 
 // When the list gets longer than 'MaxItems', CleanupTransitionList will resize
 // the list down to 'ResizeTo' size. This is so we only do few block moves of
 // the data rather than constantly shuffle stuff around in the vector.
-static const int kMaxItemsInTransitionList = 96;
-static const int kResizeBigTransitionListTo = 64;
+static const size_t kMaxItemsInTransitionList = 96;
+static const size_t kResizeBigTransitionListTo = 64;
 COMPILE_ASSERT(kResizeBigTransitionListTo < kMaxItemsInTransitionList,
                max_items_must_be_larger_than_resize_to);
 
@@ -104,4 +102,3 @@ void VisitTracker::CleanupTransitionList(TransitionList* transitions) {
 }
 
 }  // namespace history
-

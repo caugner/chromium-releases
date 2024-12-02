@@ -87,10 +87,28 @@ bool WorkItemList::AddCreateRegKeyWorkItem(HKEY predefined_root,
   return AddWorkItem(item);
 }
 
+bool WorkItemList::AddDeleteRegValueWorkItem(HKEY predefined_root,
+                                             std::wstring key_path,
+                                             std::wstring value_name,
+                                             bool is_str_type) {
+  WorkItem* item = reinterpret_cast<WorkItem*>(
+      WorkItem::CreateDeleteRegValueWorkItem(predefined_root, key_path,
+                                             value_name, is_str_type));
+  return AddWorkItem(item);
+}
+
 bool WorkItemList::AddDeleteTreeWorkItem(std::wstring root_path,
                                          std::wstring key_path) {
   WorkItem* item = reinterpret_cast<WorkItem*>(
       WorkItem::CreateDeleteTreeWorkItem(root_path, key_path));
+  return AddWorkItem(item);
+}
+
+bool WorkItemList::AddMoveTreeWorkItem(std::wstring source_path,
+                                       std::wstring dest_path,
+                                       std::wstring temp_dir) {
+  WorkItem* item = reinterpret_cast<WorkItem*>(
+      WorkItem::CreateMoveTreeWorkItem(source_path, dest_path, temp_dir));
   return AddWorkItem(item);
 }
 
@@ -116,3 +134,9 @@ bool WorkItemList::AddSetRegValueWorkItem(HKEY predefined_root,
   return AddWorkItem(item);
 }
 
+bool WorkItemList::AddSelfRegWorkItem(const std::wstring& dll_path,
+                                      bool do_register) {
+  WorkItem* item = reinterpret_cast<WorkItem*>(
+      WorkItem::CreateSelfRegWorkItem(dll_path, do_register));
+  return AddWorkItem(item);
+}

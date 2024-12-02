@@ -27,6 +27,7 @@ struct WebPreferences {
   int minimum_logical_font_size;
   std::wstring default_encoding;
   bool javascript_enabled;
+  bool web_security_enabled;
   bool javascript_can_open_windows_automatically;
   bool loads_images_automatically;
   bool plugins_enabled;
@@ -35,16 +36,14 @@ struct WebPreferences {
   bool shrinks_standalone_images_to_fit;
   bool uses_universal_detector;
   bool text_areas_are_resizable;
-  bool dashboard_compatibility_mode;
   bool java_enabled;
   bool allow_scripts_to_close_windows;
+  bool uses_page_cache;
 
   // TODO(tc): User style sheets will not work in chrome because it tries to
   // load the style sheet using a request without a frame.
   bool user_style_sheet_enabled;
   GURL user_style_sheet_location;
-
-  std::string user_agent;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for
@@ -62,6 +61,7 @@ struct WebPreferences {
         minimum_logical_font_size(6),
         default_encoding(L"ISO-8859-1"),
         javascript_enabled(true),
+        web_security_enabled(true),
         javascript_can_open_windows_automatically(true),
         loads_images_automatically(true),
         plugins_enabled(true),
@@ -70,9 +70,9 @@ struct WebPreferences {
         shrinks_standalone_images_to_fit(true),
         uses_universal_detector(false),  // Disabled: page cycler regression
         text_areas_are_resizable(true),
-        dashboard_compatibility_mode(false),
         java_enabled(true),
         allow_scripts_to_close_windows(false),
+        uses_page_cache(false),
         user_style_sheet_enabled(false) {
   }
 };

@@ -9,9 +9,11 @@
 
 #include "base/basictypes.h"
 #include "base/string_util.h"
+#include "chrome/browser/spellchecker.h"
 
+#include "third_party/icu38/public/common/unicode/normlzr.h"
+#include "third_party/icu38/public/common/unicode/schriter.h"
 #include "third_party/icu38/public/common/unicode/uchar.h"
-#include "third_party/icu38/public/common/unicode/unorm.h"
 #include "third_party/icu38/public/common/unicode/uscript.h"
 #include "third_party/icu38/public/common/unicode/uset.h"
 #include "third_party/icu38/public/i18n/unicode/ulocdata.h"
@@ -48,7 +50,7 @@ SpellcheckCharAttribute::SpellcheckCharAttribute() {
       L'\xFF07',  // MidNumLet # FULLWIDTH APOSTROPHE
       L'\xFF0E',  // MidNumLet # FULLWIDTH FULL STOP
   };
-  for (int i = 0; i < arraysize(kMidLetters); i++)
+  for (size_t i = 0; i < arraysize(kMidLetters); ++i)
     middle_letters_[kMidLetters[i]] = true;
 }
 
@@ -58,13 +60,10 @@ SpellcheckCharAttribute::~SpellcheckCharAttribute() {
 // Sets the default language for this object.
 // This function retrieves the exemplar set to set up the default character
 // attributes.
-void SpellcheckCharAttribute::SetDefaultLanguage(const std::wstring& language) {
-  // Retrieves the locale data of the given language.
-  std::string language_encoded;
-  WideToCodepage(language, "us-ascii", OnStringUtilConversionError::SKIP,
-                 &language_encoded);
+void SpellcheckCharAttribute::SetDefaultLanguage(
+    const SpellChecker::Language& language) {
   UErrorCode status = U_ZERO_ERROR;
-  ULocaleData* locale_data = ulocdata_open(language_encoded.c_str(), &status);
+  ULocaleData* locale_data = ulocdata_open(language.c_str(), &status);
   if (U_FAILURE(status))
     return;
 
@@ -76,9 +75,29 @@ void SpellcheckCharAttribute::SetDefaultLanguage(const std::wstring& language) {
   ulocdata_close(locale_data);
   if (U_SUCCESS(status)) {
     int length = uset_size(exemplar_set);
-    for (int i = 0; i < length; i++) {
+    for (int i = 0; i < length; ++i) {
       UChar32 character = uset_charAt(exemplar_set, i);
       SetWordScript(GetScriptCode(character), true);
+    }
+
+    // Many languages use combining characters to input their characters from
+    // keyboards. On the other hand, this exemplar set does not always include
+    // combining characters for such languages.
+    // To treat such combining characters as word characters, we decompose
+    // this exemplar set and treat the decomposed characters as word characters.
+    UnicodeString composed;
+    for (int i = 0; i < length; ++i)
+      composed.append(uset_charAt(exemplar_set, i));
+
+    UnicodeString decomposed;
+    Normalizer::decompose(composed, FALSE, 0, decomposed, status);
+    if (U_SUCCESS(status)) {
+      StringCharacterIterator iterator(decomposed);
+      UChar32 character = iterator.first32();
+      while (character != CharacterIterator::DONE) {
+        SetWordScript(GetScriptCode(character), true);
+        character = iterator.next32();
+      }
     }
   }
   uset_close(exemplar_set);
@@ -102,7 +121,7 @@ bool SpellcheckCharAttribute::IsContractionChar(UChar32 character) const {
 
 // Initializes the mapping table.
 void SpellcheckCharAttribute::InitializeScriptTable() {
-  for (int i = 0; i < arraysize(script_attributes_); i++)
+  for (size_t i = 0; i < arraysize(script_attributes_); ++i)
     script_attributes_[i] = false;
 }
 
@@ -117,7 +136,8 @@ UScriptCode SpellcheckCharAttribute::GetScriptCode(UChar32 character) const {
 // whether not a script is used by the selected dictionary.
 void SpellcheckCharAttribute::SetWordScript(const int script_code,
                                             bool in_use) {
-  if (script_code < 0 || script_code >= arraysize(script_attributes_))
+  if (script_code < 0 ||
+      static_cast<size_t>(script_code) >= arraysize(script_attributes_))
     return;
   script_attributes_[script_code] = in_use;
 }
@@ -126,15 +146,16 @@ void SpellcheckCharAttribute::SetWordScript(const int script_code,
 // dictionary.
 bool SpellcheckCharAttribute::IsWordScript(
     const UScriptCode script_code) const {
-  if (script_code < 0 || script_code >= arraysize(script_attributes_))
+  if (script_code < 0 ||
+      static_cast<size_t>(script_code) >= arraysize(script_attributes_))
     return false;
   return script_attributes_[script_code];
 }
 
 SpellcheckWordIterator::SpellcheckWordIterator()
     : word_(NULL),
-      position_(0),
       length_(0),
+      position_(0),
       allow_contraction_(false),
       attribute_(NULL) {
 }
@@ -145,7 +166,7 @@ SpellcheckWordIterator::~SpellcheckWordIterator() {
 // Initialize a word-iterator object.
 void SpellcheckWordIterator::Initialize(
     const SpellcheckCharAttribute* attribute,
-    const wchar_t* word,
+    const char16* word,
     size_t length,
     bool allow_contraction) {
   word_ = word;
@@ -162,7 +183,7 @@ void SpellcheckWordIterator::Initialize(
 // To handle this case easily, we should firstly extract a segment consisting
 // of word characters and contraction characters, and discard contraction
 // characters at the beginning and the end of the extracted segment.
-bool SpellcheckWordIterator::GetNextWord(std::wstring* word_string,
+bool SpellcheckWordIterator::GetNextWord(string16* word_string,
                                          int* word_start,
                                          int* word_length) {
   word_string->empty();
@@ -239,30 +260,16 @@ void SpellcheckWordIterator::TrimSegment(int segment_start,
 // "http://www.unicode.org/Public/UNIDATA/Scripts.txt".
 bool SpellcheckWordIterator::Normalize(int input_start,
                                        int input_length,
-                                       std::wstring* output_string) const {
+                                       string16* output_string) const {
   // Unicode Standard Annex #15 "http://www.unicode.org/unicode/reports/tr15/"
   // does not only write NFKD and NFKC can compose ligatures into their ASCII
   // alternatives, but also write NFKC keeps accents of characters.
   // Therefore, NFKC seems to be the best option for hunspell.
-  // To use NKFC for normalization, the length of the output string is mostly
-  // equal to the one of the input string. (One exception is ligatures.)
-  // To avoid the unorm_normalize() function from being called always twice,
-  // we temporarily allocate |input_length| + 1 characters to the output string
-  // and call the function with it. We re-allocate the output string
-  // only if it cannot store the normalized string, i.e. the output string is
-  // longer than the input one.
-  const wchar_t* input_string = &word_[input_start];
-  UErrorCode error_code = U_ZERO_ERROR;
-  int output_length = input_length + 1;
-  wchar_t *output_buffer = WriteInto(output_string, output_length);
-  output_length = unorm_normalize(input_string, input_length, UNORM_NFKC, 0,
-                                  output_buffer, output_length, &error_code);
-  if (error_code == U_BUFFER_OVERFLOW_ERROR) {
-    error_code = U_ZERO_ERROR;
-    output_buffer = WriteInto(output_string, ++output_length);
-    output_length = unorm_normalize(input_string, input_length, UNORM_NFKC, 0,
-                                    output_buffer, output_length, &error_code);
-  }
-  return (error_code == U_ZERO_ERROR);
+  UnicodeString input(FALSE, &word_[input_start], input_length);
+  UErrorCode status = U_ZERO_ERROR;
+  UnicodeString output;
+  Normalizer::normalize(input, UNORM_NFKC, 0, output, status);
+  if (U_SUCCESS(status))
+    output_string->assign(output.getTerminatedBuffer());
+  return (status == U_ZERO_ERROR);
 }
-

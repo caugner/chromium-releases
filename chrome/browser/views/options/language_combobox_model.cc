@@ -6,12 +6,11 @@
 
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/user_metrics.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/pref_service.h"
+#include "grit/generated_resources.h"
 #include "unicode/uloc.h"
-
-#include "generated_resources.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // LanguageComboboxModel used to populate a combobox with native names
@@ -30,6 +29,17 @@ LanguageComboboxModel::LanguageComboboxModel(
     Profile* profile, const std::vector<std::wstring>& locale_codes)
     : profile_(profile) {
   InitNativeNames(locale_codes);
+}
+
+LanguageComboboxModel::LanguageComboboxModel(
+    Profile* profile, const std::vector<std::string>& locale_codes)
+    : profile_(profile) {
+  std::vector<std::wstring> locale_codes_w;
+  for (std::vector<std::string>::const_iterator iter = locale_codes.begin();
+      iter != locale_codes.end(); ++iter) {
+    locale_codes_w.push_back(ASCIIToWide(*iter));
+  }
+  InitNativeNames(locale_codes_w);
 }
 
 void LanguageComboboxModel::InitNativeNames(const std::vector<std::wstring>&
@@ -73,12 +83,12 @@ void LanguageComboboxModel::InitNativeNames(const std::vector<std::wstring>&
                          &locale_names_);
 }
 
-// Overridden from ChromeViews::Combobox::Model:
-int LanguageComboboxModel::GetItemCount(ChromeViews::ComboBox* source) {
+// Overridden from views::Combobox::Model:
+int LanguageComboboxModel::GetItemCount(views::ComboBox* source) {
   return static_cast<int>(locale_names_.size());
 }
 
-std::wstring LanguageComboboxModel::GetItemAt(ChromeViews::ComboBox* source,
+std::wstring LanguageComboboxModel::GetItemAt(views::ComboBox* source,
                                               int index) {
   DCHECK(static_cast<int>(locale_names_.size()) > index);
   LocaleDataMap::const_iterator it =
@@ -164,4 +174,3 @@ int LanguageComboboxModel::GetSelectedLanguageIndex(const std::wstring&
 
   return GetIndexFromLocale(current_lang);
 }
-

@@ -9,7 +9,6 @@
 #include "webkit/glue/resource_fetcher.h"
 
 class SkBitmap;
-class WebCore::ResourceResponse;
 class WebViewImpl;
 
 // ImageResourceFetcher handles downloading an image for a webview. Once
@@ -59,4 +58,3 @@ class ImageResourceFetcher : public ResourceFetcher::Delegate {
 };
 
 #endif  // WEBKIT_GLUE_IMAGE_RESOURCE_FETCHER_H__
-

@@ -16,19 +16,18 @@
 #include "base/string_util.h"
 #include "chrome/common/drag_drop_types.h"
 #include "chrome/common/gfx/chrome_canvas.h"
-#include "chrome/common/gfx/path.h"
 #include "chrome/common/l10n_util.h"
-#include "chrome/common/os_exchange_data.h"
-#include "chrome/views/accessibility/accessible_wrapper.h"
 #include "chrome/views/background.h"
-#include "chrome/views/border.h"
 #include "chrome/views/layout_manager.h"
-#include "chrome/views/root_view.h"
-#include "chrome/views/tooltip_manager.h"
-#include "chrome/views/view_container.h"
+#include "chrome/views/widget/root_view.h"
+#include "chrome/views/widget/widget.h"
+#if defined(OS_WIN)
+#include "chrome/views/widget/tooltip_manager.h"
+#include "chrome/views/accessibility/view_accessibility_wrapper.h"
+#endif
 #include "SkShader.h"
 
-namespace ChromeViews {
+namespace views {
 
 // static
 char View::kViewClassName[] = "chrome/views/View";
@@ -58,7 +57,7 @@ class RestoreFocusTask : public Task {
   // The target view.
   View* view_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(RestoreFocusTask);
+  DISALLOW_COPY_AND_ASSIGN(RestoreFocusTask);
 };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -70,22 +69,22 @@ class RestoreFocusTask : public Task {
 View::View()
     : id_(0),
       group_(-1),
-      bounds_(0,0,0,0),
-      parent_(NULL),
       enabled_(true),
-      is_visible_(true),
       focusable_(false),
-      background_(NULL),
-      accessibility_(NULL),
-      border_(NULL),
+      bounds_(0, 0, 0, 0),
+      parent_(NULL),
+      should_restore_focus_(false),
+      is_visible_(true),
       is_parent_owned_(true),
       notify_when_visible_bounds_in_root_changes_(false),
       registered_for_visible_bounds_notification_(false),
       next_focusable_view_(NULL),
       previous_focusable_view_(NULL),
-      should_restore_focus_(false),
       restore_focus_view_task_(NULL),
       context_menu_controller_(NULL),
+#if defined(OS_WIN)
+      accessibility_(NULL),
+#endif
       drag_controller_(NULL),
       ui_mirroring_is_enabled_for_rtl_languages_(true),
       flip_canvas_on_paint_for_rtl_ui_(false) {
@@ -102,10 +101,6 @@ View::~View() {
     else
       child_views_[c]->SetParent(NULL);
   }
-  if (background_)
-    delete background_;
-  if (border_)
-    delete border_;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -114,115 +109,81 @@ View::~View() {
 //
 /////////////////////////////////////////////////////////////////////////////
 
-void View::GetBounds(CRect* out, PositionMirroringSettings settings) const {
-  *out = bounds_;
+gfx::Rect View::GetBounds(PositionMirroringSettings settings) const {
+  gfx::Rect bounds(bounds_);
 
   // If the parent uses an RTL UI layout and if we are asked to transform the
   // bounds to their mirrored position if necessary, then we should shift the
   // rectangle appropriately.
-  if (settings == APPLY_MIRRORING_TRANSFORMATION) {
-    out->MoveToX(MirroredX());
-  }
+  if (settings == APPLY_MIRRORING_TRANSFORMATION)
+    bounds.set_x(MirroredX());
+
+  return bounds;
 }
 
 // y(), width() and height() are agnostic to the RTL UI layout of the
 // parent view. x(), on the other hand, is not.
 int View::GetX(PositionMirroringSettings settings) const {
-  if (settings == IGNORE_MIRRORING_TRANSFORMATION) {
-    return bounds_.left;
-  }
-  return MirroredX();
+  return settings == IGNORE_MIRRORING_TRANSFORMATION ? x() : MirroredX();
 }
 
-void View::SetBounds(const CRect& bounds) {
-  if (bounds.left == bounds_.left &&
-      bounds.top == bounds_.top &&
-      bounds.Width() == bounds_.Width() &&
-      bounds.Height() == bounds_.Height()) {
+void View::SetBounds(const gfx::Rect& bounds) {
+  if (bounds == bounds_)
     return;
-  }
 
-  CRect prev = bounds_;
+  gfx::Rect prev = bounds_;
   bounds_ = bounds;
-  if (bounds_.right < bounds_.left)
-    bounds_.right = bounds_.left;
-
-  if (bounds_.bottom < bounds_.top)
-    bounds_.bottom = bounds_.top;
-
   DidChangeBounds(prev, bounds_);
 
   RootView* root = GetRootView();
   if (root) {
-    bool size_changed = (prev.Width() != bounds_.Width() ||
-                         prev.Height() != bounds_.Height());
-    bool position_changed = (prev.left != bounds_.left ||
-                             prev.top != bounds_.top);
+    bool size_changed = prev.size() != bounds_.size();
+    bool position_changed = prev.origin() != bounds_.origin();
     if (size_changed || position_changed)
       root->ViewBoundsChanged(this, size_changed, position_changed);
   }
 }
 
-void View::SetBounds(int x, int y, int width, int height) {
-  CRect tmp(x, y, x + width, y + height);
-  SetBounds(tmp);
+gfx::Rect View::GetLocalBounds(bool include_border) const {
+  if (include_border || !border_.get())
+    return gfx::Rect(0, 0, width(), height());
+
+  gfx::Insets insets;
+  border_->GetInsets(&insets);
+  return gfx::Rect(insets.left(), insets.top(),
+                   std::max(0, width() - insets.width()),
+                   std::max(0, height() - insets.height()));
 }
 
-void View::GetLocalBounds(CRect* out, bool include_border) const {
-  if (include_border || border_ == NULL) {
-    out->left = 0;
-    out->top = 0;
-    out->right = width();
-    out->bottom = height();
-  } else {
-    gfx::Insets insets;
-    border_->GetInsets(&insets);
-    out->left = insets.left();
-    out->top = insets.top();
-    out->right = width() - insets.left();
-    out->bottom = height() - insets.top();
-  }
+gfx::Point View::GetPosition() const {
+  return gfx::Point(GetX(APPLY_MIRRORING_TRANSFORMATION), y());
 }
 
-void View::GetSize(CSize* sz) const {
-  sz->cx = width();
-  sz->cy = height();
-}
-
-void View::GetPosition(CPoint* p) const {
-  p->x = GetX(APPLY_MIRRORING_TRANSFORMATION);
-  p->y = y();
-}
-
-void View::GetPreferredSize(CSize* out) {
-  if (layout_manager_.get()) {
-    layout_manager_->GetPreferredSize(this, out);
-  } else {
-    out->cx = out->cy = 0;
-  }
+gfx::Size View::GetPreferredSize() {
+  if (layout_manager_.get())
+    return layout_manager_->GetPreferredSize(this);
+  return gfx::Size();
 }
 
 void View::SizeToPreferredSize() {
-  CSize size;
-  GetPreferredSize(&size);
-  if ((size.cx != width()) || (size.cy != height()))
-    SetBounds(x(), y(), size.cx, size.cy);
+  gfx::Size prefsize = GetPreferredSize();
+  if ((prefsize.width() != width()) || (prefsize.height() != height()))
+    SetBounds(x(), y(), prefsize.width(), prefsize.height());
 }
 
-void View::GetMinimumSize(CSize* out) {
-  GetPreferredSize(out);
+gfx::Size View::GetMinimumSize() {
+  return GetPreferredSize();
 }
 
 int View::GetHeightForWidth(int w) {
   if (layout_manager_.get())
     return layout_manager_->GetPreferredHeightForWidth(this, w);
-
-  CSize size;
-  GetPreferredSize(&size);
-  return size.cy;
+  return GetPreferredSize().height();
 }
 
-void View::DidChangeBounds(const CRect& previous, const CRect& current) {
+void View::DidChangeBounds(const gfx::Rect& previous,
+                           const gfx::Rect& current) {
+  Layout();
 }
 
 void View::ScrollRectToVisible(int x, int y, int width, int height) {
@@ -246,6 +207,10 @@ void View::Layout() {
   if (layout_manager_.get()) {
     layout_manager_->Layout(this);
     SchedulePaint();
+    // TODO(beng): We believe the right thing to do here is return since the
+    //             layout manager should be handling things, but it causes
+    //             regressions (missing options from Options dialog and a hang
+    //             in interactive_ui_tests).
   }
 
   // Lay out contents of child Views
@@ -282,11 +247,11 @@ bool View::UILayoutIsRightToLeft() const {
 ////////////////////////////////////////////////////////////////////////////////
 
 inline int View::MirroredX() const {
+  // TODO(beng): reimplement in terms of MirroredLeftPointForRect.
   View* parent = GetParent();
-  if (parent && parent->UILayoutIsRightToLeft()) {
-    return parent->width() - bounds_.left - width();
-  }
-  return bounds_.left;
+  if (parent && parent->UILayoutIsRightToLeft())
+    return parent->width() - x() - width();
+  return x();
 }
 
 int View::MirroredLeftPointForRect(const gfx::Rect& bounds) const {
@@ -321,20 +286,7 @@ void View::SetFocusable(bool focusable) {
   focusable_ = focusable;
 }
 
-FocusManager* View::GetFocusManager() {
-  ViewContainer* container = GetViewContainer();
-  if (!container)
-    return NULL;
-
-  HWND hwnd = container->GetHWND();
-  if (!hwnd)
-    return NULL;
-
-  return ChromeViews::FocusManager::GetFocusManager(hwnd);
-}
-
 bool View::HasFocus() {
-  RootView* root_view = GetRootView();
   FocusManager* focus_manager = GetFocusManager();
   if (focus_manager)
     return focus_manager->GetFocusedView() == this;
@@ -350,31 +302,25 @@ void View::SetHotTracked(bool flag) {
 //
 /////////////////////////////////////////////////////////////////////////////
 
-void View::SchedulePaint(const CRect& r, bool urgent) {
-  if (!IsVisible()) {
+void View::SchedulePaint(const gfx::Rect& r, bool urgent) {
+  if (!IsVisible())
     return;
-  }
 
   if (parent_) {
     // Translate the requested paint rect to the parent's coordinate system
     // then pass this notification up to the parent.
-    CRect paint_rect(r);
-    CPoint p;
-    GetPosition(&p);
-    paint_rect.OffsetRect(p);
+    gfx::Rect paint_rect = r;
+    paint_rect.Offset(GetPosition());
     parent_->SchedulePaint(paint_rect, urgent);
   }
 }
 
 void View::SchedulePaint() {
-  CRect lb;
-  GetLocalBounds(&lb, true);
-  SchedulePaint(lb, false);
+  SchedulePaint(GetLocalBounds(true), false);
 }
 
 void View::SchedulePaint(int x, int y, int w, int h) {
-  CRect r(x, y, x + w, y + h);
-  SchedulePaint(&r, false);
+  SchedulePaint(gfx::Rect(x, y, w, h), false);
 }
 
 void View::Paint(ChromeCanvas* canvas) {
@@ -384,12 +330,12 @@ void View::Paint(ChromeCanvas* canvas) {
 }
 
 void View::PaintBackground(ChromeCanvas* canvas) {
-  if (background_)
+  if (background_.get())
     background_->Paint(canvas, this);
 }
 
 void View::PaintBorder(ChromeCanvas* canvas) {
-  if (border_)
+  if (border_.get())
     border_->Paint(*this, canvas);
 }
 
@@ -425,11 +371,10 @@ void View::ProcessPaint(ChromeCanvas* canvas) {
   // Note that the X (or left) position we pass to ClipRectInt takes into
   // consideration whether or not the view uses a right-to-left layout so that
   // we paint our view in its mirrored position if need be.
-  if (canvas->ClipRectInt(MirroredX(), bounds_.top, bounds_.Width(),
-                          bounds_.Height())) {
+  if (canvas->ClipRectInt(MirroredX(), y(), width(), height())) {
     // Non-empty clip, translate the graphics such that 0,0 corresponds to
     // where this view is located (related to its parent).
-    canvas->TranslateInt(MirroredX(), bounds_.top);
+    canvas->TranslateInt(MirroredX(), y());
 
     // Save the state again, so that any changes don't effect PaintChildren.
     canvas->save();
@@ -486,36 +431,22 @@ void View::PaintFloatingView(ChromeCanvas* canvas, View* view,
   view->SetParent(saved_parent);
 }
 
-void View::SetBackground(Background* b) {
-  if (background_ != b)
-    delete background_;
-  background_ = b;
-}
-
-const Background* View::GetBackground() const {
-  return background_;
-}
-
-void View::SetBorder(Border* b) {
-  if (border_ != b)
-    delete border_;
-  border_ = b;
-}
-
-const Border* View::GetBorder() const {
-  return border_;
-}
-
 gfx::Insets View::GetInsets() const {
-  const Border* border = GetBorder();
   gfx::Insets insets;
-  if (border)
-    border->GetInsets(&insets);
+  if (border_.get())
+    border_->GetInsets(&insets);
   return insets;
 }
 
 void View::SetContextMenuController(ContextMenuController* menu_controller) {
   context_menu_controller_ = menu_controller;
+}
+
+void View::ShowContextMenu(int x, int y, bool is_mouse_gesture) {
+  if (!context_menu_controller_)
+    return;
+
+  context_menu_controller_->ShowContextMenu(this, x, y, is_mouse_gesture);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -527,7 +458,7 @@ void View::SetContextMenuController(ContextMenuController* menu_controller) {
 bool View::ProcessMousePressed(const MouseEvent& e, DragInfo* drag_info) {
   const bool enabled = enabled_;
   int drag_operations;
-  if (enabled && e.IsOnlyLeftMouseButton() && HitTest(WTL::CPoint(e.x(), e.y())))
+  if (enabled && e.IsOnlyLeftMouseButton() && HitTest(e.location()))
     drag_operations = GetDragOperations(e.x(), e.y());
   else
     drag_operations = 0;
@@ -567,27 +498,16 @@ void View::ProcessMouseReleased(const MouseEvent& e, bool canceled) {
   if (!canceled && context_menu_controller_ && e.IsOnlyRightMouseButton()) {
     // Assume that if there is a context menu controller we won't be deleted
     // from mouse released.
-    CPoint location(e.x(), e.y());
-    ConvertPointToScreen(this, &location);
-    ContextMenuController* context_menu_controller = context_menu_controller_;
+    gfx::Point location(e.location());
     OnMouseReleased(e, canceled);
-    context_menu_controller_->ShowContextMenu(this, location.x, location.y,
-                                              true);
+    if (HitTest(location)) {
+      ConvertPointToScreen(this, &location);
+      ShowContextMenu(location.x(), location.y(), true);
+    }
   } else {
     OnMouseReleased(e, canceled);
   }
   // WARNING: we may have been deleted.
-}
-
-void View::DoDrag(const MouseEvent& e, int press_x, int press_y) {
-  scoped_refptr<OSExchangeData> data = new OSExchangeData;
-  WriteDragData(press_x, press_y, data.get());
-
-  // Message the RootView to do the drag and drop. That way if we're removed
-  // the RootView can detect it and avoid callins us back.
-  RootView* root_view = GetRootView();
-  root_view->StartDragForViewFromMouseEvent(
-      this, data, GetDragOperations(press_x, press_y));
 }
 
 void View::AddChildView(View* v) {
@@ -708,11 +628,25 @@ void View::PropagateAddNotifications(View* parent, View* child) {
   ViewHierarchyChangedImpl(true, true, parent, child);
 }
 
+void View::ThemeChanged() {
+  int c = GetChildViewCount();
+  for (int i = c - 1; i >= 0; --i)
+    GetChildViewAt(i)->ThemeChanged();
+}
+
 #ifndef NDEBUG
 bool View::IsProcessingPaint() const {
   return GetParent() && GetParent()->IsProcessingPaint();
 }
 #endif
+
+gfx::Point View::GetKeyboardContextMenuLocation() {
+  gfx::Rect vis_bounds = GetVisibleBounds();
+  gfx::Point screen_point(vis_bounds.x() + vis_bounds.width() / 2,
+                          vis_bounds.y() + vis_bounds.height() / 2);
+  ConvertPointToScreen(this, &screen_point);
+  return screen_point;
+}
 
 bool View::HasHitTestMask() const {
   return false;
@@ -722,11 +656,15 @@ void View::GetHitTestMask(gfx::Path* mask) const {
   DCHECK(mask);
 }
 
-void View::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
+void View::ViewHierarchyChanged(bool is_add,
+                                View* parent,
+                                View* child) {
 }
 
 void View::ViewHierarchyChangedImpl(bool register_accelerators,
-                                    bool is_add, View *parent, View *child) {
+                                    bool is_add,
+                                    View* parent,
+                                    View* child) {
   if (register_accelerators) {
     if (is_add) {
       // If you get this registration, you are part of a subtree that has been
@@ -752,7 +690,7 @@ void View::PropagateVisibilityNotifications(View* start, bool is_visible) {
 void View::VisibilityChanged(View* starting_from, bool is_visible) {
 }
 
-View* View::GetViewForPoint(const CPoint& point) {
+View* View::GetViewForPoint(const gfx::Point& point) {
   return GetViewForPoint(point, true);
 }
 
@@ -773,7 +711,8 @@ bool View::GetNotifyWhenVisibleBoundsInRootChanges() {
   return notify_when_visible_bounds_in_root_changes_;
 }
 
-View* View::GetViewForPoint(const CPoint& point, bool can_create_floating) {
+View* View::GetViewForPoint(const gfx::Point& point,
+                            bool can_create_floating) {
   // Walk the child Views recursively looking for the View that most
   // tightly encloses the specified point.
   for (int i = GetChildViewCount() - 1 ; i >= 0 ; --i) {
@@ -781,7 +720,7 @@ View* View::GetViewForPoint(const CPoint& point, bool can_create_floating) {
     if (!child->IsVisible())
       continue;
 
-    CPoint point_in_child_coords(point);
+    gfx::Point point_in_child_coords(point);
     View::ConvertPointToView(this, child, &point_in_child_coords);
     if (child->HitTest(point_in_child_coords))
       return child->GetViewForPoint(point_in_child_coords, true);
@@ -793,26 +732,23 @@ View* View::GetViewForPoint(const CPoint& point, bool can_create_floating) {
   // GetFloatingViewIDForPoint lies or if RetrieveFloatingViewForID creates a
   // view which doesn't contain the provided point
   int id;
-  if (can_create_floating && GetFloatingViewIDForPoint(point.x, point.y, &id)) {
+  if (can_create_floating &&
+      GetFloatingViewIDForPoint(point.x(), point.y(), &id)) {
     RetrieveFloatingViewForID(id);  // This creates the floating view.
     return GetViewForPoint(point, false);
   }
   return this;
 }
 
-ViewContainer* View::GetViewContainer() const {
-  // The root view holds a reference to this view hierarchy's container.
-  return parent_ ? parent_->GetViewContainer() : NULL;
+Widget* View::GetWidget() const {
+  // The root view holds a reference to this view hierarchy's Widget.
+  return parent_ ? parent_->GetWidget() : NULL;
 }
 
 // Get the containing RootView
 RootView* View::GetRootView() {
-  ViewContainer* vc = GetViewContainer();
-  if (vc) {
-    return vc->GetRootView();
-  } else {
-    return NULL;
-  }
+  Widget* widget = GetWidget();
+  return widget ? widget->GetRootView() : NULL;
 }
 
 View* View::GetViewByID(int id) const {
@@ -964,8 +900,8 @@ void View::PrintViewHierarchyImp(int indent) {
   buf << L' ';
   buf << GetID();
   buf << L' ';
-  buf << bounds_.left << L"," << bounds_.top << L",";
-  buf << bounds_.right << L"," << bounds_.bottom;
+  buf << bounds_.x() << L"," << bounds_.y() << L",";
+  buf << bounds_.right() << L"," << bounds_.bottom();
   buf << L' ';
   buf << this;
 
@@ -1020,6 +956,36 @@ void View::AddAccelerator(const Accelerator& accelerator) {
   RegisterAccelerators();
 }
 
+void View::RemoveAccelerator(const Accelerator& accelerator) {
+  std::vector<Accelerator>::iterator iter;
+  if (!accelerators_.get() ||
+      ((iter = std::find(accelerators_->begin(), accelerators_->end(),
+          accelerator)) == accelerators_->end())) {
+    NOTREACHED() << "Removing non-existing accelerator";
+    return;
+  }
+
+  accelerators_->erase(iter);
+  RootView* root_view = GetRootView();
+  if (!root_view) {
+    // We are not part of a view hierarchy, so there is nothing to do as we
+    // removed ourselves from accelerators_, we won't be registered when added
+    // to one.
+    return;
+  }
+
+  // TODO(port): Fix this once we have a FocusManger for Linux.
+#if defined(OS_WIN)
+  FocusManager* focus_manager = GetFocusManager();
+  if (focus_manager) {
+    // We may not have a FocusManager if the window containing us is being
+    // closed, in which case the FocusManager is being deleted so there is
+    // nothing to unregister.
+    focus_manager->UnregisterAccelerator(accelerator, this);
+  }
+#endif
+}
+
 void View::ResetAccelerators() {
   if (accelerators_.get()) {
     UnregisterAccelerators();
@@ -1038,6 +1004,9 @@ void View::RegisterAccelerators() {
     // added to one.
     return;
   }
+
+  // TODO(port): Fix this once we have a FocusManger for Linux.
+#if defined(OS_WIN)
   FocusManager* focus_manager = GetFocusManager();
   if (!focus_manager) {
     // Some crash reports seem to show that we may get cases where we have no
@@ -1050,6 +1019,7 @@ void View::RegisterAccelerators() {
        iter != accelerators_->end(); ++iter) {
     focus_manager->RegisterAccelerator(*iter, this);
   }
+#endif
 }
 
 void View::UnregisterAccelerators() {
@@ -1058,6 +1028,8 @@ void View::UnregisterAccelerators() {
 
   RootView* root_view = GetRootView();
   if (root_view) {
+    // TODO(port): Fix this once we have a FocusManger for Linux.
+#if defined(OS_WIN)
     FocusManager* focus_manager = GetFocusManager();
     if (focus_manager) {
       // We may not have a FocusManager if the window containing us is being
@@ -1065,20 +1037,8 @@ void View::UnregisterAccelerators() {
       // nothing to unregister.
       focus_manager->UnregisterAccelerators(this);
     }
+#endif
   }
-}
-
-/////////////////////////////////////////////////////////////////////////////
-//
-// View - accessibility
-//
-/////////////////////////////////////////////////////////////////////////////
-
-AccessibleWrapper* View::GetAccessibleWrapper() {
-  if (accessibility_.get() == NULL) {
-    accessibility_.reset(new AccessibleWrapper(this));
-  }
-  return accessibility_.get();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1195,7 +1155,10 @@ void View::DetachAllFloatingViews() {
       if (EnumerateFloatingViews(CURRENT,
                                  floating_views_[c]->GetFloatingViewID(),
                                  &tmp_id)) {
+        // TODO(port): Fix this once we have a FocusManger for Linux.
+#if defined(OS_WIN)
         focus_manager->StoreFocusedView();
+#endif
         should_restore_focus_ = true;
       }
       focused_view = NULL;
@@ -1230,7 +1193,13 @@ void View::RestoreFloatingViewFocus() {
   restore_focus_view_task_ = NULL;
   should_restore_focus_ = false;
 
-  GetFocusManager()->RestoreFocusedView();
+  // TODO(port): Fix this once we have a FocusManger for Linux.
+#if defined(OS_WIN)
+  FocusManager* focus_manager = GetFocusManager();
+  DCHECK(focus_manager);
+  if (focus_manager)
+    focus_manager->RestoreFocusedView();
+#endif
 }
 
 // static
@@ -1282,32 +1251,22 @@ bool View::EnumerateFloatingViewsForInterval(int low_bound, int high_bound,
 }
 
 // static
-void View::ConvertPointToView(View* src,
-                              View* dst,
+void View::ConvertPointToView(const View* src,
+                              const View* dst,
                               gfx::Point* point) {
   ConvertPointToView(src, dst, point, true);
 }
 
 // static
-void View::ConvertPointToView(View* src,
-                              View* dst,
-                              CPoint* point) {
-  gfx::Point tmp_point(point->x, point->y);
-  ConvertPointToView(src, dst, &tmp_point, true);
-  point->x = tmp_point.x();
-  point->y = tmp_point.y();
-}
-
-// static
-void View::ConvertPointToView(View* src,
-                              View* dst,
+void View::ConvertPointToView(const View* src,
+                              const View* dst,
                               gfx::Point* point,
                               bool try_other_direction) {
   // src can be NULL
   DCHECK(dst);
   DCHECK(point);
 
-  View* v;
+  const View* v;
   gfx::Point offset;
 
   for (v = dst; v && v != src; v = v->GetParent()) {
@@ -1330,56 +1289,48 @@ void View::ConvertPointToView(View* src,
 
     // If src is NULL, sp is in the screen coordinate system
     if (src == NULL) {
-      ViewContainer* vc = dst->GetViewContainer();
-      if (vc) {
-        CRect b;
-        vc->GetBounds(&b, false);
-        point->SetPoint(point->x() - b.left, point->y() - b.top);
+      Widget* widget = dst->GetWidget();
+      if (widget) {
+        gfx::Rect b;
+        widget->GetBounds(&b, false);
+        point->SetPoint(point->x() - b.x(), point->y() - b.y());
       }
     }
   }
 }
 
 // static
-void View::ConvertPointToViewContainer(View* src, CPoint* p) {
-  DCHECK(src);
-  DCHECK(p);
-  View *v;
-  CPoint offset(0, 0);
-
-  for (v = src; v; v = v->GetParent()) {
-    offset.x += v->GetX(APPLY_MIRRORING_TRANSFORMATION);
-    offset.y += v->y();
-  }
-  p->x += offset.x;
-  p->y += offset.y;
-}
-
-// static
-void View::ConvertPointFromViewContainer(View *source, CPoint *p) {
-  CPoint t(0, 0);
-  ConvertPointToViewContainer(source, &t);
-  p->x -= t.x;
-  p->y -= t.y;
-}
-
-// static
-void View::ConvertPointToScreen(View* src, CPoint* p) {
+void View::ConvertPointToWidget(const View* src, gfx::Point* p) {
   DCHECK(src);
   DCHECK(p);
 
-  // If the view is not connected to a tree, do nothing
-  if (src->GetViewContainer() == NULL) {
-    return;
+  gfx::Point offset;
+  for (const View* v = src; v; v = v->GetParent()) {
+    offset.set_x(offset.x() + v->GetX(APPLY_MIRRORING_TRANSFORMATION));
+    offset.set_y(offset.y() + v->y());
   }
+  p->SetPoint(p->x() + offset.x(), p->y() + offset.y());
+}
 
-  ConvertPointToViewContainer(src, p);
-  ViewContainer* vc = src->GetViewContainer();
-  if (vc) {
-    CRect r;
-    vc->GetBounds(&r, false);
-    p->x += r.left;
-    p->y += r.top;
+// static
+void View::ConvertPointFromWidget(const View* dest, gfx::Point* p) {
+  gfx::Point t;
+  ConvertPointToWidget(dest, &t);
+  p->SetPoint(p->x() - t.x(), p->y() - t.y());
+}
+
+// static
+void View::ConvertPointToScreen(const View* src, gfx::Point* p) {
+  DCHECK(src);
+  DCHECK(p);
+
+  // If the view is not connected to a tree, there's nothing we can do.
+  Widget* widget = src->GetWidget();
+  if (widget) {
+    ConvertPointToWidget(src, p);
+    gfx::Rect r;
+    widget->GetBounds(&r, false);
+    p->SetPoint(p->x() + r.x(), p->y() + r.y());
   }
 }
 
@@ -1444,25 +1395,6 @@ bool View::IsVisibleInRootView() const {
     return false;
 }
 
-bool View::HitTest(const CPoint& l) const {
-  if (l.x >= 0 && l.x < width() && l.y >= 0 && l.y < height()) {
-    if (HasHitTestMask()) {
-      gfx::Path mask;
-      GetHitTestMask(&mask);
-      ScopedHRGN rgn(mask.CreateHRGN());
-      return !!PtInRegion(rgn, l.x, l.y);
-    }
-    // No mask, but inside our bounds.
-    return true;
-  }
-  // Outside our bounds.
-  return false;
-}
-
-HCURSOR View::GetCursorForPoint(Event::EventType event_type, int x, int y) {
-  return NULL;
-}
-
 /////////////////////////////////////////////////////////////////////////////
 //
 // View - keyboard and focus
@@ -1471,9 +1403,8 @@ HCURSOR View::GetCursorForPoint(Event::EventType event_type, int x, int y) {
 
 void View::RequestFocus() {
   RootView* rv = GetRootView();
-  if (rv) {
+  if (rv && IsFocusable())
     rv->FocusView(this);
-  }
 }
 
 void View::WillGainFocus() {
@@ -1523,32 +1454,10 @@ int View::OnPerformDrop(const DropTargetEvent& event) {
   return DragDropTypes::DRAG_NONE;
 }
 
-static int GetHorizontalDragThreshold() {
-  static int threshold = -1;
-  if (threshold == -1)
-    threshold = GetSystemMetrics(SM_CXDRAG) / 2;
-  return threshold;
-}
-
-static int GetVerticalDragThreshold() {
-  static int threshold = -1;
-  if (threshold == -1)
-    threshold = GetSystemMetrics(SM_CYDRAG) / 2;
-  return threshold;
-}
-
 // static
 bool View::ExceededDragThreshold(int delta_x, int delta_y) {
   return (abs(delta_x) > GetHorizontalDragThreshold() ||
           abs(delta_y) > GetVerticalDragThreshold());
-}
-
-void View::Focus() {
-  // Set the native focus to the root view window so it receives the keyboard
-  // messages.
-  FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager)
-    focus_manager->FocusHWND(GetRootView()->GetViewContainer()->GetHWND());
 }
 
 bool View::CanProcessTabKeyEvents() {
@@ -1560,20 +1469,32 @@ bool View::GetTooltipText(int x, int y, std::wstring* tooltip) {
   return false;
 }
 
-bool View::GetTooltipTextOrigin(int x, int y, CPoint* loc) {
+bool View::GetTooltipTextOrigin(int x, int y, gfx::Point* loc) {
   return false;
 }
 
 void View::TooltipTextChanged() {
-  ViewContainer* view_container = GetViewContainer();
-  if (view_container != NULL && view_container->GetTooltipManager())
-    view_container->GetTooltipManager()->TooltipTextChanged(this);
+#if defined(OS_WIN)
+  Widget* widget = GetWidget();
+  if (widget && widget->GetTooltipManager())
+    widget->GetTooltipManager()->TooltipTextChanged(this);
+#else
+  // TODO(port): Not actually windows specific; I just haven't ported this part
+  // yet.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void View::UpdateTooltip() {
-  ViewContainer* view_container = GetViewContainer();
-  if (view_container != NULL && view_container->GetTooltipManager())
-    view_container->GetTooltipManager()->UpdateTooltip();
+#if defined(OS_WIN)
+  Widget* widget = GetWidget();
+  if (widget && widget->GetTooltipManager())
+    widget->GetTooltipManager()->UpdateTooltip();
+#else
+  // TODO(port): Not actually windows specific; I just haven't ported this part
+  // yet.
+  NOTIMPLEMENTED();
+#endif
 }
 
 void View::SetParentOwned(bool f) {
@@ -1588,13 +1509,22 @@ std::string View::GetClassName() const {
   return kViewClassName;
 }
 
+View* View::GetAncestorWithClassName(const std::string& name) {
+  for (View* view = this; view; view = view->GetParent()) {
+    if (view->GetClassName() == name)
+      return view;
+  }
+  return NULL;
+}
+
 gfx::Rect View::GetVisibleBounds() {
+  if (!IsVisibleInRootView())
+    return gfx::Rect();
   gfx::Rect vis_bounds(0, 0, width(), height());
   gfx::Rect ancestor_bounds;
   View* view = this;
   int root_x = 0;
   int root_y = 0;
-  bool has_view_container = false;
   while (view != NULL && !vis_bounds.IsEmpty()) {
     root_x += view->GetX(APPLY_MIRRORING_TRANSFORMATION);
     root_y += view->y();
@@ -1604,9 +1534,8 @@ gfx::Rect View::GetVisibleBounds() {
       ancestor_bounds.SetRect(0, 0, ancestor->width(),
                               ancestor->height());
       vis_bounds = vis_bounds.Intersect(ancestor_bounds);
-    } else if (!view->GetViewContainer()) {
-      // If the view has no ViewContainer, we're not visible. Return an empty
-      // rect.
+    } else if (!view->GetWidget()) {
+      // If the view has no Widget, we're not visible. Return an empty rect.
       return gfx::Rect();
     }
     view = ancestor;
@@ -1706,4 +1635,3 @@ void View::DragInfo::PossibleDrag(int x, int y) {
 }
 
 }  // namespace
-

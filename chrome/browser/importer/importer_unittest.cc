@@ -4,6 +4,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include <atlbase.h>
 #include <windows.h>
 #include <unknwn.h>
 #include <intshcut.h>
@@ -14,12 +15,11 @@
 
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "chrome/browser/ie7_password.h"
 #include "chrome/browser/importer/ie_importer.h"
 #include "chrome/browser/importer/importer.h"
+#include "chrome/browser/password_manager/ie7_password.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/env_util.h"
 #include "chrome/common/win_util.h"
 
 class ImporterTest : public testing::Test {
@@ -190,7 +190,9 @@ class TestObserver : public ProfileWriter,
         ++history_count_;
   }
 
-  virtual void AddBookmarkEntry(const std::vector<BookmarkEntry>& bookmark) {
+  virtual void AddBookmarkEntry(const std::vector<BookmarkEntry>& bookmark,
+                                const std::wstring& first_folder_name,
+                                int options) {
     // Importer should import the IE Favorites folder the same as the list.
     for (size_t i = 0; i < bookmark.size(); ++i) {
       if (FindBookmarkEntry(bookmark[i], kIEBookmarks,
@@ -274,10 +276,6 @@ void WritePStore(IPStore* pstore, const GUID* type, const GUID* subtype) {
 }
 
 TEST_F(ImporterTest, IEImporter) {
-  // Skips in Win2000 for the running environment can not be set up.
-  if (env_util::GetOperatingSystemVersion() == "5.0")
-    return;
-
   // Sets up a favorites folder.
   win_util::ScopedCOMInitializer com_init;
   std::wstring path = test_path_;
@@ -547,7 +545,9 @@ class FirefoxObserver : public ProfileWriter,
     ++history_count_;
   }
 
-  virtual void AddBookmarkEntry(const std::vector<BookmarkEntry>& bookmark) {
+  virtual void AddBookmarkEntry(const std::vector<BookmarkEntry>& bookmark,
+                                const std::wstring& first_folder_name,
+                                int options) {
     for (size_t i = 0; i < bookmark.size(); ++i) {
       if (FindBookmarkEntry(bookmark[i], kFirefox2Bookmarks,
                             arraysize(kFirefox2Bookmarks)))
@@ -602,17 +602,22 @@ TEST_F(ImporterTest, Firefox2Importer) {
   std::wstring data_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox2_profile\\*");
-  file_util::CopyDirectory(data_path, profile_path_, true);
+  ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox2_nss");
-  file_util::CopyDirectory(data_path, profile_path_, false);
+  ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
 
   std::wstring search_engine_path = app_path_;
   file_util::AppendToPath(&search_engine_path, L"searchplugins");
   CreateDirectory(search_engine_path.c_str(), NULL);
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox2_searchplugins");
-  file_util::CopyDirectory(data_path, search_engine_path, false);
+  if (!file_util::PathExists(data_path)) {
+    // TODO(maruel):  Create test data that we can open source!
+    LOG(ERROR) << L"Missing internal test data";
+    return;
+  }
+  ASSERT_TRUE(file_util::CopyDirectory(data_path, search_engine_path, false));
 
   MessageLoop* loop = MessageLoop::current();
   scoped_refptr<ImporterHost> host = new ImporterHost(loop);
@@ -742,7 +747,9 @@ class Firefox3Observer : public ProfileWriter,
     ++history_count_;
   }
 
-  virtual void AddBookmarkEntry(const std::vector<BookmarkEntry>& bookmark) {
+  virtual void AddBookmarkEntry(const std::vector<BookmarkEntry>& bookmark,
+                                const std::wstring& first_folder_name,
+                                int options) {
     for (size_t i = 0; i < bookmark.size(); ++i) {
       if (FindBookmarkEntry(bookmark[i], kFirefox3Bookmarks,
                             arraysize(kFirefox3Bookmarks)))
@@ -797,17 +804,22 @@ TEST_F(ImporterTest, Firefox3Importer) {
   std::wstring data_path;
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox3_profile\\*");
-  file_util::CopyDirectory(data_path, profile_path_, true);
+  ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, true));
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox3_nss");
-  file_util::CopyDirectory(data_path, profile_path_, false);
+  ASSERT_TRUE(file_util::CopyDirectory(data_path, profile_path_, false));
 
   std::wstring search_engine_path = app_path_;
   file_util::AppendToPath(&search_engine_path, L"searchplugins");
   CreateDirectory(search_engine_path.c_str(), NULL);
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   file_util::AppendToPath(&data_path, L"firefox3_searchplugins");
-  file_util::CopyDirectory(data_path, search_engine_path, false);
+  if (!file_util::PathExists(data_path)) {
+    // TODO(maruel):  Create test data that we can open source!
+    LOG(ERROR) << L"Missing internal test data";
+    return;
+  }
+  ASSERT_TRUE(file_util::CopyDirectory(data_path, search_engine_path, false));
 
   MessageLoop* loop = MessageLoop::current();
   ProfileInfo profile_info;
@@ -822,4 +834,3 @@ TEST_F(ImporterTest, Firefox3Importer) {
       HISTORY | PASSWORDS | FAVORITES | SEARCH_ENGINES, observer, true));
   loop->Run();
 }
-

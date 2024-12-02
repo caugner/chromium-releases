@@ -6,7 +6,9 @@
 #define BASE_EVENT_RECORDER_H_
 
 #include <string>
+#if defined(OS_WIN)
 #include <windows.h>
+#endif
 #include "base/basictypes.h"
 
 namespace base {
@@ -37,7 +39,7 @@ class EventRecorder {
   // Starts recording events.
   // Will clobber the file if it already exists.
   // Returns true on success, or false if an error occurred.
-  bool StartRecording(std::wstring &filename);
+  bool StartRecording(const std::wstring& filename);
 
   // Stops recording.
   void StopRecording();
@@ -47,7 +49,7 @@ class EventRecorder {
 
   // Plays events previously recorded.
   // Returns true on success, or false if an error occurred.
-  bool StartPlayback(std::wstring &filename);
+  bool StartPlayback(const std::wstring& filename);
 
   // Stops playback.
   void StopPlayback();
@@ -55,10 +57,12 @@ class EventRecorder {
   // Is the EventRecorder currently playing.
   bool is_playing() const { return is_playing_; }
 
+#if defined(OS_WIN)
   // C-style callbacks for the EventRecorder.
   // Used for internal purposes only.
   LRESULT RecordWndProc(int nCode, WPARAM wParam, LPARAM lParam);
   LRESULT PlaybackWndProc(int nCode, WPARAM wParam, LPARAM lParam);
+#endif
 
  private:
   // Create a new EventRecorder.  Events are saved to the file filename.
@@ -67,8 +71,12 @@ class EventRecorder {
   explicit EventRecorder()
       : is_recording_(false),
         is_playing_(false),
+#if defined(OS_WIN)
         journal_hook_(NULL),
-        file_(NULL) {
+        file_(NULL),
+#endif
+        playback_first_msg_time_(0),
+        playback_start_time_(0) {
   }
   ~EventRecorder();
 
@@ -76,9 +84,11 @@ class EventRecorder {
 
   bool is_recording_;
   bool is_playing_;
+#if defined(OS_WIN)
   HHOOK journal_hook_;
   FILE* file_;
   EVENTMSG playback_msg_;
+#endif
   int playback_first_msg_time_;
   int playback_start_time_;
 
@@ -88,4 +98,3 @@ class EventRecorder {
 }  // namespace base
 
 #endif // BASE_EVENT_RECORDER_H_
-

@@ -32,11 +32,14 @@
 // an FTS table that is indexed like a normal table, and the index over it is
 // free since sqlite always indexes the internal rowid.
 
+using base::Time;
+
 namespace history {
 
 namespace {
 
-const int kCurrentVersionNumber = 1;
+static const int kCurrentVersionNumber = 1;
+static const int kCompatibleVersionNumber = 1;
 
 // Snippet computation relies on the index of the columns in the original
 // create statement. These are the 0-based indices (as strings) of the
@@ -45,8 +48,7 @@ const char kTitleColumnIndex[] = "1";
 const char kBodyColumnIndex[] = "2";
 
 // The string prepended to the database identifier to generate the filename.
-const wchar_t kFilePrefix[] = L"History Index ";
-const size_t kFilePrefixLen = arraysize(kFilePrefix) - 1;  // Don't count NULL.
+const FilePath::CharType kFilePrefix[] = FILE_PATH_LITERAL("History Index ");
 
 // We do not allow rollback, but this simple scoper makes it easy to always
 // remember to commit a begun transaction. This protects against some errors
@@ -54,7 +56,7 @@ const size_t kFilePrefixLen = arraysize(kFilePrefix) - 1;  // Don't count NULL.
 // the full protection of a transaction's rollback abilities.
 class ScopedTransactionCommitter {
  public:
-   ScopedTransactionCommitter(TextDatabase* db) : db_(db) {
+  ScopedTransactionCommitter(TextDatabase* db) : db_(db) {
     db_->BeginTransaction();
   }
   ~ScopedTransactionCommitter() {
@@ -67,7 +69,7 @@ class ScopedTransactionCommitter {
 
 }  // namespace
 
-TextDatabase::TextDatabase(const std::wstring& path,
+TextDatabase::TextDatabase(const FilePath& path,
                            DBIdent id,
                            bool allow_create)
     : db_(NULL),
@@ -77,8 +79,7 @@ TextDatabase::TextDatabase(const std::wstring& path,
       allow_create_(allow_create),
       transaction_nesting_(0) {
   // Compute the file name.
-  file_name_ = path_;
-  file_util::AppendToPath(&file_name_, IDToFileName(ident_));
+  file_name_ = path_.Append(IDToFileName(ident_));
 }
 
 TextDatabase::~TextDatabase() {
@@ -94,36 +95,43 @@ TextDatabase::~TextDatabase() {
 }
 
 // static
-const wchar_t* TextDatabase::file_base() {
+const FilePath::CharType* TextDatabase::file_base() {
   return kFilePrefix;
 }
 
 // static
-std::wstring TextDatabase::IDToFileName(DBIdent id) {
+FilePath TextDatabase::IDToFileName(DBIdent id) {
   // Identifiers are intended to be a combination of the year and month, for
   // example, 200801 for January 2008. We convert this to
   // "History Index 2008-01". However, we don't make assumptions about this
   // scheme: the caller should assign IDs as it feels fit with the knowledge
   // that they will apppear on disk in this form.
-  return StringPrintf(L"%ls%d-%02d", file_base(), id / 100, id % 100);
+  FilePath::StringType filename(file_base());
+  StringAppendF(&filename, FILE_PATH_LITERAL("%d-%02d"),
+                id / 100, id % 100);
+  return FilePath(filename);
 }
 
 // static
-TextDatabase::DBIdent TextDatabase::FileNameToID(const std::wstring& file_path){
-  std::wstring file_name = file_util::GetFilenameFromPath(file_path);
+TextDatabase::DBIdent TextDatabase::FileNameToID(const FilePath& file_path) {
+  FilePath::StringType file_name = file_path.BaseName().value();
 
   // We don't actually check the prefix here. Since the file system could
   // be case insensitive in ways we can't predict (NTFS), checking could
   // potentially be the wrong thing to do. Instead, we just look for a suffix.
-  static const int kIDStringLength = 7;  // Room for "xxxx-xx".
+  static const size_t kIDStringLength = 7;  // Room for "xxxx-xx".
   if (file_name.length() < kIDStringLength)
     return 0;
-  const wchar_t* number_begin =
-      &file_name[file_name.length() - kIDStringLength];
+  const FilePath::StringType suffix(
+      &file_name[file_name.length() - kIDStringLength]);
 
-  int year, month;
-  if (swscanf_s(number_begin, L"%d-%d", &year, &month) != 2)
-    return 0;  // Unable to get both numbers.
+  if (suffix.length() != kIDStringLength ||
+      suffix[4] != FILE_PATH_LITERAL('-')) {
+    return 0;
+  }
+
+  int year = StringToInt(suffix.substr(0, 4));
+  int month = StringToInt(suffix.substr(5, 2));
 
   return year * 100 + month;
 }
@@ -136,7 +144,7 @@ bool TextDatabase::Init() {
   }
 
   // Attach the database to our index file.
-  if (sqlite3_open(WideToUTF8(file_name_).c_str(), &db_) != SQLITE_OK)
+  if (OpenSqliteDb(file_name_, &db_) != SQLITE_OK)
     return false;
   statement_cache_ = new SqliteStatementCache(db_);
 
@@ -157,7 +165,8 @@ bool TextDatabase::Init() {
   sqlite3_exec(db_, "PRAGMA locking_mode=EXCLUSIVE", NULL, NULL, NULL);
 
   // Meta table tracking version information.
-  if (!meta_table_.Init(std::string(), kCurrentVersionNumber, db_))
+  if (!meta_table_.Init(std::string(), kCurrentVersionNumber,
+                        kCompatibleVersionNumber, db_))
     return false;
   if (meta_table_.GetCompatibleVersionNumber() > kCurrentVersionNumber) {
     // This version is too new. We don't bother notifying the user on this
@@ -166,6 +175,7 @@ bool TextDatabase::Init() {
     // here. If that's not the case, since this is only indexed data, it's
     // probably better to just not give FTS results than strange errors when
     // everything else is working OK.
+    LOG(WARNING) << "Text database is too new.";
     return false;
   }
 
@@ -224,7 +234,7 @@ bool TextDatabase::AddPageData(Time time,
 
   // Add to the pages table.
   SQLITE_UNIQUE_STATEMENT(add_to_pages, *statement_cache_,
-      "INSERT INTO pages(url,title,body)VALUES(?,?,?)");
+      "INSERT INTO pages (url, title, body) VALUES (?,?,?)");
   if (!add_to_pages.is_valid())
     return false;
   add_to_pages->bind_string(0, url);
@@ -239,7 +249,7 @@ bool TextDatabase::AddPageData(Time time,
 
   // Add to the info table with the same rowid.
   SQLITE_UNIQUE_STATEMENT(add_to_info, *statement_cache_,
-      "INSERT INTO info(rowid,time) VALUES(?,?)");
+      "INSERT INTO info (rowid, time) VALUES (?,?)");
   if (!add_to_info.is_valid())
     return false;
   add_to_info->bind_int64(0, rowid);
@@ -348,7 +358,7 @@ void TextDatabase::GetTextMatches(const std::string& query,
     Match& match = results->at(results->size() - 1);
     match.url.Swap(&url);
 
-    match.title = statement->column_string16(1);
+    match.title = UTF8ToWide(statement->column_string(1));
     match.time = Time::FromInternalValue(statement->column_int64(2));
 
     // Extract any matches in the title.
@@ -385,4 +395,3 @@ void TextDatabase::GetTextMatches(const std::string& query,
 }
 
 }  // namespace history
-

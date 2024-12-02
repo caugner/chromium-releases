@@ -6,14 +6,19 @@
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_DATABASE_H_
 
 #include <deque>
-#include <string>
+#include <list>
+#include <set>
 #include <vector>
 
+#include "base/file_path.h"
+#include "base/hash_tables.h"
+#include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/bloom_filter.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class GURL;
 
@@ -31,7 +36,7 @@ class SafeBrowsingDatabase {
 
   // Initializes the database with the given filename.  The callback is
   // executed after finishing a chunk.
-  virtual bool Init(const std::wstring& filename,
+  virtual bool Init(const FilePath& filename,
                     Callback0::Type* chunk_inserted_callback) = 0;
 
   // Deletes the current database and creates a new one.
@@ -51,7 +56,7 @@ class SafeBrowsingDatabase {
                            std::string* matching_list,
                            std::vector<SBPrefix>* prefix_hits,
                            std::vector<SBFullHashResult>* full_hits,
-                           Time last_update) = 0;
+                           base::Time last_update) = 0;
 
   // Processes add/sub commands.  Database will free the chunks when it's done.
   virtual void InsertChunks(const std::string& list_name,
@@ -79,10 +84,18 @@ class SafeBrowsingDatabase {
   // Called when the user's machine has resumed from a lower power state.
   virtual void HandleResume() = 0;
 
- protected:
-  static std::wstring BloomFilterFilename(const std::wstring& db_filename);
+  virtual bool UpdateStarted() { return true; }
+  virtual void UpdateFinished(bool update_succeeded) {}
 
-  // Load the bloom filter off disk.  Generates one if it can't find it.
+  virtual FilePath filename() const { return filename_; }
+
+ protected:
+  friend class SafeBrowsingDatabaseTest;
+  FRIEND_TEST(SafeBrowsingDatabase, HashCaching);
+
+  static FilePath BloomFilterFilename(const FilePath& db_filename);
+
+  // Load the bloom filter off disk, or generates one if it doesn't exist.
   virtual void LoadBloomFilter();
 
   // Deletes the on-disk bloom filter, i.e. because it's stale.
@@ -93,13 +106,32 @@ class SafeBrowsingDatabase {
 
   // Implementation specific bloom filter building.
   virtual void BuildBloomFilter() = 0;
-  virtual void AddHostToBloomFilter(int host_key) = 0;
 
   // Measuring false positive rate. Call this each time we look in the filter.
-  virtual void IncrementBloomFilterReadCount() = 0;
+  virtual void IncrementBloomFilterReadCount() {}
 
-  std::wstring bloom_filter_filename_;
-  scoped_ptr<BloomFilter> bloom_filter_;
+  typedef struct HashCacheEntry {
+    SBFullHash full_hash;
+    int list_id;
+    int add_chunk_id;
+    int sub_chunk_id;
+    base::Time received;
+  } HashCacheEntry;
+
+  typedef std::list<HashCacheEntry> HashList;
+  typedef base::hash_map<SBPrefix, HashList> HashCache;
+
+  scoped_ptr<HashCache> hash_cache_;
+  HashCache* hash_cache() { return hash_cache_.get(); }
+
+  // Cache of prefixes that returned empty results (no full hash match).
+  typedef std::set<SBPrefix> PrefixCache;
+  PrefixCache prefix_miss_cache_;
+  PrefixCache* prefix_miss_cache() { return &prefix_miss_cache_; }
+
+  FilePath filename_;
+  FilePath bloom_filter_filename_;
+  scoped_refptr<BloomFilter> bloom_filter_;
 };
 
 #endif  // CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_DATABASE_H_

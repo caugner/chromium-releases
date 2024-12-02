@@ -5,9 +5,8 @@
 #ifndef CHROME_BROWSER_WINDOW_SIZER_H__
 #define CHROME_BROWSER_WINDOW_SIZER_H__
 
+#include "base/basictypes.h"
 #include "base/gfx/rect.h"
-#include "base/logging.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer
@@ -44,7 +43,7 @@ class WindowSizer {
 
     // Returns the bounds of the working rect of the monitor that most closely
     // intersects the provided bounds.
-    virtual gfx::Rect GetMonitorBoundsMatching(
+    virtual gfx::Rect GetMonitorWorkingRectMatching(
         const gfx::Rect& match_rect) const = 0;
 
     // Returns the delta between the working rect and the monitor size of the
@@ -84,6 +83,9 @@ class WindowSizer {
                                      gfx::Rect* window_bounds,
                                      bool* maximized);
 
+  // Returns the default origin for popups of the given size.
+  static gfx::Point GetDefaultPopupOrigin(const gfx::Size& size);
+
   // Determines the position, size and maximized state for a window as it is
   // created. This function uses several strategies to figure out optimal size
   // and placement, first looking for an existing active window, then falling
@@ -98,6 +100,7 @@ class WindowSizer {
   void DetermineWindowBounds(const gfx::Rect& specified_bounds,
                              gfx::Rect* bounds,
                              bool* maximized) const;
+
  private:
   explicit WindowSizer(const std::wstring& app_name);
 
@@ -142,4 +145,3 @@ class WindowSizer {
 
 
 #endif  // #ifndef CHROME_BROWSER_WINDOW_SIZER_H__
-

@@ -4,41 +4,14 @@
 
 #include "base/time.h"
 #include "base/string_util.h"
+#include "base/sys_string_conversions.h"
 #include "base/third_party/nspr/prtime.h"
 
 #include "base/logging.h"
 
+namespace base {
+
 // TimeDelta ------------------------------------------------------------------
-
-// static
-TimeDelta TimeDelta::FromDays(int64 days) {
-  return TimeDelta(days * Time::kMicrosecondsPerDay);
-}
-
-// static
-TimeDelta TimeDelta::FromHours(int64 hours) {
-  return TimeDelta(hours * Time::kMicrosecondsPerHour);
-}
-
-// static
-TimeDelta TimeDelta::FromMinutes(int64 minutes) {
-  return TimeDelta(minutes * Time::kMicrosecondsPerMinute);
-}
-
-// static
-TimeDelta TimeDelta::FromSeconds(int64 secs) {
-  return TimeDelta(secs * Time::kMicrosecondsPerSecond);
-}
-
-// static
-TimeDelta TimeDelta::FromMilliseconds(int64 ms) {
-  return TimeDelta(ms * Time::kMicrosecondsPerMillisecond);
-}
-
-// static
-TimeDelta TimeDelta::FromMicroseconds(int64 us) {
-  return TimeDelta(us);
-}
 
 int TimeDelta::InDays() const {
   return static_cast<int>(delta_ / Time::kMicrosecondsPerDay);
@@ -107,7 +80,7 @@ Time Time::LocalMidnight() const {
 // static
 bool Time::FromString(const wchar_t* time_string, Time* parsed_time) {
   DCHECK((time_string != NULL) && (parsed_time != NULL));
-  std::string ascii_time_string = WideToUTF8(time_string);
+  std::string ascii_time_string = SysWideToUTF8(time_string);
   if (ascii_time_string.length() == 0)
     return false;
   PRTime result_time = 0;
@@ -120,3 +93,4 @@ bool Time::FromString(const wchar_t* time_string, Time* parsed_time) {
   return true;
 }
 
+}  // namespace base

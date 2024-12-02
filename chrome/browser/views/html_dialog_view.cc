@@ -5,8 +5,8 @@
 #include "chrome/browser/views/html_dialog_view.h"
 
 #include "chrome/browser/browser.h"
-#include "chrome/views/root_view.h"
-#include "chrome/views/window.h"
+#include "chrome/views/widget/root_view.h"
+#include "chrome/views/window/window.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // HtmlDialogView, public:
@@ -26,25 +26,27 @@ HtmlDialogView::~HtmlDialogView() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HtmlDialogView, ChromeViews::View implementation:
+// HtmlDialogView, views::View implementation:
 
-void HtmlDialogView::GetPreferredSize(CSize *out) {
-  delegate_->GetDialogSize(out);
+gfx::Size HtmlDialogView::GetPreferredSize() {
+  gfx::Size out;
+  delegate_->GetDialogSize(&out);
+  return out;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// HtmlDialogView, ChromeViews::WindowDelegate implementation:
+// HtmlDialogView, views::WindowDelegate implementation:
 
 bool HtmlDialogView::CanResize() const {
   return true;
 }
 
 bool HtmlDialogView::IsModal() const {
-  return delegate_->IsModal();
+  return delegate_->IsDialogModal();
 }
 
 std::wstring HtmlDialogView::GetWindowTitle() const {
-  return L"Google Gears";
+  return delegate_->GetDialogTitle();
 }
 
 void HtmlDialogView::WindowClosing() {
@@ -55,19 +57,31 @@ void HtmlDialogView::WindowClosing() {
     OnDialogClosed("");
 }
 
-ChromeViews::View* HtmlDialogView::GetContentsView() {
+views::View* HtmlDialogView::GetContentsView() {
+  return this;
+}
+
+views::View* HtmlDialogView::GetInitiallyFocusedView() {
   return this;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // HtmlDialogContentsDelegate implementation:
 
+bool HtmlDialogView::IsDialogModal() const {
+  return IsModal();
+}
+
+std::wstring HtmlDialogView::GetDialogTitle() const {
+  return GetWindowTitle();
+}
+
 GURL HtmlDialogView::GetDialogContentURL() const {
   return delegate_->GetDialogContentURL();
 }
 
-void HtmlDialogView::GetDialogSize(CSize* size) const {
-  return delegate_->GetDialogSize(size);
+void HtmlDialogView::GetDialogSize(gfx::Size* size) const {
+  delegate_->GetDialogSize(size);
 }
 
 std::string HtmlDialogView::GetDialogArgs() const {
@@ -84,12 +98,14 @@ void HtmlDialogView::OnDialogClosed(const std::string& json_retval) {
 // PageNavigator implementation:
 void HtmlDialogView::OpenURLFromTab(TabContents* source,
                                     const GURL& url,
+                                    const GURL& referrer,
                                     WindowOpenDisposition disposition,
                                     PageTransition::Type transition) {
   // Force all links to open in a new window, ignoring the incoming
   // disposition. This is a tabless, modal dialog so we can't just
   // open it in the current frame.
-  parent_browser_->OpenURLFromTab(source, url, NEW_WINDOW, transition);
+  parent_browser_->OpenURLFromTab(source, url, referrer, NEW_WINDOW,
+                                  transition);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -140,7 +156,8 @@ bool HtmlDialogView::IsPopup(TabContents* source) {
   return true;
 }
 
-void HtmlDialogView::ToolbarSizeChanged(TabContents* source, bool is_animating) {
+void HtmlDialogView::ToolbarSizeChanged(TabContents* source,
+                                        bool is_animating) {
   Layout();
 }
 
@@ -166,4 +183,3 @@ void HtmlDialogView::InitDialog() {
   host->Init(this);
   host->set_delegate(this);
 }
-

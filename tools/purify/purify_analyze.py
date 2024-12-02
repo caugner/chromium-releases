@@ -70,7 +70,7 @@ class MemoryTreeNode(object):
     return root
 
   def __init__(self, function, bytes, blocks):
-    ''' 
+    '''
     Args:
       function: A string representing a unique method or function.
       bytes: initial number of bytes allocated in this node
@@ -105,15 +105,15 @@ class MemoryTreeNode(object):
                (other._bytes, other._blocks, other._function))
 
   def __str__(self):
-    return "(%d bytes, %d blocks, %d allocs) %s" % ( 
+    return "(%d bytes, %d blocks, %d allocs) %s" % (
         self._bytes, self._blocks, self._allocs, self._function)
 
   def PrintRecursive(self, padding="", byte_filter=0):
     '''Print the tree and all of its children recursively (depth-first).  All
     nodes at a given level of the tree are sorted in descending order by size.
-    
+
     Args:
-      padding: Printed at the front of the line.  Each recursive call adds a 
+      padding: Printed at the front of the line.  Each recursive call adds a
         single space character.
       byte_filter: a number of bytes below which we'll prune the tree
     '''
@@ -163,22 +163,37 @@ class PurifyAnalyze:
   types_excluded = ("EXH", "EXI", "EXC", "MPK")
 
 
-  def __init__(self, files, echo, name=None, source_dir=None, data_dir=None):
+  def __init__(self, files, echo, name=None, source_dir=None, data_dir=None,
+               report_dir=None):
     # The input file we're analyzing.
     self._files = files
+
     # Whether the input file contents should be echoed to stdout.
     self._echo = echo
+
     # A symbolic name for the run being analyzed, often the name of the
     # exe which was purified.
     self._name = name
+
     # The top of the source code tree of the code we're analyzing.
     # This prefix is stripped from all filenames in stacks for normalization.
     if source_dir:
       purify_message.Stack.SetSourceDir(source_dir)
+
+    script_dir = google.path_utils.ScriptDir()
+
     if data_dir:
       self._data_dir = data_dir
+      self._global_data_dir = os.path.join(script_dir, "data")
     else:
-      self._data_dir = os.path.join(google.path_utils.ScriptDir(), "data")
+      self._data_dir = os.path.join(script_dir, "data")
+      self._global_data_dir = None
+
+    if report_dir:
+      self._report_dir = report_dir
+    else:
+      self._report_dir = os.path.join(script_dir, "latest")
+
     # A map of message_type to a MessageList of that type.
     self._message_lists = {}
     self._ReadIgnoreFile()
@@ -188,8 +203,9 @@ class PurifyAnalyze:
     top-most visible stack line.
     '''
     self._pat_ignore = []
-    filenames = [os.path.join(self._data_dir, "ignore.txt"),
-        os.path.join(google.path_utils.ScriptDir(), "data", "ignore.txt")]
+    filenames = [os.path.join(self._data_dir, "ignore.txt")]
+    if self._global_data_dir:
+      filenames.append(os.path.join(self._global_data_dir, "ignore.txt"))
     for filename in filenames:
       if os.path.exists(filename):
         f = open(filename, 'r')
@@ -208,7 +224,7 @@ class PurifyAnalyze:
       return False
 
     # check ignore patterns against title and top-most visible stack frames
-    strings = [msg._title]    
+    strings = [msg._title]
     err = msg.GetErrorStack()
     if err:
       line = err.GetTopVisibleStackLine().get('function', None)
@@ -387,7 +403,7 @@ class PurifyAnalyze:
       # Purify output should never end with a real message
       if message:
         logging.error("Unexpected message at end of file %s" % file)
-  
+
     return fatal_errors == 0
 
   def GetMessageList(self, key):
@@ -396,14 +412,20 @@ class PurifyAnalyze:
     else:
       return None
 
-  def PrintSummary(self, echo=None):
+  def Summary(self, echo=None, save=True):
     ''' Print a summary of how many messages of each type were found. '''
     # make sure everyone else is done first
     sys.stderr.flush()
     sys.stdout.flush()
     if echo == None:
       echo = self._echo
+    if save:
+      filename = os.path.join(self._report_dir, "Summary.txt")
+      file = open(filename, "w")
+    else:
+      file = None
     logging.info("summary of Purify messages:")
+    self._ReportFixableMessages()
     for key in self._message_lists:
       list = self._message_lists[key]
       unique = list.UniqueMessages()
@@ -411,13 +433,13 @@ class PurifyAnalyze:
       count = 0
       for msg in all:
         count += msg._count
-      logging.info("%s(%s) unique:%d total:%d" % (self._name, 
-          purify_message.GetMessageType(key), len(unique), count))
+      self._PrintAndSave("%s(%s) unique:%d total:%d" % (self._name,
+          purify_message.GetMessageType(key), len(unique), count), file)
       if key not in ["MIU"]:
         ignore_file = "%s_%s_ignore.txt" % (self._name, key)
         ignore_hashes = self._MessageHashesFromFile(ignore_file)
         ignored = 0
-        
+
         groups = list.UniqueMessageGroups()
         group_keys = groups.keys()
         group_keys.sort(cmp=lambda x,y: len(groups[y]) - len(groups[x]))
@@ -427,28 +449,32 @@ class PurifyAnalyze:
           ignored += len(groups[group]) - len(kept_msgs)
           groups[group] = kept_msgs
         if ignored:
-          logging.info("%s(%s) ignored:%d" % (self._name, 
-            purify_message.GetMessageType(key), ignored))
+          self._PrintAndSave("%s(%s) ignored:%d" % (self._name,
+            purify_message.GetMessageType(key), ignored), file)
         total = reduce(lambda x, y: x + len(groups[y]), group_keys, 0)
         if total:
-          print "%s(%s) group summary:" % (self._name, 
-            purify_message.GetMessageType(key))
-          print "   TOTAL: %d" % total
+          self._PrintAndSave("%s(%s) group summary:" % (self._name,
+            purify_message.GetMessageType(key)), file)
+          self._PrintAndSave("   TOTAL: %d" % total, file)
           for group in group_keys:
             if len(groups[group]):
-              print "   %s: %d" % (group, len(groups[group]))
+              self._PrintAndSave("   %s: %d" % (group, len(groups[group])),
+                                 file)
         if echo:
           for group in group_keys:
             msgs = groups[group]
             if len(msgs) == 0:
               continue
-            print "messages from %s (%d)" % (group, len(msgs))
-            print "="*79
+            self._PrintAndSave("messages from %s (%d)" % (group, len(msgs)),
+                               file)
+            self._PrintAndSave("="*79, file)
             for msg in msgs:
               # for the summary output, line numbers are useful
-              print msg.NormalizedStr(verbose=True)
+              self._PrintAndSave(msg.NormalizedStr(verbose=True), file)
         # make sure stdout is flushed to avoid weird overlaps with logging
         sys.stdout.flush()
+    if file:
+      file.close()
 
   def PrintMemoryInUse(self, byte_filter=16384):
     ''' Print one or more trees showing a hierarchy of memory allocations.
@@ -465,7 +491,7 @@ class PurifyAnalyze:
     for sublist in sublists:
       tree = MemoryTreeNode.CreateTree(sublist)
       trees.append(tree)
-      
+
       # while the tree is a hierarchical assignment from the root/bottom of the
       # stack down, the summary is simply adding the total of the top-most
       # stack item from our code
@@ -511,15 +537,24 @@ class PurifyAnalyze:
     # make sure stdout is flushed to avoid weird overlaps with logging
     sys.stdout.flush()
 
-  def PrintBugReport(self):
-    ''' Print a summary of how many messages of each type were found. '''
+  def BugReport(self, save=True):
+    ''' Print a summary of how many messages of each type were found and write
+    to BugReport.txt
+    '''
+    if save:
+      filename = os.path.join(self._report_dir, "BugReport.txt")
+      file = open(filename, "w")
+    else:
+      file = None
     # make sure everyone else is done first
     sys.stderr.flush()
     sys.stdout.flush()
     logging.info("summary of Purify bugs:")
-    # This is a specialized set of counters for layout tests, with some
+
+    # This is a specialized set of counters for unit tests, with some
     # unfortunate hard-coded knowledge.
-    layout_test_counts = {}
+    test_counts = {}
+    total_count = 0
     for key in self._message_lists:
       bug = {}
       list = self._message_lists[key]
@@ -534,13 +569,15 @@ class PurifyAnalyze:
                              "total":0,
                              "count":0,
                              "programs":set()}
+        total_count += 1
         this_bug = bug[msg._title]
         this_bug["total"] += msg._count
         this_bug["count"] += 1
-        this_bug["programs"].add(msg.Program())
-        # try to summarize the problem areas for layout tests
+        prog = msg.Program()
         if self._name == "layout":
-          prog = msg.Program()
+          # For layout tests, use the last argument, which is the URL that's
+          # passed into test_shell.
+          this_bug["programs"].add(prog)
           prog_args = prog.split(" ")
           if len(prog_args):
             path = prog_args[-1].replace('\\', '/')
@@ -552,37 +589,55 @@ class PurifyAnalyze:
               if index >= 0:
                 # the port number is 8000 or 9000, but length is the same
                 path = "http: " + path[(index + len("127.0.0.1:8000/")):]
-            path = "/".join(path.split('/')[0:-1])
-            count = 1 + layout_test_counts.get(path, 0)
-            layout_test_counts[path] = count
+            count = 1 + test_counts.get(path, 0)
+            test_counts[path] = count
+        elif self._name == "ui":
+          # ui_tests.exe appends a --test-name= argument to chrome.exe
+          prog_args = prog.split(" ")
+          arg_prefix = "--test-name="
+          test_name = "UNKNOWN"
+          for arg in prog_args:
+            index = arg.find(arg_prefix)
+            if index >= 0:
+              test_name = arg[len(arg_prefix):]
+              count = 1 + test_counts.get(test_name, 0)
+              test_counts[test_name] = count
+              break
+          this_bug["programs"].add(test_name)
+        else:
+          this_bug["programs"].add(prog)
+
       for title in bug:
         b = bug[title]
-        print "[%s] %s" % (key, title)
-        print "%d tests, %d stacks, %d instances" % (len(b["programs"]),
-            b["count"], b["total"])
-        print "Reproducible with:"
+        self._PrintAndSave("[%s] %s" % (key, title), file)
+        self._PrintAndSave("%d tests, %d stacks, %d instances" % (
+            len(b["programs"]), b["count"], b["total"]), file)
+        self._PrintAndSave("Reproducible with:", file)
         for program in b["programs"]:
-          print "   %s" % program
-        print "Sample error details:"
-        print "====================="
-        print b["message"].NormalizedStr(verbose=True)
-    if len(layout_test_counts):
-      print
-      print "Layout test error counts"
-      print "========================"
-      paths = layout_test_counts.keys()
-      paths.sort()
-      for path in paths:
-        print "%s: %d" % (path, layout_test_counts[path])
+          self._PrintAndSave("   %s" % program, file)
+        self._PrintAndSave("Sample error details:", file)
+        self._PrintAndSave("=====================", file)
+        self._PrintAndSave(b["message"].NormalizedStr(verbose=True), file)
+    if len(test_counts):
+      self._PrintAndSave("", file)
+      self._PrintAndSave("test error counts", file)
+      self._PrintAndSave("========================", file)
+      tests = test_counts.keys()
+      tests.sort()
+      for test in tests:
+        self._PrintAndSave("%s: %d" % (test, test_counts[test]), file)
+    if total_count == 0:
+      self._PrintAndSave("No bugs.  Shocking, I know.", file)
     # make sure stdout is flushed to avoid weird overlaps with logging
     sys.stdout.flush()
+    if file:
+      file.close()
 
-  def SaveLatestStrings(self, string_list, key, fname_extra=""):
-    '''Output a list of strings to a file in the "latest" dir.
+  def SaveStrings(self, string_list, key, fname_extra=""):
+    '''Output a list of strings to a file in the report dir.
     '''
-    script_dir = google.path_utils.ScriptDir()
-    path = os.path.join(script_dir, "latest")
-    out = os.path.join(path, "%s_%s%s.txt" % (self._name, key, fname_extra))
+    out = os.path.join(self._report_dir,
+                       "%s_%s%s.txt" % (self._name, key, fname_extra))
     logging.info("saving %s" % (out))
     try:
       f = open(out, "w+")
@@ -599,7 +654,7 @@ class PurifyAnalyze:
     type.  See Message.NormalizedStr() for details of what's written.
     '''
     if not path:
-      path = self._data_dir
+      path = self._report_dir
     for key in self._message_lists:
       out = os.path.join(path, "%s_%s.txt" % (self._name, key))
       logging.info("saving %s" % (out))
@@ -612,6 +667,40 @@ class PurifyAnalyze:
         f.write("\n")
       f.close()
     return True
+
+  def _PrintAndSave(self, msg, file):
+    ''' Print |msg| to both stdout and to file. '''
+    if file:
+      file.write(msg + "\n")
+    print msg
+    sys.stdout.flush()
+
+  def _ReportFixableMessages(self):
+    ''' Collects all baseline files for the executable being tested, including
+    lists of flakey results, and logs the total number of messages in them.
+    '''
+    # TODO(pamg): As long as we're looking at all the files, we could use the
+    # information to report any message types that no longer happen at all.
+    fixable = 0
+    flakey = 0
+    paths = [os.path.join(self._data_dir, x)
+             for x in os.listdir(self._data_dir)]
+    for path in paths:
+      # We only care about this executable's files, and not its gtest filters.
+      if (not os.path.basename(path).startswith(self._name) or
+          not path.endswith(".txt") or
+          path.endswith("gtest.txt") or
+          path.endswith("_ignore.txt") or
+          not os.path.isfile(path)):
+        continue
+      msgs = self._MessageHashesFromFile(path)
+      if path.find("flakey") == -1:
+        fixable += len(msgs)
+      else:
+        flakey += len(msgs)
+
+    logging.info("Fixable errors: %s" % fixable)
+    logging.info("Flakey errors: %s" % flakey)
 
   def _MessageHashesFromFile(self, filename):
     ''' Reads a file of normalized messages (see SaveResults) and creates a
@@ -653,8 +742,8 @@ class PurifyAnalyze:
       logging.info("%s: %d msgs" % (filename, len(msgs)))
     return msgs
 
-  def _SaveLatestGroupSummary(self, message_list):
-    '''Save a summary of message groups and their counts to a file in "latest"
+  def _SaveGroupSummary(self, message_list):
+    '''Save a summary of message groups and their counts to a file in report_dir
     '''
     string_list = []
     groups = message_list.UniqueMessageGroups()
@@ -664,7 +753,7 @@ class PurifyAnalyze:
     for group in group_keys:
       string_list.append("%s: %d" % (group, len(groups[group])))
 
-    self.SaveLatestStrings(string_list, message_list.GetType(), "_GROUPS")
+    self.SaveStrings(string_list, message_list.GetType(), "_GROUPS")
 
   def CompareResults(self):
     ''' Compares the results from the current run with the baseline data
@@ -689,7 +778,7 @@ class PurifyAnalyze:
       # type of message which is used to generate filenames and descriptive
       # error messages
       type_name = "%s_%s" % (self._name, type)
-      
+
       # open the baseline file to compare against
       baseline_file = "%s.txt" % type_name
       baseline_hashes = self._MessageHashesFromFile(baseline_file)
@@ -706,7 +795,7 @@ class PurifyAnalyze:
       current_list = self.GetMessageList(type)
       if current_list:
         # Since we're looking at the list of unique messages,
-        # if the number of occurrances of a given unique message 
+        # if the number of occurrances of a given unique message
         # changes, it won't show up as an error.
         current_messages = current_list.UniqueMessages()
       else:
@@ -736,32 +825,32 @@ class PurifyAnalyze:
                      len(type_errors), len(type_fixes)))
 
       if len(type_errors):
-        strs = [current_hashes[x].NormalizedStr(verbose=True) 
+        strs = [current_hashes[x].NormalizedStr(verbose=True)
                 for x in type_errors]
         logging.error("%d new '%s(%s)' errors found\n%s" % (len(type_errors),
-                      purify_message.GetMessageType(type), type, 
+                      purify_message.GetMessageType(type), type,
                       '\n'.join(strs)))
         strs = [current_hashes[x].NormalizedStr() for x in type_errors]
-        self.SaveLatestStrings(strs, type, "_NEW")
+        self.SaveStrings(strs, type, "_NEW")
         errors += len(type_errors)
 
       if len(type_fixes):
         # we don't have access to the original message, so all we can do is log
         # the non-verbose normalized text
         logging.warning("%d new '%s(%s)' unexpected fixes found\n%s" % (
-                        len(type_fixes), purify_message.GetMessageType(type), 
+                        len(type_fixes), purify_message.GetMessageType(type),
                         type, '\n'.join(type_fixes)))
-        self.SaveLatestStrings(type_fixes, type, "_FIXED")
+        self.SaveStrings(type_fixes, type, "_FIXED")
         fixes += len(type_fixes)
         if len(current_messages) == 0:
           logging.warning("all errors fixed in %s" % baseline_file)
 
       if len(type_fixes) or len(type_errors):
         strs = [baseline_hashes[x] for x in new_baseline]
-        self.SaveLatestStrings(strs, type, "_BASELINE")
+        self.SaveStrings(strs, type, "_BASELINE")
 
       if current_list:
-        self._SaveLatestGroupSummary(current_list)
+        self._SaveGroupSummary(current_list)
 
     if errors:
       logging.error("%d total new errors found" % errors)
@@ -783,10 +872,10 @@ def _main():
   parser = optparse.OptionParser("usage: %prog [options] <files to analyze>")
   parser.add_option("-b", "--baseline", action="store_true", default=False,
                     help="save output to baseline files")
-  parser.add_option("-m", "--memory_in_use", 
+  parser.add_option("-m", "--memory_in_use",
                     action="store_true", default=False,
                     help="print memory in use summary")
-  parser.add_option("", "--validate", 
+  parser.add_option("", "--validate",
                     action="store_true", default=False,
                     help="validate results vs. baseline")
   parser.add_option("-e", "--echo_to_stdout",
@@ -807,6 +896,8 @@ def _main():
                     help="print output as an attempted summary of bugs")
   parser.add_option("-v", "--verbose", action="store_true", default=False,
                     help="verbose output - enable debug log messages")
+  parser.add_option("", "--report_dir",
+                    help="path where report files are saved")
 
   (options, args) = parser.parse_args()
   if not len(args) >= 1:
@@ -817,12 +908,12 @@ def _main():
     google.logging_utils.config_root(level=logging.DEBUG)
   else:
     google.logging_utils.config_root(level=logging.INFO)
-  pa = PurifyAnalyze(filenames, options.echo_to_stdout, options.name, 
-                     options.source_dir, options.data_dir)
+  pa = PurifyAnalyze(filenames, options.echo_to_stdout, options.name,
+                     options.source_dir, options.data_dir, options.report_dir)
   execute_crash = not pa.ReadFile()
   if options.bug_report:
-    pa.PrintBugReport()
-    pa.PrintSummary(False)
+    pa.BugReport()
+    pa.Summary(False)
   elif options.memory_in_use:
     pa.PrintMemoryInUse(int(options.byte_filter))
   elif execute_crash:
@@ -831,20 +922,18 @@ def _main():
   elif options.validate:
     if pa.CompareResults() != 0:
       retcode = -1
-      script_dir = google.path_utils.ScriptDir()
-      latest_dir = os.path.join(script_dir, "latest")
-      pa.SaveResults(latest_dir)
-    pa.PrintSummary()
+      pa.SaveResults()
+    pa.Summary()
   elif options.baseline:
     if not pa.SaveResults(verbose=True):
       retcode = -1
-    pa.PrintSummary(False)
+    pa.Summary(False)
   else:
-    pa.PrintSummary(False)
+    pa.Summary(False)
 
   sys.exit(retcode)
 
 if __name__ == "__main__":
-  _main()  
+  _main()
 
 

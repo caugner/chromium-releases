@@ -5,97 +5,95 @@
 #ifndef CHROME_RENDERER_RENDER_PROCESS_H__
 #define CHROME_RENDERER_RENDER_PROCESS_H__
 
-#include <objidl.h>
-#include <mlang.h>
-
-#include "base/shared_memory.h"
+#include "base/timer.h"
 #include "chrome/common/child_process.h"
 #include "chrome/renderer/render_thread.h"
+#include "skia/ext/platform_canvas.h"
 
-class RenderView;
+namespace gfx {
+class Rect;
+}
+
+class TransportDIB;
 
 // Represents the renderer end of the browser<->renderer connection. The
 // opposite end is the RenderProcessHost. This is a singleton object for
 // each renderer.
 class RenderProcess : public ChildProcess {
  public:
-  static bool GlobalInit(const std::wstring& channel_name);
-  static void GlobalCleanup();
+  // This constructor grabs the channel name from the command line arguments.
+  RenderProcess();
+  // This constructor uses the given channel name.
+  RenderProcess(const std::wstring& channel_name);
 
-  // Returns true if plugins should be loaded in-process.
-  static bool ShouldLoadPluginsInProcess();
+  ~RenderProcess();
 
-  static IMLangFontLink2* GetLangFontLink();
-
-  // Allocates shared memory.  When no longer needed, you should pass the
-  // SharedMemory pointer to FreeSharedMemory so it can be recycled.  The size
-  // reported in the resulting SharedMemory object will be greater than or
-  // equal to the requested size.  This method returns NULL if unable to
-  // allocate memory for some reason.
-  static SharedMemory* AllocSharedMemory(size_t size);
+  // Get a canvas suitable for drawing and transporting to the browser
+  //   memory: (output) the transport DIB memory
+  //   rect: the rectangle which will be painted, use for sizing the canvas
+  //   returns: NULL on error
+  //
+  // When no longer needed, you should pass the TransportDIB to
+  // ReleaseTransportDIB so that it can be recycled.
+  skia::PlatformCanvas* GetDrawingCanvas(
+      TransportDIB** memory, const gfx::Rect& rect);
 
   // Frees shared memory allocated by AllocSharedMemory.  You should only use
   // this function to free the SharedMemory object.
-  static void FreeSharedMemory(SharedMemory* mem);
+  void ReleaseTransportDIB(TransportDIB* memory);
 
-  // Deletes the shared memory allocated by AllocSharedMemory.
-  static void DeleteSharedMem(SharedMemory* mem);
+  // Returns true if plugins should be loaded in-process.
+  bool in_process_plugins() const { return in_process_plugins_; }
 
- private:
-  friend class ChildProcessFactory<RenderProcess>;
-  RenderProcess(const std::wstring& channel_name);
-  ~RenderProcess();
-
-  // Initializes the LangFontLink object. This function cannot be called
-  // while the process is restricted by the sandbox or it will fail.
-  static void InitializeLangFontLink();
-
-  // Releases the LangFontLink object if already created.
-  static void ReleaseLangFontLink();
-
-  // Returns a pointer to the RenderProcess singleton instance.  This is
-  // guaranteed to be non-NULL between calls to GlobalInit and GlobalCleanup.
-  static RenderProcess* self() {
-    return static_cast<RenderProcess*>(child_process_);
+  // Returns a pointer to the RenderProcess singleton instance.
+  static RenderProcess* current() {
+    return static_cast<RenderProcess*>(ChildProcess::current());
   }
 
-  static ChildProcess* ClassFactory(const std::wstring& channel_name);
+ protected:
+  friend class RenderThread;
+  // Just like in_process_plugins(), but called before RenderProcess is created.
+  static bool InProcessPlugins();
 
-  // Look in the shared memory cache for a suitable object to reuse.  Returns
-  // NULL if there is none.
-  SharedMemory* GetSharedMemFromCache(size_t size);
+ private:
+  void Init();
 
-  // Maybe put the given shared memory into the shared memory cache.  Returns
+  // Look in the shared memory cache for a suitable object to reuse.
+  //   result: (output) the memory found
+  //   size: the resulting memory will be >= this size, in bytes
+  //   returns: false if a suitable DIB memory could not be found
+  bool GetTransportDIBFromCache(TransportDIB** result, size_t size);
+
+  // Maybe put the given shared memory into the shared memory cache. Returns
   // true if the SharedMemory object was stored in the cache; otherwise, false
   // is returned.
-  bool PutSharedMemInCache(SharedMemory* mem);
+  bool PutSharedMemInCache(TransportDIB* memory);
 
-  void ClearSharedMemCache();
+  void ClearTransportDIBCache();
 
-  // We want to lazily clear the shared memory cache if no one has requested
-  // memory.  This methods are used to schedule a deferred call to
-  // RenderProcess::ClearSharedMemCache.
-  void ScheduleCacheClearer();
+  // Return the index of a free cache slot in which to install a transport DIB
+  // of the given size. If all entries in the cache are larger than the given
+  // size, this doesn't free any slots and returns -1.
+  int FindFreeCacheSlot(size_t size);
 
-  // ChildProcess implementation
-  virtual void Cleanup();
-
-  // The one render thread (to be replaced with a set of render threads).
-  RenderThread render_thread_;
+  // Create a new transport DIB of, at least, the given size. Return NULL on
+  // error.
+  TransportDIB* CreateTransportDIB(size_t size);
+  void FreeTransportDIB(TransportDIB*);
 
   // A very simplistic and small cache.  If an entry in this array is non-null,
   // then it points to a SharedMemory object that is available for reuse.
-  SharedMemory* shared_mem_cache_[2];
+  TransportDIB* shared_mem_cache_[2];
 
-  // This factory is used to lazily invoke ClearSharedMemCache.
-  ScopedRunnableMethodFactory<RenderProcess> clearer_factory_;
+  // This DelayTimer cleans up our cache 5 seconds after the last use.
+  base::DelayTimer<RenderProcess> shared_mem_cache_cleaner_;
 
-  static IMLangFontLink2* lang_font_link_;
+  // TransportDIB sequence number
+  uint32 sequence_number_;
 
-  static bool load_plugins_in_process_;
+  bool in_process_plugins_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(RenderProcess);
+  DISALLOW_COPY_AND_ASSIGN(RenderProcess);
 };
 
 #endif  // CHROME_RENDERER_RENDER_PROCESS_H__
-

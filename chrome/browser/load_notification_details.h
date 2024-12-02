@@ -11,7 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/time.h"
-#include "chrome/browser/navigation_controller.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 
@@ -19,34 +19,33 @@ class LoadNotificationDetails {
  public:
   LoadNotificationDetails(const GURL& url,
                           PageTransition::Type origin,
-                          TimeDelta load_time,
+                          base::TimeDelta load_time,
                           NavigationController* controller,
                           int session_index)
       : url_(url),
-        origin_(origin),
         load_time_(load_time),
-        controller_(controller),
-        session_index_(session_index) {}
+        session_index_(session_index),
+        origin_(origin),
+        controller_(controller) {}
 
   ~LoadNotificationDetails() {}
 
   const GURL& url() const { return url_; }
   PageTransition::Type origin() const { return origin_; }
-  TimeDelta load_time() const { return load_time_; }
+  base::TimeDelta load_time() const { return load_time_; }
   int session_index() const { return session_index_; }
   NavigationController* controller() const { return controller_; }
 
  private:
   GURL url_;           // the URL loaded
-  TimeDelta load_time_;               // length of time the page load took
+  base::TimeDelta load_time_;               // length of time the page load took
   int session_index_;  // index of the load within the tab session
   PageTransition::Type origin_;       // type of action that caused the load
   NavigationController* controller_;  // tells us which tab the load was in
 
   LoadNotificationDetails() {}
 
-  DISALLOW_EVIL_CONSTRUCTORS(LoadNotificationDetails);
+  DISALLOW_COPY_AND_ASSIGN(LoadNotificationDetails);
 };
 
 #endif  // CHROME_BROWSER_LOAD_NOTIFICATION_DETAILS_H__
-

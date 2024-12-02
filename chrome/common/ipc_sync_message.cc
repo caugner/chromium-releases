@@ -2,28 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
 #include <windows.h>
+#endif
 #include <stack>
 
-#include "chrome/common/ipc_sync_message.h"
 #include "base/logging.h"
+#include "base/waitable_event.h"
+#include "chrome/common/ipc_sync_message.h"
 
 namespace IPC {
 
 uint32 SyncMessage::next_id_ = 0;
 #define kSyncMessageHeaderSize 4
 
-// A dummy handle used by EnableMessagePumping.
-HANDLE dummy_event = ::CreateEvent(NULL, TRUE, TRUE, NULL);
+base::WaitableEvent* dummy_event = new base::WaitableEvent(true, true);
 
 SyncMessage::SyncMessage(
     int32 routing_id,
-    WORD type,
+    uint16 type,
     PriorityValue priority,
     MessageReplyDeserializer* deserializer)
     : Message(routing_id, type, priority),
       deserializer_(deserializer),
-      pump_messages_event_(NULL) {
+      pump_messages_event_(NULL)
+      {
   set_sync();
   set_unblock(true);
 
@@ -72,7 +77,8 @@ int SyncMessage::GetMessageId(const Message& msg) {
 Message* SyncMessage::GenerateReply(const Message* msg) {
   DCHECK(msg->is_sync());
 
-  Message* reply = new Message(msg->routing_id(), IPC_REPLY_ID, msg->priority());
+  Message* reply = new Message(msg->routing_id(), IPC_REPLY_ID,
+                               msg->priority());
   reply->set_reply();
 
   SyncHeader header;
@@ -100,8 +106,6 @@ bool SyncMessage::ReadSyncHeader(const Message& msg, SyncHeader* header) {
 bool SyncMessage::WriteSyncHeader(Message* msg, const SyncHeader& header) {
   DCHECK(msg->is_sync() || msg->is_reply());
   DCHECK(msg->payload_size() == 0);
-
-  void* iter = NULL;
   bool result = msg->WriteInt(header.message_id);
   if (!result) {
     NOTREACHED();
@@ -120,4 +124,3 @@ bool MessageReplyDeserializer::SerializeOutputParameters(const Message& msg) {
 }
 
 }  // namespace IPC
-

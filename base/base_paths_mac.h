@@ -5,8 +5,8 @@
 #ifndef BASE_BASE_PATHS_MAC_H_
 #define BASE_BASE_PATHS_MAC_H_
 
-// This file declares Mac-specific path keys for the base module.  
-// These can be used with the PathService to access various special 
+// This file declares Mac-specific path keys for the base module.
+// These can be used with the PathService to access various special
 // directories and files.
 
 namespace base {
@@ -29,4 +29,3 @@ enum {
 }  // namespace base
 
 #endif  // BASE_BASE_PATHS_MAC_H_
-

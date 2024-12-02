@@ -8,6 +8,8 @@
 #include <windows.h>
 #elif defined(OS_MACOSX)
 #include <CoreGraphics/CGGeometry.h>
+#elif defined(OS_LINUX)
+#include <gdk/gdk.h>
 #endif
 
 #include "base/logging.h"
@@ -42,6 +44,10 @@ Rect::Rect(int x, int y, int width, int height)
   set_height(height);
 }
 
+Rect::Rect(const gfx::Point& origin, const gfx::Size& size)
+    : origin_(origin), size_(size) {
+}
+
 #if defined(OS_WIN)
 Rect::Rect(const RECT& r)
     : origin_(r.left, r.top) {
@@ -66,6 +72,19 @@ Rect& Rect::operator=(const CGRect& r) {
   origin_.SetPoint(r.origin.x, r.origin.y);
   set_width(r.size.width);
   set_height(r.size.height);
+  return *this;
+}
+#elif defined(OS_LINUX)
+Rect::Rect(const GdkRectangle& r)
+    : origin_(r.x, r.y) {
+  set_width(r.width);
+  set_height(r.height);
+}
+
+Rect& Rect::operator=(const GdkRectangle& r) {
+  origin_.SetPoint(r.x, r.y);
+  set_width(r.width);
+  set_height(r.height);
   return *this;
 }
 #endif
@@ -93,11 +112,10 @@ void Rect::SetRect(int x, int y, int width, int height) {
   set_height(height);
 }
 
-void Rect::Inset(int horizontal, int vertical) {
-  set_x(x() + horizontal);
-  set_y(y() + vertical);
-  set_width(std::max(width() - (horizontal * 2), 0));
-  set_height(std::max(height() - (vertical * 2), 0));
+void Rect::Inset(int left, int top, int right, int bottom) {
+  Offset(left, top);
+  set_width(std::max(width() - left - right, 0));
+  set_height(std::max(height() - top - bottom, 0));
 }
 
 void Rect::Offset(int horizontal, int vertical) {
@@ -120,6 +138,11 @@ RECT Rect::ToRECT() const {
   r.right = right();
   r.top = y();
   r.bottom = bottom();
+  return r;
+}
+#elif defined(OS_LINUX)
+GdkRectangle Rect::ToGdkRectangle() const {
+  GdkRectangle r = {x(), y(), width(), height()};
   return r;
 }
 #elif defined(OS_MACOSX)
@@ -215,4 +238,3 @@ Point Rect::CenterPoint() const {
 }
 
 }  // namespace gfx
-

@@ -10,6 +10,7 @@
 #include "base/string_util.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/notification_service.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 
@@ -21,8 +22,13 @@ ScopableCPRequest::ScopableCPRequest(const char* u, const char* m,
                                      CPBrowsingContext c) {
   pdata = NULL;
   data = NULL;
+#if defined(OS_WIN)
   url = _strdup(u);
   method = _strdup(m);
+#else
+  url = strdup(u);
+  method = strdup(m);
+#endif
   context = c;
 }
 
@@ -40,7 +46,7 @@ ScopableCPRequest::~ScopableCPRequest() {
 // static
 void PluginHelper::DestroyAllHelpersForPlugin(ChromePluginLib* plugin) {
   NotificationService::current()->Notify(
-      NOTIFY_CHROME_PLUGIN_UNLOADED,
+      NotificationType::CHROME_PLUGIN_UNLOADED,
       Source<ChromePluginLib>(plugin),
       NotificationService::NoDetails());
 }
@@ -48,14 +54,14 @@ void PluginHelper::DestroyAllHelpersForPlugin(ChromePluginLib* plugin) {
 PluginHelper::PluginHelper(ChromePluginLib* plugin) : plugin_(plugin) {
   DCHECK(CalledOnValidThread());
   NotificationService::current()->AddObserver(
-      this, NOTIFY_CHROME_PLUGIN_UNLOADED,
+      this, NotificationType::CHROME_PLUGIN_UNLOADED,
       Source<ChromePluginLib>(plugin_));
 }
 
 PluginHelper::~PluginHelper() {
   DCHECK(CalledOnValidThread());
   NotificationService::current()->RemoveObserver(
-      this, NOTIFY_CHROME_PLUGIN_UNLOADED,
+      this, NotificationType::CHROME_PLUGIN_UNLOADED,
       Source<ChromePluginLib>(plugin_));
 }
 
@@ -63,7 +69,7 @@ void PluginHelper::Observe(NotificationType type,
                            const NotificationSource& source,
                            const NotificationDetails& details) {
   DCHECK(CalledOnValidThread());
-  DCHECK(type == NOTIFY_CHROME_PLUGIN_UNLOADED);
+  DCHECK(type == NotificationType::CHROME_PLUGIN_UNLOADED);
   DCHECK(plugin_ == Source<ChromePluginLib>(source).ptr());
 
   delete this;
@@ -93,7 +99,7 @@ uint32 PluginResponseUtils::CPLoadFlagsToNetFlags(uint32 flags) {
 
 int PluginResponseUtils::GetResponseInfo(
     const net::HttpResponseHeaders* response_headers,
-    CPResponseInfoType type, void* buf, uint32 buf_size) {
+    CPResponseInfoType type, void* buf, size_t buf_size) {
   if (!response_headers)
     return CPERR_FAILURE;
 
@@ -121,18 +127,17 @@ int PluginResponseUtils::GetResponseInfo(
 
 CPError CPB_GetCommandLineArgumentsCommon(const char* url,
                                           std::string* arguments) {
-  CommandLine cmd;
+  const CommandLine cmd = *CommandLine::ForCurrentProcess();
   std::wstring arguments_w;
 
   // Use the same UserDataDir for new launches that we currently have set.
   std::wstring user_data_dir = cmd.GetSwitchValue(switches::kUserDataDir);
   if (!user_data_dir.empty()) {
     // Make sure user_data_dir is an absolute path.
-    wchar_t user_data_dir_full[MAX_PATH];
-    if (_wfullpath(user_data_dir_full, user_data_dir.c_str(), MAX_PATH) &&
-        file_util::PathExists(user_data_dir_full)) {
-      CommandLine::AppendSwitchWithValue(
-          &arguments_w, switches::kUserDataDir, user_data_dir_full);
+    if (file_util::AbsolutePath(&user_data_dir) &&
+        file_util::PathExists(user_data_dir)) {
+      arguments_w += std::wstring(L"--") + switches::kUserDataDir +
+                     L'=' + user_data_dir;
     }
   }
 
@@ -140,7 +145,7 @@ CPError CPB_GetCommandLineArgumentsCommon(const char* url,
   // chrome.
   // Note: Do not change this flag!  Old Gears shortcuts will break if you do!
   std::wstring url_w = UTF8ToWide(url);
-  CommandLine::AppendSwitchWithValue(&arguments_w, switches::kApp, url_w);
+  arguments_w += std::wstring(L"--") + switches::kApp + L'=' + url_w;
 
   *arguments = WideToUTF8(arguments_w);
 
@@ -158,4 +163,3 @@ void* STDCALL CPB_Alloc(uint32 size) {
 void STDCALL CPB_Free(void* memory) {
   free(memory);
 }
-

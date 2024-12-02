@@ -5,26 +5,20 @@
 #include <time.h>
 
 #include "base/file_util.h"
+#include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "chrome/installer/setup/setup.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/copy_tree_work_item.h"
-#include "chrome/installer/util/create_dir_work_item.h"
-#include "chrome/installer/util/create_reg_key_work_item.h"
-#include "chrome/installer/util/delete_tree_work_item.h"
-#include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/l10n_string_util.h"
-#include "chrome/installer/util/logging_installer.h"
 #include "chrome/installer/util/google_update_constants.h"
+#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/set_reg_value_work_item.h"
 #include "chrome/installer/util/shell_util.h"
-#include "chrome/installer/util/util_constants.h"
-#include "chrome/installer/util/version.h"
-#include "chrome/installer/util/work_item_list.h"
+#include "chrome/installer/util/work_item.h"
 
-#include "installer_util_strings.h"
+// Build-time generated include file.
+#include "registered_dlls.h"
 
 namespace {
 std::wstring AppendPath(const std::wstring parent_path,
@@ -50,6 +44,10 @@ void AddUninstallShortcutWorkItems(HKEY reg_root,
                           file_util::GetFilenameFromPath(exe_path));
   uninstall_cmd.append(L"\" --");
   uninstall_cmd.append(installer_util::switches::kUninstall);
+  if (reg_root == HKEY_LOCAL_MACHINE) {
+    uninstall_cmd.append(L" --");
+    uninstall_cmd.append(installer_util::switches::kSystemLevel);
+  }
 
   // Create DisplayName, UninstallString and InstallLocation keys
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
@@ -114,10 +112,8 @@ void AddInstallerCopyTasks(const std::wstring& exe_path,
 
   install_list->AddCopyTreeWorkItem(exe_path, exe_dst, temp_path,
                                     WorkItem::ALWAYS);
-  install_list->AddCopyTreeWorkItem(archive_path, archive_dst, temp_path,
-                                    WorkItem::ALWAYS);
+  install_list->AddMoveTreeWorkItem(archive_path, archive_dst, temp_path);
 }
-
 
 // This method tells if we are running on 64 bit platform so that we can copy
 // one extra exe. If the API call to determine 64 bit fails, we play it safe
@@ -137,7 +133,7 @@ bool Is64bit() {
   return false;
 }
 
-}
+}  // namespace
 
 bool installer::InstallNewVersion(const std::wstring& exe_path,
                                   const std::wstring& archive_path,
@@ -146,7 +142,6 @@ bool installer::InstallNewVersion(const std::wstring& exe_path,
                                   const std::wstring& temp_dir,
                                   const HKEY reg_root,
                                   const Version& new_version) {
-
   if (reg_root != HKEY_LOCAL_MACHINE && reg_root != HKEY_CURRENT_USER)
     return false;
 
@@ -155,28 +150,37 @@ bool installer::InstallNewVersion(const std::wstring& exe_path,
   install_list->AddCreateDirWorkItem(temp_dir);
   install_list->AddCreateDirWorkItem(install_path);
 
-  // Copy the version folder
-  install_list->AddCopyTreeWorkItem(
+  // Move the version folder
+  install_list->AddMoveTreeWorkItem(
       AppendPath(src_path, new_version.GetString()),
       AppendPath(install_path, new_version.GetString()),
-      temp_dir, WorkItem::ALWAYS);    // Always overwrite.
+      temp_dir);
 
   // Delete any new_chrome.exe if present (we will end up create a new one
   // if required) and then copy chrome.exe
-  install_list->AddDeleteTreeWorkItem(
-      AppendPath(install_path, installer::kChromeNewExe), std::wstring());
+  std::wstring new_chrome_exe = AppendPath(install_path,
+                                           installer_util::kChromeNewExe);
+  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+  RegKey chrome_key(reg_root, dist->GetVersionKey().c_str(), KEY_READ);
+  std::wstring current_version;
+  if (file_util::PathExists(new_chrome_exe))
+    chrome_key.ReadValue(google_update::kRegOldVersionField, &current_version);
+  if (current_version.empty())
+    chrome_key.ReadValue(google_update::kRegVersionField, &current_version);
+  chrome_key.Close();
+
+  install_list->AddDeleteTreeWorkItem(new_chrome_exe, std::wstring());
   install_list->AddCopyTreeWorkItem(
       AppendPath(src_path, installer_util::kChromeExe),
       AppendPath(install_path, installer_util::kChromeExe),
-      temp_dir, WorkItem::RENAME_IF_IN_USE,
-      AppendPath(install_path, installer::kChromeNewExe));
+      temp_dir, WorkItem::NEW_NAME_IF_IN_USE, new_chrome_exe);
 
   // Extra executable for 64 bit systems.
   if (Is64bit()) {
-    install_list->AddCopyTreeWorkItem(
+    install_list->AddMoveTreeWorkItem(
         AppendPath(src_path, installer::kWowHelperExe),
         AppendPath(install_path, installer::kWowHelperExe),
-        temp_dir, WorkItem::ALWAYS);
+        temp_dir);
   }
 
   // Copy the default Dictionaries only if the folder doesnt exist already
@@ -189,14 +193,13 @@ bool installer::InstallNewVersion(const std::wstring& exe_path,
   // add shortcut in Control Panel->Add/Remove Programs.
   AddInstallerCopyTasks(exe_path, archive_path, temp_dir, install_path,
       new_version.GetString(), install_list.get());
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring product_name = dist->GetApplicationName();
   AddUninstallShortcutWorkItems(reg_root, exe_path, install_path,
       product_name, new_version.GetString(), install_list.get());
 
   // Delete any old_chrome.exe if present.
   install_list->AddDeleteTreeWorkItem(
-      AppendPath(install_path, installer::kChromeOldExe), std::wstring());
+      AppendPath(install_path, installer_util::kChromeOldExe), std::wstring());
 
   // Create Version key (if not already present) and set the new Chrome
   // version as last step.
@@ -212,13 +215,92 @@ bool installer::InstallNewVersion(const std::wstring& exe_path,
                                        true);    // overwrite version
 
   // Perform install operations.
-  if (!install_list->Do()) {
+  bool success = install_list->Do();
+
+  // If the installation worked, handle the in-use update case:
+  // * If new_chrome.exe exists, then currently Chrome was in use so save
+  // current version in old version key.
+  // * If new_chrome.exe doesnt exist, then delete old version key.
+  if (success) {
+    if (file_util::PathExists(new_chrome_exe)) {
+      if (current_version.empty()) {
+        LOG(ERROR) << "New chrome.exe exists but current version is empty!";
+        success = false;
+      } else {
+        scoped_ptr<WorkItemList> inuse_list(WorkItem::CreateWorkItemList());
+        inuse_list->AddSetRegValueWorkItem(reg_root,
+                                           version_key,
+                                           google_update::kRegOldVersionField,
+                                           current_version.c_str(),
+                                           true);
+        std::wstring rename_cmd(installer::GetInstallerPathUnderChrome(
+            install_path, new_version.GetString()));
+        file_util::AppendToPath(&rename_cmd,
+                                file_util::GetFilenameFromPath(exe_path));
+        rename_cmd = L"\"" + rename_cmd +
+                     L"\" --" + installer_util::switches::kRenameChromeExe;
+        if (reg_root == HKEY_LOCAL_MACHINE) {
+          rename_cmd = rename_cmd + L" --" +
+                       installer_util::switches::kSystemLevel;
+        }
+        inuse_list->AddSetRegValueWorkItem(reg_root,
+                                           version_key,
+                                           google_update::kRegRenameCmdField,
+                                           rename_cmd.c_str(),
+                                           true);
+        if (!inuse_list->Do()) {
+          LOG(ERROR) << "Couldn't write old version/rename value to registry.";
+          success = false;
+          inuse_list->Rollback();
+        }
+      }
+    } else {
+      scoped_ptr<WorkItemList> inuse_list(WorkItem::CreateWorkItemList());
+      inuse_list->AddDeleteRegValueWorkItem(reg_root, version_key,
+                                            google_update::kRegOldVersionField,
+                                            true);
+      inuse_list->AddDeleteRegValueWorkItem(reg_root, version_key,
+                                            google_update::kRegRenameCmdField,
+                                            true);
+      if (!inuse_list->Do()) {
+        LOG(ERROR) << "Couldn't write old version/rename value to registry.";
+        success = false;
+        inuse_list->Rollback();
+      }
+    }
+  }
+
+  // Now we need to register any self registering components and unregister
+  // any that were left from the old version that is being upgraded:
+  if (!current_version.empty()) {
+    std::wstring old_dll_path(install_path);
+    file_util::AppendToPath(&old_dll_path, current_version);
+    scoped_ptr<WorkItemList> old_dll_list(WorkItem::CreateWorkItemList());
+    if (InstallUtil::BuildDLLRegistrationList(old_dll_path, kDllsToRegister,
+                                              kNumDllsToRegister, false,
+                                              old_dll_list.get())) {
+      // Don't abort the install as a result of a failure to unregister old
+      // DLLs.
+      old_dll_list->Do();
+    }
+  }
+
+  std::wstring dll_path(install_path);
+  file_util::AppendToPath(&dll_path, new_version.GetString());
+  scoped_ptr<WorkItemList> dll_list(WorkItem::CreateWorkItemList());
+  if (InstallUtil::BuildDLLRegistrationList(dll_path, kDllsToRegister,
+                                            kNumDllsToRegister, true,
+                                            dll_list.get())) {
+    success = dll_list->Do();
+    if (!success) {
+      dll_list->Rollback();
+    }
+  }
+
+  if (!success) {
     LOG(ERROR) << "Install failed, rolling back... ";
     install_list->Rollback();
     LOG(ERROR) << "Rollback complete. ";
-    return false;
   }
-
-  return true;
+  return success;
 }
-

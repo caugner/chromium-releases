@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_PLUGIN_PLUGIN_CHANNEL_H__
-#define CHROME_PLUGIN_PLUGIN_CHANNEL_H__
+#ifndef CHROME_PLUGIN_PLUGIN_CHANNEL_H_
+#define CHROME_PLUGIN_PLUGIN_CHANNEL_H_
 
 #include <vector>
 #include "base/scoped_handle.h"
@@ -14,14 +14,12 @@
 // process.  On the renderer side there's a corresponding PluginChannelHost.
 class PluginChannel : public PluginChannelBase {
  public:
-  // renderer_handle is the the handle to the renderer process requesting the
-  // channel. The handle has to be valid in the context of the plugin process.
-  static PluginChannel* GetPluginChannel(
-      int process_id, HANDLE renderer_handle, MessageLoop* ipc_message_loop);
+  static PluginChannel* GetPluginChannel(MessageLoop* ipc_message_loop);
 
   ~PluginChannel();
 
   virtual bool Send(IPC::Message* msg);
+  virtual void OnMessageReceived(const IPC::Message& message);
 
   HANDLE renderer_handle() { return renderer_handle_.Get(); }
   int GenerateRouteID();
@@ -30,6 +28,7 @@ class PluginChannel : public PluginChannelBase {
 
  protected:
   // IPC::Channel::Listener implementation:
+  virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
 
   virtual void CleanUp();
@@ -52,9 +51,9 @@ class PluginChannel : public PluginChannelBase {
   ScopedHandle renderer_handle_;
 
   int in_send_;  // Tracks if we're in a Send call.
+  bool log_messages_;  // True if we should log sent and received messages.
 
   DISALLOW_EVIL_CONSTRUCTORS(PluginChannel);
 };
 
-#endif  // CHROME_PLUGIN_PLUGIN_CHANNEL_H__
-
+#endif  // CHROME_PLUGIN_PLUGIN_CHANNEL_H_

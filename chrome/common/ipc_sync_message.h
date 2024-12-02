@@ -5,10 +5,16 @@
 #ifndef CHROME_COMMON_IPC_SYNC_MESSAGE_H__
 #define CHROME_COMMON_IPC_SYNC_MESSAGE_H__
 
+#if defined(OS_WIN)
 #include <windows.h>
+#endif
 #include <string>
 #include "base/basictypes.h"
 #include "chrome/common/ipc_message.h"
+
+namespace base {
+class WaitableEvent;
+}
 
 namespace IPC {
 
@@ -16,7 +22,7 @@ class MessageReplyDeserializer;
 
 class SyncMessage : public Message {
  public:
-  SyncMessage(int32 routing_id, WORD type, PriorityValue priority,
+  SyncMessage(int32 routing_id, uint16 type, PriorityValue priority,
               MessageReplyDeserializer* deserializer);
 
   // Call this to get a deserializer for the output parameters.
@@ -27,9 +33,10 @@ class SyncMessage : public Message {
   // If this message can cause the receiver to block while waiting for user
   // input (i.e. by calling MessageBox), then the caller needs to pump window
   // messages and dispatch asynchronous messages while waiting for the reply.
-  // If this handle is passed in, then window messages will be pumped while
-  // it's set.  The handle must be valid until after the Send call returns.
-  void set_pump_messages_event(HANDLE event) {
+  // If this event is passed in, then window messages will start being pumped
+  // when it's set.  Note that this behavior will continue even if the event is
+  // later reset.  The event must be valid until after the Send call returns.
+  void set_pump_messages_event(base::WaitableEvent* event) {
     pump_messages_event_ = event;
     if (event) {
       header()->flags |= PUMPING_MSGS_BIT;
@@ -42,7 +49,9 @@ class SyncMessage : public Message {
   // or set_pump_messages_event but not both.
   void EnableMessagePumping();
 
-  HANDLE pump_messages_event() const { return pump_messages_event_; }
+  base::WaitableEvent* pump_messages_event() const {
+    return pump_messages_event_;
+  }
 
   // Returns true if the message is a reply to the given request id.
   static bool IsMessageReplyTo(const Message& msg, int request_id);
@@ -67,7 +76,7 @@ class SyncMessage : public Message {
   static bool WriteSyncHeader(Message* msg, const SyncHeader& header);
 
   MessageReplyDeserializer* deserializer_;
-  HANDLE pump_messages_event_;
+  base::WaitableEvent* pump_messages_event_;
 
   static uint32 next_id_;  // for generation of unique ids
 };
@@ -85,4 +94,3 @@ class MessageReplyDeserializer {
 }  // namespace IPC
 
 #endif  // CHROME_COMMON_IPC_SYNC_MESSAGE_H__
-

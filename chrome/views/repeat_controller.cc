@@ -4,7 +4,9 @@
 
 #include "chrome/views/repeat_controller.h"
 
-namespace ChromeViews {
+using base::TimeDelta;
+
+namespace views {
 
 // The delay before the first and then subsequent repeats. Values taken from
 // XUL code: http://mxr.mozilla.org/seamonkey/source/layout/xul/base/src/nsRepeatService.cpp#52
@@ -40,4 +42,4 @@ void RepeatController::Run() {
   callback_->Run();
 }
 
-}  // namespace ChromeViews
+}  // namespace views

@@ -16,6 +16,7 @@ env.Replace(
         '$THIRD_PARTY_DIR/libjpeg',
         '$THIRD_PARTY_DIR/libpng',
         '$THIRD_PARTY_DIR/zlib',
+        '$VC80_CPPPATH',
     ],
 )
 
@@ -27,7 +28,7 @@ env.Append(
 
 )
  
-if env['PLATFORM'] == 'win32':
+if env['OS'] == 'win32':
   env.Append(
       CPPFLAGS = [
 # Disable some warnings when building third-party code, so we can enable /WX.
@@ -44,7 +45,14 @@ if env['PLATFORM'] == 'win32':
           '/wd4102',
       ],
   )
-
+elif env['OS'] in ['linux', 'osx']:
+  env.Append(
+      CPPFLAGS = [
+          '-Wno-unused-variable',
+          '-Wno-unused-function',
+          '-Wno-unused-label',
+      ],
+  )
 
 input_files = [
         '$LIBGD_DIR/gd.c',
@@ -77,4 +85,4 @@ input_files = [
         '$LIBGD_DIR/wbmp.c',
 ]
 
-env.ChromeStaticLibrary('gd', input_files)
+env.GearsStaticLibrary('gd', input_files)

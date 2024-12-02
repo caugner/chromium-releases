@@ -4,49 +4,126 @@
 
 #include "net/base/x509_certificate.h"
 
-#include <map>
-
-#include "base/histogram.h"
-#include "base/lock.h"
+#include "base/logging.h"
 #include "base/pickle.h"
-#include "base/singleton.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "net/base/cert_status_flags.h"
+#include "net/base/cert_verify_result.h"
 #include "net/base/ev_root_ca_metadata.h"
+#include "net/base/net_errors.h"
+#include "net/base/scoped_cert_chain_context.h"
 
 #pragma comment(lib, "crypt32.lib")
+
+using base::Time;
 
 namespace net {
 
 namespace {
 
-// Returns true if this cert fingerprint is the null (all zero) fingerprint.
-// We use this as a bogus fingerprint value.
-bool IsNullFingerprint(const X509Certificate::Fingerprint& fingerprint) {
-  for (size_t i = 0; i < arraysize(fingerprint.data); ++i) {
-    if (fingerprint.data[i] != 0)
-      return false;
+//-----------------------------------------------------------------------------
+
+// TODO(wtc): This is a copy of the MapSecurityError function in
+// ssl_client_socket_win.cc.  Another function that maps Windows error codes
+// to our network error codes is WinInetUtil::OSErrorToNetError.  We should
+// eliminate the code duplication.
+int MapSecurityError(SECURITY_STATUS err) {
+  // There are numerous security error codes, but these are the ones we thus
+  // far find interesting.
+  switch (err) {
+    case SEC_E_WRONG_PRINCIPAL:  // Schannel
+    case CERT_E_CN_NO_MATCH:  // CryptoAPI
+      return ERR_CERT_COMMON_NAME_INVALID;
+    case SEC_E_UNTRUSTED_ROOT:  // Schannel
+    case CERT_E_UNTRUSTEDROOT:  // CryptoAPI
+      return ERR_CERT_AUTHORITY_INVALID;
+    case SEC_E_CERT_EXPIRED:  // Schannel
+    case CERT_E_EXPIRED:  // CryptoAPI
+      return ERR_CERT_DATE_INVALID;
+    case CRYPT_E_NO_REVOCATION_CHECK:
+      return ERR_CERT_NO_REVOCATION_MECHANISM;
+    case CRYPT_E_REVOCATION_OFFLINE:
+      return ERR_CERT_UNABLE_TO_CHECK_REVOCATION;
+    case CRYPT_E_REVOKED:  // Schannel and CryptoAPI
+      return ERR_CERT_REVOKED;
+    case SEC_E_CERT_UNKNOWN:
+    case CERT_E_ROLE:
+      return ERR_CERT_INVALID;
+    // We received an unexpected_message or illegal_parameter alert message
+    // from the server.
+    case SEC_E_ILLEGAL_MESSAGE:
+      return ERR_SSL_PROTOCOL_ERROR;
+    case SEC_E_ALGORITHM_MISMATCH:
+      return ERR_SSL_VERSION_OR_CIPHER_MISMATCH;
+    case SEC_E_INVALID_HANDLE:
+      return ERR_UNEXPECTED;
+    case SEC_E_OK:
+      return OK;
+    default:
+      LOG(WARNING) << "Unknown error " << err << " mapped to net::ERR_FAILED";
+      return ERR_FAILED;
   }
-  return true;
 }
 
-// Calculates the SHA-1 fingerprint of the certificate.  Returns an empty
-// (all zero) fingerprint on failure.
-X509Certificate::Fingerprint CalculateFingerprint(PCCERT_CONTEXT cert) {
-  DCHECK(NULL != cert->pbCertEncoded);
-  DCHECK(0 != cert->cbCertEncoded);
+// Map the errors in the chain_context->TrustStatus.dwErrorStatus returned by
+// CertGetCertificateChain to our certificate status flags.
+int MapCertChainErrorStatusToCertStatus(DWORD error_status) {
+  int cert_status = 0;
 
-  BOOL rv;
-  X509Certificate::Fingerprint sha1;
-  DWORD sha1_size = sizeof(sha1.data);
-  rv = CryptHashCertificate(NULL, CALG_SHA1, 0, cert->pbCertEncoded,
-                            cert->cbCertEncoded, sha1.data, &sha1_size);
-  DCHECK(rv && sha1_size == sizeof(sha1.data));
-  if (!rv)
-    memset(sha1.data, 0, sizeof(sha1.data));
-  return sha1;
+  // CERT_TRUST_IS_NOT_TIME_NESTED means a subject certificate's time validity
+  // does not nest correctly within its issuer's time validity.
+  const DWORD kDateInvalidErrors = CERT_TRUST_IS_NOT_TIME_VALID |
+                                   CERT_TRUST_IS_NOT_TIME_NESTED |
+                                   CERT_TRUST_CTL_IS_NOT_TIME_VALID;
+  if (error_status & kDateInvalidErrors)
+    cert_status |= CERT_STATUS_DATE_INVALID;
+
+  const DWORD kAuthorityInvalidErrors = CERT_TRUST_IS_UNTRUSTED_ROOT |
+                                        CERT_TRUST_IS_EXPLICIT_DISTRUST |
+                                        CERT_TRUST_IS_PARTIAL_CHAIN;
+  if (error_status & kAuthorityInvalidErrors)
+    cert_status |= CERT_STATUS_AUTHORITY_INVALID;
+
+  if ((error_status & CERT_TRUST_REVOCATION_STATUS_UNKNOWN) &&
+      !(error_status & CERT_TRUST_IS_OFFLINE_REVOCATION))
+    cert_status |= CERT_STATUS_NO_REVOCATION_MECHANISM;
+
+  if (error_status & CERT_TRUST_IS_OFFLINE_REVOCATION)
+    cert_status |= CERT_STATUS_UNABLE_TO_CHECK_REVOCATION;
+
+  if (error_status & CERT_TRUST_IS_REVOKED)
+    cert_status |= CERT_STATUS_REVOKED;
+
+  const DWORD kWrongUsageErrors = CERT_TRUST_IS_NOT_VALID_FOR_USAGE |
+                                  CERT_TRUST_CTL_IS_NOT_VALID_FOR_USAGE;
+  if (error_status & kWrongUsageErrors) {
+    // TODO(wtc): Handle these errors.
+    // cert_status = |= CERT_STATUS_WRONG_USAGE;
+  }
+
+  // The rest of the errors.
+  const DWORD kCertInvalidErrors =
+      CERT_TRUST_IS_NOT_SIGNATURE_VALID |
+      CERT_TRUST_IS_CYCLIC |
+      CERT_TRUST_INVALID_EXTENSION |
+      CERT_TRUST_INVALID_POLICY_CONSTRAINTS |
+      CERT_TRUST_INVALID_BASIC_CONSTRAINTS |
+      CERT_TRUST_INVALID_NAME_CONSTRAINTS |
+      CERT_TRUST_CTL_IS_NOT_SIGNATURE_VALID |
+      CERT_TRUST_HAS_NOT_SUPPORTED_NAME_CONSTRAINT |
+      CERT_TRUST_HAS_NOT_DEFINED_NAME_CONSTRAINT |
+      CERT_TRUST_HAS_NOT_PERMITTED_NAME_CONSTRAINT |
+      CERT_TRUST_HAS_EXCLUDED_NAME_CONSTRAINT |
+      CERT_TRUST_NO_ISSUANCE_CHAIN_POLICY |
+      CERT_TRUST_HAS_NOT_SUPPORTED_CRITICAL_EXT;
+  if (error_status & kCertInvalidErrors)
+    cert_status |= CERT_STATUS_INVALID;
+
+  return cert_status;
 }
+
+//-----------------------------------------------------------------------------
 
 // Wrappers of malloc and free for CRYPT_DECODE_PARA, which requires the
 // WINAPI calling convention.
@@ -85,6 +162,39 @@ void GetCertSubjectAltName(PCCERT_CONTEXT cert,
                            &alt_name_info_size);
   if (rv)
     output->reset(alt_name_info);
+}
+
+// Saves some information about the certificate chain chain_context in
+// *verify_result.  The caller MUST initialize *verify_result before calling
+// this function.
+void GetCertChainInfo(PCCERT_CHAIN_CONTEXT chain_context,
+                      CertVerifyResult* verify_result) {
+  PCERT_SIMPLE_CHAIN first_chain = chain_context->rgpChain[0];
+  int num_elements = first_chain->cElement;
+  PCERT_CHAIN_ELEMENT* element = first_chain->rgpElement;
+
+  // Each chain starts with the end entity certificate (i = 0) and ends with
+  // the root CA certificate (i = num_elements - 1).  Do not inspect the
+  // signature algorithm of the root CA certificate because the signature on
+  // the trust anchor is not important.
+  for (int i = 0; i < num_elements - 1; ++i) {
+    PCCERT_CONTEXT cert = element[i]->pCertContext;
+    const char* algorithm = cert->pCertInfo->SignatureAlgorithm.pszObjId;
+    if (strcmp(algorithm, szOID_RSA_MD5RSA) == 0) {
+      // md5WithRSAEncryption: 1.2.840.113549.1.1.4
+      verify_result->has_md5 = true;
+      if (i != 0)
+        verify_result->has_md5_ca = true;
+    } else if (strcmp(algorithm, szOID_RSA_MD2RSA) == 0) {
+      // md2WithRSAEncryption: 1.2.840.113549.1.1.2
+      verify_result->has_md2 = true;
+      if (i != 0)
+        verify_result->has_md2_ca = true;
+    } else if (strcmp(algorithm, szOID_RSA_MD4RSA) == 0) {
+      // md4WithRSAEncryption: 1.2.840.113549.1.1.3
+      verify_result->has_md4 = true;
+    }
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -170,306 +280,10 @@ bool ContainsPolicy(const CERT_POLICIES_INFO* policies_info,
   return false;
 }
 
-// This class wraps the CertFreeCertificateChain function in a class that can
-// be passed as a template argument to scoped_ptr_malloc.
-class ScopedPtrMallocFreeCertChain {
- public:
-  void operator()(const CERT_CHAIN_CONTEXT* x) const {
-    CertFreeCertificateChain(x);
-  }
-};
-
-typedef scoped_ptr_malloc<const CERT_CHAIN_CONTEXT,
-                          ScopedPtrMallocFreeCertChain> ScopedCertChainContext;
-
-}  // namespace
-
-bool X509Certificate::FingerprintLessThan::operator()(
-    const Fingerprint& lhs,
-    const Fingerprint& rhs) const {
-  for (size_t i = 0; i < sizeof(lhs.data); ++i) {
-    if (lhs.data[i] < rhs.data[i])
-      return true;
-    if (lhs.data[i] > rhs.data[i])
-      return false;
-  }
-  return false;
-}
-
-bool X509Certificate::LessThan::operator()(X509Certificate* lhs,
-                                           X509Certificate* rhs) const {
-  if (lhs == rhs)
-    return false;
-
-  X509Certificate::FingerprintLessThan fingerprint_functor;
-  return fingerprint_functor(lhs->fingerprint_, rhs->fingerprint_);
-}
-
-// A thread-safe cache for X509Certificate objects.
-//
-// The cache does not hold a reference to the certificate objects.  The objects
-// must |Remove| themselves from the cache upon destruction (or else the cache
-// will be holding dead pointers to the objects).
-class X509Certificate::Cache {
- public:
-  // Get the singleton object for the cache.
-  static X509Certificate::Cache* GetInstance() {
-    return Singleton<X509Certificate::Cache>::get();
-  }
-
-  // Insert |cert| into the cache.  The cache does NOT AddRef |cert|.  The cache
-  // must not already contain a certificate with the same fingerprint.
-  void Insert(X509Certificate* cert) {
-    AutoLock lock(lock_);
-
-    DCHECK(!IsNullFingerprint(cert->fingerprint())) <<
-        "Only insert certs with real fingerprints.";
-    DCHECK(cache_.find(cert->fingerprint()) == cache_.end());
-    cache_[cert->fingerprint()] = cert;
-  };
-
-  // Remove |cert| from the cache.  The cache does not assume that |cert| is
-  // already in the cache.
-  void Remove(X509Certificate* cert) {
-    AutoLock lock(lock_);
-
-    CertMap::iterator pos(cache_.find(cert->fingerprint()));
-    if (pos == cache_.end())
-      return;  // It is not an error to remove a cert that is not in the cache.
-    cache_.erase(pos);
-  };
-
-  // Find a certificate in the cache with the given fingerprint.  If one does
-  // not exist, this method returns NULL.
-  X509Certificate* Find(const Fingerprint& fingerprint) {
-    AutoLock lock(lock_);
-
-    CertMap::iterator pos(cache_.find(fingerprint));
-    if (pos == cache_.end())
-      return NULL;
-
-    return pos->second;
-  };
-
- private:
-  typedef std::map<Fingerprint, X509Certificate*, FingerprintLessThan> CertMap;
-
-  // Obtain an instance of X509Certificate::Cache via GetInstance().
-  Cache() { }
-  friend struct DefaultSingletonTraits<X509Certificate::Cache>;
-
-  // You must acquire this lock before using any private data of this object.
-  // You must not block while holding this lock.
-  Lock lock_;
-
-  // The certificate cache.  You must acquire |lock_| before using |cache_|.
-  CertMap cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(X509Certificate::Cache);
-};
-
-void X509Certificate::Initialize() {
-  std::wstring subject_info;
-  std::wstring issuer_info;
-  DWORD name_size;
-  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
-                            &cert_handle_->pCertInfo->Subject,
-                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
-                            NULL, 0);
-  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
-                            &cert_handle_->pCertInfo->Subject,
-                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
-                            WriteInto(&subject_info, name_size), name_size);
-  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
-                            &cert_handle_->pCertInfo->Issuer,
-                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
-                            NULL, 0);
-  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
-                            &cert_handle_->pCertInfo->Issuer,
-                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
-                            WriteInto(&issuer_info, name_size), name_size);
-  ParsePrincipal(WideToUTF8(subject_info), &subject_);
-  ParsePrincipal(WideToUTF8(issuer_info), &issuer_);
-
-  valid_start_ = Time::FromFileTime(cert_handle_->pCertInfo->NotBefore);
-  valid_expiry_ = Time::FromFileTime(cert_handle_->pCertInfo->NotAfter);
-
-  fingerprint_ = CalculateFingerprint(cert_handle_);
-
-  // Store the certificate in the cache in case we need it later.
-  X509Certificate::Cache::GetInstance()->Insert(this);
-}
-
-// static
-X509Certificate* X509Certificate::CreateFromHandle(OSCertHandle cert_handle) {
-  DCHECK(cert_handle);
-
-  // Check if we already have this certificate in memory.
-  X509Certificate::Cache* cache = X509Certificate::Cache::GetInstance();
-  X509Certificate* cert = cache->Find(CalculateFingerprint(cert_handle));
-  if (cert) {
-    // We've found a certificate with the same fingerprint in our cache.  We own
-    // the |cert_handle|, which makes it our job to free it.
-    CertFreeCertificateContext(cert_handle);
-    DHISTOGRAM_COUNTS(L"X509CertificateReuseCount", 1);
-    return cert;
-  }
-  // Otherwise, allocate a new object.
-  return new X509Certificate(cert_handle);
-}
-
-// static
-X509Certificate* X509Certificate::CreateFromBytes(const char* data, int length) {
-  OSCertHandle cert_handle = NULL;
-  if (!CertAddEncodedCertificateToStore(
-      NULL,  // the cert won't be persisted in any cert store
-      X509_ASN_ENCODING,
-      reinterpret_cast<const BYTE*>(data), length,
-      CERT_STORE_ADD_USE_EXISTING,
-      &cert_handle))
-    return NULL;
-
-  return CreateFromHandle(cert_handle);
-}
-
-// static
-X509Certificate* X509Certificate::CreateFromPickle(const Pickle& pickle,
-                                                   void** pickle_iter) {
-  const char* data;
-  int length;
-  if (!pickle.ReadData(pickle_iter, &data, &length))
-    return NULL;
-
-  OSCertHandle cert_handle = NULL;
-  if (!CertAddSerializedElementToStore(
-      NULL,  // the cert won't be persisted in any cert store
-      reinterpret_cast<const BYTE*>(data), length,
-      CERT_STORE_ADD_USE_EXISTING, 0, CERT_STORE_CERTIFICATE_CONTEXT_FLAG,
-      NULL, reinterpret_cast<const void **>(&cert_handle)))
-    return NULL;
-
-  return CreateFromHandle(cert_handle);
-}
-
-X509Certificate::X509Certificate(OSCertHandle cert_handle)
-    : cert_handle_(cert_handle) {
-  Initialize();
-}
-
-X509Certificate::X509Certificate(std::string subject, std::string issuer,
-                                 Time start_date, Time expiration_date)
-    : subject_(subject),
-      issuer_(issuer),
-      valid_start_(start_date),
-      valid_expiry_(expiration_date),
-      cert_handle_(NULL) {
-  memset(fingerprint_.data, 0, sizeof(fingerprint_.data));
-}
-
-void X509Certificate::Persist(Pickle* pickle) {
-  DWORD length;
-  if (!CertSerializeCertificateStoreElement(cert_handle_, 0,
-      NULL, &length)) {
-    NOTREACHED();
-    return;
-  }
-  BYTE* data = reinterpret_cast<BYTE*>(pickle->BeginWriteData(length));
-  if (!CertSerializeCertificateStoreElement(cert_handle_, 0,
-      data, &length)) {
-    NOTREACHED();
-    length = 0;
-  }
-  pickle->TrimWriteData(length);
-}
-
-X509Certificate::~X509Certificate() {
-  // We might not be in the cache, but it is safe to remove ourselves anyway.
-  X509Certificate::Cache::GetInstance()->Remove(this);
-  if (cert_handle_)
-    CertFreeCertificateContext(cert_handle_);
-}
-
-void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
-  dns_names->clear();
-  scoped_ptr_malloc<CERT_ALT_NAME_INFO> alt_name_info;
-  GetCertSubjectAltName(cert_handle_, &alt_name_info);
-  CERT_ALT_NAME_INFO* alt_name = alt_name_info.get();
-  if (alt_name) {
-    int num_entries = alt_name->cAltEntry;
-    for (int i = 0; i < num_entries; i++) {
-      // dNSName is an ASN.1 IA5String representing a string of ASCII
-      // characters, so we can use WideToASCII here.
-      if (alt_name->rgAltEntry[i].dwAltNameChoice == CERT_ALT_NAME_DNS_NAME)
-        dns_names->push_back(WideToASCII(alt_name->rgAltEntry[i].pwszDNSName));
-    }
-  }
-  if (dns_names->empty())
-    dns_names->push_back(subject_.common_name);
-}
-
-bool X509Certificate::HasExpired() const {
-  return Time::Now() > valid_expiry();
-}
-
-// Returns true if the certificate is an extended-validation certificate.
-//
-// The certificate has already been verified by the HTTP library.  cert_status
-// represents the result of that verification.  This function performs
-// additional checks of the certificatePolicies extensions of the certificates
-// in the certificate chain according to Section 7 (pp. 11-12) of the EV
-// Certificate Guidelines Version 1.0 at
-// http://cabforum.org/EV_Certificate_Guidelines.pdf.
-bool X509Certificate::IsEV(int cert_status) const {
-  if (net::IsCertStatusError(cert_status) ||
-      (cert_status & net::CERT_STATUS_REV_CHECKING_ENABLED) == 0)
-    return false;
-
-  net::EVRootCAMetadata* metadata = net::EVRootCAMetadata::GetInstance();
-
-  PCCERT_CHAIN_CONTEXT chain_context = ConstructCertChain(cert_handle_,
-      metadata->GetPolicyOIDs(), metadata->NumPolicyOIDs());
-  if (!chain_context)
-    return false;
-  ScopedCertChainContext scoped_chain_context(chain_context);
-
-  DCHECK(chain_context->cChain != 0);
-  // If the cert doesn't match any of the policies, the
-  // CERT_TRUST_IS_NOT_VALID_FOR_USAGE bit (0x10) in
-  // chain_context->TrustStatus.dwErrorStatus is set.
-  DWORD error_status = chain_context->TrustStatus.dwErrorStatus;
-  DWORD info_status = chain_context->TrustStatus.dwInfoStatus;
-  if (!chain_context->cChain || error_status != CERT_TRUST_NO_ERROR)
-    return false;
-
-  // Check the end certificate simple chain (chain_context->rgpChain[0]).
-  // If the end certificate's certificatePolicies extension contains the
-  // EV policy OID of the root CA, return true.
-  PCERT_CHAIN_ELEMENT* element = chain_context->rgpChain[0]->rgpElement;
-  int num_elements = chain_context->rgpChain[0]->cElement;
-  if (num_elements < 2)
-    return false;
-
-  // Look up the EV policy OID of the root CA.
-  PCCERT_CONTEXT root_cert = element[num_elements - 1]->pCertContext;
-  X509Certificate::Fingerprint fingerprint = CalculateFingerprint(root_cert);
-  std::string ev_policy_oid;
-  if (!metadata->GetPolicyOID(fingerprint, &ev_policy_oid))
-    return false;
-  DCHECK(!ev_policy_oid.empty());
-
-  // Get the certificatePolicies extension of the end certificate.
-  PCCERT_CONTEXT end_cert = element[0]->pCertContext;
-  scoped_ptr_malloc<CERT_POLICIES_INFO> policies_info;
-  GetCertPoliciesInfo(end_cert, &policies_info);
-  if (!policies_info.get())
-    return false;
-
-  return ContainsPolicy(policies_info.get(), ev_policy_oid.c_str());
-}
-
-// static
-void X509Certificate::ParsePrincipal(const std::string& description,
-                                     Principal* principal) {
+// Helper function to parse a principal from a WinInet description of that
+// principal.
+void ParsePrincipal(const std::string& description,
+                    X509Certificate::Principal* principal) {
   // The description of the principal is a string with each LDAP value on
   // a separate line.
   const std::string kDelimiters("\r\n");
@@ -526,38 +340,317 @@ void X509Certificate::ParsePrincipal(const std::string& description,
   }
 }
 
-X509Certificate::Policy::Judgment X509Certificate::Policy::Check(
-    X509Certificate* cert) const {
-  // It shouldn't matter which set we check first, but we check denied first
-  // in case something strange has happened.
+}  // namespace
 
-  if (denied_.find(cert->fingerprint()) != denied_.end()) {
-    // DCHECK that the order didn't matter.
-    DCHECK(allowed_.find(cert->fingerprint()) == allowed_.end());
-    return DENIED;
-  }
+void X509Certificate::Initialize() {
+  std::wstring subject_info;
+  std::wstring issuer_info;
+  DWORD name_size;
+  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
+                            &cert_handle_->pCertInfo->Subject,
+                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
+                            NULL, 0);
+  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
+                            &cert_handle_->pCertInfo->Subject,
+                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
+                            WriteInto(&subject_info, name_size), name_size);
+  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
+                            &cert_handle_->pCertInfo->Issuer,
+                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
+                            NULL, 0);
+  name_size = CertNameToStr(cert_handle_->dwCertEncodingType,
+                            &cert_handle_->pCertInfo->Issuer,
+                            CERT_X500_NAME_STR | CERT_NAME_STR_CRLF_FLAG,
+                            WriteInto(&issuer_info, name_size), name_size);
+  ParsePrincipal(WideToUTF8(subject_info), &subject_);
+  ParsePrincipal(WideToUTF8(issuer_info), &issuer_);
 
-  if (allowed_.find(cert->fingerprint()) != allowed_.end()) {
-    // DCHECK that the order didn't matter.
-    DCHECK(denied_.find(cert->fingerprint()) == denied_.end());
-    return ALLOWED;
-  }
+  valid_start_ = Time::FromFileTime(cert_handle_->pCertInfo->NotBefore);
+  valid_expiry_ = Time::FromFileTime(cert_handle_->pCertInfo->NotAfter);
 
-  // We don't have a policy for this cert.
-  return UNKNOWN;
+  fingerprint_ = CalculateFingerprint(cert_handle_);
+
+  // Store the certificate in the cache in case we need it later.
+  X509Certificate::Cache::GetInstance()->Insert(this);
 }
 
-void X509Certificate::Policy::Allow(X509Certificate* cert) {
-  // Put the cert in the allowed set and (maybe) remove it from the denied set.
-  denied_.erase(cert->fingerprint());
-  allowed_.insert(cert->fingerprint());
+// static
+X509Certificate* X509Certificate::CreateFromPickle(const Pickle& pickle,
+                                                   void** pickle_iter) {
+  const char* data;
+  int length;
+  if (!pickle.ReadData(pickle_iter, &data, &length))
+    return NULL;
+
+  OSCertHandle cert_handle = NULL;
+  if (!CertAddSerializedElementToStore(
+      NULL,  // the cert won't be persisted in any cert store
+      reinterpret_cast<const BYTE*>(data), length,
+      CERT_STORE_ADD_USE_EXISTING, 0, CERT_STORE_CERTIFICATE_CONTEXT_FLAG,
+      NULL, reinterpret_cast<const void **>(&cert_handle)))
+    return NULL;
+
+  return CreateFromHandle(cert_handle, SOURCE_LONE_CERT_IMPORT);
 }
 
-void X509Certificate::Policy::Deny(X509Certificate* cert) {
-  // Put the cert in the denied set and (maybe) remove it from the allowed set.
-  allowed_.erase(cert->fingerprint());
-  denied_.insert(cert->fingerprint());
+void X509Certificate::Persist(Pickle* pickle) {
+  DWORD length;
+  if (!CertSerializeCertificateStoreElement(cert_handle_, 0,
+      NULL, &length)) {
+    NOTREACHED();
+    return;
+  }
+  BYTE* data = reinterpret_cast<BYTE*>(pickle->BeginWriteData(length));
+  if (!CertSerializeCertificateStoreElement(cert_handle_, 0,
+      data, &length)) {
+    NOTREACHED();
+    length = 0;
+  }
+  pickle->TrimWriteData(length);
+}
+
+void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
+  dns_names->clear();
+  scoped_ptr_malloc<CERT_ALT_NAME_INFO> alt_name_info;
+  GetCertSubjectAltName(cert_handle_, &alt_name_info);
+  CERT_ALT_NAME_INFO* alt_name = alt_name_info.get();
+  if (alt_name) {
+    int num_entries = alt_name->cAltEntry;
+    for (int i = 0; i < num_entries; i++) {
+      // dNSName is an ASN.1 IA5String representing a string of ASCII
+      // characters, so we can use WideToASCII here.
+      if (alt_name->rgAltEntry[i].dwAltNameChoice == CERT_ALT_NAME_DNS_NAME)
+        dns_names->push_back(WideToASCII(alt_name->rgAltEntry[i].pwszDNSName));
+    }
+  }
+  if (dns_names->empty())
+    dns_names->push_back(subject_.common_name);
+}
+
+bool X509Certificate::HasExpired() const {
+  return Time::Now() > valid_expiry();
+}
+
+int X509Certificate::Verify(const std::string& hostname,
+                            bool rev_checking_enabled,
+                            CertVerifyResult* verify_result) const {
+  verify_result->Reset();
+
+  // Build and validate certificate chain.
+
+  CERT_CHAIN_PARA chain_para;
+  memset(&chain_para, 0, sizeof(chain_para));
+  chain_para.cbSize = sizeof(chain_para);
+  // TODO(wtc): consider requesting the usage szOID_PKIX_KP_SERVER_AUTH
+  // or szOID_SERVER_GATED_CRYPTO or szOID_SGC_NETSCAPE
+  chain_para.RequestedUsage.dwType = USAGE_MATCH_TYPE_AND;
+  chain_para.RequestedUsage.Usage.cUsageIdentifier = 0;
+  chain_para.RequestedUsage.Usage.rgpszUsageIdentifier = NULL;  // LPSTR*
+  // We can set CERT_CHAIN_RETURN_LOWER_QUALITY_CONTEXTS to get more chains.
+  DWORD flags = CERT_CHAIN_CACHE_END_CERT;
+  if (rev_checking_enabled) {
+    verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
+    flags |= CERT_CHAIN_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+  } else {
+    flags |= CERT_CHAIN_REVOCATION_CHECK_CACHE_ONLY;
+  }
+  PCCERT_CHAIN_CONTEXT chain_context;
+  if (!CertGetCertificateChain(
+           NULL,  // default chain engine, HCCE_CURRENT_USER
+           cert_handle_,
+           NULL,  // current system time
+           cert_handle_->hCertStore,  // search this store
+           &chain_para,
+           flags,
+           NULL,  // reserved
+           &chain_context)) {
+    return MapSecurityError(GetLastError());
+  }
+  ScopedCertChainContext scoped_chain_context(chain_context);
+
+  GetCertChainInfo(chain_context, verify_result);
+
+  verify_result->cert_status |= MapCertChainErrorStatusToCertStatus(
+      chain_context->TrustStatus.dwErrorStatus);
+
+  std::wstring wstr_hostname = ASCIIToWide(hostname);
+
+  SSL_EXTRA_CERT_CHAIN_POLICY_PARA extra_policy_para;
+  memset(&extra_policy_para, 0, sizeof(extra_policy_para));
+  extra_policy_para.cbSize = sizeof(extra_policy_para);
+  extra_policy_para.dwAuthType = AUTHTYPE_SERVER;
+  extra_policy_para.fdwChecks = 0;
+  extra_policy_para.pwszServerName =
+      const_cast<wchar_t*>(wstr_hostname.c_str());
+
+  CERT_CHAIN_POLICY_PARA policy_para;
+  memset(&policy_para, 0, sizeof(policy_para));
+  policy_para.cbSize = sizeof(policy_para);
+  policy_para.dwFlags = 0;
+  policy_para.pvExtraPolicyPara = &extra_policy_para;
+
+  CERT_CHAIN_POLICY_STATUS policy_status;
+  memset(&policy_status, 0, sizeof(policy_status));
+  policy_status.cbSize = sizeof(policy_status);
+
+  if (!CertVerifyCertificateChainPolicy(
+           CERT_CHAIN_POLICY_SSL,
+           chain_context,
+           &policy_para,
+           &policy_status)) {
+    return MapSecurityError(GetLastError());
+  }
+
+  if (policy_status.dwError) {
+    verify_result->cert_status |= MapNetErrorToCertStatus(
+        MapSecurityError(policy_status.dwError));
+
+    // CertVerifyCertificateChainPolicy reports only one error (in
+    // policy_status.dwError) if the certificate has multiple errors.
+    // CertGetCertificateChain doesn't report certificate name mismatch, so
+    // CertVerifyCertificateChainPolicy is the only function that can report
+    // certificate name mismatch.
+    //
+    // To prevent a potential certificate name mismatch from being hidden by
+    // some other certificate error, if we get any other certificate error,
+    // we call CertVerifyCertificateChainPolicy again, ignoring all other
+    // certificate errors.  Both extra_policy_para.fdwChecks and
+    // policy_para.dwFlags allow us to ignore certificate errors, so we set
+    // them both.
+    if (policy_status.dwError != CERT_E_CN_NO_MATCH) {
+      const DWORD extra_ignore_flags =
+          0x00000080 |  // SECURITY_FLAG_IGNORE_REVOCATION
+          0x00000100 |  // SECURITY_FLAG_IGNORE_UNKNOWN_CA
+          0x00002000 |  // SECURITY_FLAG_IGNORE_CERT_DATE_INVALID
+          0x00000200;   // SECURITY_FLAG_IGNORE_WRONG_USAGE
+      extra_policy_para.fdwChecks = extra_ignore_flags;
+      const DWORD ignore_flags =
+          CERT_CHAIN_POLICY_IGNORE_ALL_NOT_TIME_VALID_FLAGS |
+          CERT_CHAIN_POLICY_IGNORE_INVALID_BASIC_CONSTRAINTS_FLAG |
+          CERT_CHAIN_POLICY_ALLOW_UNKNOWN_CA_FLAG |
+          CERT_CHAIN_POLICY_IGNORE_WRONG_USAGE_FLAG |
+          CERT_CHAIN_POLICY_IGNORE_INVALID_NAME_FLAG |
+          CERT_CHAIN_POLICY_IGNORE_INVALID_POLICY_FLAG |
+          CERT_CHAIN_POLICY_IGNORE_ALL_REV_UNKNOWN_FLAGS |
+          CERT_CHAIN_POLICY_ALLOW_TESTROOT_FLAG |
+          CERT_CHAIN_POLICY_TRUST_TESTROOT_FLAG |
+          CERT_CHAIN_POLICY_IGNORE_NOT_SUPPORTED_CRITICAL_EXT_FLAG |
+          CERT_CHAIN_POLICY_IGNORE_PEER_TRUST_FLAG;
+      policy_para.dwFlags = ignore_flags;
+      if (!CertVerifyCertificateChainPolicy(
+               CERT_CHAIN_POLICY_SSL,
+               chain_context,
+               &policy_para,
+               &policy_status)) {
+        return MapSecurityError(GetLastError());
+      }
+      if (policy_status.dwError) {
+        verify_result->cert_status |= MapNetErrorToCertStatus(
+            MapSecurityError(policy_status.dwError));
+      }
+    }
+  }
+
+  // TODO(wtc): Suppress CERT_STATUS_NO_REVOCATION_MECHANISM for now to be
+  // compatible with WinHTTP, which doesn't report this error (bug 3004).
+  verify_result->cert_status &= ~CERT_STATUS_NO_REVOCATION_MECHANISM;
+
+  if (IsCertStatusError(verify_result->cert_status))
+    return MapCertStatusToNetError(verify_result->cert_status);
+  return OK;
+}
+
+// Returns true if the certificate is an extended-validation certificate.
+//
+// The certificate has already been verified by the HTTP library.  cert_status
+// represents the result of that verification.  This function performs
+// additional checks of the certificatePolicies extensions of the certificates
+// in the certificate chain according to Section 7 (pp. 11-12) of the EV
+// Certificate Guidelines Version 1.0 at
+// http://cabforum.org/EV_Certificate_Guidelines.pdf.
+bool X509Certificate::IsEV(int cert_status) const {
+  if (net::IsCertStatusError(cert_status) ||
+      (cert_status & net::CERT_STATUS_REV_CHECKING_ENABLED) == 0)
+    return false;
+
+  net::EVRootCAMetadata* metadata = net::EVRootCAMetadata::GetInstance();
+
+  PCCERT_CHAIN_CONTEXT chain_context = ConstructCertChain(cert_handle_,
+      metadata->GetPolicyOIDs(), metadata->NumPolicyOIDs());
+  if (!chain_context)
+    return false;
+  ScopedCertChainContext scoped_chain_context(chain_context);
+
+  DCHECK(chain_context->cChain != 0);
+  // If the cert doesn't match any of the policies, the
+  // CERT_TRUST_IS_NOT_VALID_FOR_USAGE bit (0x10) in
+  // chain_context->TrustStatus.dwErrorStatus is set.
+  DWORD error_status = chain_context->TrustStatus.dwErrorStatus;
+  DWORD info_status = chain_context->TrustStatus.dwInfoStatus;
+  if (!chain_context->cChain || error_status != CERT_TRUST_NO_ERROR)
+    return false;
+
+  // Check the end certificate simple chain (chain_context->rgpChain[0]).
+  // If the end certificate's certificatePolicies extension contains the
+  // EV policy OID of the root CA, return true.
+  PCERT_CHAIN_ELEMENT* element = chain_context->rgpChain[0]->rgpElement;
+  int num_elements = chain_context->rgpChain[0]->cElement;
+  if (num_elements < 2)
+    return false;
+
+  // Look up the EV policy OID of the root CA.
+  PCCERT_CONTEXT root_cert = element[num_elements - 1]->pCertContext;
+  Fingerprint fingerprint = CalculateFingerprint(root_cert);
+  std::string ev_policy_oid;
+  if (!metadata->GetPolicyOID(fingerprint, &ev_policy_oid))
+    return false;
+  DCHECK(!ev_policy_oid.empty());
+
+  // Get the certificatePolicies extension of the end certificate.
+  PCCERT_CONTEXT end_cert = element[0]->pCertContext;
+  scoped_ptr_malloc<CERT_POLICIES_INFO> policies_info;
+  GetCertPoliciesInfo(end_cert, &policies_info);
+  if (!policies_info.get())
+    return false;
+
+  return ContainsPolicy(policies_info.get(), ev_policy_oid.c_str());
+}
+
+// static
+X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
+    const char* data, int length) {
+  OSCertHandle cert_handle = NULL;
+  if (!CertAddEncodedCertificateToStore(
+      NULL,  // the cert won't be persisted in any cert store
+      X509_ASN_ENCODING,
+      reinterpret_cast<const BYTE*>(data), length,
+      CERT_STORE_ADD_USE_EXISTING,
+      &cert_handle))
+    return NULL;
+
+  return cert_handle;
+}
+
+// static
+void X509Certificate::FreeOSCertHandle(OSCertHandle cert_handle) {
+  CertFreeCertificateContext(cert_handle);
+}
+
+// static
+X509Certificate::Fingerprint X509Certificate::CalculateFingerprint(
+    OSCertHandle cert) {
+  DCHECK(NULL != cert->pbCertEncoded);
+  DCHECK(0 != cert->cbCertEncoded);
+
+  BOOL rv;
+  Fingerprint sha1;
+  DWORD sha1_size = sizeof(sha1.data);
+  rv = CryptHashCertificate(NULL, CALG_SHA1, 0, cert->pbCertEncoded,
+                            cert->cbCertEncoded, sha1.data, &sha1_size);
+  DCHECK(rv && sha1_size == sizeof(sha1.data));
+  if (!rv)
+    memset(sha1.data, 0, sizeof(sha1.data));
+  return sha1;
 }
 
 }  // namespace net
-

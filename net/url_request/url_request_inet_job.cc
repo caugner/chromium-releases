@@ -13,10 +13,13 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/wininet_util.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_ftp_job.h"
 #include "net/url_request/url_request_job_metrics.h"
 #include "net/url_request/url_request_job_tracker.h"
+
+using net::WinInetUtil;
 
 //
 // HOW ASYNC IO WORKS
@@ -61,20 +64,11 @@
 // the base class' version of OnIOComplete if appropriate.
 //
 
-
-using namespace std;
-
-using net::WinInetUtil;
-
-static const wchar_t kWndClass[] = L"URLRequestMessageWnd";
-
-// Custom message types for use with message_hwnd
-enum {
-  MSG_REQUEST_COMPLETE = WM_USER + 1
-};
+COMPILE_ASSERT(
+    sizeof(URLRequestInetJob::AsyncResult) == sizeof(INTERNET_ASYNC_RESULT),
+    async_result_inconsistent_size);
 
 HINTERNET URLRequestInetJob::the_internet_ = NULL;
-HWND URLRequestInetJob::message_hwnd_ = NULL;
 #ifndef NDEBUG
 MessageLoop* URLRequestInetJob::my_message_loop_ = NULL;
 #endif
@@ -85,12 +79,13 @@ URLRequestInetJob::URLRequestInetJob(URLRequest* request)
       request_handle_(NULL),
       last_error_(ERROR_SUCCESS),
       is_waiting_(false),
-      read_in_progress_(false) {
+      read_in_progress_(false),
+      loop_(MessageLoop::current()) {
   // TODO(darin): we should re-create the internet if the UA string changes,
   // but we have to be careful about existing users of this internet.
   if (!the_internet_) {
-    InitializeTheInternet(
-        request->context() ? request->context()->user_agent() : std::string());
+    InitializeTheInternet(request->context() ?
+        request->context()->GetUserAgent(GURL()) : std::string());
   }
 #ifndef NDEBUG
   DCHECK(MessageLoop::current() == my_message_loop_) <<
@@ -110,12 +105,17 @@ URLRequestInetJob::~URLRequestInetJob() {
 void URLRequestInetJob::Kill() {
   CleanupConnection();
 
+  {
+    AutoLock locked(loop_lock_);
+    loop_ = NULL;
+  }
+
   // Dispatch the NotifyDone message to the URLRequest
   URLRequestJob::Kill();
 }
 
-void URLRequestInetJob::SetAuth(const wstring& username,
-                                const wstring& password) {
+void URLRequestInetJob::SetAuth(const std::wstring& username,
+                                const std::wstring& password) {
   DCHECK((proxy_auth_ && proxy_auth_->state == net::AUTH_STATE_NEED_AUTH) ||
          (server_auth_ && server_auth_->state == net::AUTH_STATE_NEED_AUTH));
 
@@ -186,7 +186,7 @@ void URLRequestInetJob::OnIOComplete(const AsyncResult& result) {
   }
 }
 
-bool URLRequestInetJob::ReadRawData(char* dest, int dest_size,
+bool URLRequestInetJob::ReadRawData(net::IOBuffer* dest, int dest_size,
                                     int *bytes_read) {
   if (is_done())
     return 0;
@@ -197,7 +197,7 @@ bool URLRequestInetJob::ReadRawData(char* dest, int dest_size,
 
   *bytes_read = 0;
 
-  int result = CallInternetRead(dest, dest_size, bytes_read);
+  int result = CallInternetRead(dest->data(), dest_size, bytes_read);
   if (result == ERROR_SUCCESS) {
     DLOG(INFO) << "read " << *bytes_read << " bytes";
     if (*bytes_read == 0)
@@ -218,18 +218,15 @@ void URLRequestInetJob::CallOnIOComplete(const AsyncResult& result) {
   is_waiting_ = false;
 
   // the job could have completed with an error while the message was pending
-  if (is_done()) {
-    Release();  // may destroy self if last reference
-    return;
+  if (!is_done()) {
+    // Verify that our status is currently set to IO_PENDING and
+    // reset it on success.
+    DCHECK(GetStatus().is_io_pending());
+    if (result.dwResult && result.dwError == 0)
+      SetStatus(URLRequestStatus());
+
+    OnIOComplete(result);
   }
-
-  // Verify that our status is currently set to IO_PENDING and
-  // reset it on success.
-  DCHECK(GetStatus().is_io_pending());
-  if (result.dwResult && result.dwError == 0)
-    SetStatus(URLRequestStatus());
-
-  OnIOComplete(result);
 
   Release();  // may destroy self if last reference
 }
@@ -308,10 +305,11 @@ void URLRequestInetJob::CleanupHandle(HINTERNET handle) {
     if (ERROR_IO_PENDING == last_error) {
       SetStatus(URLRequestStatus(URLRequestStatus::IO_PENDING, 0));
 
-      async_result_.dwError = ERROR_INTERNET_CONNECTION_ABORTED;
-      async_result_.dwResult = reinterpret_cast<DWORD_PTR>(handle);
+      AsyncResult result;
+      result.dwError = ERROR_INTERNET_CONNECTION_ABORTED;
+      result.dwResult = reinterpret_cast<DWORD_PTR>(handle);
       MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-          this, &URLRequestInetJob::CallOnIOComplete, async_result_));
+          this, &URLRequestInetJob::CallOnIOComplete, result));
     }
   }
 }
@@ -323,23 +321,6 @@ HINTERNET URLRequestInetJob::GetTheInternet() {
 
 // static
 void URLRequestInetJob::InitializeTheInternet(const std::string& user_agent) {
-  // construct message window for processsing
-  HINSTANCE hinst = GetModuleHandle(NULL);
-
-  WNDCLASSEX wc = {0};
-  wc.cbSize = sizeof(wc);
-  wc.lpfnWndProc = URLRequestWndProc;
-  wc.hInstance = hinst;
-  wc.lpszClassName = kWndClass;
-  RegisterClassEx(&wc);
-
-  message_hwnd_ = CreateWindow(kWndClass, 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,
-                               hinst, 0);
-  if (!message_hwnd_) {
-    NOTREACHED() << "error: " << GetLastError();
-    return;
-  }
-
   // Hack attack.  We are hitting a deadlock in wininet deinitialization.
   // What is happening is that when we deinitialize, FreeLibrary will be
   // called on wininet.  The loader lock is held, and wininet!DllMain is
@@ -373,53 +354,21 @@ void URLRequestInetJob::InitializeTheInternet(const std::string& user_agent) {
 }
 
 // static
-LRESULT CALLBACK URLRequestInetJob::URLRequestWndProc(HWND hwnd,
-                                                      UINT message,
-                                                      WPARAM wparam,
-                                                      LPARAM lparam) {
-  URLRequestInetJob* job = reinterpret_cast<URLRequestInetJob*>(wparam);
-  HINTERNET handle = reinterpret_cast<HINTERNET>(lparam);
-
-  switch (message) {
-    case MSG_REQUEST_COMPLETE: {
-      // The callback will be reset if we have closed the handle and deleted
-      // the job instance.  Call CallOnIOComplete only if the handle still
-      // has a valid callback.
-      INTERNET_STATUS_CALLBACK callback = NULL;
-      DWORD option_buffer_size = sizeof(callback);
-      if (InternetQueryOption(handle, INTERNET_OPTION_CALLBACK,
-                              &callback, &option_buffer_size)
-          && (NULL != callback)) {
-        const AsyncResult& r = job->async_result_;
-        DLOG(INFO) << "REQUEST_COMPLETE: job=" << job << ", result=" <<
-            (void*) r.dwResult << ", error=" << r.dwError;
-        job->CallOnIOComplete(r);
-      }
-      break;
-    }
-    default:
-      return DefWindowProc(hwnd, message, wparam, lparam);
-  }
-
-  return 0;
-}
-
-// static
 void CALLBACK URLRequestInetJob::URLRequestStatusCallback(
     HINTERNET handle, DWORD_PTR job_id, DWORD status, LPVOID status_info,
     DWORD status_info_len) {
-  UINT message = 0;
-  LPARAM message_param = 0;
   switch (status) {
     case INTERNET_STATUS_REQUEST_COMPLETE: {
-      message = MSG_REQUEST_COMPLETE;
-      DCHECK(status_info_len == sizeof(INTERNET_ASYNC_RESULT));
-      LPINTERNET_ASYNC_RESULT r =
-          static_cast<LPINTERNET_ASYNC_RESULT>(status_info);
       URLRequestInetJob* job = reinterpret_cast<URLRequestInetJob*>(job_id);
-      job->async_result_.dwResult = r->dwResult;
-      job->async_result_.dwError = r->dwError;
-      message_param = reinterpret_cast<LPARAM>(handle);
+
+      DCHECK(status_info_len == sizeof(AsyncResult));
+      AsyncResult* result = static_cast<AsyncResult*>(status_info);
+
+      AutoLock locked(job->loop_lock_);
+      if (job->loop_) {
+        job->loop_->PostTask(FROM_HERE, NewRunnableMethod(
+            job, &URLRequestInetJob::CallOnIOComplete, *result));
+      }
       break;
     }
     case INTERNET_STATUS_USER_INPUT_REQUIRED:
@@ -428,9 +377,4 @@ void CALLBACK URLRequestInetJob::URLRequestStatusCallback(
       ResumeSuspendedDownload(handle, 0);
       break;
   }
-
-  if (message)
-    PostMessage(URLRequestInetJob::message_hwnd_, message,
-                static_cast<WPARAM>(job_id), message_param);
 }
-

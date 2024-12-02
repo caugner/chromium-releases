@@ -4,7 +4,6 @@
 
 #include "base/basictypes.h"
 #include "base/gfx/rect.h"
-#include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 typedef testing::Test RectTest;
@@ -213,7 +212,7 @@ TEST(RectTest, AdjustToFit) {
   }
 }
 
-TEST(RectText, Subtract) {
+TEST(RectTest, Subtract) {
   // Matching
   EXPECT_TRUE(
       gfx::Rect(10, 10, 20, 20).Subtract(
@@ -268,4 +267,3 @@ TEST(RectText, Subtract) {
       gfx::Rect(5, 5, 20, 30)).Equals(
       gfx::Rect(25, 10, 5, 20)));
 }
-

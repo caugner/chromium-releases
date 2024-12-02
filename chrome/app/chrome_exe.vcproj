@@ -43,6 +43,8 @@
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				BasicRuntimeChecks="0"
+				BufferSecurityCheck="false"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -55,7 +57,6 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="/safeseh /dynamicbase /ignore:4199 $(NoInherit)"
 				ImportLibrary="$(OutDir)\lib\$(ProjectName).lib"
 			/>
 			<Tool
@@ -63,6 +64,7 @@
 			/>
 			<Tool
 				Name="VCManifestTool"
+				AdditionalManifestFiles="$(SolutionDir)\app\chrome.exe.manifest"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -122,7 +124,6 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="/safeseh /dynamicbase /ignore:4199 $(NoInherit)"
 				ImportLibrary="$(OutDir)\lib\$(ProjectName).lib"
 			/>
 			<Tool
@@ -130,6 +131,7 @@
 			/>
 			<Tool
 				Name="VCManifestTool"
+				AdditionalManifestFiles="$(SolutionDir)\app\chrome.exe.manifest"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
@@ -221,7 +223,7 @@
 			>
 		</File>
 		<File
-			RelativePath=".\result_codes.h"
+			RelativePath="..\common\result_codes.h"
 			>
 		</File>
 	</Files>

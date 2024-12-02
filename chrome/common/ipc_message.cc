@@ -5,6 +5,11 @@
 #include "chrome/common/ipc_message.h"
 
 #include "base/logging.h"
+#include "build/build_config.h"
+
+#if defined(OS_POSIX)
+#include "chrome/common/file_descriptor_set_posix.h"
+#endif
 
 namespace IPC {
 
@@ -16,6 +21,9 @@ Message::~Message() {
 Message::Message()
     : Pickle(sizeof(Header)) {
   header()->routing = header()->type = header()->flags = 0;
+#if defined(OS_POSIX)
+  header()->num_fds = 0;
+#endif
   InitLoggingVariables();
 }
 
@@ -24,6 +32,9 @@ Message::Message(int32 routing_id, uint16 type, PriorityValue priority)
   header()->routing = routing_id;
   header()->type = type;
   header()->flags = priority;
+#if defined(OS_POSIX)
+  header()->num_fds = 0;
+#endif
   InitLoggingVariables();
 }
 
@@ -33,6 +44,9 @@ Message::Message(const char* data, int data_len) : Pickle(data, data_len) {
 
 Message::Message(const Message& other) : Pickle(other) {
   InitLoggingVariables();
+#if defined(OS_POSIX)
+  file_descriptor_set_ = other.file_descriptor_set_;
+#endif
 }
 
 void Message::InitLoggingVariables() {
@@ -45,6 +59,9 @@ void Message::InitLoggingVariables() {
 
 Message& Message::operator=(const Message& other) {
   *static_cast<Pickle*>(this) = other;
+#if defined(OS_POSIX)
+  file_descriptor_set_ = other.file_descriptor_set_;
+#endif
   return *this;
 }
 
@@ -69,5 +86,39 @@ void Message::set_received_time(int64 time) const {
 }
 #endif
 
-}  // namespace IPC
+#if defined(OS_POSIX)
+bool Message::WriteFileDescriptor(const base::FileDescriptor& descriptor) {
+  // We write the index of the descriptor so that we don't have to
+  // keep the current descriptor as extra decoding state when deserialising.
+  WriteInt(file_descriptor_set()->size());
+  if (descriptor.auto_close) {
+    return file_descriptor_set()->AddAndAutoClose(descriptor.fd);
+  } else {
+    return file_descriptor_set()->Add(descriptor.fd);
+  }
+}
 
+bool Message::ReadFileDescriptor(void** iter,
+                                base::FileDescriptor* descriptor) const {
+  int descriptor_index;
+  if (!ReadInt(iter, &descriptor_index))
+    return false;
+
+  FileDescriptorSet* file_descriptor_set = file_descriptor_set_.get();
+  if (!file_descriptor_set)
+    return false;
+
+  descriptor->fd = file_descriptor_set->GetDescriptorAt(descriptor_index);
+  descriptor->auto_close = false;
+
+  return descriptor->fd >= 0;
+}
+
+void Message::EnsureFileDescriptorSet() {
+  if (file_descriptor_set_.get() == NULL)
+    file_descriptor_set_ = new FileDescriptorSet;
+}
+
+#endif
+
+}  // namespace IPC

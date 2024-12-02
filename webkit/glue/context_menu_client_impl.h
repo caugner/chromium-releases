@@ -7,9 +7,11 @@
 
 #include "build/build_config.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "ContextMenuClient.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 class WebViewImpl;
 
@@ -43,4 +45,3 @@ private:
 };
 
 #endif // WEBKIT_GLUE_CONTEXT_MENU_CLIENT_IMPL_H__
-

@@ -41,10 +41,9 @@ class HostResolver {
   //
   // When callback is null, the operation completes synchronously.
   //
-  // When callback is non-null, ERR_IO_PENDING is returned if the operation
-  // could not be completed synchronously, in which case the result code will
-  // be passed to the callback when available.
-  //
+  // When callback is non-null, the operation will be performed asynchronously.
+  // ERR_IO_PENDING is returned if it has been scheduled successfully. Real
+  // result code will be passed to the completion callback.
   int Resolve(const std::string& hostname, int port,
               AddressList* addresses, CompletionCallback* callback);
 
@@ -54,6 +53,44 @@ class HostResolver {
   scoped_refptr<Request> request_;
   DISALLOW_COPY_AND_ASSIGN(HostResolver);
 };
+
+// A helper class used in unit tests to alter hostname mappings.  See
+// SetHostMapper for details.
+class HostMapper : public base::RefCountedThreadSafe<HostMapper> {
+ public:
+  virtual ~HostMapper() {}
+  virtual std::string Map(const std::string& host) = 0;
+
+ protected:
+  // Ask previous host mapper (if set) for mapping of given host.
+  std::string MapUsingPrevious(const std::string& host);
+
+ private:
+  friend class ScopedHostMapper;
+
+  // Set mapper to ask when this mapper doesn't want to modify the result.
+  void set_previous_mapper(HostMapper* mapper) {
+    previous_mapper_ = mapper;
+  }
+
+  scoped_refptr<HostMapper> previous_mapper_;
+};
+
+#ifdef UNIT_TEST
+// This function is designed to allow unit tests to override the behavior of
+// HostResolver.  For example, a HostMapper instance can force all hostnames
+// to map to a fixed IP address such as 127.0.0.1.
+//
+// The previously set HostMapper (or NULL if there was none) is returned.
+//
+// NOTE: This function is not thread-safe, so take care to only call this
+// function while there are no outstanding HostResolver instances.
+//
+// NOTE: In most cases, you should use ScopedHostMapper instead, which is
+// defined in host_resolver_unittest.h
+//
+HostMapper* SetHostMapper(HostMapper* host_mapper);
+#endif
 
 }  // namespace net
 

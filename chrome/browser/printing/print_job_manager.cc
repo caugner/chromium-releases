@@ -11,6 +11,7 @@
 #include "chrome/browser/printing/printed_document.h"
 #include "chrome/browser/printing/printed_page.h"
 #include "chrome/common/gfx/emf.h"
+#include "chrome/common/notification_service.h"
 
 namespace printing {
 
@@ -18,11 +19,11 @@ PrintJobManager::PrintJobManager()
     : debug_dump_path_() {
   NotificationService::current()->AddObserver(
       this,
-      NOTIFY_PRINT_JOB_EVENT,
+      NotificationType::PRINT_JOB_EVENT,
       NotificationService::AllSources());
   NotificationService::current()->AddObserver(
       this,
-      NOTIFY_PRINTED_DOCUMENT_UPDATED,
+      NotificationType::PRINTED_DOCUMENT_UPDATED,
       NotificationService::AllSources());
 }
 
@@ -33,11 +34,11 @@ PrintJobManager::~PrintJobManager() {
   queued_queries_.clear();
   NotificationService::current()->RemoveObserver(
       this,
-      NOTIFY_PRINT_JOB_EVENT,
+      NotificationType::PRINT_JOB_EVENT,
       NotificationService::AllSources());
   NotificationService::current()->RemoveObserver(
       this,
-      NOTIFY_PRINTED_DOCUMENT_UPDATED,
+      NotificationType::PRINTED_DOCUMENT_UPDATED,
       NotificationService::AllSources());
 }
 
@@ -46,7 +47,8 @@ void PrintJobManager::OnQuit() {
   if (current_jobs_.size() == 0)
     return;
   {
-    // Don't take a chance and copy the array since it can be modified in transit.
+    // Don't take a chance and copy the array since it can be modified in
+    // transit.
     PrintJobs current_jobs(current_jobs_);
     // Wait for every jobs to finish.
     for (size_t i = 0; i < current_jobs.size(); ++i) {
@@ -61,11 +63,11 @@ void PrintJobManager::OnQuit() {
   current_jobs_.clear();
   NotificationService::current()->RemoveObserver(
       this,
-      NOTIFY_PRINT_JOB_EVENT,
+      NotificationType::PRINT_JOB_EVENT,
       NotificationService::AllSources());
   NotificationService::current()->RemoveObserver(
       this,
-      NOTIFY_PRINTED_DOCUMENT_UPDATED,
+      NotificationType::PRINTED_DOCUMENT_UPDATED,
       NotificationService::AllSources());
   DCHECK_EQ(current_jobs_.size(), 0);
 }
@@ -98,13 +100,13 @@ void PrintJobManager::PopPrinterQuery(int document_cookie,
 void PrintJobManager::Observe(NotificationType type,
                               const NotificationSource& source,
                               const NotificationDetails& details) {
-  switch (type) {
-    case NOTIFY_PRINT_JOB_EVENT: {
+  switch (type.value) {
+    case NotificationType::PRINT_JOB_EVENT: {
       OnPrintJobEvent(Source<PrintJob>(source).ptr(),
                       *Details<JobEventDetails>(details).ptr());
       break;
     }
-    case NOTIFY_PRINTED_DOCUMENT_UPDATED: {
+    case NotificationType::PRINTED_DOCUMENT_UPDATED: {
       PrintedPage* printed_page = Details<PrintedPage>(details).ptr();
       if (printed_page)
         OnPrintedDocumentUpdated(*Source<PrintedDocument>(source).ptr(),
@@ -193,4 +195,3 @@ void PrintJobManager::OnPrintedDocumentUpdated(const PrintedDocument& document,
 }
 
 }  // namespace printing
-

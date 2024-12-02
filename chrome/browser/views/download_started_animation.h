@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_DOWNLOAD_STARTED_ANIMATION_H__
-#define CHROME_BROWSER_VIEWS_DOWNLOAD_STARTED_ANIMATION_H__
+#ifndef CHROME_BROWSER_VIEWS_DOWNLOAD_STARTED_ANIMATION_H_
+#define CHROME_BROWSER_VIEWS_DOWNLOAD_STARTED_ANIMATION_H_
 
 #include "base/gfx/rect.h"
 #include "chrome/common/animation.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/views/image_view.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/views/controls/image_view.h"
 
-namespace ChromeViews {
-  class HWNDViewContainer;
+namespace views {
+class WidgetWin;
 };
 class TabContents;
 
@@ -22,7 +22,7 @@ class TabContents;
 // finishes animating.
 class DownloadStartedAnimation : public Animation,
                                  public NotificationObserver,
-                                 public ChromeViews::ImageView {
+                                 public views::ImageView {
  public:
   DownloadStartedAnimation(TabContents* tab_contents);
 
@@ -42,7 +42,7 @@ class DownloadStartedAnimation : public Animation,
                        const NotificationDetails& details);
 
   // We use a HWND for the popup so that it may float above any HWNDs in our UI.
-  ChromeViews::HWNDViewContainer* popup_;
+  views::WidgetWin* popup_;
 
   // The content area holding us.
   TabContents* tab_contents_;
@@ -54,8 +54,7 @@ class DownloadStartedAnimation : public Animation,
   // much heartbreak.
   gfx::Rect tab_contents_bounds_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DownloadStartedAnimation);
+  DISALLOW_COPY_AND_ASSIGN(DownloadStartedAnimation);
 };
 
-#endif  // CHROME_BROWSER_VIEWS_DOWNLOAD_STARTED_ANIMATION_H__
-
+#endif  // CHROME_BROWSER_VIEWS_DOWNLOAD_STARTED_ANIMATION_H_

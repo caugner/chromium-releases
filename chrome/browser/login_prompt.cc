@@ -8,26 +8,24 @@
 #include "base/lock.h"
 #include "base/message_loop.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/constrained_window.h"
-#include "chrome/browser/controller.h"
-#include "chrome/browser/navigation_controller.h"
-#include "chrome/browser/password_manager.h"
-#include "chrome/browser/render_process_host.h"
-#include "chrome/browser/resource_dispatcher_host.h"
-#include "chrome/browser/web_contents.h"
-#include "chrome/browser/tab_util.h"
+#include "chrome/browser/password_manager/password_manager.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/tab_contents/constrained_window.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
+#include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/browser/views/login_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/views/dialog_delegate.h"
+#include "chrome/views/window/dialog_delegate.h"
+#include "grit/generated_resources.h"
 #include "net/base/auth.h"
 #include "net/url_request/url_request.h"
 
-#include "generated_resources.h"
-
 using namespace std;
-using ChromeViews::LoginView;
+using views::LoginView;
 
 class LoginHandlerImpl;
 
@@ -42,6 +40,31 @@ static void ResetLoginHandlerForRequest(URLRequest* request) {
   info->login_handler = NULL;
 }
 
+// Get the signon_realm under which this auth info should be stored.
+//
+// The format of the signon_realm for proxy auth is:
+//     proxy-host/auth-realm
+// The format of the signon_realm for server auth is:
+//     url-scheme://url-host[:url-port]/auth-realm
+//
+// Be careful when changing this function, since you could make existing
+// saved logins un-retrievable.
+
+std::string GetSignonRealm(const GURL& url,
+                           const net::AuthChallengeInfo& auth_info) {
+  std::string signon_realm;
+  if (auth_info.is_proxy) {
+    signon_realm = WideToASCII(auth_info.host);
+    signon_realm.append("/");
+  } else {
+    // Take scheme, host, and port from the url.
+    signon_realm = url.GetOrigin().spec();
+    // This ends with a "/".
+  }
+  signon_realm.append(WideToUTF8(auth_info.realm));
+  return signon_realm;
+}
+
 // ----------------------------------------------------------------------------
 // LoginHandlerImpl
 
@@ -51,7 +74,7 @@ static void ResetLoginHandlerForRequest(URLRequest* request) {
 // have been called.
 class LoginHandlerImpl : public LoginHandler,
                          public base::RefCountedThreadSafe<LoginHandlerImpl>,
-                         public ChromeViews::DialogDelegate {
+                         public views::DialogDelegate {
  public:
   LoginHandlerImpl(URLRequest* request, MessageLoop* ui_loop)
       : dialog_(NULL),
@@ -84,11 +107,11 @@ class LoginHandlerImpl : public LoginHandler,
     SendNotifications();
   }
 
-  // Returns the TabContents that needs authentication.
-  TabContents* GetTabContentsForLogin() {
+  // Returns the WebContents that needs authentication.
+  WebContents* GetWebContentsForLogin() {
     DCHECK(MessageLoop::current() == ui_loop_);
 
-    return tab_util::GetTabContentsByID(render_process_host_id_,
+    return tab_util::GetWebContentsByID(render_process_host_id_,
                                         tab_contents_id_);
   }
 
@@ -104,7 +127,7 @@ class LoginHandlerImpl : public LoginHandler,
     password_manager_ = password_manager;
   }
 
-  // ChromeViews::DialogDelegate methods:
+  // views::DialogDelegate methods:
   virtual std::wstring GetDialogButtonLabel(DialogButton button) const {
     if (button == DIALOGBUTTON_OK)
       return l10n_util::GetString(IDS_LOGIN_DIALOG_OK_BUTTON_LABEL);
@@ -124,7 +147,8 @@ class LoginHandlerImpl : public LoginHandler,
           this, &LoginHandlerImpl::CancelAuthDeferred));
       SendNotifications();
     }
-
+  }
+  virtual void DeleteDelegate() {
     // Delete this object once all InvokeLaters have been called.
     request_loop_->ReleaseSoon(FROM_HERE, this);
   }
@@ -140,7 +164,7 @@ class LoginHandlerImpl : public LoginHandler,
     SetAuth(login_view_->GetUsername(), login_view_->GetPassword());
     return true;
   }
-  virtual ChromeViews::View* GetContentsView() {
+  virtual views::View* GetContentsView() {
     return login_view_;
   }
 
@@ -238,7 +262,7 @@ class LoginHandlerImpl : public LoginHandler,
     DCHECK(MessageLoop::current() == ui_loop_);
 
     NotificationService* service = NotificationService::current();
-    TabContents* requesting_contents = GetTabContentsForLogin();
+    WebContents* requesting_contents = GetWebContentsForLogin();
     if (!requesting_contents)
       return;
 
@@ -246,11 +270,11 @@ class LoginHandlerImpl : public LoginHandler,
 
     if (!WasAuthHandled(false)) {
       LoginNotificationDetails details(this);
-      service->Notify(NOTIFY_AUTH_NEEDED,
+      service->Notify(NotificationType::AUTH_NEEDED,
                       Source<NavigationController>(controller),
                       Details<LoginNotificationDetails>(&details));
     } else {
-      service->Notify(NOTIFY_AUTH_SUPPLIED,
+      service->Notify(NotificationType::AUTH_SUPPLIED,
                       Source<NavigationController>(controller),
                       NotificationService::NoDetails());
     }
@@ -311,15 +335,18 @@ class LoginDialogTask : public Task {
   }
 
   void Run() {
-    TabContents* parent_contents = handler_->GetTabContentsForLogin();
+    WebContents* parent_contents = handler_->GetWebContentsForLogin();
     if (!parent_contents) {
       // The request was probably cancelled.
       return;
     }
 
-    wstring explanation = l10n_util::GetStringF(IDS_LOGIN_DIALOG_DESCRIPTION,
-                                                auth_info_->host,
-                                                auth_info_->realm);
+    wstring explanation = auth_info_->realm.empty() ?
+        l10n_util::GetStringF(IDS_LOGIN_DIALOG_DESCRIPTION_NO_REALM,
+                              auth_info_->host) :
+        l10n_util::GetStringF(IDS_LOGIN_DIALOG_DESCRIPTION,
+                              auth_info_->host,
+                              auth_info_->realm);
     LoginView* view = new LoginView(explanation);
     // Tell the password manager to look for saved passwords. There is only
     // a password manager when dealing with a WebContents type.
@@ -358,11 +385,7 @@ class LoginDialogTask : public Task {
       dialog_form.scheme = PasswordForm::SCHEME_OTHER;
     }
     dialog_form.origin = origin_url;
-    // TODO(timsteele): Shouldn't depend on HttpKey since a change to the
-    // format would result in not being able to retrieve existing logins
-    // for a site. Refactor HttpKey behavior to be more reusable.
-    dialog_form.signon_realm =
-        net::AuthCache::HttpKey(dialog_form.origin, *auth_info_);
+    dialog_form.signon_realm = GetSignonRealm(dialog_form.origin, *auth_info_);
     password_manager_input->push_back(dialog_form);
     // Set the password form for the handler (by copy).
     handler_->set_password_form(dialog_form);
@@ -388,4 +411,3 @@ LoginHandler* CreateLoginPrompt(net::AuthChallengeInfo* auth_info,
   ui_loop->PostTask(FROM_HERE, new LoginDialogTask(auth_info, handler));
   return handler;
 }
-

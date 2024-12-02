@@ -2,17 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_HTML_DIALOG_VIEW_H__
-#define CHROME_BROWSER_VIEWS_HTML_DIALOG_VIEW_H__
+#ifndef CHROME_BROWSER_VIEWS_HTML_DIALOG_VIEW_H_
+#define CHROME_BROWSER_VIEWS_HTML_DIALOG_VIEW_H_
 
 #include <string>
 
+#include "base/gfx/size.h"
 #include "chrome/browser/dom_ui/html_dialog_contents.h"
-#include "chrome/browser/tab_contents_delegate.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/views/dom_view.h"
+#include "chrome/views/window/window_delegate.h"
 
-namespace ChromeViews {
-  class Window;
+class Browser;
+namespace views {
+class Window;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -25,9 +28,10 @@ namespace ChromeViews {
 //
 ////////////////////////////////////////////////////////////////////////////////
 class HtmlDialogView
-  : public DOMView,
-    public HtmlDialogContentsDelegate,
-    public TabContentsDelegate {
+    : public DOMView,
+      public TabContentsDelegate,
+      public HtmlDialogContentsDelegate,
+      public views::WindowDelegate {
  public:
   HtmlDialogView(Browser* parent_browser,
                  Profile* profile,
@@ -37,25 +41,29 @@ class HtmlDialogView
   // Initializes the contents of the dialog (the DOMView and the callbacks).
   void InitDialog();
 
-  // Overridden from ChromeViews::View:
-  virtual void GetPreferredSize(CSize *out);
+  // Overridden from views::View:
+  virtual gfx::Size GetPreferredSize();
 
-  // Overridden from ChromeViews::WindowDelegate:
+  // Overridden from views::WindowDelegate:
   virtual bool CanResize() const;
   virtual bool IsModal() const;
   virtual std::wstring GetWindowTitle() const;
   virtual void WindowClosing();
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
+  virtual views::View* GetInitiallyFocusedView();
 
   // Overridden from HtmlDialogContentsDelegate:
+  virtual bool IsDialogModal() const;
+  virtual std::wstring GetDialogTitle() const;
   virtual GURL GetDialogContentURL() const;
-  virtual void GetDialogSize(CSize* size) const;
+  virtual void GetDialogSize(gfx::Size* size) const;
   virtual std::string GetDialogArgs() const;
   virtual void OnDialogClosed(const std::string& json_retval);
 
   // Overridden from TabContentsDelegate:
   virtual void OpenURLFromTab(TabContents* source,
                               const GURL& url,
+                              const GURL& referrer,
                               WindowOpenDisposition disposition,
                               PageTransition::Type transition);
   virtual void NavigationStateChanged(const TabContents* source,
@@ -89,8 +97,7 @@ class HtmlDialogView
   // using this variable.
   HtmlDialogContentsDelegate* delegate_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(HtmlDialogView);
+  DISALLOW_COPY_AND_ASSIGN(HtmlDialogView);
 };
 
-#endif  // CHROME_BROWSER_VIEWS_HTML_DIALOG_VIEW_H__
-
+#endif  // CHROME_BROWSER_VIEWS_HTML_DIALOG_VIEW_H_

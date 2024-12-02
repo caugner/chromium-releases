@@ -2,18 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_TEST_TESTING_PROFILE_H__
-#define CHROME_TEST_TESTING_PROFILE_H__
+#ifndef CHROME_TEST_TESTING_PROFILE_H_
+#define CHROME_TEST_TESTING_PROFILE_H_
 
 #include "base/base_paths.h"
+#include "base/file_path.h"
 #include "base/path_service.h"
 #include "base/file_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_prefs.h"
-#include "chrome/browser/history/history.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/sessions/session_service.h"
 #include "chrome/common/pref_service.h"
+
+#if defined(OS_POSIX)
+// TODO(port): get rid of this include. It's used just to provide declarations
+// and stub definitions for classes we encouter during the porting effort.
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
+
+// TODO(port): Get rid of this section and finish porting.
+#if defined(OS_WIN)
+#include "chrome/browser/history/history.h"
+#endif
 
 class TestingProfile : public Profile {
  public:
@@ -47,11 +59,15 @@ class TestingProfile : public Profile {
   // Creates a TemplateURLModel. If not invoked the TemplateURLModel is NULL.
   void CreateTemplateURLModel();
 
-  virtual std::wstring GetPath() {
+  virtual FilePath GetPath() {
     return path_;
   }
+  // Sets whether we're off the record. Default is false.
+  void set_off_the_record(bool off_the_record) {
+    off_the_record_ = off_the_record;
+  }
   virtual bool IsOffTheRecord() {
-    return false;
+    return off_the_record_;
   }
   virtual Profile* GetOffTheRecordProfile() {
     return NULL;
@@ -60,6 +76,15 @@ class TestingProfile : public Profile {
     return this;
   }
   virtual VisitedLinkMaster* GetVisitedLinkMaster() {
+    return NULL;
+  }
+  virtual ExtensionsService* GetExtensionsService() {
+    return NULL;
+  }
+  virtual UserScriptMaster* GetUserScriptMaster() {
+    return NULL;
+  }
+  virtual SSLHostState* GetSSLHostState() {
     return NULL;
   }
   virtual HistoryService* GetHistoryService(ServiceAccessType access) {
@@ -72,9 +97,10 @@ class TestingProfile : public Profile {
     return NULL;
   }
   virtual PrefService* GetPrefs() {
-    std::wstring prefs_filename;
+    FilePath prefs_filename;
     PathService::Get(base::DIR_TEMP, &prefs_filename);
-    file_util::AppendToPath(&prefs_filename, L"TestPreferences");
+    prefs_filename =
+        prefs_filename.Append(FILE_PATH_LITERAL("TestPreferences"));
     if (!prefs_.get()) {
       prefs_.reset(new PrefService(prefs_filename));
       Profile::RegisterUserPrefs(prefs_.get());
@@ -97,13 +123,19 @@ class TestingProfile : public Profile {
   virtual URLRequestContext* GetRequestContext() {
     return NULL;
   }
-  virtual SessionService* GetSessionService() {
+  virtual URLRequestContext* GetRequestContextForMedia() {
     return NULL;
+  }
+  void set_session_service(SessionService* session_service) {
+    session_service_ = session_service;
+  }
+  virtual SessionService* GetSessionService() {
+    return session_service_.get();
   }
   virtual void ShutdownSessionService() {
   }
   virtual bool HasSessionService() const {
-    return false;
+    return (session_service_.get() != NULL);
   }
   virtual std::wstring GetName() {
     return std::wstring();
@@ -116,8 +148,11 @@ class TestingProfile : public Profile {
   virtual void SetID(const std::wstring& id) {
     id_ = id;
   }
+  void set_last_session_exited_cleanly(bool value) {
+    last_session_exited_cleanly_ = value;
+  }
   virtual bool DidLastSessionExitCleanly() {
-    return true;
+    return last_session_exited_cleanly_;
   }
   virtual void MergeResourceString(int message_id,
                                    std::wstring* output_string) {
@@ -129,10 +164,10 @@ class TestingProfile : public Profile {
   virtual BookmarkModel* GetBookmarkModel() {
     return bookmark_bar_model_.get();
   }
-  virtual bool Profile::IsSameProfile(Profile *p) {
+  virtual bool IsSameProfile(Profile *p) {
     return this == p;
   }
-  virtual Time GetStartTime() const {
+  virtual base::Time GetStartTime() const {
     return start_time_;
   }
   virtual TabRestoreService* GetTabRestoreService() {
@@ -140,22 +175,27 @@ class TestingProfile : public Profile {
   }
   virtual void ResetTabRestoreService() {
   }
+  virtual void ReinitializeSpellChecker() {
+  }
   virtual SpellChecker* GetSpellChecker() {
     return NULL;
   }
   virtual void MarkAsCleanShutdown() {
   }
+  virtual void InitExtensions() {
+  }
 
 #ifdef CHROME_PERSONALIZATION
-  virtual ProfilePersonalization GetProfilePersonalization() {
+  virtual ProfilePersonalization* GetProfilePersonalization() {
+    return NULL;
   }
 #endif
 
  protected:
   // The path of the profile; the various database and other files are relative
   // to this.
-  std::wstring path_;
-  Time start_time_;
+  FilePath path_;
+  base::Time start_time_;
   scoped_ptr<PrefService> prefs_;
 
  private:
@@ -172,11 +212,19 @@ class TestingProfile : public Profile {
   // The TemplateURLFetcher. Only created if CreateTemplateURLModel is invoked.
   scoped_ptr<TemplateURLModel> template_url_model_;
 
+  // The SessionService. Defaults to NULL, but can be set using the setter.
+  scoped_refptr<SessionService> session_service_;
+
   // Do we have a history service? This defaults to the value of
   // history_service, but can be explicitly set.
   bool has_history_service_;
 
   std::wstring id_;
+
+  bool off_the_record_;
+
+  // Did the last session exit cleanly? Default is true.
+  bool last_session_exited_cleanly_;
 };
 
-#endif  // CHROME_TEST_TESTING_PROFILE_H__
+#endif  // CHROME_TEST_TESTING_PROFILE_H_

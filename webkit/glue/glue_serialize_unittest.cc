@@ -5,17 +5,21 @@
 #include "config.h"
 #include <string>
 
-#include "webkit/glue/glue_serialize.h"
-#include "testing/gtest/include/gtest/gtest.h"
-#include "base/pickle.h"
+#include "base/compiler_specific.h"
 
-#pragma warning(push, 0)
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "CString.h"
 #include "FormData.h"
 #include "HistoryItem.h"
 #include "PlatformString.h"
 #include "ResourceRequest.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
+
+#undef LOG
+
+#include "base/pickle.h"
+#include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/glue/glue_serialize.h"
 
 using namespace std;
 using namespace WebCore;
@@ -59,8 +63,8 @@ namespace {
 class GlueSerializeTest : public testing::Test {
  public:
   // Makes a FormData with some random data.
-  FormData* MakeFormData() {
-    FormData* form_data = new FormData();
+  PassRefPtr<FormData> MakeFormData() {
+    RefPtr<FormData> form_data = FormData::create();
 
     char d1[] = "first data block";
     form_data->appendData(d1, sizeof(d1)-1);
@@ -70,12 +74,12 @@ class GlueSerializeTest : public testing::Test {
     char d2[] = "data the second";
     form_data->appendData(d2, sizeof(d2)-1);
 
-    return form_data;
+    return form_data.release();
   }
 
   // Constructs a HistoryItem with some random data and an optional child.
   PassRefPtr<HistoryItem> MakeHistoryItem(bool with_form_data, bool pregnant) {
-    RefPtr<HistoryItem> item = new HistoryItem();
+    RefPtr<HistoryItem> item = HistoryItem::create();
 
     item->setURLString("urlString");
     item->setOriginalURLString("originalURLString");
@@ -87,7 +91,6 @@ class GlueSerializeTest : public testing::Test {
     item->setScrollPoint(IntPoint(42, -42));
     item->setIsTargetItem(true);
     item->setVisitCount(42*42);
-    item->setRSSFeedReferrer("rssFeedReferrer");
 
     Vector<String> document_state;
     document_state.append("state1");
@@ -98,19 +101,22 @@ class GlueSerializeTest : public testing::Test {
     // Form Data
     ResourceRequest dummy_request;  // only way to initialize HistoryItem
     if (with_form_data) {
-      FormData* form_data = MakeFormData();
-      dummy_request.setHTTPBody(form_data);
+      dummy_request.setHTTPBody(MakeFormData());
       dummy_request.setHTTPContentType("formContentType");
-      dummy_request.setHTTPReferrer("formReferrer");
+      dummy_request.setHTTPReferrer("referrer");
       dummy_request.setHTTPMethod("POST");
     }
     item->setFormInfoFromRequest(dummy_request);
+
+    // Setting the FormInfo causes the referrer to be set, so we set the
+    // referrer after setting the form info.
+    item->setReferrer("referrer");
 
     // Children
     if (pregnant)
       item->addChildItem(MakeHistoryItem(false, false));
 
-    return item;
+    return item.release();
   }
 
   // Checks that a == b.
@@ -125,14 +131,13 @@ class GlueSerializeTest : public testing::Test {
     EXPECT_EQ(a->scrollPoint(), b->scrollPoint());
     EXPECT_EQ(a->isTargetItem(), b->isTargetItem());
     EXPECT_EQ(a->visitCount(), b->visitCount());
-    EXPECT_EQ(a->rssFeedReferrer(), b->rssFeedReferrer());
+    EXPECT_EQ(a->referrer(), b->referrer());
     EXPECT_EQ(a->documentState(), b->documentState());
 
     // Form Data
     EXPECT_EQ(a->formData() != NULL, b->formData() != NULL);
     if (a->formData() && b->formData())
       EXPECT_EQ(*a->formData(), *b->formData());
-    EXPECT_EQ(a->formReferrer(), b->formReferrer());
     EXPECT_EQ(a->formContentType(), b->formContentType());
 
     // Children

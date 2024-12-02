@@ -5,15 +5,14 @@
 #include "chrome/browser/views/tabs/tab_strip.h"
 
 #include "base/gfx/size.h"
-#include "chrome/app/theme/theme_resources.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
-#include "chrome/browser/user_metrics.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/tabs/dragged_tab_controller.h"
 #include "chrome/browser/views/tabs/tab.h"
-#include "chrome/browser/web_contents.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/drag_drop_types.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/path.h"
@@ -24,21 +23,22 @@
 #include "chrome/common/slide_animation.h"
 #include "chrome/common/stl_util-inl.h"
 #include "chrome/common/win_util.h"
-#include "chrome/views/image_view.h"
+#include "chrome/views/controls/image_view.h"
 #include "chrome/views/painter.h"
-
-#include "generated_resources.h"
+#include "chrome/views/window/non_client_view.h"
+#include "chrome/views/window/window.h"
+#include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 
 #undef min
 #undef max
 
-using ChromeViews::DropTargetEvent;
+using views::DropTargetEvent;
 
 static const int kDefaultAnimationDurationMs = 100;
 static const int kResizeLayoutAnimationDurationMs = 166;
 static const int kReorderAnimationDurationMs = 166;
 
-static const int kLoadingAnimationFrameTimeMs = 30;
 static const int kNewTabButtonHOffset = -5;
 static const int kNewTabButtonVOffset = 5;
 static const int kResizeTabsTimeMs = 300;
@@ -60,13 +60,15 @@ static inline int Round(double x) {
 //
 //  A subclass of button that hit-tests to the shape of the new tab button.
 
-class NewTabButton : public ChromeViews::Button {
+class NewTabButton : public views::ImageButton {
  public:
-  NewTabButton() {}
+  explicit NewTabButton(views::ButtonListener* listener)
+      : views::ImageButton(listener) {
+  }
   virtual ~NewTabButton() {}
 
  protected:
-  // Overridden from ChromeViews::View:
+  // Overridden from views::View:
   virtual bool HasHitTestMask() const {
     return true;
   }
@@ -197,7 +199,7 @@ class TabStrip::TabAnimation : public AnimationDelegate {
     if (start_tab_count < end_tab_count &&
         start_unselected_width_ < standard_tab_width) {
       double minimum_tab_width =
-          static_cast<double>(TabRenderer::GetMinimumSize().width());
+          static_cast<double>(TabRenderer::GetMinimumUnselectedSize().width());
       start_unselected_width_ -= minimum_tab_width / start_tab_count;
     }
     tabstrip_->GenerateIdealBounds();
@@ -247,7 +249,7 @@ class InsertTabAnimation : public TabStrip::TabAnimation {
       double target_width =
           is_selected ? end_unselected_width_ : end_selected_width_;
       double start_width = is_selected ? Tab::GetMinimumSelectedSize().width() :
-          Tab::GetMinimumSize().width();
+          Tab::GetMinimumUnselectedSize().width();
       double delta = target_width - start_width;
       if (delta > 0)
         return start_width + (delta * animation_.GetCurrentValue());
@@ -294,7 +296,11 @@ class RemoveTabAnimation : public TabStrip::TabAnimation {
       // of the animation.
       // Removed animated Tabs are never selected.
       double start_width = start_unselected_width_;
-      double target_width = Tab::GetMinimumSize().width() + kTabHOffset;
+      // Make sure target_width is at least abs(kTabHOffset), otherwise if
+      // less than kTabHOffset during layout tabs get negatively offset.
+      double target_width =
+          std::max(abs(kTabHOffset),
+                   Tab::GetMinimumUnselectedSize().width() + kTabHOffset);
       double delta = start_width - target_width;
       return start_width - (delta * animation_.GetCurrentValue());
     }
@@ -313,38 +319,15 @@ class RemoveTabAnimation : public TabStrip::TabAnimation {
   }
 
   virtual void AnimationEnded(const Animation* animation) {
-    RemoveTabAt(index_);
+    tabstrip_->RemoveTabAt(index_);
     HighlightCloseButton();
     TabStrip::TabAnimation::AnimationEnded(animation);
   }
 
  private:
-  // Cleans up the Tab from the TabStrip at the specified |index| once its
-  // animated removal is complete.
-  void RemoveTabAt(int index) const {
-    // Save a pointer to the Tab before we remove the TabData, we'll need this
-    // later.
-    Tab* removed = tabstrip_->tab_data_.at(index).tab;
-
-    // Remove the Tab from the TabStrip's list...
-    tabstrip_->tab_data_.erase(tabstrip_->tab_data_.begin() + index);
-
-    // If the TabContents being detached was removed as a result of a drag
-    // gesture from its corresponding Tab, we don't want to remove the Tab from
-    // the child list, because if we do so it'll stop receiving events and the
-    // drag will stall. So we only remove if a drag isn't active, or the Tab
-    // was for some other TabContents.
-    if (!tabstrip_->IsDragSessionActive() ||
-        !tabstrip_->drag_controller_->IsDragSourceTab(removed)) {
-      tabstrip_->RemoveChildView(removed);
-      delete removed;
-    }
-  }
-
-  // When the animation completes, we send the ViewContainer a message to
-  // simulate a mouse moved event at the current mouse position. This tickles
-  // the Tab the mouse is currently over to show the "hot" state of the close
-  // button.
+  // When the animation completes, we send the Container a message to simulate
+  // a mouse moved event at the current mouse position. This tickles the Tab
+  // the mouse is currently over to show the "hot" state of the close button.
   void HighlightCloseButton() {
     if (tabstrip_->available_width_for_tabs_ == -1 ||
         tabstrip_->IsDragSessionActive()) {
@@ -355,15 +338,16 @@ class RemoveTabAnimation : public TabStrip::TabAnimation {
 
     POINT pt;
     GetCursorPos(&pt);
-    ChromeViews::ViewContainer* vc = tabstrip_->GetViewContainer();
+    views::Widget* widget = tabstrip_->GetWidget();
     RECT wr;
-    GetWindowRect(vc->GetHWND(), &wr);
+    GetWindowRect(widget->GetNativeView(), &wr);
     pt.x -= wr.left;
     pt.y -= wr.top;
 
     // Return to message loop - otherwise we may disrupt some operation that's
     // in progress.
-    PostMessage(vc->GetHWND(), WM_MOUSEMOVE, 0, MAKELPARAM(pt.x, pt.y));
+    PostMessage(widget->GetNativeView(), WM_MOUSEMOVE, 0,
+                MAKELPARAM(pt.x, pt.y));
   }
 
   int index_;
@@ -508,46 +492,27 @@ TabStrip::~TabStrip() {
 }
 
 int TabStrip::GetPreferredHeight() {
-  CSize preferred_size;
-  GetPreferredSize(&preferred_size);
-  return preferred_size.cy;
-}
-
-bool TabStrip::HasAvailableDragActions() const {
-  return model_->delegate()->GetDragActions() != 0;
-}
-
-void TabStrip::ShowApplicationMenu(const gfx::Point& p) {
-  TabStripModelDelegate* delegate = model_->delegate();
-  if (delegate)
-    delegate->ShowApplicationMenu(p);
+  return GetPreferredSize().height();
 }
 
 bool TabStrip::CanProcessInputEvents() const {
   return IsAnimating() == NULL;
 }
 
-bool TabStrip::PointIsWithinWindowCaption(const CPoint& point) {
-  ChromeViews::View* v = GetViewForPoint(point);
+bool TabStrip::PointIsWithinWindowCaption(const gfx::Point& point) {
+  views::View* v = GetViewForPoint(point);
 
   // If there is no control at this location, claim the hit was in the title
   // bar to get a move action.
   if (v == this)
     return true;
 
-  // If the point is within the bounds of a Tab, the point can be considered
-  // part of the caption if there are no available drag operations for the Tab.
-  if (v->GetClassName() == Tab::kTabClassName && !HasAvailableDragActions())
-    return true;
-
   // Check to see if the point is within the non-button parts of the new tab
   // button. The button has a non-rectangular shape, so if it's not in the
   // visual portions of the button we treat it as a click to the caption.
-  CRect bounds;
-  newtab_button_->GetBounds(&bounds);
-  CPoint point_in_newtab_coords(point);
+  gfx::Point point_in_newtab_coords(point);
   View::ConvertPointToView(this, newtab_button_, &point_in_newtab_coords);
-  if (bounds.PtInRect(point) &&
+  if (newtab_button_->bounds().Contains(point) &&
       !newtab_button_->HitTest(point_in_newtab_coords)) {
     return true;
   }
@@ -581,7 +546,8 @@ void TabStrip::DestroyDraggedSourceTab(Tab* tab) {
   std::vector<TabData>::iterator it = tab_data_.begin();
   for (; it != tab_data_.end(); ++it) {
     if (it->tab == tab) {
-      NOTREACHED() << "Leaving in an inconsistent state!";
+      if (!model_->closing_all())
+        NOTREACHED() << "Leaving in an inconsistent state!";
       tab_data_.erase(it);
       break;
     }
@@ -599,8 +565,26 @@ gfx::Rect TabStrip::GetIdealBounds(int index) {
   return tab_data_.at(index).ideal_bounds;
 }
 
+void TabStrip::UpdateLoadingAnimations() {
+  for (int i = 0, index = 0; i < GetTabCount(); ++i, ++index) {
+    Tab* current_tab = GetTabAt(i);
+    if (current_tab->closing()) {
+      --index;
+    } else {
+      TabContents* contents = model_->GetTabContentsAt(index);
+      if (!contents || !contents->is_loading()) {
+        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_NONE);
+      } else if (contents->waiting_for_response()) {
+        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_WAITING);
+      } else {
+        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_LOADING);
+      }
+    }
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
-// TabStrip, ChromeViews::View overrides:
+// TabStrip, views::View overrides:
 
 void TabStrip::PaintChildren(ChromeCanvas* canvas) {
   // Paint the tabs in reverse order, so they stack to the left.
@@ -617,7 +601,7 @@ void TabStrip::PaintChildren(ChromeCanvas* canvas) {
     }
   }
 
-  if (win_util::ShouldUseVistaFrame()) {
+  if (GetWidget()->AsWindow()->GetNonClientView()->UseNativeFrame()) {
     // Make sure unselected tabs are somewhat transparent.
     SkPaint paint;
     paint.setColor(SkColorSetARGB(200, 255, 255, 255));
@@ -637,12 +621,8 @@ void TabStrip::PaintChildren(ChromeCanvas* canvas) {
   newtab_button_->ProcessPaint(canvas);
 }
 
-void TabStrip::DidChangeBounds(const CRect& prev, const CRect& curr) {
-  Layout();
-}
-
 // Overridden to support automation. See automation_proxy_uitest.cc.
-ChromeViews::View* TabStrip::GetViewByID(int view_id) const {
+views::View* TabStrip::GetViewByID(int view_id) const {
   if (GetTabCount() > 0) {
     if (view_id == VIEW_ID_TAB_LAST) {
       return GetTabAt(GetTabCount() - 1);
@@ -678,10 +658,8 @@ void TabStrip::Layout() {
   SchedulePaint();
 }
 
-void TabStrip::GetPreferredSize(CSize* preferred_size) {
-  DCHECK(preferred_size);
-  preferred_size->cx = 0;
-  preferred_size->cy = Tab::GetMinimumSize().height();
+gfx::Size TabStrip::GetPreferredSize() {
+  return gfx::Size(0, Tab::GetMinimumUnselectedSize().height());
 }
 
 void TabStrip::OnDragEntered(const DropTargetEvent& event) {
@@ -718,14 +696,15 @@ int TabStrip::OnPerformDrop(const DropTargetEvent& event) {
     // Insert a new tab.
     TabContents* contents =
         model_->delegate()->CreateTabContentsForURL(
-            url, model_->profile(), PageTransition::TYPED, false, NULL);
+            url, GURL(), model_->profile(), PageTransition::TYPED, false,
+            NULL);
     model_->AddTabContents(contents, drop_index, PageTransition::GENERATED,
                            true);
   } else {
     UserMetrics::RecordAction(L"Tab_DropURLOnTab", model_->profile());
 
     model_->GetTabContentsAt(drop_index)->controller()->
-        LoadURL(url, PageTransition::GENERATED);
+        LoadURL(url, GURL(), PageTransition::GENERATED);
     model_->SelectTabContentsAt(drop_index, true);
   }
 
@@ -752,15 +731,15 @@ void TabStrip::SetAccessibleName(const std::wstring& name) {
   accessible_name_.assign(name);
 }
 
-ChromeViews::View* TabStrip::GetViewForPoint(const CPoint& point) {
+views::View* TabStrip::GetViewForPoint(const gfx::Point& point) {
   return GetViewForPoint(point, false);
 }
 
-ChromeViews::View* TabStrip::GetViewForPoint(const CPoint& point,
-                                             bool can_create_floating) {
+views::View* TabStrip::GetViewForPoint(const gfx::Point& point,
+                                       bool can_create_floating) {
   // Return any view that isn't a Tab or this TabStrip immediately. We don't
   // want to interfere.
-  ChromeViews::View* v = View::GetViewForPoint(point, can_create_floating);
+  views::View* v = View::GetViewForPoint(point, can_create_floating);
   if (v && v != this && v->GetClassName() != Tab::kTabClassName)
     return v;
 
@@ -842,7 +821,8 @@ void TabStrip::TabInsertedAt(TabContents* contents,
 
   // Don't animate the first tab, it looks weird, and don't animate anything
   // if the containing window isn't visible yet.
-  if (GetTabCount() > 1 && IsWindowVisible(GetViewContainer()->GetHWND())) {
+  if (GetTabCount() > 1 && GetWidget() &&
+      IsWindowVisible(GetWidget()->GetNativeView())) {
     StartInsertTabAnimation(index);
   } else {
     Layout();
@@ -893,23 +873,6 @@ void TabStrip::TabChangedAt(TabContents* contents, int index) {
   Tab* tab = GetTabAtAdjustForAnimation(index);
   tab->UpdateData(contents);
   tab->UpdateFromModel();
-}
-
-void TabStrip::TabValidateAnimations() {
-  if (model_->TabsAreLoading()) {
-    if (!loading_animation_timer_.IsRunning()) {
-      // Loads are happening, and the timer isn't running, so start it.
-      loading_animation_timer_.Start(
-          TimeDelta::FromMilliseconds(kLoadingAnimationFrameTimeMs), this,
-          &TabStrip::LoadingAnimationCallback);
-    }
-  } else {
-    if (loading_animation_timer_.IsRunning()) {
-      loading_animation_timer_.Stop();
-      // Loads are now complete, update the state if a task was scheduled.
-      LoadingAnimationCallback();
-    }
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1014,18 +977,18 @@ void TabStrip::StopAllHighlighting() {
     GetTabAt(i)->StopPulse();
 }
 
-void TabStrip::MaybeStartDrag(Tab* tab, const ChromeViews::MouseEvent& event) {
+void TabStrip::MaybeStartDrag(Tab* tab, const views::MouseEvent& event) {
   // Don't accidentally start any drag operations during animations if the
   // mouse is down... during an animation tabs are being resized automatically,
   // so the View system can misinterpret this easily if the mouse is down that
   // the user is dragging.
-  if (IsAnimating() || tab->closing())
+  if (IsAnimating() || tab->closing() || !HasAvailableDragActions())
     return;
   drag_controller_.reset(new DraggedTabController(tab, this));
   drag_controller_->CaptureDragInfo(gfx::Point(event.x(), event.y()));
 }
 
-void TabStrip::ContinueDrag(const ChromeViews::MouseEvent& event) {
+void TabStrip::ContinueDrag(const views::MouseEvent& event) {
   // We can get called even if |MaybeStartDrag| wasn't called in the event of
   // a TabStrip animation when the mouse button is down. In this case we should
   // _not_ continue the drag because it can lead to weird bugs.
@@ -1033,15 +996,18 @@ void TabStrip::ContinueDrag(const ChromeViews::MouseEvent& event) {
     drag_controller_->Drag();
 }
 
-void TabStrip::EndDrag(bool canceled) {
-  if (drag_controller_.get())
-    drag_controller_->EndDrag(canceled);
+bool TabStrip::EndDrag(bool canceled) {
+  return drag_controller_.get() ? drag_controller_->EndDrag(canceled) : false;
+}
+
+bool TabStrip::HasAvailableDragActions() const {
+  return model_->delegate()->GetDragActions() != 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// TabStrip, ChromeViews::BaseButton::ButtonListener implementation:
+// TabStrip, views::BaseButton::ButtonListener implementation:
 
-void TabStrip::ButtonPressed(ChromeViews::BaseButton* sender) {
+void TabStrip::ButtonPressed(views::Button* sender) {
   if (sender == newtab_button_)
     model_->AddBlankTab(true);
 }
@@ -1105,16 +1071,15 @@ void TabStrip::DidProcessMessage(const MSG& msg) {
 
 void TabStrip::Init() {
   model_->AddObserver(this);
-  newtab_button_ = new NewTabButton;
-  newtab_button_->SetListener(this, TabStripModel::kNoTab);
+  newtab_button_ = new NewTabButton(this);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SkBitmap* bitmap;
 
   bitmap = rb.GetBitmapNamed(IDR_NEWTAB_BUTTON);
-  newtab_button_->SetImage(ChromeViews::Button::BS_NORMAL, bitmap);
-  newtab_button_->SetImage(ChromeViews::Button::BS_PUSHED,
+  newtab_button_->SetImage(views::CustomButton::BS_NORMAL, bitmap);
+  newtab_button_->SetImage(views::CustomButton::BS_PUSHED,
                            rb.GetBitmapNamed(IDR_NEWTAB_BUTTON_P));
-  newtab_button_->SetImage(ChromeViews::Button::BS_HOT,
+  newtab_button_->SetImage(views::CustomButton::BS_HOT,
                            rb.GetBitmapNamed(IDR_NEWTAB_BUTTON_H));
 
   newtab_button_size_.SetSize(bitmap->width(), bitmap->height());
@@ -1159,7 +1124,7 @@ void TabStrip::GetCurrentTabWidths(double* unselected_width,
 void TabStrip::GetDesiredTabWidths(int tab_count,
                                    double* unselected_width,
                                    double* selected_width) const {
-  const double min_unselected_width = Tab::GetMinimumSize().width();
+  const double min_unselected_width = Tab::GetMinimumUnselectedSize().width();
   const double min_selected_width = Tab::GetMinimumSelectedSize().width();
   if (tab_count == 0) {
     // Return immediately to avoid divide-by-zero below.
@@ -1241,17 +1206,16 @@ void TabStrip::ResizeLayoutTabs() {
 }
 
 bool TabStrip::IsCursorInTabStripZone() {
-  CRect bounds;
-  GetLocalBounds(&bounds, true);
-  CPoint tabstrip_topleft = bounds.TopLeft();
+  gfx::Rect bounds = GetLocalBounds(true);
+  gfx::Point tabstrip_topleft(bounds.origin());
   View::ConvertPointToScreen(this, &tabstrip_topleft);
-  bounds.MoveToXY(tabstrip_topleft);
-  bounds.bottom += kTabStripAnimationVSlop;
+  bounds.set_origin(tabstrip_topleft);
+  bounds.set_height(bounds.height() + kTabStripAnimationVSlop);
 
   CPoint cursor_point;
   GetCursorPos(&cursor_point);
 
-  return !!bounds.PtInRect(cursor_point);
+  return bounds.Contains(cursor_point.x, cursor_point.y);
 }
 
 void TabStrip::AddMessageLoopObserver() {
@@ -1266,29 +1230,6 @@ void TabStrip::RemoveMessageLoopObserver() {
     MessageLoopForUI::current()->RemoveObserver(this);
     added_as_message_loop_observer_ = false;
   }
-}
-
-void TabStrip::LoadingAnimationCallback() {
-  for (int i = 0, index = 0; i < GetTabCount(); ++i, ++index) {
-    Tab* current_tab = GetTabAt(i);
-    if (current_tab->closing()) {
-      --index;
-    } else {
-      TabContents* contents = model_->GetTabContentsAt(index);
-      if (!contents || !contents->is_loading()) {
-        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_NONE);
-      } else if (contents->response_started()) {
-        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_WAITING);
-      } else {
-        current_tab->ValidateLoadingAnimation(Tab::ANIMATION_LOADING);
-      }
-    }
-  }
-
-  // Make sure the model delegates updates the animation as well.
-  TabStripModelDelegate* delegate;
-  if (model_ && (delegate = model_->delegate()))
-    delegate->ValidateLoadingAnimations();
 }
 
 gfx::Rect TabStrip::GetDropBounds(int drop_index,
@@ -1311,9 +1252,10 @@ gfx::Rect TabStrip::GetDropBounds(int drop_index,
   center_x = MirroredXCoordinateInsideView(center_x);
 
   // Determine the screen bounds.
-  CPoint drop_loc(center_x - drop_indicator_width / 2, -drop_indicator_height);
+  gfx::Point drop_loc(center_x - drop_indicator_width / 2,
+                      -drop_indicator_height);
   ConvertPointToScreen(this, &drop_loc);
-  gfx::Rect drop_bounds(drop_loc.x, drop_loc.y, drop_indicator_width,
+  gfx::Rect drop_bounds(drop_loc.x(), drop_loc.y(), drop_indicator_width,
                         drop_indicator_height);
 
   // If the rect doesn't fit on the monitor, push the arrow to the bottom.
@@ -1385,7 +1327,7 @@ void TabStrip::SetDropIndex(int index, bool drop_before) {
       drop_bounds.height(), SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
-int TabStrip::GetDropEffect(const ChromeViews::DropTargetEvent& event) {
+int TabStrip::GetDropEffect(const views::DropTargetEvent& event) {
   const int source_ops = event.GetSourceOperations();
   if (source_ops & DragDropTypes::DRAG_COPY)
     return DragDropTypes::DRAG_COPY;
@@ -1406,12 +1348,12 @@ TabStrip::DropInfo::DropInfo(int drop_index, bool drop_before, bool point_down)
     : drop_index(drop_index),
       drop_before(drop_before),
       point_down(point_down) {
-  arrow_window = new ChromeViews::HWNDViewContainer();
+  arrow_window = new views::WidgetWin;
   arrow_window->set_window_style(WS_POPUP);
   arrow_window->set_window_ex_style(WS_EX_TOPMOST | WS_EX_NOACTIVATE |
                                     WS_EX_LAYERED | WS_EX_TRANSPARENT);
 
-  arrow_view = new ChromeViews::ImageView;
+  arrow_view = new views::ImageView;
   arrow_view->SetImage(GetDropArrowImage(point_down));
 
   arrow_window->Init(
@@ -1567,9 +1509,26 @@ int TabStrip::GetAvailableWidthForTabs(Tab* last_tab) const {
   return last_tab->x() + last_tab->width();
 }
 
-bool TabStrip::IsPointInTab(Tab* tab, const CPoint& point_in_tabstrip_coords) {
-  CPoint point_in_tab_coords(point_in_tabstrip_coords);
+bool TabStrip::IsPointInTab(Tab* tab,
+                            const gfx::Point& point_in_tabstrip_coords) {
+  gfx::Point point_in_tab_coords(point_in_tabstrip_coords);
   View::ConvertPointToView(this, tab, &point_in_tab_coords);
   return tab->HitTest(point_in_tab_coords);
 }
 
+void TabStrip::RemoveTabAt(int index) {
+  Tab* removed = tab_data_.at(index).tab;
+
+  // Remove the Tab from the TabStrip's list...
+  tab_data_.erase(tab_data_.begin() + index);
+
+  // If the TabContents being detached was removed as a result of a drag
+  // gesture from its corresponding Tab, we don't want to remove the Tab from
+  // the child list, because if we do so it'll stop receiving events and the
+  // drag will stall. So we only remove if a drag isn't active, or the Tab
+  // was for some other TabContents.
+  if (!IsDragSessionActive() || !drag_controller_->IsDragSourceTab(removed)) {
+    removed->GetParent()->RemoveChildView(removed);
+    delete removed;
+  }
+}

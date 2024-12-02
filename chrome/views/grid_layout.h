@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_VIEWS_GRID_LAYOUT_H__
-#define CHROME_VIEWS_GRID_LAYOUT_H__
+#ifndef CHROME_VIEWS_GRID_LAYOUT_H_
+#define CHROME_VIEWS_GRID_LAYOUT_H_
 
 #include <string>
 #include <vector>
@@ -56,7 +56,7 @@
 //
 // AddView takes care of adding the View to the View the GridLayout was
 // created with.
-namespace ChromeViews {
+namespace views {
 
 class Column;
 class ColumnSet;
@@ -136,7 +136,7 @@ class GridLayout : public LayoutManager {
   // As a convenience this adds the view to the host. The view becomes owned
   // by the host, and NOT this GridLayout.
   void AddView(View* view, int col_span, int row_span, Alignment h_align,
-	             Alignment v_align);
+               Alignment v_align);
 
   // Adds a view with the specified alignment and spans. If
   // pref_width/pref_height is > 0 then the preferred width/height of the view
@@ -165,7 +165,7 @@ class GridLayout : public LayoutManager {
   virtual void Layout(View* host);
 
   // Returns the preferred size for the GridLayout.
-  virtual void GetPreferredSize(View* host, CSize* out);
+  virtual gfx::Size GetPreferredSize(View* host);
 
   virtual int GetPreferredHeightForWidth(View* host, int width);
 
@@ -174,7 +174,8 @@ class GridLayout : public LayoutManager {
   // they both call into this method. This sizes the Columns/Rows as
   // appropriate. If layout is true, width/height give the width/height the
   // of the host, otherwise they are ignored.
-  void SizeRowsAndColumns(bool layout, int width, int height, CSize* pref);
+     void SizeRowsAndColumns(bool layout, int width, int height,
+                             gfx::Size* pref);
 
   // Calculates the master columns of all the column sets. See Column for
   // a description of what a master column is.
@@ -348,7 +349,6 @@ class ColumnSet {
   DISALLOW_EVIL_CONSTRUCTORS(ColumnSet);
 };
 
-} // namespace
+}  // namespace views
 
-#endif // CHROME_VIEWS_GRID_LAYOUT_H__
-
+#endif // CHROME_VIEWS_GRID_LAYOUT_H_

@@ -13,24 +13,18 @@
 		/>
 	</Platforms>
 	<ToolFiles>
-		<ToolFile
-			RelativePath=".\convert_tld_data.rules"
-		/>
 	</ToolFiles>
 	<Configurations>
 		<Configuration
 			Name="Debug|Win32"
 			ConfigurationType="4"
-			InheritedPropertySheets="$(SolutionDir)..\build\common.vsprops;$(SolutionDir)..\build\debug.vsprops;$(SolutionDir)..\third_party\icu38\build\using_icu.vsprops;$(SolutionDir)..\third_party\zlib\using_zlib.vsprops;$(SolutionDir)..\sdch\using_sdch.vsprops"
+			InheritedPropertySheets="$(SolutionDir)..\build\debug.vsprops;.\net.vsprops"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="Convert TLD Data File"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -78,16 +72,13 @@
 		<Configuration
 			Name="Release|Win32"
 			ConfigurationType="4"
-			InheritedPropertySheets="$(SolutionDir)..\build\common.vsprops;$(SolutionDir)..\build\release.vsprops;$(SolutionDir)..\third_party\icu38\build\using_icu.vsprops;$(SolutionDir)..\third_party\zlib\using_zlib.vsprops;$(SolutionDir)..\sdch\using_sdch.vsprops"
+			InheritedPropertySheets="$(SolutionDir)..\build\release.vsprops;.\net.vsprops"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
-			/>
-			<Tool
-				Name="Convert TLD Data File"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
@@ -149,14 +140,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\base\auth_cache.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\base\auth_cache.h"
-				>
-			</File>
-			<File
 				RelativePath="..\base\base64.cc"
 				>
 			</File>
@@ -173,7 +156,27 @@
 				>
 			</File>
 			<File
+				RelativePath="..\base\cert_status_flags.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\base\cert_status_flags.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\cert_verifier.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\base\cert_verifier.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\cert_verify_result.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\client_socket.cc"
 				>
 			</File>
 			<File
@@ -206,6 +209,14 @@
 			</File>
 			<File
 				RelativePath="..\base\completion_callback.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\connection_type_histograms.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\base\connection_type_histograms.h"
 				>
 			</File>
 			<File
@@ -249,7 +260,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\base\effective_tld_names.dat"
+				RelativePath="..\base\effective_tld_names.cc"
 				>
 			</File>
 			<File
@@ -266,6 +277,14 @@
 			</File>
 			<File
 				RelativePath="..\base\ev_root_ca_metadata.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\file_stream.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\file_stream_win.cc"
 				>
 			</File>
 			<File
@@ -298,6 +317,14 @@
 			</File>
 			<File
 				RelativePath="..\base\host_resolver.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\io_buffer.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\base\io_buffer.h"
 				>
 			</File>
 			<File
@@ -373,7 +400,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\precompiled_net.cc"
+				RelativePath="precompiled_net.cc"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
@@ -393,7 +420,7 @@
 				</FileConfiguration>
 			</File>
 			<File
-				RelativePath=".\precompiled_net.h"
+				RelativePath="precompiled_net.h"
 				>
 			</File>
 			<File
@@ -402,6 +429,10 @@
 			</File>
 			<File
 				RelativePath="..\base\registry_controlled_domain.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\scoped_cert_chain_context.h"
 				>
 			</File>
 			<File
@@ -425,11 +456,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\base\ssl_client_socket.cc"
+				RelativePath="..\base\ssl_client_socket.h"
 				>
 			</File>
 			<File
-				RelativePath="..\base\ssl_client_socket.h"
+				RelativePath="..\base\ssl_client_socket_win.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\base\ssl_client_socket_win.h"
 				>
 			</File>
 			<File
@@ -445,11 +480,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\base\tcp_client_socket.cc"
+				RelativePath="..\base\ssl_test_util.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\base\tcp_client_socket.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\tcp_client_socket_win.cc"
 				>
 			</File>
 			<File
@@ -493,11 +532,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\base\x509_certificate_win.cc"
+				RelativePath="..\base\x509_certificate.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\base\x509_certificate.h"
+				>
+			</File>
+			<File
+				RelativePath="..\base\x509_certificate_win.cc"
 				>
 			</File>
 		</Filter>
@@ -621,6 +664,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\url_request\url_request_new_ftp_job.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\url_request\url_request_new_ftp_job.h"
+				>
+			</File>
+			<File
 				RelativePath="..\url_request\url_request_simple_job.cc"
 				>
 			</File>
@@ -653,15 +704,63 @@
 			Name="http"
 			>
 			<File
-				RelativePath="..\http\cert_status_cache.cc"
+				RelativePath="..\http\des.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\http\cert_status_cache.h"
+				RelativePath="..\http\des.h"
 				>
 			</File>
 			<File
 				RelativePath="..\http\http_atom_list.h"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth.h"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_cache.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_cache.h"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler.h"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler_basic.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler_basic.h"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler_digest.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler_digest.h"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler_ntlm.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\http\http_auth_handler_ntlm.h"
 				>
 			</File>
 			<File
@@ -713,6 +812,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\http\http_response_info.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\http\http_response_info.h"
 				>
 			</File>
@@ -722,14 +825,6 @@
 			</File>
 			<File
 				RelativePath="..\http\http_transaction_factory.h"
-				>
-			</File>
-			<File
-				RelativePath="..\http\http_transaction_winhttp.cc"
-				>
-			</File>
-			<File
-				RelativePath="..\http\http_transaction_winhttp.h"
 				>
 			</File>
 			<File
@@ -749,17 +844,21 @@
 				>
 			</File>
 			<File
-				RelativePath="..\http\winhttp_request_throttle.cc"
+				RelativePath="..\http\md4.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\http\winhttp_request_throttle.h"
+				RelativePath="..\http\md4.h"
 				>
 			</File>
 		</Filter>
 		<Filter
 			Name="disk_cache"
 			>
+			<File
+				RelativePath="..\disk_cache\addr.cc"
+				>
+			</File>
 			<File
 				RelativePath="..\disk_cache\addr.h"
 				>
@@ -806,6 +905,14 @@
 			</File>
 			<File
 				RelativePath="..\disk_cache\errors.h"
+				>
+			</File>
+			<File
+				RelativePath="..\disk_cache\eviction.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\disk_cache\eviction.h"
 				>
 			</File>
 			<File
@@ -869,14 +976,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\disk_cache\os_file.h"
-				>
-			</File>
-			<File
-				RelativePath="..\disk_cache\os_file_win.cc"
-				>
-			</File>
-			<File
 				RelativePath="..\disk_cache\rankings.cc"
 				>
 			</File>
@@ -890,6 +989,14 @@
 			</File>
 			<File
 				RelativePath="..\disk_cache\stats.h"
+				>
+			</File>
+			<File
+				RelativePath="..\disk_cache\stats_histogram.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\disk_cache\stats_histogram.h"
 				>
 			</File>
 			<File
@@ -913,11 +1020,59 @@
 			Name="proxy"
 			>
 			<File
-				RelativePath="..\proxy\proxy_resolver_fixed.cc"
+				RelativePath="..\proxy\proxy_config.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\proxy\proxy_resolver_fixed.h"
+				RelativePath="..\proxy\proxy_config.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_config_service.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_config_service_fixed.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_config_service_win.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_config_service_win.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_info.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_info.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_list.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_list.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_resolver.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_resolver_script.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_resolver_v8.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_resolver_v8.h"
 				>
 			</File>
 			<File
@@ -929,11 +1084,87 @@
 				>
 			</File>
 			<File
+				RelativePath="..\proxy\proxy_retry_info.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_script_fetcher.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_script_fetcher.h"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_server.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\proxy\proxy_server.h"
+				>
+			</File>
+			<File
 				RelativePath="..\proxy\proxy_service.cc"
 				>
 			</File>
 			<File
 				RelativePath="..\proxy\proxy_service.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="ftp"
+			>
+			<File
+				RelativePath="..\ftp\ftp_auth_cache.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_auth_cache.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_directory_parser.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_directory_parser.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_network_layer.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_network_layer.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_network_session.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_network_transaction.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_network_transaction.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_request_info.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_response_info.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_transaction.h"
+				>
+			</File>
+			<File
+				RelativePath="..\ftp\ftp_transaction_factory.h"
 				>
 			</File>
 		</Filter>

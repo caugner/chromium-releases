@@ -12,7 +12,6 @@
 #include "webkit/glue/webtextinput.h"
 
 class WebFrameImpl;
-class WebCore::Editor;
 
 class WebTextInputImpl : public WebTextInput {
  public:
@@ -54,4 +53,3 @@ class WebTextInputImpl : public WebTextInput {
 };
 
 #endif  // #ifndef WEBKIT_GLUE_WEBTEXTINPUT_IMPL_H__
-

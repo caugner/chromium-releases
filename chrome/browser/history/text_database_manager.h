@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_HISTORY_TEXT_DATABASE_MANAGER_H__
-#define CHROME_BROWSER_HISTORY_TEXT_DATABASE_MANAGER_H__
+#ifndef CHROME_BROWSER_HISTORY_TEXT_DATABASE_MANAGER_H_
+#define CHROME_BROWSER_HISTORY_TEXT_DATABASE_MANAGER_H_
 
 #include <set>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/task.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/text_database.h"
@@ -21,6 +22,8 @@
 struct sqlite3;
 
 namespace history {
+
+class HistoryPublisher;
 
 // Manages a set of text databases representing different time periods. This
 // will page them in and out as necessary, and will manage queries for times
@@ -70,13 +73,14 @@ class TextDatabaseManager {
   // The visit database is a pointer owned by the caller for the main database
   // (of recent visits). The visit database will be updated to refer to the
   // added text database entries.
-  explicit TextDatabaseManager(const std::wstring& dir,
+  explicit TextDatabaseManager(const FilePath& dir,
+                               URLDatabase* url_database,
                                VisitDatabase* visit_database);
   ~TextDatabaseManager();
 
   // Must call before using other functions. If it returns false, no other
   // functions should be called.
-  bool Init();
+  bool Init(const HistoryPublisher* history_publisher);
 
   // Allows scoping updates. This also allows things to go faster since every
   // page add doesn't need to be committed to disk (slow). Note that files will
@@ -95,7 +99,7 @@ class TextDatabaseManager {
   // get updated to refer to the full text indexed information. The visit time
   // should be the time corresponding to that visit in the database.
   void AddPageURL(const GURL& url, URLID url_id, VisitID visit_id,
-                  Time visit_time);
+                  base::Time visit_time);
   void AddPageTitle(const GURL& url, const std::wstring& title);
   void AddPageContents(const GURL& url, const std::wstring& body);
 
@@ -106,14 +110,14 @@ class TextDatabaseManager {
   bool AddPageData(const GURL& url,
                    URLID url_id,
                    VisitID visit_id,
-                   Time visit_time,
+                   base::Time visit_time,
                    const std::wstring& title,
                    const std::wstring& body);
 
   // Deletes the instance of indexed data identified by the given time and URL.
   // Any changes will be tracked in the optional change set for use when calling
   // OptimizeChangedDatabases later. change_set can be NULL.
-  void DeletePageData(Time time, const GURL& url,
+  void DeletePageData(base::Time time, const GURL& url,
                       ChangeSet* change_set);
 
   // The text database manager keeps a list of changes that are made to the
@@ -124,7 +128,7 @@ class TextDatabaseManager {
   //
   // Either or both times my be is_null to be unbounded in that direction. When
   // non-null, the range is [begin, end).
-  void DeleteFromUncommitted(Time begin, Time end);
+  void DeleteFromUncommitted(base::Time begin, base::Time end);
 
   // Same as DeleteFromUncommitted but for a single URL.
   void DeleteURLFromUncommitted(const GURL& url);
@@ -149,11 +153,12 @@ class TextDatabaseManager {
   void GetTextMatches(const std::wstring& query,
                       const QueryOptions& options,
                       std::vector<TextDatabase::Match>* results,
-                      Time* first_time_searched);
+                      base::Time* first_time_searched);
 
  private:
   // These tests call ExpireRecentChangesForTime to force expiration.
   FRIEND_TEST(TextDatabaseManagerTest, InsertPartial);
+  FRIEND_TEST(TextDatabaseManagerTest, PartialComplete);
   FRIEND_TEST(ExpireHistoryTest, DeleteURLAndFavicon);
   FRIEND_TEST(ExpireHistoryTest, FlushRecentURLsUnstarred);
 
@@ -161,12 +166,12 @@ class TextDatabaseManager {
   // visit, title, and body all come in at different times.
   class PageInfo {
    public:
-    PageInfo(URLID url_id, VisitID visit_id, Time visit_time);
+    PageInfo(URLID url_id, VisitID visit_id, base::Time visit_time);
 
     // Getters.
     URLID url_id() const { return url_id_; }
     VisitID visit_id() const { return visit_id_; }
-    Time visit_time() const { return visit_time_; }
+    base::Time visit_time() const { return visit_time_; }
     const std::wstring& title() const { return title_; }
     const std::wstring& body() const { return body_; }
 
@@ -183,7 +188,7 @@ class TextDatabaseManager {
     // Returns true if this entry was added too long ago and we should give up
     // waiting for more data. The current time is passed in as an argument so we
     // can check many without re-querying the timer.
-    bool Expired(TimeTicks now) const;
+    bool Expired(base::TimeTicks now) const;
 
    private:
     URLID url_id_;
@@ -191,11 +196,11 @@ class TextDatabaseManager {
 
     // Time of the visit of the URL. This will be the value stored in the URL
     // and visit tables for the entry.
-    Time visit_time_;
+    base::Time visit_time_;
 
     // When this page entry was created. We have a cap on the maximum time that
     // an entry will be in the queue before being flushed to the database.
-    TimeTicks added_time_;
+    base::TimeTicks added_time_;
 
     // Will be the string " " when they are set to distinguish set and unset.
     std::wstring title_;
@@ -203,8 +208,8 @@ class TextDatabaseManager {
   };
 
   // Converts the given time to a database identifier or vice-versa.
-  static TextDatabase::DBIdent TimeToID(Time time);
-  static Time IDToTime(TextDatabase::DBIdent id);
+  static TextDatabase::DBIdent TimeToID(base::Time time);
+  static base::Time IDToTime(TextDatabase::DBIdent id);
 
   // Returns a text database for the given identifier or time. This file will
   // be created if it doesn't exist and |for_writing| is set. On error,
@@ -217,7 +222,7 @@ class TextDatabaseManager {
   // The pointer will be tracked in the cache. The caller should not store it
   // or delete it since it will get automatically deleted as necessary.
   TextDatabase* GetDB(TextDatabase::DBIdent id, bool for_writing);
-  TextDatabase* GetDBForTime(Time time, bool for_writing);
+  TextDatabase* GetDBForTime(base::Time time, bool for_writing);
 
   // Populates the present_databases_ list based on which files are on disk.
   // When the list is already initialized, this will do nothing, so you can
@@ -234,16 +239,17 @@ class TextDatabaseManager {
   // Given "now," this will expire old things from the recent_changes_ list.
   // This is used as the backend for FlushOldChanges and is called directly
   // by the unit tests with fake times.
-  void FlushOldChangesForTime(TimeTicks now);
+  void FlushOldChangesForTime(base::TimeTicks now);
 
   // Directory holding our index files.
-  const std::wstring dir_;
+  const FilePath dir_;
 
   // The database connection.
   sqlite3* db_;
   DBCloseScoper db_close_scoper_;
 
   // Non-owning pointers to the recent history databases for URLs and visits.
+  URLDatabase* url_database_;
   VisitDatabase* visit_database_;
 
   // Lists recent additions that we have not yet filled out with the title and
@@ -290,10 +296,15 @@ class TextDatabaseManager {
   // Generates tasks for our periodic checking of expired "recent changes".
   ScopedRunnableMethodFactory<TextDatabaseManager> factory_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(TextDatabaseManager);
+  // This object is created and managed by the history backend. We maintain an
+  // opaque pointer to the object for our use.
+  // This can be NULL if there are no indexers registered to receive indexing
+  // data from us.
+  const HistoryPublisher* history_publisher_;
+
+  DISALLOW_COPY_AND_ASSIGN(TextDatabaseManager);
 };
 
 }  // namespace history
 
-#endif  // CHROME_BROWSER_HISTORY_TEXT_DATABASE_MANAGER_H__
-
+#endif  // CHROME_BROWSER_HISTORY_TEXT_DATABASE_MANAGER_H_

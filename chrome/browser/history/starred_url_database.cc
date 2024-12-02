@@ -7,6 +7,8 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/json_writer.h"
+#include "base/string_util.h"
+#include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/history/history.h"
@@ -16,6 +18,8 @@
 #include "chrome/common/sqlite_compiled_statement.h"
 #include "chrome/common/sqlite_utils.h"
 #include "chrome/common/stl_util-inl.h"
+
+using base::Time;
 
 // The following table is used to store star (aka bookmark) information. This
 // class derives from URLDatabase, which has its own schema.
@@ -55,7 +59,7 @@ void FillInStarredEntry(SQLStatement* s, StarredEntry* entry) {
   switch (s->column_int(1)) {
     case 0:
       entry->type = history::StarredEntry::URL;
-      entry->url = GURL(s->column_string16(6));
+      entry->url = GURL(WideToUTF8(s->column_wstring(6)));
       break;
     case 1:
       entry->type = history::StarredEntry::BOOKMARK_BAR;
@@ -70,7 +74,7 @@ void FillInStarredEntry(SQLStatement* s, StarredEntry* entry) {
       NOTREACHED();
       break;
   }
-  entry->title = s->column_string16(2);
+  entry->title = s->column_wstring(2);
   entry->date_added = Time::FromInternalValue(s->column_int64(3));
   entry->visual_order = s->column_int(4);
   entry->parent_group_id = s->column_int64(5);
@@ -87,7 +91,7 @@ StarredURLDatabase::StarredURLDatabase() {
 StarredURLDatabase::~StarredURLDatabase() {
 }
 
-bool StarredURLDatabase::MigrateBookmarksToFile(const std::wstring& path) {
+bool StarredURLDatabase::MigrateBookmarksToFile(const FilePath& path) {
   if (!DoesSqliteTableExist(GetDB(), "starred"))
     return true;
 
@@ -485,7 +489,7 @@ bool StarredURLDatabase::EnsureStarredIntegrityImpl(
       LOG(WARNING) << "Bookmark not in a bookmark folder found";
       if (!Move(*i, bookmark_node))
         return false;
-      i = unparented_urls->erase(i);
+      unparented_urls->erase(i++);
     }
   }
 
@@ -509,7 +513,7 @@ bool StarredURLDatabase::EnsureStarredIntegrityImpl(
         LOG(WARNING) << "Bookmark folder not on bookmark bar found";
         if (!Move(*i, bookmark_node))
           return false;
-        i = roots->erase(i);
+        roots->erase(i++);
       } else {
         ++i;
       }
@@ -533,7 +537,7 @@ bool StarredURLDatabase::Move(StarredNode* source, StarredNode* new_parent) {
   return true;
 }
 
-bool StarredURLDatabase::MigrateBookmarksToFileImpl(const std::wstring& path) {
+bool StarredURLDatabase::MigrateBookmarksToFileImpl(const FilePath& path) {
   std::vector<history::StarredEntry> entries;
   if (!GetAllStarredEntries(&entries))
     return false;
@@ -626,4 +630,3 @@ bool StarredURLDatabase::MigrateBookmarksToFileImpl(const std::wstring& path) {
 }
 
 }  // namespace history
-

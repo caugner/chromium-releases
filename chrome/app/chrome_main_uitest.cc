@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/common/chrome_constants.h"
 #include "chrome/test/ui/ui_test.h"
+
+#include "base/command_line.h"
+#include "base/file_path.h"
+#include "base/file_util.h"
+#include "net/base/net_util.h"
 
 typedef UITest ChromeMainTest;
 
@@ -35,11 +39,25 @@ TEST_F(ChromeMainTest, SecondLaunch) {
   include_testing_id_ = false;
   use_existing_browser_ = true;
 
-  LaunchBrowser(std::wstring(), false);
+  LaunchBrowser(CommandLine(L""), false);
 
-  int window_count;
-  ASSERT_TRUE(automation()->WaitForWindowCountToChange(1, &window_count,
-                                                       kWaitForActionMsec));
-  ASSERT_EQ(2, window_count);
+  ASSERT_TRUE(automation()->WaitForWindowCountToBecome(2, action_timeout_ms()));
 }
 
+TEST_F(ChromeMainTest, ReuseBrowserInstanceWhenOpeningFile) {
+  include_testing_id_ = false;
+  use_existing_browser_ = true;
+
+  std::wstring test_file = test_data_directory_;
+  file_util::AppendToPath(&test_file, L"empty.html");
+
+  CommandLine command_line(L"");
+  command_line.AppendLooseValue(test_file);
+
+  LaunchBrowser(command_line, false);
+
+  FilePath test_file_path(FilePath::FromWStringHack(test_file));
+
+  ASSERT_TRUE(automation()->WaitForURLDisplayed(
+      net::FilePathToFileURL(test_file_path), action_timeout_ms()));
+}

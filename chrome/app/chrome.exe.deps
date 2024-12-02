@@ -6,6 +6,7 @@ dependents = [
   'ADVAPI32.dll',
   'SHELL32.dll',
   'VERSION.dll',  # Used by breakpad
+  'winmm.dll',
 ]
 
 dependents_google_chrome = [
@@ -14,6 +15,7 @@ dependents_google_chrome = [
   'ADVAPI32.dll',
   'SHELL32.dll',
   'VERSION.dll',
+  'winmm.dll',
 ]
 
 delay_loaded = [

@@ -2,22 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <algorithm>
-
 #include "chrome/browser/views/tab_contents_container_view.h"
 
-#include "base/logging.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/render_view_host_manager.h"
-#include "chrome/browser/render_widget_host_view.h"
-#include "chrome/browser/tab_contents.h"
-#include "chrome/browser/view_ids.h"
-#include "chrome/browser/web_contents.h"
-#include "chrome/views/root_view.h"
+#include <algorithm>
 
-using ChromeViews::FocusTraversable;
-using ChromeViews::FocusManager;
-using ChromeViews::View;
+#include "base/logging.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/tab_contents/render_view_host_manager.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents/web_contents.h"
+#include "chrome/browser/view_ids.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/views/widget/root_view.h"
+#include "chrome/views/widget/widget.h"
+
+using views::FocusTraversable;
+using views::FocusManager;
+using views::View;
 
 TabContentsContainerView::TabContentsContainerView() : tab_contents_(NULL) {
   SetID(VIEW_ID_TAB_CONTAINER);
@@ -30,22 +32,29 @@ TabContentsContainerView::~TabContentsContainerView() {
 
 void TabContentsContainerView::SetTabContents(TabContents* tab_contents) {
   if (tab_contents_) {
-    // TODO(beng): (Cleanup) We want to call the _base_ class' version here.
-    //             WebContents' WM_WINDOWPOSCHANGED handler will ensure its
-    //             version is called. The correct thing to do here is to
-    //             rationalize all TabContents Hide/Show/Size etc into a single
-    //             API, but that's too complex for this first phase.
-    tab_contents_->TabContents::HideContents();
+    // TODO(brettw) should this move to HWNDView::Detach which is called below?
+    // It needs cleanup regardless.
+    HWND container_hwnd = tab_contents_->GetNativeView();
+
+    // Hide the contents before adjusting its parent to avoid a full desktop
+    // flicker.
+    ::ShowWindow(container_hwnd, SW_HIDE);
+
+    // Reset the parent to NULL to ensure hidden tabs don't receive messages.
+    ::SetParent(container_hwnd, NULL);
+
+    tab_contents_->WasHidden();
 
     // Unregister the tab contents window from the FocusManager.
-    HWND hwnd = tab_contents_->GetContentHWND();
+    views::FocusManager::UninstallFocusSubclass(container_hwnd);
+    HWND hwnd = tab_contents_->GetContentNativeView();
     if (hwnd) {
       // We may not have an HWND anymore, if the renderer crashed and we are
       // displaying the sad tab for example.
       FocusManager::UninstallFocusSubclass(hwnd);
     }
 
-    ChromeViews::RootView* root_view = tab_contents_->GetContentsRootView();
+    views::RootView* root_view = tab_contents_->GetContentsRootView();
     if (root_view) {
       // Unlink the RootViews as a clean-up.
       root_view->SetFocusTraversableParent(NULL);
@@ -71,14 +80,14 @@ void TabContentsContainerView::SetTabContents(TabContents* tab_contents) {
   // TabContents window (for the WebContents case).
   SetAssociatedFocusView(this);
 
-  Attach(tab_contents->GetContainerHWND());
-  HWND contents_hwnd = tab_contents_->GetContentHWND();
+  Attach(tab_contents->GetNativeView());
+  HWND contents_hwnd = tab_contents_->GetContentNativeView();
   if (contents_hwnd)
     FocusManager::InstallFocusSubclass(contents_hwnd, this);
 
   AddObservers();
 
-  ChromeViews::RootView* root_view = tab_contents_->GetContentsRootView();
+  views::RootView* root_view = tab_contents_->GetContentsRootView();
   if (root_view) {
     // Link the RootViews for proper focus traversal (note that we skip the
     // TabContentsContainerView as it acts as a FocusTraversable proxy).
@@ -87,7 +96,7 @@ void TabContentsContainerView::SetTabContents(TabContents* tab_contents) {
   }
 }
 
-ChromeViews::FocusTraversable* TabContentsContainerView::GetFocusTraversable() {
+views::FocusTraversable* TabContentsContainerView::GetFocusTraversable() {
   if (tab_contents_ && tab_contents_->GetContentsRootView())
     return tab_contents_->GetContentsRootView();
   return NULL;
@@ -118,7 +127,7 @@ bool TabContentsContainerView::CanProcessTabKeyEvents() {
   return tab_contents_ && !tab_contents_->GetContentsRootView();
 }
 
-ChromeViews::FocusTraversable*
+views::FocusTraversable*
     TabContentsContainerView::GetFocusTraversableParent() {
   if (tab_contents_ && tab_contents_->GetContentsRootView()) {
     // Since we link the RootView of the TabContents to the RootView that
@@ -129,8 +138,7 @@ ChromeViews::FocusTraversable*
   return GetRootView();
 }
 
-ChromeViews::View*
-    TabContentsContainerView::GetFocusTraversableParentView() {
+views::View* TabContentsContainerView::GetFocusTraversableParentView() {
   if (tab_contents_ && tab_contents_->GetContentsRootView()) {
     // Since we link the RootView of the TabContents to the RootView that
     // contains us, this should not be invoked.
@@ -143,7 +151,7 @@ ChromeViews::View*
 void TabContentsContainerView::Focus() {
   if (tab_contents_ && !tab_contents_->GetContentsRootView()) {
     // Set the native focus on the actual content of the tab.
-    ::SetFocus(tab_contents_->GetContentHWND());
+    ::SetFocus(tab_contents_->GetContentNativeView());
   }
 }
 
@@ -169,8 +177,12 @@ bool TabContentsContainerView::GetAccessibleRole(VARIANT* role) {
 }
 
 bool TabContentsContainerView::ShouldLookupAccelerators(
-    const ChromeViews::KeyEvent& e) {
-  if (tab_contents_ && !tab_contents_->IsCrashed() &&
+    const views::KeyEvent& e) {
+  // Don't look-up accelerators if we are showing a non-crashed WebContents.
+  // We'll first give the page a chance to process the key events.  If it does
+  // not process them, they'll be returned to us and we'll treat them as
+  // accelerators then.
+  if (tab_contents_ && !tab_contents_->is_crashed() &&
       tab_contents_->AsWebContents())
     return false;
   return true;
@@ -179,12 +191,12 @@ bool TabContentsContainerView::ShouldLookupAccelerators(
 void TabContentsContainerView::Observe(NotificationType type,
                                        const NotificationSource& source,
                                        const NotificationDetails& details) {
-  if (type == NOTIFY_RENDER_VIEW_HOST_CHANGED) {
+  if (type == NotificationType::RENDER_VIEW_HOST_CHANGED) {
     RenderViewHostSwitchedDetails* switched_details =
         Details<RenderViewHostSwitchedDetails>(details).ptr();
     RenderViewHostChanged(switched_details->old_host,
                           switched_details->new_host);
-  } else if (type == NOTIFY_TAB_CONTENTS_DESTROYED) {
+  } else if (type == NotificationType::TAB_CONTENTS_DESTROYED) {
     TabContentsDestroyed(Source<TabContents>(source).ptr());
   } else {
     NOTREACHED();
@@ -198,11 +210,12 @@ void TabContentsContainerView::AddObservers() {
     // shown and getting focused.  We need to keep track of that so we install
     // the focus subclass on the shown HWND so we intercept focus change events.
     NotificationService::current()->AddObserver(
-        this, NOTIFY_RENDER_VIEW_HOST_CHANGED,
+        this, NotificationType::RENDER_VIEW_HOST_CHANGED,
         Source<NavigationController>(tab_contents_->controller()));
   }
   NotificationService::current()->AddObserver(
-      this, NOTIFY_TAB_CONTENTS_DESTROYED,
+      this,
+      NotificationType::TAB_CONTENTS_DESTROYED,
       Source<TabContents>(tab_contents_));
 }
 
@@ -210,26 +223,31 @@ void TabContentsContainerView::RemoveObservers() {
   DCHECK(tab_contents_);
   if (tab_contents_->AsWebContents()) {
     NotificationService::current()->RemoveObserver(
-        this, NOTIFY_RENDER_VIEW_HOST_CHANGED,
+        this,
+        NotificationType::RENDER_VIEW_HOST_CHANGED,
         Source<NavigationController>(tab_contents_->controller()));
   }
   NotificationService::current()->RemoveObserver(
-      this, NOTIFY_TAB_CONTENTS_DESTROYED,
+      this,
+      NotificationType::TAB_CONTENTS_DESTROYED,
       Source<TabContents>(tab_contents_));
 }
 
 void TabContentsContainerView::RenderViewHostChanged(RenderViewHost* old_host,
                                                      RenderViewHost* new_host) {
-  if (old_host && old_host->view())
-    FocusManager::UninstallFocusSubclass(old_host->view()->GetPluginHWND());
+  if (old_host && old_host->view()) {
+    FocusManager::UninstallFocusSubclass(
+        old_host->view()->GetPluginNativeView());
+  }
 
-  if (new_host && new_host->view())
-    FocusManager::InstallFocusSubclass(new_host->view()->GetPluginHWND(), this);
+  if (new_host && new_host->view()) {
+    FocusManager::InstallFocusSubclass(
+        new_host->view()->GetPluginNativeView(), this);
+  }
 
   // If we are focused, we need to pass the focus to the new RenderViewHost.
-  FocusManager* focus_manager =
-      FocusManager::GetFocusManager(GetRootView()->GetViewContainer()->
-          GetHWND());
+  FocusManager* focus_manager = FocusManager::GetFocusManager(
+      GetRootView()->GetWidget()->GetNativeView());
   if (focus_manager->GetFocusedView() == this)
     Focus();
 }
@@ -240,4 +258,3 @@ void TabContentsContainerView::TabContentsDestroyed(TabContents* contents) {
   DCHECK(contents == tab_contents_);
   SetTabContents(NULL);
 }
-

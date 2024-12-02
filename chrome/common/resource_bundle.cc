@@ -1,45 +1,25 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/common/resource_bundle.h"
 
-#include <atlbase.h>
-
-#include "base/file_util.h"
 #include "base/gfx/png_decoder.h"
 #include "base/logging.h"
-#include "base/path_service.h"
-#include "base/resource_util.h"
-#include "base/scoped_ptr.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
-#include "base/win_util.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/common/chrome_paths.h"
+#include "net/base/file_stream.h"
+#include "net/base/net_errors.h"
 #include "chrome/common/gfx/chrome_font.h"
-#include "chrome/common/l10n_util.h"
-#include "chrome/common/win_util.h"
 #include "SkBitmap.h"
 
-using namespace std;
-
-ResourceBundle *ResourceBundle::g_shared_instance_ = NULL;
-
-// Returns the flags that should be passed to LoadLibraryEx.
-DWORD GetDataDllLoadFlags() {
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA)
-    return LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE;
-
-  return DONT_RESOLVE_DLL_REFERENCES;
-}
+ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
 
 /* static */
 void ResourceBundle::InitSharedInstance(const std::wstring& pref_locale) {
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle();
 
-  g_shared_instance_->LoadLocaleResources(pref_locale);
+  g_shared_instance_->LoadResources(pref_locale);
 }
 
 /* static */
@@ -58,85 +38,64 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
 }
 
 ResourceBundle::ResourceBundle()
-    : locale_resources_dll_(NULL),
-      theme_dll_(NULL) {
+    : resources_data_(NULL),
+      locale_resources_data_(NULL),
+      theme_data_(NULL) {
 }
 
-ResourceBundle::~ResourceBundle() {
+void ResourceBundle::FreeImages() {
   for (SkImageMap::iterator i = skia_images_.begin();
-	   i != skia_images_.end(); i++) {
+       i != skia_images_.end(); i++) {
     delete i->second;
   }
   skia_images_.clear();
-
-  if (locale_resources_dll_) {
-    BOOL rv = FreeLibrary(locale_resources_dll_);
-    DCHECK(rv);
-  }
-  if (theme_dll_) {
-    BOOL rv = FreeLibrary(theme_dll_);
-    DCHECK(rv);
-  }
 }
 
-void ResourceBundle::LoadLocaleResources(const std::wstring& pref_locale) {
-  DCHECK(NULL == locale_resources_dll_) << "locale dll already loaded";
-  const std::wstring& locale_path = GetLocaleDllPath(pref_locale);
-  if (locale_path.empty()) {
-    // It's possible that there are no locale dlls found, in which case we just
-    // return.
-    NOTREACHED();
-    return;
-  }
-
-  // The dll should only have resources, not executable code.
-  locale_resources_dll_ = LoadLibraryEx(locale_path.c_str(), NULL,
-                                        GetDataDllLoadFlags());
-  DCHECK(locale_resources_dll_ != NULL) << "unable to load generated resources";
-}
-
-std::wstring ResourceBundle::GetLocaleDllPath(const std::wstring& pref_locale) {
-  std::wstring locale_path;
-  PathService::Get(chrome::DIR_LOCALES, &locale_path);
-
-  const std::wstring app_locale = l10n_util::GetApplicationLocale(pref_locale);
-  if (app_locale.empty())
-    return app_locale;
-
-  file_util::AppendToPath(&locale_path, app_locale + L".dll");
-  return locale_path;
-}
-
-void ResourceBundle::LoadThemeResources() {
-  DCHECK(NULL == theme_dll_) << "theme dll already loaded";
-  std::wstring theme_dll_path;
-  PathService::Get(chrome::DIR_THEMES, &theme_dll_path);
-  file_util::AppendToPath(&theme_dll_path, L"default.dll");
-
-  // The dll should only have resources, not executable code.
-  theme_dll_ = LoadLibraryEx(theme_dll_path.c_str(), NULL,
-                             GetDataDllLoadFlags());
-  DCHECK(theme_dll_ != NULL) << "unable to load " << theme_dll_path;
+void ResourceBundle::SetThemeExtension(const Extension& e) {
+  theme_extension_.reset(new Extension(e));
 }
 
 /* static */
-SkBitmap* ResourceBundle::LoadBitmap(HINSTANCE dll_inst, int resource_id) {
-  void* data_ptr = NULL;
-  size_t data_size;
-  bool success = base::GetDataResourceFromModule(dll_inst, resource_id,
-                                                 &data_ptr, &data_size);
+SkBitmap* ResourceBundle::LoadBitmap(DataHandle data_handle, int resource_id) {
+  std::vector<unsigned char> raw_data, png_data;
+  bool success = false;
+  // First check to see if we have a registered theme extension and whether
+  // it can handle this resource.
+  // TODO(erikkay): It would be nice to use something less brittle than
+  // resource_id here.
+  if (g_shared_instance_->theme_extension_.get()) {
+    FilePath path =
+        g_shared_instance_->theme_extension_->GetThemeResourcePath(resource_id);
+    if (!path.empty()) {
+      net::FileStream file;
+      int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
+      if (file.Open(path, flags) == net::OK) {
+        int64 avail = file.Available();
+        if (avail > 0 && avail < INT_MAX) {
+          size_t size = static_cast<size_t>(avail);
+          raw_data.resize(size);
+          char* data = reinterpret_cast<char*>(&(raw_data.front()));
+          if (file.ReadUntilComplete(data, size) == avail) {
+            success= true;
+          } else {
+            raw_data.resize(0);
+          }
+        }
+      }
+    }
+  }
+  if (!success)
+    success = LoadResourceBytes(data_handle, resource_id, &raw_data);
   if (!success)
     return NULL;
 
-  unsigned char* data = static_cast<unsigned char*>(data_ptr);
-
   // Decode the PNG.
-  vector<unsigned char> png_data;
   int image_width;
   int image_height;
-  if (!PNGDecoder::Decode(data, data_size, PNGDecoder::FORMAT_BGRA,
+  if (!PNGDecoder::Decode(&raw_data.front(), raw_data.size(),
+                          PNGDecoder::FORMAT_BGRA,
                           &png_data, &image_width, &image_height)) {
-    NOTREACHED() << "Unable to decode theme resource " << resource_id;
+    NOTREACHED() << "Unable to decode image resource " << resource_id;
     return NULL;
   }
 
@@ -145,119 +104,68 @@ SkBitmap* ResourceBundle::LoadBitmap(HINSTANCE dll_inst, int resource_id) {
                                                   image_height);
 }
 
-SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
-  AutoLock lock_scope(lock_);
-
-  SkImageMap::const_iterator found = skia_images_.find(resource_id);
-  SkBitmap* bitmap = NULL;
-
-  // If not found load and store the image
-  if (found == skia_images_.end()) {
-    // Load the image
-    bitmap = LoadBitmap(theme_dll_, resource_id);
-    // We did not find the bitmap in the theme DLL, try the current one.
-    if (!bitmap)
-      bitmap = LoadBitmap(_AtlBaseModule.GetModuleInstance(), resource_id);
-    skia_images_[resource_id] = bitmap;
-  } else {
-    bitmap = found->second;
-  }
-
-  // This bitmap will be returned when a bitmap is requested that can not be
-  // found. The data inside is lazily initialized, so users must lock and
-  static SkBitmap* empty_bitmap = NULL;
-
-  // Handle the case where loading the bitmap failed.
-  if (!bitmap) {
-    LOG(WARNING) << "Unable to load bitmap with id " << resource_id;
-    if (!empty_bitmap) {
-      empty_bitmap = new SkBitmap();
-    }
-    return empty_bitmap;
-  }
-  return bitmap;
-}
-
-bool ResourceBundle::LoadImageResourceBytes(int resource_id,
-                                            vector<unsigned char>* bytes) {
-  return LoadModuleResourceBytes(theme_dll_, resource_id, bytes);
-}
-
-bool ResourceBundle::LoadDataResourceBytes(int resource_id,
-                                           vector<unsigned char>* bytes) {
-  return LoadModuleResourceBytes(_AtlBaseModule.GetModuleInstance(),
-                                 resource_id, bytes);
-}
-
-bool ResourceBundle::LoadModuleResourceBytes(
-    HINSTANCE module,
-    int resource_id,
-    std::vector<unsigned char>* bytes) {
-  void* data_ptr;
-  size_t data_size;
-  if (base::GetDataResourceFromModule(module, resource_id, &data_ptr,
-                                      &data_size)) {
-    bytes->resize(data_size);
-    memcpy(&(bytes->front()), data_ptr, data_size);
-    return true;
-  } else {
-    return false;
-  }
-}
-
-HICON ResourceBundle::LoadThemeIcon(int icon_id) {
-  return ::LoadIcon(theme_dll_, MAKEINTRESOURCE(icon_id));
-}
-
 std::string ResourceBundle::GetDataResource(int resource_id) {
   return GetRawDataResource(resource_id).as_string();
 }
 
-StringPiece ResourceBundle::GetRawDataResource(int resource_id) {
-  void* data_ptr;
-  size_t data_size;
-  if (base::GetDataResourceFromModule(
-        _AtlBaseModule.GetModuleInstance(), resource_id, &data_ptr, &data_size))
-    return StringPiece(static_cast<const char*>(data_ptr), data_size);
-  return StringPiece();
+bool ResourceBundle::LoadImageResourceBytes(int resource_id,
+                                            std::vector<unsigned char>* bytes) {
+  return LoadResourceBytes(theme_data_, resource_id, bytes);
 }
 
-// Loads and returns the global accelerators from the current module.
-HACCEL ResourceBundle::GetGlobalAccelerators() {
-  return ::LoadAccelerators(_AtlBaseModule.GetModuleInstance(),
-                            MAKEINTRESOURCE(IDR_MAINFRAME));
+bool ResourceBundle::LoadDataResourceBytes(int resource_id,
+                                           std::vector<unsigned char>* bytes) {
+  return LoadResourceBytes(resources_data_, resource_id, bytes);
 }
 
-// Loads and returns a cursor from the current module.
-HCURSOR ResourceBundle::LoadCursor(int cursor_id) {
-  return ::LoadCursor(_AtlBaseModule.GetModuleInstance(),
-                      MAKEINTRESOURCE(cursor_id));
-}
-
-std::wstring ResourceBundle::GetLocalizedString(int message_id) {
-  // If for some reason we were unable to load a resource dll, return an empty
-  // string (better than crashing).
-  if (!locale_resources_dll_)
-    return std::wstring();
-
-  DCHECK(IS_INTRESOURCE(message_id));
-
-  // Get a reference directly to the string resource.
-  HINSTANCE hinstance = locale_resources_dll_;
-  const ATLSTRINGRESOURCEIMAGE* image = AtlGetStringResourceImage(hinstance,
-                                                                  message_id);
-  if (!image) {
-    // Fall back on the current module (shouldn't be any strings here except
-    // in unittests).
-    image = AtlGetStringResourceImage(_AtlBaseModule.GetModuleInstance(),
-                                      message_id);
-    if (!image) {
-      NOTREACHED() << "unable to find resource: " << message_id;
-      return std::wstring();
-    }
+SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
+  // Check to see if we already have the Skia image in the cache.
+  {
+    AutoLock lock_scope(lock_);
+    SkImageMap::const_iterator found = skia_images_.find(resource_id);
+    if (found != skia_images_.end())
+      return found->second;
   }
-  // Copy into a wstring and return.
-  return std::wstring(image->achString, image->nLength);
+
+  scoped_ptr<SkBitmap> bitmap;
+
+  if (theme_data_)
+    bitmap.reset(LoadBitmap(theme_data_, resource_id));
+
+  // If we did not find the bitmap in the theme DLL, try the current one.
+  if (!bitmap.get())
+    bitmap.reset(LoadBitmap(resources_data_, resource_id));
+
+  // We loaded successfully.  Cache the Skia version of the bitmap.
+  if (bitmap.get()) {
+    AutoLock lock_scope(lock_);
+
+    // Another thread raced us, and has already cached the skia image.
+    if (skia_images_.count(resource_id))
+      return skia_images_[resource_id];
+
+    skia_images_[resource_id] = bitmap.get();
+    return bitmap.release();
+  }
+
+  // We failed to retrieve the bitmap, show a debugging red square.
+  {
+    LOG(WARNING) << "Unable to load bitmap with id " << resource_id;
+    NOTREACHED();  // Want to assert in debug mode.
+
+    AutoLock lock_scope(lock_);  // Guard empty_bitmap initialization.
+
+    static SkBitmap* empty_bitmap = NULL;
+    if (!empty_bitmap) {
+      // The placeholder bitmap is bright red so people notice the problem.
+      // This bitmap will be leaked, but this code should never be hit.
+      empty_bitmap = new SkBitmap();
+      empty_bitmap->setConfig(SkBitmap::kARGB_8888_Config, 32, 32);
+      empty_bitmap->allocPixels();
+      empty_bitmap->eraseARGB(255, 255, 0, 0);
+    }
+    return empty_bitmap;
+  }
 }
 
 void ResourceBundle::LoadFontsIfNecessary() {
@@ -301,4 +209,3 @@ ChromeFont ResourceBundle::GetFont(FontStyle style) {
       return *base_font_;
   }
 }
-

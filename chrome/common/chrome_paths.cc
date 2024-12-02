@@ -2,54 +2,47 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-#include <shellapi.h>
-#include <shlobj.h>
-
 #include "chrome/common/chrome_paths.h"
 
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/path_service.h"
+#include "base/string_util.h"
+#include "base/sys_info.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 
 namespace chrome {
 
-bool GetUserDirectory(int directory_type, std::wstring* result) {
-  wchar_t path_buf[MAX_PATH];
-  if (FAILED(SHGetFolderPath(NULL, directory_type, NULL,
-                             SHGFP_TYPE_CURRENT, path_buf)))
-    return false;
-  result->assign(path_buf);
-  return true;
-}
-
-// Gets the default user data directory, regardless of whether
-// DIR_USER_DATA has been overridden by a command-line option.
-bool GetDefaultUserDataDirectory(std::wstring* result) {
-  if (!PathService::Get(base::DIR_LOCAL_APP_DATA, result))
-    return false;
-#if defined(GOOGLE_CHROME_BUILD)
-  file_util::AppendToPath(result, L"Google");
-#endif
-  file_util::AppendToPath(result, chrome::kBrowserAppName);
-  file_util::AppendToPath(result, chrome::kUserDataDirname);
-  return true;
-}
-
-bool GetGearsPluginPathFromCommandLine(std::wstring *path) {
+bool GetGearsPluginPathFromCommandLine(FilePath* path) {
 #ifndef NDEBUG
   // for debugging, support a cmd line based override
-  CommandLine command_line;
-  *path = command_line.GetSwitchValue(switches::kGearsPluginPathOverride);
-  return !path->empty();
+  std::wstring plugin_path = CommandLine::ForCurrentProcess()->GetSwitchValue(
+      switches::kGearsPluginPathOverride);
+  // TODO(tc): After GetSwitchNativeValue lands, we don't need to use
+  // FromWStringHack.
+  *path = FilePath::FromWStringHack(plugin_path);
+  return !plugin_path.empty();
 #else
   return false;
 #endif
 }
 
-bool PathProvider(int key, std::wstring* result) {
+// Attempts to find the given FFmpeg library and stores the result in |path|.
+// Returns true if the library was found and exists, false otherwise.
+static bool GetFFmpegLibraryPath(FilePath* path,
+                                 const FilePath::StringType& library) {
+  // Assume FFmpeg DLLs are kept alongside chrome.dll.
+  if (!PathService::Get(base::DIR_MODULE, path))
+    return false;
+  *path = path->Append(library);
+  return file_util::PathExists(*path);
+}
+
+bool PathProvider(int key, FilePath* result) {
   // Some keys are just aliases...
   switch (key) {
     case chrome::DIR_APP:
@@ -64,26 +57,24 @@ bool PathProvider(int key, std::wstring* result) {
       return PathService::Get(base::FILE_MODULE, result);
   }
 
-  // We need to go compute the value. It would be nice to support paths with
-  // names longer than MAX_PATH, but the system functions don't seem to be
-  // designed for it either, with the exception of GetTempPath (but other
-  // things will surely break if the temp path is too long, so we don't bother
-  // handling it.
-  wchar_t system_buffer[MAX_PATH];
-  system_buffer[0] = 0;
+  // Assume that we will not need to create the directory if it does not exist.
+  // This flag can be set to true for the cases where we want to create it.
+  bool create_dir = false;
 
-  // Assume that we will need to create the directory if it does not already
-  // exist.  This flag can be set to true to prevent checking.
-  bool exists = false;
-
-  std::wstring cur;
+  FilePath cur;
   switch (key) {
     case chrome::DIR_USER_DATA:
       if (!GetDefaultUserDataDirectory(&cur))
         return false;
+      create_dir = true;
       break;
     case chrome::DIR_USER_DOCUMENTS:
-      if (!GetUserDirectory(CSIDL_MYDOCUMENTS, &cur))
+      if (!GetUserDocumentsDirectory(&cur))
+        return false;
+      create_dir = true;
+      break;
+    case chrome::DIR_DEFAULT_DOWNLOADS:
+      if (!GetUserDownloadsDirectory(&cur))
         return false;
       break;
     case chrome::DIR_CRASH_DUMPS:
@@ -93,53 +84,59 @@ bool PathProvider(int key, std::wstring* result) {
       // override the location of the app's profile directory.
       if (!GetDefaultUserDataDirectory(&cur))
         return false;
-      file_util::AppendToPath(&cur, L"Crash Reports");
+      cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
+      create_dir = true;
       break;
     case chrome::DIR_USER_DESKTOP:
-      if (FAILED(SHGetFolderPath(NULL, CSIDL_DESKTOPDIRECTORY, NULL,
-                                 SHGFP_TYPE_CURRENT, system_buffer)))
+      if (!GetUserDesktop(&cur))
         return false;
-      cur = system_buffer;
-      exists = true;
       break;
     case chrome::DIR_RESOURCES:
       if (!PathService::Get(chrome::DIR_APP, &cur))
         return false;
-      file_util::AppendToPath(&cur, L"resources");
+      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
+      create_dir = true;
       break;
     case chrome::DIR_INSPECTOR:
       if (!PathService::Get(chrome::DIR_APP, &cur))
         return false;
-      file_util::AppendToPath(&cur, L"Resources");
-      file_util::AppendToPath(&cur, L"Inspector");
-      exists = true;
+      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
+      cur = cur.Append(FILE_PATH_LITERAL("Inspector"));
       break;
     case chrome::DIR_THEMES:
       if (!PathService::Get(chrome::DIR_APP, &cur))
         return false;
-      file_util::AppendToPath(&cur, L"themes");
+      cur = cur.Append(FILE_PATH_LITERAL("themes"));
+      create_dir = true;
       break;
     case chrome::DIR_LOCALES:
       if (!PathService::Get(chrome::DIR_APP, &cur))
         return false;
-      file_util::AppendToPath(&cur, L"locales");
+#if defined(OS_MACOSX)
+      // On Mac, locale files are in Contents/Resources, a sibling of the
+      // App dir.
+      cur = cur.DirName();
+      cur = cur.Append(FILE_PATH_LITERAL("Resources"));
+#else
+      cur = cur.Append(FILE_PATH_LITERAL("locales"));
+#endif
+      create_dir = true;
       break;
     case chrome::DIR_APP_DICTIONARIES:
       if (!PathService::Get(base::DIR_EXE, &cur))
         return false;
-      file_util::AppendToPath(&cur, L"Dictionaries");
+      cur = cur.Append(FILE_PATH_LITERAL("Dictionaries"));
+      create_dir = true;
       break;
     case chrome::FILE_LOCAL_STATE:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
-      file_util::AppendToPath(&cur, chrome::kLocalStateFilename);
-      exists = true;  // don't trigger directory creation code
+      cur = cur.Append(chrome::kLocalStateFilename);
       break;
     case chrome::FILE_RECORDED_SCRIPT:
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;
-      file_util::AppendToPath(&cur, L"script.log");
-      exists = true;
+      cur = cur.Append(FILE_PATH_LITERAL("script.log"));
       break;
     case chrome::FILE_GEARS_PLUGIN:
       if (!GetGearsPluginPathFromCommandLine(&cur)) {
@@ -148,73 +145,79 @@ bool PathProvider(int key, std::wstring* result) {
         // it while Chrome is running.
         if (!PathService::Get(base::DIR_MODULE, &cur))
           return false;
-        file_util::AppendToPath(&cur, L"gears.dll");
+        cur = cur.Append(FILE_PATH_LITERAL("gears.dll"));
 
         if (!file_util::PathExists(cur)) {
           if (!PathService::Get(base::DIR_EXE, &cur))
             return false;
-          file_util::AppendToPath(&cur, L"plugins");
-          file_util::AppendToPath(&cur, L"gears");
-          file_util::AppendToPath(&cur, L"gears.dll");
+          cur = cur.Append(FILE_PATH_LITERAL("plugins"));
+          cur = cur.Append(FILE_PATH_LITERAL("gears"));
+          cur = cur.Append(FILE_PATH_LITERAL("gears.dll"));
         }
       }
-      exists = true;
+      break;
+    case chrome::FILE_LIBAVCODEC:
+      if (!GetFFmpegLibraryPath(&cur, FILE_PATH_LITERAL("avcodec-52.dll")))
+        return false;
+      break;
+    case chrome::FILE_LIBAVFORMAT:
+      if (!GetFFmpegLibraryPath(&cur, FILE_PATH_LITERAL("avformat-52.dll")))
+        return false;
+      break;
+    case chrome::FILE_LIBAVUTIL:
+      if (!GetFFmpegLibraryPath(&cur, FILE_PATH_LITERAL("avutil-49.dll")))
+        return false;
       break;
     // The following are only valid in the development environment, and
     // will fail if executed from an installed executable (because the
     // generated path won't exist).
     case chrome::DIR_TEST_DATA:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
+      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
         return false;
-      file_util::UpOneDirectory(&cur);
-      file_util::AppendToPath(&cur, L"test");
-      file_util::AppendToPath(&cur, L"data");
+      cur = cur.Append(FILE_PATH_LITERAL("chrome"));
+      cur = cur.Append(FILE_PATH_LITERAL("test"));
+      cur = cur.Append(FILE_PATH_LITERAL("data"));
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
-      exists = true;
       break;
     case chrome::DIR_TEST_TOOLS:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
+      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
         return false;
-      file_util::UpOneDirectory(&cur);
-      file_util::AppendToPath(&cur, L"tools");
-      file_util::AppendToPath(&cur, L"test");
+      cur = cur.Append(FILE_PATH_LITERAL("chrome"));
+      cur = cur.Append(FILE_PATH_LITERAL("tools"));
+      cur = cur.Append(FILE_PATH_LITERAL("test"));
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
-      exists = true;
       break;
     case chrome::FILE_PYTHON_RUNTIME:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
+      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
         return false;
-      file_util::UpOneDirectory(&cur);  // chrome
-      file_util::UpOneDirectory(&cur);
-      file_util::AppendToPath(&cur, L"third_party");
-      file_util::AppendToPath(&cur, L"python_24");
-      file_util::AppendToPath(&cur, L"python.exe");
+      cur = cur.Append(FILE_PATH_LITERAL("third_party"));
+      cur = cur.Append(FILE_PATH_LITERAL("python_24"));
+      cur = cur.Append(FILE_PATH_LITERAL("python.exe"));
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
-      exists = true;
       break;
     case chrome::FILE_TEST_SERVER:
-      if (!PathService::Get(chrome::DIR_APP, &cur))
+      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
         return false;
-      file_util::UpOneDirectory(&cur);
-      file_util::AppendToPath(&cur, L"tools");
-      file_util::AppendToPath(&cur, L"test");
-      file_util::AppendToPath(&cur, L"testserver");
-      file_util::AppendToPath(&cur, L"testserver.py");
+      cur = cur.Append(FILE_PATH_LITERAL("net"));
+      cur = cur.Append(FILE_PATH_LITERAL("tools"));
+      cur = cur.Append(FILE_PATH_LITERAL("test"));
+      cur = cur.Append(FILE_PATH_LITERAL("testserver"));
+      cur = cur.Append(FILE_PATH_LITERAL("testserver.py"));
       if (!file_util::PathExists(cur))  // we don't want to create this
         return false;
-      exists = true;
       break;
     default:
       return false;
   }
 
-  if (!exists && !file_util::PathExists(cur) && !file_util::CreateDirectory(cur))
+  if (create_dir && !file_util::PathExists(cur) &&
+      !file_util::CreateDirectory(cur))
     return false;
 
-  result->swap(cur);
+  *result = cur;
   return true;
 }
 
@@ -225,4 +228,3 @@ void RegisterPathProvider() {
 }
 
 }  // namespace chrome
-

@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_DISK_CACHE_ENTRY_IMPL_H__
-#define NET_DISK_CACHE_ENTRY_IMPL_H__
+#ifndef NET_DISK_CACHE_ENTRY_IMPL_H_
+#define NET_DISK_CACHE_ENTRY_IMPL_H_
 
+#include "base/scoped_ptr.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/storage_block.h"
 #include "net/disk_cache/storage_block-inl.h"
@@ -24,14 +25,16 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   virtual void Doom();
   virtual void Close();
   virtual std::string GetKey() const;
-  virtual Time GetLastUsed() const;
-  virtual Time GetLastModified() const;
+  virtual base::Time GetLastUsed() const;
+  virtual base::Time GetLastModified() const;
   virtual int32 GetDataSize(int index) const;
-  virtual int ReadData(int index, int offset, char* buf, int buf_len,
+  virtual int ReadData(int index, int offset, net::IOBuffer* buf, int buf_len,
                        net::CompletionCallback* completion_callback);
-  virtual int WriteData(int index, int offset, const char* buf, int buf_len,
+  virtual int WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
                         net::CompletionCallback* completion_callback,
                         bool truncate);
+  virtual base::PlatformFile UseExternalFile(int index);
+  virtual base::PlatformFile GetPlatformFile(int index);
 
   inline CacheEntryBlock* entry() {
     return &entry_;
@@ -45,14 +48,17 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
 
   // Performs the initialization of a EntryImpl that will be added to the
   // cache.
-  bool CreateEntry(Addr node_address, const std::string& key,
-                   uint32 hash);
+  bool CreateEntry(Addr node_address, const std::string& key, uint32 hash);
 
   // Returns true if this entry matches the lookup arguments.
   bool IsSameEntry(const std::string& key, uint32 hash);
 
-  // Permamently destroys this entry
+  // Permamently destroys this entry.
   void InternalDoom();
+
+  // Deletes this entry from disk. If |everything| is false, only the user data
+  // will be removed, leaving the key and control data intact.
+  void DeleteEntryData(bool everything);
 
   // Returns the address of the next entry on the list of entries with the same
   // hash.
@@ -84,11 +90,16 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   void IncrementIoCount();
   void DecrementIoCount();
 
- private:
-  ~EntryImpl();
+  // Set the access times for this entry. This method provides support for
+  // the upgrade tool.
+  void SetTimes(base::Time last_used, base::Time last_modified);
 
-  // Index for the file used to store the key, if any (files_[kKeyFileIndex]).
-  static const int kKeyFileIndex = 2;
+ private:
+   enum {
+     NUM_STREAMS = 3
+   };
+
+  ~EntryImpl();
 
   // Initializes the storage for an internal or external data block.
   bool CreateDataBlock(int index, int size);
@@ -130,15 +141,16 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   CacheEntryBlock entry_;     // Key related information for this entry.
   CacheRankingsBlock node_;   // Rankings related information for this entry.
   BackendImpl* backend_;      // Back pointer to the cache.
-  scoped_array<char> user_buffers_[2];  // Store user data.
-  scoped_refptr<File> files_[3];  // Files to store external user data and key.
-  int unreported_size_[2];    // Bytes not reported yet to the backend.
+  scoped_array<char> user_buffers_[NUM_STREAMS];  // Store user data.
+  scoped_refptr<File> files_[NUM_STREAMS + 1];  // Files to store external user
+                                                // data and key.
+  int unreported_size_[NUM_STREAMS];  // Bytes not reported yet to the backend.
   bool doomed_;               // True if this entry was removed from the cache.
-
+  bool need_file_[NUM_STREAMS];  // True if stream is prepared as an external
+                                 // file.
   DISALLOW_EVIL_CONSTRUCTORS(EntryImpl);
 };
 
 }  // namespace disk_cache
 
-#endif  // NET_DISK_CACHE_ENTRY_IMPL_H__
-
+#endif  // NET_DISK_CACHE_ENTRY_IMPL_H_

@@ -4,13 +4,15 @@
 
 #include "chrome/browser/views/input_window.h"
 
+#include "base/message_loop.h"
+#include "base/task.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/label.h"
-#include "chrome/views/text_field.h"
-#include "chrome/views/window.h"
-#include "generated_resources.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/text_field.h"
+#include "chrome/views/window/window.h"
+#include "grit/generated_resources.h"
 
 // Width to make the text field, in pixels.
 static const int kTextFieldWidth = 200;
@@ -20,9 +22,9 @@ static const int kTextFieldWidth = 200;
 // ContentView, as the name implies, is the content view for the InputWindow.
 // It registers accelerators that accept/cancel the input.
 
-class ContentView : public ChromeViews::View,
-                    public ChromeViews::DialogDelegate,
-                    public ChromeViews::TextField::Controller {
+class ContentView : public views::View,
+                    public views::DialogDelegate,
+                    public views::TextField::Controller {
  public:
   explicit ContentView(InputWindowDelegate* delegate)
       : delegate_(delegate),
@@ -30,25 +32,25 @@ class ContentView : public ChromeViews::View,
     DCHECK(delegate_);
   }
 
-  // ChromeViews::DialogDelegate overrides:
+  // views::DialogDelegate overrides:
   virtual bool IsDialogButtonEnabled(DialogButton button) const;
   virtual bool Accept();
   virtual bool Cancel();
   virtual void WindowClosing();
+  virtual void DeleteDelegate();
   virtual std::wstring GetWindowTitle() const;
   virtual bool IsModal() const { return true; }
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
-  // ChromeViews::TextField::Controller overrides:
-  virtual void ContentsChanged(ChromeViews::TextField* sender,
+  // views::TextField::Controller overrides:
+  virtual void ContentsChanged(views::TextField* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(ChromeViews::TextField*, UINT, TCHAR, UINT,
-                               UINT) {}
+  virtual void HandleKeystroke(views::TextField*, UINT, TCHAR, UINT, UINT) {}
 
  protected:
-  // ChromeViews::View overrides:
-  virtual void ViewHierarchyChanged(bool is_add, ChromeViews::View* parent,
-                                    ChromeViews::View* child);
+  // views::View overrides:
+  virtual void ViewHierarchyChanged(bool is_add, views::View* parent,
+                                    views::View* child);
 
  private:
   // Set up dialog controls and layout.
@@ -58,7 +60,7 @@ class ContentView : public ChromeViews::View,
   void FocusFirstFocusableControl();
 
   // The TextField that the user can type into.
-  ChromeViews::TextField* text_field_;
+  views::TextField* text_field_;
 
   // The delegate that the ContentView uses to communicate changes to the
   // caller.
@@ -71,7 +73,7 @@ class ContentView : public ChromeViews::View,
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// ContentView, ChromeViews::DialogDelegate implementation:
+// ContentView, views::DialogDelegate implementation:
 
 bool ContentView::IsDialogButtonEnabled(DialogButton button) const {
   if (button == DIALOGBUTTON_OK && !delegate_->IsValid(text_field_->GetText()))
@@ -93,18 +95,22 @@ void ContentView::WindowClosing() {
   delegate_->WindowClosing();
 }
 
+void ContentView::DeleteDelegate() {
+  delegate_->DeleteDelegate();
+}
+
 std::wstring ContentView::GetWindowTitle() const {
   return delegate_->GetWindowTitle();
 }
 
-ChromeViews::View* ContentView::GetContentsView() {
+views::View* ContentView::GetContentsView() {
   return this;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// ContentView, ChromeViews::TextField::Controller implementation:
+// ContentView, views::TextField::Controller implementation:
 
-void ContentView::ContentsChanged(ChromeViews::TextField* sender,
+void ContentView::ContentsChanged(views::TextField* sender,
                                   const std::wstring& new_contents) {
   GetDialogClientView()->UpdateDialogButtons();
 }
@@ -113,8 +119,8 @@ void ContentView::ContentsChanged(ChromeViews::TextField* sender,
 // ContentView, protected:
 
 void ContentView::ViewHierarchyChanged(bool is_add,
-                                       ChromeViews::View* parent,
-                                       ChromeViews::View* child) {
+                                       views::View* parent,
+                                       views::View* child) {
   if (is_add && child == this)
     InitControlLayout();
 }
@@ -123,12 +129,12 @@ void ContentView::ViewHierarchyChanged(bool is_add,
 // ContentView, private:
 
 void ContentView::InitControlLayout() {
-  text_field_ = new ChromeViews::TextField;
+  text_field_ = new views::TextField;
   text_field_->SetText(delegate_->GetTextFieldContents());
   text_field_->SetController(this);
 
-  using ChromeViews::ColumnSet;
-  using ChromeViews::GridLayout;
+  using views::ColumnSet;
+  using views::GridLayout;
 
   // TODO(sky): Vertical alignment should be baseline.
   GridLayout* layout = CreatePanelGridLayout(this);
@@ -142,8 +148,7 @@ void ContentView::InitControlLayout() {
                 GridLayout::USE_PREF, kTextFieldWidth, kTextFieldWidth);
 
   layout->StartRow(0, 0);
-  ChromeViews::Label* label =
-      new ChromeViews::Label(delegate_->GetTextFieldLabel());
+  views::Label* label = new views::Label(delegate_->GetTextFieldLabel());
   layout->AddView(label);
   layout->AddView(text_field_);
 
@@ -157,12 +162,11 @@ void ContentView::FocusFirstFocusableControl() {
   text_field_->RequestFocus();
 }
 
-ChromeViews::Window* CreateInputWindow(HWND parent_hwnd,
-                                       InputWindowDelegate* delegate) {
-  ChromeViews::Window* window =
-      ChromeViews::Window::CreateChromeWindow(parent_hwnd, gfx::Rect(),
+views::Window* CreateInputWindow(HWND parent_hwnd,
+                                 InputWindowDelegate* delegate) {
+  views::Window* window =
+      views::Window::CreateChromeWindow(parent_hwnd, gfx::Rect(),
                                               new ContentView(delegate));
-  window->client_view()->AsDialogClientView()->UpdateDialogButtons();
+  window->GetClientView()->AsDialogClientView()->UpdateDialogButtons();
   return window;
 }
-

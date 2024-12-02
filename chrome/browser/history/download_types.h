@@ -4,30 +4,32 @@
 //
 // Download creation struct used for querying the history service.
 
-#ifndef CHROME_BROWSER_DOWNLOAD_TYPES_H__
-#define CHROME_BROWSER_DOWNLOAD_TYPES_H__
+#ifndef CHROME_BROWSER_DOWNLOAD_TYPES_H_
+#define CHROME_BROWSER_DOWNLOAD_TYPES_H_
 
 #include <string>
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/time.h"
+#include "googleurl/src/gurl.h"
 
 // Used for informing the download database of a new download, where we don't
 // want to pass DownloadItems between threads. The history service also uses a
 // vector of these structs for passing us the state of all downloads at
 // initialization time (see DownloadQueryInfo below).
 struct DownloadCreateInfo {
-  DownloadCreateInfo(const std::wstring& path,
-                     const std::wstring& url,
-                     Time start_time,
+  DownloadCreateInfo(const FilePath& path,
+                     const GURL& url,
+                     base::Time start_time,
                      int64 received_bytes,
                      int64 total_bytes,
                      int32 state,
                      int32 download_id)
       : path(path),
         url(url),
-        suggested_path_exists(false),
+        path_uniquifier(0),
         start_time(start_time),
         received_bytes(received_bytes),
         total_bytes(total_bytes),
@@ -37,17 +39,20 @@ struct DownloadCreateInfo {
         render_view_id(-1),
         request_id(-1),
         db_handle(0),
-        save_as(false) {
+        save_as(false),
+        is_dangerous(false) {
   }
 
   DownloadCreateInfo() : download_id(-1) {}
 
   // DownloadItem fields
-  std::wstring path;
-  std::wstring url;
-  std::wstring suggested_path;
-  bool suggested_path_exists;
-  Time start_time;
+  FilePath path;
+  GURL url;
+  FilePath suggested_path;
+  // A number that should be added to the suggested path to make it unique.
+  // 0 means no number should be appended.  Not actually stored in the db.
+  int path_uniquifier;
+  base::Time start_time;
   int64 received_bytes;
   int64 total_bytes;
   int32 state;
@@ -59,7 +64,10 @@ struct DownloadCreateInfo {
   std::string content_disposition;
   std::string mime_type;
   bool save_as;
+  // Whether this download is potentially dangerous (ex: exe, dll, ...).
+  bool is_dangerous;
+  // The original name for a dangerous download.
+  FilePath original_name;
 };
 
-#endif  // CHROME_BROWSER_DOWNLOAD_TYPES_H__
-
+#endif  // CHROME_BROWSER_DOWNLOAD_TYPES_H_

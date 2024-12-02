@@ -4,11 +4,14 @@
 
 #include "chrome/browser/bookmarks/bookmark_storage.h"
 
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/json_writer.h"
 #include "base/message_loop.h"
+#include "base/thread.h"
 #include "chrome/browser/bookmarks/bookmark_codec.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/json_value_serializer.h"
@@ -16,11 +19,11 @@
 namespace {
 
 // Extension used for backup files (copy of main file created during startup).
-const wchar_t* const kBackupExtension = L"bak";
+const FilePath::CharType kBackupExtension[] = FILE_PATH_LITERAL("bak");
 
 // Extension for the temporary file. We write to the temp file than move to
 // kBookmarksFileName.
-const wchar_t* const kTmpExtension = L"tmp";
+const FilePath::CharType kTmpExtension[] = FILE_PATH_LITERAL("tmp");
 
 // How often we save.
 const int kSaveDelayMS = 2500;
@@ -31,13 +34,11 @@ const int kSaveDelayMS = 2500;
 
 BookmarkStorage::BookmarkStorage(Profile* profile, BookmarkModel* model)
     : model_(model),
-#pragma warning(suppress: 4355)  // Okay to pass "this" here.
-      save_factory_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(save_factory_(this)),
       backend_thread_(g_browser_process->file_thread()) {
-  std::wstring path = profile->GetPath();
-  file_util::AppendToPath(&path, chrome::kBookmarksFileName);
-  std::wstring tmp_history_path = profile->GetPath();
-  file_util::AppendToPath(&tmp_history_path, chrome::kHistoryBookmarksFileName);
+  FilePath path = profile->GetPath().Append(chrome::kBookmarksFileName);
+  FilePath tmp_history_path =
+      profile->GetPath().Append(chrome::kHistoryBookmarksFileName);
   backend_ = new BookmarkStorageBackend(path, tmp_history_path);
 }
 
@@ -113,13 +114,12 @@ void BookmarkStorage::SaveNow() {
 // BookmarkStorageBackend ------------------------------------------------------
 
 BookmarkStorageBackend::BookmarkStorageBackend(
-    const std::wstring& path,
-    const std::wstring& tmp_history_path)
-    : path_(path),
-      tmp_history_path_(tmp_history_path) {
+    const FilePath& path,
+    const FilePath& tmp_history_path)
+    : path_(path.ToWStringHack()),
+      tmp_history_path_(tmp_history_path.ToWStringHack()) {
   // Make a backup of the current file.
-  std::wstring backup_path = path;
-  file_util::ReplaceExtension(&backup_path, kBackupExtension);
+  FilePath backup_path = path.ReplaceExtension(kBackupExtension);
   file_util::CopyFile(path, backup_path);
 }
 
@@ -133,19 +133,19 @@ void BookmarkStorageBackend::Write(Value* value) {
   JSONWriter::Write(value, true, &content);
 
   // Write to a temp file, then rename.
-  std::wstring tmp_file = path_;
-  file_util::ReplaceExtension(&tmp_file, kTmpExtension);
+  // TODO(port): this code was all written to use wstrings; needs cleaning up
+  // for FilePath.
+  FilePath tmp_file_filepath =
+      FilePath::FromWStringHack(path_).ReplaceExtension(kTmpExtension);
+  std::wstring tmp_file = tmp_file_filepath.ToWStringHack();
 
   int bytes_written = file_util::WriteFile(tmp_file, content.c_str(),
                                            static_cast<int>(content.length()));
   if (bytes_written != -1) {
-    if (!MoveFileEx(tmp_file.c_str(), path_.c_str(),
-                    MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING)) {
+    if (!file_util::Move(tmp_file, path_)) {
       // Rename failed. Try again on the off chance someone has locked either
       // file and hope we're successful the second time through.
-      BOOL move_result =
-          MoveFileEx(tmp_file.c_str(), path_.c_str(),
-                     MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING);
+      bool move_result = file_util::Move(tmp_file, path_);
       DCHECK(move_result);
       if (!move_result)
         LOG(WARNING) << " writing bookmarks failed, result=" << move_result;
@@ -170,7 +170,7 @@ void BookmarkStorageBackend::Read(scoped_refptr<BookmarkStorage> service,
   Value* root = NULL;
   if (bookmark_file_exists) {
     JSONFileValueSerializer serializer(path);
-    serializer.Deserialize(&root);
+    root = serializer.Deserialize(NULL);
   }
 
   // BookmarkStorage takes ownership of root.

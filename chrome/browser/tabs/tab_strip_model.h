@@ -2,25 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H__
-#define CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H__
+#ifndef CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H_
+#define CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H_
 
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/observer_list.h"
-#include "chrome/browser/history/history.h"
-#include "chrome/browser/site_instance.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/common/notification_observer.h"
 #include "chrome/common/page_transition_types.h"
-#include "chrome/common/pref_member.h"
 
 namespace gfx {
 class Point;
+class Rect;
 }
+class DockInfo;
 class GURL;
 class NavigationController;
 class Profile;
+class SiteInstance;
 class TabContents;
 class TabStripModelOrderController;
 class TabStripModel;
@@ -67,14 +66,10 @@ class TabStripModelObserver {
   virtual void TabMoved(TabContents* contents,
                         int from_index,
                         int to_index) { }
-  // The specified TabContents at |index| changed in some way.
+  // The specified TabContents at |index| changed in some way. |contents| may
+  // be an entirely different object and the old value is no longer available
+  // by the time this message is delivered.
   virtual void TabChangedAt(TabContents* contents, int index) { }
-  // Loading progress representations for tabs should be validated/updated.
-  // TODO(beng): this wiring is cracktarded. consider revising. The loading
-  //             animation timer should live in BrowserView2, and from there
-  //             notify both the tabstrip and the window icon.
-  //             clean this up once XPFrame and VistaFrame have retired.
-  virtual void TabValidateAnimations() { }
   // The TabStripModel now no longer has any "significant" (user created or
   // user manipulated) tabs. The implementer may use this as a trigger to try
   // and close the window containing the TabStripModel, for example...
@@ -95,13 +90,16 @@ class TabStripModelObserver {
 ///////////////////////////////////////////////////////////////////////////////
 class TabStripModelDelegate {
  public:
+  // Retrieve the URL that should be used to construct blank tabs.
+  virtual GURL GetBlankTabURL() const = 0;
+
   // Ask for a new TabStripModel to be created and the given tab contents to
-  // be added to it. Its presentation (e.g. a browser window) anchored at the
-  // specified creation point. It is left up to the delegate to decide how to
-  // size the window. ass an empty point (0, 0) to allow the delegate to decide
-  // where to  position the window.
+  // be added to it. Its size and position are reflected in |window_bounds|.
+  // If |dock_info|'s type is other than NONE, the newly created window should
+  // be docked as identified by |dock_info|.
   virtual void CreateNewStripWithContents(TabContents* contents,
-                                          const gfx::Point& creation_point) = 0;
+                                          const gfx::Rect& window_bounds,
+                                          const DockInfo& dock_info) = 0;
 
   enum {
     TAB_MOVE_ACTION = 1,
@@ -118,14 +116,11 @@ class TabStripModelDelegate {
   // If |instance| is not null, its process is used to render the tab.
   virtual TabContents* CreateTabContentsForURL(
       const GURL& url,
+      const GURL& referrer,
       Profile* profile,
       PageTransition::Type transition,
       bool defer_load,
       SiteInstance* instance) const = 0;
-
-  // Show the web application context menu at the provided point. |p| is in
-  // screen coordinate system.
-  virtual void ShowApplicationMenu(const gfx::Point p) = 0;
 
   // Return whether some contents can be duplicated.
   virtual bool CanDuplicateContentsAt(int index) = 0;
@@ -134,14 +129,20 @@ class TabStripModelDelegate {
   // window.
   virtual void DuplicateContentsAt(int index) = 0;
 
-  // Called every time the the throbber needs to be updated. We have this to
-  // give the browser/frame a chance to implement some loading animation. This
-  // is used by simple web application frames.
-  virtual void ValidateLoadingAnimations() = 0;
-
   // Called when a drag session has completed and the frame that initiated the
   // the session should be closed.
   virtual void CloseFrameAfterDragSession() = 0;
+
+  // Creates an entry in the historical tab database for the specified
+  // TabContents.
+  virtual void CreateHistoricalTab(TabContents* contents) = 0;
+
+  // Runs any unload listeners associated with the specified TabContents before
+  // it is closed. If there are unload listeners that need to be run, this
+  // function returns true and the TabStripModel will wait before closing the
+  // TabContents. If it returns false, there are no unload listeners and the
+  // TabStripModel can close the TabContents immediately.
+  virtual bool RunUnloadListenerBeforeClosing(TabContents* contents) = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,7 +169,7 @@ class TabStripModelDelegate {
 class TabStripModel : public NotificationObserver {
  public:
   // Construct a TabStripModel with a delegate to help it do certain things
-  // (See TabStripModelDelegate documentation).
+  // (See TabStripModelDelegate documentation). |delegate| cannot be NULL.
   TabStripModel(TabStripModelDelegate* delegate, Profile* profile);
   virtual ~TabStripModel();
 
@@ -186,13 +187,6 @@ class TabStripModel : public NotificationObserver {
   // Retrieve the Profile associated with this TabStripModel.
   Profile* profile() const { return profile_; }
 
-  // Retrieve/set the active TabStripModelOrderController associated with this
-  // TabStripModel
-  TabStripModelOrderController* order_controller() const {
-    return order_controller_;
-  }
-  void SetOrderController(TabStripModelOrderController* order_controller);
-
   // Retrieve the index of the currently selected TabContents.
   int selected_index() const { return selected_index_; }
 
@@ -204,6 +198,11 @@ class TabStripModel : public NotificationObserver {
   // changes which notifies observers, which can use this as an optimization to
   // avoid doing meaningless or unhelpful work.
   bool closing_all() const { return closing_all_; }
+
+  // Access the order controller. Exposed only for unit tests.
+  TabStripModelOrderController* order_controller() const {
+    return order_controller_;
+  }
 
   // Basic API /////////////////////////////////////////////////////////////////
 
@@ -283,11 +282,6 @@ class TabStripModel : public NotificationObserver {
   // changed in some way.
   void UpdateTabContentsStateAt(int index);
 
-  // Notify any observers that Loading progress for TabContents should be
-  // validated.
-  // TODO(beng): (Cleanup) This should definitely be moved to the View.
-  void UpdateTabContentsLoadingAnimations();
-
   // Make sure there is an auto-generated New Tab tab in the TabStripModel.
   // If |force_create| is true, the New Tab will be created even if the
   // preference is set to false (used by startup).
@@ -300,10 +294,6 @@ class TabStripModel : public NotificationObserver {
 
   // Returns true if there are any TabContents that are currently loading.
   bool TabsAreLoading() const;
-
-  // Whether the tab has a beforeunload/unload listener that needs firing before
-  // being closed.
-  bool TabHasUnloadListener(int index);
 
   // Returns the controller controller that opened the TabContents at |index|.
   NavigationController* GetOpenerOfTabContentsAt(int index);
@@ -321,6 +311,12 @@ class TabStripModel : public NotificationObserver {
   // specified opener, starting at |start_index|.
   int GetIndexOfLastTabContentsOpenedBy(NavigationController* opener,
                                         int start_index);
+
+  // Called by the Browser when a navigation is about to occur in the specified
+  // TabContents. Depending on the tab, and the transition type of the
+  // navigation, the TabStripModel may adjust its selection and grouping
+  // behavior.
+  void TabNavigating(TabContents* contents, PageTransition::Type transition);
 
   // Forget all Opener relationships that are stored (but _not_ group
   // relationships!) This is to reduce unpredictable tab switching behavior
@@ -370,7 +366,8 @@ class TabStripModel : public NotificationObserver {
 
   // The specified contents should be opened in a new tabstrip.
   void TearOffTabContents(TabContents* detached_contents,
-                          const gfx::Point& drop_point);
+                          const gfx::Rect& window_bounds,
+                          const DockInfo& dock_info);
 
   // Context menu functions.
   enum ContextMenuCommand {
@@ -407,6 +404,13 @@ class TabStripModel : public NotificationObserver {
   // We cannot be constructed without a delegate.
   TabStripModel();
 
+  // Returns true if the specified TabContents is a New Tab at the end of the
+  // TabStrip. We check for this because opener relationships are _not_
+  // forgotten for the New Tab page opened as a result of a New Tab gesture
+  // (e.g. Ctrl+T, etc) since the user may open a tab transiently to look up
+  // something related to their current activity.
+  bool IsNewTabAtEndOfTabStrip(TabContents* contents) const;
+
   // Closes the TabContents at the specified index. This causes the TabContents
   // to be destroyed, but it may not happen immediately (e.g. if it's a
   // WebContents). If the page in question has an unload event the TabContents
@@ -436,11 +440,6 @@ class TabStripModel : public NotificationObserver {
   // Convenience for setting the opener pointer for the specified |contents| to
   // be |opener|'s NavigationController.
   void SetOpenerForContents(TabContents* contents, TabContents* opener);
-
-  // Returns true if closing the tab should add it to TabRestoreService. This
-  // returns true only if the profile has a TabRestoreService and the browser
-  // type is TABBED_BROWSER.
-  bool ShouldAddToTabRestoreService(TabContents* contents);
 
   // Returns true if the tab represented by the specified data has an opener
   // that matches the specified one. If |use_group| is true, then this will
@@ -532,8 +531,7 @@ class TabStripModel : public NotificationObserver {
   typedef ObserverList<TabStripModelObserver> TabStripModelObservers;
   TabStripModelObservers observers_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(TabStripModel);
+  DISALLOW_COPY_AND_ASSIGN(TabStripModel);
 };
 
-#endif  // CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H__
-
+#endif  // CHROME_BROWSER_TABS_TAB_STRIP_MODEL_H_

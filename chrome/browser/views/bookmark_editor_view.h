@@ -8,14 +8,15 @@
 #include <set>
 
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/views/checkbox.h"
-#include "chrome/views/dialog_delegate.h"
-#include "chrome/views/menu.h"
-#include "chrome/views/native_button.h"
-#include "chrome/views/text_field.h"
-#include "chrome/views/tree_node_model.h"
+#include "chrome/views/controls/button/checkbox.h"
+#include "chrome/views/controls/button/native_button.h"
+#include "chrome/views/controls/menu/menu.h"
+#include "chrome/views/controls/text_field.h"
+#include "chrome/views/controls/tree/tree_node_model.h"
+#include "chrome/views/controls/tree/tree_view.h"
+#include "chrome/views/window/dialog_delegate.h"
 
-namespace ChromeViews {
+namespace views {
 class Window;
 }
 
@@ -31,12 +32,12 @@ class Profile;
 //
 // To use BookmarkEditorView invoke the static show method.
 
-class BookmarkEditorView : public ChromeViews::View,
-                           public ChromeViews::NativeButton::Listener,
-                           public ChromeViews::TreeViewController,
-                           public ChromeViews::DialogDelegate,
-                           public ChromeViews::TextField::Controller,
-                           public ChromeViews::ContextMenuController,
+class BookmarkEditorView : public views::View,
+                           public views::NativeButton::Listener,
+                           public views::TreeViewController,
+                           public views::DialogDelegate,
+                           public views::TextField::Controller,
+                           public views::ContextMenuController,
                            public Menu::Delegate,
                            public BookmarkModelObserver {
   FRIEND_TEST(BookmarkEditorViewTest, ChangeParent);
@@ -47,19 +48,42 @@ class BookmarkEditorView : public ChromeViews::View,
   FRIEND_TEST(BookmarkEditorViewTest, ModelsMatch);
   FRIEND_TEST(BookmarkEditorViewTest, MoveToNewParent);
   FRIEND_TEST(BookmarkEditorViewTest, NewURL);
+  FRIEND_TEST(BookmarkEditorViewTest, ChangeURLNoTree);
+  FRIEND_TEST(BookmarkEditorViewTest, ChangeTitleNoTree);
  public:
-  // Shows the BookmarkEditorView editing |node|. If |node| is NULL a new entry
-  // is created initially parented to |parent|.
-  static void Show(HWND parent_window,
-                   Profile* profile,
-                   BookmarkNode* parent,
-                   BookmarkNode* node);
+  // Handler is notified when the BookmarkEditorView creates a new bookmark.
+  // Handler is owned by the BookmarkEditorView and deleted when it is deleted.
+  class Handler {
+   public:
+    virtual ~Handler() {}
+    virtual void NodeCreated(BookmarkNode* new_node) = 0;
+  };
+
+  // An enumeration of the possible configurations offered.
+  enum Configuration {
+    SHOW_TREE,
+    NO_TREE
+  };
 
   BookmarkEditorView(Profile* profile,
                      BookmarkNode* parent,
-                     BookmarkNode* node);
+                     BookmarkNode* node,
+                     Configuration configuration,
+                     Handler* handler);
 
   virtual ~BookmarkEditorView();
+
+  // Shows the BookmarkEditorView editing |node|. If |node| is NULL a new entry
+  // is created initially parented to |parent|. If |show_tree| is false the
+  // tree is not shown. BookmarkEditorView takes ownership of |handler| and
+  // deletes it when done. |handler| may be null. See description of Handler
+  // for details.
+  static void Show(HWND parent_window,
+                   Profile* profile,
+                   BookmarkNode* parent,
+                   BookmarkNode* node,
+                   Configuration configuration,
+                   Handler* handler);
 
   // DialogDelegate methods:
   virtual bool IsDialogButtonEnabled(DialogButton button) const;
@@ -67,29 +91,28 @@ class BookmarkEditorView : public ChromeViews::View,
   virtual std::wstring GetWindowTitle() const;
   virtual bool Accept();
   virtual bool AreAcceleratorsEnabled(DialogButton button);
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
   // View methods.
   virtual void Layout();
-  virtual void GetPreferredSize(CSize *out);
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
-  virtual void ViewHierarchyChanged(bool is_add, ChromeViews::View* parent,
-                                    ChromeViews::View* child);
+  virtual gfx::Size GetPreferredSize();
+  virtual void ViewHierarchyChanged(bool is_add, views::View* parent,
+                                    views::View* child);
 
   // TreeViewObserver methods.
-  virtual void OnTreeViewSelectionChanged(ChromeViews::TreeView* tree_view);
-  virtual bool CanEdit(ChromeViews::TreeView* tree_view,
-                       ChromeViews::TreeModelNode* node);
+  virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view);
+  virtual bool CanEdit(views::TreeView* tree_view,
+                       views::TreeModelNode* node);
 
   // TextField::Controller methods.
-  virtual void ContentsChanged(ChromeViews::TextField* sender,
+  virtual void ContentsChanged(views::TextField* sender,
                                const std::wstring& new_contents);
-  virtual void HandleKeystroke(ChromeViews::TextField* sender,
+  virtual void HandleKeystroke(views::TextField* sender,
                                UINT message, TCHAR key, UINT repeat_count,
                                UINT flags) {}
 
   // NativeButton/CheckBox.
-  virtual void ButtonPressed(ChromeViews::NativeButton* sender);
+  virtual void ButtonPressed(views::NativeButton* sender);
 
   // Menu::Delegate method.
   virtual void ExecuteCommand(int id);
@@ -113,16 +136,16 @@ class BookmarkEditorView : public ChromeViews::View,
 
  private:
   // Type of node in the tree.
-  typedef ChromeViews::TreeNodeWithValue<int> EditorNode;
+  typedef views::TreeNodeWithValue<int> EditorNode;
 
   // Model for the TreeView. Trivial subclass that doesn't allow titles with
   // empty strings.
-  class EditorTreeModel : public ChromeViews::TreeNodeModel<EditorNode> {
+  class EditorTreeModel : public views::TreeNodeModel<EditorNode> {
    public:
     explicit EditorTreeModel(EditorNode* root)
         : TreeNodeModel<EditorNode>(root) {}
 
-    virtual void SetTitle(ChromeViews::TreeModelNode* node,
+    virtual void SetTitle(views::TreeModelNode* node,
                           const std::wstring& title) {
       if (!title.empty())
         TreeNodeModel::SetTitle(node, title);
@@ -149,9 +172,12 @@ class BookmarkEditorView : public ChromeViews::View,
                                  int index);
   virtual void BookmarkNodeRemoved(BookmarkModel* model,
                                    BookmarkNode* parent,
-                                   int index);
+                                   int index,
+                                   BookmarkNode* node);
   virtual void BookmarkNodeChanged(BookmarkModel* model,
                                    BookmarkNode* node) {}
+  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                             BookmarkNode* node);
   virtual void BookmarkNodeFavIconLoaded(BookmarkModel* model,
                                          BookmarkNode* node) {}
 
@@ -223,16 +249,16 @@ class BookmarkEditorView : public ChromeViews::View,
   scoped_ptr<EditorTreeModel> tree_model_;
 
   // Displays star groups.
-  ChromeViews::TreeView tree_view_;
+  views::TreeView* tree_view_;
 
   // Used to create a new group.
-  ChromeViews::NativeButton new_group_button_;
+  scoped_ptr<views::NativeButton> new_group_button_;
 
   // Used for editing the URL.
-  ChromeViews::TextField url_tf_;
+  views::TextField url_tf_;
 
   // Used for editing the title.
-  ChromeViews::TextField title_tf_;
+  views::TextField title_tf_;
 
   // Initial parent to select. Is only used if node_ is NULL.
   BookmarkNode* parent_;
@@ -249,6 +275,11 @@ class BookmarkEditorView : public ChromeViews::View,
   // If true, we're running the menu for the bookmark bar or other bookmarks
   // nodes.
   bool running_menu_for_root_;
+
+  // Is the tree shown?
+  bool show_tree_;
+
+  scoped_ptr<Handler> handler_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkEditorView);
 };

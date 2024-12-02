@@ -18,15 +18,16 @@
 #include "base/scoped_ptr.h"
 #include "googleurl/src/gurl.h"
 
-#pragma warning(push, 0)
+#include "base/compiler_specific.h"
+
+MSVC_PUSH_WARNING_LEVEL(0);
 #include "Frame.h"
 #include "Timer.h"
 #include "ResourceHandleClient.h"
 #include "ResourceResponse.h"
-#pragma warning(pop)
+MSVC_POP_WARNING();
 
 class GURL;
-class WebCore::ResourceHandle;
 
 class ResourceFetcher : public WebCore::ResourceHandleClient {
  public:
@@ -47,18 +48,18 @@ class ResourceFetcher : public WebCore::ResourceHandleClient {
   // Stop the request and don't call the callback.
   void Cancel();
 
-  bool completed() { return completed_; }
+  bool completed() const { return completed_; }
 
   // ResourceHandleClient methods
   virtual void didReceiveResponse(WebCore::ResourceHandle* resource_handle,
                                   const WebCore::ResourceResponse& response);
 
-  virtual void didReceiveData(WebCore::ResourceHandle* resource_handle, 
+  virtual void didReceiveData(WebCore::ResourceHandle* resource_handle,
                               const char* data, int length, int total_length);
 
   virtual void didFinishLoading(WebCore::ResourceHandle* resource_handle);
 
-  virtual void didFail(WebCore::ResourceHandle* resource_handle, 
+  virtual void didFail(WebCore::ResourceHandle* resource_handle,
                        const WebCore::ResourceError& error);
 
  protected:
@@ -115,4 +116,3 @@ class ResourceFetcherWithTimeout : public ResourceFetcher {
 };
 
 #endif  // WEBKIT_GLUE_RESOURCE_FETCHER_H__
-

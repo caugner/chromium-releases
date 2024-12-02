@@ -4,15 +4,17 @@
 
 #include "net/url_request/url_request.h"
 
-#include "base/basictypes.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/singleton.h"
 #include "base/stats_counters.h"
-#include "googleurl/src/gurl.h"
+#include "base/string_util.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/base/upload_data.h"
+#include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
+#include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_manager.h"
 
@@ -20,12 +22,13 @@
 URLRequestMetrics url_request_metrics;
 #endif
 
+using base::Time;
 using net::UploadData;
 using std::string;
 using std::wstring;
 
 // Max number of http redirects to follow.  Same number as gecko.
-const static int kMaxRedirects = 20;
+static const int kMaxRedirects = 20;
 
 static URLRequestJobManager* GetJobManager() {
   return Singleton<URLRequestJobManager>::get();
@@ -46,8 +49,8 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       redirect_limit_(kMaxRedirects),
       final_upload_progress_(0) {
   URLREQUEST_COUNT_CTOR();
-  SIMPLE_STATS_COUNTER(L"URLRequestCount");
-  origin_pid_ = process_util::GetCurrentProcId();
+  SIMPLE_STATS_COUNTER("URLRequestCount");
+  origin_pid_ = base::GetCurrentProcId();
 
   // Sanity check out environment.
   DCHECK(MessageLoop::current()) <<
@@ -96,6 +99,19 @@ void URLRequest::AppendFileRangeToUpload(const wstring& file_path,
   if (!upload_)
     upload_ = new UploadData();
   upload_->AppendFileRange(file_path, offset, length);
+}
+
+void URLRequest::set_upload(net::UploadData* upload) {
+  upload_ = upload;
+}
+
+// Get the upload data directly.
+net::UploadData* URLRequest::get_upload() {
+  return upload_.get();
+}
+
+bool URLRequest::has_upload() const {
+  return upload_ != NULL;
 }
 
 void URLRequest::SetExtraRequestHeaderById(int id, const string& value,
@@ -168,6 +184,10 @@ void URLRequest::GetAllResponseHeaders(string* headers) {
   }
 }
 
+net::HttpResponseHeaders* URLRequest::response_headers() const {
+  return response_info_.headers.get();
+}
+
 bool URLRequest::GetResponseCookies(ResponseCookies* cookies) {
   DCHECK(job_);
   return job_->GetResponseCookies(cookies);
@@ -203,6 +223,21 @@ bool URLRequest::IsHandledURL(const GURL& url) {
   return IsHandledProtocol(url.scheme());
 }
 
+void URLRequest::set_policy_url(const GURL& policy_url) {
+  DCHECK(!is_pending_);
+  policy_url_ = policy_url;
+}
+
+void URLRequest::set_method(const std::string& method) {
+  DCHECK(!is_pending_);
+  method_ = method;
+}
+
+void URLRequest::set_referrer(const std::string& referrer) {
+  DCHECK(!is_pending_);
+  referrer_ = referrer;
+}
+
 void URLRequest::Start() {
   DCHECK(!is_pending_);
   DCHECK(!job_);
@@ -215,6 +250,7 @@ void URLRequest::Start() {
 
   is_pending_ = true;
   response_info_.request_time = Time::Now();
+  response_info_.was_cached = false;
 
   // Don't allow errors to be sent from within Start().
   // TODO(brettw) this may cause NotifyDone to be sent synchronously,
@@ -224,22 +260,36 @@ void URLRequest::Start() {
 }
 
 void URLRequest::Cancel() {
-  CancelWithError(net::ERR_ABORTED);
+  DoCancel(net::ERR_ABORTED, net::SSLInfo());
 }
 
-void URLRequest::CancelWithError(int os_error) {
-  DCHECK(os_error < 0);
+void URLRequest::SimulateError(int os_error) {
+  DoCancel(os_error, net::SSLInfo());
+}
 
-  // There's nothing to do if we are not waiting on a Job.
-  if (!is_pending_ || !job_)
+void URLRequest::SimulateSSLError(int os_error, const net::SSLInfo& ssl_info) {
+  // This should only be called on a started request.
+  if (!is_pending_ || !job_ || job_->has_response_started()) {
+    NOTREACHED();
     return;
+  }
+  DoCancel(os_error, ssl_info);
+}
+
+void URLRequest::DoCancel(int os_error, const net::SSLInfo& ssl_info) {
+  DCHECK(os_error < 0);
 
   // If the URL request already has an error status, then canceling is a no-op.
   // Plus, we don't want to change the error status once it has been set.
   if (status_.is_success()) {
     status_.set_status(URLRequestStatus::CANCELED);
     status_.set_os_error(os_error);
+    response_info_.ssl_info = ssl_info;
   }
+
+  // There's nothing to do if we are not waiting on a Job.
+  if (!is_pending_ || !job_)
+    return;
 
   job_->Kill();
 
@@ -248,7 +298,7 @@ void URLRequest::CancelWithError(int os_error) {
   // about being called recursively.
 }
 
-bool URLRequest::Read(char* dest, int dest_size, int *bytes_read) {
+bool URLRequest::Read(net::IOBuffer* dest, int dest_size, int *bytes_read) {
   DCHECK(job_);
   DCHECK(bytes_read);
   DCHECK(!job_->is_done());
@@ -293,11 +343,37 @@ void URLRequest::OrphanJob() {
   job_ = NULL;
 }
 
-int URLRequest::Redirect(const GURL& location, int http_status_code) {
-  // TODO(darin): treat 307 redirects of POST requests very carefully.  we
-  // should prompt the user before re-submitting the POST body.
-  DCHECK(!(method_ == "POST" && http_status_code == 307)) << "implement me!";
+// static
+std::string URLRequest::StripPostSpecificHeaders(const std::string& headers) {
+  // These are headers that may be attached to a POST.
+  static const char* const kPostHeaders[] = {
+      "content-type",
+      "content-length",
+      "origin"
+  };
 
+  std::string stripped_headers;
+  net::HttpUtil::HeadersIterator it(headers.begin(), headers.end(), "\r\n");
+
+  while (it.GetNext()) {
+    bool is_post_specific = false;
+    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kPostHeaders); ++i) {
+      if (LowerCaseEqualsASCII(it.name_begin(), it.name_end(),
+                               kPostHeaders[i])) {
+        is_post_specific = true;
+        break;
+      }
+    }
+    if (!is_post_specific) {
+      // Assume that name and values are on the same line.
+      stripped_headers.append(it.name_begin(), it.values_end());
+      stripped_headers.append("\r\n");
+    }
+  }
+  return stripped_headers;
+}
+
+int URLRequest::Redirect(const GURL& location, int http_status_code) {
   if (redirect_limit_ <= 0) {
     DLOG(INFO) << "disallowing redirect: exceeds limit";
     return net::ERR_TOO_MANY_REDIRECTS;
@@ -308,14 +384,33 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     return net::ERR_UNSAFE_REDIRECT;
   }
 
-  // NOTE: even though RFC 2616 says to preserve the request method when
-  // following a 302 redirect, normal browsers don't do that.  instead, they
-  // all convert a POST into a GET in response to a 302, and so shall we.
+  bool strip_post_specific_headers = false;
+  if (http_status_code != 307) {
+    // NOTE: Even though RFC 2616 says to preserve the request method when
+    // following a 302 redirect, normal browsers don't do that.  Instead, they
+    // all convert a POST into a GET in response to a 302 and so shall we.  For
+    // 307 redirects, browsers preserve the method.  The RFC says to prompt the
+    // user to confirm the generation of a new POST request, but IE omits this
+    // prompt and so shall we.
+    strip_post_specific_headers = method_ == "POST";
+    method_ = "GET";
+  }
   url_ = location;
-  method_ = "GET";
-  upload_ = 0;
+  upload_ = NULL;
   status_ = URLRequestStatus();
   --redirect_limit_;
+
+  if (strip_post_specific_headers) {
+    // If being switched from POST to GET, must remove headers that were
+    // specific to the POST and don't have meaning in GET. For example
+    // the inclusion of a multipart Content-Type header in GET can cause
+    // problems with some servers:
+    // http://code.google.com/p/chromium/issues/detail?id=843
+    //
+    // TODO(eroman): It would be better if this data was structured into
+    // specific fields/flags, rather than a stew of extra headers.
+    extra_request_headers_ = StripPostSpecificHeaders(extra_request_headers_);
+  }
 
   if (!final_upload_progress_) {
     final_upload_progress_ = job_->GetUploadProgress();
@@ -328,6 +423,14 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
   return net::OK;
 }
 
+URLRequestContext* URLRequest::context() {
+  return context_.get();
+}
+
+void URLRequest::set_context(URLRequestContext* context) {
+  context_ = context;
+}
+
 int64 URLRequest::GetExpectedContentSize() const {
   int64 expected_content_size = -1;
   if (job_)
@@ -336,3 +439,11 @@ int64 URLRequest::GetExpectedContentSize() const {
   return expected_content_size;
 }
 
+#ifndef NDEBUG
+
+URLRequestMetrics::~URLRequestMetrics() {
+  DLOG_IF(WARNING, object_count != 0) <<
+    "Leaking " << object_count << " URLRequest object(s)";
+}
+
+#endif

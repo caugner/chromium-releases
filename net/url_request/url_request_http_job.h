@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "base/scoped_ptr.h"
+#include "net/base/auth.h"
 #include "net/base/completion_callback.h"
 #include "net/http/http_request_info.h"
 #include "net/url_request/url_request_job.h"
@@ -36,24 +38,24 @@ class URLRequestHttpJob : public URLRequestJob {
   virtual void Kill();
   virtual net::LoadState GetLoadState() const;
   virtual uint64 GetUploadProgress() const;
-  virtual bool GetMimeType(std::string* mime_type);
+  virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetCharset(std::string* charset);
   virtual void GetResponseInfo(net::HttpResponseInfo* info);
   virtual bool GetResponseCookies(std::vector<std::string>* cookies);
   virtual int GetResponseCode();
-  virtual bool GetContentEncodings(std::vector<std::string>* encoding_type);
+  virtual bool GetContentEncodings(
+      std::vector<Filter::FilterType>* encoding_type);
+  virtual bool IsSdchResponse() const;
   virtual bool IsRedirectResponse(GURL* location, int* http_status_code);
   virtual bool IsSafeRedirect(const GURL& location);
   virtual bool NeedsAuth();
   virtual void GetAuthChallengeInfo(scoped_refptr<net::AuthChallengeInfo>*);
-  virtual void GetCachedAuthData(const net::AuthChallengeInfo& auth_info,
-                                 scoped_refptr<net::AuthData>* auth_data);
   virtual void SetAuth(const std::wstring& username,
                        const std::wstring& password);
   virtual void CancelAuth();
   virtual void ContinueDespiteLastError();
   virtual bool GetMoreData();
-  virtual bool ReadRawData(char* buf, int buf_size, int *bytes_read);
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
 
   // Shadows URLRequestJob's version of this method so we can grab cookies.
   void NotifyHeadersComplete();
@@ -67,7 +69,7 @@ class URLRequestHttpJob : public URLRequestJob {
   void OnReadCompleted(int result);
 
   net::HttpRequestInfo request_info_;
-  net::HttpTransaction* transaction_;
+  scoped_ptr<net::HttpTransaction> transaction_;
   const net::HttpResponseInfo* response_info_;
   std::vector<std::string> response_cookies_;
 
@@ -79,6 +81,9 @@ class URLRequestHttpJob : public URLRequestJob {
   net::CompletionCallbackImpl<URLRequestHttpJob> read_callback_;
 
   bool read_in_progress_;
+
+  // An URL for an SDCH dictionary as suggested in a Get-Dictionary HTTP header.
+  GURL sdch_dictionary_url_;
 
   // Keep a reference to the url request context to be sure it's not deleted
   // before us.

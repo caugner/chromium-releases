@@ -42,7 +42,7 @@ class ExternalProtocolHandler {
   // NOTE: You should Not call this function directly unless you are sure the
   // url you have has been checked against the blacklist, and has been escaped.
   // All calls to this function should originate in some way from LaunchUrl.
-  // Must run on the IO thread.
+  // Must run on the file thread.
   static void LaunchUrlWithoutSecurityCheck(const GURL& url);
 
   // Prepopulates the dictionary with known protocols to deny or allow, if
@@ -51,4 +51,3 @@ class ExternalProtocolHandler {
 };
 
 #endif  // CHROME_BROWSER_EXTERNAL_PROTOCOL_HANDLER_H__
-

@@ -2,14 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/message_loop.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/gfx/path.h"
+#include "chrome/common/notification_service.h"
 #include "chrome/views/background.h"
+#include "chrome/views/controls/button/checkbox.h"
 #include "chrome/views/event.h"
-#include "chrome/views/root_view.h"
 #include "chrome/views/view.h"
-#include "chrome/views/window.h"
+#include "chrome/views/widget/root_view.h"
+#include "chrome/views/widget/widget_win.h"
+#include "chrome/views/window/dialog_delegate.h"
+#include "chrome/views/window/window.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using namespace views;
 
 namespace {
 
@@ -22,22 +29,22 @@ class ViewTest : public testing::Test {
   ~ViewTest() {
     OleUninitialize();
   }
- 
+
  private:
   MessageLoopForUI message_loop_;
 };
 
 // Paints the RootView.
-void PaintRootView(ChromeViews::RootView* root, bool empty_paint) {
+void PaintRootView(views::RootView* root, bool empty_paint) {
   if (!empty_paint) {
     root->PaintNow();
   } else {
     // User isn't logged in, so that PaintNow will generate an empty rectangle.
     // Invoke paint directly.
-    CRect paint_rect = root->GetScheduledPaintRect();
-    ChromeCanvas canvas(paint_rect.Width(), paint_rect.Height(), true);
-    canvas.TranslateInt(-paint_rect.left, -paint_rect.top);
-    canvas.ClipRectInt(0, 0, paint_rect.Width(), paint_rect.Height());
+    gfx::Rect paint_rect = root->GetScheduledPaintRect();
+    ChromeCanvas canvas(paint_rect.width(), paint_rect.height(), true);
+    canvas.TranslateInt(-paint_rect.x(), -paint_rect.y());
+    canvas.ClipRectInt(0, 0, paint_rect.width(), paint_rect.height());
     root->ProcessPaint(&canvas);
   }
 }
@@ -88,9 +95,6 @@ class EmptyWindow : public CWindowImpl<EmptyWindow,
   DISALLOW_EVIL_CONSTRUCTORS(EmptyWindow);
 };
 */
-}
-
-using namespace ChromeViews;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -99,7 +103,7 @@ using namespace ChromeViews;
 ////////////////////////////////////////////////////////////////////////////////
 class TestView : public View {
  public:
-  TestView() {
+   TestView() : View(){
   }
 
   virtual ~TestView() {}
@@ -115,7 +119,8 @@ class TestView : public View {
     last_clip_.setEmpty();
   }
 
-  virtual void DidChangeBounds(const CRect& previous, const CRect& current);
+  virtual void DidChangeBounds(const gfx::Rect& previous,
+                               const gfx::Rect& current);
   virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
   virtual bool OnMousePressed(const MouseEvent& event);
   virtual bool OnMouseDragged(const MouseEvent& event);
@@ -124,8 +129,8 @@ class TestView : public View {
 
   // DidChangeBounds test
   bool did_change_bounds_;
-  CRect previous_bounds_;
-  CRect new_bounds_;
+  gfx::Rect previous_bounds_;
+  gfx::Rect new_bounds_;
 
   // AddRemoveNotifications test
   bool child_added_;
@@ -145,7 +150,8 @@ class TestView : public View {
 // DidChangeBounds
 ////////////////////////////////////////////////////////////////////////////////
 
-void TestView::DidChangeBounds(const CRect& previous, const CRect& current) {
+void TestView::DidChangeBounds(const gfx::Rect& previous,
+                               const gfx::Rect& current) {
   did_change_bounds_ = true;
   previous_bounds_ = previous;
   new_bounds_ = current;
@@ -154,8 +160,8 @@ void TestView::DidChangeBounds(const CRect& previous, const CRect& current) {
 TEST_F(ViewTest, DidChangeBounds) {
   TestView* v = new TestView();
 
-  CRect prev_rect(0, 0, 200, 200);
-  CRect new_rect(100, 100, 250, 250);
+  gfx::Rect prev_rect(0, 0, 200, 200);
+  gfx::Rect new_rect(100, 100, 250, 250);
 
   v->SetBounds(prev_rect);
   v->Reset();
@@ -165,9 +171,7 @@ TEST_F(ViewTest, DidChangeBounds) {
   EXPECT_EQ(v->previous_bounds_, prev_rect);
   EXPECT_EQ(v->new_bounds_, new_rect);
 
-  CRect r;
-  v->GetBounds(&r);
-  EXPECT_EQ(r, new_rect);
+  EXPECT_EQ(v->bounds(), gfx::Rect(new_rect));
   delete v;
 }
 
@@ -184,6 +188,8 @@ void TestView::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
   }
   parent_ = parent;
   child_ = child;
+}
+
 }
 
 TEST_F(ViewTest, AddRemoveNotifications) {
@@ -283,7 +289,7 @@ TEST_F(ViewTest, MouseEvent) {
   TestView* v2 = new TestView();
   v2->SetBounds (100, 100, 100, 100);
 
-  ChromeViews::HWNDViewContainer window;
+  views::WidgetWin window;
   window.set_delete_on_destroy(false);
   window.set_window_style(WS_OVERLAPPEDWINDOW);
   window.Init(NULL, gfx::Rect(50, 50, 650, 650), false);
@@ -350,14 +356,14 @@ void CheckRect(const SkRect& check_rect, const SkRect& target_rect) {
 }
 
 /* This test is disabled because it is flakey on some systems.
-TEST_F(ViewTest, Painting) {
+TEST_F(ViewTest, DISABLED_Painting) {
   // Determine if InvalidateRect generates an empty paint rectangle.
   EmptyWindow paint_window(CRect(50, 50, 650, 650));
   paint_window.RedrawWindow(CRect(0, 0, 600, 600), NULL,
                             RDW_UPDATENOW | RDW_INVALIDATE | RDW_ALLCHILDREN);
   bool empty_paint = paint_window.empty_paint();
 
-  ChromeViews::HWNDViewContainer window;
+  views::WidgetWin window;
   window.set_delete_on_destroy(false);
   window.set_window_style(WS_OVERLAPPEDWINDOW);
   window.Init(NULL, gfx::Rect(50, 50, 650, 650), NULL);
@@ -425,11 +431,11 @@ public:
 
   void Observe(NotificationType type, const NotificationSource& source,
     const NotificationDetails& details) {
-      ASSERT_TRUE(type == NOTIFY_VIEW_REMOVED);
-      removed_views_.push_back(Source<ChromeViews::View>(source).ptr());
+      ASSERT_TRUE(type == NotificationType::VIEW_REMOVED);
+      removed_views_.push_back(Source<views::View>(source).ptr());
   }
 
-  bool WasRemoved(ChromeViews::View* view) {
+  bool WasRemoved(views::View* view) {
     return std::find(removed_views_.begin(), removed_views_.end(), view) !=
         removed_views_.end();
   }
@@ -442,10 +448,12 @@ TEST_F(ViewTest, RemoveNotification) {
   scoped_ptr<RemoveViewObserver> observer(new RemoveViewObserver);
 
   NotificationService::current()->AddObserver(
-      observer.get(), NOTIFY_VIEW_REMOVED, NotificationService::AllSources());
+      observer.get(),
+      NotificationType::VIEW_REMOVED,
+      NotificationService::AllSources());
 
-  ChromeViews::HWNDViewContainer* window = new ChromeViews::HWNDViewContainer;
-  ChromeViews::RootView* root_view = window->GetRootView();
+  views::WidgetWin* window = new views::WidgetWin;
+  views::RootView* root_view = window->GetRootView();
 
   View* v1 = new View;
   root_view->AddChildView(v1);
@@ -504,11 +512,11 @@ TEST_F(ViewTest, RemoveNotification) {
               observer->WasRemoved(v111)  && observer->WasRemoved(v112));
 
   NotificationService::current()->RemoveObserver(observer.get(),
-      NOTIFY_VIEW_REMOVED, NotificationService::AllSources());
+      NotificationType::VIEW_REMOVED, NotificationService::AllSources());
 }
 
 namespace {
-class HitTestView : public ChromeViews::View {
+class HitTestView : public views::View {
  public:
   explicit HitTestView(bool has_hittest_mask)
       : has_hittest_mask_(has_hittest_mask) {
@@ -516,7 +524,7 @@ class HitTestView : public ChromeViews::View {
   virtual ~HitTestView() {}
 
  protected:
-  // Overridden from ChromeViews::View:
+  // Overridden from views::View:
   virtual bool HasHitTestMask() const {
     return has_hittest_mask_;
   }
@@ -540,32 +548,32 @@ class HitTestView : public ChromeViews::View {
   DISALLOW_COPY_AND_ASSIGN(HitTestView);
 };
 
-POINT ConvertPointToView(ChromeViews::View* view, const POINT& p) {
-  CPoint tmp = p;
-  ChromeViews::View::ConvertPointToView(view->GetRootView(), view, &tmp);
+gfx::Point ConvertPointToView(views::View* view, const gfx::Point& p) {
+  gfx::Point tmp(p);
+  views::View::ConvertPointToView(view->GetRootView(), view, &tmp);
   return tmp;
 }
 }
 
 TEST_F(ViewTest, HitTestMasks) {
-  ChromeViews::HWNDViewContainer window;
-  ChromeViews::RootView* root_view = window.GetRootView();
+  views::WidgetWin window;
+  views::RootView* root_view = window.GetRootView();
   root_view->SetBounds(0, 0, 500, 500);
 
   gfx::Rect v1_bounds = gfx::Rect(0, 0, 100, 100);
   HitTestView* v1 = new HitTestView(false);
-  v1->SetBounds(v1_bounds.ToRECT());
+  v1->SetBounds(v1_bounds);
   root_view->AddChildView(v1);
 
   gfx::Rect v2_bounds = gfx::Rect(105, 0, 100, 100);
   HitTestView* v2 = new HitTestView(true);
-  v2->SetBounds(v2_bounds.ToRECT());
+  v2->SetBounds(v2_bounds);
   root_view->AddChildView(v2);
 
-  POINT v1_centerpoint = v1_bounds.CenterPoint().ToPOINT();
-  POINT v2_centerpoint = v2_bounds.CenterPoint().ToPOINT();
-  POINT v1_origin = v1_bounds.origin().ToPOINT();
-  POINT v2_origin = v2_bounds.origin().ToPOINT();
+  gfx::Point v1_centerpoint = v1_bounds.CenterPoint();
+  gfx::Point v2_centerpoint = v2_bounds.CenterPoint();
+  gfx::Point v1_origin = v1_bounds.origin();
+  gfx::Point v2_origin = v2_bounds.origin();
 
   // Test HitTest
   EXPECT_EQ(true, v1->HitTest(ConvertPointToView(v1, v1_centerpoint)));
@@ -579,4 +587,77 @@ TEST_F(ViewTest, HitTestMasks) {
   EXPECT_EQ(v2, root_view->GetViewForPoint(v2_centerpoint));
   EXPECT_EQ(v1, root_view->GetViewForPoint(v1_origin));
   EXPECT_EQ(root_view, root_view->GetViewForPoint(v2_origin));
+}
+
+class TestDialogView : public views::View,
+                       public views::DialogDelegate {
+ public:
+  TestDialogView() {
+  }
+
+  // views::DialogDelegate implementation:
+  virtual int GetDialogButtons() const {
+    return DIALOGBUTTON_OK | DIALOGBUTTON_CANCEL;
+  }
+
+  virtual int GetDefaultDialogButton() const {
+    return DIALOGBUTTON_OK;
+  }
+
+  virtual View* GetContentsView() {
+    views::View* container = new views::View();
+    button1_ = new views::NativeButton(L"Button1");
+    button2_ = new views::NativeButton(L"Button2");
+    checkbox_ = new views::CheckBox(L"My checkbox");
+    container->AddChildView(button1_);
+    container->AddChildView(button2_);
+    container->AddChildView(checkbox_);
+    return container;
+  }
+  views::NativeButton* button1_;
+  views::NativeButton* button2_;
+  views::NativeButton* checkbox_;
+};
+
+TEST_F(ViewTest, DialogDefaultButtonTest) {
+  TestDialogView* dialog_view_ = new TestDialogView();
+  views::Window* window =
+      views::Window::CreateChromeWindow(NULL, gfx::Rect(0, 0, 100, 100),
+                                        dialog_view_);
+  views::DialogClientView* client_view =
+      static_cast<views::DialogClientView*>(window->GetClientView());
+  views::NativeButton* ok_button = client_view->ok_button();
+  views::NativeButton* cancel_button = client_view->cancel_button();
+
+  EXPECT_TRUE(ok_button->IsDefaultButton());
+
+  // Simualte focusing another button, it should become the default button.
+  client_view->FocusWillChange(ok_button, dialog_view_->button1_);
+  EXPECT_FALSE(ok_button->IsDefaultButton());
+  EXPECT_TRUE(dialog_view_->button1_->IsDefaultButton());
+
+  // Now select something that is not a button, the OK should become the default
+  // button again.
+  client_view->FocusWillChange(dialog_view_->button1_, dialog_view_->checkbox_);
+  EXPECT_TRUE(ok_button->IsDefaultButton());
+  EXPECT_FALSE(dialog_view_->button1_->IsDefaultButton());
+
+  // Select yet another button.
+  client_view->FocusWillChange(dialog_view_->checkbox_, dialog_view_->button2_);
+  EXPECT_FALSE(ok_button->IsDefaultButton());
+  EXPECT_FALSE(dialog_view_->button1_->IsDefaultButton());
+  EXPECT_TRUE(dialog_view_->button2_->IsDefaultButton());
+
+  // Focus nothing.
+  client_view->FocusWillChange(dialog_view_->button2_, NULL);
+  EXPECT_TRUE(ok_button->IsDefaultButton());
+  EXPECT_FALSE(dialog_view_->button1_->IsDefaultButton());
+  EXPECT_FALSE(dialog_view_->button2_->IsDefaultButton());
+
+  // Focus the cancel button.
+  client_view->FocusWillChange(NULL, cancel_button);
+  EXPECT_FALSE(ok_button->IsDefaultButton());
+  EXPECT_TRUE(cancel_button->IsDefaultButton());
+  EXPECT_FALSE(dialog_view_->button1_->IsDefaultButton());
+  EXPECT_FALSE(dialog_view_->button2_->IsDefaultButton());
 }

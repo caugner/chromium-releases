@@ -7,6 +7,7 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "googleurl/src/gurl.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 
@@ -31,11 +32,11 @@ void URLRequestSlowDownloadJob::Start() {
 /* static */
 void URLRequestSlowDownloadJob::AddUITestUrls() {
   URLRequestFilter* filter = URLRequestFilter::GetInstance();
-  filter->AddUrlHandler(GURL(kUnknownSizeUrl),
+  filter->AddUrlHandler(GURL(WideToUTF8(kUnknownSizeUrl)),
                         &URLRequestSlowDownloadJob::Factory);
-  filter->AddUrlHandler(GURL(kKnownSizeUrl),
+  filter->AddUrlHandler(GURL(WideToUTF8(kKnownSizeUrl)),
                         &URLRequestSlowDownloadJob::Factory);
-  filter->AddUrlHandler(GURL(kFinishDownloadUrl),
+  filter->AddUrlHandler(GURL(WideToUTF8(kFinishDownloadUrl)),
                         &URLRequestSlowDownloadJob::Factory);
 }
 
@@ -72,7 +73,7 @@ void URLRequestSlowDownloadJob::StartAsync() {
   NotifyHeadersComplete();
 }
 
-bool URLRequestSlowDownloadJob::ReadRawData(char* buf, int buf_size,
+bool URLRequestSlowDownloadJob::ReadRawData(net::IOBuffer* buf, int buf_size,
                                             int *bytes_read) {
   if (LowerCaseEqualsASCII(kFinishDownloadUrl,
                            request_->url().spec().c_str())) {
@@ -83,7 +84,7 @@ bool URLRequestSlowDownloadJob::ReadRawData(char* buf, int buf_size,
   if (should_send_second_chunk_) {
     DCHECK(buf_size > kSecondDownloadSize);
     for (int i = 0; i < kSecondDownloadSize; ++i) {
-      buf[i] = '*';
+      buf->data()[i] = '*';
     }
     *bytes_read = kSecondDownloadSize;
     should_send_second_chunk_ = false;
@@ -93,7 +94,7 @@ bool URLRequestSlowDownloadJob::ReadRawData(char* buf, int buf_size,
   if (first_download_size_remaining_ > 0) {
     int send_size = std::min(first_download_size_remaining_, buf_size);
     for (int i = 0; i < send_size; ++i) {
-      buf[i] = '*';
+      buf->data()[i] = '*';
     }
     *bytes_read = send_size;
     first_download_size_remaining_ -= send_size;
@@ -130,7 +131,15 @@ void URLRequestSlowDownloadJob::CheckDoneStatus() {
   }
 }
 
+// Public virtual version.
 void URLRequestSlowDownloadJob::GetResponseInfo(net::HttpResponseInfo* info) {
+  // Forward to private const version.
+  GetResponseInfoConst(info);
+}
+
+// Private const version.
+void URLRequestSlowDownloadJob::GetResponseInfoConst(
+    net::HttpResponseInfo* info) const {
   // Send back mock headers.
   std::string raw_headers;
   if (LowerCaseEqualsASCII(kFinishDownloadUrl,
@@ -155,9 +164,8 @@ void URLRequestSlowDownloadJob::GetResponseInfo(net::HttpResponseInfo* info) {
   info->headers = new net::HttpResponseHeaders(raw_headers);
 }
 
-bool URLRequestSlowDownloadJob::GetMimeType(std::string* mime_type) {
+bool URLRequestSlowDownloadJob::GetMimeType(std::string* mime_type) const {
   net::HttpResponseInfo info;
-  GetResponseInfo(&info);
+  GetResponseInfoConst(&info);
   return info.headers && info.headers->GetMimeType(mime_type);
 }
-

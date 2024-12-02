@@ -34,6 +34,7 @@ class SBEntry;
 typedef struct {
   std::string url;
   std::string mac;
+  std::string list_name;
 } ChunkUrl;
 
 // A truncated hash's type.
@@ -57,6 +58,8 @@ struct SBChunkHost {
 // Container for an add/sub chunk.
 struct SBChunk {
   int chunk_number;
+  int list_id;
+  bool is_add;
   std::deque<SBChunkHost> hosts;
 };
 
@@ -269,6 +272,19 @@ class SBHostInfo {
 // Helper functions -----------------------------------------------------------
 
 namespace safe_browsing_util {
+
+// SafeBrowsing list names.
+extern const char kMalwareList[];
+extern const char kPhishingList[];
+
+// Converts between the SafeBrowsing list names and their enumerated value.
+// If the list names change, both of these methods must be updated.
+enum ListType {
+  MALWARE = 0,
+  PHISH = 1,
+};
+int GetListId(const std::string& name);
+std::string GetListName(int list_id);
 
 void FreeChunks(std::deque<SBChunk>* chunks);
 

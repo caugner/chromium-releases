@@ -2,47 +2,58 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/tabs/tab_strip_model.h"
+
 #include <algorithm>
 
-#include "base/gfx/point.h"
-#include "base/logging.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_about_handler.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/dom_ui/new_tab_ui.h"
+#include "base/string_util.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/navigation_controller.h"
-#include "chrome/browser/navigation_entry.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/tab_contents_factory.h"
-#include "chrome/browser/tab_restore_service.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/tabs/tab_strip_model_order_controller.h"
-#include "chrome/browser/user_metrics.h"
+#include "chrome/browser/tab_contents/navigation_controller.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/stl_util-inl.h"
+#include "chrome/common/url_constants.h"
+
+namespace {
+
+// Returns true if the specified transition is one of the types that cause the
+// opener relationships for the tab in which the transition occured to be
+// forgotten. This is generally any navigation that isn't a link click (i.e.
+// any navigation that can be considered to be the start of a new task distinct
+// from what had previously occurred in that tab).
+bool ShouldForgetOpenersForTransition(PageTransition::Type transition) {
+  return transition == PageTransition::TYPED ||
+      transition == PageTransition::AUTO_BOOKMARK ||
+      transition == PageTransition::GENERATED ||
+      transition == PageTransition::START_PAGE;
+}
+
+}  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabStripModel, public:
 
 TabStripModel::TabStripModel(TabStripModelDelegate* delegate, Profile* profile)
     : delegate_(delegate),
-      profile_(profile),
       selected_index_(kNoTab),
+      profile_(profile),
       closing_all_(false),
       order_controller_(NULL) {
+  DCHECK(delegate_);
   NotificationService::current()->AddObserver(this,
-      NOTIFY_TAB_CONTENTS_DESTROYED, NotificationService::AllSources());
-  SetOrderController(new TabStripModelOrderController(this));
+      NotificationType::TAB_CONTENTS_DESTROYED,
+      NotificationService::AllSources());
+  order_controller_ = new TabStripModelOrderController(this);
 }
 
 TabStripModel::~TabStripModel() {
   STLDeleteContainerPointers(contents_data_.begin(), contents_data_.end());
   delete order_controller_;
   NotificationService::current()->RemoveObserver(this,
-      NOTIFY_TAB_CONTENTS_DESTROYED, NotificationService::AllSources());
+      NotificationType::TAB_CONTENTS_DESTROYED,
+      NotificationService::AllSources());
 }
 
 void TabStripModel::AddObserver(TabStripModelObserver* observer) {
@@ -51,13 +62,6 @@ void TabStripModel::AddObserver(TabStripModelObserver* observer) {
 
 void TabStripModel::RemoveObserver(TabStripModelObserver* observer) {
   observers_.RemoveObserver(observer);
-}
-
-void TabStripModel::SetOrderController(
-    TabStripModelOrderController* order_controller) {
-  if (order_controller_)
-    delete order_controller_;
-  order_controller_ = order_controller;
 }
 
 bool TabStripModel::ContainsIndex(int index) const {
@@ -218,11 +222,6 @@ void TabStripModel::UpdateTabContentsStateAt(int index) {
       TabChangedAt(GetContentsAt(index), index));
 }
 
-void TabStripModel::UpdateTabContentsLoadingAnimations() {
-  FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
-      TabValidateAnimations());
-}
-
 void TabStripModel::CloseAllTabs() {
   // Set state so that observers can adjust their behavior to suit this
   // specific condition when CloseTabContentsAt causes a flurry of
@@ -237,23 +236,6 @@ bool TabStripModel::TabsAreLoading() const {
   for (; iter != contents_data_.end(); ++iter) {
     if ((*iter)->contents->is_loading())
       return true;
-  }
-  return false;
-}
-
-bool TabStripModel::TabHasUnloadListener(int index) {
-  // TODO(beng): this should call through to the delegate, so we can mock it
-  //             in testing and then provide better test coverage for features
-  //             like "close other tabs".
-  WebContents* web_contents = GetContentsAt(index)->AsWebContents();
-  if (web_contents) {
-    // If the WebContents is not connected yet, then there's no unload
-    // handler we can fire even if the WebContents has an unload listener.
-    // One case where we hit this is in a tab that has an infinite loop 
-    // before load.
-    return web_contents->notify_disconnection() && 
-        !web_contents->showing_interstitial_page() &&
-        web_contents->render_view_host()->HasUnloadListener();
   }
   return false;
 }
@@ -310,6 +292,28 @@ int TabStripModel::GetIndexOfLastTabContentsOpenedBy(
   return kNoTab;
 }
 
+void TabStripModel::TabNavigating(TabContents* contents,
+                                  PageTransition::Type transition) {
+  if (ShouldForgetOpenersForTransition(transition)) {
+    // Don't forget the openers if this tab is a New Tab page opened at the
+    // end of the TabStrip (e.g. by pressing Ctrl+T). Give the user one
+    // navigation of one of these transition types before resetting the
+    // opener relationships (this allows for the use case of opening a new
+    // tab to do a quick look-up of something while viewing a tab earlier in
+    // the strip). We can make this heuristic more permissive if need be.
+    if (!IsNewTabAtEndOfTabStrip(contents)) {
+      // If the user navigates the current tab to another page in any way
+      // other than by clicking a link, we want to pro-actively forget all
+      // TabStrip opener relationships since we assume they're beginning a
+      // different task by reusing the current tab.
+      ForgetAllOpeners();
+      // In this specific case we also want to reset the group relationship,
+      // since it is now technically invalid.
+      ForgetGroup(contents);
+    }
+  }
+}
+
 void TabStripModel::ForgetAllOpeners() {
   // Forget all opener memories so we don't do anything weird with tab
   // re-selection ordering.
@@ -332,17 +336,17 @@ bool TabStripModel::ShouldResetGroupOnSelect(TabContents* contents) const {
 }
 
 TabContents* TabStripModel::AddBlankTab(bool foreground) {
-  DCHECK(delegate_);
   TabContents* contents = delegate_->CreateTabContentsForURL(
-      NewTabUIURL(), profile_, PageTransition::TYPED, false, NULL);
+      delegate_->GetBlankTabURL(), GURL(), profile_, PageTransition::TYPED,
+      false, NULL);
   AddTabContents(contents, -1, PageTransition::TYPED, foreground);
   return contents;
 }
 
 TabContents* TabStripModel::AddBlankTabAt(int index, bool foreground) {
-  DCHECK(delegate_);
   TabContents* contents = delegate_->CreateTabContentsForURL(
-      NewTabUIURL(), profile_, PageTransition::LINK, false, NULL);
+      delegate_->GetBlankTabURL(), GURL(), profile_, PageTransition::LINK,
+      false, NULL);
   AddTabContents(contents, index, PageTransition::LINK, foreground);
   return contents;
 }
@@ -360,7 +364,7 @@ void TabStripModel::AddTabContents(TabContents* contents,
     if (index < 0)
       index = count();
   }
-  TabContents* last_selected_contents = GetSelectedTabContents();
+
   // Tabs opened from links inherit the "group" attribute of the Tab from which
   // they were opened. This means when they're closed, that Tab will be
   // selected again.
@@ -405,9 +409,11 @@ void TabStripModel::SelectLastTab() {
 }
 
 void TabStripModel::TearOffTabContents(TabContents* detached_contents,
-                                       const gfx::Point& drop_point) {
+                                       const gfx::Rect& window_bounds,
+                                       const DockInfo& dock_info) {
   DCHECK(detached_contents);
-  delegate_->CreateNewStripWithContents(detached_contents, drop_point);
+  delegate_->CreateNewStripWithContents(detached_contents, window_bounds,
+                                        dock_info);
 }
 
 // Context menu functions.
@@ -431,10 +437,7 @@ bool TabStripModel::IsContextMenuCommandEnabled(
       return next_index != kNoTab;
     }
     case CommandDuplicate:
-      if (delegate_)
-        return delegate_->CanDuplicateContentsAt(context_index);
-      else
-        return false;
+      return delegate_->CanDuplicateContentsAt(context_index);
     default:
       NOTREACHED();
   }
@@ -451,13 +454,11 @@ void TabStripModel::ExecuteContextMenuCommand(
       break;
     case CommandReload:
       UserMetrics::RecordAction(L"TabContextMenu_Reload", profile_);
-      GetContentsAt(context_index)->controller()->Reload();
+      GetContentsAt(context_index)->controller()->Reload(true);
       break;
     case CommandDuplicate:
-      if (delegate_) {
-        UserMetrics::RecordAction(L"TabContextMenu_Duplicate", profile_);
-        delegate_->DuplicateContentsAt(context_index);
-      }
+      UserMetrics::RecordAction(L"TabContextMenu_Duplicate", profile_);
+      delegate_->DuplicateContentsAt(context_index);
       break;
     case CommandCloseTab:
       UserMetrics::RecordAction(L"TabContextMenu_CloseTab", profile_);
@@ -511,7 +512,7 @@ std::vector<int> TabStripModel::GetIndexesOpenedBy(int index) const {
 void TabStripModel::Observe(NotificationType type,
                             const NotificationSource& source,
                             const NotificationDetails& details) {
-  DCHECK(type == NOTIFY_TAB_CONTENTS_DESTROYED);
+  DCHECK(type == NotificationType::TAB_CONTENTS_DESTROYED);
   // Sometimes, on qemu, it seems like a TabContents object can be destroyed
   // while we still have a reference to it. We need to break this reference
   // here so we don't crash later.
@@ -526,21 +527,19 @@ void TabStripModel::Observe(NotificationType type,
 ///////////////////////////////////////////////////////////////////////////////
 // TabStripModel, private:
 
+bool TabStripModel::IsNewTabAtEndOfTabStrip(TabContents* contents) const {
+  return LowerCaseEqualsASCII(contents->GetURL().spec(),
+                              chrome::kChromeUINewTabURL) &&
+      contents == GetContentsAt(count() - 1) &&
+      contents->controller()->GetEntryCount() == 1;
+}
+
 bool TabStripModel::InternalCloseTabContentsAt(int index,
                                                bool create_historical_tab) {
   TabContents* detached_contents = GetContentsAt(index);
 
-  if (TabHasUnloadListener(index)) {
-    // If the page has unload listeners, then we tell the renderer to fire
-    // them. Once they have fired, we'll get a message back saying whether
-    // to proceed closing the page or not, which sends us back to this method
-    // with the HasUnloadListener bit cleared.
-    WebContents* web_contents = GetContentsAt(index)->AsWebContents();
-    // If we hit this code path, the tab had better be a WebContents tab.
-    DCHECK(web_contents);
-    web_contents->render_view_host()->FirePageBeforeUnload();
+  if (delegate_->RunUnloadListenerBeforeClosing(detached_contents))
     return false;
-  }
 
   // TODO: Now that we know the tab has no unload/beforeunload listeners,
   // we should be able to do a fast shutdown of the RenderViewProcess.
@@ -549,14 +548,12 @@ bool TabStripModel::InternalCloseTabContentsAt(int index,
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
       TabClosingAt(detached_contents, index));
 
-  const bool add_to_restore_service =
-      (detached_contents && create_historical_tab &&
-       ShouldAddToTabRestoreService(detached_contents));
   if (detached_contents) {
-    if (add_to_restore_service) {
-      profile()->GetTabRestoreService()->
-          CreateHistoricalTab(detached_contents->controller());
-    }
+    // Ask the delegate to save an entry for this tab in the historical tab
+    // database if applicable.
+    if (create_historical_tab)
+      delegate_->CreateHistoricalTab(detached_contents);
+
     detached_contents->CloseContents();
     // Closing the TabContents will later call back to us via
     // NotificationObserver and detach it.
@@ -577,7 +574,6 @@ void TabStripModel::ChangeSelectedContentsFrom(
   if (old_contents == new_contents)
     return;
   TabContents* last_selected_contents = old_contents;
-  int from_index = selected_index_;
   selected_index_ = to_index;
 
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
@@ -591,24 +587,9 @@ void TabStripModel::SetOpenerForContents(TabContents* contents,
   contents_data_.at(index)->opener = opener->controller();
 }
 
-bool TabStripModel::ShouldAddToTabRestoreService(TabContents* contents) {
-  if (!profile() || profile()->IsOffTheRecord() ||
-      !profile()->GetTabRestoreService()) {
-    return false;
-  }
-
-  Browser* browser =
-      Browser::GetBrowserForController(contents->controller(), NULL);
-  if (!browser)
-    return false; // Browser is null during unit tests.
-  return browser->GetType() == BrowserType::TABBED_BROWSER;
-}
-
 // static
 bool TabStripModel::OpenerMatches(TabContentsData* data,
                                   NavigationController* opener,
                                   bool use_group) {
   return data->opener == opener || (use_group && data->group == opener);
 }
-
-

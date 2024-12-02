@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 #include "chrome/test/test_notification_tracker.h"
-#include "chrome/common/notification_types.h"
+#include "chrome/common/notification_service.h"
 
 TestNotificationTracker::Event::Event()
-    : type(NOTIFY_ALL),
+    : type(NotificationType::ALL),
       source(NotificationService::AllSources()),
       details(NotificationService::NoDetails()) {
 }
@@ -78,4 +78,3 @@ void TestNotificationTracker::Observe(NotificationType type,
                                       const NotificationDetails& details) {
   events_.push_back(Event(type, source, details));
 }
-

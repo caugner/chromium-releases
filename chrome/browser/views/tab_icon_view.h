@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEW_TAB_ICON_VIEW_H__
-#define CHROME_BROWSER_VIEW_TAB_ICON_VIEW_H__
+#ifndef CHROME_BROWSER_VIEW_TAB_ICON_VIEW_H_
+#define CHROME_BROWSER_VIEW_TAB_ICON_VIEW_H_
 
 #include "chrome/views/view.h"
 
+class SkBitmap;
 class TabContents;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -14,21 +15,21 @@ class TabContents;
 // A view to display a tab fav icon or a throbber.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class TabIconView : public ChromeViews::View {
+class TabIconView : public views::View {
  public:
-  class TabContentsProvider {
+  // Classes implement this interface to provide state for the TabIconView.
+  class TabIconViewModel {
    public:
-    // Should return the current tab contents this TabIconView object is
-    // representing.
-    virtual TabContents* GetCurrentTabContents() = 0;
+    // Returns true if the TabIconView should show a loading animation.
+    virtual bool ShouldTabIconViewAnimate() const = 0;
 
     // Returns the favicon to display in the icon view
-    virtual SkBitmap GetFavIcon() = 0;
+    virtual SkBitmap GetFavIconForTabIconView() = 0;
   };
 
   static void InitializeIfNeeded();
 
-  explicit TabIconView(TabContentsProvider* provider);
+  explicit TabIconView(TabIconViewModel* provider);
   virtual ~TabIconView();
 
   // Invoke whenever the tab state changes or the throbber should update.
@@ -39,14 +40,21 @@ class TabIconView : public ChromeViews::View {
 
   // Overriden from View
   virtual void Paint(ChromeCanvas* canvas);
-  virtual void GetPreferredSize(CSize* out);
+  virtual gfx::Size GetPreferredSize();
 
  private:
   void PaintThrobber(ChromeCanvas* canvas);
   void PaintFavIcon(ChromeCanvas* canvas, const SkBitmap& bitmap);
+  void PaintIcon(ChromeCanvas* canvas,
+                 const SkBitmap& bitmap,
+                 int src_x,
+                 int src_y,
+                 int src_w,
+                 int src_h,
+                 bool filter);
 
-  // Our provider of current tab contents.
-  TabContentsProvider* provider_;
+  // Our model.
+  TabIconViewModel* model_;
 
   // Whether the throbber is running.
   bool throbber_running_;
@@ -58,8 +66,7 @@ class TabIconView : public ChromeViews::View {
   // throbber_running_ is true.
   int throbber_frame_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(TabIconView);
+  DISALLOW_COPY_AND_ASSIGN(TabIconView);
 };
 
-#endif  // CHROME_BROWSER_VIEW_TAB_ICON_VIEW_H__
-
+#endif  // CHROME_BROWSER_VIEW_TAB_ICON_VIEW_H_

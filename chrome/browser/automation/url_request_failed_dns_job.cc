@@ -10,8 +10,8 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_filter.h"
 
-const wchar_t URLRequestFailedDnsJob::kTestUrl[] =
-  L"http://url.handled.by.fake.dns/";
+const char URLRequestFailedDnsJob::kTestUrl[] =
+    "http://url.handled.by.fake.dns/";
 
 void URLRequestFailedDnsJob::Start() {
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
@@ -35,4 +35,3 @@ void URLRequestFailedDnsJob::StartAsync() {
   NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED,
                                     net::ERR_NAME_NOT_RESOLVED));
 }
-

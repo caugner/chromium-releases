@@ -5,23 +5,23 @@
 #include "chrome/browser/browser_process_impl.h"
 
 #include "base/command_line.h"
-#include "base/thread.h"
 #include "base/path_service.h"
-#include "chrome/browser/automation/automation_provider_list.h"
+#include "base/thread.h"
+#include "base/waitable_event.h"
+#include "chrome/browser/browser_trial.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/debugger/debugger_wrapper.h"
+#include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/download/download_file.h"
 #include "chrome/browser/download/save_file_manager.h"
 #include "chrome/browser/google_url_tracker.h"
-#include "chrome/browser/icon_manager.h"
-#include "chrome/browser/metrics_service.h"
+#include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/net/dns_global.h"
 #include "chrome/browser/plugin_service.h"
-#include "chrome/browser/printing/print_job_manager.h"
 #include "chrome/browser/profile_manager.h"
-#include "chrome/browser/render_process_host.h"
-#include "chrome/browser/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/debugger/debugger_wrapper.h"
-#include "chrome/browser/suspend_controller.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/clipboard_service.h"
@@ -29,8 +29,17 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
-#include "chrome/views/accelerator_handler.h"
-#include "chrome/views/view_storage.h"
+
+#if defined(OS_WIN)
+#include "chrome/browser/automation/automation_provider_list.h"
+#include "chrome/browser/icon_manager.h"
+#include "chrome/browser/printing/print_job_manager.h"
+#include "chrome/views/focus/view_storage.h"
+#include "chrome/views/widget/accelerator_handler.h"
+#elif defined(OS_POSIX)
+// TODO(port): Remove the temporary scaffolding as we port the above headers.
+#include "chrome/common/temp_scaffolding_stubs.h"
+#endif
 
 namespace {
 
@@ -57,8 +66,10 @@ class BrowserProcessSubThread : public ChromeThread {
 
  protected:
   virtual void Init() {
+#if defined(OS_WIN)
     // Initializes the COM library on the current thread.
     CoInitialize(NULL);
+#endif
 
     notification_service_ = new NotificationService;
   }
@@ -67,9 +78,11 @@ class BrowserProcessSubThread : public ChromeThread {
     delete notification_service_;
     notification_service_ = NULL;
 
+#if defined(OS_WIN)
     // Closes the COM library on the current thread. CoInitialize must
     // be balanced by a corresponding call to CoUninitialize.
     CoUninitialize();
+#endif
   }
 
  private:
@@ -81,7 +94,7 @@ class BrowserProcessSubThread : public ChromeThread {
 
 }  // namespace
 
-BrowserProcessImpl::BrowserProcessImpl(CommandLine& command_line)
+BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
     : created_resource_dispatcher_host_(false),
       created_metrics_service_(false),
       created_io_thread_(false),
@@ -89,10 +102,11 @@ BrowserProcessImpl::BrowserProcessImpl(CommandLine& command_line)
       created_db_thread_(false),
       created_profile_manager_(false),
       created_local_state_(false),
-      created_icon_manager_(false),
       initialized_broker_services_(false),
-      created_debugger_wrapper_(false),
       broker_services_(NULL),
+      created_icon_manager_(false),
+      created_debugger_wrapper_(false),
+      created_devtools_manager_(false),
       module_ref_count_(0),
       memory_model_(MEDIUM_MEMORY_MODEL),
       checked_for_new_frames_(false),
@@ -116,10 +130,7 @@ BrowserProcessImpl::BrowserProcessImpl(CommandLine& command_line)
         memory_model_ = MEDIUM_MEMORY_MODEL;
     }
   }
-
-  suspend_controller_ = new SuspendController();
-
-  shutdown_event_ = ::CreateEvent(NULL, TRUE, FALSE, NULL);
+  shutdown_event_.reset(new base::WaitableEvent(true, false));
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
@@ -155,6 +166,11 @@ BrowserProcessImpl::~BrowserProcessImpl() {
     resource_dispatcher_host()->Shutdown();
   }
 
+  // Shutdown DNS prefetching now to ensure that network stack objects
+  // living on the IO thread get destroyed before the IO thread goes away.
+  io_thread_->message_loop()->PostTask(FROM_HERE,
+      NewRunnableFunction(chrome_browser_net::EnsureDnsPrefetchShutdown));
+
   // Need to stop io_thread_ before resource_dispatcher_host_, since
   // io_thread_ may still deref ResourceDispatcherHost and handle resource
   // request before going away.
@@ -182,9 +198,6 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   print_job_manager_->OnQuit();
   print_job_manager_.reset();
 
-  // The ViewStorage needs to go before the NotificationService.
-  ChromeViews::ViewStorage::DeleteSharedInstance();
-
   // Now OK to destroy NotificationService.
   main_notification_service_.reset();
 
@@ -197,8 +210,10 @@ static void PostQuit(MessageLoop* message_loop) {
 }
 
 void BrowserProcessImpl::EndSession() {
+#if defined(OS_WIN)
   // Notify we are going away.
-  ::SetEvent(shutdown_event_);
+  ::SetEvent(shutdown_event_->handle());
+#endif
 
   // Mark all the profiles as clean.
   ProfileManager* pm = profile_manager();
@@ -285,7 +300,13 @@ void BrowserProcessImpl::CreateFileThread() {
   scoped_ptr<base::Thread> thread(
       new BrowserProcessSubThread(ChromeThread::FILE));
   base::Thread::Options options;
+#if defined(OS_WIN)
+  // On Windows, the FILE thread needs to be have a UI message loop which pumps
+  // messages in such a way that Google Update can communicate back to us.
   options.message_loop_type = MessageLoop::TYPE_UI;
+#else
+  options.message_loop_type = MessageLoop::TYPE_IO;
+#endif
   if (!thread->StartWithOptions(options))
     return;
   file_thread_.swap(thread);
@@ -313,7 +334,7 @@ void BrowserProcessImpl::CreateLocalState() {
   DCHECK(!created_local_state_ && local_state_.get() == NULL);
   created_local_state_ = true;
 
-  std::wstring local_state_path;
+  FilePath local_state_path;
   PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   local_state_.reset(new PrefService(local_state_path));
 }
@@ -339,11 +360,21 @@ void BrowserProcessImpl::CreateDebuggerWrapper(int port) {
   debugger_wrapper_ = new DebuggerWrapper(port);
 }
 
+void BrowserProcessImpl::CreateDevToolsManager() {
+  DCHECK(!devtools_manager_.get());
+  created_devtools_manager_ = true;
+  devtools_manager_.reset(new DevToolsManager());
+}
+
 void BrowserProcessImpl::CreateAcceleratorHandler() {
+#if defined(OS_WIN)
   DCHECK(accelerator_handler_.get() == NULL);
-  scoped_ptr<ChromeViews::AcceleratorHandler> accelerator_handler(
-      new ChromeViews::AcceleratorHandler);
+  scoped_ptr<views::AcceleratorHandler> accelerator_handler(
+      new views::AcceleratorHandler);
   accelerator_handler_.swap(accelerator_handler);
+#else
+  // TODO(port): remove this completely, it has no business being here.
+#endif
 }
 
 void BrowserProcessImpl::CreateGoogleURLTracker() {
@@ -351,4 +382,3 @@ void BrowserProcessImpl::CreateGoogleURLTracker() {
   scoped_ptr<GoogleURLTracker> google_url_tracker(new GoogleURLTracker);
   google_url_tracker_.swap(google_url_tracker);
 }
-

@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_SPELLCHECK_WORDITERATOR_H__
-#define CHROME_BROWSER_SPELLCHECK_WORDITERATOR_H__
+#ifndef CHROME_BROWSER_SPELLCHECK_WORDITERATOR_H_
+#define CHROME_BROWSER_SPELLCHECK_WORDITERATOR_H_
 
 #include <map>
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/string16.h"
 
 #include "unicode/uscript.h"
 
@@ -24,7 +25,7 @@ class SpellcheckCharAttribute {
 
   // Sets the default language of the spell checker. This controls which
   // characters are considered parts of words of the given language.
-  void SetDefaultLanguage(const std::wstring& language);
+  void SetDefaultLanguage(const std::string& language);
 
   // Returns whether or not the given character is a character used by the
   // selected dictionary.
@@ -72,7 +73,7 @@ class SpellcheckCharAttribute {
   // Represents a table of characters used by contractions.
   std::map<UChar32, bool> middle_letters_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SpellcheckCharAttribute);
+  DISALLOW_COPY_AND_ASSIGN(SpellcheckCharAttribute);
 };
 
 // A class which implements methods for finding the location of word boundaries
@@ -93,7 +94,7 @@ class SpellcheckWordIterator {
   //   * attribute [in] (const SpellcheckCharAttribute*)
   //     Represents a set of character attributes used for filtering out
   //     non-word characters.
-  //   * word [in] (const wchar_t*)
+  //   * word [in] (const char16*)
   //     Represents a string from which this object extracts words.
   //     (This string does not have to be NUL-terminated.)
   //   * length [in] (size_t)
@@ -108,20 +109,20 @@ class SpellcheckWordIterator {
   //   * false
   //     An error occured while initializing this object.
   void Initialize(const SpellcheckCharAttribute* attribute,
-                  const wchar_t* word,
+                  const char16* word,
                   size_t length,
                   bool allow_contraction);
 
   // Retrieves a word (or a contraction).
   // Parameters
-  //   * word_string [out] (std::wstring*)
+  //   * word_string [out] (string16*)
   //     Represents a word (or a contraction) to be checked its spelling.
   //     This |word_string| has been already normalized to its canonical form
   //     (i.e. decomposed ligatures, replaced full-width latin characters to
   //     its ASCII alternatives, etc.) so that a SpellChecker object can check
   //     its spelling without any additional operations.
   //     On the other hand, a substring of the input string
-  //       std::wstring str(&word[word_start], word_length);
+  //       string16 str(&word[word_start], word_length);
   //     represents the non-normalized version of this extracted word.
   //   * word_start [out] (int*)
   //     Represents the offset of this word from the beginning of the input
@@ -136,7 +137,7 @@ class SpellcheckWordIterator {
   //     Found a word (or a contraction) to be checked its spelling.
   //   * false
   //     Not found any more words or contractions to be checked their spellings.
-  bool GetNextWord(std::wstring* word_string,
+  bool GetNextWord(string16* word_string,
                    int* word_start,
                    int* word_length);
 
@@ -157,11 +158,11 @@ class SpellcheckWordIterator {
   // canonical form to the |output_string|.
   bool Normalize(int input_start,
                  int input_length,
-                 std::wstring* output_string) const;
+                 string16* output_string) const;
 
  private:
   // The pointer to the input string from which we are extracting words.
-  const wchar_t* word_;
+  const char16* word_;
 
   // The length of the original string.
   int length_;
@@ -176,8 +177,7 @@ class SpellcheckWordIterator {
   // The character attributes used for filtering out non-word characters.
   const SpellcheckCharAttribute* attribute_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(SpellcheckWordIterator);
+  DISALLOW_COPY_AND_ASSIGN(SpellcheckWordIterator);
 };
 
-#endif  // CHROME_BROWSER_SPELLCHECK_WORDITERATOR_H__
-
+#endif  // CHROME_BROWSER_SPELLCHECK_WORDITERATOR_H_

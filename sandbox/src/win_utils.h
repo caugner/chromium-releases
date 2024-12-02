@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SANDBOX_SRC_WIN_UTILS_H__
-#define SANDBOX_SRC_WIN_UTILS_H__
+#ifndef SANDBOX_SRC_WIN_UTILS_H_
+#define SANDBOX_SRC_WIN_UTILS_H_
 
 #include <windows.h>
 #include <string>
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
 
 namespace sandbox {
 
@@ -92,5 +91,4 @@ bool ResolveRegistryName(std::wstring name, std::wstring* resolved_name);
 // is a pointer to the function pointer.
 void ResolveNTFunctionPtr(const char* name, void* ptr);
 
-#endif  // SANDBOX_SRC_WIN_UTILS_H__
-
+#endif  // SANDBOX_SRC_WIN_UTILS_H_

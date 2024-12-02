@@ -10,47 +10,55 @@
 // any gtest based tests that are linked into your executable.
 
 #include "base/at_exit.h"
+#include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/debug_on_start.h"
+#include "base/file_path.h"
 #include "base/icu_util.h"
 #include "base/logging.h"
+#include "base/multiprocess_test.h"
+#include "base/scoped_nsautorelease_pool.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "testing/multiprocess_func_list.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
-#include "base/multiprocess_test.h"
+#elif defined(OS_LINUX)
+#include <gtk/gtk.h>
 #endif
 
 class TestSuite {
  public:
   TestSuite(int argc, char** argv) {
-    CommandLine::SetArgcArgv(argc, argv);
+    base::EnableTerminationOnHeapCorruption();
+    CommandLine::Init(argc, argv);
     testing::InitGoogleTest(&argc, argv);
+#if defined(OS_LINUX)
+    gtk_init_check(&argc, &argv);
+#endif
+    // Don't add additional code to this constructor.  Instead add it to
+    // Initialize().  See bug 6436.
   }
 
-  virtual ~TestSuite() {}
+  virtual ~TestSuite() {
+    CommandLine::Terminate();
+  }
 
+  // Don't add additional code to this method.  Instead add it to
+  // Initialize().  See bug 6436.
   int Run() {
-    Initialize();
+    base::ScopedNSAutoreleasePool scoped_pool;
 
-#if defined(OS_WIN)
+    Initialize();
+    std::wstring client_func =
+        CommandLine::ForCurrentProcess()->GetSwitchValue(kRunClientProcess);
     // Check to see if we are being run as a client process.
-    std::wstring client_func = CommandLine().GetSwitchValue(kRunClientProcess);
     if (!client_func.empty()) {
       // Convert our function name to a usable string for GetProcAddress.
       std::string func_name(client_func.begin(), client_func.end());
 
-      // Get our module handle and search for an exported function
-      // which we can use as our client main.
-      MultiProcessTest::ChildFunctionPtr func =
-          reinterpret_cast<MultiProcessTest::ChildFunctionPtr>(
-              GetProcAddress(GetModuleHandle(NULL), func_name.c_str()));
-      if (func)
-        return func();
-      return -1;
+      return multi_process_function_list::InvokeChildProcessTest(func_name);
     }
-#endif
-
     int result = RUN_ALL_TESTS();
 
     Shutdown();
@@ -58,7 +66,7 @@ class TestSuite {
   }
 
  protected:
-  // All fatal log messages (e.g. DCHECK failures) imply unit test failures
+  // All fatal log messages (e.g. DCHECK failures) imply unit test failures.
   static void UnitTestAssertHandler(const std::string& str) {
     FAIL() << str;
   }
@@ -81,12 +89,28 @@ class TestSuite {
   // instead of putting complex code in your constructor/destructor.
 
   virtual void Initialize() {
+    // Initialize logging.
+    FilePath exe;
+    PathService::Get(base::FILE_EXE, &exe);
+    FilePath log_filename = exe.ReplaceExtension(FILE_PATH_LITERAL("log"));
+    logging::InitLogging(log_filename.value().c_str(),
+                         logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
+                         logging::LOCK_LOG_FILE,
+                         logging::DELETE_OLD_LOG_FILE);
+    // We want process and thread IDs because we may have multiple processes.
+    // Note: temporarily enabled timestamps in an effort to catch bug 6361.
+    logging::SetLogItems(true, true, true, true);
+
 #if defined(OS_WIN)
     // In some cases, we do not want to see standard error dialogs.
     if (!IsDebuggerPresent() &&
-        !CommandLine().HasSwitch(L"show-error-dialogs")) {
+        !CommandLine::ForCurrentProcess()->HasSwitch(L"show-error-dialogs")) {
       SuppressErrorDialogs();
+#if !defined(PURIFY)
+      // When the code in this file moved around, bug 6436 resurfaced.
+      // As a hack workaround, just #ifdef out this code for Purify builds.
       logging::SetLogAssertHandler(UnitTestAssertHandler);
+#endif
     }
 #endif
 
@@ -102,4 +126,3 @@ class TestSuite {
 };
 
 #endif  // BASE_TEST_SUITE_H_
-

@@ -2,29 +2,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// This file contains the keyword autocomplete provider. The keyword provider is
-// responsible for remembering/suggesting user "search keyword queries" (e.g.
-// "imdb Godzilla") and then fixing them up into valid URLs.  An instance of it
-// gets created and managed by the autocomplete controller.  KeywordProvider
-// uses a TemplateURLModel to find the set of keywords.
+// This file contains the keyword autocomplete provider. The keyword provider
+// is responsible for remembering/suggesting user "search keyword queries"
+// (e.g.  "imdb Godzilla") and then fixing them up into valid URLs.  An
+// instance of it gets created and managed by the autocomplete controller.
+// KeywordProvider uses a TemplateURLModel to find the set of keywords.
 //
 // For more information on the autocomplete system in general, including how
 // the autocomplete controller and autocomplete providers work, see
 // chrome/browser/autocomplete.h.
 
-#ifndef CHROME_BROWSER_AUTOCOMPLETE_KEYWORD_PROVIDER_H__
-#define CHROME_BROWSER_AUTOCOMPLETE_KEYWORD_PROVIDER_H__
+#ifndef CHROME_BROWSER_AUTOCOMPLETE_KEYWORD_PROVIDER_H_
+#define CHROME_BROWSER_AUTOCOMPLETE_KEYWORD_PROVIDER_H_
 
-#include <map>
 #include <string>
-#include <vector>
+
 #include "chrome/browser/autocomplete/autocomplete.h"
 
 class Profile;
 class TemplateURL;
 class TemplateURLModel;
-
-/****************************** KeywordProvider ******************************/
 
 // Autocomplete provider for keyword input.
 //
@@ -62,13 +59,9 @@ class KeywordProvider : public AutocompleteProvider {
 
   // AutocompleteProvider
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes,
-                     bool synchronous_only);
+                     bool minimal_changes);
 
  private:
-  // Helper functor for Start(), for sorting keyword matches by quality.
-  class CompareQuality;
-
   // Extracts the next whitespace-delimited token from input and returns it.
   // Sets |remaining_input| to everything after the first token (skipping over
   // intervening whitespace).
@@ -83,11 +76,12 @@ class KeywordProvider : public AutocompleteProvider {
       AutocompleteMatch* match);
 
   // Determines the relevance for some input, given its type, whether the user
-  // typed the complete keyword, and whether the keyword is a bookmark keyword
-  // (i.e. one that does not support replacement).
+  // typed the complete keyword, and whether the keyword needs query text (true
+  // if the keyword supports replacement and the user isn't in "prefer keyword
+  // matches" mode).
   static int CalculateRelevance(AutocompleteInput::Type type,
                                 bool complete,
-                                bool is_bookmark_keyword);
+                                bool no_query_text_needed);
 
   // Creates a fully marked-up AutocompleteMatch from the user's input.
   AutocompleteMatch CreateAutocompleteMatch(
@@ -104,5 +98,4 @@ class KeywordProvider : public AutocompleteProvider {
   DISALLOW_EVIL_CONSTRUCTORS(KeywordProvider);
 };
 
-#endif  // CHROME_BROWSER_AUTOCOMPLETE_KEYWORD_PROVIDER_H__
-
+#endif  // CHROME_BROWSER_AUTOCOMPLETE_KEYWORD_PROVIDER_H_

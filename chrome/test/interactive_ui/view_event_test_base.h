@@ -7,7 +7,7 @@
 
 #include "base/message_loop.h"
 #include "base/thread.h"
-#include "chrome/views/window_delegate.h"
+#include "chrome/views/window/window_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class Task;
@@ -53,7 +53,7 @@ class Size;
 //   // Then use this to schedule another mouse move.
 //   ScheduleMouseMoveInBackground(loc.x, loc.y);
 
-class ViewEventTestBase : public ChromeViews::WindowDelegate,
+class ViewEventTestBase : public views::WindowDelegate,
                           public testing::Test {
  public:
   // Invoke when done either because of failure or success. Quits the message
@@ -74,15 +74,15 @@ class ViewEventTestBase : public ChromeViews::WindowDelegate,
 
   // WindowDelegate method. Calls into CreateContentsView to get the actual
   // view.
-  virtual ChromeViews::View* GetContentsView();
+  virtual views::View* GetContentsView();
 
   // Overriden to do nothing so that this class can be used in runnable tasks.
   void AddRef() {}
   void Release() {}
 
  protected:
-  // Returns the view that is added to the window. 
-  virtual ChromeViews::View* CreateContentsView() = 0;
+  // Returns the view that is added to the window.
+  virtual views::View* CreateContentsView() = 0;
 
   // Called once the message loop is running.
   virtual void DoTestOnMessageLoop() = 0;
@@ -108,7 +108,7 @@ class ViewEventTestBase : public ChromeViews::WindowDelegate,
   // Spawns a new thread posts a MouseMove in the background.
   void ScheduleMouseMoveInBackground(int x, int y);
 
-  ChromeViews::Window* window_;
+  views::Window* window_;
 
  private:
   // Stops the thread started by ScheduleMouseMoveInBackground.
@@ -119,7 +119,7 @@ class ViewEventTestBase : public ChromeViews::WindowDelegate,
   void RunTestMethod(Task* task);
 
   // The content of the Window.
-  ChromeViews::View* content_view_;
+  views::View* content_view_;
 
   // Thread for posting background MouseMoves.
   scoped_ptr<base::Thread> dnd_thread_;
@@ -129,7 +129,7 @@ class ViewEventTestBase : public ChromeViews::WindowDelegate,
   DISALLOW_COPY_AND_ASSIGN(ViewEventTestBase);
 };
 
-// Convenience macro for defining a ViewEventTestBase. See class description 
+// Convenience macro for defining a ViewEventTestBase. See class description
 // of ViewEventTestBase for details.
 #define VIEW_TEST(test_class, name) \
   TEST_F(test_class, name) {\

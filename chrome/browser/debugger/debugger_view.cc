@@ -10,25 +10,25 @@
 #include "base/values.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/debugger/resources/debugger_resources.h"
 #include "chrome/browser/debugger/debugger_shell.h"
 #include "chrome/browser/debugger/debugger_view.h"
 #include "chrome/browser/debugger/debugger_wrapper.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
-#include "chrome/browser/render_view_host.h"
-#include "chrome/browser/tab_contents.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/view_ids.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/browser/views/tab_contents_container_view.h"
-#include "chrome/browser/web_contents.h"
+#include "chrome/browser/tab_contents/web_contents.h"
 #include "chrome/common/gfx/chrome_canvas.h"
 #include "chrome/common/resource_bundle.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/native_scroll_bar.h"
-#include "chrome/views/scroll_view.h"
-#include "chrome/views/text_field.h"
+#include "chrome/views/controls/scrollbar/native_scroll_bar.h"
+#include "chrome/views/controls/scroll_view.h"
+#include "chrome/views/controls/text_field.h"
 #include "chrome/views/view.h"
 
+#include "grit/debugger_resources.h"
 
 DebuggerView::DebuggerView() : output_ready_(false) {
   web_container_ = new TabContentsContainerView();
@@ -38,25 +38,20 @@ DebuggerView::DebuggerView() : output_ready_(false) {
 DebuggerView::~DebuggerView() {
 }
 
-void DebuggerView::GetPreferredSize(CSize* out) {
-  out->cx = 700;
-  out->cy = 400;
+gfx::Size DebuggerView::GetPreferredSize() {
+  return gfx::Size(700, 400);
 }
 
 void DebuggerView::Layout() {
   web_container_->SetBounds(0, 0, width(), height());
 }
 
-void DebuggerView::DidChangeBounds(const CRect& previous,
-                                   const CRect& current) {
-  Layout();
-}
 
 void DebuggerView::ViewHierarchyChanged(bool is_add,
-                                        ChromeViews::View* parent,
-                                        ChromeViews::View* child) {
+                                        views::View* parent,
+                                        views::View* child) {
   if (is_add && child == this) {
-    DCHECK(GetViewContainer());
+    DCHECK(GetWidget());
     OnInit();
   }
 }
@@ -64,8 +59,7 @@ void DebuggerView::ViewHierarchyChanged(bool is_add,
 void DebuggerView::Paint(ChromeCanvas* canvas) {
 #ifndef NDEBUG
   SkPaint paint;
-  canvas->FillRectInt(SK_ColorCYAN, bounds_.left, bounds_.top,
-                      bounds_.Width(), bounds_.Height());
+  canvas->FillRectInt(SK_ColorCYAN, x(), y(), width(), height());
 #endif
 }
 
@@ -76,6 +70,12 @@ void DebuggerView::SetOutputViewReady() {
     Output(*i);
   }
   pending_output_.clear();
+
+  for (std::vector<std::string>::const_iterator i = pending_events_.begin();
+       i != pending_events_.end(); ++i) {
+    ExecuteJavascript(*i);
+  }
+  pending_events_.clear();
 }
 
 void DebuggerView::Output(const std::string& out) {
@@ -87,33 +87,31 @@ void DebuggerView::Output(const std::wstring& out) {
     pending_output_.push_back(out);
     return;
   }
-  Value* str_value = Value::CreateStringValue(out);
-  std::string json;
-  JSONWriter::Write(str_value, false, &json);
-  const std::string js = StringPrintf("appendText(%s)", json.c_str());
-  ExecuteJavascript(js);
+
+  DictionaryValue* body = new DictionaryValue;
+  body->Set(L"text", Value::CreateStringValue(out));
+  SendEventToPage(L"appendText", body);
 }
 
 void DebuggerView::OnInit() {
   // We can't create the WebContents until we've actually been put into a real
   // view hierarchy somewhere.
   Profile* profile = BrowserList::GetLastActive()->profile();
-  TabContents* tc = TabContents::CreateWithType(TAB_CONTENTS_DEBUGGER, 
-      ::GetDesktopWindow(), profile, NULL);
-  web_contents_ = tc->AsWebContents();
+  web_contents_ = new WebContents(profile, NULL, NULL, MSG_ROUTING_NONE, NULL);
+  web_contents_->CreateView();
+
   web_contents_->SetupController(profile);
   web_contents_->set_delegate(this);
   web_container_->SetTabContents(web_contents_);
   web_contents_->render_view_host()->AllowDOMUIBindings();
 
-  GURL contents("chrome-resource://debugger/");
-  web_contents_->controller()->LoadURL(contents, PageTransition::START_PAGE);
+  GURL contents("chrome-ui://inspector/debugger.html");
+  web_contents_->controller()->LoadURL(contents, GURL(),
+                                       PageTransition::START_PAGE);
 }
 
 void DebuggerView::OnShow() {
   web_contents_->Focus();
-  if (output_ready_)
-    ExecuteJavascript("focusOnCommandLine()");
 }
 
 void DebuggerView::OnClose() {
@@ -121,27 +119,41 @@ void DebuggerView::OnClose() {
   web_contents_->CloseContents();
 }
 
-void DebuggerView::SetDebuggerBreak(bool is_broken) {
-  const std::string js =
-      StringPrintf("setDebuggerBreak(%s)", is_broken ? "true" : "false");
-  ExecuteJavascript(js);
-}
-
 void DebuggerView::OpenURLFromTab(TabContents* source,
                                const GURL& url,
+                               const GURL& referrer,
                                WindowOpenDisposition disposition,
                                PageTransition::Type transition) {
-  BrowserList::GetLastActive()->OpenURL(url, disposition, transition);
+  BrowserList::GetLastActive()->OpenURL(url, referrer, disposition,
+                                        transition);
+}
+
+
+void DebuggerView::SendEventToPage(const std::wstring& name,
+                                   Value* body) {
+  DictionaryValue msg;
+  msg.SetString(L"type", L"event");
+  msg.SetString(L"event", name);
+  msg.Set(L"body", body);
+
+  std::string json;
+  JSONWriter::Write(&msg, false, &json);
+
+  const std::string js =
+    StringPrintf("DebuggerIPC.onMessageReceived(%s)", json.c_str());
+  if (output_ready_) {
+    ExecuteJavascript(js);
+  } else {
+    pending_events_.push_back(js);
+  }
 }
 
 void DebuggerView::ExecuteJavascript(const std::string& js) {
-  const std::string url = StringPrintf("javascript:void(%s)", js.c_str());
-  web_contents_->render_view_host()->ExecuteJavascriptInWebFrame(L"", 
-      UTF8ToWide(url));
+  web_contents_->render_view_host()->ExecuteJavascriptInWebFrame(L"",
+      UTF8ToWide(js));
 }
 
 void DebuggerView::LoadingStateChanged(TabContents* source) {
   if (!source->is_loading())
     SetOutputViewReady();
 }
-

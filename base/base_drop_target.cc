@@ -2,23 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <windows.h>
-#include <shlobj.h>
-
 #include "base/base_drop_target.h"
+
+#include <shlobj.h>
 
 #include "base/logging.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 
 IDropTargetHelper* BaseDropTarget::cached_drop_target_helper_ = NULL;
+int32 BaseDropTarget::drag_identity_ = 0;
 
 BaseDropTarget::BaseDropTarget(HWND hwnd)
-    : suspend_(false),
-      ref_count_(0),
-      hwnd_(hwnd) {
+    : hwnd_(hwnd),
+      suspend_(false),
+      ref_count_(0) {
   DCHECK(hwnd);
   HRESULT result = RegisterDragDrop(hwnd, this);
+  DCHECK(SUCCEEDED(result));
 }
 
 BaseDropTarget::~BaseDropTarget() {
@@ -53,6 +54,11 @@ HRESULT BaseDropTarget::DragEnter(IDataObject* data_object,
     *effect = DROPEFFECT_NONE;
     return S_OK;
   }
+
+  // Update the drag identity, skipping 0.
+  if (++drag_identity_ == 0)
+    ++drag_identity_;
+
   current_data_object_ = data_object;
   POINT screen_pt = { cursor_position.x, cursor_position.y };
   *effect = OnDragEnter(current_data_object_, key_state, screen_pt, *effect);
@@ -125,14 +131,13 @@ HRESULT BaseDropTarget::QueryInterface(const IID& iid, void** object) {
 }
 
 ULONG BaseDropTarget::AddRef() {
-  return InterlockedIncrement(&ref_count_);
+  return ++ref_count_;
 }
 
 ULONG BaseDropTarget::Release() {
-  if (InterlockedDecrement(&ref_count_) == 0) {
-    ULONG copied_refcnt = ref_count_;
+  if (--ref_count_ == 0) {
     delete this;
-    return copied_refcnt;
+    return 0U;
   }
   return ref_count_;
 }
@@ -160,4 +165,3 @@ DWORD BaseDropTarget::OnDrop(IDataObject* data_object,
                              DWORD effect) {
   return DROPEFFECT_NONE;
 }
-

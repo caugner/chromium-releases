@@ -7,40 +7,40 @@
 // will return NULL if the service is not available, so callers must check for
 // this condition.
 
-#ifndef CHROME_BROWSER_BROWSER_PROCESS_H__
-#define CHROME_BROWSER_BROWSER_PROCESS_H__
+#ifndef CHROME_BROWSER_BROWSER_PROCESS_H_
+#define CHROME_BROWSER_BROWSER_PROCESS_H_
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
-#include "base/message_loop.h"
 
 class AutomationProviderList;
 class ClipboardService;
+class DevToolsManager;
+class DownloadRequestManager;
 class GoogleURLTracker;
 class IconManager;
 class MetricsService;
-class NotificationService;
 class PrefService;
 class ProfileManager;
-class RenderProcessHost;
-class ResourceDispatcherHost;
 class DebuggerWrapper;
+class ResourceDispatcherHost;
 class WebAppInstallerService;
-class SharedEvent;
 class SuspendController;
 
 namespace base {
 class Thread;
+class WaitableEvent;
 }
 namespace sandbox {
 class BrokerServices;
 }
-namespace ChromeViews {
-class AcceleratorHandler;
-}
 namespace printing {
 class PrintJobManager;
+}
+namespace views {
+class AcceleratorHandler;
 }
 
 // NOT THREAD SAFE, call only from the main thread.
@@ -78,6 +78,7 @@ class BrowserProcess {
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual DebuggerWrapper* debugger_wrapper() = 0;
+  virtual DevToolsManager* devtools_manager() = 0;
   virtual ClipboardService* clipboard_service() = 0;
 
   // Returns the thread that we perform I/O coordination on (network requests,
@@ -91,7 +92,8 @@ class BrowserProcess {
   // It might be nicer to have a thread pool for this kind of thing.
   virtual base::Thread* file_thread() = 0;
 
-  // Returns the thread that is used for database operations such as history.
+  // Returns the thread that is used for database operations such as the web
+  // database. History has its own thread since it has much higher traffic.
   virtual base::Thread* db_thread() = 0;
 
   virtual sandbox::BrokerServices* broker_services() = 0;
@@ -108,7 +110,7 @@ class BrowserProcess {
 
   virtual bool IsShuttingDown() = 0;
 
-  virtual ChromeViews::AcceleratorHandler* accelerator_handler() = 0;
+  virtual views::AcceleratorHandler* accelerator_handler() = 0;
 
   virtual printing::PrintJobManager* print_job_manager() = 0;
 
@@ -119,21 +121,25 @@ class BrowserProcess {
 
   virtual MemoryModel memory_model() = 0;
 
-  virtual SuspendController* suspend_controller() = 0;
-
-  // TODO(beng): remove once XPFrame/VistaFrame are gone.
-  virtual bool IsUsingNewFrames() = 0;
-
 #if defined(OS_WIN)
-  // Returns an event that is signaled when the browser shutdown.
-  virtual HANDLE shutdown_event() = 0;
+  DownloadRequestManager* download_request_manager();
 #endif
 
+  // Returns an event that is signaled when the browser shutdown.
+  virtual base::WaitableEvent* shutdown_event() = 0;
+
+  // Returns a reference to the user-data-dir based profiles vector.
+  std::vector<std::wstring>& user_data_dir_profiles() {
+    return user_data_dir_profiles_;
+  }
+
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(BrowserProcess);
+  // User-data-dir based profiles.
+  std::vector<std::wstring> user_data_dir_profiles_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserProcess);
 };
 
 extern BrowserProcess* g_browser_process;
 
-#endif  // CHROME_BROWSER_BROWSER_PROCESS_H__
-
+#endif  // CHROME_BROWSER_BROWSER_PROCESS_H_

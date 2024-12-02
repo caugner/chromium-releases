@@ -4,41 +4,44 @@
 
 // This class gathers state related to a single user profile.
 
-#ifndef CHROME_BROWSER_PROFILE_H__
-#define CHROME_BROWSER_PROFILE_H__
+#ifndef CHROME_BROWSER_PROFILE_H_
+#define CHROME_BROWSER_PROFILE_H_
 
 #include <set>
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
+#include "base/file_path.h"
 #include "base/scoped_ptr.h"
-#include "base/task.h"
 #include "base/timer.h"
 #ifdef CHROME_PERSONALIZATION
 #include "chrome/personalization/personalization.h"
 #endif
+#include "chrome/common/notification_observer.h"
 
 class BookmarkModel;
+class ChromeURLRequestContext;
 class DownloadManager;
+class ExtensionsService;
 class HistoryService;
 class NavigationController;
 class PrefService;
 class SessionService;
 class SpellChecker;
+class SSLHostState;
 class TabRestoreService;
 class TemplateURLFetcher;
 class TemplateURLModel;
 class URLRequestContext;
+class UserScriptMaster;
 class VisitedLinkMaster;
 class WebDataService;
 
 class Profile {
  public:
-
   // Profile services are accessed with the following parameter. This parameter
   // defines what the caller plans to do with the service.
-  // The caller is  responsible for not performing any operation that would
+  // The caller is responsible for not performing any operation that would
   // result in persistent implicit records while using an OffTheRecord profile.
   // This flag allows the profile to perform an additional check.
   //
@@ -60,6 +63,7 @@ class Profile {
     // off the record mode.
     IMPLICIT_ACCESS
   };
+  Profile() : restored_last_session_(false) {}
   virtual ~Profile() {}
 
   // Profile prefs are registered as soon as the prefs are loaded for the first
@@ -67,7 +71,7 @@ class Profile {
   static void RegisterUserPrefs(PrefService* prefs);
 
   // Create a new profile given a path.
-  static Profile* CreateProfile(const std::wstring& path);
+  static Profile* CreateProfile(const FilePath& path);
 
   // Returns the request context for the "default" profile.  This may be called
   // from any thread.  This CAN return NULL if a first request context has not
@@ -79,7 +83,7 @@ class Profile {
   static URLRequestContext* GetDefaultRequestContext();
 
   // Returns the path of the directory where this profile's data is stored.
-  virtual std::wstring GetPath() = 0;
+  virtual FilePath GetPath() = 0;
 
   // Return whether this profile is off the record. Default is false.
   virtual bool IsOffTheRecord() = 0;
@@ -98,9 +102,24 @@ class Profile {
   // that this method is called.
   virtual VisitedLinkMaster* GetVisitedLinkMaster() = 0;
 
+  // Retrieves a pointer to the ExtensionsService associated with this
+  // profile. The ExtensionsService is created at startup.
+  virtual ExtensionsService* GetExtensionsService() = 0;
+
+  // Retrieves a pointer to the UserScriptMaster associated with this
+  // profile.  The UserScriptMaster is lazily created the first time
+  // that this method is called.
+  virtual UserScriptMaster* GetUserScriptMaster() = 0;
+
+  // Retrieves a pointer to the SSLHostState associated with this profile.
+  // The SSLHostState is lazily created the first time that this method is
+  // called.
+  virtual SSLHostState* GetSSLHostState() = 0;
+
   // Retrieves a pointer to the HistoryService associated with this
   // profile.  The HistoryService is lazily created the first time
   // that this method is called.
+  //
   // Although HistoryService is refcounted, this will not addref, and callers
   // do not need to do any reference counting as long as they keep the pointer
   // only for the local scope (which they should do anyway since the browser
@@ -143,6 +162,10 @@ class Profile {
   // keep it alive longer than the profile) must Release() it on the I/O thread.
   virtual URLRequestContext* GetRequestContext() = 0;
 
+  // Returns the request context for media resources asociated with this
+  // profile.
+  virtual URLRequestContext* GetRequestContextForMedia() = 0;
+
   // Returns the session service for this profile. This may return NULL. If
   // this profile supports a session service (it isn't off the record), and
   // the session service hasn't yet been created, this forces creation of
@@ -174,7 +197,7 @@ class Profile {
   virtual BookmarkModel* GetBookmarkModel() = 0;
 
 #ifdef CHROME_PERSONALIZATION
-  virtual ProfilePersonalization GetProfilePersonalization() = 0;
+  virtual ProfilePersonalization* GetProfilePersonalization() = 0;
 #endif
 
   // Return whether 2 profiles are the same. 2 profiles are the same if they
@@ -187,12 +210,16 @@ class Profile {
   // was created, rather it is the time the user started chrome and logged into
   // this profile. For the single profile case, this corresponds to the time
   // the user started chrome.
-  virtual Time GetStartTime() const = 0;
+  virtual base::Time GetStartTime() const = 0;
 
   // Returns the TabRestoreService. This returns NULL when off the record.
   virtual TabRestoreService* GetTabRestoreService() = 0;
 
   virtual void ResetTabRestoreService() = 0;
+
+  // This reinitializes the spellchecker according to the current dictionary
+  // language, and enable spell check option, in the prefs.
+  virtual void ReinitializeSpellChecker() = 0;
 
   // Returns the spell checker object for this profile. THIS OBJECT MUST ONLY
   // BE USED ON THE I/O THREAD! This pointer is retrieved from the profile and
@@ -205,6 +232,8 @@ class Profile {
   // that it can be invoked when the user logs out/powers down (WM_ENDSESSION).
   virtual void MarkAsCleanShutdown() = 0;
 
+  virtual void InitExtensions() = 0;
+
 #ifdef UNIT_TEST
   // Use with caution.  GetDefaultRequestContext may be called on any thread!
   static void set_default_request_context(URLRequestContext* c) {
@@ -212,23 +241,38 @@ class Profile {
   }
 #endif
 
+  // Did the user restore the last session? This is set by SessionRestore.
+  void set_restored_last_session(bool restored_last_session) {
+    restored_last_session_ = restored_last_session;
+  }
+  bool restored_last_session() const {
+    return restored_last_session_;
+  }
+
  protected:
   static URLRequestContext* default_request_context_;
+
+ private:
+  bool restored_last_session_;
 };
 
 class OffTheRecordProfileImpl;
 
 // The default profile implementation.
-class ProfileImpl : public Profile {
+class ProfileImpl : public Profile,
+                    public NotificationObserver {
  public:
   virtual ~ProfileImpl();
 
   // Profile implementation.
-  virtual std::wstring GetPath();
+  virtual FilePath GetPath();
   virtual bool IsOffTheRecord();
   virtual Profile* GetOffTheRecordProfile();
   virtual Profile* GetOriginalProfile();
   virtual VisitedLinkMaster* GetVisitedLinkMaster();
+  virtual UserScriptMaster* GetUserScriptMaster();
+  virtual SSLHostState* GetSSLHostState();
+  virtual ExtensionsService* GetExtensionsService();
   virtual HistoryService* GetHistoryService(ServiceAccessType sat);
   virtual WebDataService* GetWebDataService(ServiceAccessType sat);
   virtual PrefService* GetPrefs();
@@ -237,6 +281,7 @@ class ProfileImpl : public Profile {
   virtual DownloadManager* GetDownloadManager();
   virtual bool HasCreatedDownloadManager() const;
   virtual URLRequestContext* GetRequestContext();
+  virtual URLRequestContext* GetRequestContextForMedia();
   virtual SessionService* GetSessionService();
   virtual void ShutdownSessionService();
   virtual bool HasSessionService() const;
@@ -247,44 +292,62 @@ class ProfileImpl : public Profile {
   virtual bool DidLastSessionExitCleanly();
   virtual BookmarkModel* GetBookmarkModel();
   virtual bool IsSameProfile(Profile* profile);
-  virtual Time GetStartTime() const;
+  virtual base::Time GetStartTime() const;
   virtual TabRestoreService* GetTabRestoreService();
   virtual void ResetTabRestoreService();
+  virtual void ReinitializeSpellChecker();
   virtual SpellChecker* GetSpellChecker();
   virtual void MarkAsCleanShutdown();
+  virtual void InitExtensions();
 #ifdef CHROME_PERSONALIZATION
-  virtual ProfilePersonalization GetProfilePersonalization();
+  virtual ProfilePersonalization* GetProfilePersonalization();
 #endif
+  // NotificationObserver implementation.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
  private:
-  class RequestContext;
-
   friend class Profile;
 
-  ProfileImpl(const std::wstring& path);
+  explicit ProfileImpl(const FilePath& path);
 
   void CreateWebDataService();
-  std::wstring GetPrefFilePath();
+  FilePath GetPrefFilePath();
 
   void StopCreateSessionServiceTimer();
-  
+
   void EnsureSessionServiceCreated() {
     GetSessionService();
   }
 
-  std::wstring path_;
+  // Initializes the spellchecker. If the spellchecker already exsts, then
+  // it is released, and initialized again. This model makes sure that
+  // spellchecker language can be changed without restarting the browser.
+  // NOTE: This is being currently called in the UI thread, which is OK as long
+  // as the spellchecker object is USED in the IO thread.
+  // The |need_to_broadcast| parameter tells it whether to broadcast the new
+  // spellchecker to the resource message filters.
+  void InitializeSpellChecker(bool need_to_broadcast);
+
+  FilePath path_;
   bool off_the_record_;
   scoped_ptr<VisitedLinkMaster> visited_link_master_;
+  scoped_refptr<ExtensionsService> extensions_service_;
+  scoped_refptr<UserScriptMaster> user_script_master_;
+  scoped_ptr<SSLHostState> ssl_host_state_;
   scoped_ptr<PrefService> prefs_;
   scoped_ptr<TemplateURLFetcher> template_url_fetcher_;
   scoped_ptr<TemplateURLModel> template_url_model_;
   scoped_ptr<BookmarkModel> bookmark_bar_model_;
 
 #ifdef CHROME_PERSONALIZATION
-  ProfilePersonalization personalization_;
+  scoped_ptr<ProfilePersonalization> personalization_;
 #endif
 
-  RequestContext* request_context_;
+  ChromeURLRequestContext* request_context_;
+
+  ChromeURLRequestContext* media_request_context_;
 
   scoped_refptr<DownloadManager> download_manager_;
   scoped_refptr<HistoryService> history_service_;
@@ -301,9 +364,9 @@ class ProfileImpl : public Profile {
   scoped_ptr<OffTheRecordProfileImpl> off_the_record_profile_;
 
   // See GetStartTime for details.
-  Time start_time_;
+  base::Time start_time_;
 
-  scoped_ptr<TabRestoreService> tab_restore_service_;
+  scoped_refptr<TabRestoreService> tab_restore_service_;
 
   // This can not be a scoped_refptr because we must release it on the I/O
   // thread.
@@ -313,8 +376,27 @@ class ProfileImpl : public Profile {
   // GetSessionService won't recreate the SessionService.
   bool shutdown_session_service_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ProfileImpl);
+  DISALLOW_COPY_AND_ASSIGN(ProfileImpl);
 };
 
-#endif  // CHROME_BROWSER_PROFILE_H__
+#if defined(COMPILER_GCC)
+namespace __gnu_cxx {
 
+template<>
+struct hash<Profile*> {
+  size_t operator()(Profile* const& p) const {
+    return std::tr1::hash<long>()(reinterpret_cast<long>(p));
+  }
+};
+
+}  // namespace __gnu_cxx
+#endif
+
+// This struct is used to pass the spellchecker object through the notification
+// NOTIFY_SPELLCHECKER_REINITIALIZED. This is used as the details for the
+// notification service.
+struct SpellcheckerReinitializedDetails {
+  scoped_refptr<SpellChecker> spellchecker;
+};
+
+#endif  // CHROME_BROWSER_PROFILE_H_

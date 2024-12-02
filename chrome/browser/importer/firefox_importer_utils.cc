@@ -4,23 +4,30 @@
 
 #include "chrome/browser/importer/firefox_importer_utils.h"
 
+#include <algorithm>
+
+#if defined(OS_WIN)
 #include <shlobj.h>
+#endif
 
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/registry.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "base/time.h"
-#include "chrome/browser/template_url.h"
-#include "chrome/browser/template_url_model.h"
-#include "chrome/browser/template_url_parser.h"
-#include "chrome/common/win_util.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/search_engines/template_url_parser.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/base64.h"
 
+#if defined(OS_WIN)
+#include "base/registry.h"
+#include "chrome/common/win_util.h"
+#endif
+
 namespace {
 
+#if defined(OS_WIN)
 // NOTE: Keep these in order since we need test all those paths according
 // to priority. For example. One machine has multiple users. One non-admin
 // user installs Firefox 2, which causes there is a Firefox2 entry under HKCU.
@@ -31,6 +38,7 @@ static const HKEY kFireFoxRegistryPaths[] = {
   HKEY_CURRENT_USER,
   HKEY_LOCAL_MACHINE
 };
+#endif
 
 // FirefoxURLParameterFilter is used to remove parameter mentioning Firefox from
 // the search URL when importing search engines.
@@ -43,8 +51,9 @@ class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
   virtual bool KeepParameter(const std::string& key,
                              const std::string& value) {
     std::string low_value = StringToLowerASCII(value);
-    if (low_value.find("mozilla") != -1 || low_value.find("firefox") != -1 ||
-        low_value.find("moz:") != -1 )
+    if (low_value.find("mozilla") != std::string::npos ||
+        low_value.find("firefox") != std::string::npos ||
+        low_value.find("moz:") != std::string::npos )
       return false;
     return true;
   }
@@ -53,6 +62,7 @@ class FirefoxURLParameterFilter : public TemplateURLParser::ParameterFilter {
   DISALLOW_EVIL_CONSTRUCTORS(FirefoxURLParameterFilter);
 };
 
+#if defined(OS_WIN)
 typedef BOOL (WINAPI* SetDllDirectoryFunc)(LPCTSTR lpPathName);
 
 // A helper class whose destructor calls SetDllDirectory(NULL) to undo the
@@ -72,12 +82,15 @@ class SetDllDirectoryCaller {
  private:
   SetDllDirectoryFunc func_;
 };
+#endif
 
 }  // namespace
 
 int GetCurrentFirefoxMajorVersion() {
+#if defined(OS_WIN)
   TCHAR ver_buffer[128];
   DWORD ver_buffer_length = sizeof(ver_buffer);
+  int highest_version = 0;
   // When installing Firefox with admin account, the product keys will be
   // written under HKLM\Mozilla. Otherwise it the keys will be written under
   // HKCU\Mozilla.
@@ -87,11 +100,17 @@ int GetCurrentFirefoxMajorVersion() {
         L"CurrentVersion", ver_buffer, &ver_buffer_length);
     if (!result)
       continue;
-    return _wtoi(ver_buffer);
+    highest_version = std::max(highest_version, _wtoi(ver_buffer));
   }
+  return highest_version;
+#else
+  // TODO(port): Read in firefox configuration.
+  NOTIMPLEMENTED();
   return 0;
+#endif
 }
 
+#if defined(OS_WIN)
 std::wstring GetProfilesINI() {
   // The default location of the profile folder containing user data is
   // under the "Application Data" folder in Windows XP.
@@ -106,25 +125,6 @@ std::wstring GetProfilesINI() {
     ini_file.clear();
 
   return ini_file;
-}
-
-std::wstring GetFirefoxInstallPath() {
-  // Detects the path that Firefox is installed in.
-  std::wstring registry_path = L"Software\\Mozilla\\Mozilla Firefox";
-  TCHAR buffer[MAX_PATH];
-  DWORD buffer_length = sizeof(buffer);
-  bool result;
-  result = ReadFromRegistry(HKEY_LOCAL_MACHINE, registry_path.c_str(),
-                            L"CurrentVersion", buffer, &buffer_length);
-  if (!result)
-    return std::wstring();
-  registry_path += L"\\" + std::wstring(buffer) + L"\\Main";
-  buffer_length = sizeof(buffer);
-  result = ReadFromRegistry(HKEY_LOCAL_MACHINE, registry_path.c_str(),
-                            L"Install Directory", buffer, &buffer_length);
-  if (!result)
-    return std::wstring();
-  return buffer;
 }
 
 void ParseProfileINI(std::wstring file, DictionaryValue* root) {
@@ -170,6 +170,32 @@ void ParseProfileINI(std::wstring file, DictionaryValue* root) {
     }
   }
 }
+#endif
+
+std::wstring GetFirefoxInstallPath() {
+#if defined(OS_WIN)
+  // Detects the path that Firefox is installed in.
+  std::wstring registry_path = L"Software\\Mozilla\\Mozilla Firefox";
+  TCHAR buffer[MAX_PATH];
+  DWORD buffer_length = sizeof(buffer);
+  bool result;
+  result = ReadFromRegistry(HKEY_LOCAL_MACHINE, registry_path.c_str(),
+                            L"CurrentVersion", buffer, &buffer_length);
+  if (!result)
+    return std::wstring();
+  registry_path += L"\\" + std::wstring(buffer) + L"\\Main";
+  buffer_length = sizeof(buffer);
+  result = ReadFromRegistry(HKEY_LOCAL_MACHINE, registry_path.c_str(),
+                            L"Install Directory", buffer, &buffer_length);
+  if (!result)
+    return std::wstring();
+  return buffer;
+#else
+  // TODO(port): Load firefox configuration.
+  NOTIMPLEMENTED();
+  return std::wstring();
+#endif
+}
 
 bool CanImportURL(const GURL& url) {
   const char* kInvalidSchemes[] = {"wyciwyg", "place", "about", "chrome"};
@@ -179,7 +205,7 @@ bool CanImportURL(const GURL& url) {
     return false;
 
   // Filter out the URLs with unsupported schemes.
-  for (int i = 0; i < arraysize(kInvalidSchemes); ++i) {
+  for (size_t i = 0; i < arraysize(kInvalidSchemes); ++i) {
     if (url.SchemeIs(kInvalidSchemes[i]))
       return false;
   }
@@ -196,9 +222,9 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<std::wstring>& xml_files,
   // The first XML file represents the default search engine in Firefox 3, so we
   // need to keep it on top of the list.
   TemplateURL* default_turl = NULL;
-  for (std::vector<std::wstring>::const_iterator iter = xml_files.begin();
-       iter != xml_files.end(); ++iter) {
-    file_util::ReadFileToString(*iter, &content);
+  for (std::vector<std::wstring>::const_iterator file_iter = xml_files.begin();
+       file_iter != xml_files.end(); ++file_iter) {
+    file_util::ReadFileToString(*file_iter, &content);
     TemplateURL* template_url = new TemplateURL();
     FirefoxURLParameterFilter param_filter;
     if (TemplateURLParser::Parse(
@@ -217,8 +243,8 @@ void ParseSearchEnginesFromXMLFiles(const std::vector<std::wstring>& xml_files,
         search_engine_for_url.erase(iter);
       }
       // Give this a keyword to facilitate tab-to-search, if possible.
-      template_url->set_keyword(TemplateURLModel::GenerateKeyword(GURL(url),
-                                                                  false));
+      template_url->set_keyword(
+              TemplateURLModel::GenerateKeyword(GURL(WideToUTF8(url)), false));
       template_url->set_show_in_default_list(true);
       search_engine_for_url[url] = template_url;
       if (!default_turl)
@@ -268,15 +294,16 @@ std::string ReadBrowserConfigProp(const std::wstring& app_path,
 
   // This file has the syntax: key=value.
   size_t prop_index = content.find(pref_key + "=");
-  if (prop_index == -1)
+  if (prop_index == std::string::npos)
     return "";
 
   size_t start = prop_index + pref_key.length();
-  size_t stop = -1;
-  if (start != -1)
+  size_t stop = std::string::npos;
+  if (start != std::string::npos)
     stop = content.find("\n", start + 1);
 
-  if (start == -1 || stop == -1 || (start == stop)) {
+  if (start == std::string::npos ||
+      stop == std::string::npos || (start == stop)) {
     NOTREACHED() << "Firefox property " << pref_key << " could not be parsed.";
     return "";
   }
@@ -294,15 +321,15 @@ std::string ReadPrefsJsValue(const std::wstring& profile_path,
   std::string search_for = std::string("user_pref(\"") + pref_key +
                            std::string("\", ");
   size_t prop_index = content.find(search_for);
-  if (prop_index == -1)
+  if (prop_index == std::string::npos)
     return "";
 
   size_t start = prop_index + search_for.length();
-  size_t stop = -1;
-  if (start != -1)
+  size_t stop = std::string::npos;
+  if (start != std::string::npos)
     stop = content.find(")", start + 1);
 
-  if (start == -1 || stop == -1) {
+  if (start == std::string::npos || stop == std::string::npos) {
     NOTREACHED() << "Firefox property " << pref_key << " could not be parsed.";
     return "";
   }
@@ -327,6 +354,14 @@ int GetFirefoxDefaultSearchEngineIndex(
 
   std::wstring default_se_name = UTF8ToWide(
       ReadPrefsJsValue(profile_path, "browser.search.selectedEngine"));
+
+  if (default_se_name.empty()) {
+    // browser.search.selectedEngine does not exist if the user has not changed
+    // from the default (or has selected the default).
+    // TODO: should fallback to 'browser.search.defaultengine' if selectedEngine
+    // is empty.
+    return -1;
+  }
 
   int default_se_index = -1;
   for (std::vector<TemplateURL*>::const_iterator iter = search_engines.begin();
@@ -392,7 +427,9 @@ NSSDecryptor::NSSDecryptor()
       PK11_CheckUserPassword(NULL), PK11_FreeSlot(NULL),
       PK11_Authenticate(NULL), PK11SDR_Decrypt(NULL), SECITEM_FreeItem(NULL),
       PL_ArenaFinish(NULL), PR_Cleanup(NULL),
+#if defined(OS_WIN)
       nss3_dll_(NULL), softokn3_dll_(NULL),
+#endif
       is_nss_initialized_(false) {
 }
 
@@ -402,6 +439,7 @@ NSSDecryptor::~NSSDecryptor() {
 
 bool NSSDecryptor::Init(const std::wstring& dll_path,
                         const std::wstring& db_path) {
+#if defined(OS_WIN)
   // We call SetDllDirectory to work around a Purify bug (GetModuleHandle
   // fails inside Purify under certain conditions).  SetDllDirectory only
   // exists on Windows XP SP1 or later, so we look up its address at run time.
@@ -491,6 +529,11 @@ bool NSSDecryptor::Init(const std::wstring& dll_path,
 
   is_nss_initialized_ = true;
   return true;
+#else
+  // TODO(port): Load NSS.
+  NOTIMPLEMENTED();
+  return false;
+#endif
 }
 
 void NSSDecryptor::Free() {
@@ -500,12 +543,14 @@ void NSSDecryptor::Free() {
     PR_Cleanup();
     is_nss_initialized_ = false;
   }
+#if defined(OS_WIN)
   if (softokn3_dll_ != NULL)
     FreeLibrary(softokn3_dll_);
   softokn3_dll_ = NULL;
   if (nss3_dll_ != NULL)
     FreeLibrary(nss3_dll_);
   nss3_dll_ = NULL;
+#endif
   NSS_Init = NULL;
   NSS_Shutdown = NULL;
   PK11_GetInternalKeySlot = NULL;
@@ -558,9 +603,15 @@ void NSSDecryptor::Free() {
 * ***** END LICENSE BLOCK ***** */
 
 std::wstring NSSDecryptor::Decrypt(const std::string& crypt) const {
+#if defined(OS_WIN)
   // Do nothing if NSS is not loaded.
   if (!nss3_dll_)
     return std::wstring();
+#else
+  // TODO(port): Load nss3.
+  NOTIMPLEMENTED();
+  return std::wstring();
+#endif
 
   std::string plain;
 
@@ -724,4 +775,3 @@ void NSSDecryptor::ParseSignons(const std::string& content,
     }
   }
 }
-

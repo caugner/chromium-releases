@@ -12,15 +12,18 @@
 #include <queue>
 #include <string>
 
+#include "base/compiler_specific.h"
+#include "base/scoped_ptr.h"
 #include "base/task.h"
-#include "chrome/browser/url_fetcher.h"
+#include "chrome/browser/net/url_fetcher.h"
 #include "net/base/sdch_manager.h"
 
 class SdchDictionaryFetcher : public URLFetcher::Delegate,
                               public SdchFetcher {
  public:
-  #pragma warning(suppress: 4355)  // OK to pass "this" here.
-  SdchDictionaryFetcher() : method_factory_(this), task_is_pending_(false) {}
+  SdchDictionaryFetcher() :
+      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      task_is_pending_(false) {}
   virtual ~SdchDictionaryFetcher() {}
 
   // Implementation of SdchFetcher class.
@@ -29,8 +32,11 @@ class SdchDictionaryFetcher : public URLFetcher::Delegate,
   virtual void Schedule(const GURL& dictionary_url);
 
  private:
-  // Delay between Schedule and actual download.
-  static const int kMsDelayFromRequestTillDownload = 15000;
+  // Delay in ms between Schedule and actual download.
+  // This leaves the URL in a queue, which is de-duped, so that there is less
+  // chance we'll try to load the same URL multiple times when a pile of
+  // page subresources (or tabs opened in parallel) all suggest the dictionary.
+  static const int kMsDelayFromRequestTillDownload = 100;
 
   // Ensure the download after the above delay.
   void ScheduleDelayedRun();

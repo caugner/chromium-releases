@@ -6,7 +6,7 @@
 
 #include "chrome/views/event.h"
 
-using ChromeViews::Event;
+using views::Event;
 
 namespace event_utils {
 
@@ -24,9 +24,8 @@ WindowOpenDisposition DispositionFromEventFlags(int event_flags) {
   return false /*event.IsAltDown()*/ ? SAVE_TO_DISK : CURRENT_TAB;
 }
 
-bool IsPossibleDispositionEvent(const ChromeViews::MouseEvent& event) {
+bool IsPossibleDispositionEvent(const views::MouseEvent& event) {
   return event.IsLeftMouseButton() || event.IsMiddleMouseButton();
 }
 
 }
-

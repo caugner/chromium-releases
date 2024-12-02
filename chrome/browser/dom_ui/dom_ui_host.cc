@@ -6,10 +6,11 @@
 
 #include "base/json_reader.h"
 #include "base/json_writer.h"
+#include "base/values.h"
 #include "chrome/browser/browser.h"
-#include "chrome/browser/navigation_entry.h"
-#include "chrome/browser/tab_contents_type.h"
-#include "chrome/browser/render_view_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
+#include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/browser/tab_contents/tab_contents_type.h"
 
 DOMUIHost::DOMUIHost(Profile* profile,
                      SiteInstance* instance,
@@ -20,7 +21,7 @@ DOMUIHost::DOMUIHost(Profile* profile,
                   MSG_ROUTING_NONE,
                   NULL) {
   // Implementors of this class will have a specific tab contents type.
-  type_ = TAB_CONTENTS_UNKNOWN_TYPE;
+  set_type(TAB_CONTENTS_UNKNOWN_TYPE);
 }
 
 DOMUIHost::~DOMUIHost() {
@@ -73,14 +74,15 @@ void DOMUIHost::CallJavascriptFunction(
 void DOMUIHost::ProcessDOMUIMessage(const std::string& message,
                                     const std::string& content) {
   // Look up the callback for this message.
-  MessageCallbackMap::const_iterator callback = message_callbacks_.find(message);
+  MessageCallbackMap::const_iterator callback(message_callbacks_.find(message));
   if (callback == message_callbacks_.end())
     return;
 
   // Convert the content JSON into a Value.
-  Value* value = NULL;
+  scoped_ptr<Value> value;
   if (!content.empty()) {
-    if (!JSONReader::Read(content, &value, false)) {
+    value.reset(JSONReader::Read(content, false));
+    if (!value.get()) {
       // The page sent us something that we didn't understand.
       // This probably indicates a programming error.
       NOTREACHED();
@@ -89,8 +91,7 @@ void DOMUIHost::ProcessDOMUIMessage(const std::string& message,
   }
 
   // Forward this message and content on.
-  callback->second->Run(value);
-  delete value;
+  callback->second->Run(value.get());
 }
 
 WebPreferences DOMUIHost::GetWebkitPrefs() {
@@ -102,15 +103,5 @@ WebPreferences DOMUIHost::GetWebkitPrefs() {
 }
 
 void DOMUIHost::ExecuteJavascript(const std::wstring& javascript) {
-  // We're taking a string and making a javascript URL out of it. This means
-  // that escaping will follow the rules of a URL. Yet, the JSON text may have
-  // stuff in it that would be interpreted as escaped characters in a URL, but
-  // we want to preserve them literally.
-  //
-  // We just escape all the percents to avoid this, since when this javascript
-  // URL is interpreted, it will be unescaped.
-  std::wstring escaped_js(javascript);
-  ReplaceSubstringsAfterOffset(&escaped_js, 0, L"%", L"%25");
-  ExecuteJavascriptInWebFrame(L"", L"javascript:" + escaped_js);
+  render_view_host()->ExecuteJavascriptInWebFrame(std::wstring(), javascript);
 }
-

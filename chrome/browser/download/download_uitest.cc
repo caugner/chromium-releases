@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
+#include "base/platform_thread.h"
 #include "base/string_util.h"
 #include "chrome/browser/automation/url_request_mock_http_job.h"
 #include "chrome/browser/automation/url_request_slow_download_job.h"
@@ -73,7 +74,7 @@ class DownloadTest : public UITest {
     // Find the path on the client.
     std::wstring file_on_client(download_prefix_);
     file_on_client.append(client_filename);
-    EXPECT_PRED1(file_util::PathExists, file_on_client);
+    EXPECT_TRUE(file_util::PathExists(file_on_client));
 
     // Find the path on the server.
     std::wstring file_on_server;
@@ -84,14 +85,15 @@ class DownloadTest : public UITest {
     ASSERT_TRUE(file_util::PathExists(file_on_server));
 
     // Check that we downloaded the file correctly.
-    EXPECT_PRED2(file_util::ContentsEqual, file_on_server, file_on_client);
+    EXPECT_TRUE(file_util::ContentsEqual(file_on_server,
+                                         file_on_client));
 
     // Check if the Zone Identifier is correclty set.
     if (VolumeSupportsADS(file_on_client))
       CheckZoneIdentifier(file_on_client);
 
     // Delete the client copy of the file.
-    EXPECT_PRED2(file_util::Delete, file_on_client, false);
+    EXPECT_TRUE(file_util::Delete(file_on_client, false));
   }
 
   void CleanUpDownload(const std::wstring& file) {
@@ -101,7 +103,7 @@ class DownloadTest : public UITest {
   virtual void SetUp() {
     UITest::SetUp();
     download_prefix_ = GetDownloadDirectory();
-    download_prefix_ += file_util::kPathSeparator;
+    download_prefix_ += FilePath::kSeparators[0];
   }
 
  protected:
@@ -131,13 +133,13 @@ class DownloadTest : public UITest {
     }
 
     std::wstring filename = file_util::GetFilenameFromPath(url);
-    EXPECT_PRED1(file_util::PathExists, download_prefix_ + filename);
+    EXPECT_TRUE(file_util::PathExists(download_prefix_ + filename));
 
     // Delete the file we just downloaded.
     for (int i = 0; i < 10; ++i) {
       if (file_util::Delete(download_prefix_ + filename, false))
         break;
-      Sleep(kWaitForActionMaxMsec / 10);
+      PlatformThread::Sleep(action_max_timeout_ms() / 10);
     }
     EXPECT_FALSE(file_util::PathExists(download_prefix_ + filename));
   }
@@ -160,7 +162,7 @@ TEST_F(DownloadTest, DownloadMimeType) {
   WaitUntilTabCount(1);
 
   // Wait until the file is downloaded.
-  Sleep(1000);
+  PlatformThread::Sleep(action_timeout_ms());
 
   CleanUpDownload(file);
 
@@ -185,7 +187,7 @@ TEST_F(DownloadTest, NoDownload) {
   WaitUntilTabCount(1);
 
   // Wait to see if the file will be downloaded.
-  Sleep(1000);
+  PlatformThread::Sleep(action_timeout_ms());
 
   EXPECT_FALSE(file_util::PathExists(file_path));
   if (file_util::PathExists(file_path))
@@ -200,8 +202,8 @@ TEST_F(DownloadTest, NoDownload) {
 // download tab opened and the file exists as the filename specified in the
 // header.  This also ensures we properly handle empty file downloads.
 TEST_F(DownloadTest, ContentDisposition) {
-  wstring file = L"download-test3.html";
-  wstring download_file = L"download-test3-attachment.html";
+  wstring file = L"download-test3.gif";
+  wstring download_file = L"download-test3-attachment.gif";
   wstring expected_title = L"100% - " + download_file;
 
   EXPECT_EQ(1, GetTabCount());
@@ -210,7 +212,7 @@ TEST_F(DownloadTest, ContentDisposition) {
   WaitUntilTabCount(1);
 
   // Wait until the file is downloaded.
-  Sleep(1000);
+  PlatformThread::Sleep(action_timeout_ms());
 
   CleanUpDownload(download_file, file);
 
@@ -238,4 +240,3 @@ TEST_F(DownloadTest, DISABLED_KnownSize) {
   std::wstring filename = file_util::GetFilenameFromPath(url);
   RunSizeTest(url, L"71% - " + filename, L"100% - " + filename);
 }
-

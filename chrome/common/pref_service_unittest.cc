@@ -7,7 +7,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/notification_service.h"
-#include "chrome/common/notification_types.h"
+#include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/pref_service.h"
 #include "chrome/test/data/resource.h"
@@ -16,30 +16,30 @@
 namespace {
 
 class PrefServiceTest : public testing::Test {
-protected:
+ protected:
   virtual void SetUp() {
     // Name a subdirectory of the temp directory.
     ASSERT_TRUE(PathService::Get(base::DIR_TEMP, &test_dir_));
-    file_util::AppendToPath(&test_dir_, L"PrefServiceTest");
+    test_dir_ = test_dir_.AppendASCII("PrefServiceTest");
 
     // Create a fresh, empty copy of this directory.
     file_util::Delete(test_dir_, true);
-    CreateDirectory(test_dir_.c_str(), NULL);
+    file_util::CreateDirectory(test_dir_);
 
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_dir_));
-    file_util::AppendToPath(&data_dir_, L"pref_service");
+    data_dir_ = data_dir_.AppendASCII("pref_service");
     ASSERT_TRUE(file_util::PathExists(data_dir_));
   }
   virtual void TearDown() {
     // Clean up test directory
-    ASSERT_TRUE(file_util::Delete(test_dir_, false));
+    ASSERT_TRUE(file_util::Delete(test_dir_, true));
     ASSERT_FALSE(file_util::PathExists(test_dir_));
   }
 
   // the path to temporary directory used to contain the test operations
-  std::wstring test_dir_;
+  FilePath test_dir_;
   // the path to the directory where the test data is stored
-  std::wstring data_dir_;
+  FilePath data_dir_;
 };
 
 class TestPrefObserver : public NotificationObserver {
@@ -56,7 +56,7 @@ class TestPrefObserver : public NotificationObserver {
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
-    EXPECT_EQ(type, NOTIFY_PREF_CHANGED);
+    EXPECT_EQ(type.value, NotificationType::PREF_CHANGED);
     PrefService* prefs_in = Source<PrefService>(source).ptr();
     EXPECT_EQ(prefs_in, prefs_);
     std::wstring* pref_name_in = Details<std::wstring>(details).ptr();
@@ -81,32 +81,37 @@ class TestPrefObserver : public NotificationObserver {
 
 }  // anonymous namespace
 
+// This test is disabled. See issue 8339.
 TEST_F(PrefServiceTest, Basic) {
   PrefService prefs;
 
   // Test that it fails on nonexistent file.
-  std::wstring bogus_input_file = data_dir_;
-  file_util::AppendToPath(&bogus_input_file, L"read.txt");
+  FilePath bogus_input_file = data_dir_.AppendASCII("read.txt");
   EXPECT_FALSE(prefs.LoadPersistentPrefs(bogus_input_file));
 
   // Test that the persistent value can be loaded.
-  std::wstring input_file = data_dir_;
-  file_util::AppendToPath(&input_file, L"read.json");
+  FilePath input_file = data_dir_.AppendASCII("read.json");
   ASSERT_TRUE(file_util::PathExists(input_file));
   ASSERT_TRUE(prefs.LoadPersistentPrefs(input_file));
 
   // Register test prefs.
   const wchar_t kNewWindowsInTabs[] = L"tabs.new_windows_in_tabs";
   const wchar_t kMaxTabs[] = L"tabs.max_tabs";
+  const wchar_t kLongIntPref[] = L"long_int.pref";
   prefs.RegisterStringPref(prefs::kHomePage, L"");
   prefs.RegisterBooleanPref(kNewWindowsInTabs, false);
   prefs.RegisterIntegerPref(kMaxTabs, 0);
+  prefs.RegisterStringPref(kLongIntPref, L"2147483648");
 
   std::wstring microsoft(L"http://www.microsoft.com");
   std::wstring cnn(L"http://www.cnn.com");
   std::wstring homepage(L"http://www.example.com");
 
   EXPECT_EQ(cnn, prefs.GetString(prefs::kHomePage));
+
+  const wchar_t kSomeDirectory[] = L"some_directory";
+  FilePath some_path(FILE_PATH_LITERAL("/usr/sbin/"));
+  prefs.RegisterFilePathPref(kSomeDirectory, FilePath());
 
   // Now test that the transient value overrides the persistent value,
   // without actually altering the persistent store.
@@ -126,13 +131,20 @@ TEST_F(PrefServiceTest, Basic) {
   prefs.SetInteger(kMaxTabs, 10);
   EXPECT_EQ(10, prefs.GetInteger(kMaxTabs));
 
+  EXPECT_EQ(2147483648LL, prefs.GetInt64(kLongIntPref));
+  prefs.SetInt64(kLongIntPref, 214748364842LL);
+  EXPECT_EQ(214748364842LL, prefs.GetInt64(kLongIntPref));
+
+  EXPECT_EQ(FilePath::StringType(FILE_PATH_LITERAL("/usr/local/")),
+      prefs.GetFilePath(kSomeDirectory).value());
+  prefs.SetFilePath(kSomeDirectory, some_path);
+  EXPECT_EQ(some_path.value(), prefs.GetFilePath(kSomeDirectory).value());
+
   // Serialize and compare to expected output.
-  std::wstring output_file = test_dir_;
-  file_util::AppendToPath(&output_file, L"write.json");
+  FilePath output_file = test_dir_.AppendASCII("write.json");
   prefs.pref_filename_ = output_file;
   ASSERT_TRUE(prefs.SavePersistentPrefs(NULL));
-  std::wstring golden_output_file = data_dir_;
-  file_util::AppendToPath(&golden_output_file, L"write.golden.json");
+  FilePath golden_output_file = data_dir_.AppendASCII("write.golden.json");
   ASSERT_TRUE(file_util::PathExists(golden_output_file));
   ASSERT_TRUE(file_util::ContentsEqual(golden_output_file, output_file));
 }
@@ -148,51 +160,35 @@ TEST_F(PrefServiceTest, Overlay) {
 
   PrefService prefs;
 
-  std::wstring persistent_file = data_dir_;
-  file_util::AppendToPath(&persistent_file, L"overlay.json");
+  FilePath persistent_file = data_dir_.AppendASCII("overlay.json");
   EXPECT_TRUE(prefs.LoadPersistentPrefs(persistent_file));
 
   Value* transient_value;
   {
     JSONStringValueSerializer serializer(transient);
-    ASSERT_TRUE(serializer.Deserialize(&transient_value));
+    transient_value = serializer.Deserialize(NULL);
+    ASSERT_TRUE(transient_value);
   }
   prefs.transient()->Set(transient_string, transient_value);
 
   Value* both_transient_value;
   {
     JSONStringValueSerializer serializer(transient);
-    ASSERT_TRUE(serializer.Deserialize(&both_transient_value));
+    both_transient_value = serializer.Deserialize(NULL);
+    ASSERT_TRUE(both_transient_value);
   }
   prefs.transient()->Set(L"both", both_transient_value);
 
   // Register test prefs
-  const wchar_t* kTypes[] = { L"neither.", L"persistent.", L"transient.", L"both." };
+  static const std::wstring kTypes[] =
+      { L"neither.", L"persistent.", L"transient.", L"both." };
   for (size_t i = 0; i < arraysize(kTypes); ++i) {
-    wchar_t temp[1024];
-    wcscpy_s(temp, kTypes[i]);
-    wcscat_s(temp, L"bool");
-    prefs.RegisterBooleanPref(temp, false);
-
-    wcscpy_s(temp, kTypes[i]);
-    wcscat_s(temp, L"int");
-    prefs.RegisterIntegerPref(temp, 0);
-
-    wcscpy_s(temp, kTypes[i]);
-    wcscat_s(temp, L"real");
-    prefs.RegisterRealPref(temp, 0.0);
-
-    wcscpy_s(temp, kTypes[i]);
-    wcscat_s(temp, L"string");
-    prefs.RegisterStringPref(temp, L"");
-
-    wcscpy_s(temp, kTypes[i]);
-    wcscat_s(temp, L"list");
-    prefs.RegisterListPref(temp);
-
-    wcscpy_s(temp, kTypes[i]);
-    wcscat_s(temp, L"dictionary");
-    prefs.RegisterDictionaryPref(temp);
+    prefs.RegisterBooleanPref((kTypes[i] + L"bool").c_str(), false);
+    prefs.RegisterIntegerPref((kTypes[i] + L"int").c_str(), 0);
+    prefs.RegisterRealPref((kTypes[i] + L"real").c_str(), 0.0);
+    prefs.RegisterStringPref((kTypes[i] + L"string").c_str(), L"");
+    prefs.RegisterListPref((kTypes[i] + L"list").c_str());
+    prefs.RegisterDictionaryPref((kTypes[i] + L"dictionary").c_str());
   }
 
   ASSERT_FALSE(prefs.GetBoolean(L"neither.bool"));
@@ -290,8 +286,7 @@ TEST_F(PrefServiceTest, Overlay) {
 TEST_F(PrefServiceTest, Observers) {
   PrefService prefs;
 
-  std::wstring input_file = data_dir_;
-  file_util::AppendToPath(&input_file, L"read.json");
+  FilePath input_file = data_dir_.AppendASCII("read.json");
   EXPECT_TRUE(file_util::PathExists(input_file));
   EXPECT_TRUE(prefs.LoadPersistentPrefs(input_file));
 
@@ -331,6 +326,8 @@ TEST_F(PrefServiceTest, Observers) {
   prefs.RemovePrefObserver(pref_name, &obs2);
 }
 
+// TODO(port): port this test to POSIX.
+#if defined(OS_WIN)
 TEST_F(PrefServiceTest, LocalizedPrefs) {
   PrefService prefs;
   const wchar_t kBoolean[] = L"boolean";
@@ -352,6 +349,7 @@ TEST_F(PrefServiceTest, LocalizedPrefs) {
   prefs.SetString(kString, L"foo");
   EXPECT_EQ(L"foo", prefs.GetString(kString));
 }
+#endif
 
 TEST_F(PrefServiceTest, NoObserverFire) {
   PrefService prefs;
@@ -405,4 +403,3 @@ TEST_F(PrefServiceTest, HasPrefPath) {
   prefs.persistent_->SetString(path, L"blah");
   EXPECT_TRUE(prefs.HasPrefPath(path));
 }
-

@@ -8,7 +8,7 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
-#include "chrome/browser/url_fixer_upper.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_process_filter.h"
@@ -27,22 +27,22 @@ static const wchar_t kTempDirName[] = L"memory_test_profile";
 
 class MemoryTest : public UITest {
  public:
-  MemoryTest() {
+  MemoryTest() : cleanup_temp_dir_on_exit_(false) {
     show_window_ = true;
 
     // For now, turn off plugins because they crash like crazy.
     // TODO(mbelshe): Fix Chrome to not crash with plugins.
-    CommandLine::AppendSwitch(&launch_arguments_, switches::kDisablePlugins);
+    launch_arguments_.AppendSwitch(switches::kDisablePlugins);
 
-    CommandLine::AppendSwitch(&launch_arguments_, switches::kEnableLogging);
+    launch_arguments_.AppendSwitch(switches::kEnableLogging);
 
     // Use the playback cache, but don't use playback events.
-    CommandLine::AppendSwitch(&launch_arguments_, switches::kPlaybackMode);
-    CommandLine::AppendSwitch(&launch_arguments_, switches::kNoEvents);
+    launch_arguments_.AppendSwitch(switches::kPlaybackMode);
+    launch_arguments_.AppendSwitch(switches::kNoEvents);
 
     // Get the specified user data dir (optional)
     std::wstring profile_dir =
-      CommandLine().GetSwitchValue(switches::kUserDataDir);
+      CommandLine::ForCurrentProcess()->GetSwitchValue(switches::kUserDataDir);
 
     if (profile_dir.length() == 0) {
       // Compute the user-data-dir which contains our test cache.
@@ -52,25 +52,24 @@ class MemoryTest : public UITest {
       file_util::AppendToPath(&profile_dir, L"data");
       file_util::AppendToPath(&profile_dir, L"memory_test");
       file_util::AppendToPath(&profile_dir, L"general_mix");
+
+      if (!SetupTempDirectory(profile_dir)) {
+        // There isn't really a way to fail gracefully here.
+        // Neither this constuctor nor the SetUp() method return
+        // status to the caller.  So, just fall through using the
+        // default profile and log this.  The failure will be
+        // obvious.
+        LOG(ERROR) << "Error preparing temp directory for test";
+      }
     }
 
-    if (!SetupTempDirectory(profile_dir)) {
-      // There isn't really a way to fail gracefully here.
-      // Neither this constuctor nor the SetUp() method return
-      // status to the caller.  So, just fall through using the
-      // default profile and log this.  The failure will be
-      // obvious.
-      LOG(ERROR) << "Error preparing temp directory for test";
-    }
-
-    CommandLine::AppendSwitchWithValue(&launch_arguments_,
-                                       switches::kUserDataDir,
-                                       user_data_dir_);
+    launch_arguments_.AppendSwitchWithValue(switches::kUserDataDir,
+                                            user_data_dir_);
   }
 
   ~MemoryTest() {
     // Cleanup our temporary directory.
-    if (user_data_dir_.length() > 0)
+    if (cleanup_temp_dir_on_exit_)
       file_util::Delete(user_data_dir_, true);
   }
 
@@ -81,7 +80,7 @@ class MemoryTest : public UITest {
   // new tab.
   // <PAUSE> is a special URL that informs the loop to pause before proceeding
   // to the next URL.
-  void RunTest(const wchar_t* test_name, int num_target_tabs) {
+  void RunTest(const char* test_name, int num_target_tabs) {
     std::string urls[] = {
       "http://www.yahoo.com/",
       "http://hotjobs.yahoo.com/career-articles-the_biggest_resume_mistake_you_can_make-436",
@@ -248,25 +247,30 @@ class MemoryTest : public UITest {
                                     &timed_out);
       if (timed_out)
         printf("warning: %s timed out!\n", urls[counter].c_str());
+
+      // TODO(mbelshe): Bug 2953
+      // The automation crashes periodically if we cycle too quickly.
+      // To make these tests more reliable, slowing them down a bit.
+      Sleep(100);
     }
     size_t stop_size = GetSystemCommitCharge();
 
     PrintResults(test_name, stop_size - start_size);
   }
 
-  void PrintResults(const wchar_t* test_name, size_t commit_size) {
+  void PrintResults(const char* test_name, size_t commit_size) {
     PrintMemoryUsageInfo(test_name);
-    std::wstring trace_name(test_name);
-    trace_name.append(L"_cc");
+    std::string trace_name(test_name);
+    trace_name.append("_cc");
 
-    PrintResult(L"commit_charge", L"", trace_name,
-                commit_size / 1024, L"kb", true /* important */);
+    PrintResult("commit_charge", "", trace_name,
+                commit_size / 1024, "kb", true /* important */);
   }
 
-  void PrintIOPerfInfo(const wchar_t* test_name) {
+  void PrintIOPerfInfo(const char* test_name) {
     printf("\n");
     BrowserProcessFilter chrome_filter(user_data_dir_);
-    process_util::NamedProcessIterator
+    base::NamedProcessIterator
         chrome_process_itr(chrome::kBrowserProcessExecutableName,
                            &chrome_filter);
 
@@ -281,44 +285,44 @@ class MemoryTest : public UITest {
         continue;
       }
 
-      scoped_ptr<process_util::ProcessMetrics> process_metrics;
+      scoped_ptr<base::ProcessMetrics> process_metrics;
       IO_COUNTERS io_counters;
       process_metrics.reset(
-          process_util::ProcessMetrics::CreateProcessMetrics(process_handle));
+          base::ProcessMetrics::CreateProcessMetrics(process_handle));
       ZeroMemory(&io_counters, sizeof(io_counters));
 
       if (process_metrics.get()->GetIOCounters(&io_counters)) {
-        std::wstring chrome_name =
-            (pid == chrome_filter.browser_process_id()) ? L"_b" : L"_r";
+        std::string chrome_name =
+            (pid == chrome_filter.browser_process_id()) ? "_b" : "_r";
 
         // Print out IO performance.  We assume that the values can be
         // converted to size_t (they're reported as ULONGLONG, 64-bit numbers).
-        PrintResult(L"read_op", chrome_name, test_name + chrome_name,
-                    static_cast<size_t>(io_counters.ReadOperationCount), L"",
+        PrintResult("read_op", chrome_name, test_name + chrome_name,
+                    static_cast<size_t>(io_counters.ReadOperationCount), "",
                     false /* not important */);
-        PrintResult(L"write_op", chrome_name, test_name + chrome_name,
-                    static_cast<size_t>(io_counters.WriteOperationCount), L"",
+        PrintResult("write_op", chrome_name, test_name + chrome_name,
+                    static_cast<size_t>(io_counters.WriteOperationCount), "",
                     false /* not important */);
-        PrintResult(L"other_op", chrome_name, test_name + chrome_name,
-                    static_cast<size_t>(io_counters.OtherOperationCount), L"",
+        PrintResult("other_op", chrome_name, test_name + chrome_name,
+                    static_cast<size_t>(io_counters.OtherOperationCount), "",
                     false /* not important */);
-        PrintResult(L"read_byte", chrome_name, test_name + chrome_name,
+        PrintResult("read_byte", chrome_name, test_name + chrome_name,
                     static_cast<size_t>(io_counters.ReadTransferCount / 1024),
-                    L"kb", false /* not important */);
-        PrintResult(L"write_byte", chrome_name, test_name + chrome_name,
+                    "kb", false /* not important */);
+        PrintResult("write_byte", chrome_name, test_name + chrome_name,
                     static_cast<size_t>(io_counters.WriteTransferCount / 1024),
-                    L"kb", false /* not important */);
-        PrintResult(L"other_byte", chrome_name, test_name + chrome_name,
+                    "kb", false /* not important */);
+        PrintResult("other_byte", chrome_name, test_name + chrome_name,
                     static_cast<size_t>(io_counters.OtherTransferCount / 1024),
-                    L"kb", false /* not important */);
+                    "kb", false /* not important */);
       }
     }
   }
 
-  void PrintMemoryUsageInfo(const wchar_t* test_name) {
+  void PrintMemoryUsageInfo(const char* test_name) {
     printf("\n");
     BrowserProcessFilter chrome_filter(user_data_dir_);
-    process_util::NamedProcessIterator
+    base::NamedProcessIterator
         chrome_process_itr(chrome::kBrowserProcessExecutableName,
                            &chrome_filter);
 
@@ -346,21 +350,21 @@ class MemoryTest : public UITest {
       }
     }
 
-    std::wstring trace_name(test_name);
-    PrintResult(L"vm_final_browser", L"", trace_name + L"_vm_b",
-                browser_virtual_size / 1024, L"kb",
+    std::string trace_name(test_name);
+    PrintResult("vm_final_browser", "", trace_name + "_vm_b",
+                browser_virtual_size / 1024, "kb",
                 false /* not important */);
-    PrintResult(L"ws_final_browser", L"", trace_name + L"_ws_b",
-                browser_working_set_size / 1024, L"kb",
+    PrintResult("ws_final_browser", "", trace_name + "_ws_b",
+                browser_working_set_size / 1024, "kb",
                 false /* not important */);
-    PrintResult(L"vm_final_total", L"", trace_name + L"_vm",
-                virtual_size / 1024, L"kb",
+    PrintResult("vm_final_total", "", trace_name + "_vm",
+                virtual_size / 1024, "kb",
                 false /* not important */);
-    PrintResult(L"ws_final_total", L"", trace_name + L"_ws",
-                working_set_size / 1024, L"kb",
+    PrintResult("ws_final_total", "", trace_name + "_ws",
+                working_set_size / 1024, "kb",
                 true /* important */);
-    PrintResult(L"processes", L"", trace_name + L"_proc",
-                num_chrome_processes, L"",
+    PrintResult("processes", "", trace_name + "_proc",
+                num_chrome_processes, "",
                 false /* not important */);
   }
 
@@ -371,23 +375,32 @@ class MemoryTest : public UITest {
   //   src_dir is set to the source directory
   // Output:
   //   On success, modifies user_data_dir_ to be a new profile directory
+  //   and sets cleanup_temp_dir_on_exit_ to true.
   bool SetupTempDirectory(std::wstring src_dir) {
+    LOG(INFO) << "Setting up temp directory in " << src_dir.c_str();
     // We create a copy of the test dir and use it so that each
     // run of this test starts with the same data.  Running this
     // test has the side effect that it will change the profile.
     std::wstring temp_dir;
-    if (!file_util::CreateNewTempDirectory(kTempDirName, &temp_dir))
+    if (!file_util::CreateNewTempDirectory(kTempDirName, &temp_dir)) {
+      LOG(ERROR) << "Could not create temp directory:" << kTempDirName;
       return false;
+    }
 
     src_dir.append(L"\\*");
 
-    if (!file_util::CopyDirectory(src_dir, temp_dir, true))
+    if (!file_util::CopyDirectory(src_dir, temp_dir, true)) {
+      LOG(ERROR) << "Could not copy temp directory";
       return false;
+    }
 
     user_data_dir_ = temp_dir;
+    cleanup_temp_dir_on_exit_ = true;
+    LOG(INFO) << "Finished temp directory setup.";
     return true;
   }
 
+  bool cleanup_temp_dir_on_exit_;
   std::wstring user_data_dir_;
 };
 
@@ -404,7 +417,7 @@ class MemoryReferenceTest : public MemoryTest {
     UITest::SetUp();
   }
 
-  void RunTest(const wchar_t* test_name, int num_target_tabs) {
+  void RunTest(const char* test_name, int num_target_tabs) {
     std::wstring pages, timings;
     MemoryTest::RunTest(test_name, num_target_tabs);
   }
@@ -413,14 +426,13 @@ class MemoryReferenceTest : public MemoryTest {
 }  // namespace
 
 TEST_F(MemoryTest, SingleTabTest) {
-  RunTest(L"1t", 1);
+  RunTest("1t", 1);
 }
 
 TEST_F(MemoryTest, FiveTabTest) {
-  RunTest(L"5t", 5);
+  RunTest("5t", 5);
 }
 
 TEST_F(MemoryTest, TwelveTabTest) {
-  RunTest(L"12t", 12);
+  RunTest("12t", 12);
 }
-

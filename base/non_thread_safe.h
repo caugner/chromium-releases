@@ -5,7 +5,7 @@
 #ifndef BASE_NON_THREAD_SAFE_H__
 #define BASE_NON_THREAD_SAFE_H__
 
-#include "base/logging.h"
+#include "base/platform_thread.h"
 
 // A helper class used to help verify that methods of a class are
 // called from the same thread.  One can inherit from this class and use
@@ -31,11 +31,10 @@ class NonThreadSafe {
   NonThreadSafe();
   ~NonThreadSafe();
 
- protected:
   bool CalledOnValidThread() const;
 
  private:
-  int valid_thread_id_;
+  PlatformThreadId valid_thread_id_;
 };
 #else
 // Do nothing in release mode.
@@ -44,7 +43,6 @@ class NonThreadSafe {
   NonThreadSafe() {}
   ~NonThreadSafe() {}
 
- protected:
   bool CalledOnValidThread() const {
     return true;
   }
@@ -52,4 +50,3 @@ class NonThreadSafe {
 #endif  // NDEBUG
 
 #endif  // BASE_NON_THREAD_SAFE_H__
-

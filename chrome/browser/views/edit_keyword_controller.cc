@@ -5,28 +5,27 @@
 #include "chrome/browser/views/edit_keyword_controller.h"
 
 #include "base/string_util.h"
-#include "chrome/app/theme/theme_resources.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/template_url.h"
-#include "chrome/browser/template_url_model.h"
-#include "chrome/browser/url_fixer_upper.h"
-#include "chrome/browser/user_metrics.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/views/keyword_editor_view.h"
 #include "chrome/browser/views/standard_layout.h"
 #include "chrome/common/l10n_util.h"
 #include "chrome/common/resource_bundle.h"
-#include "chrome/views/label.h"
+#include "chrome/views/controls/label.h"
+#include "chrome/views/controls/image_view.h"
+#include "chrome/views/controls/table/table_view.h"
 #include "chrome/views/grid_layout.h"
-#include "chrome/views/image_view.h"
-#include "chrome/views/table_view.h"
-#include "chrome/views/window.h"
+#include "chrome/views/window/window.h"
 #include "googleurl/src/gurl.h"
+#include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 
-#include "generated_resources.h"
-
-using ChromeViews::GridLayout;
-using ChromeViews::ImageView;
-using ChromeViews::TextField;
+using views::GridLayout;
+using views::ImageView;
+using views::TextField;
 
 
 namespace {
@@ -53,8 +52,8 @@ EditKeywordController::EditKeywordController(
 void EditKeywordController::Show() {
   // Window interprets an empty rectangle as needing to query the content for
   // the size as well as centering relative to the parent.
-  ChromeViews::Window::CreateChromeWindow(::IsWindow(parent_) ? parent_ : NULL,
-                                          gfx::Rect(), this); 
+  views::Window::CreateChromeWindow(::IsWindow(parent_) ? parent_ : NULL,
+                                    gfx::Rect(), this);
   window()->Show();
   GetDialogClientView()->UpdateDialogButtons();
   title_tf_->SelectAll();
@@ -89,7 +88,7 @@ bool EditKeywordController::IsDialogButtonEnabled(DialogButton button) const {
   return true;
 }
 
-void EditKeywordController::WindowClosing() {
+void EditKeywordController::DeleteDelegate() {
   // User canceled the save, delete us.
   delete this;
 }
@@ -152,7 +151,7 @@ bool EditKeywordController::Accept() {
   return true;
 }
 
-ChromeViews::View* EditKeywordController::GetContentsView() {
+views::View* EditKeywordController::GetContentsView() {
   return view_;
 }
 
@@ -171,18 +170,18 @@ void EditKeywordController::HandleKeystroke(TextField* sender,
 
 void EditKeywordController::Init() {
   // Create the views we'll need.
-  view_ = new ChromeViews::View();
+  view_ = new views::View();
   if (template_url_) {
-    title_tf_ = CreateTextField(template_url_->short_name());
-    keyword_tf_ = CreateTextField(template_url_->keyword());
-    url_tf_ = CreateTextField(GetDisplayURL(*template_url_));
+    title_tf_ = CreateTextField(template_url_->short_name(), false);
+    keyword_tf_ = CreateTextField(template_url_->keyword(), true);
+    url_tf_ = CreateTextField(GetDisplayURL(*template_url_), false);
     // We don't allow users to edit prepopulate URLs. This is done as
     // occasionally we need to update the URL of prepopulated TemplateURLs.
     url_tf_->SetReadOnly(template_url_->prepopulate_id() != 0);
   } else {
-    title_tf_ = CreateTextField(std::wstring());
-    keyword_tf_ = CreateTextField(std::wstring());
-    url_tf_ = CreateTextField(std::wstring());
+    title_tf_ = CreateTextField(std::wstring(), false);
+    keyword_tf_ = CreateTextField(std::wstring(), true);
+    url_tf_ = CreateTextField(std::wstring(), false);
   }
   title_iv_ = new ImageView();
   keyword_iv_ = new ImageView();
@@ -201,7 +200,7 @@ void EditKeywordController::Init() {
   // Define the structure of the layout.
 
   // For the buttons.
-  ChromeViews::ColumnSet* column_set = layout->AddColumnSet(0);
+  views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddPaddingColumn(1, 0);
   column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
                         GridLayout::USE_PREF, 0, 0);
@@ -264,22 +263,23 @@ void EditKeywordController::Init() {
                           reversed_percent);
   }
 
-  ChromeViews::Label* description_label = new ChromeViews::Label(description);
-  description_label->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+  views::Label* description_label = new views::Label(description);
+  description_label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   layout->AddView(description_label);
 
   layout->AddPaddingRow(0, related_y);
 }
 
-ChromeViews::Label* EditKeywordController::CreateLabel(int message_id) {
-  ChromeViews::Label* label = new ChromeViews::Label(
-      l10n_util::GetString(message_id));
-  label->SetHorizontalAlignment(ChromeViews::Label::ALIGN_LEFT);
+views::Label* EditKeywordController::CreateLabel(int message_id) {
+  views::Label* label = new views::Label(l10n_util::GetString(message_id));
+  label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   return label;
 }
 
-TextField* EditKeywordController::CreateTextField(const std::wstring& text) {
-  TextField* text_field = new TextField();
+TextField* EditKeywordController::CreateTextField(const std::wstring& text,
+                                                  bool lowercase) {
+  TextField* text_field = new TextField(
+      lowercase ? TextField::STYLE_LOWERCASE : TextField::STYLE_DEFAULT);
   text_field->SetText(text);
   text_field->SetController(this);
   return text_field;
@@ -295,14 +295,14 @@ bool EditKeywordController::IsURLValid() const {
   if (!template_ref.IsValid())
     return false;
 
-  if (template_ref.SupportsReplacement()) {
-    // If the url has a search term, replace it with a random string and make
-    // sure the resulting URL is valid. We don't check the validity of the url
-    // with the search term as that is not necessarily valid.
-    url = template_ref.ReplaceSearchTerms(TemplateURL(), L"a",
-        TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring());
-  }
-  return GURL(url).is_valid();
+  if (!template_ref.SupportsReplacement())
+    return GURL(url).is_valid();
+
+  // If the url has a search term, replace it with a random string and make
+  // sure the resulting URL is valid. We don't check the validity of the url
+  // with the search term as that is not necessarily valid.
+  return template_ref.ReplaceSearchTerms(TemplateURL(), L"a",
+      TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, std::wstring()).is_valid();
 }
 
 std::wstring EditKeywordController::GetURL() const {
@@ -366,4 +366,3 @@ void EditKeywordController::CleanUpCancelledAdd() {
     template_url_ = NULL;
   }
 }
-

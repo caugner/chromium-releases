@@ -9,14 +9,16 @@
 #include <atlapp.h>
 #include <atlcrack.h>
 #include <atlmisc.h>
+#include <string>
 
 #include "base/basictypes.h"
-#include "chrome/browser/tab_contents_delegate.h"
+#include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/notification_service.h"
-#include "chrome/views/focus_manager.h"
-#include "chrome/views/root_view.h"
-#include "chrome/views/view_container.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
+#include "chrome/views/focus/focus_manager.h"
+#include "chrome/views/widget/root_view.h"
+#include "chrome/views/widget/widget.h"
 
 class AutomationProvider;
 class TabContents;
@@ -26,11 +28,11 @@ class TabContentsContainerView;
 // An external tab is a Chrome tab that is meant to displayed in an
 // external process. This class provides the FocusManger needed by the
 // TabContents as well as an implementation of TabContentsDelagate.
-// It also implements ViewContainer
+// It also implements Container
 class ExternalTabContainer : public TabContentsDelegate,
                              public NotificationObserver,
-                             public ChromeViews::ViewContainer,
-                             public ChromeViews::KeystrokeListener,
+                             public views::Widget,
+                             public views::KeystrokeListener,
                              public CWindowImpl<ExternalTabContainer,
                                                 CWindow,
                                                 CWinTraits<WS_POPUP |
@@ -38,7 +40,7 @@ class ExternalTabContainer : public TabContentsDelegate,
  public:
   BEGIN_MSG_MAP(ExternalTabContainer)
     MESSAGE_HANDLER(WM_SIZE, OnSize)
-    MSG_WM_DESTROY(OnDestroy)
+    MESSAGE_HANDLER(WM_SETFOCUS, OnSetFocus)
   END_MSG_MAP()
 
   DECLARE_WND_CLASS(chrome::kExternalTabWindowClass)
@@ -50,10 +52,18 @@ class ExternalTabContainer : public TabContentsDelegate,
     return tab_contents_;
   }
 
-  bool Init(Profile* profile);
+  bool Init(Profile* profile, HWND parent, const gfx::Rect& dimensions,
+            unsigned int style);
+
+  // This function gets called from two places, which is fine.
+  // 1. OnFinalMessage
+  // 2. In the destructor.
+  bool Uninitialize(HWND window);
+
   // Overridden from TabContentsDelegate:
   virtual void OpenURLFromTab(TabContents* source,
                               const GURL& url,
+                              const GURL& referrer,
                               WindowOpenDisposition disposition,
                               PageTransition::Type transition);
   virtual void NavigationStateChanged(const TabContents* source,
@@ -64,10 +74,6 @@ class ExternalTabContainer : public TabContentsDelegate,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture);
-  virtual void StartDraggingDetachedContents(TabContents* source,
-                                             TabContents* new_contents,
-                                             const gfx::Rect& contents_bounds,
-                                             const gfx::Point& mouse_pt);
   virtual void ActivateContents(TabContents* contents);
   virtual void LoadingStateChanged(TabContents* source);
   virtual void CloseContents(TabContents* source);
@@ -77,33 +83,34 @@ class ExternalTabContainer : public TabContentsDelegate,
   virtual void UpdateTargetURL(TabContents* source, const GURL& url);
   virtual void ContentsZoomChange(bool zoom_in);
   virtual void ToolbarSizeChanged(TabContents* source, bool is_animating);
-  virtual void DidNavigate(NavigationType nav_type,
-                           int relative_navigation_offet);
-  virtual void ForwardMessageToExternalHost(const std::string& receiver,
-                                            const std::string& message);
-
+  virtual void ForwardMessageToExternalHost(const std::string& message,
+                                            const std::string& origin,
+                                            const std::string& target);
+  virtual bool IsExternalTabContainer() const {
+    return true;
+  };
 
   // Notification service callback.
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
 
-  ////////////////////////////////////////////////////////////////////////////////
-  // ChromeViews::ViewContainer
-  ////////////////////////////////////////////////////////////////////////////////
-  virtual void GetBounds(CRect *out, bool including_frame) const;
+  /////////////////////////////////////////////////////////////////////////////
+  // views::Widget
+  /////////////////////////////////////////////////////////////////////////////
+  virtual void GetBounds(gfx::Rect* out, bool including_frame) const;
   virtual void MoveToFront(bool should_activate);
-  virtual HWND GetHWND() const;
-  virtual void PaintNow(const CRect& update_rect);
-  virtual ChromeViews::RootView* GetRootView();
+  virtual gfx::NativeView GetNativeView() const;
+  virtual void PaintNow(const gfx::Rect& update_rect);
+  virtual views::RootView* GetRootView();
   virtual bool IsVisible();
   virtual bool IsActive();
   virtual bool GetAccelerator(int cmd_id,
-                              ChromeViews::Accelerator* accelerator) {
+                              views::Accelerator* accelerator) {
     return false;
   }
 
-  // ChromeViews::KeystrokeListener implementation
+  // views::KeystrokeListener implementation
   // This method checks whether this keydown message is needed by the
   // external host. If so, it sends it over to the external host
   virtual bool ProcessKeyDown(HWND window, UINT message, WPARAM wparam,
@@ -116,6 +123,9 @@ class ExternalTabContainer : public TabContentsDelegate,
   // message it did not process
   void ProcessUnhandledAccelerator(const MSG& msg);
 
+  // See TabContents::SetInitialFocus
+  void SetInitialFocus(bool reverse);
+
   // A helper method that tests whether the given window is an
   // ExternalTabContainer window
   static bool IsExternalTabContainer(HWND window);
@@ -126,22 +136,31 @@ class ExternalTabContainer : public TabContentsDelegate,
 
  protected:
   LRESULT OnSize(UINT, WPARAM, LPARAM, BOOL& handled);
+  LRESULT OnSetFocus(UINT msg, WPARAM wp, LPARAM lp, BOOL& handled);
   void OnDestroy();
   void OnFinalMessage(HWND window);
 
  protected:
   TabContents *tab_contents_;
-  AutomationProvider* automation_;
+  scoped_refptr<AutomationProvider> automation_;
+
+  NotificationRegistrar registrar_;
+
   // Root view
-  ChromeViews::RootView root_view_;
+  views::RootView root_view_;
   // The accelerator table of the external host.
   HACCEL external_accel_table_;
   unsigned int external_accel_entry_count_;
   // A view to handle focus cycling
   TabContentsContainerView* tab_contents_container_;
  private:
+  // A failed navigation like a 404 is followed in chrome with a success
+  // navigation for the 404 page. We need to ignore the next navigation
+  // to avoid confusing the clients of the external tab. This member variable
+  // is set when we need to ignore the next load notification.
+  bool ignore_next_load_notification_;
+
   DISALLOW_COPY_AND_ASSIGN(ExternalTabContainer);
 };
 
 #endif  // CHROME_BROWSER_EXTERNAL_TAB_CONTAINER_H__
-

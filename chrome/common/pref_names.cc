@@ -102,6 +102,8 @@ const wchar_t kWebKitMinimumLogicalFontSize[] =
     L"webkit.webprefs.minimum_logical_font_size";
 const wchar_t kWebKitJavascriptEnabled[] =
     L"webkit.webprefs.javascript_enabled";
+const wchar_t kWebKitWebSecurityEnabled[] =
+    L"webkit.webprefs.web_security_enabled";
 const wchar_t kWebKitJavascriptCanOpenWindowsAutomatically[] =
     L"webkit.webprefs.javascript_can_open_windows_automatically";
 const wchar_t kWebKitLoadsImagesAutomatically[] =
@@ -129,6 +131,11 @@ const wchar_t kAlwaysCreateDestinationsTab[] =
 // Boolean that is true if the password manager is on (will record new
 // passwords and fill in known passwords).
 const wchar_t kPasswordManagerEnabled[] = L"profile.password_manager_enabled";
+
+// Boolean that is true if the form autofill is on (will record values entered
+// in text inputs in forms and shows them in a popup when user type in a text
+// input with the same name later on).
+const wchar_t kFormAutofillEnabled[] = L"profile.form_autofill_enabled";
 
 // Boolean that is true when SafeBrowsing is enabled.
 const wchar_t kSafeBrowsingEnabled[] = L"safebrowsing.enabled";
@@ -181,6 +188,12 @@ const wchar_t kDnsPrefetchingEnabled[] = L"dns_prefetching.enabled";
 // next startup, based on what was actually needed during this startup.
 const wchar_t kDnsStartupPrefetchList[] = L"StartupDNSPrefetchList";
 
+// A list of host names used to fetch web pages, and their commonly used
+// sub-resource hostnames (and expected latency benefits from pre-resolving such
+// sub-resource hostnames).
+// This list is adaptively grown and pruned.
+extern const wchar_t kDnsHostReferralList[] = L"HostReferralList";
+
 // The disabled messages in IPC logging.
 const wchar_t kIpcDisabledMessages[] = L"ipc_log_disabled_messages";
 
@@ -193,15 +206,34 @@ const wchar_t kShowHomeButton[] = L"browser.show_home_button";
 const wchar_t kRecentlySelectedEncoding[] =
     L"profile.recently_selected_encodings";
 
-// Boolean prefs that define the default values for the check boxes in the Clear
-// Browsing Data dialog.
+// Clear Browsing Data dialog preferences.
 const wchar_t kDeleteBrowsingHistory[] = L"browser.clear_data.browsing_history";
 const wchar_t kDeleteDownloadHistory[] =
     L"browser.clear_data.download_history";
 const wchar_t kDeleteCache[] = L"browser.clear_data.cache";
 const wchar_t kDeleteCookies[] = L"browser.clear_data.cookies";
 const wchar_t kDeletePasswords[] = L"browser.clear_data.passwords";
+const wchar_t kDeleteFormData[] = L"browser.clear_data.form_data";
+const wchar_t kDeleteTimePeriod[] = L"browser.clear_data.time_period";
 
+// Integer prefs giving the widths of the columns in the bookmark table. Two
+// configs are saved, one with the path column and one without.
+const wchar_t kBookmarkTableNameWidth1[] = L"bookmark_table.name_width_1";
+const wchar_t kBookmarkTableURLWidth1[] = L"bookmark_table.url_width_1";
+const wchar_t kBookmarkTableNameWidth2[] = L"bookmark_table.name_width_2";
+const wchar_t kBookmarkTableURLWidth2[] = L"bookmark_table.url_width_2";
+const wchar_t kBookmarkTablePathWidth[] = L"bookmark_table.path_width";
+
+// Bounds of the bookmark manager.
+const wchar_t kBookmarkManagerPlacement[] =
+    L"bookmark_manager.window_placement";
+
+// Integer location of the split bar in the bookmark manager.
+const wchar_t kBookmarkManagerSplitLocation[] =
+    L"bookmark_manager.split_location";
+
+// Boolean pref to define the default values for using spellchecker.
+const wchar_t kEnableSpellCheck[] = L"browser.enable_spellchecking";
 
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
@@ -250,6 +282,11 @@ const wchar_t kProfilePrefix[] = L"profile-";
 // True if the previous run of the program exited cleanly.
 const wchar_t kStabilityExitedCleanly[] =
     L"user_experience_metrics.stability.exited_cleanly";
+
+// Version string of previous run, which is used to assure that stability
+// metrics reported under current version reflect stability of the same version.
+const wchar_t kStabilityStatsVersion[] =
+    L"user_experience_metrics.stability.stats_version";
 
 // False if we received a session end and either we crashed during processing
 // the session end or ran out of time and windows terminated us.
@@ -302,7 +339,7 @@ const wchar_t kStabilityUptimeSec[] =
 
 // This is the location of a list of dictionaries of plugin stability stats.
 const wchar_t kStabilityPluginStats[] =
-    L"user_experience_metrics.stability.plugin_stats";
+    L"user_experience_metrics.stability.plugin_stats2";
 
 // Number of times the renderer has become non-responsive since the last
 // report.
@@ -327,13 +364,22 @@ const wchar_t kStabilityDebuggerNotPresent[] =
 
 // The keys below are used for the dictionaries in the
 // kStabilityPluginStats list.
-const wchar_t kStabilityPluginPath[] = L"path";
+const wchar_t kStabilityPluginName[] = L"name";
 const wchar_t kStabilityPluginLaunches[] = L"launches";
 const wchar_t kStabilityPluginInstances[] = L"instances";
 const wchar_t kStabilityPluginCrashes[] = L"crashes";
 
-// If true, the user will be prompted to manually launch renderer processes.
-const wchar_t kStartRenderersManually[] = L"renderer.start_manually";
+// The keys below are strictly increasing counters over the lifetime of
+// a chrome installation. They are (optionally) sent up to the uninstall
+// survey in the event of uninstallation.
+const wchar_t kUninstallMetricsPageLoadCount[] =
+    L"uninstall_metrics.page_load_count";
+const wchar_t kUninstallLaunchCount[] = L"uninstall_metrics.launch_count";
+const wchar_t kUninstallMetricsUptimeSec[] = L"uninstall_metrics.uptime_sec";
+const wchar_t kUninstallLastLaunchTimeSec[] =
+    L"uninstall_metrics.last_launch_time_sec";
+const wchar_t kUninstallLastObservedRunTimeSec[] =
+    L"uninstall_metrics.last_observed_running_time_sec";
 
 // A collection of position, size, and other data relating to the browser
 // window to restore on startup.
@@ -402,11 +448,14 @@ const wchar_t kShouldShowWelcomePage[] = L"show-welcome-page";
 // correct Google domain/country code for whatever location the user is in.
 const wchar_t kLastKnownGoogleURL[] = L"browser.last_known_google_url";
 
-// Integer containing the system GeoID the first time we checked the template
-// URL prepopulate data.  This is used to avoid adding a whole bunch of new
-// search engine choices if prepopulation runs when the user's GeoID differs
-// from their previous GeoID.  This pref does not exist until prepopulation has
-// been run at least once.
+// Integer containing the system Country ID the first time we checked the
+// template URL prepopulate data.  This is used to avoid adding a whole bunch of
+// new search engine choices if prepopulation runs when the user's Country ID
+// differs from their previous Country ID.  This pref does not exist until
+// prepopulation has been run at least once.
+const wchar_t kCountryIDAtInstall[] = L"countryid_at_install";
+// OBSOLETE. Same as above, but uses the Windows-specific GeoID value instead.
+// Updated if found to the above key.
 const wchar_t kGeoIDAtInstall[] = L"geoid_at_install";
 
 // An enum value of how the browser was shut down (see browser_shutdown.h).
@@ -429,5 +478,8 @@ const wchar_t kNumFoldersInOtherBookmarkFolder[] =
 // Number of keywords.
 const wchar_t kNumKeywords[] = L"user_experience_metrics.num_keywords";
 
-}  // namespace prefs
+// Whether Extensions or User Scripts are enabled.
+const wchar_t kEnableExtensions[] = L"extensions.enabled";
+const wchar_t kEnableUserScripts[] = L"extensions.user_scripts_enabled";
 
+}  // namespace prefs

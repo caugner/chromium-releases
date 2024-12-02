@@ -4,13 +4,15 @@
 
 #include "net/url_request/url_request_job_manager.h"
 
+#include <algorithm>
+
 #include "build/build_config.h"
 #include "base/string_util.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_about_job.h"
 #include "net/url_request/url_request_error_job.h"
-#if defined(OS_WIN)
 #include "net/url_request/url_request_file_job.h"
+#if defined(OS_WIN)
 #include "net/url_request/url_request_ftp_job.h"
 #else
 // TODO(playmobil): Implement on non-windows platforms.
@@ -25,14 +27,14 @@ struct SchemeToFactory {
   const char* scheme;
   URLRequest::ProtocolFactory* factory;
 };
-  
+
 }  // namespace
 
 static const SchemeToFactory kBuiltinFactories[] = {
   { "http", URLRequestHttpJob::Factory },
   { "https", URLRequestHttpJob::Factory },
-#if defined(OS_WIN)
   { "file", URLRequestFileJob::Factory },
+#if defined(OS_WIN)
   { "ftp", URLRequestFtpJob::Factory },
 #else
 // TODO(playmobil): Implement on non-windows platforms.
@@ -167,4 +169,3 @@ void URLRequestJobManager::UnregisterRequestInterceptor(
   DCHECK(i != interceptors_.end());
   interceptors_.erase(i);
 }
-

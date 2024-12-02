@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2007 Google, Inc.  All rights reserved.
+ * Copyright (C) 2007-2009 Google, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,19 +30,18 @@
 #include <set>
 #include <string>
 #include <v8.h>
-#include "base/stats_counters.h"
-#include "base/string_piece.h"
+
 #include "bindings/npruntime.h"
-#include "np_v8object.h"
+#include "NPV8Object.h"
 #include "npruntime_priv.h"
-#include "v8_npobject.h"
+#include "V8NPObject.h"
 
 #include <wtf/Assertions.h>
 
 using namespace v8;
 
 
-// TODO: Consider removing locks if we're singlethreaded already.
+// FIXME: Consider removing locks if we're singlethreaded already.
 // The static initializer here should work okay, but we want to avoid
 // static initialization in general.
 //
@@ -50,7 +49,29 @@ using namespace v8;
 // Need a platform abstraction which we can use.
 // static Lock StringIdentifierMapLock;
 
-typedef std::map<StringPiece, PrivateIdentifier*> StringIdentifierMap;
+namespace {
+
+// We use StringKey here as the key-type to avoid a string copy to
+// construct the map key and for faster comparisons than strcmp.
+struct StringKey {
+    StringKey(const char* str) : string(str), length(strlen(str)) {}
+    const char* string;
+    const size_t length;
+};
+
+inline bool operator<(const StringKey& x, const StringKey& y) {
+    // Shorter strings are less than longer strings, memcmp breaks ties.
+    if (x.length < y.length)
+        return true;
+    else if (x.length > y.length)
+        return false;
+    else
+        return memcmp(x.string, y.string, y.length) < 0;
+}
+
+}  // namespace
+
+typedef std::map<const StringKey, PrivateIdentifier*> StringIdentifierMap;
 
 static StringIdentifierMap* getStringIdentifierMap() {
     static StringIdentifierMap* stringIdentifierMap = 0;
@@ -59,7 +80,7 @@ static StringIdentifierMap* getStringIdentifierMap() {
     return stringIdentifierMap;
 }
 
-// TODO: Consider removing locks if we're singlethreaded already.
+// FIXME: Consider removing locks if we're singlethreaded already.
 // static Lock IntIdentifierMapLock;
 
 typedef std::map<int, PrivateIdentifier*> IntIdentifierMap;
@@ -67,7 +88,7 @@ typedef std::map<int, PrivateIdentifier*> IntIdentifierMap;
 static IntIdentifierMap* getIntIdentifierMap() {
     static IntIdentifierMap* intIdentifierMap = 0;
     if (!intIdentifierMap)
-        intIdentifierMap = new IntIdentifierMap;
+        intIdentifierMap = new IntIdentifierMap();
     return intIdentifierMap;
 }
 
@@ -79,26 +100,23 @@ NPIdentifier NPN_GetStringIdentifier(const NPUTF8* name) {
     if (name) {
         // AutoLock safeLock(StringIdentifierMapLock);
 
+        StringKey key(name);
         StringIdentifierMap* identMap = getStringIdentifierMap();
-
-        // We use StringPiece here as the key-type to avoid a string copy to
-        // construct the map key.
-        StringPiece nameStr(name);
-        StringIdentifierMap::iterator iter = identMap->find(nameStr);
+        StringIdentifierMap::iterator iter = identMap->find(key);
         if (iter != identMap->end())
             return static_cast<NPIdentifier>(iter->second);
 
-        size_t nameLen = nameStr.length();
+        size_t nameLen = key.length;
 
-        // We never release identifier names, so this dictionary will grow, as
-        // will the memory for the identifier name strings.
+        // We never release identifiers, so this dictionary will grow.
         PrivateIdentifier* identifier = static_cast<PrivateIdentifier*>(
             malloc(sizeof(PrivateIdentifier) + nameLen + 1));
-        memcpy(identifier + 1, name, nameLen + 1);
+        char* nameStorage = reinterpret_cast<char*>(identifier + 1);
+        memcpy(nameStorage, name, nameLen + 1);
         identifier->isString = true;
-        identifier->value.string = reinterpret_cast<NPUTF8*>(identifier + 1);
-        (*identMap)[StringPiece(identifier->value.string, nameLen)] =
-            identifier;
+        identifier->value.string = reinterpret_cast<NPUTF8*>(nameStorage);
+        key.string = nameStorage;
+        (*identMap)[key] = identifier;
         return (NPIdentifier)identifier;
     }
 
@@ -119,14 +137,13 @@ NPIdentifier NPN_GetIntIdentifier(int32_t intid) {
     // AutoLock safeLock(IntIdentifierMapLock);
 
     IntIdentifierMap* identMap = getIntIdentifierMap();
-
     IntIdentifierMap::iterator iter = identMap->find(intid);
     if (iter != identMap->end())
         return static_cast<NPIdentifier>(iter->second);
 
+    // We never release identifiers, so this dictionary will grow.
     PrivateIdentifier* identifier = reinterpret_cast<PrivateIdentifier*>(
         malloc(sizeof(PrivateIdentifier)));
-    // We never release identifier names, so this dictionary will grow.
     identifier->isString = false;
     identifier->value.number = intid;
     (*identMap)[intid] = identifier;
@@ -168,8 +185,6 @@ void NPN_ReleaseVariantValue(NPVariant* variant) {
     variant->type = NPVariantType_Void;
 }
 
-static StatsCounter global_npobjects(L"NPObjects");
-
 NPObject *NPN_CreateObject(NPP npp, NPClass* aClass) {
     ASSERT(aClass);
 
@@ -182,8 +197,6 @@ NPObject *NPN_CreateObject(NPP npp, NPClass* aClass) {
 
         obj->_class = aClass;
         obj->referenceCount = 1;
-
-        global_npobjects.Increment();
         return obj;
     }
 
@@ -208,8 +221,6 @@ void _NPN_DeallocateObject(NPObject *obj) {
     ASSERT(obj->referenceCount >= 0);
 
     if (obj) {
-        global_npobjects.Decrement();
-
         // NPObjects that remain in pure C++ may never have wrappers.
         // Hence, if it's not already alive, don't unregister it.
         // If it is alive, unregister it as the *last* thing we do
@@ -321,7 +332,9 @@ void _NPN_UnregisterObject(NPObject* obj) {
         ASSERT(g_root_objects.find(obj) != g_root_objects.end());
         NPObjectSet* set = g_root_objects[obj];
         while (set->size() > 0) {
+#ifndef NDEBUG
             size_t size = set->size();
+#endif
             NPObject* sub_object = *(set->begin());
             // The sub-object should not be a owner!
             ASSERT(g_root_objects.find(sub_object) == g_root_objects.end());

@@ -39,6 +39,18 @@ kStringIds = [
   'IDS_PRODUCT_NAME',
   'IDS_UNINSTALL_CHROME',
   'IDS_ABOUT_VERSION_COMPANY_NAME',
+  'IDS_INSTALL_HIGHER_VERSION',
+  'IDS_INSTALL_USER_LEVEL_EXISTS',
+  'IDS_INSTALL_SYSTEM_LEVEL_EXISTS',
+  'IDS_INSTALL_FAILED',
+  'IDS_INSTALL_OS_NOT_SUPPORTED',
+  'IDS_INSTALL_OS_ERROR',
+  'IDS_INSTALL_TEMP_DIR_FAILED',
+  'IDS_INSTALL_UNCOMPRESSION_FAILED',
+  'IDS_INSTALL_INVALID_ARCHIVE',
+  'IDS_INSTALL_INSUFFICIENT_RIGHTS',
+  'IDS_UNINSTALL_FAILED',
+  'IDS_INSTALL_DIR_IN_USE',
 ]
 
 # The ID of the first resource string.
@@ -138,7 +150,7 @@ def WriteHeaderFile(translated_strings, out_filename):
   """Writes a .h file with resource ids.  This file can be included by the
   executable to refer to identifiers."""
   lines = []
-  
+
   # Write the values for how the languages ids are offset.
   seen_languages = set()
   offset_id = 0
@@ -168,7 +180,7 @@ def WriteHeaderFile(translated_strings, out_filename):
   outfile.write('\n'.join(lines))
   outfile.write('\n')  # .rc files must end in a new line
   outfile.close()
-  
+
 def main(argv):
   translated_strings = CollectTranslatedStrings()
   kFilebase = os.path.join(argv[1], 'installer_util_strings')

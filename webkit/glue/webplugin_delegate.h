@@ -2,38 +2,62 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H__
-#define WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H__
+#ifndef WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H_
+#define WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H_
 
 #include <string>
+#include <vector>
 
-#include "base/basictypes.h"
 #include "base/gfx/native_widget_types.h"
-#include "base/gfx/rect.h"
 #include "third_party/npapi/bindings/npapi.h"
 
+// TODO(port): put in OS_WIN check.
 typedef struct HDC__* HDC;
-
-class GURL;
-class WebPlugin;
 struct NPObject;
+
+class FilePath;
+class GURL;
 class WebCursor;
+class WebPlugin;
 class WebPluginResourceClient;
+
+namespace gfx {
+class Rect;
+}
+
 // This is the interface that a plugin implementation needs to provide.
 class WebPluginDelegate {
  public:
+#if defined(OS_WIN)
+  enum PluginQuirks {
+    PLUGIN_QUIRK_SETWINDOW_TWICE = 1,
+    PLUGIN_QUIRK_THROTTLE_WM_USER_PLUS_ONE = 2,
+    PLUGIN_QUIRK_DONT_CALL_WND_PROC_RECURSIVELY = 4,
+    PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY = 8,
+    PLUGIN_QUIRK_DONT_ALLOW_MULTIPLE_INSTANCES = 16,
+    PLUGIN_QUIRK_DIE_AFTER_UNLOAD = 32,
+    PLUGIN_QUIRK_PATCH_TRACKPOPUP_MENU = 64,
+    PLUGIN_QUIRK_PATCH_SETCURSOR = 128,
+    PLUGIN_QUIRK_BLOCK_NONSTANDARD_GETURL_REQUESTS = 256,
+  };
+#endif
+
   WebPluginDelegate() {}
   virtual ~WebPluginDelegate() {}
+
+  static WebPluginDelegate* Create(const FilePath& filename,
+                                   const std::string& mime_type,
+                                   gfx::NativeView containing_view);
 
   // Initializes the plugin implementation with the given (UTF8) arguments.
   // Note that the lifetime of WebPlugin must be longer than this delegate.
   // If this function returns false the plugin isn't started and shouldn't be
   // called again.  If this method succeeds, then the WebPlugin is valid until
   // PluginDestroyed is called.
-  // The load_manually parameter if true indicates that the plugin data would 
-  // be passed from webkit. if false indicates that the plugin should download 
-  // the data. This also controls whether the plugin is instantiated as a full 
-  // page plugin (NP_FULL) or embedded (NP_EMBED)
+  // The load_manually parameter if true indicates that the plugin data would
+  // be passed from webkit. if false indicates that the plugin should download
+  // the data. This also controls whether the plugin is instantiated as a full
+  // page plugin (NP_FULL) or embedded (NP_EMBED).
   virtual bool Initialize(const GURL& url, char** argn, char** argv,
                           int argc, WebPlugin* plugin, bool load_manually) = 0;
 
@@ -42,19 +66,21 @@ class WebPluginDelegate {
   // methods on the WebPlugin again.
   virtual void PluginDestroyed() = 0;
 
-  // Update the geometry of the plugin.  This is a request to move the plugin,
-  // relative to its containing window, to the coords given by window_rect.
-  // Its contents should be clipped to the coords given by clip_rect, which are
-  // relative to the origin of the plugin window.
+  // Update the geometry of the plugin.  This is a request to move the
+  // plugin, relative to its containing window, to the coords given by
+  // window_rect.  Its contents should be clipped to the coords given
+  // by clip_rect, which are relative to the origin of the plugin
+  // window.  The clip_rect is in plugin-relative coordinates.
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
-                              const gfx::Rect& clip_rect, bool visible) = 0;
+                              const gfx::Rect& clip_rect) = 0;
 
-  // Tells the plugin to paint the damaged rect.  The HDC is only used for
+  // Tells the plugin to paint the damaged rect.  |context| is only used for
   // windowless plugins.
-  virtual void Paint(HDC hdc, const gfx::Rect& rect) = 0;
+  virtual void Paint(gfx::NativeDrawingContext context,
+                     const gfx::Rect& rect) = 0;
 
   // Tells the plugin to print itself.
-  virtual void Print(HDC hdc) = 0;
+  virtual void Print(gfx::NativeDrawingContext hdc) = 0;
 
   // Informs the plugin that it now has focus.
   virtual void SetFocus() = 0;
@@ -69,23 +95,19 @@ class WebPluginDelegate {
   // Receives notification about a resource load that the plugin initiated
   // for a frame.
   virtual void DidFinishLoadWithReason(NPReason reason) = 0;
-  
+
   // Returns the process id of the process that is running the plugin.
   virtual int GetProcessId() = 0;
-
-  // Returns the window handle for this plugin if it's a windowed plugin,
-  // or NULL otherwise.
-  virtual gfx::ViewHandle GetWindowHandle() = 0;
 
   virtual void FlushGeometryUpdates() = 0;
 
   // The result of the script execution is returned via this function.
   virtual void SendJavaScriptStream(const std::string& url,
-                                    const std::wstring& result, 
-                                    bool success, bool notify_needed, 
+                                    const std::wstring& result,
+                                    bool success, bool notify_needed,
                                     int notify_data) = 0;
 
-  // Receives notification about data being available. 
+  // Receives notification about data being available.
   virtual void DidReceiveManualResponse(const std::string& url,
                                         const std::string& mime_type,
                                         const std::string& headers,
@@ -101,10 +123,10 @@ class WebPluginDelegate {
   // Indicates a failure in data receipt.
   virtual void DidManualLoadFail() = 0;
 
-  // Only Available after Initialize is called.
-  virtual std::wstring GetPluginPath() = 0;
+  // Only available after Initialize is called.
+  virtual FilePath GetPluginPath() = 0;
 
-  // Only Supported when the plugin is the default plugin.
+  // Only supported when the plugin is the default plugin.
   virtual void InstallMissingPlugin() = 0;
 
   // Creates a WebPluginResourceClient instance and returns the same.
@@ -113,12 +135,24 @@ class WebPluginDelegate {
                                                         bool notify_needed,
                                                         void *notify_data,
                                                         void* stream) = 0;
-  // Notifies the delegate about a Get/Post URL request getting routed
-  virtual void URLRequestRouted(const std::string&url, bool notify_needed, 
+
+  // Notifies the delegate about a Get/Post URL request getting routed.
+  virtual void URLRequestRouted(const std::string&url, bool notify_needed,
                                 void* notify_data) = 0;
+
+  virtual bool IsWindowless() const;
+
+  virtual const gfx::Rect& GetRect() const;
+
+  virtual const gfx::Rect& GetClipRect() const;
+
+#if defined(OS_WIN)
+  // Returns a combinaison of PluginQuirks.
+  virtual int GetQuirks() const;
+#endif
+
  private:
-  DISALLOW_EVIL_CONSTRUCTORS(WebPluginDelegate);
+  DISALLOW_COPY_AND_ASSIGN(WebPluginDelegate);
 };
 
-#endif  // #ifndef WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H__
-
+#endif  // #ifndef WEBKIT_GLUE_WEBPLUGIN_DELEGATE_H_

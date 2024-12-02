@@ -90,8 +90,8 @@ class Animation {
   void SetDuration(int duration);
 
  protected:
-  // Called when the animation's timer expires.
-  void Run();
+  // Overriddable, called by Run.
+  virtual void Step();
 
   // Calculates the timer interval from the constructor list.
   int CalculateInterval(int frame_rate);
@@ -112,8 +112,11 @@ class Animation {
 
   base::RepeatingTimer<Animation> timer_;
 
+ private:
+  // Called when the animation's timer expires, calls Step.
+  void Run();
+
   DISALLOW_EVIL_CONSTRUCTORS(Animation);
 };
 
 #endif  // CHROME_COMMON_ANIMATION_H__
-

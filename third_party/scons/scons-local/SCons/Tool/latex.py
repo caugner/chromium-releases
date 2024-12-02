@@ -9,7 +9,7 @@ selection method.
 """
 
 #
-# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008 The SCons Foundation
+# Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 The SCons Foundation
 #
 # Permission is hereby granted, free of charge, to any person obtaining
 # a copy of this software and associated documentation files (the
@@ -31,7 +31,7 @@ selection method.
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
-__revision__ = "src/engine/SCons/Tool/latex.py 3424 2008/09/15 11:22:20 scons"
+__revision__ = "src/engine/SCons/Tool/latex.py 3897 2009/01/13 06:45:54 scons"
 
 import SCons.Action
 import SCons.Defaults
@@ -58,11 +58,14 @@ def generate(env):
     import dvi
     dvi.generate(env)
 
+    import pdf
+    pdf.generate(env)
+
     bld = env['BUILDERS']['DVI']
     bld.add_action('.ltx', LaTeXAuxAction)
     bld.add_action('.latex', LaTeXAuxAction)
-    bld.add_emitter('.ltx', SCons.Tool.tex.tex_emitter)
-    bld.add_emitter('.latex', SCons.Tool.tex.tex_emitter)
+    bld.add_emitter('.ltx', SCons.Tool.tex.tex_eps_emitter)
+    bld.add_emitter('.latex', SCons.Tool.tex.tex_eps_emitter)
 
     env['LATEX']        = 'latex'
     env['LATEXFLAGS']   = SCons.Util.CLVar('-interaction=nonstopmode')

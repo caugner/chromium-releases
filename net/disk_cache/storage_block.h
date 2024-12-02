@@ -63,6 +63,7 @@ class StorageBlock : public FileBlock {
 
  private:
   void AllocateData();
+  void DeleteData();
 
   T* data_;
   MappedFile* file_;
@@ -80,4 +81,3 @@ typedef StorageBlock<RankingsNode> CacheRankingsBlock;
 }  // namespace disk_cache
 
 #endif  // NET_DISK_CACHE_STORAGE_BLOCK_H__
-
