@@ -20,6 +20,7 @@
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "gpu/command_buffer/client/gl_in_process_context.h"
+#include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "ui/gfx/frame_time.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -33,6 +34,7 @@ namespace android_webview {
 namespace {
 
 using webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl;
+using webkit::gpu::WebGraphicsContext3DImpl;
 
 scoped_refptr<cc::ContextProvider> CreateContext(
     scoped_refptr<gfx::GLSurface> surface,
@@ -46,21 +48,22 @@ scoped_refptr<cc::ContextProvider> CreateContext(
   attributes.stencil = false;
   attributes.shareResources = true;
   attributes.noAutomaticFlushes = true;
-  gpu::GLInProcessContextAttribs in_process_attribs;
-  WebGraphicsContext3DInProcessCommandBufferImpl::ConvertAttributes(
-      attributes, &in_process_attribs);
-  in_process_attribs.lose_context_when_out_of_memory = 1;
+  gpu::gles2::ContextCreationAttribHelper attribs_for_gles2;
+  WebGraphicsContext3DImpl::ConvertAttributes(
+      attributes, &attribs_for_gles2);
+  attribs_for_gles2.lose_context_when_out_of_memory = true;
 
-  scoped_ptr<gpu::GLInProcessContext> context(
-      gpu::GLInProcessContext::Create(service,
-                                      surface,
-                                      surface->IsOffscreen(),
-                                      gfx::kNullAcceleratedWidget,
-                                      surface->GetSize(),
-                                      share_context,
-                                      false /* share_resources */,
-                                      in_process_attribs,
-                                      gpu_preference));
+  scoped_ptr<gpu::GLInProcessContext> context(gpu::GLInProcessContext::Create(
+      service,
+      surface,
+      surface->IsOffscreen(),
+      gfx::kNullAcceleratedWidget,
+      surface->GetSize(),
+      share_context,
+      false /* share_resources */,
+      attribs_for_gles2,
+      gpu_preference,
+      gpu::GLInProcessContextSharedMemoryLimits()));
   DCHECK(context.get());
 
   return webkit::gpu::ContextProviderInProcess::Create(
@@ -94,7 +97,7 @@ HardwareRenderer::HardwareRenderer(SharedRendererState* state)
   settings.should_clear_root_render_pass = false;
 
   layer_tree_host_ =
-      cc::LayerTreeHost::CreateSingleThreaded(this, this, NULL, settings);
+      cc::LayerTreeHost::CreateSingleThreaded(this, this, NULL, settings, NULL);
   layer_tree_host_->SetRootLayer(root_layer_);
   layer_tree_host_->SetLayerTreeHostClientReady();
   layer_tree_host_->set_has_transparent_background(true);
@@ -116,6 +119,10 @@ HardwareRenderer::~HardwareRenderer() {
 #endif  // DCHECK_IS_ON
 
   resource_collection_->SetClient(NULL);
+
+  // Reset draw constraints.
+  shared_renderer_state_->UpdateDrawConstraints(
+      ParentCompositorDrawConstraints());
 }
 
 void HardwareRenderer::DidBeginMainFrame() {
@@ -129,10 +136,9 @@ void HardwareRenderer::DidBeginMainFrame() {
 
 void HardwareRenderer::CommitFrame() {
   scoped_ptr<DrawGLInput> input = shared_renderer_state_->PassDrawGLInput();
-  if (!input.get()) {
-    DLOG(WARNING) << "No frame to commit";
+  // Happens with empty global visible rect.
+  if (!input.get())
     return;
-  }
 
   DCHECK(!input->frame.gl_frame_data);
   DCHECK(!input->frame.software_frame_data);
@@ -182,14 +188,26 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
     return;
   }
 
-  if (!delegated_layer_.get()) {
-    DLOG(ERROR) << "No frame committed";
-    return;
-  }
-
   // TODO(boliu): Handle context loss.
   if (last_egl_context_ != current_context)
     DLOG(WARNING) << "EGLContextChanged";
+
+  gfx::Transform transform(gfx::Transform::kSkipInitialization);
+  transform.matrix().setColMajorf(draw_info->transform);
+  transform.Translate(scroll_offset_.x(), scroll_offset_.y());
+
+  // Need to post the new transform matrix back to child compositor
+  // because there is no onDraw during a Render Thread animation, and child
+  // compositor might not have the tiles rasterized as the animation goes on.
+  ParentCompositorDrawConstraints draw_constraints(
+      draw_info->is_layer, transform, gfx::Rect(viewport_));
+
+  draw_constraints_ = draw_constraints;
+  shared_renderer_state_->PostExternalDrawConstraintsToChildCompositor(
+      draw_constraints);
+
+  if (!delegated_layer_.get())
+    return;
 
   viewport_.SetSize(draw_info->width, draw_info->height);
   layer_tree_host_->SetViewportSize(viewport_);
@@ -199,9 +217,6 @@ void HardwareRenderer::DrawGL(bool stencil_enabled,
                 draw_info->clip_bottom - draw_info->clip_top);
   stencil_enabled_ = stencil_enabled;
 
-  gfx::Transform transform(gfx::Transform::kSkipInitialization);
-  transform.matrix().setColMajorf(draw_info->transform);
-  transform.Translate(scroll_offset_.x(), scroll_offset_.y());
   delegated_layer_->SetTransform(transform);
 
   gl_surface_->SetBackingFrameBufferObject(framebuffer_binding_ext);

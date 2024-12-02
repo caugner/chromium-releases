@@ -23,6 +23,7 @@ import android.os.Bundle;
 import android.os.Message;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
@@ -51,9 +52,11 @@ import org.chromium.content.browser.ContentViewStatics;
 import org.chromium.content.browser.LoadUrlParams;
 import org.chromium.content.browser.NavigationHistory;
 import org.chromium.content.browser.PageTransitionTypes;
+import org.chromium.content.browser.WebContentsObserverAndroid;
 import org.chromium.content.common.CleanupReference;
 import org.chromium.content_public.Referrer;
 import org.chromium.content_public.browser.GestureStateListener;
+import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
@@ -179,8 +182,10 @@ public class AwContents {
     private final AwLayoutChangeListener mLayoutChangeListener;
     private final Context mContext;
     private ContentViewCore mContentViewCore;
+    private WindowAndroid mWindowAndroid;
     private final AwContentsClient mContentsClient;
     private final AwContentViewClient mContentViewClient;
+    private WebContentsObserverAndroid mWebContentsObserver;
     private final AwContentsClientBridge mContentsClientBridge;
     private final AwWebContentsDelegateAdapter mWebContentsDelegate;
     private final AwContentsIoThreadClient mIoThreadClient;
@@ -611,12 +616,11 @@ public class AwContents {
             Context context, InternalAccessDelegate internalDispatcher, long nativeWebContents,
             GestureStateListener gestureStateListener,
             ContentViewClient contentViewClient,
-            ContentViewCore.ZoomControlsDelegate zoomControlsDelegate) {
+            ContentViewCore.ZoomControlsDelegate zoomControlsDelegate,
+            WindowAndroid windowAndroid) {
         ContentViewCore contentViewCore = new ContentViewCore(context);
         contentViewCore.initialize(containerView, internalDispatcher, nativeWebContents,
-                context instanceof Activity ?
-                        new ActivityWindowAndroid((Activity) context) :
-                        new WindowAndroid(context.getApplicationContext()));
+                windowAndroid);
         contentViewCore.addGestureStateListener(gestureStateListener);
         contentViewCore.setContentViewClient(contentViewClient);
         contentViewCore.setZoomControlsDelegate(zoomControlsDelegate);
@@ -659,7 +663,11 @@ public class AwContents {
      * in the WebView.
      */
     void exitFullScreen() {
-        assert isFullScreen();
+        if (!isFullScreen())
+            // exitFullScreen() can be called without a prior call to enterFullScreen() if a
+            // "misbehave" app overrides onShowCustomView but does not add the custom view to
+            // the window. Exiting avoids a crash.
+            return;
 
         // Detach to tear down the GL functor if this is still associated with the old
         // container view. It will be recreated during the next call to onDraw attached to
@@ -712,7 +720,11 @@ public class AwContents {
         AwViewMethods awViewMethodsImpl = mFullScreenTransitionsState.getInitialAwViewMethods();
         awViewMethodsImpl.onVisibilityChanged(mContainerView, mContainerView.getVisibility());
         awViewMethodsImpl.onWindowVisibilityChanged(mContainerView.getWindowVisibility());
-        if (mContainerView.isAttachedToWindow()) {
+
+        // We should stop running WebView tests in JellyBean devices, see crbug/161864.
+        // Until then we skip calling isAttachedToWindow() as it has only been introduced in K.
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.KITKAT
+                || mContainerView.isAttachedToWindow()) {
             awViewMethodsImpl.onAttachedToWindow();
         } else {
             awViewMethodsImpl.onDetachedFromWindow();
@@ -748,17 +760,29 @@ public class AwContents {
         mCleanupReference = new CleanupReference(this, new DestroyRunnable(mNativeAwContents));
 
         long nativeWebContents = nativeGetWebContents(mNativeAwContents);
+
+        mWindowAndroid = mContext instanceof Activity ?
+                new ActivityWindowAndroid((Activity) mContext) :
+                new WindowAndroid(mContext.getApplicationContext());
         mContentViewCore = createAndInitializeContentViewCore(
                 mContainerView, mContext, mInternalAccessAdapter, nativeWebContents,
-                new AwGestureStateListener(), mContentViewClient, mZoomControls);
+                new AwGestureStateListener(), mContentViewClient, mZoomControls, mWindowAndroid);
         nativeSetJavaPeers(mNativeAwContents, this, mWebContentsDelegate, mContentsClientBridge,
                 mIoThreadClient, mInterceptNavigationDelegate);
-        mContentsClient.installWebContentsObserver(mContentViewCore);
+        installWebContentsObserver();
         mSettings.setWebContents(nativeWebContents);
         nativeSetDipScale(mNativeAwContents, (float) mDIPScale);
 
         // The only call to onShow. onHide should never be called.
         mContentViewCore.onShow();
+    }
+
+    private void installWebContentsObserver() {
+        if (mWebContentsObserver != null) {
+            mWebContentsObserver.detachFromWebContents();
+        }
+        mWebContentsObserver = new AwWebContentsObserver(mContentViewCore.getWebContents(),
+                mContentsClient);
     }
 
     /**
@@ -800,6 +824,13 @@ public class AwContents {
         if (wasAttached) onDetachedFromWindow();
         if (!wasPaused) onPause();
 
+        // Save injected JavaScript interfaces.
+        Map<String, Pair<Object, Class>> javascriptInterfaces =
+                new HashMap<String, Pair<Object, Class>>();
+        if (mContentViewCore != null) {
+            javascriptInterfaces.putAll(mContentViewCore.getJavascriptInterfaces());
+        }
+
         setNewAwContents(popupNativeAwContents);
 
         // Finally refresh all view state for mContentViewCore and mNativeAwContents.
@@ -813,6 +844,17 @@ public class AwContents {
         if (wasViewVisible) setViewVisibilityInternal(true);
         if (wasWindowFocused) onWindowFocusChanged(wasWindowFocused);
         if (wasFocused) onFocusChanged(true, 0, null);
+
+        // Restore injected JavaScript interfaces.
+        for (Map.Entry<String, Pair<Object, Class>> entry : javascriptInterfaces.entrySet()) {
+            @SuppressWarnings("unchecked")
+            Class<? extends Annotation> requiredAnnotation = (Class<? extends Annotation>)
+                    entry.getValue().second;
+            mContentViewCore.addPossiblyUnsafeJavascriptInterface(
+                    entry.getValue().first,
+                    entry.getKey(),
+                    requiredAnnotation);
+        }
     }
 
     /**
@@ -1023,8 +1065,6 @@ public class AwContents {
      * @param params Parameters for this load.
      */
     public void loadUrl(LoadUrlParams params) {
-        if (mNativeAwContents == 0) return;
-
         if (params.getLoadUrlType() == LoadUrlParams.LOAD_TYPE_DATA &&
                 !params.isBaseUrlDataScheme()) {
             // This allows data URLs with a non-data base URL access to file:///android_asset/ and
@@ -1063,11 +1103,12 @@ public class AwContents {
             }
         }
 
-        nativeSetExtraHeadersForUrl(
-                mNativeAwContents, params.getUrl(), params.getExtraHttpRequestHeadersString());
+        if (mNativeAwContents != 0) {
+            nativeSetExtraHeadersForUrl(
+                    mNativeAwContents, params.getUrl(), params.getExtraHttpRequestHeadersString());
+        }
         params.setExtraHeaders(new HashMap<String, String>());
 
-        nativeSendCheckRenderThreadResponsiveness(mNativeAwContents);
         mContentViewCore.loadUrl(params);
 
         // The behavior of WebViewClassic uses the populateVisitedLinks callback in WebKit.
@@ -1643,12 +1684,12 @@ public class AwContents {
     }
 
     /**
-     * @see ContentViewCore.evaluateJavaScript(String, ContentViewCore.JavaScriptCallback)
+     * @see ContentViewCore.evaluateJavaScript(String, JavaScriptCallback)
      */
     public void evaluateJavaScript(String script, final ValueCallback<String> callback) {
-        ContentViewCore.JavaScriptCallback jsCallback = null;
+        JavaScriptCallback jsCallback = null;
         if (callback != null) {
-            jsCallback = new ContentViewCore.JavaScriptCallback() {
+            jsCallback = new JavaScriptCallback() {
                 @Override
                 public void handleJavaScriptResult(String jsonResult) {
                     callback.onReceiveValue(jsonResult);
@@ -2006,11 +2047,18 @@ public class AwContents {
 
     @CalledByNative
     private void postInvalidateOnAnimation() {
-        if (SUPPORTS_ON_ANIMATION) {
+        if (SUPPORTS_ON_ANIMATION && !mWindowAndroid.isInsideVSync()) {
             mContainerView.postInvalidateOnAnimation();
         } else {
-            mContainerView.postInvalidate();
+            mContainerView.invalidate();
         }
+    }
+
+    // Call postInvalidateOnAnimation for invalidations. This is only used to synchronize
+    // draw functor destruction.
+    @CalledByNative
+    private void invalidateOnFunctorDestroy() {
+        mContainerView.invalidate();
     }
 
     @CalledByNative
@@ -2455,7 +2503,6 @@ public class AwContents {
     private native void nativeClearView(long nativeAwContents);
     private native void nativeSetExtraHeadersForUrl(long nativeAwContents,
             String url, String extraHeaders);
-    private native void nativeSendCheckRenderThreadResponsiveness(long nativeAwContents);
 
     private native void nativeInvokeGeolocationCallback(
             long nativeAwContents, boolean value, String requestingFrame);

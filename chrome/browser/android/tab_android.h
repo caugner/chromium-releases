@@ -13,6 +13,7 @@
 #include "base/strings/string16.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
+#include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/public/browser/notification_observer.h"
@@ -42,6 +43,7 @@ class PrerenderManager;
 }
 
 class TabAndroid : public CoreTabHelperDelegate,
+                   public SearchTabHelperDelegate,
                    public content::NotificationObserver {
  public:
   enum TabLoadStatus {
@@ -94,15 +96,15 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   virtual void HandlePopupNavigation(chrome::NavigateParams* params);
 
-  virtual void OnReceivedHttpAuthRequest(jobject auth_handler,
-                                         const base::string16& host,
-                                         const base::string16& realm);
-
   // Called to determine if chrome://welcome should contain links to the terms
   // of service and the privacy notice.
   virtual bool ShouldWelcomePageLinkToTermsOfService();
 
   bool HasPrerenderedUrl(GURL gurl);
+
+  void MakeLoadURLParams(
+      chrome::NavigateParams* params,
+      content::NavigationController::LoadURLParams* load_url_params);
 
   // CoreTabHelperDelegate ----------------------------------------------------
 
@@ -110,6 +112,10 @@ class TabAndroid : public CoreTabHelperDelegate,
                                content::WebContents* new_contents,
                                bool did_start_load,
                                bool did_finish_load) OVERRIDE;
+
+  // Overridden from SearchTabHelperDelegate:
+  virtual void OnWebContentsInstantSupportDisabled(
+      const content::WebContents* web_contents) OVERRIDE;
 
   // NotificationObserver -----------------------------------------------------
   virtual void Observe(int type,
@@ -147,6 +153,10 @@ class TabAndroid : public CoreTabHelperDelegate,
                                            jstring jurl,
                                            jstring jtitle);
   bool Print(JNIEnv* env, jobject obj);
+  // Called to get favicon of current tab, return null if no favicon is
+  // avaliable for current tab.
+  base::android::ScopedJavaLocalRef<jobject> GetFavicon(JNIEnv* env,
+                                                        jobject obj);
 
   // Register the Tab's native methods through JNI.
   static bool RegisterTabAndroid(JNIEnv* env);

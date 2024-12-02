@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/cancelable_callback.h"
-#include "cc/resources/direct_raster_worker_pool.h"
+#include "cc/resources/gpu_raster_worker_pool.h"
 #include "cc/resources/image_copy_raster_worker_pool.h"
 #include "cc/resources/image_raster_worker_pool.h"
 #include "cc/resources/picture_pile.h"
@@ -27,11 +27,16 @@
 namespace cc {
 namespace {
 
+const size_t kMaxTransferBufferUsageBytes = 10000U;
+// A resource of this dimension^2 * 4 must be greater than the above transfer
+// buffer constant.
+const size_t kLargeResourceDimension = 1000U;
+
 enum RasterWorkerPoolType {
   RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER,
   RASTER_WORKER_POOL_TYPE_IMAGE,
   RASTER_WORKER_POOL_TYPE_IMAGE_COPY,
-  RASTER_WORKER_POOL_TYPE_DIRECT
+  RASTER_WORKER_POOL_TYPE_GPU
 };
 
 class TestRasterTaskImpl : public RasterTask {
@@ -124,8 +129,9 @@ class RasterWorkerPoolTest
         raster_worker_pool_ = PixelBufferRasterWorkerPool::Create(
             base::MessageLoopProxy::current().get(),
             RasterWorkerPool::GetTaskGraphRunner(),
+            context_provider_.get(),
             resource_provider_.get(),
-            std::numeric_limits<size_t>::max());
+            kMaxTransferBufferUsageBytes);
         break;
       case RASTER_WORKER_POOL_TYPE_IMAGE:
         raster_worker_pool_ = ImageRasterWorkerPool::Create(
@@ -137,14 +143,15 @@ class RasterWorkerPoolTest
         raster_worker_pool_ = ImageCopyRasterWorkerPool::Create(
             base::MessageLoopProxy::current().get(),
             RasterWorkerPool::GetTaskGraphRunner(),
+            context_provider_.get(),
             resource_provider_.get(),
             staging_resource_pool_.get());
         break;
-      case RASTER_WORKER_POOL_TYPE_DIRECT:
-        raster_worker_pool_ = DirectRasterWorkerPool::Create(
-            base::MessageLoopProxy::current().get(),
-            resource_provider_.get(),
-            context_provider_.get());
+      case RASTER_WORKER_POOL_TYPE_GPU:
+        raster_worker_pool_ =
+            GpuRasterWorkerPool::Create(base::MessageLoopProxy::current().get(),
+                                        context_provider_.get(),
+                                        resource_provider_.get());
         break;
     }
 
@@ -201,9 +208,7 @@ class RasterWorkerPoolTest
     raster_worker_pool_->AsRasterizer()->ScheduleTasks(&queue);
   }
 
-  void AppendTask(unsigned id) {
-    const gfx::Size size(1, 1);
-
+  void AppendTask(unsigned id, const gfx::Size& size) {
     scoped_ptr<ScopedResource> resource(
         ScopedResource::Create(resource_provider_.get()));
     resource->Allocate(size, ResourceProvider::TextureUsageAny, RGBA_8888);
@@ -218,6 +223,8 @@ class RasterWorkerPoolTest
                    id),
         &empty));
   }
+
+  void AppendTask(unsigned id) { AppendTask(id, gfx::Size(1, 1)); }
 
   void AppendBlockingTask(unsigned id, base::Lock* lock) {
     const gfx::Size size(1, 1);
@@ -322,12 +329,33 @@ TEST_P(RasterWorkerPoolTest, FalseThrottling) {
   RunMessageLoopUntilAllTasksHaveCompleted();
 }
 
+TEST_P(RasterWorkerPoolTest, LargeResources) {
+  gfx::Size size(kLargeResourceDimension, kLargeResourceDimension);
+
+  {
+    // Verify a resource of this size is larger than the transfer buffer.
+    scoped_ptr<ScopedResource> resource(
+        ScopedResource::Create(resource_provider_.get()));
+    resource->Allocate(size, ResourceProvider::TextureUsageAny, RGBA_8888);
+    EXPECT_GE(resource->bytes(), kMaxTransferBufferUsageBytes);
+  }
+
+  AppendTask(0u, size);
+  AppendTask(1u, size);
+  AppendTask(2u, size);
+  ScheduleTasks();
+
+  // This will time out if a resource that is larger than the throttle limit
+  // never gets scheduled.
+  RunMessageLoopUntilAllTasksHaveCompleted();
+}
+
 INSTANTIATE_TEST_CASE_P(RasterWorkerPoolTests,
                         RasterWorkerPoolTest,
                         ::testing::Values(RASTER_WORKER_POOL_TYPE_PIXEL_BUFFER,
                                           RASTER_WORKER_POOL_TYPE_IMAGE,
                                           RASTER_WORKER_POOL_TYPE_IMAGE_COPY,
-                                          RASTER_WORKER_POOL_TYPE_DIRECT));
+                                          RASTER_WORKER_POOL_TYPE_GPU));
 
 }  // namespace
 }  // namespace cc

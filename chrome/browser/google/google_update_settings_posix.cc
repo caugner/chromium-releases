@@ -14,12 +14,25 @@
 
 namespace {
 
-base::LazyInstance<std::string>::Leaky g_posix_guid = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<base::Lock>::Leaky g_posix_guid_lock =
+base::LazyInstance<std::string>::Leaky g_posix_client_id =
+    LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::Lock>::Leaky g_posix_client_id_lock =
     LAZY_INSTANCE_INITIALIZER;
 
 // File name used in the user data dir to indicate consent.
 const char kConsentToSendStats[] = "Consent To Send Stats";
+
+void SetConsentFilePermissionIfNeeded(const base::FilePath& consent_file) {
+#if defined(OS_CHROMEOS)
+  // The consent file needs to be world readable. See http://crbug.com/383003
+  int permissions;
+  if (base::GetPosixFilePermissions(consent_file, &permissions) &&
+      (permissions & base::FILE_PERMISSION_READ_BY_OTHERS) == 0) {
+    permissions |= base::FILE_PERMISSION_READ_BY_OTHERS;
+    base::SetPosixFilePermissions(consent_file, permissions);
+  }
+#endif
+}
 
 }  // namespace
 
@@ -28,11 +41,17 @@ bool GoogleUpdateSettings::GetCollectStatsConsent() {
   base::FilePath consent_file;
   PathService::Get(chrome::DIR_USER_DATA, &consent_file);
   consent_file = consent_file.Append(kConsentToSendStats);
+
+  if (!base::DirectoryExists(consent_file.DirName()))
+    return false;
+
   std::string tmp_guid;
   bool consented = base::ReadFileToString(consent_file, &tmp_guid);
   if (consented) {
-    base::AutoLock lock(g_posix_guid_lock.Get());
-    g_posix_guid.Get().assign(tmp_guid);
+    SetConsentFilePermissionIfNeeded(consent_file);
+
+    base::AutoLock lock(g_posix_client_id_lock.Get());
+    g_posix_client_id.Get().assign(tmp_guid);
   }
   return consented;
 }
@@ -44,46 +63,53 @@ bool GoogleUpdateSettings::SetCollectStatsConsent(bool consented) {
   if (!base::DirectoryExists(consent_dir))
     return false;
 
-  base::AutoLock lock(g_posix_guid_lock.Get());
+  base::AutoLock lock(g_posix_client_id_lock.Get());
 
   base::FilePath consent_file = consent_dir.AppendASCII(kConsentToSendStats);
-  if (consented) {
-    if ((!base::PathExists(consent_file)) ||
-        (base::PathExists(consent_file) && !g_posix_guid.Get().empty())) {
-      const char* c_str = g_posix_guid.Get().c_str();
-      int size = g_posix_guid.Get().size();
-      return base::WriteFile(consent_file, c_str, size) == size;
-    }
-  } else {
-    g_posix_guid.Get().clear();
+  if (!consented) {
+    g_posix_client_id.Get().clear();
     return base::DeleteFile(consent_file, false);
   }
-  return true;
+
+  const std::string& client_id = g_posix_client_id.Get();
+  if (base::PathExists(consent_file) && client_id.empty())
+    return true;
+
+  int size = client_id.size();
+  bool write_success =
+      base::WriteFile(consent_file, client_id.c_str(), size) == size;
+  if (write_success)
+    SetConsentFilePermissionIfNeeded(consent_file);
+  return write_success;
 }
 
 // static
-bool GoogleUpdateSettings::GetMetricsId(std::string* metrics_id) {
-  base::AutoLock lock(g_posix_guid_lock.Get());
-  *metrics_id = g_posix_guid.Get();
-  return true;
+// TODO(gab): Implement storing/loading for all ClientInfo fields on POSIX.
+scoped_ptr<metrics::ClientInfo> GoogleUpdateSettings::LoadMetricsClientInfo() {
+  scoped_ptr<metrics::ClientInfo> client_info(new metrics::ClientInfo);
+
+  base::AutoLock lock(g_posix_client_id_lock.Get());
+  if (g_posix_client_id.Get().empty())
+    return scoped_ptr<metrics::ClientInfo>();
+  client_info->client_id = g_posix_client_id.Get();
+
+  return client_info.Pass();
 }
 
 // static
-bool GoogleUpdateSettings::SetMetricsId(const std::string& client_id) {
+// TODO(gab): Implement storing/loading for all ClientInfo fields on POSIX.
+void GoogleUpdateSettings::StoreMetricsClientInfo(
+    const metrics::ClientInfo& client_info) {
   // Make sure that user has consented to send crashes.
-  base::FilePath consent_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &consent_dir);
-  if (!base::DirectoryExists(consent_dir) ||
-      !GoogleUpdateSettings::GetCollectStatsConsent()) {
-    return false;
-  }
+  if (!GoogleUpdateSettings::GetCollectStatsConsent())
+    return;
 
   {
     // Since user has consented, write the metrics id to the file.
-    base::AutoLock lock(g_posix_guid_lock.Get());
-    g_posix_guid.Get() = client_id;
+    base::AutoLock lock(g_posix_client_id_lock.Get());
+    g_posix_client_id.Get() = client_info.client_id;
   }
-  return GoogleUpdateSettings::SetCollectStatsConsent(true);
+  GoogleUpdateSettings::SetCollectStatsConsent(true);
 }
 
 // GetLastRunTime and SetLastRunTime are not implemented for posix. Their

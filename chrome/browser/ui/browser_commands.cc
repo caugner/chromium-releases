@@ -46,13 +46,14 @@
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
-#include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
+#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
@@ -79,6 +80,7 @@
 #include "content/public/common/url_utils.h"
 #include "content/public/common/user_agent.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "net/base/escape.h"
@@ -182,9 +184,9 @@ void BookmarkCurrentPageInternal(Browser* browser) {
     // so that bookmarks have an icon for the page.
     FaviconTabHelper::FromWebContents(web_contents)->SaveFavicon();
   }
-  bool was_bookmarked_by_user = bookmark_utils::IsBookmarkedByUser(model, url);
-  bookmark_utils::AddIfNotBookmarked(model, url, title);
-  bool is_bookmarked_by_user = bookmark_utils::IsBookmarkedByUser(model, url);
+  bool was_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
+  bookmarks::AddIfNotBookmarked(model, url, title);
+  bool is_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
   // Make sure the model actually added a bookmark before showing the star. A
   // bookmark isn't created if the url is invalid.
   if (browser->window()->IsActive() && is_bookmarked_by_user) {
@@ -518,7 +520,8 @@ void OpenCurrentURL(Browser* browser) {
       TabStripModel::ADD_FORCE_INDEX | TabStripModel::ADD_INHERIT_OPENER;
   Navigate(&params);
 
-  DCHECK(browser->profile()->GetExtensionService());
+  DCHECK(extensions::ExtensionSystem::Get(
+      browser->profile())->extension_service());
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(browser->profile())
           ->enabled_extensions().GetAppByURL(url);
@@ -578,13 +581,21 @@ void CloseTab(Browser* browser) {
   browser->tab_strip_model()->CloseSelectedTabs();
 }
 
-void RestoreTab(Browser* browser) {
-  content::RecordAction(UserMetricsAction("RestoreTab"));
-  TabRestoreService* service =
-      TabRestoreServiceFactory::GetForProfile(browser->profile());
-  if (service)
-    service->RestoreMostRecentEntry(browser->tab_restore_service_delegate(),
-                                    browser->host_desktop_type());
+bool CanZoomIn(content::WebContents* contents) {
+  ZoomController* zoom_controller = ZoomController::FromWebContents(contents);
+  return zoom_controller->GetZoomPercent() !=
+      contents->GetMaximumZoomPercent() + 1;
+}
+
+bool CanZoomOut(content::WebContents* contents) {
+  ZoomController* zoom_controller = ZoomController::FromWebContents(contents);
+  return zoom_controller->GetZoomPercent() !=
+      contents->GetMinimumZoomPercent();
+}
+
+bool ActualSize(content::WebContents* contents) {
+  ZoomController* zoom_controller = ZoomController::FromWebContents(contents);
+  return zoom_controller->GetZoomPercent() != 100.0f;
 }
 
 TabStripModelDelegate::RestoreTabType GetRestoreTabType(
@@ -777,7 +788,7 @@ void Translate(Browser* browser) {
       step = translate::TRANSLATE_STEP_AFTER_TRANSLATE;
   }
   browser->window()->ShowTranslateBubble(
-      web_contents, step, TranslateErrors::NONE);
+      web_contents, step, translate::TranslateErrors::NONE, true);
 }
 
 void ManagePasswordsForPage(Browser* browser) {

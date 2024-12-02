@@ -4,6 +4,8 @@
 
 #include "chrome/browser/themes/theme_service.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_loop.h"
@@ -26,6 +28,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "grit/theme_resources.h"
@@ -78,6 +81,17 @@ void WritePackToDiskCallback(BrowserThemePack* pack,
     NOTREACHED() << "Could not write theme pack to disk";
 }
 
+// Heuristic to determine if color is grayscale. This is used to decide whether
+// to use the colorful or white logo, if a theme fails to specify which.
+bool IsColorGrayscale(SkColor color) {
+  const int kChannelTolerance = 9;
+  int r = SkColorGetR(color);
+  int g = SkColorGetG(color);
+  int b = SkColorGetB(color);
+  int range = std::max(r, std::max(g, b)) - std::min(r, std::min(g, b));
+  return range < kChannelTolerance;
+}
+
 }  // namespace
 
 ThemeService::ThemeService()
@@ -100,7 +114,7 @@ void ThemeService::Init(Profile* profile) {
   LoadThemePrefs();
 
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSIONS_READY,
+                 extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED,
                  content::Source<Profile>(profile_));
 
   theme_syncable_service_.reset(new ThemeSyncableService(profile_, this));
@@ -117,6 +131,10 @@ gfx::Image ThemeService::GetImageNamed(int id) const {
     image = rb_.GetNativeImageNamed(id);
 
   return image;
+}
+
+bool ThemeService::IsSystemThemeDistinctFromDefaultTheme() const {
+  return false;
 }
 
 bool ThemeService::UsingSystemTheme() const {
@@ -189,12 +207,15 @@ int ThemeService::GetDisplayProperty(int id) const {
     return result;
   }
 
-  if (id == Properties::NTP_LOGO_ALTERNATE &&
-      !UsingDefaultTheme() &&
-      !UsingSystemTheme()) {
-    // Use the alternate logo for themes from the web store except for
-    // |kDefaultThemeGalleryID|.
-    return 1;
+  if (id == Properties::NTP_LOGO_ALTERNATE) {
+    if (UsingDefaultTheme() || UsingSystemTheme())
+      return 0;  // Colorful logo.
+
+    if (HasCustomImage(IDR_THEME_NTP_BACKGROUND))
+      return 1;  // White logo.
+
+    SkColor background_color = GetColor(Properties::COLOR_NTP_BACKGROUND);
+    return IsColorGrayscale(background_color) ? 0 : 1;
   }
 
   return Properties::GetDefaultDisplayProperty(id);
@@ -242,12 +263,13 @@ void ThemeService::Observe(int type,
                            const content::NotificationDetails& details) {
   using content::Details;
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSIONS_READY:
-      registrar_.Remove(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-          content::Source<Profile>(profile_));
+    case extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED:
+      registrar_.Remove(this,
+                        extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED,
+                        content::Source<Profile>(profile_));
       OnExtensionServiceReady();
       break;
-    case chrome::NOTIFICATION_EXTENSION_INSTALLED_DEPRECATED: {
+    case extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED: {
       // The theme may be initially disabled. Wait till it is loaded (if ever).
       Details<const extensions::InstalledExtensionInfo> installed_details(
           details);
@@ -255,8 +277,7 @@ void ThemeService::Observe(int type,
         installed_pending_load_id_ = installed_details->extension->id();
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
-    {
+    case extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED: {
       const Extension* extension = Details<const Extension>(details).ptr();
       if (extension->is_theme() &&
           installed_pending_load_id_ != kDefaultThemeID &&
@@ -266,15 +287,13 @@ void ThemeService::Observe(int type,
       installed_pending_load_id_ = kDefaultThemeID;
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_ENABLED:
-    {
+    case extensions::NOTIFICATION_EXTENSION_ENABLED: {
       const Extension* extension = Details<const Extension>(details).ptr();
       if (extension->is_theme())
         SetTheme(extension);
       break;
     }
-    case chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED:
-    {
+    case extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED: {
       Details<const UnloadedExtensionInfo> unloaded_details(details);
       if (unloaded_details->reason != UnloadedExtensionInfo::REASON_UPDATE &&
           unloaded_details->extension->is_theme() &&
@@ -366,8 +385,12 @@ void ThemeService::RemoveUnusedThemes(bool ignore_infobars) {
   // are installed but not loaded because they are blacklisted by a management
   // policy provider.
 
-  for (size_t i = 0; i < remove_list.size(); ++i)
-    service->UninstallExtension(remove_list[i], false, NULL);
+  for (size_t i = 0; i < remove_list.size(); ++i) {
+    service->UninstallExtension(remove_list[i],
+                                extensions::UNINSTALL_REASON_ORPHANED_THEME,
+                                base::Bind(&base::DoNothing),
+                                NULL);
+  }
 }
 
 void ThemeService::UseDefaultTheme() {
@@ -499,17 +522,18 @@ void ThemeService::OnExtensionServiceReady() {
     NotifyThemeChanged();
   }
 
+  registrar_.Add(
+      this,
+      extensions::NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
+      content::Source<Profile>(profile_));
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_INSTALLED_DEPRECATED,
+                 extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
+                 extensions::NOTIFICATION_EXTENSION_ENABLED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_ENABLED,
-                 content::Source<Profile>(profile_));
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
+                 extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<Profile>(profile_));
 
   base::MessageLoop::current()->PostDelayedTask(FROM_HERE,

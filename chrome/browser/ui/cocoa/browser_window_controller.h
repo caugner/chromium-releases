@@ -25,6 +25,7 @@
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 #include "components/translate/core/common/translate_errors.h"
+#include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/gfx/rect.h"
 
 @class AvatarBaseController;
@@ -133,6 +134,9 @@ class Command;
   // to indicate that the window is in the process of transitioning into
   // fullscreen mode.
   BOOL enteringFullscreen_;
+
+  // True when entering system fullscreen.
+  BOOL enteringSystemFullscreen_;
 
   // True between |-setPresentationMode:url:bubbleType:| and
   // |-windowDidEnterFullScreen:| to indicate that the window is in the process
@@ -308,7 +312,9 @@ class Command;
 
 // Consults the Command Registry to see if this |event| needs to be handled as
 // an extension command and returns YES if so (NO otherwise).
-- (BOOL)handledByExtensionCommand:(NSEvent*)event;
+// Only extensions with the given |priority| are considered.
+- (BOOL)handledByExtensionCommand:(NSEvent*)event
+    priority:(ui::AcceleratorManager::HandlerPriority)priority;
 
 // Delegate method for the status bubble to query its base frame.
 - (NSRect)statusBubbleBaseFrame;
@@ -320,7 +326,8 @@ class Command;
 // Show the translate bubble.
 - (void)showTranslateBubbleForWebContents:(content::WebContents*)contents
                                      step:(translate::TranslateStep)step
-                                errorType:(TranslateErrors::Type)errorType;
+                                errorType:
+                                    (translate::TranslateErrors::Type)errorType;
 
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(content::WebContents*)contents;
