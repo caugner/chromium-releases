@@ -10,8 +10,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/history/android/android_history_types.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
+#include "components/history/core/android/android_history_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -191,7 +191,6 @@ class ChromeBrowserProvider : public BaseBookmarkModelObserver,
   history::TopSites* top_sites_;
 
   scoped_ptr<AndroidHistoryProviderService> service_;
-  scoped_ptr<FaviconService> favicon_service_;
 
   base::CancelableTaskTracker cancelable_task_tracker_;
 
