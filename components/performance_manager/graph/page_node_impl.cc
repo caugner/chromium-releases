@@ -6,8 +6,8 @@
 
 #include <memory>
 
-#include "base/bind.h"
 #include "base/check_op.h"
+#include "base/functional/bind.h"
 #include "base/time/default_tick_clock.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/graph/graph_impl.h"
@@ -302,6 +302,11 @@ bool PageNodeImpl::had_form_interaction() const {
   return had_form_interaction_.value();
 }
 
+bool PageNodeImpl::had_user_edits() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return had_user_edits_.value();
+}
+
 const absl::optional<freezing::FreezingVote>& PageNodeImpl::freezing_vote()
     const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -555,6 +560,11 @@ bool PageNodeImpl::HadFormInteraction() const {
   return had_form_interaction();
 }
 
+bool PageNodeImpl::HadUserEdits() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return had_user_edits();
+}
+
 const WebContentsProxy& PageNodeImpl::GetContentsProxy() const {
   return contents_proxy();
 }
@@ -582,6 +592,18 @@ uint64_t PageNodeImpl::EstimateResidentSetSize() const {
   return total;
 }
 
+uint64_t PageNodeImpl::EstimatePrivateFootprintSize() const {
+  uint64_t total = 0;
+  performance_manager::GraphOperations::VisitFrameTreePreOrder(
+      this, base::BindRepeating(
+                [](uint64_t* total, const FrameNode* frame_node) {
+                  *total += frame_node->GetPrivateFootprintKbEstimate();
+                  return true;
+                },
+                &total));
+  return total;
+}
+
 void PageNodeImpl::SetLifecycleState(LifecycleState lifecycle_state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   lifecycle_state_.SetAndMaybeNotify(this, lifecycle_state);
@@ -600,6 +622,11 @@ void PageNodeImpl::SetIsHoldingIndexedDBLock(bool is_holding_indexeddb_lock) {
 void PageNodeImpl::SetHadFormInteraction(bool had_form_interaction) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   had_form_interaction_.SetAndMaybeNotify(this, had_form_interaction);
+}
+
+void PageNodeImpl::SetHadUserEdits(bool had_user_edits) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  had_user_edits_.SetAndMaybeNotify(this, had_user_edits);
 }
 
 }  // namespace performance_manager

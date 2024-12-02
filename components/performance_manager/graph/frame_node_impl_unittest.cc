@@ -70,10 +70,8 @@ TEST_F(FrameNodeImplTest, AddFrameHierarchyBasic) {
 
 TEST_F(FrameNodeImplTest, GetFrameNodeById) {
   auto process_a = CreateNode<ProcessNodeImpl>(
-      content::PROCESS_TYPE_RENDERER,
       RenderProcessHostProxy::CreateForTesting(RenderProcessHostId(42)));
   auto process_b = CreateNode<ProcessNodeImpl>(
-      content::PROCESS_TYPE_RENDERER,
       RenderProcessHostProxy::CreateForTesting(RenderProcessHostId(43)));
   auto page = CreateNode<PageNodeImpl>();
   auto frame_a1 = CreateFrameNodeAutoId(process_a.get(), page.get());
@@ -150,6 +148,7 @@ class LenientMockObserver : public FrameNodeImpl::Observer {
   MOCK_METHOD2(OnPriorityAndReasonChanged,
                void(const FrameNode*, const PriorityAndReason& previous_value));
   MOCK_METHOD1(OnHadFormInteractionChanged, void(const FrameNode*));
+  MOCK_METHOD1(OnHadUserEditsChanged, void(const FrameNode*));
   MOCK_METHOD1(OnIsAudibleChanged, void(const FrameNode*));
   MOCK_METHOD1(OnViewportIntersectionChanged, void(const FrameNode*));
   MOCK_METHOD2(OnFrameVisibilityChanged,
@@ -408,6 +407,21 @@ TEST_F(FrameNodeImplTest, FormInteractions) {
   graph()->RemoveFrameNodeObserver(&obs);
 }
 
+TEST_F(FrameNodeImplTest, UserEdits) {
+  auto process = CreateNode<ProcessNodeImpl>();
+  auto page = CreateNode<PageNodeImpl>();
+  auto frame_node = CreateFrameNodeAutoId(process.get(), page.get());
+
+  MockObserver obs;
+  graph()->AddFrameNodeObserver(&obs);
+
+  EXPECT_CALL(obs, OnHadUserEditsChanged(frame_node.get()));
+  frame_node->SetHadUserEdits();
+  EXPECT_TRUE(frame_node->had_user_edits());
+
+  graph()->RemoveFrameNodeObserver(&obs);
+}
+
 TEST_F(FrameNodeImplTest, IsAudible) {
   auto process = CreateNode<ProcessNodeImpl>();
   auto page = CreateNode<PageNodeImpl>();
@@ -521,6 +535,7 @@ TEST_F(FrameNodeImplTest, PublicInterface) {
             public_frame_node->IsHoldingIndexedDBLock());
   EXPECT_EQ(frame_node->had_form_interaction(),
             public_frame_node->HadFormInteraction());
+  EXPECT_EQ(frame_node->had_user_edits(), public_frame_node->HadUserEdits());
   // Use the child frame node to test the viewport intersection because the
   // viewport intersection of the main frame is not tracked.
   EXPECT_EQ(child_frame_node->viewport_intersection(),

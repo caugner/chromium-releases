@@ -8,8 +8,8 @@
 #include <ostream>
 #include <string>
 
-#include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
+#include "base/functional/callback_forward.h"
 #include "components/performance_manager/public/freezing/freezing.h"
 #include "components/performance_manager/public/graph/node.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom.h"
@@ -199,6 +199,11 @@ class PageNode : public Node {
   // interactions.
   virtual bool HadFormInteraction() const = 0;
 
+  // Indicates if at least one of the frames in the page has received
+  // user-initiated edits. This is a superset of `HadFormInteraction()` that
+  // also includes changes to `contenteditable` elements.
+  virtual bool HadUserEdits() const = 0;
+
   // Returns the web contents associated with this page node. It is valid to
   // call this function on any thread but the weak pointer must only be
   // dereferenced on the UI thread.
@@ -218,6 +223,8 @@ class PageNode : public Node {
   virtual PageState GetPageState() const = 0;
 
   virtual uint64_t EstimateResidentSetSize() const = 0;
+
+  virtual uint64_t EstimatePrivateFootprintSize() const = 0;
 };
 
 // Pure virtual observer interface. Derive from this if you want to be forced to
@@ -302,6 +309,9 @@ class PageNodeObserver {
   // Invoked when the HadFormInteraction property changes.
   virtual void OnHadFormInteractionChanged(const PageNode* page_node) = 0;
 
+  // Invoked when the HadUserEdits property changes.
+  virtual void OnHadUserEditsChanged(const PageNode* page_node) = 0;
+
   // Invoked when the page state changes. See `PageState` for the valid
   // transitions.
   virtual void OnPageStateChanged(const PageNode* page_node,
@@ -360,6 +370,7 @@ class PageNode::ObserverDefaultImpl : public PageNodeObserver {
   void OnMainFrameUrlChanged(const PageNode* page_node) override {}
   void OnMainFrameDocumentChanged(const PageNode* page_node) override {}
   void OnHadFormInteractionChanged(const PageNode* page_node) override {}
+  void OnHadUserEditsChanged(const PageNode* page_node) override {}
   void OnTitleUpdated(const PageNode* page_node) override {}
   void OnFaviconUpdated(const PageNode* page_node) override {}
   void OnFreezingVoteChanged(
