@@ -142,7 +142,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kTechnologyFamilyProperty, PROPERTY_INDEX_TECHNOLOGY_FAMILY },
   { flimflam::kTypeProperty, PROPERTY_INDEX_TYPE },
   { flimflam::kUIDataProperty, PROPERTY_INDEX_UI_DATA },
-  { "UninitializedTechnologies",
+  { shill::kUninitializedTechnologiesProperty,
     PROPERTY_INDEX_UNINITIALIZED_TECHNOLOGIES },
   { flimflam::kUsageURLProperty, PROPERTY_INDEX_USAGE_URL },
   { flimflam::kOpenVPNClientCertIdProperty,
@@ -844,6 +844,9 @@ ConnectionError NativeNetworkParser::ParseError(const std::string& error) {
     { flimflam::kErrorIpsecPskAuthFailed, ERROR_IPSEC_PSK_AUTH_FAILED },
     { flimflam::kErrorIpsecCertAuthFailed, ERROR_IPSEC_CERT_AUTH_FAILED },
     { flimflam::kErrorPppAuthFailed, ERROR_PPP_AUTH_FAILED },
+    { shill::kErrorEapAuthenticationFailed, ERROR_EAP_AUTHENTICATION_FAILED },
+    { shill::kErrorEapLocalTlsFailed, ERROR_EAP_LOCAL_TLS_FAILED },
+    { shill::kErrorEapRemoteTlsFailed, ERROR_EAP_REMOTE_TLS_FAILED },
   };
   CR_DEFINE_STATIC_LOCAL(EnumMapper<ConnectionError>, parser,
       (table, arraysize(table), ERROR_NO_ERROR));

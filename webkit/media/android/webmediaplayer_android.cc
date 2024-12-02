@@ -7,6 +7,7 @@
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "media/base/android/media_player_bridge.h"
+#include "media/base/video_frame.h"
 #include "net/base/mime_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerClient.h"
 #include "webkit/media/android/stream_texture_factory_android.h"
@@ -359,6 +360,13 @@ void WebMediaPlayerAndroid::ReleaseMediaResources() {
 }
 
 void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
+  if (manager_)
+    manager_->UnregisterMediaPlayer(player_id_);
+  Detach();
+  main_loop_ = NULL;
+}
+
+void WebMediaPlayerAndroid::Detach() {
   Destroy();
 
   if (stream_id_) {
@@ -368,11 +376,7 @@ void WebMediaPlayerAndroid::WillDestroyCurrentMessageLoop() {
 
   video_frame_.reset();
 
-  if (manager_)
-    manager_->UnregisterMediaPlayer(player_id_);
-
   manager_ = NULL;
-  main_loop_ = NULL;
 }
 
 void WebMediaPlayerAndroid::ReallocateVideoFrame() {

@@ -11,9 +11,7 @@
       'web_layer_unittest.cc',
       'web_layer_tree_view_unittest.cc',
       'web_transform_animation_curve_unittest.cc',
-      'web_transform_operations_unittest.cc',
       'web_transformation_matrix_unittest.cc',
-      'test/fake_web_scrollbar_theme_geometry.h',
       'test/web_layer_tree_view_test_common.h',
     ],
   },
@@ -35,17 +33,21 @@
         'test/run_all_unittests.cc',
       ],
       'include_dirs': [
-        '.',
-        'test',
-        '<(DEPTH)/cc',
-        '<(DEPTH)/cc/stubs',
-        '<(DEPTH)/cc/test',
-        '../../third_party/WebKit/Source/Platform/chromium'
+        '../..'
       ],
       'conditions': [
         ['OS == "android" and gtest_target_type == "shared_library"', {
           'dependencies': [
             '../../testing/android/native_test.gyp:native_test_native_code',
+          ],
+        }],
+        [ 'os_posix == 1 and OS != "mac" and OS != "android" and OS != "ios"', {
+          'conditions': [
+            [ 'linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
           ],
         }],
       ],

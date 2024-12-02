@@ -12,21 +12,21 @@
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "cc/memory_history.h"
+#include "cc/rendering_stats.h"
 #include "cc/resource_pool.h"
 #include "cc/tile_priority.h"
 
 namespace cc {
-
-class RasterThread;
+class RasterWorkerPool;
 class ResourceProvider;
 class Tile;
 class TileVersion;
-struct RenderingStats;
 
 class CC_EXPORT TileManagerClient {
  public:
   virtual void ScheduleManageTiles() = 0;
-  virtual void ScheduleCheckForCompletedSetPixels() = 0;
+  virtual void DidUploadVisibleHighResolutionTile() = 0;
 
  protected:
   virtual ~TileManagerClient() {}
@@ -40,6 +40,23 @@ enum TileManagerBin {
   EVENTUALLY_BIN = 2, // Nice to have, if we've got memory and time.
   NEVER_BIN = 3, // Dont bother.
   NUM_BINS = 4
+  // Be sure to update TileManagerBinAsValue when adding new fields.
+};
+scoped_ptr<base::Value> TileManagerBinAsValue(
+    TileManagerBin bin);
+
+enum TileManagerBinPriority {
+  HIGH_PRIORITY_BIN = 0,
+  LOW_PRIORITY_BIN = 1,
+  NUM_BIN_PRIORITIES = 2
+};
+
+enum TileRasterState {
+  IDLE_STATE = 0,
+  WAITING_FOR_RASTER_STATE = 1,
+  RASTER_STATE = 2,
+  SET_PIXELS_STATE = 3,
+  NUM_STATES = 4
 };
 
 // This is state that is specific to a tile that is
@@ -57,11 +74,14 @@ class CC_EXPORT ManagedTileState {
   bool contents_swizzled;
   bool need_to_gather_pixel_refs;
   std::list<skia::LazyPixelRef*> pending_pixel_refs;
+  TileRasterState raster_state;
 
   // Ephemeral state, valid only during Manage.
-  TileManagerBin bin[NUM_TREES];
-  // Bin used to determine raster priority.
-  TileManagerBin raster_bin;
+  TileManagerBin bin[NUM_BIN_PRIORITIES];
+  TileManagerBin tree_bin[NUM_TREES];
+  // The bin that the tile would have if the GPU memory manager had a maximally permissive policy,
+  // send to the GPU memory manager to determine policy.
+  TileManagerBin gpu_memmgr_stats_bin;
   TileResolution resolution;
   float time_to_needed_in_seconds;
 };
@@ -74,61 +94,95 @@ class CC_EXPORT TileManager {
  public:
   TileManager(TileManagerClient* client,
               ResourceProvider *resource_provider,
-              size_t num_raster_threads);
+              size_t num_raster_threads,
+              bool use_cheapess_estimator);
   virtual ~TileManager();
 
-  const GlobalStateThatImpactsTilePriority& GlobalState() const { return global_state_; }
+  const GlobalStateThatImpactsTilePriority& GlobalState() const {
+      return global_state_;
+  }
   void SetGlobalState(const GlobalStateThatImpactsTilePriority& state);
 
   void ManageTiles();
-  void CheckForCompletedSetPixels();
+  void CheckForCompletedTileUploads();
 
+  scoped_ptr<base::Value> AsValue() const;
+  void GetMemoryStats(size_t* memoryRequiredBytes,
+                      size_t* memoryNiceToHaveBytes,
+                      size_t* memoryUsedBytes) const;
+  void SetRecordRenderingStats(bool record_rendering_stats);
   void GetRenderingStats(RenderingStats* stats);
+  bool HasPendingWorkScheduled(WhichTree tree) const;
 
-  int GetTilesInBinCount(TileManagerBin bin, WhichTree tree);
-  int GetDrawableTilesInBinCount(TileManagerBin bin, WhichTree tree);
+  const MemoryHistory::Entry& memory_stats_from_last_assign() const { return memory_stats_from_last_assign_; }
 
  protected:
   // Methods called by Tile
   friend class Tile;
-  void RegisterTile(Tile*);
-  void UnregisterTile(Tile*);
-  void WillModifyTilePriority(Tile*, WhichTree, const TilePriority& new_priority);
+  void RegisterTile(Tile* tile);
+  void UnregisterTile(Tile* tile);
+  void WillModifyTilePriority(
+      Tile* tile, WhichTree tree, const TilePriority& new_priority) {
+    // TODO(nduca): Do something smarter if reprioritization turns out to be
+    // costly.
+    ScheduleManageTiles();
+  }
 
  private:
-  void ResetBinCounts();
+  void SortTiles();
   void AssignGpuMemoryToTiles();
-  void FreeResourcesForTile(Tile*);
-  void ScheduleManageTiles();
-  void ScheduleCheckForCompletedSetPixels();
+  void FreeResourcesForTile(Tile* tile);
+  void ScheduleManageTiles() {
+    if (manage_tiles_pending_)
+      return;
+    client_->ScheduleManageTiles();
+    manage_tiles_pending_ = true;
+  }
   void DispatchMoreTasks();
-  void DispatchOneRasterTask(RasterThread*, scoped_refptr<Tile>);
+  void GatherPixelRefsForTile(Tile* tile);
+  void DispatchImageDecodeTasksForTile(Tile* tile);
+  void DispatchOneImageDecodeTask(
+      scoped_refptr<Tile> tile, skia::LazyPixelRef* pixel_ref);
+  void OnImageDecodeTaskCompleted(
+      scoped_refptr<Tile> tile, uint32_t pixel_ref_id);
+  bool CanDispatchRasterTask(Tile* tile);
+  scoped_ptr<ResourcePool::Resource> PrepareTileForRaster(Tile* tile);
+  void DispatchOneRasterTask(scoped_refptr<Tile> tile);
+  void PerformOneRaster(Tile* tile);
+  void OnRasterCompleted(
+      scoped_refptr<Tile> tile,
+      scoped_ptr<ResourcePool::Resource> resource,
+      int manage_tiles_call_count_when_dispatched);
   void OnRasterTaskCompleted(
-      scoped_refptr<Tile>,
-      scoped_ptr<ResourcePool::Resource>,
-      scoped_refptr<PicturePileImpl>,
-      int manage_tiles_call_count_when_dispatched,
-      RenderingStats*);
-  void DidFinishTileInitialization(Tile*);
-  void DispatchImageDecodingTasksForTile(Tile*);
-  void OnImageDecodingTaskCompleted(scoped_refptr<Tile>,
-                                    uint32_t,
-                                    RenderingStats*);
-  void DispatchOneImageDecodingTask(
-      RasterThread*, scoped_refptr<Tile>, skia::LazyPixelRef*);
-  void GatherPixelRefsForTile(Tile*);
-  RasterThread* GetFreeRasterThread();
+      scoped_refptr<Tile> tile,
+      scoped_ptr<ResourcePool::Resource> resource,
+      int manage_tiles_call_count_when_dispatched);
+  void DidFinishTileInitialization(Tile* tile);
+  void DidTileRasterStateChange(Tile* tile, TileRasterState state);
+  void DidTileBinChange(Tile* tile,
+                        TileManagerBin bin,
+                        WhichTree tree);
+  scoped_ptr<Value> GetMemoryRequirementsAsValue() const;
+
+  static void PerformRaster(uint8* buffer,
+                            const gfx::Rect& rect,
+                            float contents_scale,
+                            bool use_cheapness_estimator,
+                            PicturePileImpl* picture_pile,
+                            RenderingStats* stats);
+  static void RunImageDecodeTask(skia::LazyPixelRef* pixel_ref,
+                                 RenderingStats* stats);
+
+  static void RecordCheapnessPredictorResults(bool is_predicted_cheap,
+                                              bool is_actually_cheap);
 
   TileManagerClient* client_;
   scoped_ptr<ResourcePool> resource_pool_;
+  scoped_ptr<RasterWorkerPool> raster_worker_pool_;
   bool manage_tiles_pending_;
   int manage_tiles_call_count_;
-  bool check_for_completed_set_pixels_pending_;
 
   GlobalStateThatImpactsTilePriority global_state_;
-
-  int tiles_in_bin_count_[NUM_BINS][NUM_TREES];
-  int drawable_tiles_in_bin_count_[NUM_BINS][NUM_TREES];
 
   typedef std::vector<Tile*> TileVector;
   TileVector tiles_;
@@ -144,11 +198,15 @@ class CC_EXPORT TileManager {
 
   typedef std::queue<scoped_refptr<Tile> > TileQueue;
   TileQueue tiles_with_pending_set_pixels_;
+  size_t bytes_pending_set_pixels_;
+  bool ever_exceeded_memory_budget_;
+  MemoryHistory::Entry memory_stats_from_last_assign_;
 
-  typedef ScopedPtrVector<RasterThread> RasterThreadVector;
-  RasterThreadVector raster_threads_;
-
+  bool record_rendering_stats_;
   RenderingStats rendering_stats_;
+
+  bool use_cheapness_estimator_;
+  int raster_state_count_[NUM_STATES][NUM_TREES][NUM_BINS];
 
   DISALLOW_COPY_AND_ASSIGN(TileManager);
 };

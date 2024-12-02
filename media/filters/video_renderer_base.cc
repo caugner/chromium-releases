@@ -255,6 +255,12 @@ void VideoRendererBase::ThreadMain() {
   uint32 frames_dropped = 0;
 
   for (;;) {
+    base::AutoLock auto_lock(lock_);
+
+    // Thread exit condition.
+    if (state_ == kStopped)
+      return;
+
     if (frames_dropped > 0) {
       PipelineStatistics statistics;
       statistics.video_frames_dropped = frames_dropped;
@@ -262,12 +268,6 @@ void VideoRendererBase::ThreadMain() {
 
       frames_dropped = 0;
     }
-
-    base::AutoLock auto_lock(lock_);
-
-    // Thread exit condition.
-    if (state_ == kStopped)
-      return;
 
     // Remain idle as long as we're not playing.
     if (state_ != kPlaying || playback_rate_ == 0) {
@@ -453,7 +453,8 @@ void VideoRendererBase::PutCurrentFrame(scoped_refptr<VideoFrame> frame) {
 
 VideoRendererBase::~VideoRendererBase() {
   base::AutoLock auto_lock(lock_);
-  DCHECK(state_ == kUninitialized || state_ == kStopped) << state_;
+  CHECK(state_ == kUninitialized || state_ == kStopped) << state_;
+  CHECK_EQ(thread_, base::kNullThreadHandle);
 }
 
 void VideoRendererBase::FrameReady(VideoDecoder::Status status,

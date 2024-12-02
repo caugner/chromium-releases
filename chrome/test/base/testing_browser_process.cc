@@ -4,9 +4,10 @@
 
 #include "chrome/test/base/testing_browser_process.h"
 
+#include "base/prefs/pref_service.h"
 #include "base/string_util.h"
 #include "build/build_config.h"
-#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/bookmarks/bookmark_prompt_controller.h"
 #include "content/public/browser/notification_service.h"
@@ -18,7 +19,7 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/printing/background_printing_manager.h"
-#include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/printing/print_preview_dialog_controller.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/thumbnails/render_widget_snapshot_taker.h"
 #endif
@@ -28,6 +29,19 @@
 #else
 #include "chrome/browser/policy/policy_service_stub.h"
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
+
+#if defined(ENABLE_MESSAGE_CENTER) && defined(USE_ASH)
+#include "ash/shell.h"
+#endif
+
+#if defined(ENABLE_MESSAGE_CENTER)
+#include "ui/message_center/message_center.h"
+#endif
+
+// static
+TestingBrowserProcess* TestingBrowserProcess::GetGlobal() {
+  return static_cast<TestingBrowserProcess*>(g_browser_process);
+}
 
 TestingBrowserProcess::TestingBrowserProcess()
     : notification_service_(content::NotificationService::Create()),
@@ -182,6 +196,18 @@ NotificationUIManager* TestingBrowserProcess::notification_ui_manager() {
 #endif
 }
 
+#if defined(ENABLE_MESSAGE_CENTER)
+message_center::MessageCenter* TestingBrowserProcess::message_center() {
+#if defined(USE_ASH)
+    return ash::Shell::GetInstance()->message_center();
+#else
+  if (!message_center_.get())
+    message_center_.reset(new message_center::MessageCenter());
+  return message_center_.get();
+#endif
+}
+#endif
+
 IntranetRedirectDetector* TestingBrowserProcess::intranet_redirect_detector() {
   return NULL;
 }
@@ -214,12 +240,13 @@ printing::PrintJobManager* TestingBrowserProcess::print_job_manager() {
   return NULL;
 }
 
-printing::PrintPreviewTabController*
-TestingBrowserProcess::print_preview_tab_controller() {
+printing::PrintPreviewDialogController*
+TestingBrowserProcess::print_preview_dialog_controller() {
 #if defined(ENABLE_PRINTING)
-  if (!print_preview_tab_controller_.get())
-    print_preview_tab_controller_ = new printing::PrintPreviewTabController();
-  return print_preview_tab_controller_.get();
+  if (!print_preview_dialog_controller_.get())
+    print_preview_dialog_controller_ =
+        new printing::PrintPreviewDialogController();
+  return print_preview_dialog_controller_.get();
 #else
   NOTIMPLEMENTED();
   return NULL;

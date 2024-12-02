@@ -1,10 +1,11 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_SIGNIN_SCREEN_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_SIGNIN_SCREEN_HANDLER_H_
 
+#include <set>
 #include <string>
 
 #include "base/callback.h"
@@ -15,9 +16,11 @@
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_display.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui.h"
@@ -32,6 +35,7 @@ class ListValue;
 namespace chromeos {
 
 class CaptivePortalWindowProxy;
+class ErrorScreenActor;
 class NativeWindowDelegate;
 class User;
 
@@ -90,6 +94,10 @@ class SigninScreenHandlerDelegate {
   // and migrate to new password.
   virtual void MigrateUserData(const std::string& old_password) = 0;
 
+  // Create a new locally managed user.
+  virtual void CreateLocallyManagedUser(const string16& display_name,
+                                        const std::string password) = 0;
+
   // Load wallpaper for given |username|.
   virtual void LoadWallpaper(const std::string& username) = 0;
 
@@ -143,10 +151,12 @@ class SigninScreenHandler
       public BrowsingDataRemover::Observer,
       public SystemKeyEventListener::CapsLockObserver,
       public content::NotificationObserver,
-      public NetworkStateInformerDelegate {
+      public NetworkStateInformerDelegate,
+      public NetworkStateInformer::NetworkStateInformerObserver {
  public:
   SigninScreenHandler(
-      const scoped_refptr<NetworkStateInformer>& network_state_informer);
+      const scoped_refptr<NetworkStateInformer>& network_state_informer,
+      ErrorScreenActor* error_screen_actor);
   virtual ~SigninScreenHandler();
 
   // Shows the sign in screen. |oobe_ui| indicates whether the signin
@@ -165,10 +175,36 @@ class SigninScreenHandler
   // NetworkStateInformerDelegate implementation:
   virtual void OnNetworkReady() OVERRIDE;
 
+  // NetworkStateInformer::NetworkStateInformerObserver implementation:
+  virtual void UpdateState(NetworkStateInformer::State state,
+                           const std::string& service_path,
+                           ConnectionType connection_type,
+                           const std::string& reason) OVERRIDE;
+
  private:
+  enum UIState {
+    UI_STATE_UNKNOWN = 0,
+    UI_STATE_GAIA_SIGNIN,
+    UI_STATE_ACCOUNT_PICKER,
+    UI_STATE_LOCALLY_MANAGED_USER_CREATION
+  };
+
   typedef base::hash_set<std::string> WebUIObservers;
 
   friend class ReportDnsCacheClearedOnUIThread;
+
+  // Updates current UI of the signin screen according to |ui_state|
+  // argument.  Optionally it can pass screen initialization data via
+  // |params| argument.
+  void UpdateUIState(UIState ui_state, DictionaryValue* params);
+
+  void UpdateStateInternal(NetworkStateInformer::State state,
+                           const std::string service_path,
+                           ConnectionType connection_type,
+                           const std::string reason,
+                           bool force_update);
+  void ReloadGaiaScreen();
+  void ScheduleGaiaFrameReload();
 
   // BaseScreenHandler implementation:
   virtual void GetLocalizedStrings(
@@ -241,7 +277,6 @@ class SigninScreenHandler
   void HandleAccountPickerReady(const base::ListValue* args);
   void HandleWallpaperReady(const base::ListValue* args);
   void HandleLoginWebuiReady(const base::ListValue* args);
-  void HandleLoginRequestNetworkState(const base::ListValue* args);
   void HandleDemoWebuiReady(const base::ListValue* args);
   void HandleSignOutUser(const base::ListValue* args);
   void HandleUserImagesLoaded(const base::ListValue* args);
@@ -253,6 +288,18 @@ class SigninScreenHandler
   void HandleResyncUserData(const base::ListValue* args);
   void HandleLoginUIStateChanged(const base::ListValue* args);
   void HandleUnlockOnLoginSuccess(const base::ListValue* args);
+  void HandleLoginScreenUpdate(const base::ListValue* args);
+  void HandleShowGaiaFrameError(const base::ListValue* args);
+  void HandleShowLoadingTimeoutError(const base::ListValue* args);
+  void HandleUpdateOfflineLogin(const base::ListValue* args);
+  void HandleShowLocallyManagedUserCreationScreen(const base::ListValue* args);
+  void HandleCheckLocallyManagedUserName(const base::ListValue* args);
+  void HandleTryCreateLocallyManagedUser(const base::ListValue* args);
+
+  // Fills |user_dict| with information about |user|.
+  void FillUserDictionary(User* user,
+                          bool is_owner,
+                          DictionaryValue* user_dict);
 
   // Sends user list to account picker.
   void SendUserList(bool animated);
@@ -273,16 +320,27 @@ class SigninScreenHandler
   // (ii)  all users in the restricted list are present.
   bool AllWhitelistedUsersPresent();
 
-  // Sends network state to a WebUI |callback|.
-  void SendState(const std::string& callback,
-                 NetworkStateInformer::State state,
-                 const std::string& network_name,
-                 const std::string& reason,
-                 ConnectionType last_network_type);
-
   // Cancels password changed flow - switches back to login screen.
   // Called as a callback after cookies are cleared.
   void CancelPasswordChangedFlowInternal();
+
+  // Returns current visible screen.
+  OobeUI::Screen GetCurrentScreen() const;
+
+  // Returns true if current visible screen is the Gaia sign-in page.
+  bool IsGaiaLogin() const;
+
+  // Returns true if current screen is the error screen over signin
+  // screen.
+  bool IsSigninScreenHiddenByError() const;
+
+  // Returns true if guest signin is allowed.
+  bool IsGuestSigninAllowed() const;
+
+  // Returns true if offline login is allowed.
+  bool IsOfflineLoginAllowed() const;
+
+  UIState ui_state_;
 
   // A delegate that glues this handler with backend LoginDisplay.
   SigninScreenHandlerDelegate* delegate_;
@@ -317,12 +375,6 @@ class SigninScreenHandler
   // True if cookie jar cleanup is done.
   bool cookies_cleared_;
 
-  // True if proxy auth dialog was displayed.
-  //
-  // TODO (ygorshenin@): |proxy_dialog_was_displayed_| is used to fix
-  // 169068. Must be removed on M26 when 171668 will be fixed.
-  bool proxy_dialog_was_displayed_;
-
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
 
@@ -349,7 +401,21 @@ class SigninScreenHandler
   // True when signin UI is shown to user (either sign in form or user pods).
   bool login_ui_active_;
 
+  ErrorScreenActor* error_screen_actor_;
+
+  bool is_first_update_state_call_;
+  bool offline_login_active_;
+  NetworkStateInformer::State last_network_state_;
+
+  base::CancelableClosure update_state_closure_;
+  base::CancelableClosure connecting_closure_;
+
   content::NotificationRegistrar registrar_;
+
+  // Whether there is an auth UI pending. This flag is set on receiving
+  // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
+  // NOTIFICATION_AUTH_CANCELLED.
+  bool has_pending_auth_ui_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };
