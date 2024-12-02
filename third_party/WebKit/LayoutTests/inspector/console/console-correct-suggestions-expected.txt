@@ -7,7 +7,7 @@ Checking 'win'
 Found: window
 
 Checking 'window["doc'
-Found: "document"]
+Found: "document"], displayed as "document"
 
 Checking 'window["document"].bo'
 Found: body
@@ -71,18 +71,39 @@ Not Found: shouldNotFindThisFunction
 Checking 'shou'
 Not Found: should not find this
 
+Checking 'myMap.get('
+Found: "first"), displayed as "first"
+Found: "second"), displayed as "second"
+Found: "third"), displayed as "third"
+
+Checking 'myMap.get(''
+Found: 'first'), displayed as 'first'
+Found: 'second'), displayed as 'second'
+Found: 'third'), displayed as 'third'
+
+Checking 'myMap.set('firs'
+Found: 'first', , displayed as 'first'
+
+Checking 'myMap.set(should'
+Found: shouldFindThisFunction
+Not Found: shouldNotFindThis
+Not Found: "shouldNotFindThis")
+
+Checking 'myMap.delete(''
+Found: 'first'), displayed as 'first'
+Found: 'second'), displayed as 'second'
+Found: 'third'), displayed as 'third'
+
 Checking 'document.   bo'
 Found: body
 
 Checking 'document.	bo'
 Found: body
 
-Checking 'document.
-bo'
+Checking 'document.\nbo'
 Found: body
 
-Checking 'document.
-bo'
+Checking 'document.\r\nbo'
 Found: body
 
 Checking 'document   [    'bo'

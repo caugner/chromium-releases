@@ -1,13 +1,14 @@
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'createOffer' on 'RTCPeerConnection': Illegal invocation
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'setLocalDescription' on 'RTCPeerConnection': Illegal invocation
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'createAnswer' on 'RTCPeerConnection': Illegal invocation
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Illegal invocation
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'addIceCandidate' on 'RTCPeerConnection': Illegal invocation
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'getStats' on 'RTCPeerConnection': Illegal invocation
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'setLocalDescription' on 'RTCPeerConnection': 1 argument required, but only 0 present.
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': 1 argument required, but only 0 present.
-CONSOLE ERROR: line 75: Uncaught (in promise) TypeError: Failed to execute 'addIceCandidate' on 'RTCPeerConnection': 1 argument required, but only 0 present.
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'createOffer' on 'RTCPeerConnection': Illegal invocation
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'setLocalDescription' on 'RTCPeerConnection': Illegal invocation
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'createAnswer' on 'RTCPeerConnection': Illegal invocation
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': Illegal invocation
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'addIceCandidate' on 'RTCPeerConnection': Illegal invocation
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'getStats' on 'RTCPeerConnection': Illegal invocation
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'setLocalDescription' on 'RTCPeerConnection': 1 argument required, but only 0 present.
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'setRemoteDescription' on 'RTCPeerConnection': 1 argument required, but only 0 present.
+CONSOLE ERROR: line 83: Uncaught (in promise) TypeError: Failed to execute 'addIceCandidate' on 'RTCPeerConnection': 1 argument required, but only 0 present.
 This is a testharness.js-based test.
+Found 116 tests; 59 PASS, 57 FAIL, 0 TIMEOUT, 0 NOTRUN.
 PASS EventTarget interface: existence and properties of interface object 
 PASS EventTarget interface object length 
 PASS EventTarget interface object name 
@@ -34,7 +35,7 @@ PASS RTCPeerConnection interface: attribute iceGatheringState
 PASS RTCPeerConnection interface: attribute iceConnectionState 
 FAIL RTCPeerConnection interface: attribute canTrickleIceCandidates assert_true: The prototype object must have a property "canTrickleIceCandidates" expected true got false
 FAIL RTCPeerConnection interface: operation getConfiguration() assert_own_property: interface prototype object missing non-static operation expected property "getConfiguration" missing
-FAIL RTCPeerConnection interface: operation setConfiguration(RTCConfiguration) assert_own_property: interface prototype object missing non-static operation expected property "setConfiguration" missing
+PASS RTCPeerConnection interface: operation setConfiguration(RTCConfiguration) 
 PASS RTCPeerConnection interface: operation close() 
 PASS RTCPeerConnection interface: attribute onnegotiationneeded 
 PASS RTCPeerConnection interface: attribute onicecandidate 
@@ -96,8 +97,8 @@ FAIL RTCPeerConnection interface: pc must inherit property "iceGatheringState" w
 FAIL RTCPeerConnection interface: pc must inherit property "iceConnectionState" with the proper type (13) Unrecognized type RTCIceConnectionState
 FAIL RTCPeerConnection interface: pc must inherit property "canTrickleIceCandidates" with the proper type (14) assert_inherits: property "canTrickleIceCandidates" not found in prototype chain
 FAIL RTCPeerConnection interface: pc must inherit property "getConfiguration" with the proper type (15) assert_inherits: property "getConfiguration" not found in prototype chain
-FAIL RTCPeerConnection interface: pc must inherit property "setConfiguration" with the proper type (16) assert_inherits: property "setConfiguration" not found in prototype chain
-FAIL RTCPeerConnection interface: calling setConfiguration(RTCConfiguration) on pc with too few arguments must throw TypeError assert_inherits: property "setConfiguration" not found in prototype chain
+PASS RTCPeerConnection interface: pc must inherit property "setConfiguration" with the proper type (16) 
+PASS RTCPeerConnection interface: calling setConfiguration(RTCConfiguration) on pc with too few arguments must throw TypeError 
 PASS RTCPeerConnection interface: pc must inherit property "close" with the proper type (17) 
 FAIL RTCPeerConnection interface: pc must inherit property "onnegotiationneeded" with the proper type (18) Unrecognized type EventHandler
 FAIL RTCPeerConnection interface: pc must inherit property "onicecandidate" with the proper type (19) Unrecognized type EventHandler

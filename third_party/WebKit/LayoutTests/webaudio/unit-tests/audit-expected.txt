@@ -15,6 +15,7 @@ PASS   OfflineAudioContext does exist.
 PASS   Setting foo1 to 0 did not throw an exception. 
 PASS   function () { var foo2 = bar; } threw ReferenceError: "bar is not defined". 
 PASS   function () { var foo3 = bar; } threw ReferenceError: "bar is not defined". 
+PASS   Calling should() with no argument threw Error: "Task.should:: requires at least 1 argument.". 
 PASS   3 < 5 is true. 
 PASS   false is false. 
 PASS   1 is equal to 1. 
@@ -24,9 +25,17 @@ PASS   2 is greater than 1.
 PASS   2 is greater than or equal to 2. 
 PASS   1 is less than 2. 
 PASS   1 is less than or equal to 1. 
+PASS   1 is equal to 1. 
+PASS   should(1).beEqualTo(1) is true. 
+PASS   The message is truthful! 
 PASS   Decoding audio data with no argument rejected correctly with TypeError: Failed to execute 'decodeAudioData' on 'BaseAudioContext': 1 argument required, but only 0 present.. 
+PASS   Suspending OAC with no argument rejected correctly with TypeError. 
 PASS   Start OAC rendering resolved correctly. 
-PASS < [basic] All assertions passed. (total 15 assertions) 
-PASS # AUDIT TASK RUNNER FINISHED: 2 tasks ran successfully. 
+PASS < [basic] All assertions passed. (total 20 assertions) 
+PASS > [dummy-label-string]  
+PASS < [dummy-label-string] All assertions passed. (total 0 assertions) 
+PASS > [dummy-label-object]  
+PASS < [dummy-label-object] All assertions passed. (total 0 assertions) 
+PASS # AUDIT TASK RUNNER FINISHED: 4 tasks ran successfully. 
 Harness: the test ran to completion.
 

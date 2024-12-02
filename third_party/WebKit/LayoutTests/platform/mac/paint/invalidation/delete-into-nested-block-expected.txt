@@ -7,11 +7,6 @@
       "drawsContent": true,
       "paintInvalidations": [
         {
-          "object": "LayoutBlockFlow DIV",
-          "rect": [3, 114, 794, 111],
-          "reason": "outline"
-        },
-        {
           "object": "LayoutBlockFlow DIV id='two'",
           "rect": [8, 137, 784, 37],
           "reason": "layoutObject removal"
@@ -38,11 +33,6 @@
         },
         {
           "object": "LayoutText #text",
-          "rect": [8, 119, 32, 19],
-          "reason": "layoutObject insertion"
-        },
-        {
-          "object": "LayoutText #text",
           "rect": [8, 137, 28, 19],
           "reason": "layoutObject removal"
         },
@@ -50,21 +40,6 @@
           "object": "LayoutText #text",
           "rect": [8, 119, 28, 19],
           "reason": "layoutObject removal"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [7, 118, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [7, 118, 3, 21],
-          "reason": "invalidate paint rectangle"
-        },
-        {
-          "object": "LayoutText #text",
-          "rect": [7, 118, 3, 21],
-          "reason": "invalidate paint rectangle"
         }
       ]
     }
@@ -111,14 +86,6 @@
       "reason": "layoutObject removal"
     },
     {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "LayoutBlockFlow DIV",
-      "reason": "outline"
-    },
-    {
       "object": "LayoutBlockFlow DIV id='one'",
       "reason": "full"
     },
@@ -128,11 +95,7 @@
     },
     {
       "object": "Caret",
-      "reason": "invalidate paint rectangle"
-    },
-    {
-      "object": "Caret",
-      "reason": "invalidate paint rectangle"
+      "reason": "caret"
     },
     {
       "object": "LayoutText #text",

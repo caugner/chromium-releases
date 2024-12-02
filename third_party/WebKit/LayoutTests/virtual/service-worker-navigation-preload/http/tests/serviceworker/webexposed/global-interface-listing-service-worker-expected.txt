@@ -217,6 +217,47 @@ interface DOMMatrixReadOnly
     method toString
     method transformPoint
     method translate
+interface DOMPoint : DOMPointReadOnly
+    getter w
+    getter x
+    getter y
+    getter z
+    method constructor
+    setter w
+    setter x
+    setter y
+    setter z
+interface DOMPointReadOnly
+    static method fromPoint
+    getter w
+    getter x
+    getter y
+    getter z
+    method constructor
+    method matrixTransform
+    method toJSON
+interface DOMRect : DOMRectReadOnly
+    getter height
+    getter width
+    getter x
+    getter y
+    method constructor
+    setter height
+    setter width
+    setter x
+    setter y
+interface DOMRectReadOnly
+    static method fromRect
+    getter bottom
+    getter height
+    getter left
+    getter right
+    getter top
+    getter width
+    getter x
+    getter y
+    method constructor
+    method toJSON
 interface DOMStringList
     getter length
     method constructor
@@ -610,6 +651,7 @@ interface OffscreenCanvas : EventTarget
 interface OffscreenCanvasRenderingContext2D
     getter canvas
     getter fillStyle
+    getter filter
     getter globalAlpha
     getter globalCompositeOperation
     getter imageSmoothingEnabled
@@ -662,6 +704,7 @@ interface OffscreenCanvasRenderingContext2D
     method transform
     method translate
     setter fillStyle
+    setter filter
     setter globalAlpha
     setter globalCompositeOperation
     setter imageSmoothingEnabled
@@ -689,7 +732,7 @@ interface Path2D
     method quadraticCurveTo
     method rect
 interface PaymentRequestEvent : ExtendableEvent
-    getter data
+    getter appRequest
     method constructor
     method respondWith
 interface PerformanceObserverEntryList
@@ -742,6 +785,8 @@ interface ReadableStream
     method cancel
     method constructor
     method getReader
+    method pipeThrough
+    method pipeTo
     method tee
 interface Request
     getter bodyUsed
