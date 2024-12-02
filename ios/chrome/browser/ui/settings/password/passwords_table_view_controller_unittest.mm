@@ -31,13 +31,15 @@
 #import "ios/chrome/browser/ui/settings/cells/settings_check_item.h"
 #import "ios/chrome/browser/ui/settings/password/passwords_consumer.h"
 #import "ios/chrome/browser/ui/settings/password/passwords_mediator.h"
-#import "ios/chrome/browser/ui/table_view/cells/table_view_cells_constants.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_detail_text_item.h"
 #include "ios/chrome/browser/ui/table_view/chrome_table_view_controller_test.h"
 #import "ios/chrome/browser/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/table_view/table_view_cells_constants.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
+#import "ios/chrome/test/app/sync_test_util.h"
+#include "ios/chrome/test/scoped_key_window.h"
 #include "ios/web/public/test/web_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -58,10 +60,26 @@ using ::testing::Return;
 
 // Declaration to conformance to SavePasswordsConsumerDelegate and keep tests in
 // this file working.
-@interface PasswordsTableViewController (Test) <
-    UISearchBarDelegate,
-    PasswordsConsumer>
+@interface PasswordsTableViewController (Test) <PasswordsConsumer,
+                                                UISearchBarDelegate,
+                                                UISearchControllerDelegate>
 - (void)updateExportPasswordsButton;
+@end
+
+// TODO(crbug.com/1324555): Remove this double and uses TestSyncUserSettings
+@interface TestPasswordsMediator : PasswordsMediator
+
+@property(nonatomic) OnDeviceEncryptionState encryptionState;
+
+@end
+
+@implementation TestPasswordsMediator
+
+- (OnDeviceEncryptionState)onDeviceEncryptionState:
+    (ChromeBrowserState*)browserState {
+  return self.encryptionState;
+}
+
 @end
 
 namespace {
@@ -72,6 +90,7 @@ typedef struct {
 
 enum PasswordsSections {
   SavePasswordsSwitch = 0,
+  PasswordsInOtherApps,
   PasswordCheck,
   SavedPasswords,
   Blocked,
@@ -103,7 +122,7 @@ class PasswordsTableViewControllerTest : public ChromeTableViewControllerTest {
     CreateController();
 
     ChromeBrowserState* browserState = browser_->GetBrowserState();
-    mediator_ = [[PasswordsMediator alloc]
+    mediator_ = [[TestPasswordsMediator alloc]
         initWithPasswordCheckManager:IOSChromePasswordCheckManagerFactory::
                                          GetForBrowserState(browserState)
                     syncSetupService:nil
@@ -125,14 +144,15 @@ class PasswordsTableViewControllerTest : public ChromeTableViewControllerTest {
   int GetSectionIndex(PasswordsSections section) {
     switch (section) {
       case SavePasswordsSwitch:
+      case PasswordsInOtherApps:
       case PasswordCheck:
         return section;
       case SavedPasswords:
-        return 2;
+        return 3;
       case Blocked:
-        return 3;
+        return 4;
       case ExportPasswordsButton:
-        return 3;
+        return 4;
     }
   }
 
@@ -285,20 +305,22 @@ class PasswordsTableViewControllerTest : public ChromeTableViewControllerTest {
   web::WebTaskEnvironment task_environment_;
   std::unique_ptr<TestChromeBrowserState> browser_state_;
   std::unique_ptr<TestBrowser> browser_;
-  PasswordsMediator* mediator_;
+  TestPasswordsMediator* mediator_;
+  ScopedKeyWindow scoped_window_;
+  UIViewController* root_view_controller_ = nil;
 };
 
 // Tests default case has no saved sites and no blocked sites.
 TEST_F(PasswordsTableViewControllerTest, TestInitialization) {
   CheckController();
-  EXPECT_EQ(2 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(3 + SectionsOffset(), NumberOfSections());
 }
 
 // Tests adding one item in saved password section.
 TEST_F(PasswordsTableViewControllerTest, AddSavedPasswords) {
   AddSavedForm1();
 
-  EXPECT_EQ(3 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(4 + SectionsOffset(), NumberOfSections());
   EXPECT_EQ(1, NumberOfItemsInSection(GetSectionIndex(SavedPasswords)));
 }
 
@@ -306,7 +328,7 @@ TEST_F(PasswordsTableViewControllerTest, AddSavedPasswords) {
 TEST_F(PasswordsTableViewControllerTest, AddBlockedPasswords) {
   AddBlockedForm1();
 
-  EXPECT_EQ(3 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(4 + SectionsOffset(), NumberOfSections());
   EXPECT_EQ(1, NumberOfItemsInSection(GetSectionIndex(Blocked)));
 }
 
@@ -318,7 +340,7 @@ TEST_F(PasswordsTableViewControllerTest, AddSavedAndBlocked) {
   AddBlockedForm2();
 
   // There should be two sections added.
-  EXPECT_EQ(4 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(5 + SectionsOffset(), NumberOfSections());
 
   // There should be 1 row in saved password section.
   EXPECT_EQ(1, NumberOfItemsInSection(GetSectionIndex(SavedPasswords)));
@@ -351,11 +373,11 @@ TEST_F(PasswordsTableViewControllerTest, TestBlockedPasswordsOrder) {
       password_manager::features::kEnableFaviconForPasswords);
 
   AddBlockedForm2();
-  CheckURLCellTitle(@"secret2.com", GetSectionIndex(SavedPasswords), 0);
+  CheckURLCellEmptyTitle(@"secret2.com", GetSectionIndex(SavedPasswords), 0);
 
   AddBlockedForm1();
-  CheckURLCellTitle(@"secret.com", GetSectionIndex(SavedPasswords), 0);
-  CheckURLCellTitle(@"secret2.com", GetSectionIndex(SavedPasswords), 1);
+  CheckURLCellEmptyTitle(@"secret.com", GetSectionIndex(SavedPasswords), 0);
+  CheckURLCellEmptyTitle(@"secret2.com", GetSectionIndex(SavedPasswords), 1);
 }
 
 // Tests the order in which the saved passwords are displayed.
@@ -392,7 +414,7 @@ TEST_F(PasswordsTableViewControllerTest, AddSavedDuplicates) {
   AddSavedForm1();
   AddSavedForm1();
 
-  EXPECT_EQ(3 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(4 + SectionsOffset(), NumberOfSections());
   EXPECT_EQ(1, NumberOfItemsInSection(GetSectionIndex(SavedPasswords)));
 }
 
@@ -402,7 +424,7 @@ TEST_F(PasswordsTableViewControllerTest, AddBlockedDuplicates) {
   AddBlockedForm1();
   AddBlockedForm1();
 
-  EXPECT_EQ(3 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(4 + SectionsOffset(), NumberOfSections());
   EXPECT_EQ(1, NumberOfItemsInSection(GetSectionIndex(SavedPasswords)));
 }
 
@@ -411,11 +433,11 @@ TEST_F(PasswordsTableViewControllerTest, DeleteItems) {
   AddSavedForm1();
   AddBlockedForm1();
   AddBlockedForm2();
-  ASSERT_EQ(5, NumberOfSections());
+  ASSERT_EQ(6, NumberOfSections());
 
   // Delete item in save passwords section.
   deleteItemAndWait(GetSectionIndex(SavedPasswords), 0);
-  EXPECT_EQ(4, NumberOfSections());
+  EXPECT_EQ(5, NumberOfSections());
 
   // Section 2 should now be the blocked passwords section, and should still
   // have both its items.
@@ -427,7 +449,7 @@ TEST_F(PasswordsTableViewControllerTest, DeleteItems) {
 
   // There should be no password sections remaining and no search bar.
   deleteItemAndWait(GetSectionIndex(SavedPasswords), 0);
-  EXPECT_EQ(3, NumberOfSections());
+  EXPECT_EQ(4, NumberOfSections());
 }
 
 // Tests deleting items from saved passwords and blocked passwords sections
@@ -438,11 +460,11 @@ TEST_F(PasswordsTableViewControllerTest, DeleteItemsWithDuplicates) {
   AddBlockedForm1();
   AddBlockedForm1();
   AddBlockedForm2();
-  ASSERT_EQ(5, NumberOfSections());
+  ASSERT_EQ(6, NumberOfSections());
 
   // Delete item in save passwords section.
   deleteItemAndWait(GetSectionIndex(SavedPasswords), 0);
-  EXPECT_EQ(4, NumberOfSections());
+  EXPECT_EQ(5, NumberOfSections());
 
   // Section 2 should now be the blocked passwords section, and should still
   // have both its items.
@@ -454,7 +476,7 @@ TEST_F(PasswordsTableViewControllerTest, DeleteItemsWithDuplicates) {
 
   // There should be no password sections remaining and no search bar.
   deleteItemAndWait(GetSectionIndex(Blocked) - 1, 0);
-  EXPECT_EQ(3, NumberOfSections());
+  EXPECT_EQ(4, NumberOfSections());
 }
 
 TEST_F(PasswordsTableViewControllerTest,
@@ -497,6 +519,51 @@ TEST_F(PasswordsTableViewControllerTest,
   EXPECT_NSEQ([UIColor colorNamed:kBlueColor], exportButton.textColor);
   EXPECT_FALSE(exportButton.accessibilityTraits &
                UIAccessibilityTraitNotEnabled);
+}
+
+// Tests that adding "on device encryption" don’t break during search.
+TEST_F(PasswordsTableViewControllerTest, TestOnDeviceEncryptionWhileSearching) {
+  root_view_controller_ = [[UIViewController alloc] init];
+  scoped_window_.Get().rootViewController = root_view_controller_;
+
+  PasswordsTableViewController* passwords_controller =
+      static_cast<PasswordsTableViewController*>(controller());
+
+  // Present the view controller.
+  __block bool presentation_finished = NO;
+  UINavigationController* navigation_controller =
+      [[UINavigationController alloc]
+          initWithRootViewController:passwords_controller];
+  [root_view_controller_ presentViewController:navigation_controller
+                                      animated:NO
+                                    completion:^{
+                                      presentation_finished = YES;
+                                    }];
+  EXPECT_TRUE(base::test::ios::WaitUntilConditionOrTimeout(
+      base::test::ios::kWaitForUIElementTimeout, ^bool {
+        return presentation_finished;
+      }));
+
+  // Disable on device encryption to prepare the state.
+  mediator_.encryptionState = OnDeviceEncryptionStateNotShown;
+  [passwords_controller updateOnDeviceEncryptionSessionAndUpdateTableView];
+
+  // start of the actual test.
+  passwords_controller.navigationItem.searchController.active = YES;
+  mediator_.encryptionState = OnDeviceEncryptionStateOptedIn;
+  [passwords_controller updateOnDeviceEncryptionSessionAndUpdateTableView];
+
+  passwords_controller.navigationItem.searchController.active = NO;
+  // Dismiss |view_controller_| and waits for the dismissal to finish.
+  __block bool dismissal_finished = NO;
+  [root_view_controller_ dismissViewControllerAnimated:NO
+                                            completion:^{
+                                              dismissal_finished = YES;
+                                            }];
+  EXPECT_TRUE(base::test::ios::WaitUntilConditionOrTimeout(
+      base::test::ios::kWaitForUIElementTimeout, ^bool {
+        return dismissal_finished;
+      }));
 }
 
 // Tests that the "Export Passwords..." button is greyed out in edit mode.
@@ -572,7 +639,7 @@ TEST_F(PasswordsTableViewControllerTest, FilterItems) {
   AddBlockedForm1();
   AddBlockedForm2();
 
-  EXPECT_EQ(4 + SectionsOffset(), NumberOfSections());
+  EXPECT_EQ(5 + SectionsOffset(), NumberOfSections());
 
   PasswordsTableViewController* passwords_controller =
       static_cast<PasswordsTableViewController*>(controller());

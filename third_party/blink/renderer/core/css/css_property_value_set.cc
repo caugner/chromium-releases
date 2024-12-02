@@ -23,6 +23,7 @@
 
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_custom_property_declaration.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser.h"
@@ -321,8 +322,8 @@ bool CSSPropertyValueSet::PropertyIsImportant(const T& property) const {
     return PropertyAt(found_property_index).IsImportant();
   return ShorthandIsImportant(property);
 }
-template bool CSSPropertyValueSet::PropertyIsImportant<CSSPropertyID>(
-    const CSSPropertyID&) const;
+template CORE_EXPORT bool CSSPropertyValueSet::PropertyIsImportant<
+    CSSPropertyID>(const CSSPropertyID&) const;
 template bool CSSPropertyValueSet::PropertyIsImportant<AtomicString>(
     const AtomicString&) const;
 

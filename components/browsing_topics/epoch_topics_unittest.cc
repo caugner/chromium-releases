@@ -12,13 +12,13 @@ namespace browsing_topics {
 
 namespace {
 
-const base::Time kCalculationTime =
+constexpr base::Time kCalculationTime =
     base::Time::FromDeltaSinceWindowsEpoch(base::Days(1));
-const browsing_topics::HmacKey kTestKey = {1};
-const size_t kTaxonomySize = 349;
-const int kTaxonomyVersion = 1;
-const int kModelVersion = 2;
-const size_t kPaddedTopTopicsStartIndex = 3;
+constexpr browsing_topics::HmacKey kTestKey = {1};
+constexpr size_t kTaxonomySize = 349;
+constexpr int kTaxonomyVersion = 1;
+constexpr int64_t kModelVersion = 2;
+constexpr size_t kPaddedTopTopicsStartIndex = 2;
 
 EpochTopics CreateTestEpochTopics() {
   std::vector<TopicAndDomains> top_topics_and_observing_domains;
@@ -44,10 +44,27 @@ EpochTopics CreateTestEpochTopics() {
 
 class EpochTopicsTest : public testing::Test {};
 
+TEST_F(EpochTopicsTest, TopicForSite_InvalidIndividualTopics) {
+  std::vector<TopicAndDomains> top_topics_and_observing_domains;
+  for (int i = 0; i < 5; ++i) {
+    top_topics_and_observing_domains.emplace_back(TopicAndDomains());
+  }
+
+  EpochTopics epoch_topics(std::move(top_topics_and_observing_domains),
+                           kPaddedTopTopicsStartIndex, kTaxonomySize,
+                           kTaxonomyVersion, kModelVersion, kCalculationTime);
+  EXPECT_FALSE(epoch_topics.empty());
+
+  std::string top_site = "foo.com";
+
+  EXPECT_EQ(epoch_topics.TopicForSiteForDisplay(top_site, kTestKey),
+            absl::nullopt);
+}
+
 TEST_F(EpochTopicsTest, TopicForSite) {
   EpochTopics epoch_topics = CreateTestEpochTopics();
 
-  EXPECT_TRUE(epoch_topics.HasValidTopics());
+  EXPECT_FALSE(epoch_topics.empty());
   EXPECT_EQ(epoch_topics.taxonomy_version(), kTaxonomyVersion);
   EXPECT_EQ(epoch_topics.model_version(), kModelVersion);
   EXPECT_EQ(epoch_topics.calculation_time(), kCalculationTime);
@@ -69,13 +86,41 @@ TEST_F(EpochTopicsTest, TopicForSite) {
     // The topic index is 1, thus the candidate topic is Topic(2). Only the
     // context with HashedDomain(1) or HashedDomain(2) is allowed to see it.
     ASSERT_EQ(top_topics_index_decision_hash % 5, 1ULL);
+    {
+      bool output_is_true_topic = false;
+      bool candidate_topic_filtered = false;
+      EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(1), kTestKey,
+                                          output_is_true_topic,
+                                          candidate_topic_filtered),
+                Topic(2));
+      EXPECT_TRUE(output_is_true_topic);
+      EXPECT_FALSE(candidate_topic_filtered);
+    }
 
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(1), kTestKey),
+    {
+      bool output_is_true_topic = false;
+      bool candidate_topic_filtered = false;
+      EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(2), kTestKey,
+                                          output_is_true_topic,
+                                          candidate_topic_filtered),
+                Topic(2));
+      EXPECT_TRUE(output_is_true_topic);
+      EXPECT_FALSE(candidate_topic_filtered);
+    }
+
+    {
+      bool output_is_true_topic = false;
+      bool candidate_topic_filtered = false;
+      EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(3), kTestKey,
+                                          output_is_true_topic,
+                                          candidate_topic_filtered),
+                absl::nullopt);
+      EXPECT_FALSE(output_is_true_topic);
+      EXPECT_TRUE(candidate_topic_filtered);
+    }
+
+    EXPECT_EQ(epoch_topics.TopicForSiteForDisplay(top_site, kTestKey),
               Topic(2));
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(2), kTestKey),
-              Topic(2));
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(3), kTestKey),
-              absl::nullopt);
   }
 
   {
@@ -95,13 +140,42 @@ TEST_F(EpochTopicsTest, TopicForSite) {
     // The topic index is 2, thus the candidate topic is Topic(3). Only the
     // context with HashedDomain(1) or HashedDomain(3) is allowed to see it.
     ASSERT_EQ(top_topics_index_decision_hash % 5, 2ULL);
+    {
+      bool output_is_true_topic = false;
+      bool candidate_topic_filtered = false;
+      EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(1), kTestKey,
+                                          output_is_true_topic,
+                                          candidate_topic_filtered),
+                Topic(3));
+      EXPECT_FALSE(output_is_true_topic);
+      EXPECT_FALSE(candidate_topic_filtered);
+    }
 
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(1), kTestKey),
-              Topic(3));
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(2), kTestKey),
+    {
+      bool output_is_true_topic = false;
+      bool candidate_topic_filtered = false;
+      EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(2), kTestKey,
+                                          output_is_true_topic,
+                                          candidate_topic_filtered),
+                absl::nullopt);
+      EXPECT_FALSE(output_is_true_topic);
+      EXPECT_TRUE(candidate_topic_filtered);
+    }
+
+    {
+      bool output_is_true_topic = false;
+      bool candidate_topic_filtered = false;
+      EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(3), kTestKey,
+                                          output_is_true_topic,
+                                          candidate_topic_filtered),
+                Topic(3));
+      EXPECT_FALSE(output_is_true_topic);
+      EXPECT_FALSE(candidate_topic_filtered);
+    }
+
+    // Topic(3) is a padded topic. Thus it's not returned.
+    EXPECT_EQ(epoch_topics.TopicForSiteForDisplay(top_site, kTestKey),
               absl::nullopt);
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(3), kTestKey),
-              Topic(3));
   }
 
   {
@@ -121,41 +195,103 @@ TEST_F(EpochTopicsTest, TopicForSite) {
     // The random topic index is 185, thus Topic(186) will be returned.
     ASSERT_EQ(random_topic_index_decision % kTaxonomySize, 185ULL);
 
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(1), kTestKey),
+    bool output_is_true_topic = false;
+    bool candidate_topic_filtered = false;
+    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(1), kTestKey,
+                                        output_is_true_topic,
+                                        candidate_topic_filtered),
               Topic(186));
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(2), kTestKey),
+    EXPECT_FALSE(output_is_true_topic);
+    EXPECT_FALSE(candidate_topic_filtered);
+    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(2), kTestKey,
+                                        output_is_true_topic,
+                                        candidate_topic_filtered),
               Topic(186));
-    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(3), kTestKey),
+    EXPECT_FALSE(output_is_true_topic);
+    EXPECT_FALSE(candidate_topic_filtered);
+    EXPECT_EQ(epoch_topics.TopicForSite(top_site, HashedDomain(3), kTestKey,
+                                        output_is_true_topic,
+                                        candidate_topic_filtered),
               Topic(186));
+    EXPECT_FALSE(output_is_true_topic);
+    EXPECT_FALSE(candidate_topic_filtered);
+
+    EXPECT_EQ(epoch_topics.TopicForSiteForDisplay(top_site, kTestKey),
+              absl::nullopt);
   }
 }
 
 TEST_F(EpochTopicsTest, ClearTopics) {
   EpochTopics epoch_topics = CreateTestEpochTopics();
 
-  EXPECT_TRUE(epoch_topics.HasValidTopics());
+  EXPECT_FALSE(epoch_topics.empty());
 
   epoch_topics.ClearTopics();
 
-  EXPECT_FALSE(epoch_topics.HasValidTopics());
+  EXPECT_TRUE(epoch_topics.empty());
 
+  bool output_is_true_topic = false;
+  bool candidate_topic_filtered = false;
   EXPECT_EQ(epoch_topics.TopicForSite(/*top_domain=*/"foo.com", HashedDomain(1),
-                                      kTestKey),
+                                      kTestKey, output_is_true_topic,
+                                      candidate_topic_filtered),
             absl::nullopt);
+  EXPECT_FALSE(output_is_true_topic);
+  EXPECT_FALSE(candidate_topic_filtered);
+}
+
+TEST_F(EpochTopicsTest, ClearTopic) {
+  EpochTopics epoch_topics = CreateTestEpochTopics();
+
+  EXPECT_FALSE(epoch_topics.empty());
+
+  epoch_topics.ClearTopic(Topic(3));
+
+  EXPECT_FALSE(epoch_topics.empty());
+
+  EXPECT_TRUE(epoch_topics.top_topics_and_observing_domains()[0].IsValid());
+  EXPECT_TRUE(epoch_topics.top_topics_and_observing_domains()[1].IsValid());
+  EXPECT_FALSE(epoch_topics.top_topics_and_observing_domains()[2].IsValid());
+  EXPECT_TRUE(epoch_topics.top_topics_and_observing_domains()[3].IsValid());
+  EXPECT_TRUE(epoch_topics.top_topics_and_observing_domains()[4].IsValid());
+}
+
+TEST_F(EpochTopicsTest, ClearContextDomain) {
+  EpochTopics epoch_topics = CreateTestEpochTopics();
+
+  EXPECT_FALSE(epoch_topics.empty());
+
+  epoch_topics.ClearContextDomain(HashedDomain(1));
+
+  EXPECT_FALSE(epoch_topics.empty());
+
+  EXPECT_EQ(epoch_topics.top_topics_and_observing_domains()[0].hashed_domains(),
+            std::set<HashedDomain>{});
+  EXPECT_EQ(epoch_topics.top_topics_and_observing_domains()[1].hashed_domains(),
+            std::set<HashedDomain>({HashedDomain(2)}));
+  EXPECT_EQ(epoch_topics.top_topics_and_observing_domains()[2].hashed_domains(),
+            std::set<HashedDomain>({HashedDomain(3)}));
+  EXPECT_EQ(epoch_topics.top_topics_and_observing_domains()[3].hashed_domains(),
+            std::set<HashedDomain>({HashedDomain(2), HashedDomain(3)}));
+  EXPECT_EQ(epoch_topics.top_topics_and_observing_domains()[4].hashed_domains(),
+            std::set<HashedDomain>{});
 }
 
 TEST_F(EpochTopicsTest, FromEmptyDictionaryValue) {
   EpochTopics read_epoch_topics =
       EpochTopics::FromDictValue(base::Value::Dict());
 
-  EXPECT_FALSE(read_epoch_topics.HasValidTopics());
+  EXPECT_TRUE(read_epoch_topics.empty());
   EXPECT_EQ(read_epoch_topics.taxonomy_version(), 0);
   EXPECT_EQ(read_epoch_topics.model_version(), 0);
   EXPECT_EQ(read_epoch_topics.calculation_time(), base::Time());
 
+  bool output_is_true_topic = false;
+  bool candidate_topic_filtered = false;
   absl::optional<Topic> topic_for_site = read_epoch_topics.TopicForSite(
       /*top_domain=*/"foo.com",
-      /*hashed_context_domain=*/HashedDomain(1), kTestKey);
+      /*hashed_context_domain=*/HashedDomain(1), kTestKey, output_is_true_topic,
+      candidate_topic_filtered);
 
   EXPECT_EQ(topic_for_site, absl::nullopt);
 }
@@ -166,13 +302,16 @@ TEST_F(EpochTopicsTest, EmptyEpochTopics_ToAndFromDictValue) {
   base::Value::Dict dict_value = epoch_topics.ToDictValue();
   EpochTopics read_epoch_topics = EpochTopics::FromDictValue(dict_value);
 
-  EXPECT_FALSE(read_epoch_topics.HasValidTopics());
+  EXPECT_TRUE(read_epoch_topics.empty());
   EXPECT_EQ(read_epoch_topics.taxonomy_version(), 0);
   EXPECT_EQ(read_epoch_topics.model_version(), 0);
   EXPECT_EQ(read_epoch_topics.calculation_time(), base::Time());
 
+  bool output_is_true_topic = false;
+  bool candidate_topic_filtered = false;
   absl::optional<Topic> topic_for_site = read_epoch_topics.TopicForSite(
-      /*top_domain=*/"foo.com", HashedDomain(1), kTestKey);
+      /*top_domain=*/"foo.com", HashedDomain(1), kTestKey, output_is_true_topic,
+      candidate_topic_filtered);
 
   EXPECT_EQ(topic_for_site, absl::nullopt);
 }
@@ -183,13 +322,16 @@ TEST_F(EpochTopicsTest, PopulatedEpochTopics_ToAndFromValue) {
   base::Value::Dict dict_value = epoch_topics.ToDictValue();
   EpochTopics read_epoch_topics = EpochTopics::FromDictValue(dict_value);
 
-  EXPECT_TRUE(read_epoch_topics.HasValidTopics());
+  EXPECT_FALSE(read_epoch_topics.empty());
   EXPECT_EQ(read_epoch_topics.taxonomy_version(), 1);
   EXPECT_EQ(read_epoch_topics.model_version(), 2);
   EXPECT_EQ(read_epoch_topics.calculation_time(), kCalculationTime);
 
-  EXPECT_EQ(read_epoch_topics.TopicForSite(/*top_domain=*/"foo.com",
-                                           HashedDomain(1), kTestKey),
+  bool output_is_true_topic = false;
+  bool candidate_topic_filtered = false;
+  EXPECT_EQ(read_epoch_topics.TopicForSite(
+                /*top_domain=*/"foo.com", HashedDomain(1), kTestKey,
+                output_is_true_topic, candidate_topic_filtered),
             Topic(2));
 }
 

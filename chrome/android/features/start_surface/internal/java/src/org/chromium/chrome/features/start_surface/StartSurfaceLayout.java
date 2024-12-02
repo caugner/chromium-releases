@@ -53,6 +53,7 @@ import org.chromium.components.browser_ui.widget.animation.Interpolators;
 import org.chromium.components.browser_ui.widget.scrim.ScrimCoordinator;
 import org.chromium.components.browser_ui.widget.scrim.ScrimProperties;
 import org.chromium.components.version_info.VersionInfo;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.resources.ResourceManager;
 
@@ -110,7 +111,6 @@ public class StartSurfaceLayout extends Layout {
     private long mLastFrameTime;
     private long mMaxFrameInterval;
     private int mStartFrame;
-    private float mThumbnailAspectRatio;
 
     private boolean mAndroidViewFinishedShowing;
 
@@ -145,10 +145,13 @@ public class StartSurfaceLayout extends Layout {
             @Override
             public void finishedShowing() {
                 mAndroidViewFinishedShowing = true;
-                doneShowing();
-                // The Tab-to-GTS animation is done, and it's time to renew the thumbnail without
-                // causing janky frames. When animation is off, the thumbnail is already updated
-                // when showing the GTS.
+                if (!TabUiFeatureUtilities.isTabletGridTabSwitcherPolishEnabled(context)) {
+                    doneShowing();
+                }
+                // When Tab-to-GTS animation is done, it's time to renew the thumbnail without
+                // causing janky frames. When animation is off or not used, the thumbnail is already
+                // updated when showing the GTS. Tab-to-GTS animation is not invoked for tablet tab
+                // switcher polish.
                 if (isTabGtsAnimationEnabled()) {
                     // Delay thumbnail taking a bit more to make it less likely to happen before the
                     // thumbnail taking triggered by ThumbnailFetcher. See crbug.com/996385 for
@@ -187,7 +190,6 @@ public class StartSurfaceLayout extends Layout {
         };
 
         mController.addOverviewModeObserver(mStartSurfaceObserver);
-        mThumbnailAspectRatio = TabUtils.getTabThumbnailAspectRatio(getContext());
     }
 
     @Override
@@ -423,11 +425,6 @@ public class StartSurfaceLayout extends Layout {
     }
 
     @Override
-    public boolean handlesCloseAll() {
-        return false;
-    }
-
-    @Override
     protected void forceAnimationToFinish() {
         super.forceAnimationToFinish();
         if (mTabToSwitcherAnimation != null) {
@@ -517,8 +514,10 @@ public class StartSurfaceLayout extends Layout {
         // down, making the "create group" visible for a while.
         animationList.add(CompositorAnimator.ofWritableFloatPropertyKey(handler, sourceLayoutTab,
                 LayoutTab.MAX_CONTENT_HEIGHT, sourceLayoutTab.getUnclampedOriginalContentHeight(),
-                Math.min(getWidth() / mThumbnailAspectRatio,
-                        sourceLayoutTab.getUnclampedOriginalContentHeight()),
+                TabUiFeatureUtilities.isTabThumbnailAspectRatioNotOne()
+                        ? Math.min(getWidth() / TabUtils.getTabThumbnailAspectRatio(getContext()),
+                                sourceLayoutTab.getUnclampedOriginalContentHeight())
+                        : getWidth(),
                 ZOOMING_DURATION, Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
 
         CompositorAnimator backgroundAlpha =
@@ -571,8 +570,10 @@ public class StartSurfaceLayout extends Layout {
         // down, making the "create group" visible for a while.
         animationList.add(CompositorAnimator.ofWritableFloatPropertyKey(handler, sourceLayoutTab,
                 LayoutTab.MAX_CONTENT_HEIGHT,
-                Math.min(getWidth() / mThumbnailAspectRatio,
-                        sourceLayoutTab.getUnclampedOriginalContentHeight()),
+                TabUiFeatureUtilities.isTabThumbnailAspectRatioNotOne()
+                        ? Math.min(getWidth() / TabUtils.getTabThumbnailAspectRatio(getContext()),
+                                sourceLayoutTab.getUnclampedOriginalContentHeight())
+                        : getWidth(),
                 sourceLayoutTab.getUnclampedOriginalContentHeight(), ZOOMING_DURATION,
                 Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR));
 
@@ -619,13 +620,16 @@ public class StartSurfaceLayout extends Layout {
             @Override
             public void onAnimationStart(Animator animation) {
                 // Skip fade-in for tab switcher view, since it will translate in instead.
-                mController.showOverview(false);
                 mController.getTabSwitcherContainer().setVisibility(View.VISIBLE);
+                mController.showOverview(false);
+                mController.setSnackbarParentView(mController.getTabSwitcherContainer());
             }
 
             @Override
             public void onAnimationEnd(Animator animation) {
                 mTabToSwitcherAnimation = null;
+                mController.getTabSwitcherContainer().setY(0);
+                doneShowing();
 
                 reportTabletAnimationPerf(true);
             }
@@ -649,6 +653,11 @@ public class StartSurfaceLayout extends Layout {
         mTabToSwitcherAnimation = new AnimatorSet();
         mTabToSwitcherAnimation.play(translateDown);
         mTabToSwitcherAnimation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+                mController.setSnackbarParentView(null);
+            }
+
             @Override
             public void onAnimationEnd(Animator animation) {
                 mTabToSwitcherAnimation = null;
@@ -698,23 +707,10 @@ public class StartSurfaceLayout extends Layout {
     }
 
     /**
-     * When state is SHOWN_HOMEPAGE or SHOWING_HOMEPAGE or SHOWING_START, state surface homepage is
-     * showing. When state is StartSurfaceState.SHOWING_PREVIOUS and the previous state is
-     * SHOWN_HOMEPAGE or NOT_SHOWN, homepage is showing.
      * @return Whether start surface homepage is showing.
      */
     private boolean isShowingStartSurfaceHomepage() {
-        @StartSurfaceState
-        int currentState = mController.getStartSurfaceState();
-        @StartSurfaceState
-        int previousState = mController.getPreviousStartSurfaceState();
-
-        return currentState == StartSurfaceState.SHOWN_HOMEPAGE
-                || currentState == StartSurfaceState.SHOWING_HOMEPAGE
-                || currentState == StartSurfaceState.SHOWING_START
-                || (currentState == StartSurfaceState.SHOWING_PREVIOUS
-                        && (previousState == StartSurfaceState.SHOWN_HOMEPAGE
-                                || previousState == StartSurfaceState.NOT_SHOWN));
+        return mController.isShowingStartSurfaceHomepage();
     }
 
     private boolean isHidingStartSurfaceHomepage() {
@@ -820,10 +816,14 @@ public class StartSurfaceLayout extends Layout {
     @Override
     public boolean canHostBeFocusable() {
         if (TabUiFeatureUtilities.isLaunchPolishEnabled()
-                && ChromeAccessibilityUtil.get().isAccessibilityEnabled()) {
+                && ChromeAccessibilityUtil.get().isAccessibilityEnabled()
+                && !DeviceFormFactor.isNonMultiDisplayContextOnTablet(getContext())) {
             // We don't allow this layout to gain focus when accessibility is enabled so that the
             // CompositorViewHolder doesn't steal focus when entering tab switcher.
             // (crbug.com/1125185).
+            // We ignore this logic on tablets, since it would cause focus to briefly shift to the
+            // omnibox while entering the tab switcher. This was most notable on the NTP, where the
+            // virtual keyboard would quickly appear then disappear. (https://crbug.com/1320035).
             return false;
         }
         return super.canHostBeFocusable();
