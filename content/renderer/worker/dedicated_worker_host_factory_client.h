@@ -10,8 +10,8 @@
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/common/browser_interface_broker_proxy.h"
-#include "third_party/blink/public/mojom/renderer_preference_watcher.mojom.h"
-#include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
+#include "third_party/blink/public/mojom/renderer_preference_watcher.mojom-forward.h"
+#include "third_party/blink/public/mojom/renderer_preferences.mojom-forward.h"
 #include "third_party/blink/public/mojom/worker/dedicated_worker_host.mojom.h"
 #include "third_party/blink/public/mojom/worker/dedicated_worker_host_factory.mojom.h"
 #include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
@@ -43,13 +43,10 @@ class DedicatedWorkerHostFactoryClient final
   ~DedicatedWorkerHostFactoryClient() override;
 
   // Implements blink::WebDedicatedWorkerHostFactoryClient.
-  void CreateWorkerHostDeprecated(
-      const blink::WebSecurityOrigin& script_origin) override;
+  void CreateWorkerHostDeprecated() override;
   void CreateWorkerHost(
       const blink::WebURL& script_url,
-      const blink::WebSecurityOrigin& script_origin,
       network::mojom::CredentialsMode credentials_mode,
-      const blink::WebSecurityOrigin& fetch_client_security_origin,
       const blink::WebFetchClientSettingsObject& fetch_client_settings_object,
       mojo::ScopedMessagePipeHandle blob_url_token) override;
   scoped_refptr<blink::WebWorkerFetchContext> CloneWorkerFetchContext(

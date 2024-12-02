@@ -20,7 +20,7 @@
 #include "net/base/ip_endpoint.h"
 #include "net/cookies/canonical_cookie.h"
 #include "services/metrics/public/cpp/ukm_source.h"
-#include "third_party/blink/public/platform/web_input_event.h"
+#include "third_party/blink/public/common/input/web_input_event.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -118,7 +118,7 @@ struct ExtraRequestCompleteInfo {
   // The origin of the final URL for the request (final = after redirects).
   //
   // The full URL is not available, because in some cases the path and query
-  // may be sanitized away - see https://crbug.com/973885.
+  // be sanitized away - see https://crbug.com/973885.
   const url::Origin origin_of_final_url;
 
   // The host (IP address) and port for the request.

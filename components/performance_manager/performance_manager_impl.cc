@@ -12,7 +12,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/task/lazy_task_runner.h"
+#include "base/task/lazy_thread_pool_task_runner.h"
 #include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
@@ -40,10 +40,9 @@ PerformanceManagerImpl* g_performance_manager_from_pm_sequence = nullptr;
 PerformanceManagerImpl* g_performance_manager_from_any_sequence = nullptr;
 
 // The performance manager TaskRunner.
-base::LazySequencedTaskRunner g_performance_manager_task_runner =
-    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
-        base::TaskTraits(base::ThreadPool(),
-                         base::TaskPriority::USER_VISIBLE,
+base::LazyThreadPoolSequencedTaskRunner g_performance_manager_task_runner =
+    LAZY_THREAD_POOL_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::TaskPriority::USER_VISIBLE,
                          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
                          base::MayBlock()));
 
@@ -91,7 +90,7 @@ std::unique_ptr<PerformanceManagerImpl> PerformanceManagerImpl::Create(
 
 // static
 void PerformanceManagerImpl::Destroy(
-    std::unique_ptr<PerformanceManagerImpl> instance) {
+    std::unique_ptr<PerformanceManager> instance) {
   DCHECK_EQ(instance.get(), g_performance_manager_from_any_sequence);
   g_performance_manager_from_any_sequence = nullptr;
   GetTaskRunner()->DeleteSoon(FROM_HERE, instance.release());
@@ -141,11 +140,20 @@ std::unique_ptr<WorkerNodeImpl> PerformanceManagerImpl::CreateWorkerNode(
       worker_type, process_node, url, dev_tools_token);
 }
 
+void PerformanceManagerImpl::DeleteNode(std::unique_ptr<NodeBase> node) {
+  GetTaskRunner()->PostTask(
+      FROM_HERE, base::BindOnce(&PerformanceManagerImpl::DeleteNodeImpl,
+                                base::Unretained(this), node.release()));
+}
+
 void PerformanceManagerImpl::BatchDeleteNodes(
     std::vector<std::unique_ptr<NodeBase>> nodes) {
+  // Move the nodes vector to the heap.
+  auto nodes_ptr = std::make_unique<std::vector<std::unique_ptr<NodeBase>>>(
+      std::move(nodes));
   GetTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&PerformanceManagerImpl::BatchDeleteNodesImpl,
-                                base::Unretained(this), std::move(nodes)));
+                                base::Unretained(this), nodes_ptr.release()));
 }
 
 PerformanceManagerImpl::PerformanceManagerImpl() {
@@ -182,14 +190,11 @@ std::unique_ptr<NodeType> PerformanceManagerImpl::CreateNodeImpl(
   return new_node;
 }
 
-void PerformanceManagerImpl::PostDeleteNode(std::unique_ptr<NodeBase> node) {
-  GetTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&PerformanceManagerImpl::DeleteNodeImpl,
-                                base::Unretained(this), std::move(node)));
-}
-
-void PerformanceManagerImpl::DeleteNodeImpl(std::unique_ptr<NodeBase> node) {
+void PerformanceManagerImpl::DeleteNodeImpl(NodeBase* node_ptr) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // Must be done first to avoid leaking |node_ptr|.
+  std::unique_ptr<NodeBase> node(node_ptr);
 
   graph_.RemoveNode(node.get());
 }
@@ -208,15 +213,18 @@ void RemoveFrameAndChildrenFromGraph(FrameNodeImpl* frame_node) {
 }  // namespace
 
 void PerformanceManagerImpl::BatchDeleteNodesImpl(
-    std::vector<std::unique_ptr<NodeBase>> nodes) {
+    std::vector<std::unique_ptr<NodeBase>>* nodes_ptr) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // Must be done first to avoid leaking |nodes_ptr|.
+  std::unique_ptr<std::vector<std::unique_ptr<NodeBase>>> nodes(nodes_ptr);
 
   base::flat_set<ProcessNodeImpl*> process_nodes;
 
-  for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-    switch ((*it)->type()) {
+  for (const auto& node : *nodes) {
+    switch (node->type()) {
       case PageNodeImpl::Type(): {
-        auto* page_node = PageNodeImpl::FromNodeBase(it->get());
+        auto* page_node = PageNodeImpl::FromNodeBase(node.get());
 
         // Delete the main frame nodes until no more exist.
         while (!page_node->main_frame_nodes().empty())
@@ -229,14 +237,14 @@ void PerformanceManagerImpl::BatchDeleteNodesImpl(
       case ProcessNodeImpl::Type(): {
         // Keep track of the process nodes for removing once all frames nodes
         // are removed.
-        auto* process_node = ProcessNodeImpl::FromNodeBase(it->get());
+        auto* process_node = ProcessNodeImpl::FromNodeBase(node.get());
         process_nodes.insert(process_node);
         break;
       }
       case FrameNodeImpl::Type():
         break;
       case WorkerNodeImpl::Type(): {
-        auto* worker_node = WorkerNodeImpl::FromNodeBase(it->get());
+        auto* worker_node = WorkerNodeImpl::FromNodeBase(node.get());
         graph_.RemoveNode(worker_node);
         break;
       }

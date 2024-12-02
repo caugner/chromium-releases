@@ -39,9 +39,6 @@ class CONTENT_EXPORT RenderWidgetDelegate {
   // These methods called during handling of a SynchronizeVisualProperties
   // message to handle updating state on the delegate.
   //
-  // Called during handling a SynchronizeVisualProperties message, to close the
-  // current PagePopup if there is one.
-  virtual void CancelPagePopupForWidget() = 0;
   // Called during handling a SynchronizeVisualProperties message, with the new
   // display mode that will be applied to the RenderWidget. The display mode in
   // the RenderWidget is already changed when this method is called.
@@ -81,6 +78,11 @@ class CONTENT_EXPORT RenderWidgetDelegate {
   virtual void SetScreenMetricsEmulationParametersForWidget(
       bool enabled,
       const blink::WebDeviceEmulationParams& params) = 0;
+
+  // Called when the VisualViewport needs to be updated. Expects coordinates
+  // scaled to account for DeviceScaleFactor.
+  virtual void ResizeVisualViewportForWidget(
+      const gfx::Size& scaled_viewport_size) = 0;
 };
 
 }  // namespace content
