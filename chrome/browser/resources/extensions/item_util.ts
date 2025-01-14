@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import './strings.m.js';
+import '/strings.m.js';
 
 import {assertNotReached} from 'chrome://resources/js/assert.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
@@ -317,10 +317,12 @@ export function createDummyExtensionInfo():
     },
     errorCollection: {isEnabled: false, isActive: false},
     fileAccess: {isEnabled: false, isActive: false},
+    fileAccessPendingChange: false,
     homePage: {url: '', specified: false},
     iconUrl: '',
     id: '',
     incognitoAccess: {isEnabled: false, isActive: false},
+    incognitoAccessPendingChange: false,
     installWarnings: [],
     location: chrome.developerPrivate.Location.UNKNOWN,
     manifestErrors: [],

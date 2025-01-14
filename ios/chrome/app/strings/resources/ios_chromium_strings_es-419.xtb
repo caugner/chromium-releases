@@ -15,6 +15,7 @@
 <translation id="1383876407941801731">Buscar</translation>
 <translation id="1423007117030725713">Realiza una búsqueda en una nueva pestaña de Chromium.</translation>
 <translation id="1431818719585918472">Permite que Chromium bloquee tus pestañas de incógnito.</translation>
+<translation id="1451665391191990528">Ocultar las pestañas de incógnito abiertas cuando salgas de Chromium</translation>
 <translation id="146407871188825689">Usa Chromium en iPad de forma predeterminada</translation>
 <translation id="1471084500615228555">Borrar los datos de navegación en Chromium</translation>
 <translation id="1472013873724362412">Tu cuenta no funciona en Chromium. Comunícate con tu administrador de dominio o utiliza una cuenta común de Google para acceder.</translation>
@@ -311,7 +312,7 @@ Tus datos se encriptaron con tu frase de contraseña el <ph name="TIME" />. Ingr
 <translation id="9031260906956926157">Aún no se guardaron algunos de tus datos de Chromium en tu Cuenta de Google.
 Espera unos minutos antes de salir. Si sales ahora, se borrarán estos datos.</translation>
 <translation id="9050790730841755540">Usa Chromium cada vez que presiones vínculos en otras apps.</translation>
-<translation id="9059693977935746710">No es necesario que recuerdes esta contraseña. Se guardará en el Administrador de contraseñas de <ph name="EMAIL" />.</translation>
+<translation id="9059693977935746710">No es necesario que recuerdes esta contraseña. Se guardará en el Administrador de contraseñas de <ph name="EMAIL" /></translation>
 <translation id="9089354809943900324">Chromium no actualizado</translation>
 <translation id="9152995302810511799">Sugerencia de Chromium: Obtén la seguridad más sólida de Chromium</translation>
 <translation id="921174536258924340">Chromium no pudo revisar todas las contraseñas. Vuelve a intentarlo mañana o <ph name="BEGIN_LINK" />revisa las contraseñas guardadas en tu Cuenta de Google.<ph name="END_LINK" /></translation>

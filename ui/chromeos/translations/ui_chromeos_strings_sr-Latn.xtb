@@ -328,7 +328,7 @@
 <translation id="3603385196401704894">kanadska francuska</translation>
 <translation id="3606220979431771195">turska F</translation>
 <translation id="3616113530831147358">Audio</translation>
-<translation id="3619115746895587757">Kapučino</translation>
+<translation id="3619115746895587757">Kapućino</translation>
 <translation id="3619593063686672873">Nema nedavnih videa</translation>
 <translation id="3634507049637220048"><ph name="NETWORK_INDEX" />. mreža od <ph name="NETWORK_COUNT" />, <ph name="NETWORK_NAME" />, <ph name="CONNECTION_STATUS" />, upravlja administrator, detalji</translation>
 <translation id="36451918667380448">Usluga ovog mobilnog provajdera je zaključana. Zatražite podršku od njega.</translation>
@@ -422,6 +422,7 @@
 <translation id="4387004326333427325">Sertifikat za potvrdu autentičnosti je odbijen daljinski</translation>
 <translation id="4394214039309501350">Spoljni link</translation>
 <translation id="4394980935660306080">Ranije ove nedelje</translation>
+<translation id="4397435965699247285">OneDrive nije dostupan oflajn</translation>
 <translation id="4398096759193130964">Vratite stavke ili ih prevucite u nov folder izvan otpada</translation>
 <translation id="4401287888955153199">Izdvoji sve</translation>
 <translation id="4410695710508688828">Operacija izdvajanja nije uspela. <ph name="ERROR_MESSAGE" /></translation>

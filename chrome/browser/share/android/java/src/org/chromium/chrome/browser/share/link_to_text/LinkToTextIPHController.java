@@ -27,7 +27,7 @@ import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.url.GURL;
 
 /** This class is responsible for rendering an IPH, when receiving a link-to-text. */
-public class LinkToTextIPHController {
+public class LinkToTextIphController {
     private static final String FEATURE_NAME =
             FeatureConstants.SHARED_HIGHLIGHTING_RECEIVER_FEATURE;
 
@@ -35,13 +35,13 @@ public class LinkToTextIPHController {
     private Tracker mTracker;
 
     /**
-     * Creates an {@link LinkToTextIPHController}.
+     * Creates an {@link LinkToTextIphController}.
      *
      * @param tabSupplier An {@link ObservableSupplier} for {@link Tab} where the IPH will be
      *     rendered.
      * @param tabModelSelector The {@link TabModelSelector} to open a new tab.
      */
-    public LinkToTextIPHController(
+    public LinkToTextIphController(
             ObservableSupplier<Tab> tabSupplier,
             TabModelSelector tabModelSelector,
             ObservableSupplier<Profile> profileSupplier) {
@@ -59,15 +59,15 @@ public class LinkToTextIPHController {
                             return;
                         }
                         mTracker = TrackerFactory.getTrackerForProfile(profile);
-                        if (!mTracker.wouldTriggerHelpUI(FEATURE_NAME)) {
+                        if (!mTracker.wouldTriggerHelpUi(FEATURE_NAME)) {
                             return;
                         }
 
                         LinkToTextHelper.hasExistingSelectors(
                                 tab,
                                 (hasSelectors) -> {
-                                    if (mTracker.shouldTriggerHelpUI(FEATURE_NAME)) {
-                                        showMessageIPH(tab);
+                                    if (mTracker.shouldTriggerHelpUi(FEATURE_NAME)) {
+                                        showMessageIph(tab);
                                     }
                                 });
                     }
@@ -75,7 +75,7 @@ public class LinkToTextIPHController {
                 null);
     }
 
-    private void showMessageIPH(Tab tab) {
+    private void showMessageIph(Tab tab) {
         MessageDispatcher mMessageDispatcher =
                 MessageDispatcherProvider.from(tab.getWindowAndroid());
         PropertyModel model =
@@ -92,12 +92,10 @@ public class LinkToTextIPHController {
                         .with(
                                 MessageBannerProperties.TITLE,
                                 tab.getContext()
-                                        .getResources()
                                         .getString(R.string.iph_message_shared_highlighting_title))
                         .with(
                                 MessageBannerProperties.PRIMARY_BUTTON_TEXT,
                                 tab.getContext()
-                                        .getResources()
                                         .getString(R.string.iph_message_shared_highlighting_button))
                         .with(MessageBannerProperties.ON_DISMISSED, this::onMessageDismissed)
                         .with(

@@ -2,10 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/branches.star", "branches")
-load("//lib/builders.star", "builders", "cpu", "siso")
-load("//lib/ci.star", "ci")
-load("//lib/consoles.star", "consoles")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builders.star", "builders", "cpu")
+load("@chromium-luci//ci.star", "ci")
+load("@chromium-luci//consoles.star", "consoles")
+load("//lib/ci_constants.star", "ci_constants")
+load("//lib/gpu.star", "gpu")
+load("//lib/siso.star", "siso")
 load("//project.star", "settings")
 
 # Bucket-wide defaults
@@ -78,15 +81,15 @@ luci.bucket(
                 "chromium-led-users",
             ],
             users = [
-                ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-                ci.gpu.SHADOW_SERVICE_ACCOUNT,
+                ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+                gpu.ci.SHADOW_SERVICE_ACCOUNT,
             ],
         ),
         luci.binding(
             roles = "role/buildbucket.triggerer",
             users = [
-                ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-                ci.gpu.SHADOW_SERVICE_ACCOUNT,
+                ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+                gpu.ci.SHADOW_SERVICE_ACCOUNT,
             ],
         ),
         # TODO(crbug.com/40941662): Remove this binding after shadow bucket
@@ -101,8 +104,8 @@ luci.bucket(
         luci.binding(
             roles = "role/resultdb.invocationCreator",
             users = [
-                ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-                ci.gpu.SHADOW_SERVICE_ACCOUNT,
+                ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+                gpu.ci.SHADOW_SERVICE_ACCOUNT,
             ],
         ),
     ],
@@ -163,15 +166,13 @@ luci.gitiles_poller(
     ("win64-chrome", "win"),
 )]
 
-# Any builders that should be monitored by the Chrome-Fuchsia Gardener
-# should be in the "gardener" group.
+# Any builders that should not be monitored by the Chrome-Fuchsia Gardener
+# should be in the "fyi" group.
 consoles.console_view(
     name = "sheriff.fuchsia",
     title = "Fuchsia Sheriff Console",
     ordering = {
-        None: ["gardener", "fyi"],
-        "gardener": ["ci", "fuchsia ci", "p/chrome", "hardware"],
-        "fyi": ["arm64", "x64", "clang", "hardware"],
+        None: ["ci", "fuchsia ci", "p/chrome", "hardware", "fyi"],
     },
 )
 
@@ -182,26 +183,26 @@ consoles.console_view(
     category = category,
     short_name = short_name,
 ) for name, category, short_name in (
-    ("fuchsia-arm64-rel-ready", "gardener|p/chrome|arm64", "rel-ready"),
-    ("fuchsia-arm64-nest-sd", "gardener|p/chrome|arm64", "nest-arm"),
-    ("fuchsia-ava-nelson", "gardener|hardware|ava", "nsn"),
-    ("fuchsia-builder-perf-arm64", "gardener|p/chrome|arm64", "perf-arm"),
-    ("fuchsia-cast-astro", "gardener|hardware|cast", "ast"),
-    ("fuchsia-cast-nelson", "gardener|hardware|cast", "nsn"),
-    ("fuchsia-cast-sherlock", "gardener|hardware|cast", "sher"),
-    ("fuchsia-fyi-arm64-size", "gardener|p/chrome|arm64", "size"),
-    ("fuchsia-fyi-astro", "gardener|hardware", "ast"),
-    ("fuchsia-fyi-nelson", "gardener|hardware", "nsn"),
-    ("fuchsia-fyi-sherlock", "gardener|hardware", "sher"),
-    ("fuchsia-fyi-sherlock-qemu", "gardener|hardware|emu", "sher"),
-    ("fuchsia-smoke-astro", "gardener|hardware|smoke", "ast"),
-    ("fuchsia-smoke-nelson", "gardener|hardware|smoke", "nsn"),
-    ("fuchsia-smoke-sherlock", "gardener|hardware|smoke", "sher"),
-    ("fuchsia-smoke-sherlock-roller", "gardener|hardware|smoke", "roll"),
-    ("fuchsia-perf-nsn", "gardener|hardware|perf", "nsn"),
-    ("fuchsia-perf-shk", "gardener|hardware|perf", "sher"),
-    ("fuchsia-x64", "gardener|p/chrome|x64", "rel"),
-    ("fuchsia-x64-nest-sd", "gardener|p/chrome|x64", "nest-x64"),
+    ("fuchsia-arm64-rel-ready", "p/chrome|arm64", "rel-ready"),
+    ("fuchsia-arm64-nest-sd", "p/chrome|official", "nest-arm"),
+    ("fuchsia-ava-nelson", "hardware|ava", "nsn"),
+    ("fuchsia-builder-perf-arm64", "p/chrome|arm64", "perf-arm"),
+    ("fuchsia-cast-astro", "hardware|cast", "ast"),
+    ("fuchsia-cast-nelson", "hardware|cast", "nsn"),
+    ("fuchsia-cast-sherlock", "hardware|cast", "sher"),
+    ("fuchsia-fyi-arm64-size", "p/chrome|arm64", "size"),
+    ("fuchsia-fyi-astro", "hardware", "ast"),
+    ("fuchsia-fyi-nelson", "hardware", "nsn"),
+    ("fuchsia-fyi-sherlock", "hardware", "sher"),
+    ("fuchsia-fyi-sherlock-qemu", "hardware|emu", "sher"),
+    ("fuchsia-smoke-astro", "hardware|smoke", "ast"),
+    ("fuchsia-smoke-nelson", "hardware|smoke", "nsn"),
+    ("fuchsia-smoke-sherlock", "hardware|smoke", "sher"),
+    ("fuchsia-smoke-sherlock-roller", "hardware|smoke", "roll"),
+    ("fuchsia-perf-nsn", "hardware|perf", "nsn"),
+    ("fuchsia-perf-shk", "hardware|perf", "sher"),
+    ("fuchsia-x64", "p/chrome|official", "x64"),
+    ("fuchsia-x64-nest-sd", "p/chrome|official", "nest-x64"),
 )]
 
 exec("./ci/blink.infra.star")

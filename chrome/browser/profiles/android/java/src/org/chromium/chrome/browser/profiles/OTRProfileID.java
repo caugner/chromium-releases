@@ -11,66 +11,66 @@ import androidx.annotation.Nullable;
 import org.jni_zero.CalledByNative;
 import org.jni_zero.NativeMethods;
 
-/** Wrapper that allows passing a OTRProfileID reference around in the Java layer. */
-public class OTRProfileID {
-    private final String mProfileID;
-    // OTRProfileID value should be same with Profile::OTRProfileID::PrimaryID in native.
-    private static final OTRProfileID sPrimaryOTRProfileID =
-            new OTRProfileID("profile::primary_otr");
+/** Wrapper that allows passing a OtrProfileId reference around in the Java layer. */
+public class OtrProfileId {
+    private final String mProfileId;
+    // OtrProfileId value should be same with Profile::OtrProfileId::PrimaryID in native.
+    private static final OtrProfileId sPrimaryOtrProfileId =
+            new OtrProfileId("profile::primary_otr");
     private static final String INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX = "CCT:Incognito";
 
     @CalledByNative
-    public OTRProfileID(String profileID) {
-        assert profileID != null;
-        mProfileID = profileID;
+    public OtrProfileId(String profileId) {
+        assert profileId != null;
+        mProfileId = profileId;
     }
 
     @CalledByNative
-    private String getProfileID() {
-        return mProfileID;
+    private String getProfileId() {
+        return mProfileId;
     }
 
     /** Creates a unique profile id by appending a unique serial number to the given prefix. */
-    public static OTRProfileID createUnique(String profileIDPrefix) {
-        return OTRProfileIDJni.get().createUniqueOTRProfileID(profileIDPrefix);
+    public static OtrProfileId createUnique(String profileIdPrefix) {
+        return OtrProfileIdJni.get().createUniqueOtrProfileId(profileIdPrefix);
     }
 
     /**
      * Creates a new unique Incognito CCT profile id by appending a unique serial number to the iCCT
      * OTR profile id prefix {@link #INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX}.
      */
-    public static OTRProfileID createUniqueIncognitoCCTId() {
-        return OTRProfileIDJni.get().createUniqueOTRProfileID(INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX);
+    public static OtrProfileId createUniqueIncognitoCctId() {
+        return OtrProfileIdJni.get().createUniqueOtrProfileId(INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX);
     }
 
     /**
-     * Deconstruct OTRProfileID to a string representation. Deconstructed version will be used to
+     * Deconstruct OtrProfileId to a string representation. Deconstructed version will be used to
      * pass the id to the native side and /components/ layer.
      *
-     * @param otrProfileID An OTRProfileId instance.
-     * @return A string that represents the given otrProfileID.
+     * @param otrProfileId An OtrProfileId instance.
+     * @return A string that represents the given otrProfileId.
      */
     @CalledByNative
-    public static String serialize(OTRProfileID otrProfileID) {
-        // The OTRProfileID might be null, if it represents the regular profile.
-        if (otrProfileID == null) return null;
+    public static String serialize(OtrProfileId otrProfileId) {
+        // The OtrProfileId might be null, if it represents the regular profile.
+        if (otrProfileId == null) return null;
 
-        return otrProfileID.toString();
+        return otrProfileId.toString();
     }
 
     /**
-     * Construct OTRProfileID from the string representation.
+     * Construct OtrProfileId from the string representation.
      *
-     * @param value The string representation of the OTRProfileID that is generated with {@link
-     *         OTRProfileID#serialize} function.
-     * @return An OTRProfileID instance.
-     * @throws IllegalStateException when the OTR profile belongs to the OTRProfileID is not
-     *         available. The off-the-record profile should exist when OTRProfileId will be used.
+     * @param value The string representation of the OtrProfileId that is generated with {@link
+     *     OtrProfileId#serialize} function.
+     * @return An OtrProfileId instance.
+     * @throws IllegalStateException when the OTR profile belongs to the OtrProfileId is not
+     *     available. The off-the-record profile should exist when OtrProfileId will be used.
      */
-    public static OTRProfileID deserialize(String value) {
-        OTRProfileID otrProfileId = deserializeWithoutVerify(value);
+    public static OtrProfileId deserialize(String value) {
+        OtrProfileId otrProfileId = deserializeWithoutVerify(value);
 
-        // The off-the-record profile should exist for the given OTRProfileID, since OTRProfileID
+        // The off-the-record profile should exist for the given OtrProfileId, since OtrProfileId
         // creation is completed just before the profile creation. So there should always be a
         // profile for the id. If OTR profile is not available, deserialize function should not be
         // called.
@@ -84,106 +84,110 @@ public class OTRProfileID {
     }
 
     /**
-     * Construct OTRProfileID from the string representation. It is possible this {@link
-     * OTRProfileID} does not correspond to a real profile.
-     * @param value The string representation of the OTRProfileID that is generated with {@link
-     *        OTRProfileID#serialize} function.
-     * @return An OTRProfileID instance.
+     * Construct OtrProfileId from the string representation. It is possible this {@link
+     * OtrProfileId} does not correspond to a real profile.
+     *
+     * @param value The string representation of the OtrProfileId that is generated with {@link
+     *     OtrProfileId#serialize} function.
+     * @return An OtrProfileId instance.
      */
     @CalledByNative
-    public static OTRProfileID deserializeWithoutVerify(String value) {
+    public static OtrProfileId deserializeWithoutVerify(String value) {
         // The value might be null, if it represents the regular profile.
         if (TextUtils.isEmpty(value)) return null;
 
-        // Check if the format is align with |OTRProfileID#toString| function.
-        assert value.startsWith("OTRProfileID{") && value.endsWith("}");
+        // Check if the format is align with |OtrProfileId#toString| function.
+        assert value.startsWith("OtrProfileId{") && value.endsWith("}");
 
-        // Be careful when changing here. This should be consistent with |OTRProfileID#toString|
+        // Be careful when changing here. This should be consistent with |OtrProfileId#toString|
         // function.
-        String id = value.substring("OTRProfileID{".length(), value.length() - 1);
-        OTRProfileID otrProfileId = new OTRProfileID(id);
+        String id = value.substring("OtrProfileId{".length(), value.length() - 1);
+        OtrProfileId otrProfileId = new OtrProfileId(id);
 
         return otrProfileId;
     }
 
-    public boolean isPrimaryOTRId() {
-        return this.equals(sPrimaryOTRProfileID);
+    public boolean isPrimaryOtrId() {
+        return this.equals(sPrimaryOtrProfileId);
     }
 
     /**
      * Returns true if the OTR profile id starts with {@link #INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX}.
      */
     public boolean isIncognitoCCId() {
-        return this.getProfileID().startsWith(INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX);
+        return this.getProfileId().startsWith(INCOGNITO_CCT_OTR_PROFILE_ID_PREFIX);
     }
 
     /**
-     * @return The OTRProfileID of the primary off-the-record profile.
+     * @return The OtrProfileId of the primary off-the-record profile.
      */
-    public static OTRProfileID getPrimaryOTRProfileID() {
-        return sPrimaryOTRProfileID;
+    public static OtrProfileId getPrimaryOtrProfileId() {
+        return sPrimaryOtrProfileId;
     }
 
     /**
      * Returns true for id of primary and non-primary off-the-record profiles. Otherwise returns
      * false.
-     * @param profileID The OTRProfileID
-     * @return Whether given OTRProfileID belongs to a off-the-record profile.
+     *
+     * @param profileId The OtrProfileId
+     * @return Whether given OtrProfileId belongs to a off-the-record profile.
      */
-    public static boolean isOffTheRecord(@Nullable OTRProfileID profileID) {
-        return profileID != null;
+    public static boolean isOffTheRecord(@Nullable OtrProfileId profileId) {
+        return profileId != null;
     }
 
     /**
-     * Checks whether the given OTRProfileIDs belong to the same profile.
-     * @param otrProfileID1 The first OTRProfileID
-     * @param otrProfileID2 The second OTRProfileID
-     * @return Whether the given OTRProfileIDs are equals.
+     * Checks whether the given OtrProfileIds belong to the same profile.
+     *
+     * @param otrProfileId1 The first OtrProfileId
+     * @param otrProfileId2 The second OtrProfileId
+     * @return Whether the given OtrProfileIds are equals.
      */
     public static boolean areEqual(
-            @Nullable OTRProfileID otrProfileID1, @Nullable OTRProfileID otrProfileID2) {
-        // If both OTRProfileIDs null, then both belong to the regular profile.
-        if (otrProfileID1 == null) return otrProfileID2 == null;
+            @Nullable OtrProfileId otrProfileId1, @Nullable OtrProfileId otrProfileId2) {
+        // If both OtrProfileIds null, then both belong to the regular profile.
+        if (otrProfileId1 == null) return otrProfileId2 == null;
 
-        return otrProfileID1.equals(otrProfileID2);
+        return otrProfileId1.equals(otrProfileId2);
     }
 
     /**
-     * Checks whether the given OTRProfileID strings belong to the same profile.
-     * @param otrProfileID1 The string of first OTRProfileID
-     * @param otrProfileID2 The string of second OTRProfileID
-     * @return Whether the given OTRProfileIDs are equals.
+     * Checks whether the given OtrProfileId strings belong to the same profile.
+     *
+     * @param otrProfileId1 The string of first OtrProfileId
+     * @param otrProfileId2 The string of second OtrProfileId
+     * @return Whether the given OtrProfileIds are equals.
      */
-    public static boolean areEqual(@Nullable String otrProfileID1, @Nullable String otrProfileID2) {
-        // If both OTRProfileIDs null, then both belong to the regular profile.
-        if (TextUtils.isEmpty(otrProfileID1)) {
-            return TextUtils.isEmpty(otrProfileID2);
+    public static boolean areEqual(@Nullable String otrProfileId1, @Nullable String otrProfileId2) {
+        // If both OtrProfileIds null, then both belong to the regular profile.
+        if (TextUtils.isEmpty(otrProfileId1)) {
+            return TextUtils.isEmpty(otrProfileId2);
         }
 
-        return otrProfileID1.equals(otrProfileID2);
+        return otrProfileId1.equals(otrProfileId2);
     }
 
     @Override
     public String toString() {
-        return String.format("OTRProfileID{%s}", mProfileID);
+        return String.format("OtrProfileId{%s}", mProfileId);
     }
 
     @Override
     public int hashCode() {
-        return mProfileID.hashCode();
+        return mProfileId.hashCode();
     }
 
     @Override
     public boolean equals(Object obj) {
-        if (!(obj instanceof OTRProfileID)) return false;
-        OTRProfileID other = (OTRProfileID) obj;
-        return mProfileID.equals(other.mProfileID);
+        if (!(obj instanceof OtrProfileId)) return false;
+        OtrProfileId other = (OtrProfileId) obj;
+        return mProfileId.equals(other.mProfileId);
     }
 
     @NativeMethods
     public interface Natives {
-        OTRProfileID createUniqueOTRProfileID(String profileIDPrefix);
+        OtrProfileId createUniqueOtrProfileId(String profileIdPrefix);
 
-        OTRProfileID getPrimaryID();
+        OtrProfileId getPrimaryId();
     }
 }

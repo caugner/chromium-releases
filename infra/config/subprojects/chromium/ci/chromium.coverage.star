@@ -2,14 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builder_health_indicators.star", "health_spec")
-load("//lib/builders.star", "cpu", "os", "siso")
-load("//lib/ci.star", "ci")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/targets.star", "targets")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builder_health_indicators.star", "health_spec")
+load("@chromium-luci//builders.star", "cpu", "os")
+load("@chromium-luci//ci.star", "ci")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//targets.star", "targets")
+load("//lib/ci_constants.star", "ci_constants")
+load("//lib/siso.star", "siso")
 load("//lib/xcode.star", "xcode")
 load("//project.star", "settings")
 
@@ -27,17 +29,16 @@ luci.gitiles_poller(
 )
 
 ci.defaults.set(
-    executable = ci.DEFAULT_EXECUTABLE,
+    executable = ci_constants.DEFAULT_EXECUTABLE,
     builder_group = "chromium.coverage",
-    pool = ci.DEFAULT_POOL,
+    pool = ci_constants.DEFAULT_POOL,
     cores = 32,
     ssd = True,
     execution_timeout = 20 * time.hour,
-    health_spec = health_spec.DEFAULT,
-    priority = ci.DEFAULT_FYI_PRIORITY,
-    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    health_spec = health_spec.default(),
+    priority = ci_constants.DEFAULT_FYI_PRIORITY,
+    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
@@ -273,14 +274,6 @@ coverage_builder(
                 swarming = targets.swarming(
                     shards = 2,
                 ),
-            ),
-            # TODO: crbug.com/40258588 - This flag should have no effect on this
-            # script test, but it needs to be present to satisfy the
-            # targets-config-verifier, so remove it after landing
-            "check_network_annotations": targets.mixin(
-                args = [
-                    "--avd-config=../../tools/android/avd/proto/generic_android26.textpb",
-                ],
             ),
             # Keep this same as android-oreo-x86-rel
             "chrome_public_test_apk": targets.mixin(
@@ -902,7 +895,7 @@ coverage_builder(
         consoles.console_view_entry(
             branch_selector = branches.selector.MAIN,
             console_view = "sheriff.fuchsia",
-            category = "gardener|fuchsia ci|x64",
+            category = "fuchsia ci|x64",
             short_name = "cov",
         ),
     ],
@@ -1512,41 +1505,15 @@ coverage_builder(
                 ),
             ),
             # These tests must run with a GPU.
-            # TODO(crbug.com/40888390): This must be kept in sync with the
-            # appropriate mixin; currently, win10_nvidia_gtx_1660_stable,
-            # which is used by Dawn Win10 x64 Release (NVIDIA).
-            # TODO: crbug.com/40258588 - Mixins can be specified in
-            # per_test_modifications, but the mixin applies the extra dimension
-            # display_attached, so it can't be switched until after the tests
-            # are migrated to starlark
-            "webgpu_blink_web_tests": targets.mixin(
-                swarming = targets.swarming(
-                    dimensions = {
-                        "gpu": "10de:2184-27.21.14.5638",
-                        "os": "Windows-10-18363",
-                        "pool": "chromium.tests.gpu",
-                    },
-                ),
-            ),
+            "webgpu_blink_web_tests": [
+                "win10_nvidia_gtx_1660_stable",
+            ],
             "webgpu_blink_web_tests_with_backend_validation": targets.remove(
                 reason = "Remove from bots where capacity is constrained.",
             ),
-            # TODO(crbug.com/40888390): This must be kept in sync with the
-            # appropriate mixin; currently, win10_nvidia_gtx_1660_stable,
-            # which is used by Dawn Win10 x64 Release (NVIDIA).
-            # TODO: crbug.com/40258588 - Mixins can be specified in
-            # per_test_modifications, but the mixin applies the extra dimension
-            # display_attached, so it can't be switched until after the tests
-            # are migrated to starlark
-            "webgpu_cts_tests": targets.mixin(
-                swarming = targets.swarming(
-                    dimensions = {
-                        "gpu": "10de:2184-27.21.14.5638",
-                        "os": "Windows-10-18363",
-                        "pool": "chromium.tests.gpu",
-                    },
-                ),
-            ),
+            "webgpu_cts_tests": [
+                "win10_nvidia_gtx_1660_stable",
+            ],
             "webgpu_cts_with_validation_tests": targets.remove(
                 reason = "Don't need validation layers on code coverage bots",
             ),

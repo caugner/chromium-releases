@@ -3,34 +3,37 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.linux builder group."""
 
-load("//lib/args.star", "args")
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builder_health_indicators.star", "health_spec")
-load("//lib/builders.star", "builders", "gardener_rotations", "os", "siso")
-load("//lib/ci.star", "ci")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/targets.star", "targets")
+load("@chromium-luci//args.star", "args")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builder_health_indicators.star", "health_spec")
+load("@chromium-luci//builders.star", "builders", "os")
+load("@chromium-luci//ci.star", "ci")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//targets.star", "targets")
+load("//lib/ci_constants.star", "ci_constants")
+load("//lib/gardener_rotations.star", "gardener_rotations")
+load("//lib/siso.star", "siso")
 
 ci.defaults.set(
-    executable = ci.DEFAULT_EXECUTABLE,
+    executable = ci_constants.DEFAULT_EXECUTABLE,
     builder_group = "chromium.linux",
     builder_config_settings = builder_config.ci_settings(
         retry_failed_shards = True,
     ),
-    pool = ci.DEFAULT_POOL,
+    pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     gardener_rotations = gardener_rotations.CHROMIUM,
     tree_closing = True,
+    tree_closing_notifiers = ci_constants.DEFAULT_TREE_CLOSING_NOTIFIERS,
     main_console_view = "main",
-    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.DEFAULT,
+    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.default(),
     notifies = ["chromium.linux"],
-    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
@@ -41,7 +44,7 @@ consoles.console_view(
     ordering = {
         None: ["release", "debug"],
         "release": consoles.ordering(short_names = ["bld", "tst", "nsl", "gcc"]),
-        "cast": ["arm64", "x64"],
+        "cast": ["arm", "arm64", "x64"],
     },
 )
 
@@ -85,10 +88,7 @@ ci.builder(
             "chromium_linux_cast_receiver",
         ],
     ),
-    # TODO(vigeni): Remove as configuration has been stablized.
-    gardener_rotations = args.ignore_default(None),
-    # TODO(vigeni): Set to True configuration has been stablized.
-    tree_closing = False,
+    tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
         short_name = "arm32rel",
@@ -133,10 +133,7 @@ ci.builder(
             "chromium_linux_cast_receiver",
         ],
     ),
-    # TODO(vigeni): Remove as configuration has been stablized.
-    gardener_rotations = args.ignore_default(None),
-    # TODO(vigeni): Set to True configuration has been stablized.
-    tree_closing = False,
+    tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
         short_name = "arm64rel",
@@ -180,10 +177,7 @@ ci.builder(
             "chromium_linux_cast_receiver_gtests",
         ],
     ),
-    # TODO(vigeni): Remove as configuration has been stablized.
-    gardener_rotations = args.ignore_default(None),
-    # TODO(vigeni): Set to True configuration has been stablized.
-    tree_closing = False,
+    tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
         short_name = "x64dbg",
@@ -227,10 +221,7 @@ ci.builder(
             "chromium_linux_cast_receiver_gtests",
         ],
     ),
-    # TODO(vigeni): Remove as configuration has been stablized.
-    gardener_rotations = args.ignore_default(None),
-    # TODO(vigeni): Set to True configuration has been stablized.
-    tree_closing = False,
+    tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "cast",
         short_name = "x64rel",
@@ -253,17 +244,16 @@ ci.builder(
     ),
     ssd = True,
     free_space = builders.free_space.high,
-    # Set tree_closing to false to disable the defaualt tree closer, which
-    # filters by step name, and instead enable tree closing for any step
-    # failure.
-    tree_closing = False,
+    # Don't use the default tree closer, which filters by step name, and instead
+    # enable tree closing for any step failure.
+    tree_closing_notifiers = args.ignore_default(["close-on-any-step-failure"]),
     console_view_entry = consoles.console_view_entry(
         category = "release",
         short_name = "det",
     ),
     contact_team_email = "chrome-build-team@google.com",
     execution_timeout = 6 * time.hour,
-    notifies = ["Deterministic Linux", "close-on-any-step-failure"],
+    notifies = ["Deterministic Linux"],
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
 
@@ -307,6 +297,14 @@ ci.builder(
             "remoteexec",
             "linux",
             "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "leak_detection_isolated_scripts",
+        ],
+        mixins = [
+            "linux-jammy",
         ],
     ),
     gardener_rotations = args.ignore_default(None),
@@ -464,7 +462,7 @@ ci.builder(
 ci.thin_tester(
     name = "Linux Tests",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    triggered_by = ["ci/Linux Builder"],
+    parent = "ci/Linux Builder",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -569,7 +567,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Tests (dbg)(1)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    triggered_by = ["ci/Linux Builder (dbg)"],
+    parent = "ci/Linux Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -655,7 +653,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Tests (Wayland)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    triggered_by = ["ci/Linux Builder (Wayland)"],
+    parent = "ci/Linux Builder (Wayland)",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -746,6 +744,7 @@ ci.thin_tester(
     contact_team_email = "chrome-linux-engprod@google.com",
 )
 
+# For documentation, see //services/network/README.md.
 ci.builder(
     name = "Network Service Linux",
     builder_spec = builder_config.builder_spec(
@@ -771,6 +770,14 @@ ci.builder(
             "remoteexec",
             "linux",
             "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "network_service_extra_gtests",
+        ],
+        mixins = [
+            "linux-jammy",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -808,6 +815,23 @@ ci.builder(
             "x64",
         ],
     ),
+    targets = targets.bundle(
+        targets = [
+            "bfcache_linux_gtests",
+            "chromium_webkit_isolated_scripts",
+        ],
+        mixins = [
+            "linux-jammy",
+        ],
+        per_test_modifications = {
+            "blink_wpt_tests": targets.mixin(
+                args = [
+                    # TODO(crbug.com/40200069): Re-enable the test.
+                    "--ignore-tests=external/wpt/html/browsers/browsing-the-web/back-forward-cache/events.html",
+                ],
+            ),
+        },
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "bfcache",
         short_name = "bfc",
@@ -842,6 +866,11 @@ ci.builder(
             "extended_tracing",
             "linux",
             "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "all",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -881,6 +910,11 @@ ci.builder(
             "x64",
         ],
     ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "empty_main",
+        ],
+    ),
     # Focal is needed for better C++20 support. See crbug.com/1284275.
     os = os.LINUX_FOCAL,
     console_view_entry = consoles.console_view_entry(
@@ -918,6 +952,17 @@ ci.builder(
             "remoteexec",
             "linux",
             "x64",
+        ],
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = [
+            "image_processor_perf_test",
+            "video_decode_accelerator_tests",
+            "video_decode_accelerator_perf_tests",
+            "video_encode_accelerator_tests",
+            "video_encode_accelerator_perf_tests",
+            "v4l2_stateless_decoder",
+            "v4l2_unittest",
         ],
     ),
     tree_closing = False,

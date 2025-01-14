@@ -156,13 +156,14 @@ bool AreNumbersEqual(CGFloat num1, CGFloat num2) {
   // Disable search suggestions so that the omnibox popup does not appear.
   [ChromeEarlGrey setBoolValue:NO forUserPref:prefs::kSearchSuggestEnabled];
 
-  [self closeAllTabs];
-  [ChromeEarlGrey clearBrowsingHistory];
+  if (![ChromeTestCase forceRestartAndWipe]) {
+    [self closeAllTabs];
+    [ChromeEarlGrey clearBrowsingHistory];
+  }
 }
 
 + (void)tearDown {
   [self closeAllTabs];
-
   [super tearDown];
 }
 
@@ -175,14 +176,18 @@ bool AreNumbersEqual(CGFloat num1, CGFloat num2) {
       std::string("--") + switches::kSearchEngineChoiceCountry + "=US");
   config.additional_args.push_back(std::string("--") +
                                    switches::kEnableDiscoverFeed);
-  // Show doodle to make sure tests cover async callback logic updating logo.
-  // Note: This makes testPositionRestoredWithShiftingOffset and
-  // testPositionRestoredWithoutShiftingOffset flaky. Find a better way to hide
-  // the doodle for these tests, or wait for the doodle to display (which is the
-  // result of a real network request).
-  if (![self isRunningTest:@selector(testPositionRestoredWithShiftingOffset)] &&
-      ![self
+  if ([self isRunningTest:@selector(testPositionRestoredWithShiftingOffset)] ||
+      [self
           isRunningTest:@selector(testPositionRestoredWithoutShiftingOffset)]) {
+    // Disable doodle so that omnibox doesn't move and shift offset.
+    config.additional_args.push_back(std::string(
+        "-google-doodle-url=https://www.google.com/?deb=0nodoodle"));
+  } else {
+    // Show doodle to make sure tests cover async callback logic updating logo.
+    // Note: This makes testPositionRestoredWithShiftingOffset and
+    // testPositionRestoredWithoutShiftingOffset flaky. Find a better way to
+    // hide the doodle for these tests, or wait for the doodle to display (which
+    // is the result of a real network request).
     config.additional_args.push_back(
         std::string("-google-doodle-url=https://www.gstatic.com/chrome/ntp/"
                     "doodle_test/ddljson_android0.json"));
@@ -214,6 +219,9 @@ bool AreNumbersEqual(CGFloat num1, CGFloat num2) {
 
 - (void)setUp {
   [super setUp];
+  if ([ChromeTestCase forceRestartAndWipe]) {
+    [NTPHomeTestCase setUpHelper];
+  }
   [ChromeEarlGrey setBoolValue:YES forUserPref:prefs::kArticlesForYouEnabled];
   [ChromeEarlGrey setBoolValue:YES
                    forUserPref:feed::prefs::kArticlesListVisible];
@@ -222,13 +230,13 @@ bool AreNumbersEqual(CGFloat num1, CGFloat num2) {
   [NewTabPageAppInterface disableSetUpList];
 }
 
-- (void)tearDown {
+- (void)tearDownHelper {
   [EarlGrey rotateDeviceToOrientation:UIDeviceOrientationPortrait error:nil];
   [SearchEnginesAppInterface setSearchEngineTo:self.defaultSearchEngine];
 
   [self resetCustomizationPrefs];
 
-  [super tearDown];
+  [super tearDownHelper];
 }
 
 #pragma mark - Tests

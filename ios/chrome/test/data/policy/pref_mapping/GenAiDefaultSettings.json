@@ -1,8 +1,0 @@
-[
-  {
-    "os": [
-      "ios"
-    ],
-    "reason_for_missing_test": "No covered GenAI policies are currently supported on iOS."
-  }
-]

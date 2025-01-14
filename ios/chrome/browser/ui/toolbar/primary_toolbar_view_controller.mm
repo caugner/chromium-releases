@@ -153,8 +153,12 @@ BASE_FEATURE(kPrimaryToolbarViewDidLoadUpdateViews,
   // set to topLayoutGuide after the view creation on iOS 10.
   [self.view setUp];
 
+  // Reference the location bar container as the top omnibox layout guide.
+  // Force the synchronous layout update, as this fixes the screen rotation
+  // animation in this case.
   [self.layoutGuideCenter referenceView:self.view.locationBarContainer
-                              underName:kTopOmniboxGuide];
+                              underName:kTopOmniboxGuide
+         forcesSynchronousLayoutUpdates:YES];
   self.view.locationBarBottomConstraint.constant =
       [self verticalMarginForLocationBarForFullscreenProgress:1];
 }
@@ -178,7 +182,7 @@ BASE_FEATURE(kPrimaryToolbarViewDidLoadUpdateViews,
   // change.
   if (@available(iOS 17, *)) {
     [self registerForTraitChanges:@[
-      UITraitVerticalSizeClass.self, UITraitHorizontalSizeClass.self
+      UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class
     ]
                        withAction:@selector(updateViews:
                                       previousTraitCollection:)];
@@ -209,7 +213,7 @@ BASE_FEATURE(kPrimaryToolbarViewDidLoadUpdateViews,
 #pragma mark - Public
 
 - (void)setTabGroupIndicatorView:(TabGroupIndicatorView*)view {
-  CHECK(IsTabGroupIndicatorEnabled());
+  CHECK(IsTabGroupInGridEnabled());
   self.view.tabGroupIndicatorView = view;
 }
 
@@ -254,7 +258,7 @@ BASE_FEATURE(kPrimaryToolbarViewDidLoadUpdateViews,
   CGFloat alphaValue = fmax(progress * 2 - 1, 0);
   self.view.leadingStackView.alpha = alphaValue;
   self.view.trailingStackView.alpha = alphaValue;
-  if (IsTabGroupIndicatorEnabled()) {
+  if (IsTabGroupInGridEnabled()) {
     self.view.tabGroupIndicatorView.alpha = alphaValue;
   }
   self.view.locationBarBottomConstraint.constant =
@@ -330,7 +334,7 @@ BASE_FEATURE(kPrimaryToolbarViewDidLoadUpdateViews,
       [self verticalMarginForLocationBarForFullscreenProgress:
                 self.previousFullscreenProgress];
   self.view.topCornersRounded = NO;
-  if (IsTabGroupIndicatorEnabled()) {
+  if (IsTabGroupInGridEnabled()) {
     [self.view updateTabGroupIndicatorAvailability];
   }
   [self.delegate

@@ -7,8 +7,8 @@
 # certain ACL restrictions. For more info, see
 # http://go/chromium-cq#internal-builders-on-the-cq.
 
-load("//lib/branches.star", "branches")
-load("//lib/try.star", "default_location_filters", "try_")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//try.star", "default_location_filters", "try_")
 load("//project.star", "settings")
 
 def chrome_internal_verifier(
@@ -103,6 +103,10 @@ chrome_internal_verifier(
 )
 
 chrome_internal_verifier(
+    builder = "android-internal-unpublished-dbg",
+)
+
+chrome_internal_verifier(
     branch_selector = branches.selector.ANDROID_BRANCHES,
     builder = "android-arm-rel-ready",
 )
@@ -126,12 +130,6 @@ chrome_internal_verifier(
 
 chrome_internal_verifier(
     builder = "chromeos-brya-chrome",
-)
-
-# TODO(b/339354038): Remove once migration to un-suffixed try biulder
-# completes.
-chrome_internal_verifier(
-    builder = "chromeos-brya-chrome-skylab",
 )
 
 chrome_internal_verifier(
@@ -288,6 +286,14 @@ chrome_internal_verifier(
 chrome_internal_verifier(
     branch_selector = branches.selector.MAC_BRANCHES,
     builder = "mac-rel-ready",
+)
+
+chrome_internal_verifier(
+    builder = "optimization_guide-ios-device",
+)
+
+chrome_internal_verifier(
+    builder = "optimization_guide-ios-simulator",
 )
 
 chrome_internal_verifier(

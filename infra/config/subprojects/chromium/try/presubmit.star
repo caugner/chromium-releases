@@ -3,15 +3,16 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.android builder group."""
 
-load("//lib/builders.star", "os")
-load("//lib/branches.star", "branches")
-load("//lib/try.star", "try_")
-load("//lib/consoles.star", "consoles")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builders.star", "os")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//try.star", "try_")
+load("//lib/try_constants.star", "try_constants")
 load("//project.star", "PLATFORMS", "platform")
 load("../fallback-cq.star", "fallback_cq")
 
 try_.defaults.set(
-    pool = try_.DEFAULT_POOL,
+    pool = try_constants.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     list_view = "presubmit",
@@ -28,7 +29,7 @@ try_.defaults.set(
     # This will improve our turnaround time for landing infra/config changes
     # when addressing outages
     priority = 25,
-    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
+    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
 )
 
 consoles.list_view(
@@ -128,6 +129,20 @@ try_.presubmit_builder(
     },
     tryjob = try_.job(
         location_filters = ["infra/config/generated/builders/[^/]+/[^/]+/targets/.+\\.json"],
+    ),
+)
+
+try_.presubmit_builder(
+    name = "targets-config-verifier-dev",
+    description_html = "checks that target configs specified in starlark for dev builders match those specified in //testing/buildbot",
+    executable = "recipe:chromium/targets_config_verifier",
+    contact_team_email = "chrome-dev-infra@google.com",
+    properties = {
+        "builder_config_directory": "infra/config/generated/builders-dev",
+        "precommit_buckets": ["try"],
+    },
+    tryjob = try_.job(
+        location_filters = ["infra/config/generated/builders-dev/[^/]+/[^/]+/targets/.+\\.json"],
     ),
 )
 
