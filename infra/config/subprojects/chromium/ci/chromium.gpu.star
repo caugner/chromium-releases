@@ -3,34 +3,32 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.gpu builder group."""
 
-load("@chromium-luci//args.star", "args")
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/gpu.star", "gpu")
-load("//lib/siso.star", "siso")
+load("//lib/args.star", "args")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "cpu", "gardener_rotations", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.gpu",
-    pool = gpu.ci.POOL,
+    pool = ci.gpu.POOL,
     gardener_rotations = gardener_rotations.CHROMIUM_GPU,
     tree_closing = True,
-    tree_closing_notifiers = gpu.ci.TREE_CLOSING_NOTIFIERS,
     contact_team_email = "chrome-gpu-infra@google.com",
-    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.default(),
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.DEFAULT,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
     thin_tester_cores = 2,
+    tree_closing_notifiers = ci.gpu.TREE_CLOSING_NOTIFIERS,
 )
 
 targets.builder_defaults.set(
@@ -60,7 +58,7 @@ consoles.console_view(
     },
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "Android Release (Nexus 5X)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -70,7 +68,7 @@ gpu.ci.linux_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "download_xr_test_apks",
                 "mb",
@@ -123,7 +121,7 @@ gpu.ci.linux_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "Android Release (Pixel 2)",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     description_html = "Runs GPU tests on Pixel 2 phones",
@@ -135,7 +133,7 @@ gpu.ci.linux_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "download_xr_test_apks",
                 "mb",
@@ -181,7 +179,7 @@ gpu.ci.linux_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU Linux Builder",
     branch_selector = branches.selector.LINUX_BRANCHES,
     builder_spec = builder_config.builder_spec(
@@ -223,7 +221,7 @@ gpu.ci.linux_builder(
     cq_mirrors_console_view = "mirrors",
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU Linux Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -257,7 +255,7 @@ gpu.ci.linux_builder(
     ),
 )
 
-gpu.ci.mac_builder(
+ci.gpu.mac_builder(
     name = "GPU Mac Builder",
     branch_selector = branches.selector.MAC_BRANCHES,
     builder_spec = builder_config.builder_spec(
@@ -294,13 +292,15 @@ gpu.ci.mac_builder(
         ],
     ),
     targets = targets.bundle(),
+    cores = None,
+    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "Mac",
     ),
     cq_mirrors_console_view = "mirrors",
 )
 
-gpu.ci.mac_builder(
+ci.gpu.mac_builder(
     name = "GPU Mac Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -327,6 +327,8 @@ gpu.ci.mac_builder(
         ],
     ),
     targets = targets.bundle(),
+    cores = None,
+    cpu = cpu.ARM64,
     gardener_rotations = args.ignore_default(None),
     tree_closing = False,
     console_view_entry = consoles.console_view_entry(
@@ -334,7 +336,7 @@ gpu.ci.mac_builder(
     ),
 )
 
-gpu.ci.windows_builder(
+ci.gpu.windows_builder(
     name = "GPU Win x64 Builder",
     branch_selector = branches.selector.WINDOWS_BRANCHES,
     builder_spec = builder_config.builder_spec(
@@ -374,10 +376,9 @@ gpu.ci.windows_builder(
         category = "Windows",
     ),
     cq_mirrors_console_view = "mirrors",
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
-gpu.ci.windows_builder(
+ci.gpu.windows_builder(
     name = "GPU Win x64 Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -408,12 +409,11 @@ gpu.ci.windows_builder(
     console_view_entry = consoles.console_view_entry(
         category = "Windows",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 ci.thin_tester(
     name = "Linux Debug (NVIDIA)",
-    parent = "GPU Linux Builder (dbg)",
+    triggered_by = ["GPU Linux Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -460,7 +460,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Release (NVIDIA)",
     branch_selector = branches.selector.LINUX_BRANCHES,
-    parent = "ci/GPU Linux Builder",
+    triggered_by = ["ci/GPU Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -508,7 +508,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac Debug (Intel)",
-    parent = "GPU Mac Builder (dbg)",
+    triggered_by = ["GPU Mac Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -554,7 +554,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac Release (Intel)",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/GPU Mac Builder",
+    triggered_by = ["ci/GPU Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -593,7 +593,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac Retina Debug (AMD)",
-    parent = "GPU Mac Builder (dbg)",
+    triggered_by = ["GPU Mac Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -638,7 +638,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac Retina Release (AMD)",
     branch_selector = branches.selector.MAC_BRANCHES,
-    parent = "ci/GPU Mac Builder",
+    triggered_by = ["ci/GPU Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -677,7 +677,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 x64 Debug (NVIDIA)",
-    parent = "GPU Win x64 Builder (dbg)",
+    triggered_by = ["GPU Win x64 Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -703,6 +703,23 @@ ci.thin_tester(
             "win10_nvidia_gtx_1660_stable",
             "puppet_production",
         ],
+        per_test_modifications = {
+            "pixel_skia_gold_passthrough_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
+        },
     ),
     targets_settings = targets.settings(
         browser_config = targets.browser_config.DEBUG_X64,
@@ -717,7 +734,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Win10 x64 Release (NVIDIA)",
     branch_selector = branches.selector.WINDOWS_BRANCHES,
-    parent = "ci/GPU Win x64 Builder",
+    triggered_by = ["ci/GPU Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -746,6 +763,23 @@ ci.thin_tester(
             "win10_nvidia_gtx_1660_stable",
             "puppet_production",
         ],
+        per_test_modifications = {
+            "pixel_skia_gold_passthrough_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
+        },
     ),
     targets_settings = targets.settings(
         browser_config = targets.browser_config.RELEASE_X64,

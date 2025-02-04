@@ -295,7 +295,6 @@ class AutoEnrollmentController : public ash::NetworkStateHandlerObserver {
   AutoEnrollmentTypeChecker::CheckType auto_enrollment_check_type_ =
       AutoEnrollmentTypeChecker::CheckType::
           kForcedReEnrollmentExplicitlyRequired;
-  bool auto_enrollment_check_type_init_started_ = false;
 
   // Shared factory for outgoing network requests.
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;

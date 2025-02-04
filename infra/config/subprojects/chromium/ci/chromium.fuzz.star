@@ -3,35 +3,34 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.fuzz builder group."""
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "builders", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/siso.star", "siso")
+load("//lib/args.star", "args")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "builders", "cpu", "gardener_rotations", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 load("//lib/xcode.star", "xcode")
 load("//project.star", "settings")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.fuzz",
     builder_config_settings = builder_config.ci_settings(
         retry_failed_shards = True,
     ),
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     gardener_rotations = gardener_rotations.CHROMIUM,
-    execution_timeout = ci_constants.DEFAULT_EXECUTION_TIMEOUT,
-    health_spec = health_spec.default(),
+    execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
+    health_spec = health_spec.DEFAULT,
     notifies = ["chrome-fuzzing-core"],
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
@@ -87,7 +86,7 @@ ci.builder(
             ],
             build_config = builder_config.build_config.DEBUG,
             target_bits = 64,
-            target_platform = builder_config.target_platform.WIN,
+            target_platform = builder_config.target_platform.LINUX,
         ),
         clusterfuzz_archive = builder_config.clusterfuzz_archive(
             archive_name_prefix = "asan",
@@ -305,6 +304,53 @@ ci.builder(
 )
 
 ci.builder(
+    name = "ASAN Release V8 Sandbox Testing",
+    description_html = "This builder produces an ASan Chromium build in the V8 Sandbox Testing configuration.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(config = "chromium"),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium_asan",
+            apply_configs = [
+                "mb",
+                "clobber",
+            ],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.LINUX,
+        ),
+        clusterfuzz_archive = builder_config.clusterfuzz_archive(
+            archive_name_prefix = "asan-v8-sandbox-testing",
+            archive_subdir = "v8-sandbox-testing",
+            gs_acl = "public-read",
+            gs_bucket = "chromium-browser-asan",
+        ),
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "asan",
+            "lsan",
+            "fuzzer",
+            "v8_sandbox_testing",
+            "release_builder",
+            "remoteexec",
+            "x64",
+            "linux",
+        ],
+    ),
+    targets = targets.bundle(
+        additional_compile_targets = ["chromium_builder_asan"],
+        mixins = ["chromium-tester-service-account"],
+    ),
+    # TODO(saelo): remove this once we've verified that the builder works.
+    gardener_rotations = args.ignore_default(None),
+    console_view_entry = consoles.console_view_entry(
+        category = "linux asan",
+        short_name = "sbxtst",
+    ),
+    contact_team_email = "v8-infra@google.com",
+)
+
+ci.builder(
     name = "Centipede Upload Linux ASan",
     branch_selector = branches.selector.LINUX_BRANCHES,
     executable = "recipe:chromium/fuzz",
@@ -348,6 +394,7 @@ ci.builder(
         short_name = "centipede",
     ),
     contact_team_email = "chrome-deet-core@google.com",
+    execution_timeout = 4 * time.hour,
     properties = {
         "upload_bucket": "chromium-browser-centipede",
         "upload_directory": "asan",
@@ -1295,7 +1342,7 @@ ci.builder(
                 "clobber",
                 "mb",
             ],
-            build_config = builder_config.build_config.DEBUG,
+            build_config = builder_config.build_config.RELEASE,
             target_bits = 64,
             target_platform = builder_config.target_platform.LINUX,
         ),
@@ -1494,7 +1541,7 @@ ci.builder(
                 "mb",
             ],
             build_config = builder_config.build_config.DEBUG,
-            target_bits = 64,
+            target_bits = 32,
             target_platform = builder_config.target_platform.LINUX,
         ),
     ),

@@ -10,7 +10,6 @@
 #include <string_view>
 
 #include "base/feature_list.h"
-#include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -23,7 +22,6 @@
 #include "third_party/blink/renderer/modules/mediarecorder/video_track_recorder.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
-#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/weak_cell.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -70,7 +68,8 @@ MODULES_EXPORT VideoTrackRecorder::CodecProfile VideoStringToCodecProfile(
 class MODULES_EXPORT MediaRecorderHandler final
     : public GarbageCollected<MediaRecorderHandler>,
       public VideoTrackRecorder::CallbackInterface,
-      public AudioTrackRecorder::CallbackInterface {
+      public AudioTrackRecorder::CallbackInterface,
+      public WebMediaStreamObserver {
  public:
   MediaRecorderHandler(
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
@@ -115,34 +114,10 @@ class MODULES_EXPORT MediaRecorderHandler final
  private:
   friend class MediaRecorderHandlerFixture;
   friend class MediaRecorderHandlerPassthroughTest;
-  friend class MediaStreamObserver;
 
-  class MediaStreamObserver : public WebMediaStreamObserver {
-   public:
-    explicit MediaStreamObserver(MediaRecorderHandler* handler)
-        : media_recorder_handler_(handler) {}
-
-    // WebMediaStreamObserver overrides.
-    void TrackAdded(const WebString& track_id) override {
-      CHECK(media_recorder_handler_);
-      media_recorder_handler_->TrackAdded(track_id);
-    }
-    void TrackRemoved(const WebString& track_id) override {
-      CHECK(media_recorder_handler_);
-      media_recorder_handler_->TrackRemoved(track_id);
-    }
-
-    base::WeakPtr<WebMediaStreamObserver> AsWeakPtr() {
-      return weak_factory_.GetWeakPtr();
-    }
-
-   private:
-    WeakPersistent<MediaRecorderHandler> media_recorder_handler_;
-    base::WeakPtrFactory<WebMediaStreamObserver> weak_factory_{this};
-  };
-
-  void TrackAdded(const WebString& track_id);
-  void TrackRemoved(const WebString& track_id);
+  // WebMediaStreamObserver overrides.
+  void TrackAdded(const WebString& track_id) override;
+  void TrackRemoved(const WebString& track_id) override;
 
   // VideoTrackRecorder::CallbackInterface overrides.
   void OnEncodedVideo(
@@ -155,7 +130,7 @@ class MODULES_EXPORT MediaRecorderHandler final
                           base::TimeTicks timestamp) override;
   std::unique_ptr<media::VideoEncoderMetricsProvider>
   CreateVideoEncoderMetricsProvider() override;
-  void OnVideoEncodingError() override;
+  void OnVideoEncodingError(const media::EncoderStatus& error_status) override;
   // AudioTrackRecorder::CallbackInterface overrides.
   void OnEncodedAudio(
       const media::AudioParameters& params,
@@ -206,6 +181,12 @@ class MODULES_EXPORT MediaRecorderHandler final
   VideoTrackRecorder::CodecProfile video_codec_profile_{
       VideoTrackRecorder::CodecId::kLast};
 
+  // Indicate if the parameter sets are allowed to be inserted into the
+  // bitstream or must be "out of band" (can only be write to the
+  // `{AVC|HEVC}DecoderConfigurationRecord`). i.e. for `avc1` and `hvc1` this is
+  // false, and for `avc3` and `hev1` this is true.
+  bool add_parameter_sets_in_bitstream_ = false;
+
   // Audio Codec, OPUS is used by default.
   AudioTrackRecorder::CodecId audio_codec_id_{
       AudioTrackRecorder::CodecId::kLast};
@@ -244,9 +225,13 @@ class MODULES_EXPORT MediaRecorderHandler final
     BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
   // Converter to get the codec description from Annex-B bitstream keyframes.
   std::unique_ptr<media::H26xAnnexBToBitstreamConverter> h26x_converter_;
-#endif
 
-  std::unique_ptr<MediaStreamObserver> media_stream_observer_;
+  // The last seen codec description of the last received encoded video frame.
+  media::VideoEncoder::CodecDescription last_seen_codec_description_;
+
+  // Indicate if the codec description changed message has been printed or not.
+  bool has_codec_description_changed_error_printed_ = false;
+#endif
 
   // For invalidation of in-flight callbacks back to ourselves. Need to track
   // each callback interface specifically as there seem to be no automatic

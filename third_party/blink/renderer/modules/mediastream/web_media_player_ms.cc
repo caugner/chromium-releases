@@ -48,6 +48,7 @@
 #include "third_party/blink/renderer/modules/mediastream/web_media_player_ms_compositor.h"
 #include "third_party/blink/renderer/platform/media/media_player_client.h"
 #include "third_party/blink/renderer/platform/media/media_player_util.h"
+#include "third_party/blink/renderer/platform/media/player_id_generator.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_audio_track.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
@@ -363,6 +364,7 @@ WebMediaPlayerMS::WebMediaPlayerMS(
       client_(static_cast<MediaPlayerClient*>(client)),
       delegate_(delegate),
       delegate_id_(0),
+      player_id_(GetNextMediaPlayerId()),
       paused_(true),
       media_log_(std::move(media_log)),
       renderer_factory_(std::make_unique<MediaStreamRendererFactory>()),
@@ -404,7 +406,7 @@ WebMediaPlayerMS::~WebMediaPlayerMS() {
       String::Format("%s() [delegate_id=%d]", __func__, delegate_id_));
 
   if (!web_stream_.IsNull()) {
-    web_stream_.RemoveObserver(weak_this_);
+    web_stream_.RemoveObserver(this);
   }
 
   // Destruct compositor resources in the proper order.
@@ -479,7 +481,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
   DCHECK_NE(load_type, kLoadTypeMediaSource);
   web_stream_ = source.GetAsMediaStream();
   if (!web_stream_.IsNull())
-    web_stream_.AddObserver(weak_this_);
+    web_stream_.AddObserver(this);
 
   watch_time_reporter_.reset();
 
@@ -660,10 +662,6 @@ void WebMediaPlayerMS::ActiveStateChanged(bool is_active) {
   // track is expected to produce a black frame after becoming inactive.
   if (audio_renderer_)
     audio_renderer_->Stop();
-}
-
-int WebMediaPlayerMS::GetDelegateId() {
-  return delegate_id_;
 }
 
 std::optional<viz::SurfaceId> WebMediaPlayerMS::GetSurfaceId() {
@@ -1239,7 +1237,8 @@ void WebMediaPlayerMS::OnFrameHidden() {
 }
 
 void WebMediaPlayerMS::SetVolumeMultiplier(double multiplier) {
-  // TODO(perkj, magjed): See TODO in OnPlay().
+  volume_multiplier_ = multiplier;
+  SetVolume(volume_);
 }
 
 void WebMediaPlayerMS::ActivateSurfaceLayerForVideo(

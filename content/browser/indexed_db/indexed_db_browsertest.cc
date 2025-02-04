@@ -33,7 +33,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_database.h"
 #include "components/services/storage/privileged/mojom/indexed_db_control.mojom-test-utils.h"
 #include "components/services/storage/privileged/mojom/indexed_db_control_test.mojom.h"
@@ -622,6 +621,11 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed,
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, Bug346955148Test) {
   SimpleTest(GetTestUrl("indexeddb", "bug_346955148.html"));
+}
+
+// Regression test for crbug.com/392376370
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithGCExposed, NestedBlob) {
+  SimpleTest(GetTestUrl("indexeddb", "nested_blob.html"));
 }
 
 struct BlobModificationTime {

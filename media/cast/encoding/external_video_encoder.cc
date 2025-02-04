@@ -294,8 +294,9 @@ class ExternalVideoEncoder::VEAClientImpl final
         base::BindOnce(status_change_cb_, status, STATUS_CODEC_RUNTIME_ERROR));
 
     // Flush all in progress frames to avoid any getting stuck.
-    while (!in_progress_frame_encodes_.empty())
+    while (!in_progress_frame_encodes_.empty()) {
       AbortLatestEncodeAttemptDueToErrors();
+    }
   }
 
   void AllocateInputBuffer(size_t size) {
@@ -398,10 +399,7 @@ class ExternalVideoEncoder::VEAClientImpl final
           in_progress_frame_encodes_.front();
 
       auto encoded_frame = std::make_unique<SenderEncodedFrame>();
-      encoded_frame->dependency =
-          metadata.key_frame
-              ? openscreen::cast::EncodedFrame::Dependency::kKeyFrame
-              : openscreen::cast::EncodedFrame::Dependency::kDependent;
+      encoded_frame->is_key_frame = metadata.key_frame;
       encoded_frame->frame_id = next_frame_id_++;
       if (metadata.key_frame) {
         encoded_frame->referenced_frame_id = encoded_frame->frame_id;
@@ -447,7 +445,6 @@ class ExternalVideoEncoder::VEAClientImpl final
 
         const double actual_bitrate =
             encoded_frame->data.size() * 8.0 / frame_duration.InSecondsF();
-        encoded_frame->encoder_bitrate = actual_bitrate;
         DCHECK_GT(request.target_bit_rate, 0);
         const double bitrate_utilization =
             actual_bitrate / request.target_bit_rate;
@@ -523,8 +520,9 @@ class ExternalVideoEncoder::VEAClientImpl final
   ~VEAClientImpl() final {
     DCHECK(task_runner_->RunsTasksInCurrentSequence());
 
-    while (!in_progress_frame_encodes_.empty())
+    while (!in_progress_frame_encodes_.empty()) {
       AbortLatestEncodeAttemptDueToErrors();
+    }
 
     // According to the media::VideoEncodeAccelerator interface, Destroy()
     // should be called instead of invoking its private destructor.
@@ -572,8 +570,9 @@ class ExternalVideoEncoder::VEAClientImpl final
         case H264NALU::kNonIDRSlice: {
           H264SliceHeader slice_header;
           if (h264_parser_.ParseSliceHeader(nalu, &slice_header) !=
-              H264Parser::kOk)
+              H264Parser::kOk) {
             return -1;
+          }
           const H264PPS* pps =
               h264_parser_.GetPPS(slice_header.pic_parameter_set_id);
           if (!pps) {
@@ -715,7 +714,6 @@ bool ExternalVideoEncoder::EncodeVideoFrame(
     base::TimeTicks reference_time,
     FrameEncodedCallback frame_encoded_callback) {
   DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
-  DCHECK(!frame_encoded_callback.is_null());
 
   if (!client_ || video_frame->visible_rect().size() != frame_size_) {
     return false;

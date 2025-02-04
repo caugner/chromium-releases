@@ -3,24 +3,23 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.blink builder group."""
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//html.star", "linkify")
-load("@chromium-luci//targets.star", "targets")
-load("@chromium-luci//try.star", "try_")
-load("//lib/siso.star", "siso")
-load("//lib/try_constants.star", "try_constants")
+load("//lib/builders.star", "cpu", "os", "siso")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/branches.star", "branches")
+load("//lib/html.star", "linkify")
+load("//lib/try.star", "try_")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 
 try_.defaults.set(
-    executable = try_constants.DEFAULT_EXECUTABLE,
+    executable = try_.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.blink",
-    pool = try_constants.DEFAULT_POOL,
+    pool = try_.DEFAULT_POOL,
     cores = 8,
-    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
-    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
+    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
 )
@@ -42,11 +41,6 @@ def blink_mac_builder(*, name, **kwargs):
     kwargs.setdefault("cores", None)
     kwargs.setdefault("os", os.MAC_DEFAULT)
     kwargs.setdefault("ssd", True)
-
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    kwargs.setdefault("experiments", {
-        "chromium.use_per_builder_build_dir_name": 0,
-    })
     return try_.builder(
         name = name,
         **kwargs
@@ -104,10 +98,6 @@ try_.builder(
         },
     ),
     os = os.LINUX_DEFAULT,
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
     main_list_view = "try",
 )
 
@@ -125,10 +115,6 @@ try_.builder(
     gn_args = "ci/linux-wpt-chromium-rel",
     os = os.LINUX_DEFAULT,
     contact_team_email = "chrome-blink-engprod@google.com",
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
     main_list_view = "try",
 )
 
@@ -142,10 +128,6 @@ try_.builder(
     builderless = True,
     os = os.WINDOWS_10,
     contact_team_email = "chrome-blink-engprod@google.com",
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
     main_list_view = "try",
 )
 
@@ -209,10 +191,6 @@ try_.builder(
     ),
     builderless = True,
     os = os.WINDOWS_ANY,
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
 )
 
 try_.builder(
@@ -275,10 +253,6 @@ try_.builder(
     ),
     builderless = True,
     os = os.WINDOWS_ANY,
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
 )
 
 try_.builder(
@@ -338,10 +312,6 @@ try_.builder(
     ),
     builderless = True,
     os = os.WINDOWS_ANY,
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
 )
 
 blink_mac_builder(
@@ -608,10 +578,6 @@ try_.builder(
     os = os.MAC_ANY,
     cpu = cpu.ARM64,
     contact_team_email = "chrome-blink-engprod@google.com",
-    # TODO(crbug.com/40232671): Remove when the experiment is the default.
-    experiments = {
-        "chromium.use_per_builder_build_dir_name": 0,
-    },
     main_list_view = "try",
 )
 

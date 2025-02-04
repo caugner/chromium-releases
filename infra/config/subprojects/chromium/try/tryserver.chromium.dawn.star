@@ -3,34 +3,24 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.swangle builder group."""
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//try.star", "try_")
-load("//lib/gpu.star", "gpu")
-load("//lib/siso.star", "siso")
-load("//lib/try_constants.star", "try_constants")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builders.star", "cpu", "os", "siso")
+load("//lib/consoles.star", "consoles")
+load("//lib/try.star", "try_")
 
 try_.defaults.set(
-    executable = try_constants.DEFAULT_EXECUTABLE,
+    executable = try_.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.chromium.dawn",
-    pool = try_constants.DEFAULT_POOL,
+    pool = try_.DEFAULT_POOL,
     builderless = False,
     os = os.LINUX_DEFAULT,
-    # These builders test GPU configurations. These configurations have very
-    # limited hardware, due to the hardware needing specific GPUs. The pool of
-    # machines to run builds for these builders is intentionally limited to
-    # avoid concurrent builds from oversubscribing the test capacity. As a
-    # consequence, pending times are expected for these builders. These builder
-    # haven't been long poles in the CQ, and developers haven't complained about
-    # them, so there's no need to page for them.
-    alerts_enabled = False,
     check_for_flakiness = False,
     check_for_flakiness_with_resultdb = False,
     contact_team_email = "chrome-gpu-infra@google.com",
-    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
-    service_account = gpu.try_.SERVICE_ACCOUNT,
+    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
+    service_account = try_.gpu.SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
 )
@@ -343,9 +333,10 @@ try_.builder(
         "ci/Dawn Android arm64 Experimental Release (Pixel 6)",
     ],
     gn_args = "ci/Dawn Android arm64 Builder",
-    pool = "luci.chromium.gpu.android.pixel6.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.LINUX_DEFAULT,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -361,11 +352,10 @@ try_.builder(
         "ci/Dawn Android arm64 Release (Samsung S24)",
     ],
     gn_args = "ci/Dawn Android arm64 Builder",
-    # TODO(crbug.com/333424893): Change this to a dedicated S24 pool once
-    # additional GCE quota is available.
-    pool = "luci.chromium.gpu.android.s23.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.LINUX_DEFAULT,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -379,9 +369,10 @@ try_.builder(
         "ci/Dawn Linux x64 Experimental Release (Intel UHD 630)",
     ],
     gn_args = "ci/Dawn Linux x64 Builder",
-    pool = "luci.chromium.gpu.linux.intel.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.LINUX_DEFAULT,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -395,9 +386,10 @@ try_.builder(
         "ci/Dawn Linux x64 Experimental Release (NVIDIA GTX 1660)",
     ],
     gn_args = "ci/Dawn Linux x64 Builder",
-    pool = "luci.chromium.gpu.linux.nvidia.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.LINUX_DEFAULT,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -452,8 +444,9 @@ try_.builder(
         "ci/Dawn ChromeOS Skylab Release (volteer)",
     ],
     gn_args = "ci/Dawn ChromeOS Skylab Release (volteer)",
-    pool = "luci.chromium.gpu.chromeos.volteer.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -467,8 +460,9 @@ try_.builder(
         "ci/Dawn Linux x64 Release (Intel UHD 770)",
     ],
     gn_args = "ci/Dawn Linux x64 Builder",
-    pool = "luci.chromium.gpu.linux.intel.uhd770.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -480,8 +474,9 @@ try_.builder(
         "ci/Dawn Linux TSAN Release",
     ],
     gn_args = "ci/Dawn Linux TSAN Release",
-    pool = "luci.chromium.gpu.linux.nvidia.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -573,9 +568,10 @@ try_.builder(
         "ci/Dawn Win10 x64 Experimental Release (Intel)",
     ],
     gn_args = "ci/Dawn Win10 x64 Builder",
-    pool = "luci.chromium.gpu.win10.intel.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -589,9 +585,14 @@ try_.builder(
         "ci/Dawn Win10 x64 Release (Intel UHD 770)",
     ],
     gn_args = "ci/Dawn Win10 x64 Builder",
-    pool = "luci.chromium.gpu.win10.intel.uhd770.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    execution_timeout = 6 * time.hour,
+    # Increased scheduling timeout due to resource contention with the mega CQ,
+    # see crbug.com/384962295.
+    expiration_timeout = 4 * time.hour,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -605,9 +606,10 @@ try_.builder(
         "ci/Dawn Win10 x64 Experimental Release (NVIDIA)",
     ],
     gn_args = "ci/Dawn Win10 x64 Builder",
-    pool = "luci.chromium.gpu.win10.nvidia.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -620,9 +622,10 @@ try_.builder(
         "ci/Dawn Win10 x86 Experimental Release (Intel)",
     ],
     gn_args = "ci/Dawn Win10 x86 Builder",
-    pool = "luci.chromium.gpu.win10.intel.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -636,9 +639,10 @@ try_.builder(
         "ci/Dawn Win10 x86 Experimental Release (NVIDIA)",
     ],
     gn_args = "ci/Dawn Win10 x86 Builder",
-    pool = "luci.chromium.gpu.win10.nvidia.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -691,9 +695,10 @@ try_.builder(
         "ci/Dawn Win10 x64 ASAN Release (Intel)",
     ],
     gn_args = "ci/Dawn Win10 x64 ASAN Builder",
-    pool = "luci.chromium.gpu.win10.intel.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -706,9 +711,10 @@ try_.builder(
         "ci/Dawn Win10 x64 ASAN Release (NVIDIA)",
     ],
     gn_args = "ci/Dawn Win10 x64 ASAN Builder",
-    pool = "luci.chromium.gpu.win10.nvidia.try",
+    pool = "luci.chromium.gpu.try",
     builderless = True,
     os = os.WINDOWS_ANY,
+    max_concurrent_builds = 1,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),

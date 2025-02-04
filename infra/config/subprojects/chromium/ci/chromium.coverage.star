@@ -2,16 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/siso.star", "siso")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "cpu", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 load("//lib/xcode.star", "xcode")
 load("//project.star", "settings")
 
@@ -28,17 +26,28 @@ luci.gitiles_poller(
     schedule = "0 4 * * *",
 )
 
+# Use a separate poller to trigger the webview coverage builders.
+luci.gitiles_poller(
+    name = "code-coverage-webview-gitiles-trigger",
+    bucket = "ci",
+    repo = "https://chromium.googlesource.com/chromium/src",
+    refs = [settings.ref],
+    # Trigger coverage jobs once a day at 10 am UTC(2 am PST)
+    schedule = "0 10 * * *",
+)
+
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.coverage",
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     cores = 32,
     ssd = True,
     execution_timeout = 20 * time.hour,
-    health_spec = health_spec.default(),
-    priority = ci_constants.DEFAULT_FYI_PRIORITY,
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    health_spec = health_spec.DEFAULT,
+    priority = ci.DEFAULT_FYI_PRIORITY,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
@@ -66,6 +75,18 @@ def coverage_builder(**kwargs):
         **kwargs
     )
 
+def coverage_webview_builder(**kwargs):
+    return ci.builder(
+        schedule = "triggered",
+        triggered_by = ["code-coverage-webview-gitiles-trigger"],
+        # This should allow one to be pending should code coverage
+        # builds take longer.
+        triggering_policy = scheduler.greedy_batching(
+            max_concurrent_invocations = 2,
+        ),
+        **kwargs
+    )
+
 coverage_builder(
     name = "android-code-coverage",
     builder_spec = builder_config.builder_spec(
@@ -74,7 +95,7 @@ coverage_builder(
             apply_configs = ["android"],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "download_xr_test_apks",
                 "mb",
@@ -130,19 +151,16 @@ coverage_builder(
     use_java_coverage = True,
 )
 
-ci.builder(
+coverage_webview_builder(
     name = "android-webview-code-coverage",
     description_html = "Builder for WebView java coverage",
-    # Trigger coverage jobs once a day at 10 am UTC(2 am PST)
-    schedule = "0 10 * * *",
-    triggered_by = [],
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
             apply_configs = ["android"],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "download_xr_test_apks",
                 "mb",
@@ -210,7 +228,7 @@ coverage_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "x86_builder_mb",
             build_config = builder_config.build_config.RELEASE,
             target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
@@ -408,7 +426,7 @@ coverage_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "download_xr_test_apks",
                 "mb",
@@ -533,12 +551,9 @@ coverage_builder(
     use_clang_coverage = True,
 )
 
-ci.builder(
+coverage_webview_builder(
     name = "android-webview-code-coverage-native",
     description_html = "Builder for WebView clang coverage",
-    # Trigger coverage jobs once a day at 10 am UTC(2 am PST)
-    schedule = "0 10 * * *",
-    triggered_by = [],
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
@@ -548,7 +563,7 @@ ci.builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "download_xr_test_apks",
                 "mb",
@@ -630,7 +645,7 @@ coverage_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "x64_builder",
             apply_configs = [
                 "cronet_builder",
                 "mb",
@@ -696,7 +711,7 @@ coverage_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "x64_builder",
             apply_configs = [
                 "cronet_builder",
                 "mb",

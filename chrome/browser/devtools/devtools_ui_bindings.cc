@@ -166,7 +166,7 @@ class DefaultBindingsDelegate : public DevToolsUIBindings::Delegate {
   DefaultBindingsDelegate& operator=(const DefaultBindingsDelegate&) = delete;
 
  private:
-  ~DefaultBindingsDelegate() override {}
+  ~DefaultBindingsDelegate() override = default;
 
   void ActivateWindow() override;
   void CloseWindow() override {}
@@ -616,7 +616,7 @@ DevToolsUIBindings::FrontendWebContentsObserver::FrontendWebContentsObserver(
       devtools_bindings_(devtools_ui_bindings) {}
 
 DevToolsUIBindings::FrontendWebContentsObserver::
-    ~FrontendWebContentsObserver() {}
+    ~FrontendWebContentsObserver() = default;
 
 // static
 GURL DevToolsUIBindings::SanitizeFrontendURL(const GURL& url) {
@@ -713,13 +713,7 @@ bool IsAnyAidaPoweredFeatureEnabled() {
          base::FeatureList::IsEnabled(
              ::features::kDevToolsAiAssistanceNetworkAgent) ||
          base::FeatureList::IsEnabled(
-             ::features::kDevToolsAiAssistancePerformanceAgent) ||
-         base::FeatureList::IsEnabled(
-             ::features::kDevToolsExplainThisResourceDogfood) ||
-         base::FeatureList::IsEnabled(
-             ::features::kDevToolsAiAssistancePerformanceAgentDogfood) ||
-         base::FeatureList::IsEnabled(
-             ::features::kDevToolsAiAssistanceFileAgentDogfood);
+             ::features::kDevToolsAiAssistancePerformanceAgent);
 }
 }  // namespace
 
@@ -1577,6 +1571,8 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
                         availability.blocked_by_enterprise_policy);
   aida_availability.Set("blockedByGeo", availability.blocked_by_geo);
   aida_availability.Set("disallowLogging", availability.disallow_logging);
+  aida_availability.Set("enterprisePolicyValue",
+                        static_cast<int>(availability.enterprise_policy_value));
   response_dict.Set("aidaAvailability", std::move(aida_availability));
 
   base::Value::Dict console_insights_dict;
@@ -1623,22 +1619,6 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
             features::kDevToolsAiAssistanceNetworkAgentUserTier.Get()));
     response_dict.Set("devToolsAiAssistanceNetworkAgent",
                       std::move(network_agent_dict));
-  } else {
-    base::Value::Dict explain_this_resource_dogfood_dict;
-    explain_this_resource_dogfood_dict.Set(
-        "enabled", base::FeatureList::IsEnabled(
-                       ::features::kDevToolsExplainThisResourceDogfood));
-    explain_this_resource_dogfood_dict.Set(
-        "modelId", features::kDevToolsExplainThisResourceDogfoodModelId.Get());
-    explain_this_resource_dogfood_dict.Set(
-        "temperature",
-        features::kDevToolsExplainThisResourceDogfoodTemperature.Get());
-    explain_this_resource_dogfood_dict.Set(
-        "userTier",
-        features::kDevToolsExplainThisResourceDogfoodUserTier.GetName(
-            features::kDevToolsExplainThisResourceDogfoodUserTier.Get()));
-    response_dict.Set("devToolsAiAssistanceNetworkAgent",
-                      std::move(explain_this_resource_dogfood_dict));
   }
 
   if (base::FeatureList::IsEnabled(
@@ -1659,26 +1639,6 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
             features::kDevToolsAiAssistancePerformanceAgentUserTier.Get()));
     response_dict.Set("devToolsAiAssistancePerformanceAgent",
                       std::move(ai_assistance_performance_agent_dict));
-  } else {
-    base::Value::Dict ai_assistance_performance_agent_dogfood_dict;
-    ai_assistance_performance_agent_dogfood_dict.Set(
-        "enabled",
-        base::FeatureList::IsEnabled(
-            ::features::kDevToolsAiAssistancePerformanceAgentDogfood));
-    ai_assistance_performance_agent_dogfood_dict.Set(
-        "modelId",
-        features::kDevToolsAiAssistancePerformanceAgentDogfoodModelId.Get());
-    ai_assistance_performance_agent_dogfood_dict.Set(
-        "temperature",
-        features::kDevToolsAiAssistancePerformanceAgentDogfoodTemperature
-            .Get());
-    ai_assistance_performance_agent_dogfood_dict.Set(
-        "userTier",
-        features::kDevToolsAiAssistancePerformanceAgentDogfoodUserTier.GetName(
-            features::kDevToolsAiAssistancePerformanceAgentDogfoodUserTier
-                .Get()));
-    response_dict.Set("devToolsAiAssistancePerformanceAgent",
-                      std::move(ai_assistance_performance_agent_dogfood_dict));
   }
 
   if (base::FeatureList::IsEnabled(
@@ -1698,23 +1658,6 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
             features::kDevToolsAiAssistanceFileAgentUserTier.Get()));
     response_dict.Set("devToolsAiAssistanceFileAgent",
                       std::move(ai_assistance_file_agent_dict));
-  } else {
-    base::Value::Dict ai_assistance_file_agent_dogfood_dict;
-    ai_assistance_file_agent_dogfood_dict.Set(
-        "enabled", base::FeatureList::IsEnabled(
-                       ::features::kDevToolsAiAssistanceFileAgentDogfood));
-    ai_assistance_file_agent_dogfood_dict.Set(
-        "modelId",
-        features::kDevToolsAiAssistanceFileAgentDogfoodModelId.Get());
-    ai_assistance_file_agent_dogfood_dict.Set(
-        "temperature",
-        features::kDevToolsAiAssistanceFileAgentDogfoodTemperature.Get());
-    ai_assistance_file_agent_dogfood_dict.Set(
-        "userTier",
-        features::kDevToolsAiAssistanceFileAgentDogfoodUserTier.GetName(
-            features::kDevToolsAiAssistanceFileAgentDogfoodUserTier.Get()));
-    response_dict.Set("devToolsAiAssistanceFileAgent",
-                      std::move(ai_assistance_file_agent_dogfood_dict));
   }
 
   base::Value::Dict ve_logging_dict;
@@ -1774,6 +1717,17 @@ void DevToolsUIBindings::GetHostConfig(DispatchCallback callback) {
       base::FeatureList::IsEnabled(net::features::kEnableSchemeBoundCookies));
   response_dict.Set("devToolsEnableOriginBoundCookies",
                     std::move(origin_bound_cookies_dict));
+
+  if (base::FeatureList::IsEnabled(
+          ::features::kDevToolsAnimationStylesInStylesTab)) {
+    base::Value::Dict devtools_animation_styles_in_styles_tab_dict;
+    devtools_animation_styles_in_styles_tab_dict.Set(
+        "enabled", base::FeatureList::IsEnabled(
+                       ::features::kDevToolsAnimationStylesInStylesTab));
+    response_dict.Set("devToolsAnimationStylesInStylesTab",
+                      std::move(devtools_animation_styles_in_styles_tab_dict));
+  }
+
   base::Value response = base::Value(std::move(response_dict));
   std::move(callback).Run(&response);
 }
@@ -1803,8 +1757,7 @@ void DevToolsUIBindings::DispatchProtocolMessageFromDevToolsFrontend(
   if (!agent_host_) {
     return;
   }
-  agent_host_->DispatchProtocolMessage(
-      this, base::as_bytes(base::make_span(message)));
+  agent_host_->DispatchProtocolMessage(this, base::as_byte_span(message));
 }
 
 void DevToolsUIBindings::RecordCountHistogram(const std::string& name,
@@ -2182,7 +2135,7 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
     // process. Grant the devtools process the ability to request URLs from the
     // extension.
     content::ChildProcessSecurityPolicy::GetInstance()->GrantRequestOrigin(
-        web_contents_->GetPrimaryMainFrame()->GetProcess()->GetID(),
+        web_contents_->GetPrimaryMainFrame()->GetProcess()->GetDeprecatedID(),
         url::Origin::Create(extension->url()));
 
     base::Value::List runtime_allowed_hosts;

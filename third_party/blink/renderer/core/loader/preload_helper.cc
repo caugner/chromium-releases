@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/loader/preload_helper.h"
 
-#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/timer/elapsed_timer.h"
 #include "third_party/blink/public/common/features.h"
@@ -44,7 +43,6 @@
 #include "third_party/blink/renderer/core/loader/resource/link_dictionary_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/link_prefetch_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/script_resource.h"
-#include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/core/scheduler/scripted_idle_task_controller.h"
@@ -56,6 +54,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/raw_resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
+#include "third_party/blink/renderer/platform/loader/integrity_report.h"
 #include "third_party/blink/renderer/platform/loader/link_header.h"
 #include "third_party/blink/renderer/platform/loader/subresource_integrity.h"
 #include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
@@ -244,23 +243,6 @@ bool IsCompressionDictionaryLoadAllowed(
       return false;
     case PreloadHelper::LoadLinksFromHeaderMode::kSubresourceNotFromMemoryCache:
       return true;
-  }
-}
-
-bool IsSubresourceLoad(PreloadHelper::LoadLinksFromHeaderMode mode) {
-  switch (mode) {
-    case PreloadHelper::LoadLinksFromHeaderMode::kDocumentBeforeCommit:
-    case PreloadHelper::LoadLinksFromHeaderMode::
-        kDocumentAfterCommitWithoutViewport:
-    case PreloadHelper::LoadLinksFromHeaderMode::
-        kDocumentAfterCommitWithViewport:
-    case PreloadHelper::LoadLinksFromHeaderMode::kDocumentAfterLoadCompleted:
-      return false;
-    case PreloadHelper::LoadLinksFromHeaderMode::kSubresourceFromMemoryCache:
-    case PreloadHelper::LoadLinksFromHeaderMode::kSubresourceNotFromMemoryCache:
-      return true;
-    default:
-      NOTREACHED();
   }
 }
 
@@ -489,11 +471,8 @@ void PreloadHelper::PreloadIfNeeded(
       resource_type == ResourceType::kFont) {
     if (!integrity_attr.empty()) {
       IntegrityMetadataSet metadata_set;
-      SubresourceIntegrity::ParseIntegrityAttribute(
-          integrity_attr,
-          SubresourceIntegrityHelper::GetFeatures(
-              document.GetExecutionContext()),
-          metadata_set);
+      SubresourceIntegrity::ParseIntegrityAttribute(integrity_attr,
+                                                    metadata_set);
       link_fetch_params.SetIntegrityMetadata(metadata_set);
       link_fetch_params.MutableResourceRequest().SetFetchIntegrity(
           integrity_attr);
@@ -650,13 +629,10 @@ void PreloadHelper::ModulePreloadIfNeeded(
   IntegrityMetadataSet integrity_metadata;
   String integrity_value = params.integrity;
   if (!integrity_value.empty()) {
-    SubresourceIntegrity::IntegrityFeatures integrity_features =
-        SubresourceIntegrityHelper::GetFeatures(document.GetExecutionContext());
-    SubresourceIntegrity::ReportInfo report_info;
+    IntegrityReport integrity_report;
     SubresourceIntegrity::ParseIntegrityAttribute(
-        params.integrity, integrity_features, integrity_metadata, &report_info);
-    SubresourceIntegrityHelper::DoReport(*document.GetExecutionContext(),
-                                         report_info);
+        params.integrity, integrity_metadata, &integrity_report);
+    integrity_report.SendReports(document.GetExecutionContext());
   } else if (integrity_value.IsNull()) {
     // Step 10. "If el does not have an integrity attribute, then set integrity
     // metadata to the result of resolving a module integrity metadata with url
@@ -812,15 +788,6 @@ void PreloadHelper::LoadLinksFromHeader(
 
     LinkLoadParameters params(header, base_url);
     bool change_rel_to_prefetch = false;
-
-    // For security purposes, set `referrerpolicy: "no-referrer"` in link loads
-    // from subresources. See https://crbug.com/415810136 for details.
-    if (base::FeatureList::IsEnabled(
-            blink::features::kNoReferrerForPreloadFromSubresource)) {
-      if (IsSubresourceLoad(mode)) {
-        params.referrer_policy = network::mojom::ReferrerPolicy::kNever;
-      }
-    }
 
     if (params.rel.IsLinkPreload() && recursive_prefetch_token) {
       // Only preload headers are expected to have a recursive prefetch token

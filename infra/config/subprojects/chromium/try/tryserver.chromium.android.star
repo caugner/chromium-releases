@@ -3,28 +3,26 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.chromium.android builder group."""
 
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builders.star", "os")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("@chromium-luci//try.star", "try_")
-load("//lib/gpu.star", "gpu")
-load("//lib/siso.star", "siso")
-load("//lib/try_constants.star", "try_constants")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builders.star", "os", "siso")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
+load("//lib/try.star", "try_")
 load("//project.star", "settings")
 
 try_.defaults.set(
-    executable = try_constants.DEFAULT_EXECUTABLE,
+    executable = try_.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.chromium.android",
-    pool = try_constants.DEFAULT_POOL,
+    pool = try_.DEFAULT_POOL,
     cores = 8,
     os = os.LINUX_DEFAULT,
     compilator_cores = 32,
-    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
+    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
     orchestrator_cores = 4,
-    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
+    siso_enabled = True,
     # crbug.com/372192123 - downloading with "minimum" strategy doesn't work
     # well for Android builds because some steps have additional inputs/outputs
     # they are not configured in the build graph.
@@ -181,13 +179,14 @@ try_.builder(
 )
 
 try_.builder(
-    name = "android-tablet-14-arm64-fyi-rel",
+    name = "android-14-tablet-landscape-arm64-rel",
+    branch_selector = branches.selector.ANDROID_BRANCHES,
     mirrors = [
-        "ci/android-tablet-14-arm64-fyi-rel",
+        "ci/android-14-tablet-landscape-arm64-rel",
     ],
     gn_args = gn_args.config(
         configs = [
-            "ci/android-tablet-14-arm64-fyi-rel",
+            "ci/android-14-tablet-landscape-arm64-rel",
             "release_try_builder",
         ],
     ),
@@ -262,6 +261,8 @@ try_.builder(
 
 try_.builder(
     name = "android-15-x64-rel",
+    branch_selector = branches.selector.ANDROID_BRANCHES,
+    description_html = "Run Chromium tests on Android 15 emulator.",
     mirrors = [
         "ci/android-15-x64-rel",
     ],
@@ -284,6 +285,53 @@ try_.builder(
         configs = [
             "ci/android-15-x64-fyi-rel",
             "release_try_builder",
+        ],
+    ),
+    contact_team_email = "clank-engprod@google.com",
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
+)
+
+try_.builder(
+    name = "android-16-x64-fyi-rel",
+    mirrors = [
+        "ci/android-16-x64-fyi-rel",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/android-16-x64-fyi-rel",
+            "release_try_builder",
+        ],
+    ),
+    contact_team_email = "clank-engprod@google.com",
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
+)
+
+try_.builder(
+    name = "android-15-tablet-x64-dbg",
+    mirrors = [
+        "ci/Android x64 Builder (dbg)",
+        "ci/android-15-tablet-x64-dbg-tests",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/Android x64 Builder (dbg)",
+            "debug_try_builder",
+        ],
+    ),
+    contact_team_email = "clank-engprod@google.com",
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
+)
+
+try_.builder(
+    name = "android-15-tablet-landscape-x64-dbg",
+    mirrors = [
+        "ci/Android x64 Builder (dbg)",
+        "ci/android-15-tablet-landscape-x64-dbg-tests",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/Android x64 Builder (dbg)",
+            "debug_try_builder",
         ],
     ),
     contact_team_email = "clank-engprod@google.com",
@@ -323,7 +371,6 @@ try_.orchestrator_builder(
     experiments = {
         # go/nplus1shardsproposal
         "chromium.add_one_test_shard": 10,
-        "chromium.compilator_can_outlive_parent": 100,
         # crbug/940930
         "chromium.enable_cleandead": 100,
         # b/346598710
@@ -404,8 +451,6 @@ try_.builder(
             # Allows the bot to measure low-end arm32 and high-end arm64 using
             # a single build.
             "android_low_end_secondary_toolchain",
-            # Disable PGO due to too much volatility: https://crbug.com/344608183
-            "pgo_phase_0",
         ],
     ),
     builderless = not settings.is_main,
@@ -1110,12 +1155,12 @@ try_.orchestrator_builder(
     description_html = "Run Chromium tests on Android emulators.",
     mirrors = [
         "ci/android-12l-x64-rel-cq",
-        "ci/android-13-x64-rel",
+        "ci/android-15-x64-rel",
         "ci/android-webview-13-x64-hostside-rel",
     ],
     gn_args = gn_args.config(
         configs = [
-            "ci/android-13-x64-rel",
+            "ci/android-15-x64-rel",
             "release_try_builder",
             "use_clang_coverage",
             "use_java_coverage",
@@ -1241,7 +1286,7 @@ try_.builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             apply_configs = [
                 "mb",
             ],
@@ -1288,6 +1333,8 @@ try_.builder(
     contact_team_email = "cast-eng@google.com",
     tryjob = try_.job(
         location_filters = [
+            "build/android/.+",
+            "build/config/android/.+",
             "chromecast/.+",
             "components/cast/.+",
             "components/cast_receiver/.+",
@@ -1308,6 +1355,8 @@ try_.builder(
     contact_team_email = "cast-eng@google.com",
     tryjob = try_.job(
         location_filters = [
+            "build/android/.+",
+            "build/config/android/.+",
             "chromecast/.+",
             "components/cast/.+",
             "components/cast_receiver/.+",
@@ -1328,6 +1377,8 @@ try_.builder(
     contact_team_email = "cast-eng@google.com",
     tryjob = try_.job(
         location_filters = [
+            "build/android/.+",
+            "build/config/android/.+",
             "chromecast/.+",
             "components/cast/.+",
             "components/cast_receiver/.+",
@@ -1348,6 +1399,8 @@ try_.builder(
     contact_team_email = "cast-eng@google.com",
     tryjob = try_.job(
         location_filters = [
+            "build/android/.+",
+            "build/config/android/.+",
             "chromecast/.+",
             "components/cast/.+",
             "components/cast_receiver/.+",
@@ -1477,7 +1530,7 @@ try_.builder(
     ),
 )
 
-gpu.try_.optional_tests_builder(
+try_.gpu.optional_tests_builder(
     name = "android_optional_gpu_tests_rel",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     builder_spec = builder_config.builder_spec(
@@ -1488,7 +1541,7 @@ gpu.try_.optional_tests_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -1564,7 +1617,6 @@ gpu.try_.optional_tests_builder(
         os_type = targets.os_type.ANDROID,
         use_android_merge_script_by_default = False,
     ),
-    alerts_enabled = False,
     main_list_view = "try",
     tryjob = try_.job(
         location_filters = [
@@ -1601,7 +1653,7 @@ gpu.try_.optional_tests_builder(
     ),
 )
 
-gpu.try_.optional_tests_builder(
+try_.gpu.optional_tests_builder(
     name = "gpu-fyi-cq-android-arm64",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     mirrors = [
@@ -1612,8 +1664,6 @@ gpu.try_.optional_tests_builder(
         retry_failed_shards = False,
     ),
     gn_args = "ci/GPU FYI Android arm64 Builder",
-    # Exclude gpu fyi builders.
-    alerts_enabled = False,
     main_list_view = "try",
     tryjob = try_.job(
         location_filters = [

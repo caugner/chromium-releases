@@ -3,33 +3,30 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.gpu.fyi builder group."""
 
-load("@chromium-luci//args.star", "args")
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "cpu")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/gpu.star", "gpu")
-load("//lib/siso.star", "siso")
+load("//lib/args.star", "args")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "cpu", "gardener_rotations", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.gpu.fyi",
-    pool = gpu.ci.POOL,
+    pool = ci.gpu.POOL,
     gardener_rotations = gardener_rotations.CHROMIUM_GPU,
     contact_team_email = "chrome-gpu-infra@google.com",
     execution_timeout = 6 * time.hour,
-    health_spec = health_spec.default(),
+    health_spec = health_spec.DEFAULT,
     properties = {
         "perf_dashboard_machine_group": "ChromiumGPUFYI",
     },
-    service_account = gpu.ci.SERVICE_ACCOUNT,
-    shadow_service_account = gpu.ci.SHADOW_SERVICE_ACCOUNT,
+    service_account = ci.gpu.SERVICE_ACCOUNT,
+    shadow_service_account = ci.gpu.SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
     thin_tester_cores = 2,
@@ -81,12 +78,12 @@ consoles.console_view(
 )
 
 def gpu_fyi_windows_builder(*, name, **kwargs):
-    kwargs.setdefault("execution_timeout", ci_constants.DEFAULT_EXECUTION_TIMEOUT)
-    return gpu.ci.windows_builder(name = name, **kwargs)
+    kwargs.setdefault("execution_timeout", ci.DEFAULT_EXECUTION_TIMEOUT)
+    return ci.gpu.windows_builder(name = name, **kwargs)
 
 ci.thin_tester(
     name = "Android FYI Release (NVIDIA Shield TV)",
-    parent = "GPU FYI Android arm Builder",
+    triggered_by = ["GPU FYI Android arm Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -96,7 +93,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -127,7 +124,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Android FYI Release (Nexus 5X)",
-    parent = "GPU FYI Android arm64 Builder",
+    triggered_by = ["GPU FYI Android arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -137,7 +134,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "arm64_builder_rel_mb",
             apply_configs = [
                 "download_xr_test_apks",
             ],
@@ -191,7 +188,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Android FYI Release (Pixel 2)",
-    parent = "GPU FYI Android arm Builder",
+    triggered_by = ["GPU FYI Android arm Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -201,7 +198,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -247,7 +244,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Android FYI Release (Pixel 4)",
-    parent = "GPU FYI Android arm Builder",
+    triggered_by = ["GPU FYI Android arm Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -257,7 +254,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -351,7 +348,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Android FYI Release (Pixel 6)",
     branch_selector = branches.selector.ANDROID_BRANCHES,
-    parent = "GPU FYI Android arm64 Builder",
+    triggered_by = ["GPU FYI Android arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -361,7 +358,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "arm64_builder_rel_mb",
             apply_configs = [
                 "download_xr_test_apks",
             ],
@@ -412,7 +409,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Android FYI Experimental Release (Pixel 6)",
     description_html = "Runs standard GPU tests on experimental Pixel 6 configs",
-    parent = "GPU FYI Android arm64 Builder",
+    triggered_by = ["GPU FYI Android arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -422,7 +419,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "arm64_builder_rel_mb",
             apply_configs = [
                 "download_xr_test_apks",
             ],
@@ -477,53 +474,8 @@ ci.thin_tester(
 )
 
 ci.thin_tester(
-    name = "Android FYI Release (Motorola Moto G Power 5G)",
-    description_html = "Runs GPU tests on Motorola Moto G Power 5G phones",
-    parent = "GPU FYI Android arm64 Builder",
-    builder_spec = builder_config.builder_spec(
-        execution_mode = builder_config.execution_mode.TEST,
-        gclient_config = builder_config.gclient_config(
-            config = "chromium",
-            apply_configs = [
-                "android",
-            ],
-        ),
-        chromium_config = builder_config.chromium_config(
-            config = "android",
-            target_platform = builder_config.target_platform.ANDROID,
-        ),
-        android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
-        ),
-        run_tests_serially = True,
-    ),
-    targets = targets.bundle(
-        targets = [
-            "gpu_noop_sleep_telemetry_test",
-        ],
-        mixins = [
-            "has_native_resultdb_integration",
-            "motorola_moto_g_power_5g",
-            "limited_capacity_bot",
-        ],
-    ),
-    targets_settings = targets.settings(
-        browser_config = targets.browser_config.ANDROID_CHROMIUM,
-        os_type = targets.os_type.ANDROID,
-        use_android_merge_script_by_default = False,
-    ),
-    # Uncomment this entry when this experimental tester is actually in use.
-    # console_view_entry = consoles.console_view_entry(
-    #     category = "Android|T64|IMG",
-    #     short_name = "MGP",
-    # ),
-    list_view = "chromium.gpu.experimental",
-)
-
-# TODO(crbug.com/40282670): Add a trybot for this builder when there's capacity.
-ci.thin_tester(
     name = "Android FYI Release (Samsung A13)",
-    parent = "GPU FYI Android arm Builder",
+    triggered_by = ["GPU FYI Android arm Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -533,7 +485,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -573,7 +525,7 @@ ci.thin_tester(
 # TODO(crbug.com/40282670): Add a trybot for this builder when there's capacity.
 ci.thin_tester(
     name = "Android FYI Release (Samsung A23)",
-    parent = "GPU FYI Android arm Builder",
+    triggered_by = ["GPU FYI Android arm Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -583,7 +535,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -623,7 +575,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Android FYI Release (Samsung S23)",
     description_html = "Runs GPU tests on Samsung S23 phones",
-    parent = "GPU FYI Android arm64 Builder",
+    triggered_by = ["GPU FYI Android arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -633,7 +585,7 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "arm64_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -663,7 +615,7 @@ ci.thin_tester(
     ),
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "ChromeOS FYI Release (amd64-generic)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -756,7 +708,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "ChromeOS FYI Release Skylab (volteer)",
     description_html = "Runs standard GPU tests on Skylab-hosted volteer devices",
     builder_spec = builder_config.builder_spec(
@@ -811,7 +763,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU Flake Finder",
     executable = "recipe:chromium_expectation_files/expectation_file_scripts",
     # This will eventually be set up to run on a schedule, but only support
@@ -843,7 +795,7 @@ gpu.ci.linux_builder(
     service_account = "chromium-automated-expectation@chops-service-accounts.iam.gserviceaccount.com",
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU FYI Android arm Builder",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -853,7 +805,7 @@ gpu.ci.linux_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "main_builder_rel_mb",
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
@@ -879,7 +831,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU FYI Android arm64 Builder",
     branch_selector = branches.selector.ANDROID_BRANCHES,
     builder_spec = builder_config.builder_spec(
@@ -890,7 +842,7 @@ gpu.ci.linux_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "android",
+            config = "arm64_builder_rel_mb",
             apply_configs = [
                 "download_xr_test_apks",
             ],
@@ -919,7 +871,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU FYI Linux Wayland Builder",
     description_html = "Parent GPU builder for Linux Wayland builds",
     builder_spec = builder_config.builder_spec(
@@ -955,7 +907,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU FYI Linux Builder",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -991,7 +943,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "GPU FYI Linux Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -1024,7 +976,7 @@ gpu.ci.linux_builder(
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CI,
 )
 
-gpu.ci.linux_builder(
+ci.gpu.linux_builder(
     name = "Linux FYI GPU TSAN Release",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -1072,7 +1024,7 @@ gpu.ci.linux_builder(
     ),
 )
 
-gpu.ci.mac_builder(
+ci.gpu.mac_builder(
     name = "GPU FYI Mac Builder",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -1099,13 +1051,15 @@ gpu.ci.mac_builder(
         ],
     ),
     targets = targets.bundle(),
+    cores = None,
+    cpu = cpu.ARM64,
     console_view_entry = consoles.console_view_entry(
         category = "Mac|Builder",
         short_name = "rel",
     ),
 )
 
-gpu.ci.mac_builder(
+ci.gpu.mac_builder(
     name = "GPU FYI Mac Builder (asan)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -1139,7 +1093,7 @@ gpu.ci.mac_builder(
     ),
 )
 
-gpu.ci.mac_builder(
+ci.gpu.mac_builder(
     name = "GPU FYI Mac Builder (dbg)",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -1174,7 +1128,7 @@ gpu.ci.mac_builder(
     ),
 )
 
-gpu.ci.mac_builder(
+ci.gpu.mac_builder(
     name = "GPU FYI Mac arm64 Builder",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
@@ -1212,7 +1166,7 @@ gpu.ci.mac_builder(
 ci.thin_tester(
     name = "Linux Wayland FYI Release (AMD)",
     description_html = "Runs GPU tests on weston with Intel UHD 630",
-    parent = "GPU FYI Linux Wayland Builder",
+    triggered_by = ["GPU FYI Linux Wayland Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1251,7 +1205,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux Wayland FYI Release (Intel)",
     description_html = "Runs GPU tests on weston with AMD RX 5500 XT",
-    parent = "GPU FYI Linux Wayland Builder",
+    triggered_by = ["GPU FYI Linux Wayland Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1297,7 +1251,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Linux FYI Debug (NVIDIA)",
-    parent = "GPU FYI Linux Builder (dbg)",
+    triggered_by = ["GPU FYI Linux Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1335,7 +1289,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Linux FYI Experimental Release (Intel UHD 630)",
-    parent = "GPU FYI Linux Builder",
+    triggered_by = ["GPU FYI Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1385,7 +1339,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Linux FYI Experimental Release (NVIDIA)",
-    parent = "GPU FYI Linux Builder",
+    triggered_by = ["GPU FYI Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1429,7 +1383,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Linux FYI Release (NVIDIA)",
-    parent = "GPU FYI Linux Builder",
+    triggered_by = ["GPU FYI Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1472,7 +1426,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Linux FYI Release (AMD RX 5500 XT)",
-    parent = "GPU FYI Linux Builder",
+    triggered_by = ["GPU FYI Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1510,7 +1464,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Linux FYI Release (Intel UHD 630)",
-    parent = "GPU FYI Linux Builder",
+    triggered_by = ["GPU FYI Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1554,7 +1508,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Linux FYI Release (Intel UHD 770)",
     description_html = "Runs GPU tests on 12th gen Intel CPUs with UHD 770 GPUs",
-    parent = "GPU FYI Linux Builder",
+    triggered_by = ["GPU FYI Linux Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1599,7 +1553,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Debug (Intel)",
-    parent = "GPU FYI Mac Builder (dbg)",
+    triggered_by = ["GPU FYI Mac Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1637,7 +1591,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Experimental Release (Apple M1)",
-    parent = "GPU FYI Mac arm64 Builder",
+    triggered_by = ["GPU FYI Mac arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1678,7 +1632,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Experimental Release (Intel)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1725,7 +1679,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Experimental Retina Release (AMD)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1771,7 +1725,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Mac FYI Experimental Retina Release (Apple M2)",
     description_html = "Runs standard GPU tests on experimental M2 configs",
-    parent = "GPU FYI Mac arm64 Builder",
+    triggered_by = ["GPU FYI Mac arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1816,7 +1770,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Experimental Retina Release (NVIDIA)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1870,7 +1824,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Release (Apple M1)",
-    parent = "GPU FYI Mac arm64 Builder",
+    triggered_by = ["GPU FYI Mac arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1909,7 +1863,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Retina Release (Apple M2)",
-    parent = "GPU FYI Mac arm64 Builder",
+    triggered_by = ["GPU FYI Mac arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1948,7 +1902,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI ASAN (Intel)",
-    parent = "GPU FYI Mac Builder (asan)",
+    triggered_by = ["GPU FYI Mac Builder (asan)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2007,7 +1961,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Release (Intel)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2045,7 +1999,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Retina ASAN (AMD)",
-    parent = "GPU FYI Mac Builder (asan)",
+    triggered_by = ["GPU FYI Mac Builder (asan)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2146,7 +2100,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Retina Debug (AMD)",
-    parent = "GPU FYI Mac Builder (dbg)",
+    triggered_by = ["GPU FYI Mac Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2184,7 +2138,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Retina Release (AMD)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2222,7 +2176,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac FYI Retina Release (NVIDIA)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2260,7 +2214,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Mac Pro FYI Release (AMD)",
-    parent = "GPU FYI Mac Builder",
+    triggered_by = ["GPU FYI Mac Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2319,7 +2273,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 Debug (NVIDIA)",
-    parent = "GPU FYI Win x64 Builder (dbg)",
+    triggered_by = ["GPU FYI Win x64 Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2354,6 +2308,27 @@ ci.thin_tester(
             "tab_capture_end2end_tests": targets.remove(
                 reason = "Run these only on Release bots.",
             ),
+            # TODO(crbug.com/380431384): Re-enable when fixed
+            "webgl_conformance_vulkan_passthrough_tests": targets.remove(
+                reason = [
+                    "crbug.com/380431384 flaky crashes in random tests",
+                ],
+            ),
+            "pixel_skia_gold_passthrough_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
         },
     ),
     targets_settings = targets.settings(
@@ -2368,7 +2343,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 DX12 Vulkan Debug (NVIDIA)",
-    parent = "GPU FYI Win x64 DX12 Vulkan Builder (dbg)",
+    triggered_by = ["GPU FYI Win x64 DX12 Vulkan Builder (dbg)"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2405,7 +2380,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 DX12 Vulkan Release (NVIDIA)",
-    parent = "GPU FYI Win x64 DX12 Vulkan Builder",
+    triggered_by = ["GPU FYI Win x64 DX12 Vulkan Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2442,7 +2417,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 Experimental Release (Intel)",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2564,7 +2539,7 @@ ci.thin_tester(
     # TODO(kbr): "Experimental" caused too-long path names pre-LUCI.
     # crbug.com/812000
     name = "Win10 FYI x64 Exp Release (NVIDIA)",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2587,9 +2562,7 @@ ci.thin_tester(
         # should be running the same test_suites as
         # 'Win10 FYI x64 Release (NVIDIA)'
         targets = [
-            "gpu_fyi_win_gtests",
-            "gpu_fyi_win_release_telemetry_tests",
-            "gpu_fyi_win_optional_isolated_scripts",
+            "gpu_noop_sleep_telemetry_test",
         ],
         mixins = [
             "limited_capacity_bot",
@@ -2601,16 +2574,16 @@ ci.thin_tester(
         os_type = targets.os_type.WINDOWS,
     ),
     # Uncomment this entry when this experimental tester is actually in use.
-    console_view_entry = consoles.console_view_entry(
-        category = "Windows|10|x64|Nvidia",
-        short_name = "exp",
-    ),
+    # console_view_entry = consoles.console_view_entry(
+    #     category = "Windows|10|x64|Nvidia",
+    #     short_name = "exp",
+    # ),
     list_view = "chromium.gpu.experimental",
 )
 
 ci.thin_tester(
     name = "Win10 FYI x64 Release (AMD RX 5500 XT)",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2661,7 +2634,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 Release (Intel)",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2709,7 +2682,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Win10 FYI x64 Release (Intel UHD 770)",
     description_html = "Runs GPU tests on 12th gen Intel CPUs with UHD 770 GPUs",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2761,7 +2734,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 Release (NVIDIA)",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2794,6 +2767,42 @@ ci.thin_tester(
                     "gpu bots once the Windows OS supports HW secure decryption.",
                 ],
             ),
+            # TODO(crbug.com/380431384): Re-enable when fixed
+            "webgl_conformance_vulkan_passthrough_tests": targets.remove(
+                reason = [
+                    "crbug.com/380431384 flaky crashes in random tests",
+                ],
+            ),
+            "pixel_skia_gold_passthrough_graphite_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
+            "pixel_skia_gold_passthrough_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
         },
     ),
     targets_settings = targets.settings(
@@ -2809,7 +2818,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Win10 FYI x64 Release (NVIDIA RTX 4070 Super)",
     description_html = "Runs GPU tests on NVIDIA RTX 4070 Super GPUs",
-    parent = "GPU FYI Win x64 Builder",
+    triggered_by = ["GPU FYI Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2849,7 +2858,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x64 Release XR Perf (NVIDIA)",
-    parent = "GPU FYI XR Win x64 Builder",
+    triggered_by = ["GPU FYI XR Win x64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2886,7 +2895,7 @@ ci.thin_tester(
 
 ci.thin_tester(
     name = "Win10 FYI x86 Release (NVIDIA)",
-    parent = "GPU FYI Win Builder",
+    triggered_by = ["GPU FYI Win Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -2919,6 +2928,42 @@ ci.thin_tester(
                     "gpu bots once the Windows OS supports HW secure decryption.",
                 ],
             ),
+            # TODO(crbug.com/380431384): Re-enable when fixed
+            "webgl_conformance_vulkan_passthrough_tests": targets.remove(
+                reason = [
+                    "crbug.com/380431384 flaky crashes in random tests",
+                ],
+            ),
+            "pixel_skia_gold_passthrough_graphite_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
+            "pixel_skia_gold_passthrough_test": targets.per_test_modification(
+                mixins = targets.mixin(
+                    args = [
+                        # TODO(crbug.com/382422293): Remove when fixed
+                        "--jobs=1",
+                    ],
+                ),
+                replacements = targets.replacements(
+                    args = {
+                        # Magic substitution happens after regular replacement, so remove it
+                        # now since we are manually applying the number of jobs above.
+                        targets.magic_args.GPU_PARALLEL_JOBS: None,
+                    },
+                ),
+            ),
         },
     ),
     targets_settings = targets.settings(
@@ -2934,7 +2979,7 @@ ci.thin_tester(
 ci.thin_tester(
     name = "Win11 FYI arm64 Release (Qualcomm Adreno 690)",
     description_html = "Triggers GPU tests on Windows arm64 devices with Adreno 690 GPUs",
-    parent = "GPU FYI Win arm64 Builder",
+    triggered_by = ["GPU FYI Win arm64 Builder"],
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -3093,7 +3138,6 @@ gpu_fyi_windows_builder(
         category = "Windows|Builder|Release",
         short_name = "x86",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 gpu_fyi_windows_builder(
@@ -3129,7 +3173,6 @@ gpu_fyi_windows_builder(
         category = "Windows|Builder|Release",
         short_name = "x64",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 gpu_fyi_windows_builder(
@@ -3162,7 +3205,6 @@ gpu_fyi_windows_builder(
         category = "Windows|Builder|Debug",
         short_name = "x64",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 gpu_fyi_windows_builder(
@@ -3197,7 +3239,6 @@ gpu_fyi_windows_builder(
         category = "Windows|Builder|dx12vk",
         short_name = "rel",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 gpu_fyi_windows_builder(
@@ -3231,7 +3272,6 @@ gpu_fyi_windows_builder(
         category = "Windows|Builder|dx12vk",
         short_name = "dbg",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
 gpu_fyi_windows_builder(
@@ -3271,5 +3311,4 @@ gpu_fyi_windows_builder(
         category = "Windows|Builder|XR",
         short_name = "x64",
     ),
-    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )

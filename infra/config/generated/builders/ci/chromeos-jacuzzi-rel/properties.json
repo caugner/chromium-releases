@@ -10,7 +10,7 @@
             "builder_id": {
               "bucket": "ci",
               "builder": "chromeos-jacuzzi-rel",
-              "project": "chromium-m132"
+              "project": "chromium-m133"
             },
             "builder_spec": {
               "builder_group": "chromium.chromiumos",
@@ -46,7 +46,7 @@
         {
           "bucket": "ci",
           "builder": "chromeos-jacuzzi-rel",
-          "project": "chromium-m132"
+          "project": "chromium-m133"
         }
       ],
       "mirroring_builder_group_and_names": [
@@ -58,15 +58,18 @@
       "retry_failed_shards": false
     }
   },
+  "$build/reclient": {
+    "instance": "rbe-chromium-trusted",
+    "metrics_project": "chromium-reclient-metrics",
+    "scandeps_server": true
+  },
   "$build/siso": {
     "configs": [
       "builder"
     ],
-    "enable_cloud_monitoring": true,
     "enable_cloud_profiler": true,
     "enable_cloud_trace": true,
     "experiments": [],
-    "metrics_project": "chromium-reclient-metrics",
     "project": "rbe-chromium-trusted",
     "remote_jobs": 500
   },
@@ -78,5 +81,11 @@
     ]
   },
   "builder_group": "chromium.chromiumos",
-  "recipe": "chromium"
+  "gardener_rotations": [
+    "chrome_browser_release"
+  ],
+  "recipe": "chromium",
+  "sheriff_rotations": [
+    "chrome_browser_release"
+  ]
 }

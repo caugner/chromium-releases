@@ -3,25 +3,22 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.clang builder group."""
 
-load("@chromium-luci//args.star", "args")
-load("@chromium-luci//branches.star", "branches")
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builder_health_indicators.star", "health_spec")
-load("@chromium-luci//builders.star", "builders", "cpu", "os")
-load("@chromium-luci//ci.star", "ci")
-load("@chromium-luci//consoles.star", "consoles")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//html.star", "linkify_builder")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/ci_constants.star", "ci_constants")
-load("//lib/gardener_rotations.star", "gardener_rotations")
-load("//lib/siso.star", "siso")
+load("//lib/args.star", "args")
+load("//lib/branches.star", "branches")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builder_health_indicators.star", "health_spec")
+load("//lib/builders.star", "builders", "cpu", "gardener_rotations", "os", "siso")
+load("//lib/ci.star", "ci")
+load("//lib/consoles.star", "consoles")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/html.star", "linkify_builder")
+load("//lib/targets.star", "targets")
 load("//lib/xcode.star", "xcode")
 
 ci.defaults.set(
-    executable = ci_constants.DEFAULT_EXECUTABLE,
+    executable = ci.DEFAULT_EXECUTABLE,
     builder_group = "chromium.clang",
-    pool = ci_constants.DEFAULT_POOL,
+    pool = ci.DEFAULT_POOL,
     builderless = True,
     cores = 32,
     os = os.LINUX_DEFAULT,
@@ -41,8 +38,9 @@ ci.defaults.set(
     properties = {
         "perf_dashboard_machine_group": "ChromiumClang",
     },
-    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
+    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
 )
 
@@ -257,9 +255,9 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|Asan",
         short_name = "asn",
@@ -307,9 +305,9 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|Asan",
         short_name = "dll",
@@ -733,7 +731,7 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "lacros_on_linux",
+            "chromeos_on_linux",
             "release",
             "clang_tot",
             "x64",
@@ -772,7 +770,7 @@ ci.builder(
     ),
     gn_args = gn_args.config(
         configs = [
-            "lacros_on_linux",
+            "chromeos_on_linux",
             "debug",
             "clang_tot",
             "x64",
@@ -1324,9 +1322,8 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows",
@@ -1375,9 +1372,8 @@ ci.builder(
         ],
     ),
     builderless = False,
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows",
         short_name = "dbg",
@@ -1424,9 +1420,9 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows",
         short_name = "dll",
@@ -1472,9 +1468,9 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|x64",
         short_name = "rel",
@@ -1520,9 +1516,8 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|x64",
@@ -1570,9 +1565,8 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
     free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|x64",
@@ -1619,9 +1613,8 @@ ci.builder(
         ],
     ),
     builderless = False,
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|Asan",
         short_name = "fuz",
@@ -1669,9 +1662,9 @@ ci.builder(
             "win11",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     gardener_rotations = args.ignore_default(None),
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows",
@@ -1693,9 +1686,9 @@ ci.builder(
             "x64",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Code Coverage",
         short_name = "win",
@@ -1741,9 +1734,9 @@ ci.builder(
             "win10",
         ],
     ),
-    cores = 16,
+    cores = "32",
     os = os.WINDOWS_DEFAULT,
-    ssd = True,
+    free_space = builders.free_space.high,
     console_view_entry = consoles.console_view_entry(
         category = "ToT Windows|x64",
         short_name = "pgo",
@@ -1771,6 +1764,7 @@ ci.builder(
             build_config = builder_config.build_config.RELEASE,
             target_bits = 64,
             target_platform = builder_config.target_platform.WIN,
+            host_platform = builder_config.host_platform.LINUX,
         ),
         build_gs_bucket = "chromium-clang-archive",
     ),

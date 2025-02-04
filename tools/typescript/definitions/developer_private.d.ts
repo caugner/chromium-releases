@@ -154,6 +154,7 @@ declare global {
         custodianApprovalRequired: boolean;
         parentDisabledPermissions: boolean;
         unsupportedManifestVersion: boolean;
+        unsupportedDeveloperExtension: boolean;
       }
 
       export interface OptionsPage {
@@ -236,12 +237,10 @@ declare global {
         disableReasons: DisableReasons;
         errorCollection: AccessModifier;
         fileAccess: AccessModifier;
-        fileAccessPendingChange: boolean;
         homePage: HomePage;
         iconUrl: string;
         id: string;
         incognitoAccess: AccessModifier;
-        incognitoAccessPendingChange: boolean;
         installWarnings: string[];
         launchUrl?: string;
         location: Location;
@@ -271,6 +270,7 @@ declare global {
         pinnedToToolbar?: boolean;
         isAffectedByMV2Deprecation: boolean;
         didAcknowledgeMV2DeprecationNotice: boolean;
+        canUploadAsAccountExtension: boolean;
       }
 
       export interface ProfileInfo {
@@ -510,6 +510,8 @@ declare global {
       export function dismissMv2DeprecationPanel(): void;
       export function dismissMv2DeprecationNoticeForExtension(
           extensionId: string): Promise<void>;
+      export function uploadExtensionToAccount(extensionId: string):
+          Promise<void>;
 
       export const onItemStateChanged: ChromeEvent<(data: EventData) => void>;
       export const onProfileStateChanged:
