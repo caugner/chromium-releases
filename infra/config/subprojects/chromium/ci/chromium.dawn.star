@@ -12,6 +12,7 @@ load("//lib/ci.star", "ci")
 load("//lib/consoles.star", "consoles")
 load("//lib/gn_args.star", "gn_args")
 load("//lib/targets.star", "targets")
+load("//project.star", "settings")
 
 ci.defaults.set(
     executable = ci.DEFAULT_EXECUTABLE,
@@ -21,6 +22,13 @@ ci.defaults.set(
     contact_team_email = "chrome-gpu-infra@google.com",
     execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
     health_spec = health_spec.DEFAULT,
+    # This property is read by the the dawn_top_of_tree gclient config and must
+    # be set for branched builders in order to check out the appropriate branch.
+    # Setting it for the non-branched builders and/or builders not using
+    # dawn_top_of_tree shouldn't cause any problems.
+    properties = {
+        "dawn_ref": settings.dawn_ref,
+    },
     service_account = ci.gpu.SERVICE_ACCOUNT,
     shadow_service_account = ci.gpu.SHADOW_SERVICE_ACCOUNT,
     siso_enabled = True,
@@ -202,10 +210,13 @@ ci.gpu.linux_builder(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder_rel_mb",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -238,11 +249,15 @@ ci.gpu.linux_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "arm64_builder_rel_mb",
+            config = "main_builder",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
     ),
@@ -276,10 +291,13 @@ ci.thin_tester(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder_rel_mb",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -316,10 +334,13 @@ ci.thin_tester(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder_rel_mb",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -395,11 +416,15 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "arm64_builder_rel_mb",
+            config = "main_builder",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -635,10 +660,13 @@ ci.gpu.linux_builder(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder_rel_mb",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -672,11 +700,15 @@ ci.gpu.linux_builder(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "arm64_builder_rel_mb",
+            config = "main_builder",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
     ),
@@ -711,10 +743,13 @@ ci.thin_tester(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder_rel_mb",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -752,10 +787,13 @@ ci.thin_tester(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder_rel_mb",
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -832,11 +870,15 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "arm64_builder_rel_mb",
+            config = "main_builder",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -908,11 +950,15 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "arm64_builder_rel_mb",
+            config = "main_builder",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -994,11 +1040,15 @@ ci.thin_tester(
             ],
         ),
         chromium_config = builder_config.chromium_config(
-            config = "arm64_builder_rel_mb",
+            config = "main_builder",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 64,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "arm64_builder_rel_mb",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-dawn-archive",
         run_tests_serially = True,
@@ -1076,6 +1126,25 @@ ci.gpu.linux_builder(
             "chromeos",
             "x64",
         ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            targets.bundle(
+                targets = [
+                    "dawn_chromeos_release_tests_volteer_skylab",
+                    "dawn_chromeos_release_telemetry_tests_volteer_skylab",
+                ],
+            ),
+        ],
+        additional_compile_targets = [
+            "chromiumos_preflight",
+        ],
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.CROS_CHROME,
+        os_type = targets.os_type.CROS,
+        use_android_merge_script_by_default = False,
+        use_swarming = False,
     ),
     # TODO(crbug.com/40942991): This config is experimental and currently
     # is too difficult for gardeners to keep green.
@@ -2113,6 +2182,9 @@ ci.thin_tester(
         browser_config = targets.browser_config.RELEASE_X64,
         os_type = targets.os_type.WINDOWS,
     ),
+    # Remove from the gardening rotation due to instability.
+    # TODO(crbug.com/380912395): Add back to a gardening rotation when green.
+    gardener_rotations = args.ignore_default(None),
     console_view_entry = consoles.console_view_entry(
         category = "ToT|Windows|x64|Intel",
         short_name = "asn",
@@ -2186,6 +2258,9 @@ ci.thin_tester(
         browser_config = targets.browser_config.RELEASE_X64,
         os_type = targets.os_type.WINDOWS,
     ),
+    # Remove from the gardening rotation due to instability.
+    # TODO(crbug.com/380912395): Add back to a gardening rotation when green.
+    gardener_rotations = args.ignore_default(None),
     console_view_entry = consoles.console_view_entry(
         category = "ToT|Windows|x64|Nvidia",
         short_name = "asn",

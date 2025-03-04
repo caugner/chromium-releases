@@ -16,7 +16,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
-#include "base/ranges/algorithm.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -26,7 +25,6 @@
 #include "chrome/browser/download/bubble/download_bubble_prefs.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/performance_manager/public/user_tuning/user_tuning_utils.h"
-#include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -63,6 +61,7 @@
 #include "chrome/browser/ui/views/location_bar/intent_chip_button.h"
 #include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/media_router/cast_toolbar_button.h"
+#include "chrome/browser/ui/views/page_action/page_action_container_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_container.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
 #include "chrome/browser/ui/views/performance_controls/battery_saver_button.h"
@@ -290,7 +289,9 @@ void ToolbarView::Init() {
   size_animation_.Reset(1);
 
   std::unique_ptr<DownloadToolbarButtonView> download_button;
-  if (download::IsDownloadBubbleEnabled()) {
+  if (download::IsDownloadBubbleEnabled() &&
+      (!features::IsToolbarPinningEnabled() ||
+       !base::FeatureList::IsEnabled(features::kPinnableDownloadsButton))) {
     download_button =
         std::make_unique<DownloadToolbarButtonView>(browser_view_);
   }
@@ -440,7 +441,9 @@ void ToolbarView::Init() {
       if (features::IsToolbarPinningEnabled()) {
         pinned_toolbar_actions_container_
             ->GetActionItemFor(kActionShowChromeLabs)
-            ->SetVisible(show_chrome_labs_button_.GetValue());
+            ->SetVisible(show_chrome_labs_button_.GetValue() &&
+                         ShouldShowChromeLabsUI(chrome_labs_model_.get(),
+                                                browser_->profile()));
       } else {
         chrome_labs_button_->SetVisible(show_chrome_labs_button_.GetValue());
       }
@@ -756,7 +759,7 @@ void ToolbarView::EnabledStateChangedForCommand(int id, bool enabled) {
   DCHECK(display_mode_ == DisplayMode::NORMAL);
   const std::array<views::Button*, 5> kButtons{back_, forward_, reload_, home_,
                                                avatar_};
-  auto* button = *base::ranges::find(kButtons, id, &views::Button::tag);
+  auto* button = *std::ranges::find(kButtons, id, &views::Button::tag);
   DCHECK(button);
   button->SetEnabled(enabled);
 }
@@ -895,42 +898,29 @@ void ToolbarView::OnThemeChanged() {
   SchedulePaint();
 }
 
-// The implementation of this method is subtle.
-// The goal is to create rounded corners in the top-left and top-right corners,
-// allowing background_view_left_ and background_view_right_ to peek through. In
-// order for the corners to look good, we must use antialiasing on the clip
-// paths. When there are fractional device scale factors (e.g. 1.5), it's easy
-// (common even) to have straight edges of the clip path end up on non-integral
-// boundaries (e.g. y=68.5). This is unavoidable. Antialiasing turns these
-// non-integral boundary clip paths into 2-pixel "fuzzy" boundaries, which in
-// turn causes misalignment with other views::Views which assume the boundaries
-// are exact. Solving this problem completely will require a rethink of how we
-// implement fractional device scale factors in Chrome. In the meanwhile, the
-// implementation of this method minimizes the length of straight edges of the
-// clip path to minimize issues. To do this we carve out the two corners, and
-// then take the inverse as our clip path.
 void ToolbarView::UpdateClipPath() {
   const int corner_radius = GetLayoutConstant(TOOLBAR_CORNER_RADIUS);
-  SkPath path;
   const gfx::Rect local_bounds = GetLocalBounds();
-
-  // Carve out top-left.
-  path.moveTo(0, 0);
+  SkPath path;
+  // The bottom of the toolbar may be clipped more than necessary in
+  // certain scale factor so adds extra 2dp so that even if the origin
+  // and the height are rounded down, we still can paint til the
+  // bottom of the toolbar. The similar logic is applied to
+  // BookmarkBarView which can be the bottom component within the
+  // TopContainerView, and TopContainerView which is the parent and
+  // can also clip the paint region for child views.
+  // TODO(crbug.com/41344902): Remove this hack once the pixel canvas is
+  // enabled on all aura platforms.
+  const int extended_height = local_bounds.height() + 2;
+  path.moveTo(0, local_bounds.height());
   path.lineTo(0, corner_radius);
   path.arcTo(corner_radius, corner_radius, 0, SkPath::kSmall_ArcSize,
              SkPathDirection::kCW, corner_radius, 0);
-  path.lineTo(0, 0);
-
-  // Carve out top-right.
-  path.moveTo(local_bounds.width() - corner_radius, 0);
+  path.lineTo(local_bounds.width() - corner_radius, 0);
   path.arcTo(corner_radius, corner_radius, 0, SkPath::kSmall_ArcSize,
              SkPathDirection::kCW, local_bounds.width(), corner_radius);
-  path.lineTo(local_bounds.width(), 0);
-  path.lineTo(local_bounds.width() - corner_radius, 0);
-
-  // Take the inverse so we keep everything else. Artifacts are confined to the
-  // corners.
-  path.setFillType(SkPathFillType::kInverseWinding);
+  path.lineTo(local_bounds.width(), extended_height);
+  path.lineTo(0, extended_height);
   container_view_->SetClipPath(path);
 }
 
@@ -1075,19 +1065,7 @@ void ToolbarView::LayoutCommon() {
     }
   }
 
-  if (browser_ && chrome::ShouldUseCompactMode(browser_->profile())) {
-    if (toolbar_divider_) {
-      toolbar_divider_->SetProperty(views::kMarginsKey, gfx::Insets::VH(0, 2));
-    }
-    layout_manager_->SetInteriorMargin(gfx::Insets::VH(3, 0));
-  } else {
-    if (toolbar_divider_) {
-      toolbar_divider_->SetProperty(
-          views::kMarginsKey,
-          gfx::Insets::VH(0, GetLayoutConstant(TOOLBAR_DIVIDER_SPACING)));
-    }
-    layout_manager_->SetInteriorMargin(interior_margin);
-  }
+  layout_manager_->SetInteriorMargin(interior_margin);
 
   // Extend buttons to the window edge if we're either in a maximized or
   // fullscreen window. This makes the buttons easier to hit, see Fitts' law.
@@ -1126,16 +1104,6 @@ void ToolbarView::UpdateTypeAndSeverity(
   }
   app_menu_button_->GetViewAccessibility().SetName(accname_app);
   app_menu_button_->SetTypeAndSeverity(type_and_severity);
-
-  if (base::FeatureList::IsEnabled(features::kDefaultBrowserPromptRefresh) &&
-      DefaultBrowserPromptManager::GetInstance()->get_show_app_menu_prompt()) {
-    // Anytime the default chip is eligible to be shown, log whether the prompt
-    // was actually shown. This helps us understand how often it is pre-empted.
-    base::UmaHistogramBoolean(
-        "DefaultBrowser.AppMenu.DefaultChipShown",
-        type_and_severity.type ==
-            AppMenuIconController::IconType::DEFAULT_BROWSER_PROMPT);
-  }
 }
 
 ExtensionsToolbarContainer* ToolbarView::GetExtensionsToolbarContainer() {
@@ -1157,6 +1125,11 @@ views::View* ToolbarView::GetDefaultExtensionDialogAnchorView() {
 PageActionIconView* ToolbarView::GetPageActionIconView(
     PageActionIconType type) {
   return location_bar()->page_action_icon_controller()->GetIconView(type);
+}
+
+page_actions::PageActionView* ToolbarView::GetPageActionView(
+    actions::ActionId action_id) {
+  return location_bar()->page_action_container()->GetPageActionView(action_id);
 }
 
 AppMenuButton* ToolbarView::GetAppMenuButton() {
@@ -1250,7 +1223,9 @@ void ToolbarView::OnChromeLabsPrefChanged() {
     actions::ActionItem* chrome_labs_action =
         pinned_toolbar_actions_container_->GetActionItemFor(
             kActionShowChromeLabs);
-    chrome_labs_action->SetVisible(show_chrome_labs_button_.GetValue());
+    chrome_labs_action->SetVisible(
+        show_chrome_labs_button_.GetValue() &&
+        ShouldShowChromeLabsUI(chrome_labs_model_.get(), browser_->profile()));
     GetViewAccessibility().AnnounceText(l10n_util::GetStringUTF16(
         chrome_labs_action->GetVisible()
             ? IDS_ACCESSIBLE_TEXT_CHROMELABS_BUTTON_ADDED_BY_ENTERPRISE_POLICY

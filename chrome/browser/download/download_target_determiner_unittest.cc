@@ -61,6 +61,7 @@
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/buildflags/buildflags.h"
+#include "google_apis/gaia/gaia_id.h"
 #include "net/base/mime_util.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -111,8 +112,8 @@ const char kTransientPathValidationHistogram[] =
     "Download.PathValidationResult.Transient";
 
 template <typename T>
-base::HistogramBase::Sample ToHistogramSample(T t) {
-  return static_cast<base::HistogramBase::Sample>(t);
+base::HistogramBase::Sample32 ToHistogramSample(T t) {
+  return static_cast<base::HistogramBase::Sample32>(t);
 }
 
 // No-op delegate.
@@ -2992,7 +2993,7 @@ class DownloadTargetDeterminerDlpTest : public DownloadTargetDeterminerTest {
     DownloadTargetDeterminerTest::SetUp();
 
     AccountId account_id =
-        AccountId::FromUserEmailGaiaId("test@example.com", "12345");
+        AccountId::FromUserEmailGaiaId("test@example.com", GaiaId("12345"));
     profile_->SetIsNewProfile(true);
     user_manager::User* user =
         user_manager_->AddUserWithAffiliationAndTypeAndProfile(

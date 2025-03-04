@@ -32,7 +32,6 @@ import {Router} from '../router.js';
 
 import {getTemplate} from './sync_account_control.html.js';
 
-export const MAX_SIGNIN_PROMO_IMPRESSION: number = 10;
 
 export interface SettingsSyncAccountControlElement {
   $: {
@@ -100,12 +99,6 @@ export class SettingsSyncAccountControlElement extends
 
       shownAccount_: Object,
 
-      showingPromo: {
-        type: Boolean,
-        value: false,
-        reflectToAttribute: true,
-      },
-
       // This property should be set by the parent only and should not change
       // after the element is created.
       embeddedInSubpage: {
@@ -166,7 +159,6 @@ export class SettingsSyncAccountControlElement extends
   private storedAccounts_: StoredAccount[];
   private profileAvatarURL_: string;
   private shownAccount_: StoredAccount|null;
-  showingPromo: boolean;
   embeddedInSubpage: boolean;
   hideButtons: boolean;
   hideBanner: boolean;
@@ -202,19 +194,9 @@ export class SettingsSyncAccountControlElement extends
 
   private onSyncChanged_() {
     if (this.embeddedInSubpage) {
-      this.showingPromo = true;
       return;
     }
 
-    if (!this.showingPromo && !this.isSyncing_() &&
-        this.syncBrowserProxy_.getPromoImpressionCount() <
-            MAX_SIGNIN_PROMO_IMPRESSION) {
-      this.showingPromo = true;
-      this.syncBrowserProxy_.incrementPromoImpressionCount();
-    } else {
-      // Turn off the promo if the user is signed in.
-      this.showingPromo = false;
-    }
     if (!this.isSyncing_() && this.shownAccount_ !== undefined) {
       this.recordImpressionUserActions_();
     }
@@ -265,6 +247,12 @@ export class SettingsSyncAccountControlElement extends
       return false;
     }
 
+    if (this.hideButtons) {
+      // When buttons are hidden, only show basic account information. Avoid
+      // showing the full subtitle because it references the buttons.
+      return false;
+    }
+
     if (this.syncStatus.signedInState === SignedInState.SIGNED_IN_PAUSED) {
       return true;
     }
@@ -290,7 +278,7 @@ export class SettingsSyncAccountControlElement extends
     }
 
     if (this.syncStatus.signedInState === SignedInState.WEB_ONLY_SIGNED_IN) {
-      return accountAwareRowSubtitle;
+      return loadTimeData.substituteString(accountAwareRowSubtitle, email);
     }
 
     if (this.syncStatus.signedInState === SignedInState.SIGNED_IN_PAUSED) {
@@ -299,6 +287,10 @@ export class SettingsSyncAccountControlElement extends
 
     if (this.syncStatus &&
         this.syncStatus.hasError && this.syncStatus.statusText) {
+      if (this.syncStatus.statusAction === StatusAction.ENTER_PASSPHRASE) {
+        return loadTimeData.substituteString(this.syncStatus.statusText, email);
+      }
+
       return this.syncStatus.statusText;
     }
     return '';
@@ -440,8 +432,12 @@ export class SettingsSyncAccountControlElement extends
    * has sync enabled or if the property to hide the banner was explicitly set.
    */
   private shouldHideBanner_(): boolean {
+    if (this.hideBanner) {
+      return true;
+    }
+
     if (!loadTimeData.getBoolean('isImprovedSettingsUIOnDesktopEnabled')) {
-      return this.hideBanner || !!this.syncStatus && this.isSyncing_();
+      return !!this.syncStatus && this.isSyncing_();
     }
 
     if (this.syncStatus && this.syncStatus.hasError &&
@@ -486,12 +482,16 @@ export class SettingsSyncAccountControlElement extends
   }
 
   private shouldShowTurnOffButton_(): boolean {
+    if (this.hideButtons) {
+      return false;
+    }
+
     if (loadTimeData.getBoolean('isImprovedSettingsUIOnDesktopEnabled') &&
         this.syncStatus.statusAction !== StatusAction.NO_ACTION) {
       return true;
     }
 
-    return !this.hideButtons && !this.showSetupButtons_ && this.isSyncing_();
+    return !this.showSetupButtons_ && this.isSyncing_();
   }
 
   private getTurnOffSyncLabel_(turnOffSync: string): string {
@@ -518,6 +518,10 @@ export class SettingsSyncAccountControlElement extends
   }
 
   private shouldShowErrorActionButton_(): boolean {
+    if (this.hideButtons) {
+      return false;
+    }
+
     if (this.embeddedInSubpage &&
         this.syncStatus.statusAction === StatusAction.ENTER_PASSPHRASE) {
       // In a subpage the passphrase button is not required.
@@ -529,14 +533,15 @@ export class SettingsSyncAccountControlElement extends
       return true;
     }
 
-    return !this.hideButtons && !this.showSetupButtons_ && this.isSyncing_() &&
+    return !this.showSetupButtons_ && this.isSyncing_() &&
         !!this.syncStatus.hasError &&
         this.syncStatus.statusAction !== StatusAction.NO_ACTION;
   }
 
   private shouldShowAccountAwareSigninButton_(): boolean {
     // Only show the button when user is in sync paused state
-    return loadTimeData.getBoolean('isImprovedSettingsUIOnDesktopEnabled') &&
+    return !this.hideButtons &&
+        loadTimeData.getBoolean('isImprovedSettingsUIOnDesktopEnabled') &&
         this.syncStatus.signedInState === SignedInState.WEB_ONLY_SIGNED_IN;
   }
 
@@ -546,8 +551,7 @@ export class SettingsSyncAccountControlElement extends
       return false;
     }
 
-    if (loadTimeData.getBoolean('turnOffSyncAllowedForManagedProfiles') &&
-        this.syncStatus.domain) {
+    if (this.syncStatus.domain) {
       return false;
     }
 
@@ -635,6 +639,15 @@ export class SettingsSyncAccountControlElement extends
     }
   }
 
+
+  private onDropdownClose_() {
+    const menuAnchor =
+        this.shadowRoot!.querySelector<HTMLElement>('#dropdown-arrow');
+    assert(menuAnchor);
+    menuAnchor.setAttribute('aria-expanded', 'false');
+  }
+
+
   private onSyncButtonClick_() {
     assert(this.shownAccount_);
     assert(this.storedAccounts_.length > 0);
@@ -663,6 +676,7 @@ export class SettingsSyncAccountControlElement extends
         this.shadowRoot!.querySelector<HTMLElement>('#dropdown-arrow');
     assert(anchor);
     actionMenu.showAt(anchor);
+    anchor.setAttribute('aria-expanded', 'true');
   }
 
   private onShouldShowAvatarRowChange_() {
@@ -729,7 +743,7 @@ export class SettingsSyncAccountControlElement extends
   }
 
   private shouldShowSigninPausedButtons_() {
-    return !!this.syncStatus &&
+    return !this.hideButtons && !!this.syncStatus &&
         this.syncStatus.signedInState === SignedInState.SIGNED_IN_PAUSED;
   }
 

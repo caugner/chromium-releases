@@ -194,7 +194,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
 
   net::URLRequestContext* url_request_context() { return url_request_context_; }
 
-  NetworkService* network_service() { return network_service_; }
+  NetworkService* network_service() const { return network_service_; }
 
   mojom::NetworkContextClient* client() {
     return client_.is_bound() ? client_.get() : nullptr;
@@ -257,6 +257,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       const url::Origin& origin,
       const net::IsolationInfo& isolation_info,
       const net::CookieSettingOverrides& cookie_setting_overrides,
+      const net::CookieSettingOverrides& devtools_cookie_setting_overrides,
       mojo::PendingRemote<mojom::CookieAccessObserver> observer) override;
   void GetTrustTokenQueryAnswerer(
       mojo::PendingReceiver<mojom::TrustTokenQueryAnswerer> receiver,
@@ -416,6 +417,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
                bool include_subdomains,
                AddHSTSCallback callback) override;
   void IsHSTSActiveForHost(const std::string& host,
+                           bool is_top_level_nav,
                            IsHSTSActiveForHostCallback callback) override;
   void GetHSTSState(const std::string& domain,
                     GetHSTSStateCallback callback) override;
@@ -749,6 +751,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
       const url::Origin& origin,
       const net::IsolationInfo& isolation_info,
       const net::CookieSettingOverrides& cookie_setting_overrides,
+      const net::CookieSettingOverrides& devtools_cookie_setting_overrides,
       mojo::PendingRemote<mojom::CookieAccessObserver> cookie_observer,
       net::FirstPartySetMetadata first_party_set_metadata);
 
@@ -763,10 +766,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkContext
 
   void OnVerifyCertForSignedExchangeComplete(uint64_t cert_verify_id,
                                              int result);
-
-#if BUILDFLAG(IS_CHROMEOS)
-  void TrustAnchorUsed();
-#endif
 
 #if BUILDFLAG(IS_CT_SUPPORTED)
   // Checks the Certificate Transparency policy compliance for a given

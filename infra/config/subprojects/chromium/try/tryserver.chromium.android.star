@@ -57,6 +57,36 @@ try_.builder(
 )
 
 try_.builder(
+    name = "android-10-x86-rel",
+    mirrors = [
+        "ci/android-10-x86-rel",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/android-10-x86-rel",
+            "release_try_builder",
+        ],
+    ),
+    contact_team_email = "clank-engprod@google.com",
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
+)
+
+try_.builder(
+    name = "android-10-x86-fyi-rel",
+    mirrors = [
+        "ci/android-10-x86-fyi-rel",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/android-10-x86-fyi-rel",
+            "release_try_builder",
+        ],
+    ),
+    contact_team_email = "clank-engprod@google.com",
+    siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
+)
+
+try_.builder(
     name = "android-11-x86-rel",
     mirrors = [
         "ci/android-11-x86-rel",
@@ -405,20 +435,6 @@ try_.builder(
     contact_team_email = "chrome-mte@google.com",
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
 )
-
-# TODO(crbug.com/40240078): Reenable this builder once the reboot issue is resolved.
-# try_.builder(
-#     name = "android-asan",
-#     mirrors = ["ci/android-asan"],
-#     gn_args = gn_args.config(
-#         configs = [
-#             "ci/android-asan",
-#             "release_try_builder",
-#             "minimal_symbols",
-#         ],
-#     ),
-#     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
-# )
 
 try_.builder(
     name = "android-bfcache-rel",
@@ -1291,11 +1307,12 @@ try_.builder(
                 "mb",
             ],
             build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.ARM,
             target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder",
+            config = "base_config",
         ),
     ),
     gn_args = gn_args.config(
@@ -1542,10 +1559,13 @@ try_.gpu.optional_tests_builder(
         ),
         chromium_config = builder_config.chromium_config(
             config = "main_builder",
+            build_config = builder_config.build_config.DEBUG,
+            target_arch = builder_config.target_arch.ARM,
+            target_bits = 32,
             target_platform = builder_config.target_platform.ANDROID,
         ),
         android_config = builder_config.android_config(
-            config = "main_builder",
+            config = "base_config",
         ),
         build_gs_bucket = "chromium-gpu-fyi-archive",
     ),
@@ -1574,7 +1594,7 @@ try_.gpu.optional_tests_builder(
             "gpu_pixel_4_stable",
         ],
         per_test_modifications = {
-            "expected_color_pixel_passthrough_test": targets.mixin(
+            "expected_color_pixel_passthrough_ganesh_test": targets.mixin(
                 args = [
                     # See Android FYI Release (Pixel 4).
                     "--extra-browser-args=--disable-wcg-for-test",
@@ -1586,7 +1606,7 @@ try_.gpu.optional_tests_builder(
                     "--extra-browser-args=--disable-wcg-for-test",
                 ],
             ),
-            "pixel_skia_gold_passthrough_test": targets.mixin(
+            "pixel_skia_gold_passthrough_ganesh_test": targets.mixin(
                 args = [
                     # See Android FYI Release (Pixel 4).
                     "--extra-browser-args=--disable-wcg-for-test",
@@ -1598,7 +1618,7 @@ try_.gpu.optional_tests_builder(
                     "--extra-browser-args=--disable-wcg-for-test",
                 ],
             ),
-            "screenshot_sync_passthrough_tests": targets.mixin(
+            "screenshot_sync_passthrough_ganesh_tests": targets.mixin(
                 args = [
                     # See Android FYI Release (Pixel 4).
                     "--extra-browser-args=--disable-wcg-for-test",
@@ -1617,7 +1637,12 @@ try_.gpu.optional_tests_builder(
         os_type = targets.os_type.ANDROID,
         use_android_merge_script_by_default = False,
     ),
+    pool = "luci.chromium.gpu.try",
+    builderless = True,
+    ssd = None,
+    free_space = None,
     main_list_view = "try",
+    max_concurrent_builds = 10,
     tryjob = try_.job(
         location_filters = [
             # Inclusion filters.
@@ -1664,7 +1689,12 @@ try_.gpu.optional_tests_builder(
         retry_failed_shards = False,
     ),
     gn_args = "ci/GPU FYI Android arm64 Builder",
+    pool = "luci.chromium.gpu.try",
+    builderless = True,
+    ssd = None,
+    free_space = None,
     main_list_view = "try",
+    max_concurrent_builds = 10,
     tryjob = try_.job(
         location_filters = [
             # Inclusion filters.

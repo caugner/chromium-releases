@@ -488,6 +488,7 @@ void Shelf::CreateShelfWidget(aura::Window* root) {
   if (ash::features::IsDeskButtonEnabled()) {
     desk_button_widget()->InitializeAccessibleProperties();
   }
+  status_area_widget_->InitializeAccessibleProperties();
   status_area_widget_->InitializeTrayButtonsAccessibleNavFocus();
 }
 

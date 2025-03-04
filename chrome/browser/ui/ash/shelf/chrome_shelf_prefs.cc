@@ -28,7 +28,6 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/ranges/algorithm.h"
 #include "base/values.h"
 #include "chrome/browser/apps/app_preload_service/app_preload_service.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
@@ -379,9 +378,41 @@ void AddMallPinIfNeeded(Profile* profile,
     return;
   }
 
-  InsertPinsAfterChromeAndBeforeFirstPinnedApp(syncable_service,
-                                               {{ash::kMallSystemAppId}},
-                                               /*is_policy_initiated=*/false);
+  // Mall should be pinned immediately after Chrome, but also after Gemini if it
+  // is next after Chrome.
+  syncer::StringOrdinal chrome_position =
+      syncable_service->GetPinPosition(app_constants::kChromeAppId);
+  CHECK(chrome_position.IsValid());
+  syncer::StringOrdinal first_pin_after_chrome = GetNextPositionAfter(
+      syncable_service, chrome_position, /*exclude_chrome=*/true);
+  syncer::StringOrdinal gemini_position =
+      syncable_service->GetPinPosition(ash::kGeminiAppId);
+
+  syncer::StringOrdinal pin_mall_after;
+  syncer::StringOrdinal pin_mall_before;
+
+  if (gemini_position.IsValid() && first_pin_after_chrome == gemini_position) {
+    // Current order is <possibly some apps>, Chrome, Gemini, <something else>.
+    // Insert Mall after Gemini.
+    pin_mall_after = gemini_position;
+    pin_mall_before = GetNextPositionAfter(syncable_service, gemini_position,
+                                           /*exclude_chrome=*/true);
+
+  } else {
+    // Current order is <possibly some apps>, Chrome, <non-Gemini app>. Insert
+    // Mall immdiately after Chrome.
+    pin_mall_after = chrome_position;
+    pin_mall_before = first_pin_after_chrome;
+  }
+
+  if (!pin_mall_before.IsValid()) {
+    pin_mall_before = pin_mall_after.CreateAfter();
+  }
+
+  syncer::StringOrdinal mall_position =
+      pin_mall_after.CreateBetween(pin_mall_before);
+  syncable_service->SetPinPosition(
+      ash::kMallSystemAppId, mall_position, /*pinned_by_policy=*/false);
 
   ScopedListPrefUpdate update(profile->GetPrefs(),
                               prefs::kShelfMallAppPinRolls);
@@ -588,12 +619,12 @@ std::vector<ash::ShelfID> ChromeShelfPrefs::GetPinnedAppsFromSync(
   }
 
   // Sort pins according their ordinals.
-  base::ranges::sort(pin_infos, syncer::StringOrdinal::LessThanFn(),
-                     &PinInfo::item_ordinal);
+  std::ranges::sort(pin_infos, syncer::StringOrdinal::LessThanFn(),
+                    &PinInfo::item_ordinal);
 
   // Convert to ShelfID array.
   std::vector<ash::ShelfID> pins;
-  base::ranges::transform(
+  std::ranges::transform(
       pin_infos, std::back_inserter(pins),
       [](const auto& pin_info) { return ash::ShelfID(pin_info.app_id); });
 

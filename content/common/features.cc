@@ -65,11 +65,6 @@ BASE_FEATURE(kHidePastePopupOnGSB,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
-// When enabled, keyboard user activation will be verified by the browser side.
-BASE_FEATURE(kBrowserVerifiedUserActivationKeyboard,
-             "BrowserVerifiedUserActivationKeyboard",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
 // If enabled, changes to the zoom level are temporary and are forgotten when
 // the tab is closed. If disabled, changes to the zoom level persist, as though
 // the user affected them through the browser's UX.
@@ -316,6 +311,15 @@ BASE_FEATURE(kPreloadingConfig,
              "PreloadingConfig",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+// A misunderstanding when fixing crbug.com/40076091 meant that non-speculative
+// RFHs were being created with a provisional RenderFrame in the renderer. This
+// is nominally harmless, but can crash prerenders if devtool's network
+// overrides feature is enabled. Guarded by a feature since fixing this new bug
+// might reintroduce the previous crashes.
+BASE_FEATURE(kPrerenderMoreCorrectSpeculativeRFHCreation,
+             "PrerenderMoreCorrectSpeculativeRFHCreation",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 // This feature makes it so that having pending views increase the priority of a
 // RenderProcessHost even when there is a priority override.
 BASE_FEATURE(kPriorityOverridePendingViews,
@@ -384,20 +388,6 @@ BASE_FEATURE(kServiceWorkerAvoidMainThreadForInitialization,
 #endif
 );
 
-// (crbug.com/1371756): When enabled, the static routing API starts
-// ServiceWorker when the routing result of a main resource request was network
-// fallback.
-BASE_FEATURE(kServiceWorkerStaticRouterStartServiceWorker,
-             "ServiceWorkerStaticRouterStartServiceWorker",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
-// (crbug.com/340949948): Killswitch for the fix to address the ServiceWorker
-// main and subreosurce loader lifetime issue, which introduces fetch() failure
-// in the sw fetch handler.
-BASE_FEATURE(kServiceWorkerStaticRouterRaceRequestFix,
-             "kServiceWorkerStaticRouterRaceRequestFix",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 // The set of ServiceWorker to bypass while making navigation request.
 // They are represented by a comma separated list of HEX encoded SHA256 hash of
 // the ServiceWorker's scripts.
@@ -411,6 +401,26 @@ const base::FeatureParam<std::string>
     kServiceWorkerBypassFetchHandlerBypassedHashStrings{
         &kServiceWorkerBypassFetchHandlerHashStrings,
         "script_checksum_to_bypass", ""};
+
+// (crbug.com/41411856): When enabled, the srcdoc iframes are controlled by the
+// same service worker that controls their parent.
+BASE_FEATURE(kServiceWorkerSrcdocSupport,
+             "ServiceWorkerSrcdocSupport",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// (crbug.com/340949948): Killswitch for the fix to address the ServiceWorker
+// main and subreosurce loader lifetime issue, which introduces fetch() failure
+// in the sw fetch handler.
+BASE_FEATURE(kServiceWorkerStaticRouterRaceRequestFix,
+             "kServiceWorkerStaticRouterRaceRequestFix",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// (crbug.com/1371756): When enabled, the static routing API starts
+// ServiceWorker when the routing result of a main resource request was network
+// fallback.
+BASE_FEATURE(kServiceWorkerStaticRouterStartServiceWorker,
+             "ServiceWorkerStaticRouterStartServiceWorker",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables skipping the early call to CommitPending when navigating away from a
 // crashed frame.
@@ -461,6 +471,11 @@ BASE_FEATURE(kWarmUpNetworkProcess,
 BASE_FEATURE(kWebAssemblyDynamicTiering,
              "WebAssemblyDynamicTiering",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Enables in-process resource loading for WebUI renderer processes.
+BASE_FEATURE(kWebUIInProcessResourceLoading,
+             "WebUIInProcessResourceLoading",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables WebOTP calls in cross-origin iframes if allowed by Permissions
 // Policy.

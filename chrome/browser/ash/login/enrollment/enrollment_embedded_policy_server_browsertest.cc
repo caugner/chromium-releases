@@ -83,16 +83,10 @@ namespace {
 
 namespace em = enterprise_management;
 
-constexpr test::UIPath kEnterprisePrimaryButton = {
-    "enterprise-enrollment", "step-signin", "primary-action-button"};
-constexpr test::UIPath kEnterpriseEnrollmentButton = {
-    "enterprise-enrollment", "step-signin", "enterprise-navigation-enterprise"};
-constexpr test::UIPath kKioskEnrollmentButton = {
-    "enterprise-enrollment", "step-signin", "enterprise-navigation-kiosk"};
-constexpr test::UIPath kKioskModeEnterpriseEnrollmentButton = {
-    "enterprise-enrollment", "step-signin", "kiosk-navigation-enterprise"};
-constexpr test::UIPath kKioskModeKioskEnrollmentButton = {
-    "enterprise-enrollment", "step-signin", "kiosk-navigation-kiosk"};
+constexpr test::UIPath kPrimaryButton = {"enterprise-enrollment", "step-signin",
+                                         "primary-action-button"};
+constexpr test::UIPath kAdditionalPrimaryButton = {
+    "enterprise-enrollment", "step-signin", "additional-primary-action-button"};
 
 const char kRemoraRequisition[] = "remora";
 
@@ -188,13 +182,13 @@ class EnrollmentEmbeddedPolicyServerBase : public OobeBaseTest {
 
     SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserEmail,
                                  FakeGaiaMixin::kEmailPath);
-    test::OobeJS().ClickOnPath(kEnterprisePrimaryButton);
+    test::OobeJS().ClickOnPath(kPrimaryButton);
     SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserPassword,
                                  FakeGaiaMixin::kPasswordPath);
     if (enroll_kiosk) {
-      test::OobeJS().ClickOnPath(kKioskEnrollmentButton);
+      test::OobeJS().ClickOnPath(kAdditionalPrimaryButton);
     } else {
-      test::OobeJS().ClickOnPath(kEnterpriseEnrollmentButton);
+      test::OobeJS().ClickOnPath(kPrimaryButton);
     }
   }
 
@@ -784,6 +778,23 @@ IN_PROC_BROWSER_TEST_F(EnrollmentEmbeddedPolicyServerBase,
   EXPECT_FALSE(InstallAttributes::Get()->IsEnterpriseManaged());
 }
 
+// Error during enrollment : Error 419: ORG_UNIT_ENROLLMENT_LIMIT_EXCEEDED.
+IN_PROC_BROWSER_TEST_F(EnrollmentEmbeddedPolicyServerBase,
+                       EnrollmentErrorOrgUnitEnrollmentLimitExceeded) {
+  policy_server_.SetDeviceEnrollmentError(
+      policy::DeviceManagementService::kOrgUnitEnrollmentLimitExceeded);
+
+  TriggerEnrollmentAndSignInSuccessfully();
+
+  enrollment_ui_.WaitForStep(test::ui::kEnrollmentStepError);
+  enrollment_ui_.ExpectErrorMessage(
+      IDS_ENTERPRISE_ENROLLMENT_ORG_UNIT_ENROLLMENT_LIMIT_EXCEEDED,
+      /*can_retry=*/true);
+  enrollment_ui_.RetryAndWaitForSigninStep();
+  EXPECT_FALSE(StartupUtils::IsDeviceRegistered());
+  EXPECT_FALSE(InstallAttributes::Get()->IsEnterpriseManaged());
+}
+
 // Error during enrollment : Error fetching policy : 902 - policy not found.
 IN_PROC_BROWSER_TEST_F(EnrollmentEmbeddedPolicyServerBase,
                        EnrollmentErrorFetchingPolicyNotFound) {
@@ -1062,7 +1073,7 @@ IN_PROC_BROWSER_TEST_F(EnrollmentRecoveryTest, DifferentDomain) {
 
   login::OnlineSigninArtifacts signin_artifacts;
   signin_artifacts.email = FakeGaiaMixin::kFakeUserEmail;
-  signin_artifacts.gaia_id = GaiaId(FakeGaiaMixin::kFakeUserGaiaId);
+  signin_artifacts.gaia_id = FakeGaiaMixin::kFakeUserGaiaId;
   signin_artifacts.password = FakeGaiaMixin::kFakeUserPassword;
   signin_artifacts.using_saml = false;
 
@@ -1268,13 +1279,13 @@ class KioskEnrollmentPolicyServerTest
 
     SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserEmail,
                                  FakeGaiaMixin::kEmailPath);
-    test::OobeJS().ClickOnPath(kEnterprisePrimaryButton);
+    test::OobeJS().ClickOnPath(kPrimaryButton);
     SigninFrameJS().TypeIntoPath(FakeGaiaMixin::kFakeUserPassword,
                                  FakeGaiaMixin::kPasswordPath);
     if (enroll_kiosk) {
-      test::OobeJS().ClickOnPath(kKioskModeKioskEnrollmentButton);
+      test::OobeJS().ClickOnPath(kPrimaryButton);
     } else {
-      test::OobeJS().ClickOnPath(kKioskModeEnterpriseEnrollmentButton);
+      test::OobeJS().ClickOnPath(kAdditionalPrimaryButton);
     }
   }
 };

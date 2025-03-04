@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/views/sad_tab_view.h"
 
+#include <algorithm>
 #include <string>
 
-#include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -599,7 +599,7 @@ SadTabView::SadTabView(content::WebContents* web_contents, SadTabKind kind)
     // If the `owner_` ContentsWebView has a rounded background, the sad tab
     // should also have matching rounded corners as well.
     SetBackgroundRadii(
-        static_cast<ContentsWebView*>(owner_)->background_radii());
+        static_cast<ContentsWebView*>(owner_)->GetBackgroundRadii());
   }
 
   // Make the accessibility role of this view an alert dialog, and

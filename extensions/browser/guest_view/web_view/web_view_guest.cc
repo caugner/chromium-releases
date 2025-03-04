@@ -750,10 +750,7 @@ void WebViewGuest::GuestZoomChanged(double old_zoom_level,
 
 void WebViewGuest::CloseContents(WebContents* source) {
   CHECK(!base::FeatureList::IsEnabled(features::kGuestViewMPArch));
-
-  base::Value::Dict args;
-  DispatchEventToView(
-      std::make_unique<GuestViewEvent>(webview::kEventClose, std::move(args)));
+  GuestClose();
 }
 
 void WebViewGuest::FindReply(WebContents* source,
@@ -769,13 +766,12 @@ void WebViewGuest::FindReply(WebContents* source,
 }
 
 double WebViewGuest::GetZoom() const {
-  double zoom_level =
-      ZoomController::FromWebContents(web_contents())->GetZoomLevel();
+  double zoom_level = GetZoomController()->GetZoomLevel();
   return ConvertZoomLevelToZoomFactor(zoom_level);
 }
 
 ZoomController::ZoomMode WebViewGuest::GetZoomMode() {
-  return ZoomController::FromWebContents(web_contents())->zoom_mode();
+  return GetZoomController()->zoom_mode();
 }
 
 bool WebViewGuest::GuestHandleContextMenu(
@@ -873,6 +869,37 @@ void WebViewGuest::GuestOpenURL(
         navigation_handle_callback) {
   OpenURLFromTab(owner_web_contents(), params,
                  std::move(navigation_handle_callback));
+}
+
+void WebViewGuest::GuestClose() {
+  base::Value::Dict args;
+  DispatchEventToView(
+      std::make_unique<GuestViewEvent>(webview::kEventClose, std::move(args)));
+}
+
+void WebViewGuest::GuestRequestMediaAccessPermission(
+    const content::MediaStreamRequest& request,
+    content::MediaResponseCallback callback) {
+  if (IsOwnedByControlledFrameEmbedder()) {
+    web_view_permission_helper_->RequestMediaAccessPermissionForControlledFrame(
+        web_contents(), request, std::move(callback));
+    return;
+  }
+  web_view_permission_helper_->RequestMediaAccessPermission(
+      request, std::move(callback));
+}
+
+bool WebViewGuest::GuestCheckMediaAccessPermission(
+    content::RenderFrameHost* render_frame_host,
+    const url::Origin& security_origin,
+    blink::mojom::MediaStreamType type) {
+  if (IsOwnedByControlledFrameEmbedder()) {
+    return web_view_permission_helper_
+        ->CheckMediaAccessPermissionForControlledFrame(render_frame_host,
+                                                       security_origin, type);
+  }
+  return web_view_permission_helper_->CheckMediaAccessPermission(
+      render_frame_host, security_origin, type);
 }
 
 void WebViewGuest::CreateNewGuestWebViewWindow(
@@ -1490,13 +1517,7 @@ void WebViewGuest::RequestMediaAccessPermission(
     content::MediaResponseCallback callback) {
   CHECK(!base::FeatureList::IsEnabled(features::kGuestViewMPArch));
 
-  if (IsOwnedByControlledFrameEmbedder()) {
-    web_view_permission_helper_->RequestMediaAccessPermissionForControlledFrame(
-        source, request, std::move(callback));
-    return;
-  }
-  web_view_permission_helper_->RequestMediaAccessPermission(
-      source, request, std::move(callback));
+  GuestRequestMediaAccessPermission(request, std::move(callback));
 }
 
 bool WebViewGuest::CheckMediaAccessPermission(
@@ -1505,13 +1526,8 @@ bool WebViewGuest::CheckMediaAccessPermission(
     blink::mojom::MediaStreamType type) {
   CHECK(!base::FeatureList::IsEnabled(features::kGuestViewMPArch));
 
-  if (IsOwnedByControlledFrameEmbedder()) {
-    return web_view_permission_helper_
-        ->CheckMediaAccessPermissionForControlledFrame(render_frame_host,
-                                                       security_origin, type);
-  }
-  return web_view_permission_helper_->CheckMediaAccessPermission(
-      render_frame_host, security_origin, type);
+  return GuestCheckMediaAccessPermission(render_frame_host, security_origin,
+                                         type);
 }
 
 void WebViewGuest::CanDownload(const GURL& url,
@@ -1802,14 +1818,14 @@ bool WebViewGuest::IsSpatialNavigationEnabled() const {
 
 void WebViewGuest::SetZoom(double zoom_factor) {
   did_set_explicit_zoom_ = true;
-  auto* zoom_controller = ZoomController::FromWebContents(web_contents());
+  auto* zoom_controller = GetZoomController();
   DCHECK(zoom_controller);
   double zoom_level = blink::ZoomFactorToZoomLevel(zoom_factor);
   zoom_controller->SetZoomLevel(zoom_level);
 }
 
 void WebViewGuest::SetZoomMode(ZoomController::ZoomMode zoom_mode) {
-  ZoomController::FromWebContents(web_contents())->SetZoomMode(zoom_mode);
+  GetZoomController()->SetZoomMode(zoom_mode);
 }
 
 void WebViewGuest::SetAllowTransparency(bool allow) {
@@ -2026,14 +2042,16 @@ bool WebViewGuest::IsFullscreenForTabOrPending(
   return is_guest_fullscreen_;
 }
 
-void WebViewGuest::RequestPointerLock(WebContents* guest_web_contents,
+void WebViewGuest::RequestPointerLock(WebContents* web_contents,
                                       bool user_gesture,
                                       bool last_unlocked_by_target) {
   CHECK(!base::FeatureList::IsEnabled(features::kGuestViewMPArch));
-  CHECK_EQ(guest_web_contents, web_contents());
 
   web_view_permission_helper_->RequestPointerLockPermission(
-      user_gesture, last_unlocked_by_target);
+      user_gesture, last_unlocked_by_target,
+      base::BindOnce(
+          base::IgnoreResult(&WebContents::GotPointerLockPermissionResponse),
+          base::Unretained(web_contents)));
 }
 
 void WebViewGuest::LoadURLWithParams(
