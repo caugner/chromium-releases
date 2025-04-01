@@ -621,12 +621,16 @@ void HistoryService::AddPage(const GURL& url,
                              base::Time time,
                              VisitSource visit_source) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // This function will construct the following "self-links" entry in the
+  // VisitedLinkDatabase: `<url, url, url>`.
   AddPage(HistoryAddPageArgs(
       url, time, /*context_id=*/0, /*nav_entry_id=*/0,
       /*local_navigation_id=*/std::nullopt,
-      /*referrer=*/GURL(), RedirectList(), ui::PAGE_TRANSITION_LINK,
+      /*referrer=*/url, RedirectList(), ui::PAGE_TRANSITION_LINK,
       /*hidden=*/false, visit_source,
-      /*did_replace_entry=*/false, /*consider_for_ntp_most_visited=*/true));
+      /*did_replace_entry=*/false, /*consider_for_ntp_most_visited=*/true,
+      /*is_ephemeral=*/false, /*title=*/std::nullopt,
+      /*top_level_url=*/url));
 }
 
 void HistoryService::AddPage(HistoryAddPageArgs add_page_args) {
@@ -1193,20 +1197,6 @@ base::CancelableTaskTracker::TaskId HistoryService::QueryURL(
       std::move(callback));
 }
 
-base::CancelableTaskTracker::TaskId HistoryService::QueryURLs(
-    const std::vector<GURL>& urls,
-    bool want_visits,
-    QueryURLsCallback callback,
-    base::CancelableTaskTracker* tracker) {
-  DCHECK(backend_task_runner_) << "History service being called after cleanup";
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return tracker->PostTaskAndReplyWithResult(
-      backend_task_runner_.get(), FROM_HERE,
-      base::BindOnce(&HistoryBackend::QueryURLs, history_backend_, urls,
-                     want_visits),
-      std::move(callback));
-}
-
 // Statistics ------------------------------------------------------------------
 
 base::CancelableTaskTracker::TaskId HistoryService::GetHistoryCount(
@@ -1309,21 +1299,6 @@ base::CancelableTaskTracker::TaskId HistoryService::GetLastVisitToOrigin(
       backend_task_runner_.get(), FROM_HERE,
       base::BindOnce(&HistoryBackend::GetLastVisitToOrigin, history_backend_,
                      origin, begin_time, end_time),
-      std::move(callback));
-}
-
-base::CancelableTaskTracker::TaskId HistoryService::GetLastVisitToURL(
-    const GURL& url,
-    base::Time end_time,
-    GetLastVisitCallback callback,
-    base::CancelableTaskTracker* tracker) {
-  DCHECK(backend_task_runner_) << "History service being called after cleanup";
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  return tracker->PostTaskAndReplyWithResult(
-      backend_task_runner_.get(), FROM_HERE,
-      base::BindOnce(&HistoryBackend::GetLastVisitToURL, history_backend_, url,
-                     end_time),
       std::move(callback));
 }
 

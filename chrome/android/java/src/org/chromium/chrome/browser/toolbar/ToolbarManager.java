@@ -134,6 +134,7 @@ import org.chromium.chrome.browser.toolbar.menu_button.MenuButtonCoordinator;
 import org.chromium.chrome.browser.toolbar.menu_button.MenuButtonState;
 import org.chromium.chrome.browser.toolbar.top.ActionModeController;
 import org.chromium.chrome.browser.toolbar.top.ActionModeController.ActionBarDelegate;
+import org.chromium.chrome.browser.toolbar.top.NavigationPopup;
 import org.chromium.chrome.browser.toolbar.top.TabSwitcherActionMenuCoordinator;
 import org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton;
 import org.chromium.chrome.browser.toolbar.top.ToggleTabStackButtonCoordinator;
@@ -177,7 +178,6 @@ import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHandle;
-import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.back_forward_transition.AnimationStage;
 import org.chromium.net.NetError;
@@ -192,7 +192,6 @@ import org.chromium.ui.widget.ViewRectProvider;
 import org.chromium.url.GURL;
 
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Contains logic for managing the toolbar visual component. This class manages the interactions
@@ -340,9 +339,6 @@ public class ToolbarManager
     private @Nullable ObservableSupplier<Integer> mBookmarkBarHeightSupplier;
     private boolean mInTabSwitcherTransition;
 
-    private String mLastUrl;
-    private String mCurrentUrl;
-    private int mLastIndex = -1;
     private Tab mLastTab;
 
     private static class TabObscuringCallback implements Callback<Boolean> {
@@ -1036,6 +1032,10 @@ public class ToolbarManager
 
         mActivityTabTabObserver =
                 new ActivityTabProvider.ActivityTabTabObserver(mActivityTabProvider) {
+                    private NavigationHandle mLastNavigation;
+                    private String mLastUrl;
+                    private String mCurrentUrl;
+
                     @Override
                     public void onObservingDifferentTab(Tab tab, boolean hint) {
                         // ActivityTabProvider will null out the tab passed to
@@ -1052,12 +1052,6 @@ public class ToolbarManager
                         }
                         // Switching tabs.
                         if (mLastTab != tab) {
-                            NavigationHistory navigationHistory =
-                                    Objects.requireNonNull(tab.getWebContents())
-                                            .getNavigationController()
-                                            .getNavigationHistory();
-                            // Reset mLastIndex to the index of the new tab we switched to.
-                            mLastIndex = navigationHistory.getCurrentEntryIndex();
                             // Update mLastTab.
                             mLastTab = tab;
                         }
@@ -1191,33 +1185,29 @@ public class ToolbarManager
                             Tab tab, NavigationHandle navigation) {
                         onBackPressStateChanged();
                         if (navigation.hasCommitted() && !navigation.isSameDocument()) {
-                            // Account for forward vs backward navigation.
-                            NavigationHistory navigationHistory =
-                                    Objects.requireNonNull(tab.getWebContents())
-                                            .getNavigationController()
-                                            .getNavigationHistory();
-
-                            int currentIndex = navigationHistory.getCurrentEntryIndex();
-                            // 0: forward nav, 1: backward nav, 2: neither (tab switched).
-                            @NavigationDirection
-                            int direction =
-                                    currentIndex > mLastIndex
-                                            ? NavigationDirection.FORWARD
-                                            : currentIndex < mLastIndex
-                                                    ? NavigationDirection.BACKWARD
-                                                    : NavigationDirection.NEITHER;
                             String newUrl = navigation.getUrl().getSpec();
 
                             if (mLastUrl != null
                                     && mLastUrl.equals(newUrl)
                                     && !mLastUrl.equals(mCurrentUrl)) {
                                 // Backfalsing detected, emit metrics.
+                                // NavigationHandle#isBack or #isForward is true when the
+                                // navigation is caused by Tab#goBack or #goForward, such as
+                                // the back/forward button in toolbar, the navigation gesture,
+                                // the back button in system navigation bar.
+                                // 0: forward nav, 1: backward nav, 2: neither.
+                                @NavigationDirection int direction = NavigationDirection.NEITHER;
+                                if (mLastNavigation.isBack() && !navigation.isBack()) {
+                                    direction = NavigationDirection.FORWARD;
+                                } else if (mLastNavigation.isForward() && navigation.isBack()) {
+                                    direction = NavigationDirection.BACKWARD;
+                                }
                                 BackPressMetrics.recordBackFalsing(direction);
                             }
                             // Update the URLs and index.
                             mLastUrl = mCurrentUrl;
                             mCurrentUrl = newUrl;
-                            mLastIndex = currentIndex;
+                            mLastNavigation = navigation;
 
                             mToolbar.onNavigatedToDifferentPage();
                             maybeTriggerCacheRefreshForZeroSuggest(navigation.getUrl());
@@ -1558,6 +1548,11 @@ public class ToolbarManager
             ObservableSupplier<Integer> constraintsSupplier,
             OnLongClickListener onLongClickListener,
             ToolbarProgressBar progressBar) {
+        NavigationPopup.HistoryDelegate historyDelegate =
+                (tab) -> {
+                    HistoryManagerUtils.showHistoryManager(
+                            tab.getWindowAndroid().getActivity().get(), tab, tab.getProfile());
+                };
         TopToolbarCoordinator toolbar =
                 new TopToolbarCoordinator(
                         controlContainer,
@@ -1574,7 +1569,7 @@ public class ToolbarManager
                         mTabModelSelectorSupplier,
                         mHomepageEnabledSupplier,
                         mCompositorViewHolder::getResourceManager,
-                        HistoryManagerUtils::showHistoryManager,
+                        historyDelegate,
                         PartnerBrowserCustomizations.getInstance()
                                 ::isHomepageProviderAvailableAndEnabled,
                         DownloadUtils::downloadOfflinePage,
@@ -2421,14 +2416,6 @@ public class ToolbarManager
         if (wasFocused && focused) {
             mLocationBar.selectAll();
         }
-    }
-
-    /**
-     * Unfocus the url bar when back press is performed. Do nothing if it is unfocused.
-     * @return Whether url bar is focused when this method is called.
-     */
-    public boolean unfocusUrlBarOnBackPress() {
-        return mLocationBar.unfocusUrlBarOnBackPressed();
     }
 
     /**

@@ -438,13 +438,12 @@ const ui::CocoaActionList& GetCocoaActionListForTesting() {
 }
 
 - (BOOL)conditionallyRespondsToSelector:(SEL)selector {
-  static base::NoDestructor<std::unordered_set<SEL>> methodSelectorsForActions({
-    @selector(accessibilityPerformPress),
-        @selector(accessibilityPerformDecrement),
-        @selector(accessibilityPerformIncrement),
-        @selector(accessibilityPerformShowMenu),
-        @selector(accessibilityPerformConfirm)
-  });
+  static std::unordered_set<SEL> methodSelectorsForActions = {
+      @selector(accessibilityPerformPress),
+      @selector(accessibilityPerformDecrement),
+      @selector(accessibilityPerformIncrement),
+      @selector(accessibilityPerformShowMenu),
+      @selector(accessibilityPerformConfirm)};
 
   static std::unordered_set<SEL> methodSelectorsForParameterizedAttributes = {
       @selector(accessibilityCellForColumn:row:),
@@ -470,8 +469,8 @@ const ui::CocoaActionList& GetCocoaActionListForTesting() {
 
   // See if the method is permitted by checking its corresponding action
   // counterpart.
-  if (methodSelectorsForActions->find(selector) !=
-      methodSelectorsForActions->end()) {
+  if (methodSelectorsForActions.find(selector) !=
+      methodSelectorsForActions.end()) {
     NSString* selectorString = NSStringFromSelector(selector);
     NSString* action =
         [[AXPlatformNodeCocoa newAccessibilityAPIMethodToActionMap]

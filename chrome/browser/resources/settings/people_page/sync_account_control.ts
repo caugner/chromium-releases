@@ -233,7 +233,7 @@ export class SettingsSyncAccountControlElement extends
       return loadTimeData.substituteString(syncingLabel, email);
     }
 
-    return (this.shownAccount_! && this.shownAccount_!!.isPrimaryAccount) ?
+    return (this.shownAccount_! && this.shownAccount_.isPrimaryAccount) ?
         loadTimeData.substituteString(signedInLabel, email) :
         email;
   }
@@ -404,8 +404,19 @@ export class SettingsSyncAccountControlElement extends
       return true;
     }
 
+    if (this.syncStatus.domain) {
+      return true;
+    }
+
     return this.syncStatus.signedInState !== SignedInState.SIGNED_IN ||
         this.syncStatus.statusAction !== StatusAction.NO_ACTION;
+  }
+
+  /**
+   * Determines if the remove account button should be hidden.
+   */
+  private shouldHideRemoveAccountButton_(): boolean {
+    return !!this.syncStatus.domain;
   }
 
   /**
@@ -591,7 +602,11 @@ export class SettingsSyncAccountControlElement extends
   }
 
   private shouldHideSignoutDropdownButton_(): boolean {
-    return loadTimeData.getBoolean('isImprovedSettingsUIOnDesktopEnabled');
+    if (loadTimeData.getBoolean('isImprovedSettingsUIOnDesktopEnabled')) {
+      return true;
+    }
+
+    return !!this.syncStatus.domain;
   }
 
 
@@ -652,10 +667,10 @@ export class SettingsSyncAccountControlElement extends
     assert(this.shownAccount_);
     assert(this.storedAccounts_.length > 0);
     const isDefaultPromoAccount =
-        (this.shownAccount_!.email === this.storedAccounts_[0].email);
+        (this.shownAccount_.email === this.storedAccounts_[0].email);
 
     this.syncBrowserProxy_.startSyncingWithEmail(
-        this.shownAccount_!.email, isDefaultPromoAccount);
+        this.shownAccount_.email, isDefaultPromoAccount);
   }
 
   private onTurnOffButtonClick_() {

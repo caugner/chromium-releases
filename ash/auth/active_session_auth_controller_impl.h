@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "ash/ash_export.h"
 #include "ash/auth/active_session_auth_metrics_recorder.h"
@@ -63,7 +64,7 @@ class ASH_EXPORT ActiveSessionAuthControllerImpl
 
     void SetPinStatus(std::unique_ptr<cryptohome::PinStatus> pin_status);
 
-    const std::u16string& GetPinStatusMessage() const;
+    std::u16string_view GetPinStatusMessage() const;
 
     void Close();
 
@@ -88,8 +89,8 @@ class ASH_EXPORT ActiveSessionAuthControllerImpl
   void OnViewPreferredSizeChanged(views::View* observed_view) override;
 
   // ActiveSessionAuthView::Observer:
-  void OnPasswordSubmit(const std::u16string& password) override;
-  void OnPinSubmit(const std::u16string& pin) override;
+  void OnPasswordSubmit(std::u16string_view password) override;
+  void OnPinSubmit(std::u16string_view pin) override;
   void OnClose() override;
 
   // UserDataAuthClient::AuthFactorStatusUpdateObserver:
@@ -119,7 +120,8 @@ class ASH_EXPORT ActiveSessionAuthControllerImpl
 
   // Tracks the authentication flow for the active session.
   enum class ActiveSessionAuthState {
-    kWaitForInit,            // Initial state, awaiting session start.
+    kOnIdle,                 // Initial state, waiting for request.
+    kWaitForInit,            // Waiting session start.
     kInitialized,            // Session started, ready for user input.
     kPasswordAuthStarted,    // User submitted password, awaiting verification.
     kPasswordAuthSucceeded,  // Successful password authentication.
@@ -157,6 +159,7 @@ class ASH_EXPORT ActiveSessionAuthControllerImpl
   // of the UI. Validates the transitions.
   void SetState(ActiveSessionAuthState state);
 
+  bool IsPreInitializedState() const;
   bool IsSucceedState() const;
 
   // Internal methods for authentication.
@@ -197,7 +200,7 @@ class ASH_EXPORT ActiveSessionAuthControllerImpl
   std::unique_ptr<UserContext> user_context_;
 
   AuthFactorSet available_factors_;
-  ActiveSessionAuthState state_ = ActiveSessionAuthState::kWaitForInit;
+  ActiveSessionAuthState state_ = ActiveSessionAuthState::kOnIdle;
 
   std::unique_ptr<AuthRequest> auth_request_;
 

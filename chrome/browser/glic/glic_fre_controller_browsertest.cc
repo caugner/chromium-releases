@@ -4,36 +4,49 @@
 
 #include "chrome/browser/glic/glic_fre_controller.h"
 
-#include "base/test/run_until.h"
-#include "base/time/time.h"
-#include "chrome/browser/glic/glic_keyed_service.h"
-#include "chrome/browser/glic/interactive_glic_test.h"
-#include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
+#include "base/test/scoped_feature_list.h"
+#include "chrome/browser/glic/auth_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/public/tab_interface.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace glic {
 namespace {
 
-class GlicFreControllerBrowserTest : public glic::test::InteractiveGlicTest {
+class GlicFreControllerBrowserTest : public InProcessBrowserTest {
  public:
+  GlicFreControllerBrowserTest() {
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{features::kGlic, features::kTabstripComboButton},
+        /*disabled_features=*/{});
+  }
+  GlicFreControllerBrowserTest(const GlicFreControllerBrowserTest&) = delete;
+  GlicFreControllerBrowserTest& operator=(const GlicFreControllerBrowserTest&) =
+      delete;
+
   ~GlicFreControllerBrowserTest() override = default;
 
   void SetUpOnMainThread() override {
-    glic::test::InteractiveGlicTest::SetUpOnMainThread();
-    glic_test_environment().SetFRECompletion(false);
+    InProcessBrowserTest::SetUpOnMainThread();
+    identity_env_ = std::make_unique<signin::IdentityTestEnvironment>();
+
+    glic_fre_controller_ = std::make_unique<GlicFreController>(
+        browser()->profile(), identity_env_->identity_manager());
+  }
+
+  void TearDownOnMainThread() override {
+    InProcessBrowserTest::TearDownOnMainThread();
+    glic_fre_controller_.reset();
   }
 
   GlicFreController* glic_fre_controller() {
-    return glic_test_environment()
-        .GetService()
-        ->window_controller()
-        .fre_controller();
+    return glic_fre_controller_.get();
   }
 
   tabs::TabInterface* GetTabInterfaceForActiveWebContents(Browser* browser) {
@@ -42,17 +55,10 @@ class GlicFreControllerBrowserTest : public glic::test::InteractiveGlicTest {
     return tabs::TabInterface::MaybeGetFromContents(tab_web_contents);
   }
 
-  void WaitForFreShow() {
-    ASSERT_TRUE(base::test::RunUntil(
-        [&]() { return glic_fre_controller()->IsShowingDialogForTesting(); }));
-  }
-
-  void EnsureFreDoesNotShow() {
-    auto end_time = base::TimeTicks::Now() + base::Milliseconds(500);
-    ASSERT_TRUE(base::test::RunUntil(
-        [&]() { return end_time < base::TimeTicks::Now(); }));
-    ASSERT_FALSE(glic_fre_controller()->IsShowingDialogForTesting());
-  }
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+  std::unique_ptr<signin::IdentityTestEnvironment> identity_env_;
+  std::unique_ptr<GlicFreController> glic_fre_controller_;
 };
 
 IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
@@ -71,7 +77,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   glic_fre_controller()->ShowFreDialog(browser());
 
   // Verify the FRE dialog is shown.
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
 }
 
 IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
@@ -83,7 +89,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   glic_fre_controller()->ShowFreDialog(browser());
 
   // Verify the FRE dialog is shown.
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
 
   // Verify that another modal dialog cannot be shown now that the FRE is open.
   EXPECT_FALSE(tab->CanShowModalUI());
@@ -100,7 +106,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   browser()->tab_strip_model()->ActivateTabAt(0);
   EXPECT_TRUE(glic_fre_controller()->CanShowFreDialog(browser()));
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
 
   // Showing the FRE should be blocked as it is already open in the same tab.
   EXPECT_FALSE(glic_fre_controller()->CanShowFreDialog(browser()));
@@ -112,21 +118,11 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   chrome::AddTabAt(browser(), GURL("about:blank"), -1, true);
   browser()->tab_strip_model()->ActivateTabAt(0);
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
 
   // Close the FRE on the active tab.
   glic_fre_controller()->DismissFreIfOpenOnActiveTab(browser());
   EXPECT_FALSE(glic_fre_controller()->IsShowingDialogForTesting());
-}
-
-IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
-                       CookieSyncPreventsFreShow) {
-  glic_test_environment().SetResultForFutureCookieSyncInFre(false);
-  // Open the FRE dialog in a tab.
-  chrome::AddTabAt(browser(), GURL("about:blank"), -1, true);
-  browser()->tab_strip_model()->ActivateTabAt(0);
-  glic_fre_controller()->ShowFreDialog(browser());
-  EnsureFreDoesNotShow();
 }
 
 IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
@@ -135,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   chrome::AddTabAt(browser(), GURL("about:blank"), -1, true);
   browser()->tab_strip_model()->ActivateTabAt(0);
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
 
   // Open a new tab at the end of the tab strip and activate it.
   chrome::AddTabAt(browser(), GURL("about:blank"), -1, true);
@@ -154,7 +150,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   chrome::AddTabAt(browser(), GURL("about:blank"), -1, true);
   browser()->tab_strip_model()->ActivateTabAt(0);
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
   tabs::TabInterface* original_tab =
       GetTabInterfaceForActiveWebContents(browser());
 
@@ -166,7 +162,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   // Opening the FRE dialog should close the existing dialog.
   EXPECT_TRUE(glic_fre_controller()->CanShowFreDialog(browser()));
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
   // The original tab no longer has a modal, while the active one does.
   EXPECT_TRUE(original_tab->CanShowModalUI());
   EXPECT_FALSE(new_tab->CanShowModalUI());
@@ -180,7 +176,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   chrome::AddTabAt(browser(), GURL("about:blank"), -1, true);
   browser()->tab_strip_model()->ActivateTabAt(0);
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
   tabs::TabInterface* original_tab =
       GetTabInterfaceForActiveWebContents(browser());
 
@@ -195,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   // and a new FRE should not be opened in the active tab.
   EXPECT_FALSE(glic_fre_controller()->CanShowFreDialog(browser()));
   glic_fre_controller()->DismissFreIfOpenOnActiveTab(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
   EXPECT_FALSE(original_tab->CanShowModalUI());
 }
 
@@ -208,7 +204,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerBrowserTest,
   browser()->tab_strip_model()->ActivateTabAt(0);
 
   glic_fre_controller()->ShowFreDialog(browser());
-  WaitForFreShow();
+  EXPECT_TRUE(glic_fre_controller()->IsShowingDialogForTesting());
 
   // Open a new tab at the end of the tab strip and activate it.
   chrome::AddTabAt(browser(), GURL("about:blank"), 1, true);

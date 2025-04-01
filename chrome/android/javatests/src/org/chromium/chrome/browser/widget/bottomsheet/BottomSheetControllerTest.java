@@ -70,7 +70,6 @@ import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.url.GURL;
 
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -88,7 +87,7 @@ public class BottomSheetControllerTest {
             new ChromeTabbedActivityTestRule();
 
     @Rule
-    public final BlankCTATabInitialStateRule mIninialStateRule =
+    public final BlankCTATabInitialStateRule mInitialStateRule =
             new BlankCTATabInitialStateRule(sActivityTestRule, false);
 
     private ChromeTabbedActivity mActivity;
@@ -263,7 +262,7 @@ public class BottomSheetControllerTest {
     @Test
     @SmallTest
     @Feature({"BottomSheetController"})
-    public void testSheetPriorityInExpandedState() throws ExecutionException {
+    public void testSheetPriorityInExpandedState() {
         requestContentInSheet(mLowPriorityContent, true);
         expandSheet();
         requestContentInSheet(mHighPriorityContent, false);
@@ -389,7 +388,7 @@ public class BottomSheetControllerTest {
     @Test
     @MediumTest
     @Feature({"BottomSheetController"})
-    public void testSheetGoneAfterTabSwitcher() throws TimeoutException {
+    public void testSheetGoneAfterTabSwitcher() {
         requestContentInSheet(mLowPriorityContent, true);
         enterAndExitTabSwitcher();
         BottomSheetTestSupport.waitForState(mSheetController, SheetState.HIDDEN);
@@ -401,7 +400,7 @@ public class BottomSheetControllerTest {
     @Test
     @MediumTest
     @Feature({"BottomSheetController"})
-    public void testSheetGoneAfterTransitioningToAndFromSwitcher() throws TimeoutException {
+    public void testSheetGoneAfterTransitioningToAndFromSwitcher() {
         // Open a second tab.
         openNewTabInForeground();
 
@@ -480,9 +479,8 @@ public class BottomSheetControllerTest {
                 "The bottom sheet should be hidden.",
                 SheetState.HIDDEN,
                 mSheetController.getSheetState());
-        assertEquals(
+        assertNull(
                 "The bottom sheet is showing incorrect content.",
-                null,
                 mSheetController.getCurrentSheetContent());
     }
 
@@ -521,9 +519,8 @@ public class BottomSheetControllerTest {
                 "The bottom sheet should be hidden.",
                 SheetState.HIDDEN,
                 mSheetController.getSheetState());
-        assertEquals(
+        assertNull(
                 "The bottom sheet is showing incorrect content.",
-                null,
                 mSheetController.getCurrentSheetContent());
     }
 
@@ -550,9 +547,8 @@ public class BottomSheetControllerTest {
                 "The bottom sheet should be hidden.",
                 SheetState.HIDDEN,
                 mSheetController.getSheetState());
-        assertEquals(
+        assertNull(
                 "The bottom sheet is showing incorrect content.",
-                null,
                 mSheetController.getCurrentSheetContent());
 
         ThreadUtils.runOnUiThreadBlocking(
@@ -645,9 +641,8 @@ public class BottomSheetControllerTest {
 
         expandSheet();
 
-        assertEquals(
+        assertNull(
                 "The scrim should not be visible with a custom scrim lifecycle.",
-                null,
                 mScrimManager.getViewForTesting());
     }
 
@@ -678,7 +673,7 @@ public class BottomSheetControllerTest {
 
     @Test
     @MediumTest
-    public void testScrimTapClosesSheet() throws TimeoutException, ExecutionException {
+    public void testScrimTapClosesSheet() throws TimeoutException {
         requestContentInSheet(mHighPriorityContent, true);
         CallbackHelper closedCallbackHelper = new CallbackHelper();
         BottomSheetObserver observer =
@@ -745,7 +740,7 @@ public class BottomSheetControllerTest {
 
     @Test
     @MediumTest
-    public void testCollapseSheet() throws ExecutionException {
+    public void testCollapseSheet() {
         requestContentInSheet(mLowPriorityContent, true);
 
         ThreadUtils.runOnUiThreadBlocking(() -> mSheetController.collapseSheet(false));
@@ -758,7 +753,7 @@ public class BottomSheetControllerTest {
 
     @Test
     @MediumTest
-    public void testCollapseSheet_peekDisabled() throws ExecutionException {
+    public void testCollapseSheet_peekDisabled() {
         mLowPriorityContent.setPeekHeight(BottomSheetContent.HeightMode.DISABLED);
         requestContentInSheet(mLowPriorityContent, true);
 
@@ -917,7 +912,7 @@ public class BottomSheetControllerTest {
 
     @Test
     @MediumTest
-    public void testSheetPriorityDuringSuppression() throws ExecutionException {
+    public void testSheetPriorityDuringSuppression() {
         requestContentInSheet(mLowPriorityContent, true);
 
         ThreadUtils.runOnUiThreadBlocking(
@@ -951,7 +946,7 @@ public class BottomSheetControllerTest {
 
     @Test
     @MediumTest
-    public void testReplaceLowPriorityContentWhileOpen() throws ExecutionException {
+    public void testReplaceLowPriorityContentWhileOpen() {
         // Allow the content to be replaced without first closing the sheet.
         mLowPriorityContent.setCanSuppressInAnyState(true);
         requestContentInSheet(mLowPriorityContent, true);
@@ -1003,9 +998,8 @@ public class BottomSheetControllerTest {
                 "The bottom sheet should be hidden.",
                 SheetState.HIDDEN,
                 mSheetController.getSheetState());
-        assertEquals(
+        assertNull(
                 "The bottom sheet is showing incorrect content.",
-                null,
                 mSheetController.getCurrentSheetContent());
     }
 
@@ -1045,7 +1039,7 @@ public class BottomSheetControllerTest {
      * Enter and immediately exit the tab switcher. This function will assert that the sheet is not
      * showing in the tab switcher.
      */
-    private void enterAndExitTabSwitcher() throws TimeoutException {
+    private void enterAndExitTabSwitcher() {
         setTabSwitcherState(true);
 
         assertEquals(

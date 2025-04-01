@@ -39,8 +39,9 @@ export class CrLitElement extends LitElement {
     this.$ = new Proxy({}, {
       get(cache: ElementCache, id: string): HTMLElement|SVGElement {
         if (!self.hasUpdated && !self.isConnected) {
-          throw new Error(`CrLitElement ${
-              self.tagName} $ dictionary accessed before element is connected at least once.`);
+          const description = self.tagName + (self.id ? `#${self.id}` : '');
+          throw new Error(`CrLitElement ${description} accessed '$.${
+              id}' before connected at least once.`);
         }
 
         if (!self.hasUpdated) {
@@ -48,8 +49,9 @@ export class CrLitElement extends LitElement {
           // performUpdate() call below will cause an endless recursion. Local
           // DOM nodes should not be accessed within willUpdate() anyway.
           if (self.willUpdatePending_) {
-            throw new Error(`CrLitElement ${
-                self.tagName} tried to access this.$ within willUpdate().`);
+            const description = self.tagName + (self.id ? `#${self.id}` : '');
+            throw new Error(`CrLitElement ${description} accessed '$.${
+                id}' within willUpdate().`);
           }
 
           // See Case3 in `ensureInitialRender` docs.
@@ -137,9 +139,9 @@ export class CrLitElement extends LitElement {
             // 'undefined'.
             continue;
           }
-          this.fire(
+          this.dispatchEvent(new CustomEvent(
               `${toDashCase(key.toString())}-changed`,
-              {value: indexableThis[key]});
+              {composed: true, detail: {value: indexableThis[key]}}));
         }
       }
     }

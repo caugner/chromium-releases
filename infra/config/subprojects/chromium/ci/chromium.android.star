@@ -21,8 +21,10 @@ ci.defaults.set(
     cores = 8,
     os = os.LINUX_DEFAULT,
     gardener_rotations = gardener_rotations.ANDROID,
+    tree_closing_notifiers = ci.DEFAULT_TREE_CLOSING_NOTIFIERS,
     execution_timeout = ci.DEFAULT_EXECUTION_TIMEOUT,
     health_spec = health_spec.DEFAULT,
+    reclient_enabled = False,
     service_account = ci.DEFAULT_SERVICE_ACCOUNT,
     shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_enabled = True,
@@ -3624,9 +3626,6 @@ ci.builder(
     targets_settings = targets.settings(
         os_type = targets.os_type.ANDROID,
     ),
-    # TODO(crbug.com/390670398): Add it back to gardening once the builder is
-    # stable.
-    gardener_rotations = args.ignore_default(None),
     tree_closing = True,
     console_view_entry = consoles.console_view_entry(
         category = "builder_tester|x86",
@@ -4514,6 +4513,11 @@ ci.builder(
     ),
     contact_team_email = "clank-engprod@google.com",
     execution_timeout = 3 * time.hour,
+    # crbug.com/372192123 - downloading with "minimum" strategy doesn't work
+    # well for Android builds because some steps have additional inputs/outputs
+    # they are not configured in the build graph.
+    siso_output_local_strategy = "greedy",
+    siso_remote_linking = True,
 )
 
 ci.builder(
@@ -4591,6 +4595,7 @@ ci.builder(
             "chrome_public_test_apk": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/android.emulator_15.chrome_public_test_apk.filter",
+                    "--emulator-debug-tags=all",
                 ],
                 swarming = targets.swarming(
                     shards = 50,
@@ -4729,6 +4734,8 @@ ci.thin_tester(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/android.emulator_15_tablet.content_browsertests.filter",
                 ],
+                # TODO(crbug.com/388525813) Remove experiment once suite is stable
+                experiment_percentage = 100,
                 swarming = targets.swarming(
                     shards = 40,
                 ),
@@ -4736,6 +4743,7 @@ ci.thin_tester(
             "chrome_public_test_apk": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/android.emulator_15_tablet.chrome_public_test_apk.filter",
+                    "--emulator-debug-tags=all",
                 ],
             ),
             "chrome_public_unit_test_apk": targets.mixin(
@@ -4824,6 +4832,7 @@ ci.thin_tester(
             "chrome_public_test_apk": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/android.emulator_15_tablet_landscape.chrome_public_test_apk.filter",
+                    "--emulator-debug-tags=all",
                 ],
             ),
         },

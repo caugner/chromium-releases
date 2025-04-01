@@ -289,7 +289,6 @@ cq_build_perf_builder(
         category = "windows",
         short_name = "ninja",
     ),
-    siso_configs = ["builder"],
     siso_enabled = False,
 )
 
@@ -322,7 +321,6 @@ cq_build_perf_builder(
         category = "windows",
         short_name = "siso",
     ),
-    siso_configs = ["builder"],
 )
 
 ci_build_perf_builder(
@@ -679,7 +677,6 @@ This builder measures build performance for Windows developer builds, by simulat
         short_name = "dev",
     ),
     reclient_jobs = 1000,
-    siso_configs = [],
 )
 
 developer_build_perf_builder(

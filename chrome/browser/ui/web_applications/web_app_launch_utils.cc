@@ -35,7 +35,6 @@
 #include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/apps/link_capturing/enable_link_capturing_infobar_delegate.h"
-#include "chrome/browser/apps/link_capturing/link_capturing_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/sessions/app_session_service.h"
@@ -60,6 +59,7 @@
 #include "chrome/browser/ui/web_applications/web_app_launch_process.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
 #include "chrome/browser/ui/web_applications/web_app_tabbed_utils.h"
+#include "chrome/browser/web_applications/link_capturing_features.h"
 #include "chrome/browser/web_applications/locks/app_lock.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom-shared.h"
 #include "chrome/browser/web_applications/navigation_capturing_log.h"
@@ -432,7 +432,9 @@ bool MaybeHandleIntentPickerFocusExistingOrNavigateExisting(
   }
   std::optional<AppBrowserController::BrowserAndTabIndex> existing_app_host =
       AppBrowserController::FindTopLevelBrowsingContextForWebApp(
-          *profile, app_id, Browser::TYPE_APP);
+          *profile, app_id, Browser::TYPE_APP,
+          /*for_focus_existing=*/client_mode ==
+              LaunchHandler::ClientMode::kFocusExisting);
   if (!existing_app_host.has_value()) {
     return false;
   }
@@ -739,7 +741,7 @@ content::WebContents* NavigateWebAppUsingParams(const std::string& app_id,
     // This block safe guards against misuse of APIs (that can cause
     // GetCapturingSystemAppForURL returning the wrong value).
     //
-    // TODO(http://crbug.com/1408946): Remove this block when we find a better
+    // TODO(crbug.com/40253765): Remove this block when we find a better
     // way to prevent API misuse (e.g. by ensuring test coverage for new
     // features that could trigger this code) or this code path is no longer
     // possible.
@@ -770,7 +772,7 @@ void RecordAppWindowLaunchMetric(Profile* profile,
   }
 
   DisplayMode display =
-      provider->registrar_unsafe().GetEffectiveDisplayModeFromManifest(app_id);
+      provider->registrar_unsafe().GetAppEffectiveDisplayMode(app_id);
   if (display != DisplayMode::kUndefined) {
     DCHECK_LT(DisplayMode::kUndefined, display);
     DCHECK_LE(display, DisplayMode::kMaxValue);
@@ -805,6 +807,8 @@ void RecordAppTabLaunchMetric(Profile* profile,
     return;
   }
 
+  // Measure the display mode that was specified in the manifest if this app was
+  // set to open in a standalone window.
   DisplayMode display =
       provider->registrar_unsafe().GetEffectiveDisplayModeFromManifest(app_id);
   if (display != DisplayMode::kUndefined) {

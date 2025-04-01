@@ -125,4 +125,10 @@ bool GtkUiPlatformX11::IncludeFontScaleInDeviceScale() const {
   return true;
 }
 
+bool GtkUiPlatformX11::IncludeScaleInCursorSize() const {
+  // GTK4 supports per-monitor scaling in 4.9.2+, so the gtk-cursor-theme-size
+  // is not premultiplied by the scale factor.
+  return GtkCheckVersion(4, 9, 2);
+}
+
 }  // namespace gtk

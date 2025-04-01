@@ -730,7 +730,9 @@ class Browser : public TabStripModelObserver,
   void TabPinnedStateChanged(TabStripModel* tab_strip_model,
                              content::WebContents* contents,
                              int index) override;
-  void TabGroupedStateChanged(std::optional<tab_groups::TabGroupId> group,
+  void TabGroupedStateChanged(TabStripModel* tab_strip_model,
+                              std::optional<tab_groups::TabGroupId> old_group,
+                              std::optional<tab_groups::TabGroupId> new_group,
                               tabs::TabInterface* tab,
                               int index) override;
   void TabStripEmpty() override;
@@ -747,6 +749,8 @@ class Browser : public TabStripModelObserver,
   bool CanOverscrollContent() override;
   bool ShouldPreserveAbortedURLs(content::WebContents* source) override;
   void SetFocusToLocationBar() override;
+  bool PreHandleMouseEvent(content::WebContents* source,
+                           const blink::WebMouseEvent& event) override;
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       content::WebContents* source,
       const input::NativeWebKeyboardEvent& event) override;
@@ -864,6 +868,7 @@ class Browser : public TabStripModelObserver,
   base::CallbackListSubscription RegisterDidBecomeInactive(
       DidBecomeInactiveCallback callback) override;
   ExclusiveAccessManager* GetExclusiveAccessManager() override;
+  ImmersiveModeController* GetImmersiveModeController() override;
   BrowserActions* GetActions() override;
   Type GetType() const override;
   BrowserUserEducationInterface* GetUserEducationInterface() override;
@@ -871,7 +876,7 @@ class Browser : public TabStripModelObserver,
   std::vector<tabs::TabInterface*> GetAllTabInterfaces() override;
   Browser* GetBrowserForMigrationOnly() override;
 
-  // Called by BrowserView when on active changes.
+  // Called by BrowserView on active change for the browser.
   void DidBecomeActive();
   void DidBecomeInactive();
 
@@ -1010,7 +1015,7 @@ class Browser : public TabStripModelObserver,
                           const base::FilePath& path) override;
   bool CanUseWindowingControls(
       content::RenderFrameHost* requesting_frame) override;
-  void OnCanResizeFromWebAPIChanged() override;
+  void OnWebApiWindowResizableChanged() override;
   bool GetCanResize() override;
   void MinimizeFromWebAPI() override;
   void MaximizeFromWebAPI() override;
@@ -1301,6 +1306,9 @@ class Browser : public TabStripModelObserver,
 
   // This Browser's window.
   raw_ptr<BrowserWindow, DanglingUntriaged> window_;
+
+  // The active state of this browser.
+  bool is_active_ = false;
 
   std::unique_ptr<TabStripModelDelegate> const tab_strip_model_delegate_;
   std::unique_ptr<TabStripModel> const tab_strip_model_;

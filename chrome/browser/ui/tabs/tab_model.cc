@@ -172,7 +172,9 @@ base::CallbackListSubscription TabModel::RegisterWillDiscardContents(
 }
 
 bool TabModel::IsActivated() const {
-  return GetModelForTabInterface()->GetActiveTab() == this;
+  // TODO(crbug.com/407148703): Remove the `owning_model_` check once clients of
+  // TabInterface::MaybeGetFromContents() have been removed.
+  return owning_model_ && GetModelForTabInterface()->GetActiveTab() == this;
 }
 
 base::CallbackListSubscription TabModel::RegisterDidActivate(
@@ -296,7 +298,6 @@ TabStripModel* TabModel::GetModelForTabInterface() const {
 
 TabModel::ScopedTabModalUIImpl::ScopedTabModalUIImpl(TabModel* tab)
     : tab_(tab->weak_factory_.GetWeakPtr()) {
-  CHECK(!tab_->showing_modal_ui_);
   tab_->showing_modal_ui_ = true;
   tab_->modal_ui_changed_callback_list_.Notify(tab_.get());
 }

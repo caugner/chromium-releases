@@ -302,6 +302,7 @@ static const char* const kSwitchNames[] = {
     switches::kDisableExplicitDmaFences,
     switches::kOzoneDumpFile,
     switches::kEnableNativeGpuMemoryBuffers,
+    switches::kRenderNodeOverride,
 #endif
 #if BUILDFLAG(IS_LINUX)
     switches::kX11Display,
@@ -1300,6 +1301,11 @@ bool GpuProcessHost::LaunchGpuProcess() {
 
   if (browser_command_line.HasSwitch(switches::kDisableFrameRateLimit))
     cmd_line->AppendSwitch(switches::kDisableGpuVsync);
+
+  if (browser_command_line.HasSwitch(switches::kForceHighPerformanceGPU)) {
+    cmd_line->AppendSwitch(gpu::GpuDriverBugWorkaroundTypeToString(
+        gpu::FORCE_HIGH_PERFORMANCE_GPU));
+  }
 
   std::vector<const char*> gpu_workarounds;
   gpu::GpuDriverBugList::AppendAllWorkarounds(&gpu_workarounds);

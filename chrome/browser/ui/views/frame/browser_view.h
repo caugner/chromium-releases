@@ -121,12 +121,8 @@ class WatermarkView;
 }
 
 namespace glic {
-class BorderView;
+class GlicBorderView;
 }  // namespace glic
-
-namespace segmentation_platform {
-struct ClassificationResult;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserView
@@ -291,13 +287,17 @@ class BrowserView : public BrowserWindow,
   }
 
   // Accessor for the contents and devtools WebViews.
-  ContentsWebView* contents_web_view() { return contents_web_view_; }
+  // TODO(crbug.com/393451405): This accessor is used extensively, audit
+  // whether this breaks any use cases when side by side is enabled.
+  ContentsWebView* contents_web_view() {
+    return static_cast<ContentsWebView*>(GetContentsView());
+  }
   views::WebView* devtools_web_view() { return devtools_web_view_; }
 
   ScrimView* contents_scrim_view() { return contents_scrim_view_; }
 
 #if BUILDFLAG(ENABLE_GLIC)
-  glic::BorderView* glic_border() const { return glic_border_; }
+  glic::GlicBorderView* glic_border() const { return glic_border_; }
 #endif
 
   ScrimView* window_scrim_view_for_testing() { return window_scrim_view_; }
@@ -470,12 +470,13 @@ class BrowserView : public BrowserWindow,
   void UpdateWebAppStatusIconsVisiblity();
 
   // Getter for the `window.setResizable(bool)` state.
-  std::optional<bool> GetCanResizeFromWebAPI() const;
+  std::optional<bool> GetWebApiWindowResizable() const;
 
-  // Return a pointer to the single tab (if any) that is inactive but part of
-  // a split view. Assumes there is max one split view in the tab strip, it
-  // contains exactly two tabs, and one of those tabs is currently active.
-  const tabs::TabInterface* GetInactiveSplitTab();
+  // Return the tab strip index of the single tab (if any) that is inactive but
+  // part of a split view. Assumes there is max one split view in the tab
+  // strip, it contains exactly two tabs, and one of those tabs is currently
+  // active.
+  int GetInactiveSplitTabIndex();
 
   // Display the current active split view as a series of multiple side-by-side
   // web contents.
@@ -484,6 +485,9 @@ class BrowserView : public BrowserWindow,
   // Display only the current active tab's web contents, hiding any previous
   // side-by-side display.
   void HideSplitView();
+
+  // Activate the tab containing the given WebContents (if any).
+  void ActivateWebContents(content::WebContents* web_contents);
 
   // BrowserWindow:
   void Show() override;
@@ -534,7 +538,7 @@ class BrowserView : public BrowserWindow,
   void Maximize() override;
   void Minimize() override;
   void Restore() override;
-  void OnCanResizeFromWebAPIChanged() override;
+  void OnWebApiWindowResizableChanged() override;
   bool GetCanResize() override;
   ui::mojom::WindowShowState GetWindowShowState() const override;
   void EnterFullscreen(const GURL& url,
@@ -597,11 +601,6 @@ class BrowserView : public BrowserWindow,
   sharing_hub::ScreenshotCapturedBubble* ShowScreenshotCapturedBubble(
       content::WebContents* contents,
       const gfx::Image& image) override;
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  // TODO(crbug.com/339262105): Clean up the old password promo methods after
-  // the generic promo launch.
-  void VerifyUserEligibilityIOSPasswordPromoBubble() override;
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
   qrcode_generator::QRCodeGeneratorBubbleView* ShowQRCodeGeneratorBubble(
       content::WebContents* contents,
       const GURL& url,
@@ -643,6 +642,7 @@ class BrowserView : public BrowserWindow,
       base::OnceCallback<void(bool)> callback) override;
   void UserChangedTheme(BrowserThemeChangeType theme_change_type) override;
   void ShowAppMenu() override;
+  bool PreHandleMouseEvent(const blink::WebMouseEvent& event) override;
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       const input::NativeWebKeyboardEvent& event) override;
   bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override;
@@ -676,6 +676,7 @@ class BrowserView : public BrowserWindow,
   BookmarkBarView* GetBookmarkBarView() const;
   LocationBarView* GetLocationBarView() const;
 
+  bool IsFeaturePromoQueued(const base::Feature& iph_feature) const override;
   bool IsFeaturePromoActive(const base::Feature& iph_feature) const override;
   user_education::FeaturePromoResult CanShowFeaturePromo(
       const base::Feature& iph_feature) const override;
@@ -882,6 +883,10 @@ class BrowserView : public BrowserWindow,
     return watermark_view_;
   }
 
+  MultiContentsView* multi_contents_view_for_testing() {
+    return multi_contents_view_;
+  }
+
   // This value is used in a common calculation in NonClientFrameView
   // subclasses. This must be added to the origin of the first painted pixel of
   // NonClientFrameView to get the correct offset. See
@@ -979,20 +984,6 @@ class BrowserView : public BrowserWindow,
   // type, and there should be a subsequent re-layout to show it.
   // |contents| can be null.
   bool MaybeShowInfoBar(content::WebContents* contents);
-
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  // TODO(crbug.com/339262105): Clean up the old password promo methods after
-  // the generic promo launch.
-  // Decides whether to show the iOS Password Promo Bubble based on segmentation
-  // platform classification results (is passed as a callback to the
-  // segmentation API).
-  void MaybeShowIOSPasswordPromoBubble(
-      const segmentation_platform::ClassificationResult& result);
-  // TODO(crbug.com/339262105): Clean up the old password promo methods after
-  // the generic promo launch.
-  // Shows the iOS Password Promo Bubble.
-  void ShowIOSPasswordPromoBubble();
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
   // Updates devtools window for given contents. This method will show docked
   // devtools window for inspected |web_contents| that has docked devtools
@@ -1160,7 +1151,7 @@ class BrowserView : public BrowserWindow,
   // |  --------------------------------------------------------------  |
   // |  |  devtools_web_view_                                        |  |
   // |  |------------------------------------------------------------|  |
-  // |  |  contents_web_view_                                        |  |
+  // |  |  contents_web_view_ (or multi_contents_view_ if defined)   |  |
   // |  --------------------------------------------------------------  |
   // |------------------------------------------------------------------|
   // | Active downloads (download_shelf_)                               |
@@ -1243,10 +1234,9 @@ class BrowserView : public BrowserWindow,
   // The InfoBarContainerView that contains InfoBars for the current tab.
   raw_ptr<InfoBarContainerView> infobar_container_ = nullptr;
 
-  // The view that contains the active WebContents.
-  // TODO(crbug.com/393451405): Remove this direct reference when side by side
-  // is enabled, going through multi_contents_view_ for the active contents web
-  // view.
+  // The view that contains the active WebContents. Will be nullptr if the
+  // side-by-side feature is enabled; use multi_contents_view_ and its nested
+  // contents views instead.
   raw_ptr<ContentsWebView> contents_web_view_ = nullptr;
 
   // The view that contains all visible WebContents.
@@ -1257,9 +1247,9 @@ class BrowserView : public BrowserWindow,
   raw_ptr<ScrimView> contents_scrim_view_ = nullptr;
 
   // It draws a border around the web contents area, on top of the
-  // `contents_web_view_`. Null if the feature isn't enabled, or the platform
+  // WebContents. Null if the feature isn't enabled, or the platform
   // isn't supported.
-  raw_ptr<glic::BorderView> glic_border_ = nullptr;
+  raw_ptr<glic::GlicBorderView> glic_border_ = nullptr;
 
   // The view that contains devtools window for the selected WebContents.
   raw_ptr<views::WebView> devtools_web_view_ = nullptr;

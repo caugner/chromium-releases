@@ -22,6 +22,8 @@ AutofillSaveCardDelegate::AutofillSaveCardDelegate(
 AutofillSaveCardDelegate::~AutofillSaveCardDelegate() = default;
 
 void AutofillSaveCardDelegate::OnUiShown() {
+  // TODO(crbug.com/394337666): Remove logging `AutofillMetrics::InfoBarMetric`
+  // for iOS.
   LogInfoBarAction(AutofillMetrics::INFOBAR_SHOWN);
 }
 
@@ -52,6 +54,8 @@ void AutofillSaveCardDelegate::OnUiCanceled() {
   RunSaveCardPromptCallback(
       payments::PaymentsAutofillClient::SaveCardOfferUserDecision::kDeclined,
       /*user_provided_details=*/{});
+  // TODO(crbug.com/394337666): Remove logging `AutofillMetrics::InfoBarMetric`
+  // for iOS.
   LogInfoBarAction(AutofillMetrics::INFOBAR_DENIED);
   if (options_.card_save_type !=
       payments::PaymentsAutofillClient::CardSaveType::kCvcSaveOnly) {
@@ -76,6 +80,11 @@ void AutofillSaveCardDelegate::OnUiIgnored() {
   }
 }
 
+const payments::PaymentsAutofillClient::SaveCreditCardOptions&
+AutofillSaveCardDelegate::GetSaveCreditCardOptions() const {
+  return options_;
+}
+
 void AutofillSaveCardDelegate::OnFinishedGatheringConsent(
     payments::PaymentsAutofillClient::SaveCardOfferUserDecision user_decision,
     payments::PaymentsAutofillClient::UserProvidedCardDetails
@@ -91,13 +100,24 @@ void AutofillSaveCardDelegate::RunSaveCardPromptCallback(
     payments::PaymentsAutofillClient::UserProvidedCardDetails
         user_provided_details) {
   if (is_for_upload()) {
-    absl::get<payments::PaymentsAutofillClient::UploadSaveCardPromptCallback>(
-        std::move(save_card_callback_))
+    payments::PaymentsAutofillClient::UploadSaveCardPromptCallback
+        upload_save_card_callback = absl::get<
+            payments::PaymentsAutofillClient::UploadSaveCardPromptCallback>(
+            std::move(save_card_callback_));
+    if (upload_save_card_callback.is_null()) {
+      return;
+    }
+    std::move(upload_save_card_callback)
         .Run(user_decision, user_provided_details);
   } else {
-    absl::get<payments::PaymentsAutofillClient::LocalSaveCardPromptCallback>(
-        std::move(save_card_callback_))
-        .Run(user_decision);
+    payments::PaymentsAutofillClient::LocalSaveCardPromptCallback
+        local_save_card_callback = absl::get<
+            payments::PaymentsAutofillClient::LocalSaveCardPromptCallback>(
+            std::move(save_card_callback_));
+    if (local_save_card_callback.is_null()) {
+      return;
+    }
+    std::move(local_save_card_callback).Run(user_decision);
   }
 }
 

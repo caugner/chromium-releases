@@ -21,6 +21,7 @@ try_.defaults.set(
     compilator_cores = 32,
     execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
     orchestrator_cores = 4,
+    reclient_enabled = False,
     service_account = try_.DEFAULT_SERVICE_ACCOUNT,
     siso_enabled = True,
     # crbug.com/372192123 - downloading with "minimum" strategy doesn't work
@@ -481,6 +482,7 @@ try_.builder(
                 "//chrome/android:validate_expectations",
                 "//tools/binary_size:binary_size_trybot_py",
             ],
+            "arm64_size_config_json": "config/TrichromeLibrary64_size_config.json",
             "compile_targets": [
                 "check_chrome_static_initializers",
                 "trichrome_32_minimal_apks",
@@ -1550,6 +1552,7 @@ try_.builder(
 try_.gpu.optional_tests_builder(
     name = "android_optional_gpu_tests_rel",
     branch_selector = branches.selector.ANDROID_BRANCHES,
+    description_html = "Runs GPU tests on Pixel 4 devices. Only automatically added to CLs that touch GPU-related files.",
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
@@ -1637,12 +1640,8 @@ try_.gpu.optional_tests_builder(
         os_type = targets.os_type.ANDROID,
         use_android_merge_script_by_default = False,
     ),
-    pool = "luci.chromium.gpu.try",
-    builderless = True,
-    ssd = None,
-    free_space = None,
+    contact_team_email = "chrome-gpu-infra@google.com",
     main_list_view = "try",
-    max_concurrent_builds = 10,
     tryjob = try_.job(
         location_filters = [
             # Inclusion filters.
@@ -1681,6 +1680,7 @@ try_.gpu.optional_tests_builder(
 try_.gpu.optional_tests_builder(
     name = "gpu-fyi-cq-android-arm64",
     branch_selector = branches.selector.ANDROID_BRANCHES,
+    description_html = "Runs GPU tests on Pixel 6 devices. Only automatically added to CLs that touch GPU-related files.",
     mirrors = [
         "ci/GPU FYI Android arm64 Builder",
         "ci/Android FYI Release (Pixel 6)",
@@ -1689,12 +1689,8 @@ try_.gpu.optional_tests_builder(
         retry_failed_shards = False,
     ),
     gn_args = "ci/GPU FYI Android arm64 Builder",
-    pool = "luci.chromium.gpu.try",
-    builderless = True,
-    ssd = None,
-    free_space = None,
+    contact_team_email = "chrome-gpu-infra@google.com",
     main_list_view = "try",
-    max_concurrent_builds = 10,
     tryjob = try_.job(
         location_filters = [
             # Inclusion filters.
