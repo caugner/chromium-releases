@@ -107,6 +107,7 @@
 <translation id="1810764548349082891">Предпросмотр недоступен</translation>
 <translation id="1812302367230252929">Амхарский, транслитерация</translation>
 <translation id="1813278315230285598">Службы</translation>
+<translation id="181434555916624618">Результаты с изображением людей пока недоступны. Попробуйте ввести другой запрос.</translation>
 <translation id="1829129547161959350">Пингвин</translation>
 <translation id="183183971458492120">Загрузка данных…</translation>
 <translation id="1832073788765803750">Катакана половинной ширины</translation>
@@ -369,7 +370,7 @@
 <translation id="3906232975181435906">Установка мобильного профиля, сеть <ph name="NETWORK_INDEX" /> из <ph name="NETWORK_COUNT" />, <ph name="NETWORK_NAME" /></translation>
 <translation id="3924145049010392604">Meta</translation>
 <translation id="3943857333388298514">Вставить</translation>
-<translation id="3950820424414687140">Вход</translation>
+<translation id="3950820424414687140">Войти</translation>
 <translation id="3952872973865944257">Телугу, фонетический</translation>
 <translation id="3958548648197196644">Киви</translation>
 <translation id="397105322502079400">Вычисление…</translation>
@@ -588,7 +589,7 @@
 <translation id="5473333559083690127">Повторно введите новый PIN-код</translation>
 <translation id="5489067830765222292">Латышский</translation>
 <translation id="5489965683297092283">Фильтр "<ph name="FILTER_NAME" />" отключен.</translation>
-<translation id="5494920125229734069">Выделить все</translation>
+<translation id="5494920125229734069">Выбрать все</translation>
 <translation id="5500122897333236901">Исландский</translation>
 <translation id="5508696409934741614">Точки</translation>
 <translation id="5522908512596376669">Файлы отображаются в виде списка.</translation>

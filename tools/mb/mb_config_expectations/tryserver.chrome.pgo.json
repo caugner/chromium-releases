@@ -15,7 +15,6 @@
       "target_os": "android",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -35,7 +34,6 @@
       "target_os": "android",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -49,7 +47,6 @@
       "symbol_level": 1,
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -67,7 +64,6 @@
       "target_cpu": "arm64",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -85,7 +81,6 @@
       "target_cpu": "x64",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -100,7 +95,6 @@
       "target_cpu": "arm64",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -115,7 +109,6 @@
       "target_cpu": "x86",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   },
@@ -130,7 +123,6 @@
       "target_cpu": "x64",
       "use_reclient": false,
       "use_remoteexec": true,
-      "use_siso": true,
       "v8_is_on_release_branch": true
     }
   }

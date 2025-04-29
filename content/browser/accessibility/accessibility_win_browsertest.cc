@@ -2277,12 +2277,12 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   Microsoft::WRL::ComPtr<IAccessibleText> paragraph_text;
   SetUpSampleParagraph(&paragraph_text, ui::AXMode::kNativeAPIs |
                                             ui::AXMode::kWebContents |
-                                            ui::AXMode::kScreenReader);
+                                            ui::AXMode::kExtendedProperties);
 
   AccessibilityNotificationWaiter waiter(
       shell()->web_contents(),
       ui::AXMode::kNativeAPIs | ui::AXMode::kWebContents |
-          ui::AXMode::kScreenReader | ui::AXMode::kInlineTextBoxes,
+          ui::AXMode::kExtendedProperties | ui::AXMode::kInlineTextBoxes,
       ax::mojom::Event::kLoadComplete);
 
   // Calling `get_characterExtents` will enable `ui::AXMode::kInlineTextBoxes`
@@ -2342,7 +2342,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   EXPECT_TRUE(found);
 
   // Remove all accessibility modes.
-  content::BrowserAccessibilityState::GetInstance()->ResetAccessibilityMode();
+  content::BrowserAccessibilityState::GetInstance()
+      ->DisableProcessAccessibility();
 
   // Ensure accessibility is not enabled before we begin the test.
   EXPECT_TRUE(content::BrowserAccessibilityStateImpl::GetInstance()
@@ -3664,6 +3665,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   ASSERT_EQ(ROLE_SYSTEM_STATICTEXT, abc_role)
       << "Wrong role, was: " << IAccessible2RoleToString(abc_role);
 
+  Microsoft::WRL::ComPtr<IAccessibleText> abc_text;
+  ASSERT_HRESULT_SUCCEEDED(abc.As(&abc_text));
+  ASSERT_HRESULT_SUCCEEDED(abc_text->get_nCharacters(&n_characters));
+  ASSERT_EQ(3, n_characters);
+
   Microsoft::WRL::ComPtr<IAccessibleTextSelectionContainer> selection_container;
   ASSERT_HRESULT_SUCCEEDED(document.As(&selection_container));
 
@@ -3685,10 +3691,10 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
       received_selections.Receive(), received_selections.ReceiveSize()));
   ASSERT_EQ(1, received_selections.size());
 
-  EXPECT_EQ(paragraph_text.Get(), received_selections[0].startObj);
+  EXPECT_EQ(abc_text.Get(), received_selections[0].startObj);
   EXPECT_EQ(received_selections[0].startOffset, 0);
-  EXPECT_EQ(paragraph_text.Get(), received_selections[0].endObj);
-  ASSERT_EQ(received_selections[0].endOffset, 3);
+  EXPECT_EQ(abc_text.Get(), received_selections[0].endObj);
+  ASSERT_EQ(received_selections[0].endOffset, 1);
   ASSERT_EQ(received_selections[0].startIsActive, false);
 
   // Get the first link.
@@ -3723,6 +3729,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   ASSERT_EQ(ROLE_SYSTEM_STATICTEXT, def_role)
       << "Wrong role, was: " << IAccessible2RoleToString(def_role);
 
+  Microsoft::WRL::ComPtr<IAccessibleText> def_text;
+  ASSERT_HRESULT_SUCCEEDED(def.As(&def_text));
+  ASSERT_HRESULT_SUCCEEDED(def_text->get_nCharacters(&n_characters));
+  ASSERT_EQ(3, n_characters);
+
   Microsoft::WRL::ComPtr<IAccessible2> ghi;
   ASSERT_HRESULT_SUCCEEDED(QueryIAccessible2(
       GetAccessibleFromVariant(paragraph.Get(), paragraph_children[2].AsInput())
@@ -3732,6 +3743,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   ASSERT_HRESULT_SUCCEEDED(ghi->role(&ghi_role));
   ASSERT_EQ(ROLE_SYSTEM_STATICTEXT, ghi_role)
       << "Wrong role, was: " << IAccessible2RoleToString(ghi_role);
+
+  Microsoft::WRL::ComPtr<IAccessibleText> ghi_text;
+  ASSERT_HRESULT_SUCCEEDED(ghi.As(&ghi_text));
+  ASSERT_HRESULT_SUCCEEDED(ghi_text->get_nCharacters(&n_characters));
+  ASSERT_EQ(3, n_characters);
 
   // Select the first link by selecting its embedded object character.
   received_selections = ui::ScopedCoMemArray<IA2TextSelection>();
@@ -3751,10 +3767,10 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
       received_selections.Receive(), received_selections.ReceiveSize()));
   ASSERT_EQ(1, received_selections.size());
 
-  EXPECT_EQ(received_selections[0].startOffset, 7);
-  EXPECT_EQ(paragraph_text.Get(), received_selections[0].startObj);
+  EXPECT_EQ(received_selections[0].startOffset, 3);
+  EXPECT_EQ(abc_text.Get(), received_selections[0].startObj);
   ASSERT_EQ(received_selections[0].endOffset, 3);
-  EXPECT_EQ(first_link_text.Get(), received_selections[0].endObj);
+  EXPECT_EQ(def_text.Get(), received_selections[0].endObj);
   ASSERT_EQ(received_selections[0].startIsActive, false);
 }
 
@@ -3821,6 +3837,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   ASSERT_EQ(ROLE_SYSTEM_STATICTEXT, def_role)
       << "Wrong role, was: " << IAccessible2RoleToString(def_role);
 
+  Microsoft::WRL::ComPtr<IAccessibleText> def_text;
+  ASSERT_HRESULT_SUCCEEDED(def.As(&def_text));
+  ASSERT_HRESULT_SUCCEEDED(def_text->get_nCharacters(&n_characters));
+  ASSERT_EQ(3, n_characters);
+
   // Test setting the selection to "def".
   std::vector<IA2TextSelection> requested_selections;
   IA2TextSelection requested_selection_range = {
@@ -3842,9 +3863,12 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
       received_selections.Receive(), received_selections.ReceiveSize()));
   ASSERT_EQ(1, received_selections.size());
 
-  EXPECT_EQ(first_link_text.Get(), received_selections[0].startObj);
+  // TODO(accessibility) Don't expose IAccessibleText on text leaf nodes, which
+  // means that the startObj/endObj will become first_link_text (the parent link
+  // of the def_text text node).
+  EXPECT_EQ(def_text.Get(), received_selections[0].startObj);
   EXPECT_EQ(received_selections[0].startOffset, 0);
-  EXPECT_EQ(first_link_text.Get(), received_selections[0].endObj);
+  EXPECT_EQ(def_text.Get(), received_selections[0].endObj);
   ASSERT_EQ(received_selections[0].endOffset, 3);
   ASSERT_EQ(received_selections[0].startIsActive, false);
 
@@ -4031,6 +4055,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   ASSERT_EQ(ROLE_SYSTEM_STATICTEXT, def_role)
       << "Wrong role, was: " << IAccessible2RoleToString(def_role);
 
+  Microsoft::WRL::ComPtr<IAccessibleText> def_text;
+  ASSERT_HRESULT_SUCCEEDED(def.As(&def_text));
+  ASSERT_HRESULT_SUCCEEDED(def_text->get_nCharacters(&n_characters));
+  ASSERT_EQ(3, n_characters);
+
   // Test setting the selection starting from offset 0 on the empty link's
   // hypertext to the end of the paragraph.
   std::vector<IA2TextSelection> requested_selections;
@@ -4055,8 +4084,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
 
   EXPECT_EQ(link_text.Get(), received_selections[0].startObj);
   EXPECT_EQ(received_selections[0].startOffset, 0);
-  EXPECT_EQ(paragraph_text.Get(), received_selections[0].endObj);
-  ASSERT_EQ(received_selections[0].endOffset, 7);
+  EXPECT_EQ(def_text.Get(), received_selections[0].endObj);
+  ASSERT_EQ(received_selections[0].endOffset, 3);
   ASSERT_EQ(received_selections[0].startIsActive, false);
 }
 
@@ -6218,7 +6247,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinUIASelectivelyEnabledBrowserTest,
 
   // Web content accessibility support should now be enabled.
   expected_mode |= ui::AXMode::kNativeAPIs | ui::AXMode::kWebContents |
-                   ui::AXMode::kScreenReader;
+                   ui::AXMode::kExtendedProperties;
   EXPECT_EQ(expected_mode, content::BrowserAccessibilityStateImpl::GetInstance()
                                ->GetAccessibilityMode());
   ASSERT_TRUE(waiter.WaitForNotification());
@@ -6244,7 +6273,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinUIASelectivelyEnabledBrowserTest,
         UIA_LabeledByPropertyId, variant.Receive()));
   }
   // Now check that we have complete accessibility support enabled.
-  expected_mode |= ui::AXMode::kScreenReader;
+  expected_mode |= ui::AXMode::kExtendedProperties;
   EXPECT_EQ(expected_mode, content::BrowserAccessibilityStateImpl::GetInstance()
                                ->GetAccessibilityMode());
 
@@ -6555,7 +6584,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
 
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(shell()->web_contents());
-  BrowserAccessibilityState::GetInstance()->ResetAccessibilityMode();
+  BrowserAccessibilityState::GetInstance()->DisableProcessAccessibility();
   auto accessibility_mode = web_contents->GetAccessibilityMode();
   ASSERT_TRUE(accessibility_mode.is_mode_off());
   EXPECT_EQ(nullptr, GetManager());
@@ -6583,7 +6612,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityWinBrowserTest,
   int32_t unique_id_2 = button_2->GetAXPlatformNode()->GetUniqueId();
 
   // Turn accessibility off again.
-  BrowserAccessibilityState::GetInstance()->ResetAccessibilityMode();
+  BrowserAccessibilityState::GetInstance()->DisableProcessAccessibility();
   accessibility_mode = web_contents->GetAccessibilityMode();
   ASSERT_TRUE(accessibility_mode.is_mode_off());
   EXPECT_EQ(nullptr, GetManager());

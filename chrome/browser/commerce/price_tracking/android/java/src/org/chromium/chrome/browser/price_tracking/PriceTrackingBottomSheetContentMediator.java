@@ -4,13 +4,12 @@
 
 package org.chromium.chrome.browser.price_tracking;
 
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_BUTTON_BACKGROUND_COLOR;
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_BUTTON_ENABLED;
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_BUTTON_FOREGROUND_COLOR;
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_BUTTON_ICON;
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_BUTTON_ON_CLICK_LISTENER;
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_BUTTON_TEXT;
-import static org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetProperties.PRICE_TRACKING_TITLE;
+import static org.chromium.chrome.browser.price_tracking.PriceTrackingBottomSheetContentProperties.PRICE_TRACKING_BUTTON_BACKGROUND_COLOR;
+import static org.chromium.chrome.browser.price_tracking.PriceTrackingBottomSheetContentProperties.PRICE_TRACKING_BUTTON_FOREGROUND_COLOR;
+import static org.chromium.chrome.browser.price_tracking.PriceTrackingBottomSheetContentProperties.PRICE_TRACKING_BUTTON_ICON;
+import static org.chromium.chrome.browser.price_tracking.PriceTrackingBottomSheetContentProperties.PRICE_TRACKING_BUTTON_ON_CLICK_LISTENER;
+import static org.chromium.chrome.browser.price_tracking.PriceTrackingBottomSheetContentProperties.PRICE_TRACKING_BUTTON_TEXT;
+import static org.chromium.chrome.browser.price_tracking.PriceTrackingBottomSheetContentProperties.PRICE_TRACKING_TITLE;
 
 import android.content.Context;
 import android.view.View.OnClickListener;
@@ -19,81 +18,92 @@ import androidx.annotation.NonNull;
 import androidx.annotation.StringRes;
 
 import org.chromium.base.Callback;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.Supplier;
 import org.chromium.chrome.browser.commerce.ShoppingServiceFactory;
 import org.chromium.chrome.browser.price_insights.PriceInsightsBottomSheetCoordinator.PriceInsightsDelegate;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.browser_ui.notifications.NotificationProxyUtils;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.components.commerce.core.CommerceFeatureUtils;
+import org.chromium.components.commerce.core.PriceBucket;
+import org.chromium.components.commerce.core.ShoppingService;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.widget.Toast;
 
 /** Mediator for price tracking bottom sheet responsible for property model update. */
 public class PriceTrackingBottomSheetContentMediator {
     private final Context mContext;
-    private final Tab mTab;
+    private final Supplier<Tab> mTabSupplier;
     private final PropertyModel mPropertyModel;
     private final PriceInsightsDelegate mPriceInsightsDelegate;
-    private final ObservableSupplier<Boolean> mPriceTrackingStateSupplier;
     private final Callback<Boolean> mUpdatePriceTrackingButtonModelCallback =
             this::updatePriceTrackingButtonModel;
 
+    private ObservableSupplier<Boolean> mPriceTrackingStateSupplier;
+    private @PriceBucket int mPriceBucket;
+
     public PriceTrackingBottomSheetContentMediator(
             @NonNull Context context,
-            @NonNull Tab tab,
+            @NonNull Supplier<Tab> tabSupplier,
             @NonNull PropertyModel propertyModel,
             @NonNull PriceInsightsDelegate priceInsightsDelegate) {
         mContext = context;
-        mTab = tab;
+        mTabSupplier = tabSupplier;
         mPropertyModel = propertyModel;
         mPriceInsightsDelegate = priceInsightsDelegate;
-
-        mPriceTrackingStateSupplier = priceInsightsDelegate.getPriceTrackingStateSupplier(tab);
-        mPriceTrackingStateSupplier.addObserver(mUpdatePriceTrackingButtonModelCallback);
     }
 
     public void requestShowContent(Callback<Boolean> contentReadyCallback) {
-        updatePriceTrackingButtonModel(mPriceTrackingStateSupplier.get());
-        contentReadyCallback.onResult(true);
+        ShoppingService shoppingService =
+                ShoppingServiceFactory.getForProfile(mTabSupplier.get().getProfile());
+        if (shoppingService == null
+                || !CommerceFeatureUtils.isShoppingListEligible(shoppingService)) {
+            contentReadyCallback.onResult(false);
+        }
+
+        mPriceTrackingStateSupplier =
+                mPriceInsightsDelegate.getPriceTrackingStateSupplier(mTabSupplier.get());
+        mPriceTrackingStateSupplier.addObserver(mUpdatePriceTrackingButtonModelCallback);
+
+        shoppingService.getProductInfoForUrl(
+                mTabSupplier.get().getUrl(),
+                (url, info) -> {
+                    boolean hasProductInfo = info != null && info.productClusterId.isPresent();
+                    if (hasProductInfo) {
+                        updatePriceTrackingButtonModel(mPriceTrackingStateSupplier.get());
+                    }
+                    contentReadyCallback.onResult(hasProductInfo);
+                });
+        fetchPriceBucket();
     }
 
     private void updatePriceTrackingButtonModel(boolean isPriceTracked) {
-        boolean priceTrackingEligible =
-                CommerceFeatureUtils.isShoppingListEligible(
-                        ShoppingServiceFactory.getForProfile(mTab.getProfile()));
+        mPropertyModel.set(PRICE_TRACKING_TITLE, mTabSupplier.get().getTitle());
 
-        mPropertyModel.set(PRICE_TRACKING_TITLE, mTab.getTitle());
-        mPropertyModel.set(PRICE_TRACKING_BUTTON_ENABLED, priceTrackingEligible);
-
-        if (!priceTrackingEligible) {
-            updatePriceTrackingButtonIneligible();
-            return;
-        }
         updatePriceTrackingButtonState(isPriceTracked);
         mPropertyModel.set(
                 PRICE_TRACKING_BUTTON_ON_CLICK_LISTENER,
                 createPriceTrackingButtonListener(!isPriceTracked));
     }
 
-    public void closeContent() {
-        mPriceTrackingStateSupplier.removeObserver(mUpdatePriceTrackingButtonModelCallback);
+    private void fetchPriceBucket() {
+        ShoppingServiceFactory.getForProfile(mTabSupplier.get().getProfile())
+                .getPriceInsightsInfoForUrl(
+                        mTabSupplier.get().getUrl(),
+                        (url, info) -> {
+                            if (info != null) {
+                                mPriceBucket = info.priceBucket;
+                            }
+                        });
     }
 
-    private void updatePriceTrackingButtonIneligible() {
-        mPropertyModel.set(
-                PRICE_TRACKING_BUTTON_TEXT,
-                mContext.getString(
-                        R.string.price_insights_content_price_tracking_disabled_button_text));
-        mPropertyModel.set(
-                PRICE_TRACKING_BUTTON_ICON,
-                R.drawable.price_insights_sheet_price_tracking_button_disabled);
-        mPropertyModel.set(
-                PRICE_TRACKING_BUTTON_FOREGROUND_COLOR,
-                mContext.getColor(R.color.price_tracking_ineligible_button_foreground_color));
-        mPropertyModel.set(
-                PRICE_TRACKING_BUTTON_BACKGROUND_COLOR,
-                mContext.getColor(R.color.price_tracking_ineligible_button_background_color));
+    public void closeContent() {
+        if (mPriceTrackingStateSupplier != null) {
+            mPriceTrackingStateSupplier.removeObserver(mUpdatePriceTrackingButtonModelCallback);
+        }
+        mPriceTrackingStateSupplier = null;
     }
 
     private void updatePriceTrackingButtonState(boolean enabled) {
@@ -123,14 +133,24 @@ public class PriceTrackingBottomSheetContentMediator {
 
     private OnClickListener createPriceTrackingButtonListener(boolean shouldBeTracked) {
         return view -> {
+            logPriceTrackingButtonClicked(shouldBeTracked);
             Callback<Boolean> callback =
                     (success) -> {
                         updatePriceTrackingButtonModel(mPriceTrackingStateSupplier.get());
                         showToastMessage(shouldBeTracked, success);
                     };
             updatePriceTrackingButtonState(shouldBeTracked);
-            mPriceInsightsDelegate.setPriceTrackingStateForTab(mTab, shouldBeTracked, callback);
+            mPriceInsightsDelegate.setPriceTrackingStateForTab(
+                    mTabSupplier.get(), shouldBeTracked, callback);
         };
+    }
+
+    private void logPriceTrackingButtonClicked(boolean shouldBeTracked) {
+        String histogramActionName = shouldBeTracked ? "Track" : "Untrack";
+        RecordHistogram.recordEnumeratedHistogram(
+                "Commerce.PriceInsights.PriceTracking." + histogramActionName,
+                mPriceBucket,
+                PriceBucket.MAX_VALUE);
     }
 
     private void showToastMessage(boolean shouldBeTracked, boolean success) {

@@ -550,9 +550,6 @@ Widget* BubbleDialogDelegateView::CreateBubble(
   return CreateBubble(base::WrapUnique(delegate_view), ownership);
 }
 
-BubbleDialogDelegateView::BubbleDialogDelegateView()
-    : BubbleDialogDelegateView(nullptr, BubbleBorder::TOP_LEFT) {}
-
 BubbleDialogDelegateView::BubbleDialogDelegateView(View* anchor_view,
                                                    BubbleBorder::Arrow arrow,
                                                    BubbleBorder::Shadow shadow,
@@ -663,7 +660,7 @@ void BubbleDialogDelegate::OnBubbleWidgetActivationChanged(bool active) {
   // Install |mac_bubble_closer_| the first time the widget becomes active.
   if (active && !mac_bubble_closer_) {
     mac_bubble_closer_ = std::make_unique<ui::BubbleCloser>(
-        GetWidget()->GetNativeWindow().GetNativeNSWindow(),
+        GetWidget()->GetNativeWindow(),
         base::BindRepeating(&BubbleDialogDelegate::OnDeactivate,
                             base::Unretained(this)));
   }
@@ -1133,10 +1130,10 @@ void BubbleDialogDelegate::UpdateColorsFromTheme() {
   // through, so explicitly paint a background color.
   const bool contents_layer_opaque =
       contents_view->layer() && contents_view->layer()->fills_bounds_opaquely();
-  contents_view->SetBackground(
-      contents_layer_opaque || force_create_contents_background_
-          ? CreateSolidOrThemedBackground(background_color())
-          : nullptr);
+  contents_view->SetBackground(contents_layer_opaque ||
+                                       force_create_contents_background_
+                                   ? CreateSolidBackground(background_color())
+                                   : nullptr);
 }
 
 void BubbleDialogDelegate::OnBubbleWidgetVisibilityChanged(bool visible) {

@@ -100,18 +100,15 @@ std::unique_ptr<viz::CompositorFrame> FastInkHost::CreateCompositorFrame(
 }
 
 void FastInkHost::OnFirstFrameRequested() {
-  // Only create a buffer if not initialized as `OnFirstFrameRequested()` is
-  // called for every first begin frame for a FrameSink.
-  if (!client_shared_image_) {
-    InitializeFastInkBuffer(host_window());
-  }
+  CHECK(!client_shared_image_);
+  InitializeFastInkBuffer(host_window());
 }
 
 void FastInkHost::OnFrameSinkLost() {
-  // The fast ink buffer becomes unusable and a new buffer must be created when
-  // the GPU crashes, which is one of the most common causes of FrameSink loss.
+  // The fast ink buffer becomes unusable the GPU crashes, which is one of the
+  // most common causes of FrameSink loss. A new buffer will be created once
+  // `OnFirstFrameRequested()` will be called.
   ResetGpuBuffer();
-  InitializeFastInkBuffer(host_window());
   FrameSinkHost::OnFrameSinkLost();
 }
 
@@ -192,7 +189,6 @@ gfx::Rect FastInkHost::BufferRectFromWindowRect(
 
 void FastInkHost::Draw(SkBitmap bitmap, const gfx::Rect& damage_rect) {
   const bool initialized = client_shared_image_ != nullptr;
-
   if (!initialized) {
     // GPU process should be ready soon after start and `pending_bitmaps_`
     // should be drawn promptly. 60 is an arbitrary cap that should never

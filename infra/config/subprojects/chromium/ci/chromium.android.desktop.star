@@ -267,10 +267,10 @@ ci.thin_tester(
             "android_browsertests": targets.mixin(
                 args = [
                     "--test-launcher-filter-file=../../testing/buildbot/filters/android.desktop.emulator_15.android_browsertests.filter",
+                    "--emulator-debug-tags=all",
                 ],
-                ci_only = True,
                 swarming = targets.swarming(
-                    shards = 10,
+                    shards = 20,
                 ),
             ),
             "chrome_public_unit_test_apk": targets.mixin(

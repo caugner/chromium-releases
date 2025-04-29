@@ -871,6 +871,9 @@ bool D3D11VideoDecoder::OutputResult(const CodecPicture* picture,
     NotifyError(std::move(result).AddHere());
     return false;
   }
+  // If the output texture is in RGB pixel format, then the color space needs to
+  // be updated using the color space of the output texture.
+  picture_color_space = shared_image->color_space();
 
   scoped_refptr<VideoFrame> frame = VideoFrame::WrapSharedImage(
       texture_selector_->PixelFormat(), shared_image,
@@ -1100,6 +1103,12 @@ D3D11VideoDecoder::GetSupportedVideoDecoderConfigs(
       continue;
 
     const auto& resolution_range = kv.second;
+
+    // TODO(crbug.com/415370683): This should be handled elsewhere.
+    if (resolution_range.min_resolution.IsEmpty()) {
+      continue;
+    }
+
     configs.emplace_back(profile, profile, resolution_range.min_resolution,
                          resolution_range.max_landscape_resolution,
                          /*allow_encrypted=*/false,

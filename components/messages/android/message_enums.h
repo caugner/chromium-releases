@@ -94,7 +94,7 @@ enum class MessageIdentifier {
   SAVE_ADDRESS_PROFILE = 6,
   MERCHANT_TRUST = 7,
   // Removed: ADD_TO_HOMESCREEN_IPH = 8,
-  SEND_TAB_TO_SELF = 9,
+  // Removed: SEND_TAB_TO_SELF = 9,
   READER_MODE = 10,
   CHROME_SURVEY = 11,
   SAVE_CARD = 12,
@@ -145,6 +145,7 @@ enum class MessageIdentifier {
   COLLABORATION_REMOVED = 57,
   CCT_ACCOUNT_MISMATCH_NOTICE = 58,
   PROMPT_HATS_CLEAR_BROWSING_DATA = 59,
+  OS_ADVANCED_PROTECTION_SETTING_CHANGED_MESSAGE = 60,
   // Insert new values before this line.
   COUNT
 };

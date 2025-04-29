@@ -740,6 +740,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
                      const gfx::Size& min_size,
                      const gfx::Size& max_size);
 
+  // Generates a filled in VisualProperties struct representing the current
+  // properties of this widget.
+  blink::VisualProperties GetVisualProperties();
+
   // Returns the result of GetVisualProperties(), resetting and storing that
   // value as what has been sent to the renderer. This should be called when
   // getting VisualProperties that will be sent in order to create a
@@ -927,11 +931,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // widget Mojo interfaces and rebinds them, passing the new endpoints in the
   // returned params.
   mojom::CreateFrameWidgetParamsPtr BindAndGenerateCreateFrameWidgetParams();
-  // TODO(danakj): This is a CreateNewWindow()-specific version of the above
-  // helper to work around the fact that things are in a weird state. Figure out
-  // why that's happening and remove this.
-  mojom::CreateFrameWidgetParamsPtr
-  BindAndGenerateCreateFrameWidgetParamsForNewWindow();
 
   // RenderFrameMetadataProvider::Observer implementation.
   void OnRenderFrameMetadataChangedBeforeActivation(
@@ -1138,10 +1137,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // browser to match the clean start for the renderer side.
   void ResetStateForCreatedRenderWidget(
       const blink::VisualProperties& initial_props);
-
-  // Generates a filled in VisualProperties struct representing the current
-  // properties of this widget.
-  blink::VisualProperties GetVisualProperties();
 
   // Returns true if the |new_visual_properties| differs from
   // |old_page_visual_properties| in a way that indicates a size changed.

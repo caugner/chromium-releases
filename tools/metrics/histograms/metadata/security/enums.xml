@@ -101,6 +101,23 @@ chromium-metrics-reviews@google.com.
   <int value="17" label="Found conflicting lightweight metadata IDs"/>
 </enum>
 
+<enum name="HttpsFirstModeBlockingResult">
+  <int value="0" label="Unknown value"/>
+  <int value="1" label="An insecure HTTP request was intercepted."/>
+  <int value="2"
+      label="An insecure HTTP request was permitted because a user had
+             previously proceeded through a warning on this origin."/>
+  <int value="3"
+      label="An insecure HTTP request caused a warning to show, and the user
+             proceeded through the warning."/>
+  <int value="4"
+      label="An insecure HTTP request caused a warning to show, and the user
+             cancelled the navigation."/>
+  <int value="5"
+      label="An insecure HTTP request was permitted because no variant of
+             Ask-Before-HTTP prevented the navigation."/>
+</enum>
+
 <enum name="HttpsFirstModeInterstitialReason">
   <int value="0" label="kUnknown">Unknown reason</int>
   <int value="1" label="kPref">
@@ -155,15 +172,6 @@ chromium-metrics-reviews@google.com.
 </enum>
 
 <!-- LINT.ThenChange(/chrome/browser/ssl/https_first_mode_settings_tracker.h) -->
-
-<enum name="JsonParserExtension">
-  <int value="0" label="C style comment (/**/)"/>
-  <int value="1" label="C++ style comment (//)"/>
-  <int value="2" label="UTF-8 \xNN string escape"/>
-  <int value="3" label="Vertical tab string escape (\\v)"/>
-  <int value="4" label="Unescaped ASCII control character [0x00,0x1F]"/>
-  <int value="5" label="Unescaped newline in string (\\r or \\n)"/>
-</enum>
 
 <enum name="LandlockState">
   <int value="0" label="Enabled"/>
@@ -291,6 +299,8 @@ chromium-metrics-reviews@google.com.
   </int>
 </enum>
 
+<!-- LINT.IfChange(PrivateNetworkAccessCheckResult) -->
+
 <enum name="PrivateNetworkAccessCheckResult">
   <int value="0" label="AllowedMissingClientSecurityState"/>
   <int value="1" label="AllowedNoLessPublic"/>
@@ -305,8 +315,11 @@ chromium-metrics-reviews@google.com.
   <int value="10" label="AllowedByPolicyPreflightWarn"/>
   <int value="11" label="BlockedByInconsistentIpAddressSpace"/>
   <int value="12" label="AllowedPotentiallyTrustworthySameOrigin"/>
-  <int value="13" label="LNABlockedByMissingPermission"/>
+  <int value="13" label="LNAPermissionRequired"/>
+  <int value="14" label="LNAAllowedByPolicyWarn"/>
 </enum>
+
+<!-- LINT.ThenChange(/services/network/public/cpp/private_network_access_check_result.h:PrivateNetworkAccessCheckResult) -->
 
 <enum name="PrivateNetworkDeviceValidity">
   <int value="0" label="Device exists"/>

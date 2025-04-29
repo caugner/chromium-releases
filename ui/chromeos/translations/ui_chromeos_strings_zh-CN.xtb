@@ -107,6 +107,7 @@
 <translation id="1810764548349082891">无法预览</translation>
 <translation id="1812302367230252929">阿姆哈拉语音译</translation>
 <translation id="1813278315230285598">服务</translation>
+<translation id="181434555916624618">目前，系统不会显示包含某个人的结果。请试试其他提示。</translation>
 <translation id="1829129547161959350">企鹅</translation>
 <translation id="183183971458492120">正在加载信息…</translation>
 <translation id="1832073788765803750">半角片假名</translation>
@@ -715,7 +716,7 @@
 <translation id="6503285896705205014">管理员政策禁止复制 <ph name="COUNT" /> 个文件</translation>
 <translation id="6509122719576673235">挪威语</translation>
 <translation id="6528513914570774834">允许此设备的其他用户使用此网络</translation>
-<translation id="6549689063733911810">我最近用过</translation>
+<translation id="6549689063733911810">最近用过</translation>
 <translation id="6558280019477628686">出错了。系统可能尚未删除某些项。</translation>
 <translation id="656398493051028875">正在删除“<ph name="FILENAME" />”…</translation>
 <translation id="6581162200855843583">Google 云端硬盘链接</translation>

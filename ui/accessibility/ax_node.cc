@@ -875,11 +875,11 @@ AXSelection AXNode::GetSelection() const {
   return tree()->GetSelection();
 }
 
-AXSelection AXNode::GetUnignoredSelection(bool non_text_endpoints) const {
+AXSelection AXNode::GetUnignoredSelection() const {
   DCHECK(tree()) << "Cannot retrieve the current selection if the node is not "
                     "attached to an accessibility tree.\n"
                  << *this;
-  AXSelection selection = tree()->GetUnignoredSelection(non_text_endpoints);
+  AXSelection selection = tree()->GetUnignoredSelection();
 
   // "selection.anchor_offset" and "selection.focus_ofset" might need to be
   // adjusted if the anchor or the focus nodes include ignored children.
@@ -1553,9 +1553,27 @@ AXNode::GetExtraMacNodes() const {
   return &table_info->extra_mac_nodes;
 }
 
+#if BUILDFLAG(IS_LINUX)
+AXNode* AXNode::GetExtraAnnouncementNode(
+    ax::mojom::AriaNotificationPriority priority_property) const {
+  if (!tree_->extra_announcement_nodes()) {
+    tree_->CreateExtraAnnouncementNodes();
+  }
+
+  switch (priority_property) {
+    case ax::mojom::AriaNotificationPriority::kHigh:
+      return &tree_->extra_announcement_nodes()->AssertiveNode();
+    case ax::mojom::AriaNotificationPriority::kNormal:
+      return &tree_->extra_announcement_nodes()->PoliteNode();
+  }
+  NOTREACHED();
+}
+#endif  // BUILDFLAG(IS_LINUX)
+
 bool AXNode::IsGenerated() const {
   bool is_generated_node = id() < 0 && id() > kInitialEmptyDocumentRootNodeID;
 #if DCHECK_IS_ON()
+#if BUILDFLAG(IS_APPLE)
   // Currently, the only generated nodes are columns and table header
   // containers, and when those roles occur, they are always extra mac nodes.
   // This could change in the future.
@@ -1563,7 +1581,13 @@ bool AXNode::IsGenerated() const {
       GetRole() == ax::mojom::Role::kColumn ||
       GetRole() == ax::mojom::Role::kTableHeaderContainer;
   DCHECK_EQ(is_generated_node, is_extra_mac_node_role);
+#elif BUILDFLAG(IS_LINUX)
+  //  On Linux, generated nodes are always children of the root.
+  if (GetParent() && GetParent()->GetManager()) {
+    DCHECK(GetParent()->GetManager()->IsRoot());
+  }
 #endif
+#endif  // DCHECK_IS_ON()
   return is_generated_node;
 }
 

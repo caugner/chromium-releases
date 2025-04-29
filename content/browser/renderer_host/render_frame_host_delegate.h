@@ -22,6 +22,7 @@
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/media_player_watch_time.h"
 #include "content/public/browser/media_stream_request.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/select_audio_output_request.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/visibility.h"
@@ -95,6 +96,10 @@ namespace mojom {
 class ScreenOrientation;
 }
 }  // namespace device
+
+namespace network {
+struct ResourceRequest;
+}  // namespace network
 
 namespace network::mojom {
 class SharedDictionaryAccessDetails;
@@ -443,14 +448,22 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // The passed |opener| is the RenderFrameHost initiating the window creation.
   // It will never be null, even if the opener is suppressed via |params|.
   //
+  // The return value is the new WebContents associated with the window, if any.
+  // In some cases there is no WebContents to be returned, either because the
+  // operation failed and the window was not shown, or because the new
+  // WebContents is not meant to be visible/connected to its opener (e.g. when
+  // opening a system app on chromeos). In those cases, ShowCreatedWindow() will
+  // return nullptr. If non-null, the returned WebContents will already be owned
+  // by its WebContentsDelegate.
+  //
   // Note: this is not called "ShowWindow" because that will clash with
   // the Windows function which is actually a #define.
-  virtual void ShowCreatedWindow(
+  virtual WebContents* ShowCreatedWindow(
       RenderFrameHostImpl* opener,
       int main_frame_widget_route_id,
       WindowOpenDisposition disposition,
       const blink::mojom::WindowFeatures& window_features,
-      bool user_gesture) {}
+      bool user_gesture);
 
   // The main frame document element is ready. This happens when the document
   // has finished parsing.
@@ -777,6 +790,18 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // Gets the delegate reason for entering picture in picture automatically.
   virtual media::PictureInPictureEventsInfo::AutoPipReason GetAutoPipReason()
       const;
+
+  // Invoked when a fetch keepalive request is created in a RenderFrameHost.
+  //
+  // Note that such request is usually initiated from corresponding renderer
+  // process. This method just captures the time when the request is proxied in
+  // the browser process.
+  //
+  // `resource_request` is the fetch keepalive request that is created.
+  // `initiator_rfh` is the RenderFrameHostImpl that initiates the request.
+  virtual void OnKeepAliveRequestCreated(
+      const network::ResourceRequest& resource_request,
+      RenderFrameHostImpl* initiator_rfh) {}
 
  protected:
   virtual ~RenderFrameHostDelegate() = default;

@@ -47,7 +47,7 @@
 <translation id="1363028406613469049">Verfolgen</translation>
 <translation id="1378727793141957596">Willkommen bei Google Drive!</translation>
 <translation id="1379911846207762492">Du kannst Dateien offline verfügbar machen, wenn du keine Internetverbindung hast.</translation>
-<translation id="1383876407941801731">Durchsuchen</translation>
+<translation id="1383876407941801731">Suchen</translation>
 <translation id="1388045380422025115">Alle Typen</translation>
 <translation id="1395262318152388157">Schieberegler für die Suche</translation>
 <translation id="1399511500114202393">Kein Nutzerzertifikat</translation>
@@ -107,6 +107,7 @@
 <translation id="1810764548349082891">Keine Vorschau verfügbar</translation>
 <translation id="1812302367230252929">Amharisch (Transliteration)</translation>
 <translation id="1813278315230285598">Dienste</translation>
+<translation id="181434555916624618">Ergebnisse mit Personen werden vorerst nicht angezeigt. Versuche es mit einem anderen Prompt.</translation>
 <translation id="1829129547161959350">Pinguin</translation>
 <translation id="183183971458492120">Informationen werden geladen…</translation>
 <translation id="1832073788765803750">Katakana mit halber Breite</translation>
@@ -772,7 +773,7 @@
 <translation id="69548399407432279">Letztes Jahr</translation>
 <translation id="6960565108681981554">Nicht aktiviert. Wende dich bitte an deinen Mobilfunkanbieter.</translation>
 <translation id="696203921837389374">Synchronisierung über mobile Daten aktivieren</translation>
-<translation id="6965382102122355670">Ok</translation>
+<translation id="6965382102122355670">OK</translation>
 <translation id="6965648386495488594">Port</translation>
 <translation id="6970230597523682626">Bulgarisch</translation>
 <translation id="6973630695168034713">Ordner</translation>

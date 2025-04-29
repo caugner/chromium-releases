@@ -8,8 +8,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "model_validation-mac-arm64": {
@@ -22,8 +21,7 @@
       "symbol_level": 1,
       "target_cpu": "arm64",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "model_validation-mac-x64": {
@@ -35,8 +33,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "model_validation-win-arm64": {
@@ -49,8 +46,7 @@
       "symbol_level": 1,
       "target_cpu": "arm64",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "model_validation-win32": {
@@ -63,8 +59,7 @@
       "symbol_level": 1,
       "target_cpu": "x86",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "model_validation-win64": {
@@ -76,8 +71,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-android-arm64": {
@@ -91,8 +85,7 @@
       "target_cpu": "arm64",
       "target_os": "android",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-chromeos": {
@@ -103,8 +96,7 @@
       "symbol_level": 1,
       "target_os": "chromeos",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-ios-device": {
@@ -121,8 +113,7 @@
       "target_environment": "device",
       "target_os": "ios",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-ios-simulator": {
@@ -139,8 +130,7 @@
       "target_environment": "simulator",
       "target_os": "ios",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-linux": {
@@ -152,8 +142,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-mac-arm64": {
@@ -166,8 +155,7 @@
       "symbol_level": 1,
       "target_cpu": "arm64",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-mac-x64": {
@@ -179,8 +167,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-win-arm64": {
@@ -193,8 +180,7 @@
       "symbol_level": 1,
       "target_cpu": "arm64",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-win32": {
@@ -207,8 +193,7 @@
       "symbol_level": 1,
       "target_cpu": "x86",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide-win64": {
@@ -220,8 +205,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide_official-linux": {
@@ -237,8 +221,7 @@
       "strip_absolute_paths_from_debug_symbols": true,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "optimization_guide_official-win64": {
@@ -254,8 +237,7 @@
       "strip_absolute_paths_from_debug_symbols": true,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   }
 }

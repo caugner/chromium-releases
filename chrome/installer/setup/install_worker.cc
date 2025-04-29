@@ -639,11 +639,9 @@ void AddUpdateBrandCodeWorkItem(const InstallerState& installer_state,
     return;
 
   // Only update if this machine is a managed device, including domain join.
-  if (!base::IsManagedDevice()) {
-    return;
-  }
-
-  std::wstring new_brand = GetUpdatedBrandCode(brand);
+  // Also map in the reverse direction to fix an issue introduced in M136 by
+  // mapping indiscriminately in the forward direction.
+  std::wstring new_brand = GetUpdatedBrandCode(brand, base::IsManagedDevice());
   // Rewrite the old brand so that the next step can potentially apply both
   // changes at once.
   if (!new_brand.empty()) {
@@ -694,7 +692,8 @@ void AddUpdateBrandCodeWorkItem(const InstallerState& installer_state,
       KEY_WOW64_32KEY, google_update::kRegRLZBrandField, new_brand, true);
 }
 
-std::wstring GetUpdatedBrandCode(const std::wstring& brand_code) {
+std::wstring GetUpdatedBrandCode(const std::wstring& brand_code,
+                                 bool to_enterprise) {
   // Brand codes to be remapped on enterprise installs.
   static constexpr struct EnterpriseBrandRemapping {
     const wchar_t* old_brand;
@@ -706,8 +705,12 @@ std::wstring GetUpdatedBrandCode(const std::wstring& brand_code) {
   };
 
   for (auto mapping : kEnterpriseBrandRemapping) {
-    if (brand_code == mapping.old_brand)
+    if (to_enterprise && brand_code == mapping.old_brand) {
       return mapping.new_brand;
+    }
+    if (!to_enterprise && brand_code == mapping.new_brand) {
+      return mapping.old_brand;
+    }
   }
   return std::wstring();
 }

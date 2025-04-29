@@ -4,8 +4,7 @@
       "is_chrome_branded": true,
       "is_official_build": true,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "mac-chrome": {
@@ -15,8 +14,7 @@
       "is_official_build": true,
       "target_cpu": "x64",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "win-branded-rel": {
@@ -27,8 +25,7 @@
       "is_debug": false,
       "symbol_level": 1,
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "win-chrome": {
@@ -38,8 +35,7 @@
       "symbol_level": 1,
       "target_cpu": "x86",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   },
   "win64-chrome": {
@@ -49,8 +45,7 @@
       "symbol_level": 1,
       "target_cpu": "x64",
       "use_reclient": false,
-      "use_remoteexec": true,
-      "use_siso": true
+      "use_remoteexec": true
     }
   }
 }
