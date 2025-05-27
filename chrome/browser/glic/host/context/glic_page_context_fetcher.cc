@@ -13,8 +13,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/content_extraction/inner_text.h"
+#include "chrome/browser/glic/host/context/glic_page_context_eligibility_observer.h"
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/browser/glic/media/glic_media_integration.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/optimization_guide/content/browser/page_content_proto_provider.h"
 #include "components/pdf/browser/pdf_document_helper.h"
@@ -122,6 +124,26 @@ void GlicPageContextFetcher::Fetch(
     FocusedTabData focused_tab_data,
     const mojom::GetTabContextOptions& options,
     glic::mojom::WebClientHandler::GetContextFromFocusedTabCallback callback) {
+  CHECK(callback);
+  auto self = std::make_unique<GlicPageContextFetcher>();
+  auto* raw_self = self.get();
+  raw_self->FetchStart(
+      focused_tab_data, options,
+      base::BindOnce(
+          // Bind `fetcher` to the callback to keep it in scope until it
+          // returns.
+          [](std::unique_ptr<glic::GlicPageContextFetcher> fetcher,
+             mojom::WebClientHandler::GetContextFromFocusedTabCallback callback,
+             mojom::GetContextResultPtr result) {
+            std::move(callback).Run(std::move(result));
+          },
+          std::move(self), std::move(callback)));
+}
+
+void GlicPageContextFetcher::FetchStart(
+    FocusedTabData focused_tab_data,
+    const mojom::GetTabContextOptions& options,
+    glic::mojom::WebClientHandler::GetContextFromFocusedTabCallback callback) {
   base::expected<content::WebContents*, std::string_view> focus =
       focused_tab_data.GetFocus();
   if (!focus.has_value()) {
@@ -161,6 +183,20 @@ void GlicPageContextFetcher::Fetch(
     inner_text_done_ = true;
   }
 
+  // Get the media context if we'll have somewhere to store it.
+  if (auto* media_integration =
+          options.include_annotated_page_content
+              ? GlicMediaIntegration::GetFor(web_contents())
+              : nullptr) {
+    media_integration->ComputeContext(
+        web_contents(),
+        /*max_size_bytes_=*/20000,
+        base::BindOnce(&GlicPageContextFetcher::ReceivedMediaContext,
+                       GetWeakPtr()));
+  } else {
+    media_context_done_ = true;
+  }
+
   pdf_done_ = true;  // Will not fetch PDF contents by default.
   if (options.include_pdf) {
     bool is_pdf_document =
@@ -193,6 +229,16 @@ void GlicPageContextFetcher::Fetch(
     annotated_page_content_done_ = true;
   }
 
+  // Will only fetch context eligibility if we can observe it.
+  context_eligibility_check_done_ =
+      !(GlicPageContextEligibilityObserver::MaybeGetEligibilityForWebContents(
+          web_contents(),
+          base::BindOnce(&GlicPageContextFetcher::ReceivedContextEligibility,
+                         GetWeakPtr())));
+
+  // Note: initialization_done_ guards against processing
+  // `RunCallbackIfComplete()` until we reach this point.
+  initialization_done_ = true;
   RunCallbackIfComplete();
 }
 
@@ -203,6 +249,13 @@ void GlicPageContextFetcher::ReceivedPdfBytes(
   pdf_done_ = true;
   pdf_status_ = status;
   pdf_bytes_ = pdf_bytes;
+  RunCallbackIfComplete();
+}
+
+void GlicPageContextFetcher::ReceivedMediaContext(
+    const std::string& media_context) {
+  media_context_done_ = true;
+  media_context_ = media_context;
   RunCallbackIfComplete();
 }
 
@@ -279,83 +332,121 @@ void GlicPageContextFetcher::ReceivedAnnotatedPageContent(
   RunCallbackIfComplete();
 }
 
+void GlicPageContextFetcher::ReceivedContextEligibility(bool is_eligible) {
+  context_eligible_ = is_eligible;
+  context_eligibility_check_done_ = true;
+  base::UmaHistogramTimes("Glic.PageContextFetcher.GetContextEligibility",
+                          base::TimeTicks::Now() - start_time_);
+  base::UmaHistogramBoolean("Glic.PageContextFetcher.PageContextEligible",
+                            *context_eligible_);
+  RunCallbackIfComplete();
+}
+
 void GlicPageContextFetcher::RunCallbackIfComplete() {
+  if (!initialization_done_) {
+    return;
+  }
+
   // Continue only if the primary page changed or work is complete.
-  bool work_complete = (screenshot_done_ && inner_text_done_ &&
-                        annotated_page_content_done_ && pdf_done_) ||
-                       primary_page_changed_;
+  bool work_complete =
+      (screenshot_done_ && inner_text_done_ && annotated_page_content_done_ &&
+       pdf_done_ && media_context_done_ && context_eligibility_check_done_) ||
+      primary_page_changed_;
   if (!work_complete) {
     return;
   }
   base::UmaHistogramTimes("Glic.PageContextFetcher.Total",
                           base::TimeTicks::Now() - start_time_);
+
   mojom::GetContextResultPtr result;
-  if (web_contents() && web_contents()->GetPrimaryMainFrame() &&
-      !primary_page_changed_) {
-    auto tab_context = mojom::TabContext::New();
-    tab_context->tab_data = CreateTabData(web_contents());
-    // TODO(crbug.com/379773651): Clean up logspam when it's no longer useful.
-    LOG(WARNING) << "GlicPageContextFetcher: Returning context for "
-                 << tab_context->tab_data->url;
-    if (inner_text_result_) {
-      // Get trimmed text without copying.
-      std::string trimmed_text = std::move(inner_text_result_->inner_text);
-      size_t truncated_size = base::TruncateUTF8ToByteSize(
-                                  trimmed_text, options_.inner_text_bytes_limit)
-                                  .length();
-      bool truncated = false;
-      if (truncated_size < trimmed_text.length()) {
-        truncated = true;
-        trimmed_text.resize(truncated_size);
-      }
-
-      tab_context->web_page_data =
-          mojom::WebPageData::New(mojom::DocumentData::New(
-              web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin(),
-              std::move(trimmed_text), truncated));
-    }
-    if (screenshot_) {
-      tab_context->viewport_screenshot = std::move(screenshot_);
-    }
-
-    if (pdf_status_) {
-      auto pdf_document_data = mojom::PdfDocumentData::New();
-      pdf_document_data->origin = pdf_origin_;
-      pdf_document_data->pdf_data = std::move(pdf_bytes_);
-      pdf_document_data->size_limit_exceeded =
-          *pdf_status_ ==
-          pdf::mojom::PdfListener_GetPdfBytesStatus::kSizeLimitExceeded;
-      tab_context->pdf_document_data = std::move(pdf_document_data);
-    }
-
-    if (annotated_page_content_result_) {
-      auto annotated_page_data = mojom::AnnotatedPageData::New();
-      annotated_page_data->annotated_page_content =
-          mojo_base::ProtoWrapper(annotated_page_content_result_->proto);
-
-      auto metadata_mojom = mojom::PageMetadata::New();
-      // TODO(gklassen): Move the definition of AIPageContentMetadata into
-      // a mojom to remove the need for conversion.
-      for (const auto& frame_metadata :
-           annotated_page_content_result_->metadata.frame_metadata) {
-        auto frame_metadata_mojom = mojom::FrameMetadata::New();
-        frame_metadata_mojom->url = frame_metadata.url;
-        for (const auto& meta_tag : frame_metadata.meta_tags) {
-          frame_metadata_mojom->meta_tags.push_back(
-              mojom::MetaTag::New(meta_tag.name, meta_tag.content));
-        }
-        metadata_mojom->frame_metadata.push_back(
-            std::move(frame_metadata_mojom));
-      }
-      annotated_page_data->metadata = std::move(metadata_mojom);
-
-      tab_context->annotated_page_data = std::move(annotated_page_data);
-    }
-
-    result = mojom::GetContextResult::NewTabContext(std::move(tab_context));
-  } else {
+  if (primary_page_changed_) {
     result = mojom::GetContextResult::NewErrorReason("web contents changed");
+    std::move(callback_).Run(std::move(result));
+    return;
   }
+
+  if (!web_contents() || !web_contents()->GetPrimaryMainFrame()) {
+    result = mojom::GetContextResult::NewErrorReason("web contents changed");
+    std::move(callback_).Run(std::move(result));
+    return;
+  }
+
+  if (!context_eligible_.value_or(true)) {
+    result = mojom::GetContextResult::NewErrorReason("page context ineligible");
+    std::move(callback_).Run(std::move(result));
+    return;
+  }
+
+  auto tab_context = mojom::TabContext::New();
+  tab_context->tab_data = CreateTabData(web_contents());
+  // TODO(crbug.com/379773651): Clean up logspam when it's no longer useful.
+  LOG(WARNING) << "GlicPageContextFetcher: Returning context for "
+               << tab_context->tab_data->url;
+  if (inner_text_result_) {
+    // Get trimmed text without copying.
+    std::string trimmed_text = std::move(inner_text_result_->inner_text);
+    size_t truncated_size = base::TruncateUTF8ToByteSize(
+                                trimmed_text, options_.inner_text_bytes_limit)
+                                .length();
+    bool truncated = false;
+    if (truncated_size < trimmed_text.length()) {
+      truncated = true;
+      trimmed_text.resize(truncated_size);
+    }
+
+    tab_context->web_page_data =
+        mojom::WebPageData::New(mojom::DocumentData::New(
+            web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin(),
+            std::move(trimmed_text), truncated));
+  }
+  if (screenshot_) {
+    tab_context->viewport_screenshot = std::move(screenshot_);
+  }
+
+  if (pdf_status_) {
+    auto pdf_document_data = mojom::PdfDocumentData::New();
+    pdf_document_data->origin = pdf_origin_;
+
+    // Warning!: `pdf_bytes_` can be larger than pdf_size_limit.
+    // `pdf_size_limit` applies to the original PDF size, but the PDF is
+    // re-serialized and returned, so it is not identical to the original.
+    pdf_document_data->size_limit_exceeded =
+        *pdf_status_ ==
+            pdf::mojom::PdfListener_GetPdfBytesStatus::kSizeLimitExceeded ||
+        pdf_bytes_.size() > options_.pdf_size_limit;
+    if (!pdf_document_data->size_limit_exceeded) {
+      pdf_document_data->pdf_data = std::move(pdf_bytes_);
+    }
+
+    tab_context->pdf_document_data = std::move(pdf_document_data);
+  }
+
+  if (annotated_page_content_result_) {
+    auto annotated_page_data = mojom::AnnotatedPageData::New();
+
+    // Take the diff before: https://crrev.com/c/6496394
+    if (media_context_.length() > 0) {
+      optimization_guide::proto::ContentNode* media_node =
+          annotated_page_content_result_->proto.mutable_root_node()
+              ->add_children_nodes();
+      media_node->mutable_content_attributes()->set_attribute_type(
+          optimization_guide::proto::CONTENT_ATTRIBUTE_TEXT);
+      media_node->mutable_content_attributes()
+          ->mutable_text_data()
+          ->set_text_content(std::move(media_context_));
+      media_context_.clear();
+    }
+
+    annotated_page_data->annotated_page_content =
+        mojo_base::ProtoWrapper(annotated_page_content_result_->proto);
+
+    annotated_page_data->metadata =
+        std::move(annotated_page_content_result_->metadata);
+
+    tab_context->annotated_page_data = std::move(annotated_page_data);
+  }
+
+  result = mojom::GetContextResult::NewTabContext(std::move(tab_context));
   std::move(callback_).Run(std::move(result));
 }
 

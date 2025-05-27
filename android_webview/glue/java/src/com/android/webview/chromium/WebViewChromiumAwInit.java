@@ -7,12 +7,14 @@ package com.android.webview.chromium;
 import android.Manifest;
 import android.app.compat.CompatChanges;
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.os.Build;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
+import android.os.storage.StorageManager;
 import android.util.Log;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -71,8 +73,10 @@ import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.ResourceBundle;
 
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -89,6 +93,9 @@ public class WebViewChromiumAwInit {
 
     private static final String ASSET_PATH_WORKAROUND_HISTOGRAM_NAME =
             "Android.WebView.AssetPathWorkaroundUsed.StartChromiumLocked";
+
+    private static final String REGISTER_RESOURCE_PATHS_HISTOGRAM_NAME =
+            "Android.WebView.RegisterResourcePathsAvailable";
 
     public static class WebViewStartUpDiagnostics {
         private final Object mLock = new Object();
@@ -478,6 +485,72 @@ public class WebViewChromiumAwInit {
                                 () -> {
                                     LibraryPrefetcher.prefetchNativeLibraryForWebView();
                                 });
+                    }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                        PostTask.postTask(
+                                TaskTraits.BEST_EFFORT,
+                                () -> {
+                                    try {
+                                        Resources.class.getDeclaredMethod(
+                                                "registerResourcePaths",
+                                                String.class,
+                                                ApplicationInfo.class);
+                                        RecordHistogram.recordBooleanHistogram(
+                                                REGISTER_RESOURCE_PATHS_HISTOGRAM_NAME, true);
+                                    } catch (NoSuchMethodException e) {
+                                        RecordHistogram.recordBooleanHistogram(
+                                                REGISTER_RESOURCE_PATHS_HISTOGRAM_NAME, false);
+                                    }
+                                });
+                    }
+
+                    if (AwFeatureMap.isEnabled(AwFeatures.WEBVIEW_RECORD_APP_CACHE_HISTOGRAMS)) {
+                        PostTask.postDelayedTask(
+                                TaskTraits.BEST_EFFORT_MAY_BLOCK,
+                                () -> {
+                                    StorageManager storageManager =
+                                            (StorageManager)
+                                                    ContextUtils.getApplicationContext()
+                                                            .getSystemService(
+                                                                    Context.STORAGE_SERVICE);
+                                    UUID storageUuid =
+                                            ContextUtils.getApplicationContext()
+                                                    .getApplicationInfo()
+                                                    .storageUuid;
+                                    long startTimeGetCacheQuotaMs = SystemClock.uptimeMillis();
+                                    try {
+                                        long cacheQuotaKiloBytes =
+                                                storageManager.getCacheQuotaBytes(storageUuid)
+                                                        / 1024;
+                                        RecordHistogram.recordCount1MHistogram(
+                                                "Android.WebView.CacheQuotaSize",
+                                                (int) cacheQuotaKiloBytes);
+                                    } catch (IOException e) {
+                                    } finally {
+                                        RecordHistogram.recordTimesHistogram(
+                                                "Android.WebView.GetCacheQuotaSizeTime",
+                                                SystemClock.uptimeMillis()
+                                                        - startTimeGetCacheQuotaMs);
+                                    }
+
+                                    long startTimeGetCacheSizeMs = SystemClock.uptimeMillis();
+                                    try {
+                                        long cacheSizeKiloBytes =
+                                                storageManager.getCacheSizeBytes(storageUuid)
+                                                        / 1024;
+                                        RecordHistogram.recordCount1MHistogram(
+                                                "Android.WebView.CacheSize",
+                                                (int) cacheSizeKiloBytes);
+                                    } catch (IOException e) {
+                                    } finally {
+                                        RecordHistogram.recordTimesHistogram(
+                                                "Android.WebView.GetCacheSizeTime",
+                                                SystemClock.uptimeMillis()
+                                                        - startTimeGetCacheSizeMs);
+                                    }
+                                },
+                                5000);
                     }
 
                     AwCrashyClassUtils.maybeCrashIfEnabled();

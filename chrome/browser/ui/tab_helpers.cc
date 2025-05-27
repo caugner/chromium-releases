@@ -91,8 +91,8 @@
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/privacy_sandbox/privacy_sandbox_prompt_helper.h"
 #include "chrome/browser/ui/recently_audible_helper.h"
-#include "chrome/browser/ui/safety_hub/unused_site_permissions_service.h"
-#include "chrome/browser/ui/safety_hub/unused_site_permissions_service_factory.h"
+#include "chrome/browser/ui/safety_hub/revoked_permissions_service.h"
+#include "chrome/browser/ui/safety_hub/revoked_permissions_service_factory.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_dialogs.h"
@@ -173,6 +173,7 @@
 #include "chrome/browser/fast_checkout/fast_checkout_tab_helper.h"
 #include "chrome/browser/fingerprinting_protection/chrome_fingerprinting_protection_web_contents_helper_factory.h"
 #include "chrome/browser/flags/android/chrome_feature_list.h"
+#include "chrome/browser/loader/from_gws_navigation_and_keep_alive_request_tab_helper.h"
 #include "chrome/browser/plugins/plugin_observer_android.h"
 #include "chrome/browser/privacy_sandbox/tracking_protection_settings_factory.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
@@ -180,6 +181,7 @@
 #include "components/facilitated_payments/core/features/features.h"
 #include "components/fingerprinting_protection_filter/common/fingerprinting_protection_filter_features.h"
 #include "components/ip_protection/common/ip_protection_status.h"
+#include "components/page_load_metrics/browser/features.h"
 #include "components/sensitive_content/android/android_sensitive_content_client.h"
 #include "components/sensitive_content/features.h"
 #include "components/webapps/browser/android/app_banner_manager_android.h"
@@ -572,17 +574,17 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   TrustedVaultEncryptionKeysTabHelper::CreateForWebContents(web_contents);
 #if BUILDFLAG(IS_ANDROID)
   if (base::FeatureList::IsEnabled(features::kSafetyHub)) {
-    auto* service = UnusedSitePermissionsServiceFactory::GetForProfile(profile);
+    auto* service = RevokedPermissionsServiceFactory::GetForProfile(profile);
     if (service) {
-      UnusedSitePermissionsService::TabHelper::CreateForWebContents(
-          web_contents, service);
+      RevokedPermissionsService::TabHelper::CreateForWebContents(web_contents,
+                                                                 service);
     }
   }
 #else   // BUILDFLAG(IS_ANDROID)
-  auto* service = UnusedSitePermissionsServiceFactory::GetForProfile(profile);
+  auto* service = RevokedPermissionsServiceFactory::GetForProfile(profile);
   if (service) {
-    UnusedSitePermissionsService::TabHelper::CreateForWebContents(web_contents,
-                                                                  service);
+    RevokedPermissionsService::TabHelper::CreateForWebContents(web_contents,
+                                                               service);
   }
 #endif  // BUILDFLAG(IS_ANDROID)
   ukm::InitializeSourceUrlRecorderForWebContents(web_contents);
@@ -607,6 +609,12 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   }
   ContextMenuHelper::CreateForWebContents(web_contents);
   FastCheckoutTabHelper::CreateForWebContents(web_contents);
+
+  if (base::FeatureList::IsEnabled(
+          page_load_metrics::features::kBeaconLeakageLogging)) {
+    FromGWSNavigationAndKeepAliveRequestTabHelper::CreateForWebContents(
+        web_contents);
+  }
 
   javascript_dialogs::TabModalDialogManager::CreateForWebContents(
       web_contents,

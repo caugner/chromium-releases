@@ -8,6 +8,7 @@
 #include "chrome/browser/ui/tabs/tab_group.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/tabs/test/tab_strip_interactive_test_mixin.h"
 #include "chrome/browser/ui/views/tabs/recent_activity_bubble_dialog_view.h"
 #include "chrome/browser/ui/views/tabs/tab_group_header.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
@@ -90,7 +91,7 @@ RecentActivityAction GetRecentActivityActionFromCollaborationEvent(
 namespace tab_groups {
 
 class RecentActivityBubbleDialogViewInteractiveUiTest
-    : public InteractiveBrowserTest {
+    : public TabStripInteractiveTestMixin<InteractiveBrowserTest> {
  public:
   RecentActivityBubbleDialogViewInteractiveUiTest() = default;
   ~RecentActivityBubbleDialogViewInteractiveUiTest() override = default;
@@ -131,20 +132,6 @@ class RecentActivityBubbleDialogViewInteractiveUiTest
     http_response->set_code(net::HTTP_OK);
     http_response->set_content(CreateSerializedAvatar());
     return http_response;
-  }
-
-  MultiStep FinishTabstripAnimations() {
-    return Steps(WaitForShow(kTabStripElementId),
-                 WithView(kTabStripElementId, [](TabStrip* tab_strip) {
-                   tab_strip->StopAnimating(true);
-                 }).SetDescription("FinishTabstripAnimation"));
-  }
-
-  MultiStep HoverTabAt(int index) {
-    const char kTabToHover[] = "Tab to hover";
-    return Steps(NameDescendantViewByType<Tab>(kBrowserViewElementId,
-                                               kTabToHover, index),
-                 MoveMouseTo(kTabToHover));
   }
 
   MultiStep WaitForImages(int activity_log_index) {
@@ -303,6 +290,13 @@ IN_PROC_BROWSER_TEST_F(RecentActivityBubbleDialogViewInteractiveUiTest,
   activity_without_avatar.activity_metadata.triggering_user->avatar_url =
       GURL("");
   activity_log.emplace_back(activity_without_avatar);
+
+  auto activity_with_long_description = CreateActivityForTab(group_id, tab2);
+  activity_with_long_description.activity_metadata.triggering_user->avatar_url =
+      GURL("");
+  activity_with_long_description.description_text =
+      u"long long long long long long long long long long long long long long ";
+  activity_log.emplace_back(activity_with_long_description);
 
   RunTestSequence(
       WaitForShow(kTabGroupHeaderElementId), FinishTabstripAnimations(),

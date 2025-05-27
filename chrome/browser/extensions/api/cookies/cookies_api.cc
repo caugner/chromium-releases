@@ -161,12 +161,15 @@ void CookiesEventRouter::OnCookieChange(bool otr,
   }
   base::Value::List args;
   base::Value::Dict dict;
-  dict.Set(kRemovedKey, change.cause != net::CookieChangeCause::INSERTED);
+  dict.Set(
+      kRemovedKey,
+      change.cause != net::CookieChangeCause::INSERTED &&
+          change.cause != net::CookieChangeCause::INSERTED_NO_CHANGE_OVERWRITE);
 
   Profile* profile =
       otr ? profile_->GetPrimaryOTRProfile(/*create_if_needed=*/false)
           : profile_->GetOriginalProfile();
-  // TODO(crbug.com/407373848): OTR profile must exist when the cookie change event
+  // TODO(407373848): OTR profile must exist when the cookie change event
   // arrived. Change this to CHECK once this is merged.
   DCHECK(profile);
   if (!profile) {
@@ -184,6 +187,7 @@ void CookiesEventRouter::OnCookieChange(bool otr,
     // only make sense for deletions.
     case net::CookieChangeCause::INSERTED:
     case net::CookieChangeCause::EXPLICIT:
+    case net::CookieChangeCause::INSERTED_NO_CHANGE_OVERWRITE:
       cause_dict_entry = kExplicitChangeCause;
       break;
 
@@ -346,7 +350,7 @@ ExtensionFunction::ResponseAction CookiesGetFunction::Run() {
   DCHECK(!url_.is_empty() && url_.is_valid());
   cookies_helpers::GetCookieListFromManager(
       cookie_manager, url_,
-      net::CookiePartitionKeyCollection::FromOptional(partition_key.value()),
+      net::CookiePartitionKeyCollection(std::move(partition_key).value()),
       base::BindOnce(&CookiesGetFunction::GetCookieListCallback, this));
 
   // Extension telemetry signal intercept
@@ -637,8 +641,7 @@ ExtensionFunction::ResponseAction CookiesSetFunction::Run() {
       base::BindOnce(&CookiesSetFunction::SetCanonicalCookieCallback, this));
   cookies_helpers::GetCookieListFromManager(
       cookie_manager, url_,
-      net::CookiePartitionKeyCollection::FromOptional(
-          net_partition_key.value()),
+      net::CookiePartitionKeyCollection(std::move(net_partition_key).value()),
       base::BindOnce(&CookiesSetFunction::GetCookieListCallback, this));
 
   // Will finish asynchronously.
@@ -727,7 +730,7 @@ ExtensionFunction::ResponseAction CookiesRemoveFunction::Run() {
       network::mojom::CookieDeletionFilter::New());
 
   filter->cookie_partition_key_collection =
-      net::CookiePartitionKeyCollection::FromOptional(partition_key.value());
+      net::CookiePartitionKeyCollection(std::move(partition_key).value());
   filter->url = url_;
   filter->cookie_name = parsed_args_->details.name;
   cookie_manager->DeleteCookies(

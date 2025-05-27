@@ -123,6 +123,7 @@
 <translation id="3984746313391923992">組織が Chrome にログインしないように求めています。</translation>
 <translation id="3988789688219830639">Google Chrome で写真または動画にアクセスできません。iOS の [設定] &gt; [プライバシー] &gt; [写真] でアクセスを有効にしてください。</translation>
 <translation id="4064699917955374540">Google アカウントで Chrome のデータを使用して保存するには、本人確認を行ってください。</translation>
+<translation id="411154422556990518">価格トラッキングの更新や Chrome のヒントをチェックできます。</translation>
 <translation id="417201473131094001">Chrome Canary では対象外です。</translation>
 <translation id="424864128008805179">Chrome からログアウトしますか？</translation>
 <translation id="4430797724889237570">Gmail、マップ、YouTube などのアプリで選択したリンクを Chrome で開きます</translation>
@@ -133,6 +134,7 @@
 <translation id="4636900170638246267">このサイトと Chrome にログインしてください。</translation>
 <translation id="4647910807533196601">Chrome で最近使ったタブを開きます。</translation>
 <translation id="4693084815234024320">Chrome のシークレット モードです</translation>
+<translation id="4713907610796204963">Chrome のご利用開始に役立つ基本的な使い方を紹介します</translation>
 <translation id="4724297637870447613">Chrome をどこでも使用</translation>
 <translation id="4738647308035481133">Google Chrome ページ</translation>
 <translation id="4742795653798179840">Chrome データを削除しました</translation>
@@ -228,7 +230,6 @@
 Chrome を使いやすくするためにデータを使用するその他の設定については、<ph name="BEGIN_LINK" />Google サービス<ph name="END_LINK" />をご覧ください。</translation>
 <translation id="6922332667202044570">Chrome の閲覧履歴データを削除します。</translation>
 <translation id="6924922227983877439">リンクを開くデフォルトを Chrome にする</translation>
-<translation id="6931601805528922498">ログインすると、仕事関連のブラウジングに使うアカウントが Chrome に追加されます。</translation>
 <translation id="6975725306479268850">自動入力で Chrome を選択する</translation>
 <translation id="7056826488869329999">Chrome で安全チェックを開いて実行します。</translation>
 <translation id="7061455974939528301">Chrome アイコンを長押しして、[ホーム画面を編集] をクリックします</translation>
@@ -240,7 +241,6 @@ Chrome を使いやすくするためにデータを使用するその他の設�
 <translation id="7175129790242719365">Chrome のヒント: Chrome にログインする</translation>
 <translation id="7187993566681480880">ログイン時に、Chrome を安全に利用できるようにするほか、他の Google アプリのセキュリティ強化に使用されることがあります。</translation>
 <translation id="7200524487407690471">Chrome では、データ侵害や安全でないウェブサイトなどからユーザーを保護するため、1 日 1 回、安全チェックを自動的に実行します。安全チェックの詳細は [設定] で確認できます。</translation>
-<translation id="7203324561587388418">最新のコンテンツや Chrome の役立つヒントをチェックできます。</translation>
 <translation id="72119412072970160">iPad の他のアプリで Google パスワード マネージャーに保存したパスワードを使用できます。</translation>
 <translation id="7214019116829172458">Chrome でシークレット タブを開く</translation>
 <translation id="722167379782941918">Chrome は保護強化機能を推奨しています</translation>
@@ -253,6 +253,7 @@ Chrome を使いやすくするためにデータを使用するその他の設�
 <translation id="7299681342915173313">メール、ドキュメント、他のアプリのリンクをタップしたときに、常に Chrome が使えるようになります。</translation>
 <translation id="7344094882820374540">Chrome の最高水準のセキュリティで危険なサイトから身を守りましょう</translation>
 <translation id="7349129508108954623">Chrome で Google マップを使用して、検出された住所までの経路やローカル情報を取得できるようにします。</translation>
+<translation id="7371674917547846460">Chrome の役立つヒントなどをチェックできます。</translation>
 <translation id="7394108421562933108">Chrome の Google マップ表示</translation>
 <translation id="7400722733683201933">Google Chrome について</translation>
 <translation id="7466693328838535498">[検索ウィジェット] ボックスに「Chrome」と入力</translation>
@@ -263,6 +264,7 @@ Chrome を使いやすくするためにデータを使用するその他の設�
 <translation id="7581063337314642333">Chrome でタブグリッドにアクセス</translation>
 <translation id="7599894504325210080">Chrome の自動入力拡張ビュー</translation>
 <translation id="7617512710641355143">Chrome は管理されています</translation>
+<translation id="7626032353295482388">Chrome へようこそ</translation>
 <translation id="7642373780953416937">Chrome で自動的に検出されたプライバシーとセキュリティの問題がある場合は、アラートが表示されます。</translation>
 <translation id="7660356333829433649">Chrome を最大限に活用するヒントをこちらで随時ご紹介します。</translation>
 <translation id="7662994914830945754">どのデバイスからでも Chrome で自分のタブにアクセスするには、ログインして同期をオンにしてください</translation>
@@ -276,6 +278,7 @@ Chrome を使いやすくするためにデータを使用するその他の設�
 <translation id="778855399387580014">新しい Chrome タブで検索を開始します。</translation>
 <translation id="7792140019572081272">Chrome では、Face ID を使用してセンシティブ データを保護します。</translation>
 <translation id="7855730255114109580">Google Chrome は最新版です</translation>
+<translation id="787226752901403048">Chrome にログインして、タブグループの共有や参加、アイデアの出し合いなどを行うことができます</translation>
 <translation id="7897703007638178753">Chrome で最近使ったタブを表示</translation>
 <translation id="7948283758957877064">Chrome の新機能</translation>
 <translation id="8000174216052461231">Chrome のヒント: Chrome の厳重なセキュリティ機能で保護</translation>

@@ -12,6 +12,7 @@ import static org.chromium.chrome.browser.tasks.tab_management.ArchivedTabsCardV
 import static org.chromium.chrome.browser.tasks.tab_management.ArchivedTabsCardViewProperties.WIDTH;
 
 import android.app.Activity;
+import android.graphics.drawable.GradientDrawable;
 import android.util.Size;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -42,6 +43,7 @@ import org.chromium.chrome.browser.tasks.tab_management.TabListCoordinator.TabLi
 import org.chromium.chrome.browser.tasks.tab_management.TabListCoordinator.TabListMode;
 import org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties.ModelType;
 import org.chromium.chrome.browser.tasks.tab_management.TabSwitcherMessageManager.MessageUpdateObserver;
+import org.chromium.chrome.browser.theme.SurfaceColorUpdateUtils;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeController;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.components.browser_ui.desktop_windowing.DesktopWindowStateManager;
@@ -49,6 +51,7 @@ import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightParams;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightShape;
 import org.chromium.components.feature_engagement.Tracker;
+import org.chromium.components.tab_group_sync.TabGroupSyncService;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -102,6 +105,11 @@ public class ArchivedTabsMessageService extends MessageService
                                 });
                     }
                     mEndIconView = mCustomCardView.findViewById(R.id.end_image);
+                    GradientDrawable cardViewBg =
+                            (GradientDrawable)
+                                    mCustomCardView.findViewById(R.id.card).getBackground();
+                    cardViewBg.setColor(
+                            SurfaceColorUpdateUtils.getMessageCardBackgroundColor(mActivity));
                     PropertyModelChangeProcessor.create(
                             mCustomCardModel, mCustomCardView, ArchivedTabsCardViewBinder::bind);
                 }
@@ -144,6 +152,7 @@ public class ArchivedTabsMessageService extends MessageService
     private final @NonNull ObservableSupplier<TabListCoordinator> mTabListCoordinatorSupplier;
     private final @Nullable DesktopWindowStateManager mDesktopWindowStateManager;
     private final @NonNull ObservableSupplier<EdgeToEdgeController> mEdgeToEdgeSupplier;
+    private final @Nullable TabGroupSyncService mTabGroupSyncService;
 
     private TabArchiveSettings mTabArchiveSettings;
     private ArchivedTabsDialogCoordinator mArchivedTabsDialogCoordinator;
@@ -170,7 +179,8 @@ public class ArchivedTabsMessageService extends MessageService
             @NonNull Runnable appendMessageRunnable,
             @NonNull ObservableSupplier<TabListCoordinator> tabListCoordinatorSupplier,
             @Nullable DesktopWindowStateManager desktopWindowStateManager,
-            @NonNull ObservableSupplier<EdgeToEdgeController> edgeToEdgeSupplier) {
+            @NonNull ObservableSupplier<EdgeToEdgeController> edgeToEdgeSupplier,
+            @Nullable TabGroupSyncService tabGroupSyncService) {
         super(MessageType.ARCHIVED_TABS_MESSAGE);
         mActivity = activity;
         mArchivedTabModelOrchestrator = archivedTabModelOrchestrator;
@@ -214,6 +224,7 @@ public class ArchivedTabsMessageService extends MessageService
         }
 
         mEdgeToEdgeSupplier = edgeToEdgeSupplier;
+        mTabGroupSyncService = tabGroupSyncService;
     }
 
     @Override
@@ -345,7 +356,8 @@ public class ArchivedTabsMessageService extends MessageService
                         mTabArchiveSettings,
                         mModalDialogManager,
                         mDesktopWindowStateManager,
-                        mEdgeToEdgeSupplier);
+                        mEdgeToEdgeSupplier,
+                        mTabGroupSyncService);
     }
 
     private void updateModelProperties() {

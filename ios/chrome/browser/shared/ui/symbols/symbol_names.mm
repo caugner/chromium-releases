@@ -196,6 +196,8 @@ NSString* const kWifiSymbol = @"wifi";
 NSString* const kBookmarksSymbol = @"star";
 NSString* const kSyncErrorSymbol =
     @"exclamationmark.arrow.triangle.2.circlepath";
+NSString* const kSyncPasswordErrorSymbol =
+    @"lock.trianglebadge.exclamationmark.fill";
 NSString* const kMenuSymbol = @"ellipsis";
 NSString* const kSortSymbol = @"arrow.up.arrow.down";
 NSString* const kExpandSymbol = @"arrow.up.left.and.arrow.down.right";
@@ -286,6 +288,7 @@ NSString* const kRectangleGroupBubble = @"rectangle.3.group.bubble";
 NSString* const kHomeSymbol = @"house";
 NSString* const kWorkSymbol = @"case";
 NSString* const kShieldedEnvelope = @"envelope.badge.shield.half.filled";
+NSString* const kReaderModeSymbol = @"text.page";
 
 // Names of the default symbol being non-monochrome by default. When using them,
 // you probably want to set their color to monochrome.

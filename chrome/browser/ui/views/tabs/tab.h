@@ -199,9 +199,11 @@ class Tab : public gfx::AnimationDelegate,
 
   void SetShouldShowDiscardIndicator(bool enabled);
 
+  void UpdateInsets();
+
  private:
   class TabCloseButtonObserver;
-  friend class AlertIndicatorButtonTest;
+  friend class TabContentsTest;
   friend class TabTest;
   friend class TabStripTestBase;
 #if BUILDFLAG(IS_CHROMEOS)
@@ -211,7 +213,9 @@ class Tab : public gfx::AnimationDelegate,
   FRIEND_TEST_ALL_PREFIXES(TabTest, TitleTextHasSufficientContrast);
   FRIEND_TEST_ALL_PREFIXES(TabHoverCardInteractiveUiTest,
                            HoverCardVisibleOnTabCloseButtonFocusAfterTabFocus);
-  FRIEND_TEST_ALL_PREFIXES(AlertIndicatorButtonTest, AccessibleNameChanged);
+  FRIEND_TEST_ALL_PREFIXES(TabContentsTest, AccessibleNameChanged);
+  FRIEND_TEST_ALL_PREFIXES(TabContentsTest,
+                           AccessibleNameChangesWithCollaborationMessages);
 
   bool ShouldUpdateAccessibleName(TabRendererData& old_data,
                                   TabRendererData& new_data);

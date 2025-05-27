@@ -34,40 +34,6 @@ consoles.list_view(
     ],
 )
 
-def dawn_mac_builder(*, name, **kwargs):
-    kwargs.setdefault("cpu", None)
-    return try_.builder(
-        name = name,
-        builderless = True,
-        cores = None,
-        free_space = None,
-        os = os.MAC_ANY,
-        ssd = None,
-        pool = "luci.chromium.gpu.try",
-        max_concurrent_builds = 1,
-        **kwargs
-    )
-
-def dawn_win_builderless_builder(*, name, **kwargs):
-    kwargs.setdefault("ssd", None)
-    kwargs.setdefault("max_concurrent_builds", 1)
-    kwargs.setdefault("free_space", None)
-    return try_.builder(
-        name = name,
-        builderless = True,
-        os = os.WINDOWS_ANY,
-        pool = "luci.chromium.gpu.try",
-        **kwargs
-    )
-
-def dawn_win_builderful_builder(*, name, **kwargs):
-    return try_.builder(
-        name = name,
-        builderless = False,
-        os = os.WINDOWS_ANY,
-        **kwargs
-    )
-
 try_.builder(
     name = "dawn-chromium-presubmit",
     branch_selector = [
@@ -266,7 +232,7 @@ try_.builder(
     ),
 )
 
-dawn_win_builderless_builder(
+try_.builder(
     name = "dawn-win10-x64-deps-rel",
     branch_selector = branches.selector.WINDOWS_BRANCHES,
     mirrors = [
@@ -275,8 +241,8 @@ dawn_win_builderless_builder(
         "ci/Dawn Win10 x64 DEPS Release (NVIDIA)",
     ],
     gn_args = "ci/Dawn Win10 x64 DEPS Builder",
+    os = os.WINDOWS_ANY,
     main_list_view = "try",
-    max_concurrent_builds = 5,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -297,7 +263,7 @@ dawn_win_builderless_builder(
     ),
 )
 
-dawn_win_builderless_builder(
+try_.builder(
     name = "dawn-win10-x86-deps-rel",
     branch_selector = branches.selector.WINDOWS_BRANCHES,
     mirrors = [
@@ -306,10 +272,10 @@ dawn_win_builderless_builder(
         "ci/Dawn Win10 x86 DEPS Release (NVIDIA)",
     ],
     gn_args = "ci/Dawn Win10 x86 DEPS Builder",
+    os = os.WINDOWS_ANY,
     check_for_flakiness = False,
     check_for_flakiness_with_resultdb = False,
     main_list_view = "try",
-    max_concurrent_builds = 5,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -561,6 +527,20 @@ try_.builder(
     ),
 )
 
+def dawn_mac_builder(*, name, **kwargs):
+    kwargs.setdefault("cpu", None)
+    return try_.builder(
+        name = name,
+        builderless = True,
+        cores = None,
+        free_space = None,
+        os = os.MAC_ANY,
+        ssd = None,
+        pool = "luci.chromium.gpu.try",
+        max_concurrent_builds = 1,
+        **kwargs
+    )
+
 dawn_mac_builder(
     name = "dawn-try-mac-amd-exp",
     mirrors = [
@@ -621,6 +601,25 @@ dawn_mac_builder(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
 )
+
+def dawn_win_builderless_builder(*, name, **kwargs):
+    kwargs.setdefault("ssd", None)
+    kwargs.setdefault("max_concurrent_builds", 1)
+    return try_.builder(
+        name = name,
+        builderless = True,
+        os = os.WINDOWS_ANY,
+        pool = "luci.chromium.gpu.try",
+        **kwargs
+    )
+
+def dawn_win_builderful_builder(*, name, **kwargs):
+    return try_.builder(
+        name = name,
+        builderless = False,
+        os = os.WINDOWS_ANY,
+        **kwargs
+    )
 
 dawn_win_builderless_builder(
     name = "dawn-try-win-x64-intel-exp",
@@ -689,7 +688,7 @@ dawn_win_builderless_builder(
     ),
 )
 
-dawn_win_builderless_builder(
+dawn_win_builderful_builder(
     name = "win-dawn-rel",
     mirrors = [
         "ci/Dawn Win10 x64 Builder",
@@ -697,7 +696,6 @@ dawn_win_builderless_builder(
         "ci/Dawn Win10 x64 Release (NVIDIA)",
     ],
     gn_args = "ci/Dawn Win10 x64 Builder",
-    max_concurrent_builds = 3,
     test_presentation = resultdb.test_presentation(
         grouping_keys = ["status", "v.test_suite", "v.gpu"],
     ),
@@ -714,7 +712,7 @@ dawn_win_builderful_builder(
     ),
 )
 
-dawn_win_builderless_builder(
+dawn_win_builderful_builder(
     name = "dawn-try-win10-x86-rel",
     mirrors = [
         "ci/Dawn Win10 x86 Builder",

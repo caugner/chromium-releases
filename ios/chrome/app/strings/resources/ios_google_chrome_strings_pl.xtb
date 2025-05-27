@@ -123,6 +123,7 @@ Odczekaj kilka minut, zanim się wylogujesz. Jeśli wylogujesz się teraz, te da
 <translation id="3984746313391923992">Twoja organizacja nie pozwala Ci zalogować się w Chrome.</translation>
 <translation id="3988789688219830639">Google Chrome nie ma dostępu do Twoich zdjęć ani filmów. Aby włączyć dostęp w iOS, wybierz Ustawienia &gt; Prywatność &gt; Zdjęcia.</translation>
 <translation id="4064699917955374540">Aby móc zapisywać dane z Chrome na koncie Google i ich używać, potwierdź swoją tożsamość.</translation>
+<translation id="411154422556990518">Otrzymuj powiadomienia ze śledzenia cen i wskazówki dotyczące Chrome.</translation>
 <translation id="417201473131094001">Nieobsługiwane w Chrome Canary</translation>
 <translation id="424864128008805179">Wylogować z Chrome?</translation>
 <translation id="4430797724889237570">Otwieraj linki z Gmaila, Map, YouTube i innych aplikacji w Chrome</translation>
@@ -133,6 +134,7 @@ Odczekaj kilka minut, zanim się wylogujesz. Jeśli wylogujesz się teraz, te da
 <translation id="4636900170638246267">Zaloguj się w na tej stronie i w Chrome.</translation>
 <translation id="4647910807533196601">Otwórz moją ostatnio używaną kartę w Chrome.</translation>
 <translation id="4693084815234024320">Jesteś w trybie incognito w Chrome</translation>
+<translation id="4713907610796204963">Aby zacząć, zapoznaj się z najważniejszymi przydatnymi informacjami o Chrome</translation>
 <translation id="4724297637870447613">Korzystaj z Chrome w dowolnym miejscu</translation>
 <translation id="4738647308035481133">Strona Google Chrome</translation>
 <translation id="4742795653798179840">Usunięte dane Chrome</translation>
@@ -228,7 +230,6 @@ Aby zmienić to ustawienie, <ph name="BEGIN_LINK" />wyczyść dane Chrome na swo
 W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz więcej ustawień, które wykorzystują dane do ulepszania działania Chrome.</translation>
 <translation id="6922332667202044570">Usuń dane przeglądania w Chrome.</translation>
 <translation id="6924922227983877439">Otwieraj linki domyślnie w Chrome</translation>
-<translation id="6931601805528922498">Gdy się zalogujesz, Twoje konto zostanie dodane do Chrome i będzie przeznaczone do przeglądania stron związanych z pracą.</translation>
 <translation id="6975725306479268850">Wybieranie Chrome do autouzupełniania</translation>
 <translation id="7056826488869329999">Otwiera i uruchamia kontrolę zabezpieczeń w Chrome.</translation>
 <translation id="7061455974939528301">Naciśnij i przytrzymaj ikonę Chrome i kliknij „Edytuj ekran główny”</translation>
@@ -240,7 +241,6 @@ W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz wi�
 <translation id="7175129790242719365">Wskazówka dotycząca Chrome: zaloguj się w Chrome</translation>
 <translation id="7187993566681480880">Dba o Twoje bezpieczeństwo w Chrome i może poprawiać Twoje bezpieczeństwo w innych aplikacjach Google, gdy się w nich zalogujesz.</translation>
 <translation id="7200524487407690471">Chrome codziennie automatycznie uruchamia kontrolę zabezpieczeń, aby chronić Cię przed naruszeniami bezpieczeństwa danych, niebezpiecznymi stronami i innymi zagrożeniami. Więcej informacji o kontroli zabezpieczeń znajdziesz w Ustawieniach.</translation>
-<translation id="7203324561587388418">Bądź na bieżąco z treściami i przydatnymi wskazówkami dotyczącymi Chrome.</translation>
 <translation id="72119412072970160">Haseł zapisanych w menedżerze haseł Google możesz używać w innych aplikacjach na iPadzie.</translation>
 <translation id="7214019116829172458">Otwórz kartę incognito w Chrome</translation>
 <translation id="722167379782941918">Chrome zaleca silniejszą ochronę</translation>
@@ -253,6 +253,7 @@ W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz wi�
 <translation id="7299681342915173313">Teraz możesz używać Chrome za każdym razem, gdy klikniesz link w e-mailach, dokumentach i w innych aplikacjach.</translation>
 <translation id="7344094882820374540">Korzystaj z najlepszych zabezpieczeń Chrome przed niebezpiecznymi stronami</translation>
 <translation id="7349129508108954623">Zezwalaj Chrome na używanie Map Google do podawania wskazówek i informacji lokalnych o wykrytych adresach.</translation>
+<translation id="7371674917547846460">Otrzymuj przydatne wskazówki dotyczące Chrome i inne informacje.</translation>
 <translation id="7394108421562933108">Mapy w Chrome</translation>
 <translation id="7400722733683201933">Google Chrome – informacje</translation>
 <translation id="7466693328838535498">W polu Widżety wyszukiwania wpisz Chrome</translation>
@@ -263,6 +264,7 @@ W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz wi�
 <translation id="7581063337314642333">Wyświetl siatkę kart w Chrome</translation>
 <translation id="7599894504325210080">Widok rozwinięty autouzupełniania w Chrome</translation>
 <translation id="7617512710641355143">Przeglądarka Chrome jest zarządzana</translation>
+<translation id="7626032353295482388">Witamy w Chrome</translation>
 <translation id="7642373780953416937">Otrzymuj alerty o problemach związanych z prywatnością i bezpieczeństwem, które automatycznie wykrywa Chrome.</translation>
 <translation id="7660356333829433649">Wróć tutaj, aby zobaczyć więcej przydatnych wskazówek, które pomogą Ci w pełni wykorzystać możliwości Chrome.</translation>
 <translation id="7662994914830945754">Aby widzieć swoje karty zawsze, kiedy korzystasz z Chrome, zaloguj się i włącz synchronizację</translation>
@@ -276,6 +278,7 @@ W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz wi�
 <translation id="778855399387580014">Rozpocznij wyszukiwanie na nowej karcie Chrome.</translation>
 <translation id="7792140019572081272">Chrome dba o bezpieczeństwo Twoich danych wrażliwych za pomocą Face ID.</translation>
 <translation id="7855730255114109580">Masz aktualną wersję Google Chrome</translation>
+<translation id="787226752901403048">Zaloguj się w Chrome, aby udostępniać grupy kart i do nich dołączać oraz wspólnie pracować nad pomysłami</translation>
 <translation id="7897703007638178753">Zobacz ostatnie karty w Chrome</translation>
 <translation id="7948283758957877064">Nowości w Chrome</translation>
 <translation id="8000174216052461231">Wskazówka dotycząca Chrome: korzystaj z najlepszych zabezpieczeń Chrome</translation>

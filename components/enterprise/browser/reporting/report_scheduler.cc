@@ -15,10 +15,12 @@
 #include "build/build_config.h"
 #include "components/enterprise/browser/controller/browser_dm_token_storage.h"
 #include "components/enterprise/browser/reporting/common_pref_names.h"
+#include "components/enterprise/browser/reporting/report_generation_config.h"
 #include "components/enterprise/browser/reporting/reporting_delegate_factory.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
 #include "components/policy/core/common/cloud/dm_token.h"
+#include "components/policy/core/common/policy_logger.h"
 #include "components/prefs/pref_service.h"
 
 namespace em = enterprise_management;
@@ -35,6 +37,7 @@ bool IsBrowserVersionUploaded(ReportScheduler::ReportTrigger trigger) {
     case ReportScheduler::kTriggerManual:
     case ReportScheduler::kTriggerUpdate:
     case ReportScheduler::kTriggerNewVersion:
+    case ReportScheduler::kTriggerSecurity:
       return true;
     case ReportScheduler::kTriggerNone:
       return false;
@@ -81,12 +84,18 @@ ReportScheduler::ReportScheduler(CreateParams params)
       base::BindRepeating(&ReportScheduler::GenerateAndUploadReport,
                           weak_ptr_factory_.GetWeakPtr()));
   RegisterPrefObserver();
+
+  delegate_->OnInitializationCompleted();
 }
 
 ReportScheduler::~ReportScheduler() = default;
 
 bool ReportScheduler::IsReportingEnabled() const {
   return delegate_->GetPrefService()->GetBoolean(reporting_pref_name_);
+}
+
+bool ReportScheduler::AreSecurityReportsEnabled() const {
+  return delegate_->AreSecurityReportsEnabled();
 }
 
 bool ReportScheduler::IsNextReportScheduledForTesting() const {
@@ -98,9 +107,9 @@ ReportScheduler::ReportTrigger ReportScheduler::GetActiveTriggerForTesting()
   return active_trigger_;
 }
 
-void ReportScheduler::SetReportUploaderForTesting(
+void ReportScheduler::QueueReportUploaderForTesting(
     std::unique_ptr<ReportUploader> uploader) {
-  report_uploader_ = std::move(uploader);
+  report_uploaders_for_test_.push_back(std::move(uploader));
 }
 
 ReportScheduler::Delegate* ReportScheduler::GetDelegateForTesting() {
@@ -115,7 +124,12 @@ void ReportScheduler::OnDMTokenUpdated() {
 }
 
 void ReportScheduler::UploadFullReport(base::OnceClosure on_report_uploaded) {
-  if (!IsReportingEnabled()) {
+  ReportTrigger trigger = kTriggerNone;
+  if (IsReportingEnabled()) {
+    trigger = kTriggerManual;
+  } else if (delegate_->AreSecurityReportsEnabled()) {
+    trigger = kTriggerSecurity;
+  } else {
     VLOG(1) << "Reporting is not enabled.";
     std::move(on_report_uploaded).Run();
     return;
@@ -127,7 +141,7 @@ void ReportScheduler::UploadFullReport(base::OnceClosure on_report_uploaded) {
     return;
   }
   on_manual_report_uploaded_ = std::move(on_report_uploaded);
-  GenerateAndUploadReport(kTriggerManual);
+  GenerateAndUploadReport(trigger);
 }
 
 void ReportScheduler::RegisterPrefObserver() {
@@ -136,6 +150,7 @@ void ReportScheduler::RegisterPrefObserver() {
       reporting_pref_name_,
       base::BindRepeating(&ReportScheduler::OnReportEnabledPrefChanged,
                           base::Unretained(this)));
+
   // Trigger first pref check during launch process.
   OnDMTokenUpdated();
 }
@@ -237,6 +252,11 @@ void ReportScheduler::Start(base::Time last_upload_time) {
 }
 
 void ReportScheduler::GenerateAndUploadReport(ReportTrigger trigger) {
+  if (delegate_->AreSecurityReportsEnabled()) {
+    // Does nothing if client is already registered.
+    SetupBrowserPolicyClientRegistration();
+  }
+
   if (active_trigger_ != kTriggerNone) {
     // A report is already being generated. Remember this trigger to be handled
     // once the current report completes.
@@ -245,16 +265,35 @@ void ReportScheduler::GenerateAndUploadReport(ReportTrigger trigger) {
   }
 
   active_trigger_ = trigger;
-  ReportType report_type = TriggerToReportType(trigger);
+  ReportType report_type = TriggerToReportType(active_trigger_);
+  SecuritySignalsMode signals_mode = SecuritySignalsMode::kNoSignals;
+  if (report_type == ReportType::kProfileReport) {
+    signals_mode = delegate_->AreSecurityReportsEnabled()
+                       ? (active_trigger_ == ReportScheduler::kTriggerSecurity
+                              ? SecuritySignalsMode::kSignalsOnly
+                              : SecuritySignalsMode::kSignalsAttached)
+                       : SecuritySignalsMode::kNoSignals;
+  }
+
+  active_report_generation_config_ = ReportGenerationConfig(
+      report_type, signals_mode, delegate_->UseCookiesInUploads());
+
+  VLOG_POLICY(1, REPORTING)
+      << "Starting report generation with the following configuration: "
+      << active_report_generation_config_.ToString();
+
   if (report_type == ReportType::kProfileReport) {
     DCHECK(profile_request_generator_);
-    profile_request_generator_->Generate(base::BindOnce(
-        &ReportScheduler::OnReportGenerated, base::Unretained(this)));
+    profile_request_generator_->Generate(
+        active_report_generation_config_,
+        base::BindOnce(&ReportScheduler::OnReportGenerated,
+                       base::Unretained(this)));
   } else {
     DCHECK(report_generator_);
     report_generator_->Generate(
-        report_type, base::BindOnce(&ReportScheduler::OnReportGenerated,
-                                    base::Unretained(this)));
+        active_report_generation_config_.report_type,
+        base::BindOnce(&ReportScheduler::OnReportGenerated,
+                       base::Unretained(this)));
   }
 }
 
@@ -270,13 +309,23 @@ void ReportScheduler::OnReportGenerated(ReportRequestQueue requests) {
     return;
   }
   VLOG(1) << "Uploading enterprise report.";
-  if (!report_uploader_) {
+  if (!report_uploader_ && report_uploaders_for_test_.size() > 0) {
+    report_uploader_ = std::move(report_uploaders_for_test_.front());
+    report_uploaders_for_test_.erase(report_uploaders_for_test_.begin());
+  } else if (!report_uploader_) {
     report_uploader_ =
         std::make_unique<ReportUploader>(cloud_policy_client_, kMaximumRetry);
   }
-  RecordUploadTrigger(active_trigger_);
+
+  RecordUploadTrigger();
+  if (active_report_generation_config_.security_signals_mode !=
+      SecuritySignalsMode::kNoSignals) {
+    delegate_->GetPrefService()->SetTime(kLastSignalsUploadAttemptTimestamp,
+                                         base::Time::Now());
+  }
+
   report_uploader_->SetRequestAndUpload(
-      TriggerToReportType(active_trigger_), std::move(requests),
+      active_report_generation_config_, std::move(requests),
       base::BindOnce(&ReportScheduler::OnReportUploaded,
                      base::Unretained(this)));
 }
@@ -292,8 +341,21 @@ void ReportScheduler::OnReportUploaded(ReportUploader::ReportStatus status) {
       if (IsBrowserVersionUploaded(active_trigger_))
         delegate_->OnBrowserVersionUploaded();
 
-      delegate_->GetPrefService()->SetTime(kLastUploadSucceededTimestamp,
-                                           base::Time::Now());
+      // Signals-only report does not contain most content of a status report
+      // and should not update this timestamp.
+      if (active_trigger_ != ReportScheduler::kTriggerSecurity) {
+        delegate_->GetPrefService()->SetTime(kLastUploadSucceededTimestamp,
+                                             base::Time::Now());
+      }
+
+      if (active_report_generation_config_.security_signals_mode !=
+          SecuritySignalsMode::kNoSignals) {
+        delegate_->GetPrefService()->SetTime(
+            kLastSignalsUploadSucceededTimestamp, base::Time::Now());
+        delegate_->GetPrefService()->SetString(
+            kLastSignalsUploadSucceededConfig,
+            active_report_generation_config_.ToString());
+      }
       [[fallthrough]];
     case ReportUploader::kTransientError:
       // Stop retrying and schedule the next report to avoid stale report.
@@ -313,9 +375,6 @@ void ReportScheduler::OnReportUploaded(ReportUploader::ReportStatus status) {
   }
 
   if ((active_trigger_ == kTriggerManual || active_trigger_ == kTriggerTimer)) {
-    if (on_manual_report_uploaded_)
-      std::move(on_manual_report_uploaded_).Run();
-
     // Timer and Manual report are exactly same. If we just uploaded one, skip
     // the other.
     if (pending_triggers_ & kTriggerTimer)
@@ -323,6 +382,25 @@ void ReportScheduler::OnReportUploaded(ReportUploader::ReportStatus status) {
     if (pending_triggers_ & kTriggerManual)
       pending_triggers_ -= kTriggerManual;
   }
+
+  if (active_trigger_ == kTriggerManual || active_trigger_ == kTriggerTimer ||
+      active_trigger_ == kTriggerSecurity) {
+    if (on_manual_report_uploaded_) {
+      std::move(on_manual_report_uploaded_).Run();
+    }
+
+    if (active_report_generation_config_.security_signals_mode !=
+        SecuritySignalsMode::kNoSignals) {
+      delegate_->OnSecuritySignalsUploaded();
+
+      // A full report includes security signals already, we don't need another
+      // security signals only report until the timer runs out again.
+      if (pending_triggers_ & kTriggerSecurity) {
+        pending_triggers_ -= kTriggerSecurity;
+      }
+    }
+  }
+
   active_trigger_ = kTriggerNone;
   RunPendingTriggers();
 }
@@ -344,17 +422,27 @@ void ReportScheduler::RunPendingTriggers() {
     // Manual-triggered reports also contains all data.
     trigger = kTriggerManual;
     pending_triggers_ = 0;
+  } else if ((pending_triggers_ & kTriggerSecurity) != 0) {
+    trigger = kTriggerSecurity;
+    pending_triggers_ -= kTriggerSecurity;
   } else {
-    trigger = (pending_triggers_ & kTriggerUpdate) != 0 ? kTriggerUpdate
-                                                        : kTriggerNewVersion;
-    pending_triggers_ = 0;
+    // Update and NewVersion triggers lead to the same report content being
+    // uploaded.
+    if ((pending_triggers_ & kTriggerUpdate) != 0) {
+      trigger = kTriggerUpdate;
+      pending_triggers_ -= kTriggerUpdate;
+    }
+
+    if ((pending_triggers_ & kTriggerNewVersion) != 0) {
+      trigger = kTriggerNewVersion;
+      pending_triggers_ -= kTriggerNewVersion;
+    }
   }
 
   GenerateAndUploadReport(trigger);
 }
 
-// static
-void ReportScheduler::RecordUploadTrigger(ReportTrigger trigger) {
+void ReportScheduler::RecordUploadTrigger() {
   // These values are persisted to logs. Entries should not be renumbered and
   // numeric values should never be reused.
   enum class Sample {
@@ -365,9 +453,10 @@ void ReportScheduler::RecordUploadTrigger(ReportTrigger trigger) {
     kExtensionRequest = 4,          // Deprecated.
     kExtensionRequestRealTime = 5,  // Deprecated.
     kManual = 6,
-    kMaxValue = kManual
+    kSecurity = 7,
+    kMaxValue = kSecurity
   } sample = Sample::kNone;
-  switch (trigger) {
+  switch (active_trigger_) {
     case kTriggerNone:
       break;
     case kTriggerTimer:
@@ -382,9 +471,19 @@ void ReportScheduler::RecordUploadTrigger(ReportTrigger trigger) {
     case kTriggerNewVersion:
       sample = Sample::kNewVersion;
       break;
+    case kTriggerSecurity:
+      sample = Sample::kSecurity;
+      break;
   }
   base::UmaHistogramEnumeration("Enterprise.CloudReportingUploadTrigger",
                                 sample);
+
+  if (active_report_generation_config_.security_signals_mode !=
+      SecuritySignalsMode::kNoSignals) {
+    base::UmaHistogramEnumeration(
+        "Enterprise.SecurityReport.User.Mode",
+        active_report_generation_config_.security_signals_mode);
+  }
 }
 
 ReportType ReportScheduler::TriggerToReportType(
@@ -399,6 +498,9 @@ ReportType ReportScheduler::TriggerToReportType(
       return ReportType::kBrowserVersion;
     case ReportScheduler::kTriggerNewVersion:
       return ReportType::kBrowserVersion;
+    case ReportScheduler::kTriggerSecurity:
+      // Security triggers are not supported at the browser-level yet.
+      return ReportType::kProfileReport;
   }
 }
 

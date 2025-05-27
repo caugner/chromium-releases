@@ -29,6 +29,7 @@
 #include "chrome/browser/preloading/preloading_prefs.h"
 #include "chrome/browser/preloading/prerender/prerender_manager.h"
 #include "chrome/browser/preloading/prerender/prerender_utils.h"
+#include "chrome/browser/preloading/search_preload/search_preload_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
@@ -57,27 +58,6 @@
 using omnibox::mojom::NavigationPredictor;
 
 namespace {
-void SetIsNavigationInDomainCallback(content::PreloadingData* preloading_data) {
-  constexpr content::PreloadingPredictor kPredictors[] = {
-      chrome_preloading_predictor::kDefaultSearchEngine,
-      chrome_preloading_predictor::kOmniboxSearchSuggestDefaultMatch,
-      chrome_preloading_predictor::kOmniboxMousePredictor,
-      chrome_preloading_predictor::kOmniboxSearchPredictor,
-      chrome_preloading_predictor::kOmniboxTouchDownPredictor};
-  for (const auto& predictor : kPredictors) {
-    preloading_data->SetIsNavigationInDomainCallback(
-        predictor,
-        base::BindRepeating(
-            [](content::NavigationHandle* navigation_handle) -> bool {
-              auto transition_type = navigation_handle->GetPageTransition();
-              return (transition_type & ui::PAGE_TRANSITION_FROM_ADDRESS_BAR) &&
-                     ui::PageTransitionCoreTypeIs(
-                         transition_type,
-                         ui::PageTransition::PAGE_TRANSITION_GENERATED) &&
-                     ui::PageTransitionIsNewNavigation(transition_type);
-            }));
-  }
-}
 
 // Recomputes the destination URL for |match| with the updated prefetch
 // information (does not modify |destination_url|). Passing true to
@@ -234,20 +214,53 @@ GURL GetPrerenderUrlFromMatch(
                                 /*prefetch_param=*/"");
 }
 
+void SetIsNavigationInDomainCallback(content::PreloadingData* preloading_data) {
+  constexpr content::PreloadingPredictor kPredictors[] = {
+      chrome_preloading_predictor::kDefaultSearchEngine,
+      chrome_preloading_predictor::kOmniboxSearchSuggestDefaultMatch,
+      chrome_preloading_predictor::kOmniboxMousePredictor,
+      chrome_preloading_predictor::kOmniboxSearchPredictor,
+      chrome_preloading_predictor::kOmniboxTouchDownPredictor};
+  for (const auto& predictor : kPredictors) {
+    preloading_data->SetIsNavigationInDomainCallback(
+        predictor,
+        base::BindRepeating(
+            [](content::NavigationHandle* navigation_handle) -> bool {
+              auto transition_type = navigation_handle->GetPageTransition();
+              return (transition_type & ui::PAGE_TRANSITION_FROM_ADDRESS_BAR) &&
+                     ui::PageTransitionCoreTypeIs(
+                         transition_type,
+                         ui::PageTransition::PAGE_TRANSITION_GENERATED) &&
+                     ui::PageTransitionIsNewNavigation(transition_type);
+            }));
+  }
+}
+
 struct SearchPrefetchService::SearchPrefetchServingReasonRecorder {
  public:
-  explicit SearchPrefetchServingReasonRecorder(bool for_prerender)
-      : for_prerender_(for_prerender) {}
+  // Passing the SearchPrefetchService pointer is optional. If it is passed,
+  // the recorder will ask the service to track the search terms it in its dtor.
+  explicit SearchPrefetchServingReasonRecorder(
+      bool for_prerender,
+      SearchPrefetchService* service = nullptr)
+      : for_prerender_(for_prerender), service_(service) {}
   ~SearchPrefetchServingReasonRecorder() {
     base::UmaHistogramEnumeration(
         for_prerender_
             ? "Omnibox.SearchPrefetch.PrefetchServingReason2.Prerender"
             : "Omnibox.SearchPrefetch.PrefetchServingReason2",
         reason_);
+    if (service_) {
+      service_->RecordInterceptionMetrics(search_terms_, reason_);
+    }
   }
 
-  SearchPrefetchServingReason reason_ = SearchPrefetchServingReason::kServed;
   const bool for_prerender_ = false;
+  // A method of SearchPrefetchService holds this instance, so it is safe to
+  // refer to it with pointer.
+  raw_ptr<SearchPrefetchService> service_;
+  SearchPrefetchServingReason reason_ = SearchPrefetchServingReason::kServed;
+  std::u16string search_terms_;
 };
 
 // static
@@ -261,6 +274,7 @@ void SearchPrefetchService::RegisterProfilePrefs(PrefRegistrySimple* registry) {
 SearchPrefetchService::SearchPrefetchService(Profile* profile)
     : profile_(profile) {
   CHECK(!profile_->IsOffTheRecord() || IsPrefetchIncognitoEnabled());
+  CHECK(!features::IsDsePreload2Enabled());
 
   if (LoadFromPrefs())
     SaveToPrefs();
@@ -539,7 +553,12 @@ SearchPrefetchURLLoader::RequestHandler
 SearchPrefetchService::TakePrefetchResponseFromMemoryCache(
     const network::ResourceRequest& tentative_resource_request) {
   const GURL& navigation_url = tentative_resource_request.url;
-  SearchPrefetchServingReasonRecorder recorder(/*for_prerender=*/false);
+  SearchPrefetchServingReasonRecorder recorder(
+      /*for_prerender=*/false,
+      // Not to track back/forward style navigation.
+      tentative_resource_request.load_flags & net::LOAD_SKIP_CACHE_VALIDATION
+          ? nullptr
+          : this);
 
   auto iter =
       RetrieveSearchTermsInMemoryCache(tentative_resource_request, recorder);
@@ -1080,14 +1099,19 @@ SearchPrefetchService::RetrieveSearchTermsInMemoryCache(
   }
 
   GURL canonical_search_url;
-  if (!HasCanonicalPreloadingOmniboxSearchURL(navigation_url, profile_,
-                                              &canonical_search_url) ||
-      !IsSearchDestinationMatch(canonical_search_url, profile_,
-                                navigation_url)) {
+  std::u16string search_terms;
+  if (!HasCanonicalPreloadingOmniboxSearchURL(
+          navigation_url, profile_, &canonical_search_url, &search_terms)) {
     recorder.reason_ = SearchPrefetchServingReason::kNotDefaultSearchWithTerms;
     return prefetches_.end();
   }
-
+  // TODO(https://crbug.com/417978876): figure out the reason why search_terms
+  // can be empty when `HasCanonicalPreloadingOmniboxSearchURL` returns true.
+  if (search_terms.empty()) {
+    recorder.reason_ = SearchPrefetchServingReason::kNotDefaultSearchWithTerms;
+    return prefetches_.end();
+  }
+  recorder.search_terms_ = search_terms;
   const auto& iter = prefetches_.find(canonical_search_url);
 
   // Return early if there is no prefetch found before checking for other
@@ -1244,4 +1268,37 @@ void SearchPrefetchService::MaybePreloadDictionary(
 
 void SearchPrefetchService::DeletePreloadedDictionaries() {
   preloaded_shared_dictionaries_handle_.reset();
+}
+
+void SearchPrefetchService::RecordInterceptionMetrics(
+    const std::u16string& search_terms,
+    SearchPrefetchServingReason serving_status) {
+  // Do not track empty search terms.
+  if (search_terms.empty()) {
+    return;
+  }
+  switch (serving_status) {
+    // Do not track non-DSE navigations.
+    case SearchPrefetchServingReason::kSearchEngineNotValid:
+    case SearchPrefetchServingReason::kJavascriptDisabled:
+    case SearchPrefetchServingReason::kNotDefaultSearchWithTerms:
+      return;
+    case SearchPrefetchServingReason::kServed:
+    case SearchPrefetchServingReason::kNoPrefetch:
+    case SearchPrefetchServingReason::kPrefetchWasForDifferentOrigin:
+    case SearchPrefetchServingReason::kRequestFailed:
+    case SearchPrefetchServingReason::kNotServedOtherReason:
+    case SearchPrefetchServingReason::kPostReloadFormOrLink:
+      break;
+    case SearchPrefetchServingReason::kRequestInFlightNotReady:
+      NOTREACHED();
+  }
+  auto iter = search_terms_cache_.Get(search_terms);
+  if (iter != search_terms_cache_.end()) {
+    base::UmaHistogramCustomTimes(
+        "Omnibox.SearchPrefetch.DuplicateSearchTermsAge",
+        base::Time::Now() - iter->second, base::Milliseconds(1),
+        base::Hours(10), 100);
+  }
+  search_terms_cache_.Put(search_terms, base::Time::Now());
 }

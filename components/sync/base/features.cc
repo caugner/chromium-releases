@@ -78,6 +78,17 @@ BASE_FEATURE(kReplaceSyncPromosWithSignInPromos,
 #endif
 );
 
+BASE_FEATURE(kSyncSupportAlwaysSyncingPriorityPreferences,
+             "SyncSupportAlwaysSyncingPriorityPreferences",
+#if BUILDFLAG(IS_CHROMEOS)
+             // TODO(crbug.com/418991364): Enable by default once prefs account
+             // storage is launched on ChromeOS.
+             base::FEATURE_DISABLED_BY_DEFAULT
+#else
+             base::FEATURE_ENABLED_BY_DEFAULT
+#endif  // BUILDFLAG(IS_CHROMEOS)
+);
+
 BASE_FEATURE(kEnableBookmarksSelectedTypeOnSigninForTesting,
              "EnableBookmarksSelectedTypeOnSigninForTesting",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -93,10 +104,6 @@ bool IsReadingListAccountStorageEnabled() {
       syncer::kReadingListEnableSyncTransportModeUponSignIn);
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-
-BASE_FEATURE(kSyncSharedTabGroupDataInTransportMode,
-             "SyncSharedTabGroupDataInTransportMode",
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSyncEnableWalletMetadataInTransportMode,
              "SyncEnableWalletMetadataInTransportMode",
@@ -157,5 +164,11 @@ BASE_FEATURE(kSyncEnablePasswordsSyncErrorMessageAlternative,
 BASE_FEATURE(kSyncSimulateBookmarksPingPongForTesting,
              "SyncSimulateBookmarksPingPongForTesting",
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+#if BUILDFLAG(IS_IOS)
+BASE_FEATURE(kSyncTrustedVaultInfobarImprovements,
+             "SyncTrustedVaultInfobarImprovements",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_IOS)
 
 }  // namespace syncer

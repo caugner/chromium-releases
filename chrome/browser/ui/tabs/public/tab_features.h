@@ -23,9 +23,12 @@ class ReadAnythingSidePanelController;
 class SidePanelRegistry;
 class TranslatePageActionController;
 class IntentPickerViewPageActionController;
+class FileSystemAccessPageActionController;
+class PwaInstallPageActionController;
 
 namespace commerce {
 class CommerceUiTabHelper;
+class PriceInsightsPageActionViewController;
 }
 
 namespace content {
@@ -50,6 +53,7 @@ class ExtensionSidePanelManager;
 
 #if BUILDFLAG(ENABLE_GLIC)
 namespace glic {
+class GlicPageContextEligibilityObserver;
 class GlicTabIndicatorHelper;
 }
 #endif
@@ -98,6 +102,8 @@ namespace tabs {
 
 class TabInterface;
 class TabDialogManager;
+
+class InactiveWindowMouseEventController;
 
 // This class owns the core controllers for features that are scoped to a given
 // tab. It can be subclassed by tests to perform dependency injection.
@@ -178,6 +184,11 @@ class TabFeatures {
     return intent_picker_view_page_action_controller_.get();
   }
 
+  FileSystemAccessPageActionController*
+  file_system_access_page_action_controller() {
+    return file_system_access_page_action_controller_.get();
+  }
+
   tab_groups::CollaborationMessagingTabData*
   collaboration_messaging_tab_data() {
     return collaboration_messaging_tab_data_.get();
@@ -191,7 +202,27 @@ class TabFeatures {
     return memory_saver_chip_controller_.get();
   }
 
+  commerce::PriceInsightsPageActionViewController*
+  commerce_price_insights_page_action_view_controller() {
+    return commerce_price_insights_page_action_view_controller_.get();
+  }
+
   LensOverlayController* lens_overlay_controller();
+
+  PwaInstallPageActionController* pwa_install_page_action_controller() {
+    return pwa_install_page_action_controller_.get();
+  }
+
+  InactiveWindowMouseEventController* inactive_window_mouse_event_controller() {
+    return inactive_window_mouse_event_controller_.get();
+  }
+
+#if BUILDFLAG(ENABLE_GLIC)
+  glic::GlicPageContextEligibilityObserver*
+  glic_page_context_eligibility_observer() {
+    return glic_page_context_eligibility_observer_.get();
+  }
+#endif
 
   // Called exactly once to initialize features.
   // Can be overridden in tests to initialize nothing.
@@ -275,6 +306,10 @@ class TabFeatures {
   std::unique_ptr<IntentPickerViewPageActionController>
       intent_picker_view_page_action_controller_;
 
+  // Responsible for managing the "File System Access" page action.
+  std::unique_ptr<FileSystemAccessPageActionController>
+      file_system_access_page_action_controller_;
+
   // Responsible for managing all page actions of a tab. Other controllers
   // interact with this to have their feature's page action shown.
   std::unique_ptr<page_actions::PageActionController> page_action_controller_;
@@ -283,8 +318,16 @@ class TabFeatures {
   std::unique_ptr<TranslatePageActionController>
       translate_page_action_controller_;
 
+  // Responsible for managing the "PWA Install" page action.
+  std::unique_ptr<PwaInstallPageActionController>
+      pwa_install_page_action_controller_;
+
   // Responsible for managing the "Zoom" page action and bubble.
   std::unique_ptr<zoom::ZoomViewController> zoom_view_controller_;
+
+  // Responsible for managing the commerce "Price insights" page action.
+  std::unique_ptr<commerce::PriceInsightsPageActionViewController>
+      commerce_price_insights_page_action_view_controller_;
 
   // Contains the recent collaboration message for a shared tab.
   std::unique_ptr<tab_groups::CollaborationMessagingTabData>
@@ -295,10 +338,16 @@ class TabFeatures {
 
 #if BUILDFLAG(ENABLE_GLIC)
   std::unique_ptr<glic::GlicTabIndicatorHelper> glic_tab_indicator_helper_;
+
+  std::unique_ptr<glic::GlicPageContextEligibilityObserver>
+      glic_page_context_eligibility_observer_;
 #endif
 
   std::unique_ptr<memory_saver::MemorySaverChipController>
       memory_saver_chip_controller_;
+
+  std::unique_ptr<InactiveWindowMouseEventController>
+      inactive_window_mouse_event_controller_;
 
   std::unique_ptr<FromGWSNavigationAndKeepAliveRequestObserver>
       from_gws_navigation_and_keep_alive_request_observer_;

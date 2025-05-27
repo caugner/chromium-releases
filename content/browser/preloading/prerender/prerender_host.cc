@@ -572,7 +572,7 @@ void PrerenderHost::ReadyToCommitNavigation(
   // ReadyToCommitNavigation is called when the headers are received.
   were_headers_received_ = true;
   for (auto& observer : observers_) {
-    observer.OnHeadersReceived();
+    observer.OnHeadersReceived(*navigation_handle);
   }
 }
 
@@ -1495,8 +1495,7 @@ void PrerenderHost::OnWaitingForHeadersFinished(
 }
 
 bool PrerenderHost::ShouldAbortNavigationBecausePrefetchUnavailable() const {
-  CHECK(base::FeatureList::IsEnabled(
-      features::kPrerender2FallbackPrefetchSpecRules));
+  CHECK(features::UsePrefetchPrerenderIntegration());
 
   auto is_prefetch_used =
       [](const std::optional<PrefetchStatus>& prefetch_status) -> bool {

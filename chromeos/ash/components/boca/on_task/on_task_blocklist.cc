@@ -15,6 +15,8 @@
 #include "base/values.h"
 #include "components/google/core/common/google_util.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "components/url_matcher/url_matcher.h"
+#include "components/url_matcher/url_util.h"
 #include "content/public/browser/web_contents.h"
 
 namespace {
@@ -59,6 +61,26 @@ base::Value::List GetLimitedTrafficFilter(const GURL& url) {
   allowed_traffic.Append("." + url.spec());
   return allowed_traffic;
 }
+
+// Forked version of `google_util::IsGoogleSearchUrl` with loosened checks to
+// allow for all subdomains of Google domain URLs.
+bool IsGoogleSearchUrl(const GURL& url) {
+  if (!url.is_valid()) {
+    return false;
+  }
+
+  const std::string_view url_path = url.path_piece();
+  bool is_home_page_path = (url_path == "/") || (url_path == "/webhp");
+  if (!is_home_page_path && url_path != "/search" && url_path != "/imgres") {
+    return false;
+  }
+
+  // Check for query parameter in URL parameter and hash fragment, depending on
+  // the path type.
+  return google_util::HasGoogleSearchQueryParam(url.ref_piece()) ||
+         (!is_home_page_path &&
+          google_util::HasGoogleSearchQueryParam(url.query_piece()));
+}
 }  // namespace
 
 OnTaskBlocklist::OnTaskBlocklist(
@@ -67,6 +89,16 @@ OnTaskBlocklist::OnTaskBlocklist(
 
 OnTaskBlocklist::~OnTaskBlocklist() {
   CleanupBlocklist();
+}
+
+// static
+bool OnTaskBlocklist::IsURLInDomain(const GURL& url, const GURL& domain_url) {
+  base::Value::List domain_level_traffic_filter =
+      GetDomainLevelTrafficFilter(domain_url);
+  url_matcher::URLMatcher url_matcher;
+  url_matcher::util::AddAllowFiltersWithLimit(&url_matcher,
+                                              domain_level_traffic_filter);
+  return !url_matcher.MatchURL(url).empty();
 }
 
 policy::URLBlocklist::URLBlocklistState OnTaskBlocklist::GetURLBlocklistState(
@@ -82,7 +114,7 @@ policy::URLBlocklist::URLBlocklistState OnTaskBlocklist::GetURLBlocklistState(
       LockedNavigationOptions::WORKSPACE_NAVIGATION) {
     if (google_util::IsGoogleDomainUrl(url, google_util::ALLOW_SUBDOMAIN,
                                        google_util::ALLOW_NON_STANDARD_PORTS) &&
-        !google_util::HasGoogleSearchQueryParam(url.query_piece())) {
+        !IsGoogleSearchUrl(url)) {
       return policy::URLBlocklist::URLBlocklistState::URL_IN_ALLOWLIST;
     }
     return policy::URLBlocklist::URLBlocklistState::URL_IN_BLOCKLIST;
@@ -194,7 +226,7 @@ void OnTaskBlocklist::RefreshForUrlBlocklist(content::WebContents* tab) {
     } else if (current_page_restriction_level_ ==
                LockedNavigationOptions::
                    SAME_DOMAIN_OPEN_OTHER_DOMAIN_LIMITED_NAVIGATION) {
-      if (!url.DomainIs(previous_url_.GetWithEmptyPath().GetContentPiece())) {
+      if (!IsURLInDomain(url, previous_url_)) {
         blocklist_source = std::make_unique<OnTaskBlocklistSource>(
             url, LockedNavigationOptions::DOMAIN_NAVIGATION);
         current_page_restriction_level_ =
@@ -255,7 +287,7 @@ bool OnTaskBlocklist::CanPerformOneLevelNavigation(content::WebContents* tab) {
 
     // Same domain + 1LD navigation restriction.
     return last_committed_url.is_valid() &&
-           last_committed_url.DomainIs(one_level_deep_original_url.host());
+           IsURLInDomain(last_committed_url, one_level_deep_original_url);
   }
   return true;
 }

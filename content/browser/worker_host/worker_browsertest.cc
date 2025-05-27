@@ -55,6 +55,7 @@
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
+#include "services/network/public/mojom/reconnect_event_observer.mojom.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "url/gurl.h"
 
@@ -944,7 +945,8 @@ IN_PROC_BROWSER_TEST_P(WorkerFromCredentiallessIframeNikBrowserTest,
                             main_rfh->GetIsolationInfoForSubresources()
                                 .network_anonymization_key(),
                             net::MutableNetworkTrafficAnnotationTag(
-                                TRAFFIC_ANNOTATION_FOR_TESTS));
+                                TRAFFIC_ANNOTATION_FOR_TESTS),
+                            std::nullopt, mojo::NullRemote());
 
     connection_tracker_->WaitForAcceptedConnections(1);
     EXPECT_EQ(1u, connection_tracker_->GetAcceptedSocketCount());
@@ -1112,6 +1114,85 @@ IN_PROC_BROWSER_TEST_P(WorkerTest, SameSiteCookiesSharedWorkerCrossAll) {
       subframe_rfh,
       "new SharedWorker('/workers/worker.js', {sameSiteCookies: 'all'});");
   ASSERT_FALSE(worker_result.error.empty());
+}
+
+// Test for the SharedWorker extendedLifetime option.
+// See: https://github.com/whatwg/html/issues/10997
+class SharedWorkerExtendedLifetimeBrowserTest : public ContentBrowserTest {
+ public:
+  void SetUpOnMainThread() override {
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+
+ protected:
+  SharedWorkerHost* CreateSharedWorkerInMainURL() {
+    GURL main_url = embedded_test_server()->GetURL("/title1.html");
+    EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+    EXPECT_EQ("Worker connected.", EvalJs(shell(), R"(
+    new Promise(resolve => {
+      const worker =
+        new SharedWorker("/workers/messageport_worker.js",
+                          {extendedLifetime: true});
+      worker.onerror = (e) => resolve("Worker blocked.");
+      worker.port.onmessage = (e) => resolve(e.data);
+    })
+  )"));
+    auto* host = GetSharedWorkerHost(
+        embedded_test_server()->GetURL("/workers/messageport_worker.js"));
+    return host;
+  }
+  SharedWorkerHost* GetSharedWorkerHostFromToken(
+      const blink::SharedWorkerToken& token) {
+    return GetSharedWorkerService()->GetSharedWorkerHostFromToken(token);
+  }
+
+ private:
+  SharedWorkerServiceImpl* GetSharedWorkerService() {
+    StoragePartition* partition = shell()
+                                      ->web_contents()
+                                      ->GetBrowserContext()
+                                      ->GetDefaultStoragePartition();
+    DCHECK(partition);
+    return static_cast<SharedWorkerServiceImpl*>(
+        partition->GetSharedWorkerService());
+  }
+  SharedWorkerHost* GetSharedWorkerHost(const GURL& url) {
+    auto* service = GetSharedWorkerService();
+    return service->FindMatchingSharedWorkerHost(
+        url, "", blink::StorageKey::CreateFirstParty(url::Origin::Create(url)),
+        blink::mojom::SharedWorkerSameSiteCookies::kAll);
+  }
+
+  base::test::ScopedFeatureList features_{
+      blink::features::kSharedWorkerExtendedLifetime};
+};
+
+IN_PROC_BROWSER_TEST_F(SharedWorkerExtendedLifetimeBrowserTest,
+                       EnsureExtendLifetime) {
+  if (!SupportsSharedWorker()) {
+    return;
+  }
+
+  auto* host = CreateSharedWorkerInMainURL();
+  EXPECT_TRUE(host);
+  EXPECT_TRUE(host->instance().extended_lifetime());
+  auto token = host->token();
+
+  // Navigate to the other page to the other URL.
+  GURL other_url = embedded_test_server()->GetURL("/title2.html");
+  EXPECT_TRUE(NavigateToURL(shell(), other_url));
+  // Ensure the SharedWorker exist.
+  EXPECT_TRUE(GetSharedWorkerHostFromToken(token));
+
+  // Navigate back to the main URL.
+  auto* host2 = CreateSharedWorkerInMainURL();
+  EXPECT_TRUE(host2);
+  EXPECT_TRUE(host2->instance().extended_lifetime());
+
+  // Since the extended lifetime is enabled, SharedWorkerHost should be the
+  // same.
+  EXPECT_EQ(host, host2);
 }
 
 }  // namespace content
