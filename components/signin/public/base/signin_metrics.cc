@@ -6,6 +6,8 @@
 
 #include <limits.h>
 
+#include <string_view>
+
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -38,6 +40,23 @@ std::string_view GetPromoActionHistogramSuffix(PromoAction promo_action) {
       NOTREACHED() << "No signin promo should not record metrics.";
   }
 }
+
+#if BUILDFLAG(IS_IOS)
+std::string_view ReauthFlowEventToHistogramSuffix(ReauthFlowEvent event) {
+  switch (event) {
+    case ReauthFlowEvent::kStarted:
+      return ".Started";
+    case ReauthFlowEvent::kCompleted:
+      return ".Completed";
+    case ReauthFlowEvent::kError:
+      return ".Error";
+    case ReauthFlowEvent::kCancelled:
+      return ".Cancelled";
+    case ReauthFlowEvent::kInterrupted:
+      return ".Interrupted";
+  }
+}
+#endif  // BUILDFLAG(IS_IOS)
 
 }  // namespace
 
@@ -165,6 +184,10 @@ void LogSigninWithAccountType(SigninAccountType account_type) {
 
 void LogSyncOptInStarted(AccessPoint access_point) {
   base::UmaHistogramEnumeration("Signin.SyncOptIn.Started", access_point);
+}
+
+void LogSyncOptInOffered(AccessPoint access_point) {
+  base::UmaHistogramEnumeration("Signin.SyncOptIn.Offered", access_point);
 }
 
 void LogSyncSettingsOpened(AccessPoint access_point) {
@@ -314,6 +337,14 @@ void RecordSignoutConfirmationFromDataLossAlert(
       break;
   }
   base::UmaHistogramBoolean(histogram, signout_confirmed);
+}
+
+void RecordReauthFlowEventInSigninFlow(signin_metrics::AccessPoint access_point,
+                                       ReauthFlowEvent event) {
+  base::UmaHistogramEnumeration(
+      base::StrCat({"Signin.Reauth.InSigninFlow",
+                    ReauthFlowEventToHistogramSuffix(event)}),
+      access_point);
 }
 #endif  // BUILDFLAG(IS_IOS)
 
@@ -465,6 +496,7 @@ void RecordSigninUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::kHistoryPage:
     case AccessPoint::kWidget:
     case AccessPoint::kHistorySyncEducationalTip:
+    case AccessPoint::kManagedProfileAutoSigninIos:
       NOTREACHED() << "Access point " << static_cast<int>(access_point)
                    << " is not supposed to log signin user actions.";
     case AccessPoint::kCollaborationShareTabGroup:
@@ -531,10 +563,6 @@ void RecordSigninUserActionForAccessPoint(AccessPoint access_point) {
       base::RecordAction(
           base::UserMetricsAction("Signin_Signin_FromSetUpList"));
       break;
-    case AccessPoint::kPasswordMigrationWarningAndroid:
-      base::RecordAction(base::UserMetricsAction(
-          "Signin_Signin_FromPasswordMigrationWarningAndroid"));
-      break;
     case AccessPoint::kChromeSigninInterceptBubble:
       base::RecordAction(base::UserMetricsAction(
           "Signin_Signin_FromChromeSigninInterceptBubble"));
@@ -590,6 +618,14 @@ void RecordSigninUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::kHistorySyncOptinExpansionPillOnInactivity:
       base::RecordAction(base::UserMetricsAction(
           "Signin_Signin_FromHistorySyncOptinExpansionPillOnInactivity"));
+      break;
+    case AccessPoint::kNonModalSigninPasswordPromo:
+      base::RecordAction(base::UserMetricsAction(
+          "Signin_Signin_FromNonModalSigninPasswordPromo"));
+      break;
+    case AccessPoint::kNonModalSigninBookmarkPromo:
+      base::RecordAction(base::UserMetricsAction(
+          "Signin_Signin_FromNonModalSigninBookmarkPromo"));
       break;
   }
 }
@@ -743,7 +779,6 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::kSaveToPhotosIos:
     case AccessPoint::kReauthInfoBar:
     case AccessPoint::kAccountConsistencyService:
-    case AccessPoint::kPasswordMigrationWarningAndroid:
     case AccessPoint::kRestorePrimaryAccountOnProfileLoad:
     case AccessPoint::kTabOrganization:
     case AccessPoint::kProfileMenuSignoutConfirmationPrompt:
@@ -765,6 +800,9 @@ void RecordSigninImpressionUserActionForAccessPoint(AccessPoint access_point) {
     case AccessPoint::kCollaborationLeaveOrDeleteTabGroup:
     case AccessPoint::kHistorySyncOptinExpansionPillOnInactivity:
     case AccessPoint::kHistorySyncEducationalTip:
+    case AccessPoint::kManagedProfileAutoSigninIos:
+    case AccessPoint::kNonModalSigninPasswordPromo:
+    case AccessPoint::kNonModalSigninBookmarkPromo:
       NOTREACHED() << "Signin_Impression_From* user actions are not recorded "
                       "for access point "
                    << static_cast<int>(access_point);

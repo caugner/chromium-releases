@@ -722,13 +722,42 @@ scoped_refptr<StaticBitmapImage> DrawingBuffer::TransferToStaticBitmapImage() {
 
   if (CheckForDestructionAndChangeAndResolveIfNeeded(kDiscardAllowed) ==
       kContentsResolvedIfNeeded) {
+    // NOTE: GPU compositing is always used on Android and ChromeOS.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
     shared_image =
         ExportSharedImageFromBackBuffer(sync_token, &release_callback);
+#else
+    if (IsUsingGpuCompositing()) {
+      shared_image =
+          ExportSharedImageFromBackBuffer(sync_token, &release_callback);
+    } else {
+      // Read back the contents of the buffer into an unaccelerated image. It's
+      // necessary to do the readback here via the WebGL context as the image
+      // returned from this method may later be sent to the compositor, and the
+      // shared GPU context is unavailable when software compositing is used.
+      auto image = GetRGBAUnacceleratedStaticBitmapImage(kBackBuffer);
+
+      // transferToImageBitmap() semantically "takes" the image from the back
+      // buffer, analogously to presentation. Hence, mark the buffer as being
+      // unchanged since its last export as well as needing clearing if relevant
+      // (note: for GPU compositing this is done in
+      // ExportSharedImageFromBackBuffer()). This is crucial to ensure correct
+      // semantics of followup operations (e.g., for offscreen canvas it's
+      // needed to ensure that PushFrame() will actually push a frame after a
+      // transferToImageBitmap() call).
+      contents_changed_ = false;
+      if (preserve_drawing_buffer_ == kDiscard) {
+        SetBufferClearNeeded(true);
+      }
+      return image;
+    }
+#endif
   }
 
   if (!shared_image) {
-    // If we couldn't resolve the contents or couldn't produce a SharedImage
-    // out of them, return an transparent black ImageBitmap.
+    // If we couldn't resolve the contents or (for the GPU compositor) couldn't
+    // produce a SharedImage out of them, return an transparent black
+    // ImageBitmap.
     // The only situation in which this could happen is when two or more calls
     // to transferToImageBitmap are made back-to-back, or when the context gets
     // lost. We intentionally leave the transparent black image in legacy color
@@ -1213,15 +1242,6 @@ cc::Layer* DrawingBuffer::CcLayer() {
     layer_->SetContentsOpaque(requested_alpha_type_ == kOpaque_SkAlphaType);
     layer_->SetBlendBackgroundColor(requested_alpha_type_ !=
                                     kOpaque_SkAlphaType);
-    if (staging_texture_) {
-      // If staging_texture_ exists, then premultiplication
-      // has already been handled via CopySubTextureCHROMIUM.
-      DCHECK(requested_alpha_type_ == kUnpremul_SkAlphaType);
-      layer_->SetPremultipliedAlpha(true);
-    } else {
-      layer_->SetPremultipliedAlpha(requested_alpha_type_ !=
-                                    kUnpremul_SkAlphaType);
-    }
   }
 
   return layer_.get();
@@ -1753,7 +1773,8 @@ GLenum DrawingBuffer::StorageFormat() const {
   return requested_format_;
 }
 
-sk_sp<SkData> DrawingBuffer::PaintRenderingResultsToRGBADataArray(
+scoped_refptr<StaticBitmapImage>
+DrawingBuffer::GetRGBAUnacceleratedStaticBitmapImage(
     SourceDrawingBuffer source_buffer) {
   ScopedStateRestorer scoped_state_restorer(this);
 
@@ -1808,7 +1829,11 @@ sk_sp<SkData> DrawingBuffer::PaintRenderingResultsToRGBADataArray(
     front_color_buffer_->EndAccess();
   }
 
-  return dst_buffer;
+  return StaticBitmapImage::Create(
+      std::move(dst_buffer),
+      SkImageInfo::Make(SkISize::Make(Size().width(), Size().height()),
+                        color_type, kUnpremul_SkAlphaType,
+                        color_space_.ToSkColorSpace()));
 }
 
 void DrawingBuffer::ReadBackFramebuffer(base::span<uint8_t> pixels,
@@ -1957,11 +1982,11 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
 
   SkAlphaType back_buffer_alpha_type = kPremul_SkAlphaType;
   if (using_swap_chain_) {
+    usage = usage | gpu::SHARED_IMAGE_USAGE_SCANOUT;
+    usage = usage | gpu::SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE;
     gpu::SharedImageInterface::SwapChainSharedImages shared_images =
-        sii->CreateSwapChain(
-            color_buffer_format_, size, color_space_, origin,
-            back_buffer_alpha_type,
-            gpu::SharedImageUsageSet(usage | gpu::SHARED_IMAGE_USAGE_SCANOUT));
+        sii->CreateSwapChain(color_buffer_format_, size, color_space_, origin,
+                             back_buffer_alpha_type, usage);
     back_buffer_shared_image = std::move(shared_images.back_buffer);
     front_buffer_shared_image = std::move(shared_images.front_buffer);
   } else {

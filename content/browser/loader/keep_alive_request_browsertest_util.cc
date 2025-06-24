@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 #include "content/browser/loader/keep_alive_request_browsertest_util.h"
 
+#include "base/strings/stringprintf.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/test/back_forward_cache_util.h"
@@ -112,7 +113,8 @@ void KeepAliveRequestBrowserTestBase::ExpectFetchKeepAliveHistogram(
     const ExpectedTotalRequests& total,
     const ExpectedStartedRequests& started_count,
     const ExpectedSucceededRequests& succeeded_count,
-    const ExpectedFailedRequests& failed_count) {
+    const ExpectedFailedRequests& failed_count,
+    size_t retried_count) {
   // Collect metrics recorded in the renderer processes, if expecting any.
   for (size_t retries = 0;
        retries < 20 &&
@@ -175,6 +177,11 @@ void KeepAliveRequestBrowserTestBase::ExpectFetchKeepAliveHistogram(
         "FetchKeepAlive.Requests2.Failed.Renderer", renderer_sample,
         *failed_count.renderer);
   }
+  histogram_tester().ExpectUniqueSample(
+      "FetchKeepAlive.Requests2.Retried.Browser", browser_sample,
+      retried_count);
+  histogram_tester().ExpectUniqueSample(
+      "FetchKeepAlive.Requests2.Retried.Renderer", renderer_sample, 0);
 }
 
 WebContentsImpl* KeepAliveRequestBrowserTestBase::web_contents() const {

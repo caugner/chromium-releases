@@ -2,11 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# This file contains bundle definitions, which are groupings of targets that can
-# be referenced by other bundles or by builders. Bundles cannot be used in
-# //testing/buildbot
+"""Bundle declarations
 
-load("//lib/targets.star", "targets")
+Bundles are groupings of tests and/or compile targets that can be referenced by
+builders or other bundles. Bundles cannot be referenced in //testing/buildbot.
+"""
+
+load("@chromium-luci//targets.star", "targets")
 
 # No bundle definitions should be above
 # TODO: b/402830227 - Once the AyeAye analyzer correctly includes the closing
@@ -161,6 +163,10 @@ targets.bundle(
     targets = [
         "android_trichrome_smoke_tests",
         "android_smoke_tests",
+        "android_emulator_specific_chrome_public_tests",
+    ],
+    mixins = [
+        "force-main-user",
     ],
 )
 
@@ -802,9 +808,11 @@ targets.bundle(
             ),
         ),
         "android_webview_wpt_tests": targets.mixin(
+            ci_only = True,
             swarming = targets.swarming(
                 shards = 4,
             ),
+            experiment_percentage = 100,
         ),
         "android_webdriver_wpt_tests": targets.mixin(
             ci_only = True,
@@ -1646,10 +1654,16 @@ targets.bundle(
 targets.bundle(
     name = "chromium_gtests_for_linux_wayland_mutter",
     targets = [
+        "browser_tests",
         "content_browsertests",
         "interactive_ui_tests",
     ],
     per_test_modifications = {
+        "browser_tests": targets.mixin(
+            swarming = targets.swarming(
+                shards = 8,
+            ),
+        ),
         "content_browsertests": targets.mixin(
             swarming = targets.swarming(
                 shards = 8,
@@ -2108,7 +2122,7 @@ targets.bundle(
         "mac_specific_chromium_gtests",
     ],
     mixins = [
-        "mac_14_vm_optional",
+        "mac_15_vm_optional",
     ],
 )
 
@@ -2737,6 +2751,9 @@ targets.bundle(
         ),
         "sync_integration_tests_no_field_trial": targets.mixin(
             ci_only = True,
+            swarming = targets.swarming(
+                shards = 3,
+            ),
         ),
     },
 )
@@ -2768,6 +2785,9 @@ targets.bundle(
         ),
         "sync_integration_tests_no_field_trial": targets.mixin(
             ci_only = True,
+            swarming = targets.swarming(
+                shards = 3,
+            ),
         ),
     },
 )
@@ -3008,6 +3028,7 @@ targets.bundle(
     name = "fuchsia_isolated_scripts",
     targets = [
         "chromium_webkit_isolated_scripts",
+        "component_storage_test",
         # TODO(crbug.com/40821367): Enable content_shell_crash_test
         "gpu_angle_fuchsia_unittests_isolated_scripts",
     ],
@@ -3194,14 +3215,14 @@ targets.bundle(
             targets = "gpu_angle_ios_end2end_gtests",
             variants = [
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_14_18_0",
+                "SIM_IPHONE_14_18_2",
             ],
         ),
         targets.bundle(
             targets = "gpu_angle_ios_white_box_gtests",
             variants = [
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_14_18_0",
+                "SIM_IPHONE_14_18_2",
             ],
         ),
     ],
@@ -4199,6 +4220,7 @@ targets.bundle(
     targets = [
         "gpu_common_and_optional_telemetry_tests",
         "gpu_passthrough_telemetry_tests",
+        "gpu_webrtc_telemetry_test",
         "gpu_webcodecs_telemetry_test",
         "gpu_webgl2_conformance_gles_passthrough_telemetry_tests",
         "gpu_webgl_conformance_gles_passthrough_telemetry_tests",
@@ -4222,6 +4244,12 @@ targets.bundle(
         ),
         targets.bundle(
             targets = "gpu_webcodecs_telemetry_test",
+            variants = [
+                "CROS_VOLTEER_PUBLIC_RELEASE_ASH_LKGM",
+            ],
+        ),
+        targets.bundle(
+            targets = "gpu_webrtc_telemetry_test",
             variants = [
                 "CROS_VOLTEER_PUBLIC_RELEASE_ASH_LKGM",
             ],
@@ -4257,6 +4285,7 @@ targets.bundle(
     targets = [
         "gpu_common_and_optional_telemetry_tests",
         "gpu_passthrough_telemetry_tests",
+        "gpu_webrtc_telemetry_test",
         "gpu_webcodecs_telemetry_test",
         "gpu_webgl2_conformance_gles_passthrough_telemetry_tests",
         "gpu_webgl_conformance_gles_passthrough_telemetry_tests",
@@ -4315,6 +4344,7 @@ targets.bundle(
     targets = [
         "gpu_common_and_optional_telemetry_tests",
         "gpu_gl_passthrough_ganesh_telemetry_tests",
+        "gpu_webrtc_gl_passthrough_ganesh_telemetry_test",
         "gpu_webcodecs_gl_passthrough_ganesh_telemetry_test",
         "gpu_webgl2_conformance_gl_passthrough_ganesh_telemetry_tests",
         "gpu_webgl_conformance_gl_passthrough_ganesh_telemetry_tests",
@@ -4348,8 +4378,11 @@ targets.bundle(
     targets = [
         "gpu_gl_passthrough_ganesh_telemetry_tests",
         "gpu_metal_passthrough_ganesh_telemetry_tests",
+        "gpu_webrtc_gl_passthrough_ganesh_telemetry_test",
         "gpu_webcodecs_gl_passthrough_ganesh_telemetry_test",
+        "gpu_webrtc_metal_passthrough_ganesh_telemetry_test",
         "gpu_webcodecs_metal_passthrough_ganesh_telemetry_test",
+        "gpu_webrtc_metal_passthrough_graphite_telemetry_test",
         "gpu_webcodecs_metal_passthrough_graphite_telemetry_test",
         "gpu_webgl2_conformance_gl_passthrough_ganesh_telemetry_tests",
         "gpu_webgl2_conformance_metal_passthrough_graphite_telemetry_tests",
@@ -4374,6 +4407,19 @@ targets.bundle(
             ],
         ),
     },
+)
+
+targets.bundle(
+    name = "gpu_fyi_only_mac_release_graphite_telemetry_tests",
+    targets = [
+        "gpu_common_and_optional_telemetry_tests",
+        "gpu_metal_passthrough_graphite_telemetry_tests",
+        "gpu_webcodecs_metal_passthrough_graphite_telemetry_test",
+        "gpu_webrtc_metal_passthrough_graphite_telemetry_test",
+        "gpu_webgl2_conformance_metal_passthrough_graphite_telemetry_tests",
+        "gpu_webgl_conformance_metal_passthrough_graphite_telemetry_tests",
+        "gpu_webgl_conformance_swangle_passthrough_representative_telemetry_tests",
+    ],
 )
 
 targets.bundle(
@@ -4408,6 +4454,7 @@ targets.bundle(
         "gpu_common_and_optional_telemetry_tests",
         "gpu_passthrough_telemetry_tests",
         "gpu_webcodecs_telemetry_test",
+        "gpu_webrtc_telemetry_test",
         "gpu_webgl2_conformance_d3d11_passthrough_telemetry_tests",
         "gpu_webgl_conformance_d3d11_passthrough_telemetry_tests",
         "gpu_webgl_conformance_d3d9_passthrough_telemetry_tests",
@@ -4444,6 +4491,7 @@ targets.bundle(
         "gpu_common_and_optional_telemetry_tests",
         "gpu_passthrough_telemetry_tests",
         "gpu_webcodecs_telemetry_test",
+        "gpu_webrtc_telemetry_test",
         "gpu_webgl2_conformance_d3d11_passthrough_telemetry_tests",
         "gpu_webgl_conformance_d3d11_passthrough_telemetry_tests",
         "gpu_webgl_conformance_d3d9_passthrough_telemetry_tests",
@@ -4508,6 +4556,7 @@ targets.bundle(
     targets = [
         "gpu_common_and_optional_telemetry_tests",
         "gpu_validating_telemetry_tests",
+        "gpu_webrtc_validating_ganesh_telemetry_test",
         "gpu_webcodecs_validating_ganesh_telemetry_test",
         "gpu_webgl_conformance_gles_passthrough_ganesh_telemetry_tests",
         "gpu_webgl_conformance_validating_ganesh_telemetry_tests",
@@ -4541,6 +4590,7 @@ targets.bundle(
         "gpu_common_and_optional_telemetry_tests",
         "gpu_passthrough_ganesh_telemetry_tests",
         "gpu_validating_telemetry_tests",
+        "gpu_webrtc_validating_ganesh_telemetry_test",
         "gpu_webcodecs_validating_ganesh_telemetry_test",
         "gpu_webgl2_conformance_gles_passthrough_telemetry_tests",
         "gpu_webgl2_conformance_validating_telemetry_tests",
@@ -4556,7 +4606,9 @@ targets.bundle(
         "gpu_passthrough_ganesh_telemetry_tests",
         "gpu_passthrough_graphite_telemetry_tests",
         "gpu_validating_telemetry_tests",
+        "gpu_webrtc_validating_ganesh_telemetry_test",
         "gpu_webcodecs_validating_ganesh_telemetry_test",
+        "gpu_webrtc_validating_graphite_telemetry_test",
         "gpu_webcodecs_validating_graphite_telemetry_test",
         "gpu_webgl2_conformance_gles_passthrough_telemetry_tests",
         "gpu_webgl2_conformance_validating_telemetry_tests",
@@ -4742,6 +4794,29 @@ targets.bundle(
             ),
         ],
     },
+)
+
+targets.bundle(
+    name = "gpu_webrtc_validating_ganesh_telemetry_test",
+    targets = [
+        "webrtc_tests",
+    ],
+    per_test_modifications = {
+        "webrtc_tests": [
+            targets.mixin(
+                args = [
+                    "--extra-browser-args=--use-cmd-decoder=validating --disable-features=SkiaGraphite",
+                ],
+            ),
+        ],
+    },
+)
+
+targets.bundle(
+    name = "gpu_webrtc_validating_graphite_telemetry_test",
+    targets = [
+        "webrtc_graphite_tests",
+    ],
 )
 
 targets.bundle(
@@ -4996,15 +5071,15 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
@@ -5014,9 +5089,9 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
@@ -5026,9 +5101,9 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
     ],
@@ -5153,7 +5228,7 @@ targets.bundle(
                 "--test-launcher-filter-file=testing/buildbot/filters/ios.content_browsertests.filter",
             ],
             swarming = targets.swarming(
-                shards = 5,
+                shards = 10,
             ),
         ),
         "content_unittests": targets.mixin(
@@ -5236,7 +5311,7 @@ targets.bundle(
         targets.bundle(
             targets = "clang_tot_gtests",
             variants = [
-                "SIM_IPHONE_X_16_4",
+                "SIM_IPHONE_14_17_5",
             ],
         ),
     ],
@@ -5250,9 +5325,8 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             variants = [
-                "SIM_IPHONE_14_16_4",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
@@ -5261,15 +5335,12 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_AIR_5TH_GEN_16_4",
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
-                "SIM_IPAD_PRO_6TH_GEN_16_4",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPAD_PRO_6TH_GEN_17_5",
-                "SIM_IPAD_PRO_7TH_GEN_18_0",
-                "SIM_IPHONE_14_16_4",
+                "SIM_IPAD_PRO_7TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
@@ -5278,23 +5349,19 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_16_4",
                 "SIM_IPAD_PRO_6TH_GEN_17_5",
-                "SIM_IPAD_PRO_7TH_GEN_18_0",
-                "SIM_IPHONE_14_16_4",
+                "SIM_IPAD_PRO_7TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_16_4",
                 "SIM_IPAD_PRO_6TH_GEN_17_5",
-                "SIM_IPAD_PRO_7TH_GEN_18_0",
-                "SIM_IPHONE_14_16_4",
+                "SIM_IPAD_PRO_7TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
     ],
@@ -5473,7 +5540,7 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             mixins = [
-                "mac_14_vm_optional",
+                "mac_15_vm_optional",
             ],
             variants = [
                 "SIM_IPHONE_14_PLUS_17_5",
@@ -5509,7 +5576,7 @@ targets.bundle(
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             mixins = [
-                "mac_14_vm_optional",
+                "mac_15_vm_optional",
             ],
             variants = [
                 "SIM_IPAD_PRO_6TH_GEN_17_5",
@@ -5530,7 +5597,6 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPHONE_SE_3RD_GEN_16_4",
                 "SIM_IPHONE_SE_3RD_GEN_17_5",
                 "SIM_IPHONE_SE_3RD_GEN_18_2",
             ],
@@ -5542,7 +5608,6 @@ targets.bundle(
                 "record_failed_tests",
             ],
             variants = [
-                "SIM_IPAD_AIR_5TH_GEN_16_4",
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
                 "SIM_IPAD_AIR_6TH_GEN_18_2",
             ],
@@ -5554,7 +5619,6 @@ targets.bundle(
                 "record_failed_tests",
             ],
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_16_4",
                 "SIM_IPAD_PRO_6TH_GEN_17_5",
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
             ],
@@ -5562,19 +5626,15 @@ targets.bundle(
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             mixins = [
-                "mac_14_vm_optional",
+                "mac_15_vm_optional",
             ],
             variants = [
-                "SIM_IPAD_AIR_5TH_GEN_16_4",
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
                 "SIM_IPAD_AIR_6TH_GEN_18_2",
-                "SIM_IPAD_PRO_6TH_GEN_16_4",
                 "SIM_IPAD_PRO_6TH_GEN_17_5",
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
-                "SIM_IPHONE_14_PLUS_16_4",
                 "SIM_IPHONE_14_PLUS_17_5",
                 "SIM_IPHONE_14_PLUS_18_2",
-                "SIM_IPHONE_SE_3RD_GEN_16_4",
                 "SIM_IPHONE_SE_3RD_GEN_17_5",
                 "SIM_IPHONE_SE_3RD_GEN_18_2",
             ],
@@ -5589,7 +5649,7 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             mixins = [
-                "mac_14_vm_optional",
+                "mac_15_vm_optional",
             ],
             variants = [
                 "SIM_IPHONE_14_17_5",
@@ -5667,9 +5727,9 @@ targets.bundle(
             targets = "ios_common_tests",
             variants = [
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
@@ -5679,9 +5739,9 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
@@ -5691,18 +5751,18 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             variants = [
                 "SIM_IPAD_AIR_5TH_GEN_17_5",
-                "SIM_IPAD_AIR_6TH_GEN_18_0",
+                "SIM_IPAD_AIR_6TH_GEN_18_2",
                 "SIM_IPHONE_14_17_5",
-                "SIM_IPHONE_15_18_0",
+                "SIM_IPHONE_15_18_2",
             ],
         ),
     ],
@@ -5853,6 +5913,13 @@ targets.bundle(
             ],
         ),
         targets.bundle(
+            targets = "gpu_webrtc_telemetry_test",
+            variants = [
+                "LINUX_INTEL_UHD_630_STABLE",
+                "LINUX_NVIDIA_GTX_1660_STABLE",
+            ],
+        ),
+        targets.bundle(
             targets = "gpu_webgl2_conformance_gl_passthrough_telemetry_tests",
             variants = [
                 "LINUX_INTEL_UHD_630_STABLE",
@@ -5943,6 +6010,14 @@ targets.bundle(
             ],
         ),
         targets.bundle(
+            targets = "gpu_webrtc_gl_passthrough_ganesh_telemetry_test",
+            variants = [
+                "MAC_MINI_INTEL_GPU_STABLE",
+                "MAC_RETINA_AMD_GPU_STABLE",
+                "MAC_RETINA_NVIDIA_GPU_STABLE",
+            ],
+        ),
+        targets.bundle(
             targets = "gpu_webcodecs_metal_passthrough_ganesh_telemetry_test",
             variants = [
                 "MAC_MINI_INTEL_GPU_STABLE",
@@ -5950,7 +6025,21 @@ targets.bundle(
             ],
         ),
         targets.bundle(
+            targets = "gpu_webrtc_metal_passthrough_ganesh_telemetry_test",
+            variants = [
+                "MAC_MINI_INTEL_GPU_STABLE",
+                "MAC_RETINA_AMD_GPU_STABLE",
+            ],
+        ),
+        targets.bundle(
             targets = "gpu_webcodecs_metal_passthrough_graphite_telemetry_test",
+            variants = [
+                "MAC_MINI_INTEL_GPU_STABLE",
+                "MAC_RETINA_AMD_GPU_STABLE",
+            ],
+        ),
+        targets.bundle(
+            targets = "gpu_webrtc_metal_passthrough_graphite_telemetry_test",
             variants = [
                 "MAC_MINI_INTEL_GPU_STABLE",
                 "MAC_RETINA_AMD_GPU_STABLE",
@@ -6628,6 +6717,20 @@ targets.bundle(
 )
 
 targets.bundle(
+    name = "trees_in_viz_fyi_blink_web_tests",
+    targets = [
+        "blink_web_tests",
+    ],
+    mixins = [
+        targets.mixin(
+            args = [
+                "--flag-specific=trees-in-viz",
+            ],
+        ),
+    ],
+)
+
+targets.bundle(
     name = "trees_in_viz_fyi_gtests",
     targets = [
         "blink_unittests",
@@ -7159,6 +7262,13 @@ targets.bundle(
         ),
         targets.bundle(
             targets = "gpu_webcodecs_telemetry_test",
+            variants = [
+                "WIN10_INTEL_UHD_630_STABLE",
+                "WIN10_NVIDIA_GTX_1660_STABLE",
+            ],
+        ),
+        targets.bundle(
+            targets = "gpu_webrtc_telemetry_test",
             variants = [
                 "WIN10_INTEL_UHD_630_STABLE",
                 "WIN10_NVIDIA_GTX_1660_STABLE",

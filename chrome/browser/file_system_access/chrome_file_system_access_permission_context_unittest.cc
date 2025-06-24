@@ -1348,6 +1348,7 @@ TEST_F(ChromeFileSystemAccessPermissionContextTest,
       ->SkipSanitizeDownloadTargetPathForTesting();
   DownloadPrefs::FromBrowserContext(browser_context())
       ->SetDownloadPath(temp_dir_.GetPath());
+
 #if BUILDFLAG(IS_ANDROID)
   // Android always uses the system Download directory (/storage/emulated/...).
   ASSERT_TRUE(base::android::GetDownloadsDirectory(&expected_downloads));

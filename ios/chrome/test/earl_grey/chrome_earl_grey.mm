@@ -1341,6 +1341,13 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
       result.success, @"An error was produced during the script's execution");
 }
 
+- (void)evaluateJavaScriptInIsolatedWorldForSideEffect:(NSString*)javaScript {
+  JavaScriptExecutionResult* result =
+      [ChromeEarlGreyAppInterface executeJavaScriptInIsolatedWorld:javaScript];
+  EG_TEST_HELPER_ASSERT_TRUE(
+      result.success, @"An error was produced during the script's execution");
+}
+
 - (NSString*)mobileUserAgentString {
   return [ChromeEarlGreyAppInterface mobileUserAgentString];
 }
@@ -1522,6 +1529,13 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   return success ? value->GetString() : "";
 }
 
+- (base::Time)localStateTimePref:(const std::string&)prefName {
+  // Note: `localStatePrefValue` cannot be used here because base::Value doesn't
+  // support base::Time.
+  return [ChromeEarlGreyAppInterface
+      localStateTimePref:base::SysUTF8ToNSString(prefName)];
+}
+
 - (void)setIntegerValue:(int)value
       forLocalStatePref:(const std::string&)prefName {
   [ChromeEarlGreyAppInterface
@@ -1662,6 +1676,19 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 
 - (void)copyLinkAsURLToPasteBoard:(NSString*)link {
   [ChromeEarlGreyAppInterface copyLinkAsURLToPasteBoard:link];
+}
+
+- (void)copyImageToPasteboard:(UIImage*)image {
+  [ChromeEarlGreyAppInterface
+      copyImageToPasteboard:UIImagePNGRepresentation(image)];
+  GREYCondition* copyCondition =
+      [GREYCondition conditionWithName:@"Image copied condition"
+                                 block:^BOOL {
+                                   return [self pasteboardHasImages];
+                                 }];
+
+  // Wait for the image to be copied.
+  GREYAssertTrue([copyCondition waitWithTimeout:5], @"Copying image failed");
 }
 
 #pragma mark - Context Menus Utilities (EG2)
@@ -1906,6 +1933,12 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 - (void)overrideVariationsServiceStoredPermanentCountry:(NSString*)country {
   return [ChromeEarlGreyAppInterface
       overrideVariationsServiceStoredPermanentCountry:country];
+}
+
+#pragma mark - Shared Tab Groups Utilities
+
+- (NSError*)waitForMessagingBackendServiceInitialized {
+  return [ChromeEarlGreyAppInterface waitForMessagingBackendServiceInitialized];
 }
 
 @end

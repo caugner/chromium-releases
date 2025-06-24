@@ -129,7 +129,7 @@ bool ShouldUseQuietUI(content::WebContents* web_contents,
 #if BUILDFLAG(IS_CHROMEOS)
 bool IsWebKiosk() {
   return user_manager::UserManager::IsInitialized() &&
-         user_manager::UserManager::Get()->IsLoggedInAsWebKioskApp();
+         user_manager::UserManager::Get()->IsLoggedInAsKioskWebApp();
 }
 
 bool IsIwaKiosk() {
@@ -550,7 +550,7 @@ ChromePermissionsClient::GetAutoApprovalStatus(
           permissions::features::kAllowMultipleOriginsForWebKioskPermissions)) {
     Profile* profile = Profile::FromBrowserContext(browser_context);
     if (IsWebKioskOriginAllowed(profile->GetPrefs(), origin)) {
-      return permissions::PermissionAction::GRANTED;
+      return permissions::PermissionAction::GRANTED_ONCE;
     }
   }
 

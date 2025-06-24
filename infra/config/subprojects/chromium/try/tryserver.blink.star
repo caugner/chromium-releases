@@ -3,25 +3,25 @@
 # found in the LICENSE file.
 """Definitions of builders in the tryserver.blink builder group."""
 
-load("//lib/builders.star", "cpu", "os", "siso")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/branches.star", "branches")
-load("//lib/html.star", "linkify")
-load("//lib/try.star", "try_")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/targets.star", "targets")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builders.star", "cpu", "os")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//html.star", "linkify")
+load("@chromium-luci//targets.star", "targets")
+load("@chromium-luci//try.star", "try_")
+load("//lib/siso.star", "siso")
+load("//lib/try_constants.star", "try_constants")
 
 try_.defaults.set(
-    executable = try_.DEFAULT_EXECUTABLE,
+    executable = try_constants.DEFAULT_EXECUTABLE,
     builder_group = "tryserver.blink",
-    pool = try_.DEFAULT_POOL,
+    pool = try_constants.DEFAULT_POOL,
     cores = 8,
     contact_team_email = "chrome-blink-engprod@google.com",
-    execution_timeout = try_.DEFAULT_EXECUTION_TIMEOUT,
-    reclient_enabled = False,
-    service_account = try_.DEFAULT_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
+    service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
 )
@@ -815,4 +815,71 @@ _mac_rebaseline_builder(
         ],
     ),
     cpu = cpu.ARM64,
+)
+
+_rebaseline_builder(
+    name = "android-15-chrome-blink-rel",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+            apply_configs = ["android"],
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+            ],
+            build_config = builder_config.build_config.RELEASE,
+            target_arch = builder_config.target_arch.INTEL,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.ANDROID,
+        ),
+        android_config = builder_config.android_config(
+            config = "base_config",
+        ),
+        build_gs_bucket = "chromium-android-archive",
+    ),
+    builder_config_settings = builder_config.try_settings(
+        retry_failed_shards = False,
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "android_builder",
+            "release_builder",
+            "remoteexec",
+            "minimal_symbols",
+            "x64",
+            "strip_debug_info",
+            "android_fastbuild",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "android_chrome_wpt_tests",
+            "android_webdriver_wpt_tests",
+        ],
+        mixins = [
+            "has_native_resultdb_integration",
+            "15-x64-emulator",
+            "emulator-8-cores",
+            "linux-jammy",
+            "x86-64",
+        ],
+        per_test_modifications = {
+            "android_chrome_wpt_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 4,
+                ),
+            ),
+            "android_webdriver_wpt_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 15,
+                ),
+            ),
+        },
+    ),
+    targets_settings = targets.settings(
+        os_type = targets.os_type.ANDROID,
+    ),
+    main_list_view = "try",
 )

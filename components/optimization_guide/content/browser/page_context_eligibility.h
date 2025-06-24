@@ -12,6 +12,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_native_library.h"
 #include "base/types/pass_key.h"
+#include "components/optimization_guide/content/browser/page_content_proto_provider.h"
 #include "components/optimization_guide/content/browser/page_context_eligibility_api.h"
 
 namespace optimization_guide {
@@ -40,6 +41,10 @@ class PageContextEligibility {
 
   raw_ptr<const PageContextEligibilityAPI> api_;
 };
+
+// Convert the page metadata from the `result` to a vector of `FrameMetadata`.
+std::vector<optimization_guide::FrameMetadata> GetFrameMetadataFromPageContent(
+    const optimization_guide::AIPageContentResult& result);
 
 // Checks if the page is context eligible using the api provided in
 // `api_holder`. This function must be called instead of the function in the API

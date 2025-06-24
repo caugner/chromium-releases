@@ -18,14 +18,16 @@
 #include "build/build_config.h"
 #include "chrome/browser/sessions/chrome_tab_restore_service_client.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
+#include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/test/mock_browser_window_interface.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
+#include "chrome/browser/ui/tabs/alert/tab_alert.h"
 #include "chrome/browser/ui/tabs/organization/tab_declutter_controller.h"
-#include "chrome/browser/ui/tabs/split_tab_data.h"
-#include "chrome/browser/ui/tabs/split_tab_visual_data.h"
-#include "chrome/browser/ui/tabs/tab_enums.h"
+#include "chrome/browser/ui/tabs/public/tab_features.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_sync_service_initialized_observer.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/tabs/test_tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/test_util.h"
@@ -34,6 +36,7 @@
 #include "chrome/browser/ui/webui/metrics_reporter/mock_metrics_reporter.h"
 #include "chrome/browser/ui/webui/tab_search/tab_search.mojom-forward.h"
 #include "chrome/browser/ui/webui/tab_search/tab_search_ui.h"
+#include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -42,7 +45,9 @@
 #include "components/tab_groups/tab_group_color.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
+#include "components/tabs/public/split_tab_data.h"
 #include "components/tabs/public/split_tab_id.h"
+#include "components/tabs/public/split_tab_visual_data.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_web_ui.h"
@@ -177,6 +182,7 @@ class TabSearchPageHandlerTest : public BrowserWithTestWindowTest {
     web_contents_ = content::WebContents::Create(
         content::WebContents::CreateParams(profile()));
     web_ui_.set_web_contents(web_contents_.get());
+    webui::SetBrowserWindowInterface(web_contents_.get(), browser());
     profile2_ = profile_manager()->CreateTestingProfile(
         "testing_profile2", nullptr, std::u16string(), 0,
         GetTestingFactories());
@@ -186,10 +192,21 @@ class TabSearchPageHandlerTest : public BrowserWithTestWindowTest {
         false);
     browser4_ = CreateTestBrowser(profile2(), false);
     browser5_ = CreateTestBrowser(profile1(), true);
-    BrowserList::SetLastActive(browser1());
+    browser1()->DidBecomeActive();
     webui_controller_ = std::make_unique<TabSearchUI>(web_ui());
+
+    // Handle any mock calls that might occur during the instantiation of the
+    // TabSearchPageHandler. Tests are able to override these calls with more
+    // specific EXPECT_CALLS.
+    EXPECT_CALL(page_, UnusedTabsChanged(testing::_))
+        .WillRepeatedly(testing::Return());
+
     handler_ = std::make_unique<TestTabSearchPageHandler>(
         page_.BindAndGetRemote(), web_ui(), webui_controller_.get());
+
+    // Wait for the TabGroupSyncService to properly initialize before making any
+    // changes to tab groups.
+    WaitForTabGroupSyncServiceInitialized();
   }
 
   void TearDown() override {
@@ -239,6 +256,21 @@ class TabSearchPageHandlerTest : public BrowserWithTestWindowTest {
         nullptr, nullptr);
   }
 
+  void WaitForTabGroupSyncServiceInitialized() {
+    tab_groups::TabGroupSyncService* tab_group_service_1 =
+        tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile1());
+    tab_groups::TabGroupSyncService* tab_group_service_2 =
+        tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile2());
+    auto observer_1 =
+        std::make_unique<tab_groups::TabGroupSyncServiceInitializedObserver>(
+            tab_group_service_1);
+    auto observer_2 =
+        std::make_unique<tab_groups::TabGroupSyncServiceInitializedObserver>(
+            tab_group_service_2);
+    observer_1->Wait();
+    observer_2->Wait();
+  }
+
  protected:
   void AddTabWithTitle(Browser* browser,
                        const GURL url,
@@ -264,7 +296,6 @@ class TabSearchPageHandlerTest : public BrowserWithTestWindowTest {
 
     std::unique_ptr<Browser> browser =
         CreateBrowser(profile, type, false, window.get());
-    BrowserList::SetLastActive(browser.get());
     // Self deleting.
     new TestBrowserWindowOwner(std::move(window));
     return browser;
@@ -368,7 +399,6 @@ TEST_F(TabSearchPageHandlerTest, TabsAndGroups) {
   AddTabWithTitle(browser1(), GURL(kTabUrl2), kTabName2);
 
   TabStripModel* tab_strip_model = browser1()->tab_strip_model();
-  TabGroupModel* tab_group_model = tab_strip_model->group_model();
 
   // Associate a tab to a given tab group.
   tab_groups::TabGroupId group1 = tab_strip_model->AddToNewGroup({0});
@@ -377,7 +407,7 @@ TEST_F(TabSearchPageHandlerTest, TabsAndGroups) {
   const tab_groups::TabGroupColorId sample_color =
       tab_groups::TabGroupColorId::kGrey;
   tab_groups::TabGroupVisualData visual_data1(sample_title, sample_color);
-  tab_group_model->GetTabGroup(group1)->SetVisualData(visual_data1);
+  tab_strip_model->ChangeTabGroupVisuals(group1, visual_data1);
 
   // Get Tabs and Tab Group details.
   tab_search::mojom::PageHandler::GetProfileDataCallback callback1 =
@@ -444,7 +474,7 @@ TEST_F(TabSearchPageHandlerTest, MediaTabsTest) {
           [&](tab_search::mojom::ProfileDataPtr profile_tabs) {
             auto* window1 = profile_tabs->windows[0].get();
             auto* tab1 = window1->tabs[0].get();
-            EXPECT_EQ(TabAlertState::AUDIO_PLAYING, tab1->alert_states[0]);
+            EXPECT_EQ(tabs::TabAlert::AUDIO_PLAYING, tab1->alert_states[0]);
           });
   handler()->GetProfileData(std::move(callback));
 
@@ -464,7 +494,6 @@ TEST_F(TabSearchPageHandlerTest, RecentlyClosedTabGroup) {
   AddTabWithTitle(browser1(), GURL(kTabUrl2), kTabName2);
 
   TabStripModel* tab_strip_model = browser1()->tab_strip_model();
-  TabGroupModel* tab_group_model = tab_strip_model->group_model();
 
   // Associate a tab to a given tab group.
   tab_groups::TabGroupId group1 = tab_strip_model->AddToNewGroup({0});
@@ -473,7 +502,7 @@ TEST_F(TabSearchPageHandlerTest, RecentlyClosedTabGroup) {
   const tab_groups::TabGroupColorId sample_color =
       tab_groups::TabGroupColorId::kGrey;
   tab_groups::TabGroupVisualData visual_data1(sample_title, sample_color);
-  tab_group_model->GetTabGroup(group1)->SetVisualData(visual_data1);
+  tab_strip_model->ChangeTabGroupVisuals(group1, visual_data1);
 
   // Close a group and its tabs.
   tab_strip_model->CloseAllTabsInGroup(group1);
@@ -532,8 +561,7 @@ TEST_F(TabSearchPageHandlerTest, RecentlyClosedWindowWithGroupTabs) {
   const tab_groups::TabGroupColorId sample_color =
       tab_groups::TabGroupColorId::kGrey;
   tab_groups::TabGroupVisualData visual_data1(sample_title, sample_color);
-  TabGroupModel* tab_group_model = tab_strip_model->group_model();
-  tab_group_model->GetTabGroup(group1)->SetVisualData(visual_data1);
+  tab_strip_model->ChangeTabGroupVisuals(group1, visual_data1);
 
   // Close the tabs associated with a browser.
   browser1()->tab_strip_model()->CloseAllTabs();
@@ -783,8 +811,7 @@ TEST_F(TabSearchPageHandlerTest,
   const tab_groups::TabGroupColorId sample_color =
       tab_groups::TabGroupColorId::kGrey;
   tab_groups::TabGroupVisualData visual_data1(sample_title, sample_color);
-  TabGroupModel* tab_group_model = tab_strip_model->group_model();
-  tab_group_model->GetTabGroup(group1)->SetVisualData(visual_data1);
+  tab_strip_model->ChangeTabGroupVisuals(group1, visual_data1);
 
   browser1()->tab_strip_model()->CloseAllTabs();
   browser2()->tab_strip_model()->CloseAllTabs();
@@ -935,10 +962,14 @@ TEST_F(TabSearchPageHandlerTest,
 
 class TabSearchPageHandlerDeclutterTest : public TabSearchPageHandlerTest {
  public:
-  void SetUp() override {
-    TabSearchPageHandlerTest::SetUp();
+  TabSearchPageHandlerDeclutterTest() {
     feature_list_.InitWithFeatures(
         {features::kTabstripDeclutter, features::kTabstripDedupe}, {});
+  }
+
+  void SetUp() override {
+    TabSearchPageHandlerTest::SetUp();
+
     testing_profile_ = std::make_unique<TestingProfile>();
     tab_strip_model_delegate_ = std::make_unique<TestTabStripModelDelegate>();
     tab_strip_model_ = std::make_unique<TabStripModel>(
@@ -972,9 +1003,23 @@ class TabSearchPageHandlerDeclutterTest : public TabSearchPageHandlerTest {
   TabStripModel* fake_tab_strip_model() { return tab_strip_model_.get(); }
   Profile* testing_profile() { return testing_profile_.get(); }
 
+  tabs::TabInterface* AppendBackgroundTab() {
+    std::unique_ptr<tabs::TabModel> tab_model =
+        std::make_unique<tabs::TabModel>(
+            content::WebContents::Create(
+                content::WebContents::CreateParams(testing_profile())),
+            fake_tab_strip_model());
+    tabs::TabFeatures* const tab_features = tab_model->GetTabFeatures();
+    tabs::TabInterface* const tab_interface = tab_model.get();
+    tab_features->SetTabUIHelperForTesting(
+        std::make_unique<TabUIHelper>(*tab_interface));
+    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    return tab_interface;
+  }
+
  private:
-  std::unique_ptr<TestingProfile> testing_profile_;
   base::test::ScopedFeatureList feature_list_;
+  std::unique_ptr<TestingProfile> testing_profile_;
   std::unique_ptr<TestTabStripModelDelegate> tab_strip_model_delegate_;
   std::unique_ptr<TabStripModel> tab_strip_model_;
   std::unique_ptr<MockTabDeclutterController> tab_declutter_controller_;
@@ -988,26 +1033,14 @@ TEST_F(TabSearchPageHandlerDeclutterTest, TabDeclutterFindUnusedTabs) {
   // Create stale tabs.
   std::vector<tabs::TabInterface*> stale_tabs_raw_ptr;
   for (int i = 0; i < 4; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    stale_tabs_raw_ptr.push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    stale_tabs_raw_ptr.push_back(AppendBackgroundTab());
   }
 
   // Create duplicate tabs.
   std::map<GURL, std::vector<tabs::TabInterface*>> duplicate_tabs;
   GURL duplicate_tabs_url("https://duplicate_url.com");
   for (int i = 0; i < 2; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    duplicate_tabs[duplicate_tabs_url].push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    duplicate_tabs[duplicate_tabs_url].push_back(AppendBackgroundTab());
   }
 
   EXPECT_CALL(*tab_declutter_controller(), GetStaleTabs())
@@ -1038,30 +1071,19 @@ TEST_F(TabSearchPageHandlerDeclutterTest, TabDeclutterExcludeTabs) {
   // Create stale tabs.
   std::vector<tabs::TabInterface*> stale_tabs_raw_ptr;
   for (int i = 0; i < 4; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    stale_tabs_raw_ptr.push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    stale_tabs_raw_ptr.push_back(AppendBackgroundTab());
   }
 
   // Create duplicate tabs.
   std::map<GURL, std::vector<tabs::TabInterface*>> duplicate_tabs;
   GURL duplicate_tabs_url("https://duplicate_url.com");
   for (int i = 0; i < 2; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
+    tabs::TabInterface* const tab_interface = AppendBackgroundTab();
     auto navigation_simulator =
         content::NavigationSimulator::CreateBrowserInitiated(
-            duplicate_tabs_url, tab_model->GetContents());
+            duplicate_tabs_url, tab_interface->GetContents());
     navigation_simulator->Commit();
-    duplicate_tabs[duplicate_tabs_url].push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    duplicate_tabs[duplicate_tabs_url].push_back(tab_interface);
   }
 
   EXPECT_CALL(*tab_declutter_controller(), GetStaleTabs())
@@ -1094,25 +1116,13 @@ TEST_F(TabSearchPageHandlerDeclutterTest, TabDeclutterObserverTest) {
   std::vector<tabs::TabInterface*> stale_tabs_raw_ptr;
 
   for (int i = 0; i < 4; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    stale_tabs_raw_ptr.push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    stale_tabs_raw_ptr.push_back(AppendBackgroundTab());
   }
 
   std::map<GURL, std::vector<tabs::TabInterface*>> duplicate_tabs;
   GURL duplicate_tabs_url("https://duplicate_url.com");
   for (int i = 0; i < 2; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    duplicate_tabs[duplicate_tabs_url].push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    duplicate_tabs[duplicate_tabs_url].push_back(AppendBackgroundTab());
   }
 
   EXPECT_CALL(*tab_declutter_controller(), GetStaleTabs())
@@ -1136,31 +1146,19 @@ TEST_F(TabSearchPageHandlerDeclutterTest, TabDeclutterUnusedTabChanges) {
 
   // Create 10 stale tabs.
   for (int i = 0; i < 10; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    stale_tabs_raw_ptr.push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    stale_tabs_raw_ptr.push_back(AppendBackgroundTab());
   }
 
   // Create duplicate tabs.
   std::map<GURL, std::vector<tabs::TabInterface*>> duplicate_tabs;
   GURL duplicate_tabs_url("https://duplicate_url.com");
   for (int i = 0; i < 5; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-
+    tabs::TabInterface* const tab_interface = AppendBackgroundTab();
     auto navigation_simulator =
         content::NavigationSimulator::CreateBrowserInitiated(
-            duplicate_tabs_url, tab_model->GetContents());
+            duplicate_tabs_url, tab_interface->GetContents());
     navigation_simulator->Commit();
-    duplicate_tabs[duplicate_tabs_url].push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    duplicate_tabs[duplicate_tabs_url].push_back(tab_interface);
   }
 
   EXPECT_CALL(*tab_declutter_controller(), GetStaleTabs())
@@ -1224,31 +1222,20 @@ TEST_F(TabSearchPageHandlerDeclutterTest, TabDuplicateURLChanges) {
 
   // Create 10 stale tabs.
   for (int i = 0; i < 10; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
-    stale_tabs_raw_ptr.push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    stale_tabs_raw_ptr.push_back(AppendBackgroundTab());
   }
 
   // Create duplicate tabs.
   std::map<GURL, std::vector<tabs::TabInterface*>> duplicate_tabs;
   GURL duplicate_tabs_url("https://duplicate_url.com");
   for (int i = 0; i < 5; ++i) {
-    std::unique_ptr<tabs::TabModel> tab_model =
-        std::make_unique<tabs::TabModel>(
-            content::WebContents::Create(
-                content::WebContents::CreateParams(testing_profile())),
-            fake_tab_strip_model());
+    tabs::TabInterface* const tab_interface = AppendBackgroundTab();
 
     auto navigation_simulator =
         content::NavigationSimulator::CreateBrowserInitiated(
-            duplicate_tabs_url, tab_model->GetContents());
+            duplicate_tabs_url, tab_interface->GetContents());
     navigation_simulator->Commit();
-    duplicate_tabs[duplicate_tabs_url].push_back(tab_model.get());
-    fake_tab_strip_model()->AppendTab(std::move(tab_model), false);
+    duplicate_tabs[duplicate_tabs_url].push_back(tab_interface);
   }
 
   EXPECT_CALL(*tab_declutter_controller(), GetStaleTabs())
@@ -1301,8 +1288,8 @@ TEST_F(TabSearchPageHandlerTest, ReplaceActiveSplitTab) {
   AddTab(browser(), GURL(kTabUrl2));
   AddTab(browser(), GURL(kTabUrl3));
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
-  const split_tabs::SplitTabId split_id = tab_strip_model->AddToNewSplit(
-      {1}, split_tabs::SplitTabLayout::kHorizontal);
+  const split_tabs::SplitTabId split_id =
+      tab_strip_model->AddToNewSplit({1}, split_tabs::SplitTabVisualData());
 
   const split_tabs::SplitTabData* split_data =
       tab_strip_model->GetSplitData(split_id);

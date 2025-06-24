@@ -91,9 +91,8 @@ collaboration_pb::Message CreateTabGroupMessage(
     const tab_groups::SavedTabGroup& tab_group,
     collaboration_pb::EventType event_type,
     DirtyType dirty_type) {
-  collaboration_pb::Message message =
-      CreateMessage(collaboration_group_id, event_type, dirty_type,
-                    tab_group.update_time_windows_epoch_micros());
+  collaboration_pb::Message message = CreateMessage(
+      collaboration_group_id, event_type, dirty_type, tab_group.update_time());
   message.mutable_tab_group_data()->set_sync_tab_group_id(
       tab_group.saved_guid().AsLowercaseString());
   message.mutable_tab_group_data()->set_title(
@@ -120,11 +119,10 @@ collaboration_pb::Message CreateTabMessage(
     const tab_groups::SavedTabGroupTab& tab,
     collaboration_pb::EventType event_type,
     DirtyType dirty_type) {
-  collaboration_pb::Message message =
-      CreateMessage(collaboration_group_id, event_type, dirty_type,
-                    event_type == collaboration_pb::TAB_ADDED
-                        ? tab.creation_time_windows_epoch_micros()
-                        : tab.update_time_windows_epoch_micros());
+  collaboration_pb::Message message = CreateMessage(
+      collaboration_group_id, event_type, dirty_type,
+      event_type == collaboration_pb::TAB_ADDED ? tab.creation_time()
+                                                : tab.update_time());
   message.mutable_tab_data()->set_sync_tab_id(
       tab.saved_tab_guid().AsLowercaseString());
   message.mutable_tab_data()->set_sync_tab_group_id(
@@ -479,6 +477,10 @@ bool IsCurrentUserOwner(const signin::IdentityManager* identity_manager,
   return IsMemberOwner(group_data, account.gaia);
 }
 
+bool HasSeenTabUpdate(const tab_groups::SavedTabGroupTab& tab) {
+  return tab.last_seen_time() >= tab.navigation_time();
+}
+
 }  // namespace
 
 MessagingBackendServiceImpl::MessagingBackendServiceImpl(
@@ -763,11 +765,18 @@ void MessagingBackendServiceImpl::OnTabGroupRemoved(
   // section.
   std::vector<collaboration_pb::Message> messages =
       store_->GetRecentMessagesForGroup(*collaboration_group_id);
-  std::set<std::string> message_uuids;
+  std::set<std::string> message_uuid_strings;
+  std::set<base::Uuid> message_uuids;
   for (auto& message : messages) {
-    message_uuids.insert(message.uuid());
+    message_uuid_strings.insert(message.uuid());
+    message_uuids.insert(base::Uuid::ParseLowercase(message.uuid()));
   }
-  store_->RemoveMessages(message_uuids);
+  store_->RemoveMessages(message_uuid_strings);
+
+  // Regardless of whether the user is leaving or deleting the group and
+  // regardless of whether it happened from a remote event or a local event,
+  // we should hide any instant messages related to the group.
+  instant_message_processor_->HideInstantMessage(message_uuids);
 
   if (source == tab_groups::TriggerSource::LOCAL) {
     return;
@@ -877,6 +886,11 @@ void MessagingBackendServiceImpl::OnTabAdded(
   DirtyType dirty_type = (is_local || triggering_user_is_self)
                              ? DirtyType::kNone
                              : DirtyType::kDotAndChip;
+
+  if (HasSeenTabUpdate(added_tab)) {
+    dirty_type = DirtyType::kNone;
+  }
+
   collaboration_pb::Message message =
       CreateTabMessage(*collaboration_group_id, added_tab,
                        collaboration_pb::TAB_ADDED, dirty_type);
@@ -975,6 +989,9 @@ void MessagingBackendServiceImpl::OnTabUpdated(
       (is_local || triggering_user_is_self)
           ? DirtyType::kNone
           : (is_selected ? DirtyType::kChip : DirtyType::kDotAndChip);
+  if (HasSeenTabUpdate(updated_tab)) {
+    dirty_type = DirtyType::kNone;
+  }
 
   collaboration_pb::Message message =
       CreateTabMessage(*collaboration_group_id, updated_tab,
@@ -1116,6 +1133,10 @@ void MessagingBackendServiceImpl::OnTabLastSeenTimeChanged(
   }
 
   if (!tab) {
+    return;
+  }
+
+  if (!HasSeenTabUpdate(*tab)) {
     return;
   }
 

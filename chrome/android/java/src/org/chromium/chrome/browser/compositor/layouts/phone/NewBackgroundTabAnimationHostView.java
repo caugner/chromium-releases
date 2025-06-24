@@ -11,6 +11,7 @@ import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
 import android.util.AttributeSet;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -18,14 +19,19 @@ import android.widget.ImageView;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.IntDef;
+import androidx.core.content.ContextCompat;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.theme.ThemeUtils;
 import org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
+import org.chromium.ui.animation.RunOnNextLayout;
+import org.chromium.ui.animation.RunOnNextLayoutDelegate;
 import org.chromium.ui.animation.ViewCurvedMotionAnimatorFactory;
 import org.chromium.ui.interpolators.Interpolators;
+import org.chromium.ui.util.ColorUtils;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
@@ -33,11 +39,12 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /** Host view for the new background tab animation. */
-public class NewBackgroundTabAnimationHostView extends FrameLayout {
+public class NewBackgroundTabAnimationHostView extends FrameLayout implements RunOnNextLayout {
     /* package */ static final long CROSS_FADE_DURATION_MS = 150L;
-    private static final long CURVED_MOTION_DURATION_MS = 300L;
-    private static final long LINK_SCALE_DURATION_MS = 160L;
-    private static final long DELAY_DURATION_MS = 100L;
+    private static final long PATH_ARC_DURATION_MS = 400L;
+    private static final long LINK_SCALE_DURATION_MS = 192L;
+    private static final long TRANSLATE_DELAY_DURATION_MS = 100L;
+    private static final long SHRINK_DELAY_DURATION_MS = 50L;
 
     @IntDef({
         AnimationType.UNINITIALIZED,
@@ -54,23 +61,28 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
         int NTP_FULL_SCROLL = 3;
     }
 
+    private final RunOnNextLayoutDelegate mRunOnNextLayoutDelegate;
+
     private NewBackgroundTabFakeTabSwitcherButton mFakeTabSwitcherButton;
     private ImageView mLinkIcon;
     private @AnimationType int mAnimationType;
     private boolean mIsTopToolbar;
     private int mStatusBarHeight;
+    private int mXOffset;
 
     /** Default constructor for inflation. */
     public NewBackgroundTabAnimationHostView(Context context, AttributeSet attrs) {
         super(context, attrs);
         mAnimationType = AnimationType.UNINITIALIZED;
+        mRunOnNextLayoutDelegate = new RunOnNextLayoutDelegate(this);
     }
 
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
         mLinkIcon = findViewById(R.id.new_tab_background_animation_link_icon);
-        setLinkIconTint(SemanticColorUtils.getDefaultIconColor(getContext()));
+        @ColorInt int tintColor = SemanticColorUtils.getDefaultIconColor(getContext());
+        mLinkIcon.setImageTintList(ColorStateList.valueOf(tintColor));
         mFakeTabSwitcherButton = findViewById(R.id.new_background_tab_fake_tab_switcher_button);
     }
 
@@ -83,34 +95,35 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
     /* package */ AnimatorSet getAnimatorSet(float originX, float originY) {
         assert mAnimationType != AnimationType.UNINITIALIZED;
         int[] target = new int[2];
-        mFakeTabSwitcherButton.getButtonLocation(target, mStatusBarHeight);
+        mFakeTabSwitcherButton.getButtonLocation(target, mXOffset, mStatusBarHeight);
         target[0] -= Math.round(mLinkIcon.getWidth() / 2f);
         target[1] -= Math.round(mLinkIcon.getHeight() / 2f);
 
         AnimatorSet transitionAnimator = getTransitionAnimator();
-        ObjectAnimator curvedAnimator =
-                getCurvedMotionAnimator(originX, originY, target[0], target[1]);
-
+        ObjectAnimator pathAnimator = getPathArcAnimator(originX, originY, target[0], target[1]);
         AnimatorSet backgroundAnimation = new AnimatorSet();
         AnimatorSet fakeTabSwitcherAnimator;
 
         if (mAnimationType == AnimationType.DEFAULT) {
             fakeTabSwitcherAnimator =
                     mFakeTabSwitcherButton.getShrinkAnimator(/* incrementCount= */ true);
+            fakeTabSwitcherAnimator.setStartDelay(SHRINK_DELAY_DURATION_MS);
+            transitionAnimator.setStartDelay(SHRINK_DELAY_DURATION_MS);
+
             backgroundAnimation
                     .play(transitionAnimator)
                     .with(fakeTabSwitcherAnimator)
-                    .after(curvedAnimator);
+                    .after(pathAnimator);
         } else {
-            transitionAnimator.setStartDelay(CURVED_MOTION_DURATION_MS - CROSS_FADE_DURATION_MS);
+            transitionAnimator.setStartDelay(PATH_ARC_DURATION_MS - CROSS_FADE_DURATION_MS);
             fakeTabSwitcherAnimator =
                     mFakeTabSwitcherButton.getTranslateAnimator(
                             NewBackgroundTabFakeTabSwitcherButton.TranslateDirection.UP);
-            fakeTabSwitcherAnimator.setStartDelay(DELAY_DURATION_MS);
+            fakeTabSwitcherAnimator.setStartDelay(TRANSLATE_DELAY_DURATION_MS);
             AnimatorSet scaleAnimator = mFakeTabSwitcherButton.getScaleDownAnimator();
 
             backgroundAnimation
-                    .play(curvedAnimator)
+                    .play(pathAnimator)
                     .with(transitionAnimator)
                     .before(scaleAnimator)
                     .before(fakeTabSwitcherAnimator);
@@ -130,6 +143,7 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
      * @param toolbarHeight Current height of the toolbar in the screen (absolute y-coordinate in
      *     the screen).
      * @param statusBarHeight The status bar height to calculate the y-offset within the screen.
+     * @param xOffset Offset for cases where the screen can't draw from x = 0.
      * @param ntpToolbarTransitionPercentage To know if the search box is in the toolbar position.
      */
     /* package */ void setUpAnimation(
@@ -141,8 +155,10 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
             int tabCount,
             int toolbarHeight,
             int statusBarHeight,
+            int xOffset,
             float ntpToolbarTransitionPercentage) {
         mStatusBarHeight = statusBarHeight;
+        mXOffset = xOffset;
         mIsTopToolbar = isTopToolbar;
         mFakeTabSwitcherButton.setTabCount(tabCount, isIncognito);
 
@@ -151,11 +167,22 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
         int brandedColorScheme =
                 ThemeUtils.getBrandedColorScheme(context, backgroundColor, isIncognito);
         mFakeTabSwitcherButton.setBrandedColorScheme(brandedColorScheme);
+        if (ColorUtils.inNightMode(context)) {
+            mLinkIcon.setImageTintList(ChromeColors.getPrimaryIconTint(context, isIncognito));
+            @ColorInt
+            int color =
+                    isIncognito
+                            ? ContextCompat.getColor(
+                                    context, R.color.gm3_baseline_surface_container_high_dark)
+                            : SemanticColorUtils.getColorSurfaceContainerHigh(context);
+            GradientDrawable roundedRect = (GradientDrawable) mLinkIcon.getBackground();
+            roundedRect.setColor(color);
+        }
 
         Rect tabSwitcherRect = new Rect();
         boolean tabSwitcherButtonIsVisible =
                 tabSwitcherButton.getGlobalVisibleRect(tabSwitcherRect);
-        int horizontalMargin = tabSwitcherRect.left;
+        int horizontalMargin = tabSwitcherRect.left - xOffset;
         int verticalMargin = toolbarHeight - statusBarHeight;
 
         if (tabSwitcherButtonIsVisible || !isNtp) {
@@ -179,22 +206,23 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
     }
 
     /**
-     * Returns the {@link ObjectAnimator} for the curved motion animation.
+     * Returns the {@link ObjectAnimator} for the path arc animation.
      *
      * @param originX x-coordinate for the start point.
      * @param originY y-coordinate for the start point.
      * @param finalX x-coordinate for the end point.
      * @param finalY y-coordinate for the end point.
      */
-    private ObjectAnimator getCurvedMotionAnimator(
+    private ObjectAnimator getPathArcAnimator(
             float originX, float originY, float finalX, float finalY) {
         boolean isClockwise = mIsTopToolbar ? (originX >= finalX) : (originX <= finalX);
 
         ObjectAnimator animator =
                 ViewCurvedMotionAnimatorFactory.build(
                         mLinkIcon, originX, originY, finalX, finalY, isClockwise);
-        animator.setDuration(CURVED_MOTION_DURATION_MS);
-        animator.setInterpolator(Interpolators.NEW_BACKGROUND_TAB_ANIMATION_PATH_INTERPOLATOR);
+        animator.setDuration(PATH_ARC_DURATION_MS);
+        animator.setInterpolator(Interpolators.EMPHASIZED_DECELERATE);
+
         animator.addListener(
                 new AnimatorListenerAdapter() {
                     @Override
@@ -230,13 +258,20 @@ public class NewBackgroundTabAnimationHostView extends FrameLayout {
         return animatorSet;
     }
 
-    /**
-     * Sets the tint for {@link #mLinkIcon}.
-     *
-     * @param color The {@link ColorInt} for the tint.
-     */
-    private void setLinkIconTint(@ColorInt int color) {
-        mLinkIcon.setImageTintList(ColorStateList.valueOf(color));
+    @Override
+    public void onLayout(boolean changed, int l, int t, int r, int b) {
+        super.onLayout(changed, l, t, r, b);
+        runOnNextLayoutRunnables();
+    }
+
+    @Override
+    public void runOnNextLayout(Runnable runnable) {
+        mRunOnNextLayoutDelegate.runOnNextLayout(runnable);
+    }
+
+    @Override
+    public void runOnNextLayoutRunnables() {
+        mRunOnNextLayoutDelegate.runOnNextLayoutRunnables();
     }
 
     /* package */ @AnimationType

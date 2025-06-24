@@ -11,6 +11,7 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
 #include "ash/public/cpp/network_config_service.h"
+#include "base/check.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
@@ -31,11 +32,15 @@
 #include "chromeos/ash/components/boca/session_api/session_client_impl.h"
 #include "chromeos/ash/components/boca/session_api/student_heartbeat_request.h"
 #include "chromeos/ash/components/boca/session_api/update_student_activities_request.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_constants.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_frame_consumer.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_remoting_client_manager.h"
 #include "chromeos/services/network_config/public/cpp/cros_network_config_util.h"
 #include "chromeos/strings/grit/chromeos_strings.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "google_apis/common/api_error_codes.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/message_center/message_center.h"
 
@@ -52,12 +57,15 @@ const net::BackoffEntry::Policy kStudentHeartbeatBackoffPolicy = {
     .always_use_initial_delay = false};
 }  // namespace
 
-BocaSessionManager::BocaSessionManager(SessionClientImpl* session_client_impl,
-                                       const PrefService* pref_service,
-                                       AccountId account_id,
-                                       bool is_producer)
+BocaSessionManager::BocaSessionManager(
+    SessionClientImpl* session_client_impl,
+    const PrefService* pref_service,
+    AccountId account_id,
+    bool is_producer,
+    std::unique_ptr<SpotlightRemotingClientManager> remoting_client_manager)
     : is_producer_(is_producer),
       account_id_(std::move(account_id)),
+      remoting_client_manager_(std::move(remoting_client_manager)),
       pref_service_(pref_service),
       session_client_impl_(std::move(session_client_impl)),
       student_heartbeat_retry_backoff_{&kStudentHeartbeatBackoffPolicy} {
@@ -243,7 +251,7 @@ void BocaSessionManager::ParseSessionResponse(
   }
 
   if (from_polling) {
-    RecordPollingResult(current_session_.get(), result.value().get());
+    boca::RecordPollingResult(current_session_.get(), result.value().get());
   }
 
   UpdateCurrentSession(std::move(result.value()), true);
@@ -387,6 +395,28 @@ BocaSessionManager::SodaStatus BocaSessionManager::GetSodaStatus() {
   return SodaStatus::kUninstalled;
 }
 
+void BocaSessionManager::StartCrdClient(
+    std::string crd_connection_code,
+    base::OnceClosure done_callback,
+    SpotlightFrameConsumer::FrameReceivedCallback frame_received_callback,
+    SpotlightCrdStateUpdatedCallback crd_state_callback) {
+  CHECK(ash::features::IsBocaSpotlightRobotRequesterEnabled());
+
+  remoting_client_manager_->StartCrdClient(
+      crd_connection_code, std::move(done_callback),
+      std::move(frame_received_callback), std::move(crd_state_callback));
+}
+
+void BocaSessionManager::EndSpotlightSession() {
+  CHECK(ash::features::IsBocaSpotlightRobotRequesterEnabled());
+  remoting_client_manager_->StopCrdClient();
+}
+
+std::string BocaSessionManager::GetDeviceRobotEmail() {
+  CHECK(ash::features::IsBocaSpotlightRobotRequesterEnabled());
+  return remoting_client_manager_->GetDeviceRobotEmail();
+}
+
 void BocaSessionManager::LoadInitialNetworkState() {
   cros_network_config_->GetNetworkStateList(
       chromeos::network_config::mojom::NetworkFilter::New(
@@ -452,25 +482,6 @@ bool BocaSessionManager::IsSessionTakeOver(
     return false;
   }
   return previous_session->session_id() != current_session->session_id();
-}
-
-void BocaSessionManager::RecordPollingResult(
-    const ::boca::Session* previous_session,
-    const ::boca::Session* current_session) {
-  BocaPollingResult polling_result;
-  if (!previous_session && !current_session) {
-    polling_result = BocaPollingResult::kNoUpdate;
-  } else if (!previous_session) {
-    polling_result = BocaPollingResult::kSessionStart;
-  } else if (!current_session) {
-    polling_result = BocaPollingResult::kSessionEnd;
-  } else if (previous_session->SerializeAsString() !=
-             current_session->SerializeAsString()) {
-    polling_result = BocaPollingResult::kInSessionUpdate;
-  } else {
-    polling_result = BocaPollingResult::kNoUpdate;
-  }
-  base::UmaHistogramEnumeration(kPollingResultHistName, polling_result);
 }
 
 void BocaSessionManager::HandleTakeOver(

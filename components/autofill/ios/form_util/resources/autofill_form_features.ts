@@ -40,15 +40,6 @@ let autofillDisallowSlashDotLabels: boolean = true;
 let autofillIsolatedContentWorld: boolean = false;
 // LINT.ThenChange(//components/autofill/ios/common/features.mm:autofill_isolated_content_world)
 
-// LINT.IfChange(autofill_fix_post_filling_payment_sheet)
-/**
-Enables fixing the issue where the payment sheet spams after dismissing a
-modal dialog that was triggered from the KA (e.g. filling a suggestion).
- */
-let autofillFixPaymentSheetSpam: boolean = false;
-// LINT.ThenChange(//components/autofill/ios/common/features.mm:autofill_fix_post_filling_payment_sheet)
-
-
 // LINT.IfChange(autofill_correct_user_edited_bit_in_parsed_field)
 /**
 Enables correctly setting the is_user_edited bit in the parsed form fields
@@ -71,6 +62,13 @@ Dedupes form submission by only allowing one submission per form.
 */
 let autofillDedupeFormSubmission: boolean = false;
 // LINT.ThenChange(//components/autofill/ios/common/features.mm:autofill_dedupe_form_submission)
+
+// LINT.IfChange(autofill_report_form_submission_errors)
+/**
+ * Reports JS errors that occur upon handling form submission in the renderer.
+ */
+let autofillReportFormSubmissionErrors: boolean = false;
+// LINT.ThenChange(//components/autofill/ios/common/features.mm:autofill_report_form_submission_errors)
 
 /**
  * @see autofillAcrossIframes
@@ -129,20 +127,6 @@ function isAutofillIsolatedContentWorldEnabled(): boolean {
 }
 
 /**
- * @see autofillFixPaymentSheetSpam
- */
-function setAutofillFixPaymentSheetSpam(enabled: boolean): void {
-  autofillFixPaymentSheetSpam = enabled;
-}
-
-/**
- * @see autofillFixPaymentSheetSpam
- */
-function isAutofillFixPaymentSheetSpamEnabled(): boolean {
-  return autofillFixPaymentSheetSpam;
-}
-
-/**
  * @see autofillCorrectUserEditedBitInParsedField
  */
 function setAutofillCorrectUserEditedBitInParsedField(enabled: boolean): void {
@@ -185,6 +169,20 @@ function isAutofillDedupeFormSubmissionEnabled(): boolean {
   return autofillDedupeFormSubmission;
 }
 
+/**
+ * @see autofillReportFormSubmissionErrors
+ */
+function setAutofillReportFormSubmissionErrors(enabled: boolean): void {
+  autofillReportFormSubmissionErrors = enabled;
+}
+
+/**
+ * @see autofillReportFormSubmissionErrors
+ */
+function isAutofillReportFormSubmissionErrorsEnabled(): boolean {
+  return autofillReportFormSubmissionErrors;
+}
+
 // Expose globally via `gCrWeb` instead of `export` to ensure state (feature
 // on/off) is maintained across imports.
 gCrWebLegacy.autofill_form_features = {
@@ -196,12 +194,12 @@ gCrWebLegacy.autofill_form_features = {
   isAutofillDisallowSlashDotLabelsEnabled,
   setAutofillIsolatedContentWorld,
   isAutofillIsolatedContentWorldEnabled,
-  setAutofillFixPaymentSheetSpam,
-  isAutofillFixPaymentSheetSpamEnabled,
   setAutofillCorrectUserEditedBitInParsedField,
   isAutofillCorrectUserEditedBitInParsedField,
   setAutofillAllowDefaultPreventedSubmission,
   isAutofillAllowDefaultPreventedSubmission,
   setAutofillDedupeFormSubmission,
   isAutofillDedupeFormSubmissionEnabled,
+  setAutofillReportFormSubmissionErrors,
+  isAutofillReportFormSubmissionErrorsEnabled,
 };

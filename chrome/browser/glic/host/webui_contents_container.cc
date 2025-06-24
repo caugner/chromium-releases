@@ -39,9 +39,13 @@ WebUIContentsContainer::WebUIContentsContainer(
 
 WebUIContentsContainer::~WebUIContentsContainer() {
   web_contents_->ClosePage();
+  GlicProfileManager* glic_profile_manager = GlicProfileManager::GetInstance();
+  if (!glic_profile_manager) {
+    return;
+  }
   auto* glic_service = GlicKeyedServiceFactory::GetGlicKeyedService(
       glic_window_controller_->profile());
-  GlicProfileManager::GetInstance()->OnUnloadingClientForService(glic_service);
+  glic_profile_manager->OnUnloadingClientForService(glic_service);
 }
 
 bool WebUIContentsContainer::HandleKeyboardEvent(
@@ -49,7 +53,7 @@ bool WebUIContentsContainer::HandleKeyboardEvent(
     const input::NativeWebKeyboardEvent& event) {
   GlicView* glic_view = glic_window_controller_->GetGlicView();
   return glic_view && unhandled_keyboard_event_handler_.HandleKeyboardEvent(
-                          event, glic_view->web_view()->GetFocusManager());
+                          event, glic_view->GetFocusManager());
 }
 
 void WebUIContentsContainer::RequestMediaAccessPermission(
@@ -62,7 +66,9 @@ void WebUIContentsContainer::RequestMediaAccessPermission(
 
 void WebUIContentsContainer::PrimaryMainFrameRenderProcessGone(
     base::TerminationStatus status) {
-  base::RecordAction(base::UserMetricsAction("GlicSessionWebUiCrash"));
+  if (status != base::TERMINATION_STATUS_NORMAL_TERMINATION) {
+    base::RecordAction(base::UserMetricsAction("GlicSessionWebUiCrash"));
+  }
   auto* keyed_service = GlicKeyedServiceFactory::GetGlicKeyedService(
       web_contents_->GetBrowserContext());
   keyed_service->CloseUI();

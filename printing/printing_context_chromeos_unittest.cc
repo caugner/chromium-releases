@@ -10,9 +10,11 @@
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "printing/backend/cups_ipp_constants.h"
 #include "printing/backend/mock_cups_printer.h"
 #include "printing/mojom/print.mojom.h"
+#include "printing/printing_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -213,6 +215,45 @@ TEST_F(PrintingContextTest, SettingsToIPPOptions_MediaCol) {
   TestMediaColValue(gfx::Size(29700, 42000), 100, 200, 300, 400);
 }
 
+TEST_F(PrintingContextTest, SettingsToIPPOptions_MediaColCustomMargins) {
+  base::test::ScopedFeatureList scoped_enable;
+  scoped_enable.InitAndEnableFeature(features::kApiPrintingMarginsAndScale);
+  settings_.set_requested_media(
+      {gfx::Size(297000, 420000), "iso_a3_297x420mm"});
+  settings_.SetCustomMargins({0, 0, 50, 30, 40, 60});
+  printable_area_ =
+      gfx::Rect(2000, 1000, 297000 - (2000 + 3000), 420000 - (1000 + 4000));
+  TestMediaColValue(gfx::Size(29700, 42000), 6, 5, 3, 4);
+}
+
+// This test checks that if custom margins are provided, but they are not
+// obtained from media-col (in other words, they cannot be converted back to
+// PWG units), the default margins are used.
+TEST_F(PrintingContextTest,
+       SettingsToIPPOptions_MediaColUnsupportedCustomMargins) {
+  base::test::ScopedFeatureList scoped_enable;
+  scoped_enable.InitAndEnableFeature(features::kApiPrintingMarginsAndScale);
+  settings_.set_requested_media(
+      {gfx::Size(297000, 420000), "iso_a3_297x420mm"});
+  settings_.SetCustomMargins({0, 0, 123, 321, 231, 132});
+  printable_area_ =
+      gfx::Rect(2000, 1000, 297000 - (2000 + 3000), 420000 - (1000 + 4000));
+  TestMediaColValue(gfx::Size(29700, 42000), 100, 200, 300, 400);
+}
+
+TEST_F(PrintingContextTest, SettingsToIPPOptions_MediaColZeroMargins) {
+  base::test::ScopedFeatureList scoped_enable;
+  scoped_enable.InitAndEnableFeature(features::kApiPrintingMarginsAndScale);
+  settings_.set_requested_media(
+      {gfx::Size(297000, 420000), "iso_a3_297x420mm"});
+  // Set all margins to zero
+  settings_.SetCustomMargins({0, 0, 0, 0, 0, 0});
+  settings_.set_borderless(true);
+  printable_area_ = gfx::Rect(0, 0, 297000, 420000);
+  // All margins should be zero
+  TestMediaColValue(gfx::Size(29700, 42000), 0, 0, 0, 0);
+}
+
 TEST_F(PrintingContextTest, SettingsToIPPOptionsMediaColLandscape) {
   settings_.set_requested_media(
       {gfx::Size(148000, 200000), "om_200030x148170um_200x148mm"});
@@ -389,6 +430,8 @@ TEST_F(PrintingContextTest, SettingsToIPPOptionsClientInfoEmpty) {
 }
 
 TEST_F(PrintingContextTest, SettingsToIPPOptionsPrintScaling) {
+  base::test::ScopedFeatureList scoped_enable;
+  scoped_enable.InitAndEnableFeature(features::kApiPrintingMarginsAndScale);
   // Define test cases for print scaling
   struct PrintScalingTestCase {
     mojom::PrintScalingType scaling_type;

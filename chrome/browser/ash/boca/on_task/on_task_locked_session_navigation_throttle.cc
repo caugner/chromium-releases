@@ -76,8 +76,8 @@ bool IsBocaAppHostURL(const GURL& url) {
 }  // namespace
 
 OnTaskLockedSessionNavigationThrottle::OnTaskLockedSessionNavigationThrottle(
-    content::NavigationHandle* navigation_handle)
-    : content::NavigationThrottle(navigation_handle) {}
+    content::NavigationThrottleRegistry& registry)
+    : content::NavigationThrottle(registry) {}
 
 OnTaskLockedSessionNavigationThrottle::
     ~OnTaskLockedSessionNavigationThrottle() = default;
@@ -87,18 +87,18 @@ const char* OnTaskLockedSessionNavigationThrottle::GetNameForLogging() {
 }
 
 // static
-std::unique_ptr<content::NavigationThrottle>
-OnTaskLockedSessionNavigationThrottle::MaybeCreateThrottleFor(
-    content::NavigationHandle* handle) {
+void OnTaskLockedSessionNavigationThrottle::MaybeCreateAndAdd(
+    content::NavigationThrottleRegistry& registry) {
+  content::NavigationHandle& handle = registry.GetNavigationHandle();
   if (!ash::boca_util::IsEnabled(
           ash::BrowserContextHelper::Get()->GetUserByBrowserContext(
-              handle->GetWebContents()->GetBrowserContext()))) {
-    return nullptr;
+              handle.GetWebContents()->GetBrowserContext()))) {
+    return;
   }
 
   LockedSessionWindowTracker* const window_tracker =
       LockedSessionWindowTrackerFactory::GetForBrowserContext(
-          handle->GetWebContents()->GetBrowserContext());
+          handle.GetWebContents()->GetBrowserContext());
   // We do not need to create the throttle when we are not currently observing a
   // window that needs to be in locked mode, or if the navigation throttle is
   // not ready to start (where we are adding new tabs), or if the navigation is
@@ -107,27 +107,28 @@ OnTaskLockedSessionNavigationThrottle::MaybeCreateThrottleFor(
   // we are not navigating to a new page).
   if (!window_tracker || !window_tracker->browser() ||
       !window_tracker->can_start_navigation_throttle()) {
-    return nullptr;
+    return;
   }
 
-  if (!handle->IsInOutermostMainFrame()) {
-    return nullptr;
+  if (!handle.IsInOutermostMainFrame()) {
+    return;
   }
 
-  if (handle->IsSameDocument()) {
-    return nullptr;
+  if (handle.IsSameDocument()) {
+    return;
   }
 
   Browser* const content_browser =
-      LockedSessionWindowTracker::GetBrowserWithTab(handle->GetWebContents());
+      LockedSessionWindowTracker::GetBrowserWithTab(handle.GetWebContents());
 
   // Ensure we only apply the nav throttle on OnTask SWA navigations.
   if (content_browser && (content_browser != window_tracker->browser() &&
                           !content_browser->is_type_app_popup())) {
-    return nullptr;
+    return;
   }
-  window_tracker->ObserveWebContents(handle->GetWebContents());
-  return base::WrapUnique(new OnTaskLockedSessionNavigationThrottle(handle));
+  window_tracker->ObserveWebContents(handle.GetWebContents());
+  registry.AddThrottle(
+      base::WrapUnique(new OnTaskLockedSessionNavigationThrottle(registry)));
 }
 
 void OnTaskLockedSessionNavigationThrottle::MaybeShowBlockedURLToast() {
@@ -237,8 +238,14 @@ OnTaskLockedSessionNavigationThrottle::CheckRestrictions() {
     return CANCEL;
   }
 
-  // Allow redirects triggered as separate navigation requests to go through.
-  if (navigation_handle()->GetRedirectChain().size() > 1) {
+  // Allow redirects triggered as separate navigation requests to go through so
+  // they do not count towards the 1LD quota. We do not extend this to other
+  // navigation restrictions to prevent users from circumventing said
+  // restrictions.
+  OnTaskBlocklist* const on_task_blocklist =
+      window_tracker->on_task_blocklist();
+  if (navigation_handle()->GetRedirectChain().size() > 1 &&
+      on_task_blocklist->IsCurrentRestrictionOneLevelDeep()) {
     return PROCEED;
   }
   const GURL& url = navigation_handle()->GetURL();
@@ -286,7 +293,7 @@ OnTaskLockedSessionNavigationThrottle::CheckRestrictions() {
   // that URL needs to be blocked by another blocklist, such as the one imposed
   // by the device admin panel, this would be enforced by a different
   // NavigationThrottle.
-  if (window_tracker->on_task_blocklist()->IsCurrentRestrictionOneLevelDeep() &&
+  if (on_task_blocklist->IsCurrentRestrictionOneLevelDeep() &&
       navigation_handle()->GetReloadType() != content::ReloadType::NONE &&
       navigation_handle()->GetWebContents()->GetLastCommittedURL().is_valid()) {
     should_redirects_pass_ = true;
@@ -297,7 +304,7 @@ OnTaskLockedSessionNavigationThrottle::CheckRestrictions() {
   // the context menu. Back needs to be explicitly allowed to go back in the
   // case this was a one level deep navigation and we do not want to block
   // the navigation from going back.
-  if (window_tracker->on_task_blocklist()->IsCurrentRestrictionOneLevelDeep() &&
+  if (on_task_blocklist->IsCurrentRestrictionOneLevelDeep() &&
       navigation_handle()->GetNavigationEntry() &&
       navigation_handle()->GetNavigationEntry()->GetTransitionType() &
           ui::PageTransition::PAGE_TRANSITION_FORWARD_BACK) {
@@ -310,9 +317,6 @@ OnTaskLockedSessionNavigationThrottle::CheckRestrictions() {
       return PROCEED;
     }
   }
-
-  OnTaskBlocklist* const on_task_blocklist =
-      window_tracker->on_task_blocklist();
 
   policy::URLBlocklist::URLBlocklistState blocklist_state =
       on_task_blocklist->GetURLBlocklistState(url);

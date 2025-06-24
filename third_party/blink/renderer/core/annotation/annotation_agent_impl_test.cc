@@ -21,6 +21,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_boolean_scrollintoviewoptions.h"
 #include "third_party/blink/renderer/core/annotation/annotation_agent_container_impl.h"
 #include "third_party/blink/renderer/core/annotation/annotation_test_utils.h"
+#include "third_party/blink/renderer/core/annotation/node_annotation_selector.h"
 #include "third_party/blink/renderer/core/annotation/text_annotation_selector.h"
 #include "third_party/blink/renderer/core/css/font_face.h"
 #include "third_party/blink/renderer/core/css/font_face_set_document.h"
@@ -143,6 +144,16 @@ class AnnotationAgentImplTest : public SimTest {
         AnnotationAgentContainerImpl::CreateIfNeeded(GetDocument());
     return container->CreateUnboundAgent(type, *selector);
   }
+
+  AnnotationAgentImpl* CreateNodeAgent(
+      DOMNodeId dom_node_id,
+      mojom::blink::AnnotationType type = mojom::blink::AnnotationType::kGlic) {
+    auto* selector = MakeGarbageCollected<NodeAnnotationSelector>(dom_node_id);
+    auto* container =
+        AnnotationAgentContainerImpl::CreateIfNeeded(GetDocument());
+    return container->CreateUnboundAgent(type, *selector);
+  }
+
   // Performs a check that the given node is fully visible in the visual
   // viewport - that is, it's entire bounding rect is contained in the visual
   // viewport. Returns whether the check passed so it can be used as an ASSERT
@@ -1191,6 +1202,41 @@ TEST_F(AnnotationAgentImplTest, ActivatesContentVisibilityAuto) {
       range->ToEphemeralRange()));
 }
 
+TEST_F(AnnotationAgentImplTest, NodeContentsBeginsWithLineBreak) {
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+      p {
+        position: absolute;
+        width: 200px;
+        height: 20px;
+        left: 0;
+        top: 20000px;
+      }
+    </style>
+    <body>
+      <div id="section">
+        <div>Step</div>
+        1
+      </div>
+    </body>
+  )HTML");
+
+  auto* element_foo =
+      GetDocument().body()->getElementById(AtomicString("section"));
+  ASSERT_NE(element_foo, nullptr);
+  auto* agent = CreateNodeAgent(element_foo->GetDomNodeId());
+  // Produce a compositor frame. This should process the DOM mutations and
+  // finish attaching the agent.
+  Compositor().BeginFrame();
+  EXPECT_TRUE(agent->IsAttached());
+  agent->ScrollIntoView(/*applies_focus=*/false);
+  Compositor().BeginFrame();
+  EXPECT_TRUE(ExpectInViewport(*element_foo));
+}
+
 // kTextFinder type annotations must not cause side-effects. Ensure they do not
 // expand a hidden=until-found element.
 TEST_F(AnnotationAgentImplTest, TextFinderDoesntMutateDom) {
@@ -1841,6 +1887,8 @@ TEST_F(AnnotationAgentImplTest, ValidFlatTreeRangeIsInvalidDOMRange) {
   EXPECT_FALSE(agent->IsAttached());
 }
 
+// TODO(https://crbug.com/417493172): This should be parameterized for scroll
+// types.
 TEST_F(AnnotationAgentImplTest, GlicHighlight_SmokeTest) {
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -2296,5 +2344,132 @@ TEST_F(AnnotationAgentImplTest,
   EXPECT_TRUE(GlicAnimationFinished());
   EXPECT_EQ(GetAlphaForGlicMarkerAt(0u), 1.f);
 }
+
+namespace {
+enum class ScrollType {
+  kNoScroll = 0,
+  kSmoothScroll,
+  kInstantScroll,
+};
+
+struct GlicScrollBehaviorConfig {
+  ScrollType type;
+  int element_top;
+  int body_height;
+};
+
+void PrintTo(const GlicScrollBehaviorConfig& v, std::ostream* os) {
+  std::string type;
+  switch (v.type) {
+    case ScrollType::kNoScroll:
+      type = "NoScroll";
+      break;
+    case ScrollType::kSmoothScroll:
+      type = "SmoothScroll";
+      break;
+    case ScrollType::kInstantScroll:
+      type = "InstantScroll";
+      break;
+  }
+  *os << type;
+}
+}  // namespace
+
+class AnnotationAgentImplTestWithScrollingBehavior
+    : public AnnotationAgentImplTest,
+      public ::testing::WithParamInterface<GlicScrollBehaviorConfig> {
+ public:
+  AnnotationAgentImplTestWithScrollingBehavior() = default;
+  ~AnnotationAgentImplTestWithScrollingBehavior() override = default;
+};
+
+// Assert that there are highlight animations when prefers-reduced-motion is
+// enabled, and SmoothScroll becomes instant.
+TEST_P(AnnotationAgentImplTestWithScrollingBehavior,
+       NoAnimationWithPrefersReducedMotion) {
+  GlicScrollBehaviorConfig config = GetParam();
+  SimRequest request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  request.Complete(String::Format(R"HTML(
+      <!DOCTYPE html>
+      <style>
+        #foo {
+          position: absolute;
+          top: %dpx;
+        }
+        body {
+          height: %dpx;
+          margin: 0;
+        }
+      </style>
+      <p id='foo'>FOO<p>
+    )HTML", config.element_top, config.body_height)
+  );
+
+  Compositor().BeginFrame();
+
+  // Enables prefers-reduced-motion.
+  WebViewImpl* web_view =
+      GetDocument().GetPage()->GetChromeClient().GetWebView();
+  web_view->GetSettings()->SetPrefersReducedMotion(true);
+
+  Element* foo_element = GetDocument().getElementById(AtomicString("foo"));
+  RangeInFlatTree* range =
+      CreateRangeToExpectedText(foo_element->firstChild(), 0, 3, "FOO");
+  auto* agent = CreateAgentForRange(range, mojom::blink::AnnotationType::kGlic);
+  ASSERT_TRUE(agent);
+
+  MockAnnotationAgentHost host;
+  host.BindToAgent(*agent);
+  ASSERT_FALSE(host.did_finish_attachment_rect_);
+
+  // Finish the attachment.
+  Compositor().BeginFrame();
+  host.FlushForTesting();
+  ASSERT_TRUE(host.did_finish_attachment_rect_);
+  ASSERT_TRUE(agent->IsAttached());
+  ASSERT_TRUE(GlicAnimationNotStarted());
+
+  switch (GetParam().type) {
+    case ScrollType::kNoScroll: {
+      // The browser tells the renderer to scroll. Since we don't need to
+      // scroll, the highlight animation starts immediately, which sets the
+      // opacity to full.
+      agent->ScrollIntoView(/*applies_focus=*/false);
+      EXPECT_TRUE(ExpectInViewport(*foo_element));
+      break;
+    }
+    case ScrollType::kSmoothScroll:
+      // We would ordinarily smooth scroll here. Since prefers-reduced-motion is
+      // enabled, the scroll is instant.
+    case ScrollType::kInstantScroll: {
+      // We need to scroll.
+      EXPECT_TRUE(ExpectNotInViewport(*foo_element));
+      host.agent_->ScrollIntoView(/*applies_focus=*/false);
+      host.FlushForTesting();
+      // Instant scroll.
+      EXPECT_TRUE(ExpectInViewport(*foo_element));
+      break;
+    }
+  }
+
+  EXPECT_TRUE(GlicAnimationFinished());
+  EXPECT_EQ(GetAlphaForGlicMarkerAt(0u), 1.f);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    /*no prefix*/,
+    AnnotationAgentImplTestWithScrollingBehavior,
+    ::testing::Values(
+        GlicScrollBehaviorConfig{.type = ScrollType::kNoScroll,
+                                 .element_top = 100,
+                                 .body_height = 200},
+        GlicScrollBehaviorConfig{.type = ScrollType::kSmoothScroll,
+                                 .element_top = 1000,
+                                 .body_height = 5000},
+        GlicScrollBehaviorConfig{.type = ScrollType::kInstantScroll,
+                                 .element_top = 17000,
+                                 .body_height = 20000}),
+    ::testing::PrintToStringParamName());
 
 }  // namespace blink

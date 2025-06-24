@@ -3,29 +3,29 @@
 # found in the LICENSE file.
 """Definitions of builders in the chromium.fyi builder group."""
 
-load("//lib/branches.star", "branches")
-load("//lib/builder_config.star", "builder_config")
-load("//lib/builder_health_indicators.star", "health_spec")
-load("//lib/builders.star", "builders", "cpu", "os", "siso")
-load("//lib/ci.star", "ci")
-load("//lib/consoles.star", "consoles")
-load("//lib/gn_args.star", "gn_args")
-load("//lib/html.star", "linkify", "linkify_builder")
-load("//lib/targets.star", "targets")
+load("@chromium-luci//branches.star", "branches")
+load("@chromium-luci//builder_config.star", "builder_config")
+load("@chromium-luci//builder_health_indicators.star", "health_spec")
+load("@chromium-luci//builders.star", "cpu", "os")
+load("@chromium-luci//ci.star", "ci")
+load("@chromium-luci//consoles.star", "consoles")
+load("@chromium-luci//gn_args.star", "gn_args")
+load("@chromium-luci//html.star", "linkify")
+load("@chromium-luci//targets.star", "targets")
+load("//lib/ci_constants.star", "ci_constants")
+load("//lib/siso.star", "siso")
 load("//lib/xcode.star", "xcode")
 
 ci.defaults.set(
-    executable = ci.DEFAULT_EXECUTABLE,
+    executable = ci_constants.DEFAULT_EXECUTABLE,
     builder_group = "chromium.fyi",
-    pool = ci.DEFAULT_POOL,
+    pool = ci_constants.DEFAULT_POOL,
     cores = 8,
     execution_timeout = 10 * time.hour,
-    health_spec = health_spec.DEFAULT,
-    priority = ci.DEFAULT_FYI_PRIORITY,
-    reclient_enabled = False,
-    service_account = ci.DEFAULT_SERVICE_ACCOUNT,
-    shadow_service_account = ci.DEFAULT_SHADOW_SERVICE_ACCOUNT,
-    siso_enabled = True,
+    health_spec = health_spec.default(),
+    priority = ci_constants.DEFAULT_FYI_PRIORITY,
+    service_account = ci_constants.DEFAULT_SERVICE_ACCOUNT,
+    shadow_service_account = ci_constants.DEFAULT_SHADOW_SERVICE_ACCOUNT,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
@@ -90,36 +90,20 @@ consoles.console_view(
     },
 )
 
-def fyi_reclient_comparison_builder(*, name, **kwargs):
-    kwargs.setdefault("executable", "recipe:reclient_reclient_comparison")
-    kwargs["reclient_bootstrap_env"] = kwargs.get("reclient_bootstrap_env", {})
-    kwargs["reclient_bootstrap_env"].update({
-        "RBE_ip_reset_min_delay": "-1s",
-        "RBE_fast_log_collection": "true",
-    })
-    kwargs["reclient_enabled"] = True
-    return ci.builder(name = name, **kwargs)
-
 def fyi_ios_builder(*, name, **kwargs):
     kwargs.setdefault("cores", None)
     if kwargs.get("builderless", False):
         kwargs.setdefault("os", os.MAC_DEFAULT)
-    kwargs.setdefault("reclient_scandeps_server", True)
     kwargs.setdefault("xcode", xcode.xcode_default)
     return ci.builder(name = name, **kwargs)
 
 def mac_builder_defaults(**kwargs):
     kwargs.setdefault("cores", 4)
     kwargs.setdefault("os", os.MAC_DEFAULT)
-    kwargs.setdefault("reclient_scandeps_server", True)
     return kwargs
 
 def fyi_mac_builder(*, name, **kwargs):
     return ci.builder(name = name, **mac_builder_defaults(**kwargs))
-
-def fyi_mac_reclient_comparison_builder(*, name, **kwargs):
-    kwargs["reclient_enabled"] = True
-    return fyi_reclient_comparison_builder(name = name, **mac_builder_defaults(**kwargs))
 
 ci.builder(
     name = "Linux Viz",
@@ -242,6 +226,7 @@ ci.builder(
     targets = targets.bundle(
         targets = [
             "trees_in_viz_fyi_gtests",
+            "trees_in_viz_fyi_blink_web_tests",
         ],
         mixins = [
             "linux-jammy",
@@ -621,7 +606,7 @@ ci.builder(
 
 ci.thin_tester(
     name = "mac-fieldtrial-tester",
-    triggered_by = ["ci/mac-arm64-rel"],
+    parent = "ci/mac-arm64-rel",
     builder_spec = builder_config.builder_spec(
         execution_mode = builder_config.execution_mode.TEST,
         gclient_config = builder_config.gclient_config(
@@ -1540,395 +1525,6 @@ ci.builder(
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CI,
 )
 
-fyi_reclient_comparison_builder(
-    name = "Comparison Android (reclient)",
-    description_html = """\
-This builder measures Android build performance with reclient prod vs test.<br/>\
-The bot specs should be in sync with {}.\
-""".format(linkify_builder("ci", "Deterministic Android (dbg)")),
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "android_builder",
-                "android_with_static_analysis",
-                "debug_static_builder",
-                "remoteexec",
-                "arm64",
-                "webview_google",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "android_builder",
-                "android_with_static_analysis",
-                "debug_static_builder",
-                "remoteexec",
-                "arm64",
-                "webview_google",
-            ],
-        ),
-    },
-    cores = 16,
-    os = os.LINUX_DEFAULT,
-    # Target luci-chromium-ci-bionic-us-central1-b-ssd-16-*.
-    ssd = True,
-    console_view_entry = consoles.console_view_entry(
-        category = "android",
-        short_name = "cmp",
-    ),
-    execution_timeout = 15 * time.hour,
-    reclient_cache_silo = "Comparison Android - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_reclient_comparison_builder(
-    name = "Comparison Android (reclient) (reproxy cache)",
-    description_html = """\
-This builder measures Android build performance with reclient prod vs test using reproxy's deps cache.<br/>\
-The bot specs should be in sync with {}.\
-""".format(linkify_builder("ci", "Comparison Android (reclient)")),
-    cores = 16,
-    os = os.LINUX_DEFAULT,
-    # Target luci-chromium-ci-bionic-us-central1-b-ssd-16-*.
-    ssd = True,
-    console_view_entry = consoles.console_view_entry(
-        category = "android|expcache",
-        short_name = "cmp",
-    ),
-    execution_timeout = 15 * time.hour,
-    reclient_cache_silo = "Comparison Android (reproxy cache) - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_mac_reclient_comparison_builder(
-    name = "Comparison Mac (reclient)",
-    schedule = "0 */4 * * *",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "mac",
-                "x64",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "mac",
-                "x64",
-            ],
-        ),
-    },
-    builderless = True,
-    cores = 12,
-    cpu = cpu.X86_64,
-    console_view_entry = consoles.console_view_entry(
-        category = "mac",
-        short_name = "cmp",
-    ),
-    execution_timeout = 14 * time.hour,
-    reclient_bootstrap_env = {
-        "GLOG_vmodule": "bridge*=2",
-    },
-    reclient_cache_silo = "Comparison Mac - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_mac_reclient_comparison_builder(
-    name = "Comparison Mac arm64 (reclient)",
-    schedule = "0 */4 * * *",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "arm64",
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "mac",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "arm64",
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "mac",
-            ],
-        ),
-    },
-    builderless = True,
-    cores = None,
-    cpu = cpu.ARM64,
-    console_view_entry = consoles.console_view_entry(
-        category = "mac",
-        short_name = "cmp",
-    ),
-    execution_timeout = 10 * time.hour,
-    reclient_bootstrap_env = {
-        "GLOG_vmodule": "bridge*=2",
-    },
-    reclient_cache_silo = "Comparison Mac - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_mac_reclient_comparison_builder(
-    name = "Comparison Mac arm64 on arm64 (reclient)",
-    schedule = "0 */4 * * *",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "arm64",
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "mac",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "arm64",
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "mac",
-            ],
-        ),
-    },
-    builderless = True,
-    cores = None,
-    cpu = cpu.ARM64,
-    console_view_entry = consoles.console_view_entry(
-        category = "mac",
-        short_name = "cmp",
-    ),
-    execution_timeout = 10 * time.hour,
-    reclient_bootstrap_env = {
-        "GLOG_vmodule": "bridge*=2",
-    },
-    reclient_cache_silo = "Comparison Mac - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_reclient_comparison_builder(
-    name = "Comparison Windows (8 cores) (reclient)",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "win",
-                "x64",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "win",
-                "x64",
-            ],
-        ),
-    },
-    builderless = True,
-    cores = 8,
-    os = os.WINDOWS_DEFAULT,
-    free_space = builders.free_space.high,
-    console_view_entry = consoles.console_view_entry(
-        category = "win",
-        short_name = "re",
-    ),
-    execution_timeout = 14 * time.hour,
-    reclient_cache_silo = "Comparison Windows 8 cores - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-    siso_remote_jobs = 80,
-)
-
-fyi_reclient_comparison_builder(
-    name = "Comparison Windows (reclient)",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "win",
-                "x64",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "gpu_tests",
-                "release_builder",
-                "remoteexec",
-                "minimal_symbols",
-                "win",
-                "x64",
-            ],
-        ),
-    },
-    builderless = True,
-    cores = "16|32",
-    os = os.WINDOWS_DEFAULT,
-    free_space = builders.free_space.high,
-    console_view_entry = consoles.console_view_entry(
-        category = "win",
-        short_name = "re",
-    ),
-    execution_timeout = 14 * time.hour,
-    reclient_cache_silo = "Comparison Windows - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_reclient_comparison_builder(
-    name = "Comparison Simple Chrome (reclient)",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "chromeos_device",
-                "dcheck_off",
-                "remoteexec",
-                "amd64-generic-vm",
-                "ozone_headless",
-                "use_fake_dbus_clients",
-                "x64",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "chromeos_device",
-                "dcheck_off",
-                "remoteexec",
-                "amd64-generic-vm",
-                "ozone_headless",
-                "use_fake_dbus_clients",
-                "x64",
-            ],
-        ),
-    },
-    builderless = True,
-    os = os.LINUX_DEFAULT,
-    console_view_entry = consoles.console_view_entry(
-        category = "cros x64",
-        short_name = "cmp",
-    ),
-    execution_timeout = 14 * time.hour,
-    reclient_cache_silo = "Comparison Simple Chrome - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-)
-
-fyi_mac_reclient_comparison_builder(
-    name = "Comparison ios (reclient)",
-    schedule = "0 */4 * * *",
-    gn_args = {
-        "build1": gn_args.config(
-            configs = [
-                "debug_static_builder",
-                "remoteexec",
-                "ios_simulator",
-                "x64",
-                "xctest",
-            ],
-        ),
-        "build2": gn_args.config(
-            configs = [
-                "debug_static_builder",
-                "remoteexec",
-                "ios_simulator",
-                "x64",
-                "xctest",
-            ],
-        ),
-    },
-    builderless = True,
-    cores = None,
-    cpu = cpu.ARM64,
-    console_view_entry = consoles.console_view_entry(
-        category = "ios",
-        short_name = "cmp",
-    ),
-    execution_timeout = 10 * time.hour,
-    reclient_cache_silo = "Comparison ios - cache siloed",
-    shadow_siso_project = siso.project.TEST_UNTRUSTED,
-    siso_project = siso.project.TEST_TRUSTED,
-    xcode = xcode.xcode_default,
-)
-
-ci.builder(
-    name = "Win x64 Builder (reclient)",
-    builder_spec = builder_config.builder_spec(
-        gclient_config = builder_config.gclient_config(
-            config = "chromium",
-            apply_configs = [
-                "use_clang_coverage",
-                "reclient_test",
-            ],
-        ),
-        chromium_config = builder_config.chromium_config(
-            config = "chromium",
-            apply_configs = ["mb"],
-            build_config = builder_config.build_config.RELEASE,
-            target_bits = 64,
-            target_platform = builder_config.target_platform.WIN,
-        ),
-        build_gs_bucket = "chromium-fyi-archive",
-    ),
-    gn_args = gn_args.config(
-        configs = [
-            "gpu_tests",
-            "release_builder",
-            "remoteexec",
-            "minimal_symbols",
-            "win",
-            "x64",
-        ],
-    ),
-    # Copied from
-    # https://source.chromium.org/chromium/chromium/src/+/7b147a6777cb32d6a12e1716c61a0ed50dc1229a:testing/buildbot/waterfalls.pyl;l=6023-6030
-    targets = targets.bundle(
-        targets = [
-            "chromium_win_scripts",
-        ],
-        additional_compile_targets = [
-            "pdf_fuzzers",
-        ],
-    ),
-    builderless = True,
-    cores = 16,
-    os = os.WINDOWS_DEFAULT,
-    ssd = True,
-    console_view_entry = consoles.console_view_entry(
-        category = "win",
-        short_name = "re",
-    ),
-    shadow_siso_project = None,
-    siso_project = siso.project.TEST_TRUSTED,
-    siso_remote_jobs = None,
-)
-
 fyi_ios_builder(
     name = "ios-blink-dbg-fyi",
     builder_spec = builder_config.builder_spec(
@@ -2740,4 +2336,56 @@ ci.builder(
         category = "linux",
     ),
     contact_team_email = "crossbench-infra-vteam@google.com",
+)
+
+ci.builder(
+    name = "win-no-safe-browsing-rel",
+    description_html = "Builds for Windows with `safe_browsing_mode = 0`.",
+    builder_spec = builder_config.builder_spec(
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+            apply_configs = [
+                "win",
+            ],
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = ["mb"],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.WIN,
+        ),
+        build_gs_bucket = "chromium-win-archive",
+    ),
+    gn_args = gn_args.config(
+        configs = [
+            "no_safe_browsing",
+            "release_builder",
+            "remoteexec",
+            "x86",
+            "no_symbols",
+            "win",
+        ],
+    ),
+    targets = targets.bundle(
+        targets = [
+            "browser_tests",
+            "components_unittests",
+            "unit_tests",
+        ],
+        additional_compile_targets = [
+            "chrome",
+        ],
+        mixins = [
+            "win10",
+            "x86-64",
+        ],
+    ),
+    builderless = True,
+    os = os.WINDOWS_DEFAULT,
+    console_view_entry = consoles.console_view_entry(
+        category = "misc",
+        short_name = "nosb",
+    ),
+    contact_team_email = "chrome-counter-abuse-core@google.com",
 )

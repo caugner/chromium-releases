@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/frame/csp/csp_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/deprecation/deprecation_report_body.h"
 #include "third_party/blink/renderer/core/frame/document_policy_violation_report_body.h"
+#include "third_party/blink/renderer/core/frame/integrity_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/intervention_report_body.h"
 #include "third_party/blink/renderer/core/frame/permissions_policy_violation_report_body.h"
 #include "third_party/blink/renderer/core/frame/report.h"
@@ -188,8 +189,27 @@ void ReportingContext::SendToReportingAPI(Report* report,
         type == ReportType::kDeprecation ||
         type == ReportType::kPermissionsPolicyViolation ||
         type == ReportType::kPotentialPermissionsPolicyViolation ||
+        type == ReportType::kIntegrityViolation ||
         type == ReportType::kIntervention ||
         type == ReportType::kDocumentPolicyViolation)) {
+    return;
+  }
+
+  KURL url = KURL(report->url());
+  // CSP Hash and IntegrityPolicy reports are not a LocationReportBody.
+  if (type == ReportType::kCSPHash) {
+    const CSPHashReportBody* body =
+        static_cast<CSPHashReportBody*>(report->body());
+    GetReportingService()->QueueCSPHashReport(
+        url, endpoint, body->subresourceURL(), body->hash(), body->type(),
+        body->destination());
+    return;
+  } else if (type == ReportType::kIntegrityViolation) {
+    const IntegrityViolationReportBody* body =
+        static_cast<IntegrityViolationReportBody*>(report->body());
+    GetReportingService()->QueueIntegrityViolationReport(
+        url, endpoint, body->documentURL(), body->blockedURL(),
+        body->destination(), body->reportOnly());
     return;
   }
 
@@ -197,7 +217,6 @@ void ReportingContext::SendToReportingAPI(Report* report,
       static_cast<LocationReportBody*>(report->body());
   int line_number = location_body->lineNumber().value_or(0);
   int column_number = location_body->columnNumber().value_or(0);
-  KURL url = KURL(report->url());
 
   if (type == ReportType::kCSPViolation) {
     // Send the CSP violation report.
@@ -210,12 +229,6 @@ void ReportingContext::SendToReportingAPI(Report* report,
         body->originalPolicy() ? body->originalPolicy() : "",
         body->sourceFile(), body->sample(), body->disposition().AsString(),
         body->statusCode(), line_number, column_number);
-  } else if (type == ReportType::kCSPHash) {
-    const CSPHashReportBody* body =
-        static_cast<CSPHashReportBody*>(report->body());
-    GetReportingService()->QueueCSPHashReport(
-        url, endpoint, body->subresourceURL(), body->hash(), body->type(),
-        body->destination());
   } else if (type == ReportType::kDeprecation) {
     // Send the deprecation report.
     const DeprecationReportBody* body =

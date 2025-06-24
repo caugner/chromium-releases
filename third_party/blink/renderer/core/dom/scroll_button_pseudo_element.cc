@@ -29,13 +29,18 @@ namespace {
 
 ScrollOffset CalculateSnappedScrollPosition(
     const ScrollableArea* scrollable_area,
-    gfx::Vector2dF scaled_delta) {
+    ScrollDirectionPhysical direction) {
   gfx::PointF current_position = scrollable_area->ScrollPosition();
   std::unique_ptr<cc::SnapSelectionStrategy> strategy =
-      cc::SnapSelectionStrategy::CreateForEndAndDirection(
-          current_position, scaled_delta,
-          RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled());
-  current_position += scaled_delta;
+      scrollable_area->PageScrollSnapStrategy(direction);
+  gfx::Vector2dF displacement = ToScrollDelta(direction, 1);
+  displacement.Scale(
+      scrollable_area->ScrollStep(ui::ScrollGranularity::kScrollByPage,
+                                  kHorizontalScrollbar),
+      scrollable_area->ScrollStep(ui::ScrollGranularity::kScrollByPage,
+                                  kVerticalScrollbar));
+
+  current_position += displacement;
   if (std::optional<cc::SnapPositionData> snap_position =
           scrollable_area->GetSnapPosition(*strategy)) {
     if (snap_position->type != cc::SnapPositionData::Type::kNone) {
@@ -69,7 +74,11 @@ void ScrollButtonPseudoElement::HandleButtonActivation() {
   PaintLayerScrollableArea* scrollable_area =
       scroller->IsDocumentElement() ? scroller->GetFrameView()->LayoutViewport()
                                     : scroller->GetScrollableArea();
-  CHECK(scrollable_area);
+  // Future proof in case of possibility to activate scroll button
+  // without an appropriate scroller via a click event from JS.
+  if (!scrollable_area) {
+    return;
+  }
 
   LogicalToPhysical<bool> mapping(
       scrolling_element.GetComputedStyle()->GetWritingDirection(),
@@ -77,26 +86,26 @@ void ScrollButtonPseudoElement::HandleButtonActivation() {
       GetPseudoId() == kPseudoIdScrollButtonInlineEnd,
       GetPseudoId() == kPseudoIdScrollButtonBlockStart,
       GetPseudoId() == kPseudoIdScrollButtonBlockEnd);
-  gfx::Vector2dF displacement;
+  std::optional<ScrollDirectionPhysical> direction;
   if (mapping.Top()) {
-    displacement.set_y(-scrollable_area->ScrollStep(
-        ui::ScrollGranularity::kScrollByPage, kVerticalScrollbar));
+    direction = ScrollDirectionPhysical::kScrollUp;
   } else if (mapping.Bottom()) {
-    displacement.set_y(scrollable_area->ScrollStep(
-        ui::ScrollGranularity::kScrollByPage, kVerticalScrollbar));
+    direction = ScrollDirectionPhysical::kScrollDown;
   } else if (mapping.Left()) {
-    displacement.set_x(-scrollable_area->ScrollStep(
-        ui::ScrollGranularity::kScrollByPage, kHorizontalScrollbar));
+    direction = ScrollDirectionPhysical::kScrollLeft;
   } else if (mapping.Right()) {
-    displacement.set_x(scrollable_area->ScrollStep(
-        ui::ScrollGranularity::kScrollByPage, kHorizontalScrollbar));
+    direction = ScrollDirectionPhysical::kScrollRight;
   }
-  if (!displacement.IsZero()) {
+  if (direction) {
+    gfx::Vector2dF displacement = ToScrollDelta(*direction, 1);
+    displacement.Scale(
+        scrollable_area->ScrollStep(ui::ScrollGranularity::kScrollByPage,
+                                    kHorizontalScrollbar),
+        scrollable_area->ScrollStep(ui::ScrollGranularity::kScrollByPage,
+                                    kVerticalScrollbar));
     gfx::PointF current_position = scrollable_area->ScrollPosition();
     std::unique_ptr<cc::SnapSelectionStrategy> strategy =
-        cc::SnapSelectionStrategy::CreateForEndAndDirection(
-            current_position, displacement,
-            RuntimeEnabledFeatures::FractionalScrollOffsetsEnabled());
+        scrollable_area->PageScrollSnapStrategy(*direction);
     gfx::PointF new_position =
         scrollable_area->GetSnapPositionAndSetTarget(*strategy).value_or(
             current_position + displacement);
@@ -126,6 +135,14 @@ void ScrollButtonPseudoElement::DefaultEventHandler(Event& event) {
   PseudoElement::DefaultEventHandler(event);
 }
 
+FocusableState ScrollButtonPseudoElement::SupportsFocus(
+    UpdateBehavior update_behavior) const {
+  if (IsDisabledFormControl()) {
+    return FocusableState::kNotFocusable;
+  }
+  return PseudoElement::SupportsFocus(update_behavior);
+}
+
 bool ScrollButtonPseudoElement::UpdateSnapshotInternal() {
   // Note: we can hit it here, since we don't unsubscribe from
   // scroll snapshot client (maybe we should).
@@ -136,6 +153,15 @@ bool ScrollButtonPseudoElement::UpdateSnapshotInternal() {
       DynamicTo<LayoutBox>(UltimateOriginatingElement().GetLayoutObject());
   if (!scroller ||
       (!scroller->IsScrollContainer() && !scroller->IsDocumentElement())) {
+    // Make sure the scroll button is disabled if the originating element
+    // is not an appropriate scroller.
+    if (enabled_) {
+      enabled_ = false;
+      SetNeedsStyleRecalc(
+          StyleChangeType::kLocalStyleChange,
+          StyleChangeReasonForTracing::Create(style_change_reason::kControl));
+      return false;
+    }
     return true;
   }
   ScrollableArea* scrollable_area =
@@ -158,36 +184,22 @@ bool ScrollButtonPseudoElement::UpdateSnapshotInternal() {
   if (mapping.Top()) {
     enabled_ = current_position.y() >
                CalculateSnappedScrollPosition(
-                   scrollable_area,
-                   gfx::Vector2dF(0, -scrollable_area->ScrollStep(
-                                         ui::ScrollGranularity::kScrollByPage,
-                                         kVerticalScrollbar)))
+                   scrollable_area, ScrollDirectionPhysical::kScrollUp)
                    .y();
   } else if (mapping.Bottom()) {
     enabled_ = current_position.y() <
                CalculateSnappedScrollPosition(
-                   scrollable_area,
-                   gfx::Vector2dF(0, scrollable_area->ScrollStep(
-                                         ui::ScrollGranularity::kScrollByPage,
-                                         kVerticalScrollbar)))
+                   scrollable_area, ScrollDirectionPhysical::kScrollDown)
                    .y();
   } else if (mapping.Left()) {
     enabled_ = current_position.x() >
                CalculateSnappedScrollPosition(
-                   scrollable_area,
-                   gfx::Vector2dF(-scrollable_area->ScrollStep(
-                                      ui::ScrollGranularity::kScrollByPage,
-                                      kHorizontalScrollbar),
-                                  0))
+                   scrollable_area, ScrollDirectionPhysical::kScrollLeft)
                    .x();
   } else if (mapping.Right()) {
     enabled_ = current_position.x() <
                CalculateSnappedScrollPosition(
-                   scrollable_area,
-                   gfx::Vector2dF(scrollable_area->ScrollStep(
-                                      ui::ScrollGranularity::kScrollByPage,
-                                      kHorizontalScrollbar),
-                                  0))
+                   scrollable_area, ScrollDirectionPhysical::kScrollRight)
                    .x();
   }
   if (enabled != enabled_) {

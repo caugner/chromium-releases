@@ -49,11 +49,6 @@ using ::country_codes::CountryId;
 namespace search_engines {
 
 namespace {
-#if !BUILDFLAG(IS_ANDROID)
-// Defines `kSearchEngineResourceIdMap`.
-#include "components/search_engines/generated_search_engine_resource_ids-inc.cc"
-#endif
-
 // Serialization keys for `ChoiceScreenDisplayState`.
 constexpr char kDisplayStateCountryIdKey[] = "country_id";
 constexpr char kDisplayStateSearchEnginesKey[] = "search_engines";
@@ -323,23 +318,21 @@ std::optional<base::Time> GetChoiceScreenCompletionTimestamp(
 #if !BUILDFLAG(IS_ANDROID)
 std::u16string GetMarketingSnippetString(
     const TemplateURLData& template_url_data) {
+  constexpr bool kEnableBuiltinSearchProviderAssets =
+      !!BUILDFLAG(ENABLE_BUILTIN_SEARCH_PROVIDER_ASSETS);
+
+  // TODO(crbug.com/420943295): `GetMarketingSnippetResourceId()` is generated
+  // code. The flag-gating should be moved there directly.
   int snippet_resource_id =
-      GetMarketingSnippetResourceId(template_url_data.keyword());
+      kEnableBuiltinSearchProviderAssets
+          ? GetMarketingSnippetResourceId(template_url_data.keyword())
+          : -1;
 
   return snippet_resource_id == -1
              ? l10n_util::GetStringFUTF16(
                    IDS_SEARCH_ENGINE_FALLBACK_MARKETING_SNIPPET,
                    template_url_data.short_name())
              : l10n_util::GetStringUTF16(snippet_resource_id);
-}
-
-int GetIconResourceId(const std::u16string& engine_keyword) {
-  // `kSearchEngineResourceIdMap` is defined in
-  // `components/search_engines/generated_search_engine_resource_ids-inc.cc`
-  const base::fixed_flat_map<std::u16string_view, int,
-                             kSearchEngineResourceIdMap.size()>::const_iterator
-      iterator = kSearchEngineResourceIdMap.find(engine_keyword);
-  return iterator == kSearchEngineResourceIdMap.cend() ? -1 : iterator->second;
 }
 
 #endif  // !BUILDFLAG(IS_ANDROID)

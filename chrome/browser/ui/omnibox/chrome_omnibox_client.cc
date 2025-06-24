@@ -19,6 +19,7 @@
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/trace_event/typed_macros.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -59,7 +60,8 @@
 #include "chrome/browser/ui/hats/hats_service.h"
 #include "chrome/browser/ui/hats/hats_service_factory.h"
 #include "chrome/browser/ui/layout_constants.h"
-#include "chrome/browser/ui/lens/lens_overlay_controller.h"
+#include "chrome/browser/ui/lens/lens_search_controller.h"
+#include "chrome/browser/ui/lens/lens_searchbox_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_navigation_observer.h"
 #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
@@ -90,6 +92,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/constants.h"
@@ -116,9 +119,9 @@ namespace {
 
 using predictors::AutocompleteActionPredictor;
 
-LensOverlayController* GetLensOverlayController(
+LensSearchController* GetLensSearchController(
     content::WebContents* web_contents) {
-  return web_contents ? LensOverlayController::FromTabWebContents(web_contents)
+  return web_contents ? LensSearchController::FromTabWebContents(web_contents)
                       : nullptr;
 }
 
@@ -381,10 +384,10 @@ void ChromeOmniboxClient::OnKeywordModeChanged(bool entered,
     return;
   }
 
-  if (LensOverlayController* lens_overlay_controller =
-          GetLensOverlayController(location_bar_->GetWebContents())) {
+  if (LensSearchController* lens_search_controller =
+          GetLensSearchController(location_bar_->GetWebContents())) {
     // TODO(crbug.com/408073216): Create and use new dismissal source.
-    lens_overlay_controller->CloseUIAsync(
+    lens_search_controller->CloseLensAsync(
         lens::LensOverlayDismissalSource::kEscapeKeyPress);
   }
 }
@@ -563,6 +566,26 @@ void ChromeOmniboxClient::OnResultChanged(
         request_ids_.push_back(bitmap_fetcher_service->RequestImage(
             turl->favicon_url(), base::BindOnce(on_bitmap_fetched, result_index,
                                                 turl->favicon_url())));
+      }
+    }
+    if (match.HasTakeoverAction(OmniboxActionId::CONTEXTUAL_SEARCH_OPEN_LENS) &&
+        omnibox_feature_configs::ContextualSearch::Get()
+            .open_lens_action_uses_thumbnail) {
+      if (const content::WebContents* web_contents =
+              location_bar_->GetWebContents()) {
+        content::RenderWidgetHostView* view =
+            web_contents->GetPrimaryMainFrame()
+                ->GetRenderViewHost()
+                ->GetWidget()
+                ->GetView();
+        if (view && view->IsSurfaceAvailableForCopy()) {
+          view->CopyFromSurface(
+              /*src_rect=*/gfx::Rect(),
+              /*output_size=*/gfx::Size(),
+              base::BindPostTask(
+                  base::SequencedTaskRunner::GetCurrentDefault(),
+                  base::BindOnce(on_bitmap_fetched, result_index, GURL())));
+        }
       }
     }
     if (!match.ImageUrl().is_empty()) {
@@ -777,7 +800,8 @@ void ChromeOmniboxClient::OnPopupVisibilityChanged(bool popup_is_open) {
     auto* const helper =
         OmniboxTabHelper::FromWebContents(location_bar_->GetWebContents());
     CHECK(helper);
-    helper->OnPopupVisibilityChanged(popup_is_open);
+    helper->OnPopupVisibilityChanged(
+        popup_is_open, GetPageClassification(/*is_prefetch=*/false));
   }
 }
 
@@ -795,9 +819,10 @@ bool ChromeOmniboxClient::IsHistoryEmbeddingsEnabled() const {
 
 std::optional<lens::proto::LensOverlaySuggestInputs>
 ChromeOmniboxClient::GetLensOverlaySuggestInputs() const {
-  if (LensSearchboxClient* lens_overlay_controller =
-          GetLensOverlayController(location_bar_->GetWebContents())) {
-    return lens_overlay_controller->GetLensSuggestInputs();
+  if (LensSearchController* lens_search_controller =
+          GetLensSearchController(location_bar_->GetWebContents())) {
+    return lens_search_controller->lens_searchbox_controller()
+        ->GetLensSuggestInputs();
   }
   return std::nullopt;
 }

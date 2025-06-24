@@ -344,6 +344,14 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
             android_node->GetUniqueId(),
             ANDROID_ACCESSIBILITY_EVENT_CONTENT_CHANGE_TYPE_TEXT);
       }
+
+      // If the name of a dialog changes, its pane title also changes.
+      // Notify the Android framework about the pane title change.
+      if (ui::IsDialog(android_node->GetRole())) {
+        wcax->HandleWindowContentChange(
+            android_node->GetUniqueId(),
+            ANDROID_ACCESSIBILITY_EVENT_CONTENT_CHANGE_TYPE_PANE_TITLE);
+      }
       break;
     }
     case ui::AXEventGenerator::Event::RANGE_VALUE_CHANGED:
@@ -379,10 +387,6 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
       }
       break;
 
-    case ui::AXEventGenerator::Event::CHILDREN_CHANGED:
-      wcax->ClearNodeInfoCacheForGivenId(android_node->GetUniqueId());
-      break;
-
     // Currently unused events on this platform.
     case ui::AXEventGenerator::Event::NONE:
     case ui::AXEventGenerator::Event::ACCESS_KEY_CHANGED:
@@ -395,6 +399,7 @@ void BrowserAccessibilityManagerAndroid::FireGeneratedEvent(
     case ui::AXEventGenerator::Event::BUSY_CHANGED:
     case ui::AXEventGenerator::Event::CARET_BOUNDS_CHANGED:
     case ui::AXEventGenerator::Event::CHECKED_STATE_DESCRIPTION_CHANGED:
+    case ui::AXEventGenerator::Event::CHILDREN_CHANGED:
     case ui::AXEventGenerator::Event::CONTROLS_CHANGED:
     case ui::AXEventGenerator::Event::DETAILS_CHANGED:
     case ui::AXEventGenerator::Event::DESCRIBED_BY_CHANGED:

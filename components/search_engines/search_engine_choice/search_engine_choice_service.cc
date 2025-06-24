@@ -492,7 +492,7 @@ void SearchEngineChoiceService::MaybeRecordChoiceScreenDisplayState(
                      : "no")
               : "no value");
 
-      NOTREACHED(base::NotFatalUntil::M138);
+      NOTREACHED(base::NotFatalUntil::M141);
       caller_trace_key.Clear();
     }
   }
@@ -648,6 +648,12 @@ void SearchEngineChoiceService::RegisterLocalStatePrefs(
 void SearchEngineChoiceService::ClearCountryIdCacheForTesting() {
   CHECK_IS_TEST();
   regional_capabilities_service_->ClearCountryIdCacheForTesting();  // IN-TEST
+}
+
+SearchEngineChoiceService::Client&
+SearchEngineChoiceService::GetClientForTesting() {
+  CHECK_IS_TEST();
+  return *client_.get();
 }
 
 bool SearchEngineChoiceService::IsDsePropagationAllowedForGuest() const {

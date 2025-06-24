@@ -165,7 +165,6 @@
 #include "chromeos/ash/experiences/arc/arc_util.h"
 #include "chromeos/dbus/constants/dbus_paths.h"
 #include "content/public/common/content_features.h"
-#include "ui/lottie/resource.h"  // nogncheck
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
@@ -749,7 +748,7 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
   const auto* invoked_in_browser =
       std::get_if<InvokedInBrowserProcess>(&invoked_in);
   if (!invoked_in_browser) {
-    CommonEarlyInitialization(invoked_in);
+    CommonEarlyInitialization();
     return std::nullopt;
   }
 
@@ -849,7 +848,7 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
       ->ChromeProcessSingleton::InitializeFeatures();
 #endif
 
-  CommonEarlyInitialization(invoked_in);
+  CommonEarlyInitialization();
 
   // Initializes the resource bundle and determines the locale.
   std::string actual_locale = LoadLocalState(
@@ -930,7 +929,7 @@ void ChromeMainDelegate::CreateThreadPool(std::string_view name) {
 #endif
 }
 
-void ChromeMainDelegate::CommonEarlyInitialization(InvokedIn invoked_in) {
+void ChromeMainDelegate::CommonEarlyInitialization() {
   const base::CommandLine* const command_line =
       base::CommandLine::ForCurrentProcess();
   std::string process_type =
@@ -1388,10 +1387,6 @@ void ChromeMainDelegate::PreSandboxStartup() {
       // See comment at ReadAppLocale() for why we do this.
       locale = ash::startup_settings_cache::ReadAppLocale();
     }
-
-    ui::ResourceBundle::SetLottieParsingFunctions(
-        &lottie::ParseLottieAsStillImage,
-        &lottie::ParseLottieAsThemedStillImage);
 #endif
 #if BUILDFLAG(IS_ANDROID)
     // The renderer sandbox prevents us from accessing our .pak files directly.

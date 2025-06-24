@@ -37,7 +37,7 @@ BASE_FEATURE(kTabGroupSyncDisableNetworkLayer,
 // continue to use SavedTabGroupKeyedService.
 BASE_FEATURE(kTabGroupSyncServiceDesktopMigration,
              "TabGroupSyncServiceDesktopMigration",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Feature flag for Java controller layer migration to use TabGroupSyncDelegate.
 // Noop when disabled.
@@ -81,6 +81,11 @@ BASE_FEATURE(kEnableUrlRestriction,
 BASE_FEATURE(kEnableOriginatingSavedGroupCleanUp,
              "EnableOriginatingSavedGroupCleanUp",
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Swaps the click actions for the tab group header.
+BASE_FEATURE(kLeftClickOpensTabGroupBubble,
+             "LeftClickOpensTabGroupBubble",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsTabGroupSyncServiceDesktopMigrationEnabled() {
   return (base::FeatureList::IsEnabled(kTabGroupSyncServiceDesktopMigration) ||

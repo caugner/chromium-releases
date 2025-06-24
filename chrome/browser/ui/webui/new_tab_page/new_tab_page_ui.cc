@@ -45,6 +45,7 @@
 #include "chrome/browser/ui/views/side_panel/customize_chrome/side_panel_controller_views.h"
 #include "chrome/browser/ui/webui/browser_command/browser_command_handler.h"
 #include "chrome/browser/ui/webui/cr_components/most_visited/most_visited_handler.h"
+#include "chrome/browser/ui/webui/customize_buttons/customize_buttons_handler.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/metrics_reporter/metrics_reporter_service.h"
 #include "chrome/browser/ui/webui/new_tab_page/new_tab_page_handler.h"
@@ -55,6 +56,7 @@
 #include "chrome/browser/ui/webui/searchbox/realbox_handler.h"
 #include "chrome/browser/ui/webui/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
+#include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/search/instant_types.h"
 #include "chrome/common/url_constants.h"
@@ -70,6 +72,7 @@
 #include "components/google/core/common/google_util.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/history_clusters/core/features.h"
+#include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/page_image_service/image_service.h"
 #include "components/page_image_service/image_service_handler.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -98,6 +101,11 @@
 #include "ui/webui/webui_util.h"
 #include "url/origin.h"
 #include "url/url_util.h"
+
+#if !BUILDFLAG(OPTIMIZE_WEBUI)
+#include "chrome/grit/new_tab_shared_resources.h"
+#include "chrome/grit/new_tab_shared_resources_map.h"
+#endif
 
 #if !defined(OFFICIAL_BUILD)
 #include "chrome/browser/ui/webui/new_tab_page/foo/foo_handler.h"
@@ -208,6 +216,8 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
       "mostRelevantTabResumptionModuleFallbackToHost",
       base::FeatureList::IsEnabled(
           ntp_features::kNtpMostRelevantTabResumptionModuleFallbackToHost));
+  source->AddBoolean("footerEnabled",
+                     base::FeatureList::IsEnabled(ntp_features::kNtpFooter));
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"doneButton", IDS_DONE},
@@ -465,6 +475,17 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
   source->AddBoolean("modulesReloadable", microsoft_module_enabled);
   source->AddBoolean("waitToLoadModules", microsoft_module_enabled);
 
+  source->AddBoolean(
+      "searchboxShowComposeEntrypoint",
+      (base::FeatureList::IsEnabled(
+           ntp_features::kNtpSearchboxComposeEntrypoint) ||
+       base::FeatureList::IsEnabled(ntp_features::kNtpSearchboxComposebox)) &&
+          omnibox::IsMiaAllowedByPolicy(profile->GetPrefs()));
+  source->AddBoolean(
+      "searchboxShowComposebox",
+      base::FeatureList::IsEnabled(ntp_features::kNtpSearchboxComposebox) &&
+          omnibox::IsMiaAllowedByPolicy(profile->GetPrefs()));
+
   SearchboxHandler::SetupWebUIDataSource(
       source, profile,
       /*enable_voice_search=*/true,
@@ -473,6 +494,10 @@ content::WebUIDataSource* CreateAndAddNewTabPageUiHtmlSource(Profile* profile) {
 
   webui::SetupWebUIDataSource(source, kNewTabPageResources,
                               IDR_NEW_TAB_PAGE_NEW_TAB_PAGE_HTML);
+
+#if !BUILDFLAG(OPTIMIZE_WEBUI)
+  source->AddResourcePaths(kNewTabSharedResources);
+#endif
 
   // Allow embedding of iframes for the doodle and
   // chrome-untrusted://new-tab-page for other external content and resources.
@@ -494,6 +519,7 @@ NewTabPageUI::NewTabPageUI(content::WebUI* web_ui)
     : ui::MojoWebUIController(web_ui, /*enable_chrome_send=*/true),
       content::WebContentsObserver(web_ui->GetWebContents()),
       page_factory_receiver_(this),
+      customize_buttons_factory_receiver_(this),
       most_visited_page_factory_receiver_(this),
       browser_command_factory_receiver_(this),
       profile_(Profile::FromWebUI(web_ui)),
@@ -659,6 +685,16 @@ void NewTabPageUI::BindInterface(
 }
 
 void NewTabPageUI::BindInterface(
+    mojo::PendingReceiver<
+        customize_buttons::mojom::CustomizeButtonsHandlerFactory>
+        pending_receiver) {
+  if (customize_buttons_factory_receiver_.is_bound()) {
+    customize_buttons_factory_receiver_.reset();
+  }
+  customize_buttons_factory_receiver_.Bind(std::move(pending_receiver));
+}
+
+void NewTabPageUI::BindInterface(
     mojo::PendingReceiver<most_visited::mojom::MostVisitedPageHandlerFactory>
         pending_receiver) {
   if (most_visited_page_factory_receiver_.is_bound()) {
@@ -775,6 +811,17 @@ void NewTabPageUI::CreateBrowserCommandHandler(
   promo_browser_command_handler_ = std::make_unique<BrowserCommandHandler>(
       std::move(pending_handler), profile_, supported_commands,
       web_ui()->GetWebContents());
+}
+
+void NewTabPageUI::CreateCustomizeButtonsHandler(
+    mojo::PendingRemote<customize_buttons::mojom::CustomizeButtonsDocument>
+        pending_page,
+    mojo::PendingReceiver<customize_buttons::mojom::CustomizeButtonsHandler>
+        pending_page_handler) {
+  customize_buttons_handler_ = std::make_unique<CustomizeButtonsHandler>(
+      std::move(pending_page_handler), std::move(pending_page), web_ui(),
+      webui::GetTabInterface(web_contents()),
+      std::make_unique<NewTabPageFeaturePromoHelper>());
 }
 
 void NewTabPageUI::CreatePageHandler(

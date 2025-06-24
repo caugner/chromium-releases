@@ -80,6 +80,14 @@ namespace content {
 
 namespace {
 
+// Another switch for `kServiceWorkerBackgroundUpdateForRegisteredStorageKeys`
+// intended to be controlled from Field Trial (e.g. kill-switch). The original
+// flag may be overridden by `AwFieldTrials::RegisterFeatureOverrides`.
+BASE_FEATURE(
+    kServiceWorkerBackgroundUpdateForRegisteredStorageKeysFieldTrialControlled,
+    "ServiceWorkerBackgroundUpdateForRegisteredStorageKeysFieldTrialControlled",
+    base::FEATURE_ENABLED_BY_DEFAULT);
+
 // Translate a ServiceWorkerVersion::Status to a
 // ServiceWorkerRunningInfo::ServiceWorkerVersionStatus.
 ServiceWorkerRunningInfo::ServiceWorkerVersionStatus
@@ -267,7 +275,17 @@ ServiceWorkerContextWrapper::ServiceWorkerContextWrapper(
       core_sync_observer_list_(
           base::MakeRefCounted<ServiceWorkerContextSynchronousObserverList>()),
       browser_context_(browser_context),
-      process_manager_(std::make_unique<ServiceWorkerProcessManager>()) {
+      process_manager_(std::make_unique<ServiceWorkerProcessManager>()),
+      storage_shared_buffer_(
+          base::FeatureList::IsEnabled(
+              features::
+                  kServiceWorkerBackgroundUpdateForRegisteredStorageKeys) &&
+                  base::FeatureList::IsEnabled(
+                      kServiceWorkerBackgroundUpdateForRegisteredStorageKeysFieldTrialControlled)
+              ? base::MakeRefCounted<
+                    storage::ServiceWorkerStorage::StorageSharedBuffer>(
+                    /*enable_registered_storage_keys=*/true)
+              : nullptr) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Add this object as an observer of the wrapped |context_core_|. This lets us
@@ -1746,11 +1764,6 @@ void ServiceWorkerContextWrapper::DidFindRegistrationForWarmUp(
           blink::EmbeddedWorkerStatus::kRunning) {
     std::move(callback).Run();
 
-    // This code can be called from `ServiceWorkerVersion::FinishStartWorker`
-    // and `ServiceWorkerVersion::OnTimeoutTimer` just before stopping service
-    // worker. To avoid start warming up the next warm-up candidate,
-    // `MaybeProcessPendingWarmUpRequest` needs to be asynchronously called to
-    // wait for stopping the current service worker. (see: http://b/40874535)
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(
@@ -1775,11 +1788,6 @@ void ServiceWorkerContextWrapper::DidWarmUpServiceWorker(
 
   std::move(callback).Run();
 
-  // This code can be called from `ServiceWorkerVersion::FinishStartWorker` and
-  // `ServiceWorkerVersion::OnTimeoutTimer` just before stopping service worker.
-  // To avoid start warming up the next warm-up candidate,
-  // `MaybeProcessPendingWarmUpRequest` needs to be asynchronously called to
-  // wait for stopping the current service worker. (see: http://b/40874535)
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(
@@ -1841,7 +1849,7 @@ void ServiceWorkerContextWrapper::BindStorageControl(
       FROM_HERE,
       base::BindOnce(
           base::IgnoreResult(&storage::ServiceWorkerStorageControlImpl::Create),
-          std::move(receiver), user_data_directory_));
+          std::move(receiver), user_data_directory_, storage_shared_buffer_));
 }
 
 void ServiceWorkerContextWrapper::SetStorageControlBinderForTest(

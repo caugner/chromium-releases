@@ -6,13 +6,16 @@
 #define CHROMEOS_ASH_COMPONENTS_BOCA_BOCA_SESSION_MANAGER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/functional/callback.h"
+#include "base/functional/callback_forward.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
+#include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "base/types/expected.h"
@@ -20,6 +23,9 @@
 #include "chromeos/ash/components/boca/notifications/boca_notification_handler.h"
 #include "chromeos/ash/components/boca/proto/session.pb.h"
 #include "chromeos/ash/components/boca/session_api/session_client_impl.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_constants.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_frame_consumer.h"
+#include "chromeos/ash/components/boca/spotlight/spotlight_remoting_client_manager.h"
 #include "chromeos/services/network_config/public/cpp/cros_network_config_observer.h"
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
@@ -51,7 +57,8 @@ class BocaSessionManager
     : public chromeos::network_config::CrosNetworkConfigObserver,
       public signin::IdentityManager::Observer,
       public user_manager::UserManager::UserSessionStateObserver,
-      public session_manager::SessionManagerObserver {
+      public session_manager::SessionManagerObserver,
+      public remoting::ClientStatusObserver {
  public:
   using SessionCaptionInitializer =
       base::RepeatingCallback<void(base::OnceCallback<void(bool)>)>;
@@ -62,8 +69,6 @@ class BocaSessionManager
   inline static constexpr int kLocalSessionTrackerBufferInSeconds = 60;
   inline static constexpr int kDefaultStudentHeartbeatIntervalInSeconds = 30;
   inline static constexpr int kSkipPollingBufferInSeconds = 2;
-  inline static constexpr char kPollingResultHistName[] =
-      "Ash.Boca.PollingResult";
 
   enum class BocaAction {
     kDefault = 0,
@@ -105,7 +110,9 @@ class BocaSessionManager
   BocaSessionManager(SessionClientImpl* session_client_impl,
                      const PrefService* pref_service,
                      AccountId account_id,
-                     bool is_producer);
+                     bool is_producer,
+                     std::unique_ptr<SpotlightRemotingClientManager>
+                         remoting_client_manager = nullptr);
   BocaSessionManager(const BocaSessionManager&) = delete;
   BocaSessionManager& operator=(const BocaSessionManager&) = delete;
   ~BocaSessionManager() override;
@@ -222,6 +229,19 @@ class BocaSessionManager
     soda_installer_ = soda_installer;
   }
   SodaStatus GetSodaStatus();
+
+  void StartCrdClient(
+      std::string crd_connection_code,
+      base::OnceClosure done_callback,
+      SpotlightFrameConsumer::FrameReceivedCallback frame_received_callback,
+      SpotlightCrdStateUpdatedCallback crd_state_callback);
+
+  // Calls the `SpotlightRemotingClientManager` to try and stop an existing
+  // session and then free up any remaining resources.
+  void EndSpotlightSession();
+
+  virtual std::string GetDeviceRobotEmail();
+
   base::ObserverList<Observer>& observers() { return observers_; }
 
   AccountId& account_id() { return account_id_; }
@@ -230,6 +250,14 @@ class BocaSessionManager
 
   base::OneShotTimer& session_duration_timer_for_testing() {
     return session_duration_timer_;
+  }
+
+  base::OnceClosure& end_session_callback_for_testing() {
+    return end_session_callback_for_testing_;
+  }
+
+  void set_end_session_callback_for_testing(base::OnceClosure cb) {
+    end_session_callback_for_testing_ = std::move(cb);
   }
 
  private:
@@ -243,8 +271,6 @@ class BocaSessionManager
   bool IsSessionActive(const ::boca::Session* session);
   bool IsSessionTakeOver(const ::boca::Session* previous_session,
                          const ::boca::Session* current_session);
-  void RecordPollingResult(const ::boca::Session* previous_session,
-                           const ::boca::Session* current_session);
   void HandleTakeOver(bool dispatch_event,
                       std::unique_ptr<::boca::Session> session);
   void DispatchEvent();
@@ -269,6 +295,7 @@ class BocaSessionManager
   void CloseAllCaptions();
 
   const bool is_producer_;
+  base::OnceClosure end_session_callback_for_testing_;
   base::TimeDelta in_session_polling_interval_;
   base::TimeDelta indefinite_polling_interval_;
   base::ObserverList<Observer> observers_;
@@ -306,6 +333,7 @@ class BocaSessionManager
   AccountId account_id_;
   std::u16string active_tab_title_;
   BocaNotificationHandler notification_handler_;
+  std::unique_ptr<SpotlightRemotingClientManager> remoting_client_manager_;
   raw_ptr<const PrefService> pref_service_;
   raw_ptr<SessionClientImpl> session_client_impl_;
   raw_ptr<signin::IdentityManager> identity_manager_;

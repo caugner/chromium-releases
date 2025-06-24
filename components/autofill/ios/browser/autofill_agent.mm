@@ -372,10 +372,8 @@ bool ContainsFocusableField(const FormData& form, FieldRendererId field_id) {
       suggestion.type == autofill::SuggestionType::kCreditCardEntry ||
       suggestion.type == autofill::SuggestionType::kCreateNewPlusAddress ||
       suggestion.type == autofill::SuggestionType::kVirtualCreditCardEntry ||
-      ((base::FeatureList::IsEnabled(
-            autofill::features::kAutofillAddressFieldSwapping) &&
-        suggestion.type ==
-            autofill::SuggestionType::kAddressFieldByFieldFilling))) {
+      suggestion.type ==
+          autofill::SuggestionType::kAddressFieldByFieldFilling) {
     _pendingAutocompleteFieldID = fieldRendererID;
     if (_suggestionDelegate) {
       autofill::Suggestion autofill_suggestion;
@@ -593,10 +591,8 @@ bool ContainsFocusableField(const FormData& form, FieldRendererId field_id) {
         popup_suggestion.type == autofill::SuggestionType::kCreditCardEntry ||
         popup_suggestion.type ==
             autofill::SuggestionType::kVirtualCreditCardEntry ||
-        (base::FeatureList::IsEnabled(
-             autofill::features::kAutofillAddressFieldSwapping) &&
-         popup_suggestion.type ==
-             autofill::SuggestionType::kAddressFieldByFieldFilling)) {
+        popup_suggestion.type ==
+            autofill::SuggestionType::kAddressFieldByFieldFilling) {
       // Filter out any key/value suggestions if the user hasn't typed yet.
       if (popup_suggestion.type ==
               autofill::SuggestionType::kAutocompleteEntry &&
@@ -1007,6 +1003,16 @@ bool ContainsFocusableField(const FormData& form, FieldRendererId field_id) {
                    fieldToFormLookupMap:fieldToFormLookupMap];
   }
 
+  if (base::FeatureList::IsEnabled(kAutofillRefillForFormsIos) &&
+      base::FeatureList::IsEnabled(
+          autofill::features::kAutofillAcrossIframesIos)) {
+    auto* driver =
+        autofill::AutofillDriverIOS::FromWebStateAndWebFrame(_webState, frame);
+    if (driver && driver->is_processed()) {
+      driver->ScanForms();
+    }
+  }
+
   [self recordFormFillingSuccessMetrics:!fillingResults.empty()];
 }
 
@@ -1102,6 +1108,13 @@ bool ContainsFocusableField(const FormData& form, FieldRendererId field_id) {
 // Sends the the |data| to |frame| to actually fill the data.
 - (void)sendData:(AutofillData)data toFrame:(web::WebFrame*)frame {
   DCHECK(_webState->IsVisible());
+
+  // `frame` may come from a frame ID that was previously cached; the frame
+  // could have been destroyed since then. See crbug.com/425991572.
+  if (!frame) {
+    return;
+  }
+
   __weak __typeof(self) weakSelf = self;
   const auto callback =
       [](__weak AutofillAgent* agent, base::WeakPtr<web::WebFrame> frame,

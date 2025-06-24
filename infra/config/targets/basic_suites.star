@@ -2,14 +2,22 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# This file contains suite definitions that can be used in
-# //testing/buildbot/waterfalls.pyl and will also be usable for builders that
-# set their tests in starlark (once that is ready). The legacy_ prefix on the
-# declarations indicates the capability to be used in //testing/buildbot. Once a
-# suite is no longer needed in //testing/buildbot, targets.bundle (which does
-# not yet exist) can be used for grouping tests in a more flexible manner.
+"""Basic suite definitions
 
-load("//lib/targets.star", "targets")
+Basic suites are a collection of tests that can be referenced by a builder in
+//testing/buildbot/waterfalls.pyl or by compound suites and matrix compound
+suites (defined in ./compound_suites.star and ./matrix_compound_suites.star
+respectively). Suites also define a bundle containing the same tests as the
+suite, so they can be used wherever a bundle is expected.
+
+The legacy_ prefix denotes the ability for basic suites to be referenced in
+//testing/buildbot. Once a suite is no longer referenced via //testing/buildbot,
+targets.bundle can be used for grouping tests in a more flexible manner (mixing
+test types and/or compile targets and arbitrary nesting). Named bundles are
+defined in ./bundles.star.
+"""
+
+load("@chromium-luci//targets.star", "targets")
 
 # TODO(gbeaty) - Make the resultdb information for tests using the same binaries
 # consistent and move the information onto the binaries
@@ -86,10 +94,6 @@ targets.legacy_basic_suite(
     tests = {
         "chrome_all_tast_tests": targets.legacy_test_config(
             skylab = targets.skylab(
-                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
-                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
-                # put the stub string here.
-                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
                 # Temporary increases the maximum retries due to the unstable cloudbots (b/377616158)
                 test_level_retries = 2,
                 # Number of shards. Might be overriden for slower boards.
@@ -108,10 +112,6 @@ targets.legacy_basic_suite(
         "chrome_criticalstaging_tast_tests": targets.legacy_test_config(
             ci_only = True,
             skylab = targets.skylab(
-                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
-                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
-                # put the stub string here.
-                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
                 test_level_retries = 2,
                 shards = 3,
                 timeout_sec = 14400,
@@ -129,10 +129,6 @@ targets.legacy_basic_suite(
         "chrome_disabled_tast_tests": targets.legacy_test_config(
             ci_only = True,
             skylab = targets.skylab(
-                # `tast_expr` must be a non-empty string to run the tast tests. But the value of
-                # would be overridden by `tast_arrt_expr` defined in chromeos/BUILD.gn, so that we
-                # put the stub string here.
-                tast_expr = "STUB_STRING_TO_RUN_TAST_TESTS",
                 test_level_retries = 1,
                 shards = 2,
                 timeout_sec = 14400,
@@ -856,6 +852,34 @@ targets.legacy_basic_suite(
     name = "gpu_webcodecs_metal_passthrough_graphite_telemetry_test",
     tests = {
         "webcodecs_metal_passthrough_graphite_tests": targets.legacy_test_config(),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "gpu_webrtc_telemetry_test",
+    tests = {
+        "webrtc_tests": targets.legacy_test_config(),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "gpu_webrtc_gl_passthrough_ganesh_telemetry_test",
+    tests = {
+        "webrtc_gl_passthrough_ganesh_tests": targets.legacy_test_config(),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "gpu_webrtc_metal_passthrough_ganesh_telemetry_test",
+    tests = {
+        "webrtc_metal_passthrough_ganesh_tests": targets.legacy_test_config(),
+    },
+)
+
+targets.legacy_basic_suite(
+    name = "gpu_webrtc_metal_passthrough_graphite_telemetry_test",
+    tests = {
+        "webrtc_metal_passthrough_graphite_tests": targets.legacy_test_config(),
     },
 )
 

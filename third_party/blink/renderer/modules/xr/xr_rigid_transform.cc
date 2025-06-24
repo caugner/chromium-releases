@@ -7,7 +7,6 @@
 #include <cmath>
 #include <utility>
 
-#include "base/not_fatal_until.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_point_init.h"
 #include "third_party/blink/renderer/core/geometry/dom_point_read_only.h"
 #include "third_party/blink/renderer/modules/xr/xr_utils.h"
@@ -35,8 +34,7 @@ XRRigidTransform::XRRigidTransform(const gfx::Transform& transformationMatrix)
 void XRRigidTransform::DecomposeMatrix() {
   // decompose matrix to position and orientation
   std::optional<gfx::DecomposedTransform> decomp = matrix_->Decompose();
-  CHECK(decomp, base::NotFatalUntil::M129)
-      << "Matrix decompose failed for " << matrix_->ToString();
+  CHECK(decomp) << "Matrix decompose failed for " << matrix_->ToString();
 
   position_ = DOMPointReadOnly::Create(
       decomp->translate[0], decomp->translate[1], decomp->translate[2], 1.0);
@@ -110,15 +108,8 @@ XRRigidTransform* XRRigidTransform::Create(DOMPointInit* position,
 
 NotShared<DOMFloat32Array> XRRigidTransform::matrix() {
   EnsureMatrix();
-  if (!matrix_array_) {
+  if (!matrix_array_ || matrix_array_->IsDetached()) {
     matrix_array_ = transformationMatrixToDOMFloat32Array(*matrix_);
-  }
-
-  if (!matrix_array_ || !matrix_array_->Data()) {
-    // A page may take the matrix_array_ value and detach it so matrix_array_ is
-    // a detached array buffer.  This breaks the inspector, so return an empty
-    // array instead.
-    return NotShared<DOMFloat32Array>(DOMFloat32Array::Create(0));
   }
 
   return matrix_array_;

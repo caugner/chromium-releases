@@ -110,7 +110,8 @@ class LocationBarMediator
                 ComponentCallbacks,
                 TemplateUrlService.TemplateUrlServiceObserver,
                 BackPressHandler,
-                PauseResumeWithNativeObserver {
+                PauseResumeWithNativeObserver,
+                SearchEngineUtils.SearchBoxHintTextObserver {
 
     private static final int ICON_FADE_ANIMATION_DURATION_MS = 150;
     private static final int ICON_FADE_ANIMATION_DELAY_MS = 75;
@@ -178,8 +179,8 @@ class LocationBarMediator
     private AutocompleteCoordinator mAutocompleteCoordinator;
     private @Nullable OmniboxPrerender mOmniboxPrerender;
     private UrlBarCoordinator mUrlCoordinator;
-    private ObservableSupplier<Profile> mProfileSupplier;
-    private CallbackController mCallbackController = new CallbackController();
+    private final ObservableSupplier<Profile> mProfileSupplier;
+    private final CallbackController mCallbackController = new CallbackController();
     private final OverrideUrlLoadingDelegate mOverrideUrlLoadingDelegate;
     private final LocaleManager mLocaleManager;
     private final List<Runnable> mDeferredNativeRunnables = new ArrayList<>();
@@ -215,9 +216,9 @@ class LocationBarMediator
     // Tracks if the location bar is laid out in a focused state due to an ntp scroll.
     private boolean mIsLocationBarFocusedFromNtpScroll;
     private @BrandedColorScheme int mBrandedColorScheme = BrandedColorScheme.APP_DEFAULT;
-    private ObservableSupplierImpl<Boolean> mBackPressStateSupplier =
+    private final ObservableSupplierImpl<Boolean> mBackPressStateSupplier =
             new ObservableSupplierImpl<>();
-    private @Nullable ObservableSupplier<TabModelSelector> mTabModelSelectorSupplier;
+    private final @Nullable ObservableSupplier<TabModelSelector> mTabModelSelectorSupplier;
     private @Nullable SearchEngineUtils mSearchEngineUtils;
 
     /*package */ LocationBarMediator(
@@ -289,8 +290,12 @@ class LocationBarMediator
 
     @SuppressWarnings("NullAway")
     /* package */ void destroy() {
+        mCallbackController.destroy();
         if (mTemplateUrlServiceSupplier.hasValue()) {
             mTemplateUrlServiceSupplier.get().removeObserver(this);
+        }
+        if (mSearchEngineUtils != null) {
+            mSearchEngineUtils.removeSearchBoxHintTextObserver(this);
         }
         mStatusCoordinator = null;
         mAutocompleteCoordinator = null;
@@ -336,17 +341,13 @@ class LocationBarMediator
                 && mLocationBarDataProvider.hasTab()
                 && !mLocationBarDataProvider.isIncognito()) {
             if (mTemplateUrlServiceSupplier.hasValue()) {
-                if (mTemplateUrlServiceSupplier.get().isDefaultSearchEngineGoogle()) {
-                    GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
-                            mProfileSupplier.get(), mTemplateUrlServiceSupplier.get());
-                }
+                GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
+                        mProfileSupplier.get(), mTemplateUrlServiceSupplier.get());
             } else {
                 mTemplateUrlServiceSupplier.onAvailable(
                         (templateUrlService) -> {
-                            if (templateUrlService.isDefaultSearchEngineGoogle()) {
-                                GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
-                                        mProfileSupplier.get(), templateUrlService);
-                            }
+                            GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
+                                    mProfileSupplier.get(), templateUrlService);
                         });
             }
         } // Focus change caused by a closed tab may result in there not being an active tab.
@@ -361,14 +362,12 @@ class LocationBarMediator
         mNativeInitialized = true;
         mOmniboxPrerender = new OmniboxPrerender();
         mTemplateUrlServiceSupplier.onAvailable(
-                (templateUrlService) -> {
-                    templateUrlService.addObserver(this);
-                    if (OmniboxFeatures.sUseFusedLocationProvider.isEnabled()
-                            && templateUrlService.isDefaultSearchEngineGoogle()) {
-                        GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
-                                mProfileSupplier.get(), mTemplateUrlServiceSupplier.get());
-                    }
-                });
+                mCallbackController.makeCancelable(
+                        (templateUrlService) -> {
+                            templateUrlService.addObserver(this);
+                            GeolocationHeader.primeLocationForGeoHeaderIfEnabled(
+                                    mProfileSupplier.get(), mTemplateUrlServiceSupplier.get());
+                        }));
 
         mLocationBarLayout.onFinishNativeInitialization();
         if (mProfileSupplier.hasValue()) setProfile(mProfileSupplier.get());
@@ -605,7 +604,9 @@ class LocationBarMediator
             LoadUrlParams loadUrlParams = new LoadUrlParams(url);
             try (TimingMetric record =
                     TimingMetric.shortUptime("Android.Omnibox.SetGeolocationHeadersTime")) {
-                loadUrlParams.setVerbatimHeaders(GeolocationHeader.getGeoHeader(url, currentTab));
+                loadUrlParams.setVerbatimHeaders(
+                        GeolocationHeader.getGeoHeader(
+                                url, mProfileSupplier.get(), mTemplateUrlServiceSupplier.get()));
             }
             loadUrlParams.setTransitionType(
                     omniboxLoadUrlParams.transitionType | PageTransition.FROM_ADDRESS_BAR);
@@ -1093,7 +1094,13 @@ class LocationBarMediator
 
         assumeNonNull(mOmniboxPrerender);
         mOmniboxPrerender.initializeForProfile(profile);
+
+        if (mSearchEngineUtils != null) {
+            mSearchEngineUtils.removeSearchBoxHintTextObserver(this);
+        }
+
         mSearchEngineUtils = SearchEngineUtils.getForProfile(profile);
+        mSearchEngineUtils.addSearchBoxHintTextObserver(this);
         mLocationBarLayout.setSearchEngineUtils(mSearchEngineUtils);
     }
 
@@ -1718,5 +1725,10 @@ class LocationBarMediator
         DefaultBrowserPromoUtils.getInstance()
                 .maybeShowDefaultBrowserPromoMessages(
                         mContext, mWindowAndroid, mProfileSupplier.get());
+    }
+
+    @Override
+    public void onSearchBoxHintTextChanged(String newHintText) {
+        mUrlCoordinator.setUrlBarHintText(newHintText);
     }
 }

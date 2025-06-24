@@ -14,6 +14,7 @@
 #include "chrome/browser/safe_browsing/download_protection/download_item_metadata.h"
 #include "chrome/browser/safe_browsing/safe_browsing_navigation_observer_manager_factory.h"
 #include "components/download/public/common/download_danger_type.h"
+#include "components/enterprise/connectors/core/reporting_utils.h"
 #include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/content/common/file_type_policies.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
@@ -33,6 +34,11 @@
 namespace safe_browsing {
 
 namespace {
+
+#if BUILDFLAG(IS_ANDROID)
+// File suffix for APKs.
+const base::FilePath::CharType kApkSuffix[] = FILE_PATH_LITERAL(".apk");
+#endif
 
 // Escapes a certificate attribute so that it can be used in a allowlist
 // entry.  Currently, we only escape slashes, since they are used as a
@@ -427,6 +433,29 @@ std::unique_ptr<ReferrerChainData> IdentifyReferrerChain(
                                              recent_navigations_to_collect);
 }
 
+ReferrerChain GetOrIdentifyReferrerChainForEnterprise(
+    download::DownloadItem& item) {
+  safe_browsing::ReferrerChainData* referrer_chain_data =
+      static_cast<safe_browsing::ReferrerChainData*>(
+          item.GetUserData(safe_browsing::ReferrerChainData::
+                               kDownloadReferrerChainDataKeyForEnterprise));
+  if (!referrer_chain_data || !referrer_chain_data->GetReferrerChain() ||
+      referrer_chain_data->GetReferrerChain()->empty()) {
+    std::unique_ptr<safe_browsing::ReferrerChainData> new_referrer_chain_data =
+        safe_browsing::IdentifyReferrerChain(
+            item, enterprise_connectors::kReferrerUserGestureLimit);
+    if (!new_referrer_chain_data ||
+        !new_referrer_chain_data->GetReferrerChain()) {
+      return safe_browsing::ReferrerChain();
+    }
+    referrer_chain_data = new_referrer_chain_data.get();
+    item.SetUserData(safe_browsing::ReferrerChainData::
+                         kDownloadReferrerChainDataKeyForEnterprise,
+                     std::move(new_referrer_chain_data));
+  }
+  return *referrer_chain_data->GetReferrerChain();
+}
+
 #if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 bool ShouldSendDangerousDownloadReport(
     download::DownloadItem* item,
@@ -489,6 +518,20 @@ ShouldUploadBinaryForDeepScanning(download::DownloadItem* item) {
   // Create temporary metadata wrapper on the stack.
   DownloadItemMetadata metadata(item);
   return DeepScanningRequest::ShouldUploadBinary(metadata);
+#endif
+}
+
+bool IsFiletypeSupportedForFullDownloadProtection(
+    const base::FilePath& file_name) {
+  // On Android, do not use FileTypePolicies, which are currently only
+  // applicable to desktop platforms. Instead, hardcode the APK filetype check
+  // for Android here.
+  // TODO(chlily): Refactor/fix FileTypePolicies and then remove this
+  // platform-specific hardcoded behavior.
+#if BUILDFLAG(IS_ANDROID)
+  return file_name.MatchesExtension(kApkSuffix);
+#else
+  return FileTypePolicies::GetInstance()->IsCheckedBinaryFile(file_name);
 #endif
 }
 

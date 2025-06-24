@@ -476,23 +476,6 @@ void ExtensionService::PerformActionBasedOnExtensionTelemetryServiceVerdicts(
   error_controller_->ShowErrorIfNeeded();
 }
 
-void ExtensionService::EnableExtension(const std::string& extension_id) {
-  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  extension_registrar_->EnableExtension(extension_id);
-}
-
-void ExtensionService::DisableExtension(
-    const ExtensionId& extension_id,
-    disable_reason::DisableReason disable_reason) {
-  DisableExtension(extension_id, DisableReasonSet({disable_reason}));
-}
-
-void ExtensionService::DisableExtension(
-    const ExtensionId& extension_id,
-    const DisableReasonSet& disable_reasons) {
-  extension_registrar_->DisableExtension(extension_id, disable_reasons);
-}
-
 void ExtensionService::DisableUserExtensionsExcept(
     const std::vector<std::string>& except_ids) {
   ManagementPolicy* management_policy = system_->management_policy();
@@ -519,7 +502,8 @@ void ExtensionService::DisableUserExtensionsExcept(
     }
     const std::string& id = extension->id();
     if (!base::Contains(except_ids, id)) {
-      DisableExtension(id, disable_reason::DISABLE_USER_ACTION);
+      extension_registrar_->DisableExtension(
+          id, {disable_reason::DISABLE_USER_ACTION});
     }
   }
 }
@@ -665,13 +649,13 @@ void ExtensionService::CheckManagementPolicy() {
   }
 
   for (const auto& i : to_disable) {
-    DisableExtension(i.first, i.second);
+    extension_registrar_->DisableExtension(i.first, {i.second});
   }
 
   // No extension is getting re-enabled here after disabling because |to_enable|
   // is mutually exclusive to |to_disable|.
   for (const std::string& id : to_enable) {
-    EnableExtension(id);
+    extension_registrar_->EnableExtension(id);
   }
 
   if (updater_ && updater_->enabled()) {
@@ -701,7 +685,7 @@ void ExtensionService::CheckManagementPolicy() {
       remove_list.push_back(extension->id());
     }
   }
-  for (auto extension_id : remove_list) {
+  for (const auto& extension_id : remove_list) {
     std::u16string error;
     if (!extension_registrar_->UninstallExtension(
             extension_id, UNINSTALL_REASON_INTERNAL_MANAGEMENT, &error)) {
@@ -940,7 +924,7 @@ void ExtensionService::OnInstalledExtensionsLoaded() {
     }
   }
   for (const auto& extension : to_enable) {
-    EnableExtension(extension->id());
+    extension_registrar_->EnableExtension(extension->id());
   }
 
   // Check installed extensions against the blocklist if and only if the

@@ -107,6 +107,10 @@ LensViewFinderTransition TransitionFromPresentationStyle(
 
   _lensViewController =
       ios::provider::NewChromeLensViewFinderController(configuration);
+  if (!_lensViewController) {
+    return;
+  }
+
   [_lensViewController setLensViewFinderDelegate:self];
 
   _lensViewController.transitioningDelegate = _transitionManager;
@@ -130,6 +134,8 @@ LensViewFinderTransition TransitionFromPresentationStyle(
   } else if (dismissalCause ==
              LensOverlayDismissalCauseSwipeDownFromTranslate) {
     [_lensViewController buildCaptureInfrastructureForTranslate];
+  } else if (dismissalCause == LensOverlayDismissalCauseDismissButton) {
+    [_lensViewController tearDownCaptureInfrastructureWithPlaceholder:NO];
   }
 }
 
@@ -146,22 +152,19 @@ LensViewFinderTransition TransitionFromPresentationStyle(
 
 - (void)lensController:(id<ChromeLensViewFinderController>)lensController
     didSelectImageWithMetadata:(id<LensImageMetadata>)imageMetadata {
-  LensOverlayEntrypoint entrypoint =
-      imageMetadata.isCameraImage ? LensOverlayEntrypoint::kLVFCameraCapture
-                                  : LensOverlayEntrypoint::kLVFImagePicker;
+  [_lensViewController tearDownCaptureInfrastructureWithPlaceholder:YES];
 
-  id<LensOverlayCommands> _lensOverlayCommands = HandlerForProtocol(
-      self.browser->GetCommandDispatcher(), LensOverlayCommands);
-  __weak id<ChromeLensViewFinderController> weakLensViewController =
-      _lensViewController;
-
-  // Once post capture is presented, the live camera can be torn down.
-  [_lensOverlayCommands
-      searchWithLensImageMetadata:imageMetadata
-                       entrypoint:entrypoint
-                       completion:^(BOOL success) {
-                         [weakLensViewController tearDownCaptureInfrastructure];
-                       }];
+  __weak __typeof(self) weakSelf = self;
+  auto startPostCapture = ^{
+    [weakSelf startPostCaptureWithMetadata:imageMetadata];
+  };
+  if (_lensViewController.presentedViewController) {
+    [_lensViewController.presentedViewController
+        dismissViewControllerAnimated:YES
+                           completion:startPostCapture];
+  } else {
+    startPostCapture();
+  }
 }
 
 - (void)lensController:(id<ChromeLensViewFinderController>)lensController
@@ -223,6 +226,19 @@ LensViewFinderTransition TransitionFromPresentationStyle(
 
   [HandlerForProtocol(self.browser->GetCommandDispatcher(), ApplicationCommands)
       openURLInNewTab:command];
+}
+
+- (void)startPostCaptureWithMetadata:(id<LensImageMetadata>)imageMetadata {
+  LensOverlayEntrypoint entrypoint =
+      imageMetadata.isCameraImage ? LensOverlayEntrypoint::kLVFCameraCapture
+                                  : LensOverlayEntrypoint::kLVFImagePicker;
+
+  id<LensOverlayCommands> lensOverlayCommands = HandlerForProtocol(
+      self.browser->GetCommandDispatcher(), LensOverlayCommands);
+  [lensOverlayCommands searchWithLensImageMetadata:imageMetadata
+                                        entrypoint:entrypoint
+                           initialPresentationBase:_lensViewController
+                                        completion:nil];
 }
 
 @end

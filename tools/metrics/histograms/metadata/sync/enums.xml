@@ -76,6 +76,7 @@ chromium-metrics-reviews@google.com.
 <enum name="BatchUploadEntryPoint">
   <int value="0" label="Password manager settings"/>
   <int value="1" label="Password promo card"/>
+  <int value="2" label="Bookmark manager promo card"/>
 </enum>
 
 <!-- LINT.ThenChange(/chrome/browser/profiles/batch_upload/batch_upload_service.h:EntryPoint) -->
@@ -132,7 +133,7 @@ chromium-metrics-reviews@google.com.
       label="Local and account datasets are non-empty but do not intersect"/>
 </enum>
 
-<!-- LINT.ThenChange(//components/sync_bookmarks/bookmark_model_merger_comparison_metrics.h:BookmarkSetComparisonOutcome) -->
+<!-- LINT.ThenChange(/components/sync_bookmarks/bookmark_model_merger_comparison_metrics.h:BookmarkSetComparisonOutcome) -->
 
 <!-- LINT.IfChange(BookmarksGUIDDuplicates) -->
 
@@ -149,11 +150,6 @@ chromium-metrics-reviews@google.com.
 <enum name="BooleanIsFirstSync">
   <int value="0" label="Not first sync"/>
   <int value="1" label="First sync"/>
-</enum>
-
-<enum name="BooleanIsSignedIn">
-  <int value="0" label="Not signed in"/>
-  <int value="1" label="Signed in"/>
 </enum>
 
 <!-- LINT.IfChange(CrossUserSharingDecryptionResult) -->
@@ -206,6 +202,33 @@ chromium-metrics-reviews@google.com.
 
 <!-- LINT.ThenChange(/components/sync_bookmarks/bookmark_specifics_conversions.cc:InvalidBookmarkSpecificsError) -->
 
+<!-- LINT.IfChange(LegacyBookmarkSetComparisonOutcome) -->
+
+<enum name="LegacyBookmarkSetComparisonOutcome">
+  <int value="0" label="Both datasets empty"/>
+  <int value="1" label="Account data empty (local data non-empty)"/>
+  <int value="2" label="Local data empty (account data non-empty)"/>
+  <int value="3" label="Both datasets equal and non-empty"/>
+  <int value="4"
+      label="Account data non-empty and a strict subset of local data"/>
+  <int value="5"
+      label="Intersection of local and account data [99%, 100%) of the total"/>
+  <int value="6"
+      label="Intersection of local and account data [95%, 99%) of the total"/>
+  <int value="7"
+      label="Intersection of local and account data [90%, 95%) of the total"/>
+  <int value="8"
+      label="Intersection of local and account data [50%, 90%) of the total"/>
+  <int value="9"
+      label="Intersection of local and account data [10%, 50%) of the total"/>
+  <int value="10"
+      label="Intersection of local and account data (0%, 10%) of the total"/>
+  <int value="11"
+      label="Local and account datasets are non-empty but do not intersect"/>
+</enum>
+
+<!-- LINT.ThenChange(//components/sync_bookmarks/bookmark_model_merger_comparison_metrics_unittests.cc:LegacyBookmarkSetComparisonOutcome) -->
+
 <!-- LINT.IfChange(NudgedUpdateResult) -->
 
 <enum name="NudgedUpdateResult">
@@ -241,26 +264,6 @@ chromium-metrics-reviews@google.com.
 </enum>
 
 <!-- LINT.ThenChange(/components/sync/service/passphrase_type_metrics_provider.h:PassphraseTypeForMetrics) -->
-
-<!-- LINT.IfChange(PaymentsAccountStorageUponConfiguration) -->
-
-<enum name="PaymentsAccountStorageUponConfiguration">
-  <int value="0"
-      label="(deprecated) Signed in implicitly with in-memory storage"/>
-  <int value="1" label="Signed in explicitly with on-disk storage"/>
-  <int value="2" label="Signed in explicitly with in-memory storage"/>
-  <int value="3"
-      label="(deprecated) Signed in implicitly with on-disk storage"/>
-  <int value="4" label="Signed in implicitly with in-memory storage"/>
-  <int value="5"
-      label="(UNEXPECTED) Signed in implicitly with on-disk storage"/>
-  <int value="6"
-      label="Signed in with Sync-the-feature on with on-disk storage"/>
-  <int value="7"
-      label="Signed in with Sync-the-feature on with in-memory storage"/>
-</enum>
-
-<!-- LINT.ThenChange(/components/browser_sync/common_controller_builder.cc:PaymentsAccountStorageUponConfiguration) -->
 
 <!-- LINT.IfChange(PendingInvalidationStatus) -->
 
@@ -1099,7 +1102,7 @@ chromium-metrics-reviews@google.com.
   <int value="9" label="NEW_CLIENT"/>
   <int value="10" label="RECONFIGURATION"/>
   <int value="12" label="GU_TRIGGER"/>
-  <int value="13" label="RETRY"/>
+  <int value="13" label="(deprecated) RETRY"/>
   <int value="14" label="PROGRAMMATIC"/>
 </enum>
 
@@ -1129,19 +1132,6 @@ chromium-metrics-reviews@google.com.
 </enum>
 
 <!-- LINT.ThenChange(/components/history/core/browser/sync/history_sync_bridge.cc:SyncHistoryDatabaseError) -->
-
-<!-- LINT.IfChange(SyncHistorySpecificsError) -->
-
-<enum name="SyncHistorySpecificsError">
-  <int value="0"
-      label="Missing required fields (visit time, originator cache GUID, or
-             redirect entries)"/>
-  <int value="1" label="Too old (already expired)"/>
-  <int value="2" label="Too new (too far in the future)"/>
-  <int value="3" label="Unwanted URL (e.g. file: or chrome:)"/>
-</enum>
-
-<!-- LINT.ThenChange(/components/history/core/browser/sync/history_sync_bridge.cc:SyncHistorySpecificsError) -->
 
 <!-- LINT.IfChange(SyncIncomingInvalidationStatus) -->
 
@@ -1374,9 +1364,10 @@ chromium-metrics-reviews@google.com.
   <int value="3" label="New Tab Page Infobar"/>
   <int value="4" label="Password Manager Error Message"/>
   <int value="5" label="Account menu"/>
+  <int value="6" label="Password Manager Settings"/>
 </enum>
 
-<!-- LINT.ThenChange(/components/sync/service/sync_service_utils.h:TrustedVaultUserActionTriggerForUMA) -->
+<!-- LINT.ThenChange(/components/sync/service/sync_service_utils.h:TrustedVaultUserActionTrigger) -->
 
 <!-- LINT.IfChange(UserActionableError) -->
 

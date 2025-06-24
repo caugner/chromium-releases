@@ -10,7 +10,9 @@
 #include <string>
 
 #include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/functional/callback_forward.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
@@ -116,6 +118,16 @@ class OnTaskSessionManager : public boca::BocaSessionManager::Observer,
 
     bool launch_in_progress_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
 
+    // Task queue that tracks pending tab management operations. Only needed
+    // when the app launch is in progress.
+    std::vector<base::OnceClosure> pending_tab_management_tasks_
+        GUARDED_BY_CONTEXT(sequence_checker_);
+
+    // Tracks the pending pin or unpin operation. Only needed when the app
+    // launch is in progress.
+    base::OnceClosure pending_pin_or_unpin_task_
+        GUARDED_BY_CONTEXT(sequence_checker_) = base::NullCallback();
+
     base::WeakPtrFactory<SystemWebAppLaunchHelper> weak_ptr_factory_{this};
   };
 
@@ -158,6 +170,9 @@ class OnTaskSessionManager : public boca::BocaSessionManager::Observer,
   bool should_lock_window_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
   bool lock_in_progress_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
   bool enter_pause_mode_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
+
+  // The set of urls sent by the provider.
+  base::flat_set<GURL> provider_url_set_ GUARDED_BY_CONTEXT(sequence_checker_);
 
   // Maps the url that providers send to the tab ids spawned from the url. This
   // map allows to remove all the related tabs to the url.

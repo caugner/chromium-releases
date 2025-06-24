@@ -75,7 +75,9 @@ using testing::IsEmpty;
 using testing::IsNull;
 using testing::Not;
 using testing::NotNull;
+using testing::Pair;
 using testing::Pointee;
+using testing::Property;
 using testing::Return;
 using testing::ReturnRef;
 using testing::Sequence;
@@ -327,7 +329,8 @@ syncer::EntityData CreateEntityData(
     const CollaborationId& collaboration_id,
     const GaiaId& created_by,
     const GaiaId& updated_by,
-    base::Time creation_time = base::Time::Now()) {
+    base::Time creation_time = base::Time::Now(),
+    base::Time modification_time = base::Time::Now()) {
   syncer::EntityData entity_data;
   *entity_data.specifics.mutable_shared_tab_group_data() = specifics;
   sync_pb::SyncEntity::CollaborationMetadata collaboration_metadata_proto;
@@ -341,29 +344,32 @@ syncer::EntityData CreateEntityData(
           collaboration_metadata_proto);
   entity_data.name = specifics.guid();
   entity_data.creation_time = creation_time;
+  entity_data.modification_time = modification_time;
   return entity_data;
 }
 
 std::unique_ptr<syncer::EntityChange> CreateAddEntityChange(
     const sync_pb::SharedTabGroupDataSpecifics& specifics,
     const CollaborationId& collaboration_id,
-    base::Time creation_time = base::Time::Now()) {
+    base::Time creation_time = base::Time::Now(),
+    base::Time modification_time = base::Time::Now()) {
   const std::string& storage_key = specifics.guid();
   return syncer::EntityChange::CreateAdd(
-      storage_key,
-      CreateEntityData(specifics, collaboration_id, kDefaultGaiaId,
-                       /*updated_by=*/kDefaultGaiaId, creation_time));
+      storage_key, CreateEntityData(specifics, collaboration_id, kDefaultGaiaId,
+                                    /*updated_by=*/kDefaultGaiaId,
+                                    creation_time, modification_time));
 }
 
 std::unique_ptr<syncer::EntityChange> CreateUpdateEntityChange(
     const sync_pb::SharedTabGroupDataSpecifics& specifics,
     const CollaborationId& collaboration_id,
-    base::Time creation_time = base::Time::Now()) {
+    base::Time creation_time = base::Time::Now(),
+    base::Time modification_time = base::Time::Now()) {
   const std::string& storage_key = specifics.guid();
   return syncer::EntityChange::CreateUpdate(
-      storage_key,
-      CreateEntityData(specifics, collaboration_id, kDefaultGaiaId,
-                       /*updated_by=*/kDefaultGaiaId, creation_time));
+      storage_key, CreateEntityData(specifics, collaboration_id, kDefaultGaiaId,
+                                    /*updated_by=*/kDefaultGaiaId,
+                                    creation_time, modification_time));
 }
 
 std::unique_ptr<syncer::EntityChange> CreateDeleteEntityChange(
@@ -454,41 +460,13 @@ class SharedTabGroupDataSyncBridgeTest : public testing::Test {
     saved_tab_group_model_.reset();
   }
 
-  size_t GetNumEntriesInStore() const {
-    std::unique_ptr<syncer::DataTypeStore::RecordList> entries;
-    base::RunLoop run_loop;
-    store_->ReadAllData(base::BindLambdaForTesting(
-        [&run_loop, &entries](
-            const std::optional<syncer::ModelError>& error,
-            std::unique_ptr<syncer::DataTypeStore::RecordList> data) {
-          entries = std::move(data);
-          run_loop.Quit();
-        }));
-    run_loop.Run();
-    return entries->size();
+  size_t GetNumEntriesInStore() {
+    return syncer::DataTypeStoreTestUtil::ReadAllDataAndWait(store()).size();
   }
 
-  std::vector<sync_pb::SharedTabGroupDataSpecifics> GetAllSpecificsFromStore()
-      const {
-    std::unique_ptr<syncer::DataTypeStore::RecordList> entries;
-    base::RunLoop run_loop;
-    store_->ReadAllData(base::BindLambdaForTesting(
-        [&run_loop, &entries](
-            const std::optional<syncer::ModelError>& error,
-            std::unique_ptr<syncer::DataTypeStore::RecordList> data) {
-          entries = std::move(data);
-          run_loop.Quit();
-        }));
-    run_loop.Run();
-
-    std::vector<sync_pb::SharedTabGroupDataSpecifics> specifics;
-    for (const syncer::DataTypeStore::Record& record : *entries) {
-      proto::SharedTabGroupData local_proto;
-      bool success = local_proto.ParseFromString(record.value);
-      CHECK(success);
-      specifics.push_back(local_proto.specifics());
-    }
-    return specifics;
+  std::map<std::string, proto::SharedTabGroupData> GetAllLocalDataFromStore() {
+    return syncer::DataTypeStoreTestUtil::ReadAllDataAsProtoAndWait<
+        proto::SharedTabGroupData>(store());
   }
 
   // Generates and mocks unique positions for all the tabs in the `group`.
@@ -2099,8 +2077,8 @@ TEST_F(SharedTabGroupDataSyncBridgeTest,
   ASSERT_THAT(group.saved_tabs(), SizeIs(1));
   const SavedTabGroupTab& tab = group.saved_tabs()[0];
 
-  EXPECT_EQ(group.creation_time_windows_epoch_micros(), kCreationTime);
-  EXPECT_EQ(tab.creation_time_windows_epoch_micros(), kCreationTime);
+  EXPECT_EQ(group.creation_time(), kCreationTime);
+  EXPECT_EQ(tab.creation_time(), kCreationTime);
 }
 
 TEST_F(SharedTabGroupDataSyncBridgeTest,
@@ -2115,17 +2093,54 @@ TEST_F(SharedTabGroupDataSyncBridgeTest,
       "http://google.com/1", u"tab", group.saved_guid(), /*position=*/0);
   group.AddTabLocally(tab);
 
-  EXPECT_CALL(
-      mock_processor(),
-      Put(StorageKeyForTab(tab),
-          Pointee(HasCreationTime(tab.creation_time_windows_epoch_micros())),
-          _));
-  EXPECT_CALL(
-      mock_processor(),
-      Put(StorageKeyForGroup(group),
-          Pointee(HasCreationTime(group.creation_time_windows_epoch_micros())),
-          _));
+  EXPECT_CALL(mock_processor(),
+              Put(StorageKeyForTab(tab),
+                  Pointee(HasCreationTime(tab.creation_time())), _));
+  EXPECT_CALL(mock_processor(),
+              Put(StorageKeyForGroup(group),
+                  Pointee(HasCreationTime(group.creation_time())), _));
   model()->AddedLocally(group);
+}
+
+TEST_F(SharedTabGroupDataSyncBridgeTest,
+       ShouldPropagateNavigationTimeOnRemoteUpdate) {
+  const CollaborationId kCollaborationId("collaboration");
+  ASSERT_TRUE(InitializeBridgeAndModel());
+
+  const base::Time kCreationTime = base::Time::Now() - base::Hours(4);
+  const base::Time kModificationTime = base::Time::Now() - base::Hours(3);
+
+  // Add a group with a single tab from sync. Check navigation time.
+  sync_pb::SharedTabGroupDataSpecifics group_specifics =
+      MakeTabGroupSpecifics("title", sync_pb::SharedTabGroup::RED);
+  ApplySingleEntityChange(CreateAddEntityChange(
+      group_specifics, kCollaborationId, kCreationTime, kModificationTime));
+
+  sync_pb::SharedTabGroupDataSpecifics tab_specifics =
+      MakeTabSpecifics("title", GURL("http://url.com"),
+                       base::Uuid::ParseLowercase(group_specifics.guid()),
+                       GenerateRandomUniquePosition());
+  ApplySingleEntityChange(CreateAddEntityChange(
+      tab_specifics, kCollaborationId, kCreationTime, kModificationTime));
+
+  ASSERT_THAT(model()->saved_tab_groups(), SizeIs(1));
+  SavedTabGroup group = model()->saved_tab_groups().front();
+  ASSERT_THAT(group.saved_tabs(), SizeIs(1));
+  SavedTabGroupTab tab = group.saved_tabs()[0];
+
+  EXPECT_EQ(group.creation_time(), kCreationTime);
+  EXPECT_EQ(tab.creation_time(), kCreationTime);
+  EXPECT_EQ(tab.navigation_time(), kModificationTime);
+
+  // Update the tab again from sync. Verify the updated navigation time.
+  const base::Time kModificationTime2 = base::Time::Now() - base::Hours(2);
+  ApplySingleEntityChange(CreateUpdateEntityChange(
+      tab_specifics, kCollaborationId, kCreationTime, kModificationTime2));
+  group = model()->saved_tab_groups().front();
+  tab = group.saved_tabs()[0];
+  EXPECT_EQ(group.creation_time(), kCreationTime);
+  EXPECT_EQ(tab.creation_time(), kCreationTime);
+  EXPECT_EQ(tab.navigation_time(), kModificationTime2);
 }
 
 TEST_F(SharedTabGroupDataSyncBridgeTest,
@@ -2626,10 +2641,13 @@ TEST_F(SharedTabGroupDataSyncBridgeTest,
   ApplySingleEntityChange(CreateAddEntityChange(
       remote_tab_group_specifics.shared_tab_group_data(), kCollaborationId));
 
-  std::vector<sync_pb::SharedTabGroupDataSpecifics> stored_specifics =
-      GetAllSpecificsFromStore();
-  ASSERT_THAT(stored_specifics,
-              ElementsAre(GroupSpecificsHasUnsupportedField("extra_field")));
+  const std::string group_guid =
+      remote_tab_group_specifics.shared_tab_group_data().guid();
+  EXPECT_THAT(GetAllLocalDataFromStore(),
+              ElementsAre(Pair(
+                  group_guid,
+                  Property(&proto::SharedTabGroupData::specifics,
+                           GroupSpecificsHasUnsupportedField("extra_field")))));
 }
 
 TEST_F(SharedTabGroupDataSyncBridgeTest, ShouldNotPopulateKnownClearedFields) {

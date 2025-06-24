@@ -85,18 +85,25 @@ void SetDawnErrorCrashKey(std::string_view message) {
 // Different versions of DumpWithoutCrashing for different reasons.
 // Deliberately prevent inlining so that the crash report's call stack can
 // distinguish between them.
+#if BUILDFLAG(IS_WIN)
 NOINLINE NOOPT void DumpWithoutCrashingOnDXGIError(wgpu::ErrorType error_type,
                                                    std::string_view message) {
   LOG(ERROR) << "DXGI Error: " << message;
-  base::debug::DumpWithoutCrashing();
+
+  if (features::kSkiaGraphiteDawnDumpWCOnD3DError.Get()) {
+    base::debug::DumpWithoutCrashing();
+  }
 }
 
 NOINLINE NOOPT void DumpWithoutCrashingOnD3D11DebugLayerError(
     wgpu::ErrorType error_type,
     std::string_view message) {
   LOG(ERROR) << message;
-  base::debug::DumpWithoutCrashing();
+  if (features::kSkiaGraphiteDawnDumpWCOnD3DError.Get()) {
+    base::debug::DumpWithoutCrashing();
+  }
 }
+#endif
 
 NOINLINE NOOPT void DumpWithoutCrashingOnGenericError(
     wgpu::ErrorType error_type,
@@ -108,11 +115,14 @@ NOINLINE NOOPT void DumpWithoutCrashingOnGenericError(
 void DumpWithoutCrashingOnError(wgpu::ErrorType error_type,
                                 std::string_view message) {
   SetDawnErrorCrashKey(message);
+#if BUILDFLAG(IS_WIN)
   if (message.find("DXGI_ERROR") != std::string_view::npos) {
     DumpWithoutCrashingOnDXGIError(error_type, message);
   } else if (message.find("The D3D11 debug layer") != std::string_view::npos) {
     DumpWithoutCrashingOnD3D11DebugLayerError(error_type, message);
-  } else {
+  } else
+#endif
+  {
     DumpWithoutCrashingOnGenericError(error_type, message);
   }
 }
@@ -159,6 +169,9 @@ std::vector<const char*> GetEnabledToggles(
     // Use packed D24_UNORM_S8_UINT DXGI format for Depth24PlusStencil8
     // format.
     enabled_toggles.push_back("use_packed_depth24_unorm_stencil8_format");
+    // Tell Dawn to defer sending commands to GPU until swapchain's Present.
+    // This will batch the commands better.
+    enabled_toggles.push_back("d3d11_delay_flush_to_gpu");
   }
 #endif
 
@@ -932,11 +945,16 @@ bool DawnSharedContext::OnMemoryDump(
         ->AddScalar(MemoryAllocatorDump::kNameSize,
                     MemoryAllocatorDump::kUnitsBytes,
                     mem_usage.depthStencilTexturesUsage);
-    pmd->GetOrCreateAllocatorDump(
-           base::JoinString({kDawnMemoryDumpPrefix, "textures/msaa"}, "/"))
-        ->AddScalar(MemoryAllocatorDump::kNameSize,
-                    MemoryAllocatorDump::kUnitsBytes,
-                    mem_usage.msaaTexturesUsage);
+    auto* msaa_dump = pmd->GetOrCreateAllocatorDump(
+        base::JoinString({kDawnMemoryDumpPrefix, "textures/msaa"}, "/"));
+    msaa_dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                         MemoryAllocatorDump::kUnitsBytes,
+                         mem_usage.msaaTexturesUsage);
+    msaa_dump->AddScalar(MemoryAllocatorDump::kNameObjectCount,
+                         MemoryAllocatorDump::kUnitsObjects,
+                         mem_usage.msaaTexturesCount);
+    msaa_dump->AddScalar("biggest_size", MemoryAllocatorDump::kUnitsBytes,
+                         mem_usage.largestMsaaTextureUsage);
     pmd->GetOrCreateAllocatorDump(
            base::JoinString({kDawnMemoryDumpPrefix, "buffers"}, "/"))
         ->AddScalar(MemoryAllocatorDump::kNameSize,

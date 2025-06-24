@@ -216,7 +216,9 @@ class CONTENT_EXPORT ServiceWorkerClientOwner final {
   // Used to create a ServiceWorkerClient for prefetch. This is still a
   // navigation request's reserved client, but doesn't have associated
   // `ongoing_navigation_frame_tree_node_id`.
-  ScopedServiceWorkerClient CreateServiceWorkerClientForPrefetch();
+  ScopedServiceWorkerClient CreateServiceWorkerClientForPrefetch(
+      scoped_refptr<network::SharedURLLoaderFactory>
+          network_url_loader_factory);
 
   // Used for starting a web worker (dedicated worker or shared worker). Returns
   // a service worker client for the worker.
@@ -627,6 +629,9 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   // store a list of storage keys that have registered service workers.
   void DidGetRegisteredStorageKeys(
       base::TimeTicks start_time,
+      const std::vector<blink::StorageKey>& storage_keys);
+
+  void SetRegisteredStorageKeys(
       const std::vector<blink::StorageKey>& storage_keys);
 
   // It's safe to store a raw pointer instead of a scoped_refptr to |wrapper_|

@@ -6,6 +6,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/functional/callback.h"
@@ -13,6 +14,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_split.h"
 #include "build/chromecast_buildflags.h"
+#include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/embedder_support/user_agent_utils.h"
 #include "components/policy/content/safe_sites_navigation_throttle.h"
 #include "components/site_isolation/features.h"
@@ -24,6 +26,7 @@
 #include "content/public/browser/client_certificate_delegate.h"
 #include "content/public/browser/devtools_manager_delegate.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/navigation_throttle_registry.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/common/content_switches.h"
 #include "fuchsia_web/common/fuchsia_dir_scheme.h"
@@ -147,10 +150,23 @@ static constexpr char const* kAllProcessSwitchesToCopy[] = {
     switches::kEnableContentDirectories,
 };
 
+std::vector<ContentSettingsPattern> GetProtectedServiceWorkers() {
+  const auto tokens = base::SplitString(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kProtectedServiceWorkers),
+      ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  std::vector<ContentSettingsPattern> patterns;
+  for (const auto& token : tokens) {
+    patterns.push_back(ContentSettingsPattern::FromString(token));
+  }
+  return patterns;
+}
+
 }  // namespace
 
 WebEngineContentBrowserClient::WebEngineContentBrowserClient()
-    : cors_exempt_headers_(GetCorsExemptHeaders()) {
+    : cors_exempt_headers_(GetCorsExemptHeaders()),
+      protected_service_workers_(GetProtectedServiceWorkers()) {
   // Logging in this class ensures this is logged once per web_instance.
   LogComponentStartWithVersion("WebEngine web_instance");
 }
@@ -194,9 +210,6 @@ void WebEngineContentBrowserClient::OverrideWebPreferences(
     content::WebContents* web_contents,
     content::SiteInstance& main_frame_site,
     blink::web_pref::WebPreferences* web_prefs) {
-  // Disable WebSQL support since it is being removed from the web platform
-  // and does not work. See crbug.com/1317431.
-  web_prefs->databases_enabled = false;
 
   // TODO(crbug.com/40245916): Remove once supported in WebEngine.
   web_prefs->disable_webauthn = true;
@@ -297,6 +310,19 @@ std::string WebEngineContentBrowserClient::GetAcceptLangs(
   return l10n_util::GetStringUTF8(IDS_ACCEPT_LANGUAGES);
 }
 
+// TODO(crbug.com/434764000): May revise if service workers should be allowed
+// in incognito mode at all.
+bool WebEngineContentBrowserClient::MayDeleteServiceWorkerRegistration(
+    const GURL& scope,
+    content::BrowserContext*) {
+  for (const auto& pattern : protected_service_workers_) {
+    if (pattern.Matches(scope)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 base::OnceClosure WebEngineContentBrowserClient::SelectClientCertificate(
     content::BrowserContext* browser_context,
     int process_id,
@@ -309,32 +335,29 @@ base::OnceClosure WebEngineContentBrowserClient::SelectClientCertificate(
   return base::OnceClosure();
 }
 
-std::vector<std::unique_ptr<content::NavigationThrottle>>
-WebEngineContentBrowserClient::CreateThrottlesForNavigation(
-    content::NavigationHandle* navigation_handle) {
-  std::vector<std::unique_ptr<content::NavigationThrottle>> throttles;
+void WebEngineContentBrowserClient::CreateThrottlesForNavigation(
+    content::NavigationThrottleRegistry& registry) {
+  auto& navigation_handle = registry.GetNavigationHandle();
   auto* frame_impl =
-      FrameImpl::FromWebContents(navigation_handle->GetWebContents());
+      FrameImpl::FromWebContents(navigation_handle.GetWebContents());
   DCHECK(frame_impl);
 
   // Only create throttle if FrameImpl has a NavigationPolicyProvider,
   // indicating an interest in navigations.
   if (frame_impl->navigation_policy_handler()) {
-    throttles.push_back(std::make_unique<NavigationPolicyThrottle>(
-        navigation_handle, frame_impl->navigation_policy_handler()));
+    registry.AddThrottle(std::make_unique<NavigationPolicyThrottle>(
+        registry, frame_impl->navigation_policy_handler()));
   }
 
   const std::optional<std::string>& explicit_sites_filter_error_page =
       frame_impl->explicit_sites_filter_error_page();
 
   if (explicit_sites_filter_error_page) {
-    throttles.push_back(std::make_unique<SafeSitesNavigationThrottle>(
-        navigation_handle,
-        navigation_handle->GetWebContents()->GetBrowserContext(),
+    registry.AddThrottle(std::make_unique<SafeSitesNavigationThrottle>(
+        registry,
+        navigation_handle.GetWebContents()->GetBrowserContext(),
         *explicit_sites_filter_error_page));
   }
-
-  return throttles;
 }
 
 std::vector<std::unique_ptr<blink::URLLoaderThrottle>>

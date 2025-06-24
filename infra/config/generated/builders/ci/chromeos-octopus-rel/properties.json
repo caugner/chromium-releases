@@ -10,7 +10,7 @@
             "builder_id": {
               "bucket": "ci",
               "builder": "chromeos-octopus-rel",
-              "project": "chromium-m137"
+              "project": "chromium-m138"
             },
             "builder_spec": {
               "builder_group": "chromium.chromiumos",
@@ -46,7 +46,7 @@
         {
           "bucket": "ci",
           "builder": "chromeos-octopus-rel",
-          "project": "chromium-m137"
+          "project": "chromium-m138"
         }
       ],
       "mirroring_builder_group_and_names": [
@@ -56,7 +56,8 @@
         }
       ],
       "retry_failed_shards": false,
-      "targets_spec_directory": "src/infra/config/generated/builders/ci/chromeos-octopus-rel/targets"
+      "targets_spec_directory": "infra/config/generated/builders/ci/chromeos-octopus-rel/targets",
+      "targets_spec_directory_relative_to_source_dir": true
     }
   },
   "$build/siso": {
@@ -66,9 +67,7 @@
     "enable_cloud_monitoring": true,
     "enable_cloud_profiler": true,
     "enable_cloud_trace": true,
-    "experiments": [
-      "fallback-on-exec-error"
-    ],
+    "experiments": [],
     "metrics_project": "chromium-reclient-metrics",
     "project": "rbe-chromium-trusted",
     "remote_jobs": 500
@@ -81,11 +80,5 @@
     ]
   },
   "builder_group": "chromium.chromiumos",
-  "gardener_rotations": [
-    "chrome_browser_release"
-  ],
-  "recipe": "chromium",
-  "sheriff_rotations": [
-    "chrome_browser_release"
-  ]
+  "recipe": "chromium"
 }

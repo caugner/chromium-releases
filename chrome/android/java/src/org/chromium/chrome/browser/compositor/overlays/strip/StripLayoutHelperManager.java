@@ -50,6 +50,7 @@ import org.chromium.chrome.browser.compositor.layouts.components.TintedComposito
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.AreaMotionEventFilter;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.MotionEventHandler;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutView.StripLayoutViewOnClickHandler;
+import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutView.StripLayoutViewOnKeyboardFocusHandler;
 import org.chromium.chrome.browser.compositor.overlays.strip.reorder.TabDragSource;
 import org.chromium.chrome.browser.compositor.scene_layer.TabStripSceneLayer;
 import org.chromium.chrome.browser.data_sharing.DataSharingTabManager;
@@ -100,10 +101,10 @@ import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.display.DisplayUtil;
 import org.chromium.ui.dragdrop.DragAndDropDelegate;
 import org.chromium.ui.dragdrop.DragDropGlobalState;
 import org.chromium.ui.interpolators.Interpolators;
-import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.resources.ResourceManager;
 import org.chromium.ui.util.ColorUtils;
 import org.chromium.url.GURL;
@@ -175,7 +176,7 @@ public class StripLayoutHelperManager
     // Tab strip transition constants.
     @VisibleForTesting
     static final Interpolator TAB_STRIP_TRANSITION_INTERPOLATOR =
-            Interpolators.FAST_OUT_SLOW_IN_INTERPOLATOR;
+            Interpolators.STANDARD_DEFAULT_EFFECTS;
 
     // Fade constants.
     static final float FADE_SHORT_WIDTH_DP = 60;
@@ -203,7 +204,6 @@ public class StripLayoutHelperManager
     private float mWidth; // in dp units
     private float mHeight; // Height of the entire tab strip compositor layer in DP.
     private final float mScrollableStripHeight; // Height of the scrollable tab strip layer in DP.
-    private boolean mIsVerticalScrollInProgress; // Is the tab strip is being scrolled by a gesture.
 
     // Padding regions that tabs should remain untouchable.
     private float mLeftPadding; // in dp units
@@ -212,7 +212,7 @@ public class StripLayoutHelperManager
     private final float mDensity;
     private int mOrientation;
     @Nullable private TintedCompositorButton mModelSelectorButton;
-    private Context mContext;
+    private final Context mContext;
     private float mStripTransitionScrimOpacity;
     private Animator mFadeTransitionAnimator;
     // This will be set only when a strip height transition runs to update the strip visibility and
@@ -222,7 +222,7 @@ public class StripLayoutHelperManager
     private final StatusBarColorController mStatusBarColorController;
     private TabStripSceneLayer mTabStripTreeProvider;
     private TabStripEventHandler mTabStripEventHandler;
-    private TabSwitcherLayoutObserver mTabSwitcherLayoutObserver;
+    private final TabSwitcherLayoutObserver mTabSwitcherLayoutObserver;
     private final View mToolbarControlContainer;
     private final ViewStub mTabHoverCardViewStub;
     @Nullable private TooltipManager mTooltipManager;
@@ -239,7 +239,7 @@ public class StripLayoutHelperManager
     private final DesktopWindowStateManager mDesktopWindowStateManager;
 
     // 3-dots menu button with tab strip end padding
-    private float mStripEndPadding;
+    private final float mStripEndPadding;
     private TabModelSelectorTabModelObserver mTabModelSelectorTabModelObserver;
     private TabModelSelectorTabObserver mTabModelSelectorTabObserver;
     private final Callback<TabModel> mCurrentTabModelObserver =
@@ -253,7 +253,7 @@ public class StripLayoutHelperManager
     private final ObservableSupplier<LayerTitleCache> mLayerTitleCacheSupplier;
     private final BrowserControlsStateProvider mBrowserControlsStateProvider;
     private final Callback<Integer> mStripVisibilityStateObserver;
-    private ObservableSupplierImpl<Integer> mStripVisibilityStateSupplier;
+    private final ObservableSupplierImpl<Integer> mStripVisibilityStateSupplier;
 
     // Drag-Drop
     @Nullable private TabDragSource mTabDragSource;
@@ -301,7 +301,7 @@ public class StripLayoutHelperManager
             }
             long time = time();
             if (mModelSelectorButton != null && mModelSelectorButton.click(x, y, buttons)) {
-                mModelSelectorButton.handleClick(time);
+                mModelSelectorButton.handleClick(time, buttons);
                 return;
             }
             getActiveStripLayoutHelper().click(time(), x, y, buttons);
@@ -419,7 +419,6 @@ public class StripLayoutHelperManager
      * @param toolbarManager The ToolbarManager instance.
      * @param desktopWindowStateManager The DesktopWindowStateManager for the app header.
      * @param actionConfirmationManager The {@link ActionConfirmationManager} for group actions.
-     * @param modalDialogManager The {@link ModalDialogManager} for the context menu.
      * @param dataSharingTabManager The {@link DataSharingTabManager} for shared groups.
      * @param bottomSheetController The {@link BottomSheetController} used to show bottom sheets.
      * @param shareDelegateSupplier Supplies {@link ShareDelegate} to share tab URLs.
@@ -445,7 +444,6 @@ public class StripLayoutHelperManager
             @NonNull ToolbarManager toolbarManager,
             @Nullable DesktopWindowStateManager desktopWindowStateManager,
             ActionConfirmationManager actionConfirmationManager,
-            ModalDialogManager modalDialogManager,
             DataSharingTabManager dataSharingTabManager,
             @NonNull BottomSheetController bottomSheetController,
             @NonNull Supplier<ShareDelegate> shareDelegateSupplier) {
@@ -467,7 +465,8 @@ public class StripLayoutHelperManager
                 new AreaMotionEventFilter(context, mTabStripEventHandler, null, false, false);
 
         mIsLayoutOptimizationsEnabled =
-                ToolbarFeatures.isTabStripWindowLayoutOptimizationEnabled(true);
+                ToolbarFeatures.isTabStripWindowLayoutOptimizationEnabled(
+                        /* isTablet= */ true, DisplayUtil.isContextInDefaultDisplay(mContext));
         mScrollableStripHeight = res.getDimension(R.dimen.tab_strip_height) / mDensity;
         mHeight =
                 mIsLayoutOptimizationsEnabled
@@ -486,8 +485,12 @@ public class StripLayoutHelperManager
 
         if (!ChromeFeatureList.sTabStripIncognitoMigration.isEnabled()) {
             StripLayoutViewOnClickHandler selectorClickHandler =
-                    (time, view) -> handleModelSelectorButtonClick();
-            createModelSelectorButton(context, selectorClickHandler);
+                    (time, view, motionEventButtonState) -> handleModelSelectorButtonClick();
+            StripLayoutViewOnKeyboardFocusHandler selectorKeyboardFocusHandler =
+                    (isFocused, view) -> {
+                        getActiveStripLayoutHelper().onKeyboardFocus(isFocused, view);
+                    };
+            createModelSelectorButton(context, selectorClickHandler, selectorKeyboardFocusHandler);
         }
         // Use toolbar menu button padding to align MSB with menu button.
         mStripEndPadding = res.getDimension(R.dimen.button_end_padding) / mDensity;
@@ -526,7 +529,6 @@ public class StripLayoutHelperManager
                         toolbarContainerView,
                         windowAndroid,
                         actionConfirmationManager,
-                        modalDialogManager,
                         dataSharingTabManager,
                         () -> getStripVisibilityState() == StripVisibilityState.VISIBLE,
                         bottomSheetController,
@@ -545,7 +547,6 @@ public class StripLayoutHelperManager
                         toolbarContainerView,
                         windowAndroid,
                         actionConfirmationManager,
-                        modalDialogManager,
                         dataSharingTabManager,
                         () -> getStripVisibilityState() == StripVisibilityState.VISIBLE,
                         bottomSheetController,
@@ -609,7 +610,9 @@ public class StripLayoutHelperManager
 
     // Incognito button for Tab Strip Redesign.
     private void createModelSelectorButton(
-            Context context, StripLayoutViewOnClickHandler selectorClickHandler) {
+            Context context,
+            StripLayoutViewOnClickHandler selectorClickHandler,
+            StripLayoutViewOnKeyboardFocusHandler keyboardFocusHandler) {
         mModelSelectorButton =
                 new TintedCompositorButton(
                         context,
@@ -618,6 +621,7 @@ public class StripLayoutHelperManager
                         MODEL_SELECTOR_BUTTON_BACKGROUND_WIDTH_DP,
                         MODEL_SELECTOR_BUTTON_BACKGROUND_HEIGHT_DP,
                         selectorClickHandler,
+                        keyboardFocusHandler,
                         R.drawable.ic_incognito,
                         MODEL_SELECTOR_BUTTON_CLICK_SLOP_DP);
 
@@ -794,17 +798,19 @@ public class StripLayoutHelperManager
                     getStripTransitionScrimColor(), mStripTransitionScrimOpacity);
 
             yOffset = 0;
-        } else if (ChromeFeatureList.sBrowserControlsInViz.isEnabled()
-                && mIsVerticalScrollInProgress) {
-            // With bciv, we don't want anything else controlling the offset while scrolling.
-            // Tabstrip currently has no min height, so setting to 0 is ok.
-            yOffset = 0;
         } else if ((getStripVisibilityState() & StripVisibilityState.HIDDEN_BY_HEIGHT_TRANSITION)
                 != 0) {
             // When the tab strip is hidden by a height transition, the stable offset of this scene
             // layer should be a negative value.
             yOffset -= getHeight();
+        } else if (ChromeFeatureList.sBrowserControlsInViz.isEnabled()
+                && !mBrowserControlsStateProvider.isVisibilityForced()) {
+            // With bciv, as long as if the visibility isn't forced by the browser, and if the
+            // tabstrip isn't hidden, the composited layers should positioned at their fully visible
+            // positions.
+            yOffset = 0;
         }
+
         mTabStripTreeProvider.pushAndUpdateStrip(
                 this,
                 mLayerTitleCacheSupplier.get(),
@@ -1139,9 +1145,9 @@ public class StripLayoutHelperManager
             Rect msbRect =
                     new Rect(
                             (int) Math.floor(msbTouchRect.left * mDensity),
-                            (int) Math.max(Math.floor(msbTouchRect.top * mDensity), mTopPadding),
+                            (int) Math.floor(Math.max(msbTouchRect.top, mTopPadding) * mDensity),
                             (int) Math.ceil(msbTouchRect.right * mDensity),
-                            (int) Math.min(Math.ceil(msbTouchRect.bottom * mDensity), mHeight));
+                            (int) Math.ceil(Math.min(msbTouchRect.bottom, mHeight) * mDensity));
             rects.add(msbRect);
         }
         mToolbarControlContainer.setSystemGestureExclusionRects(rects);
@@ -1439,11 +1445,6 @@ public class StripLayoutHelperManager
                             mTabStripTreeProvider.updateOffsetTag(
                                     offsetTagsInfo.getContentOffsetTag());
                         }
-                    }
-
-                    @Override
-                    public void onContentViewScrollingStateChanged(boolean scrolling) {
-                        mIsVerticalScrollInProgress = scrolling;
                     }
                 };
 

@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_ASH_BOCA_BOCA_MANAGER_H_
 #define CHROME_BROWSER_ASH_BOCA_BOCA_MANAGER_H_
 
+#include <memory>
+
 #include "chrome/browser/ash/boca/boca_app_client_impl.h"
 #include "chromeos/ash/components/boca/babelorca/babel_orca_manager.h"
 #include "chromeos/ash/components/boca/babelorca/soda_installer.h"

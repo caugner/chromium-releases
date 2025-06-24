@@ -708,6 +708,10 @@ MediaTrackSettings* MediaStreamTrackImpl::getSettings() const {
         *suppress_local_audio_playback_setting_);
   }
 
+  if (restrict_own_audio_setting_.has_value()) {
+    settings->setRestrictOwnAudio(*restrict_own_audio_setting_);
+  }
+
   return settings;
 }
 
@@ -778,6 +782,19 @@ CaptureHandle* MediaStreamTrackImpl::getCaptureHandle() const {
   return capture_handle;
 }
 
+void MediaStreamTrackImpl::Dispose() {
+  // `MediaStreamTrackImpl` and the `SpeechRecognitionMediaStreamAudioSink`
+  // which it owns may be destroyed before the `MediaStreamAudioTrack`. Remove
+  // the sinks before destroying them to prevent `MediaStreamAudioTrack` from
+  // using them after destruction.
+  if (MediaStreamAudioTrack* audio_track =
+          MediaStreamAudioTrack::From(Component())) {
+    for (SpeechRecognitionMediaStreamAudioSink* sink : registered_sinks_) {
+      audio_track->RemoveSink(sink);
+    }
+  }
+}
+
 ScriptPromise<IDLUndefined> MediaStreamTrackImpl::applyConstraints(
     ScriptState* script_state,
     const MediaTrackConstraints* constraints) {
@@ -816,6 +833,13 @@ void MediaStreamTrackImpl::SetConstraintsInternal(
       constraints_.Basic().suppress_local_audio_playback.HasIdeal()) {
     suppress_local_audio_playback_setting_ =
         constraints_.Basic().suppress_local_audio_playback.Ideal();
+  }
+
+  CHECK(!restrict_own_audio_setting_.has_value());
+  if (!constraints_.IsNull() &&
+      constraints_.Basic().restrict_own_audio.HasIdeal()) {
+    restrict_own_audio_setting_ =
+        constraints_.Basic().restrict_own_audio.Ideal();
   }
 }
 

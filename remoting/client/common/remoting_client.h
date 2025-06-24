@@ -11,6 +11,7 @@
 
 #include "base/functional/callback.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/observer_list.h"
 #include "remoting/base/http_status.h"
 #include "remoting/base/oauth_token_info.h"
 #include "remoting/protocol/client_stub.h"
@@ -30,9 +31,11 @@ class HostInfo;
 
 class DirectoryServiceClient;
 class OAuthTokenGetter;
+class ClientStatusObserver;
 
 namespace protocol {
 class ConnectionToHost;
+class FrameConsumer;
 class SessionManager;
 class VideoRenderer;
 }  // namespace protocol
@@ -44,6 +47,7 @@ class RemotingClient : public SignalStrategy::Listener,
  public:
   RemotingClient(
       base::OnceClosure quit_closure,
+      protocol::FrameConsumer* frame_consumer,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   RemotingClient(const RemotingClient&) = delete;
@@ -55,6 +59,9 @@ class RemotingClient : public SignalStrategy::Listener,
                     OAuthTokenInfo oauth_token_info);
 
   void StopSession();
+
+  void AddObserver(ClientStatusObserver* observer);
+  void RemoveObserver(ClientStatusObserver* observer);
 
  private:
   // ClientStub implementation.
@@ -92,6 +99,7 @@ class RemotingClient : public SignalStrategy::Listener,
   std::string host_secret_;
   OAuthTokenInfo oauth_token_info_;
   base::OnceClosure quit_closure_;
+  base::ObserverList<ClientStatusObserver> observers_;
 
   // Used to provide an OAuth access token for service requests. Since a raw *
   // is passed around, this field should be destroyed after the service clients.
@@ -107,9 +115,12 @@ class RemotingClient : public SignalStrategy::Listener,
   // //remoting/signaling so it can be used in the client.
   std::unique_ptr<SignalStrategy> signal_strategy_;
 
+  // |frame_consumer_| must outlive |video_renderer_|.
+  const raw_ptr<protocol::FrameConsumer> frame_consumer_;
+
   // Session related members.
-  std::unique_ptr<protocol::SessionManager> session_manager_;
   std::unique_ptr<protocol::ConnectionToHost> connection_;
+  std::unique_ptr<protocol::SessionManager> session_manager_;
   std::unique_ptr<protocol::VideoRenderer> video_renderer_;
 
   // Used to make service requests.
