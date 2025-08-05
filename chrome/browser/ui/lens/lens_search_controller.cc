@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/lens/lens_search_controller.h"
 
 #include "base/check.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/lens/core/mojom/geometry.mojom.h"
@@ -250,7 +251,7 @@ void LensSearchController::CloseLensAsync(
     // Also trigger the overlay fade out animation, but don't pass a callback
     // to finish the closing process since the side panel will call
     // the finish closing process callback in OnSidePanelHidden().
-    lens_overlay_controller_->TriggerOverlayCloseAnimation(base::DoNothing());
+    lens_overlay_controller_->TriggerOverlayFadeOutAnimation(base::DoNothing());
     return;
   }
   state_ = State::kClosing;
@@ -259,7 +260,7 @@ void LensSearchController::CloseLensAsync(
   // fade out. Play the fade out animation and then clean up the rest of the UI
   // afterwards.
   if (lens_overlay_controller_->state() != LensOverlayController::State::kOff) {
-    lens_overlay_controller_->TriggerOverlayCloseAnimation(
+    lens_overlay_controller_->TriggerOverlayFadeOutAnimation(
         base::BindOnce(&LensSearchController::CloseLensPart2,
                        weak_ptr_factory_.GetWeakPtr(), dismissal_source));
   } else {
@@ -274,6 +275,21 @@ void LensSearchController::CloseLensSync(
   }
   state_ = State::kClosing;
   CloseLensPart2(dismissal_source);
+}
+
+void LensSearchController::HideOverlay(
+    lens::LensOverlayDismissalSource dismissal_source) {
+  if (state() == State::kOff) {
+    return;
+  }
+
+  // If the overlay is showing, the overlay needs to fade out. Play the fade out
+  // animation and then clean up the rest of the UI afterwards.
+  if (lens_overlay_controller_->state() != LensOverlayController::State::kOff) {
+    lens_overlay_controller_->TriggerOverlayFadeOutAnimation(
+        base::BindOnce(&LensSearchController::OnOverlayHidden,
+                       weak_ptr_factory_.GetWeakPtr(), dismissal_source));
+  }
 }
 
 void LensSearchController::MaybeLaunchSurvey() {
@@ -565,6 +581,20 @@ void LensSearchController::CloseLensPart2(
   lens_session_metrics_logger_->RecordEndOfSessionMetrics(dismissal_source);
 
   state_ = State::kOff;
+}
+
+void LensSearchController::OnOverlayHidden(
+    lens::LensOverlayDismissalSource dismissal_source) {
+  // If the side panel is not open, end the session.
+  if (lens_overlay_side_panel_coordinator_->state() ==
+      lens::LensOverlaySidePanelCoordinator::State::kOff) {
+    CloseLensPart2(dismissal_source);
+    return;
+  }
+
+  // Since the side panel is open and the overlay has smoothly faded out, hide
+  // the overlay to restore state to the live page.
+  lens_overlay_controller_->HideOverlayAndMaybeSetLivePageState();
 }
 
 void LensSearchController::OnSidePanelWillHide(

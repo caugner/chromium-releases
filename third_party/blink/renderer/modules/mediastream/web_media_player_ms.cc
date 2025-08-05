@@ -15,6 +15,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
+#include "base/notimplemented.h"
 #include "base/sequence_checker.h"
 #include "base/strings/to_string.h"
 #include "base/task/bind_post_task.h"
@@ -410,7 +411,7 @@ WebMediaPlayerMS::~WebMediaPlayerMS() {
       String::Format("%s() [delegate_id=%d]", __func__, delegate_id_));
 
   if (!web_stream_.IsNull()) {
-    web_stream_.RemoveObserver(weak_this_);
+    web_stream_.RemoveObserver(this);
   }
 
   // Destruct compositor resources in the proper order.
@@ -485,7 +486,7 @@ WebMediaPlayer::LoadTiming WebMediaPlayerMS::Load(
   DCHECK_NE(load_type, kLoadTypeMediaSource);
   web_stream_ = source.GetAsMediaStream();
   if (!web_stream_.IsNull())
-    web_stream_.AddObserver(weak_this_);
+    web_stream_.AddObserver(this);
 
   watch_time_reporter_.reset();
 

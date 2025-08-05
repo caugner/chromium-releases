@@ -2,13 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Compile target declarations
-
-Compile targets can be referenced in additional_compile_targets for a builder in
-waterfalls.pyl or as additional_compile_targets in a bundle declaration.
-"""
-
-load("@chromium-luci//targets.star", "targets")
+load("//lib/targets.star", "targets")
 
 targets.compile_target(
     name = "all",
@@ -210,6 +204,13 @@ targets.compile_target(
 targets.compile_target(
     name = "components/openscreen_platform",
     label = "//components/openscreen_platform",
+)
+
+targets.compile_target(
+    name = "content_shell",
+    label = "//content/shell:content_shell",
+    # All references have been moved to starlark
+    skip_usage_check = True,
 )
 
 targets.compile_target(
@@ -446,13 +447,6 @@ targets.compile_target(
 targets.compile_target(
     name = "video_decode_accelerator_perf_tests",
     label = "//media/gpu/test:video_decode_accelerator_perf_tests",
-    # All references have been moved to starlark
-    skip_usage_check = True,
-)
-
-targets.compile_target(
-    name = "video_encode_accelerator_tests",
-    label = "//media/gpu/test:video_encode_accelerator_tests",
     # All references have been moved to starlark
     skip_usage_check = True,
 )

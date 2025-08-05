@@ -1014,6 +1014,7 @@
 <translation id="4305817255990598646">Которулуу</translation>
 <translation id="4307713728991152670">Телефонуңуздагы соңку сүрөттөрдү, медиа файлдарды жана колдонмолорду көрүү параметрин тууралоо</translation>
 <translation id="4312840429157639164">Камера жогорку оң бурчка кадалды. Системанын платформасына туура келген жок.</translation>
+<translation id="4312935606722154789">Жанаша турган эки терезени топтоштуруу же топтон чыгаруу</translation>
 <translation id="4316910396681052118">БАРДЫК КОЛДОНМОЛОР</translation>
 <translation id="4321179778687042513">Ctrl</translation>
 <translation id="4322385711258710213">Бардык Chrome серепчисинин сунуштарын жашыруу</translation>
@@ -1453,7 +1454,6 @@
 <translation id="5691772641933328258">Манжа изи таанылган жок</translation>
 <translation id="5693255400847650006">Микрофон колдонулууда</translation>
 <translation id="5699366815052349604">Жигердүү терезени бардык иш такталарга дайындоо</translation>
-<translation id="5701785125601597013">Phone Hub аркылуу телефон билдирүүлөрүн тез жөнөтүңүз же аларга жооп бериңиз</translation>
 <translation id="570390244361237317">Бардык колдонмолор. Тизмеге өтүү үчүн жебе баскычтарын басыңыз</translation>
 <translation id="5705197514573687092">Ынтаа коюу режиминин параметрлери көрсөтүлсүн. Таймер төмөнкү убакытка коюлду: <ph name="FOCUS_DURATION" />.</translation>
 <translation id="5707775774148071965">Түзмөктөгү маалыматты өткөрүү ылдамдыгы бул кабелден жогору. Түзмөктүн майнаптуулугу чектелиши мүмкүн.</translation>
@@ -1583,7 +1583,6 @@
 <translation id="6095425951508823973"><ph name="PROVIDER" /> менен байланышты кошуу</translation>
 <translation id="6099678161144790572">Мурунку айда түзөтүлгөн</translation>
 <translation id="6103838137565245112">тутум</translation>
-<translation id="610395411842312282">Жанаша турган эки терезени топтоштуруу</translation>
 <translation id="6108952804512516814">ЖИ менен түзүү</translation>
 <translation id="6114505516289286752"><ph name="LANGUAGE" /> тилиндеги кеп файлдары жүктөлүп алынды</translation>
 <translation id="6119360623251949462"><ph name="CHARGING_STATE" />. <ph name="BATTERY_SAVER_STATE" /></translation>
@@ -2303,7 +2302,7 @@
 <translation id="8487660088084188539">Бул функциялар күйгүзүлсө, киргизилген текст, документтин контенти жана веб беттин URL дареги Google'дун серверлерине жөнөтүлүшү мүмкүн. Бул маалымат текст жазуу боюнча сунуштарды, кыскача маалыматты түзүү, суроолорго жооп берүү жана кызматты жакшыртуу үчүн <ph name="LINK_TO_SERVICE_TERMS" /> ылайык колдонулат. Жеке же купуя нерселерди кошпоңуз.</translation>
 <translation id="8487699605742506766">Байланыш түйүнү</translation>
 <translation id="8491237443345908933">Шилтемени жаңы өтмөктө ачуу</translation>
-<translation id="8492573885090281069"><ph name="DISPLAY_NAME" /> <ph name="SPECIFIED_RESOLUTION" /> дааналыкты колдоого албайт. Дааналыгы төмөнкүгө өзгөртүлдү: <ph name="FALLBACK_RESOLUTION" />. Өзгөрүүлөрдү сактоо үчүн "Ырастоо" баскычын басыңыз. Мурунку жөндөөлөр <ph name="TIMEOUT_SECONDS" /> кийин калыбына келтирилет.</translation>
+<translation id="8492573885090281069"><ph name="DISPLAY_NAME" /> <ph name="SPECIFIED_RESOLUTION" /> дааналыкты колдоого албайт. Дааналыгы төмөнкүгө өзгөртүлдү: <ph name="FALLBACK_RESOLUTION" />. Өзгөртүүлөрдү сактоо үчүн "Ырастоо" баскычын басыңыз. Мурунку жөндөөлөр <ph name="TIMEOUT_SECONDS" /> кийин калыбына келтирилет.</translation>
 <translation id="8507563469658346379">Баары, <ph name="REMAINING_TIME" /></translation>
 <translation id="8511123073331775246">Жаңы иш тактаны түзүү</translation>
 <translation id="85123341071060231">Chromebook түзмөгүңүздүн Bluetooth'у өчүк. Chromebook'тун кулпусун ачуу үчүн сырсөздү териңиз.</translation>
@@ -2511,7 +2510,7 @@
 <translation id="9194617393863864469">Башка колдонуучуну киргизүү…</translation>
 <translation id="9195857219954068558">Chromebook түзмөгүңүз жаңыртылды. Мурунку терезелериңизди жана колдонмолоруңузду ачыңыз.</translation>
 <translation id="9195990613383871904">Эртең</translation>
-<translation id="9198992156681343238"><ph name="DISPLAY_NAME" /> дааналыгы төмөнкүгө өзгөртүлдү: <ph name="RESOLUTION" />. Өзгөрүүлөрдү сактоо үчүн "Ырастоо" баскычын басыңыз. Мурунку параметрлер <ph name="TIMEOUT_SECONDS" /> кийин калыбына келет.</translation>
+<translation id="9198992156681343238"><ph name="DISPLAY_NAME" /> дааналыгы төмөнкүгө өзгөртүлдү: <ph name="RESOLUTION" />. Өзгөртүүлөрдү сактоо үчүн "Ырастоо" баскычын басыңыз. Мурунку жөндөөлөр <ph name="TIMEOUT_SECONDS" /> кийин калыбына келтирилет.</translation>
 <translation id="9201044636667689546"><ph name="NAME" /> түзмөгүн ушул Chromebook менен байланыштырыңыз</translation>
 <translation id="9201374708878217446"><ph name="CONNECTION_STATUS" />, Администраторуңуз башкарат</translation>
 <translation id="9207682216934703221"><ph name="APP_NAME" />, <ph name="APP2_NAME" /> жана жайгашкан жерди аныктоого уруксат алган бардык колдонмолор менен вебсайттарга, ошондой эле ChromeOS'ко Wi-Fi жана мобилдик тармактын жайгашкан жерин колдонуу мүмкүнчүлүгү берилет.</translation>

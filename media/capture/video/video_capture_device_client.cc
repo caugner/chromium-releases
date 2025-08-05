@@ -21,6 +21,7 @@
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/sequence_checker.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -1105,8 +1106,7 @@ void VideoCaptureDeviceClient::OnIncomingCapturedY16Data(
     return;
   }
   auto buffer_access = buffer.handle_provider->GetHandleForInProcessAccess();
-  memcpy(buffer_access->data(), data,
-         std::min(static_cast<size_t>(length), buffer_access->mapped_size()));
+  memcpy(buffer_access->data(), data, length);
   const VideoCaptureFormat output_format = VideoCaptureFormat(
       format.frame_size, format.frame_rate, PIXEL_FORMAT_Y16);
   OnIncomingCapturedBuffer(std::move(buffer), output_format, reference_time,

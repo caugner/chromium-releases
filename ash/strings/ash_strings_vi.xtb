@@ -158,7 +158,7 @@ Dưới đây là một số việc bạn có thể thử để bắt đầu.</t
 <translation id="1469148162491666137">Nếu bạn bật, <ph name="APP1_NAME" />, <ph name="APP2_NAME" /> và tất cả ứng dụng cũng như trang web có quyền truy cập máy ảnh và micrô sẽ có thể sử dụng máy ảnh và micrô. Bạn có thể cần làm mới trang web hoặc khởi động lại ứng dụng.</translation>
 <translation id="147310119694673958">Pin điện thoại <ph name="BATTERY_PERCENTAGE" />%</translation>
 <translation id="1475340220124222168">Bật/tắt điểm phát sóng. Điểm phát sóng đang bật, có 1 thiết bị đã kết nối.</translation>
-<translation id="1479685784053141667">Tạo người liên hệ</translation>
+<translation id="1479685784053141667">Tạo liên hệ</translation>
 <translation id="1479909375538722835">Trình đơn hỗ trợ tiếp cận nổi</translation>
 <translation id="1483493594462132177">Gửi</translation>
 <translation id="1484102317210609525"><ph name="DEVICE_NAME" /> (HDMI/DP)</translation>
@@ -183,7 +183,7 @@ Dưới đây là một số việc bạn có thể thử để bắt đầu.</t
 <translation id="1549721333775633305">Hiện chế độ cài đặt của tính năng Chia sẻ nhanh. Đã tắt tính năng Chia sẻ nhanh</translation>
 <translation id="1550406609415860283">Có sẵn thiết bị</translation>
 <translation id="1550523713251050646">Nhấp để xem các tùy chọn khác</translation>
-<translation id="1555130319947370107">Xanh dương</translation>
+<translation id="1555130319947370107">Xanh lam</translation>
 <translation id="1557622599341396706">Hiện tên không gian làm việc</translation>
 <translation id="1569384531973824928">Nếu bạn bật, tất cả ứng dụng và trang web có quyền truy cập máy ảnh và micrô sẽ có thể sử dụng máy ảnh và micrô. Bạn có thể cần làm mới trang web hoặc khởi động lại ứng dụng.</translation>
 <translation id="1571697193564730395">Bật/tắt chế độ Không làm phiền. <ph name="STATE_TEXT" /></translation>
@@ -329,7 +329,7 @@ Dưới đây là một số việc bạn có thể thử để bắt đầu.</t
 <translation id="2067220651560163985">Hiện nhiệt độ theo độ C</translation>
 <translation id="2067602449040652523">Độ sáng bàn phím</translation>
 <translation id="2075520525463668108">Bật/tắt <ph name="CAPTURE_MEDIUM" />. <ph name="CAPTURE_MEDIUM" /> ở trạng thái <ph name="CAPTURE_STATE" /></translation>
-<translation id="2079545284768500474">Huỷ</translation>
+<translation id="2079545284768500474">Hoàn tác</translation>
 <translation id="2083190527011054446">Xin chào <ph name="GIVEN_NAME" />!</translation>
 <translation id="2086334242442703436">Mở Bộ chọn biểu tượng cảm xúc</translation>
 <translation id="2088116547584365419">trò chơi</translation>
@@ -1014,6 +1014,7 @@ Một số tính năng bị hạn chế nhằm tăng thời lượng pin.</trans
 <translation id="4305817255990598646">Chuyển</translation>
 <translation id="4307713728991152670">Thiết lập tính năng xem ứng dụng, nội dung nghe nhìn và ảnh gần đây có trên điện thoại</translation>
 <translation id="4312840429157639164">Máy ảnh đang bám theo góc trên bên phải. Xung đột với khu vực hệ thống.</translation>
+<translation id="4312935606722154789">Nhóm hoặc huỷ nhóm hai cửa sổ cạnh nhau</translation>
 <translation id="4316910396681052118">TẤT CẢ ỨNG DỤNG</translation>
 <translation id="4321179778687042513">ctrl</translation>
 <translation id="4322385711258710213">Ẩn mọi đề xuất của trình duyệt Chrome</translation>
@@ -1453,7 +1454,6 @@ Chưa kết nối thiết bị nào.</translation>
 <translation id="5691772641933328258">Không nhận dạng được vân tay</translation>
 <translation id="5693255400847650006">Micrô đang được sử dụng</translation>
 <translation id="5699366815052349604">Gán cửa sổ đang hoạt động cho tất cả không gian làm việc</translation>
-<translation id="5701785125601597013">Nhanh chóng gửi hoặc trả lời tin nhắn trên điện thoại bằng Trung tâm điều khiển điện thoại</translation>
 <translation id="570390244361237317">Tất cả ứng dụng, di chuyển bằng phím mũi tên để truy cập tất cả ứng dụng</translation>
 <translation id="5705197514573687092">Hiện chế độ cài đặt Tập trung. Thời gian hẹn giờ là <ph name="FOCUS_DURATION" />.</translation>
 <translation id="5707775774148071965">Thiết bị của bạn hỗ trợ tốc độ dữ liệu cao hơn cáp của bạn. Hiệu suất của thiết bị có thể bị hạn chế.</translation>
@@ -1583,7 +1583,6 @@ Chưa kết nối thiết bị nào.</translation>
 <translation id="6095425951508823973">Thêm đường kết nối bằng <ph name="PROVIDER" /></translation>
 <translation id="6099678161144790572">Chỉnh sửa tháng trước</translation>
 <translation id="6103838137565245112">hệ thống</translation>
-<translation id="610395411842312282">Xếp hai cửa sổ cạnh nhau vào một nhóm</translation>
 <translation id="6108952804512516814">Tạo bằng AI</translation>
 <translation id="6114505516289286752">Đã tải tệp mã chuyển lời nói thành văn bản <ph name="LANGUAGE" /> xuống</translation>
 <translation id="6119360623251949462"><ph name="CHARGING_STATE" />. <ph name="BATTERY_SAVER_STATE" /></translation>

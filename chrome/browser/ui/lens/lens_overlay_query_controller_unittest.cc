@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "lens_overlay_query_controller.h"
+#include "chrome/browser/ui/lens/lens_overlay_query_controller.h"
 
 #include <string>
 
@@ -10,6 +10,8 @@
 #include "base/containers/span.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_view_util.h"
 #include "base/test/protobuf_matchers.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
@@ -3845,7 +3847,7 @@ TEST_F(LensOverlayQueryControllerTest,
       /*primary_content_type=*/lens::MimeType::kUnknown,
       /*pdf_current_page=*/std::nullopt, 0, base::TimeTicks::Now());
   ASSERT_TRUE(full_image_response_future.Wait());
-  ASSERT_FALSE(query_controller.last_cluster_info_request().has_value());
+  ASSERT_TRUE(query_controller.last_cluster_info_request().has_value());
 
   query_controller.SendRegionSearch(
       kTestTime, std::move(region), lens::REGION_SEARCH,

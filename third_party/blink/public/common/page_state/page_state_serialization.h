@@ -18,7 +18,6 @@
 #include "third_party/blink/public/mojom/page_state/page_state.mojom.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/point_f.h"
-#include "url/gurl.h"
 #include "url/origin.h"
 
 namespace blink {
@@ -96,13 +95,6 @@ BLINK_COMMON_EXPORT void LegacyEncodePageStateForTesting(
     const ExplodedPageState& exploded,
     int version,
     std::string* encoded);
-
-// Similar to `PageState::GetReferencedFiles`, but returns all FilePaths within
-// the entire PageState by traversing its frame tree. Used to validate that the
-// list returned by `GetReferencedFiles` is complete.
-BLINK_COMMON_EXPORT bool GetAllFilesInPageState(
-    const std::string& encoded,
-    std::vector<base::FilePath>* files);
 
 #if BUILDFLAG(IS_ANDROID)
 BLINK_COMMON_EXPORT bool DecodePageStateWithDeviceScaleFactorForTesting(

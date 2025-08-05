@@ -17,7 +17,6 @@
 #include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/containers/contains.h"
-#include "base/debug/stack_trace.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
@@ -1527,19 +1526,6 @@ const Display& DisplayManager::GetFakePrimaryDisplay() {
 
 size_t DisplayManager::GetNumDisplays() const {
   return active_display_list_.size();
-}
-
-size_t DisplayManager::GetNumExternalDisplays() const {
-  if (display::HasInternalDisplay()) {
-    size_t count = 0;
-    for (int64_t id : connected_display_id_list_) {
-      if (!IsInternalDisplayId(id)) {
-        count += 1;
-      }
-    }
-    return count;
-  }
-  return num_connected_displays();
 }
 
 bool DisplayManager::IsActiveDisplayId(int64_t display_id) const {

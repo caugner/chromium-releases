@@ -5,7 +5,9 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_NEW_TAB_FOOTER_FOOTER_WEB_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_NEW_TAB_FOOTER_FOOTER_WEB_VIEW_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/ui/webui/new_tab_footer/new_tab_footer_ui.h"
 #include "chrome/browser/ui/webui/top_chrome/webui_contents_wrapper.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/mojom/menu_source_type.mojom.h"
@@ -39,7 +41,7 @@ class NewTabFooterWebView : public views::WebView,
   NewTabFooterWebView& operator=(const NewTabFooterWebView&) = delete;
   ~NewTabFooterWebView() override;
 
-  void ShowUI(base::TimeTicks load_start);
+  void ShowUI(base::TimeTicks load_start, GURL url);
 
   // WebUIContentsWrapper::Host:
   void ShowUI() override;
@@ -52,12 +54,16 @@ class NewTabFooterWebView : public views::WebView,
                            const input::NativeWebKeyboardEvent& event) override;
 
  private:
+  // The URL of tab that the footer is attached to.
+  // This URL is updated on navigation or tab change when the footer needs to be
+  // shown.
+  GURL attached_tab_url_;
   std::unique_ptr<views::MenuRunner> context_menu_runner_;
   std::unique_ptr<ui::MenuModel> context_menu_model_;
   // Processes keyboard events not handled by the renderer.
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
   raw_ptr<BrowserWindowInterface> browser_;
-  std::unique_ptr<WebUIContentsWrapper> contents_wrapper_;
+  std::unique_ptr<WebUIContentsWrapperT<NewTabFooterUI>> contents_wrapper_;
 
   base::WeakPtrFactory<NewTabFooterWebView> weak_factory_{this};
 };

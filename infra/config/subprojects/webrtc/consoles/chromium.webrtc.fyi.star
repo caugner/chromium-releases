@@ -2,28 +2,18 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("//console-header.star", "get_header")
+load("//console-header.star", "HEADER")
 
 luci.console_view(
     name = "chromium.webrtc.fyi",
     repo = "https://webrtc.googlesource.com/src",
     refs = ["refs/heads/master", "refs/heads/main"],
-    header = get_header(),
+    header = HEADER,
     entries = [
-        luci.console_view_entry(
-            builder = "webrtc.fyi/WebRTC Chromium FYI Android Builder (dbg)",
-            category = "android|debug|builder",
-            short_name = "32",
-        ),
         luci.console_view_entry(
             builder = "webrtc.fyi/WebRTC Chromium FYI Android Builder ARM64 (dbg)",
             category = "android|debug|builder",
             short_name = "64",
-        ),
-        luci.console_view_entry(
-            builder = "webrtc.fyi/WebRTC Chromium FYI Android Tests (dbg)",
-            category = "android|debug|tester",
-            short_name = "32",
         ),
         luci.console_view_entry(
             builder = "webrtc.fyi/WebRTC Chromium FYI Android Tests ARM64 (dbg)",

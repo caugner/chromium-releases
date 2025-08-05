@@ -21,12 +21,12 @@
 #include "base/containers/circular_deque.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
+#include "base/containers/to_vector.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
-#include "base/functional/overloaded.h"
 #include "base/memory/raw_ref.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
@@ -77,6 +77,7 @@
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/attribution_utils.h"
 #include "services/network/public/mojom/attribution.mojom-forward.h"
+#include "third_party/abseil-cpp/absl/functional/overload.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom.h"
@@ -2334,7 +2335,29 @@ void AttributionDataHostManagerImpl::ClearRegistrationsDeferUntilNavigation(
   if (!BackgroundRegistrationsEnabled()) {
     return;
   }
-  for (auto it = registrations_.begin(); it != registrations_.end(); ++it) {
+
+  // Iterate over a copy of the IDs to avoid concurrent modification of
+  // `registrations_` from the ultimate call to
+  // `MaybeOnRegistrationsFinished()`, which erases from that set, and from any
+  // recursive call to this method itself. This assumes that registration IDs
+  // are unique for the entire recursive call stack, but we believe that to be
+  // true, because we never *insert* into `registrations_` in that call stack.
+  // See http://crbug.com/427800555 for crashes due to iterator invalidation
+  // resulting from the concurrent modification.
+
+  std::vector<RegistrationsId> registration_ids =
+      base::ToVector(registrations_, &Registrations::id);
+
+  for (auto id : registration_ids) {
+    auto it = registrations_.find(id);
+
+    bool ok = it != registrations_.end();
+    base::UmaHistogramBoolean("Conversions.DataHostRegistrationInSet", ok);
+
+    if (!ok) {
+      continue;
+    }
+
     if (it->defer_until_navigation() == navigation_id) {
       it->ClearDeferUntilNavigation();
       if (!it->pending_registration_data().empty()) {
@@ -2407,7 +2430,7 @@ void AttributionDataHostManagerImpl::MaybeLogAuditIssueAndReportHeaderError(
           registration_type] = std::move(pending_decode);
 
   AttributionReportingIssueType issue_type = std::visit(
-      base::Overloaded{
+      absl::Overload{
           [](SourceRegistrationError) {
             return AttributionReportingIssueType::kInvalidRegisterSourceHeader;
           },

@@ -779,7 +779,7 @@ void PageHandler::Reload(std::optional<bool> bypassCache,
   }
 }
 
-static network::mojom::ReferrerPolicy ParsePolicyFromString(
+static std::optional<network::mojom::ReferrerPolicy> ParsePolicyFromString(
     const std::string& policy) {
   if (policy == Page::ReferrerPolicyEnum::NoReferrer)
     return network::mojom::ReferrerPolicy::kNever;
@@ -798,9 +798,7 @@ static network::mojom::ReferrerPolicy ParsePolicyFromString(
   }
   if (policy == Page::ReferrerPolicyEnum::UnsafeUrl)
     return network::mojom::ReferrerPolicy::kAlways;
-
-  DCHECK(policy.empty());
-  return network::mojom::ReferrerPolicy::kDefault;
+  return std::nullopt;
 }
 
 namespace {
@@ -857,9 +855,7 @@ void PageHandler::Navigate(const std::string& url,
 
   // chrome-untrusted:// WebUIs might perform high-priviledged actions on
   // navigation, disallow navigation to them unless the client is trusted.
-  if ((gurl.SchemeIs(kChromeUIUntrustedScheme) ||
-       gurl.SchemeIs(kChromeDevToolsScheme)) &&
-      !is_trusted_) {
+  if (gurl.SchemeIs(kChromeUIUntrustedScheme) && !is_trusted_) {
     callback->sendFailure(Response::ServerError(
         "Navigating to a URL with a privileged scheme is not allowed"));
     return;
@@ -908,9 +904,18 @@ void PageHandler::Navigate(const std::string& url,
     return;
   }
 
-  NavigationController::LoadURLParams params(gurl);
   network::mojom::ReferrerPolicy policy =
-      ParsePolicyFromString(referrer_policy.value_or(""));
+      network::mojom::ReferrerPolicy::kDefault;
+  if (referrer_policy.has_value()) {
+    const auto& parsed_policy = ParsePolicyFromString(referrer_policy.value());
+    if (!parsed_policy.has_value()) {
+      callback->sendFailure(Response::InvalidParams("Invalid referrerPolicy"));
+      return;
+    }
+    policy = parsed_policy.value();
+  }
+
+  NavigationController::LoadURLParams params(gurl);
   params.referrer = Referrer(GURL(referrer.value_or("")), policy);
   params.transition_type = type;
   params.frame_tree_node_id = frame_tree_node->frame_tree_node_id();
@@ -2091,7 +2096,7 @@ DisableForRenderFrameHostReasonToProtocol(
           return Page::BackForwardCacheNotRestoredReasonEnum::
               EmbedderOfflinePage;
         case back_forward_cache::DisabledReasonId::
-            kChromePasswordManagerClient_BindCredentialManager:
+            kContentCredentialManager_BindCredentialManager:
           return Page::BackForwardCacheNotRestoredReasonEnum::
               EmbedderChromePasswordManagerClientBindCredentialManager;
         case back_forward_cache::DisabledReasonId::kPermissionRequestManager:

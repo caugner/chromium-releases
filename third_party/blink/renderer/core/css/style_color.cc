@@ -131,24 +131,23 @@ StyleColor::UnresolvedRelativeColor::UnresolvedRelativeColor(
     const CSSValue& channel1,
     const CSSValue& channel2,
     const CSSValue* alpha,
-    const CSSToLengthConversionData& conversion_data)
+    const CSSLengthResolver& length_resolver)
     : UnresolvedColorFunction(UnresolvedColorFunction::Type::kRelativeColor),
       origin_color_(origin_color.color_or_unresolved_color_function_),
       origin_color_type_(ResolveColorOperandType(origin_color)),
       color_interpolation_space_(color_interpolation_space) {
   auto to_channel =
-      [&conversion_data](
-          const CSSValue& value) -> scoped_refptr<const CalculationValue> {
+      [&length_resolver](const CSSValue& value) -> const CalculationValue* {
     if (const CSSNumericLiteralValue* numeric =
             DynamicTo<CSSNumericLiteralValue>(value)) {
       if (numeric->IsPercentage()) {
-        return CalculationValue::Create(
+        return MakeGarbageCollected<CalculationValue>(
             PixelsAndPercent(0., numeric->DoubleValue(), false, true),
             Length::ValueRange::kAll);
       } else {
         // It's not actually a "pixels" value, but treating it as one simplifies
         // storage and resolution.
-        return CalculationValue::Create(
+        return MakeGarbageCollected<CalculationValue>(
             PixelsAndPercent(numeric->DoubleValue()), Length::ValueRange::kAll);
       }
     } else if (const CSSIdentifierValue* identifier =
@@ -156,16 +155,14 @@ StyleColor::UnresolvedRelativeColor::UnresolvedRelativeColor(
       if (identifier->GetValueID() == CSSValueID::kNone) {
         return nullptr;
       }
-      scoped_refptr<CalculationExpressionNode> expression =
-          base::MakeRefCounted<CalculationExpressionColorChannelKeywordNode>(
+      const CalculationExpressionNode* expression =
+          MakeGarbageCollected<CalculationExpressionColorChannelKeywordNode>(
               CSSValueIDToColorChannelKeyword(identifier->GetValueID()));
-      return CalculationValue::CreateSimplified(std::move(expression),
+      return CalculationValue::CreateSimplified(expression,
                                                 Length::ValueRange::kAll);
     } else if (const CSSMathFunctionValue* function =
                    DynamicTo<CSSMathFunctionValue>(value)) {
-      // TODO(crbug.com/428657802): This is a temporary fix, we shouldn't mix
-      // SVG "user units" and <number> type, as "user units" should be zoomed.
-      return function->ToCalcValue(conversion_data.Unzoomed());
+      return function->ToCalcValue(length_resolver);
     } else {
       NOTREACHED();
     }
@@ -183,8 +180,8 @@ StyleColor::UnresolvedRelativeColor::UnresolvedRelativeColor(
     // of the origin color (rather than defaulting to 100%, as it does in the
     // absolute syntax).
     alpha_was_specified_ = false;
-    scoped_refptr<CalculationExpressionNode> expression =
-        base::MakeRefCounted<CalculationExpressionColorChannelKeywordNode>(
+    const CalculationExpressionNode* expression =
+        MakeGarbageCollected<CalculationExpressionColorChannelKeywordNode>(
             ColorChannelKeyword::kAlpha);
     alpha_ = CalculationValue::CreateSimplified(std::move(expression),
                                                 Length::ValueRange::kAll);
@@ -194,11 +191,15 @@ StyleColor::UnresolvedRelativeColor::UnresolvedRelativeColor(
 void StyleColor::UnresolvedRelativeColor::Trace(Visitor* visitor) const {
   UnresolvedColorFunction::Trace(visitor);
   visitor->Trace(origin_color_);
+  visitor->Trace(channel0_);
+  visitor->Trace(channel1_);
+  visitor->Trace(channel2_);
+  visitor->Trace(alpha_);
 }
 
 CSSValue* StyleColor::UnresolvedRelativeColor::ToCSSValue() const {
-  auto to_css_value = [](const scoped_refptr<const CalculationValue>& channel)
-      -> const CSSValue* {
+  auto to_css_value =
+      [](const Member<const CalculationValue>& channel) -> const CSSValue* {
     if (channel == nullptr) {
       return CSSIdentifierValue::Create(CSSValueID::kNone);
     }
@@ -211,11 +212,11 @@ CSSValue* StyleColor::UnresolvedRelativeColor::ToCSSValue() const {
             channel->Pixels(), CSSPrimitiveValue::UnitType::kNumber);
       }
     }
-    scoped_refptr<const CalculationExpressionNode> expression =
+    const CalculationExpressionNode* expression =
         channel->GetOrCreateExpression();
     if (expression->IsColorChannelKeyword()) {
       return CSSIdentifierValue::Create(ColorChannelKeywordToCSSValueID(
-          To<CalculationExpressionColorChannelKeywordNode>(expression.get())
+          To<CalculationExpressionColorChannelKeywordNode>(expression)
               ->Value()));
     } else {
       return CSSMathFunctionValue::Create(
@@ -287,13 +288,13 @@ Color StyleColor::UnresolvedRelativeColor::Resolve(
   };
 
   std::array<std::optional<double>, 3> params = {
-      to_channel_value(channel0_.get(),
+      to_channel_value(channel0_.Get(),
                        function_metadata.channel_percentage[0]),
-      to_channel_value(channel1_.get(),
+      to_channel_value(channel1_.Get(),
                        function_metadata.channel_percentage[1]),
-      to_channel_value(channel2_.get(),
+      to_channel_value(channel2_.Get(),
                        function_metadata.channel_percentage[2])};
-  std::optional<double> param_alpha = to_channel_value(alpha_.get(), 1.f);
+  std::optional<double> param_alpha = to_channel_value(alpha_.Get(), 1.f);
   ColorFunctionParser::MakePerColorSpaceAdjustments(
       /*is_relative_color=*/true,
       /*is_legacy_syntax=*/false, color_interpolation_space_, params,

@@ -2,11 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-load("@chromium-luci//builder_config.star", "builder_config")
-load("@chromium-luci//builders.star", "builder", "cpu", "defaults", "os")
-load("@chromium-luci//gn_args.star", "gn_args")
-load("@chromium-luci//targets.star", "targets")
-load("//lib/siso.star", "siso")
+load("//lib/builder_config.star", "builder_config")
+load("//lib/builders.star", "builder", "cpu", "defaults", "os", "siso")
+load("//lib/gn_args.star", "gn_args")
+load("//lib/targets.star", "targets")
 
 luci.bucket(
     name = "webrtc",
@@ -66,7 +65,6 @@ defaults.set(
         "perf_dashboard_machine_group": "ChromiumWebRTC",
     },
     service_account = "chromium-ci-builder@chops-service-accounts.iam.gserviceaccount.com",
-    siso_enabled = True,
     siso_project = siso.project.DEFAULT_TRUSTED,
     siso_remote_jobs = siso.remote_jobs.DEFAULT,
 )
@@ -142,7 +140,7 @@ builder(
             "webrtc_chromium_simple_gtests",
         ],
         mixins = [
-            "chromium_pixel_2_pie",
+            "panther_on_14",
         ],
     ),
     targets_settings = targets.settings(

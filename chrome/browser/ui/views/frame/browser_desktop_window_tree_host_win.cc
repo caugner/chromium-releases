@@ -265,13 +265,6 @@ bool BrowserDesktopWindowTreeHostWin::UsesNativeSystemMenu() const {
   return true;
 }
 
-void BrowserDesktopWindowTreeHostWin::ClientDestroyedWidget() {
-  system_menu_.reset();
-  browser_window_property_manager_.reset();
-  browser_frame_ = nullptr;
-  browser_view_ = nullptr;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserDesktopWindowTreeHostWin, views::DesktopWindowTreeHostWin overrides:
 
@@ -449,6 +442,10 @@ bool BrowserDesktopWindowTreeHostWin::PreHandleMSG(UINT message,
 void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
                                                     WPARAM w_param,
                                                     LPARAM l_param) {
+  if (!GetWidget()) {
+    return;
+  }
+
   switch (message) {
     case WM_SETFOCUS: {
       UpdateWorkspace();
@@ -541,6 +538,15 @@ bool BrowserDesktopWindowTreeHostWin::ShouldWindowContentsBeTransparent()
   CHECK(browser_view_);
   return !ShouldBrowserCustomDrawTitlebar(browser_view_) &&
          views::DesktopWindowTreeHostWin::ShouldWindowContentsBeTransparent();
+}
+
+void BrowserDesktopWindowTreeHostWin::ClientDestroyedWidget() {
+  profile_observation_.Reset();
+  system_menu_.reset();
+  browser_window_property_manager_.reset();
+  browser_frame_ = nullptr;
+  browser_view_ = nullptr;
+  DesktopWindowTreeHostWin::ClientDestroyedWidget();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

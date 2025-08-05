@@ -20,6 +20,7 @@
 #include "base/files/file_util.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/path_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -3494,7 +3495,6 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   VerifySearchQueryParameters(loaded_search_query->search_query_url_);
   VerifyTextQueriesAreEqual(loaded_search_query->search_query_url_,
                             first_search_url);
-  EXPECT_TRUE(loaded_search_query->selected_region_thumbnail_uri_.empty());
   EXPECT_FALSE(loaded_search_query->selected_region_);
   EXPECT_FALSE(loaded_search_query->selected_text_);
   EXPECT_FALSE(loaded_search_query->translate_options_);
@@ -3523,7 +3523,6 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   VerifySearchQueryParameters(loaded_search_query->search_query_url_);
   VerifyTextQueriesAreEqual(loaded_search_query->search_query_url_,
                             second_search_url);
-  EXPECT_TRUE(loaded_search_query->selected_region_thumbnail_uri_.empty());
   EXPECT_FALSE(loaded_search_query->selected_region_);
   EXPECT_FALSE(loaded_search_query->selected_text_);
   EXPECT_FALSE(loaded_search_query->translate_options_);
@@ -3546,7 +3545,6 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   VerifySearchQueryParameters(loaded_search_query->search_query_url_);
   VerifyTextQueriesAreEqual(loaded_search_query->search_query_url_,
                             first_search_url);
-  EXPECT_TRUE(loaded_search_query->selected_region_thumbnail_uri_.empty());
   EXPECT_FALSE(loaded_search_query->selected_region_);
   EXPECT_FALSE(loaded_search_query->selected_text_);
   EXPECT_FALSE(loaded_search_query->translate_options_);
@@ -4526,7 +4524,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, FindBarClosesOverlay) {
       [&]() { return controller->state() == State::kOverlay; }));
 
   // Open the find bar.
-  browser()->GetFindBarController()->Show();
+  browser()->GetFeatures().GetFindBarController()->Show();
 
   // Verify the overlay turns off.
   ASSERT_TRUE(base::test::RunUntil(
@@ -4600,10 +4598,8 @@ class LensOverlayControllerEntrypointsBrowserTest
   void SetupFeatureList() override {
     std::vector<base::test::FeatureRefAndParams> enabled_features = {
         {lens::features::kLensOverlay, {}},
-        {lens::features::kLensOverlayContextualSearchbox,
-         {
-
-         }},
+        {lens::features::kLensOverlayContextualSearchbox, {}},
+        {lens::features::kLensOverlayOmniboxEntryPoint, {}},
         {lens::features::kLensOverlaySurvey, {}},
         {lens::features::kLensOverlaySidePanelOpenInNewTab, {}}};
     if (IsPageActionsMigrationEnabled()) {
@@ -5255,8 +5251,10 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserFullscreenDisabled,
       [&]() { return controller->state() == State::kOverlay; }));
 
   // Enter into fullscreen mode.
-  FullscreenController* fullscreen_controller =
-      browser()->exclusive_access_manager()->fullscreen_controller();
+  FullscreenController* fullscreen_controller = browser()
+                                                    ->GetFeatures()
+                                                    .exclusive_access_manager()
+                                                    ->fullscreen_controller();
   content::WebContents* tab_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   fullscreen_controller->EnterFullscreenModeForTab(
@@ -5281,8 +5279,10 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserFullscreenDisabled,
       IDC_CONTENT_CONTEXT_LENS_OVERLAY));
 
   // Enter into fullscreen mode.
-  FullscreenController* fullscreen_controller =
-      browser()->exclusive_access_manager()->fullscreen_controller();
+  FullscreenController* fullscreen_controller = browser()
+                                                    ->GetFeatures()
+                                                    .exclusive_access_manager()
+                                                    ->fullscreen_controller();
   content::WebContents* tab_web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   fullscreen_controller->EnterFullscreenModeForTab(
@@ -6344,6 +6344,11 @@ class LensOverlayControllerBrowserWithPixelsTest
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(::switches::kEnablePixelOutputInTests);
     InProcessBrowserTest::SetUpCommandLine(command_line);
+  }
+
+  void SetupFeatureList() override {
+    feature_list_.InitAndDisableFeature(
+        lens::features::kLensOverlayVisualSelectionUpdates);
   }
 
   bool IsNotEmptyAndNotTransparentBlack(SkBitmap bitmap) {

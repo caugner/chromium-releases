@@ -84,7 +84,7 @@ class WebGLObject : public ScriptWrappable {
   // This indicates whether the client side has already issued a delete call,
   // not whether the OpenGL resource is deleted. Object()==0, or !HasObject(),
   // indicates that the OpenGL resource has been deleted.
-  bool MarkedForDeletion() { return marked_for_deletion_; }
+  bool MarkedForDeletion() const { return marked_for_deletion_; }
 
   // True if this object belongs to the group or context.
   bool Validate(const WebGLContextObjectSupport*) const;
@@ -123,9 +123,9 @@ class WebGLObject : public ScriptWrappable {
 
   GLuint object_ = 0;
 
-  // The context generation number of the associated WebGLContext when the
-  // object was created, to prevent reuse in later generations.
-  uint64_t context_generation_at_creation_;
+  // This was the number of context losses of the object's associated
+  // WebGLContext at the time this object was created.
+  uint32_t cached_number_of_context_losses_;
 
   unsigned attachment_count_ = 0;
 
