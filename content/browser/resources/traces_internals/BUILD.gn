@@ -38,6 +38,10 @@ generate_grd("bufbuild_grdp") {
       [ "wire/index.rollup.js|@bufbuild/protobuf/wire/index.js" ]
 }
 
+# This proto library is a workaround needed specifically for traces_internals.
+# This should not be used generally in WebUI without first consulting with the
+# WebUI team.
+# See http://crrev.com/c/6823635/comments/3315c843_b662261c for more details.
 proto_library("config_proto") {
   sources =
       [ "//third_party/perfetto/protos/perfetto/config/perfetto_config.proto" ]
@@ -59,6 +63,7 @@ build_webui("build") {
   ts_files = [
     "app.html.ts",
     "app.ts",
+    "trace_util.ts",
     "trace_report.html.ts",
     "trace_report.ts",
     "traces_browser_proxy.ts",
@@ -75,6 +80,7 @@ build_webui("build") {
   css_files = [
     "app.css",
     "trace_recorder.css",
+    "config_toggle.css",
     "trace_report_list.css",
     "trace_report.css",
     "tracing_scenarios_config.css",

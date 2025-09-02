@@ -10,6 +10,8 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "ash/public/cpp/login_screen_test_api.h"
+#include "ash/root_window_controller.h"
+#include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/functional/bind.h"
@@ -87,6 +89,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/login/login_display_host.h"
 #include "chrome/browser/ui/ash/login/webui_login_view.h"
+#include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/consolidated_consent_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/display_size_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/error_screen_handler.h"
@@ -135,7 +138,8 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "google_apis/gaia/gaia_id.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/register_basic_auth_handler.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "remoting/host/chromeos/features.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
@@ -1600,13 +1604,15 @@ class WizardControllerProxyAuthOnSigninTest : public OobeBaseTest {
       const WizardControllerProxyAuthOnSigninTest&) = delete;
 
  protected:
-  WizardControllerProxyAuthOnSigninTest()
-      : proxy_server_(net::SpawnedTestServer::TYPE_BASIC_AUTH_PROXY,
-                      base::FilePath()) {}
+  WizardControllerProxyAuthOnSigninTest() {}
   ~WizardControllerProxyAuthOnSigninTest() override = default;
 
   // WizardControllerTest:
   void SetUp() override {
+    // No need to configure the "proxy" test server to proxy anything. This test
+    // only requires the configured "proxy" return proxy auth challenges.
+    net::test_server::RegisterProxyBasicAuthHandler(proxy_server_, "user",
+                                                    "pass");
     ASSERT_TRUE(proxy_server_.Start());
     OobeBaseTest::SetUp();
   }
@@ -1617,12 +1623,11 @@ class WizardControllerProxyAuthOnSigninTest : public OobeBaseTest {
                                     proxy_server_.host_port_pair().ToString());
   }
 
-  net::SpawnedTestServer& proxy_server() { return proxy_server_; }
-
  private:
   DeviceStateMixin device_state_{
       &mixin_host_, DeviceStateMixin::State::OOBE_COMPLETED_CLOUD_ENROLLED};
-  net::SpawnedTestServer proxy_server_;
+  net::test_server::EmbeddedTestServer proxy_server_{
+      net::test_server::EmbeddedTestServer::Type::TYPE_HTTP};
 };
 
 // TODO(crbug.com/1286218): Flakes on CrOS.
@@ -2549,6 +2554,17 @@ IN_PROC_BROWSER_TEST_F(WizardControllerTest, SkipGaiaInfoForChildAccount) {
   test::WaitForConsumerUpdateScreen();
   test::ExitConsumerUpdateScreenNoUpdate();
   OobeScreenWaiter(AddChildScreenView::kScreenId).Wait();
+}
+
+// Showing the system tray on the kiosk splash screen is a source of exploits.
+// Ensure we don't.
+IN_PROC_BROWSER_TEST_F(WizardControllerTest, SystemTrayShouldBeDisabledOnKioskSplashScreen) {
+  WaitForOobeUI();
+  WizardController::default_controller()->AdvanceToScreen(
+      AppLaunchSplashScreenView::kScreenId);
+  OobeScreenWaiter(AppLaunchSplashScreenView::kScreenId).Wait();
+
+  ASSERT_FALSE(Shell::GetPrimaryRootWindowController()->IsSystemTrayVisible());
 }
 
 class WizardControllerGaiaTest : public WizardControllerTest {

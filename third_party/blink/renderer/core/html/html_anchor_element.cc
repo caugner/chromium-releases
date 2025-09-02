@@ -619,19 +619,19 @@ void HTMLAnchorElementBase::NavigateToHyperlink(
   }
 }
 
-Element* HTMLAnchorElementBase::InterestTargetElement() const {
-  if (!RuntimeEnabledFeatures::HTMLInterestTargetAttributeEnabled(
+Element* HTMLAnchorElementBase::InterestForElement() const {
+  if (!RuntimeEnabledFeatures::HTMLInterestForAttributeEnabled(
           GetDocument().GetExecutionContext())) {
     return nullptr;
   }
   // Anchor elements that don't have the `href` attribute are not interactive,
-  // so they can't support `interesttarget`.
+  // so they can't support `interestfor`.
   if (!IsInTreeScope() || !IsLink()) {
     return nullptr;
   }
 
   return GetElementAttributeResolvingReferenceTarget(
-      html_names::kInteresttargetAttr);
+      html_names::kInterestforAttr);
 }
 
 void HTMLAnchorElementBase::HandleClick(MouseEvent& event) {
@@ -855,10 +855,10 @@ Element* HTMLAnchorElement::ScrollTargetElement() const {
 PaintLayerScrollableArea*
 HTMLAnchorElement::AncestorScrollableAreaOfScrollTargetElement() const {
   Element* scroll_target = ScrollTargetElement();
-  if (!scroll_target || !scroll_target->GetLayoutBox()) {
+  if (!scroll_target || !scroll_target->GetLayoutObject()) {
     return nullptr;
   }
-  for (LayoutBox* parent_box = scroll_target->GetLayoutBox()->ParentBox();
+  for (LayoutBox* parent_box = scroll_target->GetLayoutObject()->EnclosingBox();
        parent_box; parent_box = parent_box->ParentBox()) {
     if (ScrollableArea* scrollable_area =
             scroll_into_view_util::GetScrollableAreaForLayoutBox(

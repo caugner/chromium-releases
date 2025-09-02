@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "base/gtest_prod_util.h"
-#include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
+#include "base/timer/elapsed_timer.h"
 #include "chrome/browser/glic/fre/glic_fre.mojom.h"
 #include "chrome/browser/glic/host/auth_controller.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
@@ -35,6 +35,20 @@ class Widget;
 namespace glic {
 
 class GlicFreDialogView;
+
+// This enum is used to record the reason for the FRE error state.
+// These values are persisted to logs.
+// LINT.IfChange(FreErrorStateReason)
+enum class FreErrorStateReason {
+  // Sign-in is required.
+  kSignInRequired = 0,
+  // Error while re-syncing cookies before showing FRE.
+  kErrorResyncingCookies = 1,
+  // Timeout exceeded during loading error.
+  kTimeoutExceeded = 2,
+  kMaxValue = kTimeoutExceeded,
+};
+// LINT.ThenChange(tools/metrics/histograms/metadata/glic/enums.xml:FreErrorStateReason)
 
 // This class owns and manages the glic FRE modal dialog, and is owned by a
 // GlicWindowController.
@@ -85,7 +99,7 @@ class GlicFreController {
   void AcceptFre();
 
   // Closes the FRE dialog.
-  void DismissFre();
+  void DismissFre(mojom::FreWebUiState panel);
 
   // Used when the native window is closed directly.
   void CloseWithReason(views::Widget::ClosedReason reason);
@@ -93,11 +107,11 @@ class GlicFreController {
   // Re-sync cookies to FRE webview.
   void PrepareForClient(base::OnceCallback<void(bool)> callback);
 
+  // Loading timeout was exceeded.
+  void ExceededTimeoutError();
+
   // Notify FRE controller that the user clicked on a link.
   void OnLinkClicked(const GURL& url);
-
-  // Notify FRE controller that the user clicked "no thanks" in the FRE.
-  void OnNoThanksClicked();
 
   // Attempts to warm the FRE web contents.
   void TryPreload();
@@ -115,9 +129,13 @@ class GlicFreController {
 
   bool IsShowingDialog() const;
 
+  bool IsShowingDialogAndStateInitialized() const;
+
   gfx::Size GetFreInitialSize();
 
   void UpdateFreWidgetSize(const gfx::Size& new_size);
+
+  void LogWebUiLoadComplete();
 
   AuthController& GetAuthControllerForTesting() { return auth_controller_; }
 
@@ -165,8 +183,17 @@ class GlicFreController {
   base::RepeatingCallbackList<void(mojom::FreWebUiState)>
       webui_state_callback_list_;
 
-  // The timestamp when the FRE window is shown.
-  base::TimeTicks show_start_time_;
+  // Tracks elapsed time between the request for the FRE to show to the time it
+  // is fully loaded and showing.
+  std::optional<base::ElapsedTimer> presentation_timer_;
+
+  // Tracks elapsed time between the start of the WebUI framework loading and
+  // the moment it's fully loaded. This ends right before the web client begins loading.
+  std::optional<base::ElapsedTimer> webui_framework_load_timer_;
+
+  // Tracks elapsed time between the start of the web client loading and the
+  // moment it's fully loaded.
+  std::optional<base::ElapsedTimer> web_client_load_timer_;
 
   base::WeakPtrFactory<GlicFreController> weak_ptr_factory_{this};
 };

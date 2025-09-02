@@ -21,6 +21,9 @@ public class InstanceSwitcherItemProperties {
     public static final PropertyModel.WritableBooleanPropertyKey ENABLE_COMMAND =
             new PropertyModel.WritableBooleanPropertyKey();
 
+    public static final PropertyModel.WritableObjectPropertyKey<String> MAX_INFO_TEXT =
+            new PropertyModel.WritableObjectPropertyKey<>();
+
     public static final PropertyModel.WritableObjectPropertyKey<Drawable> FAVICON =
             new PropertyModel.WritableObjectPropertyKey<>();
 
@@ -42,9 +45,6 @@ public class InstanceSwitcherItemProperties {
     public static final PropertyModel.WritableObjectPropertyKey<String> LAST_ACCESSED =
             new PropertyModel.WritableObjectPropertyKey<>();
 
-    public static final PropertyModel.WritableObjectPropertyKey<View.OnClickListener>
-            CLOSE_BUTTON_CLICK_LISTENER = new PropertyModel.WritableObjectPropertyKey<>();
-
     public static final PropertyModel.WritableBooleanPropertyKey IS_SELECTED =
             new PropertyModel.WritableBooleanPropertyKey();
 
@@ -52,6 +52,7 @@ public class InstanceSwitcherItemProperties {
             new PropertyKey[] {
                 CURRENT,
                 ENABLE_COMMAND,
+                MAX_INFO_TEXT,
                 FAVICON,
                 TITLE,
                 DESC,
@@ -59,7 +60,6 @@ public class InstanceSwitcherItemProperties {
                 CLICK_LISTENER,
                 MORE_MENU,
                 LAST_ACCESSED,
-                CLOSE_BUTTON_CLICK_LISTENER,
                 IS_SELECTED
             };
 }

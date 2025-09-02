@@ -134,14 +134,10 @@ void StorageServiceImpl::BindLocalStorageControl(
       return;
     }
 
-    auto iter = persistent_local_storage_map_.find(*path);
-    bool found = iter != persistent_local_storage_map_.end();
-    // The map shouldn't contain an entry for this path. We should only bind a
-    // LocalStorage mojom::Receiver once.
-    CHECK(!found, base::NotFatalUntil::M140);
     // TODO(crbug.com/396030877): Remove this workaround to remove the
     // pre-existing LocalStorage once the issue is resolved.
-    if (found) {
+    auto iter = persistent_local_storage_map_.find(*path);
+    if (iter != persistent_local_storage_map_.end()) {
       ShutDownAndRemoveLocalStorage(iter->second);
     }
   }
@@ -167,14 +163,10 @@ void StorageServiceImpl::BindSessionStorageControl(
       return;
     }
 
-    auto iter = persistent_session_storage_map_.find(*path);
-    bool found = iter != persistent_session_storage_map_.end();
-    // The map shouldn't contain an entry for this path. We should only bind a
-    // SessionStorage mojom::Receiver once.
-    CHECK(!found, base::NotFatalUntil::M140);
     // TODO(crbug.com/396030877): Remove this workaround to remove the
     // pre-existing SessionStorage once the issue is resolved.
-    if (found) {
+    auto iter = persistent_session_storage_map_.find(*path);
+    if (iter != persistent_session_storage_map_.end()) {
       ShutDownAndRemoveSessionStorage(iter->second);
     }
   }

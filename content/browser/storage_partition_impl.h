@@ -47,7 +47,6 @@
 #include "services/network/public/mojom/device_bound_sessions.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_context_client.mojom.h"
-#include "storage/browser/blob/blob_url_registry.h"
 #include "storage/browser/quota/quota_client_type.h"
 #include "storage/browser/quota/quota_settings.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
@@ -71,6 +70,7 @@ class DeviceBoundSessionAccessObserver;
 }  // namespace network
 
 namespace storage {
+class BlobUrlRegistry;
 struct BucketClientInfo;
 class SharedStorageManager;
 }
@@ -372,12 +372,6 @@ class CONTENT_EXPORT StoragePartitionImpl
       const scoped_refptr<net::HttpResponseHeaders>& head_headers,
       mojo::PendingRemote<network::mojom::AuthChallengeResponder>
           auth_challenge_responder) override;
-  void OnPrivateNetworkAccessPermissionRequired(
-      const GURL& url,
-      const net::IPAddress& ip_address,
-      const std::optional<std::string>& private_network_device_id,
-      const std::optional<std::string>& private_network_device_name,
-      OnPrivateNetworkAccessPermissionRequiredCallback callback) override;
   void OnLocalNetworkAccessPermissionRequired(
       OnLocalNetworkAccessPermissionRequiredCallback callback) override;
   void OnClearSiteData(
@@ -548,6 +542,12 @@ class CONTENT_EXPORT StoragePartitionImpl
   void SetClearNoncesInNetworkContextParamsForTesting(
       const base::TimeDelta& delay,
       base::RepeatingClosure callback);
+
+  // Increments/decrements/gets the active document count tracked in
+  // `active_document_per_nik_count_`.
+  void IncrementActiveDocumentCount(const net::NetworkIsolationKey& nik);
+  void DecrementActiveDocumentCount(const net::NetworkIsolationKey& nik);
+  int GetActiveDocumentCount(const net::NetworkIsolationKey& nik);
 
   enum class ContextType {
     kRenderFrameHostContext,
@@ -953,6 +953,10 @@ class CONTENT_EXPORT StoragePartitionImpl
   // execute when the task completes in order to test it.
   base::RepeatingClosure clear_nonces_in_network_context_callback_for_testing_ =
       base::DoNothing();
+
+  // Tracks the number of active documents within the same StoragePartition,
+  // keyed by NetworkIsolationKeys.
+  std::map<net::NetworkIsolationKey, int> active_document_per_nik_count_;
 
   base::WeakPtrFactory<StoragePartitionImpl> weak_factory_{this};
 };

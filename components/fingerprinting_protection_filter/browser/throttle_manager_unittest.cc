@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/390223051): Remove C-library calls to fix the errors.
-#pragma allow_unsafe_libc_calls
-#endif
-
 #include "components/fingerprinting_protection_filter/browser/throttle_manager.h"
 
 #include <map>
@@ -51,6 +46,7 @@
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "url/gurl.h"
 
 namespace subresource_filter {
@@ -85,13 +81,28 @@ enum PageActivationNotificationTiming {
   WILL_PROCESS_RESPONSE,
 };
 
-class FakeRendererAgent {
+class FakeRendererAgent : public mojom::FingerprintingProtectionAgent {
  public:
   explicit FakeRendererAgent(content::WebContents* web_contents) {
     ThrottleManager::BindReceiver(
         remote_.BindNewEndpointAndPassDedicatedReceiver(),
         &web_contents->GetPrimaryPage().GetMainDocument());
-    RequestActivation();
+  }
+
+  ~FakeRendererAgent() override = default;
+
+  void OnFingerprintingProtectionAgentReceiver(
+      mojo::ScopedInterfaceEndpointHandle handle) {
+    receiver_.reset();
+    receiver_.Bind(
+        mojo::PendingAssociatedReceiver<mojom::FingerprintingProtectionAgent>(
+            std::move(handle)));
+  }
+
+  // mojom::FingerprintingProtectionAgent:
+  void ActivateForNextCommittedLoad(
+      subresource_filter::mojom::ActivationStatePtr activation_state) override {
+    last_activation_ = std::move(activation_state);
   }
 
   std::optional<bool> LastActivated() {
@@ -104,18 +115,10 @@ class FakeRendererAgent {
   }
 
  private:
-  void RequestActivation() {
-    remote_->CheckActivation(base::BindOnce(
-        &FakeRendererAgent::OnActivationComputed, base::Unretained(this)));
-  }
-
-  void OnActivationComputed(
-      subresource_filter::mojom::ActivationStatePtr activation_state) {
-    last_activation_ = std::move(activation_state);
-  }
-
-  mojo::AssociatedRemote<mojom::FingerprintingProtectionHost> remote_;
   subresource_filter::mojom::ActivationStatePtr last_activation_;
+  mojo::AssociatedRemote<mojom::FingerprintingProtectionHost> remote_;
+  mojo::AssociatedReceiver<mojom::FingerprintingProtectionAgent> receiver_{
+      this};
 };
 
 // Simple throttle that sends page-level activation to the manager for a
@@ -403,6 +406,11 @@ class ThrottleManagerTest
   void CreateAgentForHost(content::RenderFrameHost* host) {
     auto new_agent = std::make_unique<FakeRendererAgent>(
         RenderViewHostTestHarness::web_contents());
+    host->GetRemoteAssociatedInterfaces()->OverrideBinderForTesting(
+        mojom::FingerprintingProtectionAgent::Name_,
+        base::BindRepeating(
+            &FakeRendererAgent::OnFingerprintingProtectionAgentReceiver,
+            base::Unretained(new_agent.get())));
     agent_map_[host] = std::move(new_agent);
   }
 
@@ -853,6 +861,32 @@ TEST_P(ThrottleManagerEnabledTest, SameSiteNavigationStopsActivation) {
       GURL("https://www.example.com/disallowed.html"), main_rfh());
   EXPECT_EQ(content::NavigationThrottle::PROCEED,
             SimulateStartAndGetResult(navigation_simulator()).action());
+}
+
+// Since subresource blocking happens on the Renderer process, it is possible
+// for the `ThrottleManager` to receive a notification of a blocked subresource
+// before it has gotten access to a `Page` object. In this case it should still
+// record a bit so that sending the corresponding notification to User Bypass
+// can be attempted once the page is available and becomes primary.
+TEST_P(ThrottleManagerEnabledTest,
+       NotifyBlockedSubresourceBeforePageCommitSucceeds) {
+  CreateTestNavigation(GURL(kTestURLWithActivation), main_rfh());
+  navigation_simulator()->Start();
+
+  auto* throttle_manager = ThrottleManager::FromNavigationHandle(
+      *navigation_simulator()->GetNavigationHandle());
+  auto* web_contents_helper =
+      FingerprintingProtectionWebContentsHelper::FromWebContents(
+          navigation_simulator()->GetNavigationHandle()->GetWebContents());
+  // Simulate getting notified of a blocked resource from the Renderer.
+  throttle_manager->MaybeNotifyOnBlockedResource(/*frame_host=*/nullptr);
+  // Check that the `ThrottleManager` records that a resource has been blocked.
+  EXPECT_TRUE(
+      throttle_manager->current_committed_load_has_notified_disallowed_load_);
+  // We should not notify further to avoid affecting UI while the
+  // `ThrottleManager` is not attached to a primary page.
+  EXPECT_FALSE(
+      web_contents_helper->subresource_blocked_in_current_primary_page());
 }
 
 // Basic test of throttle manager lifetime and getter methods. Ensure a new

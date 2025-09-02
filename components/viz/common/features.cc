@@ -48,6 +48,14 @@ BASE_FEATURE(kAndroidBcivBottomControls,
              "AndroidBcivBottomControls",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+// If this flag is enabled, a DumpWithoutCrashing() is captured when a bad
+// state is detected when moving the composited UI. For example, this could
+// mean scrolling without a resource, or OffsetTagValues trying to position
+// the UI outside of their valid constraints.
+BASE_FEATURE(kAndroidDumpForBadCompositedUiState,
+             "AndroidDumpForBadCompositedUiState",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 #endif  // BUILDFLAG(IS_ANDROID)
 
 BASE_FEATURE(kBackdropFilterMirrorEdgeMode,
@@ -102,6 +110,10 @@ const char kDrawQuadSplit[] = "num_of_splits";
 BASE_FEATURE(kDrawQuadSplitLimit,
              "DrawQuadSplitLimit",
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kEnableBackdropFiltersCullingOptimization,
+             "EnableBackdropFiltersCullingOptimization",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 constexpr base::FeatureParam<DelegatedCompositingMode>::Option
     kDelegatedCompositingModeOption[] = {
@@ -243,20 +255,11 @@ const base::FeatureParam<int> kCALayerNewLimitManyVideos{&kCALayerNewLimit,
 #endif
 
 #if BUILDFLAG(IS_MAC)
-// Whether the presentation should be delayed until the next CVDisplayLink
-// callback.
+// Whether the presentation should be delayed until the next DisplayLink
+// callback. Currently only for frames that handle interaction.
 BASE_FEATURE(kVSyncAlignedPresent,
              "VSyncAlignedPresent",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Present the frame at next VSync only if this frame handles interaction or
-// animation as described in kTargetForVSync. Three finch experiment groups for
-// kVSyncAlignedPresent.
-constexpr const char kTargetForVSyncAllFrames[] = "AllFrames";
-constexpr const char kTargetForVSyncAnimation[] = "Animation";
-constexpr const char kTargetForVSyncInteraction[] = "Interaction";
-const base::FeatureParam<std::string> kTargetForVSync{
-    &kVSyncAlignedPresent, "Target", kTargetForVSyncAllFrames};
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 BASE_FEATURE(kAllowUndamagedNonrootRenderPassToSkip,
@@ -466,6 +469,12 @@ int DrawQuadSplitLimit() {
                     kMaxDrawQuadSplitLimit);
 }
 
+bool IsBackdropFiltersCullingOptimizationEnabled() {
+  static bool is_enabled =
+      base::FeatureList::IsEnabled(kEnableBackdropFiltersCullingOptimization);
+  return is_enabled;
+}
+
 bool IsDelegatedCompositingEnabled() {
   return base::FeatureList::IsEnabled(kDelegatedCompositing);
 }
@@ -578,18 +587,35 @@ bool IsCrosContentAdjustedRefreshRateEnabled() {
 #if BUILDFLAG(IS_WIN)
 bool ShouldRemoveRedirectionBitmap() {
   // Limit to Win11 because there are a high number of D3D9 users on Win10;
-  // which requires the Redirection Bitmap. Additionally, software GL in tests
-  // can take the Swiftshader rendering path, which also needs the Redirection
-  // Bitmap. On devices with DComp disabled, ANGLE draws to the redirection
-  // bitmap via a blit swap chain, so check for the command line switch as well.
-  // 22H2 is specified because it is the lowest version supporting DWM system
-  // backdrop.
-  return base::win::GetVersion() >= base::win::Version::WIN11_22H2 &&
-         base::FeatureList::IsEnabled(kRemoveRedirectionBitmap) &&
-         !base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kOverrideUseSoftwareGLForTests) &&
-         !base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kDisableDirectComposition);
+  // which requires the redirection bitmap. 22H2 is specified because it is the
+  // lowest version supporting DWM system backdrop.
+  if (base::win::GetVersion() < base::win::Version::WIN11_22H2) {
+    return false;
+  }
+
+  const auto* command_line = base::CommandLine::ForCurrentProcess();
+
+  // If direct composition is disabled say for testing, we will use an ANGLE
+  // EGLSurface which uses a BitBlt swap chain that needs a redirection surface.
+  if (command_line->HasSwitch(switches::kDisableDirectComposition)) {
+    return false;
+  }
+
+  // When using swiftshader for testing, we will also use an ANGLE EGLSurface.
+  if (command_line->HasSwitch(switches::kOverrideUseSoftwareGLForTests)) {
+    return false;
+  }
+
+  // Some users set ANGLE backend to D3D9 or OpenGL via chrome://flags and in
+  // that case too we would also use an ANGLE EGLSurface.
+  const std::string angle_backend =
+      command_line->GetSwitchValueASCII(switches::kUseANGLE);
+  if (angle_backend == gl::kANGLEImplementationD3D9Name ||
+      angle_backend == gl::kANGLEImplementationOpenGLName) {
+    return false;
+  }
+
+  return base::FeatureList::IsEnabled(kRemoveRedirectionBitmap);
 }
 #endif
 

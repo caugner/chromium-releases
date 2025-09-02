@@ -25,6 +25,8 @@ import {sanitizeInnerHtml} from 'chrome://resources/js/parse_html_subset.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {PasswordManagerImpl, PasswordManagerPage} from '../autofill_page/password_manager_proxy.js';
+import type {MetricsBrowserProxy} from '../metrics_browser_proxy.js';
+import {MetricsBrowserProxyImpl} from '../metrics_browser_proxy.js';
 
 import type {ClearBrowsingDataBrowserProxy, UpdateSyncStateEvent} from './clear_browsing_data_browser_proxy.js';
 import {ClearBrowsingDataBrowserProxyImpl} from './clear_browsing_data_browser_proxy.js';
@@ -34,10 +36,7 @@ import {getTemplate} from './other_google_data_dialog.html.js';
 export interface SettingsOtherGoogleDataDialogElement {
   $: {
     dialog: CrDialogElement,
-    googleSearchHistoryLink: CrLinkRowElement,
     passwordManagerLink: CrLinkRowElement,
-    myActivityLink: CrLinkRowElement,
-    nonGoogleSearchHistoryLink: HTMLElement,
   };
 }
 
@@ -80,6 +79,8 @@ export class SettingsOtherGoogleDataDialogElement extends
       ClearBrowsingDataBrowserProxyImpl.getInstance();
   private syncBrowserProxy_: SyncBrowserProxy =
       SyncBrowserProxyImpl.getInstance();
+  private metricsBrowserProxy_: MetricsBrowserProxy =
+      MetricsBrowserProxyImpl.getInstance();
 
   override ready() {
     super.ready();
@@ -117,16 +118,30 @@ export class SettingsOtherGoogleDataDialogElement extends
   private onPasswordManagerClick_() {
     PasswordManagerImpl.getInstance().showPasswordManager(
         PasswordManagerPage.PASSWORDS);
+
+    this.metricsBrowserProxy_.recordAction(
+        'Settings.DeleteBrowsingData.PasswordManagerLinkClick');
   }
 
   private onMyActivityLinkClick_() {
     OpenWindowProxyImpl.getInstance().openUrl(
         loadTimeData.getString('deleteBrowsingDataMyActivityUrl'));
+
+    this.metricsBrowserProxy_.recordAction(
+        'Settings.DeleteBrowsingData.MyActivityLinkClick');
   }
 
   private onGoogleSearchHistoryLinkClick_() {
     OpenWindowProxyImpl.getInstance().openUrl(
         loadTimeData.getString('deleteBrowsingDataSearchHistoryUrl'));
+
+    this.metricsBrowserProxy_.recordAction(
+        'Settings.DeleteBrowsingData.GoogleSearchHistoryLinkClick');
+  }
+
+  private onGeminiAppsActivityClick_() {
+    OpenWindowProxyImpl.getInstance().openUrl(
+        loadTimeData.getString('myActivityGeminiAppsUrl'));
   }
 
   private shouldShowMyActivityLink_() {
@@ -137,18 +152,10 @@ export class SettingsOtherGoogleDataDialogElement extends
     return isSignedIn(this.syncStatus_) && this.isGoogleDse_;
   }
 
-  private getMyActivityLinkCssClass_() {
-    if (!this.isGoogleDse_) {
-      return 'middle-link-row';
-    }
-    return 'last-link-row';
-  }
-
-  private getPasswordsLinkCssClass_() {
-    if (this.isGoogleDse_ && !isSignedIn(this.syncStatus_)) {
-      return 'only-link-row';
-    }
-    return 'first-link-row';
+  private shouldShowGeminiAppsActivityLink_() {
+    return isSignedIn(this.syncStatus_) &&
+        loadTimeData.getBoolean('showGlicSettings') &&
+        loadTimeData.getBoolean('enableBrowsingHistoryActorIntegrationM1');
   }
 }
 

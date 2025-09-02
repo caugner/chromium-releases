@@ -17,6 +17,7 @@
 #include "chrome/browser/interstitials/enterprise_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/chrome_enterprise_url_lookup_service_factory.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/safe_browsing/buildflags.h"
 #include "components/safe_browsing/core/browser/realtime/chrome_enterprise_url_lookup_service.h"
 #include "components/safe_browsing/core/browser/realtime/policy_engine.h"
@@ -27,6 +28,7 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/constants.h"
+#include "url/gurl.h"
 
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 #include "components/safe_browsing/core/browser/realtime/url_lookup_service_base.h"
@@ -45,6 +47,11 @@ constexpr char kURLVerdictSourceHistogram[] =
 
 // This is non-null in tests to install a fake service.
 safe_browsing::RealTimeUrlLookupServiceBase* g_lookup_service = nullptr;
+
+bool IsWatermarkWebUIURL(const GURL& url) {
+  return url.SchemeIs(content::kChromeUIScheme) &&
+         url.host_piece() == chrome::kChromeUIWatermarkHost;
+}
 
 content::Page& GetPageFromWebContents(content::WebContents* web_contents) {
   return web_contents->GetPrimaryMainFrame()->GetPage();
@@ -170,13 +177,14 @@ void DoLookup(safe_browsing::RealTimeUrlLookupServiceBase* lookup_service,
   DCHECK(!callback.is_null());
   DCHECK(IsEnterpriseLookupEnabled(web_contents->GetBrowserContext()));
   // The referring_app_info parameter to StartLookup is Android-specific.
-  lookup_service->StartLookup(
+  lookup_service->StartMaybeCachedLookup(
       url,
       base::BindOnce(&OnRealTimeLookupComplete, std::move(callback),
                      identifier),
       base::SequencedTaskRunner::GetCurrentDefault(),
       sessions::SessionTabHelper::IdForTab(web_contents),
-      /*referring_app_info=*/std::nullopt);
+      /*referring_app_info=*/std::nullopt, /*use_cache=*/
+      !base::FeatureList::IsEnabled(kEnableSinglePageAppDataProtection));
 }
 
 std::string GetIdentifier(content::BrowserContext* browser_context) {
@@ -214,6 +222,19 @@ DataProtectionNavigationObserver::CreateForNavigationIfNeeded(
     return nullptr;
   }
 
+  if (IsWatermarkWebUIURL(navigation_handle->GetURL())) {
+    UrlSettings settings;
+    // TODO(crbug.com/434714853): Replace with i18n string
+    settings.watermark_text = "Watermark Test Page";
+    std::move(callback).Run(settings);
+    return nullptr;
+  }
+
+  VLOG(1) << "enterprise.data_protection: same document navigation: "
+          << navigation_handle->IsSameDocument();
+  VLOG(1) << "enterprise.data_protection: URL to scan: "
+          << navigation_handle->GetURL();
+
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
   // The Data protection settings need to be cleared if:
   // 1. This is a skipped URL. This is needed to handle for example navigating
@@ -245,6 +266,13 @@ void DataProtectionNavigationObserver::ApplyDataProtectionSettings(
     Profile* profile,
     content::WebContents* web_contents,
     Callback callback) {
+  if (IsWatermarkWebUIURL(web_contents->GetLastCommittedURL())) {
+    UrlSettings settings;
+    // TODO(crbug.com/434714853): Replace with i18n string
+    settings.watermark_text = "Watermark Test Page";
+    std::move(callback).Run(settings);
+    return;
+  }
   auto* ud = GetUserData(web_contents);
   if (ud) {
     std::move(callback).Run(ud->settings());
@@ -350,7 +378,13 @@ void DataProtectionNavigationObserver::OnLookupComplete(
     std::unique_ptr<safe_browsing::RTLookupResponse> rt_lookup_response) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!is_from_cache_);
+  base::ScopedClosureRunner done(
+      base::BindOnce(&DataProtectionNavigationObserver::MaybeCleanup,
+                     weak_factory_.GetWeakPtr()));
   is_verdict_received_ = true;
+  if (!web_contents()) {
+    return;
+  }
   if (is_navigation_finished_) {
     OnDoLookupComplete(web_contents()->GetWeakPtr(),
                        std::move(pending_navigation_callback_), identifier_,
@@ -358,8 +392,6 @@ void DataProtectionNavigationObserver::OnLookupComplete(
   } else {
     rt_lookup_response_ = std::move(rt_lookup_response);
   }
-
-  MaybeCleanup();
 }
 
 bool DataProtectionNavigationObserver::ShouldPerformRealTimeUrlCheck(

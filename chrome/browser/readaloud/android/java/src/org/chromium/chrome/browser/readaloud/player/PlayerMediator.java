@@ -18,6 +18,9 @@ import android.widget.SeekBar.OnSeekBarChangeListener;
 import org.chromium.base.Callback;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
+import org.chromium.chrome.browser.browser_controls.BottomControlsStacker.LayerType;
+import org.chromium.chrome.browser.readaloud.ReadAloudFeatures;
 import org.chromium.chrome.browser.readaloud.ReadAloudMetrics;
 import org.chromium.chrome.browser.readaloud.ReadAloudPrefs;
 import org.chromium.chrome.modules.readaloud.Feedback.FeedbackType;
@@ -27,6 +30,7 @@ import org.chromium.chrome.modules.readaloud.PlaybackArgs.PlaybackMode;
 import org.chromium.chrome.modules.readaloud.PlaybackArgs.PlaybackModeSelectionEnablementStatus;
 import org.chromium.chrome.modules.readaloud.PlaybackArgs.PlaybackVoice;
 import org.chromium.chrome.modules.readaloud.PlaybackListener;
+import org.chromium.chrome.modules.readaloud.Player.Delegate;
 import org.chromium.chrome.modules.readaloud.contentjs.Highlighter.Mode;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -42,6 +46,7 @@ class PlayerMediator implements InteractionHandler {
     private final PlayerCoordinator mCoordinator;
     private final PlayerCoordinator.Delegate mDelegate;
     private final PropertyModel mModel;
+    private final BottomControlsStacker mBottomControlsStacker;
 
     /** Clock to use so we can mock time in tests. */
     public interface Clock {
@@ -183,11 +188,13 @@ class PlayerMediator implements InteractionHandler {
 
     PlayerMediator(
             PlayerCoordinator coordinator,
-            PlayerCoordinator.Delegate delegate,
-            PropertyModel model) {
+            Delegate delegate,
+            PropertyModel model,
+            BottomControlsStacker bottomControlsStacker) {
         mCoordinator = coordinator;
         mDelegate = delegate;
         mModel = model;
+        mBottomControlsStacker = bottomControlsStacker;
         mModel.set(PlayerProperties.INTERACTION_HANDLER, this);
 
         mDelegate.getCurrentLanguageVoicesSupplier().addObserver(mVoiceListObserver);
@@ -401,7 +408,7 @@ class PlayerMediator implements InteractionHandler {
         }
 
         ReadAloudPrefs.setSpeed(mDelegate.getPrefService(), newSpeed);
-        mPlayback.setRate(newSpeed);
+        mPlayback.setRate(resolveActualPlaybackSpeed(newSpeed));
         if (newSpeed >= 2.0f) {
             mDelegate.setHighlighterMode(Mode.TEXT_HIGHLIGHTING_MODE_PARAGRAPH);
         } else {
@@ -431,9 +438,23 @@ class PlayerMediator implements InteractionHandler {
     public void onShouldRestoreMiniPlayer() {
         @PlaybackListener.State int state = mModel.get(PlayerProperties.PLAYBACK_STATE);
         // TODO(b/352563278): All player UI should be made to work without a playback.
-        if (mPlayback != null || state == ERROR || state == BUFFERING || state == PLAYBACK_CREATION) {
-            mCoordinator.restoreMiniPlayer();
+        if (mPlayback != null
+                || state == ERROR
+                || state == BUFFERING
+                || state == PLAYBACK_CREATION) {
+            boolean bottomToolbarVisible =
+                    mBottomControlsStacker.isLayerVisible(LayerType.BOTTOM_TOOLBAR);
+            mCoordinator.restoreMiniPlayer(/* animate= */ !bottomToolbarVisible);
         }
+    }
+
+    private float resolveActualPlaybackSpeed(float requestedSpeed) {
+        if (assumeNonNull(assumeNonNull(mPlayback).getMetadata()).playbackMode()
+                != PlaybackMode.OVERVIEW) {
+            return requestedSpeed;
+        }
+        return requestedSpeed
+                + (float) ReadAloudFeatures.getAudioOverviewsSpeedAdditionPercentage() / 100.0f;
     }
 
     private void maybeSeekRelative(long nanos) {

@@ -2425,6 +2425,11 @@ EGL_FUNCTIONS = [
   'names': ['eglPostSubBufferNV'],
   'arguments': 'EGLDisplay dpy, EGLSurface surface, '
     'EGLint x, EGLint y, EGLint width, EGLint height', },
+{ 'return_type': 'EGLBoolean',
+  'versions': [{'name': 'eglPresentationTimeANDROID',
+                'extensions': ['EGL_ANDROID_presentation_time']}],
+  'arguments': 'EGLDisplay dpy, EGLSurface surface, EGLnsecsANDROID time',
+},
 { 'return_type': 'EGLenum',
   'names': ['eglQueryAPI'],
   'arguments': 'void', },
@@ -2623,7 +2628,9 @@ EGL_CLIENT_EXTENSIONS_EXTRA = [
   'EGL_ANGLE_platform_angle_null',
   'EGL_ANGLE_platform_angle_opengl',
   'EGL_ANGLE_platform_angle_vulkan',
+  'EGL_EXT_platform_base',
   'EGL_EXT_platform_device',
+  'EGL_KHR_platform_gbm',
   'EGL_MESA_platform_surfaceless',
 ]
 

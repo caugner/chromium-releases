@@ -379,7 +379,7 @@
 <translation id="4040753847560036377">Okerreko PUKa</translation>
 <translation id="4057991113334098539">Aktibatzen…</translation>
 <translation id="4092890906744441904">Irlandarra</translation>
-<translation id="4101601646343868113">Hasi saioa sare mugikorrean eta berretsi mugikorrerako datu-tarifa aktibo daukazula</translation>
+<translation id="4101601646343868113">Hasi saioa sare mugikorrean eta berretsi datu-konexioaren tarifa aktibo daukazula</translation>
 <translation id="4124731372776320263">Drive-ko fitxategi bat sinkronizatzen</translation>
 <translation id="4124935795427217608">Adarbakarra</translation>
 <translation id="4131235941541910880">Eraman zaborrontzira behar ez dituzun elementuak</translation>
@@ -680,7 +680,7 @@
 <translation id="6267547857941397424"><ph name="NETWORK_INDEX" />/<ph name="NETWORK_COUNT" />, <ph name="PHONE_NAME" />. Seinalearen indarra: % <ph name="SIGNAL_STRENGTH" />. Telefonoaren bateria: % <ph name="BATTERY_STATUS" />. Konektatu.</translation>
 <translation id="6269630227984243955">Malaysiarra</translation>
 <translation id="6271903698064569429">Ezin dira kargatu fitxategiak, <ph name="SHARED_DRIVE_NAME" /> unitate partekatuko biltegian ez dagoelako behar adina toki.</translation>
-<translation id="6279140785485544797">Agian iraungita dago mugikorrerako datu-tarifa. Laguntza jasotzeko, jarri operadorearekin harremanetan.</translation>
+<translation id="6279140785485544797">Agian iraungita dago datu-konexioaren tarifa. Laguntza jasotzeko, jarri operadorearekin harremanetan.</translation>
 <translation id="6287852322318138013">Hautatu fitxategia irekitzeko aplikazioa</translation>
 <translation id="6295542640242147836">Blokeatu SIMa</translation>
 <translation id="6296410173147755564">PUKak ez du balio</translation>
@@ -1004,7 +1004,7 @@
 <translation id="8569764466147087991">Hautatu irekitzeko fitxategi bat</translation>
 <translation id="8577897833047451336">Kroaziarra</translation>
 <translation id="8578308463707544055">Indonesiarra</translation>
-<translation id="8600173386174225982">Irudi txikiko ikuspegira aldatu da fitxategi-zerrenda.</translation>
+<translation id="8600173386174225982">Irudi txikien ikuspegira aldatu da fitxategi-zerrenda.</translation>
 <translation id="8601932370724196034">Crostini motako irudi-fitxategia</translation>
 <translation id="8609695766746872526">Islandiarra</translation>
 <translation id="8630384863424041081">Idatzi zure SIM txartelaren PINa edo operadoreak emandako PIN lehenetsia. Laguntza jasotzeko, jarri operadorearekin harremanetan.</translation>

@@ -11,6 +11,7 @@
 @class TabGroupIndicatorView;
 @protocol NewTabPageShortcutsHandler;
 @class OmniboxContainerView;
+@class NewTabPageColorPalette;
 
 // Header view for the NTP. The header view contains all views that are
 // displayed above the list of most visited sites, which includes the
@@ -127,6 +128,9 @@
 // Returns a snapshot view of the fakebox's buttons to be used during focus
 // and defocus animations.
 - (UIView*)fakeboxButtonsSnapshot;
+
+// Whether AIM is allowed.
+- (void)setAIMAllowed:(BOOL)allowed;
 
 @end
 

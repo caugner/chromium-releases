@@ -22,12 +22,13 @@ struct RenderFrameInfo {
  public:
   RenderFrameInfo();
   RenderFrameInfo(const RenderFrameInfo& other);
-  ~RenderFrameInfo() = default;
+  ~RenderFrameInfo();
 
   content::GlobalRenderFrameHostToken global_frame_token;
   url::Origin source_origin;
   GURL url;
   std::string serialized_server_token;
+  std::optional<optimization_guide::proto::MediaData> media_data;
 };
 
 struct TargetNodeInfo {
@@ -65,6 +66,23 @@ std::optional<optimization_guide::TargetNodeInfo> FindNodeAtPoint(
     const optimization_guide::proto::AnnotatedPageContent&
         annotated_page_content,
     const gfx::Point& coordinate);
+
+// Returns the target node and containing document info if there's a matching
+// node from the annotated page content with the same dom node id and under a
+// frame node with matching document identifier. Returns std::nullopt otherwise.
+std::optional<optimization_guide::TargetNodeInfo> FindNodeWithID(
+    const optimization_guide::proto::AnnotatedPageContent&
+        annotated_page_content,
+    const std::string_view document_identifier,
+    const int dom_node_id);
+
+
+// Returns the URL to use for frame metadata given the Document's
+// `committed_url` and `committed_origin`. The `committed_url` may not be a
+// valid origin (for example about:blank or data: URLs) but the origin will be
+// the web origin of the Document's content.
+GURL GetURLForFrameMetadata(const GURL& committed_url,
+                            const url::Origin& committed_origin);
 
 }  // namespace optimization_guide
 

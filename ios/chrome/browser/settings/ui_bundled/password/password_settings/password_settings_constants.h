@@ -18,7 +18,6 @@ typedef NS_ENUM(NSInteger, PasswordSettingsSectionIdentifier) {
   SectionIdentifierGooglePasswordManagerPin,
   SectionIdentifierOnDeviceEncryption,
   SectionIdentifierExportPasswordsButton,
-  SectionIdentifierImportPasswordsButton,
   SectionIdentifierDeleteCredentialsButton,
 };
 
@@ -54,5 +53,8 @@ extern NSString* const kPasswordSettingsOnDeviceEncryptionSetUpId;
 // Accessibility IDs of change PIN elements.
 extern NSString* const kPasswordSettingsChangePinButtonId;
 extern NSString* const kPasswordSettingsChangePinDescriptionId;
+
+// Accessibility ID of automatic passkey upgrade toggle.
+extern NSString* const kPasswordSettingsAutomaticPasskeyUpgradeToggleId;
 
 #endif  // IOS_CHROME_BROWSER_SETTINGS_UI_BUNDLED_PASSWORD_PASSWORD_SETTINGS_PASSWORD_SETTINGS_CONSTANTS_H_

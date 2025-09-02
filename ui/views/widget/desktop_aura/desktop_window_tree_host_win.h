@@ -106,6 +106,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void Close() override;
   void CloseNow() override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
+  DesktopWindowTreeHost::WindowTreeHosts GetOwnedWindowTreeHosts() override;
   void Show(ui::mojom::WindowShowState show_state,
             const gfx::Rect& restore_bounds) override;
   bool IsVisible() const override;
@@ -296,7 +297,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   // Call Windows API to update the window display affinity.
   void UpdateAllowScreenshots();
 
-  // Designates an acrylic DWM_SYSTEMBACKDROP to the window if it does not have
+  // Designates a Mica DWM_SYSTEMBACKDROP to the window if it does not have
   // a redirection bitmap.
   void UpdateBackdropColorMode();
 

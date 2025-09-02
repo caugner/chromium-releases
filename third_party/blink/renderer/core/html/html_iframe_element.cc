@@ -36,6 +36,7 @@
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/policy_disposition.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_iframe_element.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_string_trustedhtml.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -94,7 +95,8 @@ HTMLIFrameElement::~HTMLIFrameElement() = default;
 const AttrNameToTrustedType& HTMLIFrameElement::GetCheckedAttributeTypes()
     const {
   DEFINE_STATIC_LOCAL(AttrNameToTrustedType, attribute_map,
-                      ({{"srcdoc", SpecificTrustedType::kHTML}}));
+                      ({{"srcdoc", std::pair{SpecificTrustedType::kHTML,
+                                             "HTMLIFrameElement"}}}));
   return attribute_map;
 }
 
@@ -216,8 +218,8 @@ void HTMLIFrameElement::ParseAttribute(
         GetDocument().AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
             mojom::blink::ConsoleMessageSource::kOther,
             mojom::blink::ConsoleMessageLevel::kError,
-            "Error while parsing the 'sandbox' attribute: " +
-                String::FromUTF8(parsed.error_message)));
+            StrCat({"Error while parsing the 'sandbox' attribute: ",
+                    String::FromUTF8(parsed.error_message)})));
       }
     }
     SetSandboxFlags(current_flags);
@@ -711,6 +713,23 @@ void HTMLIFrameElement::NaturalSizingInfoChanged() {
     object->SetNeedsLayoutAndIntrinsicWidthsRecalcAndFullPaintInvalidation(
         layout_invalidation_reason::kSizeChanged);
   }
+}
+
+const V8UnionStringOrTrustedHTML* HTMLIFrameElement::srcdoc() const {
+  return MakeGarbageCollected<V8UnionStringOrTrustedHTML>(
+      getAttribute(html_names::kSrcdocAttr));
+}
+
+void HTMLIFrameElement::setSrcdoc(const V8UnionStringOrTrustedHTML* value,
+                                  ExceptionState& exception_state) {
+  String compliantValue =
+      TrustedTypesCheckForHTML(value, GetExecutionContext(),
+                               "HTMLIFrameElement", "srcdoc", exception_state);
+  if (exception_state.HadException()) {
+    return;
+  }
+  SetAttributeWithoutValidation(html_names::kSrcdocAttr,
+                                AtomicString(compliantValue));
 }
 
 }  // namespace blink

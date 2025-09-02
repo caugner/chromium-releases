@@ -27,6 +27,7 @@
 #include "chrome/browser/tab_contents/web_contents_collection.h"
 #include "chrome/browser/themes/theme_service_observer.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
+#include "chrome/browser/ui/bookmarks/bookmark_bar_controller.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_observer.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -35,8 +36,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
-#include "chrome/browser/ui/unowned_user_data/unowned_user_data_host.h"
-#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "components/paint_preview/buildflags/buildflags.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sessions/core/session_id.h"
@@ -51,6 +50,7 @@
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/base/unowned_user_data/unowned_user_data_host.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -64,15 +64,11 @@
 #endif
 
 class BackgroundContents;
-class BreadcrumbManagerBrowserAgent;
 class BrowserActions;
-class BrowserContentSettingBubbleModelDelegate;
-class BrowserLiveTabContext;
 class BrowserView;
 class BrowserWindow;
 class BrowserWindowFeatures;
 class FindBarController;
-class OverscrollPrefManager;
 class Profile;
 class ScopedKeepAlive;
 class ScopedProfileKeepAlive;
@@ -96,10 +92,6 @@ struct DropData;
 class NavigationHandle;
 class SessionStorageNamespace;
 }  // namespace content
-
-namespace extensions {
-class ExtensionBrowserWindowHelper;
-}  // namespace extensions
 
 namespace gfx {
 class Image;
@@ -200,12 +192,6 @@ class Browser : public TabStripModelObserver,
     kDeskTemplate,
   };
 
-  // Represents the reasons for force showing bookmark bar.
-  enum ForceShowBookmarkBarFlag {
-    kNone = 0,
-    kTabGroupsTutorialActive = 1 << 0,
-    kTabGroupSaved = 1 << 1,
-  };
 
   // Represents whether a value was known to be explicitly specified.
   enum class ValueSpecified { kUnknown, kSpecified, kUnspecified };
@@ -478,10 +464,11 @@ class Browser : public TabStripModelObserver,
     return tab_strip_model_delegate_.get();
   }
 
-  BrowserActions* browser_actions() const { return browser_actions_.get(); }
+  BrowserActions* browser_actions() { return GetActions(); }
 
+  // TODO(crbug.com/434734349): Remove this method once callsites are migrated.
   chrome::BrowserCommandController* command_controller() {
-    return command_controller_.get();
+    return GetCommandController();
   }
 
   SessionID session_id() const { return session_id_; }
@@ -489,11 +476,6 @@ class Browser : public TabStripModelObserver,
   bool should_trigger_session_restore() const {
     return should_trigger_session_restore_;
   }
-  BrowserContentSettingBubbleModelDelegate*
-  content_setting_bubble_model_delegate() {
-    return content_setting_bubble_model_delegate_.get();
-  }
-  BrowserLiveTabContext* live_tab_context() { return live_tab_context_.get(); }
   const web_app::AppBrowserController* app_controller() const {
     return app_controller_.get();
   }
@@ -506,9 +488,6 @@ class Browser : public TabStripModelObserver,
 
   base::WeakPtr<Browser> AsWeakPtr();
   base::WeakPtr<const Browser> AsWeakPtr() const;
-
-  // Returns the state of the bookmark bar.
-  BookmarkBar::State bookmark_bar_state() const { return bookmark_bar_state_; }
 
   // State Storage and Retrieval for UI ///////////////////////////////////////
 
@@ -673,8 +652,6 @@ class Browser : public TabStripModelObserver,
   // Show various bits of UI
   void OpenFile();
 
-  void UpdateDownloadShelfVisibility(bool visible);
-
   // Whether the specified WebContents can be saved.
   // Saving can be disabled e.g. for the DevTools window.
   bool CanSaveContents(content::WebContents* web_contents) const;
@@ -733,6 +710,7 @@ class Browser : public TabStripModelObserver,
   void PreHandleDragUpdate(const content::DropData& drop_data,
                            const gfx::PointF& client_pt) override;
   void PreHandleDragExit() override;
+  void HandleDragEnded() override;
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       content::WebContents* source,
       const input::NativeWebKeyboardEvent& event) override;
@@ -812,9 +790,6 @@ class Browser : public TabStripModelObserver,
     return &unload_controller_;
   }
 
-  // Sets or clears the flags to force showing bookmark bar.
-  void SetForceShowBookmarkBarFlag(ForceShowBookmarkBarFlag flag);
-  void ClearForceShowBookmarkBarFlag(ForceShowBookmarkBarFlag flag);
 
   // BrowserWindowInterface overrides:
   views::WebView* GetWebView() override;
@@ -838,8 +813,8 @@ class Browser : public TabStripModelObserver,
   tabs::TabInterface* GetActiveTabInterface() override;
   BrowserWindowFeatures& GetFeatures() override;
   const BrowserWindowFeatures& GetFeatures() const override;
-  UnownedUserDataHost& GetUnownedUserDataHost() override;
-  const UnownedUserDataHost& GetUnownedUserDataHost() const override;
+  ui::UnownedUserDataHost& GetUnownedUserDataHost() override;
+  const ui::UnownedUserDataHost& GetUnownedUserDataHost() const override;
   web_modal::WebContentsModalDialogHost*
   GetWebContentsModalDialogHostForWindow() override;
   bool IsActive() const override;
@@ -851,8 +826,8 @@ class Browser : public TabStripModelObserver,
   ImmersiveModeController* GetImmersiveModeController() override;
   BrowserActions* GetActions() override;
   Type GetType() const override;
-  BrowserUserEducationInterface* GetUserEducationInterface() override;
   web_app::AppBrowserController* GetAppBrowserController() override;
+  const web_app::AppBrowserController* GetAppBrowserController() const override;
   std::vector<tabs::TabInterface*> GetAllTabInterfaces() override;
   Browser* GetBrowserForMigrationOnly() override;
   bool IsTabModalPopupDeprecated() const override;
@@ -871,6 +846,13 @@ class Browser : public TabStripModelObserver,
   void DidBecomeActive();
   void DidBecomeInactive();
 
+  // Synchronously destroys the browser, `this` is no longer valid after the
+  // operation completes.
+  // WARNING: Clients should generally not use this and instead prefer
+  // requesting the browser close via BrowserWindow::Close(), which happens
+  // async and allows graceful teardown of the tab strip and associated data.
+  void SynchronouslyDestroyBrowser();
+
 #if BUILDFLAG(IS_CHROMEOS)
   bool IsLockedForOnTask();
   void SetLockedForOnTask(bool locked);
@@ -888,11 +870,8 @@ class Browser : public TabStripModelObserver,
   friend class ExclusiveAccessTest;
   friend class FullscreenControllerInteractiveTest;
   FRIEND_TEST_ALL_PREFIXES(AppModeTest, EnableAppModeTest);
-  FRIEND_TEST_ALL_PREFIXES(BrowserCommandControllerTest,
-                           IsReservedCommandOrKeyIsApp);
   FRIEND_TEST_ALL_PREFIXES(BrowserCloseTest, LastIncognito);
   FRIEND_TEST_ALL_PREFIXES(BrowserCloseTest, LastRegular);
-  FRIEND_TEST_ALL_PREFIXES(BrowserCommandControllerTest, AppFullScreen);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, OpenAppWindowLikeNtp);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, AppIdSwitch);
   FRIEND_TEST_ALL_PREFIXES(ExclusiveAccessBubbleWindowControllerTest,
@@ -912,34 +891,6 @@ class Browser : public TabStripModelObserver,
 
     // Result of the tab strip not having any significant tabs.
     DETACH_TYPE_EMPTY
-  };
-
-  // Describes where the bookmark bar state change originated from.
-  enum BookmarkBarStateChangeReason {
-    // From the constructor.
-    BOOKMARK_BAR_STATE_CHANGE_INIT,
-
-    // Change is the result of the active tab changing.
-    BOOKMARK_BAR_STATE_CHANGE_TAB_SWITCH,
-
-    // Change is the result of the bookmark bar pref changing.
-    BOOKMARK_BAR_STATE_CHANGE_PREF_CHANGE,
-
-    // Change is the result of a state change in the active tab.
-    BOOKMARK_BAR_STATE_CHANGE_TAB_STATE,
-
-    // Change is the result of window toggling in/out of fullscreen mode.
-    BOOKMARK_BAR_STATE_CHANGE_TOGGLE_FULLSCREEN,
-
-    // Change is the result of switching the option of showing toolbar in full
-    // screen. Only used on Mac.
-    BOOKMARK_BAR_STATE_CHANGE_TOOLBAR_OPTION_CHANGE,
-
-    // Change is the result of a force show reason
-    BOOKMARK_BAR_STATE_CHANGE_FORCE_SHOW,
-
-    // Change is the result of a split tab being created or removed.
-    BOOKMARK_BAR_STATE_CHANGE_SPLIT_TAB_CHANGE,
   };
 
   // Tracks whether a tabstrip call to action UI is showing.
@@ -1102,11 +1053,6 @@ class Browser : public TabStripModelObserver,
       content::RenderFrameHost* render_frame_host) override;
 #endif
 
-  // WebContentsCollection::Observer:
-  void DidFinishNavigation(
-      content::WebContents* web_contents,
-      content::NavigationHandle* navigation_handle) override;
-
   // Overridden from WebContentsModalDialogManagerDelegate:
   void SetWebContentsBlocked(content::WebContents* web_contents,
                              bool blocked) override;
@@ -1149,11 +1095,6 @@ class Browser : public TabStripModelObserver,
   // Handle changes to kDevToolsAvailability preference.
   void OnDevToolsAvailabilityChanged();
 
-#if BUILDFLAG(IS_CHROMEOS)
-  // Handle `on_task_locked_` state changes.
-  void OnLockedForOnTaskUpdated();
-#endif
-
   // UI update coalescing and handling ////////////////////////////////////////
 
   // Asks the toolbar (and as such the location bar) to update its state to
@@ -1190,6 +1131,8 @@ class Browser : public TabStripModelObserver,
   // listed first.
   // TODO(beng): remove this.
   std::vector<StatusBubble*> GetStatusBubbles();
+
+  chrome::BrowserCommandController* GetCommandController();
 
   // Session restore functions ////////////////////////////////////////////////
 
@@ -1274,11 +1217,6 @@ class Browser : public TabStripModelObserver,
   bool SupportsWindowFeatureImpl(WindowFeature feature,
                                  bool check_can_support) const;
 
-  // Resets |bookmark_bar_state_| based on the active tab. Notifies the
-  // BrowserWindow if necessary.
-  void UpdateBookmarkBarState(BookmarkBarStateChangeReason reason);
-
-  bool ShouldShowBookmarkBar() const;
 
   // Returns true if we can start the shutdown sequence for the browser, i.e.
   // the last browser window is being closed.
@@ -1306,6 +1244,12 @@ class Browser : public TabStripModelObserver,
   void UpdateTabGroupSessionDataForTab(
       tabs::TabInterface* tab,
       std::optional<tab_groups::TabGroupId> group);
+
+  void UpdateSplitTabSessionData(
+      tabs::TabInterface* tab,
+      std::optional<split_tabs::SplitTabId> split_id);
+
+  void UpdateSplitTabSessionVisualData(const split_tabs::SplitTabId& split_id);
 
   // Create `FindBarController` if it does not exist.
   // TODO(crbug.com/423956131): Convert to `GetFindBarController` which returns
@@ -1409,32 +1353,15 @@ class Browser : public TabStripModelObserver,
   // Dialog box used for opening and saving files.
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
 
-  // Helper which implements the ContentSettingBubbleModel interface.
-  std::unique_ptr<BrowserContentSettingBubbleModelDelegate>
-      content_setting_bubble_model_delegate_;
-
-  // Helper which implements the LiveTabContext interface.
-  std::unique_ptr<BrowserLiveTabContext> live_tab_context_;
-
   // Helper which handles bookmark app specific browser configuration.
   // This must be initialized before |command_controller_| to ensure the correct
   // set of commands are enabled.
   const std::unique_ptr<web_app::AppBrowserController> app_controller_;
 
-  BookmarkBar::State bookmark_bar_state_;
-
-  std::unique_ptr<BrowserActions> browser_actions_;
-
-  std::unique_ptr<chrome::BrowserCommandController> command_controller_;
-
   // True if the browser window has been shown at least once.
   bool window_has_shown_;
 
   std::string user_title_;
-
-  // Listens for browser-related breadcrumb events to be added to crash reports.
-  std::unique_ptr<BreadcrumbManagerBrowserAgent>
-      breadcrumb_manager_browser_agent_;
 
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
 
@@ -1452,11 +1379,6 @@ class Browser : public TabStripModelObserver,
   // when enabled, disables certain functionality that a web browser would
   // never typically disable.
   bool on_task_locked_ = false;
-#endif
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  std::unique_ptr<extensions::ExtensionBrowserWindowHelper>
-      extension_browser_window_helper_;
 #endif
 
   const base::ElapsedTimer creation_timer_;
@@ -1477,11 +1399,6 @@ class Browser : public TabStripModelObserver,
   // determined by the NavigateParams::is_tab_modal_popup_deprecated.
   bool is_tab_modal_popup_deprecated_ = false;
 
-#if defined(USE_AURA)
-  std::unique_ptr<OverscrollPrefManager> overscroll_pref_manager_;
-#endif
-
-  int force_show_bookmark_bar_flags_ = ForceShowBookmarkBarFlag::kNone;
 
   using BrowserDidCloseCallbackList =
       base::RepeatingCallbackList<void(BrowserWindowInterface*)>;
@@ -1511,7 +1428,10 @@ class Browser : public TabStripModelObserver,
   // Tracks whether a modal UI is showing.
   bool showing_call_to_action_ = false;
 
-  UnownedUserDataHost unowned_user_data_host_;
+  // Tracks whether the browser object is fully initialized.
+  bool is_initialized_ = false;
+
+  ui::UnownedUserDataHost unowned_user_data_host_;
 
   // The following factory is used for chrome update coalescing.
   base::WeakPtrFactory<Browser> chrome_updater_factory_{this};

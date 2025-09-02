@@ -12,8 +12,11 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/background/glic/glic_launcher_configuration.h"
+#include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/glic_pref_names.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
@@ -21,6 +24,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip_control_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "chrome/common/buildflags.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -33,10 +37,6 @@
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view_class_properties.h"
-
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/resources/grit/glic_browser_resources.h"
-#endif
 
 namespace glic {
 
@@ -53,7 +53,8 @@ GlicButton::GlicButton(TabStripController* tab_strip_controller,
                           tooltip,
                           kGlicNudgeButtonElementId,
                           Edge::kNone,
-                          icon),
+                          icon,
+                          /*show_close_button=*/true),
       menu_model_(CreateMenuModel()),
       tab_strip_controller_(tab_strip_controller),
       hovered_callback_(std::move(hovered_callback)),
@@ -83,10 +84,44 @@ GlicButton::GlicButton(TabStripController* tab_strip_controller,
       SetLayoutManager(std::make_unique<views::BoxLayout>());
   layout_manager->set_main_axis_alignment(
       views::BoxLayout::MainAxisAlignment::kStart);
+
+  // Subscribe to changes in state of glic FRE dialog and glic window.
+  glic::GlicKeyedService* service =
+      glic::GlicKeyedService::Get(tab_strip_controller_->GetProfile());
+  glic_window_activation_subscription_ =
+      service->window_controller().AddWindowActivationChangedCallback(
+          base::BindRepeating(&GlicButton::PanelStateChanged,
+                              base::Unretained(this)));
+
+  GlicFreController* fre_controller =
+      service->window_controller().fre_controller();
+  fre_subscription_ =
+      fre_controller->AddWebUiStateChangedCallback(base::BindRepeating(
+          &GlicButton::OnFreWebUiStateChanged, base::Unretained(this)));
 }
 
 GlicButton::~GlicButton() = default;
 
+void GlicButton::OnFreWebUiStateChanged(mojom::FreWebUiState new_state) {
+  UpdateTooltipText();
+}
+
+void GlicButton::PanelStateChanged(bool active) {
+  UpdateTooltipText();
+}
+
+void GlicButton::UpdateTooltipText() {
+  GlicKeyedService* service =
+      GlicKeyedService::Get(tab_strip_controller_->GetProfile());
+  // Set tooltip and accessibility text based on whether any glic UI (window or
+  // FRE) is open.
+  std::u16string tooltip_text = l10n_util::GetStringUTF16(
+      service->IsWindowOrFreShowing() ? IDS_GLIC_TAB_STRIP_BUTTON_TOOLTIP_CLOSE
+                                      : IDS_GLIC_TAB_STRIP_BUTTON_TOOLTIP);
+
+  SetTooltipText(tooltip_text);
+  GetViewAccessibility().SetName(tooltip_text);
+}
 
 void GlicButton::SetIsShowingNudge(bool is_showing) {
   if (is_showing) {
@@ -192,14 +227,10 @@ void GlicButton::OnMenuClosed() {
 }
 
 void GlicButton::AnnounceNudgeShown() {
-#if BUILDFLAG(ENABLE_GLIC)
   auto announcement = l10n_util::GetStringFUTF16(
       IDS_GLIC_CONTEXTUAL_CUEING_ANNOUNCEMENT,
       GlicLauncherConfiguration::GetGlobalHotkey().GetShortcutText());
   GetViewAccessibility().AnnounceAlert(announcement);
-#else
-  NOTIMPLEMENTED();
-#endif
 }
 
 BEGIN_METADATA(GlicButton)

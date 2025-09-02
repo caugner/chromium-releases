@@ -107,6 +107,7 @@ public class TabGridIphTest {
 
     @Before
     public void setUp() {
+        mActivityTestRule.reenableIph();
         IphMessageService.setSkipIphInTestsForTesting(false);
         mPage = mActivityTestRule.startOnBlankPage();
         TabUiTestHelper.verifyTabSwitcherLayoutType(mActivityTestRule.getActivity());
@@ -238,6 +239,22 @@ public class TabGridIphTest {
         ChromeRenderTestRule.sanitize(cta.findViewById(R.id.tab_grid_message_item));
         mRenderTestRule.render(
                 cta.findViewById(R.id.tab_grid_message_item), "iph_entrance_portrait");
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"RenderTest"})
+    public void testRenderIph_Portrait_Incognito() throws IOException {
+        ChromeTabbedActivity cta = mActivityTestRule.getActivity();
+
+        createTabs(cta, /* isIncognito= */ true, 1);
+        enterTabSwitcher(cta);
+        CriteriaHelper.pollUiThread(TabSwitcherMessageManager::hasAppendedMessagesForTesting);
+        onViewWaiting(withId(R.id.tab_grid_message_item)).check(matches(isDisplayed()));
+
+        ChromeRenderTestRule.sanitize(cta.findViewById(R.id.tab_grid_message_item));
+        mRenderTestRule.render(
+                cta.findViewById(R.id.tab_grid_message_item), "iph_entrance_portrait_incognito");
     }
 
     @Test
@@ -375,7 +392,7 @@ public class TabGridIphTest {
         RecyclerView.ViewHolder viewHolder =
                 ((RecyclerView) cta.findViewById(R.id.tab_list_recycler_view))
                         .findViewHolderForAdapterPosition(1);
-        assertEquals(TabProperties.UiType.MESSAGE, viewHolder.getItemViewType());
+        assertEquals(TabProperties.UiType.IPH_MESSAGE, viewHolder.getItemViewType());
 
         onView(
                         allOf(

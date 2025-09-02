@@ -330,9 +330,16 @@ class AutocompleteController : public AutocompleteProviderListener,
   FRIEND_TEST_ALL_PREFIXES(AutocompleteControllerTest,
                            NoActionsAttachedToLensSearchboxMatches);
   FRIEND_TEST_ALL_PREFIXES(AutocompleteControllerTest,
+                           ContextualQueryAppendsSearchboxStats);
+  FRIEND_TEST_ALL_PREFIXES(AutocompleteControllerTest,
                            ContextualSearchActionAttachedPageKeywordMode);
   FRIEND_TEST_ALL_PREFIXES(AutocompleteControllerTest,
                            ContextualSearchActionAttachedInZeroSuggest);
+  FRIEND_TEST_ALL_PREFIXES(AutocompleteControllerTest,
+                           AttachContextualSearchOpenLensActionToMatches);
+  FRIEND_TEST_ALL_PREFIXES(
+      AutocompleteControllerTest,
+      ContextualSearchOpenLensActionAttachedPageKeywordMode);
   FRIEND_TEST_ALL_PREFIXES(AutocompleteProviderTest,
                            RedundantKeywordsIgnoredInResult);
   FRIEND_TEST_ALL_PREFIXES(AutocompleteProviderTest, UpdateSearchboxStats);
@@ -529,6 +536,10 @@ class AutocompleteController : public AutocompleteProviderListener,
   // repeated across multiple consecutive matches.
   void MaybeCleanSuggestionsForKeywordMode(const AutocompleteInput& input,
                                            AutocompleteResult* result);
+
+  // Removes promotional IPH suggestions if `result` contains toolbelt. Does not
+  // remove disclaimer IPHs.
+  void MaybeCleanIphSuggestions(AutocompleteResult* result);
 
   // Get the experiment stats v2 entry for the omnibox position. Used on iOS.
   const omnibox::metrics::ChromeSearchboxStats::ExperimentStatsV2

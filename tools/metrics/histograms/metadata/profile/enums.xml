@@ -358,7 +358,9 @@ chromium-metrics-reviews@google.com.
 <enum name="ProfileGaiaNameShareStatus">
   <int value="0" label="Not shared"/>
   <int value="1" label="Shared by non managed profiles"/>
-  <int value="2" label="Shared only by managed profiles"/>
+  <int value="2"
+      label="Appears at most once in non managed profiles, but shared when
+             including managed profiles"/>
 </enum>
 
 <!-- LINT.ThenChange(//chrome/browser/profiles/profile_metrics.h:GaiaNameShareStatus) -->
@@ -407,6 +409,29 @@ chromium-metrics-reviews@google.com.
   <int value="40" label="kGlicView"/>
   <int value="41" label="kWaitingForGlicView"/>
 </enum>
+
+<!-- LINT.IfChange(ProfileManagementFlowStep) -->
+
+<enum name="ProfileManagementFlowStep">
+  <int value="0" label="Unkown step - not expected to be recorded"/>
+  <int value="1" label="Profile Picker Main Page"/>
+  <int value="2" label="Sign in step - account selection"/>
+  <int value="3" label="Finish SAML sign in (in browser)"/>
+  <int value="4" label="Reauth step"/>
+  <int value="5" label="Post Sign in flows">
+    Combination of multiple views; e.g. sync confirmation screen/history sync,
+    enterprise management screens, profile switch.
+  </int>
+  <int value="6" label="FRE Main Page"/>
+  <int value="7" label="Default Browser Promo"/>
+  <int value="8" label="Default Search Engine selection"/>
+  <int value="9" label="Finish in Browser">
+    Not an actual user facing step; the user has no input, it will open the
+    browser.
+  </int>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/ui/views/profiles/profile_management_flow_controller.h:Step) -->
 
 <!-- LINT.IfChange(ProfileMenuActionableItem) -->
 
@@ -477,6 +502,7 @@ chromium-metrics-reviews@google.com.
   <int value="14" label="Manage profile item in the app menu"/>
   <int value="15" label="Add new profile item in the app menu"/>
   <int value="16" label="Glic Manager"/>
+  <int value="17" label="On startup create profile with email"/>
 </enum>
 
 <!-- LINT.ThenChange(//chrome/browser/ui/profiles/profile_picker.h:EntryPoint) -->

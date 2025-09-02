@@ -29,19 +29,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 
+#include "base/compiler_specific.h"
 #include "third_party/blink/public/platform/modules/mediastream/web_media_stream.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component_impl.h"
 #include "third_party/blink/renderer/platform/webrtc/peer_connection_remote_audio_source.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace blink {
 
@@ -68,10 +65,12 @@ void MediaStreamDescriptor::AddComponent(MediaStreamComponent* component) {
       break;
   }
 
-  // Iterate over a copy of |observers_| to avoid re-entrancy issues.
-  Vector<WebMediaStreamObserver*> observers = observers_;
-  for (auto*& observer : observers)
-    observer->TrackAdded(WebString(component->Id()));
+  // Iterate over a copy of the observers to avoid re-entrancy issues.
+  for (const auto& observer : CleanedUpObservers()) {
+    if (observer) {
+      observer->TrackAdded(WebString(component->Id()));
+    }
+  }
 }
 
 void MediaStreamDescriptor::RemoveComponent(MediaStreamComponent* component) {
@@ -89,10 +88,12 @@ void MediaStreamDescriptor::RemoveComponent(MediaStreamComponent* component) {
       break;
   }
 
-  // Iterate over a copy of |observers_| to avoid re-entrancy issues.
-  Vector<WebMediaStreamObserver*> observers = observers_;
-  for (auto*& observer : observers)
-    observer->TrackRemoved(WebString(component->Id()));
+  // Iterate over a copy of the observers to avoid re-entrancy issues.
+  for (const auto& observer : CleanedUpObservers()) {
+    if (observer) {
+      observer->TrackRemoved(WebString(component->Id()));
+    }
+  }
 }
 
 void MediaStreamDescriptor::AddRemoteTrack(MediaStreamComponent* component) {
@@ -120,10 +121,12 @@ void MediaStreamDescriptor::SetActive(bool active) {
     return;
 
   active_ = active;
-  // Iterate over a copy of |observers_| to avoid re-entrancy issues.
-  Vector<WebMediaStreamObserver*> observers = observers_;
-  for (auto*& observer : observers)
-    observer->ActiveStateChanged(active_);
+  // Iterate over a copy of the observers to avoid re-entrancy issues.
+  for (const auto& observer : CleanedUpObservers()) {
+    if (observer) {
+      observer->ActiveStateChanged(active_);
+    }
+  }
 }
 
 void MediaStreamDescriptor::NotifyEnabledStateChangeForWebRtcAudio(
@@ -132,22 +135,33 @@ void MediaStreamDescriptor::NotifyEnabledStateChangeForWebRtcAudio(
       base::FeatureList::IsEnabled(kPropagateEnabledEventForWebRtcAudioTrack));
   // We don't store the enabled state here, instead only the 'WebMediaPlayerMS'
   // will have the state.
-  // Iterate over a copy of |observers_| to avoid re-entrancy issues.
-  Vector<WebMediaStreamObserver*> observers = observers_;
-  for (auto*& observer : observers) {
-    observer->EnabledStateChangedForWebRtcAudio(enabled);
+  // Iterate over a copy of the observers to avoid re-entrancy issues.
+  for (const auto& observer : CleanedUpObservers()) {
+    if (observer) {
+      observer->EnabledStateChangedForWebRtcAudio(enabled);
+    }
   }
 }
 
-void MediaStreamDescriptor::AddObserver(WebMediaStreamObserver* observer) {
-  DCHECK_EQ(observers_.Find(observer), kNotFound);
-  observers_.push_back(observer);
+void MediaStreamDescriptor::AddObserver(
+    base::WeakPtr<WebMediaStreamObserver> observer) {
+  if (observer) {
+    observers_.push_back(observer);
+  }
 }
 
-void MediaStreamDescriptor::RemoveObserver(WebMediaStreamObserver* observer) {
-  wtf_size_t index = observers_.Find(observer);
-  DCHECK(index != kNotFound);
-  observers_.EraseAt(index);
+void MediaStreamDescriptor::RemoveObserver(
+    base::WeakPtr<WebMediaStreamObserver> observer) {
+  if (!observer) {
+    return;
+  }
+  EraseIf(observers_,
+          [observer](
+              const base::WeakPtr<WebMediaStreamObserver>& current_observer) {
+            // Also remove invalidated observers.
+            return !current_observer ||
+                   current_observer.get() == observer.get();
+          });
 }
 
 MediaStreamDescriptor::MediaStreamDescriptor(
@@ -165,12 +179,23 @@ MediaStreamDescriptor::MediaStreamDescriptor(
   DCHECK(id_.length());
   for (MediaStreamComponentVector::const_iterator iter =
            audio_components.begin();
-       iter != audio_components.end(); ++iter)
+       iter != audio_components.end(); UNSAFE_TODO(++iter)) {
     audio_components_.push_back((*iter));
+  }
   for (MediaStreamComponentVector::const_iterator iter =
            video_components.begin();
-       iter != video_components.end(); ++iter)
+       iter != video_components.end(); UNSAFE_TODO(++iter)) {
     video_components_.push_back((*iter));
+  }
+}
+
+Vector<base::WeakPtr<WebMediaStreamObserver>>
+MediaStreamDescriptor::CleanedUpObservers() {
+  EraseIf(observers_,
+          [](const base::WeakPtr<WebMediaStreamObserver>& observer) {
+            return !observer;
+          });
+  return observers_;
 }
 
 void MediaStreamDescriptor::Trace(Visitor* visitor) const {

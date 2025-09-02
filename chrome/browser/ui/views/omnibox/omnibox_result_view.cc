@@ -174,6 +174,7 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupViewViews* popup_view,
   //   selection_indicator_
   //   local_answer_header_and_suggestion_and_buttons_ (BoxLayout vertical)
   //     local_answer_header_ (added lazily)
+  //     divider_line_
   //     suggestion_and_buttons (FlexLayout horizontal)
   //       suggestion_and_button_row (FlexLayout horizontal)
   //         suggestion_view_
@@ -203,11 +204,7 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupViewViews* popup_view,
   divider_line_ = local_answer_header_and_suggestion_and_buttons_->AddChildView(
       std::make_unique<views::Separator>());
   divider_line_->SetOrientation(views::Separator::Orientation::kHorizontal);
-  // TODO(crbug.com/423729255): The mocks extend to the edge but without
-  //  any adjustment, the right edge only doesn't extend all the way.
-  //  This just pushes the left edge so it doesn't look asymmetrical.
-  divider_line_->SetProperty(views::kMarginsKey,
-                             gfx::Insets::TLBR(0, 16, 8, 0));
+  divider_line_->SetProperty(views::kMarginsKey, gfx::Insets::TLBR(8, 0, 2, 0));
 
   auto* suggestion_and_buttons =
       local_answer_header_and_suggestion_and_buttons_->AddChildView(
@@ -245,14 +242,6 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupViewViews* popup_view,
       },
       base::Unretained(this)));
   iph_link_focus_ring->SetColorId(kColorOmniboxResultsFocusIndicator);
-
-  // Allocate space for the suggestion text only after accounting
-  // for the space needed to render the inline action chip row.
-  suggestion_view_->SetProperty(
-      views::kFlexBehaviorKey,
-      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
-                               views::MaximumFlexSizeRule::kPreferred)
-          .WithOrder(2));
 
   // TODO(b/345536738): Move the common code for setting up instances of
   //  OmniboxResultViewButton to the constructor.
@@ -323,12 +312,14 @@ OmniboxResultView::OmniboxResultView(OmniboxPopupViewViews* popup_view,
       std::make_unique<OmniboxSuggestionButtonRowView>(popup_view_,
                                                        model_index));
   // If there's insufficient space for rendering both the suggestion text
-  // and the action chip row together, then allow the inline action chip row
-  // to disappear entirely.
+  // and the action chip row at their preferred sizes, the give priority to the
+  // button row by setting its order to 1 here and the suggestion view's order
+  // to 2 in `SetMatch()` (lower numbers get higher priority).
   button_row_->SetProperty(
       views::kFlexBehaviorKey,
-      views::FlexSpecification(views::MinimumFlexSizeRule::kPreferredSnapToZero,
-                               views::MaximumFlexSizeRule::kPreferred));
+      views::FlexSpecification(views::MinimumFlexSizeRule::kScaleToZero,
+                               views::MaximumFlexSizeRule::kPreferred)
+          .WithOrder(1));
 
   mouse_enter_exit_handler_.ObserveMouseEnterExitOn(this);
 
@@ -372,12 +363,27 @@ void OmniboxResultView::SetMatch(const AutocompleteMatch& match) {
 
   suggestion_view_->SetProperty(views::kMarginsKey,
                                 gfx::Insets::TLBR(0, 0, 0, 0));
+  // Allocate space for the suggestion text only after accounting for the space
+  // needed to render the inline action chip row, by setting the order to 2.
+  //
+  // In the toolbelt case, we want to snap the suggestion text to zero, since
+  // that looks better when there's not room for both. But in the normal case,
+  // we want to scale the suggestion text to zero since an elided suggestion
+  // still provides useful information.
+  suggestion_view_->SetProperty(
+      views::kFlexBehaviorKey,
+      views::FlexSpecification(
+          match_.IsToolbelt() ?
+              views::MinimumFlexSizeRule::kPreferredSnapToMinimum :
+              views::MinimumFlexSizeRule::kScaleToMinimum,
+          views::MaximumFlexSizeRule::kPreferred)
+          .WithOrder(2));
 
   suggestion_view_->OnMatchUpdate(this, match_);
   UpdateDividerLineVisibility();
   UpdateFeedbackButtonsVisibility();
   UpdateRemoveSuggestionVisibility();
-  if (match_.IsIPHSuggestion()) {
+  if (match_.IsIphSuggestion()) {
     remove_suggestion_button_->SetTooltipText(
         l10n_util::GetStringUTF16(IDS_OMNIBOX_CLOSE_IPH_SUGGESTION));
     remove_suggestion_button_->GetViewAccessibility().SetName(
@@ -466,7 +472,6 @@ void OmniboxResultView::ApplyThemeAndRefreshIcons(bool force_reapply_styles) {
   // Note: if this is an extension icon or favicon then this can be done in
   //       SetMatch() once (rather than repeatedly, as happens here). There may
   //       be an optimization opportunity here.
-  // TODO(dschuyler): determine whether to optimize the color changes.
   auto icon = GetIcon();
   if (icon.IsEmpty()) {
     suggestion_view_->ClearIcon();
@@ -477,14 +482,16 @@ void OmniboxResultView::ApplyThemeAndRefreshIcons(bool force_reapply_styles) {
   // We must reapply colors for all the text fields here. If we don't, we can
   // break theme changes for ZeroSuggest. See https://crbug.com/1095205.
   //
-  // TODO(tommycli): We should finish migrating this logic to live entirely
-  // within OmniboxTextView, which should keep track of its own OmniboxPart.
+  // TODO(crbug.com/430318151): We should finish migrating this logic to live
+  // entirely within OmniboxTextView, which should keep track of its own
+  // OmniboxPart.
   bool prefers_contrast =
       GetNativeTheme() && GetNativeTheme()->UserHasContrastPreference();
   if (match_.type == AutocompleteMatchType::NULL_RESULT_MESSAGE) {
     suggestion_view_->content()->ApplyTextColor(
-        match_.IsIPHSuggestion() ? kColorOmniboxResultsTextDimmed
-                                 : kColorOmniboxText);
+        match_.IsIphSuggestion() || match_.IsToolbelt()
+            ? kColorOmniboxResultsTextDimmed
+            : kColorOmniboxText);
   } else if (prefers_contrast || force_reapply_styles) {
     // Normally, OmniboxTextView caches its appearance, but in high contrast,
     // selected-ness changes the text colors, so the styling of the text part of
@@ -571,7 +578,10 @@ OmniboxPartState OmniboxResultView::GetThemeState() const {
   // message. The selected and hovered states imply an action can be taken from
   // that suggestion, so do not allow those states for this result.
   if (match_.type == AutocompleteMatchType::NULL_RESULT_MESSAGE) {
-    return match_.IsIPHSuggestion() ? OmniboxPartState::IPH
+    if (match_.IsToolbelt()) {
+      return OmniboxPartState::TOOLBELT;
+    }
+    return match_.IsIphSuggestion() ? OmniboxPartState::IPH
                                     : OmniboxPartState::NORMAL;
   }
 
@@ -597,7 +607,9 @@ void OmniboxResultView::SetRichSuggestionImage(const gfx::ImageSkia& image) {
 void OmniboxResultView::ButtonPressed(OmniboxPopupSelection::LineState state,
                                       const ui::Event& event) {
   popup_view_->model()->OpenSelection(
-      OmniboxPopupSelection(model_index_, state), event.time_stamp());
+      OmniboxPopupSelection(model_index_, state), event.time_stamp(),
+      WindowOpenDisposition::CURRENT_TAB,
+      /*via_keyboard=*/event.IsKeyEvent());
   if (state == OmniboxPopupSelection::FOCUSED_BUTTON_REMOVE_SUGGESTION) {
     // The button could be pressed and the deletion successful, but the match
     // may continue to appear with the X button remaining so it looked like it

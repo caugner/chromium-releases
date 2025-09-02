@@ -60,12 +60,6 @@ BASE_FEATURE(kAllowWithholdingExtensionPermissionsOnInstall,
              "AllowWithholdingExtensionPermissionsOnInstall",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-#if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
-BASE_FEATURE(kBlockInstallingExtensionsOnDesktopAndroid,
-             "BlockInstallingExtensionsOnDesktopAndroid",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
-
 BASE_FEATURE(kCheckingNoExtensionIdInExtensionIpcs,
              "EMF_NO_EXTENSION_ID_FOR_EXTENSION_SOURCE",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -92,7 +86,7 @@ BASE_FEATURE(kExtensionManifestV2DeprecationWarning,
 
 BASE_FEATURE(kExtensionManifestV2Unsupported,
              "ExtensionManifestV2Unsupported",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kExtensionManifestV2ExceptionList,
              "ExtensionManifestV2ExceptionList",
@@ -111,9 +105,9 @@ BASE_FEATURE(kAllowLegacyMV2Extensions,
              "AllowLegacyMV2Extensions",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kExtensionWARForRedirect,
-             "ExtensionWARForRedirect",
-             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kExtensionProtocolHandlers,
+             "ExtensionProtocolHandlers",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kExtensionsManifestV3Only,
              "ExtensionsManifestV3Only",
@@ -190,14 +184,6 @@ BASE_FEATURE(kDeclarativeNetRequestHeaderSubstitution,
              "DeclarativeNetRequestHeaderSubstitution",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kSilentDebuggerExtensionAPI,
-             "SilentDebuggerExtensionAPI",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kRemoveCoreSiteInstance,
-             "RemoveCoreSiteInstance",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kDisableDisableExtensionsExceptCommandLineSwitch,
              "DisableDisableExtensionsExceptCommandLineSwitch",
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS)
@@ -249,7 +235,7 @@ BASE_FEATURE(kRuntimeOnMessagePromiseReturnSupport,
 
 BASE_FEATURE(kOptimizeServiceWorkerStartRequests,
              "OptimizeServiceWorkerStartRequests",
-             base::FEATURE_ENABLED_BY_DEFAULT);
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kAvoidCloneArgsOnExtensionFunctionDispatch,
              "AvoidCloneArgsOnExtensionFunctionDispatch",

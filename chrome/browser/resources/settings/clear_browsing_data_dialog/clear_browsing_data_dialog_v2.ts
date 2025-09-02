@@ -27,10 +27,16 @@ import type {CrLinkRowElement} from 'chrome://resources/cr_elements/cr_link_row/
 import {WebUiListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
 import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
 import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
+import {focusWithoutInk} from 'chrome://resources/js/focus_without_ink.js';
 import {afterNextRender, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import type {SettingsCheckboxElement} from '../controls/settings_checkbox.js';
 import {loadTimeData} from '../i18n_setup.js';
+import type {MetricsBrowserProxy} from '../metrics_browser_proxy.js';
+import {MetricsBrowserProxyImpl} from '../metrics_browser_proxy.js';
+import {routes} from '../route.js';
+import type {Route} from '../router.js';
+import {RouteObserverMixin} from '../router.js';
 
 import type {ClearBrowsingDataBrowserProxy, UpdateSyncStateEvent} from './clear_browsing_data_browser_proxy.js';
 import {BrowsingDataType, ClearBrowsingDataBrowserProxyImpl, TimePeriod} from './clear_browsing_data_browser_proxy.js';
@@ -134,7 +140,7 @@ export function getDataTypePrefName(datatypes: BrowsingDataType) {
 }
 
 const SettingsClearBrowsingDataDialogV2ElementBase =
-    WebUiListenerMixin(PrefsMixin(PolymerElement));
+    RouteObserverMixin(WebUiListenerMixin(PrefsMixin(PolymerElement)));
 
 export class SettingsClearBrowsingDataDialogV2Element extends
     SettingsClearBrowsingDataDialogV2ElementBase {
@@ -155,6 +161,7 @@ export class SettingsClearBrowsingDataDialogV2Element extends
 
       deleteButtonLabel_: {
         type: String,
+        value: loadTimeData.getString('deleteDataFromDevice'),
         computed: 'computeDeleteButtonLabel_(syncStatus_.signedInState)',
       },
 
@@ -229,6 +236,8 @@ export class SettingsClearBrowsingDataDialogV2Element extends
       ClearBrowsingDataBrowserProxyImpl.getInstance();
   private syncBrowserProxy_: SyncBrowserProxy =
       SyncBrowserProxyImpl.getInstance();
+  private metricsBrowserProxy_: MetricsBrowserProxy =
+      MetricsBrowserProxyImpl.getInstance();
 
   override ready() {
     super.ready();
@@ -280,6 +289,12 @@ export class SettingsClearBrowsingDataDialogV2Element extends
     this.clearBrowsingDataBrowserProxy_.initialize();
 
     this.setFocusOutlineToVisible_();
+  }
+
+  override currentRouteChanged(currentRoute: Route) {
+    if (currentRoute === routes.CLEAR_BROWSER_DATA) {
+      this.metricsBrowserProxy_.recordAction('ClearBrowsingData_DialogCreated');
+    }
   }
 
   private setUpDataTypeOptionLists_() {
@@ -379,12 +394,21 @@ export class SettingsClearBrowsingDataDialogV2Element extends
 
     const dataTypes = this.getSelectedDataTypes_();
     const timePeriod = this.$.timePicker.getSelectedTimePeriod();
+    this.clearBrowsingDataBrowserProxy_
+        .recordSettingsClearBrowsingDataAdvancedTimePeriodHistogram(timePeriod);
 
     // Update the DataType and TimePeriod prefs with the latest selection.
     this.$.deleteBrowsingDataDialog
         .querySelectorAll<SettingsCheckboxElement>(
             'settings-checkbox[no-set-pref]')
-        .forEach(checkbox => checkbox.sendPrefChange());
+        .forEach(
+            checkbox =>
+                // Manually update the checkboxes' pref value. This is a
+                // temporary fix as the `SettingsCheckbox.sendPrefChange` does
+                // not update prefs when they are passed dynamically.
+                // TODO(crbug.com/431174247): Figure out why
+                // `SettingsCheckbox.sendPrefChange` is not working.
+            this.setPrefValue(checkbox.pref!.key, checkbox.checked));
     this.$.timePicker.sendPrefChange();
 
     const {showHistoryNotice} =
@@ -436,6 +460,8 @@ export class SettingsClearBrowsingDataDialogV2Element extends
 
   private onShowMoreClick_() {
     this.dataTypesExpanded_ = true;
+    this.metricsBrowserProxy_.recordAction(
+        'Settings.DeleteBrowsingData.CheckboxesShowMoreClick');
 
     // Set the focus to the first checkbox in the 'more' options list.
     afterNextRender(this, () => {
@@ -460,6 +486,8 @@ export class SettingsClearBrowsingDataDialogV2Element extends
 
   private onManageOtherGoogleDataRowClick_() {
     this.showOtherGoogleDataDialog_ = true;
+    this.metricsBrowserProxy_.recordAction(
+        'Settings.DeleteBrowsingData.OtherDataEntryPointClick');
   }
 
   private setFocusOutlineToVisible_() {
@@ -478,16 +506,16 @@ export class SettingsClearBrowsingDataDialogV2Element extends
   private onOtherGoogleDataDialogClose_(e: Event) {
     e.stopPropagation();
     this.showOtherGoogleDataDialog_ = false;
-    afterNextRender(this, () => {
-      this.$.cancelButton.focus();
-      this.setFocusOutlineToVisible_();
-    });
+    afterNextRender(
+        this, () => focusWithoutInk(this.$.manageOtherGoogleDataRow));
   }
 
   private onCheckboxSubLabelLinkClick_(e: CustomEvent<{id: string}>) {
     // <if expr="not is_chromeos">
     if (e.detail.id === 'signOutLink') {
       this.syncBrowserProxy_.signOut(/*delete_profile=*/ false);
+      this.metricsBrowserProxy_.recordAction(
+          'Settings.DeleteBrowsingData.CookiesSignOutLinkClick');
       return;
     }
     // </if>
