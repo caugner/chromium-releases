@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/390223051): Remove C-library calls to fix the errors.
-#pragma allow_unsafe_libc_calls
-#endif
-
 #include "components/search_engines/template_url.h"
 
 #include <algorithm>
@@ -50,6 +45,7 @@
 #include "components/search_engines/template_url_data.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_starter_pack_data.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/sync/base/features.h"
 #include "components/url_formatter/url_formatter.h"
 #include "google_apis/google_api_keys.h"
@@ -58,7 +54,12 @@
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "third_party/search_engines_data/resources/definitions/prepopulated_engines.h"
 #include "ui/base/device_form_factor.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(ENABLE_BUILTIN_SEARCH_PROVIDER_ASSETS) && !BUILDFLAG(IS_ANDROID)
+#include "third_party/search_engines_data/search_engine_descriptions_strings_map.h"
+#endif
 
 namespace {
 
@@ -1358,6 +1359,7 @@ std::string TemplateURLRef::HandleReplacements(
           case RequestSource::NTP_MODULE:
           case RequestSource::SEARCHBOX:
           case RequestSource::CROS_APP_LIST:
+          case RequestSource::NTP_COMPOSEBOX:
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
             HandleReplacement("sourceid", "chrome-mobile", replacement, &url);
 #else
@@ -1365,7 +1367,8 @@ std::string TemplateURLRef::HandleReplacements(
 #endif
             break;
           case RequestSource::LENS_OVERLAY:
-            // No replacement.
+            // Lens Overlay searchboxes don't rely on TemplateURL replacement
+            // and set `source=` in //c/b/u/lens/lens_overlay_url_builder.cc.
             break;
         }
         break;
@@ -1411,8 +1414,20 @@ std::string TemplateURLRef::HandleReplacements(
             HandleReplacement(std::string(), "chrome-omni", replacement, &url);
 #endif
             break;
+          case RequestSource::NTP_COMPOSEBOX:
+            if (base::FeatureList::IsEnabled(
+                    omnibox::kComposeboxUsesChromeComposeClient)) {
+              HandleReplacement(std::string(), "chrome-compose", replacement,
+                                &url);
+            } else {
+              HandleReplacement(std::string(), "chrome-omni", replacement,
+                                &url);
+            }
+            break;
           case RequestSource::LENS_OVERLAY:
-            // No replacement.
+            // No replacement. Lens Overlay searchboxes don't rely on
+            // TemplateURL replacement and set `client=` in
+            // //components/omnibox/browser/remote_suggestions_service.cc.
             break;
         }
         break;
@@ -1433,7 +1448,9 @@ std::string TemplateURLRef::HandleReplacements(
             break;
           case RequestSource::NTP_MODULE:
           case RequestSource::LENS_OVERLAY:
-            // No replacement.
+          case RequestSource::NTP_COMPOSEBOX:
+            // No replacement. `gs_ri` is longer recommended for new clients.
+            // New identifiers should be based on their client names.
             break;
         }
         break;
@@ -1826,9 +1843,38 @@ std::optional<std::string_view> TemplateURL::GetBaseBuiltinResourceId() const {
 std::string TemplateURL::GetBuiltinImageResourceId() const {
   std::optional<std::string_view> base_resource_id = GetBaseBuiltinResourceId();
   if (base_resource_id.has_value()) {
-    return base::StrCat({base_resource_id.value(), "_IMAGE"});
+    return base::StrCat({"IDR_", base_resource_id.value(), "_IMAGE"});
   }
   return "IDR_DEFAULT_FAVICON";
+}
+
+std::string TemplateURL::GetBuiltinDescriptionResourceId() const {
+  std::optional<std::string_view> base_resource_id = GetBaseBuiltinResourceId();
+  if (base_resource_id.has_value()) {
+    return base::StrCat({"IDS_", base_resource_id.value(), "_DESCRIPTION"});
+  }
+  return {};
+}
+
+std::optional<std::u16string> TemplateURL::GetBuiltinMarketingSnippet() const {
+#if BUILDFLAG(ENABLE_BUILTIN_SEARCH_PROVIDER_ASSETS) && !BUILDFLAG(IS_ANDROID)
+  auto resource_id = GetBuiltinDescriptionResourceId();
+  if (!resource_id.empty()) {
+    auto iter = std::ranges::find_if(
+        kSearchEngineDescriptionsStrings,
+        [&](const auto& resource) { return resource.path == resource_id; });
+
+    if (iter != std::end(kSearchEngineDescriptionsStrings)) {
+      return l10n_util::GetStringUTF16(iter->id);
+    }
+  }
+#endif
+  return std::nullopt;
+}
+
+std::u16string TemplateURL::GetMarketingSnippet() const {
+  return GetBuiltinMarketingSnippet().value_or(l10n_util::GetStringFUTF16(
+      IDS_SEARCH_ENGINE_FALLBACK_MARKETING_SNIPPET, short_name()));
 }
 
 SearchEngineType TemplateURL::GetEngineType(

@@ -503,14 +503,9 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 
 // Tests that navigating back to an offline page is still displaying the error
 // page and don't mess the navigation stack.
-// TODO(crbug.com/435147625): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testNavigateBackToDistilledPage testNavigateBackToDistilledPage
-#else
-#define MAYBE_testNavigateBackToDistilledPage \
-  FLAKY_testNavigateBackToDistilledPage
-#endif
-- (void)MAYBE_testNavigateBackToDistilledPage {
+// TODO(crbug.com/435147625): Fix flakiness and reenable this test.
+// TODO(crbug.com/436256665): Fix flakiness and reenable this test.
+- (void)DISABLED_testNavigateBackToDistilledPage {
   [ReadingListAppInterface forceConnectionToWifi];
   GURL distillablePageURL(self.testServer->GetURL(kDistillableURL));
   GURL nonDistillablePageURL(self.testServer->GetURL(kNonDistillableURL));
@@ -561,15 +556,9 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads offline version via context menu.
-// TODO(crbug.com/435147625): Reenable this test.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testSavingToReadingListAndLoadDistilled \
-  testSavingToReadingListAndLoadDistilled
-#else
-#define MAYBE_testSavingToReadingListAndLoadDistilled \
-  FLAKY_testSavingToReadingListAndLoadDistilled
-#endif
-- (void)MAYBE_testSavingToReadingListAndLoadDistilled {
+// TODO(crbug.com/435147625): Fix flakiness and reenable this test.
+// TODO(crbug.com/436259173): Fix flakiness and reenable this test.
+- (void)DISABLED_testSavingToReadingListAndLoadDistilled {
   [ReadingListAppInterface forceConnectionToWifi];
   GURL distillablePageURL(self.testServer->GetURL(kDistillableURL));
   GURL nonDistillablePageURL(self.testServer->GetURL(kNonDistillableURL));
@@ -624,7 +613,8 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 }
 
 // Tests that offline page does not request online resources.
-- (void)testSavingToReadingListAndLoadDistilledNoOnlineResource {
+// TODO(crbug.com/436270360): Fix flakiness and reenable this test.
+- (void)DISABLED_testSavingToReadingListAndLoadDistilledNoOnlineResource {
   self.serverServesRedImage = false;
   [ReadingListAppInterface forceConnectionToWifi];
   GURL distillablePageURL(self.testServer->GetURL(kDistillableURL));
@@ -670,7 +660,8 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads online version by tapping on entry.
-- (void)testSavingToReadingListAndLoadNormal {
+// TODO(crbug.com/436275889): Fix flakiness and reenable this test.
+- (void)DISABLED_testSavingToReadingListAndLoadNormal {
   [ReadingListAppInterface forceConnectionToWifi];
   GURL distillableURL = self.testServer->GetURL(kDistillableURL);
   // Open http://potato
@@ -702,7 +693,8 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads offline version by tapping on entry without web server.
-- (void)testSavingToReadingListAndLoadNoNetwork {
+// TODO(crbug.com/436264293): Fix flakiness and reenable this test.
+- (void)DISABLED_testSavingToReadingListAndLoadNoNetwork {
   [ReadingListAppInterface forceConnectionToWifi];
   GURL distillableURL = self.testServer->GetURL(kDistillableURL);
   // Open http://potato
@@ -746,7 +738,8 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads offline version by tapping on entry with delayed web server.
-- (void)testSavingToReadingListAndLoadBadNetwork {
+// TODO(crbug.com/436251784): Fix flakiness and re-enable.
+- (void)DISABLED_testSavingToReadingListAndLoadBadNetwork {
   [ReadingListAppInterface forceConnectionToWifi];
   GURL distillableURL = self.testServer->GetURL(kDistillableURL);
   // Open http://potato
@@ -801,6 +794,12 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 // Tests that only the "Cancel", "Delete All Read" and "Mark All…" buttons are
 // showing when not editing.
 - (void)testVisibleButtonsEditingModeEmptySelection {
+// TODO(crbug.com/429610821): Re-enable the test on iOS26.
+#if defined(__IPHONE_26_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_26_0
+  if (base::ios::IsRunningOnIOS26OrLater()) {
+    EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.");
+  }
+#endif
   AddEntriesAndEnterEdit();
 
   AssertToolbarButtonNotVisibleWithID(kReadingListToolbarDeleteButtonID);
@@ -825,7 +824,9 @@ void AssertIsShowingDistillablePage(bool online, const GURL& distillable_url) {
 
 // Tests that the "Cancel", "Edit" and "Mark Unread" buttons are not visible
 // after delete (using swipe).
-- (void)testVisibleButtonsAfterSwipeDeletion {
+// TODO(crbug.com/440119404): Re-enable after roll is complete and testers are
+// also updated.
+- (void)DISABLED_testVisibleButtonsAfterSwipeDeletion {
   AddEntriesAndOpenReadingList();
 
   [[[EarlGrey selectElementWithMatcher:VisibleReadingListItem(kReadTitle)]

@@ -89,7 +89,6 @@ class Origin;
 
 namespace blink {
 class WebGestureEvent;
-class WebMouseEvent;
 enum class ProtocolHandlerSecurityLevel;
 }
 
@@ -194,6 +193,14 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Selects the specified contents, bringing its container to the front.
   virtual void ActivateContents(WebContents* contents) {}
+
+  // A WebContents within a browser is considered active if it is the "active"
+  // tab in the browser's tab strip. A non-active WebContents cannot have focus,
+  // but it is possible for an active WebContents to not be focused if focus is
+  // elsewhere in the browser.Just because a WebContents is visible, doesn't
+  // mean it is active due to the SplitView feature. WebContents outside a
+  // browser are always considered active.
+  virtual bool IsContentsActive(WebContents* contents);
 
   // Notifies the delegate that this contents is starting or is done loading
   // some resource. The delegate should use this notification to represent
@@ -305,12 +312,10 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool HandleContextMenu(RenderFrameHost& render_frame_host,
                                  const ContextMenuParams& params);
 
-  // Allows delegates to handle mouse events before sending to the renderer.
-  // Returns true if the event was handled, false otherwise. A true value means
-  // no more processing should happen on the event. The default return value is
-  // false.
-  virtual bool PreHandleMouseEvent(WebContents* source,
-                                   const blink::WebMouseEvent& event);
+  // Allows delegates to handle mouse drag events before sending to the
+  // renderer. Returns true if the event was handled, false otherwise. A true
+  // value means no more processing should happen on the event. The default
+  // return value is false.
   virtual void PreHandleDragUpdate(const DropData& drop_data,
                                    const gfx::PointF& client_pt) {}
   virtual void PreHandleDragExit() {}

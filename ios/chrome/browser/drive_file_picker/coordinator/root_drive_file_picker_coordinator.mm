@@ -11,6 +11,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/continuation.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
+#import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/drive/model/drive_list.h"
 #import "ios/chrome/browser/drive/model/drive_service_factory.h"
 #import "ios/chrome/browser/drive_file_picker/coordinator/browse_drive_file_picker_coordinator.h"
@@ -125,12 +126,12 @@
       ui::DeviceFormFactor::DEVICE_FORM_FACTOR_PHONE) {
     _navigationController.sheetPresentationController.prefersGrabberVisible =
         YES;
+    // TODO(crbug.com/441764702): Add `mediumDetent` back.
     _navigationController.sheetPresentationController.detents = @[
-      [UISheetPresentationControllerDetent mediumDetent],
       [UISheetPresentationControllerDetent largeDetent],
     ];
     _navigationController.sheetPresentationController.selectedDetentIdentifier =
-        UISheetPresentationControllerDetentIdentifierMedium;
+        UISheetPresentationControllerDetentIdentifierLarge;
   } else {
     _navigationController.sheetPresentationController.prefersGrabberVisible =
         NO;
@@ -340,9 +341,9 @@
 
 // Initiate the add account flow.
 - (void)showAddAccount {
-  // In case of double-tap, we must stop the first coordinator. This may occur
-  // because, up to iOS 18, the view may have disappeared without calling the
-  // signin completion. See crbug.com/395959814
+  if (_signinCoordinator.viewWillPersist) {
+    return;
+  }
   [_signinCoordinator stop];
   __weak __typeof(self) weakSelf = self;
   signin_metrics::AccessPoint accessPoint =
@@ -353,6 +354,7 @@
                                           browser:self.browser
                                      contextStyle:contextStyle
                                       accessPoint:accessPoint
+                                   prefilledEmail:nil
                              continuationProvider:
                                  DoNothingContinuationProvider()];
   _signinCoordinator.signinCompletion =

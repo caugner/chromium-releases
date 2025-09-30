@@ -21,8 +21,8 @@
 #include "components/page_info/core/features.h"
 #include "components/permissions/features.h"
 #include "components/permissions/permission_hats_trigger_helper.h"
-#include "components/plus_addresses/features.h"
-#include "components/plus_addresses/plus_address_hats_utils.h"
+#include "components/plus_addresses/core/browser/plus_address_hats_utils.h"
+#include "components/plus_addresses/core/common/features.h"
 #include "components/privacy_sandbox/privacy_sandbox_features.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/variations/service/google_groups_manager.h"
@@ -725,7 +725,9 @@ std::vector<hats::SurveyConfig> GetAllSurveyConfigs() {
       password_manager::features::kPasswordChangeSuccessSurveyTriggerId.Get(),
       /*product_specific_bits_data_fields=*/
       std::vector<std::string>{password_manager::features_util::
-                                   kPasswordChangeSuggestedPasswordsAdoption},
+                                   kPasswordChangeSuggestedPasswordsAdoption,
+                               password_manager::features_util::
+                                   kPasswordChangeBlockingChallengeDetected},
       /*product_specific_string_data_fields=*/
       std::vector<std::string>{
           password_manager::features_util::
@@ -738,7 +740,9 @@ std::vector<hats::SurveyConfig> GetAllSurveyConfigs() {
       password_manager::features::kPasswordChangeErrorSurveyTriggerId.Get(),
       /*product_specific_bits_data_fields=*/
       std::vector<std::string>{password_manager::features_util::
-                                   kPasswordChangeSuggestedPasswordsAdoption},
+                                   kPasswordChangeSuggestedPasswordsAdoption,
+                               password_manager::features_util::
+                                   kPasswordChangeBlockingChallengeDetected},
       /*product_specific_string_data_fields=*/
       std::vector<std::string>{
           password_manager::features_util::
@@ -751,7 +755,9 @@ std::vector<hats::SurveyConfig> GetAllSurveyConfigs() {
       password_manager::features::kPasswordChangeCanceledSurveyTriggerId.Get(),
       /*product_specific_bits_data_fields=*/
       std::vector<std::string>{password_manager::features_util::
-                                   kPasswordChangeSuggestedPasswordsAdoption},
+                                   kPasswordChangeSuggestedPasswordsAdoption,
+                               password_manager::features_util::
+                                   kPasswordChangeBlockingChallengeDetected},
       /*product_specific_string_data_fields=*/
       std::vector<std::string>{
           password_manager::features_util::

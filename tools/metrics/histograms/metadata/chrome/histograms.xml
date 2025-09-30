@@ -42,7 +42,53 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Chrome.DWriteFontProxy.GetFontFailedHResult" enum="Hresult"
+    expires_after="2026-08-31">
+  <owner>andresrperez@chromium.org</owner>
+  <owner>anthonyvd@chromium.org</owner>
+  <owner>drott@chromium.org</owner>
+  <owner>etienneb@chromium.org</owner>
+  <summary>
+    The HResult of failed GetFont calls in
+    DWriteFontProxyImpl::GetFontFileHandles.
+  </summary>
+</histogram>
+
+<histogram name="Chrome.DWriteFontProxy.GetFontFamilyFailedHResult"
+    enum="Hresult" expires_after="2026-08-31">
+  <owner>andresrperez@chromium.org</owner>
+  <owner>anthonyvd@chromium.org</owner>
+  <owner>drott@chromium.org</owner>
+  <owner>etienneb@chromium.org</owner>
+  <summary>
+    The HResult of failed GetFontFamily calls in
+    DWriteFontProxyImpl::GetFontFileHandles.
+  </summary>
+</histogram>
+
 <histogram name="Chrome.DWriteFontProxy.WinLastError" enum="WinGetLastError"
+    expires_after="2026-08-31">
+  <owner>andresrperez@chromium.org</owner>
+  <owner>drott@chromium.org</owner>
+  <owner>etienneb@chromium.org</owner>
+  <summary>
+    The Windows last error obtained from a call to GetLastError after a failed
+    attempt to obtain the file handle for a font.
+  </summary>
+</histogram>
+
+<histogram name="Chrome.FontDataService.EmptyPathOnGetFileHandle"
+    enum="Boolean" expires_after="2026-08-31">
+  <owner>andresrperez@chromium.org</owner>
+  <owner>drott@chromium.org</owner>
+  <owner>etienneb@chromium.org</owner>
+  <summary>
+    Records whether the font path is empty when attempting to obtain the file
+    handle for a font.
+  </summary>
+</histogram>
+
+<histogram name="Chrome.FontDataService.WinLastError" enum="WinGetLastError"
     expires_after="2026-08-31">
   <owner>andresrperez@chromium.org</owner>
   <owner>drott@chromium.org</owner>
@@ -195,7 +241,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Chrome.ProcessSingleton.TerminateProcessTime" units="ms"
-    expires_after="2025-12-14">
+    expires_after="2026-02-22">
   <owner>gab@chromium.org</owner>
   <owner>etienneb@chromium.org</owner>
   <summary>
@@ -369,7 +415,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ChromeColors.ColorType" enum="ChromeColorType"
-    expires_after="2025-12-21">
+    expires_after="2026-02-22">
   <owner>tiborg@chromium.org</owner>
   <owner>chrome-desktop-ntp@google.com</owner>
   <summary>
@@ -384,7 +430,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ChromeColors.DynamicColorOnLoad"
-    enum="DynamicChromeColorsInfo" expires_after="2025-12-14">
+    enum="DynamicChromeColorsInfo" expires_after="2026-02-15">
   <owner>tiborg@chromium.org</owner>
   <owner>chrome-desktop-ntp@google.com</owner>
   <summary>

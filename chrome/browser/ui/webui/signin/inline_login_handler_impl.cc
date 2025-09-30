@@ -337,7 +337,7 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
         base::IgnoreArgs<Browser*>(base::BindOnce(
             &InlineSigninHelper::OnClientOAuthSuccessAndBrowserOpened,
             base::Unretained(this), result)),
-        true, false, profile_);
+        true, false, false, profile_);
   } else {
     OnClientOAuthSuccessAndBrowserOpened(result);
   }
@@ -712,7 +712,9 @@ void InlineLoginHandlerImpl::FinishCompleteLogin(
   switch (reason) {
     case HandlerSigninReason::kReauthentication:
     case HandlerSigninReason::kForcedSigninPrimaryAccount:
-      can_offer_error = CanOfferSignin(profile, params.gaia_id, params.email);
+      can_offer_error =
+          CanOfferSignin(profile, params.gaia_id, params.email,
+                         /*allow_account_from_other_profile=*/false);
       break;
     case HandlerSigninReason::kFetchLstOnly:
       break;

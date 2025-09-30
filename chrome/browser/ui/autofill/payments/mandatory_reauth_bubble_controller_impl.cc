@@ -53,6 +53,19 @@ void MandatoryReauthBubbleControllerImpl::SetupAndShowBubble(
     return;
   }
 
+  SetupBubble(std::move(accept_mandatory_reauth_callback),
+              std::move(cancel_mandatory_reauth_callback),
+              std::move(close_mandatory_reauth_callback));
+  autofill_metrics::LogMandatoryReauthOptInBubbleOffer(
+      autofill_metrics::MandatoryReauthOptInBubbleOffer::kShown,
+      /*is_reshow=*/false);
+  ShowBubble();
+}
+
+void MandatoryReauthBubbleControllerImpl::SetupBubble(
+    base::OnceClosure accept_mandatory_reauth_callback,
+    base::OnceClosure cancel_mandatory_reauth_callback,
+    base::RepeatingClosure close_mandatory_reauth_callback) {
   is_reshow_ = false;
   accept_mandatory_reauth_callback_ =
       std::move(accept_mandatory_reauth_callback);
@@ -60,11 +73,6 @@ void MandatoryReauthBubbleControllerImpl::SetupAndShowBubble(
       std::move(cancel_mandatory_reauth_callback);
   close_mandatory_reauth_callback_ = std::move(close_mandatory_reauth_callback);
   current_bubble_type_ = MandatoryReauthBubbleType::kOptIn;
-  autofill_metrics::LogMandatoryReauthOptInBubbleOffer(
-      autofill_metrics::MandatoryReauthOptInBubbleOffer::kShown,
-      /*is_reshow=*/false);
-
-  ShowBubble();
 }
 
 void MandatoryReauthBubbleControllerImpl::ReshowBubble() {
@@ -207,8 +215,8 @@ bool MandatoryReauthBubbleControllerImpl::IsIconVisible() {
   return current_bubble_type_ != MandatoryReauthBubbleType::kInactive;
 }
 
-MandatoryReauthBubbleType MandatoryReauthBubbleControllerImpl::GetBubbleType()
-    const {
+MandatoryReauthBubbleType
+MandatoryReauthBubbleControllerImpl::GetMandatoryReauthBubbleType() const {
   return current_bubble_type_;
 }
 
@@ -238,6 +246,15 @@ void MandatoryReauthBubbleControllerImpl::DoShowBubble() {
 #endif  // BUILDFLAG(IS_ANDROID)
 }
 
+BubbleType MandatoryReauthBubbleControllerImpl::GetBubbleType() const {
+  return BubbleType::kMandatoryReauth;
+}
+
+base::WeakPtr<BubbleControllerBase>
+MandatoryReauthBubbleControllerImpl::GetBubbleControllerBaseWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
 #if BUILDFLAG(IS_ANDROID)
 base::android::ScopedJavaLocalRef<jobject>
 MandatoryReauthBubbleControllerImpl::GetJavaControllerBridge() {
@@ -265,10 +282,16 @@ void MandatoryReauthBubbleControllerImpl::UpdatePageActionIcon() {
     return;
   }
 
+  tabs::TabFeatures* const tab_features = tab_interface->GetTabFeatures();
+  if (!tab_features) {
+    // This controller outlives the tab features.
+    return;
+  }
+
   // NOTE: Consider creating a separate page action view controller file when
   // the logic to show the page action become complex.
   page_actions::PageActionController* page_action_controller =
-      tab_interface->GetTabFeatures()->page_action_controller();
+      tab_features->page_action_controller();
   if (!page_action_controller) {
     return;
   }

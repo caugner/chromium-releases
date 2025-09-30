@@ -305,9 +305,13 @@ extern const char kNTPMIAEntrypointParamOmniboxContainedSingleButton[];
 extern const char kNTPMIAEntrypointParamOmniboxContainedInline[];
 extern const char kNTPMIAEntrypointParamOmniboxContainedEnlargedFakebox[];
 extern const char kNTPMIAEntrypointParamEnlargedFakeboxNoIncognito[];
+extern const char kNTPMIAEntrypointParamAIMInQuickActions[];
 
-// Feature flag to change the MIA entrypoint in NTP.
+// Feature flag to change the MIA entrypoint in NTP. Applies to en-US locales
+// only.
 BASE_DECLARE_FEATURE(kNTPMIAEntrypoint);
+// Like above, but applies regardless of client's locale.
+BASE_DECLARE_FEATURE(kNTPMIAEntrypointAllLocales);
 
 // When enabled the AIM ZPS entrypoint will open the AIM prototype which
 // contains temporary UI exploration for AIM.
@@ -390,6 +394,9 @@ extern const char kBottomOmniboxDefaultSettingParamBottom[];
 extern const char kBottomOmniboxDefaultSettingParamSafariSwitcher[];
 // Feature flag to change the default position of the omnibox.
 BASE_DECLARE_FEATURE(kBottomOmniboxDefaultSetting);
+
+// Feature flag to enable improvdements in the bottom omnibox.
+BASE_DECLARE_FEATURE(kBottomOmniboxEvolution);
 
 // Feature flag to put all clipboard access onto a background thread. Any
 // synchronous clipboard access will always return nil/false.
@@ -524,9 +531,6 @@ BASE_DECLARE_FEATURE(kDownloadAutoDeletionFeatureEnabled);
 
 // Whether the kDownloadAutoDeletion feature is enabled.
 bool IsDownloadAutoDeletionFeatureEnabled();
-
-// Feature flag that allows opening the downloaded PDF files in Chrome.
-BASE_DECLARE_FEATURE(kDownloadedPDFOpening);
 
 // Download List UI feature constants and types.
 extern const char kDownloadListUITypeParam[];
@@ -722,24 +726,6 @@ bool IsSegmentationTipsManagerEnabled();
 // Flag to not keep a strong reference to the spotlight index, as a tentative
 // memory improvement measure.
 BASE_DECLARE_FEATURE(kSpotlightNeverRetainIndex);
-
-// Feature that enables improvements for Save to Photos feature.
-BASE_DECLARE_FEATURE(kIOSSaveToPhotosImprovements);
-
-// A set of parameters to indicate which improvement to apply to the Save to
-// Photos feature.
-extern const char kSaveToPhotosContextMenuImprovementParam[];
-extern const char kSaveToPhotosTitleImprovementParam[];
-extern const char kSaveToPhotosAccountDefaultChoiceImprovementParam[];
-
-// Returns true if the Save to Photos action improvement is enabled.
-bool IsSaveToPhotosActionImprovementEnabled();
-
-// Returns true if the Save to Photos title improvement is enabled.
-bool IsSaveToPhotosTitleImprovementEnabled();
-
-// Returns true if the Save to Photos account picker improvement is enabled.
-bool IsSaveToPhotosAccountPickerImprovementEnabled();
 
 // Feature flag to enable app background refresh.
 // Use IsAppBackgroundRefreshEnabled() instead of this constant directly.
@@ -1037,18 +1023,6 @@ BASE_DECLARE_FEATURE(kRunDefaultStatusCheck);
 // Returns whether `kRunDefaultStatusCheck` is enabled.
 bool IsRunDefaultStatusCheckEnabled();
 
-// Feature flag to have the tab group visually contained.
-BASE_DECLARE_FEATURE(kContainedTabGroup);
-
-// Whether the feature associated with contained tab group is enabled.
-bool IsContainedTabGroupEnabled();
-
-// Feature flag to have more color for the tab groups.
-BASE_DECLARE_FEATURE(kColorfulTabGroup);
-
-// Whether the feature associated with colorful tab group is enabled.
-bool IsColorfulTabGroupEnabled();
-
 // Feature flag to highlight the app's features during the FRE.
 BASE_DECLARE_FEATURE(kBestOfAppFRE);
 
@@ -1098,5 +1072,17 @@ bool IsDefaultBrowserOffCyclePromoEnabled();
 BASE_DECLARE_FEATURE(kIOSLogInstallAttribution);
 
 bool IsInstallAttributionLoggingEnabled();
+
+// Feature flag for migrating all default browser promos to use the new Default
+// Apps iOS settings page.
+BASE_DECLARE_FEATURE(kIOSUseDefaultAppsDestinationForPromos);
+
+bool IsDefaultAppsDestinationAvailable();
+bool IsUseDefaultAppsDestinationForPromosEnabled();
+
+// Feature flag for a workaround on iOS26 to show edit menu items synchronously.
+// Enabled by default. Can be disabled if the bug is fixed on iOS 26.
+BASE_DECLARE_FEATURE(kSynchronousEditMenuItems);
+bool ShouldShowEditMenuItemsSynchronously();
 
 #endif  // IOS_CHROME_BROWSER_SHARED_PUBLIC_FEATURES_FEATURES_H_

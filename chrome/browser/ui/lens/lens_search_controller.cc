@@ -31,6 +31,7 @@
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "components/lens/lens_features.h"
 #include "components/lens/lens_overlay_permission_utils.h"
+#include "components/lens/lens_url_utils.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/optimization_guide/content/browser/page_context_eligibility.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -133,6 +134,21 @@ void LensSearchController::OpenLensOverlay(
                       /*permission_granted_callback=*/base::BindRepeating(
                           &LensSearchController::OpenLensOverlay,
                           weak_ptr_factory_.GetWeakPtr(), invocation_source))) {
+    return;
+  }
+
+  // If flag enabled, perform an empty contextual query instead of opening the
+  // overlay as normal. For internal debugging only.
+  if (lens::features::IsLensOverlayForceEmptyCsbQueryEnabled()) {
+    IssueTextSearchRequest(
+        lens::LensOverlayInvocationSource::kContentAreaContextMenuText,
+        /*query_text=*/"",
+        /*additional_query_parameters=*/{},
+        // TODO(crbug.com/432490312): Match type here is likely not ideal.
+        // Investigate removing match type from this function.
+        AutocompleteMatchType::Type::SEARCH_SUGGEST,
+        /*is_zero_prefix_suggestion=*/false,
+        /*suppress_contextualization=*/false);
     return;
   }
 

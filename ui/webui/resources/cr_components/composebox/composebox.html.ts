@@ -24,60 +24,106 @@ export function getHtml(this: ComposeboxElement) {
       </cr-button>
     </div>
   `: ''}
-  <div id="composebox" tabindex="-1" @keydown="${this.onKeydown_}"
+  <div id="composebox" @keydown="${this.onKeydown_}"
       ?inert=${this.showErrorScrim_}
       @focusin=${this.handleComposeboxFocusIn_}
       @focusout=${this.handleComposeboxFocusOut_}>
     <div id="inputContainer">
-      <ntp-composebox-file-carousel
-        id="carousel"
-        .files=${Array.from(this.files_.values())}
-        @delete-file=${this.onDeleteFile_}>
-      </ntp-composebox-file-carousel>
-      <textarea autocomplete="off" id="input"
-          type="search" spellcheck="false"
-          placeholder="${this.inputPlaceholder_}"
-          @keydown="${this.onInputKeydown_}"
-          @input=${this.handleInput_}></textarea>
-      <div id="uploadContainer" class="icon-fade">
-        <cr-icon-button
-            class="upload-icon no-overlap"
-            id="imageUploadButton"
-            iron-icon="composebox:imageUpload"
-            title="$i18n{composeboxImageUploadButtonTitle}"
-            .disabled="${this.inputsDisabled_}"
-            @click="${this.openImageUpload_}">
-        </cr-icon-button>
-        ${this.composeboxShowPdfUpload_ ? html`
-        <cr-icon-button
-            class="upload-icon no-overlap"
-            id="fileUploadButton"
-            iron-icon="composebox:fileUpload"
-            title="$i18n{composeboxPdfUploadButtonTitle}"
-            .disabled="${this.inputsDisabled_}"
-            @click="${this.openFileUpload_}">
-        </cr-icon-button>
-        `: ''}
+      <div id="textContainer" part="text-container">
+        <div id="iconContainer" part="icon-container">
+          <div id="aimIcon"></div>
+        </div>
+        <div id="inputWrapper">
+          <textarea autocomplete="off" id="input"
+            type="search" spellcheck="false"
+            placeholder="${this.inputPlaceholder_}"
+            part="input"
+            @input=${this.handleInput_}
+            @scroll="${this.handleScroll_}"
+            @focusin="${this.handleInputFocusIn_}"></textarea>
+          ${this.shouldShowSmartComposeInlineHint_() ? html`
+            <div id="smartCompose">
+              <!-- Comments in between spans to eliminate spacing between
+                   spans -->
+              <span id="invisibleText">${this.input_}</span><!--
+              --><span id="ghostText">${this.smartComposeInlineHint_}</span><!--
+              --><span id="tabChip">Tab</span>
+            </div>
+          `: ''}
+        </div>
       </div>
-    </div>
-    <!-- A seperate container is needed for the submit button so the
-         expand/collapse animation can be applied without affecting the submit
-         button enabled/disabled state. -->
-    <div id="submitContainer" class="icon-fade">
-      <cr-icon-button
-        class="action-icon icon-arrow-upward"
-        id="submitIcon"
-        title="$i18n{composeboxSubmitButtonTitle}"
-        @click="${this.onSubmitClick_}"
-        ?disabled="${!this.submitEnabled_}">
-      </cr-icon-button>
+      ${this.showFileCarousel_ ? html`
+        <ntp-composebox-file-carousel
+          id="carousel"
+          .files=${Array.from(this.files_.values())}
+          @delete-file=${this.onDeleteFile_}>
+        </ntp-composebox-file-carousel> ` : ''}
+      ${this.showDropdown_ && this.showFileCarousel_ ? html`
+      <div class="carousel-divider"></div>` : ''}
+      <ntp-composebox-dropdown
+          id="matches"
+          role="listbox"
+          .result="${this.result_}"
+          .selectedMatchIndex="${this.selectedMatchIndex_}"
+          @selected-match-index-changed="${this.onSelectedMatchIndexChanged_}"
+          @match-focusin="${this.onMatchFocusin_}"
+          @match-click="${this.onMatchClick_}"
+          ?hidden="${!this.showDropdown_}">
+      </ntp-composebox-dropdown>
+    ${this.contextMenuEnabled_ ? html`
+      <composebox-context-menu-entrypoint id="contextEntrypoint"
+          class="upload-icon no-overlap"
+          .tabSuggestions="${this.tabSuggestions_}"
+          @open-image-upload="${this.openImageUpload_}"
+          @open-file-upload="${this.openFileUpload_}"
+          @add-tab-context="${this.addTabContext_}"
+          @refresh-tab-suggestions="${this.refreshTabSuggestions_}"
+          ?inputs-disabled="${this.inputsDisabled_}">
+      </composebox-context-menu-entrypoint>
+    ` : html`
+      <div id="uploadContainer" class="icon-fade">
+          <cr-icon-button
+              class="upload-icon no-overlap"
+              id="imageUploadButton"
+              iron-icon="composebox:imageUpload"
+              title="$i18n{composeboxImageUploadButtonTitle}"
+              .disabled="${this.inputsDisabled_}"
+              @click="${this.openImageUpload_}">
+          </cr-icon-button>
+          ${this.composeboxShowPdfUpload_ ? html`
+          <cr-icon-button
+              class="upload-icon no-overlap"
+              id="fileUploadButton"
+              iron-icon="composebox:fileUpload"
+              title="$i18n{composeboxPdfUploadButtonTitle}"
+              .disabled="${this.inputsDisabled_}"
+              @click="${this.openFileUpload_}">
+          </cr-icon-button>
+          `: ''}
+      </div>
+    `}
     </div>
     <cr-icon-button
         class="action-icon icon-fade icon-clear"
         id="cancelIcon"
+        part="action-icon cancel-icon"
         title="${this.computeCancelButtonTitle_()}"
         @click="${this.onCancelClick_}">
     </cr-icon-button>
+    <!-- A seperate container is needed for the submit button so the
+       expand/collapse animation can be applied without affecting the submit
+       button enabled/disabled state. -->
+    <div id="submitContainer" class="icon-fade" part="submit">
+      <cr-icon-button
+        class="action-icon icon-arrow-upward"
+        id="submitIcon"
+        part="action-icon"
+        title="${this.i18n('composeboxSubmitButtonTitle')}"
+        @click="${this.submitQuery_}"
+        ?disabled="${!this.submitEnabled_}"
+        @focusin="${this.handleSubmitFocusIn_}">
+      </cr-icon-button>
+    </div>
   </div>
   <input type="file"
       accept="${this.imageFileTypes_}"
@@ -91,6 +137,13 @@ export function getHtml(this: ComposeboxElement) {
       @change="${this.onFileChange_}"
       hidden>
   </input>
+  ${this.shouldShowSuggestionActivityLink_() ? html`
+    <div id="suggestionActivity">
+      <localized-link
+        localized-string="${this.i18nAdvanced('suggestionActivityLink')}">
+      </localized-link>
+    </div>
+  `: ''}
 <!--_html_template_end_-->`;
   // clang-format on
 }

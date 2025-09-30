@@ -35,6 +35,9 @@ extern const char kMediaBackgrounded[];
 // The user opened the Global Media Controls dialog.
 extern const char kGlobalMediaControlsOpened[];
 
+// A split tab has been created
+extern const char kSplitViewCreated[];
+
 // A side panel has been pinned.
 extern const char kSidePanelPinned[];
 
@@ -343,6 +346,21 @@ extern const char kIOSFirstRunComplete[];
 
 // Event fired after the quiet period following FRE completion has elapsed.
 extern const char kIOSFREBadgeHoldbackPeriodElapsed[];
+
+// The user has tapped on the Reader Mode entrypoint.
+extern const char kIOSReaderModeUsed[];
+
+// Event fired when the Reader Mode "What's new" badge is displayed.
+extern const char kIOSIPHBadgedReaderModeTriggered[];
+
+// Event fired when the AI Hub's "New" badge entrypoint is tapped.
+extern const char kIOSAIHubNewBadgeTriggered[];
+
+// AI Hub's "New" badge entrypoint was used.
+extern const char kIOSAIHubNewBadgeUsed[];
+
+// Event fired when the Gemini Promo is completed for the first time on iOS.
+extern const char kIOSGeminiPromoFirstCompletion[];
 
 #endif  // BUILDFLAG(IS_IOS)
 

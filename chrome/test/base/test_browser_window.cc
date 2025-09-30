@@ -11,12 +11,13 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "components/sharing_message/sharing_dialog_data.h"
 #include "components/user_education/common/new_badge/new_badge_controller.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
-#include "ui/base/interaction/element_identifier.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/color/color_provider_key.h"
 #include "ui/color/color_provider_manager.h"
@@ -28,16 +29,14 @@ std::unique_ptr<Browser> CreateBrowserWithTestWindowForParams(
     Browser::CreateParams params) {
   DCHECK(!params.window);
   auto window = std::make_unique<TestBrowserWindow>();
-  auto* window_ptr = window.get();
-  new TestBrowserWindowOwner(std::move(window));
-  params.window = window_ptr;
-  window_ptr->set_is_minimized(params.initial_show_state ==
-                               ui::mojom::WindowShowState::kMinimized);
+  window->set_is_minimized(params.initial_show_state ==
+                           ui::mojom::WindowShowState::kMinimized);
   // Tests generally expect TestBrowserWindows not to be active.
-  window_ptr->set_is_active(
+  window->set_is_active(
       params.initial_show_state != ui::mojom::WindowShowState::kInactive &&
       params.initial_show_state != ui::mojom::WindowShowState::kDefault &&
       params.initial_show_state != ui::mojom::WindowShowState::kMinimized);
+  params.window = window.release();
 
   return Browser::DeprecatedCreateOwnedForTesting(params);
 }
@@ -63,9 +62,21 @@ content::WebContents* TestBrowserWindow::TestLocationBar::GetWebContents() {
 
 // TestBrowserWindow ----------------------------------------------------------
 
-TestBrowserWindow::TestBrowserWindow() = default;
+TestBrowserWindow::TestBrowserWindow() {
+  // TestBrowserWindow will always be instantiated before its Browser.
+  // TODO(crbug.com/413168662): This can be removed once Browser is updated to
+  // always own its BrowserWindow.
+  browser_list_observer_.Observe(BrowserList::GetInstance());
+}
 
-TestBrowserWindow::~TestBrowserWindow() = default;
+TestBrowserWindow::~TestBrowserWindow() {
+  if (browser_) {
+    // BrowserWindow implementations are expected to call
+    // TearDownPreBrowserWindowDestruction() before destruction.
+    browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
+    browser_ = nullptr;
+  }
+}
 
 void TestBrowserWindow::Close() {
   if (close_callback_) {
@@ -114,10 +125,6 @@ const ui::ThemeProvider* TestBrowserWindow::GetThemeProvider() const {
 const ui::ColorProvider* TestBrowserWindow::GetColorProvider() const {
   return ui::ColorProviderManager::Get().GetColorProviderFor(
       ui::ColorProviderKey());
-}
-
-ui::ElementContext TestBrowserWindow::GetElementContext() {
-  return element_context_;
 }
 
 int TestBrowserWindow::GetTopControlsHeight() const {
@@ -199,10 +206,6 @@ autofill::AutofillBubbleHandler* TestBrowserWindow::GetAutofillBubbleHandler() {
 
 ExtensionsContainer* TestBrowserWindow::GetExtensionsContainer() {
   return nullptr;
-}
-
-bool TestBrowserWindow::PreHandleMouseEvent(const blink::WebMouseEvent& event) {
-  return false;
 }
 
 content::KeyboardEventProcessingResult
@@ -339,6 +342,12 @@ web_modal::WebContentsModalDialogHost*
   return nullptr;
 }
 
+web_modal::WebContentsModalDialogHost*
+TestBrowserWindow::GetWebContentsModalDialogHostFor(
+    content::WebContents* web_contents) {
+  return nullptr;
+}
+
 ExclusiveAccessContext* TestBrowserWindow::GetExclusiveAccessContext() {
   return nullptr;
 }
@@ -374,19 +383,9 @@ void TestBrowserWindow::SetIsTabModalPopupDeprecated(
   is_tab_modal_popup_deprecated_ = is_tab_modal_popup_deprecated;
 }
 
-// TestBrowserWindowOwner -----------------------------------------------------
-
-TestBrowserWindowOwner::TestBrowserWindowOwner(
-    std::unique_ptr<TestBrowserWindow> window)
-    : window_(std::move(window)) {
-  BrowserList::AddObserver(this);
-}
-
-TestBrowserWindowOwner::~TestBrowserWindowOwner() {
-  BrowserList::RemoveObserver(this);
-}
-
-void TestBrowserWindowOwner::OnBrowserRemoved(Browser* browser) {
-  if (browser->window() == window_.get())
-    delete this;
+void TestBrowserWindow::OnBrowserAdded(Browser* browser) {
+  if (browser->create_params().window == this) {
+    browser_ = browser;
+    browser_list_observer_.Reset();
+  }
 }

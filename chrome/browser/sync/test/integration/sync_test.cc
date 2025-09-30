@@ -68,7 +68,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/os_crypt/sync/os_crypt_mocker.h"
 #include "components/password_manager/core/browser/password_manager_buildflags.h"
-#include "components/plus_addresses/features.h"
+#include "components/plus_addresses/core/common/features.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/base/signin_switches.h"
@@ -105,8 +105,10 @@
 #include "chrome/browser/ash/app_list/test/fake_app_list_model_updater.h"
 #include "chrome/browser/sync/test/integration/sync_arc_package_helper.h"
 #include "chromeos/ash/components/account_manager/account_manager_factory.h"
+#include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
 #include "chromeos/ash/experiences/arc/test/arc_util_test_support.h"
 #include "components/account_manager_core/chromeos/account_manager.h"
+#include "components/user_manager/user_manager.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_ANDROID)
@@ -365,8 +367,18 @@ bool SyncTest::CreateProfile(int index) {
   DCHECK_EQ(index, 0);
   Profile* profile = ProfileManager::GetLastUsedProfile();
 #else   // BUILDFLAG(IS_ANDROID)
-  Profile* profile =
-      g_browser_process->profile_manager()->GetProfile(profile_path);
+  Profile* profile = nullptr;
+#if BUILDFLAG(IS_CHROMEOS)
+  if (use_primary_user_profile_) {
+    CHECK_EQ(index, 0);
+    profile = Profile::FromBrowserContext(
+        ash::BrowserContextHelper::Get()->GetBrowserContextByUser(
+            user_manager::UserManager::Get()->GetPrimaryUser()));
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+  if (!profile) {
+    profile = g_browser_process->profile_manager()->GetProfile(profile_path);
+  }
 #endif  // BUILDFLAG(IS_ANDROID)
 
   InitializeProfile(index, profile);
@@ -397,6 +409,14 @@ std::vector<raw_ptr<Profile, VectorExperimental>> SyncTest::GetAllProfiles() {
   }
   return profiles;
 }
+
+#if BUILDFLAG(IS_CHROMEOS)
+void SyncTest::SetUsePrimaryUserProfile(bool value) {
+  // Must be called early enough.
+  CHECK(profiles_.empty());
+  use_primary_user_profile_ = true;
+}
+#endif
 
 #if !BUILDFLAG(IS_ANDROID)
 Browser* SyncTest::GetBrowser(int index) {
@@ -1121,8 +1141,17 @@ syncer::DataTypeSet AllowedTypesInStandaloneTransportMode() {
 
   if (base::FeatureList::IsEnabled(
           switches::kEnablePreferencesAccountStorage)) {
-    allowed_types.Put(syncer::PREFERENCES);
     allowed_types.Put(syncer::PRIORITY_PREFERENCES);
+#if BUILDFLAG(IS_ANDROID)
+    allowed_types.Put(syncer::PREFERENCES);
+#else
+    // On desktop, support for transport mode for preferences is implemented
+    // alongside that of search engines.
+    if (base::FeatureList::IsEnabled(
+            syncer::kSeparateLocalAndAccountSearchEngines)) {
+      allowed_types.Put(syncer::PREFERENCES);
+    }
+#endif  // BUILDFLAG(IS_ANDROID)
   }
   if (base::FeatureList::IsEnabled(
           switches::kSyncEnableBookmarksInTransportMode)) {
@@ -1159,10 +1188,6 @@ syncer::DataTypeSet AllowedTypesInStandaloneTransportMode() {
       }
     }
 
-    if (base::FeatureList::IsEnabled(commerce::kProductSpecifications)) {
-      allowed_types.Put(syncer::PRODUCT_COMPARISON);
-    }
-
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     if (base::FeatureList::IsEnabled(
             switches::kEnableExtensionsExplicitBrowserSignin)) {
@@ -1195,7 +1220,11 @@ syncer::DataTypeSet AllowedTypesInStandaloneTransportMode() {
   }
 
   if (base::FeatureList::IsEnabled(
-          syncer::kSeparateLocalAndAccountSearchEngines)) {
+          syncer::kSeparateLocalAndAccountSearchEngines) &&
+      // Support for transport mode for search engines is implemented alongside
+      // that of preferences.
+      base::FeatureList::IsEnabled(
+          switches::kEnablePreferencesAccountStorage)) {
     allowed_types.Put(syncer::SEARCH_ENGINES);
   }
 

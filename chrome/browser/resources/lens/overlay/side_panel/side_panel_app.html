@@ -2,6 +2,8 @@
   :host {
     --cr-searchbox-height: 52px;
     --cr-searchbox-min-width: min(calc(100%), 1100px);
+    --composebox-collapsed-height: 90px;
+    --aim-header-height: 66px;
   }
 
   /* Light mode not on AIM results */
@@ -73,8 +75,8 @@
   }
 
   :host([enable-client-side-aim-header]) .results-pane {
-    inset-block-start: 66px;
-    height: calc(100vh - 66px);
+    inset-block-start: var(--aim-header-height);
+    height: calc(100vh - var(--aim-header-height) - var(--composebox-collapsed-height));
   }
 
   :host([enable-floating-g-for-header]) #ghostLoader {
@@ -83,13 +85,12 @@
   }
 
   /* Set z-index to hide results to prevent ghost frames when reshowing. */
-  :host([is-loading-results]) #results {
+  :host([is-loading-results]) .results {
     z-index: 0;
   }
 
   #ghostLoader {
     background-color: white;
-    max-width: 796px;
   }
 
   :host([dark-mode]) #ghostLoader {
@@ -103,7 +104,7 @@
   }
 
   :host([is-back-arrow-visible]) #ghostLoader {
-    max-width: 832px;
+    --ghost-loader-container-max-width: 832px;
   }
 
   #searchbox {
@@ -232,6 +233,7 @@
     --color-new-tab-page-composebox-scrim-background: var(--search-background-color);
     display: none;
     inset-block-end: 0;
+    min-height: var(--composebox-collapsed-height);
     position: absolute;
     width: 100%;
     z-index: 2;
@@ -244,7 +246,7 @@
       transparent 1%,
       var(--color-new-tab-page-composebox-scrim-background) 52px
     );
-    inset: -66px 0 0;
+    inset: calc(var(--aim-header-height) * -1) 0 0;
     pointer-events: none;
     position: absolute;
     width: 100%;
@@ -279,7 +281,7 @@
 
   #aimHeader {
     inset-inline: 0;
-    height: 66px;
+    height: var(--aim-header-height);
     background-color: var(--search-background-color);
   }
 
@@ -288,9 +290,51 @@
   }
 
   #composebox {
+    --expanded-border-radius: 24px;
+    --input-bottom-spacing: 16px;
+    --text-input-top-spacing: 16px;
+    --text-input-left-spacing: 24px;
+    box-shadow: none;
     position: relative;
     width: calc(100% - 32px); /* 16px on each side */
     margin-bottom: 30px;
+  }
+
+  #composebox::part(text-container) {
+    padding: 0;
+  }
+
+  #composebox::part(icon-container) {
+    display: none;
+  }
+
+  #composebox::part(input) {
+    color: var(--color-new-tab-page-composebox-font);
+    padding-inline-start: var(--text-input-left-spacing);
+  }
+
+  #composebox::part(input)::placeholder {
+    color: revert;
+  }
+
+  #composebox::part(action-icon) {
+    --cr-icon-button-size: 48px;
+    --cr-icon-button-icon-size: 24px;
+    --cr-icon-button-hover-background-color:
+      var(--color-new-tab-page-composebox-hover);
+  }
+
+  #composebox::part(cancel-icon) {
+    --cr-icon-button-fill-color:
+      var(--color-new-tab-page-composebox-cancel-button);
+  }
+
+  #composebox::part(submit) {
+    display: block;
+  }
+
+  #composebox::part(label) {
+    display: none;
   }
 
   :host(:not([show-upload-progress])) #uploadProgressBarContainer,
@@ -405,12 +449,22 @@
 <iframe
   name="results"
   id="results"
-  class="results-pane"
+  class="results results-pane"
   allow="cross-origin-isolated; display-capture; geolocation; microphone;
            clipboard-read; clipboard-write;"
   frameborder="0"
+  hidden$="[[enableWebviewResults]]"
 >
 </iframe>
+<webview
+  name="resultsWebview"
+  id="resultsWebview"
+  class="results results-pane"
+  partition="persist:lenspart"
+  hidden$="[[!enableWebviewResults]]"
+>
+</webview>
+
 <feedback-toast id="feedbackToast"></feedback-toast>
 
 <cr-toast id="messageToast" duration="4000">
@@ -421,5 +475,5 @@
 </cr-toast>
 
 <div id="composeboxContainer">
-  <ntp-composebox id="composebox" is-collapsible hide-file-inputs> </ntp-composebox>
+  <ntp-composebox id="composebox" is-collapsible hide-file-inputs_> </ntp-composebox>
 </div>

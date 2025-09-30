@@ -105,6 +105,9 @@ class ClientSideDetectionHost
    public:
     // Represents the result of an intelligent scan.
     struct IntelligentScanResult {
+      static constexpr int kModelVersionUnavailable = -1;
+      static IntelligentScanResult Failure(int model_version);
+
       std::string brand;
       std::string intent;
       int model_version;
@@ -126,8 +129,6 @@ class ClientSideDetectionHost
         bool log_failed_eligibility_reason) = 0;
     // Gets the intelligent scan result from the on-device model. The callback
     // will return an empty optional if the on-device model is not available.
-    // Note: The caller is responsible for calling ResetOnDeviceSession before
-    // calling this function again.
     virtual void InquireOnDeviceModel(
         std::string rendered_texts,
         InquireOnDeviceModelDoneCallback callback) = 0;
@@ -135,6 +136,10 @@ class ClientSideDetectionHost
     // the session was reset. Does nothing and returns false if there is no
     // session.
     virtual bool ResetOnDeviceSession() = 0;
+    // Determines if a scam warning should be shown based on the intelligent
+    // scan verdict.
+    virtual bool ShouldShowScamWarning(
+        std::optional<IntelligentScanVerdict> verdict) = 0;
   };
 
   // The caller keeps ownership of the tab object and is responsible for

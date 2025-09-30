@@ -693,8 +693,13 @@ void ClientSession::CreatePerMonitorVideoStreams() {
 
     HOST_LOG << "Creating video stream for id " << id;
 
-    auto video_stream = connection_->StartVideoStream(
-        id, desktop_environment_->CreateVideoCapturer(id));
+    auto video_capturer = desktop_environment_->CreateVideoCapturer(id);
+    if (!video_capturer) {
+      LOG(WARNING) << "Cannot create video capturer for id " << id;
+      continue;
+    }
+    auto video_stream =
+        connection_->StartVideoStream(id, std::move(video_capturer));
 
     // SetObserver(this) is not called on the new video-stream, because
     // per-monitor resizing should be handled by OnDesktopDisplayChanged()
@@ -1288,6 +1293,9 @@ void ClientSession::OnDesktopDisplayChanged(
 
   // Generate and send VideoLayout message.
   protocol::VideoLayout layout;
+  if (displays->has_pixel_type()) {
+    layout.set_pixel_type(displays->pixel_type());
+  }
   layout.set_supports_full_desktop_capture(can_capture_full_desktop_);
   if (displays->has_primary_screen_id()) {
     layout.set_primary_screen_id(displays->primary_screen_id());

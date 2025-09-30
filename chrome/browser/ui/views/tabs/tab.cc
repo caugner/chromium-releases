@@ -25,13 +25,14 @@
 #include "cc/paint/paint_flags.h"
 #include "cc/paint/paint_recorder.h"
 #include "cc/paint/paint_shader.h"
-#include "chrome/browser/glic/glic_enabling.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/alert/tab_alert.h"
+#include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/collaboration_messaging_tab_data.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
@@ -792,6 +793,11 @@ void Tab::SetGroup(std::optional<tab_groups::TabGroupId> group) {
   UpdateAccessibleName();
 }
 
+void Tab::SetSplit(std::optional<split_tabs::SplitTabId> split) {
+  TabSlotView::SetSplit(split);
+  UpdateAccessibleName();
+}
+
 gfx::Size Tab::CalculatePreferredSize(
     const views::SizeBounds& available_size) const {
   return gfx::Size(GetTabSizeInfo().standard_width,
@@ -949,8 +955,8 @@ bool Tab::ShouldUpdateAccessibleName(TabRendererData& old_data,
           old_data.alert_state != new_data.alert_state ||
           old_data.should_show_discard_status !=
               new_data.should_show_discard_status ||
-          old_data.discarded_memory_savings_in_bytes !=
-              new_data.discarded_memory_savings_in_bytes ||
+          old_data.discarded_memory_savings !=
+              new_data.discarded_memory_savings ||
           old_data.tab_resource_usage != new_data.tab_resource_usage ||
           old_data.pinned != new_data.pinned ||
           old_data.title != new_data.title || collaboration_message_changed);
@@ -1048,7 +1054,8 @@ std::u16string Tab::GetTooltipText(const std::u16string& title,
   if (!result.empty()) {
     result.append(1, '\n');
   }
-  result.append(GetTabAlertStateText(alert_state.value()));
+  result.append(
+      tabs::TabAlertController::GetTabAlertStateText(alert_state.value()));
   return result;
 }
 

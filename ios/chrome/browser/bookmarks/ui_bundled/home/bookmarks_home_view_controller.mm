@@ -32,6 +32,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/cells/signin_promo_view_configurator.h"
 #import "ios/chrome/browser/authentication/ui_bundled/cells/table_view_signin_promo_item.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_coordinator.h"
+#import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_model_bridge_observer.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_model_factory.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_storage_type.h"
@@ -697,6 +698,10 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 }
 
 - (void)showSignin:(ShowSigninCommand*)command {
+  if (_signinCoordinator.viewWillPersist) {
+    return;
+  }
+  [_signinCoordinator stop];
   __weak __typeof(self) weakSelf = self;
   [command addSigninCompletion:^(SigninCoordinatorResult result,
                                  id<SystemIdentity>) {
@@ -1247,6 +1252,9 @@ BookmarkNodeIDSet GetBookmarkNodeIDSet(
 #pragma mark - BookmarkTableCellTitleEditDelegate
 
 - (void)textDidChangeTo:(NSString*)newName {
+  if (!_bookmarkModel) {
+    return;
+  }
   DCHECK(self.mediator.editingFolderNode);
   self.mediator.addingNewFolder = NO;
   if (newName.length > 0) {

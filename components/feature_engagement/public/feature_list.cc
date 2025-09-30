@@ -76,6 +76,7 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHPageZoomFeature,
     &kIPHPdfPageDownloadFeature,
     &kIPHPreviewsOmniboxUIFeature,
+    &kIPHReaderModeDistillInAppFeature,
     &kIPHReadAloudAppMenuFeature,
     &kIPHReadAloudExpandedPlayerFeature,
     &kIPHReadAloudPlaybackModeFeature,
@@ -136,6 +137,7 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHBadgedReadingListFeature,
     &kIPHWhatsNewFeature,
     &kIPHWhatsNewUpdatedFeature,
+    &kIPHBadgedReaderModeFeature,
     &kIPHReadingListMessagesFeature,
     &kIPHBadgedTranslateManualTriggerFeature,
     &kIPHDiscoverFeedHeaderFeature,
@@ -196,6 +198,7 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHIOSPageActionMenu,
     &kIPHiOSHomepageLensNewBadge,
     &kIPHiOSHomepageCustomizationNewBadge,
+    &kIPHiOSAIHubNewBadge,
 #endif  // BUILDFLAG(IS_IOS)
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
@@ -209,7 +212,6 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHComposeNewBadgeFeature,
     &kIPHDesktopCustomizeChromeFeature,
     &kIPHDesktopCustomizeChromeRefreshFeature,
-    &kIPHDesktopNewTabPageModulesCustomizeFeature,
     &kIPHDiscardRingFeature,
     &kIPHDownloadEsbPromoFeature,
     &kIPHExplicitBrowserSigninPreferenceRememberedFeature,
@@ -248,6 +250,8 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHReadingListInSidePanelFeature,
     &kIPHReadingModeSidePanelFeature,
     &kIPHShoppingCollectionFeature,
+    &kIPHSideBySidePinnableFeature,
+    &kIPHSideBySideTabSwitchFeature,
     &kIPHSidePanelGenericPinnableFeature,
     &kIPHSidePanelLensOverlayPinnableFeature,
     &kIPHSidePanelLensOverlayPinnableFollowupFeature,
@@ -282,6 +286,7 @@ const base::Feature* const kAllFeatures[] = {
     &kIPHAutofillEnableLoyaltyCardsFeature,
     &kIPHAutofillExternalAccountProfileSuggestionFeature,
     &kIPHAutofillHomeWorkProfileSuggestionFeature,
+    &kIPHAutofillAccountNameEmailSuggestionFeature,
     &kIPHAutofillVirtualCardCVCSuggestionFeature,
     &kIPHAutofillVirtualCardSuggestionFeature,
     &kIPHCookieControlsFeature,

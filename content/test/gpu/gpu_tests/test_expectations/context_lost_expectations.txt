@@ -13,7 +13,7 @@
 #             android-sm-s911u1
 #         android-brya android-corsola
 #         chromeos-board-amd64-generic chromeos-board-eve chromeos-board-jacuzzi
-#             chromeos-board-octopus chromeos-board-volteer
+#             chromeos-board-octopus
 #         fuchsia-board-astro fuchsia-board-nelson fuchsia-board-sherlock
 #             fuchsia-board-qemu-x64 ]
 # Platform
@@ -186,6 +186,9 @@ crbug.com/524808 [ win8 nvidia ] ContextLost_WebGLContextLostFromSelectElement [
 ###################
 # Non-"Skip" expectations go here to suppress regular flakes/failures.
 
+# Very flaky on Pixel 2 and Samsung A13 Android bots
+crbug.com/444480419 [ android android-pixel-2 ] ContextLost_WebGLContextLostInHiddenTab [ Failure ]
+crbug.com/444480419 [ android android-sm-a137f ] ContextLost_WebGLContextLostInHiddenTab [ Failure ]
 
 # Fails with Graphite on Windows and Mac
 crbug.com/329145823 [ win release amd ] GpuCrash_InfoForHardwareGpu [ Failure ]

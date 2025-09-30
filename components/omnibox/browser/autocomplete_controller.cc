@@ -1105,6 +1105,11 @@ bool AutocompleteController::ShouldRunProvider(
            provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST;
   }
 
+  if (omnibox::IsComposebox(input_.current_page_classification())) {
+    return provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST ||
+           provider->type() == AutocompleteProvider::TYPE_SEARCH;
+  }
+
 #if BUILDFLAG(IS_ANDROID)
   if (omnibox::IsAndroidHub(input_.current_page_classification())) {
     return provider->type() == AutocompleteProvider::TYPE_SEARCH ||
@@ -1567,6 +1572,13 @@ void AutocompleteController::AggregateNewMatches() {
     internal_result_.MergeSuggestionGroupsMap(
         provider->suggestion_groups_map());
   }
+
+  // Smart compose will only be set by the search provider.
+  if (search_provider_ && ShouldRunProvider(search_provider_) &&
+      !search_provider_->get_smart_compose_inline_hint().empty()) {
+    internal_result_.set_smart_compose_inline_hint(
+        search_provider_->get_smart_compose_inline_hint());
+  }
 }
 
 void AutocompleteController::MlRerank(OldResult& old_result) {
@@ -1690,7 +1702,8 @@ bool AutocompleteController::CheckWhetherDefaultMatchChanged(
 
 void AutocompleteController::AttachActions() {
   // No actions should be attached for lens searchboxes.
-  if (omnibox::IsLensSearchbox(input_.current_page_classification())) {
+  if (omnibox::IsLensSearchbox(input_.current_page_classification()) ||
+      omnibox::IsComposebox(input_.current_page_classification())) {
     return;
   }
 

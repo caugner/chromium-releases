@@ -343,9 +343,29 @@ constexpr int kRendererMainThreadTaskExecutionIndices[] = {1, 2, 3, 4, 5, -1};
 constexpr MessageInfo kRendererMainThreadTaskExecution = {
     kRendererMainThreadTaskExecutionIndices, nullptr};
 
+// Proto Message: MissedVsyncsForJankReason
+constexpr int kMissedVsyncsForJankReasonIndices[] = {1, 2, -1};
+constexpr MessageInfo kMissedVsyncsForJankReason = {
+    kMissedVsyncsForJankReasonIndices, nullptr};
+
+// Proto Message: ScrollJankV4Result
+constexpr int kScrollJankV4ResultIndices[] = {1, 2, 3, 4, 5, 6, 7, 8, -1};
+constexpr MessageInfo const* kScrollJankV4ResultComplexMessages[] = {
+    nullptr, &kMissedVsyncsForJankReason,
+    nullptr, nullptr,
+    nullptr, nullptr,
+    nullptr, nullptr};
+constexpr MessageInfo kScrollJankV4Result = {
+    kScrollJankV4ResultIndices, kScrollJankV4ResultComplexMessages};
+
 // Proto Message: EventLatency
-constexpr int kEventLatencyIndices[] = {1, 2, 4, 5, 6, 7, 8, 9, -1};
-constexpr MessageInfo kEventLatency = {kEventLatencyIndices, nullptr};
+constexpr int kEventLatencyIndices[] = {1, 2, 4, 5, 6, 7, 8, 9, 10, -1};
+constexpr MessageInfo const* kEventLatencyComplexMessages[] = {
+    nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr,
+    nullptr, nullptr, &kScrollJankV4Result};
+constexpr MessageInfo kEventLatency = {kEventLatencyIndices,
+                                       kEventLatencyComplexMessages};
 
 // Proto Message: ProcessSingleton
 constexpr int kProcessSingletonIndices[] = {1, 2, -1};
@@ -803,7 +823,8 @@ constexpr int kCounterDescriptorIndices[] = {1, 3, 4, 5, -1};
 constexpr MessageInfo kCounterDescriptor = {kCounterDescriptorIndices, nullptr};
 
 // Proto Message: TrackDescriptor
-constexpr int kTrackDescriptorIndices[] = {1, 3, 4, 5, 6, 7, 8, 9, 10, -1};
+constexpr int kTrackDescriptorIndices[] = {1, 3,  4,  5,  6,  7,  8,
+                                           9, 10, 11, 12, 15, 17, -1};
 constexpr MessageInfo const* kTrackDescriptorComplexMessages[] = {
     nullptr,
     &kProcessDescriptor,
@@ -812,6 +833,10 @@ constexpr MessageInfo const* kTrackDescriptorComplexMessages[] = {
     &kChromeProcessDescriptor,
     &kChromeThreadDescriptor,
     &kCounterDescriptor,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
     nullptr,
     nullptr};
 constexpr MessageInfo kTrackDescriptor = {kTrackDescriptorIndices,
@@ -831,10 +856,16 @@ constexpr int kReadyThreadEtwEventIndices[] = {1, 3, 5, 6, -1};
 constexpr MessageInfo kReadyThreadEtwEvent = {kReadyThreadEtwEventIndices,
                                               nullptr};
 
+// Proto Message: MemInfoEtwEvent
+constexpr int kMemInfoEtwEventIndices[] = {1, 2, 3,  4,  5,  6,  7,
+                                           8, 9, 10, 11, 12, 13, -1};
+constexpr MessageInfo kMemInfoEtwEvent = {kMemInfoEtwEventIndices, nullptr};
+
 // Proto Message: EtwTraceEvent
-constexpr int kEtwTraceEventIndices[] = {1, 2, 3, 4, 5, -1};
+constexpr int kEtwTraceEventIndices[] = {1, 2, 3, 4, 5, 6, -1};
 constexpr MessageInfo const* kEtwTraceEventComplexMessages[] = {
-    nullptr, &kCSwitchEtwEvent, &kReadyThreadEtwEvent, nullptr, nullptr};
+    nullptr, &kCSwitchEtwEvent, &kReadyThreadEtwEvent,
+    nullptr, nullptr,           &kMemInfoEtwEvent};
 constexpr MessageInfo kEtwTraceEvent = {kEtwTraceEventIndices,
                                         kEtwTraceEventComplexMessages};
 

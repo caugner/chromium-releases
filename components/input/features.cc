@@ -16,6 +16,10 @@ BASE_FEATURE(kUseAndroidBufferedInputDispatch,
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
+BASE_FEATURE(kDispatchSingleEventIfNoPrediction,
+             "DispatchSingleEventIfNoPrediction",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kLogBubblingTouchscreenGesturesForDebug,
              "LogBubblingTouchscreenGesturesForDebug",
 #if BUILDFLAG(IS_ANDROID)
@@ -35,6 +39,15 @@ BASE_FEATURE(kScrollBubblingFix,
              "ScrollBubblingFix",
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kUpdateScrollPredictorInputMapping,
+             "UpdateScrollPredictorInputMapping",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(bool,
+                   kGenerateSyntheticScrollPrediction,
+                   &kUpdateScrollPredictorInputMapping,
+                   "generate_synthetic_scroll",
+                   true);
+
 // Flag guard for fix for crbug.com/404464598.
 BASE_FEATURE(kUseFirstCoalescedFrameAsFlingGenerationTimestamp,
              "UseFirstCoalescedFrameAsFlingGenerationTimestamp",
@@ -51,5 +64,20 @@ BASE_FEATURE_PARAM(
     "delay",
     input::kHungRendererDelay  // Default value in input_constants.h
 );
+
+// Flag guard for unresponsive renderer multiple stack collection attempts.
+BASE_FEATURE(kUnresponsiveMultipleStackCollection,
+             "UnresponsiveMultipleStackCollection",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kUnresponsiveMultipleStackCollectionDelay,
+                   &kUnresponsiveMultipleStackCollection,
+                   "delay",
+                   base::Milliseconds(100));
+BASE_FEATURE_PARAM(size_t,
+                   kUnresponsiveMultipleStackCollectionCount,
+                   &kUnresponsiveMultipleStackCollection,
+                   "count",
+                   5);
 
 }  // namespace input::features

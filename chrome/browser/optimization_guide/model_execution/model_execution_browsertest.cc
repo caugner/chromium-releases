@@ -55,6 +55,7 @@
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/dns/mock_host_resolver.h"
+#include "services/on_device_model/public/cpp/cpu.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/tflite/buildflags.h"
 
@@ -672,8 +673,13 @@ IN_PROC_BROWSER_TEST_F(ModelExecutionEnabledBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_F(ModelExecutionEnabledBrowserTest,
                        MAYBE_GetOnDeviceModelEligibilityModelNotEligible) {
+  // The CPU backend can be used when the GPU is unavailable.
+  const auto expected_elibility =
+      on_device_model::IsCpuCapable()
+          ? OnDeviceModelEligibilityReason::kModelToBeInstalled
+          : OnDeviceModelEligibilityReason::kModelNotEligible;
   EXPECT_EQ(GetOnDeviceModelEligibility(ModelBasedCapabilityKey::kCompose),
-            OnDeviceModelEligibilityReason::kModelNotEligible);
+            expected_elibility);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -1006,8 +1012,7 @@ class ModelExecutionNewFeaturesEnabledAutomaticallyTest
 #if !BUILDFLAG(IS_ANDROID)
 
 class ModelExecutionEnterprisePolicyBrowserTest
-    : public ModelExecutionEnabledBrowserTest,
-      public ::testing::WithParamInterface<bool> {
+    : public ModelExecutionEnabledBrowserTest {
  public:
   void SetUp() override {
     policy_provider_.SetDefaultReturns(
@@ -1030,23 +1035,15 @@ class ModelExecutionEnterprisePolicyBrowserTest
         features::internal::kTabOrganizationGraduated,
         features::internal::kWallpaperSearchGraduated};
 
-    if (ShowEnterpriseDisabledFeatures()) {
-      enabled_features.push_back(features::kAiSettingsPageEnterpriseDisabledUi);
-    } else {
-      disabled_features.push_back(
-          features::kAiSettingsPageEnterpriseDisabledUi);
-    }
-
     scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
   }
 
-  bool ShowEnterpriseDisabledFeatures() { return GetParam(); }
 
  protected:
   testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
 };
 
-IN_PROC_BROWSER_TEST_P(ModelExecutionEnterprisePolicyBrowserTest,
+IN_PROC_BROWSER_TEST_F(ModelExecutionEnterprisePolicyBrowserTest,
                        EnableComposeWithoutLogging) {
   EnableSignin();
 
@@ -1116,7 +1113,7 @@ IN_PROC_BROWSER_TEST_P(ModelExecutionEnterprisePolicyBrowserTest,
       1);
 }
 
-IN_PROC_BROWSER_TEST_P(ModelExecutionEnterprisePolicyBrowserTest,
+IN_PROC_BROWSER_TEST_F(ModelExecutionEnterprisePolicyBrowserTest,
                        DisableThenEnableWallpaperSearch) {
   EnableSignin();
 
@@ -1142,8 +1139,7 @@ IN_PROC_BROWSER_TEST_P(ModelExecutionEnterprisePolicyBrowserTest,
                nullptr);
   policy_provider_.UpdateChromePolicy(policies);
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(ShowEnterpriseDisabledFeatures(),
-            IsSettingVisible(UserVisibleFeatureKey::kWallpaperSearch));
+  EXPECT_TRUE(IsSettingVisible(UserVisibleFeatureKey::kWallpaperSearch));
   EXPECT_FALSE(ShouldFeatureBeCurrentlyEnabledForUser(
       UserVisibleFeatureKey::kWallpaperSearch));
 
@@ -1163,10 +1159,6 @@ IN_PROC_BROWSER_TEST_P(ModelExecutionEnterprisePolicyBrowserTest,
   EXPECT_TRUE(ShouldFeatureBeCurrentlyEnabledForUser(
       UserVisibleFeatureKey::kWallpaperSearch));
 }
-
-INSTANTIATE_TEST_SUITE_P(,
-                         ModelExecutionEnterprisePolicyBrowserTest,
-                         ::testing::Bool());
 
 #endif  //  !BUILDFLAG(IS_ANDROID)
 
