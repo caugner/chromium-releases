@@ -8,7 +8,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.verify;
 
 import org.junit.After;
 import org.junit.Before;
@@ -140,7 +139,6 @@ public class ReaderModeActionRateLimiterTest {
         assertTrue(
                 mPrefs.readLong(ChromePreferenceKeys.READER_MODE_ACTION_SUPPRESSION_END_TIMESTAMP)
                         > 0);
-        verify(mObserver).onWillStartSuppression();
     }
 
     private void resetTemporarySuppression() {

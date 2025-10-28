@@ -131,7 +131,7 @@ Patientez quelques minutes avant de vous déconnecter. Si vous vous déconnectez
 <translation id="4633328489441962921">Chrome ne parvient pas à rechercher les mises à jour</translation>
 <translation id="4636900170638246267">Connectez-vous à ce site et à Chrome.</translation>
 <translation id="4647910807533196601">Ouvrez votre dernier onglet dans Chrome.</translation>
-<translation id="4693084815234024320">Vous êtes en navigation privée Chrome</translation>
+<translation id="4693084815234024320">Vous êtes en navigation privée dans Chrome</translation>
 <translation id="4713740144985377441">Retournez dans Chrome pour importer votre fichier</translation>
 <translation id="4713907610796204963">Découvrez les bases utiles de Chrome pour bien démarrer</translation>
 <translation id="4724297637870447613">Utilisez Chrome où que vous soyez</translation>
@@ -193,6 +193,7 @@ Patientez quelques minutes avant de changer de compte. Si vous changez de compte
 <translation id="6145223986912084844">chrome</translation>
 <translation id="6177442314419606057">Effectuer une recherche dans Chrome</translation>
 <translation id="6181652351336379338">Recherchez des images dans Chrome.</translation>
+<translation id="6187085551300363958">Astuce Chrome : enregistrez vos mots de passe</translation>
 <translation id="6200694931081795166">Pour définir Chrome comme votre navigateur par défaut :
   1. Accédez aux réglages
   2. Appuyez sur "Appli de navigateur par défaut"
@@ -264,6 +265,7 @@ Pour voir d'autres paramètres qui utilisent les données pour améliorer votre 
 <translation id="7599894504325210080">Vue développée de la saisie automatique Chrome</translation>
 <translation id="7617512710641355143">Chrome est géré</translation>
 <translation id="7626032353295482388">Bienvenue dans Chrome</translation>
+<translation id="7641448682796883218">Astuce Chrome : navigation sécurisée avec protection renforcée</translation>
 <translation id="7642373780953416937">Recevez des alertes concernant les problèmes de confidentialité ou de sécurité que Chrome détecte automatiquement pour vous.</translation>
 <translation id="7660356333829433649">Revenez ici pour découvrir d'autres conseils utiles afin de profiter au maximum de Chrome.</translation>
 <translation id="7662994914830945754">Pour retrouver vos onglets Chrome quel que soit l'appareil utilisé, connectez-vous et activez la synchronisation</translation>
@@ -300,7 +302,7 @@ Seule une personne connaissant votre phrase secrète peut lire vos données chif
 <translation id="8370517070665726704">© <ph name="YEAR" /> Google LLC. Tous droits réservés.</translation>
 <translation id="8371138994040262994">Ouvre les réglages dans Chrome.</translation>
 <translation id="8387459386171870978">Continuer à utiliser Chrome</translation>
-<translation id="8392023217086447677">Ouvert dans la navigation privée Chrome</translation>
+<translation id="8392023217086447677">Ouvert en navigation privée dans Chrome</translation>
 <translation id="840168496893712993">Certains modules complémentaires entraînent le plantage de Chrome. Veuillez essayer de les désinstaller.</translation>
 <translation id="8413500425974960807">Astuce Chrome : déplacez Chrome vers le dock</translation>
 <translation id="8413795581997394485">Protection contre les extensions, sites et téléchargements connus pour être dangereux. Lorsque vous consultez un site, Chrome envoie une partie obscurcie de l'URL à Google via un serveur de confidentialité qui masque votre adresse IP. Si un site a un comportement suspect, les URL complètes et des extraits du contenu des pages sont également envoyés.</translation>
@@ -330,7 +332,7 @@ Vos données ont été chiffrées avec votre phrase secrète le <ph name="TIME" 
 <translation id="8874688701962049679">Conseils pour exploiter tout le potentiel de Chrome.</translation>
 <translation id="8897749957032330183">Les mots de passe sont enregistrés dans le Gestionnaire de mots de passe de Google sur cet appareil.</translation>
 <translation id="9004772704776174843">Chrome est déconnecté</translation>
-<translation id="9068336935206019333">Ouvrir en navigation privée Chrome</translation>
+<translation id="9068336935206019333">Ouvrir en navigation privée dans Chrome</translation>
 <translation id="9082304295862405388">Gemini peut utiliser votre position exacte, selon l'autorisation que vous avez déjà accordée à Chrome</translation>
 <translation id="909127538042363610">Renforcez la sécurité de Chrome</translation>
 <translation id="9122931302567044771">Cela signifie que Chrome demandera la version pour ordinateur à chaque fois.</translation>

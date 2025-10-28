@@ -16,12 +16,13 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/native_ui_types.h"
 #include "ui/gtk/gtk_compat.h"
 #include "ui/gtk/gtk_types.h"
 #include "ui/gtk/gtk_ui.h"
@@ -286,6 +287,15 @@ CairoSurface::CairoSurface(SkBitmap& bitmap)
           bitmap.width(),
           bitmap.height(),
           cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, bitmap.width()))),
+      cairo_(cairo_create(surface_)) {}
+
+CairoSurface::CairoSurface(void* pixels, int width, int height)
+    : surface_(cairo_image_surface_create_for_data(
+          static_cast<unsigned char*>(pixels),
+          CAIRO_FORMAT_ARGB32,
+          width,
+          height,
+          cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width))),
       cairo_(cairo_create(surface_)) {}
 
 CairoSurface::CairoSurface(const gfx::Size& size)

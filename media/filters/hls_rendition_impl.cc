@@ -11,15 +11,6 @@
 
 namespace media {
 
-namespace {
-
-bool KeyIsValidSize(const std::vector<uint8_t>& key) {
-  // HLS allows 128- and 256-bit keys, but not 192-bit.
-  return key.size() == 16 || key.size() == 32;
-}
-
-}  // namespace
-
 constexpr base::TimeDelta kBufferDuration = base::Seconds(10);
 
 HlsRenditionImpl::~HlsRenditionImpl() {
@@ -457,13 +448,15 @@ void HlsRenditionImpl::FetchNext(base::OnceClosure cb,
   scoped_refptr<hls::MediaSegment> segment;
   base::TimeDelta segment_start;
   base::TimeDelta segment_end;
-  std::tie(segment, segment_start, segment_end) = segments_->GetNextSegment();
+  bool needs_init = false;
+  std::tie(segment, segment_start, segment_end, needs_init) =
+      segments_->GetNextSegment();
 
   // If this segment has a different init segment than the segment before it,
   // we need to include the init segment before we fetch. Alternatively, if
   // we've seeked somewhere and flushed old data, we'll need the init segment
   // again.
-  bool include_init = requires_init_segment_ || segment->HasNewInitSegment();
+  bool include_init = requires_init_segment_ || needs_init;
 
   TRACE_EVENT_BEGIN("media", "HLS::FetchSegment",
                     perfetto::Track::FromPointer(this), "start", segment_start,
@@ -509,65 +502,15 @@ void HlsRenditionImpl::OnSegmentData(
   std::unique_ptr<HlsDataSourceStream> stream = std::move(result).value();
   DCHECK(!stream->CanReadMore());
 
-  // This plaintext vector needs to be declared in the same scope as the
-  // `AppendAndParseData` call, as it will be the memory backing for the span
-  // which that function consumes. Declaring it elsewhere would lead to a
-  // potential use-after-free or stack smash.
-  std::vector<uint8_t> plaintext;
-  base::span<const uint8_t> stream_data = stream->data();
-
-  if (auto enc_data = segment->GetEncryptionData()) {
-    switch (enc_data->GetMethod()) {
-      case hls::XKeyTagMethod::kAES128:
-      case hls::XKeyTagMethod::kAES256: {
-        if (key_.empty() || !segment->HasNewEncryptionData() ||
-            fetched_new_key) {
-          // Hold on to the segment - this is likely the last reference to it,
-          // and it contains our aes key.
-          segment_with_key_ = segment;
-
-          auto maybe_iv = enc_data->GetIVStr(segment->GetMediaSequenceNumber());
-          if (!maybe_iv.has_value()) {
-            // TODO: if no key is present in enc_data, it seems like
-            // kInsufficientCryptoMetadata is a better error code than
-            // kFailedToDecryptSegment. Maybe the check for maybe_key below
-            // should be moved to this block?
-            rendition_host_->Quit(
-                HlsDemuxerStatus::Codes::kInsufficientCryptoMetadata);
-            return;
-          }
-
-          auto key = enc_data->GetKey();
-          if (maybe_iv->size() != std::size(iv_) || !KeyIsValidSize(key)) {
-            rendition_host_->Quit(
-                HlsDemuxerStatus::Codes::kFailedToDecryptSegment);
-            return;
-          }
-
-          base::span(iv_).copy_from(base::as_byte_span(*maybe_iv));
-          key_ = key;
-        }
-
-        // Decrypt the ciphertext, and re-assign the data span to point to the
-        // cleartext memory in `plaintext`.
-        auto maybe_plaintext = crypto::aes_cbc::Decrypt(key_, iv_, stream_data);
-        if (!maybe_plaintext) {
-          rendition_host_->Quit(
-              HlsDemuxerStatus::Codes::kFailedToDecryptSegment);
-          return;
-        }
-
-        plaintext = std::move(maybe_plaintext).value();
-        stream_data = plaintext;
-        if (plaintext.size() == 0) {
-          FetchNext(std::move(cb), required_time);
-          return;
-        }
-        break;
-      }
-      default:
-        break;
-    }
+  std::vector<uint8_t> mem;
+  base::span<const uint8_t> stream_data;
+  if (!segment->GetPlaintextStreamSource(stream->data(), &stream_data, &mem)) {
+    rendition_host_->Quit(HlsDemuxerStatus::Codes::kFailedToDecryptSegment);
+    return;
+  }
+  if (!stream_data.size() && stream->data().size()) {
+    FetchNext(std::move(cb), required_time);
+    return;
   }
 
   if (last_discontinuity_sequence_num_.value_or(

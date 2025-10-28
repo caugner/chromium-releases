@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">Gen</translation>
 <translation id="1254593899333212300">Conexiune directă la internet</translation>
 <translation id="1272293450992660632">Valorile PIN nu se potrivesc.</translation>
+<translation id="1279040297980392566">Se așteaptă finalizarea scanării. Reîncearcă mai târziu.</translation>
 <translation id="1280820357415527819">Se caută rețele mobile</translation>
 <translation id="1293556467332435079">Fișiere</translation>
 <translation id="1297922636971898492">Google Drive nu este disponibil momentan. Încărcarea va reporni automat când Google Drive va putea fi accesat.</translation>
@@ -102,7 +103,7 @@
 <translation id="1761091787730831947">Permite accesul pentru <ph name="VM_NAME" /></translation>
 <translation id="1773212559869067373">Certificatul de autentificare a fost respins local</translation>
 <translation id="1775381402323441512">Informații despre fișierul video</translation>
-<translation id="180035236176489073">Trebuie să fiți online pentru a accesa aceste fișiere.</translation>
+<translation id="180035236176489073">Trebuie să fii online pentru a accesa aceste fișiere.</translation>
 <translation id="1807938677607439181">Toate fișierele</translation>
 <translation id="1810764548349082891">Nicio previzualizare disponibilă</translation>
 <translation id="1812302367230252929">Amharică, transliterație</translation>
@@ -393,7 +394,7 @@
 <translation id="4193154014135846272">Document Google</translation>
 <translation id="4202378258276439759">Spaniolă (America Latină)</translation>
 <translation id="4202977638116331303">Georgiană</translation>
-<translation id="421017592316736757">Trebuie să fiți online pentru a accesa acest fișier.</translation>
+<translation id="421017592316736757">Trebuie să fii online pentru a accesa acest fișier.</translation>
 <translation id="4212740939091998969">Dosarul cu numele „<ph name="FOLDER_NAME" />” există deja. Alege un alt nume.</translation>
 <translation id="4218274196133425560">Elimină excepția pentru <ph name="HOST_NAME" /></translation>
 <translation id="4261901459838235729">Prezentare Google</translation>
@@ -1078,6 +1079,7 @@
 <translation id="9213073329713032541">Instalarea a început.</translation>
 <translation id="9219103736887031265">Imagini</translation>
 <translation id="9219908252191632183">Peisaj lunar</translation>
+<translation id="931652069802536959">Rețeaua este blocată de politică</translation>
 <translation id="938470336146445890">Instalează un certificat de utilizator.</translation>
 <translation id="939736085109172342">Dosar nou</translation>
 <translation id="943972244133411984">Modificat de</translation>

@@ -9,6 +9,9 @@ import static android.view.Display.INVALID_DISPLAY;
 
 import static androidx.test.espresso.matcher.ViewMatchers.assertThat;
 
+import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth.assertWithMessage;
+
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
@@ -84,7 +87,7 @@ import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.AccessorySheetData;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.Action;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.UserInfo;
-import org.chromium.chrome.browser.keyboard_accessory.data.PropertyProvider;
+import org.chromium.chrome.browser.keyboard_accessory.data.Provider;
 import org.chromium.chrome.browser.keyboard_accessory.data.UserInfoField;
 import org.chromium.chrome.browser.keyboard_accessory.sheet_component.AccessorySheetCoordinator;
 import org.chromium.chrome.browser.keyboard_accessory.sheet_tabs.AccessorySheetTabCoordinator;
@@ -120,7 +123,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @Config(manifest = Config.NONE)
 @Features.EnableFeatures({
     ChromeFeatureList.AUTOFILL_ANDROID_DESKTOP_SUPPRESS_ACCESSORY_ON_EMPTY,
-    ChromeFeatureList.AUTOFILL_ANDROID_DESKTOP_KEYBOARD_ACCESSORY_REVAMP
+    ChromeFeatureList.AUTOFILL_ANDROID_DESKTOP_KEYBOARD_ACCESSORY_REVAMP,
+    ChromeFeatureList.AUTOFILL_ENABLE_KEYBOARD_ACCESSORY_CHIP_REDESIGN
 })
 public class ManualFillingControllerTest {
     private static final int sKeyboardHeightDp = 100;
@@ -185,10 +189,9 @@ public class ManualFillingControllerTest {
      * Actions.
      */
     private static class SheetProviderHelper {
-        private final PropertyProvider<Action[]> mActionListProvider =
-                new PropertyProvider<>(GENERATE_PASSWORD_AUTOMATIC);
-        private final PropertyProvider<AccessorySheetData> mAccessorySheetDataProvider =
-                new PropertyProvider<>();
+        private final Provider<Action[]> mActionListProvider =
+                new Provider<>(GENERATE_PASSWORD_AUTOMATIC);
+        private final Provider<AccessorySheetData> mAccessorySheetDataProvider = new Provider<>();
 
         private final ArrayList<Action> mRecordedActions = new ArrayList<>();
         private int mRecordedActionNotifications;
@@ -200,7 +203,7 @@ public class ManualFillingControllerTest {
          * #getRecordedActions()} and {@link #getFirstRecordedAction()}.
          *
          * @param unusedTypeId Unused but necessary to enable use as method reference.
-         * @param item The {@link Action[]} provided by a {@link PropertyProvider<Action[]>}.
+         * @param item The {@link Action[]} provided by a {@link Provider<Action[]>}.
          */
         void record(int unusedTypeId, Action[] item) {
             mRecordedActionNotifications++;
@@ -213,7 +216,7 @@ public class ManualFillingControllerTest {
          * #getRecordedSheetData()} and {@link #getFirstRecordedPassword()}.
          *
          * @param unusedTypeId Unused but necessary to enable use as method reference.
-         * @param data The {@link AccessorySheetData} provided by a {@link PropertyProvider}.
+         * @param data The {@link AccessorySheetData} provided by a {@link Provider}.
          */
         void record(int unusedTypeId, AccessorySheetData data) {
             mRecordedSheetData.set(data);
@@ -273,7 +276,7 @@ public class ManualFillingControllerTest {
          */
         Action getFirstRecordedAction() {
             int firstNonTabLayoutAction = 0;
-            assert mRecordedActions.size() >= firstNonTabLayoutAction;
+            assertThat(mRecordedActions.size()).isAtLeast(firstNonTabLayoutAction);
             return mRecordedActions.get(firstNonTabLayoutAction);
         }
 
@@ -281,12 +284,12 @@ public class ManualFillingControllerTest {
          * @return First password in a sheet captured by {@link #record(int, AccessorySheetData)}.
          */
         String getFirstRecordedPassword() {
-            assert getRecordedSheetData() != null;
-            assert getRecordedSheetData().getUserInfoList() != null;
+            assertThat(getRecordedSheetData()).isNotNull();
+            assertThat(getRecordedSheetData().getUserInfoList()).isNotNull();
             UserInfo info = getRecordedSheetData().getUserInfoList().get(0);
-            assert info != null;
-            assert info.getFields() != null;
-            assert info.getFields().size() > 1;
+            assertThat(info).isNotNull();
+            assertThat(info.getFields()).isNotNull();
+            assertThat(info.getFields().size()).isGreaterThan(1);
             return info.getFields().get(1).getDisplayText();
         }
 
@@ -314,18 +317,18 @@ public class ManualFillingControllerTest {
         /**
          * The returned provider is the same used by {@link #provideActions(Action[])}.
          *
-         * @return A {@link PropertyProvider}.
+         * @return A {@link Provider}.
          */
-        PropertyProvider<Action[]> getActionListProvider() {
+        Provider<Action[]> getActionListProvider() {
             return mActionListProvider;
         }
 
         /**
          * The returned provider is the same used by {@link #providePasswordSheet(String)}.
          *
-         * @return A {@link PropertyProvider}.
+         * @return A {@link Provider}.
          */
-        PropertyProvider<AccessorySheetData> getSheetDataProvider() {
+        Provider<AccessorySheetData> getSheetDataProvider() {
             return mAccessorySheetDataProvider;
         }
     }
@@ -401,9 +404,8 @@ public class ManualFillingControllerTest {
         // Create a new tab with a passwords tab:
         addBrowserTab(mMediator, 1111, null);
 
-        // Registering a provider creates a new passwords tab:
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
 
         // Now check the how many tabs were sent to the sub components:
         ArgumentCaptor<KeyboardAccessoryData.Tab[]> barTabCaptor =
@@ -530,7 +532,7 @@ public class ManualFillingControllerTest {
 
         // Create a new passwords tab:
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
 
         // Simulate creating a second tab without any tabs:
         Tab secondTab = addBrowserTab(mMediator, 2222, firstTab);
@@ -580,7 +582,7 @@ public class ManualFillingControllerTest {
 
         // Create a new passwords tab:
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
 
         // Simulate closing the tab (uncommitted):
         mMediator.getTabModelObserverForTesting().willCloseTab(tab, true);
@@ -637,7 +639,7 @@ public class ManualFillingControllerTest {
         Tab tab = addBrowserTab(mMediator, 1111, null);
         // Add an action provider that never provides any actions.
         mController.registerActionProvider(
-                mLastMockWebContents, new PropertyProvider<>(GENERATE_PASSWORD_AUTOMATIC));
+                mLastMockWebContents, new Provider<>(GENERATE_PASSWORD_AUTOMATIC));
         getStateForBrowserTab().getActionsProvider().addObserver(firstTabHelper::record);
 
         // Create a new tab with an action:
@@ -935,7 +937,7 @@ public class ManualFillingControllerTest {
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, FLOATING_SHEET);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
 
         when(mMockKeyboardAccessory.empty()).thenReturn(false);
@@ -998,7 +1000,7 @@ public class ManualFillingControllerTest {
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, FLOATING_SHEET);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
 
         when(mMockKeyboardAccessory.empty()).thenReturn(false);
@@ -1133,7 +1135,7 @@ public class ManualFillingControllerTest {
         // After initialization with one tab, the accessory sheet is closed.
         addBrowserTab(mMediator, 1234, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         when(mMockKeyboardAccessory.hasActiveTab()).thenReturn(false);
         assertThat(mController.isFillingViewShown(null), is(false));
 
@@ -1275,7 +1277,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, HIDDEN);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
@@ -1293,7 +1295,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(KEYBOARD_EXTENSION_STATE, HIDDEN);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
         when(mMockKeyboardAccessory.empty()).thenReturn(false);
@@ -1311,7 +1313,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(KEYBOARD_EXTENSION_STATE, HIDDEN);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
         when(mMockKeyboardAccessory.empty()).thenReturn(false);
@@ -1328,7 +1330,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, FLOATING_BAR);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
@@ -1347,7 +1349,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, FLOATING_BAR);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
@@ -1366,7 +1368,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, FLOATING_SHEET);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
@@ -1387,7 +1389,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(SHOW_WHEN_VISIBLE, true);
         when(mMockSoftKeyboardDelegate.isSoftKeyboardShowing(any())).thenReturn(true);
         mModel.set(KEYBOARD_EXTENSION_STATE, EXTENDING_KEYBOARD);
@@ -1416,7 +1418,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         mModel.set(SHOW_WHEN_VISIBLE, true);
         mModel.set(KEYBOARD_EXTENSION_STATE, REPLACING_KEYBOARD);
         reset(mMockKeyboardAccessory, mMockAccessorySheet);
@@ -1481,6 +1483,7 @@ public class ManualFillingControllerTest {
         assertTrue(style.isDocked());
         assertEquals(0, style.getMaxWidth());
         verify(mMockKeyboardAccessory, never()).setHasStickyLastItem(anyBoolean());
+        verify(mMockKeyboardAccessory, never()).setAnimateSuggestionsFromTop(anyBoolean());
     }
 
     @Test
@@ -1502,6 +1505,7 @@ public class ManualFillingControllerTest {
         assertFalse(style.isDocked());
         assertTrue(style.getMaxWidth() > 0);
         verify(mMockKeyboardAccessory).setHasStickyLastItem(false);
+        verify(mMockKeyboardAccessory).setAnimateSuggestionsFromTop(true);
     }
 
     @Test
@@ -1525,6 +1529,7 @@ public class ManualFillingControllerTest {
         assertFalse(style.isDocked());
         assertTrue(style.getMaxWidth() > 0);
         verify(mMockKeyboardAccessory).setHasStickyLastItem(false);
+        verify(mMockKeyboardAccessory).setAnimateSuggestionsFromTop(true);
     }
 
     @Test
@@ -1548,6 +1553,7 @@ public class ManualFillingControllerTest {
         assertFalse(style.isDocked());
         assertTrue(style.getMaxWidth() > 0);
         verify(mMockKeyboardAccessory).setHasStickyLastItem(false);
+        verify(mMockKeyboardAccessory).setAnimateSuggestionsFromTop(true);
     }
 
     @Test
@@ -1571,6 +1577,7 @@ public class ManualFillingControllerTest {
         assertTrue(style.isDocked());
         assertEquals(0, style.getMaxWidth());
         verify(mMockKeyboardAccessory).setHasStickyLastItem(true);
+        verify(mMockKeyboardAccessory).setAnimateSuggestionsFromTop(false);
     }
 
     @Test
@@ -1578,7 +1585,7 @@ public class ManualFillingControllerTest {
         // Prepare a tab and register a new tab, so there is a reason to display the bar.
         addBrowserTab(mMediator, 1111, null);
         mController.registerSheetDataProvider(
-                mLastMockWebContents, AccessoryTabType.PASSWORDS, new PropertyProvider<>());
+                mLastMockWebContents, AccessoryTabType.PASSWORDS, new Provider<>());
         assertThat(mModel.get(SHOW_WHEN_VISIBLE), is(false));
         assertThat(mModel.get(KEYBOARD_EXTENSION_STATE), is(HIDDEN));
 
@@ -1695,6 +1702,8 @@ public class ManualFillingControllerTest {
         // Return the correct keyboard_accessory_height for the current density:
         when(mMockResources.getDimensionPixelSize(R.dimen.keyboard_accessory_suggestion_height))
                 .thenReturn((int) (density * 48));
+        when(mMockResources.getDimensionPixelSize(R.dimen.keyboard_accessory_height_redesign))
+                .thenReturn((int) (density * 48));
     }
 
     /**
@@ -1747,7 +1756,9 @@ public class ManualFillingControllerTest {
      * @return A {@link ManualFillingState} that is never null.
      */
     private ManualFillingState getStateForBrowserTab() {
-        assert mLastMockWebContents != null : "In testing, WebContents should never be null!";
+        assertWithMessage("In testing, WebContents should never be null!")
+                .that(mLastMockWebContents)
+                .isNotNull();
         return mCache.getStateFor(mLastMockWebContents);
     }
 

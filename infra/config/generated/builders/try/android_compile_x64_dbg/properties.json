@@ -10,7 +10,7 @@
             "builder_id": {
               "bucket": "ci",
               "builder": "Android x64 Builder All Targets (dbg)",
-              "project": "chromium-m141"
+              "project": "chromium-m142"
             },
             "builder_spec": {
               "builder_group": "chromium.android",
@@ -42,11 +42,12 @@
         {
           "bucket": "ci",
           "builder": "Android x64 Builder All Targets (dbg)",
-          "project": "chromium-m141"
+          "project": "chromium-m142"
         }
       ],
       "is_compile_only": true,
-      "targets_spec_directory": "src/infra/config/generated/builders/try/android_compile_x64_dbg/targets"
+      "targets_spec_directory": "infra/config/generated/builders/try/android_compile_x64_dbg/targets",
+      "targets_spec_directory_relative_to_source_dir": true
     }
   },
   "$build/flakiness": {

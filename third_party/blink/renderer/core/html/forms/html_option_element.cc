@@ -537,7 +537,16 @@ void HTMLOptionElement::RemovedFrom(ContainerNode& insertion_point) {
     CHECK(!new_ancestor_select);
     CHECK(old_ancestor_select);
     SetOwnerSelectElement(new_ancestor_select);
-    old_ancestor_select->OptionRemoved(*this);
+    const bool should_skip_option_removed =
+        !parentNode() && insertion_point == old_ancestor_select;
+    if (!RuntimeEnabledFeatures::SelectChildrenRemovedFixEnabled() ||
+        !should_skip_option_removed) {
+      // If this option was removed from a select element as a direct child,
+      // then let HTMLSelectElement::ChildrenChanged make the call to
+      // OptionRemoved in order to avoid
+      // https://issues.chromium.org/issues/444330901
+      old_ancestor_select->OptionRemoved(*this);
+    }
   }
 }
 
@@ -683,8 +692,10 @@ void HTMLOptionElement::DefaultEventHandlerInternal(Event& event) {
             // bottom one.
             ScrollIntoViewOptions* scroll_into_view_options =
                 ScrollIntoViewOptions::Create();
-            scroll_into_view_options->setBlock("start");
-            scroll_into_view_options->setInlinePosition("nearest");
+            scroll_into_view_options->setBlock(
+                V8ScrollLogicalPosition::Enum::kStart);
+            scroll_into_view_options->setInlinePosition(
+                V8ScrollLogicalPosition::Enum::kNearest);
             scrollIntoViewWithOptions(scroll_into_view_options);
           }
           // Then find the last option that is still in the view.
@@ -709,8 +720,10 @@ void HTMLOptionElement::DefaultEventHandlerInternal(Event& event) {
             // the top one.
             ScrollIntoViewOptions* scroll_into_view_options =
                 ScrollIntoViewOptions::Create();
-            scroll_into_view_options->setBlock("end");
-            scroll_into_view_options->setInlinePosition("nearest");
+            scroll_into_view_options->setBlock(
+                V8ScrollLogicalPosition::Enum::kEnd);
+            scroll_into_view_options->setInlinePosition(
+                V8ScrollLogicalPosition::Enum::kNearest);
             scrollIntoViewWithOptions(scroll_into_view_options);
           }
           // Then find the first option that is in the view.

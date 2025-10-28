@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">शैली</translation>
 <translation id="1254593899333212300">प्रत्यक्ष इंटरनेट कनेक्‍शन</translation>
 <translation id="1272293450992660632">पिन के मान मेल नहीं खाते.</translation>
+<translation id="1279040297980392566">स्कैन होने की प्रोसेस पूरी होने तक इंतज़ार करें. इसके बाद, फिर से कोशिश करें</translation>
 <translation id="1280820357415527819">मोबाइल नेटवर्क खोजे जा रहे हैं</translation>
 <translation id="1293556467332435079">फ़ाइल</translation>
 <translation id="1297922636971898492">Google डिस्क इस समय उपलब्ध नहीं है. Google डिस्क के वापस आ जाने पर अपलोडिंग अपने आप फिर से प्रारंभ हो जाएगी.</translation>
@@ -877,7 +878,7 @@
 <translation id="7774365994322694683">पक्षी</translation>
 <translation id="7780322752056734036"><ph name="NUMBER_OF_ITEMS" /> आइटम वापस लाए गए</translation>
 <translation id="7781829728241885113">बीता कल</translation>
-<translation id="7788080748068240085">"<ph name="FILE_NAME" />" को ऑफ़लाइन सेव करने के लिए आपको <ph name="TOTAL_FILE_SIZE" /> जगह और खाली करनी होगी :<ph name="MARKUP_1" /> <ph name="MARKUP_2" />उन फ़ाइलों को अनपिन करें जिन्हें अब आपको ऑफ़लाइन एक्सेस नहीं करना है<ph name="MARKUP_3" /> <ph name="MARKUP_4" />अपने डाउनलोड फ़ोल्डर से फ़ाइलें मिटाएं<ph name="MARKUP_5" /></translation>
+<translation id="7788080748068240085">"<ph name="FILE_NAME" />" को ऑफ़लाइन सेव करने के लिए आपको <ph name="TOTAL_FILE_SIZE" /> जगह और खाली करनी होगी :<ph name="MARKUP_1" /> <ph name="MARKUP_2" />उन फ़ाइलों को अनपिन करें जिन्हें अब आपको ऑफ़लाइन ऐक्सेस नहीं करना है<ph name="MARKUP_3" /> <ph name="MARKUP_4" />अपने डाउनलोड फ़ोल्डर से फ़ाइलें मिटाएं<ph name="MARKUP_5" /></translation>
 <translation id="7794058097940213561">डिवाइस स्‍वरूपित करें</translation>
 <translation id="7799329977874311193">HTML दस्‍तावेज़</translation>
 <translation id="7801354353640549019">Chromebook</translation>
@@ -1048,7 +1049,7 @@
 <translation id="9007990314804111233">अपने Microsoft खाते में साइन इन करें</translation>
 <translation id="9017798300203431059">रूसी फ़ोनेटिक</translation>
 <translation id="9034924485347205037">Linux की फ़ाइलें</translation>
-<translation id="9035012421917565900">ये आइटम '<ph name="DESTINATION_NAME" />' में वापस नहीं ले जाए जा सकते हैं, इसलिए आप इस कार्रवाई को पहले जैसा नहीं कर सकेंगे.</translation>
+<translation id="9035012421917565900">ये आइटम ‘<ph name="DESTINATION_NAME" />' में वापस नहीं ले जाए जा सकते हैं, इसलिए आप इस कार्रवाई को पहले जैसा नहीं कर सकेंगे.</translation>
 <translation id="9035689366572880647">मौजूदा पिन डालें</translation>
 <translation id="9038620279323455325">"<ph name="FILE_NAME" />" नाम की फ़ाइल पहले से मौजूद है. कृपया कोई दूसरा नाम चुनें.</translation>
 <translation id="9046895021617826162">कनेक्ट करना विफल</translation>
@@ -1076,6 +1077,7 @@
 <translation id="9213073329713032541">ठीक से इंस्टॉल होना शुरू हो गया है.</translation>
 <translation id="9219103736887031265">इमेज</translation>
 <translation id="9219908252191632183">लूनर</translation>
+<translation id="931652069802536959">नीति के तहत नेटवर्क को ब्लॉक किया गया है</translation>
 <translation id="938470336146445890">कृपया कोई 'उपयोगकर्ता प्रमाणपत्र' इंस्टॉल करें.</translation>
 <translation id="939736085109172342">नया फ़ोल्डर</translation>
 <translation id="943972244133411984">बदलाव करने वाले</translation>

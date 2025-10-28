@@ -51,6 +51,7 @@
 #include "google_apis/google_api_keys.h"
 #include "net/base/mime_util.h"
 #include "net/base/url_util.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "third_party/search_engines_data/resources/definitions/prepopulated_engines.h"
 #include "ui/base/device_form_factor.h"
@@ -1443,6 +1444,13 @@ std::string TemplateURLRef::HandleReplacements(
               break;
             }
 #endif
+            if (search_terms_args.page_classification ==
+                    metrics::OmniboxEventProto::NTP_REALBOX &&
+                search_terms_args.lens_overlay_suggest_inputs.has_value()) {
+              // No replacement. `gs_ri` is not recommended for contextual
+              // queries.
+              break;
+            }
             HandleReplacement(std::string(), "chrome-ext-ansg", replacement,
                               &url);
             break;
@@ -1817,16 +1825,32 @@ std::optional<std::string_view> TemplateURL::GetBaseBuiltinResourceId() const {
     return std::nullopt;
   }
 
+  // User-defined engines should not be decorated with branded icons.
+  if (data().prepopulate_id == 0) {
+    return std::nullopt;
+  }
+
   if (!base_builtin_resource_id_.has_value()) {
+    // 1. Attempt to identify the definition by keyword.
+    // This is going to handle 99% of the cases correctly, including Yahoo
+    // variants, where different countries may use different assets.
     const TemplateURLPrepopulateData::PrepopulatedEngine*
         reference_builtin_engine =
             TemplateURLPrepopulateData::GetPrepopulatedEngineFromBuiltInData(
-                data().prepopulate_id,
-                // We are deliberately not providing a list of regional engines.
-                // It would be useful to disambiguate between regional variants
-                // of some engines that could be using different icons. It is
-                // not a use case we have for now, so that's unnecessary.
+                data().keyword(),
                 /*regional_prepopulated_engines=*/{});
+
+    if (!reference_builtin_engine) {
+      // 2. Attempt to identify the definition by prepopulate_id.
+      // Failed to look up engine by keyword. Fall back to identifying engine by
+      // matching prepopulate id. This might cause some assets to be incorrectly
+      // assigned if the regional variant of a search engine expects to use a
+      // different asset which has not been supplied (see: Yahoo vs Yahoo JP).
+      reference_builtin_engine =
+          TemplateURLPrepopulateData::GetPrepopulatedEngineFromBuiltInData(
+              data().prepopulate_id,
+              /*regional_prepopulated_engines=*/{});
+    }
 
     if (reference_builtin_engine &&
         reference_builtin_engine->base_builtin_resource_id) {

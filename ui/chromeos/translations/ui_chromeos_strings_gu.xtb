@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">શૈલી</translation>
 <translation id="1254593899333212300">ડાયરેક્ટ ઇન્ટરનેટ કનેક્શન</translation>
 <translation id="1272293450992660632">પિન મૂલ્યો મેળ ખાતા નથી.</translation>
+<translation id="1279040297980392566">સ્કૅન પૂર્ણ થવાની રાહ જોઈ રહ્યા છીએ, પછીથી ફરી પ્રયાસ કરો</translation>
 <translation id="1280820357415527819">મોબાઇલ નેટવર્ક માટે શોધી રહ્યાં છીએ</translation>
 <translation id="1293556467332435079">Files</translation>
 <translation id="1297922636971898492">Google ડ્રાઇવ હાલમાં ઉપલબ્ધ નથી. Google ડ્રાઇવ પાછું આવી જાય તે પછી અપલોડિંગ ઑટોમૅટિક રીતે ફરીથી શરૂ થશે.</translation>
@@ -71,7 +72,7 @@
 <translation id="1572585716423026576">વૉલપેપર તરીકે સેટ કરો</translation>
 <translation id="1576937952766665062">બંગાળી (લિપ્યંતર)</translation>
 <translation id="1577977504532381335">ઍડમિન પૉલિસી રિવ્યૂ કરો</translation>
-<translation id="158849752021629804">હોમ નેટવર્કની આવશ્યકતા છે</translation>
+<translation id="158849752021629804">ઘરના નેટવર્કની આવશ્યકતા છે</translation>
 <translation id="1589128298353575783"><ph name="NUMBER_OF_PB" /> PB</translation>
 <translation id="1601786938618212857">Zip</translation>
 <translation id="1620510694547887537">કૅમેરા</translation>
@@ -801,7 +802,7 @@
 <translation id="7180611975245234373">રિફ્રેશ કરો</translation>
 <translation id="7189874332498648577"><ph name="NUMBER_OF_GB" /> GB</translation>
 <translation id="7191454237977785534">ફાઇલના રૂપમાં સાચવો</translation>
-<translation id="7229570126336867161">EVDO ની જરૂર છે</translation>
+<translation id="7229570126336867161">EVDOની જરૂર છે</translation>
 <translation id="7230898482850090046">તમારા ઍડમિનિસ્ટ્રેટરે તમને "સિમ કાર્ડ લૉક કરો" સેટિંગ બંધ કરવાની વિનંતી કરી છે</translation>
 <translation id="7238097264433196391">ડ્રાઇવનું નામ</translation>
 <translation id="7238643356913091553"><ph name="NETWORK_NAME" />, વિગતો</translation>
@@ -1076,6 +1077,7 @@
 <translation id="9213073329713032541">ઇન્સ્ટૉલેશન સફળતાપૂર્વક શરૂ થયું.</translation>
 <translation id="9219103736887031265">છબીઓ</translation>
 <translation id="9219908252191632183">ચંદ્ર</translation>
+<translation id="931652069802536959">નેટવર્ક પૉલિસી દ્વારા બ્લૉક કરેલું છે</translation>
 <translation id="938470336146445890">કૃપા કરીને એક વપરાશકર્તા  પ્રમાણપત્ર ઇન્સ્ટોલ કરો.</translation>
 <translation id="939736085109172342">નવું ફોલ્ડર</translation>
 <translation id="943972244133411984">ફેરફાર કરનાર</translation>

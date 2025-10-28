@@ -10,6 +10,7 @@
 #import "components/autofill/core/browser/data_manager/payments/payments_data_manager.h"
 #import "components/autofill/core/browser/data_manager/test_personal_data_manager.h"
 #import "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#import "components/autofill/core/common/autofill_features.h"
 #import "ios/chrome/browser/settings/ui_bundled/autofill/autofill_add_credit_card_mediator_delegate.h"
 #import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -46,6 +47,8 @@ class AutofillAddCreditCardMediatorTest : public PlatformTest {
   autofill::TestPersonalDataManager personal_data_manager_;
   AutofillAddCreditCardMediator* add_credit_card_mediator_;
   id add_credit_card_mediator_delegate_mock_;
+  base::test::ScopedFeatureList feature_list_{
+      autofill::features::kAutofillEnableCvcStorageAndFilling};
 };
 
 // Test saving a credit card with invalid card number.
@@ -374,4 +377,49 @@ TEST_F(AutofillAddCreditCardMediatorTest,
   histogram_tester.ExpectUniqueSample("Autofill.PaymentMethods.SettingsPage."
                                       "StoredCreditCardCountBeforeCardAdded",
                                       0, 1);
+}
+
+// Tests that the metric is recorded when adding a card with a CVC.
+TEST_F(AutofillAddCreditCardMediatorTest, TestAddCardWithCvcRecordsUserAction) {
+  base::UserActionTester user_action_tester;
+
+  // Verify that the action has not been logged yet.
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount("AutofillCreditCardsAddedWithCvc"));
+
+  // Simulate adding a card with a CVC.
+  [add_credit_card_mediator_ addCreditCardViewController:nil
+                             addCreditCardWithHolderName:@"John Doe"
+                                              cardNumber:@"4111111111111111"
+                                         expirationMonth:@"10"
+                                          expirationYear:@"2025"
+                                            cardNickname:@"My Card"
+                                                 cardCvc:@"123"];
+
+  // Verify that the action was logged exactly once.
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount("AutofillCreditCardsAddedWithCvc"));
+}
+
+// Tests that the metric is not recorded when adding a card without a CVC.
+TEST_F(AutofillAddCreditCardMediatorTest,
+       TestAddCardWithoutCvcDoesNotRecordUserAction) {
+  base::UserActionTester user_action_tester;
+
+  // Verify that the action has not been logged yet.
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount("AutofillCreditCardsAddedWithCvc"));
+
+  // Simulate adding a card without a CVC (passing an empty string).
+  [add_credit_card_mediator_ addCreditCardViewController:nil
+                             addCreditCardWithHolderName:@"Jane Doe"
+                                              cardNumber:@"4111111111111112"
+                                         expirationMonth:@"11"
+                                          expirationYear:@"2026"
+                                            cardNickname:@"Another Card"
+                                                 cardCvc:@""];
+
+  // Verify that the action was still not logged.
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount("AutofillCreditCardsAddedWithCvc"));
 }

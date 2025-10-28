@@ -1553,6 +1553,7 @@ TEST_F(PasswordSuggestionGeneratorTest,
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
+#if !BUILDFLAG(IS_ANDROID)
 TEST_F(PasswordSuggestionGeneratorTest,
        PasswordRecoveryFlow_AppendsTroubleSigningInSuggestion) {
   base::test::ScopedFeatureList feature_list;
@@ -1576,19 +1577,22 @@ TEST_F(PasswordSuggestionGeneratorTest,
               fill_data.preferred_login.username_value,
               password_label(fill_data.preferred_login.password_value.size()),
               /*realm_label=*/u"", favicon()),
-#if !BUILDFLAG(IS_ANDROID)
           EqualsTroubleSigningInSuggestion(
               PasswordAndMetadataToSuggestionDetails(
                   fill_data.preferred_login)),
-#endif  // !BUILDFLAG(IS_ANDROID)
           EqualsSuggestion(SuggestionType::kSeparator),
           EqualsManagePasswordsSuggestion()));
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 TEST_F(PasswordSuggestionGeneratorTest,
        PasswordRecoveryFlow_AppendsBackupPasswordSuggestion) {
   base::test::ScopedFeatureList feature_list;
+#if BUILDFLAG(IS_ANDROID)
+  feature_list.InitAndEnableFeature(features::kFillRecoveryPassword);
+#else
   feature_list.InitAndEnableFeature(features::kShowRecoveryPassword);
+#endif
   autofill::PasswordFormFillData fill_data =
       password_form_fill_data_with_backup();
   autofill::PasswordAndMetadata additional_credential;
@@ -1599,8 +1603,10 @@ TEST_F(PasswordSuggestionGeneratorTest,
   const auto credential = fill_data.preferred_login;
   const auto payload = PasswordAndMetadataToSuggestionDetails(credential);
   // Simulate the user flow to get to the `kIncludeBackup` state.
+#if !BUILDFLAG(IS_ANDROID)
   undo_controller().OnSuggestionSelected(credential);
   undo_controller().OnTroubleSigningInClicked(payload);
+#endif
 
   std::vector<Suggestion> suggestions = generator().GetSuggestionsForDomain(
       undo_controller(), fill_data, favicon(), /*username_filter=*/u"",
@@ -1622,6 +1628,14 @@ TEST_F(PasswordSuggestionGeneratorTest,
               additional_credential.username_value,
               password_label(additional_credential.password_value.size()),
               /*realm_label=*/u"", favicon()),
+#if BUILDFLAG(IS_ANDROID)
+          // Android displays all backup logins for the domain (not only for the
+          // selected suggestion)
+          EqualsBackupPasswordSuggestion(
+              additional_credential.username_value,
+              additional_credential.backup_password_value.value(),
+              PasswordAndMetadataToSuggestionDetails(additional_credential)),
+#endif
           EqualsSuggestion(SuggestionType::kSeparator),
           EqualsManagePasswordsSuggestion()));
 }
@@ -1645,6 +1659,7 @@ TEST_F(PasswordSuggestionGeneratorTest,
                                    GetFreeformFooterText())));
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 TEST_F(PasswordSuggestionGeneratorTest,
        PasswordRecoveryFlow_TroubleSigningInIsAppendedLast) {
   base::test::ScopedFeatureList feature_list;
@@ -1679,12 +1694,11 @@ TEST_F(PasswordSuggestionGeneratorTest,
               additional_credeтtial.username_value,
               password_label(additional_credeтtial.password_value.size()),
               /*realm_label=*/u"", favicon()),
-#if !BUILDFLAG(IS_ANDROID)
           EqualsTroubleSigningInSuggestion(payload_trouble),
-#endif  // !BUILDFLAG(IS_ANDROID)
           EqualsSuggestion(SuggestionType::kSeparator),
           EqualsManagePasswordsSuggestion()));
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 TEST_F(PasswordSuggestionGeneratorTest,
        PasswordRecoveryFlow_NoRecoveryFlowForCredentialWithoutBackupPassword) {
@@ -1719,7 +1733,11 @@ TEST_F(PasswordSuggestionGeneratorTest,
 TEST_F(PasswordSuggestionGeneratorTest,
        PasswordRecoveryFlow_RecoverySuggestionsAreNotShownWhenFlagIsOff) {
   base::test::ScopedFeatureList feature_list;
+#if BUILDFLAG(IS_ANDROID)
+  feature_list.InitAndDisableFeature(features::kFillRecoveryPassword);
+#else
   feature_list.InitAndDisableFeature(features::kShowRecoveryPassword);
+#endif  // BUILDFLAG(IS_ANDROID)
   autofill::PasswordFormFillData fill_data =
       password_form_fill_data_with_backup();
   const autofill::PasswordAndMetadata cred_regular = fill_data.preferred_login;

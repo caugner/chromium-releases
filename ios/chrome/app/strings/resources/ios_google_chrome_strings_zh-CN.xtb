@@ -193,6 +193,7 @@
 <translation id="6145223986912084844">Chrome</translation>
 <translation id="6177442314419606057">在 Chrome 中搜索</translation>
 <translation id="6181652351336379338">在 Chrome 中搜索影像内容。</translation>
+<translation id="6187085551300363958">Chrome 提示：保存密码</translation>
 <translation id="6200694931081795166">若要将 Chrome 设为默认浏览器，请执行以下操作：
   1. 打开“设置”
   2. 点按“默认浏览器应用”
@@ -262,6 +263,7 @@
 <translation id="7599894504325210080">Chrome 自动填充视图已展开</translation>
 <translation id="7617512710641355143">Chrome 处于受管理状态</translation>
 <translation id="7626032353295482388">欢迎使用 Chrome</translation>
+<translation id="7641448682796883218">Chrome 提示：增强型安全浏览</translation>
 <translation id="7642373780953416937">接收有关 Chrome 为您自动检测到的任何隐私或安全问题的提醒。</translation>
 <translation id="7660356333829433649">欢迎回来查看更多实用提示，了解如何充分利用 Chrome。</translation>
 <translation id="7662994914830945754">要查看您在其他设备上用 Chrome 打开的标签页，请登录账号并开启同步功能</translation>
@@ -326,7 +328,7 @@
 <translation id="8874688701962049679">实用技巧，助您充分发掘 Chrome 的各种功能。</translation>
 <translation id="8897749957032330183">系统会将密码保存到此设备上的 Google 密码管理工具中。</translation>
 <translation id="9004772704776174843">已退出 Chrome 账号</translation>
-<translation id="9068336935206019333">在 Chrome 中以无痕模式打开</translation>
+<translation id="9068336935206019333">在 Chrome 无痕模式下打开</translation>
 <translation id="9082304295862405388">Gemini 可能会使用您的精确位置，具体取决于您已向 Chrome 授予的权限</translation>
 <translation id="909127538042363610">获享 Chrome 最强大的安全保护</translation>
 <translation id="9122931302567044771">这意味着 Chrome 每次都会对桌面版网站发出请求。</translation>

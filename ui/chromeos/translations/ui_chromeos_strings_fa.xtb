@@ -8,7 +8,7 @@
 <translation id="1056775291175587022">شبکه‌ای وجود ندارد</translation>
 <translation id="1056898198331236512">اخطار</translation>
 <translation id="1060368002126861100">‏برای باز کردن فایل‌ها با <ph name="APP_NAME" />، ابتدا آن‌ها را به پوشه فایل‌های Windows منتقل کنید.</translation>
-<translation id="1062407476771304334">جایگزینی</translation>
+<translation id="1062407476771304334">جایگزین کردن</translation>
 <translation id="1119383441774809183">نمایش پیامک‌ها</translation>
 <translation id="1119447706177454957">خطای داخلی</translation>
 <translation id="1120073797882051782">هانگول روماجا</translation>
@@ -35,6 +35,7 @@
 <translation id="1249250836236328755">ژانر</translation>
 <translation id="1254593899333212300">اتصال اینترنتی مستقیم</translation>
 <translation id="1272293450992660632">مقادیر پین مطابقت ندارند.</translation>
+<translation id="1279040297980392566">درانتظار اتمام اسکن؛ بعداً دوباره امتحان کنید</translation>
 <translation id="1280820357415527819">درحال جستجوی شبکه‌های دستگاه همراه</translation>
 <translation id="1293556467332435079">Files</translation>
 <translation id="1297922636971898492">‏Google Drive در حال حاضر در دسترس نیست. به محض در دسترس قرار گرفتن Google Drive بارگذاری کردن به صورت خودکار دوباره شروع می‌شود.</translation>
@@ -202,7 +203,7 @@
 <translation id="255937426064304553">بین‌المللی آمریکایی</translation>
 <translation id="2563185590376525700">قورباغه</translation>
 <translation id="2578394532502990878">تامیل (آوایی)</translation>
-<translation id="2579959351793446050">اوریه</translation>
+<translation id="2579959351793446050">اودیا</translation>
 <translation id="2587195714949534472">درحال آماده شدن برای همگام‌سازی <ph name="FILE_NAME" />…</translation>
 <translation id="2602810353103180630">شبکه <ph name="NETWORK_INDEX" /> از <ph name="NETWORK_COUNT" />، <ph name="NETWORK_NAME" />، <ph name="CONNECTION_STATUS" />، قدرت سیگنال <ph name="SIGNAL_STRENGTH" />٪، سرپرستتان آن را مسدود کرده است، جزئیات</translation>
 <translation id="2614589611416690597">ویدیو  <ph name="VIDEO_TYPE" /></translation>
@@ -277,7 +278,7 @@
 <translation id="3254434849914415189">برنامه پیش‌فرض را برای فایل‌های <ph name="FILE_TYPE" /> انتخاب کنید:</translation>
 <translation id="3255159654094949700">عربی</translation>
 <translation id="326396468955264502">‏<ph name="NUMBER_OF_FILES" /> فایل منتقل نشدند زیرا رمزگذاری شده‌اند.</translation>
-<translation id="3264582393905923483">زمینه</translation>
+<translation id="3264582393905923483">بافت</translation>
 <translation id="3272909651715601089">«<ph name="PATH" />» باز نشد</translation>
 <translation id="3280431534455935878"> آماده‌سازی</translation>
 <translation id="3280719573299097127">به شبکه با حجم محدود متصل هستید. همگام‌سازی فایل‌ها موقتاً متوقف شد.</translation>
@@ -294,7 +295,7 @@
 <translation id="3353984535370177728">انتخاب یک پوشه برای بارگذاری</translation>
 <translation id="3356580349448036450">کامل</translation>
 <translation id="3358452157379365236">گیتار</translation>
-<translation id="3368922792935385530">متصل</translation>
+<translation id="3368922792935385530">متصل‌شده</translation>
 <translation id="3382143449143186018">نپالی با صفحه‌کلید هندی</translation>
 <translation id="338691029516748599">شبکه <ph name="NETWORK_INDEX" /> از <ph name="NETWORK_COUNT" />، <ph name="NETWORK_NAME" />، <ph name="SECURITY_STATUS" />، قدرت سیگنال <ph name="SIGNAL_STRENGTH" />٪، تحت‌مدیریت سرپرست، اتصال</translation>
 <translation id="3408072735282270043">فعال کردن <ph name="NETWORK_NAME" /></translation>
@@ -432,7 +433,7 @@
 <translation id="4462159676511157176">سرورهای نام سفارشی</translation>
 <translation id="4465725236958772856">شبکه <ph name="NETWORK_INDEX" /> از <ph name="NETWORK_COUNT" />، <ph name="NETWORK_NAME" />، تحت‌مدیریت سرپرست، اتصال</translation>
 <translation id="4470564870223067757">مجموعه هانگول ۲</translation>
-<translation id="4472575034687746823">شروع به کار</translation>
+<translation id="4472575034687746823">شروع کنید</translation>
 <translation id="4474142134969976028">نتیجه منطبقی پیدا نشد</translation>
 <translation id="4477002475007461989">رومانیایی</translation>
 <translation id="4477219268485577442">آوایی بلغاری</translation>
@@ -508,12 +509,12 @@
 <translation id="4987699874727873250">انگلیسی (هند)</translation>
 <translation id="4988205478593450158">آیا مطمئنید می‌خواهید «<ph name="FILE_NAME" />» را حذف کنید؟</translation>
 <translation id="498902553138568924">پروانه قرمز</translation>
-<translation id="4992066212339426712">باصدا کردن</translation>
+<translation id="4992066212339426712">صدادار کردن</translation>
 <translation id="5010406651457630570">رایانه‌ها</translation>
 <translation id="5011233892417813670">Chromebook</translation>
 <translation id="5024856940085636730">اقدام بیشتر از انتظار طول می‌کشد. می‌خواهید از این کار صرف‌نظر کنید؟</translation>
 <translation id="5036159836254554629">‏مدیریت هم‌رسانی Parallels Desktop</translation>
-<translation id="5038625366300922036">مشاهده موارد بیشتر...</translation>
+<translation id="5038625366300922036">بیشتر دیدن…</translation>
 <translation id="5044852990838351217">ارمنی</translation>
 <translation id="5045550434625856497">گذرواژه نادرست</translation>
 <translation id="5059127710849015030">نویسه‌گردانی نپالی</translation>
@@ -529,7 +530,7 @@
 <translation id="5123433949759960244">بسکتبال</translation>
 <translation id="5129662217315786329">لهستانی</translation>
 <translation id="5144820558584035333">مجموعه هانگول ۳ (۳۹۰‏)</translation>
-<translation id="5145331109270917438">تاریخ تغییر</translation>
+<translation id="5145331109270917438">تاریخ اصلاح شدن</translation>
 <translation id="515594325917491223">شطرنج</translation>
 <translation id="5158983316805876233">استفاده از پراکسی یکسان برای همه پروتکل ها</translation>
 <translation id="5159383109919732130">‏<ph name="BEGIN_BOLD" />هنوز دستگاه خود را جدا نکنید!<ph name="END_BOLD" />
@@ -619,7 +620,7 @@
 <translation id="5769519078756170258">میزبان یا دامنه برای استثنا</translation>
 <translation id="5775750595919327203">اردو</translation>
 <translation id="5776325638577448643">پاک کردن و قالب‌بندی</translation>
-<translation id="57838592816432529">بی‌صدا کردن</translation>
+<translation id="57838592816432529">صامت کردن</translation>
 <translation id="5788127256798019331">‏فایل‌های Play</translation>
 <translation id="5790193330357274855">قزاقی</translation>
 <translation id="5804245609861364054">نویسه‌گردانی کنادا</translation>
@@ -985,7 +986,7 @@
 <translation id="8475647382427415476">‏Google Drive نتوانست در این لحظه «<ph name="FILENAME" />» را همگام‌سازی کند. Google Drive بعداً دوباره امتحان می‌کند.</translation>
 <translation id="8477649328507734757">اسپینینگ</translation>
 <translation id="8484284835977497781">از عکس‌های اخیرتان انتخاب کنید.</translation>
-<translation id="8487700953926739672">امکان دسترسی به صورت آفلاین</translation>
+<translation id="8487700953926739672">دردسترس در حالت آفلاین</translation>
 <translation id="8492972329130824181">شبکه خانه دردسترس نیست. برای اتصال، رومینگ داده تلفن همراه باید فعال باشد.</translation>
 <translation id="8499098729323186194">درحال استخراج <ph name="NUMBER_OF_ITEMS" /> مورد…</translation>
 <translation id="8502913769543567768">شبکه <ph name="NETWORK_INDEX" /> از <ph name="NETWORK_COUNT" /> شبکه، <ph name="NETWORK_NAME" />، <ph name="NETWORK_PROVIDER_NAME" />، بعداز راه‌اندازی دستگاه فعال کنید، تحت مدیریت سرپرست است</translation>
@@ -1078,6 +1079,7 @@
 <translation id="9213073329713032541">نصب باموفقیت شروع شد.</translation>
 <translation id="9219103736887031265">تصاویر</translation>
 <translation id="9219908252191632183">منظره سطح ماه</translation>
+<translation id="931652069802536959">شبکه توسط خط‌مشی مسدود شده است</translation>
 <translation id="938470336146445890">لطفاً یک مجوز کاربر نصب کنید.</translation>
 <translation id="939736085109172342">پوشهٔ جدید</translation>
 <translation id="943972244133411984">اصلاح‌شده توسط</translation>

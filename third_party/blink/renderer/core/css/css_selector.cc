@@ -818,8 +818,7 @@ CSSSelector::PseudoType CSSSelector::NameToPseudoType(
 
   if ((match->type == CSSSelector::kPseudoInterestSource ||
        match->type == CSSSelector::kPseudoInterestTarget) &&
-      !RuntimeEnabledFeatures::HTMLInterestForAttributeEnabled(
-          document ? document->GetExecutionContext() : nullptr)) {
+      !RuntimeEnabledFeatures::HTMLInterestForAttributeEnabled()) {
     return CSSSelector::kPseudoUnknown;
   }
 
@@ -1127,19 +1126,6 @@ static void SerializeNamespacePrefixIfNeeded(const AtomicString& prefix,
   builder.Append('|');
 }
 
-template <typename ListType>
-static void SerializeIdentifierList(StringBuilder& builder,
-                                    const ListType& list) {
-  bool is_first = true;
-  for (const AtomicString& item : list) {
-    if (!is_first) {
-      builder.Append(", ");
-    }
-    SerializeIdentifier(item, builder);
-    is_first = false;
-  }
-}
-
 // static
 template <bool expand_pseudo_references>
 void CSSSelector::SerializeSelectorList(const CSSSelectorList* selector_list,
@@ -1168,10 +1154,15 @@ String CSSSelector::SelectorTextExpandingPseudoReferences(
 }
 
 template <bool expand_pseudo_references>
-bool CSSSelector::SerializeSimpleSelector(StringBuilder& builder,
+void CSSSelector::SerializeSimpleSelector(StringBuilder& builder,
                                           uintptr_t scope_id) const {
   bool suppress_selector_list = false;
-  if (Match() == kId) {
+  if ((Match() == kTag || Match() == kUniversalTag) && !IsImplicit()) {
+    SerializeNamespacePrefixIfNeeded(TagQName().Prefix(), g_star_atom, builder,
+                                     IsAttributeSelector());
+    SerializeIdentifierOrAny(TagQName().LocalName(), UniversalSelectorAtom(),
+                             builder);
+  } else if (Match() == kId) {
     builder.Append('#');
     SerializeIdentifier(SerializingValue(), builder);
   } else if (Match() == kClass) {
@@ -1226,17 +1217,12 @@ bool CSSSelector::SerializeSimpleSelector(StringBuilder& builder,
         break;
       }
       case kPseudoDir:
+      case kPseudoLang:
       case kPseudoState:
         builder.Append('(');
         SerializeIdentifier(Argument(), builder);
         builder.Append(')');
         break;
-      case kPseudoLang: {
-        builder.Append('(');
-        SerializeIdentifierList(builder, *ArgumentList());
-        builder.Append(')');
-        break;
-      }
       case kPseudoHas:
       case kPseudoNot:
         DCHECK(SelectorList());
@@ -1274,8 +1260,14 @@ bool CSSSelector::SerializeSimpleSelector(StringBuilder& builder,
         NOTREACHED();
       case kPseudoActiveViewTransitionType: {
         CHECK(!IdentList().empty());
-        builder.Append('(');
-        SerializeIdentifierList(builder, IdentList());
+        String separator = "(";
+        for (AtomicString type : IdentList()) {
+          builder.Append(separator);
+          if (separator == "(") {
+            separator = ", ";
+          }
+          SerializeIdentifier(type, builder);
+        }
         builder.Append(')');
         break;
       }
@@ -1384,25 +1376,15 @@ bool CSSSelector::SerializeSimpleSelector(StringBuilder& builder,
                                                     scope_id);
     builder.Append(')');
   }
-  return true;
 }
 
 template <bool expand_pseudo_references>
 const CSSSelector* CSSSelector::SerializeCompound(StringBuilder& builder,
                                                   uintptr_t scope_id) const {
-  if ((Match() == kTag || Match() == kUniversalTag) && !IsImplicit()) {
-    SerializeNamespacePrefixIfNeeded(TagQName().Prefix(), g_star_atom, builder,
-                                     IsAttributeSelector());
-    SerializeIdentifierOrAny(TagQName().LocalName(), UniversalSelectorAtom(),
-                             builder);
-  }
-
   for (const CSSSelector* simple_selector = this; simple_selector;
        simple_selector = simple_selector->NextSimpleSelector()) {
-    if (!simple_selector->SerializeSimpleSelector<expand_pseudo_references>(
-            builder, scope_id)) {
-      return nullptr;
-    }
+    simple_selector->SerializeSimpleSelector<expand_pseudo_references>(
+        builder, scope_id);
     if (simple_selector->Relation() != kSubSelector) {
       return simple_selector;
     }
@@ -1453,6 +1435,7 @@ String CSSSelector::SelectorTextInternal(uintptr_t scope_id) const {
         result = StrCat({" ~ ", builder.ReleaseString(), result});
         break;
       case kSubSelector:
+      case kPseudoChild:
       case kShadowPart:
       case kUAShadow:
       case kShadowSlot:
@@ -1473,27 +1456,14 @@ String CSSSelector::SelectorTextInternal(uintptr_t scope_id) const {
 
 String CSSSelector::SimpleSelectorTextForDebug() const {
   StringBuilder builder;
-  if ((Match() == kTag || Match() == kUniversalTag) && !IsImplicit()) {
-    SerializeNamespacePrefixIfNeeded(TagQName().Prefix(), g_star_atom, builder,
-                                     IsAttributeSelector());
-    SerializeIdentifierOrAny(TagQName().LocalName(), UniversalSelectorAtom(),
-                             builder);
-  } else {
-    // `scope_id` is ignored when `expand_pseudo_references` is false.
-    SerializeSimpleSelector<!kExpandPseudoReferences>(builder, /*scope_id=*/0);
-  }
+  // `scope_id` is ignored when `expand_pseudo_references` is false.
+  SerializeSimpleSelector<!kExpandPseudoReferences>(builder, /*scope_id=*/0);
   return builder.ToString();
 }
 
 void CSSSelector::SetArgument(const AtomicString& value) {
   CreateRareData();
   data_.rare_data_->argument_ = value;
-}
-
-void CSSSelector::SetArgumentList(
-    std::unique_ptr<Vector<AtomicString>> arguments) {
-  CreateRareData();
-  data_.rare_data_->argument_list_ = std::move(arguments);
 }
 
 void CSSSelector::SetSelectorList(CSSSelectorList* selector_list) {
@@ -1957,14 +1927,6 @@ static bool ForAnyInComplexSelector(const Functor& functor,
   return false;
 }
 
-bool CSSSelector::FollowsSlotted() const {
-  const CSSSelector* previous = NextSimpleSelector();
-  if (!previous) {
-    return false;
-  }
-  return previous->GetPseudoType() == kPseudoSlotted;
-}
-
 bool CSSSelector::CrossesTreeScopes() const {
   for (const CSSSelector* s = this; s; s = s->NextSimpleSelector()) {
     switch (s->Relation()) {
@@ -2062,9 +2024,9 @@ void CSSSelector::SetIdentList(
 }
 
 void CSSSelector::Trace(Visitor* visitor) const {
-  if (Match() == kPseudoClass && GetPseudoType() == kPseudoParent) {
+  if (MatchForOilpan() == kPseudoClass && GetPseudoType() == kPseudoParent) {
     visitor->Trace(data_.parent_rule_);
-  } else if (HasRareData()) {
+  } else if (HasRareDataForOilpan()) {
     visitor->Trace(data_.rare_data_);
   }
 }

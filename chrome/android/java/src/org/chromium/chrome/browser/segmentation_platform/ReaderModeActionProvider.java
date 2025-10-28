@@ -20,12 +20,14 @@ import org.chromium.chrome.browser.dom_distiller.ReaderModeManager.DistillationS
 import org.chromium.chrome.browser.dom_distiller.ReaderModeMetrics;
 import org.chromium.chrome.browser.dom_distiller.TabDistillabilityProvider;
 import org.chromium.chrome.browser.dom_distiller.TabDistillabilityProvider.DistillabilityObserver;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabHidingType;
 import org.chromium.chrome.browser.toolbar.adaptive.AdaptiveToolbarButtonVariant;
 import org.chromium.components.dom_distiller.core.DomDistillerFeatures;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.ukm.UkmRecorder;
 import org.chromium.url.GURL;
 
@@ -53,7 +55,9 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
             mSignalAccumulator = signalAccumulator;
 
             mTab.addObserver(this);
-            if (DomDistillerFeatures.shouldUseReadabilityTriggeringHeuristic()) {
+            if (!isTabPossiblyDistillable(mTab)) {
+                onIsPageDistillableResult(mTab, /* isDistillable= */ false, /* isLast= */ true, /* isMobileOptimized= */ false);
+            } else if (DomDistillerFeatures.shouldUseReadabilityTriggeringHeuristic()) {
                 useReadabilityHeuristic();
             } else {
                 useDistillabilityProvider();
@@ -129,6 +133,10 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
                 destroy();
             }
         }
+
+        private boolean hasTimedOut() {
+            return mSignalAccumulator.hasTimedOut();
+        }
     }
 
     private @Nullable OneshotDistillabilityObserver mDistillabilityObserver;
@@ -155,6 +163,15 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
             signalAccumulator.setSignal(AdaptiveToolbarButtonVariant.READER_MODE, true);
             return;
         }
+
+        // If ReaderModeDistillInApp is enabled and the param for showing the CPA is disabled, don't
+        // show the button.
+        if (DomDistillerFeatures.sReaderModeDistillInApp.isEnabled()
+                && !DomDistillerFeatures.sReaderModeDistillInAppShowCpa.getValue()) {
+            signalAccumulator.setSignal(AdaptiveToolbarButtonVariant.READER_MODE, false);
+            return;
+        }
+
         final TabDistillabilityProvider tabDistillabilityProvider =
                 TabDistillabilityProvider.get(tab);
         if (tabDistillabilityProvider == null) return;
@@ -168,7 +185,14 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
 
     @Override
     public void onActionShown(@Nullable Tab tab, @AdaptiveToolbarButtonVariant int action) {
-        if (action != AdaptiveToolbarButtonVariant.READER_MODE || tab == null || tab.isLoading()) {
+        if (tab == null) return;
+
+        // Rule out the other action chosen from all the collected signals, but should still handle
+        // timed-out ones to give a chance to Message UI that could have been held off until now(
+        // only for MTB-CCT).
+        boolean isReaderMode = action == AdaptiveToolbarButtonVariant.READER_MODE;
+        if (!(isReaderMode
+                || (ChromeFeatureList.sCctAdaptiveButton.isEnabled() && hasSignalTimedOut()))) {
             return;
         }
 
@@ -176,6 +200,14 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
         if (DomDistillerFeatures.sReaderModeDistillInApp.isEnabled()
                 && DomDistillerUrlUtils.isDistilledPage(tab.getUrl())) {
             return;
+        }
+
+        if (isReaderMode) {
+            ReaderModeMetrics.recordReaderModeContextualPageActionEvent(
+                    ReaderModeMetrics.ReaderModeContextualPageActionEvent.SHOWN);
+            // Always notify the rate limiter that the action was shown to ensure the rate limiting
+            // logic is applied.
+            ReaderModeActionRateLimiter.getInstance().onActionShown();
         }
 
         new Handler(Looper.getMainLooper())
@@ -188,11 +220,14 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
                                             .getUserData(ReaderModeManager.USER_DATA_KEY);
                             if (readerModeManager != null) {
                                 readerModeManager.onContextualPageActionShown(
-                                        mButtonVisibilitySupplier);
-                                ReaderModeActionRateLimiter.getInstance().onActionShown();
+                                        mButtonVisibilitySupplier, isReaderMode);
                             }
                         },
                         /* delayMillis= */ 500);
+    }
+
+    private boolean hasSignalTimedOut() {
+        return mDistillabilityObserver != null && mDistillabilityObserver.hasTimedOut();
     }
 
     @Override
@@ -204,7 +239,15 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
 
     private void notifyActionAvailable(
             Tab tab, boolean isDistillable, SignalAccumulator signalAccumulator) {
-        if (ReaderModeActionRateLimiter.getInstance().isActionSuppressed()) return;
+        ReaderModeMetrics.recordReaderModeContextualPageActionEvent(
+                isDistillable
+                        ? ReaderModeMetrics.ReaderModeContextualPageActionEvent.ELIGIBLE
+                        : ReaderModeMetrics.ReaderModeContextualPageActionEvent.NOT_ELIGIBLE);
+        if (ReaderModeActionRateLimiter.getInstance().isActionSuppressed()) {
+            ReaderModeMetrics.recordReaderModeContextualPageActionEvent(
+                    ReaderModeMetrics.ReaderModeContextualPageActionEvent.SUPPRESSED);
+            return;
+        }
         signalAccumulator.setSignal(AdaptiveToolbarButtonVariant.READER_MODE, isDistillable);
 
         long latency = System.currentTimeMillis() - signalAccumulator.getSignalStartTimeMs();
@@ -221,5 +264,9 @@ public class ReaderModeActionProvider implements ContextualPageActionController.
                     .addMetric("Latency", (int) latency)
                     .record();
         }
+    }
+
+    private boolean isTabPossiblyDistillable(@Nullable Tab tab) {
+        return tab != null && !tab.getUrl().getSpec().startsWith(UrlConstants.CHROME_SCHEME);
     }
 }

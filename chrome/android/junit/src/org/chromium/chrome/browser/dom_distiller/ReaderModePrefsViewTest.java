@@ -4,6 +4,10 @@
 
 package org.chromium.chrome.browser.dom_distiller;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +16,9 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 
+import androidx.core.view.AccessibilityDelegateCompat;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 import androidx.test.filters.SmallTest;
 
 import com.google.android.material.button.MaterialButton;
@@ -70,23 +77,28 @@ public class ReaderModePrefsViewTest {
     @SmallTest
     public void testInitialState() {
         // Verify that the initial state of the view is correct.
-        assert ((MaterialButton) mReaderModePrefsView.findViewById(R.id.light_mode)).isChecked();
-        assert ((MaterialButton) mReaderModePrefsView.findViewById(R.id.font_sans_serif))
-                .isChecked();
-        Slider slider = (Slider) mReaderModePrefsView.findViewById(R.id.font_size);
-        assert slider.getValue() == 1.0f;
+        assertTrue(
+                ((MaterialButton) mReaderModePrefsView.findViewById(R.id.light_mode)).isChecked());
+        assertTrue(
+                ((MaterialButton) mReaderModePrefsView.findViewById(R.id.font_sans_serif))
+                        .isChecked());
+        Slider slider = (Slider) mReaderModePrefsView.findViewById(R.id.font_size_slider);
+        assertEquals(1.0f, slider.getValue(), 0.0f);
     }
 
     @Test
     @SmallTest
     public void testThemeButtons() {
+        when(mDistilledPagePrefs.getTheme())
+                .thenReturn(Theme.LIGHT, Theme.LIGHT, Theme.DARK, Theme.SEPIA);
+        // Test clicking the already selected theme.
         HistogramWatcher histogramLight =
                 HistogramWatcher.newBuilder()
-                        .expectIntRecord("DomDistiller.Android.ThemeSelected", Theme.LIGHT)
+                        .expectNoRecords("DomDistiller.Android.ThemeSelected")
                         .build();
         mReaderModePrefsView.findViewById(R.id.light_mode).performClick();
-        verify(mDistilledPagePrefs).setUserPrefTheme(Theme.LIGHT);
-        Assert.assertEquals(1, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
+        verify(mDistilledPagePrefs, never()).setUserPrefTheme(Theme.LIGHT);
+        Assert.assertEquals(0, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
         histogramLight.assertExpected();
 
         HistogramWatcher histogramDark =
@@ -95,7 +107,7 @@ public class ReaderModePrefsViewTest {
                         .build();
         mReaderModePrefsView.findViewById(R.id.dark_mode).performClick();
         verify(mDistilledPagePrefs).setUserPrefTheme(Theme.DARK);
-        Assert.assertEquals(2, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
+        Assert.assertEquals(1, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
         histogramDark.assertExpected();
 
         HistogramWatcher histogramSepia =
@@ -104,24 +116,41 @@ public class ReaderModePrefsViewTest {
                         .build();
         mReaderModePrefsView.findViewById(R.id.sepia_mode).performClick();
         verify(mDistilledPagePrefs).setUserPrefTheme(Theme.SEPIA);
-        Assert.assertEquals(3, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
+        Assert.assertEquals(2, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
         histogramSepia.assertExpected();
+
+        // Test clicking the first option again.
+        HistogramWatcher histogramLight2 =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord("DomDistiller.Android.ThemeSelected", Theme.LIGHT)
+                        .build();
+        mReaderModePrefsView.findViewById(R.id.light_mode).performClick();
+        verify(mDistilledPagePrefs).setUserPrefTheme(Theme.LIGHT);
+        Assert.assertEquals(3, mActionTester.getActionCount("DomDistiller.Android.ThemeChanged"));
+        histogramLight2.assertExpected();
     }
 
     @Test
     @SmallTest
     public void testFontFamilyButtons() {
+        when(mDistilledPagePrefs.getFontFamily())
+                .thenReturn(
+                        FontFamily.SANS_SERIF,
+                        FontFamily.SANS_SERIF,
+                        FontFamily.SERIF,
+                        FontFamily.MONOSPACE);
+        // Test clicking the already selected font family.
         HistogramWatcher histogramSansSerif =
                 HistogramWatcher.newBuilder()
-                        .expectIntRecord(
-                                "DomDistiller.Android.FontFamilySelected", FontFamily.SANS_SERIF)
+                        .expectNoRecords("DomDistiller.Android.FontFamilySelected")
                         .build();
         mReaderModePrefsView.findViewById(R.id.font_sans_serif).performClick();
-        verify(mDistilledPagePrefs).setFontFamily(FontFamily.SANS_SERIF);
+        verify(mDistilledPagePrefs, never()).setFontFamily(FontFamily.SANS_SERIF);
         Assert.assertEquals(
-                1, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
+                0, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
         histogramSansSerif.assertExpected();
 
+        // Test clicking a new font family.
         HistogramWatcher histogramSerif =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(
@@ -130,7 +159,7 @@ public class ReaderModePrefsViewTest {
         mReaderModePrefsView.findViewById(R.id.font_serif).performClick();
         verify(mDistilledPagePrefs).setFontFamily(FontFamily.SERIF);
         Assert.assertEquals(
-                2, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
+                1, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
         histogramSerif.assertExpected();
 
         HistogramWatcher histogramMonospace =
@@ -141,8 +170,20 @@ public class ReaderModePrefsViewTest {
         mReaderModePrefsView.findViewById(R.id.font_monospace).performClick();
         verify(mDistilledPagePrefs).setFontFamily(FontFamily.MONOSPACE);
         Assert.assertEquals(
-                3, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
+                2, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
         histogramMonospace.assertExpected();
+
+        // Test clicking the first option again.
+        HistogramWatcher histogramSansSerif2 =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord(
+                                "DomDistiller.Android.FontFamilySelected", FontFamily.SANS_SERIF)
+                        .build();
+        mReaderModePrefsView.findViewById(R.id.font_sans_serif).performClick();
+        verify(mDistilledPagePrefs).setFontFamily(FontFamily.SANS_SERIF);
+        Assert.assertEquals(
+                3, mActionTester.getActionCount("DomDistiller.Android.FontFamilyChanged"));
+        histogramSansSerif2.assertExpected();
     }
 
     @Test
@@ -152,7 +193,7 @@ public class ReaderModePrefsViewTest {
                 HistogramWatcher.newBuilder()
                         .expectIntRecord("DomDistiller.Android.FontScalingSelected", 250)
                         .build();
-        Slider slider = (Slider) mReaderModePrefsView.findViewById(R.id.font_size);
+        Slider slider = (Slider) mReaderModePrefsView.findViewById(R.id.font_size_slider);
 
         // Manually force abritary size on the slider for the purposes of simulating drag motion.
         slider.measure(
@@ -188,5 +229,81 @@ public class ReaderModePrefsViewTest {
         Assert.assertEquals(
                 1, mActionTester.getActionCount("DomDistiller.Android.FontScalingChanged"));
         histograms.assertExpected();
+    }
+
+    @Test
+    @SmallTest
+    public void testThemeButtonsAccessibility() {
+        // Test container
+        View themeContainer = mReaderModePrefsView.findViewById(R.id.theme_container);
+        AccessibilityDelegateCompat containerDelegate =
+                ViewCompat.getAccessibilityDelegate(themeContainer);
+        AccessibilityNodeInfoCompat containerInfo = AccessibilityNodeInfoCompat.obtain();
+        containerDelegate.onInitializeAccessibilityNodeInfo(themeContainer, containerInfo);
+
+        AccessibilityNodeInfoCompat.CollectionInfoCompat collectionInfo =
+                containerInfo.getCollectionInfo();
+        assertNotNull(collectionInfo);
+        assertEquals(3, collectionInfo.getColumnCount());
+        assertEquals(1, collectionInfo.getRowCount());
+        assertEquals(
+                AccessibilityNodeInfoCompat.CollectionInfoCompat.SELECTION_MODE_SINGLE,
+                collectionInfo.getSelectionMode());
+
+        // Test buttons
+        int[] buttonIds = new int[] {R.id.light_mode, R.id.sepia_mode, R.id.dark_mode};
+        for (int i = 0; i < buttonIds.length; i++) {
+            View button = mReaderModePrefsView.findViewById(buttonIds[i]);
+            AccessibilityDelegateCompat buttonDelegate =
+                    ViewCompat.getAccessibilityDelegate(button);
+            AccessibilityNodeInfoCompat buttonInfo = AccessibilityNodeInfoCompat.obtain();
+            buttonDelegate.onInitializeAccessibilityNodeInfo(button, buttonInfo);
+
+            AccessibilityNodeInfoCompat.CollectionItemInfoCompat itemInfo =
+                    buttonInfo.getCollectionItemInfo();
+            assertNotNull(itemInfo);
+            assertEquals(0, itemInfo.getRowIndex());
+            assertEquals(i, itemInfo.getColumnIndex());
+            assertEquals(((MaterialButton) button).isChecked(), itemInfo.isSelected());
+        }
+    }
+
+    @Test
+    @SmallTest
+    public void testFontFamilyButtonsAccessibility() {
+        // Test container
+        View fontFamilyButtonContainer =
+                mReaderModePrefsView.findViewById(R.id.font_family_button_container);
+        AccessibilityDelegateCompat containerDelegate =
+                ViewCompat.getAccessibilityDelegate(fontFamilyButtonContainer);
+        AccessibilityNodeInfoCompat containerInfo = AccessibilityNodeInfoCompat.obtain();
+        containerDelegate.onInitializeAccessibilityNodeInfo(
+                fontFamilyButtonContainer, containerInfo);
+
+        AccessibilityNodeInfoCompat.CollectionInfoCompat collectionInfo =
+                containerInfo.getCollectionInfo();
+        assertNotNull(collectionInfo);
+        assertEquals(3, collectionInfo.getColumnCount());
+        assertEquals(1, collectionInfo.getRowCount());
+        assertEquals(
+                AccessibilityNodeInfoCompat.CollectionInfoCompat.SELECTION_MODE_SINGLE,
+                collectionInfo.getSelectionMode());
+
+        // Test buttons
+        int[] buttonIds = new int[] {R.id.font_sans_serif, R.id.font_serif, R.id.font_monospace};
+        for (int i = 0; i < buttonIds.length; i++) {
+            View button = mReaderModePrefsView.findViewById(buttonIds[i]);
+            AccessibilityDelegateCompat buttonDelegate =
+                    ViewCompat.getAccessibilityDelegate(button);
+            AccessibilityNodeInfoCompat buttonInfo = AccessibilityNodeInfoCompat.obtain();
+            buttonDelegate.onInitializeAccessibilityNodeInfo(button, buttonInfo);
+
+            AccessibilityNodeInfoCompat.CollectionItemInfoCompat itemInfo =
+                    buttonInfo.getCollectionItemInfo();
+            assertNotNull(itemInfo);
+            assertEquals(0, itemInfo.getRowIndex());
+            assertEquals(i, itemInfo.getColumnIndex());
+            assertEquals(((MaterialButton) button).isChecked(), itemInfo.isSelected());
+        }
     }
 }

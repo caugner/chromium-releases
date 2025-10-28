@@ -17,6 +17,7 @@ import androidx.appcompat.content.res.AppCompatResources;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
@@ -26,6 +27,7 @@ import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabsUiType;
 import org.chromium.chrome.browser.browserservices.ui.controller.Verifier;
+import org.chromium.chrome.browser.dom_distiller.ReaderModeManager;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.multiwindow.MultiWindowModeStateDispatcher;
@@ -51,6 +53,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /** App menu properties delegate for {@link CustomTabActivity}. */
+@NullMarked
 public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegateImpl {
     private static final String CUSTOM_MENU_ITEM_ID_KEY = "CustomMenuItemId";
     private static final String SHOW_OPEN_IN_BROWSER_MENU_TOP_PARAM =
@@ -313,6 +316,11 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
             observeAndMaybeAddReadAloud(modelList, currentTab);
         }
 
+        // --- Reader Mode ---
+        if (shouldShowReaderModeItem()) {
+            modelList.add(buildReaderModeItem(currentTab));
+        }
+
         // --- Share ---
         if (mShowShare) {
             modelList.add(buildShareListItem(false));
@@ -408,6 +416,18 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
         modelList.add(new MVCListAdapter.ListItem(AppMenuHandler.AppMenuItemType.STANDARD, model));
     }
 
+    private boolean shouldShowReaderModeItem() {
+        if (!ChromeFeatureList.sCctAdaptiveButton.isEnabled()
+                || !ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                        ChromeFeatureList.CCT_ADAPTIVE_BUTTON,
+                        ReaderModeManager.CPA_FALLBACK_MENU_PARAM,
+                        false)) {
+            return false;
+        }
+        var cpaController = mContextualPageActionControllerSupplier.get();
+        return cpaController != null && cpaController.hasReaderMode();
+    }
+
     /**
      * @return The index that the given menu item should appear in the result of {@link
      *     BrowserServicesIntentDataProvider#getMenuTitles()}. Returns -1 if item not found.
@@ -421,7 +441,7 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
     }
 
     @Override
-    public Bundle getBundleForMenuItem(int itemId) {
+    public @Nullable Bundle getBundleForMenuItem(int itemId) {
         if (!mItemIdToIndexMap.containsKey(itemId)) {
             return null;
         }
@@ -445,8 +465,7 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
         if (footerTextView != null) {
             Resources res = footer.getResources();
             String appName = res.getString(R.string.app_name);
-            String footerText =
-                    res.getString(R.string.twa_running_in_chrome_template, appName);
+            String footerText = res.getString(R.string.twa_running_in_chrome_template, appName);
             footerTextView.setText(footerText);
         }
 

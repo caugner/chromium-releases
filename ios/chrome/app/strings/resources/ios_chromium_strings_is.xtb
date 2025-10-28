@@ -4,7 +4,6 @@
 <translation id="1000436330784933699">Hér geturðu opnað Linsu.</translation>
 <translation id="1042296835509784301">Opnar Aðgangsorðastjórnun í Chromium.</translation>
 <translation id="1047130070405668746">Veldu Chromium</translation>
-<translation id="1086486568852410168">Leita með Google linsu</translation>
 <translation id="1091252999271033193">Þetta þýðir að Chromium biður alltaf um snjalltækjaútgáfu vefsvæðis.</translation>
 <translation id="1115463765356382667">Ljúktu ráðlögðu aðgerðunum hér að neðan til að nýta Chromium sem best.</translation>
 <translation id="1185134272377778587">Um Chromium</translation>
@@ -39,10 +38,11 @@
 <translation id="1811860791247653035">Hafðu Chromium með í <ph name="FEATURE_NAME_1" /> og <ph name="FEATURE_NAME_2" /> til að fá aðgang að sérsniði og öðrum eiginleikum</translation>
 <translation id="1838412507805038478">Chromium staðfesti að <ph name="ISSUER" /> gaf út vottorð þessa vefsvæðis.</translation>
 <translation id="1839447949248872139">Opnaðu tengla sjálfkrafa í Chromium</translation>
-<translation id="1843424232666537147">Í Chromium eru eiginleikar sem aðstoða þig við að hafa umsjón með gögnum á netinu og hversu fljótlega þú hleður vefsíðum niður.
+<translation id="1843424232666537147">Í Chromium eru eiginleikar sem aðstoða þig við að hafa umsjón með gögnum á netinu og hversu hratt þú hleður vefsíðum niður.
 <ph name="BEGIN_LINK" />Frekari upplýsingar<ph name="END_LINK" /></translation>
 <translation id="1847960401032164406">Kort í Chromium</translation>
 <translation id="1867772173333403444">4. Veldu Chromium</translation>
+<translation id="1965068424387304464">Chromium-ráð: Vistaðu aðgangsorð</translation>
 <translation id="2006345422933397527">Chromium gat ekki leitað að uppfærslum. Athugaðu nettenginguna þína.</translation>
 <translation id="2042889939382983733">Skoða Chromium-ferilinn þinn</translation>
 <translation id="2052320862053429062">Chromium athugar aðgangsorðin þín reglulega og ber þau saman við lista sem hafa verið birtir á netinu. Meðan á þessu stendur eru aðgangsorðin þín og notandanöfnin dulkóðuð svo enginn geti lesið þau, þ.m.t. Google.</translation>
@@ -119,6 +119,7 @@ Prófaðu að bíða í nokkrar mínútur áður en þú skiptir um reikning. Ef
 <translation id="3816686541346279443">Chromium býðst til að vista aðgangsorðið þitt.</translation>
 <translation id="3827545470516145620">Þú er með staðlaða öryggisvörn í þessu tæki</translation>
 <translation id="3833326979834193417">Chromium keyrir öryggisathugun sjálfkrafa daglega til að verja þig gegn öryggisbrotum, ótraustum vefsvæðum og fleiru. Þú færð frekari upplýsingar um öryggisathugun í stillingunum.</translation>
+<translation id="3837584850181228767">Chromium-ráð: Enn öruggari vefskoðun</translation>
 <translation id="3845223911364528001">Farðu aftur í Chromium til að hlaða skránni upp</translation>
 <translation id="3855938650519180865">Nýjungar í Chromium</translation>
 <translation id="3886689467633467988">Skráðu þig inn á þetta vefsvæði og Chromium til að fá bókamerkin þín og fleira í öll tækin þín.</translation>

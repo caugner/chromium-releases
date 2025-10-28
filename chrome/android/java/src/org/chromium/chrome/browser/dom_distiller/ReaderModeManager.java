@@ -32,6 +32,7 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsVisibilityManager;
+import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabsUiType;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
@@ -126,6 +127,21 @@ public class ReaderModeManager extends EmptyTabObserver
 
     // LINT.ThenChange(//tools/metrics/histograms/metadata/accessibility/enums.xml:DomDistillerEntryPoint)
 
+    /** Possible tab types for reader mode entry points. */
+    @IntDef({
+        EntryPointTabType.REGULAR_TAB,
+        EntryPointTabType.CUSTOM_TAB,
+        EntryPointTabType.INCOGNITO_TAB,
+        EntryPointTabType.INCOGNITO_CUSTOM_TAB,
+    })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface EntryPointTabType {
+        int REGULAR_TAB = 0;
+        int CUSTOM_TAB = 1;
+        int INCOGNITO_TAB = 2;
+        int INCOGNITO_CUSTOM_TAB = 3;
+    }
+
     /** Possible states that the distiller can be in on a web page. */
     @IntDef({
         DistillationStatus.POSSIBLE,
@@ -158,6 +174,12 @@ public class ReaderModeManager extends EmptyTabObserver
     /** Histogram name for the end distillability result. */
     public static final String PAGE_DISTILLATION_RESULT_HISTOGRAM =
             "DomDistiller.Android.OnDistillableResult.PageDistillationResult";
+
+    /**
+     * Field param for MTB-CCT indicating that the fallback UI for reader mode is overflow menu. If
+     * false, the fallback UI will be Message.
+     */
+    public static final String CPA_FALLBACK_MENU_PARAM = "reader_mode_fallback_menu";
 
     /** The url of the last page visited if the last page was reader mode page. Otherwise null. */
     private @Nullable GURL mReaderModePageUrl;
@@ -578,6 +600,16 @@ public class ReaderModeManager extends EmptyTabObserver
             // If the manager hasn't been notified of the CPA yet, don't show the prompt for now.
             // Later it will be shown if CPA is determined to be hidden.
             if (!mHasBeenNotifiedOfCpa) return;
+
+            // Do not proceed to show Message UI if CPA is shown, or the fallback UI will be in
+            // the overflow menu.
+            if (mIsReaderModeButtonShowingOnToolbar
+                    || ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                            ChromeFeatureList.CCT_ADAPTIVE_BUTTON,
+                            CPA_FALLBACK_MENU_PARAM,
+                            false)) {
+                return;
+            }
         }
 
         // Test if the user is requesting the desktop site. Ignore this if distiller is set to
@@ -603,6 +635,7 @@ public class ReaderModeManager extends EmptyTabObserver
                 if (mMessageShown) {
                     return;
                 }
+
                 showReaderModeMessage(messageDispatcher);
                 mMessageShown = true;
             }
@@ -686,13 +719,41 @@ public class ReaderModeManager extends EmptyTabObserver
             navigateToReaderMode();
         }
         RecordUserAction.record("MobileReaderModeActivated");
-        if (mHasBeenNotifiedOfCpa && !mIsReaderModeButtonShowingOnToolbar) {
+        boolean isCpaFallbackMessage =
+                !ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
+                        ChromeFeatureList.CCT_ADAPTIVE_BUTTON, CPA_FALLBACK_MENU_PARAM, false);
+        if (mHasBeenNotifiedOfCpa && !mIsReaderModeButtonShowingOnToolbar && isCpaFallbackMessage) {
             RecordHistogram.recordEnumeratedHistogram(
                     "CustomTab.AdaptiveToolbarButton.FallbackUi",
                     AdaptiveToolbarButtonVariant.READER_MODE,
                     AdaptiveToolbarButtonVariant.MAX_VALUE);
         }
-        ReaderModeMetrics.recordReaderModeEntryPoint(entryPoint);
+        recordEntryPointMetric(entryPoint);
+    }
+
+    private void recordEntryPointMetric(@EntryPoint int entryPoint) {
+        @EntryPointTabType int entryPointTabType;
+        boolean isIncognito = mTab.isIncognito();
+        boolean isOrWillBeCustomTab = mTab.isCustomTab() || shouldDistillInCustomTab();
+        Activity activity = TabUtils.getActivity(mTab);
+        Intent intent = (activity != null) ? activity.getIntent() : null;
+        // Incognito CCT does not return true when checking mTab.isIncognito().
+        boolean isIncognitoCustomTab =
+                (intent != null)
+                        && IntentUtils.safeGetBooleanExtra(
+                                intent, IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, false)
+                        && isOrWillBeCustomTab;
+
+        if (isIncognitoCustomTab) {
+            entryPointTabType = EntryPointTabType.INCOGNITO_CUSTOM_TAB;
+        } else if (isOrWillBeCustomTab) {
+            entryPointTabType = EntryPointTabType.CUSTOM_TAB;
+        } else if (isIncognito) {
+            entryPointTabType = EntryPointTabType.INCOGNITO_TAB;
+        } else {
+            entryPointTabType = EntryPointTabType.REGULAR_TAB;
+        }
+        ReaderModeMetrics.recordReaderModeEntryPoint(entryPoint, entryPointTabType);
     }
 
     private boolean shouldDistillInCustomTab() {
@@ -752,7 +813,9 @@ public class ReaderModeManager extends EmptyTabObserver
                                             Snackbar.UMA_UNKNOWN)
                                     .setAction(
                                             mTab.getContext().getString(R.string.chrome_dismiss),
-                                            null));
+                                            null)
+                                    // Important to get the full message displayed to the user.
+                                    .setDefaultLines(false));
                 });
     }
 
@@ -819,7 +882,8 @@ public class ReaderModeManager extends EmptyTabObserver
         // Use Incognito CCT if the source page is in Incognito mode.
         if (mTab.isIncognito()) {
             IncognitoCustomTabIntentDataProvider.addIncognitoExtrasForChromeFeatures(
-                    customTabsIntent.intent, IntentHandler.IncognitoCctCallerId.READER_MODE);
+                    customTabsIntent.intent,
+                    BrowserServicesIntentDataProvider.IncognitoCctCallerId.READER_MODE);
         }
 
         customTabsIntent.launchUrl(activity, Uri.parse(distillerUrl));
@@ -870,7 +934,10 @@ public class ReaderModeManager extends EmptyTabObserver
      * @return Whether reader mode should trigger through messages.
      */
     public static boolean shouldUseReaderModeMessages(Tab tab) {
-        return tab != null && (tab.isCustomTab() || tab.isIncognito());
+        // Messages are explicitly disabled for in-app distillation.
+        return !DomDistillerFeatures.sReaderModeDistillInApp.isEnabled()
+                && tab != null
+                && (tab.isCustomTab() || tab.isIncognito());
     }
 
     /**
@@ -967,9 +1034,11 @@ public class ReaderModeManager extends EmptyTabObserver
      * contextual page action UI is enabled to update the rate limiting logic and to suppress the
      * message prompt if the current tab is a CCT.
      *
-     * @param showCpaButton Whether the reader mode UI is the current CPA being shown.
+     * @param showCpaButton Whether the CPA button can be shown in the UI
+     * @param isReaderMode Whether the chose action is reader mode type.
      */
-    public void onContextualPageActionShown(OneshotSupplier<Boolean> showCpaButton) {
+    public void onContextualPageActionShown(
+            OneshotSupplier<Boolean> showCpaButton, boolean isReaderMode) {
         // If the feature is enabled and the tab is a custom tab, the manager should be aware if the
         // displayed contextual page action is the reader one. Once determined, #tryShowingPrompt
         // can successfully decide between showing a message prompt or suppressing it in favor of
@@ -978,8 +1047,12 @@ public class ReaderModeManager extends EmptyTabObserver
             mHasBeenNotifiedOfCpa = true;
             showCpaButton.runSyncOrOnAvailable(
                     show -> {
-                        mIsReaderModeButtonShowingOnToolbar = show;
-                        if (show) {
+                        mIsReaderModeButtonShowingOnToolbar = isReaderMode && show;
+                        if (isReaderMode) {
+                            RecordHistogram.recordBooleanHistogram(
+                                    "Android.ReaderModeCpa.Shown", show);
+                        }
+                        if (mIsReaderModeButtonShowingOnToolbar) {
                             markUrlAsShown();
                         } else {
                             tryShowingPrompt();

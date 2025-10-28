@@ -813,19 +813,9 @@ bool FormDataImporter::ProcessExtractedCreditCard(
     const std::optional<CreditCard>& extracted_credit_card,
     bool is_credit_card_upstream_enabled,
     ukm::SourceId ukm_source_id) {
-  // If a flow without interactive authentication was completed and the user
-  // didn't update the result that was filled into the form, re-auth opt-in flow
-  // might be offered.
-  if (auto* mandatory_reauth_manager =
-          client_->GetPaymentsAutofillClient()
-              ->GetOrCreatePaymentsMandatoryReauthManager();
-      credit_card_import_type_ != CreditCardImportType::kNewCard &&
-      mandatory_reauth_manager &&
-      mandatory_reauth_manager->ShouldOfferOptin(
-          payment_method_type_if_non_interactive_authentication_flow_completed_)) {
-    payment_method_type_if_non_interactive_authentication_flow_completed_
-        .reset();
-    mandatory_reauth_manager->StartOptInFlow();
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillPrioritizeSaveCardOverMandatoryReauth) &&
+      ProceedWithCardMandatoryReauthOptInIfApplicable()) {
     return true;
   }
 
@@ -834,10 +824,14 @@ bool FormDataImporter::ProcessExtractedCreditCard(
     return false;
   }
 
-  // If a virtual card was extracted from the form, return as we do not do
-  // anything with virtual cards beyond this point.
+  // If a virtual card was extracted from the form, we do not do anything with
+  // virtual cards beyond this point. If
+  // `kAutofillPrioritizeSaveCardOverMandatoryReauth` is enabled, try to offer
+  // mandatory re-auth before returning.
   if (credit_card_import_type_ == CreditCardImportType::kVirtualCard) {
-    return false;
+    return base::FeatureList::IsEnabled(
+               features::kAutofillPrioritizeSaveCardOverMandatoryReauth) &&
+           ProceedWithCardMandatoryReauthOptInIfApplicable();
   }
 
   // Do not offer upload save for google domain.
@@ -862,9 +856,39 @@ bool FormDataImporter::ProcessExtractedCreditCard(
   }
 
   // Proceed with card or CVC saving if applicable.
-  return credit_card_save_manager_->ProceedWithSavingIfApplicable(
-      submitted_form, *extracted_credit_card, credit_card_import_type_,
-      is_credit_card_upstream_enabled, ukm_source_id);
+  if (credit_card_save_manager_->ProceedWithSavingIfApplicable(
+          submitted_form, *extracted_credit_card, credit_card_import_type_,
+          is_credit_card_upstream_enabled, ukm_source_id)) {
+    return true;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillPrioritizeSaveCardOverMandatoryReauth) &&
+      ProceedWithCardMandatoryReauthOptInIfApplicable()) {
+    // Try to offer mandatory re-auth as the last step.
+    return true;
+  }
+
+  return false;
+}
+
+bool FormDataImporter::ProceedWithCardMandatoryReauthOptInIfApplicable() {
+  // If a flow without interactive authentication was completed and the user
+  // didn't update the result that was filled into the form, re-auth opt-in
+  // flow might be offered.
+  if (auto* mandatory_reauth_manager =
+          client_->GetPaymentsAutofillClient()
+              ->GetOrCreatePaymentsMandatoryReauthManager();
+      credit_card_import_type_ != CreditCardImportType::kNewCard &&
+      mandatory_reauth_manager &&
+      mandatory_reauth_manager->ShouldOfferOptin(
+          payment_method_type_if_non_interactive_authentication_flow_completed_)) {
+    payment_method_type_if_non_interactive_authentication_flow_completed_
+        .reset();
+    mandatory_reauth_manager->StartOptInFlow();
+    return true;
+  }
+  return false;
 }
 
 bool FormDataImporter::ProcessIbanImportCandidate(Iban& extracted_iban) {
@@ -1085,9 +1109,7 @@ FormDataImporter::ExtractCreditCardFromForm(const FormStructure& form) {
       // old value: '1234', offset: 4, new value:'5678', result: '12345678'
       // old value: '12345678', offset: 4, new value:'0000', result: '12340000'
       if (field.credit_card_number_offset() > 0 &&
-          field.credit_card_number_offset() <= old_value.size() &&
-          base::FeatureList::IsEnabled(
-              features::kAutofillFixSplitCreditCardImport)) {
+          field.credit_card_number_offset() <= old_value.size()) {
         value = old_value.replace(field.credit_card_number_offset(),
                                   value.size(), value);
       }
@@ -1108,11 +1130,9 @@ FormDataImporter::ExtractCreditCardFromForm(const FormStructure& form) {
     std::u16string new_value = result.card.GetInfo(field.Type(), app_locale);
     // Skip duplicate field check if the field is a split credit card
     // number field.
-    bool skip_duplication_check =
+    const bool skip_duplication_check =
         field.Type().GetCreditCardType() == FieldType::CREDIT_CARD_NUMBER &&
-        field.credit_card_number_offset() > 0 &&
-        base::FeatureList::IsEnabled(
-            features::kAutofillFixSplitCreditCardImport);
+        field.credit_card_number_offset() > 0;
     result.has_duplicate_credit_card_field_type |=
         !skip_duplication_check && !old_value.empty() && old_value != new_value;
   };

@@ -52,6 +52,7 @@
 #include "chrome/browser/ui/views/user_education/autofill_help_bubble_factory.h"
 #include "chrome/browser/ui/views/user_education/browser_help_bubble.h"
 #include "chrome/browser/ui/views/user_education/browser_ntp_promos.h"
+#include "chrome/browser/ui/views/user_education/custom_webui_help_bubble.h"
 #include "chrome/browser/ui/views/user_education/impl/browser_feature_promo_controller.h"
 #include "chrome/browser/ui/views/user_education/impl/browser_feature_promo_controller_20.h"
 #include "chrome/browser/ui/views/user_education/impl/browser_feature_promo_controller_25.h"
@@ -82,8 +83,8 @@
 #include "components/lens/lens_features.h"
 #include "components/password_manager/core/browser/features/password_features.h"
 #include "components/pdf/browser/pdf_document_helper.h"
+#include "components/plus_addresses/core/browser/grit/plus_addresses_strings.h"
 #include "components/plus_addresses/core/common/features.h"
-#include "components/plus_addresses/grit/plus_addresses_strings.h"
 #include "components/safe_browsing/core/common/safebrowsing_referral_methods.h"
 #include "components/saved_tab_groups/public/features.h"
 #include "components/strings/grit/components_strings.h"
@@ -117,7 +118,7 @@
 #include "ui/views/view_utils.h"
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-#include "components/plus_addresses/resources/vector_icons.h"
+#include "components/plus_addresses/core/browser/resources/vector_icons.h"
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -131,6 +132,11 @@
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/ui/webui/extensions_zero_state_promo/zero_state_promo_ui.h"
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+#if BUILDFLAG(ENABLE_GLIC)
+#include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#endif
 
 namespace {
 
@@ -293,36 +299,28 @@ void MaybeRegisterChromeFeaturePromos(
                        "Triggered after a home/work suggestion is available to "
                        "user for filling")));
 
+  registry.RegisterFeature(std::move(
+      FeaturePromoSpecification::CreateForToastPromo(
+          feature_engagement::kIPHAutofillAccountNameEmailSuggestionFeature,
+          autofill::PopupViewViews::
+              kAutofillAccountNameEmailSuggestionElementId,
+          IDS_AUTOFILL_IPH_ACCOUNT_NAME_EMAIL_SUGGESTION,
+          IDS_AUTOFILL_IPH_ACCOUNT_NAME_EMAIL_SUGGESTION_SCREENREADER,
+          FeaturePromoSpecification::AcceleratorInfo())
+          .SetBubbleArrow(HelpBubbleArrow::kLeftCenter)
+          .SetBubbleTitleText(
+              IDS_AUTOFILL_IPH_ACCOUNT_NAME_EMAIL_SUGGESTION_TITLE)
+          .SetMetadata(
+              143, "sygiet@google.com",
+              "Triggered after a name and email suggestion is available to "
+              "user for filling")));
+
   // kIPHAutofillAiOptInFeature:
   registry.RegisterFeature(std::move(
       FeaturePromoSpecification::CreateForCustomAction(
           feature_engagement::kIPHAutofillAiOptInFeature,
           autofill::PopupViewViews::kAutofillAiOptInIphElementId,
-          IDS_AUTOFILL_AI_OPT_IN_IPH_BODY,
-          [&]() {
-            int index =
-                feature_engagement::kAutofillIphCTAVariationsStringValue.Get();
-            if (index < 0 ||
-                index > base::to_underlying(
-                            autofill::features::
-                                AutofillIphCTAVariationsStringVarations::
-                                    kMaxValue)) {
-              return IDS_AUTOFILL_AI_OPT_IN_IPH_SEE_HOW;
-            }
-            switch (static_cast<autofill::features::
-                                    AutofillIphCTAVariationsStringVarations>(
-                index)) {
-              case autofill::features::AutofillIphCTAVariationsStringVarations::
-                  kSeeHow:
-                return IDS_AUTOFILL_AI_OPT_IN_IPH_SEE_HOW;
-              case autofill::features::AutofillIphCTAVariationsStringVarations::
-                  kTryIt:
-                return IDS_AUTOFILL_AI_OPT_IN_IPH_TRY_IT;
-              case autofill::features::AutofillIphCTAVariationsStringVarations::
-                  kTurnOn:
-                return IDS_AUTOFILL_AI_OPT_IN_IPH_TURN_ON;
-            }
-          }(),
+          IDS_AUTOFILL_AI_OPT_IN_IPH_BODY, IDS_AUTOFILL_AI_OPT_IN_IPH_TURN_ON,
           base::BindRepeating(
               [](ContextPtr ctx,
                  user_education::FeaturePromoHandle promo_handle) {
@@ -370,13 +368,22 @@ void MaybeRegisterChromeFeaturePromos(
           .SetMetadata(100, "siyua@chromium.org",
                        "Triggered after autofill popup appears.")));
 
+  bool bnpl_second_line_string_experiment_enabled =
+      base::FeatureList::IsEnabled(
+          autofill::features::
+              kAutofillEnableBuyNowPayLaterUpdatedSuggestionSecondLineString);
+
   // kIPHAutofillBnplAffirmOrZipSuggestionFeature:
   registry.RegisterFeature(std::move(
       FeaturePromoSpecification::CreateForToastPromo(
           feature_engagement::kIPHAutofillBnplAffirmOrZipSuggestionFeature,
           autofill::PopupViewViews::kAutofillBnplAffirmOrZipSuggestionElementId,
-          IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP,
-          IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER,
+          bnpl_second_line_string_experiment_enabled
+              ? IDS_AUTOFILL_CARD_BNPL_SUGGESTION_WITH_GOOGLE_PAY_IPH_BUBBLE_LABEL_DESKTOP
+              : IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP,
+          bnpl_second_line_string_experiment_enabled
+              ? IDS_AUTOFILL_CARD_BNPL_SUGGESTION_WITH_GOOGLE_PAY_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER
+              : IDS_AUTOFILL_CARD_BNPL_AFFIRM_OR_ZIP_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER,
           FeaturePromoSpecification::AcceleratorInfo())
           .SetBubbleArrow(HelpBubbleArrow::kLeftCenter)
           .SetMetadata(137, "yiwenqian@google.com",
@@ -390,8 +397,12 @@ void MaybeRegisterChromeFeaturePromos(
               kIPHAutofillBnplAffirmZipOrKlarnaSuggestionFeature,
           autofill::PopupViewViews::
               kAutofillBnplAffirmZipOrKlarnaSuggestionElementId,
-          IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP,
-          IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER,
+          bnpl_second_line_string_experiment_enabled
+              ? IDS_AUTOFILL_CARD_BNPL_SUGGESTION_WITH_GOOGLE_PAY_IPH_BUBBLE_LABEL_DESKTOP
+              : IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP,
+          bnpl_second_line_string_experiment_enabled
+              ? IDS_AUTOFILL_CARD_BNPL_SUGGESTION_WITH_GOOGLE_PAY_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER
+              : IDS_AUTOFILL_CARD_BNPL_AFFIRM_ZIP_OR_KLARNA_SUGGESTION_IPH_BUBBLE_LABEL_DESKTOP_SCREENREADER,
           FeaturePromoSpecification::AcceleratorInfo())
           .SetBubbleArrow(HelpBubbleArrow::kLeftCenter)
           .SetMetadata(
@@ -612,7 +623,7 @@ void MaybeRegisterChromeFeaturePromos(
               IDS_EXTENSIONS_ZERO_STATE_PROMO_CUSTOM_ACTION_IPH_DESCRIPTION,
               IDS_EXTENSIONS_ZERO_STATE_PROMO_CUSTOM_ACTION_IPH_ACCEPT,
               CreateNavigationAction(extension_urls::AppendUtmSource(
-                  extension_urls::GetWebstoreLaunchURL(),
+                  extension_urls::GetNewWebstoreLaunchURL(),
                   extension_urls::kCustomActionIphUtmSource)))
               .SetCustomActionIsDefault(true)
               .SetBubbleTitleText(IDS_EXTENSIONS_ZERO_STATE_PROMO_IPH_TITLE)
@@ -670,6 +681,35 @@ void MaybeRegisterChromeFeaturePromos(
           .OverrideFocusOnShow(false)
           .SetMetadata(
               133, "dfried@chromium.org",
+              "Attempts to trigger when the user is on a supported page.")));
+
+  // kIPHGlicTryItFeature:
+  registry.RegisterFeature(std::move(
+      FeaturePromoSpecification::CreateForCustomAction(
+          feature_engagement::kIPHGlicTryItFeature, kGlicButtonElementId,
+          IDS_GLIC_TRYIT_BODY, IDS_GLIC_PROMO_CONFIRM,
+          base::BindRepeating(
+              [](ContextPtr ctx,
+                 user_education::FeaturePromoHandle promo_handle) {
+                auto* browser = GetBrowser(ctx);
+                if (!browser) {
+                  return;
+                }
+                if (auto* glic_service =
+                        glic::GlicKeyedService::Get(browser->GetProfile())) {
+                  glic_service->ToggleUI(
+                      browser, /*prevent_close=*/true,
+                      glic::mojom::InvocationSource::kTopChromeButton);
+                }
+              }))
+          .SetBubbleTitleText(IDS_GLIC_TRYIT_TITLE)
+          .SetBubbleArrow(HelpBubbleArrow::kTopRight)
+          .SetCustomActionIsDefault(true)
+          // Since this can appear randomly, we do not want to steal focus from
+          // the user; see https://crbug.com/418579754
+          .OverrideFocusOnShow(false)
+          .SetMetadata(
+              142, "dewittj@chromium.org",
               "Attempts to trigger when the user is on a supported page.")));
 #endif  // BUILDFLAG(ENABLE_GLIC)
 
@@ -1125,8 +1165,8 @@ void MaybeRegisterChromeFeaturePromos(
                 "Triggered when a shared tab becomes the active tab.")));
   }
 
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-  // kIPHSupervisedUserProfileSigninFeature
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+  // kIPHSupervisedUserProfileSigninFeature:
   registry.RegisterFeature(std::move(
       FeaturePromoSpecification::CreateForCustomAction(
           feature_engagement::kIPHSupervisedUserProfileSigninFeature,
@@ -1153,7 +1193,28 @@ void MaybeRegisterChromeFeaturePromos(
           .SetMetadata(128, "anthie@google.com",
                        "Triggered on signin-in a supervised user to "
                        "a new profile or an existing local profile")));
-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+
+  // kIPHSignInBenefitsFeature:
+  registry.RegisterFeature(std::move(
+      FeaturePromoSpecification::CreateForCustomAction(
+          feature_engagement::kIPHSignInBenefitsFeature,
+          kToolbarAvatarButtonElementId, IDS_SIGN_IN_BENEFITS_IPH_TEXT,
+          IDS_PROMO_MANAGE_BUTTON,
+          base::BindRepeating(
+              [](ContextPtr ctx,
+                 user_education::FeaturePromoHandle promo_handle) {
+                // Open account settings page.
+                ShowSingletonTab(GetBrowser(ctx),
+                                 GURL(chrome::kChromeUIAccountSettingsURL));
+              }))
+          .SetPromoSubtype(user_education::FeaturePromoSpecification::
+                               PromoSubtype::kActionableAlert)
+          .SetBubbleArrow(HelpBubbleArrow::kTopRight)
+          .SetCustomActionIsDefault(false)
+          .SetMetadata(142, "ddac@google.com",
+                       "Triggered for a signed-in user who hasn't turned on "
+                       "sync yet, after the sync-to-signin migration.")));
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
   // kIPHTabOrganizationSuccessFeature:
   registry.RegisterFeature(std::move(

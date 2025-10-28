@@ -20,4 +20,4 @@ blaze run //lens/chrome/scripts/proto_export -- \
 
 
 Local Modifications:
-Comment for time_usec in request_id needs update on server copy.
+Unchanged from the output of the export script.

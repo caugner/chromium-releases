@@ -21,6 +21,7 @@
 <translation id="1732764153129912782">Du kan göra ändringar i inställningarna för annonsintegritet</translation>
 <translation id="1780659583673667574">Om du till exempel besöker en webbplats för att hitta middagsrecept kan webbplatsen göra bedömningen att du är intresserad av matlagning. Senare kan en annan webbplats visa en relaterad annons för en matkassetjänst som föreslås av den första webbplatsen.</translation>
 <translation id="1887631853265748225">Med funktionerna för annonsintegritet kan du begränsa vilken information webbplatser och deras annonseringspartners kan få om dig när de visar anpassade annonser.</translation>
+<translation id="19426210786412737">Dina nuvarande Chrome-inställningar har uppdaterats så att webbplatser får åtkomst till tredjepartscookies. Du kan ändra den här inställningen när som helst.</translation>
 <translation id="1954777269544683286">Google kräver att företag offentligt anger att de inte använder denna data för att spåra dig på olika webbplatser. Det är företagens ansvar att informera dig om hur de använder din data. <ph name="BEGIN_LINK" />Läs mer i vår integritetspolicy<ph name="END_LINK" />.</translation>
 <translation id="2004697686368036666">Vissa webbplatsers funktioner kanske inte fungerar</translation>
 <translation id="2089807121381188462"><ph name="BEGIN_BOLD" />Hur kan du hantera den här datan?<ph name="END_BOLD" /> Chrome raderar webbplatser som är äldre än 30 dagar automatiskt. Om du besöker en webbplats på nytt kan den dyka upp på listan igen. Du kan även blockera webbplatser från att föreslå annonser för dig och inaktivera föreslagna annonser på webbplatser när som helst i inställningarna för Chrome.</translation>
@@ -48,7 +49,7 @@
 <translation id="3442071090395342573">Chromium raderar all aktivitetsdata som du har delat med webbplatser efter 30 dagar. Om du besöker en webbplats på nytt kan den dyka upp på listan igen. Läs mer om hur du <ph name="BEGIN_LINK" />hanterar annonsintegritet i Chrome<ph name="END_LINK" />.</translation>
 <translation id="3467081767799433066">Med annonsmätning delas begränsade typer av data mellan webbplatser för att mäta annonsernas resultat, till exempel om du har gjort ett köp efter att ha besökt en webbplats.</translation>
 <translation id="3624583033347146597">Välj inställningar för tredjepartscookies</translation>
-<translation id="364348650177270461">Chromium försöker begränsa enhets- och webbläsardata, som installerade teckensnitt eller din tidszon, från inbäddade webbplatser som kanske försöker få information om dig</translation>
+<translation id="364348650177270461">Chromium försöker begränsa enhets- och webbläsardata, som installerade fonter eller din tidszon, från inbäddade webbplatser som kanske försöker få information om dig</translation>
 <translation id="3645682729607284687">Chrome registrerar ämnen du är intresserad av baserat på din senaste webbhistorik. Exempel på ämnen är Sport, Kläder med mera</translation>
 <translation id="3665701035629774409">Chrome blockerar tredjepartscookies i inkognitoläge, men administratören har tillåtit tredjepartscookies för den här webbplatsen. Inkognitoläget kan även ge ytterligare spårningsskydd. Hantera spårningsskydd i inkognitoläge i <ph name="BEGIN_LINK" />Inställningar<ph name="END_LINK" />.</translation>
 <translation id="3696118321107706175">Så här använder webbplatser din data</translation>
@@ -63,7 +64,7 @@
 <translation id="4009365983562022788">Google kräver att företag offentligt anger att de inte använder denna data för att spåra dig på olika webbplatser. Vissa webbplatser kan använda din aktivitet för att anpassa din upplevelse för mer än bara annonser. De kan även kombinera den med annan information som de redan känner till om dig. Det är företagens ansvar att informera dig om hur de använder din data. Läs mer i vår <ph name="BEGIN_LINK1" />integritetspolicy<ph name="LINK_END1" />.</translation>
 <translation id="4115793614265434327">Chromium blockerar tredjepartscookies i inkognitoläge, men administratören har tillåtit tredjepartscookies för den här webbplatsen.</translation>
 <translation id="4177501066905053472">Annonsämnen</translation>
-<translation id="4200539465901914137">Chrome försöker begränsa enhets- och webbläsardata, till exempel installerade teckensnitt eller din tidszon, från inbäddade webbplatser som kanske försöker få information om dig</translation>
+<translation id="4200539465901914137">Chrome försöker begränsa enhets- och webbläsardata, till exempel installerade fonter eller din tidszon, från inbäddade webbplatser som kanske försöker få information om dig</translation>
 <translation id="4278390842282768270">Tillåts</translation>
 <translation id="4301151630239508244">Annonsämnen är bara en av många saker som en webbplats kan använda för att anpassa annonser. Webbplatser kan visa annonser även utan annonsämnen, men de kanske är mindre anpassade. Läs mer om hur du <ph name="BEGIN_LINK_1" />hanterar annonsintegritet<ph name="END_LINK_1" />.</translation>
 <translation id="435360899831421654">Begränsa åtkomsten till enhets- och webbinformation. Inställningen är inaktiverad.</translation>
@@ -109,6 +110,7 @@
 <translation id="6308169245546905162">Webbplatser kan använda tredjepartscookies för att få information om åtgärder du vidtar på andra webbplatser</translation>
 <translation id="6388287739339671750">Blockera spårningsskript</translation>
 <translation id="6398358690696005758">Läs mer om hur Google skyddar din data i vår <ph name="BEGIN_LINK1" />integritetspolicy<ph name="LINK_END1" />.</translation>
+<translation id="6494210367693221285">Dina nuvarande Chromium-inställningar har uppdaterats så att webbplatser får åtkomst till tredjepartscookies. Du kan ändra den här inställningen när som helst.</translation>
 <translation id="6702015235374976491">Annonsämnen hjälper webbplatser att visa relevanta annonser samtidigt som din webbhistorik och identitet skyddas. Chrome kan registrera ämnen som du är intresserad av baserat på din senaste webbhistorik. Senare kan en webbplats be om relevanta ämnen i Chrome för att anpassa vilka annonser som visas.</translation>
 <translation id="6710025070089118043">Webbplatser kan inte använda tredjepartscookies för att anpassa innehåll och annonser och få information om åtgärder du vidtar på andra webbplatser, om du inte ger relaterade webbplatser åtkomst till dem</translation>
 <translation id="6737378617247709185">Chromium blockerar tredjepartscookies i inkognitoläge, men administratören har tillåtit tredjepartscookies för den här webbplatsen. Inkognitoläget kan även ge ytterligare spårningsskydd. Hantera spårningsskydd i inkognitoläge i <ph name="BEGIN_LINK" />Inställningar<ph name="END_LINK" />.</translation>
@@ -154,6 +156,7 @@
 <translation id="8442977418416307640">Öppnas i ett vanligt Chromium-fönster</translation>
 <translation id="8578320000709741352">Webbplatser du besöker kan bädda in innehåll och tjänster från andra webbplatser (som bilder, annonser och text) som kan användas för att samla in information om dig. Läs mer om att hantera <ph name="START_LINK" />spårningsskydd i inkognitoläget<ph name="END_LINK" /></translation>
 <translation id="859369389161884405">Öppnar integritetspolicyn i en ny flik</translation>
+<translation id="8712637175834984815">OK</translation>
 <translation id="877699835489047794"><ph name="BEGIN_BOLD" />Hur kan du hantera den här datan?<ph name="END_BOLD" /> Chrome raderar automatiskt ämnen som är äldre än fyra veckor. Medan du surfar kan ett ämne dyka upp på listan igen. Du kan även blockera ämnen som du inte vill att Chrome ska dela med webbplatser och inaktivera annonsämnen när som helst i inställningarna för Chrome.</translation>
 <translation id="8803526663383843427">När funktionen är aktiverad</translation>
 <translation id="8825639607990802302">Alternativ för integritet och webbplatsdata</translation>

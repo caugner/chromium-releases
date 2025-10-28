@@ -130,6 +130,11 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
             loadTimeData.getBoolean('showGlicDefaultTabContextSetting'),
       },
 
+      showGlicPersonalContextLink_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('showGeminiPersonalContextLink'),
+      },
+
       locationSubLabel_: {
         type: String,
         computed: `computeLocationSubLabel_(prefs.${
@@ -181,6 +186,12 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         type: String,
         computed: `computeSpark_()`,
       },
+
+      isEnterpriseAccountDataProtected_: {
+        type: Boolean,
+        computed: `computeIsEnterpriseAccountDataProtected_(prefs.${
+            SettingsGlicPageFeaturePrefName.USER_STATUS}.value)`,
+      },
     };
   }
 
@@ -211,6 +222,7 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   declare private glicExtensionsFeatureEnabled_: boolean;
   declare private glicUserStatusCheckFeatureEnabled_: boolean;
   declare private showGlicDefaultTabContextSetting_: boolean;
+  declare private showGlicPersonalContextLink_: boolean;
   declare private locationSubLabel_: string;
   declare private locationLearnMoreUrl_: string;
   declare private microphoneSubLabel_: string;
@@ -219,6 +231,7 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   declare private defaultTabAccessSubLabel_: string;
   declare private defaultTabAccessLearnMoreUrl_: string;
   declare private spark_: string;
+  declare private isEnterpriseAccountDataProtected_: boolean;
 
   override async connectedCallback() {
     super.connectedCallback();
@@ -396,6 +409,13 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
     this.metricsBrowserProxy_.recordAction(
         AiPageActions
             .GLIC_SHORTCUTS_DEFAULT_TAB_ACCESS_TOGGLE_LEARN_MORE_CLICKED);
+    OpenWindowProxyImpl.getInstance().openUrl(
+        this.defaultTabAccessLearnMoreUrl_);
+  }
+
+  private onGeminiPersonalContextClick_() {
+    OpenWindowProxyImpl.getInstance().openUrl(
+        loadTimeData.getString('geminiPersonalContextUrl'));
   }
 
   private disallowedByAdminChanged_(disallowed: boolean) {
@@ -414,58 +434,61 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         'Glic.Settings.TabstripButton.' + (enabled ? 'Enabled' : 'Disabled'));
   }
 
+  private computeIsEnterpriseAccountDataProtected_(
+      userStatus: GlicUserStatusPref|undefined): boolean {
+    return this.glicUserStatusCheckFeatureEnabled_ &&
+        !!userStatus?.isEnterpriseAccountDataProtected;
+  }
+
   private computeLocationSubLabel_(userStatus: GlicUserStatusPref|undefined):
       string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicLocationToggleSublabelDataProtected') :
         this.i18n('glicLocationToggleSublabel');
   }
 
   private computeLocationLearnMoreUrl_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         '' :
         this.i18n('glicLocationToggleLearnMoreUrl');
   }
 
   private computeMicrophoneSubLabel_(userStatus: GlicUserStatusPref|undefined):
       string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicMicrophoneToggleSublabelDataProtected') :
         this.i18n('glicMicrophoneToggleSublabel');
   }
 
   private computeTabAccessSubLabel_(userStatus: GlicUserStatusPref|undefined):
       string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicTabAccessToggleSublabelDataProtected') :
         this.i18n('glicTabAccessToggleSublabel');
   }
 
   private computeTabAccessLearnMoreUrl_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicTabAccessToggleLearnMoreUrlDataProtected') :
         this.i18n('glicTabAccessToggleLearnMoreUrl');
   }
 
+  // i18nAdvanced is needed to allow for translating strings containing HTML.
+  // The glicDefaultTabAccessToggleSublabel strings contain <ph> elements which
+  // are translated to <a> tags to provide a link in the label.
   private computeDefaultTabAccessSubLabel_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
-        this.i18n('glicDefaultTabAccessToggleSublabelDataProtected') :
-        this.i18n('glicDefaultTabAccessToggleSublabel');
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
+        this.i18nAdvanced('glicDefaultTabAccessToggleSublabelDataProtected')
+            .toString() :
+        this.i18nAdvanced('glicDefaultTabAccessToggleSublabel').toString();
   }
 
   private computeDefaultTabAccessLearnMoreUrl_(
       userStatus: GlicUserStatusPref|undefined): string {
-    return this.glicUserStatusCheckFeatureEnabled_ &&
-            userStatus?.isEnterpriseAccountDataProtected ?
+    return this.computeIsEnterpriseAccountDataProtected_(userStatus) ?
         this.i18n('glicDefaultTabAccessToggleLearnMoreUrlDataProtected') :
         this.i18n('glicDefaultTabAccessToggleLearnMoreUrl');
   }

@@ -38,11 +38,9 @@ inline constexpr char kIPHDemoModeFeatureChoiceParam[] = "chosen_feature";
 // Defines a single flags_ui::FeatureEntry::FeatureVariation entry, fully
 // enclosed. This is intended to be used with the declaration of
 // |kIPHDemoModeChoiceVariations| below.
-#define VARIATION_ENTRY(base_feature)                                \
-  {                                                                  \
-    base_feature##Variation[0].param_value, base_feature##Variation, \
-        std::size(base_feature##Variation), nullptr                  \
-  }
+#define VARIATION_ENTRY(base_feature)                               \
+  {base_feature##Variation[0].param_value, base_feature##Variation, \
+   std::size(base_feature##Variation), nullptr}
 
 // Defines a flags_ui::FeatureEntry::FeatureParam for each feature.
 DEFINE_VARIATION_PARAM(kIPHDummyFeature, "IPH_Dummy");
@@ -83,6 +81,7 @@ DEFINE_VARIATION_PARAM(kIPHAutoDarkUserEducationMessageFeature,
 DEFINE_VARIATION_PARAM(kIPHAutoDarkUserEducationMessageOptInFeature,
                        "IPH_AutoDarkUserEducationMessageOptIn");
 DEFINE_VARIATION_PARAM(kIPHAppSpecificHistory, "IPH_AppSpecificHistory");
+DEFINE_VARIATION_PARAM(kIPHBookmarksBarFeature, "IPH_BookmarksBar");
 DEFINE_VARIATION_PARAM(kIPHCCTHistory, "IPH_CCTHistory");
 DEFINE_VARIATION_PARAM(kIPHCCTMinimized, "IPH_CCTMinimized");
 DEFINE_VARIATION_PARAM(kIPHContextualPageActionsQuietVariantFeature,
@@ -353,7 +352,6 @@ DEFINE_VARIATION_PARAM(kIPHiOSHomepageLensNewBadge,
                        "IPH_iOSHomepageLensNewBadge");
 DEFINE_VARIATION_PARAM(kIPHiOSHomepageCustomizationNewBadge,
                        "IPH_iOSHomepageCustomizationNewBadge");
-
 DEFINE_VARIATION_PARAM(kIPHiOSAIHubNewBadge, "IPH_iOSAIHubNewBadge");
 
 #endif  // BUILDFLAG(IS_IOS)
@@ -380,6 +378,7 @@ DEFINE_VARIATION_PARAM(kIPHDownloadEsbPromoFeature, "IPH_DownloadEsbPromo");
 DEFINE_VARIATION_PARAM(kIPHExplicitBrowserSigninPreferenceRememberedFeature,
                        "IPH_ExplicitBrowserSigninPreferenceRemembered");
 DEFINE_VARIATION_PARAM(kIPHGlicPromoFeature, "IPH_GlicPromo");
+DEFINE_VARIATION_PARAM(kIPHGlicTryItFeature, "IPH_GlicTryIt");
 DEFINE_VARIATION_PARAM(kIPHHistorySearchFeature, "IPH_HistorySearch");
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 DEFINE_VARIATION_PARAM(kIPHExtensionsMenuFeature, "IPH_ExtensionsMenu");
@@ -586,6 +585,7 @@ DEFINE_VARIATION_PARAM(kIPHDesktopPWAsLinkCapturingLaunch,
                        "IPH_DesktopPWAsLinkCapturingLaunch");
 DEFINE_VARIATION_PARAM(kIPHDesktopPWAsLinkCapturingLaunchAppInTab,
                        "IPH_DesktopPWAsLinkCapturingLaunchAppInTab");
+DEFINE_VARIATION_PARAM(kIPHSignInBenefitsFeature, "IPH_SignInBenefits");
 DEFINE_VARIATION_PARAM(kIPHSupervisedUserProfileSigninFeature,
                        "IPH_SupervisedUserProfileSignin");
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
@@ -597,6 +597,10 @@ DEFINE_VARIATION_PARAM(kIPHiOSAddressPromoDesktopFeature,
                        "IPH_iOSAddressPromoDesktop");
 DEFINE_VARIATION_PARAM(kIPHiOSPaymentPromoDesktopFeature,
                        "IPH_iOSPaymentPromoDesktop");
+DEFINE_VARIATION_PARAM(kIPHiOSLensPromoDesktopFeature,
+                       "IPH_iOSLensPromoDesktop");
+DEFINE_VARIATION_PARAM(kIPHiOSEnhancedBrowsingDesktopFeature,
+                       "IPH_iOSEnhancedBrowsingDesktop");
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 // Defines the array of which features should be listed in the chrome://flags
@@ -629,6 +633,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHAutoDarkUserEducationMessageFeature),
         VARIATION_ENTRY(kIPHAutoDarkUserEducationMessageOptInFeature),
         VARIATION_ENTRY(kIPHAppSpecificHistory),
+        VARIATION_ENTRY(kIPHBookmarksBarFeature),
         VARIATION_ENTRY(kIPHCCTHistory),
         VARIATION_ENTRY(kIPHCCTMinimized),
         VARIATION_ENTRY(kIPHContextualPageActionsQuietVariantFeature),
@@ -775,6 +780,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHiOSWelcomeBackFeature),
         VARIATION_ENTRY(kIPHiOSSafariImportFeature),
         VARIATION_ENTRY(kIPHIOSPageActionMenu),
+        VARIATION_ENTRY(kIPHiOSAIHubNewBadge),
 #elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
         VARIATION_ENTRY(kIPHBatterySaverModeFeature),
@@ -787,6 +793,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHDiscardRingFeature),
         VARIATION_ENTRY(kIPHExplicitBrowserSigninPreferenceRememberedFeature),
         VARIATION_ENTRY(kIPHGlicPromoFeature),
+        VARIATION_ENTRY(kIPHGlicTryItFeature),
         VARIATION_ENTRY(kIPHPwaQuietNotificationFeature),
         VARIATION_ENTRY(kIPHHistorySearchFeature),
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -895,6 +902,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
         VARIATION_ENTRY(kIPHDesktopPWAsLinkCapturingLaunch),
         VARIATION_ENTRY(kIPHDesktopPWAsLinkCapturingLaunchAppInTab),
+        VARIATION_ENTRY(kIPHSignInBenefitsFeature),
         VARIATION_ENTRY(kIPHSupervisedUserProfileSigninFeature),
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
@@ -902,6 +910,8 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHiOSPasswordPromoDesktopFeature),
         VARIATION_ENTRY(kIPHiOSAddressPromoDesktopFeature),
         VARIATION_ENTRY(kIPHiOSPaymentPromoDesktopFeature),
+        VARIATION_ENTRY(kIPHiOSLensPromoDesktopFeature),
+        VARIATION_ENTRY(kIPHiOSEnhancedBrowsingDesktopFeature),
 #endif  // !BUILDFLAG(IS_ANDROID)
 };
 

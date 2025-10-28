@@ -47,18 +47,9 @@ void AppendLogsQueryParam(
     std::string* query_string,
     const std::vector<lens::mojom::LatencyLogPtr>& log_data);
 
-// Returns a modified GURL with appended or replaced parameters depending on the
-// entrypoint and other parameters.
-GURL AppendOrReplaceQueryParametersForLensRequest(const GURL& url,
-                                                  EntryPoint ep);
-
 // Returns a query string with all relevant query parameters. Needed for when a
 // GURL is unavailable to append to.
 std::string GetQueryParametersForLensRequest(EntryPoint ep);
-
-// Check if the lens URL is a valid results page. This is done by checking if
-// the URL has a payload parameter.
-bool IsValidLensResultUrl(const GURL& url);
 
 // Returns true if the given URL corresponds to a Lens mWeb result page. This is
 // done by checking the URL and its parameters.
@@ -66,7 +57,12 @@ bool IsLensMWebResult(const GURL& url);
 
 std::string Base64EncodeRequestId(LensOverlayRequestId request_id);
 
+// Returns the vit query parameter value for the given mime type.
 std::string VitQueryParamValueForMimeType(MimeType mime_type);
+
+// Returns the vit query parameter value for the given media type.
+std::string VitQueryParamValueForMediaType(
+    LensOverlayRequestId::MediaType media_type);
 
 // Returns a key-value map of all parameters in `url` except the query
 // parameter.

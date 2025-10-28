@@ -287,6 +287,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void OnSizeChanged() override;
   void OnPhysicalBackingSizeChanged(
       std::optional<base::TimeDelta> deadline_override) override;
+  void OnWindowPositionChanged() override;
   void NotifyVirtualKeyboardOverlayRect(
       const gfx::Rect& keyboard_rect) override;
   void ShowInterestInElement(int) override;
@@ -521,6 +522,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void UnlockOrientation() override;
   void SetHasPersistentVideo(bool has_persistent_video) override;
 
+  // This method is used as a callback for `ViewAndroid::HitTest` to determine
+  // if the View is actually ready to send event.
+  bool IsHitTestReady();
+
  private:
   friend class RenderWidgetHostViewAndroidTest;
   friend class RenderWidgetHostViewAndroidFullscreenRotationTest;
@@ -528,6 +533,9 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessBrowserTest,
                            GestureManagerListensToChildFrames);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAndroidTest, DisplayFeature);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAndroidTest, UpdateControls);
+  FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostViewAndroidFluidResizeBrowserTest,
+                           ResizeDefersSynchronizationToNextFrame);
 
   class ScreenStateChangeHandler {
    public:
@@ -748,6 +756,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   float prev_top_controls_translate_;
   float prev_top_controls_min_height_offset_pix_;
   float prev_bottom_shown_pix_;
+  float prev_bottom_controls_pix_;
   float prev_bottom_controls_translate_;
   float prev_bottom_controls_min_height_offset_pix_;
   float page_scale_;
@@ -827,6 +836,10 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   ScreenStateChangeHandler screen_state_change_handler_;
 
   std::optional<base::flat_set<ui::DomCode>> locked_keyboard_keys_;
+
+  // Used to schedule a single visual properties update on the next vsync tick
+  // to achieve fluid resizing.
+  bool visual_properties_update_pending_ = false;
 
   base::WeakPtrFactory<RenderWidgetHostViewAndroid> weak_ptr_factory_{this};
 };

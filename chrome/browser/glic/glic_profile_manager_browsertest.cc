@@ -10,6 +10,7 @@
 
 #include "base/memory/memory_pressure_monitor.h"
 #include "base/test/test_future.h"
+#include "chrome/browser/actor/actor_keyed_service_factory.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/contextual_cueing/contextual_cueing_service.h"
@@ -46,12 +47,14 @@ class MockGlicKeyedService : public GlicKeyedService {
       signin::IdentityManager* identity_manager,
       ProfileManager* profile_manager,
       GlicProfileManager* glic_profile_manager,
-      contextual_cueing::ContextualCueingService* contextual_cueing_service)
+      contextual_cueing::ContextualCueingService* contextual_cueing_service,
+      actor::ActorKeyedService* actor_keyed_service)
       : GlicKeyedService(Profile::FromBrowserContext(browser_context),
                          identity_manager,
                          profile_manager,
                          glic_profile_manager,
-                         contextual_cueing_service) {}
+                         contextual_cueing_service,
+                         actor_keyed_service) {}
   MOCK_METHOD(void, ClosePanel, (), (override));
 
   bool IsWindowDetached() const override { return detached_; }
@@ -106,10 +109,12 @@ class GlicProfileManagerBrowserTest : public InProcessBrowserTest {
       content::BrowserContext* context) {
     auto* identitity_manager = IdentityManagerFactory::GetForProfile(
         Profile::FromBrowserContext(context));
+    auto* actor_keyed_service =
+        actor::ActorKeyedServiceFactory::GetActorKeyedService(context);
     return std::make_unique<MockGlicKeyedService>(
         context, identitity_manager, g_browser_process->profile_manager(),
         GlicProfileManager::GetInstance(),
-        /*contextual_cueing_service=*/nullptr);
+        /*contextual_cueing_service=*/nullptr, actor_keyed_service);
   }
 
   GlicTestEnvironment glic_test_environment_;
@@ -210,6 +215,10 @@ class GlicProfileManagerPreloadingTest
                                    delay_ms},
                                   {features::kGlicWarmingJitterMs.name, "0"}}}},
           /*disabled_features=*/{});
+    } else {
+      scoped_feature_list_.InitWithFeatures(
+          /*enabled_features=*/{},
+          /*disabled_features=*/{features::kGlicWarming});
     }
 
     // We initialize memory pressure to moderate to prevent any premature
@@ -287,7 +296,8 @@ IN_PROC_BROWSER_TEST_P(GlicProfileManagerPreloadingTest,
   }
   ResetMemoryPressure();
   browser()->profile()->NotifyWillBeDestroyed();
-  EXPECT_EQ(WaitForShouldPreload(), GlicPrewarmingChecksResult::kProfileGone);
+  EXPECT_EQ(WaitForShouldPreload(),
+            GlicPrewarmingChecksResult::kBrowserShuttingDown);
 }
 
 IN_PROC_BROWSER_TEST_P(GlicProfileManagerPreloadingTest,

@@ -83,6 +83,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/blink/public/mojom/input/input_handler.mojom.h"
 #include "third_party/perfetto/include/perfetto/tracing/track.h"
@@ -488,7 +489,18 @@ bool RenderWidgetHostViewAndroid::ScreenStateChangeHandler::
           // left in a rotation throttle and ending it here.
           end_rotation = true;
         } else {
+          // A standalone non-rotation resize has occurred. For WebView, we sync
+          // immediately. For the browser, schedule a vsync-aligned update to
+          // process it smoothly.
           sync_needed = true;
+          if (base::FeatureList::IsEnabled(features::kFluidResize) &&
+              rwhva_->using_browser_compositor_) {
+            sync_needed = false;
+            if (!rwhva_->visual_properties_update_pending_) {
+              rwhva_->visual_properties_update_pending_ = true;
+              rwhva_->SetNeedsAnimate();
+            }
+          }
         }
       }
     }
@@ -639,6 +651,7 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
       prev_top_controls_translate_(0.f),
       prev_top_controls_min_height_offset_pix_(0.f),
       prev_bottom_shown_pix_(0.f),
+      prev_bottom_controls_pix_(0.f),
       prev_bottom_controls_translate_(0.f),
       prev_bottom_controls_min_height_offset_pix_(0.f),
       page_scale_(1.f),
@@ -650,6 +663,10 @@ RenderWidgetHostViewAndroid::RenderWidgetHostViewAndroid(
   // layer is managed by the DelegatedFrameHost.
   view_.SetLayer(cc::slim::Layer::Create());
   view_.set_event_handler(this);
+  if (base::FeatureList::IsEnabled(ui::kCheckHitEligibility)) {
+    view_.SetHitTestCallback(base::BindRepeating(
+        &RenderWidgetHostViewAndroid::IsHitTestReady, base::Unretained(this)));
+  }
 
   // If we're showing at creation time, we won't get a visibility change, so
   // generate our initial LocalSurfaceId here.
@@ -819,15 +836,18 @@ bool RenderWidgetHostViewAndroid::SynchronizeVisualProperties(
     const std::optional<viz::LocalSurfaceId>& child_local_surface_id,
     bool reuse_current_local_surface_id,
     bool ignore_ack) {
-    // Always merge the child_id, even if we cannot sync at this time.
-    if (child_local_surface_id)
-      local_surface_id_allocator_.UpdateFromChild(*child_local_surface_id);
+  // Always merge the child_id, even if we cannot sync at this time.
+  if (child_local_surface_id) {
+    local_surface_id_allocator_.UpdateFromChild(*child_local_surface_id);
+  }
 
-    if (!CanSynchronizeVisualProperties())
-      return false;
+  if (!CanSynchronizeVisualProperties()) {
+    return false;
+  }
 
-    if (!child_local_surface_id && !reuse_current_local_surface_id)
-      local_surface_id_allocator_.GenerateId();
+  if (!child_local_surface_id && !reuse_current_local_surface_id) {
+    local_surface_id_allocator_.GenerateId();
+  }
 
   // If we still have an invalid viz::LocalSurfaceId, then we are hidden and
   // evicted. This will have been triggered by a child acknowledging a previous
@@ -1448,8 +1468,9 @@ bool RenderWidgetHostViewAndroid::OnGestureEvent(
     float delta = min_page_scale_ / page_scale_;
     web_event = ui::CreateWebGestureEventFromGestureEventAndroid(
         ui::GestureEventAndroid(event.type(), event.location(),
-                                event.screen_location(), event.time(), delta, 0,
-                                0, 0, 0, /*target_viewport*/ false,
+                                event.screen_location(), event.time(),
+                                event.source(), delta, 0, 0, 0, 0,
+                                /*target_viewport*/ false,
                                 /*synthetic_scroll*/ false,
                                 /*prevent_boosting*/ false));
   } else {
@@ -2000,6 +2021,21 @@ bool RenderWidgetHostViewAndroid::SupportsAnimation() const {
 }
 
 void RenderWidgetHostViewAndroid::SetNeedsAnimate() {
+  if (base::FeatureList::IsEnabled(features::kFluidResize)) {
+    // The synchronous (WebView) compositor does not have a proper browser
+    // compositor with which to drive animations.
+    CHECK(using_browser_compositor_);
+
+    // No-op if we are not attached to a window, as we are not visible. Visual
+    // properties will be synchronized when the view is shown.
+    if (observing_root_window_) {
+      if (auto* compositor = view_.GetWindowAndroid()->GetCompositor()) {
+        compositor->SetNeedsAnimate();
+      }
+    }
+    return;
+  }
+
   DCHECK(view_.GetWindowAndroid());
   DCHECK(using_browser_compositor_);
   view_.GetWindowAndroid()->SetNeedsAnimate();
@@ -2199,6 +2235,8 @@ bool RenderWidgetHostViewAndroid::UpdateControls(
   float bottom_shown_pix = bottom_controls_pix * bottom_controls_shown_ratio;
   bool bottom_changed = !cc::MathUtil::IsFloatNearlyTheSame(
       bottom_shown_pix, prev_bottom_shown_pix_);
+  bottom_changed |= !cc::MathUtil::IsFloatNearlyTheSame(
+      bottom_controls_pix, prev_bottom_controls_pix_);
   float bottom_translate = bottom_controls_pix - bottom_shown_pix;
 
   float bottom_min_height_offset_pix = bottom_controls_min_height_offset;
@@ -2214,6 +2252,7 @@ bool RenderWidgetHostViewAndroid::UpdateControls(
   prev_bottom_shown_pix_ = bottom_shown_pix;
   prev_bottom_controls_translate_ = bottom_translate;
   prev_bottom_controls_min_height_offset_pix_ = bottom_min_height_offset_pix;
+  prev_bottom_controls_pix_ = bottom_controls_pix;
   controls_initialized_ = true;
   return top_changed || bottom_changed;
 }
@@ -2364,6 +2403,16 @@ bool RenderWidgetHostViewAndroid::Animate(base::TimeTicks frame_time) {
   // an OOPIF client.
   if (touch_selection_controller_)
     needs_animate |= touch_selection_controller_->Animate(frame_time);
+
+  if (visual_properties_update_pending_ &&
+      base::FeatureList::IsEnabled(features::kFluidResize)) {
+    visual_properties_update_pending_ = false;
+    // Use a short deadline for fluid resizing. We don't want to block the
+    // UI thread, but we want the update to happen quickly.
+    SynchronizeVisualProperties(cc::DeadlinePolicy::UseDefaultDeadline(),
+                                std::nullopt);
+  }
+
   return needs_animate;
 }
 
@@ -2525,7 +2574,9 @@ void RenderWidgetHostViewAndroid::OnPointerLockRelease() {
 
 bool RenderWidgetHostViewAndroid::LockKeyboard(
     std::optional<base::flat_set<ui::DomCode>> codes) {
-  CHECK(!keyboard_locked_);
+  if (keyboard_locked_) {
+    return true;
+  }
 
   if (!base::FeatureList::IsEnabled(features::kKeyboardLockApiOnAndroid)) {
     return false;
@@ -2798,15 +2849,8 @@ void RenderWidgetHostViewAndroid::UpdateNativeViewTree(
   bool resize = false;
   if (will_build_tree != has_view_tree) {
     if (has_view_tree) {
-      // TODO(crbug.com/440324557): Unconditionally remove parent before
-      // removing `this` as an observer.
-      if (input_transfer_handler_) {
-        view_.RemoveFromParent();
-        view_.RemoveObserver(this);
-      } else {
-        view_.RemoveObserver(this);
-        view_.RemoveFromParent();
-      }
+      view_.RemoveFromParent();
+      view_.RemoveObserver(this);
       view_.GetLayer()->RemoveFromParent();
     }
     if (will_build_tree) {
@@ -2975,6 +3019,15 @@ void RenderWidgetHostViewAndroid::OnPhysicalBackingSizeChanged(
     SynchronizeVisualProperties(
         cc::DeadlinePolicy::UseSpecifiedDeadline(deadline_in_frames),
         std::nullopt);
+}
+
+void RenderWidgetHostViewAndroid::OnWindowPositionChanged() {
+  RenderWidgetHostDelegate* delegate = host()->delegate();
+  if (!delegate) {
+    return;
+  }
+
+  delegate->SendScreenRects();
 }
 
 void RenderWidgetHostViewAndroid::OnRootWindowVisibilityChanged(bool visible) {
@@ -3705,6 +3758,12 @@ CompositorImpl* RenderWidgetHostViewAndroid::GetCompositorImpl() {
     return nullptr;
   }
   return static_cast<CompositorImpl*>(window->GetCompositor());
+}
+
+bool RenderWidgetHostViewAndroid::IsHitTestReady() {
+  // We do not want to send to a view which is still in prerendering state,
+  // since any event should not be sent to non-active (and showing) view.
+  return !host()->frame_tree()->is_prerendering();
 }
 
 }  // namespace content
