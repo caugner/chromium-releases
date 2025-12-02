@@ -48,17 +48,6 @@ void EnableAutoResizeForWebContents(content::WebContents* web_contents) {
   }
 }
 
-// Enables the web contents to support web platform defined draggable regions
-// for the current primary render frame host. This should be called each time
-// the primary rfh changes (after navigation for e.g.).
-void EnableDraggableRegions(content::WebContents* web_contents) {
-  if (content::RenderFrameHost* rfh = web_contents->GetPrimaryMainFrame()) {
-    mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame> client;
-    rfh->GetRemoteAssociatedInterfaces()->GetInterface(&client);
-    client->SetSupportsDraggableRegions(true);
-  }
-}
-
 }  // namespace
 
 bool WebUIContentsWrapper::Host::HandleKeyboardEvent(
@@ -93,6 +82,12 @@ content::WebContents* WebUIContentsWrapper::Host::AddNewContents(
   return nullptr;
 }
 
+bool WebUIContentsWrapper::Host::PreHandleGestureEvent(
+    content::WebContents* source,
+    const blink::WebGestureEvent& event) {
+  return false;
+}
+
 WebUIContentsWrapper::WebUIContentsWrapper(const GURL& webui_url,
                                            Profile* profile,
                                            int task_manager_string_id,
@@ -123,7 +118,7 @@ WebUIContentsWrapper::WebUIContentsWrapper(const GURL& webui_url,
     EnableAutoResizeForWebContents(web_contents_.get());
   }
   if (supports_draggable_regions_) {
-    EnableDraggableRegions(web_contents_.get());
+    web_contents_->SetSupportsDraggableRegions(true);
   }
 
   profile_observation_.Observe(profile);
@@ -239,13 +234,18 @@ content::WebContents* WebUIContentsWrapper::AddNewContents(
                : nullptr;
 }
 
+bool WebUIContentsWrapper::PreHandleGestureEvent(
+    content::WebContents* source,
+    const blink::WebGestureEvent& event) {
+  return host_ ? host_->PreHandleGestureEvent(source, event) : false;
+}
+
 void WebUIContentsWrapper::PrimaryPageChanged(content::Page& page) {
   if (webui_resizes_host_) {
     EnableAutoResizeForWebContents(web_contents_.get());
   }
   if (supports_draggable_regions_) {
     draggable_regions_.reset();
-    EnableDraggableRegions(web_contents_.get());
   }
 }
 

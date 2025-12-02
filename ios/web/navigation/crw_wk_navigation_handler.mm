@@ -254,21 +254,10 @@ void LogPresentingErrorPageFailedWithError(NSError* error) {
   auto decisionHandler = ^(WKNavigationActionPolicy policy) {
     preferences.preferredContentMode = contentMode;
     if (@available(iOS 16.0, *)) {
-      if ((policy == WKNavigationActionPolicyAllow) &&
-          isMainFrameNavigationAction) {
-        UMA_HISTOGRAM_BOOLEAN("IOS.MainFrameNavigationIsInLockdownMode",
-                              preferences.lockdownModeEnabled);
-      }
-
       if (!self.beingDestroyed) {
         bool browser_lockdown_mode_enabled =
             web::GetWebClient()->IsBrowserLockdownModeEnabled();
-        if ((policy == WKNavigationActionPolicyAllow) &&
-            isMainFrameNavigationAction) {
-          UMA_HISTOGRAM_BOOLEAN(
-              "IOS.MainFrameNavigationIsInBrowserLockdownMode",
-              browser_lockdown_mode_enabled);
-        }
+
         if (browser_lockdown_mode_enabled) {
           preferences.lockdownModeEnabled = true;
         }
@@ -695,7 +684,7 @@ void LogPresentingErrorPageFailedWithError(NSError* error) {
   if (@available(iOS 26, *)) {
     if ([error.domain isEqualToString:@(web::kWebKitErrorDomain)] &&
         error.code == web::kWebKitErrorCannotShowUrl &&
-        !error.userInfo[NSURLErrorFailingURLStringErrorKey]) {
+        !net::GetFailingURLStringFromError(error)) {
       // URL is expected in these errors, but it broke on iOS 26. Apply
       // workaround until WebKit fix is shipped.
       // TODO(crbug.com/441372052): Remove workaround.
@@ -1979,7 +1968,7 @@ void LogPresentingErrorPageFailedWithError(NSError* error) {
 
   // Error page needs the URL string in the error's userInfo for proper
   // display.
-  if (!error.userInfo[NSURLErrorFailingURLStringErrorKey]) {
+  if (!net::GetFailingURLStringFromError(error)) {
     NSMutableDictionary* updatedUserInfo = [[NSMutableDictionary alloc] init];
     [updatedUserInfo addEntriesFromDictionary:error.userInfo];
     [updatedUserInfo setObject:blockedNSURL.absoluteString
@@ -2165,8 +2154,7 @@ void LogPresentingErrorPageFailedWithError(NSError* error) {
       ssl_info = info;
     }
   }
-  NSString* failingURLString =
-      error.userInfo[NSURLErrorFailingURLStringErrorKey];
+  NSString* failingURLString = net::GetFailingURLStringFromError(error);
   GURL failingURL(base::SysNSStringToUTF8(failingURLString));
   GURL itemURL = item->GetURL();
   if (itemURL != failingURL) {

@@ -15,6 +15,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_forward.h"
 #include "base/logging.h"
+#include "base/time/time.h"
 #include "chrome/browser/glic/fre/fre_util.h"
 #include "chrome/browser/glic/host/auth_controller.h"
 #include "chrome/common/chrome_features.h"
@@ -33,6 +34,13 @@
 #include "url/gurl.h"
 
 namespace glic {
+
+BASE_FEATURE(kGlicCookieSyncTimeout, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kGlicCookieSyncTimeoutDuration,
+                   &kGlicCookieSyncTimeout,
+                   "glic_cookie_sync_timeout_duration",
+                   GlicCookieSynchronizer::kCookieSyncDefaultTimeout);
 
 namespace {
 
@@ -202,6 +210,12 @@ void GlicCookieSynchronizer::CopyCookiesToWebviewStoragePartition(
     return;
   }
 
+  if (base::FeatureList::IsEnabled(kGlicCookieSyncTimeout)) {
+    timeout_.Start(FROM_HERE, kGlicCookieSyncTimeoutDuration.Get(),
+                   base::BindOnce(&GlicCookieSynchronizer::OnTimeout,
+                                  base::Unretained(this)));
+  }
+
   if (!GetStoragePartition()) {
     DLOG(ERROR) << "glic webview storage partition does not exist";
     CompleteAuth(false);
@@ -246,13 +260,16 @@ void GlicCookieSynchronizer::BeginCookieSync() {
     CompleteAuth(false);
     return;
   }
+  signin::MultiloginParameters parameters = {
+      gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER,
+      {primary_account_id}};
+  if (base::FeatureList::IsEnabled(features::kGlicIgnoreOfflineState)) {
+    parameters.wait_on_connectivity = false;
+  }
   cookie_loader_ =
       identity_manager_->GetAccountsCookieMutator()
           ->SetAccountsInCookieForPartition(
-              this,
-              {gaia::MultiloginMode::MULTILOGIN_UPDATE_COOKIE_ACCOUNTS_ORDER,
-               {primary_account_id}},
-              gaia::GaiaSource::kChromeGlic,
+              this, parameters, gaia::GaiaSource::kChromeGlic,
               base::BindOnce(&GlicCookieSynchronizer::OnAuthFinished,
                              GetWeakPtr()));
 }
@@ -272,7 +289,12 @@ void GlicCookieSynchronizer::OnAuthFinished(
   }
 }
 
+void GlicCookieSynchronizer::OnTimeout() {
+  CompleteAuth(/*is_success=*/false);
+}
+
 void GlicCookieSynchronizer::CompleteAuth(bool is_success) {
+  timeout_.Stop();
   cookie_loader_.reset();
 
   std::vector<base::OnceCallback<void(bool)>> callbacks;

@@ -21,6 +21,8 @@
 #import "components/image_fetcher/core/image_fetcher.h"
 #import "components/image_fetcher/core/image_fetcher_service.h"
 #import "components/image_fetcher/core/request_metadata.h"
+#import "components/ntp_tiles/pref_names.h"
+#import "components/omnibox/browser/aim_eligibility_service.h"
 #import "components/omnibox/browser/omnibox_prefs.h"
 #import "components/omnibox/common/omnibox_features.h"
 #import "components/prefs/ios/pref_observer_bridge.h"
@@ -46,7 +48,6 @@
 #import "ios/chrome/browser/home_customization/ui/home_customization_framing_coordinates.h"
 #import "ios/chrome/browser/home_customization/utils/home_customization_constants.h"
 #import "ios/chrome/browser/metrics/model/new_tab_page_uma.h"
-#import "ios/chrome/browser/ntp/model/new_tab_page_state.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/ntp/search_engine_logo/ui/search_engine_logo_state.h"
 #import "ios/chrome/browser/ntp/shared/metrics/feed_metrics_constants.h"
@@ -89,6 +90,7 @@
 #import "ios/web/public/navigation/referrer.h"
 #import "ios/web/public/web_state.h"
 #import "skia/ext/skia_utils_ios.h"
+#import "ui/base/device_form_factor.h"
 #import "ui/base/l10n/l10n_util.h"
 #import "url/gurl.h"
 
@@ -178,8 +180,12 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 @end
 
 @implementation NewTabPageMediator {
-  // The profile.
-  raw_ptr<ProfileIOS> _profile;
+  // AIM eligibility service.
+  raw_ptr<AimEligibilityService> _aimEligibilityService;
+  // AIM eligibility subscription.
+  base::CallbackListSubscription _aimEligibilitySubscription;
+  // Whether AIM is currently allowed.
+  BOOL _isAIMAllowed;
   // Listen for default search engine changes.
   std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
   // Observes changes in identity and updates the Identity Disc.
@@ -225,6 +231,8 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
   raw_ptr<feature_engagement::Tracker, DanglingUntriaged> _tracker;
   // Tracks whether the NTP was ever in landscape.
   BOOL _wasNTPInLandscape;
+  // Whether the mediator has been set up.
+  BOOL _mediatorSetUp;
 }
 
 // Synthesized from NewTabPageMutator.
@@ -257,7 +265,8 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
     discoverFeedVisibilityBrowserAgent:
         (DiscoverFeedVisibilityBrowserAgent*)discoverFeedVisibilityBrowserAgent
               featureEngagementTracker:(feature_engagement::Tracker*)tracker
-                               profile:(ProfileIOS*)profile {
+                 aimEligibilityService:
+                     (AimEligibilityService*)aimEligibilityService {
   self = [super init];
   if (self) {
     CHECK(identityManager);
@@ -292,7 +301,15 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
     _signedInIdentity =
         _authService->GetPrimaryIdentity(signin::ConsentLevel::kSignin);
     _tracker = tracker;
-    _profile = profile;
+    _aimEligibilityService = aimEligibilityService;
+    if (_aimEligibilityService) {
+      __weak __typeof(self) weakSelf = self;
+      _aimEligibilitySubscription =
+          _aimEligibilityService->RegisterEligibilityChangedCallback(
+              base::BindRepeating(^(void) {
+                [weakSelf updateAIMAvailability];
+              }));
+    }
   }
   return self;
 }
@@ -375,9 +392,11 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
             _backgroundCustomizationService, self);
   }
   [self updateAIMAvailability];
+  _mediatorSetUp = YES;
 }
 
 - (void)shutdown {
+  _mediatorSetUp = NO;
   _browserViewVisibilityNotifierBrowserAgent->RemoveObserver(
       _browserViewVisibilityObserverBridge.get());
   _discoverFeedVisibilityBrowserAgent->RemoveObserver(
@@ -394,7 +413,9 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
   _syncService = nullptr;
   _regionalCapabilitiesService = nullptr;
   _identityManager = nullptr;
-  _profile = nullptr;
+  _aimEligibilitySubscription = {};
+  _aimEligibilityService = nullptr;
+  _isAIMAllowed = NO;
   self.feedControlDelegate = nil;
   _backgroundCustomizationServiceObserverBridge = nullptr;
   _backgroundCustomizationService = nullptr;
@@ -406,31 +427,15 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
   base::UmaHistogramBoolean("IOS.NTP.LandscapeMode", _wasNTPInLandscape);
 }
 
-- (void)saveNTPStateForWebState:(web::WebState*)webState {
-  NewTabPageState* NTPState = [[NewTabPageState alloc]
-      initWithScrollPosition:self.scrollPositionToSave
-                selectedFeed:[self.feedControlDelegate selectedFeed]
-       followingFeedSortType:[self.feedControlDelegate followingFeedSortType]];
-  self.feedMetricsRecorder.NTPState = NTPState;
-  NewTabPageTabHelper::FromWebState(webState)->SetNTPState(NTPState);
+- (void)saveNTPScrollPositionForWebState:(web::WebState*)webState {
+  NewTabPageTabHelper::FromWebState(webState)->SetNTPScrollPosition(
+      self.scrollPositionToSave);
 }
 
-- (void)restoreNTPStateForWebState:(web::WebState*)webState {
-  NewTabPageState* NTPState =
-      NewTabPageTabHelper::FromWebState(webState)->GetNTPState();
-  self.feedMetricsRecorder.NTPState = NTPState;
-  if ([self.feedControlDelegate isFollowingFeedAvailable]) {
-    [self.NTPContentDelegate updateForSelectedFeed:NTPState.selectedFeed];
-  }
-
-  if (NTPState.shouldScrollToTopOfFeed) {
-    [self.consumer restoreScrollPositionToTopOfFeed];
-    // Prevent next NTP from being scrolled to the top of feed.
-    NTPState.shouldScrollToTopOfFeed = NO;
-    NewTabPageTabHelper::FromWebState(webState)->SetNTPState(NTPState);
-  } else {
-    [self.consumer restoreScrollPosition:NTPState.scrollPosition];
-  }
+- (void)restoreNTPScrollPositionForWebState:(web::WebState*)webState {
+  [self.consumer
+      restoreScrollPosition:NewTabPageTabHelper::FromWebState(webState)
+                                ->GetNTPScrollPosition()];
 }
 
 - (void)setPlaceholderService:(PlaceholderService*)placeholderService {
@@ -503,7 +508,7 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 }
 
 - (void)onExtendedAccountInfoUpdated:(const AccountInfo&)info {
-  if (info.gaia != GaiaId(_signedInIdentity.gaiaID)) {
+  if (info.gaia != _signedInIdentity.gaiaId) {
     return;
   }
   [self updateAccountImage];
@@ -538,9 +543,9 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 #pragma mark - PrefObserverDelegate
 
 - (void)onPreferenceChanged:(const std::string&)preferenceName {
-  // Handle customization prefs
-  if (preferenceName == prefs::kHomeCustomizationMostVisitedEnabled ||
-      preferenceName == prefs::kHomeCustomizationMagicStackEnabled) {
+  // Handle customization prefs.
+  if (preferenceName == ntp_tiles::prefs::kMostVisitedHomeModuleEnabled ||
+      preferenceName == ntp_tiles::prefs::kMagicStackHomeModuleEnabled) {
     [self updateModuleVisibilityForConsumer];
     [self.NTPContentDelegate updateModuleVisibility];
   }
@@ -561,9 +566,25 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 #pragma mark - Private
 
 - (void)updateAIMAvailability {
-  BOOL aimAllowed = IsAIMAvailable(_profile);
+  BOOL aimAllowed = NO;
+  if (_aimEligibilityService) {
+    aimAllowed = _aimEligibilityService->IsAimEligible();
+  }
+  if (ui::GetDeviceFormFactor() != ui::DEVICE_FORM_FACTOR_PHONE) {
+    aimAllowed = aimAllowed && IsAIMNTPEntrypointTabletEnabled();
+  }
+
   [self.consumer setAIMAllowed:aimAllowed];
   [self.headerConsumer setAIMAllowed:aimAllowed];
+
+  if (aimAllowed == _isAIMAllowed) {
+    return;
+  }
+  _isAIMAllowed = aimAllowed;
+  // Only update the modules if the mediator has already been set up.
+  if (IsAIMEligibilityRefreshNTPModulesEnabled() && _mediatorSetUp) {
+    [self.NTPContentDelegate updateModuleVisibility];
+  }
 }
 
 // Fetches and update user's avatar on NTP, or use default avatar if user is
@@ -594,9 +615,9 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 // Updates the consumer with the current visibility of the NTP modules.
 - (void)updateModuleVisibilityForConsumer {
   self.consumer.mostVisitedVisible =
-      _prefService->GetBoolean(prefs::kHomeCustomizationMostVisitedEnabled);
+      _prefService->GetBoolean(ntp_tiles::prefs::kMostVisitedHomeModuleEnabled);
   self.consumer.magicStackVisible =
-      _prefService->GetBoolean(prefs::kHomeCustomizationMagicStackEnabled);
+      _prefService->GetBoolean(ntp_tiles::prefs::kMagicStackHomeModuleEnabled);
 }
 
 // Starts observing some prefs.
@@ -607,9 +628,11 @@ const net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 
   // Observe customization prefs.
   _prefObserverBridge->ObserveChangesForPreference(
-      prefs::kHomeCustomizationMostVisitedEnabled, _prefChangeRegistrar.get());
+      ntp_tiles::prefs::kMostVisitedHomeModuleEnabled,
+      _prefChangeRegistrar.get());
   _prefObserverBridge->ObserveChangesForPreference(
-      prefs::kHomeCustomizationMagicStackEnabled, _prefChangeRegistrar.get());
+      ntp_tiles::prefs::kMagicStackHomeModuleEnabled,
+      _prefChangeRegistrar.get());
 }
 
 - (void)updateAccountErrorBadge {

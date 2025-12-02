@@ -48,8 +48,8 @@ omnibox::NTPComposeboxConfig GetNTPComposeboxConfig() {
   default_config.mutable_entry_point()->set_num_page_load_animations(3);
 
   auto* composebox = default_config.mutable_composebox();
-  composebox->set_close_by_escape(true);
-  composebox->set_close_by_click_outside(true);
+  composebox->set_close_by_escape(kCloseComposeboxByEscape.Get());
+  composebox->set_close_by_click_outside(kCloseComposeboxByClickOutside.Get());
 
   auto* image_upload = composebox->mutable_image_upload();
   image_upload->set_enable_webp_encoding(false);
@@ -69,7 +69,7 @@ omnibox::NTPComposeboxConfig GetNTPComposeboxConfig() {
   composebox->set_is_pdf_upload_enabled(true);
 
   auto* placeholder_config = composebox->mutable_placeholder_config();
-  placeholder_config->set_change_text_animation_interval_ms(4000);
+  placeholder_config->set_change_text_animation_interval_ms(2000);
   placeholder_config->set_fade_text_animation_duration_ms(250);
 
   placeholder_config->add_placeholders(
@@ -77,11 +77,7 @@ omnibox::NTPComposeboxConfig GetNTPComposeboxConfig() {
   placeholder_config->add_placeholders(
       omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_PLAN);
   placeholder_config->add_placeholders(
-      omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_COMPARE);
-  placeholder_config->add_placeholders(
       omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_RESEARCH);
-  placeholder_config->add_placeholders(
-      omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_TEACH);
   placeholder_config->add_placeholders(
       omnibox::NTPComposeboxConfig_PlaceholderConfig_Placeholder_WRITE);
 
@@ -134,10 +130,14 @@ bool IsNtpComposeboxEnabled(Profile* profile) {
     return false;
   }
 
+  AimEligibilityService* aim_eligibility_service =
+      AimEligibilityServiceFactory::GetForProfile(profile);
+  if (!aim_eligibility_service) {
+    return false;
+  }
+
   return base::FeatureList::IsEnabled(kNtpComposebox) &&
-         AimEligibilityService::GenericKillSwitchFeatureCheck(
-             AimEligibilityServiceFactory::GetForProfile(profile),
-             kNtpComposebox);
+         aim_eligibility_service->IsAimEligible();
 }
 
 bool IsDeepSearchEnabled(Profile* profile) {
@@ -180,10 +180,11 @@ bool IsCreateImagesEnabled(Profile* profile) {
          aim_eligibility_service->IsCreateImagesEligible();
 }
 
-std::unique_ptr<ComposeboxQueryController::QueryControllerConfigParams>
+std::unique_ptr<
+    contextual_search::ContextualSearchContextController::ConfigParams>
 CreateQueryControllerConfigParams() {
   auto config_params = std::make_unique<
-      ComposeboxQueryController::QueryControllerConfigParams>();
+      contextual_search::ContextualSearchContextController::ConfigParams>();
   config_params->send_lns_surface = kSendLnsSurfaceParam.Get();
   config_params->suppress_lns_surface_param_if_no_image =
       kSuppressLnsSurfaceParamIfNoImage.Get();
@@ -191,7 +192,6 @@ CreateQueryControllerConfigParams() {
   config_params->enable_viewport_images = kEnableViewportImages.Get();
   config_params->use_separate_request_ids_for_multi_context_viewport_images =
       kUseSeparateRequestIdsForMultiContextViewportImages.Get();
-  config_params->clear_previous_state_on_session_start = true;
   return config_params;
 }
 
@@ -214,7 +214,7 @@ const base::FeatureParam<bool>
     kUseSeparateRequestIdsForMultiContextViewportImages(
         &kNtpComposebox,
         "UseSeparateRequestIdsForMultiContextViewportImages",
-        true);
+        false);
 
 const base::FeatureParam<bool> kShowComposeboxZps(&kNtpComposebox,
                                                   "ShowComposeboxZps",
@@ -259,6 +259,15 @@ const base::FeatureParam<bool> kShowCreateImageTool(&kNtpComposebox,
 
 const base::FeatureParam<bool> kShowSubmit(&kNtpComposebox, "ShowSubmit", true);
 
+const base::FeatureParam<bool> kShowVoiceSearchInSteadyComposebox(&kNtpComposebox,
+                                                "ShowVoiceSearchInSteadyComposebox",
+                                                true);
+
+const base::FeatureParam<bool> kShowVoiceSearchInExpandedComposebox(
+                                                &kNtpComposebox,
+                                                "ShowVoiceSearchInExpandedComposebox",
+                                                true);
+
 const base::FeatureParam<bool> kShowSmartCompose(&kNtpComposebox,
                                                  "ShowSmartCompose",
                                                  true);
@@ -272,7 +281,29 @@ const base::FeatureParam<int> kContextMenuMaxTabSuggestions(
     "ContextMenuMaxTabSuggestions",
     5);
 
+const base::FeatureParam<bool> kContextMenuEnableMultiTabSelection(
+    &kNtpComposebox,
+    "ContextMenuEnableMultiTabSelection",
+    false);
+
 const base::FeatureParam<int> kMaxNumFiles(&kNtpComposebox, "MaxNumFiles", 1);
+
+const base::FeatureParam<bool> kEnableContextDragAndDrop(&kNtpComposebox,
+                                                  "EnableContextDragAndDrop",
+                                                  true);
+
+const base::FeatureParam<bool> kCloseComposeboxByEscape(&kNtpComposebox,
+                                                    "CloseComposeboxByEscape",
+                                                    true);
+
+const base::FeatureParam<bool> kCloseComposeboxByClickOutside(
+                                                    &kNtpComposebox,
+                                                    "CloseComposeboxByClickOutside",
+                                                    true);
+const base::FeatureParam<bool> kAddTabUploadDelayOnRecentTabChipClick(
+    &kNtpComposebox,
+    "AddTabUploadDelayOnRecentTabChipClick",
+    true);
 
 FeatureConfig::FeatureConfig() : config(GetNTPComposeboxConfig()) {}
 
@@ -302,17 +333,38 @@ bool IsNtpRealboxNextEnabled(Profile* profile) {
     return false;
   }
 
+  AimEligibilityService* aim_eligibility_service =
+      AimEligibilityServiceFactory::GetForProfile(profile);
+  if (!aim_eligibility_service) {
+    return false;
+  }
+
   return base::FeatureList::IsEnabled(kNtpRealboxNext) &&
-         AimEligibilityService::GenericKillSwitchFeatureCheck(
-             AimEligibilityServiceFactory::GetForProfile(profile),
-             kNtpRealboxNext);
+         aim_eligibility_service->IsAimEligible();
 }
 
 BASE_FEATURE(kNtpRealboxNext, base::FEATURE_DISABLED_BY_DEFAULT);
 
+const base::FeatureParam<PlaceholderText>::Option kSteadyPlaceholderOptions[] =
+    {
+        {PlaceholderText::ASK_OR_TYPE, "AskOrType"},
+        {PlaceholderText::ASK, "Ask"},
+};
+
+const base::FeatureParam<PlaceholderText> kSteadyPlaceholder(
+    &kNtpRealboxNext,
+    "SteadyPlaceholder",
+    PlaceholderText::ASK_OR_TYPE,
+    &kSteadyPlaceholderOptions);
+
 const base::FeatureParam<bool> kCyclingPlaceholders(&kNtpRealboxNext,
                                                     "CyclingPlaceholders",
                                                     false);
+
+const base::FeatureParam<bool> kShowVoiceSearchInExpandedRealbox(
+    &kNtpRealboxNext,
+    "ShowVoiceSearchInExpandedRealbox",
+    false);
 
 const base::FeatureParam<RealboxLayoutMode>::Option
     kRealboxLayoutModeOptions[] = {

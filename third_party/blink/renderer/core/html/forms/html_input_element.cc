@@ -2492,10 +2492,8 @@ void HTMLInputElement::SetFocused(bool is_focused,
     SetUserHasEditedTheFieldAndBlurred();
   }
 
-  if (RuntimeEnabledFeatures::RadioKeyboardFocusableOptimizeEnabled()) {
-    if (RadioButtonGroupScope* scope = GetRadioButtonGroupScope()) {
-      scope->UpdateLastFocusedState(this);
-    }
+  if (RadioButtonGroupScope* scope = GetRadioButtonGroupScope()) {
+    scope->UpdateLastFocusedState(this);
   }
 }
 
