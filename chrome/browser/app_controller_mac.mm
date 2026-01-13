@@ -14,6 +14,7 @@
 #include "base/apple/bridging.h"
 #include "base/apple/foundation_util.h"
 #include "base/auto_reset.h"
+#include "base/check_is_test.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/containers/flat_map.h"
@@ -109,6 +110,7 @@
 #include "components/enterprise/browser/controller/chrome_browser_cloud_management_controller.h"
 #include "components/handoff/handoff_manager.h"
 #include "components/handoff/handoff_utility.h"
+#include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/policy/core/common/policy_pref_names.h"
@@ -774,6 +776,14 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
       // NSMenuItems.
       [AppController.sharedController updateMenuItemKeyEquivalents];
     }];
+
+    // Notify BrowserList to keep the application running so it doesn't go away
+    // when all the browser windows get closed. This is done as early as
+    // possible to make sure we even keep the application alive if some other
+    // subsystem creates and destroys a ScopedKeepAlive before the application
+    // finishes launching.
+    _keepAlive = std::make_unique<ScopedKeepAlive>(
+        KeepAliveOrigin::APP_CONTROLLER, KeepAliveRestartOption::DISABLED);
   }
   return self;
 }
@@ -929,7 +939,9 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
     return NO;
   }
 
-  size_t num_browsers = chrome::GetTotalBrowserCount();
+  const BOOL should_terminate =
+      !KeepAliveRegistry::GetInstance()->IsOriginRegistered(
+          KeepAliveOrigin::BROWSER);
 
   // Initiate a shutdown (via chrome::CloseAllBrowsersAndQuit()) if we aren't
   // already shutting down.
@@ -938,7 +950,7 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
     chrome::CloseAllBrowsersAndQuit();
   }
 
-  return num_browsers == 0 ? YES : NO;
+  return should_terminate;
 }
 
 - (void)stopTryingToTerminateApplication:(NSApplication*)app {
@@ -982,7 +994,8 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 // Called when the app is shutting down. Clean-up as appropriate.
 - (void)applicationWillTerminate:(NSNotification*)aNotification {
   // There better be no browser windows left at this point.
-  CHECK_EQ(0u, chrome::GetTotalBrowserCount());
+  CHECK(!KeepAliveRegistry::GetInstance()->IsOriginRegistered(
+      KeepAliveOrigin::BROWSER));
 
   // Tell BrowserList not to keep the browser process alive. Once all the
   // browsers get dealloc'd, it will stop the RunLoop and fall back into main().
@@ -1068,10 +1081,6 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
 
   [self setLastProfile:profile];
   _lastActiveColorProvider = browser->window()->GetColorProvider();
-
-  if (_tabGroupMenuBridge) {
-    _tabGroupMenuBridge->SetActiveBrowser(browser);
-  }
 }
 
 // Called when shutting down or logging out.
@@ -1163,11 +1172,6 @@ class AppControllerNativeThemeObserver : public ui::NativeThemeObserver {
     // Store the notification as it will be reposted when the dialog is closed.
     return;
   }
-
-  // Notify BrowserList to keep the application running so it doesn't go away
-  // when all the browser windows get closed.
-  _keepAlive = std::make_unique<ScopedKeepAlive>(
-      KeepAliveOrigin::APP_CONTROLLER, KeepAliveRestartOption::DISABLED);
 
   [self setUpdateCheckInterval];
 
@@ -2498,7 +2502,13 @@ void RunInProfileSafely(const base::FilePath& profile_dir,
 }
 
 void AllowApplicationToTerminate() {
-  [AppController.sharedController allowApplicationToTerminate];
+  if (NSApp) {
+    [AppController.sharedController allowApplicationToTerminate];
+  } else {
+    // Some test processes don't initialize NSApp, in which case accessing
+    // sharedController would crash.
+    CHECK_IS_TEST();
+  }
 }
 
 // static

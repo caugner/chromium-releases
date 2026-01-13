@@ -47,6 +47,12 @@
 #error "This file must not be included on macOS; Chromium Mac doesn't use Aura."
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS)
+// TODO(crbug.com/376575664): Remove this include directive when the
+// ADVANCED_MEMORY_SAFETY_CHECKS macro is removed.
+#include "base/memory/safety_checks.h"
+#endif
+
 namespace cc {
 class LayerTreeFrameSink;
 }
@@ -110,6 +116,11 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
                            public ui::PropertyHandler,
                            public ui::metadata::MetaDataProvider,
                            public viz::HostFrameSinkClient {
+#if BUILDFLAG(IS_CHROMEOS)
+  // TODO(crbug.com/376575664): Remove this macro once the bug gets fixed.
+  ADVANCED_MEMORY_SAFETY_CHECKS();
+#endif
+
  public:
   METADATA_HEADER_BASE(Window);
 
@@ -538,6 +549,11 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   // ui::GestureConsumer:
   bool RequiresDoubleTapGestureEvents() const override;
+  base::WeakPtr<ui::GestureConsumer> GetWeakPtr() override;
+
+  // This method is provided to return a WeakPtr of aura::Window instead of
+  // ui::GestureConsumer, as c++ do not support template covariant return type.
+  base::WeakPtr<aura::Window> GetWeakPtrAsWindow();
 
   // Returns |state| as a string. This is generally only useful for debugging.
   static const std::u16string OcclusionStateToString(OcclusionState state);
@@ -568,6 +584,15 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
   //       enable window shape based occlusion.
   void SetOpaqueRegionsForOcclusion(
       const std::vector<gfx::Rect>& opaque_regions_for_occlusion);
+
+#if BUILDFLAG(IS_CHROMEOS)
+  // Override the occlusion state on this window.
+  // TODO(crbug.com/476220853): Remove this once the better fix is landed.
+  void SetOcclusionStateOverride(std::optional<OcclusionState> occlusion_state);
+  bool has_occlusion_state_override() const {
+    return !!occlusion_state_override_;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   const std::vector<gfx::Rect>& opaque_regions_for_occlusion() const {
     return opaque_regions_for_occlusion_;
@@ -772,6 +797,9 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   // Occlusion state of the window.
   OcclusionState occlusion_state_ = OcclusionState::UNKNOWN;
+#if BUILDFLAG(IS_CHROMEOS)
+  std::optional<OcclusionState> occlusion_state_override_ = std::nullopt;
+#endif
 
   // Occluded region of the window in the root window coordinates.
   SkRegion occluded_region_in_root_;
@@ -850,6 +878,8 @@ class AURA_EXPORT Window : public ui::LayerDelegate,
 
   // Used when this is embedding external content.
   base::WeakPtr<cc::LayerTreeFrameSink> frame_sink_;
+
+  base::WeakPtrFactory<Window> weak_factory_{this};
 };
 
 }  // namespace aura

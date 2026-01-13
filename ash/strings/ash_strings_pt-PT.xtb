@@ -1542,7 +1542,7 @@ Nenhum dispositivo ligado.</translation>
 <translation id="6075098173600599596">Alterar utilização de letras maiúsculas</translation>
 <translation id="6091929401758362855">Playlist: <ph name="PLAYLIST_TITLE" /></translation>
 <translation id="6093867385179428431">Desativado pelo administrador</translation>
-<translation id="6095008505822982596">Taxa de voz</translation>
+<translation id="6095008505822982596">Velocidade de voz</translation>
 <translation id="6095425951508823973">Adicionar ligação a <ph name="PROVIDER" /></translation>
 <translation id="6099678161144790572">Editado no mês passado</translation>
 <translation id="6103838137565245112">sistema</translation>
@@ -2411,6 +2411,7 @@ Para encerrar o dispositivo, prima sem soltar o botão ligar/desligar novamente 
 <translation id="9050999376345823055">Premir "." para soltar</translation>
 <translation id="906458777597946297">Maximizar janela</translation>
 <translation id="9065203028668620118">Editar</translation>
+<translation id="9068849894565669697">Selecionar cor</translation>
 <translation id="9071966355747967534">A funcionalidade <ph name="FEATURE_NAME" /> não está disponível</translation>
 <translation id="9072519059834302790"><ph name="TIME_LEFT" /> até a bateria terminar.</translation>
 <translation id="9074432941673450836">Use apps para fazer tudo o que precisa no <ph name="PRODUCT_NAME" />. Pode encontrar as suas apps no Launcher. Também pode premir a tecla do Launcher (acima da tecla Shift esquerda) no teclado.</translation>

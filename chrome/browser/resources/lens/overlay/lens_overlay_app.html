@@ -145,7 +145,7 @@
     transition-delay: 80ms;
   }
 
-  .action-button {
+  .options-button {
     --cr-icon-button-icon-size: 24px;
     --cr-icon-button-size: 36px;
     --cr-icon-button-fill-color: var(--color-overlay-icon);
@@ -331,7 +331,7 @@
     padding: 16px 20px;
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
+    gap: 12px;
     border-radius: 24px;
     background: #FFF;
     /* Elevation Light/2 */
@@ -391,6 +391,18 @@
     font-size: 13px;
     font-weight: 400;
     line-height: 20px;
+    min-height: 72px;
+  }
+
+  #privacyNoticeButtons {
+    --color-button-background-tonal: #D3E3FD;
+    --color-button-foreground-tonal: #041E49;
+    --color-button-background-prominent: #0B57D0;
+    --color-button-foreground-prominent: #FFFFFF;
+    display: flex;
+    gap: 8px;
+    justify-content: end;
+    width: 100%;
   }
 
   #searchboxContainer {
@@ -457,6 +469,16 @@
     inset-inline-start: 0;
     inset-inline-end: 0;
     top: 0;
+  }
+
+  /* Used for text that should only be visible to screen readers. */
+  .sr-only {
+    height: 1px;
+    left: -10000px;
+    overflow: hidden;
+    position: absolute;
+    top: auto;
+    width: 1px;
   }
 
   /**
@@ -549,10 +571,20 @@
       on-pointerenter="handlePointerEnterBackgroundScrim"
       on-pointerleave="handlePointerLeaveBackgroundScrim"></div>
   <template is="dom-if" if="[[isPrivacyNoticeVisible]]">
-    <div id="privacyNotice">
+    <div id="privacyNotice" aria-live="polite" tabindex="-1">
       <div id="privacyNoticeHeader">$i18n{privacyNoticeHeader}
       </div>
       <div id="privacyNoticeBody">$i18nRaw{privacyNoticeBody}</div>
+      <div id="privacyNoticeButtons">
+        <cr-button id="privacyNoticeCancel" class="tonal-button"
+            on-click="onPrivacyNoticeCancel">
+          $i18n{privacyNoticeCancel}
+        </cr-button>
+        <cr-button id="privacyNoticeContinue" class="action-button"
+            on-click="onPrivacyNoticeContinue">
+          $i18n{privacyNoticeContinue}
+        </cr-button>
+      </div>
     </div>
   </template>
   <lens-selection-overlay id="selectionOverlay" theme="[[theme]]"
@@ -585,7 +617,7 @@
   <div id="optionsButtonContainer" class="button-container">
     <div id="moreOptions">
       <cr-icon-button iron-icon="cr:more-vert" id="moreOptionsButton"
-          class="action-button" on-click="onMoreOptionsButtonClick"
+          class="options-button" on-click="onMoreOptionsButtonClick"
           role="button" aria-label="$i18n{moreOptions}"
           aria-controls="moreOptionsMenu" aria-haspopup="menu"
           aria-expanded="[[moreOptionsMenuVisible]]" title="$i18n{moreOptions}">
@@ -614,7 +646,7 @@
         </div>
       </div>
     </div>
-    <cr-icon-button id="closeButton" class="action-button"
+    <cr-icon-button id="closeButton" class="options-button"
         on-click="onCloseButtonClick" aria-label="$i18n{close}"
         title="$i18n{close}"></cr-icon-button>
   </div>

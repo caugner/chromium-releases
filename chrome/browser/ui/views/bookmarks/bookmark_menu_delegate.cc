@@ -67,6 +67,7 @@
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_separator.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/view_class_properties.h"
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 
@@ -188,6 +189,31 @@ class BookmarkModelDropObserver : public BookmarkMergedSurfaceServiceObserver {
       bookmark_merged_service_observation_{this};
 };
 
+int IsInvalidDragOrDropCommand(int command_id) {
+  std::unordered_set<int> invalid_command_ids = {
+      IDC_SHOW_BOOKMARK_SIDE_PANEL, IDC_BOOKMARK_BAR_OPEN_ALL,
+      IDC_BOOKMARK_BAR_OPEN_ALL_NEW_TAB_GROUP};
+  return invalid_command_ids.contains(command_id);
+}
+
+DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kOpenAllCommandSeperator);
+
+int GetOpenAllCommandsOffset(MenuItemView* menu) {
+  if (!menu->HasSubmenu()) {
+    return 0;
+  }
+
+  views::View* child =
+      menu->GetSubmenu()->GetViewByElementId(kOpenAllCommandSeperator);
+  if (child) {
+    const std::optional<size_t> index = menu->GetSubmenu()->GetIndexOf(child);
+    if (index.has_value()) {
+      return index.value() + 1;
+    }
+  }
+
+  return 0;
+}
 }  // namespace
 
 BookmarkMenuDelegate::BookmarkFolderOrURL::BookmarkFolderOrURL(
@@ -414,14 +440,26 @@ void BookmarkMenuDelegate::ExecuteCommand(int id, int mouse_event_flags) {
 
   DCHECK(menu_id_to_node_map_.find(id) != menu_id_to_node_map_.end());
 
+  bookmarks::OpenAllBookmarksContext context =
+      bookmarks::OpenAllBookmarksContext::kNone;
+  WindowOpenDisposition initial_disposition =
+      ui::DispositionFromEventFlags(mouse_event_flags);
+
+  if (id == IDC_BOOKMARK_BAR_OPEN_ALL) {
+    initial_disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
+  } else if (id == IDC_BOOKMARK_BAR_OPEN_ALL_NEW_TAB_GROUP) {
+    context = bookmarks::OpenAllBookmarksContext::kInGroup;
+    initial_disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
+  }
+
   RecordBookmarkLaunch(location_,
                        profile_metrics::GetBrowserProfileType(profile_));
 
   std::vector<raw_ptr<const BookmarkNode, VectorExperimental>> selection =
       menu_id_to_node_map_.find(id)->second.GetUnderlyingNodes(
           GetBookmarkMergedSurfaceService());
-  bookmarks::OpenAllIfAllowed(browser_, selection,
-                              ui::DispositionFromEventFlags(mouse_event_flags));
+  bookmarks::OpenAllIfAllowed(browser_, selection, initial_disposition,
+                              context);
 }
 
 bool BookmarkMenuDelegate::ShouldExecuteCommandWithoutClosingMenu(
@@ -514,7 +552,7 @@ ui::mojom::DragOperation BookmarkMenuDelegate::GetDropOperation(
   // Should only get here if we have drop data.
   DCHECK(drop_data_.is_valid());
 
-  if (item->GetCommand() == IDC_SHOW_BOOKMARK_SIDE_PANEL) {
+  if (IsInvalidDragOrDropCommand(item->GetCommand())) {
     return ui::mojom::DragOperation::kNone;
   }
 
@@ -567,13 +605,13 @@ bool BookmarkMenuDelegate::ShowContextMenu(
   context_menu_ = std::make_unique<BookmarkContextMenu>(
       parent_, browser_, profile_, location_, nodes,
       ShouldCloseOnRemove(folder_or_url));
-  context_menu_->set_observer(this);
+  bookmark_context_menu_observation_.Observe(context_menu_.get());
   context_menu_->RunMenuAt(p, source_type);
   return true;
 }
 
 bool BookmarkMenuDelegate::CanDrag(MenuItemView* menu) {
-  if (menu->GetCommand() == IDC_SHOW_BOOKMARK_SIDE_PANEL) {
+  if (IsInvalidDragOrDropCommand(menu->GetCommand())) {
     return false;
   }
   // Don't let users drag permanent nodes (managed, other or mobile folder).
@@ -637,6 +675,9 @@ void BookmarkMenuDelegate::BookmarkNodeMoved(
     MenuItemView* moved_menu = node_to_menu->second;
     old_parent_menu = moved_menu->GetParentMenuItem();
     RemoveBookmarkNode(moved_node.GetIfNonPermanentNode(), moved_menu);
+    if (old_parent_menu) {
+      UpdateOpenAllCommands(old_parent_menu, old_parent);
+    }
   }
 
   GetAndUpdateStaleMenuArtifacts();
@@ -658,6 +699,8 @@ void BookmarkMenuDelegate::BookmarkNodeMoved(
       AddBookmarkNode(moved_node.GetIfNonPermanentNode(), new_parent_menu,
                       new_index);
     }
+
+    UpdateOpenAllCommands(new_parent_menu, new_parent);
   }
 
   if (old_parent_menu) {
@@ -809,6 +852,9 @@ void BookmarkMenuDelegate::AddBookmarkNode(const bookmarks::BookmarkNode* node,
         SubmenuIndexOf(new_parent_menu, other_node_menu_separator_) + 1;
   }
 
+  // The menu may start with 'open all' and 'open all as tab group' items
+  // and we insert the |node| relative to these.
+  insertion_idx += GetOpenAllCommandsOffset(new_parent_menu);
   BuildNodeMenuItemAt(node, new_parent_menu, insertion_idx);
 }
 
@@ -847,6 +893,7 @@ void BookmarkMenuDelegate::DidRemoveBookmarks() {
 }
 
 void BookmarkMenuDelegate::OnContextMenuClosed() {
+  bookmark_context_menu_observation_.Reset();
   context_menu_.reset();
 }
 
@@ -986,6 +1033,7 @@ MenuItemView* BookmarkMenuDelegate::CreateMenu(
   menu->SetCommand(GetAndIncrementNextMenuID());
   AddMenuToMaps(menu, BookmarkFolderOrURL(folder));
   node_start_child_idx_map_[folder] = start_child_index;
+
   BuildMenu(folder, start_child_index, menu);
   return menu;
 }
@@ -1092,6 +1140,15 @@ void BookmarkMenuDelegate::BuildMenu(const BookmarkParentFolder& folder,
   if (folder.as_permanent_folder() ==
       BookmarkParentFolder::PermanentFolderType::kOtherNode) {
     BuildOtherNodeMenuHeader(menu);
+  } else if (base::FeatureList::IsEnabled(
+                 features::kTabGroupMenuImprovements)) {
+    const BookmarkNode* node = folder.as_non_permanent_folder();
+    if (node && node->parent() &&
+        node->parent()->type() == BookmarkNode::Type::BOOKMARK_BAR) {
+      if (parent_menu_item_ == nullptr) {
+        MaybeAppendOpenAllCommandItems(menu, folder);
+      }
+    }
   }
   const ui::ImageModel folder_icon = chrome::GetBookmarkFolderIcon(
       chrome::BookmarkFolderIconType::kNormal, ui::kColorMenuIcon);
@@ -1248,5 +1305,58 @@ void BookmarkMenuDelegate::BuildOtherNodeMenuHeader(MenuItemView* menu) {
   if (other_folder_children_count) {
     menu->AppendSeparator();
     other_node_menu_separator_ = menu->GetSubmenu()->children().back().get();
+  }
+}
+
+void BookmarkMenuDelegate::MaybeAppendOpenAllCommandItems(
+    views::MenuItemView* menu,
+    const BookmarkParentFolder& folder) {
+  CHECK_EQ(GetSubmenuChildCount(menu), 0u);
+  const bookmarks::BookmarkNode* node =
+      GetBookmarkMergedSurfaceService()->GetUnderlyingNodes(folder)[0];
+  int count = bookmarks::OpenCount(node);
+
+  if (count > 0) {
+    menu->AppendMenuItem(IDC_BOOKMARK_BAR_OPEN_ALL,
+                         l10n_util::GetPluralStringFUTF16(
+                             IDS_BOOKMARK_BAR_OPEN_ALL_COUNT, count));
+
+    menu->AppendMenuItem(
+        IDC_BOOKMARK_BAR_OPEN_ALL_NEW_TAB_GROUP,
+        l10n_util::GetPluralStringFUTF16(
+            IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_NEW_TAB_GROUP, count));
+
+    menu_id_to_node_map_.insert_or_assign(IDC_BOOKMARK_BAR_OPEN_ALL,
+                                          BookmarkFolderOrURL(folder));
+    menu_id_to_node_map_.insert_or_assign(
+        IDC_BOOKMARK_BAR_OPEN_ALL_NEW_TAB_GROUP, BookmarkFolderOrURL(folder));
+
+    menu->AppendSeparator();
+
+    menu->GetSubmenu()->children().back()->SetProperty(
+        views::kElementIdentifierKey, kOpenAllCommandSeperator);
+  }
+}
+
+void BookmarkMenuDelegate::UpdateOpenAllCommands(
+    MenuItemView* menu,
+    const BookmarkParentFolder& folder) {
+  if (GetOpenAllCommandsOffset(menu) > 0) {
+    const bookmarks::BookmarkNode* node =
+        GetBookmarkMergedSurfaceService()->GetUnderlyingNodes(folder)[0];
+    int open_count = bookmarks::OpenCount(node);
+    std::vector<MenuItemView*> menu_items = menu->GetSubmenu()->GetMenuItems();
+    bool enable_items = open_count > 0;
+
+    // Update the first two items
+    if (enable_items) {
+      menu_items[0]->SetTitle(l10n_util::GetPluralStringFUTF16(
+          IDS_BOOKMARK_BAR_OPEN_ALL_COUNT, open_count));
+      menu_items[1]->SetTitle(l10n_util::GetPluralStringFUTF16(
+          IDS_BOOKMARK_BAR_OPEN_ALL_COUNT_NEW_TAB_GROUP, open_count));
+    }
+
+    menu_items[0]->SetEnabled(enable_items);
+    menu_items[1]->SetEnabled(enable_items);
   }
 }

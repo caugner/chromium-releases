@@ -289,8 +289,8 @@ TrustedTypePolicy* TrustedTypePolicyFactory::createPolicy(
             kDisallowedDuplicateName;
     const String message =
         disallowed_because_of_duplicate_name
-            ? "Policy with name \"" + policy_name + "\" already exists."
-            : "Policy \"" + policy_name + "\" disallowed.";
+            ? StrCat({"Policy with name \"", policy_name, "\" already exists."})
+            : StrCat({"Policy \"", policy_name, "\" disallowed."});
     v8::Isolate* isolate = GetExecutionContext()->GetIsolate();
     TryRethrowScope rethrow_scope(isolate, exception_state);
     auto exception = V8ThrowException::CreateTypeError(isolate, message);
@@ -484,6 +484,15 @@ void TrustedTypePolicyFactory::Trace(Visitor* visitor) const {
   visitor->Trace(empty_html_);
   visitor->Trace(empty_script_);
   visitor->Trace(policy_map_);
+}
+
+// Ensure that the qualified names are constructed on the main thread to avoid
+// race conditions in the QualifiedNameCache (crbug.com/503618702).
+// static
+void TrustedTypePolicyFactory::EagerlyInitializeOnMainThread() {
+  DCHECK(IsMainThread());
+  GetAttributeTypeVector();
+  GetPropertyTypeVector();
 }
 
 inline bool FindEventHandlerAttributeInTable(

@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -61,6 +62,7 @@
 #include "extensions/common/extension_features.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
+#include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/mojom/context_type.mojom.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/url_pattern.h"
@@ -71,6 +73,7 @@
 #include "net/http/http_util.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/web_transport.mojom.h"
+#include "third_party/blink/public/common/features_generated.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
@@ -299,11 +302,10 @@ void WebRequestAPI::ProxySet::OnDNRExtensionUnloaded(
 WebRequestAPI::RequestIDGenerator::RequestIDGenerator() = default;
 WebRequestAPI::RequestIDGenerator::~RequestIDGenerator() = default;
 
-int64_t WebRequestAPI::RequestIDGenerator::Generate(
-    int32_t routing_id,
-    int32_t network_service_request_id) {
+int64_t WebRequestAPI::RequestIDGenerator::Generate(int32_t routing_id,
+                                                    int32_t client_request_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  auto it = saved_id_map_.find({routing_id, network_service_request_id});
+  auto it = saved_id_map_.find({routing_id, client_request_id});
   if (it != saved_id_map_.end()) {
     int64_t id = it->second;
     saved_id_map_.erase(it);
@@ -312,16 +314,22 @@ int64_t WebRequestAPI::RequestIDGenerator::Generate(
   return ++id_;
 }
 
-void WebRequestAPI::RequestIDGenerator::SaveID(
-    int32_t routing_id,
-    int32_t network_service_request_id,
-    uint64_t request_id) {
-  // If |network_service_request_id| is 0, we cannot reliably match the
-  // generated ID to a future request, so ignore it.
-  if (network_service_request_id != 0) {
-    saved_id_map_.insert(
-        {{routing_id, network_service_request_id}, request_id});
+void WebRequestAPI::RequestIDGenerator::SaveID(int32_t routing_id,
+                                               int32_t client_request_id,
+                                               uint64_t request_id) {
+  // If `client_request_id` is 0, we cannot reliably match the generated ID to a
+  // restarted request, so ignore it.
+  if (client_request_id != 0) {
+    saved_id_map_.insert({{routing_id, client_request_id}, request_id});
   }
+}
+
+int32_t WebRequestAPI::RequestIDGenerator::GenerateNetworkRequestId() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (network_request_id_ == std::numeric_limits<int32_t>::max()) {
+    network_request_id_ = 0;
+  }
+  return ++network_request_id_;
 }
 
 WebRequestAPI::WebRequestAPI(content::BrowserContext* context)
@@ -737,6 +745,10 @@ void WebRequestAPI::OnExtensionLoaded(content::BrowserContext* browser_context,
   if (HasAnyWebRequestPermissions(*extension)) {
     ++web_request_extension_count_;
     update_may_have_proxies = true;
+    if (BackgroundInfo::IsServiceWorkerBased(extension)) {
+      WebRequestEventRouter::Get(browser_context)
+          ->LoadPersistedLazyListeners(browser_context, extension->id());
+    }
   }
   if (HasAnyDeclarativeWebRequestPermissions(*extension)) {
     ++declarative_request_extension_count_;
@@ -894,8 +906,8 @@ WebRequestInternalAddEventListenerFunction::Run() {
 
   int extra_info_spec = 0;
   if (HasOptionalArgument(2)) {
-    EXTENSION_FUNCTION_VALIDATE(ExtraInfoSpec::InitFromValue(
-        browser_context(), args()[2], &extra_info_spec));
+    EXTENSION_FUNCTION_VALIDATE(
+        ExtraInfoSpec::InitFromValue(args()[2], &extra_info_spec));
   }
 
   const auto& event_name_value = args()[3];
@@ -915,6 +927,31 @@ WebRequestInternalAddEventListenerFunction::Run() {
                                    .GetByID(extension_id_safe());
   std::string extension_name =
       extension ? extension->name() : extension_id_safe();
+
+  if (extra_info_spec & ExtraInfoSpec::SECURITY_INFO) {
+    if (extension && extension->is_platform_app()) {
+      // The security info should not be available in Chrome Apps.
+      return RespondNow(Error(keys::kSecurityInfoAPINotAvailable));
+    }
+
+    if (extension) {
+      if (!base::FeatureList::IsEnabled(
+              extensions_features::kWebRequestSecurityInfo)) {
+        return RespondNow(Error(keys::kSecurityInfoFlagAbsentInExtensions));
+      }
+    } else {
+      if (!GetContextData()->HasControlledFrameCapability()) {
+        // Available only in extensions and Controlled Frame.
+        return RespondNow(Error(keys::kSecurityInfoAPINotAvailable));
+      }
+
+      if (!base::FeatureList::IsEnabled(
+              blink::features::kControlledFrameWebRequestSecurityInfo)) {
+        return RespondNow(
+            Error(keys::kSecurityInfoFlagAbsentInControlledFrame));
+      }
+    }
+  }
 
   if (web_view_instance_id) {
     // If a web view ID has been supplied and the call is from an extension

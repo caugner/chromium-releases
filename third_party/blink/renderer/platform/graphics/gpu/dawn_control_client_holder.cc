@@ -13,6 +13,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/config/gpu_switches.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/webgpu_mailbox_texture.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_resource_provider_cache.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
@@ -53,9 +54,19 @@ DawnControlClientHolder::DawnControlClientHolder(
                        ->GetAPIChannel()),
       recyclable_resource_cache_(GetContextProviderWeakPtr(), task_runner) {}
 
-DawnControlClientHolder::~DawnControlClientHolder() = default;
+DawnControlClientHolder::~DawnControlClientHolder() {
+  DestroyMappableBuffers();
+}
 
 void DawnControlClientHolder::Destroy() {
+  // Dissociate all mailbox textures to ensure their scoped access objects are
+  // destroyed before the context is lost.
+  for (auto& mailbox_texture : mailbox_textures_) {
+    if (mailbox_texture) {
+      mailbox_texture->Dissociate();
+    }
+  }
+  DestroyMappableBuffers();
   MarkContextLost();
 
   // Destroy the WebGPU context.
@@ -136,6 +147,37 @@ void DawnControlClientHolder::EnsureFlush(scheduler::EventLoop& event_loop) {
         }
       },
       scoped_refptr<DawnControlClientHolder>(this)));
+}
+
+void DawnControlClientHolder::TrackMailboxTexture(
+    base::WeakPtr<WebGPUMailboxTexture> mailbox_texture) {
+  mailbox_textures_.push_back(std::move(mailbox_texture));
+}
+
+void DawnControlClientHolder::UntrackMailboxTexture(
+    base::WeakPtr<WebGPUMailboxTexture> mailbox_texture) {
+  for (wtf_size_t i = 0; i < mailbox_textures_.size(); ++i) {
+    if (mailbox_textures_[i].get() == mailbox_texture.get()) {
+      mailbox_textures_.EraseAt(i);
+      return;
+    }
+  }
+}
+
+void DawnControlClientHolder::TrackMappableBuffer(const wgpu::Buffer& buffer) {
+  mappable_buffers_.insert(buffer);
+}
+
+void DawnControlClientHolder::UntrackMappableBuffer(
+    const wgpu::Buffer& buffer) {
+  mappable_buffers_.erase(buffer);
+}
+
+void DawnControlClientHolder::DestroyMappableBuffers() {
+  for (const auto& buffer : mappable_buffers_) {
+    buffer.Destroy();
+  }
+  mappable_buffers_.clear();
 }
 
 std::vector<wgpu::WGSLLanguageFeatureName> GatherWGSLLanguageFeatures() {

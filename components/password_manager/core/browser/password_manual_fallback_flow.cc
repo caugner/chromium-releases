@@ -12,6 +12,7 @@
 #include "base/check_deref.h"
 #include "base/containers/contains.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
@@ -211,12 +212,13 @@ void PasswordManualFallbackFlow::DidSelectSuggestion(
       if (!form) {
         return;
       }
+      const auto payload =
+          suggestion.GetPayload<Suggestion::PasswordSuggestionDetails>();
       password_manager_driver_->PreviewSuggestionById(
           form->username_element_renderer_id,
           form->password_element_renderer_id,
           GetUsernameFromLabel(suggestion.labels[0][0].value),
-          suggestion.GetPayload<Suggestion::PasswordSuggestionDetails>()
-              .password);
+          std::u16string(payload.password.length(), '*'));
       break;
     }
     case autofill::SuggestionType::kPasswordFieldByFieldFilling:

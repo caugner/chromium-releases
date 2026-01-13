@@ -27,11 +27,21 @@ BASE_FEATURE(kSerialPortConnected,
 #endif  // !BUILDFLAG(IS_ANDROID)
 );
 
+// Restricts the sharing of C++ SerialPort and WritableStream instances across
+// different DOMWrapperWorld contexts to prevent cross-world leaks.
+BASE_FEATURE(kWebSerialWorldIsolatedCache, base::FEATURE_ENABLED_BY_DEFAULT);
+
 // This feature allows to dynamically introduce an additional list of devices
 // blocked by WebUSB via a Finch parameter. This parameter should be specified
 // in the Finch configuration to manage the list of blocked devices.
 BASE_FEATURE(kWebUsbBlocklist,
              "WebUSBBlocklist",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, WebUSB control transfers are blocked if they target a
+// protected interface class, even if the recipient is not set to interface
+// or endpoint. This protects devices which ignore this field.
+BASE_FEATURE(kWebUsbProtectedClassControlTransferBlock,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 // When enabled, accessing the navigator.hid attribute does not prevent the
@@ -41,7 +51,7 @@ BASE_FEATURE(kWebHidAttributeAllowsBackForwardCache,
 
 #if BUILDFLAG(IS_WIN)
 // Enable integration with the Windows system-level location permission.
-BASE_FEATURE(kWinSystemLocationPermission, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kWinSystemLocationPermission, base::FEATURE_ENABLED_BY_DEFAULT);
 // Enables a fix for a HID issue where feature reports read from devices that
 // do not use report IDs would incorrectly include an extra zero byte at the
 // start of the report and truncate the last byte of the report.
@@ -58,11 +68,11 @@ const base::FeatureParam<int> kWinSystemLocationPermissionPollingParam{
 // Enables usage of the location provider manager to select between
 // the operating system's location API or our network-based provider
 // as the source of location data for Geolocation API.
-#if BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 BASE_FEATURE(kLocationProviderManager, base::FEATURE_ENABLED_BY_DEFAULT);
 #else
 BASE_FEATURE(kLocationProviderManager, base::FEATURE_DISABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_MAC)
+#endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(IS_CHROMEOS)
 // Enables crash key logging for USB device open operations on ChromeOS. See
@@ -103,6 +113,12 @@ const base::FeatureParam<device::mojom::LocationProviderManagerMode>
         &kLocationProviderManager, "LocationProviderManagerMode",
         device::mojom::LocationProviderManagerMode::kHybridPlatform,
         &location_provider_manager_mode_options};
+#elif BUILDFLAG(IS_WIN)
+const base::FeatureParam<device::mojom::LocationProviderManagerMode>
+    kLocationProviderManagerParam{
+        &kLocationProviderManager, "LocationProviderManagerMode",
+        device::mojom::LocationProviderManagerMode::kPlatformOnly,
+        &location_provider_manager_mode_options};
 #else
 const base::FeatureParam<device::mojom::LocationProviderManagerMode>
     kLocationProviderManagerParam{
@@ -134,5 +150,9 @@ BASE_FEATURE(kAutomaticUsbDetach, base::FEATURE_DISABLED_BY_DEFAULT);
 // Can be disabled as a kill switch if needed.
 BASE_FEATURE(kSerialSplitDtrAndRts, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // !BUILDFLAG(IS_WIN)
+
+#if BUILDFLAG(IS_MAC)
+BASE_FEATURE(kHidReportRequestExactLength, base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_MAC)
 
 }  // namespace features

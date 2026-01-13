@@ -10,8 +10,10 @@
 #include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/metadata/metadata_header_macros.h"
+#include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/controls/webview/webview.h"
@@ -50,6 +52,10 @@ class GlicView : public views::WebView {
 
   // views::WebView:
   void SetWebContents(content::WebContents* web_contents) override;
+  void DraggableRegionsChanged(
+      const std::vector<blink::mojom::DraggableRegionPtr>& regions,
+      content::WebContents* contents) override;
+
   void SetDraggableAreas(const std::vector<gfx::Rect>& draggable_areas);
 
   bool IsPointWithinDraggableArea(const gfx::Point& point);
@@ -57,6 +63,11 @@ class GlicView : public views::WebView {
   // Try to get the background color from the web UI and use it as this view's
   // background color. Only call after the client is initialized.
   void UpdateBackgroundColor();
+
+  void SetBackgroundRoundedCorners(const gfx::RoundedCornersF& radii);
+  const gfx::RoundedCornersF& background_rounded_corners() const {
+    return background_radii_;
+  }
 
   void UpdatePrimaryDraggableAreaOnResize();
 
@@ -67,13 +78,21 @@ class GlicView : public views::WebView {
   }
 
  private:
+  void SetDraggableRegion(const SkRegion& region, bool for_webview);
+
   std::optional<SkColor> GetClientBackgroundColor();
 
   base::WeakPtr<ui::AcceleratorTarget> accelerator_delegate_;
   raw_ptr<views::WebView> web_view_;
+  gfx::RoundedCornersF background_radii_;
+
   // Defines the areas of the view from which it can be dragged. These areas can
   // be updated by the glic web client.
   std::vector<gfx::Rect> draggable_areas_;
+
+  SkRegion draggable_region_;
+  SkRegion webview_draggable_region_;
+
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
   base::WeakPtrFactory<GlicView> weak_ptr_factory_{this};
 };

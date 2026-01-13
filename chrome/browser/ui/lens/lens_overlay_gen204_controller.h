@@ -95,13 +95,14 @@ class LensOverlayGen204Controller {
   // event.
   // TODO(crbug.com/394645019): Remove the encoded analytics id parameter when
   // the analytics id param is no longer used on the server.
-  void SendTaskCompletionGen204IfEnabled(std::string encoded_analytics_id,
-                                         lens::mojom::UserAction user_action,
-                                         lens::LensOverlayRequestId request_id);
+  virtual void SendTaskCompletionGen204IfEnabled(
+      std::string encoded_analytics_id,
+      lens::mojom::UserAction user_action,
+      lens::LensOverlayRequestId request_id);
 
   // Sends a semantic event gen204 request. Some semantic events do not
   // have an associated request id (e.g. text gleam view end).
-  void SendSemanticEventGen204IfEnabled(
+  virtual void SendSemanticEventGen204IfEnabled(
       lens::mojom::SemanticEvent event,
       std::optional<lens::LensOverlayRequestId> request_id);
 
@@ -118,7 +119,7 @@ class LensOverlayGen204Controller {
   // Handles the gen204 network response and removes the source from
   // gen204_loaders_.
   void OnGen204NetworkResponse(const network::SimpleURLLoader* source,
-                               std::unique_ptr<std::string> response_body);
+                               std::optional<std::string> response_body);
 
   // The invocation source that triggered the query flow.
   lens::LensOverlayInvocationSource invocation_source_;

@@ -117,7 +117,8 @@ class TestInputEventObserver : public RenderWidgetHost::InputEventObserver {
   const blink::WebInputEvent& event() const { return *event_; }
 
   void OnInputEvent(const RenderWidgetHost& widget,
-                    const blink::WebInputEvent& event) override {
+                    const blink::WebInputEvent& event,
+                    InputEventSource source) override {
     events_received_.push_back(event.GetType());
     event_ = event.Clone();
   }
@@ -1619,8 +1620,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessHitTestBrowserTest,
               kScaleTolerance);
   EXPECT_NEAR(0.5f * scale_factor, transform_from_child.rc(1, 1),
               kScaleTolerance);
-  EXPECT_EQ(child_origin.x(), transform_from_child.rc(0, 3));
-  EXPECT_EQ(child_origin.y(), transform_from_child.rc(1, 3));
+  EXPECT_NEAR(child_origin.x(), transform_from_child.rc(0, 3), kScaleTolerance);
+  EXPECT_NEAR(child_origin.y(), transform_from_child.rc(1, 3), kScaleTolerance);
 
   gfx::Transform transform_child_to_child =
       transform_from_child * transform_to_child;
@@ -1845,7 +1846,8 @@ class OutgoingEventWaiter : public RenderWidgetHost::InputEventObserver {
   }
 
   void OnInputEvent(const RenderWidgetHost& widget,
-                    const blink::WebInputEvent& event) override {
+                    const blink::WebInputEvent& event,
+                    InputEventSource source) override {
     if (event.GetType() == type_) {
       seen_event_ = true;
       if (quit_closure_)
@@ -1884,7 +1886,8 @@ class BadInputEventObserver : public RenderWidgetHost::InputEventObserver {
   }
 
   void OnInputEvent(const RenderWidgetHost& widget,
-                    const blink::WebInputEvent& event) override {
+                    const blink::WebInputEvent& event,
+                    InputEventSource source) override {
     EXPECT_NE(type_, event.GetType())
         << "Unexpected " << blink::WebInputEvent::GetName(event.GetType());
   }

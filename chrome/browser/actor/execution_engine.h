@@ -11,6 +11,7 @@
 
 #include "base/callback_list.h"
 #include "base/functional/callback.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/safe_ref.h"
 #include "base/memory/weak_ptr.h"
@@ -30,6 +31,10 @@
 #include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 class Profile;
+
+namespace affiliations {
+struct Facet;
+}  // namespace affiliations
 
 namespace content {
 class NavigationHandle;
@@ -132,6 +137,9 @@ class ExecutionEngine : public ToolDelegate {
   Profile& GetProfile() override;
   AggregatedJournal& GetJournal() override;
   favicon::FaviconService* GetFaviconService() override;
+  void IsAcceptableNavigationDestination(
+      const GURL& url,
+      DecisionCallbackWithReason callback) override;
   actor_login::ActorLoginService& GetActorLoginService() override;
   autofill::ActorFormFillingService& GetActorFormFillingService() override;
   void PromptToSelectCredential(
@@ -139,7 +147,8 @@ class ExecutionEngine : public ToolDelegate {
       const base::flat_map<std::string, gfx::Image>& icons,
       ToolDelegate::CredentialSelectedCallback callback) override;
   void SetUserSelectedCredential(
-      const CredentialWithPermission& credential) override;
+      const CredentialWithPermission& credential,
+      base::OnceClosure affiliations_fetched) override;
   const std::optional<CredentialWithPermission> GetUserSelectedCredential(
       const url::Origin& request_origin) const override;
   void RequestToShowAutofillSuggestions(
@@ -183,9 +192,23 @@ class ExecutionEngine : public ToolDelegate {
     return user_takeover_result_;
   }
 
+  const base::flat_map<url::Origin, url::Origin>&
+  GetAffiliatedOriginMapForTesting() const {
+    return affiliated_origin_map_;
+  }
+
   void AddObserver(StateObserver* observer);
 
   void RemoveObserver(StateObserver* observer);
+
+  void DidUninterruptTask();
+
+  void set_tool_invoke_complete_callback_for_testing(
+      base::OnceClosure callback) {
+    tool_invoke_complete_callback_for_testing_ = std::move(callback);
+  }
+
+  State state() { return state_; }
 
  private:
   class NewTabWebContentsObserver;
@@ -197,7 +220,7 @@ class ExecutionEngine : public ToolDelegate {
 
   // Starts the next action by calling SafetyChecksForNextAction(). Must only be
   // called if there is a next action.
-  void KickOffNextAction(mojom::ActionResultPtr init_hooks_result);
+  void KickOffNextAction();
 
   // Performs safety checks for next action. This is asynchronous.
   void SafetyChecksForNextAction();
@@ -228,6 +251,13 @@ class ExecutionEngine : public ToolDelegate {
   // Returns the next action that will be started when ExecuteNextAction is
   // reached.
   const ToolRequest& GetNextAction() const;
+
+  // Processes the affiliation service results for the given `source_origin`.
+  // and saves it into `affiliated_origin_map_`.
+  void OnAffiliationsReceived(const url::Origin& source_origin,
+                              base::OnceClosure affiliations_fetched,
+                              const std::vector<affiliations::Facet>& results,
+                              bool success);
 
   // Returns the index / action that was last executed and is still in progress.
   // It is an error to call this when an action is not in progress.
@@ -305,6 +335,8 @@ class ExecutionEngine : public ToolDelegate {
       actor_form_filling_service_;
   std::unique_ptr<ui::UiEventDispatcher> ui_event_dispatcher_;
 
+  base::flat_map<url::Origin, url::Origin> affiliated_origin_map_;
+
   std::vector<std::unique_ptr<ToolRequest>> action_sequence_;
   ActorTask::ActCallback act_callback_;
 
@@ -341,6 +373,12 @@ class ExecutionEngine : public ToolDelegate {
   std::optional<mojom::ActionResultCode> user_takeover_result_;
 
   base::ObserverList<StateObserver> observers_;
+
+  // If a tool finishes while the task is in a waiting state, the finish
+  // callback and processing is deferred until the task is resumed.
+  base::OnceClosure deferred_finish_tool_invoke_;
+
+  base::OnceClosure tool_invoke_complete_callback_for_testing_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

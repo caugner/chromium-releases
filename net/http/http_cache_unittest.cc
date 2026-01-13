@@ -551,7 +551,9 @@ void RangeTransactionServer::RangeHandler(const HttpRequestInfo* request,
                                                  start, end, length_);
   response_headers->append(content_range);
 
-  if (!request->extra_headers.HasHeader("If-None-Match") || modified_) {
+  if ((!request->extra_headers.HasHeader("If-None-Match") &&
+       !request->extra_headers.HasHeader("If-Modified-Since")) ||
+      modified_) {
     std::string data;
     if (end == start) {
       EXPECT_EQ(0, end % 10);
@@ -570,8 +572,14 @@ void RangeTransactionServer::RangeHandler(const HttpRequestInfo* request,
       int64_t len = end - start + 1;
       std::string content_length =
           base::StringPrintf("Content-Length: %" PRId64 "\n", len);
-      response_headers->replace(response_headers->find("Content-Length:"),
-                                content_length.size(), content_length);
+      size_t length_start = response_headers->find("Content-Length:");
+      CHECK_NE(length_start, std::string::npos);
+      size_t length_end = response_headers->find('\n', length_start);
+      if (length_end == std::string::npos) {
+        length_end = response_headers->length();
+      }
+      response_headers->replace(length_start, length_end - length_start,
+                                content_length);
     }
   } else {
     response_status->assign("HTTP/1.1 304 Not Modified");
@@ -802,7 +810,10 @@ void ContinueAfterConnect(
 
 }  // namespace
 
-using HttpCacheTest = TestWithTaskEnvironment;
+class HttpCacheTest : public TestWithTaskEnvironment {
+ public:
+  void CacheControlNoCacheNormalLoad(bool skip_feature_enabled);
+};
 
 class HttpCacheIOCallbackTest : public HttpCacheTest {
  public:
@@ -1236,30 +1247,16 @@ TEST_F(HttpCacheSimpleGetTest, DelayedCacheLock) {
 enum class SplitCacheTestCase {
   kDisabled,
   kEnabledTripleKeyed,
-  kEnabledTriplePlusCrossSiteMainFrameNavBool,
 };
 
-const struct {
-  const SplitCacheTestCase test_case;
-  base::test::FeatureRef feature;
-} kTestCaseToFeatureMapping[] = {
-    {SplitCacheTestCase::kEnabledTriplePlusCrossSiteMainFrameNavBool,
-     net::features::kSplitCacheByCrossSiteMainFrameNavigationBoolean}};
 
 class HttpCacheTestSplitCacheFeature
     : public HttpCacheTest,
       public ::testing::WithParamInterface<SplitCacheTestCase> {
  public:
-  HttpCacheTestSplitCacheFeature()
-      : split_cache_experiment_feature_list_(GetParam(),
-                                             kTestCaseToFeatureMapping) {
-    if (IsSplitCacheEnabled()) {
-      split_cache_enabled_feature_list_.InitAndEnableFeature(
-          net::features::kSplitCacheByNetworkIsolationKey);
-    } else {
-      split_cache_enabled_feature_list_.InitAndDisableFeature(
-          net::features::kSplitCacheByNetworkIsolationKey);
-    }
+  HttpCacheTestSplitCacheFeature() {
+    split_cache_feature_list_.InitWithFeatureState(
+        features::kSplitCacheByNetworkIsolationKey, IsSplitCacheEnabled());
   }
 
   bool IsSplitCacheEnabled() const {
@@ -1267,9 +1264,7 @@ class HttpCacheTestSplitCacheFeature
   }
 
  private:
-  net::test::ScopedMutuallyExclusiveFeatureList
-      split_cache_experiment_feature_list_;
-  base::test::ScopedFeatureList split_cache_enabled_feature_list_;
+  base::test::ScopedFeatureList split_cache_feature_list_;
 };
 
 TEST_P(HttpCacheTestSplitCacheFeature, SimpleGetVerifyGoogleFontMetrics) {
@@ -1296,29 +1291,26 @@ TEST_P(HttpCacheTestSplitCacheFeature, SimpleGetVerifyGoogleFontMetrics) {
 INSTANTIATE_TEST_SUITE_P(
     All,
     HttpCacheTestSplitCacheFeature,
-    testing::ValuesIn(
-        {SplitCacheTestCase::kDisabled, SplitCacheTestCase::kEnabledTripleKeyed,
-         SplitCacheTestCase::kEnabledTriplePlusCrossSiteMainFrameNavBool}),
+    testing::ValuesIn({SplitCacheTestCase::kDisabled,
+                       SplitCacheTestCase::kEnabledTripleKeyed}),
     [](const testing::TestParamInfo<SplitCacheTestCase>& info) {
       switch (info.param) {
         case SplitCacheTestCase::kDisabled:
           return "SplitCacheDisabled";
         case SplitCacheTestCase::kEnabledTripleKeyed:
           return "SplitCacheNikFrameSiteEnabled";
-        case SplitCacheTestCase::kEnabledTriplePlusCrossSiteMainFrameNavBool:
-          return "SplitCacheEnabledTriplePlusCrossSiteMainFrameNavigationBool";
       }
     });
 
 class HttpCacheTestSplitCacheFeatureEnabled : public HttpCacheTest {
  public:
   HttpCacheTestSplitCacheFeatureEnabled() {
-    split_cache_always_enabled_feature_list_.InitAndEnableFeature(
+    split_cache_enabled_feature_list_.InitAndEnableFeature(
         features::kSplitCacheByNetworkIsolationKey);
   }
 
  private:
-  base::test::ScopedFeatureList split_cache_always_enabled_feature_list_;
+  base::test::ScopedFeatureList split_cache_enabled_feature_list_;
 };
 
 TEST_F(HttpCacheSimpleGetTest, NoDiskCache) {
@@ -3834,6 +3826,74 @@ TEST_F(HttpCacheRangeGetTest, ParallelValidationRestartDoneHeaders) {
   EXPECT_EQ(4, cache.network_layer()->transaction_count());
   EXPECT_EQ(1, cache.disk_cache()->open_count());
   EXPECT_EQ(1, cache.disk_cache()->create_count());
+}
+
+TEST_F(HttpCacheRangeGetTest, VaryRange) {
+  MockHttpCache cache;
+  cache.disk_cache()->set_double_create_check(false);
+
+  ScopedMockTransaction transaction(kRangeGET_TransactionOK);
+  transaction.response_headers =
+      "Last-Modified: Sat, 18 Apr 2007 01:10:43 GMT\n"
+      "Date: Sat, 18 Apr 2007 02:10:43 GMT\n"
+      "Accept-Ranges: bytes\n"
+      "Vary: range\n"
+      "Content-Length: 10\n";
+
+  RangeTransactionServer range_support;
+  range_support.set_length(60000);
+
+  // Request the transaction's 40-49 range, and get it cached.
+  {
+    std::string headers;
+    RunTransactionTestWithResponse(cache.http_cache(), transaction, &headers);
+    Verify206Response(headers, 40, 49);
+  }
+
+  // Now request an extension.
+  transaction.request_headers = "Range: bytes = 40-59009\r\n" EXTRA_HEADER;
+  MockHttpRequest request(transaction);
+  Context c;
+
+  c.trans = cache.CreateTransaction();
+  ASSERT_TRUE(c.trans);
+
+  int rv = c.callback.GetResult(
+      c.trans->Start(&request, c.callback.callback(), NetLogWithSource()));
+  ASSERT_THAT(rv, IsOk());
+
+  // First read the 40-49 portion.
+  scoped_refptr<IOBufferWithSize> buf =
+      base::MakeRefCounted<IOBufferWithSize>(10);
+  rv = c.callback.GetResult(
+      c.trans->Read(buf.get(), buf->size(), c.callback.callback()));
+  EXPECT_EQ(10, rv);
+  EXPECT_EQ(buf->first(10), base::byte_span_from_cstring("rg: 40-49 "));
+
+  // Replace with an in-progress different entry, with a different range, that's
+  // in-flight.
+  Context c2;
+  ScopedMockTransaction transaction2(transaction);
+  transaction2.request_headers = "Range: bytes = 30-39\r\n" EXTRA_HEADER;
+  transaction2.load_flags = LOAD_BYPASS_CACHE;
+  transaction2.data = "rg: 30-39 ";
+  MockHttpRequest request2(transaction2);
+
+  c2.trans = cache.CreateTransaction();
+  ASSERT_TRUE(c2.trans);
+
+  rv = c2.callback.GetResult(
+      c2.trans->Start(&request2, c2.callback.callback(), NetLogWithSource()));
+  ASSERT_THAT(rv, IsOk());
+
+  // Try to read the 50-5059 portion. The right bits should come in.
+  scoped_refptr<IOBufferWithSize> buf2 =
+      base::MakeRefCounted<IOBufferWithSize>(6000);
+  std::ranges::fill(buf2->span(), 'A');
+  rv = c.callback.GetResult(
+      c.trans->Read(buf2.get(), buf2->size(), c.callback.callback()));
+  EXPECT_LE(10, rv);
+  EXPECT_EQ(buf2->first(10), base::byte_span_from_cstring("rg: 50-59 "));
 }
 
 // A test of doing a range request to a cached 301 response
@@ -9607,7 +9667,6 @@ TEST_F(HttpCacheRangeGetTest, Previous200) {
   std::string headers;
   MockTransaction transaction2(kRangeGET_TransactionOK);
   RangeTransactionServer handler;
-  handler.set_not_modified(true);
   RunTransactionTestWithResponse(cache.http_cache(), transaction2, &headers);
 
   // We are expecting a 206.
@@ -9641,7 +9700,7 @@ TEST_F(HttpCacheRangeGetTest, Previous200) {
   base::RunLoop().RunUntilIdle();
 
   // Now we should receive a range from the server and drop the stored entry.
-  handler.set_not_modified(false);
+  handler.set_modified(true);
   transaction2.request_headers = kRangeGET_TransactionOK.request_headers;
   RunTransactionTestWithResponse(cache.http_cache(), transaction2, &headers);
   Verify206Response(headers, 40, 49);
@@ -11053,7 +11112,14 @@ TEST_F(HttpCacheTest, CachedRedirect) {
 
 // Verify that no-cache resources are stored in cache, but are not fetched from
 // cache during normal loads.
-TEST_F(HttpCacheTest, CacheControlNoCacheNormalLoad) {
+void HttpCacheTest::CacheControlNoCacheNormalLoad(bool skip_feature_enabled) {
+  base::test::ScopedFeatureList feature_list;
+  if (skip_feature_enabled) {
+    feature_list.InitAndEnableFeature(features::kHttpCacheSkipUnusableEntry);
+  } else {
+    feature_list.InitAndDisableFeature(features::kHttpCacheSkipUnusableEntry);
+  }
+
   for (bool use_memory_entry_data : {false, true}) {
     MockHttpCache cache;
     cache.disk_cache()->set_support_in_memory_entry_data(use_memory_entry_data);
@@ -11072,7 +11138,7 @@ TEST_F(HttpCacheTest, CacheControlNoCacheNormalLoad) {
     RunTransactionTest(cache.http_cache(), transaction);
 
     EXPECT_EQ(2, cache.network_layer()->transaction_count());
-    if (use_memory_entry_data) {
+    if (skip_feature_enabled && use_memory_entry_data) {
       EXPECT_EQ(0, cache.disk_cache()->open_count());
       EXPECT_EQ(2, cache.disk_cache()->create_count());
     } else {
@@ -11085,6 +11151,60 @@ TEST_F(HttpCacheTest, CacheControlNoCacheNormalLoad) {
     EXPECT_TRUE(cache.OpenBackendEntry(request.CacheKey(), &entry));
     entry->Close();
   }
+}
+
+TEST_F(HttpCacheTest, CacheControlNoCacheNormalLoadSkipUnusable) {
+  CacheControlNoCacheNormalLoad(true);
+}
+
+TEST_F(HttpCacheTest, CacheControlNoCacheNormalLoadDontSkipUnusable) {
+  CacheControlNoCacheNormalLoad(false);
+}
+
+TEST_F(HttpCacheTest, ConcurrentUnusable) {
+  MockHttpCache cache;
+  cache.disk_cache()->set_support_in_memory_entry_data(true);
+
+  ScopedMockTransaction transaction(kSimpleGET_Transaction);
+  transaction.response_headers = "cache-control: no-cache\n";
+
+  // Initial load.
+  RunTransactionTest(cache.http_cache(), transaction);
+
+  EXPECT_EQ(1, cache.network_layer()->transaction_count());
+  EXPECT_EQ(0, cache.disk_cache()->open_count());
+  EXPECT_EQ(1, cache.disk_cache()->create_count());
+
+  // Two concurrent requests, one read-only.
+  MockHttpRequest request1(transaction);
+  request1.load_flags = LOAD_SKIP_CACHE_VALIDATION | LOAD_ONLY_FROM_CACHE;
+  TestCompletionCallback callback1;
+
+  MockHttpRequest request2(transaction);
+  TestCompletionCallback callback2;
+
+  auto transact1 = cache.http_cache()->CreateTransaction(DEFAULT_PRIORITY);
+  ASSERT_TRUE(transact1);
+  int rv1 =
+      transact1->Start(&request1, callback1.callback(), NetLogWithSource());
+  ASSERT_EQ(rv1, ERR_IO_PENDING);
+
+  auto transact2 = cache.http_cache()->CreateTransaction(DEFAULT_PRIORITY);
+  ASSERT_TRUE(transact2);
+  int rv2 =
+      transact2->Start(&request2, callback2.callback(), NetLogWithSource());
+  ASSERT_EQ(rv2, ERR_IO_PENDING);
+
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  EXPECT_EQ(OK, callback2.WaitForResult());
+
+  ReadAndVerifyTransaction(transact1.get(), transaction);
+  ReadAndVerifyTransaction(transact2.get(), transaction);
+
+  // `transact1` reused, `transact2` didn't.
+  EXPECT_EQ(2, cache.network_layer()->transaction_count());
+  EXPECT_EQ(1, cache.disk_cache()->open_count());
+  EXPECT_EQ(2, cache.disk_cache()->create_count());
 }
 
 // Verify that no-cache resources are stored in cache and fetched from cache
@@ -11592,7 +11712,6 @@ TEST_P(HttpCacheTestSplitCacheFeature, SplitCache) {
     case SplitCacheTestCase::kDisabled:
       NOTREACHED();
     case SplitCacheTestCase::kEnabledTripleKeyed:
-    case SplitCacheTestCase::kEnabledTriplePlusCrossSiteMainFrameNavBool:
       // The `is_subframe_document_resource` being true is enough to cause a
       // different cache partition to be used.
       break;
@@ -11691,7 +11810,6 @@ TEST_P(HttpCacheTestSplitCacheFeature, GenerateCacheKeyForRequestFailures) {
       is_request_cacheable = true;
       break;
     case SplitCacheTestCase::kEnabledTripleKeyed:
-    case SplitCacheTestCase::kEnabledTriplePlusCrossSiteMainFrameNavBool:
       is_request_cacheable = false;
       break;
   }
@@ -14119,7 +14237,6 @@ TEST_F(HttpCacheTest, PrioritizeCachingFlagSetForMainFrameNavigationRequest) {
 
 enum class SplitCacheByCredentials { kDisabled, kEnabled };
 enum class SplitCacheByNIK { kDisabled, kEnabled };
-enum class SplitCacheByCrossSiteNav { kDisabled, kEnabled };
 enum class IsSubframeDocumentResource { kNo, kYes };  // Corresponds to bool.
 enum class IsMainFrameNavigation { kNo, kYes };       // Corresponds to bool.
 enum class IsSharedResource { kNo, kYes };            // Corresponds to bool.
@@ -14143,8 +14260,6 @@ struct GenerateCacheKeyTestParams {
   SplitCacheByCredentials split_cache_by_credentials =
       SplitCacheByCredentials::kDisabled;
   SplitCacheByNIK split_cache_by_nik = SplitCacheByNIK::kDisabled;
-  SplitCacheByCrossSiteNav split_cache_by_cross_site_nav =
-      SplitCacheByCrossSiteNav::kDisabled;
 
   // Expected cache key.
   std::optional<std::string> expected_key;
@@ -14173,10 +14288,6 @@ class HttpCacheGenerateCacheKeyTest
     enable_or_disable_feature(
         features::kSplitCacheByNetworkIsolationKey,
         param.split_cache_by_nik == SplitCacheByNIK::kEnabled);
-    enable_or_disable_feature(
-        features::kSplitCacheByCrossSiteMainFrameNavigationBoolean,
-        param.split_cache_by_cross_site_nav ==
-            SplitCacheByCrossSiteNav::kEnabled);
 
     feature_list_.InitWithFeatures(enabled_features, disabled_features);
   }
@@ -14239,30 +14350,26 @@ const GenerateCacheKeyTestParams kGenerateCacheKeyTestParams[] = {
     {"NoSplitting", "http://a.com/", LOAD_NORMAL,
      IsSubframeDocumentResource::kNo, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo, std::nullopt, 0, SplitCacheByCredentials::kDisabled,
-     SplitCacheByNIK::kDisabled, SplitCacheByCrossSiteNav::kDisabled,
-     "1/0/http://a.com/", "1/0/"},
+     SplitCacheByNIK::kDisabled, "1/0/http://a.com/", "1/0/"},
     {"NoSplittingWithUploadData", "http://a.com/", LOAD_NORMAL,
      IsSubframeDocumentResource::kNo, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo, std::nullopt, 123,
      SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kDisabled,
-     SplitCacheByCrossSiteNav::kDisabled, "1/123/http://a.com/", "1/123/"},
+     "1/123/http://a.com/", "1/123/"},
     {"SplitByCredentials_NoCookies", "http://a.com/", LOAD_DO_NOT_SAVE_COOKIES,
      IsSubframeDocumentResource::kNo, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo, std::nullopt, 0, SplitCacheByCredentials::kEnabled,
-     SplitCacheByNIK::kDisabled, SplitCacheByCrossSiteNav::kDisabled,
-     "0/0/http://a.com/", "0/0/"},
+     SplitCacheByNIK::kDisabled, "0/0/http://a.com/", "0/0/"},
     {"SplitByCredentials_WithCookies", "http://a.com/", LOAD_NORMAL,
      IsSubframeDocumentResource::kNo, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo, std::nullopt, 0, SplitCacheByCredentials::kEnabled,
-     SplitCacheByNIK::kDisabled, SplitCacheByCrossSiteNav::kDisabled,
-     "1/0/http://a.com/", "1/0/"},
+     SplitCacheByNIK::kDisabled, "1/0/http://a.com/", "1/0/"},
     {"SplitByNIK_Basic", "http://a.com/", LOAD_NORMAL,
      IsSubframeDocumentResource::kNo, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo,
      NetworkIsolationKey(SchemefulSite(GURL("http://b.com")),
                          SchemefulSite(GURL("http://c.com"))),
      0, SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kEnabled,
-     SplitCacheByCrossSiteNav::kDisabled,
      "1/0/_dk_http://b.com http://c.com http://a.com/",
      "1/0/_dk_http://b.com http://c.com"},
     {"SplitByNIK_SharedResource", "http://a.com/", LOAD_NORMAL,
@@ -14271,19 +14378,18 @@ const GenerateCacheKeyTestParams kGenerateCacheKeyTestParams[] = {
      NetworkIsolationKey(SchemefulSite(GURL("http://b.com")),
                          SchemefulSite(GURL("http://c.com"))),
      0, SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kEnabled,
-     SplitCacheByCrossSiteNav::kDisabled, "1/0/http://a.com/", "1/0/"},
+     "1/0/http://a.com/", "1/0/"},
     {"SplitByNIK_TransientNIK", "http://a.com/", LOAD_NORMAL,
      IsSubframeDocumentResource::kNo, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo, NetworkIsolationKey::CreateTransientForTesting(), 0,
      SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kEnabled,
-     SplitCacheByCrossSiteNav::kDisabled, std::nullopt, std::nullopt},
+     std::nullopt, std::nullopt},
     {"SplitByNIK_SubframeDocument", "http://a.com/", LOAD_NORMAL,
      IsSubframeDocumentResource::kYes, IsMainFrameNavigation::kNo, std::nullopt,
      IsSharedResource::kNo,
      NetworkIsolationKey(SchemefulSite(GURL("http://b.com")),
                          SchemefulSite(GURL("http://c.com"))),
      0, SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kEnabled,
-     SplitCacheByCrossSiteNav::kDisabled,
      "1/0/_dk_s_http://b.com http://c.com http://a.com/",
      "1/0/_dk_s_http://b.com http://c.com"},
     {"SplitByCrossSiteNav_SameSite", "http://a.com/", LOAD_NORMAL,
@@ -14292,7 +14398,6 @@ const GenerateCacheKeyTestParams kGenerateCacheKeyTestParams[] = {
      NetworkIsolationKey(SchemefulSite(GURL("http://c.com")),
                          SchemefulSite(GURL("http://d.com"))),
      0, SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kEnabled,
-     SplitCacheByCrossSiteNav::kEnabled,
      "1/0/_dk_http://c.com http://d.com http://a.com/",
      "1/0/_dk_http://c.com http://d.com"},
     {"SplitByCrossSiteNav_CrossSite", "http://a.com/", LOAD_NORMAL,
@@ -14301,7 +14406,6 @@ const GenerateCacheKeyTestParams kGenerateCacheKeyTestParams[] = {
      NetworkIsolationKey(SchemefulSite(GURL("http://c.com")),
                          SchemefulSite(GURL("http://d.com"))),
      0, SplitCacheByCredentials::kDisabled, SplitCacheByNIK::kEnabled,
-     SplitCacheByCrossSiteNav::kEnabled,
      "1/0/_dk_cn_http://c.com http://d.com http://a.com/",
      "1/0/_dk_cn_http://c.com http://d.com"},
 };

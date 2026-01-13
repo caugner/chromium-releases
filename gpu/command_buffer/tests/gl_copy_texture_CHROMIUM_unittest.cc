@@ -2,13 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include <array>
 
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 
 #ifndef GL_GLEXT_PROTOTYPES
@@ -159,9 +155,9 @@ std::string GetFragmentShaderSource(GLenum target, GLenum format, bool is_es3) {
 
 void setColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a, uint8_t* color) {
   color[0] = r;
-  color[1] = g;
-  color[2] = b;
-  color[3] = a;
+  UNSAFE_TODO(color[1]) = g;
+  UNSAFE_TODO(color[2]) = b;
+  UNSAFE_TODO(color[3]) = a;
 }
 
 void getExpectedColorAndMask(GLenum src_internal_format,
@@ -324,10 +320,10 @@ void getTextureDataAndExpectedRGBAs(FormatType src_format_type,
         for (uint32_t j = 0; j < 4; ++j) {
           if (j < src_channel_count) {
             texture_data->at((width * y + x) * src_channel_count + j) =
-                (alt ? alt_color : color)[j];
+                UNSAFE_TODO((alt ? alt_color : color)[j]);
           }
           expected_rgba_pixels->at((width * y + x) * 4 + j) =
-              (alt ? alt_expected_color : expected_color)[j];
+              UNSAFE_TODO((alt ? alt_expected_color : expected_color)[j]);
         }
       }
     }
@@ -339,7 +335,7 @@ void getTextureDataAndExpectedRGBAs(FormatType src_format_type,
 
     texture_data->resize(num_pixels * src_channel_count * sizeof(uint16_t));
     uint16_t* texture_data16 =
-        reinterpret_cast<uint16_t*>(texture_data->data());
+        UNSAFE_TODO(reinterpret_cast<uint16_t*>(texture_data->data()));
     int16_t flip_sign = -1;
     for (uint32_t i = 0; i < num_pixels * src_channel_count;
          i += src_channel_count) {
@@ -348,12 +344,12 @@ void getTextureDataAndExpectedRGBAs(FormatType src_format_type,
         // the same as without the offset.
         flip_sign *= -1;
         int16_t offset = flip_sign * ((i + j) % 0x7F);
-        texture_data16[i + j] = color_16bit[j] + offset;
+        UNSAFE_TODO(texture_data16[i + j]) = color_16bit[j] + offset;
       }
     }
     for (uint32_t i = 0; i < num_pixels * 4; i += 4) {
       for (int c = 0; c < 4; ++c) {
-        expected_rgba_pixels->at(i + c) = expected_color[c];
+        expected_rgba_pixels->at(i + c) = UNSAFE_TODO(expected_color[c]);
       }
     }
 
@@ -365,10 +361,11 @@ void getTextureDataAndExpectedRGBAs(FormatType src_format_type,
                                         color[0];
     texture_data->resize(num_pixels * sizeof(uint32_t));
     uint32_t* texture_data32 =
-        reinterpret_cast<uint32_t*>(texture_data->data());
+        UNSAFE_TODO(reinterpret_cast<uint32_t*>(texture_data->data()));
     for (uint32_t p = 0; p < num_pixels; ++p) {
-      texture_data32[p] = color_rgb10_a2;
-      memcpy(expected_rgba_pixels->data() + p * 4, expected_color, 4);
+      UNSAFE_TODO(texture_data32[p]) = color_rgb10_a2;
+      UNSAFE_TODO(
+          memcpy(expected_rgba_pixels->data() + p * 4, expected_color, 4));
     }
     return;
   }
@@ -1813,6 +1810,104 @@ TEST_F(GLCopyTextureCHROMIUMTest, CopySubTextureOffset) {
 
   glDeleteTextures(2, textures_);
   glDeleteFramebuffers(1, &framebuffer_id_);
+}
+
+TEST_P(GLCopyTextureCHROMIUMES3Test, RasterizerDiscardDoesNotInterfere) {
+#if !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
+  GTEST_SKIP() << "Test only reproduces with validating decoder";
+#else
+  if (gl_.gpu_preferences().use_passthrough_cmd_decoder) {
+    GTEST_SKIP() << "Skipping test because it's run with the passthrough "
+                    "command decoder";
+  }
+
+  if (!gl_.IsInitialized()) {
+    GTEST_SKIP() << "ES3 context unavailable";
+  }
+
+  constexpr GLsizei kW = 64, kH = 64;
+
+  // --- Step 1: prime VRAM with a recognisable pattern, then free it. ---
+  {
+    GLuint prime;
+    glGenTextures(1, &prime);
+    glBindTexture(GL_TEXTURE_2D, prime);
+    std::vector<uint8_t> pat(kW * kH * 4, 0xCA);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA,
+                 GL_UNSIGNED_BYTE, pat.data());
+    glFinish();
+    glDeleteTextures(1, &prime);
+  }
+
+  // --- Step 2: dest texture, allocated WITHOUT data → uninitialized VRAM. ---
+  GLuint dest;
+  glGenTextures(1, &dest);
+  glBindTexture(GL_TEXTURE_2D, dest);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               nullptr);
+
+  // --- Step 3: trivial source texture (contents irrelevant). ---
+  GLuint src;
+  glGenTextures(1, &src);
+  glBindTexture(GL_TEXTURE_2D, src);
+  std::vector<uint8_t> green(kW * kH * 4, 0);
+  for (size_t i = 0; i < green.size(); i += 4) {
+    green[i + 1] = 0xFF;  // G
+    green[i + 3] = 0xFF;  // A
+  }
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kW, kH, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               green.data());
+
+  // --- Step 4: enable RASTERIZER_DISCARD on the command-buffer context. ---
+  glEnable(GL_RASTERIZER_DISCARD);
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // --- Step 5: issue the copy. flip_y=GL_TRUE forces a draw-based path ---
+  CopyType copy_type = GetParam();
+  if (copy_type == TexImage) {
+    glCopyTextureCHROMIUM(src, 0, GL_TEXTURE_2D, dest, 0, GL_RGBA8,
+                          GL_UNSIGNED_BYTE, GL_TRUE, GL_FALSE, GL_FALSE);
+  } else {
+    glCopySubTextureCHROMIUM(src, 0, GL_TEXTURE_2D, dest, 0, 0, 0, 0, 0, kW, kH,
+                             GL_TRUE, GL_FALSE, GL_FALSE);
+  }
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  glDisable(GL_RASTERIZER_DISCARD);
+
+  // --- Step 6: read back. ---
+  GLuint fbo;
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         dest, 0);
+  ASSERT_EQ(static_cast<GLenum>(GL_FRAMEBUFFER_COMPLETE),
+            glCheckFramebufferStatus(GL_FRAMEBUFFER));
+
+  std::vector<uint8_t> pixels(kW * kH * 4, 0);
+  glReadPixels(0, 0, kW, kH, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+  ASSERT_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+
+  // --- Step 7: prove the leak is gone (copy succeeded). ---
+  size_t nonzero = 0, green_px = 0;
+  for (size_t i = 0; i < pixels.size(); i += 4) {
+    if (pixels[i] || pixels[i + 1] || pixels[i + 2] || pixels[i + 3]) {
+      ++nonzero;
+    }
+    if (pixels[i] == 0x00 && pixels[i + 1] == 0xFF && pixels[i + 2] == 0x00 &&
+        pixels[i + 3] == 0xFF) {
+      ++green_px;
+    }
+  }
+
+  // Expect all pixels to be green.
+  EXPECT_EQ(green_px, static_cast<size_t>(kW * kH));
+  EXPECT_GT(nonzero, 0u);
+
+  glDeleteFramebuffers(1, &fbo);
+  glDeleteTextures(1, &src);
+  glDeleteTextures(1, &dest);
+#endif  // !BUILDFLAG(ENABLE_VALIDATING_COMMAND_DECODER)
 }
 
 }  // namespace gpu

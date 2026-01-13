@@ -404,6 +404,10 @@ input::TouchEmulator* InputManager::GetTouchEmulator(bool create_if_necessary) {
   return nullptr;
 }
 
+void InputManager::CancelAutoscroll(input::RenderWidgetHostViewInput* view) {
+  // Stub for InputVizard. Autoscroll is not yet supported in Viz.
+}
+
 const DisplayHitTestQueryMap& InputManager::GetDisplayHitTestQuery() const {
   return frame_sink_manager_->GetDisplayHitTestQuery();
 }
@@ -545,7 +549,7 @@ void InputManager::StateOnTouchTransfer(
       iter->second.rir_support.get());
   android_state_transfer_handler_.StateOnTouchTransfer(
       std::move(state), support_android->GetWeakPtr());
-#endif
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void InputManager::ForceEnableZoomStateChanged(
@@ -957,3 +961,7 @@ bool InputManager::TransferInputBackToBrowser() {
 #endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace viz
+
+#if BUILDFLAG(IS_ANDROID)
+DEFINE_JNI(InputTransferHandlerViz)
+#endif

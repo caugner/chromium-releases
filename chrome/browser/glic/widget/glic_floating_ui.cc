@@ -11,7 +11,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/glic/glic_profile_manager.h"
 #include "chrome/browser/glic/service/glic_instance_helper.h"
-#include "chrome/browser/glic/service/glic_instance_metrics.h"
+#include "chrome/browser/glic/service/metrics/glic_instance_metrics.h"
 #include "chrome/browser/glic/widget/application_hotkey_delegate.h"
 #include "chrome/browser/glic/widget/glic_inactive_floating_ui.h"
 #include "chrome/browser/glic/widget/glic_panel_hotkey_delegate.h"
@@ -119,7 +119,6 @@ void GlicFloatingUi::CreateAndSetupWidget(gfx::Rect initial_bounds) {
                                     initial_bounds, user_resizable_);
 
   // TODO: Setup AccessibilityText.
-  GetGlicWidget()->SetZOrderLevel(ui::ZOrderLevel::kFloatingWindow);
 #if BUILDFLAG(IS_MAC)
   GetGlicWidget()->SetActivationIndependence(true);
   GetGlicWidget()->SetVisibleOnAllWorkspaces(true);
@@ -202,6 +201,11 @@ void GlicFloatingUi::EnableDragResize(bool enabled) {
 }
 
 void GlicFloatingUi::MaybeSetWidgetCanResize() {
+  // During teardown, the widget's delegate is null. Just return early.
+  if (!GetGlicWidget()->widget_delegate()) {
+    return;
+  }
+
   if (GetGlicWidget()->widget_delegate()->CanResize() == user_resizable_ ||
       glic_window_animator_->IsAnimating()) {
     // If the resize state is already correct or the widget is animating do not
@@ -278,8 +282,12 @@ void GlicFloatingUi::Show(const ShowOptions& options) {
   GetGlicView()->UpdateBackgroundColor();
   application_hotkey_manager_->InitializeAccelerators();
   glic_panel_hotkey_manager_->InitializeAccelerators();
+
   // TODO: Set up manual resize.
-  window_event_observer_->SetDraggingAreasAndWatchForMouseEvents();
+  if (!base::FeatureList::IsEnabled(features::kGlicHandleDraggingNatively)) {
+    window_event_observer_->SetDraggingAreasAndWatchForMouseEvents();
+  }
+
   // Add capability to show web modal dialogs (e.g. Data Controls Dialogs for
   // enterprise users) via constrained_window APIs.
   web_modal::WebContentsModalDialogManager::CreateForWebContents(

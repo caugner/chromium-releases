@@ -8,7 +8,6 @@
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
-#include "base/functional/callback_forward.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
@@ -30,6 +29,7 @@
 #include "chrome/browser/actor/aggregated_journal.h"
 #include "chrome/browser/actor/aggregated_journal_file_serializer.h"
 #include "chrome/browser/actor/aggregated_journal_in_memory_serializer.h"
+#include "chrome/browser/background/glic/glic_launcher_configuration.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/contextual_cueing/contextual_cueing_features.h"
 #include "chrome/browser/enterprise/browser_management/management_service_factory.h"
@@ -44,6 +44,7 @@
 #include "chrome/browser/glic/host/auth_controller.h"
 #include "chrome/browser/glic/host/context/glic_focused_browser_manager.h"
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
+#include "chrome/browser/glic/host/glic.mojom-data-view.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/host/glic_annotation_manager.h"
 #include "chrome/browser/glic/host/glic_features.mojom.h"
@@ -56,7 +57,7 @@
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
-#include "chrome/browser/glic/service/glic_instance_metrics.h"
+#include "chrome/browser/glic/service/metrics/glic_instance_metrics.h"
 #include "chrome/browser/glic/widget/browser_conditions.h"
 #include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/global_features.h"
@@ -75,12 +76,15 @@
 #include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/common/actor/journal_details_builder.h"
 #include "chrome/common/actor/task_id.h"
 #include "chrome/common/actor_webui.mojom.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
 #include "components/autofill/core/browser/integrators/glic/actor_form_filling_types.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/feature_engagement/public/event_constants.h"
 #include "components/feedback/content/content_tracing_manager.h"
 #include "components/feedback/feedback_data.h"
 #include "components/feedback/feedback_uploader.h"
@@ -129,6 +133,18 @@ struct EqualsTraits<::SkBitmap> {
 namespace glic {
 
 namespace {
+
+#if BUILDFLAG(IS_MAC)
+constexpr mojom::Platform kPlatform = mojom::Platform::kMacOS;
+#elif BUILDFLAG(IS_WIN)
+constexpr mojom::Platform kPlatform = mojom::Platform::kWindows;
+#elif BUILDFLAG(IS_LINUX)
+constexpr mojom::Platform kPlatform = mojom::Platform::kLinux;
+#elif BUILDFLAG(IS_CHROMEOS)
+constexpr mojom::Platform kPlatform = mojom::Platform::kChromeOS;
+#else
+constexpr mojom::Platform kPlatform = mojom::Platform::kUnknown;
+#endif
 
 mojom::GetContextResultPtr LogErrorAndUnwrapResult(
     base::OnceCallback<void(GlicGetContextFromTabError)> error_logger,
@@ -544,6 +560,9 @@ class JournalHandler {
 // events through GlicKeyedService to other components, relies on the assumption
 // that there is exactly 1 WebUI instance. If this assumption is ever violated
 // then many classes will break.
+//
+// TODO(crbug.com/458761731): Once `loadAndExtractContent` is defined in the
+// handler mojom interface, override and implement its mojom declaration.
 class GlicWebClientHandler : public glic::mojom::WebClientHandler,
                              public GlicWindowController::StateObserver,
                              public GlicWebClientAccess,
@@ -659,6 +678,10 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
         prefs::kGlicUserEnabledActuationOnWeb,
         base::BindRepeating(&GlicWebClientHandler::OnPrefChanged,
                             base::Unretained(this)));
+    pref_change_registrar_.Add(
+        prefs::kGlicCompletedFre,
+        base::BindRepeating(&GlicWebClientHandler::OnPrefChanged,
+                            base::Unretained(this)));
     host().AddPanelStateObserver(this);
 
     if (base::FeatureList::IsEnabled(
@@ -735,6 +758,7 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
 
     auto state = glic::mojom::WebClientInitialState::New();
     state->chrome_version = version_info::GetVersion();
+    state->platform = kPlatform;
     state->microphone_permission_enabled =
         pref_service_->GetBoolean(prefs::kGlicMicrophoneEnabled);
     state->location_permission_enabled =
@@ -766,6 +790,8 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
         base::FeatureList::IsEnabled(features::kGlicScrollTo);
     state->enable_zero_state_suggestions =
         contextual_cueing::IsZeroStateSuggestionsEnabled();
+    state->enable_cached_get_user_profile_info = base::FeatureList::IsEnabled(
+        features::kGlicEnableCachedGetUserProfileInfo);
 
     local_state_pref_change_registrar_.Init(g_browser_process->local_state());
     local_state_pref_change_registrar_.Add(
@@ -806,6 +832,16 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
     if (GlicEnabling::IsMultiInstanceEnabled()) {
       state->host_capabilities.push_back(mojom::HostCapability::kMultiInstance);
     }
+    if (GlicEnabling::IsTrustFirstOnboardingEnabled()) {
+      int arm = features::kGlicTrustFirstOnboardingArmParam.Get();
+      if (arm == 1) {
+        state->host_capabilities.push_back(
+            mojom::HostCapability::kTrustFirstOnboardingArm1);
+      } else if (arm == 2) {
+        state->host_capabilities.push_back(
+            mojom::HostCapability::kTrustFirstOnboardingArm2);
+      }
+    }
     state->enable_get_page_metadata =
         base::FeatureList::IsEnabled(blink::features::kFrameMetadataObserver);
     state->enable_api_activation_gating =
@@ -831,6 +867,10 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
     state->enable_open_password_manager_settings_page =
         base::FeatureList::IsEnabled(
             features::kGlicOpenPasswordManagerSettingsPageApi);
+    state->enable_trust_first_onboarding =
+        GlicEnabling::IsTrustFirstOnboardingEnabled();
+    state->onboarding_completed =
+        GlicEnabling::HasConsentedForProfile(profile_);
 
     std::move(callback).Run(std::move(state));
   }
@@ -1030,7 +1070,8 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
     for (auto tab_id : tab_ids) {
       tab_handles.push_back(tabs::TabHandle(tab_id));
     }
-    std::move(callback).Run(sharing_manager().PinTabs(tab_handles));
+    std::move(callback).Run(sharing_manager().PinTabs(
+        tab_handles, GlicPinTrigger::kWebClientUnknown));
   }
 
   void UnpinTabs(const std::vector<int32_t>& tab_ids,
@@ -1039,10 +1080,13 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
     for (auto tab_id : tab_ids) {
       tab_handles.push_back(tabs::TabHandle(tab_id));
     }
-    std::move(callback).Run(sharing_manager().UnpinTabs(tab_handles));
+    std::move(callback).Run(sharing_manager().UnpinTabs(
+        tab_handles, GlicUnpinTrigger::kWebClientUnknown));
   }
 
-  void UnpinAllTabs() override { sharing_manager().UnpinAllTabs(); }
+  void UnpinAllTabs() override {
+    sharing_manager().UnpinAllTabs(GlicUnpinTrigger::kWebClientUnknown);
+  }
 
   void CreateTask(actor::webui::mojom::TaskOptionsPtr options,
                   CreateTaskCallback callback) override {
@@ -1287,26 +1331,47 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
         g_browser_process->profile_manager()
             ->GetProfileAttributesStorage()
             .GetProfileAttributesWithPath(profile_->GetPath());
-    if (!entry) {
+    auto* identity_manager =
+        IdentityManagerFactory::GetForProfileIfExists(profile_);
+    if (!entry || !identity_manager) {
       std::move(callback).Run(nullptr);
       return;
     }
 
+    // ChromeOS doesn't support multi-profile, so `entry` would not be populated
+    // with the correct user information. However, all profile entries are
+    // populated from IdentityManager, which is supported on all platforms.
+    const auto account_info =
+        identity_manager->FindExtendedAccountInfoByGaiaId(entry->GetGAIAId());
+
     auto result = glic::mojom::UserProfileInfo::New();
+
+    result->display_name = account_info.GetFullName().value_or("");
+    result->email = base::UTF16ToUTF8(entry->GetUserName());
+    result->given_name = account_info.GetGivenName().value_or("");
+
+    policy::ManagementService* management_service =
+        policy::ManagementServiceFactory::GetForProfile(profile_);
+    result->is_managed =
+        management_service && management_service->IsAccountManaged();
+
+#if BUILDFLAG(IS_CHROMEOS)
+    // ChromeOS doesn't support profile, so local profile name and custom
+    // profile avatar are not supported. Instead, we will just use the user
+    // account avatar.
+    auto icon = account_info.GetAvatarImage();
+    if (icon.has_value()) {
+      result->avatar_icon = icon->AsBitmap();
+    }
+#else
+    result->local_profile_name =
+        base::UTF16ToUTF8(entry->GetLocalProfileName());
     // TODO(crbug.com/382794680): Determine the correct size.
     gfx::Image icon = entry->GetAvatarIcon(512);
     if (!icon.IsEmpty()) {
       result->avatar_icon = icon.AsBitmap();
     }
-    result->display_name = base::UTF16ToUTF8(entry->GetGAIAName());
-    result->email = base::UTF16ToUTF8(entry->GetUserName());
-    result->given_name = base::UTF16ToUTF8(entry->GetGAIAGivenName());
-    result->local_profile_name =
-        base::UTF16ToUTF8(entry->GetLocalProfileName());
-    policy::ManagementService* management_service =
-        policy::ManagementServiceFactory::GetForProfile(profile_);
-    result->is_managed =
-        management_service && management_service->IsAccountManaged();
+#endif  //  BUILDFLAG(IS_CHROMEOS)
     std::move(callback).Run(std::move(result));
   }
 
@@ -1360,6 +1425,9 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
     if (auto* instance_metrics = host().instance_metrics()) {
       instance_metrics->OnUserInputSubmitted(mode);
     }
+
+    // TODO(crbug.com/462769104): move this to a non-metrics API.
+    sharing_manager().OnConversationTurnSubmitted();
   }
 
   void OnContextUploadStarted() override {
@@ -1449,7 +1517,7 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
       return;
     }
     annotation_manager_->ScrollTo(std::move(params), std::move(callback),
-                                  &host());
+                                  &host(), this);
   }
 
   void DropScrollToHighlight() override {
@@ -1498,6 +1566,22 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
 
   void OnViewChanged(mojom::ViewChangedNotificationPtr notification) override {
     host().OnViewChanged(this, notification->current_view);
+  }
+
+  void SetOnboardingCompleted() override {
+    glic_service_->metrics()->OnTrustFirstOnboardingAccept();
+    pref_service_->SetInteger(prefs::kGlicCompletedFre,
+                              static_cast<int>(prefs::FreStatus::kCompleted));
+
+    GlicLauncherConfiguration::CheckDefaultBrowserToEnableLauncher();
+
+#if !BUILDFLAG(IS_ANDROID)
+    Browser* browser = chrome::FindTabbedBrowser(profile_, false);
+    if (auto* interface = BrowserUserEducationInterface::From(browser)) {
+      interface->NotifyAdditionalConditionEvent(
+          feature_engagement::events::kGlicOnboardingCompleted);
+    }
+#endif  // !BUILDFLAG(IS_ANDROID)
   }
 
   // GlicWindowController::StateObserver implementation.
@@ -1711,19 +1795,28 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
   void WebClientDisconnected() { Uninstall(); }
 
   void OnPrefChanged(const std::string& pref_name) {
-    bool is_enabled = pref_service_->GetBoolean(pref_name);
     if (pref_name == prefs::kGlicMicrophoneEnabled) {
-      web_client_->NotifyMicrophonePermissionStateChanged(is_enabled);
+      web_client_->NotifyMicrophonePermissionStateChanged(
+          pref_service_->GetBoolean(pref_name));
     } else if (pref_name == prefs::kGlicGeolocationEnabled) {
-      web_client_->NotifyLocationPermissionStateChanged(is_enabled);
+      web_client_->NotifyLocationPermissionStateChanged(
+          pref_service_->GetBoolean(pref_name));
     } else if (pref_name == prefs::kGlicTabContextEnabled) {
-      web_client_->NotifyTabContextPermissionStateChanged(is_enabled);
+      web_client_->NotifyTabContextPermissionStateChanged(
+          pref_service_->GetBoolean(pref_name));
     } else if (pref_name == prefs::kGlicClosedCaptioningEnabled) {
-      web_client_->NotifyClosedCaptioningSettingChanged(is_enabled);
+      web_client_->NotifyClosedCaptioningSettingChanged(
+          pref_service_->GetBoolean(pref_name));
     } else if (pref_name == prefs::kGlicDefaultTabContextEnabled) {
-      web_client_->NotifyDefaultTabContextPermissionStateChanged(is_enabled);
+      web_client_->NotifyDefaultTabContextPermissionStateChanged(
+          pref_service_->GetBoolean(pref_name));
     } else if (pref_name == prefs::kGlicUserEnabledActuationOnWeb) {
-      web_client_->NotifyActuationOnWebSettingChanged(is_enabled);
+      web_client_->NotifyActuationOnWebSettingChanged(
+          pref_service_->GetBoolean(pref_name));
+    } else if (pref_name == prefs::kGlicCompletedFre) {
+      web_client_->NotifyOnboardingCompletedChanged(
+          pref_service_->GetInteger(prefs::kGlicCompletedFre) ==
+          static_cast<int>(prefs::FreStatus::kCompleted));
     } else {
       DCHECK(false) << "Unknown Glic permission pref changed: " << pref_name;
     }
@@ -1776,9 +1869,10 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
     web_client_->NotifyFocusedTabChanged(std::move(data));
   }
 
-  void NotifyActorTaskStateChanged(const actor::ActorTask& task) {
+  void NotifyActorTaskStateChanged(actor::TaskId task_id,
+                                   actor::ActorTask::State task_state) {
     const mojom::ActorTaskState state = [&]() {
-      switch (task.GetState()) {
+      switch (task_state) {
         case actor::ActorTask::State::kCreated:
         case actor::ActorTask::State::kReflecting:
         case actor::ActorTask::State::kWaitingOnUser:
@@ -1794,7 +1888,7 @@ class GlicWebClientHandler : public glic::mojom::WebClientHandler,
           return mojom::ActorTaskState::kStopped;
       }
     }();
-    web_client_->NotifyActorTaskStateChanged(task.id().value(), state);
+    web_client_->NotifyActorTaskStateChanged(task_id.value(), state);
   }
 
   void RequestToShowCredentialSelectionDialog(

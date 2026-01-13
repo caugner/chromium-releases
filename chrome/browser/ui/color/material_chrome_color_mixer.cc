@@ -268,6 +268,12 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
     return;
   }
 
+  mixer[kColorActorUiHandoffButtonBorder] = {ui::kColorSysActorUiBorder};
+  mixer[kColorActorUiOverlayBorder] = {ui::kColorSysActorUiBorder};
+  mixer[kColorActorUiOverlayBorderGlow] = {ui::kColorSysActorUiGradientEnd};
+  mixer[kColorActorUiScrimStart] = {ui::kColorSysActorUiGradientStart};
+  mixer[kColorActorUiScrimMiddle] = {ui::kColorSysActorUiGradientMiddle};
+  mixer[kColorActorUiScrimEnd] = {ui::kColorSysActorUiGradientEnd};
   mixer[kColorAppMenuHighlightDefault] = {ui::kColorSysTonalContainer};
   mixer[kColorAppMenuHighlightSeverityLow] = {kColorAppMenuHighlightDefault};
   mixer[kColorAppMenuHighlightSeverityMedium] = {kColorAppMenuHighlightDefault};
@@ -277,6 +283,8 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
   mixer[kColorAppMenuChipInkDropHover] = {ui::kColorSysStateHoverOnSubtle};
   mixer[kColorAppMenuChipInkDropRipple] = {ui::kColorSysStateRipplePrimary};
   mixer[kColorAvatarButtonHighlightSyncPaused] = {
+      kColorAvatarButtonHighlightDefault};
+  mixer[kColorAvatarButtonHighlightPasskeysLocked] = {
       kColorAvatarButtonHighlightDefault};
   mixer[kColorAvatarButtonHighlightSigninPaused] = {
       kColorAvatarButtonHighlightDefault};

@@ -27,6 +27,12 @@ void AppendStickinessSignalForFormula(
     std::map<std::string, std::string>& params,
     const std::string& formula);
 
+void AppendLensOverlaySidePanelParams(
+    std::map<std::string, std::string>& params,
+    uint64_t gen204_id,
+    bool has_text,
+    bool has_image);
+
 GURL AppendCommonSearchParametersToURL(const GURL& url_to_modify,
                                        bool use_dark_mode);
 
@@ -34,10 +40,6 @@ GURL AppendVideoContextParamToURL(const GURL& url_to_modify,
                                   std::optional<GURL> page_url);
 
 GURL AppendDarkModeParamToURL(const GURL& url_to_modify, bool use_dark_mode);
-
-GURL AppendInvocationSourceParamToURL(
-    const GURL& url_to_modify,
-    lens::LensOverlayInvocationSource invocation_source);
 
 GURL BuildTextOnlySearchURL(
     base::Time query_start_time,
@@ -106,10 +108,6 @@ GURL GetSearchResultsUrlFromRedirectUrl(const GURL& url);
 // or when the SRP redirects to append parameters unrelated to the search
 // results.
 GURL RemoveIgnoredSearchURLParameters(const GURL& url);
-
-// Remove parameters that cause the SRP to be rendered for the side panel. Used
-// when opening the SRP in a new tab.
-GURL RemoveSidePanelURLParameters(const GURL& url);
 
 // Returns the URL to open in a new tab by adding a unique vsrid to the side
 // panel new tab URL. If the given URL is empty, or is a URL for a contextual

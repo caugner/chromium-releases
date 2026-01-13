@@ -15,6 +15,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/safe_ref.h"
 #include "base/scoped_observation.h"
+#include "base/threading/sequence_bound.h"
 #include "chrome/common/read_anything/read_anything.mojom.h"
 #include "chrome/renderer/accessibility/read_anything/read_aloud_app_model.h"
 #include "chrome/renderer/accessibility/read_anything/read_anything_app_model.h"
@@ -148,7 +149,7 @@ class ReadAnythingAppController
   void ScreenAIServiceReady() override;
   void OnGetVoicePackInfo(
       read_anything::mojom::VoicePackInfoPtr voice_pack_info) override;
-  void OnReadingModeHidden() override;
+  void OnReadingModeHidden(bool tab_active) override;
   void OnTabWillDetach() override;
   void OnTabMuteStateChange(bool muted) override;
 #if BUILDFLAG(IS_CHROMEOS)
@@ -231,6 +232,7 @@ class ReadAnythingAppController
   std::string GetHtmlTag(ui::AXNodeID ax_node_id) const;
   std::string GetLanguage(ui::AXNodeID ax_node_id) const;
   std::u16string GetTextContent(ui::AXNodeID ax_node_id) const;
+  std::u16string GetPrefixText(ui::AXNodeID ax_node_id) const;
   std::string GetTextDirection(ui::AXNodeID ax_node_id) const;
   std::string GetUrl(ui::AXNodeID ax_node_id) const;
   std::string GetAltText(ui::AXNodeID ax_node_id) const;
@@ -252,6 +254,7 @@ class ReadAnythingAppController
                          ui::AXNodeID focus_node_id,
                          int focus_offset);
   void OnCollapseSelection() const;
+  void OnDistilled(int word_count);
   bool IsGoogleDocs() const;
   bool IsReadAloudEnabled() const;
   bool IsTsTextSegmentationEnabled() const;
@@ -311,7 +314,10 @@ class ReadAnythingAppController
   // available.
   void UpdateDependencyParserModel(base::File model_file);
 
-  DependencyParserModel& GetDependencyParserModelForTesting();
+  void OnDependencyParserModelAvailabilityChecked(bool is_available);
+
+  base::SequenceBound<DependencyParserModel>&
+  GetDependencyParserModelForTesting();
 
   // Called when distillation has completed.
   void OnAXTreeDistilled(const ui::AXTreeID& tree_id,

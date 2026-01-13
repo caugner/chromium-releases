@@ -44,7 +44,6 @@ class PageLoadMetricsEmbedderInterface;
 class PageLoadMetricsMemoryTracker;
 class PageLoadMetricsObserverDelegate;
 class PageLoadTracker;
-struct MemoryUpdate;
 
 // MetricsWebContentsObserver tracks page loads and loading metrics
 // related data based on IPC messages received from a
@@ -91,6 +90,8 @@ class MetricsWebContentsObserver
   void WebContentsWillSoonBeDestroyed();
 
   // content::WebContentsObserver implementation:
+  void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override;
   void ReadyToCommitNavigation(
       content::NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(
@@ -101,7 +102,8 @@ class MetricsWebContentsObserver
       content::NavigationHandle* navigation_handle) override;
   void NavigationStopped() override;
   void OnInputEvent(const content::RenderWidgetHost& widget,
-                    const blink::WebInputEvent& event) override;
+                    const blink::WebInputEvent& event,
+                    input::InputEventSource source) override;
   void OnVisibilityChanged(content::Visibility visibility) override;
   void PrimaryMainFrameRenderProcessGone(
       base::TerminationStatus status) override;
@@ -136,7 +138,6 @@ class MetricsWebContentsObserver
                          StorageType storage_type);
 
   // These methods are forwarded from the MetricsNavigationThrottle.
-  void WillStartNavigationRequest(content::NavigationHandle* navigation_handle);
   void WillProcessNavigationResponse(
       content::NavigationHandle* navigation_handle);
 
@@ -192,11 +193,6 @@ class MetricsWebContentsObserver
   // it's likely that prefetch will occur in this WebContents. This should
   // not be called within WebContentsObserver::DidFinishNavigation methods.
   void OnPrefetchLikely();
-
-  // Called when V8 per-frame memory usage updates are available. Virtual for
-  // test classes to override.
-  virtual void OnV8MemoryChanged(
-      const std::vector<MemoryUpdate>& memory_updates);
 
   // Called when a `SharedStorageWorkletHost` is created for `rfh`.
   void OnSharedStorageWorkletHostCreated(content::RenderFrameHost* rfh);
@@ -256,8 +252,7 @@ class MetricsWebContentsObserver
   // otherwise. The tracker measures per-frame memory usage by V8.
   PageLoadMetricsMemoryTracker* GetMemoryTracker() const;
 
-  void WillStartNavigationRequestImpl(
-      content::NavigationHandle* navigation_handle);
+  void DidStartNavigationImpl(content::NavigationHandle* navigation_handle);
 
   // page_load_metrics::mojom::PageLoadMetrics implementation.
   void UpdateTiming(
@@ -387,12 +382,6 @@ class MetricsWebContentsObserver
   // and vanish before we get signal about what caused the abort (new
   // navigation, stop button, etc.).
   std::vector<std::unique_ptr<PageLoadTracker>> aborted_provisional_loads_;
-
-  // Memory updates that are accumulated while there is no PageLoadTracker
-  // associated with RenderFrameHost. Will be sent in
-  // HandleCommittedNavigationForTrackedLoad, unless the RenderFrameHost is
-  // deleted and/or web contents is destroyed.
-  std::vector<MemoryUpdate> queued_memory_updates_;
 
   // This stores the PageLoadTracker for the primary page. GetPageLoadTracker()
   // is available to find a PageLoadTracker for non-primary pages.

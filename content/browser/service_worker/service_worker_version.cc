@@ -33,6 +33,7 @@
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
 #include "base/uuid.h"
+#include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
 #include "components/services/storage/public/mojom/service_worker_database.mojom-forward.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/child_process_security_policy_impl.h"
@@ -701,7 +702,7 @@ void ServiceWorkerVersion::ScheduleUpdate() {
   // and soon no one might hold a reference to us.
   context_->ProtectVersion(base::WrapRefCounted(this));
 
-  update_timer_.Start(FROM_HERE, ServiceWorkerContext::GetUpdateDelay(),
+  update_timer_.Start(FROM_HERE, ServiceWorkerContext::kUpdateDelay,
                       base::BindOnce(&ServiceWorkerVersion::StartUpdate,
                                      weak_factory_.GetWeakPtr()));
 }
@@ -847,7 +848,15 @@ bool ServiceWorkerVersion::FinishRequestWithFetchCount(int request_id,
   // ServiceWorkerVersion::Request
   TRACE_EVENT_END("ServiceWorker", perfetto::Track::FromPointer(request),
                   "Handled", was_handled);
-  request_timeouts_.erase(request->timeout_iter);
+  if (base::FeatureList::IsEnabled(
+          features::kServiceWorkerOptionalTimeoutIterator)) {
+    if (request->timeout_iter.has_value()) {
+      request_timeouts_.erase(*request->timeout_iter);
+    }
+  } else {
+    // Equivalent to the previous, non-optional iterator behavior. Maybe unsafe.
+    request_timeouts_.erase(request->timeout_iter.value_or({}));
+  }
   inflight_requests_.Remove(request_id);
   // TODO(crbug.com/40864997): remove the following DCHECK when the cause
   // identified.
@@ -1111,15 +1120,9 @@ void ServiceWorkerVersion::EvictBackForwardCachedControllee(
     BackForwardCacheMetrics::NotRestoredReason reason) {
   controllee->EvictFromBackForwardCache(reason);
   controllees_to_be_evicted_[controllee->client_uuid()] = reason;
-  // TODO(crbug.com/341322515): remove this if expression with
-  // CHECK in RemoveControlleeFromBackForwardCacheMap().
-  // As I assumed in #comment21 of the crbug, this behavior can be expected
-  // for a dedicated worker.
-  if (!BFCacheContainsControllee(controllee->client_uuid()) &&
-      controllee->IsContainerForWorkerClient()) {
-    return;
+  if (controllee->was_controlled_when_entered_back_forward_cache()) {
+    RemoveControlleeFromBackForwardCacheMap(controllee->client_uuid());
   }
-  RemoveControlleeFromBackForwardCacheMap(controllee->client_uuid());
 }
 
 void ServiceWorkerVersion::AddObserver(Observer* observer) {
@@ -1364,6 +1367,12 @@ void ServiceWorkerVersion::SetDevToolsAttached(bool attached) {
 
 void ServiceWorkerVersion::SetMainScriptResponse(
     std::unique_ptr<MainScriptResponse> response) {
+  main_script_fetched_ = true;
+  if (!response) {
+    main_script_response_callbacks_.Notify();
+    return;
+  }
+
   script_response_time_for_devtools_ = response->response_time;
   main_script_response_ = std::move(response);
 
@@ -1381,6 +1390,30 @@ void ServiceWorkerVersion::SetMainScriptResponse(
   if (context_) {
     context_->OnMainScriptResponseSet(version_id(), *main_script_response_);
   }
+
+  main_script_response_callbacks_.Notify();
+}
+
+bool ServiceWorkerVersion::main_script_fetched() const {
+  return main_script_fetched_;
+}
+
+void ServiceWorkerVersion::EnsureMainScriptResponseSet(
+    base::OnceClosure callback) {
+  if (main_script_fetched_) {
+    std::move(callback).Run();
+    return;
+  }
+
+  main_script_response_callbacks_.AddUnsafe(std::move(callback));
+
+  if (installed_scripts_sender_) {
+    return;
+  }
+
+  installed_scripts_sender_ =
+      std::make_unique<ServiceWorkerInstalledScriptsSender>(this);
+  installed_scripts_sender_->Start();
 }
 
 void ServiceWorkerVersion::SimulatePingTimeoutForTesting() {
@@ -2455,12 +2488,13 @@ void ServiceWorkerVersion::StartWorkerInternal() {
   params->main_script_load_params = std::move(main_script_load_params_);
 
   if (IsInstalled(status())) {
-    DCHECK(!installed_scripts_sender_);
-    installed_scripts_sender_ =
-        std::make_unique<ServiceWorkerInstalledScriptsSender>(this);
+    if (!installed_scripts_sender_) {
+      installed_scripts_sender_ =
+          std::make_unique<ServiceWorkerInstalledScriptsSender>(this);
+      installed_scripts_sender_->Start();
+    }
     params->installed_scripts_info =
         installed_scripts_sender_->CreateInfoAndBind();
-    installed_scripts_sender_->Start();
   }
 
   params->service_worker_receiver =
@@ -2618,6 +2652,14 @@ void ServiceWorkerVersion::OnTimeoutTimer() {
       break;
     }
     timed_out_infos.push_back(*it);
+    // Erase the entry from `request_timeouts_` and update `InflightRequest`
+    // accordingly.
+    if (base::FeatureList::IsEnabled(
+            features::kServiceWorkerOptionalTimeoutIterator)) {
+      InflightRequest* request = inflight_requests_.Lookup(it->id);
+      CHECK(request);
+      request->timeout_iter = std::nullopt;
+    }
     it = request_timeouts_.erase(it);
   }
 

@@ -545,7 +545,7 @@
 <translation id="2872961005593481000">إيقاف التشغيل</translation>
 <translation id="2876338922445400217">التكبير على الشاشة</translation>
 <translation id="2876760662374103627">ميزة "التحكّم بالوجه" مفعَّلة</translation>
-<translation id="2878884018241093801">ليست هناك عناصر تم استخدامها مؤخرًا</translation>
+<translation id="2878884018241093801">ما مِن عناصر مُستخدمة مؤخرًا</translation>
 <translation id="2880541185262491188">تم إدخال رقم التعريف الشخصي مرات كثيرة جدًا. يُرجى الانتظار لمدة <ph name="TIME_LEFT" /> وإعادة المحاولة</translation>
 <translation id="2883271196820422439">استئناف استخدام مفاتيح الماوس</translation>
 <translation id="2885950158625301909">مزيد من المعلومات</translation>
@@ -2410,6 +2410,7 @@
 <translation id="9050999376345823055">اضغط على "." للإفلات</translation>
 <translation id="906458777597946297">تكبير النافذة</translation>
 <translation id="9065203028668620118">تعديل</translation>
+<translation id="9068849894565669697">اختيار اللون</translation>
 <translation id="9071966355747967534">ميزة "<ph name="FEATURE_NAME" />" غير متاحة</translation>
 <translation id="9072519059834302790"><ph name="TIME_LEFT" /> حتى تصبح البطارية فارغة.</translation>
 <translation id="9074432941673450836">‏استخدِم التطبيقات لتنفيذ كل مهامك المطلوبة على <ph name="PRODUCT_NAME" />. وانتقِل إلى "مشغِّل التطبيقات" للعثور على كل تطبيقاتك. يمكنك أيضًا الضغط على مفتاح "مشغّل التطبيقات" (فوق مفتاح Shift الأيسر) في لوحة المفاتيح.</translation>

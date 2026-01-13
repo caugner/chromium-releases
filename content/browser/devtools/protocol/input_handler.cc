@@ -783,7 +783,8 @@ class InputHandler::InputInjector
 
  private:
   void OnInputEvent(const RenderWidgetHost& widget,
-                    const blink::WebInputEvent& event) override {
+                    const blink::WebInputEvent& event,
+                    InputEventSource source) override {
     input_queued_ = true;
   }
 
@@ -1438,7 +1439,7 @@ void InputHandler::OnWidgetForDispatchDragEvent(
       static_cast<blink::DragOperationsMask>(data->GetDragOperationsMask());
   std::unique_ptr<DropData> drop_data =
       std::make_unique<DropData>(ProtocolDragDataToDropData(std::move(data)));
-  drop_data->view_id = widget_host->GetRoutingID();
+  widget_host->FilterDropData(drop_data.get());
   int event_modifiers =
       GetEventModifiers(modifiers.value_or(blink::WebInputEvent::kNoModifiers),
                         false, false, 0, 0);

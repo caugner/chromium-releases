@@ -15,6 +15,8 @@
 #import "components/commerce/core/pref_names.h"
 #import "components/component_updater/pref_names.h"
 #import "components/content_settings/core/common/pref_names.h"
+#import "components/contextual_search/pref_names.h"
+#import "components/contextual_search/search_content_sharing_policy_handler.h"
 #import "components/enterprise/browser/data_region/data_region_policy_handler.h"
 #import "components/enterprise/browser/reporting/cloud_profile_reporting_policy_handler.h"
 #import "components/enterprise/browser/reporting/cloud_reporting_frequency_policy_handler.h"
@@ -36,7 +38,7 @@
 #import "components/policy/core/browser/configuration_policy_handler_list.h"
 #import "components/policy/core/browser/configuration_policy_handler_parameters.h"
 #import "components/policy/core/browser/gen_ai_default_settings_policy_handler.h"
-#import "components/policy/core/browser/url_blocklist_policy_handler.h"
+#import "components/policy/core/browser/url_list/url_blocklist_policy_handler.h"
 #import "components/policy/core/common/policy_pref_names.h"
 #import "components/policy/policy_constants.h"
 #import "components/safe_browsing/core/common/safe_browsing_policy_handler.h"
@@ -148,9 +150,6 @@ constexpr auto kSimplePolicyMap = std::to_array<PolicyToPreferenceMapEntry>({
   { policy::key::kLensCameraAssistedSearchEnabled,
     prefs::kLensCameraAssistedSearchPolicyAllowed,
     base::Value::Type::BOOLEAN },
-  { policy::key::kLensOverlaySettings,
-    lens::prefs::kLensOverlaySettings,
-    base::Value::Type::INTEGER },
   { policy::key::kContextMenuPhotoSharingSettings,
     prefs::kIosSaveToPhotosContextMenuPolicySettings,
     base::Value::Type::INTEGER },
@@ -269,15 +268,31 @@ std::unique_ptr<policy::ConfigurationPolicyHandlerList> BuildPolicyHandlerList(
       gen_ai_default_policies;
   gen_ai_default_policies.emplace_back(
       policy::key::kLensOverlaySettings, lens::prefs::kLensOverlaySettings,
+      policy::key::kSearchContentSharingSettings,
       policy::GenAiDefaultSettingsPolicyHandler::PolicyValueToPrefMap(
           {{0, 0}, {1, 0}, {2, 1}}));
   gen_ai_default_policies.emplace_back(
       policy::key::kAIModeSettings, omnibox::kAIModeSettings,
       policy::GenAiDefaultSettingsPolicyHandler::PolicyValueToPrefMap(
           {{0, 0}, {1, 0}, {2, 1}}));
+  // Default value for SearchContentSharingSettings is 0 if
+  // GenAiDefaultSettings value is 0 or 1, or 1 if the latter is 2.
+  gen_ai_default_policies.emplace_back(
+      policy::key::kSearchContentSharingSettings,
+      contextual_search::kSearchContentSharingSettings,
+      policy::GenAiDefaultSettingsPolicyHandler::PolicyValueToPrefMap(
+          {{0, 0}, {1, 0}, {2, 1}}));
   handlers->AddHandler(
       std::make_unique<policy::GenAiDefaultSettingsPolicyHandler>(
           std::move(gen_ai_default_policies)));
+
+  handlers->AddHandler(std::make_unique<policy::SimpleDeprecatingPolicyHandler>(
+      std::make_unique<SimplePolicyHandler>(policy::key::kLensOverlaySettings,
+                                            lens::prefs::kLensOverlaySettings,
+                                            base::Value::Type::INTEGER),
+      std::make_unique<contextual_search::SearchContentSharingPolicyHandler>(
+          lens::prefs::kLensOverlaySettings,
+          /* convert_policy_value_to_enabled_boolean= */ false)));
 
   handlers->AddHandler(std::make_unique<policy::CloudUserOnlyPolicyHandler>(
       std::make_unique<SimplePolicyHandler>(

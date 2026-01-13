@@ -8,9 +8,10 @@ import './searchbox_icon.js';
 import './searchbox_thumbnail.js';
 import '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import '//resources/cr_components/composebox/error_scrim.js';
+import '//resources/cr_components/composebox/recent_tab_chip.js';
 import '//resources/cr_components/search/animated_glow.js';
 
-import type {ComposeboxFile, ContextualUpload, FileUpload, TabUpload} from '//resources/cr_components/composebox/common.js';
+import type {ComposeboxFile, ContextualUpload, FileUpload, TabUpload, TabUploadOrigin} from '//resources/cr_components/composebox/common.js';
 import {GlifAnimationState} from '//resources/cr_components/composebox/context_menu_entrypoint.js';
 import type {ContextualEntrypointAndCarouselElement} from '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import {ComposeboxMode} from '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
@@ -42,6 +43,7 @@ import type {SearchboxIconElement} from './searchbox_icon.js';
 const LENS_GHOST_LOADER_TAG_NAME = 'cr-searchbox-ghost-loader';
 // LINT.ThenChange(/chrome/browser/resources/lens/shared/searchbox_ghost_loader.ts:GhostLoaderTagName)
 const DESKTOP_CHROME_NTP_REALBOX_ENTRY_POINT_VALUE = '42';
+const MULTILINE_INPUT_HEIGHT_THRESHOLD = 50;
 
 // Register --placeholder-opacity as type <number> so that we can animate it.
 CSS.registerProperty({
@@ -68,7 +70,7 @@ interface AnimationDetails {
  * Responsible for cycling placeholder text animations on an HTMLInputElement.
  */
 export class PlaceholderTextCycler {
-  private input_: HTMLInputElement;
+  private input_: HTMLInputElement|HTMLTextAreaElement;
   private animation_: Animation|null = null;
   private placeholderTexts_: string[] = [];
   private placeholderTextsCurrentIndex_: number = 0;
@@ -76,7 +78,7 @@ export class PlaceholderTextCycler {
   private fadePlaceholderTextDurationMs_: number = 250;
 
   constructor(
-      animatedPlaceholderContainer: HTMLInputElement,
+      animatedPlaceholderContainer: HTMLInputElement|HTMLTextAreaElement,
       placeholderTexts: string[], changeTextAnimationIntervalMs: number,
       fadeTextAnimationDurationMs: number) {
     assert(placeholderTexts.length > 0);
@@ -165,7 +167,7 @@ interface InputUpdate {
   moveCursorToEnd?: boolean;
 }
 
-interface ComposeClickEventDetail {
+interface ClickEventDetail {
   button: number;
   ctrlKey: boolean;
   metaKey: boolean;
@@ -175,7 +177,7 @@ interface ComposeClickEventDetail {
 export interface SearchboxElement {
   $: {
     icon: SearchboxIconElement,
-    input: HTMLInputElement,
+    input: HTMLInputElement|HTMLTextAreaElement,
     inputWrapper: HTMLElement,
     matches: SearchboxDropdownElement,
     context: ContextualEntrypointAndCarouselElement,
@@ -251,6 +253,11 @@ export class SearchboxElement extends SearchboxElementBase implements
 
       /** Whether the searchbox should match the searchbox. */
       matchSearchbox: {
+        type: Boolean,
+        reflect: true,
+      },
+
+      multiLineEnabled: {
         type: Boolean,
         reflect: true,
       },
@@ -392,6 +399,7 @@ export class SearchboxElement extends SearchboxElementBase implements
         reflect: true,
       },
       tabSuggestions_: {type: Array},
+      recentTabForChip_: {type: Object},
       isDraggingFile: {
         reflect: true,
         type: Boolean,
@@ -411,6 +419,7 @@ export class SearchboxElement extends SearchboxElementBase implements
   accessor isDark: boolean = false;
   accessor matchSearchbox: boolean =
       loadTimeData.getBoolean('searchboxMatchSearchboxTheme');
+  accessor multiLineEnabled: boolean = false;
   accessor searchboxAriaDescription: string = '';
   accessor searchboxLensSearchEnabled: boolean =
       loadTimeData.getBoolean('searchboxLensSearch');
@@ -453,6 +462,7 @@ export class SearchboxElement extends SearchboxElementBase implements
   protected accessor isThumbnailDeletable_: boolean = false;
   private accessor useWebkitSearchIcons_: boolean = false;
   protected accessor tabSuggestions_: TabInfo[] = [];
+  protected accessor recentTabForChip_: TabInfo|null = null;
   protected showVoiceSearchInExpandedRealbox: boolean =
       loadTimeData.getBoolean('expandedSearchboxShowVoiceSearch') ?? false;
 
@@ -564,6 +574,15 @@ export class SearchboxElement extends SearchboxElementBase implements
         this.fire('searchbox-input-focus-changed', {value: this.inputFocused_});
       }
     }
+
+    if (changedPrivateProperties.has('tabSuggestions_')) {
+      this.recentTabForChip_ =
+          this.tabSuggestions_.find(tab => tab.showInCurrentTabChip) || null;
+      if (!this.recentTabForChip_) {
+        this.recentTabForChip_ =
+            this.tabSuggestions_.find(tab => tab.showInPreviousTabChip) || null;
+      }
+    }
   }
 
   private computeInputAriaLive_(): string {
@@ -613,14 +632,23 @@ export class SearchboxElement extends SearchboxElementBase implements
     }
 
     this.result_ = result;
-    const hasMatches = result?.matches?.length > 0;
-    const hasPrimaryMatches = result?.matches?.some(match => {
+    const hasMatches = result.matches?.length > 0;
+    const hasPrimaryMatches = result.matches?.some(match => {
       const sideType =
           result.suggestionGroupsMap[match.suggestionGroupId]?.sideType ||
           SideType.kDefaultPrimary;
       return sideType === SideType.kDefaultPrimary;
     });
+
     this.dropdownIsVisible = hasPrimaryMatches;
+    if (this.multiLineEnabled) {
+      const isUserTyping = result.input.trim().length > 0;
+      const matchNum = result.matches?.length || 0;
+
+      if (isUserTyping && (matchNum <= 1)) {
+        this.dropdownIsVisible = false;
+      }
+    }
 
     const firstMatch = hasMatches ? this.result_.matches[0] : null;
     if (firstMatch && firstMatch.allowedToBeDefaultMatch) {
@@ -695,6 +723,10 @@ export class SearchboxElement extends SearchboxElementBase implements
     this.inputFocused_ = true;
     this.pageHandler_.onFocusChanged(true);
     this.placeholderCycler_?.stop();
+  }
+
+  protected onInputFocusout_() {
+    this.inputFocused_ = false;
   }
 
   protected onInputInput_(e: InputEvent) {
@@ -787,11 +819,12 @@ export class SearchboxElement extends SearchboxElementBase implements
     }
   }
 
-  protected onInputMouseDown_(e: MouseEvent) {
+  protected onInputMouseDown_(e: MouseEvent|null) {
     // Non-main (generally left) mouse clicks are ignored.
-    if (e.button !== 0) {
+    if (e && e.button !== 0) {
       return;
     }
+    this.inputFocused_ = true;
 
     // Query autocomplete if dropdown is not visible
     if (this.dropdownIsVisible) {
@@ -808,7 +841,7 @@ export class SearchboxElement extends SearchboxElementBase implements
         e.preventDefault();
         const dataTransfer = new DataTransfer();
         files.forEach(file => dataTransfer.items.add(file));
-        this.$.context.addFiles(dataTransfer.files);
+        this.$.context.addPastedFiles(dataTransfer.files);
         return;
       }
     }
@@ -834,8 +867,6 @@ export class SearchboxElement extends SearchboxElementBase implements
         newlyFocusedEl?.tagName.toLowerCase() === LENS_GHOST_LOADER_TAG_NAME) {
       return;
     }
-
-    this.inputFocused_ = false;
 
     if (this.lastQueriedInput_ === '') {
       // Clear the input as well as the matches if the input was empty when
@@ -917,13 +948,39 @@ export class SearchboxElement extends SearchboxElementBase implements
       }
     }
 
+    if (this.composeButtonEnabled && e.key === 'Tab' &&
+        this.lastInput_.inline &&
+        this.$.input === this.shadowRoot.activeElement) {
+      if (e.shiftKey) {
+        this.updateInput_({inline: ''});
+        return;
+      }
+
+      const newText = this.lastInput_.text + this.lastInput_.inline;
+      this.updateInput_({
+        text: newText,
+        inline: '',
+        moveCursorToEnd: true,
+      });
+      this.queryAutocomplete_(newText);
+      e.preventDefault();
+      return;
+    }
+
     if (e.key === 'Backspace' || e.key === 'Tab') {
       return;
     }
 
+    const matchNum = this.result_?.matches.length || 0;
+    const isMultiline =
+        this.$.input.scrollHeight > MULTILINE_INPUT_HEIGHT_THRESHOLD;
+
     // ArrowUp/ArrowDown query autocomplete when matches are not visible.
     if (!this.dropdownIsVisible) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (isMultiline || matchNum <= 1) {
+          return;
+        }
         const inputValue = this.$.input.value;
         if (inputValue.trim() || !inputValue) {
           this.queryAutocomplete_(inputValue);
@@ -966,6 +1023,9 @@ export class SearchboxElement extends SearchboxElementBase implements
     }
 
     if (e.key === 'Enter') {
+      if (this.multiLineEnabled && e.shiftKey) {
+        return;
+      }
       const array: HTMLElement[] = [this.$.matches, this.$.input];
       if (array.includes(e.target as HTMLElement)) {
         if (this.lastQueriedInput_ !== null &&
@@ -1085,12 +1145,14 @@ export class SearchboxElement extends SearchboxElementBase implements
     url: Url,
     delayUpload: boolean,
     onContextAdded: (file: ComposeboxFile) => void,
+    origin: TabUploadOrigin,
   }>) {
     const attachment: TabUpload = {
       tabId: e.detail.id,
       url: e.detail.url,
       title: e.detail.title,
       delayUpload: e.detail.delayUpload,
+      origin: e.detail.origin,
     };
     this.openComposebox_([attachment]);
   }
@@ -1113,7 +1175,18 @@ export class SearchboxElement extends SearchboxElementBase implements
     e.detail.onPreviewFetched(previewDataUrl || '');
   }
 
-  protected onComposeButtonClick_(e: CustomEvent<ComposeClickEventDetail>) {
+  protected onContextMenuContainerClick_() {
+    if (this.inputFocused_ || this.searchboxLayoutMode === 'Compact') {
+      return;
+    }
+
+    this.focusInput();
+    this.onInputMouseDown_(null);
+  }
+
+  protected onComposeButtonClick_(e: CustomEvent<ClickEventDetail>) {
+    // TODO(crbug.com/463667769): Call submitQuery here since RealboxHandler is
+    // now a `ContextualSearchboxHandler`.
     if (!this.composeboxEnabled || this.$.input.value.trim()) {
       // Construct navigation url.
       const searchParams = new URLSearchParams();
@@ -1196,6 +1269,13 @@ export class SearchboxElement extends SearchboxElementBase implements
       return null;
     }
     return this.result_.matches[this.selectedMatchIndex_] || null;
+  }
+
+  protected computeShowRecentTabChip_(): boolean {
+    // composeboxShowRecentTabChip is unavailable in the WebUI Browser.
+    return loadTimeData.valueExists('composeboxShowRecentTabChip') &&
+        loadTimeData.getBoolean('composeboxShowRecentTabChip') &&
+        this.result_?.input.length === 0;
   }
 
   protected computePlaceholderText_(placeholderText: string): string {

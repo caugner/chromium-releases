@@ -1370,7 +1370,7 @@ Keine Geräte verbunden.</translation>
 <translation id="5556459405103347317">Neu laden</translation>
 <translation id="5558091555391176027">Hohe Sichtbarkeit bei Nearby Share aktivieren/deaktivieren</translation>
 <translation id="5558314826121965174">Kreativität</translation>
-<translation id="556042886152191864">Schaltfläche</translation>
+<translation id="556042886152191864">Button</translation>
 <translation id="5570122939431135380">Neuen Tab in neuem Inkognitofenster öffnen</translation>
 <translation id="5571066253365925590">Bluetooth aktiviert</translation>
 <translation id="5572632238877308040">Essentials</translation>
@@ -2147,7 +2147,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8098591350844501178">Streamen von Bildschirm an <ph name="RECEIVER_NAME" /> beenden</translation>
 <translation id="810637681351706236">App von Ablage loslösen</translation>
 <translation id="8113423164597455979">An: alle Apps</translation>
-<translation id="8113515504791187892">Vorlesen-Schaltfläche</translation>
+<translation id="8113515504791187892">Vorlesen-Button</translation>
 <translation id="8120151603115102514">Dein Smartphone hat keinen Sperrbildschirm. Gib zum Entsperren das Passwort ein.</translation>
 <translation id="8120249852906205273">Neu starten</translation>
 <translation id="8127095419621171197">Rechner App öffnen</translation>
@@ -2302,7 +2302,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8676770494376880701">Leistungsschwaches Ladegerät angeschlossen</translation>
 <translation id="8679158879996532670">Einstellungen für den Konzentrationsmodus anzeigen. Konzentrationsmodus ist aktiviert, noch <ph name="REMAINING_TIME" />.</translation>
 <translation id="8683506306463609433">Leistungsverfolgung ist aktiv</translation>
-<translation id="8703634754197148428">Aufnahme starten. Wenn die Aufnahme gestartet ist, kannst du Alt + Umschalttaste + L verwenden, um zur Ablage zu gehen – dort findest du die Schaltfläche zum Beenden der Aufnahme.</translation>
+<translation id="8703634754197148428">Aufnahme starten. Wenn die Aufnahme gestartet ist, kannst du Alt + Umschalttaste + L verwenden, um zur Ablage zu gehen – dort findest du den Button zum Beenden der Aufnahme.</translation>
 <translation id="8704155109538237473">Fokus auf das Bild-im-Bild-Fenster verschieben</translation>
 <translation id="870917907284186124">Spracheingabe aktivieren/deaktivieren</translation>
 <translation id="8711169534266271368">Optionen für das Dashboard für Spiele</translation>
@@ -2411,6 +2411,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="9050999376345823055">Zum Loslassen die Punkt-Taste („.“) drücken</translation>
 <translation id="906458777597946297">Fenster maximieren</translation>
 <translation id="9065203028668620118">Bearbeiten</translation>
+<translation id="9068849894565669697">Farbe auswählen</translation>
 <translation id="9071966355747967534"><ph name="FEATURE_NAME" /> ist nicht verfügbar</translation>
 <translation id="9072519059834302790">Noch <ph name="TIME_LEFT" />, bis der Akku leer ist.</translation>
 <translation id="9074432941673450836">Auf deinem <ph name="PRODUCT_NAME" /> kannst du mit Apps alle deine Aufgaben erledigen. Du findest deine Apps im Launcher. Du kannst auch auf der Tastatur die Launcher-Taste (über der linken Umschalttaste) drücken.</translation>

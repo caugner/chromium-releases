@@ -142,6 +142,7 @@ WebRequestProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
     WebRequestProxyingURLLoaderFactory* factory,
     uint64_t request_id,
     int32_t network_service_request_id,
+    int32_t client_request_id,
     int32_t view_routing_id,
     int32_t frame_routing_id,
     uint32_t options,
@@ -156,6 +157,7 @@ WebRequestProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
       original_initiator_(request.request_initiator),
       request_id_(request_id),
       network_service_request_id_(network_service_request_id),
+      client_request_id_(client_request_id),
       view_routing_id_(view_routing_id),
       frame_routing_id_(frame_routing_id),
       options_(options),
@@ -170,6 +172,9 @@ WebRequestProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
           network_service_request_id_ != 0 &&
           WebRequestEventRouter::Get(factory_->browser_context_)
               ->HasAnyExtraHeadersListener(factory_->browser_context_)),
+      has_any_security_info_listeners_(
+          WebRequestEventRouter::Get(factory_->browser_context_)
+              ->HasAnySecurityInfoListener(factory_->browser_context_)),
       navigation_response_task_runner_(navigation_response_task_runner) {
   TRACE_EVENT_WITH_FLOW1(
       "extensions",
@@ -205,7 +210,10 @@ WebRequestProxyingURLLoaderFactory::InProgressRequest::InProgressRequest(
       for_cors_preflight_(true),
       has_any_extra_headers_listeners_(
           WebRequestEventRouter::Get(factory_->browser_context_)
-              ->HasAnyExtraHeadersListener(factory_->browser_context_)) {
+              ->HasAnyExtraHeadersListener(factory_->browser_context_)),
+      has_any_security_info_listeners_(
+          WebRequestEventRouter::Get(factory_->browser_context_)
+              ->HasAnySecurityInfoListener(factory_->browser_context_)) {
   TRACE_EVENT_WITH_FLOW1(
       "extensions",
       "WebRequestProxyingURLLoaderFactory::InProgressRequest::"
@@ -278,6 +286,10 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
   // `current_request_uses_header_client_` is true but the request is not made
   // with the kURLLoadOptionUseHeaderClient option, also check
   // `has_any_extra_headers_listeners_` here. See http://crbug.com/1074282.
+  // Note that the header client is also used with has_any_security_info_client
+  // to obtain ssl_info of the connection. However, value of
+  // current_request_uses_header_client might be false, to not expose sensitive
+  // headers.
   current_request_uses_header_client_ =
       has_any_extra_headers_listeners_ &&
       factory_->url_loader_header_client_receiver_.is_bound() &&
@@ -635,6 +647,7 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::OnBeforeSendHeaders(
 void WebRequestProxyingURLLoaderFactory::InProgressRequest::OnHeadersReceived(
     const std::string& headers,
     const net::IPEndPoint& remote_endpoint,
+    const std::optional<net::SSLInfo>& ssl_info,
     OnHeadersReceivedCallback callback) {
   TRACE_EVENT_WITH_FLOW1(
       "extensions",
@@ -646,6 +659,13 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::OnHeadersReceived(
       "for_cors_preflight", for_cors_preflight_);
 
   auto parsed_headers = base::MakeRefCounted<net::HttpResponseHeaders>(headers);
+
+  if (WebRequestEventRouter::Get(factory_->browser_context_)
+          ->HasSecurityInfoListenerForRequest(factory_->browser_context_,
+                                              &info_.value())) {
+    info_->AddSslInfo(ssl_info);
+  }
+
   if (!current_request_uses_header_client_) {
     std::move(callback).Run(net::OK, std::nullopt, std::nullopt);
 
@@ -857,7 +877,7 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
     uint32_t options = options_;
     // Even if this request does not use the header client, future redirects
     // might, so we need to set the option on the loader.
-    if (has_any_extra_headers_listeners_) {
+    if (has_any_extra_headers_listeners_ || has_any_security_info_listeners_) {
       options |= network::mojom::kURLLoadOptionUseHeaderClient;
     }
     factory_->target_factory_->CreateLoaderAndStart(
@@ -1250,6 +1270,11 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
 
   WebRequestEventRouter::Get(factory_->browser_context_)
       ->OnResponseStarted(factory_->browser_context_, &info_.value(), net::OK);
+
+  // OnReceiveResponse() can be called at most once. This check is added to
+  // debug crbug.com/463388771.
+  CHECK(!has_forwarded_response_);
+  has_forwarded_response_ = true;
   target_client_->OnReceiveResponse(current_response_.Clone(),
                                     std::move(current_body_),
                                     std::move(current_cached_metadata_));
@@ -1423,15 +1448,15 @@ void WebRequestProxyingURLLoaderFactory::InProgressRequest::
                          const std::string& description) {
   if (custom_reason == network::mojom::URLLoader::kClientDisconnectReason &&
       description == blink::ThrottlingURLLoader::kFollowRedirectReason) {
-    // Save the ID here because this request will be restarted with a new
-    // URLLoader instead of continuing with FollowRedirect(). The saved ID will
-    // be retrieved in the restarted request, which will call
-    // RequestIDGenerator::Generate() with the same ID pair.
-    factory_->request_id_generator_->SaveID(
-        view_routing_id_, network_service_request_id_, request_id_);
+    // Save the mapping so the restarted `URLLoader` retrieves the same
+    // extension-visible WebRequest ID when calling
+    // `RequestIDGenerator::Generate()` with the same (`view_routing_id_`,
+    // `client_request_id_`) pair.
+    factory_->request_id_generator_->SaveID(view_routing_id_,
+                                            client_request_id_, request_id_);
 
     state_ = State::kRedirectFollowedByAnotherInProgressRequest;
-    // Deletes |this|.
+    // Deletes `this`.
     factory_->RemoveRequest(network_service_request_id_, request_id_);
   } else {
     OnNetworkError(CreateURLLoaderCompletionStatus(net::ERR_ABORTED));
@@ -1582,32 +1607,50 @@ void WebRequestProxyingURLLoaderFactory::CreateLoaderAndStart(
   DCHECK(render_process_id_ != -1 || navigation_ui_data_ ||
          IsForServiceWorkerScript() || IsForPrefetch());
 
-  // The |web_request_id| doesn't really matter. It just needs to be
+  // The `web_request_id` doesn't really matter. It just needs to be
   // unique per-BrowserContext so extensions can make sense of it.
-  // Note that |network_service_request_id_| by contrast is not
+  // Note that `network_service_request_id` by contrast is not
   // necessarily unique, so we don't use it for identity here. This
   // request ID may be the same as a previous request if the previous
   // request was redirected to a URL that required a different loader.
   const uint64_t web_request_id =
       request_id_generator_->Generate(view_routing_id_, request_id);
 
-  if (request_id) {
+  // Determine the request ID forwarded to the network service:
+  // - For requests from child processes (`render_process_id_ != -1`), generate
+  //   a unique, non-zero network service request ID. The caller-supplied ID is
+  //   untrusted and may collide across concurrent requests or be 0. A unique ID
+  //   ensures network service callbacks (e.g., auth challenges,
+  //   `TrustedHeaderClient` events) reliably route back to this proxy request.
+  // - For browser-initiated requests (`render_process_id_ == -1`, e.g., frame
+  //   navigations), forward the trusted browser-assigned ID unmodified so that
+  //   components like `LoginTabHelper` can correlate auth cancellation against
+  //   the global navigation ID.
+  const int32_t network_service_request_id =
+      (render_process_id_ != -1)
+          ? request_id_generator_->GenerateNetworkRequestId()
+          : request_id;
+
+  if (network_service_request_id) {
     // Only requests with a non-zero request ID can have their proxy
     // associated with said ID. This is necessary to support
     // correlation against any auth events received by the browser.
     // Requests with a request ID of 0 therefore do not support
-    // dispatching |WebRequest.onAuthRequired| events.
+    // dispatching `webRequest.onAuthRequired` events.
     proxies_->AssociateProxyWithRequestId(
-        this, content::GlobalRequestID(render_process_id_, request_id));
-    network_request_id_to_web_request_id_.emplace(request_id, web_request_id);
+        this, content::GlobalRequestID(render_process_id_,
+                                       network_service_request_id));
+    network_request_id_to_web_request_id_.emplace(network_service_request_id,
+                                                  web_request_id);
   }
 
   auto result = requests_.emplace(
-      web_request_id, std::make_unique<InProgressRequest>(
-                          this, web_request_id, request_id, view_routing_id_,
-                          frame_routing_id_, options, ukm_source_id_, request,
-                          traffic_annotation, std::move(loader_receiver),
-                          std::move(client), navigation_response_task_runner_));
+      web_request_id,
+      std::make_unique<InProgressRequest>(
+          this, web_request_id, network_service_request_id, request_id,
+          view_routing_id_, frame_routing_id_, options, ukm_source_id_, request,
+          traffic_annotation, std::move(loader_receiver), std::move(client),
+          navigation_response_task_runner_));
   result.first->second->Restart();
 }
 

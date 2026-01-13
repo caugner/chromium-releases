@@ -209,7 +209,9 @@ IN_PROC_BROWSER_TEST_F(ActorKeyedServiceBrowserTest,
                                                future.GetCallback());
 
   const ActorKeyedService::TabObservationResult& result = future.Get();
-  ASSERT_FALSE(result.has_value());
+  std::optional<std::string> error_message =
+      ActorKeyedService::ExtractErrorMessageIfFailed(result);
+  ASSERT_TRUE(result.has_value());
 }
 
 IN_PROC_BROWSER_TEST_F(ActorKeyedServiceBrowserTest,
@@ -226,7 +228,11 @@ IN_PROC_BROWSER_TEST_F(ActorKeyedServiceBrowserTest,
   auto add_tab_result = add_tab_future.Take();
   ASSERT_TRUE(add_tab_result);
 
-  TestFuture<std::unique_ptr<optimization_guide::proto::ActionsResult>,
+  TestFuture<base::TimeTicks /*start_time*/, mojom::ActionResultCode,
+             std::optional<size_t> /*index_of_failed_actions*/,
+             std::vector<actor::ActionResultWithLatencyInfo>, actor::TaskId,
+             bool /*skip_async_observation_information*/,
+             std::unique_ptr<optimization_guide::proto::ActionsResult>,
              std::unique_ptr<actor::AggregatedJournal::PendingAsyncEntry>>
       future;
   actor::BuildActionsResultWithObservations(
@@ -234,13 +240,43 @@ IN_PROC_BROWSER_TEST_F(ActorKeyedServiceBrowserTest,
       mojom::ActionResultCode::kOk, std::nullopt,
       std::vector<actor::ActionResultWithLatencyInfo>(), *task, true,
       future.GetCallback());
-  auto [actions_result, _] = future.Take();
+  const std::unique_ptr<optimization_guide::proto::ActionsResult>&
+      actions_result = future.Get<6>();
   ASSERT_TRUE(actions_result);
   EXPECT_EQ(actions_result->action_result(),
             static_cast<int32_t>(mojom::ActionResultCode::kOk));
   EXPECT_EQ(actions_result->tabs_size(), 1);
   EXPECT_FALSE(actions_result->tabs()[0].has_annotated_page_content());
   EXPECT_FALSE(actions_result->tabs()[0].has_screenshot());
+}
+
+IN_PROC_BROWSER_TEST_F(ActorKeyedServiceBrowserTest, StopPausedTask) {
+  TaskId task_id = actor_keyed_service()->CreateTask();
+  // Navigate the active tab to a new page.
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_https_test_server().GetURL("/actor/blank.html")));
+
+  {
+    actor::ActorTask* task = actor_keyed_service()->GetTask(task_id);
+    TestFuture<mojom::ActionResultPtr> add_tab_future;
+    task->AddTab(browser()->GetActiveTabInterface()->GetHandle(),
+                 add_tab_future.GetCallback());
+    auto add_tab_result = add_tab_future.Take();
+    ASSERT_TRUE(add_tab_result);
+
+    task->Pause(/*from_actor=*/false);
+    CHECK(!task->IsCompleted());
+  }
+  base::RunLoop run_loop;
+  auto discard = active_tab()->RegisterWillDetach(base::BindRepeating(
+      [](base::RepeatingClosure run_loop_closure, tabs::TabInterface* tab,
+         tabs::TabInterface::DetachReason reason) { run_loop_closure.Run(); },
+      run_loop.QuitClosure()));
+  active_tab()->Close();
+  run_loop.Run();
+
+  // The task should be destroyed.
+  EXPECT_FALSE(actor_keyed_service()->GetTask(task_id));
 }
 
 }  // namespace

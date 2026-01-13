@@ -5,6 +5,7 @@
 #include "chrome/browser/new_tab_page/one_google_bar/one_google_bar_loader_impl.h"
 
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -12,6 +13,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/json/json_writer.h"
+#include "base/strings/escape.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -156,7 +158,7 @@ class OneGoogleBarLoaderImpl::AuthenticatedURLLoader {
  public:
   using LoadDoneCallback =
       base::OnceCallback<void(const network::SimpleURLLoader* simple_loader,
-                              std::unique_ptr<std::string> response_body)>;
+                              std::optional<std::string> response_body)>;
 
   AuthenticatedURLLoader(
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
@@ -170,7 +172,7 @@ class OneGoogleBarLoaderImpl::AuthenticatedURLLoader {
  private:
   void SetRequestHeaders(network::ResourceRequest* request) const;
 
-  void OnURLLoaderComplete(std::unique_ptr<std::string> response_body);
+  void OnURLLoaderComplete(std::optional<std::string> response_body);
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   const GURL api_url_;
@@ -215,9 +217,6 @@ void OneGoogleBarLoaderImpl::AuthenticatedURLLoader::SetRequestHeaders(
                    signin::PROFILE_MODE_ADD_ACCOUNT_DISABLED;
   }
 
-  // TODO(crbug.com/40151268): Check whether the child account status should
-  // also be sent in the Mirror request header when loading the local version of
-  // OneGoogleBar.
   std::string chrome_connected_header_value =
       chrome_connected_header_helper.BuildRequestHeader(
           /*is_header_request=*/true, api_url_,
@@ -280,7 +279,7 @@ void OneGoogleBarLoaderImpl::AuthenticatedURLLoader::Start() {
 }
 
 void OneGoogleBarLoaderImpl::AuthenticatedURLLoader::OnURLLoaderComplete(
-    std::unique_ptr<std::string> response_body) {
+    std::optional<std::string> response_body) {
   std::move(callback_).Run(simple_loader_.get(), std::move(response_body));
 }
 
@@ -338,13 +337,16 @@ GURL OneGoogleBarLoaderImpl::GetApiUrl() const {
   }
 
   for (const auto& param_pair : additional_query_params_) {
-    // Add the "async=" parameter. We can't use net::AppendQueryParameter for
-    // this because we need the ":" to remain unescaped.
+    // Escape to neutralize injection chars (e.g., '&', '='), then restore the
+    // ':' and ',' that the backend requires to stay literal in "async".
     if (param_pair.first == "async") {
-      std::string query = api_url.GetQuery() + "&async=" + param_pair.second;
-      if (query.at(0) == '&') {
-        query = query.substr(1);
-      }
+      std::string async_value =
+          base::EscapeQueryParamValue(param_pair.second, /*use_plus*/ true);
+      base::ReplaceSubstringsAfterOffset(&async_value, 0, "%2C", ",");
+      base::ReplaceSubstringsAfterOffset(&async_value, 0, "%3A", ":");
+      std::string query = api_url.GetQuery();
+      query = query.empty() ? "async=" + async_value
+                            : query + "&async=" + async_value;
       GURL::Replacements replacements;
       replacements.SetQueryStr(query);
       api_url = api_url.ReplaceComponents(replacements);
@@ -361,7 +363,7 @@ GURL OneGoogleBarLoaderImpl::GetApiUrl() const {
 
 void OneGoogleBarLoaderImpl::LoadDone(
     const network::SimpleURLLoader* simple_loader,
-    std::unique_ptr<std::string> response_body) {
+    std::optional<std::string> response_body) {
   // The loader will be deleted when the request is handled.
   std::unique_ptr<AuthenticatedURLLoader> deleter(std::move(pending_request_));
 
@@ -373,8 +375,7 @@ void OneGoogleBarLoaderImpl::LoadDone(
     return;
   }
 
-  std::string response;
-  response.swap(*response_body);
+  std::string response = std::move(response_body).value();
 
   // The response may start with )]}'. Ignore this.
   auto remainder = base::RemovePrefix(response, kResponsePreamble);

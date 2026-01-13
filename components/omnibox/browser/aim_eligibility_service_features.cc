@@ -10,15 +10,12 @@ namespace omnibox {
 
 BASE_FEATURE(kAimEnabled, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kAimServerEligibilityEnabled, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kAimServerEligibilityEnabled, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kAimServerEligibilityCustomRetryPolicyEnabled,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kAimServerEligibilityForPrimaryAccountEnabled,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kAimServerEligibilityChangedNotification,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kAimServerRequestOnStartupEnabled,

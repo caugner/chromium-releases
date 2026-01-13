@@ -11,6 +11,7 @@ import './overlay_border_glow.js';
 import './overlay_shimmer_canvas.js';
 import '/strings.m.js';
 import '//resources/cr_elements/cr_button/cr_button.js';
+import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import '//resources/cr_elements/cr_toast/cr_toast.js';
 
 import type {CrIconButtonElement} from '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
@@ -1429,7 +1430,10 @@ export class SelectionOverlayElement extends SelectionOverlayElementBase {
   }
 
   private onNotifyResultsPanelOpened() {
-    assert(!this.sidePanelOpened);
+    // No-op if the side panel was already opened.
+    if (this.sidePanelOpened) {
+      return;
+    }
     // The close button should be showing on the selection overlay. Record this
     // as a close button impression if the side panel was not already opened.
     recordLensOverlaySelectionCloseButtonShown(INVOCATION_SOURCE);

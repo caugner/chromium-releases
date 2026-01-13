@@ -136,10 +136,6 @@ GlicUI::GlicUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
   if (allowed_origins.empty()) {
     allowed_origins = features::kGlicAllowedOriginsOverride.Get();
   }
-  if (allowed_origins.empty()) {
-    // TODO(crbug.com/396147389): Replace with the correct default.
-    allowed_origins = "https://*.google.com/";
-  }
 
   // Allow corp origins for @google accounts.
   signin::IdentityManager* identity_manager =
@@ -198,8 +194,9 @@ GlicUI::GlicUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
                      GlicEnabling::IsUnifiedFreEnabled(
                          Profile::FromBrowserContext(browser_context)));
   source->AddBoolean("shouldShowFre",
-                     !GlicEnabling::HasConsentedForProfile(
-                         Profile::FromBrowserContext(browser_context)));
+                     !GlicEnabling::IsTrustFirstOnboardingEnabled() &&
+                         !GlicEnabling::HasConsentedForProfile(
+                             Profile::FromBrowserContext(browser_context)));
   source->AddInteger("reloadMaxLoadingTimeMs",
                      features::kGlicReloadMaxLoadingTimeMs.Get());
   source->AddBoolean("caaGuestError", base::FeatureList::IsEnabled(

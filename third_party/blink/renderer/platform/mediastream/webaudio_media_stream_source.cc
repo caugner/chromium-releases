@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/task/single_thread_task_runner.h"
+#include "media/base/audio_bus.h"
 #include "media/base/audio_glitch_info.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
@@ -22,10 +23,38 @@ WebAudioMediaStreamSource::WebAudioMediaStreamSource(
           &WebAudioMediaStreamSource::DeliverRebufferedAudio,
           CrossThreadUnretained(this)))) {
   DVLOG(1) << "WebAudioMediaStreamSource::WebAudioMediaStreamSource()";
+  consumer_ = base::MakeRefCounted<AudioConsumer>(this);
 }
 
 WebAudioMediaStreamSource::~WebAudioMediaStreamSource() {
   DVLOG(1) << "WebAudioMediaStreamSource::~WebAudioMediaStreamSource()";
+  consumer_->Detach();
+}
+
+WebAudioMediaStreamSource::AudioConsumer::AudioConsumer(
+    WebAudioMediaStreamSource* owner)
+    : owner_(owner) {}
+
+void WebAudioMediaStreamSource::AudioConsumer::Detach() {
+  base::AutoLock lock(lock_);
+  owner_ = nullptr;
+}
+
+void WebAudioMediaStreamSource::AudioConsumer::SetFormat(int number_of_channels,
+                                                         float sample_rate) {
+  base::AutoLock lock(lock_);
+  if (owner_) {
+    owner_->SetFormat(number_of_channels, sample_rate);
+  }
+}
+
+void WebAudioMediaStreamSource::AudioConsumer::ConsumeAudio(
+    const Vector<const float*>& audio_data,
+    int number_of_frames) {
+  base::AutoTryLock try_lock(lock_);
+  if (try_lock.is_acquired() && owner_) {
+    owner_->ConsumeAudioInternal(audio_data, number_of_frames);
+  }
 }
 
 void WebAudioMediaStreamSource::SetFormat(int number_of_channels,
@@ -53,11 +82,11 @@ void WebAudioMediaStreamSource::SetFormat(int number_of_channels,
     wrapper_bus_ = media::AudioBus::CreateWrapper(params.channels());
 }
 
-void WebAudioMediaStreamSource::ConsumeAudio(
+void WebAudioMediaStreamSource::ConsumeAudioInternal(
     const Vector<const float*>& audio_data,
     int number_of_frames) {
   TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("mediastream"),
-               "WebAudioMediaStreamSource::ConsumeAudio", "frames",
+               "WebAudioMediaStreamSource::ConsumeAudioInternal", "frames",
                number_of_frames);
 
   //  TODO(https://crbug.com/1302080): this should use the actual audio

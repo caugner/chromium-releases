@@ -13,18 +13,20 @@ import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaym
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplIssuerContextProperties.ON_ISSUER_CLICK_ACTION;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplIssuerTosTextItemProperties.BNPL_TOS_ICON_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplIssuerTosTextItemProperties.DESCRIPTION_TEXT;
-import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressFooterProperties.APPLY_LINK_DEACTIVATED_STYLE;
-import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressFooterProperties.HIDE_OPTIONS_LINK_TEXT;
-import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressFooterProperties.ON_LINK_CLICK_CALLBACK;
-import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressFooterProperties.TERMS_TEXT_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressHeaderProperties.BNPL_BACK_BUTTON_ENABLED;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressHeaderProperties.BNPL_ON_BACK_BUTTON_CLICKED;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressTermsProperties.APPLY_LINK_DEACTIVATED_STYLE;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressTermsProperties.HIDE_OPTIONS_LINK_TEXT;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressTermsProperties.ON_LINK_CLICK_CALLBACK;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSelectionProgressTermsProperties.TERMS_TEXT_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSuggestionProperties.BNPL_ICON_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSuggestionProperties.BNPL_ITEM_COLLECTION_INFO;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSuggestionProperties.IS_ENABLED;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSuggestionProperties.ON_BNPL_CLICK_ACTION;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSuggestionProperties.PRIMARY_TEXT;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplSuggestionProperties.SECONDARY_TEXT;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplTosHeaderProperties.ISSUER_IMAGE_DRAWABLE_ID;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.BnplTosHeaderProperties.ISSUER_TITLE_STRING;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ButtonProperties.ON_CLICK_ACTION;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ButtonProperties.TEXT_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.CURRENT_SCREEN;
@@ -62,7 +64,8 @@ import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaym
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.SHEET_HALF_HEIGHT_DESCRIPTION_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.SHEET_ITEMS;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.TermsLabelProperties.TERMS_LABEL_TEXT_ID;
-import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.TosFooterProperties.LEGAL_MESSAGE;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.TosFooterProperties.LEGAL_MESSAGE_LINES;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.TosFooterProperties.LINK_OPENER;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.VISIBLE;
 
 import android.text.SpannableString;
@@ -86,7 +89,6 @@ import androidx.appcompat.content.res.AppCompatResources;
 import org.chromium.chrome.browser.autofill.AutofillUiUtils;
 import org.chromium.chrome.browser.touch_to_fill.common.FillableItemCollectionInfo;
 import org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.AllLoyaltyCardsItemProperties;
-import org.chromium.components.autofill.payments.BnplIssuerTosDetail.LegalMessages;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.text.ChromeClickableSpan;
@@ -375,6 +377,39 @@ class TouchToFillPaymentMethodViewBinder {
             sheetHeaderSubtitle.setText(view.getContext().getString(model.get(SUBTITLE_ID)));
         } else if (propertyKey == TITLE_STRING) {
             sheetHeaderTitle.setText(model.get(TITLE_STRING));
+        } else {
+            assert false : "Unhandled update to property:" + propertyKey;
+        }
+    }
+
+    /**
+     * Factory used to create a new BNPL ToS header inside the ListView inside the {@link
+     * TouchToFillPaymentMethodView}.
+     *
+     * @param parent The parent {@link ViewGroup} of the new item.
+     */
+    static View createBnplTosHeaderView(ViewGroup parent) {
+        return LayoutInflater.from(parent.getContext())
+                .inflate(R.layout.touch_to_fill_bnpl_tos_header_item, parent, false);
+    }
+
+    /**
+     * Called whenever a property in the given model changes. It updates the given view accordingly.
+     *
+     * @param model The observed {@link PropertyModel}. Its data need to be reflected in the view.
+     * @param view The {@link View} of the header to update.
+     * @param key The {@link PropertyKey} which changed.
+     */
+    static void bindBnplTosHeaderView(PropertyModel model, View view, PropertyKey propertyKey) {
+        ImageView sheetHeaderImage = view.findViewById(R.id.bnpl_tos_branding_icon);
+        TextView sheetHeaderTitle = view.findViewById(R.id.bnpl_tos_title);
+
+        if (propertyKey == ISSUER_IMAGE_DRAWABLE_ID) {
+            sheetHeaderImage.setImageDrawable(
+                    AppCompatResources.getDrawable(
+                            view.getContext(), model.get(ISSUER_IMAGE_DRAWABLE_ID)));
+        } else if (propertyKey == ISSUER_TITLE_STRING) {
+            sheetHeaderTitle.setText(model.get(ISSUER_TITLE_STRING));
         } else {
             assert false : "Unhandled update to property:" + propertyKey;
         }
@@ -736,16 +771,15 @@ class TouchToFillPaymentMethodViewBinder {
      * @param key The {@link PropertyKey} which changed.
      */
     static void bindLegalMessageItemView(PropertyModel model, View view, PropertyKey propertyKey) {
-        if (propertyKey == LEGAL_MESSAGE) {
+        if (propertyKey == LEGAL_MESSAGE_LINES || propertyKey == LINK_OPENER) {
             TextView textView = view.findViewById(R.id.legal_message);
-            LegalMessages legalMessages = model.get(LEGAL_MESSAGE);
             textView.setText(
                     AutofillUiUtils.getSpannableStringForLegalMessageLines(
                             textView.getContext(),
-                            legalMessages.mLines,
+                            model.get(LEGAL_MESSAGE_LINES),
                             /* underlineLinks= */ false,
                             (String url) -> {
-                                legalMessages.mLinkOpener.accept(url);
+                                model.get(LINK_OPENER).accept(url);
                             }));
             textView.setMovementMethod(LinkMovementMethod.getInstance());
         } else {
@@ -754,15 +788,15 @@ class TouchToFillPaymentMethodViewBinder {
     }
 
     /**
-     * Factory used to create a new BNPL footer for selection and progress screens inside the
+     * Factory used to create a new BNPL terms for selection and progress screens inside the
      * ListView inside the {@link TouchToFillPaymentMethodView}.
      *
      * @param parent The parent {@link ViewGroup} of the new item.
      */
-    static View createBnplSelectionProgressFooterItemView(ViewGroup parent) {
+    static View createBnplSelectionProgressTermsItemView(ViewGroup parent) {
         return LayoutInflater.from(parent.getContext())
                 .inflate(
-                        R.layout.touch_to_fill_bnpl_selection_and_progress_screen_footer_item,
+                        R.layout.touch_to_fill_bnpl_selection_and_progress_screen_terms_item,
                         parent,
                         false);
     }
@@ -774,7 +808,7 @@ class TouchToFillPaymentMethodViewBinder {
      * @param view The {@link View} of the header to update.
      * @param key The {@link PropertyKey} which changed.
      */
-    static void bindBnplSelectionProgressFooterView(
+    static void bindBnplSelectionProgressTermsView(
             PropertyModel model, View view, PropertyKey propertyKey) {
         if (propertyKey == TERMS_TEXT_ID) {
             TextView termsLabelTextView = view.findViewById(R.id.bnpl_terms_label);
@@ -782,14 +816,17 @@ class TouchToFillPaymentMethodViewBinder {
         } else if (propertyKey == HIDE_OPTIONS_LINK_TEXT
                 || propertyKey == ON_LINK_CLICK_CALLBACK
                 || propertyKey == APPLY_LINK_DEACTIVATED_STYLE) {
-            buildFooterSpannable(model, view);
+            buildOpenPaymentSettingsSpannable(model, view);
         } else {
             assert false : "Unhandled update to property:" + propertyKey;
         }
     }
 
-    /** Builds the entire SpannableString for the footer from the properties in the model. */
-    private static void buildFooterSpannable(PropertyModel model, View view) {
+    /**
+     * Builds the entire SpannableString for the open payment settings label part of the terms from
+     * the properties in the model.
+     */
+    private static void buildOpenPaymentSettingsSpannable(PropertyModel model, View view) {
         ClickableSpan span;
         if (model.get(APPLY_LINK_DEACTIVATED_STYLE)) {
             // For the disabled state, create a custom span 38% opacity for the link text.
@@ -824,7 +861,7 @@ class TouchToFillPaymentMethodViewBinder {
             span = new ChromeClickableSpan(view.getContext(), model.get(ON_LINK_CLICK_CALLBACK));
         }
         String rawFooterText = model.get(HIDE_OPTIONS_LINK_TEXT);
-        TextView footer = view.findViewById(R.id.bnpl_footer_label);
+        TextView footer = view.findViewById(R.id.bnpl_open_payment_settings_label);
         SpannableString spannableFooter =
                 SpanApplier.applySpans(
                         rawFooterText, new SpanApplier.SpanInfo("<link>", "</link>", span));

@@ -7,9 +7,12 @@
 #include <memory>
 #include <utility>
 
+#include "base/feature_list.h"
+#include "base/memory/weak_ptr.h"
 #include "components/performance_manager/graph/page_node_impl.h"
 #include "components/performance_manager/test_support/graph_test_harness.h"
 #include "components/performance_manager/test_support/mock_graphs.h"
+#include "content/public/common/content_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace performance_manager {
@@ -62,6 +65,8 @@ TEST_F(TabPageDecoratorTest, TestBecomesTabAndRemoval) {
       .Times(1);
 
   EXPECT_EQ(TabPageDecorator::FromPageNode(mock_graph.page.get()), nullptr);
+  EXPECT_EQ(TabPageDecorator::WeakHandleFromPageNode(mock_graph.page.get()),
+            nullptr);
 
   mock_graph.page->SetType(PageType::kTab);
 
@@ -70,8 +75,13 @@ TEST_F(TabPageDecoratorTest, TestBecomesTabAndRemoval) {
   EXPECT_NE(handle, nullptr);
   EXPECT_EQ(handle->page_node(), mock_graph.page.get());
 
+  base::WeakPtr<TabPageDecorator::TabHandle> weak_handle =
+      TabPageDecorator::WeakHandleFromPageNode(mock_graph.page.get());
+  EXPECT_EQ(weak_handle.get(), handle);
+
   mock_graph.frame.reset();
   mock_graph.page.reset();
+  EXPECT_FALSE(weak_handle);
 }
 
 TEST_F(TabPageDecoratorTest, TestDiscarding) {
@@ -86,6 +96,8 @@ TEST_F(TabPageDecoratorTest, TestDiscarding) {
       .Times(1);
 
   EXPECT_EQ(TabPageDecorator::FromPageNode(mock_graph.page.get()), nullptr);
+  EXPECT_EQ(TabPageDecorator::WeakHandleFromPageNode(mock_graph.page.get()),
+            nullptr);
 
   mock_graph.page->SetType(PageType::kTab);
 
@@ -94,19 +106,41 @@ TEST_F(TabPageDecoratorTest, TestDiscarding) {
   EXPECT_NE(handle, nullptr);
   EXPECT_EQ(handle->page_node(), mock_graph.page.get());
 
+  base::WeakPtr<TabPageDecorator::TabHandle> weak_handle =
+      TabPageDecorator::WeakHandleFromPageNode(mock_graph.page.get());
+  EXPECT_EQ(weak_handle.get(), handle);
+
   auto new_page_node = TestNodeWrapper<PageNodeImpl>::Create(graph());
-  EXPECT_CALL(*observer_, OnTabAboutToBeDiscarded(
-                              mock_graph.page.get(),
-                              Truly(TabHandleMatches(new_page_node.get()))))
-      .Times(1);
+  // When kWebContentsDiscard is enabled, the page node is not replaced.
+  auto& page_node_after_discard =
+      base::FeatureList::IsEnabled(::features::kWebContentsDiscard)
+          ? mock_graph.page
+          : new_page_node;
+
   EXPECT_CALL(*observer_,
-              OnBeforeTabRemoved(Truly(TabHandleMatches(new_page_node.get()))))
+              OnTabAboutToBeDiscarded(
+                  mock_graph.page.get(),
+                  Truly(TabHandleMatches(page_node_after_discard.get()))))
+      .Times(1);
+  EXPECT_CALL(*observer_, OnBeforeTabRemoved(Truly(
+                              TabHandleMatches(page_node_after_discard.get()))))
       .Times(1);
 
-  mock_graph.page->OnAboutToBeDiscarded(new_page_node->GetWeakPtr());
+  mock_graph.page->OnAboutToBeDiscarded(page_node_after_discard->GetWeakPtr());
+
+  // WeakPtr should not be reset during discard.
+  EXPECT_TRUE(weak_handle);
 
   mock_graph.frame.reset();
   mock_graph.page.reset();
+  if (base::FeatureList::IsEnabled(::features::kWebContentsDiscard)) {
+    // PageNode doesn't change during discard so WeakPtr is reset now.
+    EXPECT_FALSE(weak_handle);
+  } else {
+    EXPECT_TRUE(weak_handle);
+    new_page_node.reset();
+    EXPECT_FALSE(weak_handle);
+  }
 }
 
 }  // namespace performance_manager

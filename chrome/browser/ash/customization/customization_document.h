@@ -63,6 +63,10 @@ class CustomizationDocument {
   // Return true if the document was successfully fetched and parsed.
   bool IsReady() const { return root_.get(); }
 
+  void set_root_for_test(std::unique_ptr<base::DictValue> root) {
+    root_ = std::move(root);
+  }
+
  protected:
   explicit CustomizationDocument(const std::string& accepted_version);
 
@@ -233,7 +237,7 @@ class ServicesCustomizationDocument : public CustomizationDocument {
   // Overriden from CustomizationDocument:
   bool LoadManifestFromString(const std::string& manifest) override;
 
-  void OnSimpleLoaderComplete(std::unique_ptr<std::string> response_body);
+  void OnSimpleLoaderComplete(std::optional<std::string> response_body);
 
   // Initiate file fetching. Wait for online status.
   void StartFileFetch();

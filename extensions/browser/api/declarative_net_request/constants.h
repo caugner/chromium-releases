@@ -10,7 +10,6 @@
 #include <string_view>
 
 #include "base/containers/fixed_flat_map.h"
-#include "base/feature_list.h"
 #include "extensions/common/api/declarative_net_request/constants.h"
 
 namespace extensions::declarative_net_request {
@@ -115,10 +114,11 @@ enum class UpdateDynamicRulesStatus {
   kErrorWriteJson = 17,
   kErrorWriteFlatbuffer = 18,
   kErrorUnsafeRuleCountExceeded = 19,
+  kErrorCreateMatcher_RulesetFileSizeLimitExceeded = 20,
 
   // Magic constant used by histograms code. Should be equal to the largest enum
   // value.
-  kMaxValue = kErrorUnsafeRuleCountExceeded,
+  kMaxValue = kErrorCreateMatcher_RulesetFileSizeLimitExceeded,
 };
 
 // Describes the result of loading a single JSON Ruleset.
@@ -149,9 +149,12 @@ enum class LoadRulesetResult {
   // prefs.
   kErrorChecksumNotFound = 5,
 
+  // Ruleset loading failed because the indexed file exceeded the size limit.
+  kErrorRulesetFileSizeLimitExceeded = 6,
+
   // Magic constant used by histograms code. Should be equal to the largest enum
   // value.
-  kMaxValue = kErrorChecksumNotFound,
+  kMaxValue = kErrorRulesetFileSizeLimitExceeded,
 };
 
 // Specifies whether and how extensions require host permissions to modify the

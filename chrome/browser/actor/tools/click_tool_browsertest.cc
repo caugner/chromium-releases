@@ -7,18 +7,29 @@
 #include <tuple>
 
 #include "base/strings/strcat.h"
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
+#include "base/test/test_timeouts.h"
+#include "chrome/browser/actor/actor_features.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/tools/tool_request.h"
 #include "chrome/browser/actor/tools/tools_test_util.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/actor.mojom.h"
 #include "chrome/common/chrome_features.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/download_test_observer.h"
+#include "pdf/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/point_conversions.h"
+
+#if BUILDFLAG(ENABLE_PDF)
+#include "components/pdf/browser/pdf_document_helper.h"
+#include "pdf/pdf_features.h"
+#endif  // BUILDFLAG(ENABLE_PDF)
 
 using base::test::TestFuture;
 using content::ChildFrameAt;
@@ -31,6 +42,62 @@ using content::RenderFrameHost;
 namespace actor {
 
 namespace {
+
+#if BUILDFLAG(ENABLE_PDF) && !BUILDFLAG(IS_CHROMEOS)
+void CheckForConditionAndWaitMoreIfNeeded(
+    base::RepeatingCallback<bool()> condition,
+    base::OnceClosure quit_closure) {
+  if (condition.Run()) {
+    std::move(quit_closure).Run();
+    return;
+  }
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&CheckForConditionAndWaitMoreIfNeeded,
+                     std::move(condition), std::move(quit_closure)),
+      TestTimeouts::tiny_timeout());
+}
+
+// Wait until |condition| returns true.
+void WaitForCondition(base::RepeatingCallback<bool()> condition,
+                      const std::string& description) {
+  base::RunLoop run_loop;
+  CheckForConditionAndWaitMoreIfNeeded(condition, run_loop.QuitClosure());
+  run_loop.Run();
+
+  ASSERT_TRUE(condition.Run())
+      << "Timeout waiting for condition: " << description;
+}
+#endif
+
+// This observer detects when WebContents receives notification of a user
+// gesture having occurred, following a user input event targeted to
+// a RenderWidgetHost under that WebContents.
+class UserInteractionObserver : public content::WebContentsObserver {
+ public:
+  explicit UserInteractionObserver(content::WebContents* web_contents)
+      : WebContentsObserver(web_contents) {}
+
+  UserInteractionObserver(const UserInteractionObserver&) = delete;
+  UserInteractionObserver& operator=(const UserInteractionObserver&) = delete;
+
+  ~UserInteractionObserver() override {}
+
+  // Retrieve the flag. There is no need to wait on a loop since
+  // DidGetUserInteraction() should be called synchronously with the input
+  // event processing in the browser process.
+  bool WasUserInteractionReceived() { return user_interaction_received_; }
+
+  void Reset() { user_interaction_received_ = false; }
+
+ private:
+  // WebContentsObserver
+  void DidGetUserInteraction(const blink::WebInputEvent& event) override {
+    user_interaction_received_ = true;
+  }
+
+  bool user_interaction_received_ = false;
+};
 
 class ActorClickToolBrowserTest : public ActorToolsTest,
                                   public ::testing::WithParamInterface<
@@ -403,6 +470,25 @@ IN_PROC_BROWSER_TEST_P(ActorClickToolBrowserTest, ClickTool_Delay) {
   EXPECT_GE(delta, features::kGlicActorClickDelay.Get());
 }
 
+IN_PROC_BROWSER_TEST_P(ActorClickToolBrowserTest, UserInteractionTriggered) {
+  const GURL start_url =
+      embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), start_url));
+
+  UserInteractionObserver observer(web_contents());
+
+  std::unique_ptr<ToolRequest> action =
+      MakeClickRequest(*active_tab(), gfx::Point(1, 1));
+
+  ASSERT_FALSE(observer.WasUserInteractionReceived());
+
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(action), result.GetCallback());
+  ExpectOkResult(result);
+
+  ASSERT_TRUE(observer.WasUserInteractionReceived());
+}
+
 INSTANTIATE_TEST_SUITE_P(
     ,
     ActorClickToolBrowserTest,
@@ -457,6 +543,87 @@ IN_PROC_BROWSER_TEST_F(ActorClickToolScaledBrowserTest,
     ASSERT_TRUE(ExecJs(web_contents(), "clicked_button = ''"));
   }
 }
+
+#if BUILDFLAG(ENABLE_PDF) && !BUILDFLAG(IS_CHROMEOS)
+
+class ActorClickToolPDFBrowserTest
+    : public ActorToolsTest,
+      public ::testing::WithParamInterface<bool> {
+ public:
+  ActorClickToolPDFBrowserTest() {
+    if (BypaassTOUValidationForGuestView()) {
+      feature_list_.InitWithFeatures({kActorBypassTOUValidationForGuestView},
+                                     {chrome_pdf::features::kPdfOopif});
+    } else {
+      feature_list_.InitWithFeatures({},
+                                     {chrome_pdf::features::kPdfOopif,
+                                      kActorBypassTOUValidationForGuestView});
+    }
+  }
+
+  ~ActorClickToolPDFBrowserTest() override = default;
+
+  bool BypaassTOUValidationForGuestView() { return GetParam(); }
+
+  void SetUpOnMainThread() override {
+    ActorToolsTest::SetUpOnMainThread();
+    ASSERT_TRUE(embedded_test_server()->Start());
+    ASSERT_TRUE(embedded_https_test_server().Start());
+  }
+
+  static std::string DescribeParams(
+      const testing::TestParamInfo<ParamType>& info) {
+    return info.param ? "BypassGuestViewTOU" : "CheckGuestViewTOU";
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+// Ensure clicks can rotate on a PDF.
+IN_PROC_BROWSER_TEST_P(ActorClickToolPDFBrowserTest, Click) {
+  const GURL url = embedded_test_server()->GetURL("/pdf/test.pdf");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  WaitForCondition(
+      base::BindLambdaForTesting([this]() {
+        auto* pdf_helper =
+            pdf::PDFDocumentHelper::MaybeGetForWebContents(web_contents());
+        if (!pdf_helper) {
+          return false;
+        }
+        return pdf_helper->IsDocumentLoadComplete();
+      }),
+      "PDF Loaded");
+
+  while (true) {
+    GetPageApc();
+    std::unique_ptr<ToolRequest> action =
+        MakeClickRequest(*active_tab(), gfx::Point(650, 25));
+    ActResultFuture future;
+    actor_task().Act(ToRequestList(action), future.GetCallback());
+    if (BypaassTOUValidationForGuestView()) {
+      // This should always pass the first time.
+      ExpectOkResult(future);
+      break;
+    } else {
+      // Sometimes it might be allowed, but it will fail eventually. Keep
+      // looping until we fail.
+      const auto& result = *(future.Get<0>());
+      if (result.code ==
+          mojom::ActionResultCode::kFrameLocationChangedSinceObservation) {
+        break;
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         ActorClickToolPDFBrowserTest,
+                         ::testing::Bool(),
+                         &ActorClickToolPDFBrowserTest::DescribeParams);
+
+#endif  // BUILDFLAG(ENABLE_PDF) && !BUILDFLAG(IS_CHROMEOS)
 
 }  // namespace
 }  // namespace actor

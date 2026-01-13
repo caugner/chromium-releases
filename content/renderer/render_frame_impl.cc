@@ -73,6 +73,7 @@
 #include "content/common/navigation_params_utils.h"
 #include "content/common/renderer_host.mojom.h"
 #include "content/common/web_package/signed_exchange_utils.h"
+#include "content/common/web_ui_loading_util.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_features.h"
@@ -936,9 +937,6 @@ blink::WebNavigationTimings BuildNavigationTimings(
   renderer_navigation_timings.parent_resource_timing_access =
       browser_navigation_timings.parent_resource_timing_access;
 
-  renderer_navigation_timings.system_entropy_at_navigation_start =
-      browser_navigation_timings.system_entropy_at_navigation_start;
-
   return renderer_navigation_timings;
 }
 
@@ -1075,10 +1073,6 @@ void FillMiscNavigationParams(
   navigation_params->content_settings =
       std::move(commit_params.content_settings);
 
-  if (commit_params.cookie_deprecation_label.has_value()) {
-    navigation_params->cookie_deprecation_label =
-        WebString::FromASCII(*commit_params.cookie_deprecation_label);
-  }
   navigation_params->initial_permission_statuses =
       std::move(commit_params.initial_permission_statuses);
 
@@ -1249,6 +1243,41 @@ void InitializeFrameWidgetForFrame(
   // renderer, and that update comes as part of the CreateFrame message.
   // TODO(crbug.com/40387047): This could become part of WebFrameWidget Init.
   web_frame_widget->ApplyVisualProperties(widget_params->visual_properties);
+}
+
+mojo::ScopedDataPipeConsumerHandle FillResponseForInitialWebUI(
+    const GURL& url,
+    const url::Origin& origin,
+    const blink::mojom::LocalResourceLoaderConfigPtr&
+        local_resource_loader_config,
+    network::mojom::URLResponseHeadPtr* response_head,
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote) {
+  // Read the response body locally within the renderer, and make the
+  // `response_body` pipe point to the result.
+  CHECK(local_resource_loader_config->sources.contains(origin));
+  const blink::mojom::LocalResourceSourcePtr& source =
+      local_resource_loader_config->sources[origin];
+  const std::map<std::string, std::string> replacement_strings(
+      source->replacement_strings.begin(), source->replacement_strings.end());
+
+  auto [response_body, output_size] =
+      webui::GetPipe(LocalResourceURLLoaderFactory::GetResource(
+                         url, source, replacement_strings, "text/html"),
+                     /*requested_range=*/std::nullopt);
+
+  // Update the content length, and send the completion signal with the
+  // correct length. Note that we don't need to call `OnReceiveResponse()`
+  // here, since `NavigationBodyLoader` doesn't need it, and just reads from
+  // the `response_body` pipe directly.
+  (*response_head)->content_length = output_size;
+  mojo::Remote<network::mojom::URLLoaderClient> client(
+      std::move(client_remote));
+  network::URLLoaderCompletionStatus status(net::OK);
+  status.encoded_data_length = output_size;
+  status.encoded_body_length = output_size;
+  status.decoded_body_length = output_size;
+  client->OnComplete(status);
+  return std::move(response_body);
 }
 
 }  // namespace
@@ -2555,6 +2584,15 @@ void RenderFrameImpl::CommitNavigation(
     mojom::CookieManagerInfoPtr cookie_manager_info,
     mojom::StorageInfoPtr storage_info,
     mojom::NavigationClient::CommitNavigationCallback commit_callback) {
+  if (commit_params->is_initial_webui) {
+    // Immediately mark the RenderFrame with its is-initial-WebUI-ness.
+    is_initial_webui_ = true;
+  } else {
+    // Once an initial WebUI is committed in a RenderFrame, it shouldn't be able
+    // to be used to commit non-initial WebUIs.
+    CHECK(!is_initial_webui_);
+  }
+
   RendererNavigationMetricsManager::Instance().MarkCommitStart(
       commit_params->navigation_metrics_token);
   if (!response_head->client_side_content_decoding_types.empty()) {
@@ -2623,8 +2661,11 @@ void RenderFrameImpl::CommitNavigation(
   AssertNavigationCommits assert_navigation_commits(
       this, kMayReplaceInitialEmptyDocument);
 
+  base::ElapsedTimer elapsed_timer;
   SetOldPageLifecycleStateFromNewPageCommitIfNeeded(
       commit_params->old_page_info.get(), common_params->url);
+  base::TimeDelta total_lifecycle_events_processing_time_on_commit =
+      elapsed_timer.Elapsed();
 
   bool was_initiated_in_this_frame =
       navigation_client_impl_ &&
@@ -2655,9 +2696,29 @@ void RenderFrameImpl::CommitNavigation(
       ToWebPolicyContainer(std::move(policy_container));
   navigation_params->view_transition_state =
       std::move(commit_params->view_transition_state);
+  navigation_params->navigation_timings
+      .total_lifecycle_events_processing_time_on_commit =
+      total_lifecycle_events_processing_time_on_commit;
 
   if (frame_->IsOutermostMainFrame() && permissions_policy) {
     navigation_params->permissions_policy_override = permissions_policy;
+  }
+
+  if (IsForInitialWebUI() && base::FeatureList::IsEnabled(
+                                 features::kInitialWebUISyncNavStartToCommit)) {
+    CHECK(subresource_loader_factories);
+    CHECK(subresource_loader_factories->local_resource_loader_config());
+    // Initial WebUI navigations loads the response body locally within the
+    // renderer instead of reading from the pipe from the browser. Set up the
+    // pipes here. Note that for navigation body loading, we don't actually
+    // expect any calls to the `URLLoader` interface, so just put a null Remote.
+    mojo::PendingRemote<network::mojom::URLLoaderClient> client_remote;
+    url_loader_client_endpoints = network::mojom::URLLoaderClientEndpoints::New(
+        mojo::NullRemote(), client_remote.InitWithNewPipeAndPassReceiver());
+    response_body = FillResponseForInitialWebUI(
+        common_params->url, commit_params->origin_to_commit,
+        subresource_loader_factories->local_resource_loader_config(),
+        &response_head, std::move(client_remote));
   }
 
   auto commit_with_params = base::BindOnce(
@@ -4097,7 +4158,8 @@ void RenderFrameImpl::DidFinishSameDocumentNavigation(
     blink::mojom::SameDocumentNavigationType same_document_navigation_type,
     bool is_client_redirect,
     const std::optional<blink::SameDocNavigationScreenshotDestinationToken>&
-        screenshot_destination) {
+        screenshot_destination,
+    base::UnguessableToken same_document_metrics_token) {
   TRACE_EVENT1("navigation,rail",
                "RenderFrameImpl::didFinishSameDocumentNavigation",
                "frame_token", frame_token_);
@@ -4126,6 +4188,8 @@ void RenderFrameImpl::DidFinishSameDocumentNavigation(
       document_loader->ReplacesCurrentHistoryItem();
   same_document_params->navigation_entry_screenshot_destination =
       screenshot_destination;
+  same_document_params->same_document_metrics_token =
+      same_document_metrics_token;
 
   DidCommitNavigationInternal(
       commit_type, transition, navigation_state.get(),
@@ -5658,22 +5722,6 @@ void RenderFrameImpl::SynchronouslyCommitAboutBlankForBug778318(
         initiator->ToWebLocalFrame()->GetDocument().Url().GetString();
   }
 
-  // To prevent pages from being able to abuse window.open() to determine the
-  // system entropy, always set a fixed value of 'normal', for consistency with
-  // other top-level navigations.
-  if (IsMainFrame()) {
-    navigation_params->navigation_timings.system_entropy_at_navigation_start =
-        blink::mojom::SystemEntropy::kNormal;
-  } else {
-    // Sub frames always have an empty entropy state since they are generally
-    // renderer-initiated. See
-    // https://docs.google.com/document/d/1D6DqptsCEd3wPRsZ0q1iwVBAXXmhxZuLV-KKFI0ptCg/edit?usp=sharing
-    // for background.
-    DCHECK_EQ(blink::mojom::SystemEntropy::kEmpty,
-              navigation_params->navigation_timings
-                  .system_entropy_at_navigation_start);
-  }
-
   frame_->CommitNavigation(std::move(navigation_params), BuildDocumentState());
 }
 
@@ -6880,8 +6928,6 @@ WebView* RenderFrameImpl::CreateNewWindow(
       << "Session storage namespace must be populated.";
   view_params->hidden = is_background_tab;
   view_params->never_composited = never_composited;
-  view_params->partitioned_popin_params =
-      std::move(reply->partitioned_popin_params);
 
   WebView* web_view = agent_scheduling_group_->CreateWebView(
       std::move(view_params),
@@ -6922,14 +6968,7 @@ RenderFrameImpl::CreateScopedClientNavigationThrottler() {
 }
 
 bool RenderFrameImpl::IsForInitialWebUI() const {
-#if !BUILDFLAG(IS_ANDROID)
-  static const bool is_for_initial_webui =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kRendererForInitialWebUI);
-  return is_for_initial_webui;
-#else
-  return false;
-#endif  // !BUILDFLAG(IS_ANDROID)
+  return is_initial_webui_;
 }
 
 void RenderFrameImpl::ResetMembersUsedForDurationOfCommit() {

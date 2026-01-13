@@ -10,6 +10,7 @@
 #include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/notimplemented.h"
+#include "base/strings/string_util.h"
 #include "ui/base/glib/glib_cast.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/events/event_utils.h"
@@ -39,12 +40,12 @@ GdkWindow* GtkUiPlatformWayland::GetGdkWindow(
   return nullptr;
 }
 
-bool GtkUiPlatformWayland::SetGtkWidgetTransientFor(
+void GtkUiPlatformWayland::SetGtkWidgetTransientFor(
     GtkWidget* widget,
     gfx::AcceleratedWidget parent) {
-  return ui::LinuxUiDelegate::GetInstance()->ExportWindowHandle(
+  ui::LinuxUiDelegate::GetInstance()->ExportWindowHandle(
       parent, base::BindOnce(&GtkUiPlatformWayland::OnHandleSetTransient,
-                             weak_factory_.GetWeakPtr(), widget));
+                             weak_factory_.GetWeakPtr(), WrapGObject(widget)));
 }
 
 void GtkUiPlatformWayland::ClearTransientFor(gfx::AcceleratedWidget parent) {
@@ -57,9 +58,15 @@ void GtkUiPlatformWayland::ShowGtkWindow(GtkWindow* window) {
   gtk_window_present(window);
 }
 
-void GtkUiPlatformWayland::OnHandleSetTransient(GtkWidget* widget,
-                                                const std::string& handle) {
-  char* parent = const_cast<char*>(handle.c_str());
+void GtkUiPlatformWayland::OnHandleSetTransient(
+    ScopedGObject<GtkWidget> widget_ref,
+    std::string handle) {
+  GtkWidget* widget = widget_ref.get();
+  auto handle_no_prefix = base::RemovePrefix(handle, "wayland:");
+  if (!handle_no_prefix || handle_no_prefix->empty()) {
+    return;
+  }
+  char* parent = const_cast<char*>(handle_no_prefix->data());
   if (gtk::GtkCheckVersion(4)) {
     auto* toplevel = GlibCast<GdkToplevel>(
         gtk_native_get_surface(gtk_widget_get_native(widget)),

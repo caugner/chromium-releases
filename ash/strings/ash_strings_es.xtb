@@ -999,7 +999,7 @@ Algunas funciones están limitadas para aumentar la duración de la batería.</t
 <translation id="4356872429719185452">Muestra detalles del punto de acceso. El punto de acceso se está activando.</translation>
 <translation id="4364101114148522660"><ph name="DURATION" />  Grabando</translation>
 <translation id="4368227575116094370">Crear hoja de cálculo de Google</translation>
-<translation id="4371348193907997655">Configuración de envío</translation>
+<translation id="4371348193907997655">Ajustes de Cast</translation>
 <translation id="4371834685492830207">El PIN solo puede contener caracteres válidos</translation>
 <translation id="4375482231364171368">Buscar en la barra de direcciones</translation>
 <translation id="4378479437904450384"><ph name="WIRELESS_PROVIDER" />; intensidad de la señal: <ph name="SIGNAL_STRENGTH" /> %</translation>
@@ -2412,6 +2412,7 @@ Para apagarlo, mantén pulsado de nuevo el botón de encendido del dispositivo.<
 <translation id="9050999376345823055">Pulsa "." para soltar</translation>
 <translation id="906458777597946297">Maximizar ventana</translation>
 <translation id="9065203028668620118">Editar</translation>
+<translation id="9068849894565669697">Seleccionar color</translation>
 <translation id="9071966355747967534"><ph name="FEATURE_NAME" /> no está disponible</translation>
 <translation id="9072519059834302790">Tiempo restante para que se agote la batería: <ph name="TIME_LEFT" />.</translation>
 <translation id="9074432941673450836">Usa aplicaciones para hacer todo lo que quieras en tu <ph name="PRODUCT_NAME" />. Puedes encontrar tus aplicaciones en el menú de aplicaciones. También puedes pulsar la tecla del menú de aplicaciones (situada encima de la tecla Mayús de la izquierda) del teclado.</translation>

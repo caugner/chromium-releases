@@ -123,7 +123,7 @@ bool HasBrotliHeader(std::string_view data) {
                 "Magic number should be 2 bytes long");
   return data.size() >= ResourceBundle::kBrotliHeaderSize &&
          data_bytes[0] == ResourceBundle::kBrotliConst[0] &&
-         (data_bytes.subspan(1u)[0]) == ResourceBundle::kBrotliConst[1];
+         data_bytes[1] == ResourceBundle::kBrotliConst[1];
 }
 
 // Returns the uncompressed size of Brotli compressed |input| from header.
@@ -137,8 +137,7 @@ size_t GetBrotliDecompressSize(std::string_view input) {
   size_t bytes_size = ResourceBundle::kBrotliHeaderSize -
                       std::size(ResourceBundle::kBrotliConst);
   for (size_t i = 0; i < bytes_size; i++) {
-    uncompress_size |= static_cast<uint64_t>((raw_input.subspan(i)[0]))
-                       << (i * 8);
+    uncompress_size |= static_cast<uint64_t>(raw_input[i]) << (i * 8);
   }
   return static_cast<size_t>(uncompress_size);
 }
@@ -168,8 +167,7 @@ bool BrotliDecompress(std::string_view input, OutputBufferType output) {
   raw_input = raw_input.subspan(ResourceBundle::kBrotliHeaderSize);
 
   return BrotliDecoderDecompress(
-             input.size() - ResourceBundle::kBrotliHeaderSize, raw_input.data(),
-             &decompress_size,
+             raw_input.size(), raw_input.data(), &decompress_size,
              GetBufferForWriting(output, decompress_size).data()) ==
          BROTLI_DECODER_RESULT_SUCCESS;
 }
@@ -731,6 +729,7 @@ bool ResourceBundle::HasDataResource(int resource_id) const {
   if (delegate_ && delegate_->HasDataResource(resource_id)) {
     return true;
   }
+  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& resource_handle : resource_handles_) {
     if (resource_handle->HasResource(static_cast<uint16_t>(resource_id))) {
       return true;
@@ -793,6 +792,8 @@ std::string_view ResourceBundle::GetRawDataResourceForScale(
       return data;
     }
   }
+
+  base::AutoLock lock_scope(*resource_handles_lock_);
 
   if (scale_factor != ui::k100Percent) {
     for (const auto& resource_handle : resource_handles_) {
@@ -1015,6 +1016,7 @@ void ResourceBundle::CheckCanOverrideStringResources() {
 ResourceBundle::ResourceBundle(Delegate* delegate)
     : delegate_(delegate),
       locale_resources_data_lock_(new base::Lock),
+      resource_handles_lock_(new base::Lock),
       max_scale_factor_(k100Percent) {
   mangle_localized_strings_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kMangleLocalizedStrings);
@@ -1106,6 +1108,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
 
 void ResourceBundle::AddResourceHandle(
     std::unique_ptr<ResourceHandle> resource_handle) {
+  base::AutoLock lock_scope(*resource_handles_lock_);
 #if DCHECK_IS_ON()
   resource_handle->CheckForDuplicateResources(resource_handles_);
 #endif
@@ -1139,7 +1142,13 @@ void ResourceBundle::InitDefaultFontList() {
 }
 
 gfx::ImageSkia ResourceBundle::CreateImageSkia(int resource_id) {
-  DCHECK(!resource_handles_.empty()) << "Missing call to SetResourcesDataDLL?";
+#if DCHECK_IS_ON()
+  {
+    base::AutoLock lock_scope(*resource_handles_lock_);
+    DCHECK(!resource_handles_.empty())
+        << "Missing call to SetResourcesDataDLL?";
+  }
+#endif
 
   std::optional<LottieData> data = GetLottieData(resource_id);
   if (data) {
@@ -1198,6 +1207,7 @@ bool ResourceBundle::LoadBitmap(int resource_id,
                                 SkBitmap* bitmap,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
+  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& pack : resource_handles_) {
     if (pack->GetResourceScaleFactor() == ui::kScaleFactorNone &&
         LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {

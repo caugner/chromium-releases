@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/web_applications/tabbed_web_app_navigation_throttle.h"
 
+#include "base/functional/bind.h"
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -54,7 +56,7 @@ void TabbedWebAppNavigationThrottle::MaybeCreateAndAdd(
 
   const BrowserWindowInterface* browser_window =
       tab->GetBrowserWindowInterface();
-  if (!browser_window || !browser_window->GetAppBrowserController()) {
+  if (!browser_window || !AppBrowserController::IsWebApp(browser_window)) {
     return;
   }
 
@@ -69,7 +71,7 @@ void TabbedWebAppNavigationThrottle::MaybeCreateAndAdd(
   CHECK(provider);
 
   const webapps::AppId& app_id =
-      browser_window->GetAppBrowserController()->app_id();
+      AppBrowserController::From(browser_window)->app_id();
 
   std::optional<GURL> home_tab_url =
       provider->registrar_unsafe().GetAppPinnedHomeTabUrl(app_id);
@@ -91,7 +93,7 @@ TabbedWebAppNavigationThrottle::WillStartRequest() {
   BrowserWindowInterface* browser_window = tab->GetBrowserWindowInterface();
   CHECK(browser_window);
   const AppBrowserController* app_controller =
-      browser_window->GetAppBrowserController();
+      AppBrowserController::From(browser_window);
   CHECK(app_controller);
   const WebAppProvider* provider =
       WebAppProvider::GetForWebContents(web_contents);
@@ -122,7 +124,9 @@ TabbedWebAppNavigationThrottle::WillStartRequest() {
     // should close it.
     if (browser_window->GetTabStripModel()->count() > 1 &&
         !web_contents->GetLastCommittedURL().is_valid()) {
-      web_contents->ClosePage();
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, base::BindOnce(&content::WebContents::ClosePage,
+                                    web_contents->GetWeakPtr()));
     }
     return FocusHomeTab(*app_controller, *browser_window->GetTabStripModel());
   }

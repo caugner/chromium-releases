@@ -74,6 +74,7 @@
 <translation id="1274654146705270731">πορτοκάλια</translation>
 <translation id="1275718070701477396">Επιλέχθηκε</translation>
 <translation id="1290331692326790741">Ασθενές σήμα</translation>
+<translation id="1292474106138697109">Οθόνη εφαρμογής Εργαλεία για την τάξη</translation>
 <translation id="1300115153046603471">Το APN είναι τύπου προεπιλογής και <ph name="ATTACH" />.</translation>
 <translation id="1301069673413256657">GSM</translation>
 <translation id="1301340234286078471">Μετατροπή</translation>
@@ -1011,7 +1012,7 @@
 <translation id="5401938042319910061">Εκτέλεση όλων των ρουτινών</translation>
 <translation id="5410755018770633464">χοτ ντογκ</translation>
 <translation id="5423849171846380976">Ενεργοποιημένο</translation>
-<translation id="5430931332414098647">Άμεση σύνδεση</translation>
+<translation id="5430931332414098647">Άμεσος διαμοιρασμός</translation>
 <translation id="5431318178759467895">Χρώμα</translation>
 <translation id="5457599981699367932">Περιήγηση ως επισκέπτης</translation>
 <translation id="54609108002486618">Διαχειριζόμενη</translation>
@@ -1046,6 +1047,7 @@
 <translation id="5596627076506792578">Περισσότερες επιλογές</translation>
 <translation id="5600027863942488546">Το πλήκτρο <ph name="KEY_NAME" /> ελέγχθηκε</translation>
 <translation id="5606865426897221650">Καρτέλα</translation>
+<translation id="5612205513582918357">Η εφαρμογή Εργαλεία για την τάξημοιράζεται την οθόνη σας με τον χρήστη <ph name="RECEIVER_NAME" /></translation>
 <translation id="5613201299517339763">Αποσυνδεθήκατε</translation>
 <translation id="5620281292257375798">Εσωτερική χρήση μόνο</translation>
 <translation id="5628106863521633649">Διαθέσιμες γλώσσες</translation>
@@ -1413,7 +1415,7 @@
 <translation id="7184043045742675738">Κάντε κλικ σε οποιοδήποτε πλήκτρο για να προσαρμόσετε το κουμπί. Επανατοποθετήστε το πλήκτρο χρησιμοποιώντας το ποντίκι ή τα πλήκτρα βέλους.</translation>
 <translation id="7187669805838282391">την Τετάρτη</translation>
 <translation id="7205318498545665455">Επιλέξτε το μικρόφωνό σας</translation>
-<translation id="7206979415662233817">Όροι Παροχής Υπηρεσιών</translation>
+<translation id="7206979415662233817">Όροι παροχής υπηρεσιών</translation>
 <translation id="7210635925306941239">κυανό</translation>
 <translation id="7212547870105584639">Διαχείριση ρυθμίσεων APN δικτύου. Τα APN δημιουργούν μια σύνδεση μεταξύ ενός δικτύου κινητής τηλεφωνίας και του διαδικτύου. <ph name="BEGIN_LINK_LEARN_MORE" />Μάθετε περισσότερα<ph name="END_LINK_LEARN_MORE" /></translation>
 <translation id="7212734716605298123">Ενημερώσεις υλικολογισμικού για εξωτερικές συσκευές</translation>
@@ -1444,7 +1446,7 @@
 <translation id="7319430975418800333">A3</translation>
 <translation id="7321055305895875150">πράσινο και γαλαζοπράσινο</translation>
 <translation id="7328475450575141167">πουλί του παραδείσου</translation>
-<translation id="7331297744262591636">Πρέπει να είστε τουλάχιστον 18 ετών και να συμφωνήσετε ότι η από μέρους σας χρήση των ταπετσαριών AI υπόκειται στους <ph name="GOOGLE_TERMS_OF_SERVICE_LINK" />Όρους Παροχής Υπηρεσιών της Google<ph name="END_LINK_GOOGLE_TERMS_OF_SERVICE" /> και στους <ph name="BEGIN_LINK_GEN_AI_TERMS_OF_SERVICE" />Πρόσθετους Όρους Παροχής Υπηρεσιών Παραγωγικού AI<ph name="END_LINK_GEN_AI_TERMS_OF_SERVICE" />.
+<translation id="7331297744262591636">Πρέπει να είστε τουλάχιστον 18 ετών και να συμφωνήσετε ότι η από μέρους σας χρήση των ταπετσαριών AI υπόκειται στους <ph name="GOOGLE_TERMS_OF_SERVICE_LINK" />Όρους παροχής υπηρεσιών της Google<ph name="END_LINK_GOOGLE_TERMS_OF_SERVICE" /> και στους <ph name="BEGIN_LINK_GEN_AI_TERMS_OF_SERVICE" />Πρόσθετους όρους παροχής υπηρεσιών παραγωγικού AI<ph name="END_LINK_GEN_AI_TERMS_OF_SERVICE" />.
           <ph name="LINE_BREAK" />
           <ph name="LINE_BREAK" />
           Μπορείτε να δημιουργήσετε ταπετσαρίες με AI μόνο για προσωπική και μη εμπορική χρήση. Όταν λαμβάνετε βοήθεια για τις ταπετσαρίες, το κείμενο αποστέλλεται στους διακομιστές του Google AI για τη δημιουργία προτάσεων ταπετσαριών σύμφωνα με την <ph name="BEGIN_LINK_GOOGLE_PRIVACY_POLICY" />Πολιτική απορρήτου της Google<ph name="END_LINK_GOOGLE_PRIVACY_POLICY" />. <ph name="BEGIN_LINK_LEARN_MORE" />Μάθετε περισσότερα<ph name="END_LINK_LEARN_MORE" /></translation>
@@ -1473,7 +1475,6 @@
 <translation id="7425832472614771259">Ολοκλήρωση λήψης του μοντέλου μεταγραφής στα <ph name="LANGUAGE_NAME" /> κατά <ph name="PROGRESS_PERCENTAGE" />%</translation>
 <translation id="7427315641433634153">MSCHAP</translation>
 <translation id="7438298994385592770">Δεν είναι δυνατή η απενεργοποίηση ή η κατάργηση αυτού του APN. Βεβαιωθείτε ότι τα ενεργοποιημένα APN τύπου <ph name="ATTACH" /> έχουν απενεργοποιηθεί ή καταργηθεί.</translation>
-<translation id="7458359366992324037">Απομακρυσμένη οθόνη</translation>
 <translation id="7458970041932198923">Συνδεθείτε σε ένα δίκτυο και επαναλάβετε τη φόρτωση της σελίδας για να δείτε και να ορίσετε avatar.</translation>
 <translation id="7469648432129124067">Εντοπίστηκε πύλη</translation>
 <translation id="7481312909269577407">Προώθηση</translation>

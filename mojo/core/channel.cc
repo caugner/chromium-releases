@@ -941,7 +941,12 @@ class Channel::ReadBuffer {
 
   // Ensures the ReadBuffer has enough contiguous space allocated to hold
   // |num_bytes| more bytes; returns the address of the first available byte.
+  // If computing the new size overflows, returns nullptr.
   char* Reserve(size_t num_bytes) {
+    const auto new_size = base::CheckAdd(num_bytes, size_);
+    if (!new_size.IsValid()) {
+      return nullptr;
+    }
     if (num_occupied_bytes_ + num_bytes > size_) {
       size_ = std::max(static_cast<size_t>(size_ * kGrowthFactor),
                        num_occupied_bytes_ + num_bytes);
@@ -1196,7 +1201,10 @@ Channel::DispatchResult Channel::TryDispatchMessage(
     // Handle the message.
     if (Message::IsExperimentalControlMessage(header)) {
       // Note: IsExperimentalControlMessage() implies IsExperimentalV3().
+#if !defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
+      // Let fuzzers go further without crashing.
       CHECK(SupportsChannelUpgrade()) << "Cannot handle control messages";
+#endif
       if (!OnControlMessage(Message::ExtractType(header), data.data(),
                             data.size(), std::move(handles))) {
         return DispatchResult::kError;

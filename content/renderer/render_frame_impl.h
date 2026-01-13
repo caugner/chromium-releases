@@ -55,7 +55,6 @@
 #include "content/renderer/content_security_policy_util.h"
 #include "content/renderer/local_resource_url_loader_factory.h"
 #include "content/renderer/media/media_factory.h"
-#include "ipc/platform_file_for_transit.h"
 #include "content/renderer/navigation_client.h"
 #include "media/base/routing_token_callback.h"
 #include "media/base/speech_recognition_client.h"
@@ -554,7 +553,8 @@ class CONTENT_EXPORT RenderFrameImpl
       blink::mojom::SameDocumentNavigationType same_document_navigation_type,
       bool is_client_redirect,
       const std::optional<blink::SameDocNavigationScreenshotDestinationToken>&
-          screenshot_destination) override;
+          screenshot_destination,
+      base::UnguessableToken same_document_metrics_token) override;
   void DidFailAsyncSameDocumentCommit() override;
   void WillFreezePage() override;
   void DidOpenDocumentInputStream(const blink::WebURL& url) override;
@@ -1591,6 +1591,11 @@ class CONTENT_EXPORT RenderFrameImpl
   // Used by DevTools to defer async client navigations for the duration of
   // handling a CDP command.
   ClientNavigationThrottler client_navigation_throttler_;
+
+  // Set to true if the RenderFrameImpl committed an initial WebUI, which is a
+  // subset of topchrome WebUIs that are loaded and shown from the initial
+  // browser startup, e.g. the reload button.
+  bool is_initial_webui_ = false;
 
   base::WeakPtrFactory<RenderFrameImpl> weak_factory_{this};
 };

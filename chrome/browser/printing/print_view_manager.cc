@@ -287,12 +287,19 @@ bool PrintViewManager::PrintPreview(
   // Users can send print commands all they want and it is beyond
   // PrintViewManager's control. Just ignore the extra commands.
   // See http://crbug.com/136842 for example.
-  if (print_preview_state_ != NOT_PREVIEWING)
+  if (print_preview_state_ != NOT_PREVIEWING) {
     return false;
+  }
 
   // Don't print / print preview crashed tabs.
-  if (IsCrashed() || !rfh->IsRenderFrameLive())
+  if (IsCrashed() || !rfh->IsRenderFrameLive()) {
     return false;
+  }
+
+  // Don't print / print preview fenched frames.
+  if (rfh->IsNestedWithinFencedFrame()) {
+    return false;
+  }
 
   GetPrintRenderFrame(rfh)->InitiatePrintPreview(
 #if BUILDFLAG(IS_CHROMEOS)
@@ -409,9 +416,16 @@ void PrintViewManager::OnScriptedPrintPreviewCallback(
     return;
 
   // Running a dialog causes an exit to webpage-initiated fullscreen.
-  // http://crbug.com/728276
-  if (web_contents()->IsFullscreen())
+  // https://crbug.com/41322524
+  if (web_contents()->IsFullscreen()) {
+    // Return early if `this` got destroyed inside ExitFullscreen().
+    // https://crbug.com/517047197
+    auto weak_this = weak_factory_.GetWeakPtr();
     web_contents()->ExitFullscreen(true);
+    if (!weak_this) {
+      return;
+    }
+  }
 
   auto* dialog_controller = PrintPreviewDialogController::GetInstance();
   CHECK(dialog_controller);
@@ -424,11 +438,22 @@ void PrintViewManager::OnScriptedPrintPreviewCallback(
 
 void PrintViewManager::RequestPrintPreview(
     mojom::RequestPrintPreviewParamsPtr params) {
+  auto* rfh = GetCurrentTargetFrame();
+  if (rfh->IsNestedWithinFencedFrame()) {
+    // Either the renderer should have checked and disallowed the request for
+    // fenced frames in ChromeClient, or PrintPreview() above should have
+    // checked. Ignore the request and mark it as bad if those checks didn't
+    // happen for some reason.
+    bad_message::ReceivedBadMessage(rfh->GetProcess(),
+                                    bad_message::PVM_PRINT_FENCED_FRAME);
+    return;
+  }
+
 #if BUILDFLAG(ENTERPRISE_CONTENT_ANALYSIS)
   set_analyzing_content(/*analyzing=*/true);
 #endif
   RejectPrintPreviewRequestIfRestricted(
-      GetCurrentTargetFrame()->GetGlobalId(),
+      rfh->GetGlobalId(),
       base::BindOnce(&PrintViewManager::OnRequestPrintPreviewCallback,
                      weak_factory_.GetWeakPtr(), std::move(params),
                      GetCurrentTargetFrame()->GetGlobalId()));

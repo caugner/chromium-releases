@@ -111,6 +111,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"  // nogncheck crbug.com/40147906
 #include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "chrome/browser/ui/lens/lens_searchbox_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -651,6 +652,23 @@ bool ChromeAutocompleteProviderClient::ShouldSendPageTitleSuggestParam() const {
   return IsContextualSearchFeatureEnabled(
       omnibox_feature_configs::ContextualSearch::kSendPageTitleSuggestParam,
       /*country=*/"us", /*locale=*/"en-US");
+}
+
+bool ChromeAutocompleteProviderClient::IsOmniboxNextLensSearchChipEnabled()
+    const {
+#if !BUILDFLAG(IS_ANDROID)
+  return IsOmniboxNextAimPopupEnabled() && omnibox::kShowLensSearchChip.Get();
+#else
+  return false;
+#endif  // !BUILDFLAG(IS_ANDROID)
+}
+
+bool ChromeAutocompleteProviderClient::IsOmniboxNextAimPopupEnabled() const {
+#if !BUILDFLAG(IS_ANDROID)
+  return omnibox::IsAimPopupEnabled(profile_);
+#else
+  return false;
+#endif  // !BUILDFLAG(IS_ANDROID)
 }
 
 base::CallbackListSubscription

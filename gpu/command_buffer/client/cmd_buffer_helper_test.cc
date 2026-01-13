@@ -67,6 +67,8 @@ class CommandBufferHelperTest : public testing::Test {
     return helper_->immediate_entry_count_;
   }
 
+  int32_t TotalEntryCount() const { return helper_->total_entry_count_; }
+
   // Adds a command to the buffer through the helper, while adding it as an
   // expected call on the API mock.
   void AddCommandWithExpect(error::Error _return,
@@ -100,7 +102,7 @@ class CommandBufferHelperTest : public testing::Test {
         std::make_unique<CommandBufferEntry[]>(arg_count ? arg_count : 1);
 
     for (int32_t ii = 0; ii < arg_count; ++ii) {
-      args_ptr[ii].value_uint32 = 0xF00DF00D + ii;
+      UNSAFE_TODO(args_ptr[ii]).value_uint32 = 0xF00DF00D + ii;
     }
 
     // Add command and save args in test_command_args_ until the test completes.
@@ -653,6 +655,17 @@ TEST_F(CommandBufferHelperTest, IsContextLost) {
   EXPECT_FALSE(helper_->IsContextLost());
   command_buffer_->service()->SetParseError(error::kGenericError);
   EXPECT_TRUE(helper_->IsContextLost());
+}
+
+TEST_F(CommandBufferHelperTest, TestInvalidGetOffset) {
+  EXPECT_FALSE(helper_->IsContextLost());
+  EXPECT_TRUE(helper_->usable());
+
+  command_buffer_->SetGetOffsetForTest(TotalEntryCount() + 1);
+  helper_->RefreshCachedToken();  // calls UpdateCachedState internally.
+
+  EXPECT_TRUE(helper_->IsContextLost());
+  EXPECT_FALSE(helper_->usable());
 }
 
 // Checks helper's 'flush generation' updates.

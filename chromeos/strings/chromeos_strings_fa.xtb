@@ -74,6 +74,7 @@
 <translation id="1274654146705270731">پرتقال</translation>
 <translation id="1275718070701477396">انتخاب شد</translation>
 <translation id="1290331692326790741">سیگنال ضعیف</translation>
+<translation id="1292474106138697109">نمایش «ابزارهای کلاسی»</translation>
 <translation id="1300115153046603471">‏APN از نوع پیش‌فرض و <ph name="ATTACH" /> است.</translation>
 <translation id="1301069673413256657">GSM</translation>
 <translation id="1301340234286078471">تبدیل</translation>
@@ -375,7 +376,7 @@
 <translation id="2493126929778606526">بهترین عکس‌هایتان که به‌طور خودکار انتخاب شده‌اند</translation>
 <translation id="249323605434939166"><ph name="QUERY_TEXT" /> · <ph name="SOURCE_LANGUAGE_NAME" /></translation>
 <translation id="2501126912075504550">عقیق</translation>
-<translation id="2501278716633472235">بازگشت</translation>
+<translation id="2501278716633472235">برگشتن</translation>
 <translation id="2505327257735685095">بازآوری کاغذدیواری کنونی</translation>
 <translation id="2507491234071975894">بلندگو</translation>
 <translation id="2512979179176933762">نمایش پنجره‌ها</translation>
@@ -932,7 +933,7 @@
 <translation id="5056587122125565772">ساختن تصویر</translation>
 <translation id="5078711626843651677">مدل‌های صوتی تا زمانی که برچسب‌گذاری گوینده کامل شود به‌طور موقت در دستگاه ذخیره می‌شوند. هروقت بخواهید می‌توانید این گزینه را در «تنظیمات» خاموش کنید.</translation>
 <translation id="5078983345702708852">آینده‌نگرانه</translation>
-<translation id="5087864757604726239">برگشت</translation>
+<translation id="5087864757604726239">برگشتن</translation>
 <translation id="5088172560898466307">نام سرور میزبان</translation>
 <translation id="5089810972385038852">ایالت</translation>
 <translation id="5090362543162270857">IPsec (IKEv2)</translation>
@@ -1046,6 +1047,7 @@
 <translation id="5596627076506792578">گزینه‌های بیشتر</translation>
 <translation id="5600027863942488546">کلید <ph name="KEY_NAME" /> امتحان شد</translation>
 <translation id="5606865426897221650">Tab</translation>
+<translation id="5612205513582918357">«ابزارهای کلاسی» درحال هم‌رسانی صفحه‌نمایش شما در <ph name="RECEIVER_NAME" /> است</translation>
 <translation id="5613201299517339763">از سیستم خارج شدید</translation>
 <translation id="5620281292257375798">فقط داخلی</translation>
 <translation id="5628106863521633649">زبان‌های دردسترس</translation>
@@ -1396,7 +1398,7 @@
 <translation id="7138614237884624401">نوشتار ساده‌شده</translation>
 <translation id="7138668887584231801">تعداد کلمات برای خلاصه کردن کافی نیست</translation>
 <translation id="7143207342074048698">در حال اتصال</translation>
-<translation id="7144878232160441200">سعی مجدد</translation>
+<translation id="7144878232160441200">امتحان مجدد</translation>
 <translation id="7144954474087165241">بتخانه</translation>
 <translation id="7147557737960578492">با انتخاب کلید جدید، مجدداً تخصیص دهید</translation>
 <translation id="714876143603641390">‏اتصال LAN</translation>
@@ -1473,7 +1475,6 @@
 <translation id="7425832472614771259">مدل ترانویسی <ph name="LANGUAGE_NAME" /> تا <ph name="PROGRESS_PERCENTAGE" />٪ بارگیری شده است</translation>
 <translation id="7427315641433634153">MSCHAP</translation>
 <translation id="7438298994385592770">‏این APN را نمی‌توان غیرفعال یا حذف کرد. مطمئن شوید نقطه‌های APN ‏<ph name="ATTACH" /> فعال را غیرفعال یا حذف کرده‌اید.</translation>
-<translation id="7458359366992324037">نمایشگر راه دور</translation>
 <translation id="7458970041932198923">لطفاً برای مشاهده و تنظیم چهره‌نماها، به شبکه متصل شوید و صفحه را مجدداً بار کنید.</translation>
 <translation id="7469648432129124067">درگاهی شناسایی شد</translation>
 <translation id="7481312909269577407">ارسال کردن</translation>
@@ -1652,7 +1653,7 @@
 <translation id="8262870577632766028">۱ ساعت</translation>
 <translation id="827422111966801947">نیلی سیر</translation>
 <translation id="8280687443902283243">ویرایش عنوان</translation>
-<translation id="8286154143153872371">لطفاً برای مشاهده کاغذدیواری، به شبکه متصل شوید و صفحه را بار کردن مجدد کنید.</translation>
+<translation id="8286154143153872371">لطفاً برای مشاهده کاغذدیواری، به شبکه متصل شوید و صفحه را مجدداً بار کنید.</translation>
 <translation id="8291967909914612644">کشور ارائه‌دهنده اصلی</translation>
 <translation id="8294431847097064396">منبع</translation>
 <translation id="8302368968391049045">‏دیواره آتش HTTPS</translation>

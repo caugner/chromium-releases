@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/cancelable_callback.h"
 #include "base/containers/id_map.h"
 #include "base/functional/callback.h"
@@ -46,7 +47,6 @@
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/service_worker_client_info.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
-#include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -562,6 +562,11 @@ class CONTENT_EXPORT ServiceWorkerVersion
 
   // Sets the response information used to load the main script.
   void SetMainScriptResponse(std::unique_ptr<MainScriptResponse> response);
+
+  // Ensures that the response information for the main script is set. If it is
+  // not set yet, it starts fetching it.
+  void EnsureMainScriptResponseSet(base::OnceClosure callback);
+  bool main_script_fetched() const;
   const MainScriptResponse* GetMainScriptResponse();
 
   // Simulate ping timeout. Should be used for tests-only.
@@ -887,8 +892,10 @@ class CONTENT_EXPORT ServiceWorkerVersion
     base::Time start_time;
     base::TimeTicks start_time_ticks;
     ServiceWorkerMetrics::EventType event_type;
-    // Points to this request's entry in |request_timeouts_|.
-    std::set<InflightRequestTimeoutInfo>::iterator timeout_iter;
+    // Points to this request's entry in |request_timeouts_|. Please invalidate
+    // this when the corresponding entry is removed from `request_timeouts_`.
+    // TODO(crbug.com/499449324): Refactor this code by simplifying ownerships.
+    std::optional<std::set<InflightRequestTimeoutInfo>::iterator> timeout_iter;
   };
 
   // The timeout timer interval.
@@ -1178,6 +1185,9 @@ class CONTENT_EXPORT ServiceWorkerVersion
 
   std::unique_ptr<ServiceWorkerInstalledScriptsSender>
       installed_scripts_sender_;
+
+  base::OnceClosureList main_script_response_callbacks_;
+  bool main_script_fetched_ = false;
 
   std::vector<SkipWaitingCallback> pending_skip_waiting_requests_;
   base::TimeTicks skip_waiting_time_;

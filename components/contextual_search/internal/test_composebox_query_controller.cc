@@ -102,11 +102,21 @@ TestComposeboxQueryController::CreateEndpointFetcher(
     if (next_file_upload_request_should_return_error_) {
       fake_server_response_code =
           google_apis::ApiErrorCode::HTTP_INTERNAL_SERVER_ERROR;
+    } else {
+      fake_server_response_string =
+          fake_file_upload_response_.SerializeAsString();
     }
 
     lens::LensOverlayServerRequest sent_request;
     sent_request.ParseFromString(request_string);
+
+    if (sent_request.has_interaction_request()) {
+      fake_server_response_string =
+          fake_interaction_response_.SerializeAsString();
+      sent_interaction_requests_.push_back(sent_request);
+    } else {
     sent_upload_requests_.push_back(sent_request);
+    }
   }
 
   last_sent_cors_exempt_headers_.clear();
@@ -121,6 +131,10 @@ TestComposeboxQueryController::CreateEndpointFetcher(
 
   auto response = std::make_unique<FakeEndpointFetcher>(fake_endpoint_response);
   response->disable_responding_ = disable_response;
+
+  for (auto& callback : on_endpoint_fetcher_created_callbacks_) {
+    callback.Run();
+  }
   return response;
 }
 

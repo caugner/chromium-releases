@@ -535,6 +535,10 @@ PasswordForm CreateFormForLeakCheck(const PasswordForm& pending_credentials,
       submitted_credentials.new_password_element_renderer_id;
   form.confirmation_password_element_renderer_id =
       submitted_credentials.confirmation_password_element_renderer_id;
+  // Take the url from the submitted form because the url from pendind
+  // credentials may be for the site where the stored password was saved
+  // originally.
+  form.url = submitted_credentials.url;
   return form;
 }
 
@@ -606,6 +610,11 @@ void PasswordManager::RegisterProfilePrefs(
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)  // Desktop
   registry->RegisterListPref(prefs::kPasswordManagerPromoCardsList);
 #endif  // BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || \
+    BUILDFLAG(IS_MAC)
+  registry->RegisterListPref(prefs::kPasswordManagerBlocklist);
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) ||
+        // BUILDFLAG(IS_MAC)
   registry->RegisterBooleanPref(prefs::kPasswordSharingEnabled, true);
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
   registry->RegisterIntegerPref(prefs::kRelaunchChromeBubbleDismissedCounter,
@@ -1740,7 +1749,7 @@ void PasswordManager::ProcessAutofillPredictions(
   const FormPredictions& form_predictions =
       server_predictions_
           .insert_or_assign(
-              CalculateFormSignature(form),
+              {CalculateFormSignature(form), driver_id},
               ConvertToFormPredictions(driver_id, form, predictions))
           .first->second;
 
@@ -1890,13 +1899,13 @@ PasswordFormManager* PasswordManager::GetMatchedManagerForField(
 std::optional<FormPredictions> PasswordManager::FindServerPredictionsForField(
     FieldRendererId field_id,
     int driver_id) {
-  for (const auto& form : server_predictions_) {
-    if (form.second.driver_id != driver_id) {
+  for (const auto& [key, predictions] : server_predictions_) {
+    if (key.second != driver_id) {
       continue;
     }
-    for (const PasswordFieldPrediction& field : form.second.fields) {
+    for (const PasswordFieldPrediction& field : predictions.fields) {
       if (field.renderer_id == field_id) {
-        return form.second;
+        return predictions;
       }
     }
   }

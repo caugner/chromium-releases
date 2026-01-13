@@ -8,6 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/trace_event/typed_macros.h"
+#include "media/base/audio_bus.h"
 #include "media/base/audio_glitch_info.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
@@ -360,6 +361,15 @@ void OfflineAudioDestinationHandler::PrepareTaskRunnerForRendering() {
 
   // The task runner MUST be valid at this point.
   DCHECK(render_thread_task_runner_);
+}
+
+void OfflineAudioDestinationHandler::PrepareTaskRunnerForWorklet() {
+  CHECK(IsMainThread());
+
+  // Updates the render task runner to the AudioWorklet backing thread when a
+  // worklet becomes ready while the context is suspended, ensuring that
+  // rendering resumes on the correct thread.
+  PrepareTaskRunnerForRendering();
 }
 
 void OfflineAudioDestinationHandler::RestartRendering() {

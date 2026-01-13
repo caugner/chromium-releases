@@ -22,6 +22,23 @@ using endpoint_fetcher::HttpMethod;
 
 namespace lens {
 
+MockLensOverlayQueryController::MockLensOverlayQueryController(
+    lens::LensOverlayGen204Controller* gen204_controller)
+    : LensOverlayQueryController(
+          /*full_image_callback=*/base::DoNothing(),
+          /*url_callback=*/base::DoNothing(),
+          /*interaction_callback=*/base::DoNothing(),
+          /*thumbnail_created_callback=*/base::DoNothing(),
+          /*page_content_upload_progress_callback=*/base::DoNothing(),
+          /*variations_client=*/nullptr,
+          /*identity_manager=*/nullptr,
+          /*profile=*/nullptr,
+          lens::LensOverlayInvocationSource::kAppMenu,
+          /*use_dark_mode=*/false,
+          gen204_controller) {}
+
+MockLensOverlayQueryController::~MockLensOverlayQueryController() = default;
+
 constexpr char kPdfMimeType[] = "application/pdf";
 constexpr char kPlainTextMimeType[] = "text/plain";
 constexpr char kHtmlMimeType[] = "text/html";
@@ -58,7 +75,6 @@ TestLensOverlayQueryController::TestLensOverlayQueryController(
     LensOverlayFullImageResponseCallback full_image_callback,
     LensOverlayUrlResponseCallback url_callback,
     LensOverlayInteractionResponseCallback interaction_callback,
-    LensOverlaySuggestInputsCallback interaction_data_callback,
     LensOverlayThumbnailCreatedCallback thumbnail_created_callback,
     UploadProgressCallback upload_progress_callback,
     variations::VariationsClient* variations_client,
@@ -70,7 +86,6 @@ TestLensOverlayQueryController::TestLensOverlayQueryController(
     : LensOverlayQueryController(full_image_callback,
                                  url_callback,
                                  interaction_callback,
-                                 interaction_data_callback,
                                  thumbnail_created_callback,
                                  upload_progress_callback,
                                  variations_client,
@@ -385,7 +400,7 @@ void TestLensOverlayQueryController::SendSemanticEventGen204IfEnabled(
 
 void TestLensOverlayQueryController::RunSuggestInputsCallback() {
   const lens::proto::LensOverlaySuggestInputs& last_suggest_inputs =
-      suggest_inputs_for_testing();
+      GetLensSuggestInputs();
   if (last_suggest_inputs.encoded_request_id().empty()) {
     LensOverlayQueryController::RunSuggestInputsCallback();
     return;

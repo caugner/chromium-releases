@@ -17,7 +17,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
-#include "base/functional/callback_forward.h"
 #include "base/functional/callback_helpers.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/notreached.h"
@@ -31,6 +30,7 @@
 #include "build/build_config.h"
 #include "components/services/storage/public/cpp/buckets/bucket_id.h"
 #include "components/services/storage/public/cpp/buckets/bucket_locator.h"
+#include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/file_system_access/features.h"
 #include "content/browser/file_system_access/file_system_access.pb.h"
 #include "content/browser/file_system_access/file_system_access_access_handle_host_impl.h"
@@ -47,6 +47,7 @@
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -149,7 +150,7 @@ void ShowFilePickerOnUIThread(
   WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
   RenderFrameHost* outermost_rfh = rfh ? rfh->GetOutermostMainFrame() : nullptr;
 
-  if (!web_contents || !outermost_rfh) {
+  if (!web_contents || !outermost_rfh || !outermost_rfh->IsActive()) {
     std::move(callback).Run(file_system_access_error::FromStatus(
                                 FileSystemAccessStatus::kOperationAborted),
                             {});
@@ -247,7 +248,7 @@ void ShowFilePickerOnUIThread(
           ->browser()
           ->MaybeGetScopedPictureInPictureTucker(web_contents));
 
-  FileSystemChooser::CreateAndShow(web_contents, options, std::move(callback),
+  FileSystemChooser::CreateAndShow(rfh, options, std::move(callback),
                                    std::move(scoped_objects));
 }
 
@@ -501,6 +502,14 @@ void FileSystemAccessManagerImpl::GetSandboxedFileSystem(
     GetSandboxedFileSystemCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  if (!ChildProcessSecurityPolicy::GetInstance()->CanAccessDataForOrigin(
+          binding_context.process_id(), binding_context.storage_key.origin())) {
+    std::move(callback).Run(file_system_access_error::FromFileError(
+                                base::File::FILE_ERROR_SECURITY),
+                            mojo::NullRemote());
+    return;
+  }
+
   auto response_callback = base::BindOnce(
       [](base::WeakPtr<FileSystemAccessManagerImpl> manager,
          const BindingContext& callback_binding_context,
@@ -579,31 +588,14 @@ void FileSystemAccessManagerImpl::ChooseEntries(
     return;
   }
 
-  // Renderer process should already check for user activation before sending
-  // IPC, but just to be sure double check here as well. This is not treated
-  // as a BadMessage because it is possible for the transient user activation
-  // to expire between the renderer side check and this check.
-  ContentBrowserClient* content_browser_client = GetContentClient()->browser();
-  WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
-  if (!rfh->HasTransientUserActivation() &&
-      content_browser_client
-          ->IsTransientActivationRequiredForShowFileOrDirectoryPicker(
-              web_contents)) {
-    std::move(callback).Run(
-        file_system_access_error::FromStatus(
-            FileSystemAccessStatus::kPermissionDenied,
-            "User activation is required to show a file picker."),
-        std::vector<blink::mojom::FileSystemAccessEntryPtr>());
-    return;
-  }
-
   // Consume user activation to address this issue: crbug.com/40059071
   // TODO(crbug.com/411125804): Consider moving this user activation check to
   // the renderer process or informing the renderer that it lost user
   // activation.
-  if (content_browser_client
+  if (GetContentClient()
+          ->browser()
           ->IsTransientActivationRequiredForShowFileOrDirectoryPicker(
-              web_contents)) {
+              WebContents::FromRenderFrameHost(rfh))) {
     FrameTreeNode::From(rfh)->UpdateUserActivationState(
         blink::mojom::UserActivationUpdateType::kConsumeTransientActivation,
         blink::mojom::UserActivationNotificationType::kNone);

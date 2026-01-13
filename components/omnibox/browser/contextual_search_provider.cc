@@ -142,7 +142,7 @@ struct EligibleMatchesAndActions {
             input, client, toolbelt_config.show_lens_action_on_non_ntp,
             toolbelt_config.show_lens_action_on_ntp, std::nullopt) &&
         (toolbelt_config.always_include_lens_action ||
-         LensEntrypointEligible(input, client));
+         ContextualSearchProvider::LensEntrypointEligible(input, client));
 
     // When the AIM page action is enabled, we need to suppress the AIM toolbelt
     // action in order to ensure that there's at most one AIM entrypoint shown
@@ -193,11 +193,14 @@ struct EligibleMatchesAndActions {
     //   inputs. `lens_entry_match`, `toolbelt_lens` is not restricted to zero
     //   inputs.
     // - Only shown if toolbelt lens not shown.
+    // - Only shown if "lens search chip" (Omnibox Next) is not enabled.
     const auto& contextual_search_config =
         omnibox_feature_configs::ContextualSearch::Get();
-    lens_entry_match = contextual_search_config.show_open_lens_action &&
-                       !toolbelt_lens && input.IsZeroSuggest() &&
-                       LensEntrypointEligible(input, client);
+    lens_entry_match =
+        contextual_search_config.show_open_lens_action && !toolbelt_lens &&
+        input.IsZeroSuggest() &&
+        ContextualSearchProvider::LensEntrypointEligible(input, client) &&
+        !client->IsOmniboxNextLensSearchChipEnabled();
 
     // - Check feature/params.
     // - Disabled if either `toolbelt` or `contextual_search_config` are shown.
@@ -216,19 +219,6 @@ struct EligibleMatchesAndActions {
     // - Hidden on zero input.
     page_suggestions = page_verbatim && !input.text().empty() &&
                        !input.omit_asynchronous_matches();
-  }
-
-  // Show on web & SRP, but not NTP.
-  // Http, https, & local files are allowed but not other local schemes.
-  // Do not show if Lens is already opened.
-  static bool LensEntrypointEligible(const AutocompleteInput& input,
-                                     AutocompleteProviderClient* client) {
-    return (omnibox::IsOtherWebPage(input.current_page_classification()) ||
-            omnibox::IsSearchResultsPage(
-                input.current_page_classification())) &&
-           (input.current_url().SchemeIsHTTPOrHTTPS() ||
-            input.current_url().SchemeIs(url::kFileScheme)) &&
-           client->IsLensEnabled() && client->AreLensEntrypointsVisible();
   }
 
   // - Show on non-NTP depending on finch param passed in via
@@ -349,7 +339,7 @@ void ContextualSearchProvider::Start(const AutocompleteInput& input,
   }
 
   if (eligibility.lens_entry_match) {
-    AddLensEntrypointMatch(keyword_input);
+    matches_.push_back(CreateLensEntrypointMatch(keyword_input));
   }
 
   if (eligibility.page_verbatim) {
@@ -391,6 +381,48 @@ bool ContextualSearchProvider::HasToolbeltLensAction() const {
     return match.IsToolbelt() &&
            match.HasAction(OmniboxActionId::CONTEXTUAL_SEARCH_OPEN_LENS);
   });
+}
+
+AutocompleteMatch ContextualSearchProvider::CreateLensEntrypointMatch(
+    const AutocompleteInput& input) {
+  // This match is effectively a pedal that doesn't require any query matching.
+  // Relevance depends on the page class, and selecting an appropriate score is
+  // necessary to avoid downstream conflicts in grouping framework sort order.
+  AutocompleteMatch match(
+      this,
+      omnibox::IsSearchResultsPage(input.current_page_classification())
+          ? omnibox::kContextualActionZeroSuggestRelevanceLow
+          : omnibox::kContextualActionZeroSuggestRelevance,
+      false, AutocompleteMatchType::PEDAL);
+  match.transition = ui::PAGE_TRANSITION_GENERATED;
+  match.suggest_type = omnibox::SuggestType::TYPE_NATIVE_CHROME;
+  match.suggestion_group_id = omnibox::GroupId::GROUP_CONTEXTUAL_SEARCH_ACTION;
+
+  // Lens invocation action with secondary text that shows URL host.
+  match.takeover_action =
+      base::MakeRefCounted<ContextualSearchOpenLensAction>();
+  match.contents =
+      base::UTF8ToUTF16(url_formatter::StripWWW(input.current_url().GetHost()));
+  if (!match.contents.empty()) {
+    match.contents_class = {{0, ACMatchClassification::DIM}};
+  }
+  match.description = match.takeover_action->GetLabelStrings().hint;
+  if (!match.description.empty()) {
+    match.description_class = {{0, ACMatchClassification::NONE}};
+  }
+  match.fill_into_edit = match.description;
+  return match;
+}
+
+// static
+bool ContextualSearchProvider::LensEntrypointEligible(
+    const AutocompleteInput& input,
+    const AutocompleteProviderClient* client) {
+  return (omnibox::IsOtherWebPage(input.current_page_classification()) ||
+          omnibox::IsSearchResultsPage(input.current_page_classification())) &&
+         (input.current_url().SchemeIsHTTPOrHTTPS() ||
+          input.current_url().SchemeIs(url::kFileScheme)) &&
+         client->IsLensEnabled() && client->AreLensEntrypointsVisible();
 }
 
 ContextualSearchProvider::ContextualSearchProvider(
@@ -469,7 +501,7 @@ void ContextualSearchProvider::SuggestRequestCompleted(
     AutocompleteInput input,
     const network::SimpleURLLoader* source,
     const int response_code,
-    std::unique_ptr<std::string> response_body) {
+    std::optional<std::string> response_body) {
   DCHECK(!done_);
   DCHECK_EQ(loader_.get(), source);
 
@@ -547,37 +579,6 @@ void ContextualSearchProvider::ConvertSuggestResultsToAutocompleteMatches(
   for (const auto& entry : results.suggestion_groups_map) {
     suggestion_groups_map_[entry.first].MergeFrom(entry.second);
   }
-}
-
-void ContextualSearchProvider::AddLensEntrypointMatch(
-    const AutocompleteInput& input) {
-  // This match is effectively a pedal that doesn't require any query matching.
-  // Relevance depends on the page class, and selecting an appropriate score is
-  // necessary to avoid downstream conflicts in grouping framework sort order.
-  AutocompleteMatch match(
-      this,
-      omnibox::IsSearchResultsPage(input.current_page_classification())
-          ? omnibox::kContextualActionZeroSuggestRelevanceLow
-          : omnibox::kContextualActionZeroSuggestRelevance,
-      false, AutocompleteMatchType::PEDAL);
-  match.transition = ui::PAGE_TRANSITION_GENERATED;
-  match.suggest_type = omnibox::SuggestType::TYPE_NATIVE_CHROME;
-  match.suggestion_group_id = omnibox::GroupId::GROUP_CONTEXTUAL_SEARCH_ACTION;
-
-  // Lens invocation action with secondary text that shows URL host.
-  match.takeover_action =
-      base::MakeRefCounted<ContextualSearchOpenLensAction>();
-  match.contents =
-      base::UTF8ToUTF16(url_formatter::StripWWW(input.current_url().GetHost()));
-  if (!match.contents.empty()) {
-    match.contents_class = {{0, ACMatchClassification::DIM}};
-  }
-  match.description = match.takeover_action->GetLabelStrings().hint;
-  if (!match.description.empty()) {
-    match.description_class = {{0, ACMatchClassification::NONE}};
-  }
-  match.fill_into_edit = match.description;
-  matches_.push_back(match);
 }
 
 void ContextualSearchProvider::AddDefaultVerbatimMatch(

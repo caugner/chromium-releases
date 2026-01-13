@@ -90,14 +90,6 @@ BASE_FEATURE(kDestroyProfileOnBrowserClose,
 // Profiles. This flags lets us destroy the System Profile, as well.
 BASE_FEATURE(kDestroySystemProfiles, base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Enables delaying the call to FullBrowserTransitionManager::OnProfileCreated()
-// until after BrowserContextDependencyManager::CreateBrowserContextServices()
-// in ProfileImpl::OnLocaleReady(). This change is thought to avoid creating
-// certain KeyedServices before they are properly initialized, but is flagged
-// guarded in case it causes unexpected issues.
-BASE_FEATURE(kDelayOnProfileCreatedForFullBrowserTransition,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 // Enables showing the email of the flex org admin that setup CBCM in the
 // management disclosures.
 BASE_FEATURE(kFlexOrgManagementDisclosure,
@@ -148,16 +140,6 @@ BASE_FEATURE(kNewTabPageTriggerForPrefetch, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kNotificationOneTapUnsubscribeOnDesktop,
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // !BUILDFLAG(IS_ANDROID)
-
-// Enables executing the browser commands sent by the NTP promos.
-BASE_FEATURE(kPromoBrowserCommands, base::FEATURE_ENABLED_BY_DEFAULT);
-
-// Parameter name for the promo browser command ID provided along with
-// kPromoBrowserCommands.
-// The value of this parameter should be parsable as an unsigned integer and
-// should map to one of the browser commands specified in:
-// ui/webui/resources/js/browser_command/browser_command.mojom
-const char kBrowserCommandIdParam[] = "BrowserCommandIdParam";
 
 #if BUILDFLAG(IS_WIN) && BUILDFLAG(GOOGLE_CHROME_BRANDING)
 // When this feature is enabled, Chrome will register os_update_handler with

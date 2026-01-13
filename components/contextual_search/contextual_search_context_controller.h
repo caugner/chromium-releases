@@ -10,9 +10,19 @@
 #include <optional>
 #include <string>
 
+#include "base/functional/callback.h"
 #include "base/observer_list_types.h"
 #include "components/contextual_search/contextual_search_types.h"
 #include "components/lens/lens_bitmap_processing.h"
+#include "components/lens/lens_overlay_invocation_source.h"
+#include "third_party/lens_server_proto/aim_communication.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_client_context.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_cluster_info.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_selection_type.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_server.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_service_deps.pb.h"
+#include "third_party/lens_server_proto/lens_overlay_visual_search_interaction_data.pb.h"
+#include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 
 namespace base {
 class Time;
@@ -36,6 +46,8 @@ namespace contextual_search {
 class ContextualSearchContextController {
  public:
   // Struct containing configuration params for the context controller.
+  // Note: When the ContextualTasks feature is enabled, some of these parameters
+  // are overridden by the ComposeboxQueryController.
   struct ConfigParams {
    public:
     // Whether to send the `lns_surface` parameter in search URLs.
@@ -53,6 +65,13 @@ class ContextualSearchContextController {
     // Does nothing if `enable_multi_context_input_flow` is false or if
     // `enable_viewport_images` is false.
     bool use_separate_request_ids_for_multi_context_viewport_images = true;
+    // Whether to offer ZPS for the first document attachment, when multiple
+    // attachments are available (true), or the only attachment if exactly one
+    // attachment is available (false).
+    bool prioritize_suggestions_for_the_first_attached_document = false;
+    // Whether or not to attach the page title and url directly to the suggest
+    // request params.
+    bool attach_page_title_and_url_to_suggest_requests = false;
   };
 
   // Observer interface for the Page Handler to get updates on file upload
@@ -91,8 +110,65 @@ class ContextualSearchContextController {
     // The type of search url to create.
     SearchUrlType search_url_type = SearchUrlType::kAim;
 
+    // The entry point for the AIM search.
+    omnibox::ChromeAimEntryPoint aim_entry_point =
+        omnibox::UNKNOWN_AIM_ENTRY_POINT;
+
+    // The tokens of the contextual inputs to attach to the search url.
+    std::vector<base::UnguessableToken> file_tokens;
+
     // Additional params to attach to the search url.
     std::map<std::string, std::string> additional_params;
+
+    // The selection type corresponding to the interaction.
+    std::optional<lens::LensOverlaySelectionType> lens_overlay_selection_type;
+
+    // The invocation source of the interaction.
+    std::optional<lens::LensOverlayInvocationSource> invocation_source;
+
+    // The image crop corresponding to the interaction. This should only be set
+    // if the selection type is set for an interaction.
+    // TODO(crbug.com/462509452): Consider passing a OnceCallback that returns
+    // the image crop, so that it can be create asynchronously.
+    std::optional<lens::ImageCrop> image_crop;
+
+    // The client logs corresponding to the interaction. This should only be set
+    // if the selection type is set for an interaction.
+    std::optional<lens::LensOverlayClientLogs> client_logs;
+
+    // The callback to run when the interaction response is received.
+    base::OnceCallback<void(lens::LensOverlayInteractionResponse)>
+        interaction_response_callback;
+  };
+
+  // Struct containing information needed to create a ClientToAimMessage.
+  struct CreateClientToAimRequestInfo {
+   public:
+    CreateClientToAimRequestInfo();
+    ~CreateClientToAimRequestInfo();
+
+    // The text of the query.
+    std::string query_text;
+
+    // The client-side time the query was started.
+    base::Time query_start_time;
+
+    // The tokens of the newly uploaded contextual inputs to attach to the AIM
+    // turn.
+    std::vector<base::UnguessableToken> file_tokens;
+
+    // The input source of the query text.
+    lens::QueryPayload::QueryTextSource query_text_source =
+        lens::QueryPayload::QUERY_TEXT_SOURCE_UNSPECIFIED;
+
+    // Whether deep search is selected.
+    bool deep_search_selected = false;
+
+    // Whether create images is selected.
+    bool create_images_selected = false;
+
+    // Additional CGI params to append to the search request URL.
+    std::map<std::string, std::string> additional_cgi_params;
   };
 
   virtual ~ContextualSearchContextController() = default;
@@ -102,8 +178,15 @@ class ContextualSearchContextController {
 
   // Called when a query has been submitted. `query_start_time` is the time
   // that the user clicked the submit button.
-  virtual GURL CreateSearchUrl(
-      std::unique_ptr<CreateSearchUrlRequestInfo> search_url_request_info) = 0;
+  virtual void CreateSearchUrl(
+      std::unique_ptr<CreateSearchUrlRequestInfo> search_url_request_info,
+      base::OnceCallback<void(GURL)> callback) = 0;
+
+  // Called when a follow-up Aquery has been submitted. `query_start_time` is
+  // the time that the user clicked the submit button.
+  virtual lens::ClientToAimMessage CreateClientToAimRequest(
+      std::unique_ptr<CreateClientToAimRequestInfo>
+          create_client_to_aim_request_info) = 0;
 
   // Observer management.
   virtual void AddObserver(FileUploadStatusObserver* obs) = 0;
@@ -116,24 +199,23 @@ class ContextualSearchContextController {
       std::unique_ptr<lens::ContextualInputData> contextual_input_data,
       std::optional<lens::ImageEncodingOptions> image_options) = 0;
 
-  // Removes file from file cache.
   virtual bool DeleteFile(const base::UnguessableToken& file_token) = 0;
-
-  // Clear entire file cache.
   virtual void ClearFiles() = 0;
 
-  // Resets the suggest inputs, setting it to the suggest inputs for the
-  // last file if there is only one attached file remaining.
-  virtual void ResetSuggestInputs() = 0;
-
-  virtual int num_files_in_request() = 0;
+  // Creates the suggest inputs proto for the given attached context tokens.
+  virtual std::unique_ptr<lens::proto::LensOverlaySuggestInputs>
+  CreateSuggestInputs(
+      const std::vector<base::UnguessableToken>& attached_context_tokens) = 0;
 
   // Return the file from `active_files_` map or nullptr if not found.
   virtual const FileInfo* GetFileInfo(
       const base::UnguessableToken& file_token) = 0;
 
-  virtual const lens::proto::LensOverlaySuggestInputs& suggest_inputs()
-      const = 0;
+  // Return the file infos for all files in the request.
+  virtual std::vector<const FileInfo*> GetFileInfoList() = 0;
+
+  // Returns a weak pointer to the context controller.
+  virtual base::WeakPtr<ContextualSearchContextController> AsWeakPtr() = 0;
 };
 
 }  // namespace contextual_search

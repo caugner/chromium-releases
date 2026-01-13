@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "chrome/test/chromedriver/chrome/devtools_event_listener.h"
@@ -234,6 +233,8 @@ class WebViewImpl : public WebView {
 
   WebView* FindContainerForFrame(const std::string& frame_id) override;
 
+  std::unique_ptr<WebViewHolder> GetHolder() override;
+
  protected:
   WebViewImpl(const std::string& id,
               const bool w3c_compliant,
@@ -334,14 +335,14 @@ class WebViewImpl : public WebView {
 
 // Responsible for locking a WebViewImpl and its associated data structure to
 // prevent them from being freed which they are still in use.
-class WebViewImplHolder {
+class WebViewImplHolder : public WebViewHolder {
  public:
   explicit WebViewImplHolder(WebViewImpl* web_view);
 
   WebViewImplHolder(const WebViewImplHolder&) = delete;
   WebViewImplHolder& operator=(const WebViewImplHolder&) = delete;
 
-  ~WebViewImplHolder();
+  ~WebViewImplHolder() override;
 
  private:
   struct Item {

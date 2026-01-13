@@ -22,6 +22,7 @@
 #include "third_party/abseil-cpp/absl/strings/str_format.h"
 #include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 using content::NavigationHandle;
 using content::WebContents;
@@ -31,9 +32,10 @@ namespace actor {
 
 namespace {
 
-mojom::ActionResultPtr MayActOnUrlToResult(bool may_act) {
-  return may_act ? MakeOkResult()
-                 : MakeResult(mojom::ActionResultCode::kUrlBlocked);
+mojom::ActionResultPtr UrlCheckToActionResult(MayActOnUrlBlockReason reason) {
+  return reason == MayActOnUrlBlockReason::kAllowed
+             ? MakeOkResult()
+             : MakeResult(mojom::ActionResultCode::kUrlBlocked);
 }
 
 }  // namespace
@@ -49,7 +51,7 @@ NavigateTool::NavigateTool(TaskId task_id,
 
 NavigateTool::~NavigateTool() = default;
 
-void NavigateTool::Validate(ValidateCallback callback) {
+void NavigateTool::Validate(ToolCallback callback) {
   if (!url_.is_valid()) {
     // URL is invalid.
     PostResponseTask(std::move(callback),
@@ -57,19 +59,21 @@ void NavigateTool::Validate(ValidateCallback callback) {
     return;
   }
 
-  MayActOnUrl(url_,
-              /*allow_insecure_http=*/true,
-              Profile::FromBrowserContext(web_contents()->GetBrowserContext()),
-              journal(), task_id(),
-              base::BindOnce(&MayActOnUrlToResult).Then(std::move(callback)));
+  tool_delegate().IsAcceptableNavigationDestination(
+      url_, base::BindOnce(&UrlCheckToActionResult).Then(std::move(callback)));
 }
 
-void NavigateTool::Invoke(InvokeCallback callback) {
+void NavigateTool::Invoke(ToolCallback callback) {
   CHECK(web_contents());
   invoke_callback_ = std::move(callback);
 
   if (base::FeatureList::IsEnabled(kGlicNavigateUsingLoadURL)) {
     content::NavigationController::LoadURLParams params(url_);
+
+    if (base::FeatureList::IsEnabled(kGlicNavigateToolUseOpaqueInitiator)) {
+      params.initiator_origin = url::Origin();
+    }
+
     params.transition_type = ::ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
     params.is_renderer_initiated = false;
     params.has_user_gesture = true;
@@ -124,7 +128,7 @@ std::unique_ptr<ObservationDelayController> NavigateTool::GetObservationDelayer(
 }
 
 void NavigateTool::UpdateTaskBeforeInvoke(ActorTask& task,
-                                          InvokeCallback callback) const {
+                                          ToolCallback callback) const {
   task.AddTab(tab_handle_, std::move(callback));
 }
 
@@ -142,7 +146,7 @@ void NavigateTool::DidFinishNavigation(NavigationHandle* navigation_handle) {
     auto result =
         navigation_handle->HasCommitted() && !navigation_handle->IsErrorPage()
             ? MakeOkResult()
-            : MakeErrorResult();
+            : MakeResult(mojom::ActionResultCode::kNavigateCommittedErrorPage);
 
     if (invoke_callback_) {
       PostResponseTask(std::move(invoke_callback_), std::move(result));

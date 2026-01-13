@@ -6,17 +6,17 @@
 #define CHROME_BROWSER_UI_WEBUI_SEARCHBOX_SEARCHBOX_TEST_UTILS_H_
 
 #include "base/memory/raw_ptr.h"
+#include "chrome/browser/ui/contextual_search/tab_contextualization_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/test_omnibox_edit_model.h"
+#include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/searchbox/lens_searchbox_client.h"
-#include "components/lens/tab_contextualization_controller.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
 #include "components/omnibox/browser/test_omnibox_client.h"
 #include "components/omnibox/composebox/composebox_query.mojom.h"
 #include "realbox_handler.h"
-#include "searchbox_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -76,6 +76,13 @@ class MockSearchboxPage : public searchbox::mojom::Page {
               AddFileContext,
               (const base::UnguessableToken&,
                searchbox::mojom::SelectedFileInfoPtr));
+  MOCK_METHOD(void,
+              UpdateAutoSuggestedTabContext,
+              (searchbox::mojom::TabInfoPtr));
+  MOCK_METHOD(void, UpdateLensSearchEligibility, (bool eligible), (override));
+  MOCK_METHOD(void, UpdateAimEligibility, (bool eligible), (override));
+  MOCK_METHOD(void, UpdateContentSharingPolicy, (bool enabled), (override));
+  MOCK_METHOD(void, OnShowAiModePrefChanged, (bool canShow), (override));
 };
 
 class MockAutocompleteController : public AutocompleteController {
@@ -101,6 +108,7 @@ class MockOmniboxEditModel : public OmniboxEditModel {
 
   // OmniboxEditModel:
   MOCK_METHOD(void, SetUserText, (const std::u16string&), (override));
+  MOCK_METHOD(void, OpenAiMode, (bool, bool), (override));
 };
 
 class MockLensSearchboxClient : public LensSearchboxClient {
@@ -118,7 +126,7 @@ class MockLensSearchboxClient : public LensSearchboxClient {
               (),
               (override, const));
   MOCK_METHOD(std::string&, GetThumbnail, (), (override));
-  MOCK_METHOD(const lens::proto::LensOverlaySuggestInputs&,
+  MOCK_METHOD(lens::proto::LensOverlaySuggestInputs,
               GetLensSuggestInputs,
               (),
               (override, const));

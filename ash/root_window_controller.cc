@@ -501,6 +501,17 @@ class FillLayoutManager : public aura::LayoutManager {
   raw_ptr<aura::Window> container_;
 };
 
+void SetOcclusionOverrideToTrackedWindow(
+    aura::Window* subtree,
+    std::optional<aura::Window::OcclusionState> state) {
+  if (subtree->GetOcclusionState() != aura::Window::OcclusionState::UNKNOWN) {
+    subtree->SetOcclusionStateOverride(state);
+  }
+  for (auto child : subtree->children()) {
+    SetOcclusionOverrideToTrackedWindow(child, state);
+  }
+}
+
 }  // namespace
 
 // static
@@ -920,7 +931,7 @@ void RootWindowController::StartSplitViewOverviewSession(
     return;
   }
 
-  if (Shell::Get()->IsInTabletMode()) {
+  if (display::Screen::Get()->InTabletMode()) {
     OverviewController::Get()->StartOverview(
         action.value_or(OverviewStartAction::kSplitView),
         type.value_or(OverviewEnterExitType::kNormal));
@@ -940,6 +951,13 @@ void RootWindowController::EndSplitViewOverviewSession(
         ->RecordSplitViewOverviewSessionExitPointMetrics(exit_point);
   }
   split_view_overview_session_.reset();
+}
+
+void RootWindowController::ForceOccludeWindowsInAlwaysOnTop(bool occlude) {
+  SetOcclusionOverrideToTrackedWindow(
+      GetContainer(kShellWindowId_AlwaysOnTopContainer),
+      occlude ? std::optional(aura::Window::OcclusionState::OCCLUDED)
+              : std::nullopt);
 }
 
 void RootWindowController::SetScreenRotationAnimatorForTest(
@@ -1199,6 +1217,8 @@ void RootWindowController::CreateContainers() {
                       "AlwaysOnTopContainer", shutdown_screenshot_container);
   ::wm::SetChildWindowVisibilityChangesAnimated(always_on_top_container);
   always_on_top_container->SetProperty(::wm::kUsesScreenCoordinatesKey, true);
+  window_util::SetChildrenUseExtendedHitRegionForWindow(
+      always_on_top_container);
 
   aura::Window* float_container =
       CreateContainer(kShellWindowId_FloatContainer, "FloatContainer",

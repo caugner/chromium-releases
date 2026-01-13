@@ -45,7 +45,6 @@
 #include "base/containers/flat_tree.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
-#include "base/functional/callback_forward.h"
 #include "base/hash/sha1.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
@@ -2168,8 +2167,12 @@ void InputDeviceSettingsControllerImpl::RestoreDefaultKeyboardRemappings(
   mojom::KeyboardSettingsPtr new_settings = keyboard.settings->Clone();
   new_settings->modifier_remappings = {};
   new_settings->six_pack_key_remappings = mojom::SixPackKeyInfo::New();
-  new_settings->f11 = ui::mojom::ExtendedFkeysModifier::kDisabled;
-  new_settings->f12 = ui::mojom::ExtendedFkeysModifier::kDisabled;
+  if (new_settings->f11.has_value()) {
+    new_settings->f11 = ui::mojom::ExtendedFkeysModifier::kDisabled;
+  }
+  if (new_settings->f12.has_value()) {
+    new_settings->f12 = ui::mojom::ExtendedFkeysModifier::kDisabled;
+  }
   if (keyboard.meta_key == ui::mojom::MetaKey::kCommand) {
     new_settings->modifier_remappings[ui::mojom::ModifierKey::kControl] =
         ui::mojom::ModifierKey::kMeta;

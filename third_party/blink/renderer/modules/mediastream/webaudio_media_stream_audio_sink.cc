@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "media/base/audio_bus.h"
 #include "media/base/audio_fifo.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_timestamp_helper.h"
@@ -44,8 +45,13 @@ WebAudioMediaStreamAudioSink::WebAudioMediaStreamAudioSink(
 }
 
 WebAudioMediaStreamAudioSink::~WebAudioMediaStreamAudioSink() {
-  if (audio_converter_.get())
-    audio_converter_->RemoveInput(this);
+  // Use the lock to protect access to audio_converter_.
+  {
+    base::AutoLock auto_lock(lock_);
+    if (audio_converter_.get()) {
+      audio_converter_->RemoveInput(this);
+    }
+  }
 
   // If the track is still active, it is necessary to notify the track before
   // the source provider goes away.

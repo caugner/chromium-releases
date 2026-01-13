@@ -490,6 +490,13 @@ gn_args.config(
 )
 
 gn_args.config(
+    name = "dawn_use_swiftshader",
+    args = {
+        "dawn_use_swiftshader": True,
+    },
+)
+
+gn_args.config(
     name = "dcheck_always_on",
     args = {
         "dcheck_always_on": True,
@@ -1494,14 +1501,6 @@ gn_args.config(
     name = "webview_google",
     args = {
         "system_webview_package_name": "com.google.android.webview",
-    },
-)
-
-# For Android N-P, only userdebug/eng
-gn_args.config(
-    name = "webview_monochrome",
-    args = {
-        "system_webview_package_name": "com.google.android.apps.chrome",
     },
 )
 

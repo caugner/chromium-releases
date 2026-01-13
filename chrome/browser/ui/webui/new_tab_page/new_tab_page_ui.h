@@ -53,7 +53,6 @@
 #include "ui/native_theme/native_theme.h"
 #include "ui/native_theme/native_theme_observer.h"
 #include "ui/webui/mojo_web_ui_controller.h"
-#include "ui/webui/resources/cr_components/color_change_listener/color_change_listener.mojom.h"
 #include "ui/webui/resources/cr_components/composebox/composebox.mojom.h"
 #include "ui/webui/resources/cr_components/most_visited/most_visited.mojom.h"
 
@@ -66,13 +65,13 @@ class NavigationHandle;
 class WebUI;
 }  // namespace content
 
+namespace contextual_search {
+class ContextualSearchSessionHandle;
+}  // namespace contextual_search
+
 namespace page_image_service {
 class ImageServiceHandler;
 }  // namespace page_image_service
-
-namespace ui {
-class ColorChangeHandler;
-}  // namespace ui
 
 class BrowserCommandHandler;
 class ComposeboxHandler;
@@ -140,12 +139,6 @@ class NewTabPageUI
   // interface passing the pending receiver that will be internally bound.
   void BindInterface(
       mojo::PendingReceiver<new_tab_page::mojom::PageHandlerFactory>
-          pending_receiver);
-
-  // Instantiates the implementor of the mojom::PageHandler mojo interface
-  // passing the pending receiver that will be internally bound.
-  void BindInterface(
-      mojo::PendingReceiver<color_change_listener::mojom::PageHandler>
           pending_receiver);
 
   // Instantiates the implementor of the searchbox::mojom::PageHandler mojo
@@ -332,13 +325,21 @@ class NewTabPageUI
   // type of NTP promos can be shown, if any.
   std::string_view GetNtpPromoType();
 
+  // Lazily creates and returns a reference to the owned contextual search
+  // session handle for `realbox_handler_` and `composebox_handler_`.
+  contextual_search::ContextualSearchSessionHandle*
+  GetOrCreateContextualSessionHandle();
+
   // The counter for NewTabPage.Count UMA metrics.
   static int instance_count_;
+
+  // Must outlive `realbox_handler_` and `composebox_handler_`.
+  std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+      shared_session_handle_;
 
   std::unique_ptr<NewTabPageHandler> page_handler_;
   mojo::Receiver<new_tab_page::mojom::PageHandlerFactory>
       page_factory_receiver_;
-  std::unique_ptr<ui::ColorChangeHandler> color_provider_handler_;
   std::unique_ptr<CustomizeButtonsHandler> customize_buttons_handler_;
   mojo::Receiver<customize_buttons::mojom::CustomizeButtonsHandlerFactory>
       customize_buttons_factory_receiver_;

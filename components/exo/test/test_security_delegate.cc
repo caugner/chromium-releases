@@ -37,6 +37,14 @@ exo::SecurityDelegate::SetBoundsPolicy TestSecurityDelegate::CanSetBounds(
   return policy_;
 }
 
+bool TestSecurityDelegate::CanAccessRemoteShell() const {
+  return remote_shell_allowed_;
+}
+
+bool TestSecurityDelegate::CanSetSystemModal() const {
+  return system_modal_allowed_;
+}
+
 std::vector<ui::FileInfo> TestSecurityDelegate::GetFilenames(
     ui::EndpointType source,
     const std::vector<uint8_t>& data) const {
@@ -72,6 +80,14 @@ void TestSecurityDelegate::SendPickle(ui::EndpointType target,
 void TestSecurityDelegate::SetCanSetBounds(
     exo::SecurityDelegate::SetBoundsPolicy policy) {
   policy_ = policy;
+}
+
+void TestSecurityDelegate::SetCanAccessRemoteShell(bool allowed) {
+  remote_shell_allowed_ = allowed;
+}
+
+void TestSecurityDelegate::SetCanSetSystemModal(bool allowed) {
+  system_modal_allowed_ = allowed;
 }
 
 void TestSecurityDelegate::RunSendPickleCallback(std::vector<GURL> urls) {

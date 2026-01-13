@@ -21,21 +21,21 @@
 #include "net/base/net_errors.h"
 #include "third_party/abseil-cpp/absl/strings/str_format.h"
 
+namespace actor {
+
 namespace {
 
 // The polling interval used to update the pending_navigations_ list.
 constexpr base::TimeDelta kPendingNavigationPollingInterval =
     base::Milliseconds(100);
 
-actor::mojom::ActionResultPtr MayActOnUrlToResult(bool may_act) {
-  return may_act
-             ? actor::MakeOkResult()
-             : actor::MakeResult(actor::mojom::ActionResultCode::kUrlBlocked);
+mojom::ActionResultPtr UrlCheckToActionResult(MayActOnUrlBlockReason reason) {
+  return reason == MayActOnUrlBlockReason::kAllowed
+             ? MakeOkResult()
+             : MakeResult(mojom::ActionResultCode::kUrlBlocked);
 }
 
 }  // namespace
-
-namespace actor {
 
 using ::content::NavigationController;
 using ::content::NavigationHandle;
@@ -53,7 +53,7 @@ HistoryTool::HistoryTool(TaskId task_id,
 
 HistoryTool::~HistoryTool() = default;
 
-void HistoryTool::Validate(ValidateCallback callback) {
+void HistoryTool::Validate(ToolCallback callback) {
   // Get the navigation entry that would be navigated to.
   int offset = direction_ == HistoryToolRequest::Direction::kBack ? -1 : 1;
   content::NavigationEntry* entry =
@@ -69,11 +69,9 @@ void HistoryTool::Validate(ValidateCallback callback) {
   validated_entry_id_ = entry->GetUniqueID();
 
   // Check if the destination URL is blocked.
-  MayActOnUrl(entry->GetURL(),
-              /*allow_insecure_http=*/true,
-              Profile::FromBrowserContext(web_contents()->GetBrowserContext()),
-              journal(), task_id(),
-              base::BindOnce(&MayActOnUrlToResult).Then(std::move(callback)));
+  tool_delegate().IsAcceptableNavigationDestination(
+      entry->GetURL(),
+      base::BindOnce(&UrlCheckToActionResult).Then(std::move(callback)));
 }
 
 mojom::ActionResultPtr HistoryTool::TimeOfUseValidation(
@@ -104,7 +102,7 @@ mojom::ActionResultPtr HistoryTool::TimeOfUseValidation(
   return result;
 }
 
-void HistoryTool::Invoke(InvokeCallback callback) {
+void HistoryTool::Invoke(ToolCallback callback) {
   CHECK(web_contents());
   CHECK(!IsInvokeInProgress());
   CHECK(pending_navigations_.empty());
@@ -156,7 +154,7 @@ std::unique_ptr<ObservationDelayController> HistoryTool::GetObservationDelayer(
 }
 
 void HistoryTool::UpdateTaskBeforeInvoke(ActorTask& task,
-                                         InvokeCallback callback) const {
+                                         ToolCallback callback) const {
   task.AddTab(tab_handle_, std::move(callback));
 }
 

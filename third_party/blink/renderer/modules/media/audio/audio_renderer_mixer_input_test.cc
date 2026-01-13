@@ -14,6 +14,7 @@
 #include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
+#include "media/base/audio_bus.h"
 #include "media/base/audio_latency.h"
 #include "media/base/fake_audio_render_callback.h"
 #include "media/base/mock_audio_renderer_sink.h"
@@ -212,6 +213,21 @@ TEST_F(AudioRendererMixerInputTest, SwitchOutputDevice) {
   EXPECT_EQ(new_mixer, mixers_[1].get());
   EXPECT_NE(old_mixer, new_mixer);
   mixer_input_->Stop();
+}
+
+TEST_F(AudioRendererMixerInputTest, StopDuringSwitchOutputDevice) {
+  mixer_input_->Initialize(audio_parameters_, fake_callback_.get());
+  mixer_input_->Start();
+  const std::string kDeviceId("mock-device-id");
+  EXPECT_CALL(*this,
+              SwitchCallbackCalled(media::OUTPUT_DEVICE_STATUS_ERROR_INTERNAL));
+  base::RunLoop run_loop;
+  mixer_input_->SwitchOutputDevice(
+      kDeviceId,
+      blink::BindOnce(&AudioRendererMixerInputTest::SwitchCallback,
+                      Unretained(this), blink::Unretained(&run_loop)));
+  mixer_input_->Stop();
+  run_loop.Run();
 }
 
 // Test SwitchOutputDevice() to the same device as the current (default) device

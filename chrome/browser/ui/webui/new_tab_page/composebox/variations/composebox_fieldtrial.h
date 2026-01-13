@@ -16,34 +16,25 @@ class Profile;
 
 namespace ntp_composebox {
 
-inline constexpr char kConfigParamParseSuccessHistogram[] =
-    "NewTabPage.Composebox.ConfigParseSuccess";
-
 // If overridden to false, disables the feature (kill switch). If true, enables
 // the feature.
 BASE_DECLARE_FEATURE(kNtpComposebox);
 
 // The serialized base64 encoded `omnibox::NTPComposeboxConfig`.
 extern const base::FeatureParam<std::string> kConfigParam;
-// Whether to send the lns_surface parameter.
-// TODO(crbug.com/430070871): Remove this flag once the server supports the
-// `lns_surface` parameter.
-extern const base::FeatureParam<bool> kSendLnsSurfaceParam;
-// If kSendLnsSurfaceParam is true, whether to suppress the `lns_surface`
-// parameter if there is no image upload. Does nothing if kSendLnsSurfaceParam
-// is false.
-extern const base::FeatureParam<bool> kSuppressLnsSurfaceParamIfNoImage;
 // Whether or not to use separate request ids for viewport images if the
 // multi-context input flow is enabled.
 extern const base::FeatureParam<bool>
     kUseSeparateRequestIdsForMultiContextViewportImages;
-
 // Whether to show zps suggestions under the composebox.
 extern const base::FeatureParam<bool> kShowComposeboxZps;
 // Whether to show typed suggestions under the composebox.
 extern const base::FeatureParam<bool> kShowComposeboxTypedSuggest;
 // Whether to show image suggestions under the composebox.
 extern const base::FeatureParam<bool> kShowComposeboxImageSuggestions;
+// Whether or not to attach the page title and url directly to the suggest
+// request params.
+extern const base::FeatureParam<bool> kAttachPageTitleAndUrlToSuggestRequest;
 // Whether to show the + entrypoint and contextual input menu in the realbox and
 // composebox.
 extern const base::FeatureParam<bool> kShowContextMenu;
@@ -61,14 +52,15 @@ extern const base::FeatureParam<int> kMaxNumFiles;
 // Whether or not to show a description in the context menu entrypoint, or just
 // the icon.
 extern const base::FeatureParam<bool> kShowContextMenuDescription;
+// Whether or not to show the context menu description only when the user
+// hovers over the button.
+extern const base::FeatureParam<bool> kEnableEphemeralContextMenuDescription;
 // Whether or not to enable viewport images with page context uploads.
 extern const base::FeatureParam<bool> kEnableViewportImages;
 // Whether to show the tools and models picker in the composebox.
 extern const base::FeatureParam<bool> kShowToolsAndModels;
 // Whether to show the create image button in the composebox context menu.
 extern const base::FeatureParam<bool> kShowCreateImageTool;
-// Whether to force tools and models to show in the composebox context menu.
-extern const base::FeatureParam<bool> kForceToolsAndModels;
 // Whether to allow drag and drop files on composebox
 extern const base::FeatureParam<bool> kEnableContextDragAndDrop;
 
@@ -86,6 +78,8 @@ extern const base::FeatureParam<bool> kCloseComposeboxByEscape;
 extern const base::FeatureParam<bool> kCloseComposeboxByClickOutside;
 // Whether to delay an upload if tab context is added from the recent tab chip.
 extern const base::FeatureParam<bool> kAddTabUploadDelayOnRecentTabChipClick;
+// Whether to trap tab focus within the composebox.
+extern const base::FeatureParam<bool> kEnableModalComposebox;
 
 bool IsNtpComposeboxEnabled(Profile* profile);
 
@@ -150,6 +144,9 @@ enum class RealboxLayoutMode {
 
 // Flag to control the realbox layout mode (Tall, Compact).
 extern const base::FeatureParam<RealboxLayoutMode> kRealboxLayoutMode;
+
+// Whether to enable multi-line input in the searchbox.
+extern const base::FeatureParam<bool> kMultiLineEnabled;
 
 bool IsNtpRealboxNextEnabled(Profile* profile);
 

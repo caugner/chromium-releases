@@ -150,6 +150,7 @@ TEST_F(ActorSitePolicyTest, BlockIpAddress) {
 
 TEST_F(ActorSitePolicyTest, BlockNonHTTPScheme) {
   CheckUrl(GURL("file:///my_file"), false);
+  CheckUrl(GURL("file://localhost/tmp"), false);
   CheckUrl(GURL(chrome::kChromeUIVersionURL), false);
 }
 
@@ -158,11 +159,11 @@ TEST_F(ActorSitePolicyTest, BlockInsecureHTTP) {
 }
 
 TEST_F(ActorSitePolicyTest, InsecureHTTPAllowedWhenSpecified) {
-  base::test::TestFuture<bool> allowed;
+  base::test::TestFuture<MayActOnUrlBlockReason> allowed;
   MayActOnUrl(GURL("http://a.test/"), /*allow_insecure_http=*/true, profile(),
               ActorKeyedService::Get(profile())->GetJournal(), TaskId(),
               allowed.GetCallback());
-  EXPECT_TRUE(allowed.Get());
+  EXPECT_EQ(allowed.Get(), MayActOnUrlBlockReason::kAllowed);
 }
 
 TEST_F(ActorSitePolicyTest, AllowAllowlistedHosts) {

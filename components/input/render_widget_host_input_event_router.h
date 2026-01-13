@@ -23,7 +23,6 @@
 #include "components/viz/common/hit_test/hit_test_query.h"
 #include "components/viz/common/hit_test/hit_test_region_observer.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "mojo/public/cpp/bindings/remote.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 #include "ui/base/mojom/menu_source_type.mojom-forward.h"
 #include "ui/gfx/geometry/transform.h"
@@ -116,6 +115,7 @@ class COMPONENT_EXPORT(INPUT) RenderWidgetHostInputEventRouter final
    public:
     virtual ~Delegate() = default;
     virtual TouchEmulator* GetTouchEmulator(bool create_if_necessary) = 0;
+    virtual void CancelAutoscroll(RenderWidgetHostViewInput* view) = 0;
   };
 
   explicit RenderWidgetHostInputEventRouter(viz::HitTestDataProvider* provider,
@@ -190,9 +190,11 @@ class COMPONENT_EXPORT(INPUT) RenderWidgetHostInputEventRouter final
 
   // RenderWidgetTargeter::Delegate:
   RenderWidgetHostViewInput* FindViewFromFrameSinkId(
-      const viz::FrameSinkId& frame_sink_id) const override;
+      const viz::FrameSinkId& frame_sink_id,
+      RenderWidgetHostViewInput* ancestor_to_verify = nullptr) const override;
   bool ShouldContinueHitTesting(
       RenderWidgetHostViewInput* target_view) const override;
+  void CancelAutoscroll(RenderWidgetHostViewInput* view) override;
 
   // Allows a target to claim or release capture of mouse events.
   void SetMouseCaptureTarget(RenderWidgetHostViewInput* target,
@@ -235,12 +237,18 @@ class COMPONENT_EXPORT(INPUT) RenderWidgetHostInputEventRouter final
 
   size_t TouchEventAckQueueLengthForTesting() const;
   size_t RegisteredViewCountForTesting() const;
+  const gfx::PointF& mouse_down_post_transformed_coordinate_for_testing()
+      const {
+    return mouse_down_post_transformed_coordinate_;
+  }
 
   void set_route_to_root_for_devtools(bool route) {
     route_to_root_for_devtools_ = route;
   }
 
-  void SetAutoScrollInProgress(bool is_autoscroll_in_progress);
+  RenderWidgetTargeter::AutoscrollStatus SetAutoScrollInProgress(
+      RenderWidgetHostViewInput* view,
+      bool is_autoscroll_in_progress);
 
   RenderWidgetHostViewInput* GetLastMouseMoveTargetForTest();
   RenderWidgetHostViewInput* GetLastMouseMoveRootViewForTest();

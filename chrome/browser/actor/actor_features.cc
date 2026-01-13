@@ -29,7 +29,8 @@ BASE_FEATURE_PARAM(bool,
                    "allowlist_only",
                    true);
 
-BASE_FEATURE(kActorDoNotStoreCompletedTasks, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kActorBypassTOUValidationForGuestView,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicActionUseOptimizationGuide, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -87,13 +88,26 @@ BASE_FEATURE(kGlicTabScreenshotPaintPreviewBackend,
 // b/460113906.
 BASE_FEATURE(kGlicNavigateUsingLoadURL, base::FEATURE_ENABLED_BY_DEFAULT);
 
+// Whether to specify that an opaque origin should be set for the initiator
+// in NavigateTool requests. Fix for http://crbug.com/436224875
+BASE_FEATURE(kGlicNavigateToolUseOpaqueInitiator,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 // When the above NavigateWithBrowserNavigator is off, uses the legacy
 // NavigateTool path but with user gesture disabled. Also a fix for b/460113906
 // but with different risk profile.  No-op if above flag is on.
 BASE_FEATURE(kGlicNavigateWithoutUserGesture, base::FEATURE_ENABLED_BY_DEFAULT);
 
+// Killswitch for updating the Glic Actor API to ensure that calls to
+// performAction return first when a task is stopped or paused.
+BASE_FEATURE(kGlicPerformActionsReturnsBeforeStateChange,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kGlicSkipBeforeUnloadDialogAndNavigate,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Killswitch for b/465690937.
+BASE_FEATURE(kGlicDeferActUntilUninterrupted, base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<bool> kFullPageScreenshot{
     &kGlicTabScreenshotPaintPreviewBackend, "full_page_screenshot", false};
@@ -119,5 +133,13 @@ const base::FeatureParam<
         &kGlicTabScreenshotPaintPreviewBackend, "screenshot_iframe_redaction",
         page_content_annotations::ScreenshotIframeRedactionScope::kCrossSite,
         &kScreenshotIframeRedactionOptions};
+
+BASE_FEATURE(kActorBindCreatedTabToTask, base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kActorRestartObservationDelayControllerOnNavigate,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kActorSendBrowserSignalForAction,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace actor

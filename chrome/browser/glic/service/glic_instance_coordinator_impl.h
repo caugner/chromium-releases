@@ -19,9 +19,9 @@
 #include "chrome/browser/glic/host/glic_web_client_access.h"
 #include "chrome/browser/glic/host/host.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
-#include "chrome/browser/glic/service/glic_instance_coordinator_metrics.h"
 #include "chrome/browser/glic/service/glic_instance_impl.h"
 #include "chrome/browser/glic/service/glic_tab_creation_observer.h"
+#include "chrome/browser/glic/service/metrics/glic_instance_coordinator_metrics.h"
 #include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -45,6 +45,10 @@ namespace contextual_cueing {
 class ContextualCueingService;
 }
 namespace glic {
+
+BASE_DECLARE_FEATURE(kGlicHibernateAllOnMemoryPressure);
+
+BASE_DECLARE_FEATURE(kGlicHibernateOnMemoryUsage);
 
 // An interface to GlicInstanceCoordinatorImpl. Should be used instead of direct
 // access to GlicInstanceCoordinatorImpl to allow for test fakes.
@@ -106,6 +110,10 @@ class GlicInstanceCoordinatorImpl
   // coordinator.
   void Shutdown() override;
   void Close() override;
+  void CloseInstanceWithFrame(
+      content::RenderFrameHost* render_frame_host) override;
+  void CloseAndShutdownInstanceWithFrame(
+      content::RenderFrameHost* render_frame_host) override;
 
   void AddGlobalStateObserver(StateObserver* observer) override;
   void RemoveGlobalStateObserver(StateObserver* observer) override;
@@ -165,6 +173,7 @@ class GlicInstanceCoordinatorImpl
   void CloseFloaty();
 
   void OnMemoryPressure(base::MemoryPressureLevel level) override;
+  void CheckMemoryUsage();
 
   void RemoveInstance(GlicInstanceImpl* instance) override;
 
@@ -193,6 +202,7 @@ class GlicInstanceCoordinatorImpl
 
   base::MemoryPressureListenerRegistration
       memory_pressure_listener_registration_;
+  base::RepeatingTimer memory_monitor_timer_;
 
   bool warming_enabled_ = true;
 

@@ -22,16 +22,22 @@ enum class MimeType;
 
 namespace contextual_search {
 
+// LINT.IfChange(ContextualSearchSource)
+
 enum class ContextualSearchSource {
   kUnknown,
   kNewTabPage,
   kOmnibox,
+  kContextualTasks,
+  kLens,
 };
+
+// LINT.ThenChange(//tools/metrics/histograms/metadata/contextual_search/histograms.xml:ContextualSearchSource,//tools/metrics/actions/actions.xml)
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 // Describes the query submission details.
-enum class MultimodalState {
+enum class ContextualSearchMultimodalState {
   kTextOnly = 0,
   kFileOnly = 1,
   kTextAndFile = 2,
@@ -64,6 +70,11 @@ struct SessionMetrics {
   // where a user navigates to the AIM page on a new window or tab and the
   // composebox remains open.
   int num_query_submissions = 0;
+  // The number of times a tab is added as context to the session.
+  int tab_context_added_count = 0;
+  // The number of times a tab with a duplicate title is added as context to the
+  // session.
+  int tab_with_duplicate_title_clicked_count = 0;
 };
 
 class ContextualSearchMetricsRecorder {
@@ -75,7 +86,7 @@ class ContextualSearchMetricsRecorder {
   // session state metrics. Virtual for testing.
   virtual void NotifySessionStateChanged(SessionState session_state);
 
-  void OnFileUploadStatusChanged(
+  virtual void OnFileUploadStatusChanged(
       lens::MimeType file_mime_type,
       FileUploadStatus file_upload_status,
       const std::optional<FileUploadErrorType>& error_type);
@@ -85,7 +96,11 @@ class ContextualSearchMetricsRecorder {
   // Maps mime types to its string version for histogram naming.
   std::string MimeTypeToString(lens::MimeType mime_type);
   // Maps contextual search sources to its string version for histogram naming.
-  std::string ContextualSearchSourceToString(ContextualSearchSource source);
+  static std::string ContextualSearchSourceToString(
+      ContextualSearchSource source);
+  ContextualSearchSource source() const { return source_; }
+  // Maps submission types to its string version for histogram naming.
+  std::string SubmissionTypeToString(SubmissionType submission_type);
 
   // Records several metrics about the query, such the number of characters
   // found in the query.
@@ -98,7 +113,19 @@ class ContextualSearchMetricsRecorder {
                                 lens::MimeType file_type,
                                 FileUploadStatus file_status);
 
-  std::string GetMetricsSuffix() const { return metrics_suffix_; }
+  void RecordTabClickedMetrics(bool has_duplicate_title,
+                               std::optional<int> recency_ranking);
+
+  void RecordTabContextMenuMetrics(int total_tab_count,
+                                   int duplicate_title_count);
+
+  void RecordToolsSubmissionType(SubmissionType submission_type);
+
+  void RecordToolState(SubmissionType submission_type, AimToolState tool_state);
+
+  // Records whether the config was parsed successfully.
+  static void RecordConfigParseSuccess(ContextualSearchSource source,
+                                       bool success);
 
  private:
   // Called when the session starts to correctly track session
@@ -119,6 +146,7 @@ class ContextualSearchMetricsRecorder {
   void FinalizeSessionMetrics();
   // Resets all session metrics at the end of a session.
   void ResetSessionMetrics();
+  ContextualSearchSource source_;
   std::string metrics_suffix_;
   std::unique_ptr<SessionMetrics> session_metrics_;
   SessionState session_state_ = SessionState::kNone;

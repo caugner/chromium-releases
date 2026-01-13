@@ -23,6 +23,7 @@
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_tab_helper.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_feature.h"
+#import "ios/chrome/browser/intelligence/page_action_menu/utils/ai_hub_metrics.h"
 #import "ios/chrome/browser/lens_overlay/coordinator/lens_overlay_availability.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_modality.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_request_queue.h"
@@ -33,6 +34,7 @@
 #import "ios/chrome/browser/shared/public/commands/page_action_menu_commands.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/signin/model/authentication_service.h"
 #import "ios/chrome/browser/translate/model/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/web/model/blocked_popup_tab_helper.h"
 #import "ios/chrome/grit/ios_strings.h"
@@ -59,6 +61,9 @@ const CGFloat kFeatureRowIconSize = 20;
   // Observer for the WebState.
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
 
+  // The authentication service to check sign-in status.
+  raw_ptr<AuthenticationService> _authenticationService;
+
   // The `PrefService` used to store reminder data.
   raw_ptr<PrefService> _profilePrefs;
 
@@ -76,6 +81,7 @@ const CGFloat kFeatureRowIconSize = 20;
 }
 
 - (instancetype)initWithWebState:(web::WebState*)webState
+           authenticationService:(AuthenticationService*)authenticationService
               profilePrefService:(PrefService*)profilePrefs
               templateURLService:(TemplateURLService*)templateURLService
                       BWGService:(BwgService*)BWGService
@@ -85,6 +91,7 @@ const CGFloat kFeatureRowIconSize = 20;
   self = [super init];
   if (self) {
     _webState = webState;
+    _authenticationService = authenticationService;
     _profilePrefs = profilePrefs;
     _templateURLService = templateURLService;
     _BWGService = BWGService;
@@ -115,6 +122,14 @@ const CGFloat kFeatureRowIconSize = 20;
 }
 
 #pragma mark - PageActionMenuMutator
+
+- (BOOL)shouldShowFeatureEntryPoints {
+  if (!_authenticationService) {
+    return NO;
+  }
+  return _authenticationService->HasPrimaryIdentity(
+      signin::ConsentLevel::kSignin);
+}
 
 - (BOOL)isLensAvailableForTraitCollection:(UITraitCollection*)traitCollection {
   BOOL isLandscape = IsCompactHeight(traitCollection);
@@ -263,7 +278,8 @@ const CGFloat kFeatureRowIconSize = 20;
   return base::SysUTF8ToNSString(url.GetHost());
 }
 
-- (void)revokePermission:(PageActionMenuFeatureType)featureType {
+- (void)updatePermission:(BOOL)granted
+              forFeature:(PageActionMenuFeatureType)featureType {
   if (!_webState) {
     return;
   }
@@ -276,22 +292,15 @@ const CGFloat kFeatureRowIconSize = 20;
     case PageActionMenuMicrophonePermission:
       permission = web::PermissionMicrophone;
       break;
-    case PageActionMenuTranslate:
-    case PageActionMenuPopupBlocker:
-    case PageActionMenuPriceTracking:
-      CHECK(false)
-          << "revokePermission called with non-permission feature type: "
-          << featureType;
+    default:
+      return;
   }
 
-  _webState->SetStateForPermission(web::PermissionStateBlocked, permission);
-
-  // Post task to ensure WebState has processed the permission change.
-  __weak PageActionMenuMediator* weakSelf = self;
-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(^{
-        [weakSelf.consumer updateFeatureRowsAvailability];
-      }));
+  if (granted) {
+    _webState->SetStateForPermission(web::PermissionStateAllowed, permission);
+  } else {
+    _webState->SetStateForPermission(web::PermissionStateBlocked, permission);
+  }
 }
 
 - (NSArray<PageActionMenuFeature*>*)activeFeatures {
@@ -300,12 +309,14 @@ const CGFloat kFeatureRowIconSize = 20;
 
   // Translate feature.
   if ([self isFeatureAvailable:PageActionMenuTranslate]) {
+    RecordPageActionMenuFeatureRowShown(
+        IOSPageActionMenuFeatureType::kTranslate);
     PageActionMenuFeature* translateFeature = [[PageActionMenuFeature alloc]
         initWithFeatureType:PageActionMenuTranslate
                       title:l10n_util::GetNSString(
                                 IDS_IOS_AI_HUB_TRANSLATE_LABEL)
-                       icon:DefaultSymbolWithPointSize(kTranslateSymbol,
-                                                       kFeatureRowIconSize)
+                       icon:CustomSymbolTemplateWithPointSize(
+                                kTranslateSymbol, kFeatureRowIconSize)
                  actionType:PageActionMenuButtonAction];
     translateFeature.subtitle = [self translateLanguagePair];
     translateFeature.actionType = PageActionMenuSettingsAction;
@@ -316,6 +327,8 @@ const CGFloat kFeatureRowIconSize = 20;
 
   // Popup blocker feature.
   if ([self isFeatureAvailable:PageActionMenuPopupBlocker]) {
+    RecordPageActionMenuFeatureRowShown(
+        IOSPageActionMenuFeatureType::kPopupBlocker);
     PageActionMenuFeature* popupFeature = [[PageActionMenuFeature alloc]
         initWithFeatureType:PageActionMenuPopupBlocker
                       title:l10n_util::GetNSString(
@@ -337,6 +350,8 @@ const CGFloat kFeatureRowIconSize = 20;
 
   // Camera permission feature.
   if ([self isFeatureAvailable:PageActionMenuCameraPermission]) {
+    RecordPageActionMenuFeatureRowShown(
+        IOSPageActionMenuFeatureType::kCameraPermission);
     PageActionMenuFeature* cameraFeature = [[PageActionMenuFeature alloc]
         initWithFeatureType:PageActionMenuCameraPermission
                       title:l10n_util::GetNSString(
@@ -344,12 +359,16 @@ const CGFloat kFeatureRowIconSize = 20;
                        icon:CustomSymbolWithPointSize(kCameraFillSymbol,
                                                       kFeatureRowIconSize)
                  actionType:PageActionMenuToggleAction];
-    cameraFeature.toggleState = YES;
+    web::PermissionState state =
+        _webState->GetStateForPermission(web::PermissionCamera);
+    cameraFeature.toggleState = (state == web::PermissionStateAllowed);
     [features addObject:cameraFeature];
   }
 
   // Microphone permission feature.
   if ([self isFeatureAvailable:PageActionMenuMicrophonePermission]) {
+    RecordPageActionMenuFeatureRowShown(
+        IOSPageActionMenuFeatureType::kMicrophonePermission);
     PageActionMenuFeature* micFeature = [[PageActionMenuFeature alloc]
         initWithFeatureType:PageActionMenuMicrophonePermission
                       title:l10n_util::GetNSString(
@@ -357,11 +376,15 @@ const CGFloat kFeatureRowIconSize = 20;
                        icon:DefaultSymbolWithPointSize(kMicrophoneFillSymbol,
                                                        kFeatureRowIconSize)
                  actionType:PageActionMenuToggleAction];
-    micFeature.toggleState = YES;
+    web::PermissionState state =
+        _webState->GetStateForPermission(web::PermissionMicrophone);
+    micFeature.toggleState = (state == web::PermissionStateAllowed);
     [features addObject:micFeature];
   }
   // Price tracking feature.
   if ([self isFeatureAvailable:PageActionMenuPriceTracking]) {
+    RecordPageActionMenuFeatureRowShown(
+        IOSPageActionMenuFeatureType::kPriceTracking);
     PageActionMenuFeature* priceTrackingFeature = [[PageActionMenuFeature alloc]
         initWithFeatureType:PageActionMenuPriceTracking
                       title:l10n_util::GetNSString(
@@ -371,6 +394,29 @@ const CGFloat kFeatureRowIconSize = 20;
                  actionType:PageActionMenuButtonAction];
     priceTrackingFeature.actionText =
         l10n_util::GetNSString(IDS_IOS_AI_HUB_PRICE_TRACKING_BUTTON_LABEL);
+
+    ContextualPanelTabHelper* tabHelper =
+        ContextualPanelTabHelper::FromWebState(_webState);
+    if (tabHelper) {
+      std::vector<base::WeakPtr<ContextualPanelItemConfiguration>> configs =
+          tabHelper->GetCurrentCachedConfigurations();
+      for (const auto& config_weak : configs) {
+        if (!config_weak) {
+          continue;
+        }
+        ContextualPanelItemConfiguration* config = config_weak.get();
+        if (config->item_type == ContextualPanelItemType::PriceInsightsItem) {
+          PriceInsightsItemConfiguration* priceInsightsConfig =
+              static_cast<PriceInsightsItemConfiguration*>(config);
+          if (!priceInsightsConfig->is_subscribed) {
+            priceTrackingFeature.actionText = l10n_util::GetNSString(
+                IDS_IOS_AI_HUB_PRICE_TRACKING_TRACK_BUTTON_LABEL);
+          }
+          break;
+        }
+      }
+    }
+
     [features addObject:priceTrackingFeature];
   }
 
@@ -393,6 +439,9 @@ const CGFloat kFeatureRowIconSize = 20;
 
   GURL currentUrl = _webState->GetLastCommittedURL();
 
+  RecordPageActionMenuFeatureRowUsed(
+      IOSPageActionMenuFeatureType::kPopupBlocker);
+
   // Open each blocked popup and allow future popups from this site.
   for (const auto& popup : popups) {
     web::WebState::OpenURLParams params(popup.popup_url, popup.referrer,
@@ -406,8 +455,6 @@ const CGFloat kFeatureRowIconSize = 20;
         ContentSettingsPattern::Wildcard(), ContentSettingsType::POPUPS,
         CONTENT_SETTING_ALLOW);
   }
-
-  [self.consumer updateFeatureRowsAvailability];
 }
 
 - (void)revertTranslation {
@@ -421,9 +468,11 @@ const CGFloat kFeatureRowIconSize = 20;
     return;
   }
 
+  RecordPageActionMenuFeatureRowUsed(IOSPageActionMenuFeatureType::kTranslate);
+
   translateClient->GetTranslateManager()->RevertTranslation();
 
-  [self.consumer updateFeatureRowsAvailability];
+  [self updateTranslateInfobarAcceptedState:NO];
 }
 
 #pragma mark - CRWWebStateObserver
@@ -489,6 +538,9 @@ std::string GetTargetLanguageCode(ChromeIOSTranslateClient* translate_client) {
     return;
   }
 
+  RecordPageActionMenuFeatureRowSettingsOpened(
+      IOSPageActionMenuFeatureType::kPriceTracking);
+
   [self.contextualSheetHandler openContextualSheet];
 }
 
@@ -504,33 +556,25 @@ std::string GetTargetLanguageCode(ChromeIOSTranslateClient* translate_client) {
     return;
   }
 
-  translate::TranslateManager* translateManager =
-      translateClient->GetTranslateManager();
-  translate::LanguageState* languageState =
-      translateManager->GetLanguageState();
-  std::string sourceLanguage = languageState->source_language();
-  std::string targetLanguage = languageState->current_language();
+  RecordPageActionMenuFeatureRowSettingsOpened(
+      IOSPageActionMenuFeatureType::kTranslate);
 
-  // Create translate infobar without showing banner.
-  // Setting triggered_from_menu=false with TRANSLATE_STEP_AFTER_TRANSLATE
-  // suppresses the banner per ChromeIOSTranslateClient::CreateInfoBar logic.
-  translateClient->ShowTranslateUI(translate::TRANSLATE_STEP_AFTER_TRANSLATE,
-                                   sourceLanguage, targetLanguage,
-                                   translate::TranslateErrors::NONE, false);
+  InfoBarIOS* translateInfobar = [self findTranslateInfobar];
+  if (!translateInfobar) {
+    translate::TranslateManager* translateManager =
+        translateClient->GetTranslateManager();
+    translate::LanguageState* languageState =
+        translateManager->GetLanguageState();
+    std::string sourceLanguage = languageState->source_language();
+    std::string targetLanguage = languageState->current_language();
 
-  infobars::InfoBarManager* infoBarManager =
-      InfoBarManagerImpl::FromWebState(webState);
-  if (!infoBarManager) {
-    return;
-  }
-
-  InfoBarIOS* translateInfobar = nullptr;
-  for (infobars::InfoBar* infobar : infoBarManager->infobars()) {
-    InfoBarIOS* infobarIOS = static_cast<InfoBarIOS*>(infobar);
-    if (infobarIOS->infobar_type() == InfobarType::kInfobarTypeTranslate) {
-      translateInfobar = infobarIOS;
-      break;
-    }
+    // Create translate infobar without showing banner.
+    // Setting triggered_from_menu=false with TRANSLATE_STEP_AFTER_TRANSLATE
+    // suppresses the banner per ChromeIOSTranslateClient::CreateInfoBar logic.
+    translateClient->ShowTranslateUI(translate::TRANSLATE_STEP_AFTER_TRANSLATE,
+                                     sourceLanguage, targetLanguage,
+                                     translate::TranslateErrors::NONE, false);
+    translateInfobar = [self findTranslateInfobar];
   }
 
   if (!translateInfobar) {
@@ -568,6 +612,30 @@ std::string GetTargetLanguageCode(ChromeIOSTranslateClient* translate_client) {
       base::BindOnce(^(NSArray<NSString*>* suggestions){
           // No-op.
       }));
+}
+
+// Finds the translate infobar.
+- (InfoBarIOS*)findTranslateInfobar {
+  InfoBarManagerImpl* manager = InfoBarManagerImpl::FromWebState(_webState);
+  if (!manager) {
+    return nullptr;
+  }
+
+  for (infobars::InfoBar* infobar : manager->infobars()) {
+    InfoBarIOS* infobarIOS = static_cast<InfoBarIOS*>(infobar);
+    if (infobarIOS->infobar_type() == InfobarType::kInfobarTypeTranslate) {
+      return infobarIOS;
+    }
+  }
+  return nullptr;
+}
+
+// Updates the translate infobar's accepted state.
+- (void)updateTranslateInfobarAcceptedState:(BOOL)accepted {
+  InfoBarIOS* translateInfobar = [self findTranslateInfobar];
+  if (translateInfobar) {
+    translateInfobar->set_accepted(accepted);
+  }
 }
 
 @end

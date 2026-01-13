@@ -1396,7 +1396,7 @@
 <translation id="5620979661744857819">Доступ будет предоставлен приложению "<ph name="APP_NAME" />", а также всем приложениям и сайтам с разрешениями "Камера" и "Микрофон". Возможно, потребуется обновить веб-страницу или перезапустить приложение.</translation>
 <translation id="5625955975703555628">LTE+</translation>
 <translation id="5627392655516693966">Введен неверный пароль. Повторите попытку.</translation>
-<translation id="5632485077360054581">Показать</translation>
+<translation id="5632485077360054581">Подробнее</translation>
 <translation id="5648021990716966815">Микрофонный разъем</translation>
 <translation id="5652575806481723716">Приложение "<ph name="FOCUSED_APP_NAME" />" требует вашего внимания.</translation>
 <translation id="5662075790140998213">Рабочий стол 10</translation>
@@ -2411,6 +2411,7 @@
 <translation id="9050999376345823055">Чтобы отпустить кнопку, нажмите "."</translation>
 <translation id="906458777597946297">Развернуть окно</translation>
 <translation id="9065203028668620118">Изменить</translation>
+<translation id="9068849894565669697">Выберите цвет</translation>
 <translation id="9071966355747967534">Функция "<ph name="FEATURE_NAME" />" недоступна</translation>
 <translation id="9072519059834302790">Оставшееся время работы от батареи: <ph name="TIME_LEFT" />.</translation>
 <translation id="9074432941673450836">Выполняйте разные задачи на устройстве (<ph name="PRODUCT_NAME" />) с помощью приложений. Чтобы их найти, откройте панель запуска. Для этого также можно использовать специальную клавишу на клавиатуре – она располагается над Shift слева.</translation>
@@ -2474,7 +2475,7 @@
 <translation id="954052413789300507">Недостаточно свободного места для скачивания файла <ph name="FILENAME" />. Освободите пространство.</translation>
 <translation id="954520015070501466">30 минут</translation>
 <translation id="956452277966142925">Настройки игровой панели</translation>
-<translation id="961856697154696964">Удалить данные браузера</translation>
+<translation id="961856697154696964">Данные  о работе в браузере</translation>
 <translation id="974545358917229949">Показано результатов поиска по запросу "<ph name="QUERY" />": <ph name="RESULT_COUNT" /></translation>
 <translation id="981011780479609956">Срок сдачи не указан</translation>
 <translation id="98120814841227350">Перейти к концу документа</translation>

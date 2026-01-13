@@ -10,11 +10,11 @@
 
 #include "base/check.h"
 #include "base/feature_list.h"
-#include "base/functional/callback_forward.h"
 #include "base/functional/concurrent_closures.h"
 #include "base/strings/to_string.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/types/expected.h"
+#include "components/affiliations/core/browser/affiliation_service.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/save_password_progress_logger.h"
 #include "components/autofill/core/common/unique_ids.h"
@@ -48,6 +48,21 @@ using password_manager::PasswordManagerInterface;
 using Logger = autofill::SavePasswordProgressLogger;
 
 namespace {
+
+bool IsAffiliatedOrigin(const std::vector<affiliations::Facet>& facets,
+                        const url::Origin& current_origin) {
+  for (const auto& facet : facets) {
+    if (!facet.uri.IsValidWebFacetURI()) {
+      continue;
+    }
+    url::Origin affiliated_origin =
+        url::Origin::Create(GURL(facet.uri.canonical_spec()));
+    if (current_origin.IsSameOriginWith(affiliated_origin)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 std::unique_ptr<BrowserSavePasswordProgressLogger> GetLogger(
     PasswordManagerClient* client) {
@@ -125,8 +140,6 @@ void ActorLoginCredentialFiller::AttemptLogin(
 
   LogStatus(logger.get(), Logger::STRING_ACTOR_LOGIN_FILLING_ATTEMPT_STARTED);
 
-  CHECK(network::IsOriginPotentiallyTrustworthy(origin_));
-
   // The check is added separately in order to differentiate between having
   // no signin form on the page and filling being disallowed.
   if (!client_->IsFillingEnabled(origin_.GetURL())) {
@@ -139,34 +152,85 @@ void ActorLoginCredentialFiller::AttemptLogin(
     return;
   }
 
-  // Disallow filling a credential requested for a different primary main frame
-  // origin than the one it was requested for.
-  if (!origin_.IsSameOriginWith(credential_.request_origin)) {
-    LogStatus(logger.get(),
-              Logger::STRING_ACTOR_LOGIN_PRIMARY_MAIN_FRAME_ORIGIN_CHANGED);
-    BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kInvalidCredential);
-    std::move(callback_).Run(LoginStatusResult::kErrorInvalidCredential);
+  // If the origin matches exactly, proceed immediately.
+  if (origin_.IsSameOriginWith(credential_.request_origin)) {
+    FetchEligibleForms(
+        base::BindOnce(&ActorLoginCredentialFiller::ProcessRetrievedForms,
+                       weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
-  CHECK(network::IsOriginPotentiallyTrustworthy(origin_));
+  // Otherwise, check if `origin_` and `credential_.request_origin` are
+  // strongly affiliated.
+  affiliations::AffiliationService* affiliation_service =
+      client_->GetAffiliationService();
+  if (base::FeatureList::IsEnabled(
+          password_manager::features::
+              kActorLoginPermissionsUseStrongAffiliations) &&
+      affiliation_service) {
+    affiliation_service->GetAffiliationsAndBranding(
+        affiliations::FacetURI::FromPotentiallyInvalidSpec(
+            credential_.request_origin.GetURL().spec()),
+        base::BindOnce(&ActorLoginCredentialFiller::OnAffiliationsReceived,
+                       weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
 
-  FetchEligibleForms(
-      base::BindOnce(&ActorLoginCredentialFiller::ProcessRetrievedForms,
-                     weak_ptr_factory_.GetWeakPtr()));
+  LogStatus(logger.get(),
+            Logger::STRING_ACTOR_LOGIN_PRIMARY_MAIN_FRAME_ORIGIN_CHANGED);
+  BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kInvalidCredential);
+  std::move(callback_).Run(LoginStatusResult::kErrorInvalidCredential);
+}
+
+void ActorLoginCredentialFiller::OnAffiliationsReceived(
+    const std::vector<affiliations::Facet>& results,
+    bool success) {
+  std::unique_ptr<BrowserSavePasswordProgressLogger> logger =
+      GetLogger(client_);
+
+  if (success && IsAffiliatedOrigin(results, origin_)) {
+    LogStatus(logger.get(),
+              Logger::STRING_ACTOR_LOGIN_ATTEMPT_LOGIN_ON_AFFILIATED_ORIGIN);
+    FetchEligibleForms(
+        base::BindOnce(&ActorLoginCredentialFiller::ProcessRetrievedForms,
+                       weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+
+  LogStatus(logger.get(),
+            Logger::STRING_ACTOR_LOGIN_PRIMARY_MAIN_FRAME_ORIGIN_CHANGED);
+  BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kInvalidCredential);
+  std::move(callback_).Run(LoginStatusResult::kErrorInvalidCredential);
 }
 
 void ActorLoginCredentialFiller::FetchEligibleForms(
     base::OnceCallback<
         void(std::vector<password_manager::PasswordFormManager*>)>
         on_forms_retrieved_cb) {
+  CHECK(network::IsOriginPotentiallyTrustworthy(origin_));
+  auto log_parsed_forms_details =
+      [](base::WeakPtr<ActorLoginCredentialFiller> filler,
+         FormFinderResult form_finder_result) {
+        if (filler) {
+          for (auto& detail : form_finder_result.parsed_forms_details) {
+            *filler->attempt_login_logs_.add_parsed_form_details() =
+                std::move(detail);
+          }
+        }
+        return std::move(form_finder_result.eligible_managers);
+      };
+
   if (base::FeatureList::IsEnabled(
           password_manager::features::kActorLoginFieldVisibilityCheck)) {
     login_form_finder_->GetEligibleLoginFormManagersAsync(
-        origin_, std::move(on_forms_retrieved_cb));
+        origin_,
+        base::BindOnce(log_parsed_forms_details, weak_ptr_factory_.GetWeakPtr())
+            .Then(std::move(on_forms_retrieved_cb)));
   } else {
     std::move(on_forms_retrieved_cb)
-        .Run(login_form_finder_->GetEligibleLoginFormManagers(origin_));
+        .Run(log_parsed_forms_details(
+            weak_ptr_factory_.GetWeakPtr(),
+            login_form_finder_->GetEligibleLoginFormManagers(origin_)));
   }
 }
 
@@ -197,13 +261,8 @@ void ActorLoginCredentialFiller::ProcessRetrievedForms(
 
   device_authenticator_ = client_->GetDeviceAuthenticator();
 
-  if (base::FeatureList::IsEnabled(
-          password_manager::features::kActorLoginFillingHeuristics)) {
-    MaybeReauthAndFillAllEligibleFields(std::move(eligible_managers),
-                                        *stored_credential);
-  } else {
-    MaybeReauthAndFillForm(signin_form_manager, *stored_credential);
-  }
+  MaybeReauthAndFillAllEligibleFields(std::move(eligible_managers),
+                                      *stored_credential);
 }
 
 void ActorLoginCredentialFiller::MaybeReauthAndFillAllEligibleFields(
@@ -234,27 +293,6 @@ void ActorLoginCredentialFiller::MaybeReauthAndFillAllEligibleFields(
 
   FillAllEligibleFields(stored_credential, is_primary_main_frame,
                         std::move(eligible_managers));
-}
-
-void ActorLoginCredentialFiller::MaybeReauthAndFillForm(
-    password_manager::PasswordFormManager* signin_form_manager,
-    const password_manager::PasswordForm& stored_credential) {
-  if (should_store_permission_) {
-    signin_form_manager->SetShouldStoreActorLoginPermission();
-  }
-
-  if (client_->IsReauthBeforeFillingRequired(device_authenticator_.get())) {
-    AttemptReauth(base::BindOnce(
-        &ActorLoginCredentialFiller::FillForm, weak_ptr_factory_.GetWeakPtr(),
-        signin_form_manager->GetDriver()->AsWeakPtr(),
-        signin_form_manager->GetParsedObservedForm()->form_data.global_id(),
-        stored_credential.username_value, stored_credential.password_value));
-    return;
-  }
-
-  FillForm(signin_form_manager->GetDriver()->AsWeakPtr(),
-           signin_form_manager->GetParsedObservedForm()->form_data.global_id(),
-           stored_credential.username_value, stored_credential.password_value);
 }
 
 void ActorLoginCredentialFiller::AttemptReauth(base::OnceClosure on_reauth_cb) {
@@ -323,50 +361,6 @@ void ActorLoginCredentialFiller::OnDeviceReauthCompleted(
   std::move(fill_form_cb).Run();
 }
 
-void ActorLoginCredentialFiller::FillForm(
-    base::WeakPtr<PasswordManagerDriver> driver,
-    autofill::FormGlobalId form_global_id,
-    std::u16string username,
-    std::u16string password) {
-  if (reauth_start_time_.has_value()) {
-    base::TimeDelta reauth_duration =
-        base::TimeTicks::Now() - reauth_start_time_.value();
-    start_time_ += reauth_duration;
-  }
-  std::unique_ptr<BrowserSavePasswordProgressLogger> logger =
-      GetLogger(client_);
-  if (!driver) {
-    LogStatus(logger.get(), Logger::STRING_ACTOR_LOGIN_FRAME_CHANGED);
-    BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kNoFillableFields);
-    std::move(callback_).Run(LoginStatusResult::kErrorNoFillableFields);
-    return;
-  }
-
-  PasswordManagerInterface* password_manager = driver->GetPasswordManager();
-  PasswordFormCache* form_cache = password_manager->GetPasswordFormCache();
-  const PasswordForm* form_to_fill =
-      form_cache->GetPasswordForm(driver.get(), form_global_id.renderer_id);
-
-  if (!form_to_fill) {
-    LogStatus(logger.get(), Logger::STRING_ACTOR_LOGIN_FORM_WENT_AWAY);
-    BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kNoFillableFields);
-    std::move(callback_).Run(LoginStatusResult::kErrorNoFillableFields);
-    return;
-  }
-
-  base::ConcurrentClosures concurrent_filling;
-  FillField(driver.get(), form_global_id,
-            form_to_fill->username_element_renderer_id, username,
-            FieldType::kUsername, concurrent_filling.CreateClosure());
-  FillField(driver.get(), form_global_id,
-            form_to_fill->password_element_renderer_id, password,
-            FieldType::kPassword, concurrent_filling.CreateClosure());
-
-  std::move(concurrent_filling)
-      .Done(base::BindOnce(&ActorLoginCredentialFiller::OnFillingDone,
-                           weak_ptr_factory_.GetWeakPtr()));
-}
-
 void ActorLoginCredentialFiller::FillAllEligibleFields(
     const password_manager::PasswordForm& stored_credential,
     bool should_skip_iframes,
@@ -402,11 +396,15 @@ void ActorLoginCredentialFiller::FillAllEligibleFields(
 
     const password_manager::PasswordForm* parsed_form =
         manager->GetParsedObservedForm();
-    FillField(manager->GetDriver().get(), parsed_form->form_data.global_id(),
+    autofill::FormGlobalId form_global_id = parsed_form->form_data.global_id();
+    ActorLoginFormFinder::SetFormData(
+        *filling_results_[form_global_id].mutable_form_data(), *parsed_form);
+
+    FillField(manager->GetDriver().get(), form_global_id,
               parsed_form->username_element_renderer_id,
               stored_credential.username_value, FieldType::kUsername,
               concurrent_filling.CreateClosure());
-    FillField(manager->GetDriver().get(), parsed_form->form_data.global_id(),
+    FillField(manager->GetDriver().get(), form_global_id,
               parsed_form->password_element_renderer_id,
               stored_credential.password_value, FieldType::kPassword,
               concurrent_filling.CreateClosure());

@@ -32,6 +32,7 @@
 #include "net/base/auth.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/request_priority.h"
+#include "net/ssl/ssl_info.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/resource_request.h"
@@ -79,6 +80,7 @@ class WebRequestProxyingURLLoaderFactory
         WebRequestProxyingURLLoaderFactory* factory,
         uint64_t request_id,
         int32_t network_service_request_id,
+        int32_t client_request_id,
         int32_t view_routing_id,
         int32_t frame_routing_id,
         uint32_t options,
@@ -139,6 +141,7 @@ class WebRequestProxyingURLLoaderFactory
                              OnBeforeSendHeadersCallback callback) override;
     void OnHeadersReceived(const std::string& headers,
                            const net::IPEndPoint& endpoint,
+                           const std::optional<net::SSLInfo>& ssl_info,
                            OnHeadersReceivedCallback callback) override;
 
     // Erases all DNR actions in `info_` that are associated with
@@ -215,7 +218,14 @@ class WebRequestProxyingURLLoaderFactory
     network::ResourceRequest request_;
     const std::optional<url::Origin> original_initiator_;
     const uint64_t request_id_ = 0;
+    // The request ID forwarded to `target_factory_`. Used to correlate
+    // network-stack callbacks (such as `TrustedHeaderClient` and auth events)
+    // with this request.
     const int32_t network_service_request_id_ = 0;
+    // The request ID supplied by the caller of `CreateLoaderAndStart()`. Used
+    // solely to preserve the extension-visible WebRequest ID across a request
+    // restart (e.g., via `ThrottlingURLLoader`).
+    const int32_t client_request_id_ = 0;
     const int32_t view_routing_id_ = IPC::mojom::kRoutingIdNone;
     const int32_t frame_routing_id_ = IPC::mojom::kRoutingIdNone;
     const uint32_t options_ = 0;
@@ -256,6 +266,12 @@ class WebRequestProxyingURLLoaderFactory
     // is only set to true if there is a listener that needs to view or modify
     // headers set in the network process.
     const bool has_any_extra_headers_listeners_ = false;
+
+    // Similar to the |has_any_extra_headers_listeners_|, setting
+    // |has_any_security_info_listeners_| also will make the request to use
+    // network::mojom::kURLLoadOptionUseHeaderClient option.
+    const bool has_any_security_info_listeners_ = false;
+
     bool current_request_uses_header_client_ = false;
     OnBeforeSendHeadersCallback on_before_send_headers_callback_;
     OnHeadersReceivedCallback on_headers_received_callback_;
@@ -279,6 +295,10 @@ class WebRequestProxyingURLLoaderFactory
     };
     std::unique_ptr<FollowRedirectParams> pending_follow_redirect_params_;
     State state_ = State::kInProgress;
+
+    // Whether URLLoaderClient's OnReceiveResponse() has been called. It must be
+    // called at most once. It is added to debug crbug.com/463388771.
+    bool has_forwarded_response_ = false;
 
     // A task runner that should be used for the request when non-null. Non-null
     // when this was created for a navigation request.

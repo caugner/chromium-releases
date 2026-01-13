@@ -9,6 +9,7 @@ import '/strings.m.js';
 import 'chrome://new-tab-page/shared/customize_buttons/customize_buttons.js';
 import 'chrome://resources/cr_components/searchbox/searchbox.js';
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 import 'chrome://resources/cr_components/composebox/composebox.js';
 
 import {GlifAnimationState} from '//resources/cr_components/composebox/context_menu_entrypoint.js';
@@ -16,11 +17,12 @@ import type {CustomizeButtonsElement} from 'chrome://new-tab-page/shared/customi
 import {ColorChangeUpdater} from 'chrome://resources/cr_components/color_change_listener/colors_css_updater.js';
 import type {ContextualUpload} from 'chrome://resources/cr_components/composebox/common.js';
 import type {ComposeboxElement} from 'chrome://resources/cr_components/composebox/composebox.js';
+import {VoiceSearchAction as ComposeVoiceSearchAction} from 'chrome://resources/cr_components/composebox/composebox.js';
 import {ComposeboxMode} from 'chrome://resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
 import {HelpBubbleMixinLit} from 'chrome://resources/cr_components/help_bubble/help_bubble_mixin_lit.js';
 import type {SearchboxElement} from 'chrome://resources/cr_components/searchbox/searchbox.js';
 import type {CrToastElement} from 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import {assert} from 'chrome://resources/js/assert.js';
+import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
 import type {ClickInfo} from 'chrome://resources/js/browser_command.mojom-webui.js';
 import {Command} from 'chrome://resources/js/browser_command.mojom-webui.js';
 import {BrowserCommandProxy} from 'chrome://resources/js/browser_command/browser_command_proxy.js';
@@ -47,7 +49,7 @@ import type {LogoElement} from './logo.js';
 import {recordBoolean, recordDuration, recordEnumeration, recordLinearValue, recordLoadDuration, recordSparseValueWithPersistentHash} from './metrics_utils.js';
 import {ParentTrustedDocumentProxy} from './modules/microsoft_auth_frame_connector.js';
 import type {PageCallbackRouter, PageHandlerRemote, Theme} from './new_tab_page.mojom-webui.js';
-import {IphFeature, NtpBackgroundImageSource} from './new_tab_page.mojom-webui.js';
+import {NtpBackgroundImageSource} from './new_tab_page.mojom-webui.js';
 import {NewTabPageProxy} from './new_tab_page_proxy.js';
 import type {MicrosoftAuthUntrustedDocumentRemote} from './ntp_microsoft_auth_shared_ui.mojom-webui.js';
 import {ShowNtpPromosResult} from './ntp_promo.mojom-webui.js';
@@ -162,6 +164,8 @@ export interface AppElement {
     logo: LogoElement,
     searchbox: SearchboxElement,
     composebox: ComposeboxElement,
+    undoToast: CrToastElement,
+    undoToastMessage: HTMLElement,
   };
 }
 
@@ -258,6 +262,8 @@ export class AppElement extends AppElementBase {
       microsoftModuleEnabled_: {type: Boolean},
       microsoftAuthIframePath_: {type: String},
 
+      multiLineEnabled_: {type: Boolean},
+
       ntpRealboxNextEnabled_: {
         type: Boolean,
         reflect: true,
@@ -316,6 +322,8 @@ export class AppElement extends AppElementBase {
       showScrim_: {type: Boolean, reflect: true},
 
       contextMenuGlifAnimationState_: {type: String},
+      undoAutoRemovalCallback_: {type: Object},
+      undoAutoRemovalMessage_: {type: Object},
     };
   }
 
@@ -365,6 +373,8 @@ export class AppElement extends AppElementBase {
   protected accessor microsoftModuleEnabled_: boolean =
       loadTimeData.getBoolean('microsoftModuleEnabled');
   protected accessor microsoftAuthIframePath_: string = MSAL_IFRAME_ORIGIN;
+  protected accessor multiLineEnabled_: boolean =
+      loadTimeData.getBoolean('multiLineEnabled');
   protected accessor promoAndModulesLoaded_: boolean = false;
   protected accessor lazyRender_: boolean = false;
   protected accessor scrolledToTop_: boolean =
@@ -400,6 +410,14 @@ export class AppElement extends AppElementBase {
       this.ntpNextFeaturesEnabled_ && this.isActionChipsVisible_ ?
       GlifAnimationState.SPINNER_ONLY :
       GlifAnimationState.INELIGIBLE;
+  protected accessor undoAutoRemovalCallback_: (() => void)|null = null;
+  protected accessor undoAutoRemovalMessage_: string|null = null;
+  protected enableModalComposebox_: boolean =
+      loadTimeData.getBoolean('enableModalComposebox');
+  protected ephemeralContextMenuDescriptionEnabled_: boolean =
+      loadTimeData.getBoolean('enableEphemeralContextMenuDescription') ?? false;
+  protected showContextMenuDescription_: boolean =
+      loadTimeData.getBoolean('composeboxShowContextMenuDescription');
 
   private callbackRouter_: PageCallbackRouter;
   private pageHandler_: PageHandlerRemote;
@@ -421,6 +439,8 @@ export class AppElement extends AppElementBase {
   private pendingComposeboxContextFiles_: ContextualUpload[] = [];
   private pendingComposeboxText_: string = '';
   private pendingComposeboxMode_: ComposeboxMode = ComposeboxMode.DEFAULT;
+  private pendingAutoRemovalToasts_:
+      Array<{message: string, undo: () => void}> = [];
 
   constructor() {
     performance.mark('app-creation-start');
@@ -721,6 +741,14 @@ export class AppElement extends AppElementBase {
       this.onPromoAndModulesLoadedChange_();
     }
 
+    if (changedPrivateProperties.has('showComposebox_') &&
+        this.showComposebox_ && this.enableModalComposebox_) {
+      const composeboxDialog =
+          this.shadowRoot.querySelector<HTMLDialogElement>('#composeboxDialog');
+      assert(composeboxDialog);
+      composeboxDialog.showModal();
+    }
+
     if (changedPrivateProperties.has('oneGoogleBarLoaded_') ||
         changedPrivateProperties.has('theme_') ||
         changedPrivateProperties.has('showComposebox_')) {
@@ -801,7 +829,6 @@ export class AppElement extends AppElementBase {
       this.registerHelpBubble(
           CUSTOMIZE_CHROME_BUTTON_ELEMENT_ID,
           ['ntp-customize-buttons', '#customizeButton'], {fixed: true});
-      this.pageHandler_.maybeShowFeaturePromo(IphFeature.kCustomizeChrome);
       return true;
     }
     return false;
@@ -858,6 +885,13 @@ export class AppElement extends AppElementBase {
   }
 
   protected closeComposebox_(e: CustomEvent) {
+    if (this.enableModalComposebox_) {
+      const composeboxDialog =
+          this.shadowRoot.querySelector<HTMLDialogElement>('#composeboxDialog');
+      assert(composeboxDialog);
+      composeboxDialog.close();
+    }
+
     const composeboxText = e.detail.composeboxText;
 
     if (composeboxText && composeboxText.trim()) {
@@ -879,7 +913,21 @@ export class AppElement extends AppElementBase {
 
   protected onOpenVoiceSearch_() {
     this.showVoiceSearchOverlay_ = true;
-    recordVoiceAction(VoiceAction.ACTIVATE_SEARCH_BOX);
+    recordVoiceAction(VoiceAction.ACTIVATE);
+  }
+
+  protected onComposeVoiceSearchAction_(
+      e: CustomEvent<{value: ComposeVoiceSearchAction}>) {
+    switch (e.detail.value) {
+      case ComposeVoiceSearchAction.ACTIVATE:
+        recordVoiceAction(VoiceAction.ACTIVATE);
+        break;
+      case ComposeVoiceSearchAction.QUERY_SUBMITTED:
+        recordVoiceAction(VoiceAction.QUERY_SUBMITTED);
+        break;
+      default:
+        assertNotReached();
+    }
   }
 
   protected onOpenLensSearch_() {
@@ -888,6 +936,13 @@ export class AppElement extends AppElementBase {
 
   protected onCloseLensSearch_() {
     this.showLensUploadDialog_ = false;
+  }
+
+  protected onContextMenuEntrypointClick_() {
+    if (this.ephemeralContextMenuDescriptionEnabled_ &&
+        this.showContextMenuDescription_) {
+      this.pageHandler_.recordContextMenuClick();
+    }
   }
 
   protected onCustomizeClick_() {
@@ -1311,6 +1366,10 @@ export class AppElement extends AppElementBase {
     return !!this.theme_ && this.theme_.isDark;
   }
 
+  protected themeHasBackgroundImage_(): boolean {
+    return !!this.theme_ && !!this.theme_.backgroundImage;
+  }
+
   protected showThemeAttribution_(): boolean {
     return !!this.theme_?.backgroundImage?.attributionUrl;
   }
@@ -1360,6 +1419,57 @@ export class AppElement extends AppElementBase {
         this.contextMenuGlifAnimationState_ = GlifAnimationState.STARTED;
       }
     }
+  }
+
+  /**
+   * Called whenever an auto-removed feature is being processed and the undo
+   * toast needs to be shown. This will queue up the toast in the pending FIFO
+   * list and then call the processing function.
+   *
+   * @param undoToastContext - An event that contains the undo toast message and
+   *                           the undo callback function.
+   */
+  protected showAutoRemovedToast_(
+      undoToastContext: CustomEvent<{message: string, undo: () => void}>) {
+    this.pendingAutoRemovalToasts_.push(undoToastContext.detail);
+    this.processPendingAutoRemovalToasts_();
+  }
+
+  /**
+   * Called whenever the pending toasts need to be processed. This is called
+   * whenever a new toast is added to the pending list through an auto-removal
+   * event, or when the user clicks on the undo button in the toast.
+   *
+   * In case the undo toast is already open, then it's a no-op to avoid showing
+   * multiple toasts at the same time. Otherwise, the first pending toast is
+   * popped and shown.
+   */
+  private processPendingAutoRemovalToasts_() {
+    if (this.pendingAutoRemovalToasts_.length === 0) {
+      return;
+    }
+
+    if (this.$.undoToast.open) {
+      return;
+    }
+
+    const undoToastContext = this.pendingAutoRemovalToasts_.shift()!;
+    this.undoAutoRemovalCallback_ = undoToastContext.undo;
+    this.undoAutoRemovalMessage_ = undoToastContext.message;
+    this.$.undoToast.show();
+  }
+
+  /**
+   * Processes an auto-removal undo click. It will hide the toast, call the
+   * undo callback, and call the processing function to handle the next queued
+   * toast (if any).
+   */
+  protected onAutoRemovalUndoClick_() {
+    this.$.undoToast.hide();
+    this.undoAutoRemovalCallback_?.();
+    this.undoAutoRemovalCallback_ = null;
+    this.undoAutoRemovalMessage_ = null;
+    this.processPendingAutoRemovalToasts_();
   }
 }
 

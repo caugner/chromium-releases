@@ -94,10 +94,11 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [quickDeleteHandler
-                           showQuickDeleteAndCanPerformTabsClosureAnimation:
-                               YES];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [quickDeleteHandler
+                             showQuickDeleteAndCanPerformRadialWipeAnimation:
+                                 YES];
+                       }];
                      }];
     }
     case OmniboxPedalId::SET_CHROME_AS_DEFAULT_BROWSER: {
@@ -111,9 +112,10 @@ const CGFloat kSymbolSize = 18;
       DefaultBrowserSettingsPageSource source =
           DefaultBrowserSettingsPageSource::kOmnibox;
       ProceduralBlock action = ^{
-        [omniboxHandler cancelOmniboxEdit];
-        [settingsHandler showDefaultBrowserSettingsFromViewController:nil
-                                                         sourceForUMA:source];
+        [omniboxHandler cancelOmniboxEditWithCompletion:^{
+          [settingsHandler showDefaultBrowserSettingsFromViewController:nil
+                                                           sourceForUMA:source];
+        }];
       };
       return [[OmniboxPedalData alloc]
               initWithTitle:hint
@@ -146,9 +148,10 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [settingsHandler
-                           showSavedPasswordsSettingsFromViewController:nil];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [settingsHandler
+                             showSavedPasswordsSettingsFromViewController:nil];
+                       }];
                      }];
     }
     case OmniboxPedalId::UPDATE_CREDIT_CARD: {
@@ -166,8 +169,9 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [settingsHandler showCreditCardSettings];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [settingsHandler showCreditCardSettings];
+                       }];
                      }];
     }
     case OmniboxPedalId::LAUNCH_INCOGNITO: {
@@ -183,10 +187,11 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [applicationHandler
-                           openURLInNewTab:[OpenNewTabCommand
-                                               incognitoTabCommand]];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [applicationHandler
+                             openURLInNewTab:[OpenNewTabCommand
+                                                 incognitoTabCommand]];
+                       }];
                      }];
     }
     case OmniboxPedalId::RUN_CHROME_SAFETY_CHECK: {
@@ -204,11 +209,12 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [settingsHandler
-                           showAndStartSafetyCheckForReferrer:
-                               password_manager::PasswordCheckReferrer::
-                                   kSafetyCheck];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [settingsHandler
+                             showAndStartSafetyCheckForReferrer:
+                                 password_manager::PasswordCheckReferrer::
+                                     kSafetyCheck];
+                       }];
                      }];
     }
     case OmniboxPedalId::MANAGE_CHROME_SETTINGS: {
@@ -226,8 +232,10 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [applicationHandler showSettingsFromViewController:nil];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [applicationHandler
+                             showSettingsFromViewController:nil];
+                       }];
                      }];
     }
     case OmniboxPedalId::VIEW_CHROME_HISTORY: {
@@ -245,8 +253,9 @@ const CGFloat kSymbolSize = 18;
            imageBorderColor:nil
                        type:pedalType
                      action:^{
-                       [omniboxHandler cancelOmniboxEdit];
-                       [applicationHandler showHistory];
+                       [omniboxHandler cancelOmniboxEditWithCompletion:^{
+                         [applicationHandler showHistory];
+                       }];
                      }];
     }
       // If a new case is added here, make sure to update the method returning

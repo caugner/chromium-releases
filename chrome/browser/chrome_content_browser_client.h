@@ -296,7 +296,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::BrowserContext* browser_context,
       const GURL& url) override;
 #if !BUILDFLAG(IS_ANDROID)
-  bool IsInitialWebUIScheme(const GURL& url) override;
+  bool IsInitialWebUIURL(const GURL& url) override;
 #endif  // !BUILDFLAG(IS_ANDROID)
   bool IsIsolatedContextAllowedForUrl(content::BrowserContext* browser_context,
                                       const GURL& lock_url) override;
@@ -634,7 +634,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost& render_frame_host,
       blink::AssociatedInterfaceRegistry& associated_registry) override;
   void BindGpuHostReceiver(mojo::GenericPendingReceiver receiver) override;
-  void BindUtilityHostReceiver(mojo::GenericPendingReceiver receiver) override;
+  void BindUtilityHostReceiver(const std::string& service_name,
+                               mojo::GenericPendingReceiver receiver) override;
   void BindHostReceiverForRenderer(
       content::RenderProcessHost* render_process_host,
       mojo::GenericPendingReceiver receiver) override;
@@ -658,6 +659,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   CreateCommitDeferringConditionsForNavigation(
       content::NavigationHandle* navigation_handle,
       content::CommitDeferringCondition::NavigationType type) override;
+  std::vector<std::unique_ptr<content::ProcessSelectionDeferringCondition>>
+  CreateProcessSelectionDeferringConditionsForNavigation(
+      content::NavigationHandle& navigation_handle) override;
   std::unique_ptr<content::NavigationUIData> GetNavigationUIData(
       content::NavigationHandle* navigation_handle) override;
   std::unique_ptr<media::ScreenEnumerator> CreateScreenEnumerator()
@@ -961,8 +965,10 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const url::Origin& origin) override;
   bool IsJitDisabledForSite(content::BrowserContext* browser_context,
                             const GURL& site_url) override;
-  bool AreV8OptimizationsDisabledForSite(
+  bool AreV8OptimizationsEnabledForSite(
       content::BrowserContext* browser_context,
+      const std::optional<base::SafeRef<content::ProcessSelectionUserData>>&
+          process_selection_user_data,
       const GURL& site_url) override;
   bool DisallowV8FeatureFlagOverridesForSite(const GURL& site_url) override;
   ukm::UkmService* GetUkmService() override;
@@ -1103,8 +1109,6 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void PreferenceRankVideoDeviceInfos(
       content::BrowserContext* browser_context,
       blink::WebMediaDeviceInfoArray& infos) override;
-  network::mojom::IpProtectionProxyBypassPolicy
-  GetIpProtectionProxyBypassPolicy() override;
   void MaybePrewarmHttpDiskCache(
       content::BrowserContext& browser_context,
       const std::optional<url::Origin>& initiator_origin,
@@ -1200,15 +1204,18 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::optional<std::vector<std::u16string>> GetClipboardTypesIfPolicyApplied(
       const ui::ClipboardSequenceNumberToken& seqno) override;
 
-  bool ShouldEnableCanvasNoise(content::BrowserContext* browser_context,
-                               const GURL& origin) override;
-
   bool UsePrefetchPrerenderIntegration() override;
   bool UsePreloadServingMetrics() override;
 #if !BUILDFLAG(IS_ANDROID)
   bool ShouldDisallowCredentialRequest(
       content::WebContents* web_contents) override;
 #endif  //! BUILDFLAG(IS_ANDROID)
+
+  void RecordAssistedLogin(
+      content::ContentBrowserClient::AssistedLoginType login_type) override;
+
+  std::optional<bool> GetOverrideValueForStaticStorageQuota(
+      content::BrowserContext* browser_context) override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);

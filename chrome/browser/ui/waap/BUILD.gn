@@ -6,6 +6,8 @@ assert(!is_android)
 
 static_library("waap") {
   sources = [
+    "initial_web_ui_manager.cc",
+    "initial_web_ui_manager.h",
     "waap_ui_metrics_recorder.cc",
     "waap_ui_metrics_recorder.h",
     "waap_ui_metrics_service.cc",
@@ -16,10 +18,14 @@ static_library("waap") {
   deps = [
     "//base",
     "//chrome/browser/profiles:profile",
+    "//chrome/browser/sessions",
+    "//chrome/browser/ui:ui_features",
+    "//chrome/browser/ui/browser_window",
     "//chrome/common:constants",
     "//components/keyed_service/core",
     "//components/startup_metric_utils",
     "//content/public/browser",
+    "//ui/base/unowned_user_data",
     "//ui/views",
   ]
 }
@@ -30,7 +36,9 @@ source_set("waap_utils") {
     "waap_utils.h",
   ]
   deps = [
+    ":waap",
     "//base",
+    "//chrome/browser/profiles:profile",
     "//chrome/common",
     "//chrome/common:chrome_features",
     "//content/public/common",

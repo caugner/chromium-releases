@@ -4,6 +4,7 @@
 
 #include "ash/webui/projector_app/projector_xhr_sender.h"
 
+#include <optional>
 #include <string>
 
 #include "ash/constants/ash_features.h"
@@ -23,6 +24,7 @@
 #include "net/http/http_status_code.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/simple_url_loader.h"
+#include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "url/gurl.h"
@@ -97,7 +99,7 @@ constexpr char kAuthorizationHeaderPrefix[] = "Bearer ";
 constexpr char kApiKeyParam[] = "key";
 
 // List of URL prefix supported by `ProjectorXhrSender`.
-const char* kUrlAllowlist[] = {
+constexpr const char* kUrlAllowlist[] = {
     "https://www.googleapis.com/drive/v3/files/",
     "https://www.googleapis.com/upload/drive/v3/files/",
     // TODO(b/229792620): Remove this URL prefix once web component is updated
@@ -179,7 +181,7 @@ projector::mojom::XhrResponsePtr CreateXhrResposne(
     std::string response_body,
     projector::mojom::XhrResponseCode resposne_code) {
   auto response = projector::mojom::XhrResponse::New();
-  response->response = response_body;
+  response->response = std::move(response_body);
   response->response_code = resposne_code;
   return response;
 }
@@ -187,8 +189,10 @@ projector::mojom::XhrResponsePtr CreateXhrResposne(
 }  // namespace
 
 ProjectorXhrSender::ProjectorXhrSender(
+    signin::IdentityManager* identity_manager,
     network::mojom::URLLoaderFactory* url_loader_factory)
-    : url_loader_factory_(url_loader_factory) {}
+    : oauth_token_fetcher_(identity_manager),
+      url_loader_factory_(url_loader_factory) {}
 ProjectorXhrSender::~ProjectorXhrSender() = default;
 
 void ProjectorXhrSender::Send(
@@ -233,10 +237,7 @@ void ProjectorXhrSender::Send(
   if (account_email.has_value() && !account_email->empty()) {
     email = *account_email;
   } else {
-    email = ProjectorAppClient::Get()
-                ->GetIdentityManager()
-                ->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
-                .email;
+    email = oauth_token_fetcher_.GetPrimaryAccountInfo().email;
   }
 
   // Fetch OAuth token for authorizing the request.
@@ -280,6 +281,12 @@ void ProjectorXhrSender::SendRequest(
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = url;
   resource_request->method = RequestTypeToString(method);
+  // Projector will not navigate to any additional URLs outside of Drive so
+  // we disable redirects of any kind.
+  resource_request->redirect_mode = network::mojom::RedirectMode::kError;
+  resource_request->credentials_mode =
+      allow_cookie ? network::mojom::CredentialsMode::kInclude
+                   : network::mojom::CredentialsMode::kOmit;
   // The OAuth token will be empty if the request is using end user credentials
   // for authorization.
   if (!token.empty()) {
@@ -325,7 +332,7 @@ void ProjectorXhrSender::OnSimpleURLLoaderComplete(
     int request_id,
     SendRequestCallback callback,
     const std::string& token,
-    std::unique_ptr<std::string> response_body) {
+    std::optional<std::string> response_body) {
   auto& loader = loader_map_[request_id];
 
   auto hasHeaders = loader->ResponseInfo() && loader->ResponseInfo()->headers;
@@ -338,7 +345,8 @@ void ProjectorXhrSender::OnSimpleURLLoaderComplete(
   // 2XX.
   bool is_success =
       response_body && response_code >= 200 && response_code < 300;
-  auto response_body_or_empty = response_body ? *response_body : std::string();
+  auto response_body_or_empty =
+      std::move(response_body).value_or(std::string());
   auto xhr_response_code =
       is_success ? projector::mojom::XhrResponseCode::kSuccess
                  : projector::mojom::XhrResponseCode::kXhrFetchFailure;

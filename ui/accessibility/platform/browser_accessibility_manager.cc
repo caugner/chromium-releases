@@ -254,7 +254,9 @@ void BrowserAccessibilityManager::FireGeneratedEvent(
     return;
   }
 
-  auto* wrapper = GetFromAXNode(node);
+  // Mitigation for b/498205735. Using raw_ptr on the stack as defense-in-depth
+  // to ensure memory is quarantined if freed during the loop below.
+  raw_ptr<BrowserAccessibility> wrapper = GetFromAXNode(node);
   DCHECK(wrapper);
 
   const auto& node_data = wrapper->GetData();
@@ -1072,6 +1074,19 @@ void BrowserAccessibilityManager::Collapse(const BrowserAccessibility& node) {
 
   AXActionData action_data;
   action_data.action = ax::mojom::Action::kCollapse;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
+  AXPlatform::GetInstance().OnActionFromAssistiveTech();
+}
+
+void BrowserAccessibilityManager::RequestLayoutBasedAction(
+    const BrowserAccessibility& node) {
+  if (!delegate_) {
+    return;
+  }
+
+  AXActionData action_data;
+  action_data.action = ax::mojom::Action::kRequestLayoutBasedAction;
   action_data.target_node_id = node.GetId();
   delegate_->AccessibilityPerformAction(action_data);
   AXPlatform::GetInstance().OnActionFromAssistiveTech();

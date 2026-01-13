@@ -401,7 +401,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
     // Specifies that the system default caption and icon should not be
     // rendered, and that the client area should be equivalent to the window
-    // area. Only used on some platforms (Windows and Linux).
+    // area. Only used on some platforms (Windows, Linux and ChromeOS).
     bool remove_standard_frame = false;
 
     // Whether the widget should be maximized or minimized.
@@ -1604,7 +1604,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // through the |native_widget_| weak ptr.
   std::unique_ptr<internal::NativeWidgetPrivate> owned_native_widget_;
 
-  base::ObserverList<WidgetObserver> observers_;
+  // A WidgetObserver handles an event that invokes other events, therefore is
+  // inherently reentrant.
+  base::ObserverList<WidgetObserver,
+                     /*check_empty=*/false,
+                     base::ObserverListReentrancyPolicy::kAllowReentrancy>
+      observers_;
 
   base::ObserverList<WidgetRemovalsObserver>::Unchecked removals_observers_;
 
