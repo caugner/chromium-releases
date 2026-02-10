@@ -10,9 +10,7 @@
 
 #include <string>
 
-#include "base/compiler_specific.h"
 #include "base/containers/circular_deque.h"
-#include "base/memory/aligned_memory.h"
 #include "base/memory/ref_counted.h"
 
 // Models a chunk derived from an AudioBuffer.
@@ -22,36 +20,25 @@ class AudioChunk : public base::RefCountedThreadSafe<AudioChunk> {
   // Creates a chunk of |length| bytes, initialized to zeros.
   AudioChunk(size_t length, int bytes_per_sample);
   AudioChunk(const uint8_t* data, size_t length, int bytes_per_sample);
-  AudioChunk(base::span<const uint8_t> data_span, int bytes_per_sample);
 
   AudioChunk(const AudioChunk&) = delete;
   AudioChunk& operator=(const AudioChunk&) = delete;
 
   bool IsEmpty() const;
   int bytes_per_sample() const { return bytes_per_sample_; }
-  std::string_view AsStringView() const LIFETIME_BOUND;
-
-  // DEPRECATED: Use AsStringView() or spanified accessors instead, as this
-  // incurs a copy.
-  // TODO(crbug.com/484089981): Internal code depends on this method to create a
-  // copy of the returned string. Delete it once internal code has switched to
-  // `AsStringView()` instead.
-  std::string AsString();
-
   size_t NumSamples() const;
+  const std::string& AsString() const;
   int16_t GetSample16(size_t index) const;
-  base::span<const int16_t> SamplesData16AsSpan() const;
-  base::span<int16_t> SamplesData16AsWriteableSpan();
-
-  // Guaranteed to be aligned to `bytes_per_sample_`.
-  base::span<const uint8_t> data() const { return data_; }
-  base::span<uint8_t> writable_data() { return data_; }
+  const int16_t* SamplesData16() const;
+  uint8_t* writable_data() {
+    return reinterpret_cast<uint8_t*>(&data_string_[0]);
+  }
 
  private:
   friend class base::RefCountedThreadSafe<AudioChunk>;
   ~AudioChunk();
 
-  base::AlignedHeapArray<uint8_t> data_;
+  std::string data_string_;
   const int bytes_per_sample_;
 };
 

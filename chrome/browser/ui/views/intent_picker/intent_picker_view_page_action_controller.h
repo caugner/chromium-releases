@@ -37,8 +37,7 @@ class IntentPickerViewPageActionController {
   // If should_show_icon is true, the icon and chip are shown.
   // Otherwise, they are hidden by calling HideIcon().
   void UpdatePageActionVisibility(bool should_show_icon,
-                                  const ui::ImageModel& app_icon,
-                                  bool should_show_expanded_chip);
+                                  const ui::ImageModel& app_icon);
 
  private:
   // Hides the Intent Picker page action icon and closes any associated bubble.

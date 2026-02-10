@@ -27,10 +27,6 @@ class URLLoaderFactory;
 }  // namespace mojom
 }  // namespace network
 
-namespace signin {
-class IdentityManager;
-}  // namespace signin
-
 namespace ash {
 
 constexpr char kDriveV3BaseUrl[] = "https://www.googleapis.com/drive/v3/files/";
@@ -46,8 +42,8 @@ class ProjectorXhrSender {
   using SendRequestCallback =
       base::OnceCallback<void(projector::mojom::XhrResponsePtr)>;
 
-  ProjectorXhrSender(signin::IdentityManager* identity_manager,
-                     network::mojom::URLLoaderFactory* url_loader_factory);
+  explicit ProjectorXhrSender(
+      network::mojom::URLLoaderFactory* url_loader_factory);
   ProjectorXhrSender(const ProjectorXhrSender&) = delete;
   ProjectorXhrSender& operator=(const ProjectorXhrSender&) = delete;
   virtual ~ProjectorXhrSender();

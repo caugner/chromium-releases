@@ -4,12 +4,17 @@
 
 #include "content/browser/service_worker/service_worker_installed_scripts_sender.h"
 
+#include <algorithm>
+#include <optional>
+
 #include "base/memory/ref_counted.h"
 #include "base/stl_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/service_worker/service_worker_consts.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_script_cache_map.h"
+#include "net/base/hash_value.h"
 
 namespace content {
 
@@ -31,7 +36,7 @@ ServiceWorkerInstalledScriptsSender::~ServiceWorkerInstalledScriptsSender() {}
 
 blink::mojom::ServiceWorkerInstalledScriptsInfoPtr
 ServiceWorkerInstalledScriptsSender::CreateInfoAndBind() {
-  DCHECK(!manager_.is_bound());
+  DCHECK_EQ(State::kNotStarted, state_);
 
   std::vector<storage::mojom::ServiceWorkerResourceRecordPtr> resources =
       owner_->script_cache_map()->GetResources();
@@ -84,8 +89,18 @@ void ServiceWorkerInstalledScriptsSender::StartSendingScript(
   current_sending_url_ = script_url;
 
   mojo::Remote<storage::mojom::ServiceWorkerResourceReader> resource_reader;
+  std::optional<std::string> sha256_checksum =
+      owner_->script_cache_map()->LookupSha256Checksum(script_url);
+  std::optional<net::SHA256HashValue> sha256_hash_value;
+  if (sha256_checksum) {
+    sha256_hash_value.emplace();
+    if (!base::HexStringToSpan(*sha256_checksum, *sha256_hash_value)) {
+      sha256_hash_value.reset();
+    }
+  }
   owner_->context()->registry().GetRemoteStorageControl()->CreateResourceReader(
-      resource_id, resource_reader.BindNewPipeAndPassReceiver());
+      resource_id, sha256_hash_value,
+      resource_reader.BindNewPipeAndPassReceiver());
   TRACE_EVENT_BEGIN("ServiceWorker", "SendingScript",
                     perfetto::Track::FromPointer(this), "script_url",
                     current_sending_url_.spec());
@@ -247,14 +262,6 @@ void ServiceWorkerInstalledScriptsSender::UpdateFinishedReasonAndBecomeIdle(
   DCHECK(current_sending_url_.is_empty());
   state_ = State::kIdle;
   last_finished_reason_ = reason;
-
-  // Inform the owner that we are done with the main script. If the reason is
-  // not Success, we may still need to notify listeners that no metadata will
-  // be forthcoming.
-  if (reason != ServiceWorkerInstalledScriptReader::FinishedReason::kSuccess) {
-    owner_->SetMainScriptResponse(nullptr);
-  }
-
   if (finish_callback_) {
     std::move(finish_callback_).Run();
   }

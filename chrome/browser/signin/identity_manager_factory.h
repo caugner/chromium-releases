@@ -60,9 +60,7 @@ class IdentityManagerFactory : public ProfileKeyedServiceFactory {
       user_prefs::PrefRegistrySyncable* registry) override;
 
   // List of observers. Checks that list is empty on destruction.
-  base::ObserverList<Observer,
-                     /*check_empty=*/true,
-                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
+  base::ObserverList<Observer, /*check_empty=*/true, /*allow_reentrancy=*/false>
       observer_list_;
 };
 

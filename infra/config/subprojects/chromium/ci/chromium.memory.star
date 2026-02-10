@@ -435,6 +435,11 @@ linux_memory_builder(
             "linux-jammy",
         ],
         per_test_modifications = {
+            "angle_unittests": targets.mixin(
+                args = [
+                    "--gtest_filter=-TestSuiteTest.RunFlakyTests:TestSuiteTest.RunMockTests",
+                ],
+            ),
             "browser_tests": targets.mixin(
                 # These are very slow on the ASAN trybot for some reason.
                 # crbug.com/1257927
@@ -463,7 +468,7 @@ linux_memory_builder(
             "interactive_ui_tests": targets.mixin(
                 # These are slow on the ASan trybot for some reason, crbug.com/1257927
                 swarming = targets.swarming(
-                    shards = 15,
+                    shards = 30,
                 ),
             ),
             "net_unittests": targets.mixin(
@@ -697,7 +702,7 @@ linux_memory_builder(
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
-                    shards = 40,
+                    shards = 52,
                 ),
             ),
             "content_browsertests": targets.mixin(

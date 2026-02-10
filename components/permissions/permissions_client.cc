@@ -55,11 +55,12 @@ bool PermissionsClient::IsCookieDeletionDisabled(
   return false;
 }
 
-void PermissionsClient::GetUkmSourceId(ContentSettingsType permission_type,
-                                       content::BrowserContext* browser_context,
-                                       content::WebContents* web_contents,
-                                       const GURL& requesting_origin,
-                                       GetUkmSourceIdCallback callback) {
+void PermissionsClient::GetUkmSourceId(
+    ContentSettingsType permission_type,
+    content::BrowserContext* browser_context,
+    content::RenderFrameHost* render_frame_host,
+    const GURL& requesting_origin,
+    GetUkmSourceIdCallback callback) {
   std::move(callback).Run(std::nullopt);
 }
 
@@ -135,15 +136,16 @@ bool PermissionsClient::CanBypassEmbeddingOriginCheck(
   return false;
 }
 
-std::optional<GURL> PermissionsClient::OverrideCanonicalOrigin(
+std::optional<GURL> PermissionsClient::GetCanonicalOriginOverride(
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
   return std::nullopt;
 }
 
-bool PermissionsClient::DoURLsMatchNewTabPage(const GURL& requesting_origin,
-                                              const GURL& embedding_origin) {
-  return false;
+std::optional<GURL> PermissionsClient::GetEmbeddingOriginOverride(
+    const GURL& requesting_origin,
+    content::WebContents* web_contents) {
+  return std::nullopt;
 }
 
 permissions::PermissionIgnoredReason PermissionsClient::DetermineIgnoreReason(

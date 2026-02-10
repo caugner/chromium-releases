@@ -212,13 +212,12 @@ void PasswordManualFallbackFlow::DidSelectSuggestion(
       if (!form) {
         return;
       }
-      const auto payload =
-          suggestion.GetPayload<Suggestion::PasswordSuggestionDetails>();
       password_manager_driver_->PreviewSuggestionById(
           form->username_element_renderer_id,
           form->password_element_renderer_id,
           GetUsernameFromLabel(suggestion.labels[0][0].value),
-          std::u16string(payload.password.length(), '*'));
+          suggestion.GetPayload<Suggestion::PasswordSuggestionDetails>()
+              .password);
       break;
     }
     case autofill::SuggestionType::kPasswordFieldByFieldFilling:

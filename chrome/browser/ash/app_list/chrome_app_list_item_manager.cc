@@ -69,8 +69,6 @@ void ChromeAppListItemManager::UpdateChromeItem(
 
   // Remove `item` from the sorted children list then add it back to ensure that
   // `item` is placed in the sorted list correctly after position update.
-  // TODO(crbug.com/40203095): if `new_position` is always valid, clean
-  // this code by using a function that moves an item in the sorted list.
   DCHECK(old_position.IsValid());
   RemoveChildFromFolderItemMapping(item, new_folder);
   AddChildItemToFolderItemMapping(item, new_folder);
@@ -82,10 +80,9 @@ void ChromeAppListItemManager::RemoveChromeItem(const std::string& id) {
 
   if (item->is_folder()) {
     auto iter = folder_item_mappings_.find(id);
-    if (iter != folder_item_mappings_.end()) {
-      DCHECK(iter->second.empty());
-      folder_item_mappings_.erase(iter);
-    }
+    DCHECK(iter != folder_item_mappings_.end());
+    DCHECK(iter->second.empty());
+    folder_item_mappings_.erase(iter);
   } else if (!item->folder_id().empty()) {
     RemoveChildFromFolderItemMapping(item, item->folder_id());
   }
@@ -138,9 +135,7 @@ syncer::StringOrdinal ChromeAppListItemManager::CreateChromePositionOnLast()
 ChromeAppListItem* ChromeAppListItemManager::FindLastChildInFolder(
     const std::string& folder_id) {
   auto iter = folder_item_mappings_.find(folder_id);
-  if (iter == folder_item_mappings_.end()) {
-    return nullptr;
-  }
+  DCHECK(iter != folder_item_mappings_.end());
   const std::vector<raw_ptr<ChromeAppListItem, VectorExperimental>>&
       sorted_children = iter->second;
 
@@ -157,9 +152,7 @@ void ChromeAppListItemManager::AddChildItemToFolderItemMapping(
 
   // Find the target folder's children.
   auto iter = folder_item_mappings_.find(dst_folder);
-  if (iter == folder_item_mappings_.end()) {
-    return;
-  }
+  DCHECK(iter != folder_item_mappings_.end());
   std::vector<raw_ptr<ChromeAppListItem, VectorExperimental>>*
       sorted_children_ptr = &iter->second;
 
@@ -176,17 +169,13 @@ void ChromeAppListItemManager::RemoveChildFromFolderItemMapping(
 
   // Find the source folder's children.
   auto folder_item_mappings_iter = folder_item_mappings_.find(src_folder);
-  if (folder_item_mappings_iter == folder_item_mappings_.end()) {
-    return;
-  }
+  DCHECK(folder_item_mappings_iter != folder_item_mappings_.end());
   std::vector<raw_ptr<ChromeAppListItem, VectorExperimental>>*
       sorted_children_ptr = &folder_item_mappings_iter->second;
 
   auto children_array_iter =
       std::ranges::find(*sorted_children_ptr, child_item);
-  if (children_array_iter == sorted_children_ptr->cend()) {
-    return;
-  }
+  DCHECK(children_array_iter != sorted_children_ptr->cend());
 
   // Delete `child_item` from `src_folder`'s children list.
   sorted_children_ptr->erase(children_array_iter);

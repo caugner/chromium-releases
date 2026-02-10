@@ -6,7 +6,6 @@
 
 #include <string_view>
 
-#include "base/check.h"
 #include "base/memory/raw_ptr.h"
 #include "content/services/auction_worklet/auction_v8_helper.h"
 #include "content/services/auction_worklet/auction_v8_logger.h"
@@ -18,16 +17,15 @@
 namespace auction_worklet {
 
 DeprecatedUrlLazyFiller::DeprecatedUrlLazyFiller(AuctionV8Helper* v8_helper,
+                                                 AuctionV8Logger* v8_logger,
                                                  const GURL* url,
                                                  const char* warning)
     : LazyFiller(v8_helper),
-      v8_logger_(nullptr),
+      v8_logger_(v8_logger),
       url_(url),
       warning_(warning) {}
 
-DeprecatedUrlLazyFiller::~DeprecatedUrlLazyFiller() {
-  DCHECK_EQ(v8_logger_, nullptr);
-}
+DeprecatedUrlLazyFiller::~DeprecatedUrlLazyFiller() = default;
 
 bool DeprecatedUrlLazyFiller::AddDeprecatedUrlGetter(
     v8::Local<v8::Object> object,
@@ -41,9 +39,7 @@ void DeprecatedUrlLazyFiller::HandleDeprecatedUrl(
     v8::Local<v8::Name> name,
     const v8::PropertyCallbackInfo<v8::Value>& info) {
   DeprecatedUrlLazyFiller* self = GetSelf<DeprecatedUrlLazyFiller>(info);
-  if (self->v8_logger_) {
-    self->v8_logger_->LogConsoleWarning(self->warning_.get());
-  }
+  self->v8_logger_->LogConsoleWarning(self->warning_.get());
 
   AuctionV8Helper* v8_helper = self->v8_helper();
   v8::Isolate* isolate = v8_helper->isolate();

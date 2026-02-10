@@ -146,6 +146,10 @@ std::string URLDataSource::GetAccessControlAllowOriginForOrigin(
   return std::string();
 }
 
+const ui::TemplateReplacements* URLDataSource::GetReplacements() {
+  return nullptr;
+}
+
 bool URLDataSource::ShouldReplaceI18nInJS() {
   return false;
 }

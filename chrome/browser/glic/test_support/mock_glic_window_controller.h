@@ -30,7 +30,8 @@ class MockGlicWindowController
               (BrowserWindowInterface*,
                bool,
                mojom::InvocationSource,
-               std::optional<std::string>),
+               std::optional<std::string>,
+               bool),
               (override));
   MOCK_METHOD(void, ShowAfterSignIn, (base::WeakPtr<Browser>), (override));
   MOCK_METHOD(void, Attach, (), ());
@@ -45,7 +46,7 @@ class MockGlicWindowController
   MOCK_METHOD(gfx::Size, GetPanelSize, (), (override));
   MOCK_METHOD(void, SetDraggableAreas, (const std::vector<gfx::Rect>&), ());
   MOCK_METHOD(void, SetMinimumWidgetSize, (const gfx::Size&), ());
-  MOCK_METHOD(void, Close, (), (override));
+  MOCK_METHOD(void, Close, (const CloseOptions&), (override));
   MOCK_METHOD(void,
               CloseInstanceWithFrame,
               (content::RenderFrameHost * render_frame_host),
@@ -106,7 +107,8 @@ class MockGlicWindowController
               conversation_id,
               (),
               (const, override));
-  MOCK_METHOD(base::TimeTicks, GetLastActiveTime, (), (const, override));
+  MOCK_METHOD(base::Time, GetLastActivationTimestamp, (), (const, override));
+  MOCK_METHOD(base::TimeDelta, GetTimeSinceLastActive, (), (const, override));
   MOCK_METHOD(void, AddGlobalStateObserver, (PanelStateObserver*), (override));
   MOCK_METHOD(void,
               RemoveGlobalStateObserver,

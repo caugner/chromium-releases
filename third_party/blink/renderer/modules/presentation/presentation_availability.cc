@@ -129,20 +129,18 @@ void PresentationAvailability::AddResolver(
 }
 
 void PresentationAvailability::RejectPendingPromises() {
-  HeapVector<Member<ScriptPromiseResolver<PresentationAvailability>>> resolvers;
-  resolvers.swap(availability_resolvers_);
-  for (auto& resolver : resolvers) {
+  for (auto& resolver : availability_resolvers_) {
     resolver->RejectWithDOMException(DOMExceptionCode::kNotSupportedError,
                                      kNotSupportedErrorInfo);
   }
+  availability_resolvers_.clear();
 }
 
 void PresentationAvailability::ResolvePendingPromises() {
-  HeapVector<Member<ScriptPromiseResolver<PresentationAvailability>>> resolvers;
-  resolvers.swap(availability_resolvers_);
-  for (auto& resolver : resolvers) {
+  for (auto& resolver : availability_resolvers_) {
     resolver->Resolve(this);
   }
+  availability_resolvers_.clear();
 }
 
 void PresentationAvailability::Trace(Visitor* visitor) const {

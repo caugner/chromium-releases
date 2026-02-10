@@ -45,6 +45,7 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_ui_types.h"
 #include "ui/views/accessibility/tree/widget_ax_manager.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/drag_controller.h"
 #include "ui/views/event_monitor.h"
@@ -516,7 +517,7 @@ void Widget::Init(InitParams params) {
   // because RootView's constructor may access it (e.g., to fire events).
   // However, the rest of InitAccessibility() depends on `root_view_`, so we
   // defer calling it until after `root_view_` is initialized.
-  if (::features::IsAccessibilityTreeForViewsEnabled()) {
+  if (ViewAccessibility::IsViewsAccessibilityTreeEnabled()) {
     CHECK(!ax_manager_)
         << "Widget::InitAccessibility() should only be called once";
     ax_manager_ = std::make_unique<WidgetAXManager>(this);
@@ -1565,13 +1566,10 @@ void Widget::SetCapture(View* view) {
   }
 
   if (!native_widget_->HasCapture()) {
-    WidgetDeletionObserver widget_deletion_observer(this);
     native_widget_->SetCapture();
 
-    // Early return if this widget was destroyed, the native widget was torn
-    // down, or setting capture was unsuccessful.
-    if (!widget_deletion_observer.IsWidgetAlive() || !native_widget_ ||
-        !native_widget_->HasCapture()) {
+    // Early return if setting capture was unsuccessful.
+    if (!native_widget_->HasCapture()) {
       return;
     }
   }
@@ -2433,6 +2431,13 @@ void Widget::SetColorModeOverride(
   }
 }
 
+void Widget::SetUserColorOverride(std::optional<SkColor> user_color) {
+  if (user_color != user_color_override_) {
+    user_color_override_ = user_color;
+    ThemeChanged();
+  }
+}
+
 void Widget::SetBackgroundColor(std::optional<ui::ColorId> background_color) {
   if (background_color != background_color_) {
     background_color_ = background_color;
@@ -2460,6 +2465,12 @@ ui::ColorProviderKey Widget::GetColorProviderKey() const {
   // apply specifically to themselves and their children, apply these here.
   if (color_mode_override_.has_value()) {
     key.color_mode = color_mode_override_.value();
+  }
+
+  // Widgets may have specific overrides set on the Widget itself that should
+  // apply specifically to themselves and their children, apply these here.
+  if (user_color_override_.has_value()) {
+    key.user_color = user_color_override_.value();
   }
 
   return key;

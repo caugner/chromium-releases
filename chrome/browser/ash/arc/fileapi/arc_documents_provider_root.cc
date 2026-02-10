@@ -803,9 +803,7 @@ void ArcDocumentsProviderRoot::ResolveToContentUrlWithDocumentId(
     std::move(callback).Run(GURL());
     return;
   }
-  GURL url = BuildDocumentUrl(authority_, document_id);
-  runner_->GrantAccessToContentUrl(url);
-  std::move(callback).Run(url);
+  std::move(callback).Run(BuildDocumentUrl(authority_, document_id));
 }
 
 void ArcDocumentsProviderRoot::GetExtraMetadataFromDocument(

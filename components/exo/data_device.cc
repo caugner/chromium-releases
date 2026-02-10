@@ -61,13 +61,6 @@ DataDevice::DataDevice(DataDeviceDelegate* delegate, Seat* seat)
 }
 
 DataDevice::~DataDevice() {
-  while (!window_tracker_.windows().empty()) {
-    aura::Window* window = window_tracker_.Pop();
-    if (aura::client::GetDragDropDelegate(window) == this) {
-      aura::client::SetDragDropDelegate(window, nullptr);
-    }
-  }
-
   delegate_->OnDataDeviceDestroying(this);
 
   ui::ClipboardMonitor::GetInstance()->RemoveObserver(this);
@@ -162,7 +155,6 @@ void DataDevice::OnClipboardDataChanged() {
 void DataDevice::OnSurfaceCreated(Surface* surface) {
   if (delegate_->CanAcceptDataEventsForSurface(surface)) {
     aura::client::SetDragDropDelegate(surface->window(), this);
-    window_tracker_.Add(surface->window());
   }
 }
 

@@ -8,7 +8,6 @@
 
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/host/context/glic_focused_tab_manager.h"
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
@@ -25,7 +24,6 @@
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/ui_features.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -138,27 +136,26 @@ class GlicMetricsTestBase : public testing::Test {
       : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   void SetUp() override {
-    testing_profile_manager_ = std::make_unique<TestingProfileManager>(
-        TestingBrowserProcess::GetGlobal());
-    ASSERT_TRUE(testing_profile_manager_->SetUp());
     TestingBrowserProcess::GetGlobal()->SetStatusTray(
         std::make_unique<MockStatusTray>());
-    TestingBrowserProcess::GetGlobal()->CreateGlobalFeaturesForTesting();
+    raw_ptr<TestingProfileManager> testing_profile_manager =
+        TestingBrowserProcess::GetGlobal()->SetUpGlobalFeaturesForTesting(
+            /*profile_manager=*/true);
 #if BUILDFLAG(IS_CHROMEOS)
     glic_user_session_test_helper_.PreProfileSetUp(
-        testing_profile_manager_->profile_manager());
+        testing_profile_manager->profile_manager());
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-    profile_ = testing_profile_manager_->CreateTestingProfile("profile");
-    ForceSigninAndModelExecutionCapability(profile_);
+    profile_ = testing_profile_manager->CreateTestingProfile("profile");
+    ForceSigninAndGlicCapability(profile_);
   }
 
   void TearDown() override {
     // The order of some of these operations is important to avoid
     // dangling pointer crashes.
-    TestingBrowserProcess::GetGlobal()->GetFeatures()->Shutdown();
     profile_ = nullptr;
-    testing_profile_manager_.reset();
+
+    TestingBrowserProcess::GetGlobal()->TearDownGlobalFeaturesForTesting();
 
 #if BUILDFLAG(IS_CHROMEOS)
     glic_user_session_test_helper_.PostProfileTearDown();
@@ -189,15 +186,12 @@ class GlicMetricsTestBase : public testing::Test {
   ukm::TestAutoSetUkmRecorder& ukm_tester() { return ukm_tester_; }
 
   ProfileManager* profile_manager() {
-    return testing_profile_manager_->profile_manager();
+    return TestingBrowserProcess::GetGlobal()->profile_manager();
   }
 
   Profile* profile() { return profile_.get(); }
 
  private:
-  base::test::ScopedFeatureList scoped_feature_list_{
-      features::kGlicClosedCaptioning};
-
   content::BrowserTaskEnvironment task_environment_;
 #if BUILDFLAG(IS_CHROMEOS)
   ash::NetworkHandlerTestHelper network_handler_test_helper_;
@@ -215,7 +209,6 @@ class GlicMetricsTestBase : public testing::Test {
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
   signin::IdentityTestEnvironment identity_env_;
-  std::unique_ptr<TestingProfileManager> testing_profile_manager_;
   raw_ptr<TestingProfile> profile_ = nullptr;
 };
 

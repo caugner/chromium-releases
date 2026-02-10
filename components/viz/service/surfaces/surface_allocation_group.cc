@@ -160,11 +160,8 @@ void SurfaceAllocationGroup::TakeAggregatedLatencyInfoUpTo(
 }
 
 void SurfaceAllocationGroup::OnFirstSurfaceActivation(Surface* surface) {
-  // Copy container as it can be mutated during iteration.
-  auto active_embedders = active_embedders_;
-  for (Surface* embedder : active_embedders) {
+  for (Surface* embedder : active_embedders_)
     embedder->OnChildActivatedForActiveFrame(surface->surface_id());
-  }
   base::flat_map<Surface*, SurfaceId> embedders_to_notify;
   for (const auto& entry : blocked_embedders_) {
     if (!entry.second.IsNewerThan(surface->surface_id()))

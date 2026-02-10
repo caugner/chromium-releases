@@ -125,9 +125,6 @@ bool CommonDecoder::Bucket::GetAsStrings(
   if (!total_size.IsValid())
     return false;
   for (GLsizei ii = 0; ii < count; ++ii) {
-    if (UNSAFE_TODO(length[ii]) < 0) {
-      return false;
-    }
     strs[ii] = bucket_data + total_size.ValueOrDefault(0);
     total_size += UNSAFE_TODO(length[ii]);
     total_size += 1;  // NUL char at the end of each char array.
@@ -165,6 +162,17 @@ CommonDecoder::CommonDecoder(DecoderClient* client,
 }
 
 CommonDecoder::~CommonDecoder() = default;
+
+base::span<uint8_t> CommonDecoder::GetSharedMemoryAsSpan(uint32_t shm_id,
+                                                         uint32_t offset,
+                                                         uint32_t size) {
+  scoped_refptr<gpu::Buffer> buffer =
+      command_buffer_service_->GetTransferBuffer(shm_id);
+  if (!buffer) {
+    return {};
+  }
+  return buffer->GetSpanData(offset, size);
+}
 
 void* CommonDecoder::GetAddressAndCheckSize(unsigned int shm_id,
                                             unsigned int data_offset,

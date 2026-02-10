@@ -196,6 +196,14 @@ const char kDisableLogging[]                = "disable-logging";
 // Disables using CODECAPI_AVLowLatencyMode when creating DXVA decoders.
 const char kDisableLowLatencyDxva[]         = "disable-low-latency-dxva";
 
+// Disables renaming the main browser thread to "CrBrowserMain" during browser
+// startup. The internally mapped thread name is being emitted to Perfetto
+// traces, which means that the main thread is identified as "CrBrowserMain"
+// instead of the process name. Enabling this switch will prevent the thread
+// from being named, which fixes the Perfetto trace issue.
+const char kDisableMainThreadNameOverride[] =
+    "disable-main-thread-name-override";
+
 // Disables Mojo broker capabilities in the browser during Mojo initialization.
 const char kDisableMojoBroker[] = "disable-mojo-broker";
 
@@ -598,11 +606,6 @@ const char kReduceAcceptLanguageHTTP[] = "reduce-accept-language-http";
 // implements phase 4 of User-Agent reduction:
 // https://blog.chromium.org/2021/09/user-agent-reduction-origin-trial-and-dates.html.
 const char kReduceUserAgentMinorVersion[] = "reduce-user-agent-minor-version";
-
-// Reduce the platform and oscpu in the desktop User-Agent string. This flag
-// implements phase 5 of User-Agent reduction:
-// https://blog.chromium.org/2021/09/user-agent-reduction-origin-trial-and-dates.html.
-const char kReduceUserAgentPlatformOsCpu[] = "reduce-user-agent-platform-oscpu";
 
 // Enables remote debug over stdio pipes [in=3, out=4] or over the remote pipes
 // specified in the 'remote-debugging-io-pipes' switch.

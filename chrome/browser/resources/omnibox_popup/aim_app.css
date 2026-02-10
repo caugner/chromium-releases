@@ -22,6 +22,7 @@
   --cr-composebox-match-match-padding-bottom: 0;
   --cr-composebox-match-remove-button-top: 4px;
   --cr-composebox-match-text-container-font-size: var(--omnibox-font-size);
+  --cr-composebox-match-text-padding-inline-end: 4px;
   --cr-composebox-max-height: 800px;
   --cr-composebox-text-container-padding-block-start: 0;
   --search-animated-glif-rotation-duration: 2000ms;
@@ -37,6 +38,7 @@ cr-composebox {
   --color-composebox-context-entrypoint-text: var(--color-omnibox-context-entrypoint-text);
   --color-composebox-context-entrypoint-text-disabled: var(--color-omnibox-composebox-foreground-disabled);
   --color-composebox-file-carousel-remove-button: var(--color-omnibox-results-button-ink-drop-row-hovered);
+  --color-composebox-file-chip-spinner: var(--color-omnibox-composebox-primary-action);
 
   /* Themed gradient hover background color for the close button in
    * cr-composebox-file-thumbnail. */
@@ -47,7 +49,8 @@ cr-composebox {
     transparent 100%);
 
   --color-composebox-file-carousel-url: var(--color-omnibox-text-dimmed);
-  --color-composebox-file-image-overlay: var(--color-omnibox-text);
+  --color-composebox-file-image-overlay: var(--color-omnibox-composebox-file-thumbnail-overlay);
+  --color-composebox-file-image-overlay-icon-color: var(--color-omnibox-composebox-file-thumbnail-overlay-icon);
   --color-composebox-font: var(--color-omnibox-text);
   --color-composebox-font-light: var(--color-omnibox-text);
   --color-composebox-hover: unset; /* Lens only */

@@ -24,7 +24,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lens/core/mojom/geometry.mojom.h"
 #include "chrome/browser/lens/core/mojom/overlay_object.mojom-forward.h"
-#include "chrome/browser/lens/core/mojom/text.mojom-forward.h"
 #include "chrome/browser/lens/core/mojom/text.mojom.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/lens/lens_overlay_gen204_controller.h"
@@ -236,6 +235,7 @@ LenOverlayEntryPointFromInvocationSource(
     case lens::LensOverlayInvocationSource::kFindInPage:
       return lens::LensOverlayClientLogs::FIND_IN_PAGE;
     case lens::LensOverlayInvocationSource::kContextualTasksComposebox:
+    case lens::LensOverlayInvocationSource::kCobrowseToolbarButton:
       // TODO(crbug.com/469463485): This should be contextual tasks specific,
       // not unknown.
       return lens::LensOverlayClientLogs::UNKNOWN_ENTRY_POINT;
@@ -253,7 +253,6 @@ LenOverlayEntryPointFromInvocationSource(
     // used by the Lens overlay query controller, which is not used by those
     // flows, it is not necessary.
     case lens::LensOverlayInvocationSource::kNtpContextualQuery:
-      NOTREACHED() << "Invocation source not supported.";
   }
   return lens::LensOverlayClientLogs::UNKNOWN_ENTRY_POINT;
 }

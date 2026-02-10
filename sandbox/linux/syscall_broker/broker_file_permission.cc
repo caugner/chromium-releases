@@ -12,7 +12,6 @@
 
 #include <ostream>
 #include <string>
-#include <string_view>
 
 #include "base/check.h"
 #include "base/compiler_specific.h"
@@ -33,14 +32,19 @@ BrokerFilePermission& BrokerFilePermission::operator=(
 BrokerFilePermission::~BrokerFilePermission() = default;
 
 namespace {
-bool ContainsParentOrSelfReference(std::string_view path) {
-  // No trailing /.. or /.
-  if (path.ends_with("/..") || path.ends_with("/.")) {
+bool ContainsParentReference(const char* path, size_t len) {
+  // No trailing /..
+  if (len >= 3 && UNSAFE_TODO(path[len - 3]) == '/' &&
+      UNSAFE_TODO(path[len - 2]) == '.' && UNSAFE_TODO(path[len - 1]) == '.') {
     return true;
   }
-  if (path.find("/../") != std::string_view::npos ||
-      path.find("/./") != std::string_view::npos) {
-    return true;
+  for (size_t i = 0; i < len; i++) {
+    if (UNSAFE_TODO(path[i]) == '/' && (len - i) > 3) {
+      if (UNSAFE_TODO(path[i + 1]) == '.' && UNSAFE_TODO(path[i + 2]) == '.' &&
+          UNSAFE_TODO(path[i + 3]) == '/') {
+        return true;
+      }
+    }
   }
   return false;
 }
@@ -64,7 +68,7 @@ bool BrokerFilePermission::ValidatePath(const char* path) {
   if (len > 1 && UNSAFE_TODO(path[len - 1]) == '/') {
     return false;
   }
-  if (ContainsParentOrSelfReference(std::string_view(path, len))) {
+  if (ContainsParentReference(path, len)) {
     return false;
   }
   return true;
@@ -300,7 +304,7 @@ void BrokerFilePermission::DieOnInvalidPermission() {
   else
     CHECK(last_char != '/') << GetErrorMessageForTests();
 
-  CHECK(!ContainsParentOrSelfReference(path_));
+  CHECK(!ContainsParentReference(path_.c_str(), path_.length()));
 }
 
 BrokerFilePermission::BrokerFilePermission(std::string path, uint64_t flags)

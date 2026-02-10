@@ -42,10 +42,10 @@ std::unique_ptr<VulkanImage> VulkanImage::Create(
     const void* extra_image_create_info,
     const void* extra_memory_allocation_info) {
   auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
-  if (image->InitializeSingleOrJointPlanes(
+  if (!image->InitializeSingleOrJointPlanes(
           device_queue, size, format, usage, flags, image_tiling,
           extra_image_create_info, extra_memory_allocation_info,
-          /*requirements=*/nullptr) != kSuccess) {
+          /*requirements=*/nullptr)) {
     return nullptr;
   }
   return image;
@@ -62,9 +62,9 @@ std::unique_ptr<VulkanImage> VulkanImage::CreateWithExternalMemory(
     const void* extra_image_create_info,
     const void* extra_memory_allocation_info) {
   auto image = std::make_unique<VulkanImage>(base::PassKey<VulkanImage>());
-  if (image->InitializeWithExternalMemory(
+  if (!image->InitializeWithExternalMemory(
           device_queue, size, format, usage, flags, image_tiling,
-          extra_image_create_info, extra_memory_allocation_info) != kSuccess) {
+          extra_image_create_info, extra_memory_allocation_info)) {
     return nullptr;
   }
   return image;
@@ -266,7 +266,7 @@ bool VulkanImage::BindMemory(size_t plane,
   return true;
 }
 
-VulkanImage::InitializeResult VulkanImage::AllocateAndBindMemory(
+bool VulkanImage::AllocateAndBindMemory(
     size_t plane,
     const VkMemoryRequirements* requirements,
     const void* extra_memory_allocation_info) {
@@ -278,7 +278,7 @@ VulkanImage::InitializeResult VulkanImage::AllocateAndBindMemory(
     tmp_requirements = GetMemoryRequirements(plane);
     if (!tmp_requirements.memoryTypeBits) {
       DLOG(ERROR) << "vkGetImageMemoryRequirements failed";
-      return kFailedBeforeAllocateMemory;
+      return false;
     }
     requirements = &tmp_requirements;
   }
@@ -294,17 +294,17 @@ VulkanImage::InitializeResult VulkanImage::AllocateAndBindMemory(
   auto memory =
       VulkanMemory::Create(device_queue_, requirements, &dedicated_memory_info);
   if (!memory) {
-    return kFailedBeforeAllocateMemory;
+    return false;
   }
 
   if (!BindMemory(plane, std::move(memory))) {
-    return kFailedAfterAllocateMemory;
+    return false;
   }
 
-  return kSuccess;
+  return true;
 }
 
-VulkanImage::InitializeResult VulkanImage::InitializeSingleOrJointPlanes(
+bool VulkanImage::InitializeSingleOrJointPlanes(
     VulkanDeviceQueue* device_queue,
     const gfx::Size& size,
     VkFormat format,
@@ -319,7 +319,6 @@ VulkanImage::InitializeResult VulkanImage::InitializeSingleOrJointPlanes(
 
   device_queue_ = device_queue;
   disjoint_planes_ = false;
-  InitializeResult result = kFailedBeforeAllocateMemory;
 
   do {
     if (!CreateVkImage(size, format, usage, flags, image_tiling,
@@ -327,9 +326,7 @@ VulkanImage::InitializeResult VulkanImage::InitializeSingleOrJointPlanes(
       break;
     }
 
-    result =
-        AllocateAndBindMemory(0, requirements, extra_memory_allocation_info);
-    if (result != kSuccess) {
+    if (!AllocateAndBindMemory(0, requirements, extra_memory_allocation_info)) {
       break;
     }
 
@@ -339,7 +336,7 @@ VulkanImage::InitializeResult VulkanImage::InitializeSingleOrJointPlanes(
     // VK_IMAGE_TILING_OPTIMAL the layout is not usable and
     // vkGetImageSubresourceLayout() is illegal.
     if (image_tiling != VK_IMAGE_TILING_LINEAR) {
-      return kSuccess;
+      return true;
     }
 
     const VkImageSubresource image_subresource = {
@@ -350,15 +347,15 @@ VulkanImage::InitializeResult VulkanImage::InitializeSingleOrJointPlanes(
     vkGetImageSubresourceLayout(device_queue_->GetVulkanDevice(), image_,
                                 &image_subresource, &layouts_[0]);
 
-    return kSuccess;
+    return true;
   } while (false);
 
   // Initialize failed.
   Destroy();
-  return result;
+  return false;
 }
 
-VulkanImage::InitializeResult VulkanImage::InitializeWithExternalMemory(
+bool VulkanImage::InitializeWithExternalMemory(
     VulkanDeviceQueue* device_queue,
     const gfx::Size& size,
     VkFormat format,
@@ -384,14 +381,14 @@ VulkanImage::InitializeResult VulkanImage::InitializeWithExternalMemory(
     DLOG(ERROR) << "External memory is not supported."
                 << " format:" << format << " image_tiling:" << image_tiling
                 << " usage:" << usage << " flags:" << flags;
-    return kFailedBeforeAllocateMemory;
+    return false;
   }
   if (!(external_format_properties.externalMemoryFeatures &
         VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT)) {
     DLOG(ERROR) << "External memory cannot be exported."
                 << " format:" << format << " image_tiling:" << image_tiling
                 << " usage:" << usage << " flags:" << flags;
-    return kFailedBeforeAllocateMemory;
+    return false;
   }
 
   handle_types_ = external_format_properties.compatibleHandleTypes;

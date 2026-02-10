@@ -461,6 +461,7 @@
 // Context menu items to control glic
 #define IDC_CONTENT_CONTEXT_CLOSE_GLIC  50231
 #define IDC_CONTENT_CONTEXT_RELOAD_GLIC  50232
+#define IDC_CONTENT_CONTEXT_ARCHIVE_GLIC 50233
 // Context menu items in the bookmark bar
 #define IDC_BOOKMARK_BAR_OPEN_ALL 51000
 #define IDC_BOOKMARK_BAR_OPEN_ALL_NEW_WINDOW 51001
@@ -604,6 +605,11 @@
 #define IDC_OMNIBOX_CONTEXT_ADD_FILE                          54011
 #define IDC_OMNIBOX_CONTEXT_CREATE_IMAGES                     54012
 #define IDC_OMNIBOX_CONTEXT_DEEP_RESEARCH                     54013
+#define IDC_OMNIBOX_CONTEXT_CANVAS                            54014
+#define IDC_OMNIBOX_CONTEXT_SET_MODEL_AUTO                    54015
+#define IDC_OMNIBOX_CONTEXT_SET_MODEL_THINKING                54016
+#define IDC_OMNIBOX_CONTEXT_SET_MODEL_REGULAR                 54017
+#define IDC_OMNIBOX_CONTEXT_SET_MODEL_PRO_NO_GEN_UI           54018
 
 // NOTE: The last valid command value is 57343 (0xDFFF)
 // See http://msdn.microsoft.com/en-us/library/t2zechd4(VS.71).aspx

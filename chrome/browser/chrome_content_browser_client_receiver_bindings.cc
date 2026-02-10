@@ -353,9 +353,14 @@ void ChromeContentBrowserClient::RegisterBrowserInterfaceBindersForFrame(
 #endif
 }
 
-void ChromeContentBrowserClient::RegisterWebUIInterfaceBrokers(
+void ChromeContentBrowserClient::RegisterTrustedWebUIInterfaceBrokers(
     content::WebUIBrowserInterfaceBrokerRegistry& registry) {
-  chrome::internal::PopulateChromeWebUIFrameInterfaceBrokers(registry);
+  chrome::internal::PopulateTrustedChromeWebUIFrameInterfaceBrokers(registry);
+}
+
+void ChromeContentBrowserClient::RegisterUntrustedWebUIInterfaceBrokers(
+    content::WebUIBrowserInterfaceBrokerRegistry& registry) {
+  chrome::internal::PopulateUntrustedChromeWebUIFrameInterfaceBrokers(registry);
 }
 
 void ChromeContentBrowserClient::
@@ -642,7 +647,6 @@ void ChromeContentBrowserClient::BindGpuHostReceiver(
 }
 
 void ChromeContentBrowserClient::BindUtilityHostReceiver(
-    const std::string& service_name,
     mojo::GenericPendingReceiver receiver) {
   if (auto r = receiver.As<metrics::mojom::CallStackProfileCollector>()) {
     metrics::CallStackProfileCollector::Create(std::move(r));
@@ -653,7 +657,7 @@ void ChromeContentBrowserClient::BindUtilityHostReceiver(
           receiver
               .As<chromeos::mojo_service_manager::mojom::ServiceManager>()) {
     ash::mojo_service_manager::EstablishUtilityProcessBridge(
-        service_name, std::move(service_manager_receiver));
+        std::move(service_manager_receiver));
     return;
   }
 #endif

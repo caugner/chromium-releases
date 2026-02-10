@@ -116,8 +116,8 @@ class FakeGCMDriverForInstanceID : public gcm::FakeGCMDriver,
 
   base::ObserverList<gcm::GCMConnectionObserver,
                      /*check_empty=*/false,
-                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>::
-      Unchecked connection_observers_;
+                     /*allow_reentrancy=*/false>::Unchecked
+      connection_observers_;
 
   base::WeakPtrFactory<FakeGCMDriverForInstanceID> weak_ptr_factory_{this};
 };

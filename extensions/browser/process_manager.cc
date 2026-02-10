@@ -4,13 +4,10 @@
 
 #include "extensions/browser/process_manager.h"
 
-#include <algorithm>
-#include <iterator>
 #include <memory>
-#include <set>
+#include <unordered_set>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -284,7 +281,7 @@ ProcessManager::FrameSet ProcessManager::GetRenderFrameHostsForExtension(
 
 bool ProcessManager::IsRenderFrameHostRegistered(
     content::RenderFrameHost* render_frame_host) {
-  return base::Contains(all_extension_frames_, render_frame_host);
+  return all_extension_frames_.contains(render_frame_host);
 }
 
 void ProcessManager::AddObserver(ProcessManagerObserver* observer) {
@@ -484,15 +481,13 @@ void ProcessManager::IncrementLazyKeepaliveCount(
   }
 }
 
-bool ProcessManager::DecrementLazyKeepaliveCount(
+void ProcessManager::DecrementLazyKeepaliveCount(
     const Extension* extension,
     Activity::Type activity_type,
     const std::string& extra_data) {
   if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
-    return DecrementLazyKeepaliveCount(extension->id(), activity_type,
-                                       extra_data);
+    DecrementLazyKeepaliveCount(extension->id(), activity_type, extra_data);
   }
-  return false;
 }
 
 void ProcessManager::NotifyExtensionProcessTerminated(
@@ -570,7 +565,7 @@ void ProcessManager::NetworkRequestDone(
   ExtensionHost* host = result->second;
   pending_network_requests_.erase(result);
 
-  if (!base::Contains(background_hosts_, host)) {
+  if (!background_hosts_.contains(host)) {
     return;
   }
 
@@ -677,7 +672,7 @@ void ProcessManager::CloseBackgroundHost(ExtensionHost* host) {
         mojom::ViewType::kExtensionBackgroundPage);
   delete host;
   // |host| should deregister itself from our structures.
-  CHECK(!base::Contains(background_hosts_, host));
+  CHECK(!background_hosts_.contains(host));
 
   for (auto& observer : observer_list_)
     observer.OnBackgroundHostClose(extension_id);
@@ -751,28 +746,20 @@ base::Uuid ProcessManager::IncrementServiceWorkerKeepaliveCount(
   return request_uuid;
 }
 
-bool ProcessManager::DecrementLazyKeepaliveCount(
+void ProcessManager::DecrementLazyKeepaliveCount(
     const ExtensionId& extension_id,
     Activity::Type activity_type,
     const std::string& extra_data) {
-  auto map_it = background_page_data_.find(extension_id);
-  if (map_it == background_page_data_.end()) {
-    return false;
-  }
-  BackgroundPageData& data = map_it->second;
+  BackgroundPageData& data = background_page_data_[extension_id];
 
-  // Only decrement counts that correspond to a precisely tracked increment.
-  // Renderer IPCs are untrusted and must not be able to balance or drain other
-  // legitimate keepalive activity types.
-  const auto activity = std::make_pair(activity_type, extra_data);
-  const auto it = data.activities.find(activity);
-  if (it == data.activities.end()) {
-    return false;
-  }
   DCHECK(data.lazy_keepalive_count > 0 ||
          !extension_registry_->enabled_extensions().Contains(extension_id));
   --data.lazy_keepalive_count;
-  data.activities.erase(it);
+  const auto it =
+      data.activities.find(std::make_pair(activity_type, extra_data));
+  if (it != data.activities.end()) {
+    data.activities.erase(it);
+  }
 
   // If we reach a zero keepalive count when the lazy background page is about
   // to be closed, incrementing close_sequence_id will cancel the close
@@ -791,7 +778,6 @@ bool ProcessManager::DecrementLazyKeepaliveCount(
           g_event_page_idle_time);
     }
   }
-  return true;
 }
 
 void ProcessManager::DecrementServiceWorkerKeepaliveCount(
@@ -897,7 +883,7 @@ void ProcessManager::CloseLazyBackgroundPageNow(const ExtensionId& extension_id,
       return;
     }
 
-    // Close remaining views. First, collect frames to unregister.
+    // Close remaining views.
     std::vector<content::RenderFrameHost*> frames_to_close;
     for (const auto& key_value : all_extension_frames_) {
       if (key_value.second.CanKeepalive() &&
@@ -906,28 +892,13 @@ void ProcessManager::CloseLazyBackgroundPageNow(const ExtensionId& extension_id,
         frames_to_close.push_back(key_value.first);
       }
     }
-    // Collect unique WebContents and unregister frames.
-    std::set<content::WebContents*> raw_web_contents;
     for (content::RenderFrameHost* frame : frames_to_close) {
-      if (content::WebContents* web_contents =
-              content::WebContents::FromRenderFrameHost(frame)) {
-        raw_web_contents.insert(web_contents);
-      }
+      content::WebContents::FromRenderFrameHost(frame)->ClosePage();
+      // WebContents::ClosePage() may result in calling
+      // UnregisterRenderFrameHost() asynchronously and may cause race
+      // conditions when the background page is reloaded.
+      // To avoid this, unregister the view now.
       UnregisterRenderFrameHost(frame);
-    }
-    // Safely close the collected pages using WeakPtrs. WebContents::ClosePage()
-    // can execute synchronously and destroy WebContents and frames, which would
-    // lead to a UAF if iterating over frames or raw pointers while calling
-    // ClosePage(). See crbug.com/513156160.
-    std::vector<base::WeakPtr<content::WebContents>> safe_web_contents;
-    safe_web_contents.reserve(raw_web_contents.size());
-    std::ranges::transform(
-        raw_web_contents, std::back_inserter(safe_web_contents),
-        [](content::WebContents* contents) { return contents->GetWeakPtr(); });
-    for (const auto& web_contents : safe_web_contents) {
-      if (web_contents) {
-        web_contents->ClosePage();
-      }
     }
 
     host = GetBackgroundHostForExtension(extension_id);
@@ -1064,7 +1035,7 @@ void ProcessManager::OnExtensionHostDestroyed(ExtensionHost* host) {
   TRACE_EVENT0("browser,startup", "ProcessManager::OnExtensionHostDestroyed");
   host->RemoveObserver(this);
 
-  DCHECK(base::Contains(background_hosts_, host));
+  DCHECK(background_hosts_.contains(host));
   background_hosts_.erase(host);
   // Note: |host->extension()| may be null at this point.
   ClearBackgroundPageData(host->extension_id());

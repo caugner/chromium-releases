@@ -10,6 +10,7 @@
 
 #include "base/barrier_callback.h"
 #include "base/base64url.h"
+#include "base/command_line.h"
 #include "base/containers/flat_set.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -554,24 +555,13 @@ void DigitalIdentityRequestImpl::Get(
     return;
   }
 
-  // ShowDigitalIdentityInterstitial can synchronously exit fullscreen on
-  // Windows, which can spin the message loop and destroy the WebContents and
-  // `this`. We use a WeakPtr to guard against this potential UAF.
-  base::WeakPtr<DigitalIdentityRequestImpl> weak_this =
-      weak_ptr_factory_.GetWeakPtr();
-
-  auto abort_callback = provider_->ShowDigitalIdentityInterstitial(
-      *WebContents::FromRenderFrameHost(&render_frame_host()), origin(),
-      *interstitial_type,
-      base::BindOnce(&DigitalIdentityRequestImpl::OnInterstitialDone,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(protocol),
-                     std::move(request_to_send)));
-
-  if (!weak_this) {
-    return;
-  }
-
-  update_interstitial_on_abort_callback_ = std::move(abort_callback);
+  update_interstitial_on_abort_callback_ =
+      provider_->ShowDigitalIdentityInterstitial(
+          *WebContents::FromRenderFrameHost(&render_frame_host()), origin(),
+          *interstitial_type,
+          base::BindOnce(&DigitalIdentityRequestImpl::OnInterstitialDone,
+                         weak_ptr_factory_.GetWeakPtr(), std::move(protocol),
+                         std::move(request_to_send)));
 }
 
 void DigitalIdentityRequestImpl::Create(
@@ -667,14 +657,8 @@ void DigitalIdentityRequestImpl::Abort() {
     return;
   }
 
-  base::WeakPtr<DigitalIdentityRequestImpl> weak_this =
-      weak_ptr_factory_.GetWeakPtr();
   if (update_interstitial_on_abort_callback_) {
     std::move(update_interstitial_on_abort_callback_).Run();
-  }
-
-  if (!weak_this) {
-    return;
   }
 
   CompleteRequestWithStatus(

@@ -864,18 +864,18 @@ void JPEGImageDecoder::OnSetData(scoped_refptr<SegmentReader> data) {
   // multi-picture format, also known as CIPA DC-007). This is in contrast with
   // other decoders (e.g AVIF), which are aware of gainmap metadata.
   if (data && aux_image_ == cc::AuxImage::kGainmap) {
-    sk_sp<SkData> base_image_data = data->GetAsSkData();
+    auto base_image_data = data->GetAsSkData();
     DCHECK(base_image_data);
-    SkGainmapInfo gainmap_info;
-    sk_sp<SkData> gainmap_image_data;
     auto base_metadata_decoder = SkJpegMetadataDecoder::Make(base_image_data);
-    if (!base_metadata_decoder->findGainmapImage(
-            base_image_data, gainmap_image_data, gainmap_info)) {
+    if (auto [gainmap_image_data, _] =
+            base_metadata_decoder->findGainmapImage(base_image_data);
+        gainmap_image_data) {
+      data = SegmentReader::CreateFromSkData(std::move(gainmap_image_data));
+      data_ = data;
+    } else {
       SetFailed();
       return;
     }
-    data = SegmentReader::CreateFromSkData(std::move(gainmap_image_data));
-    data_ = data;
   }
 
   if (reader_) {
@@ -951,12 +951,11 @@ unsigned JPEGImageDecoder::DesiredScaleNumerator(wtf_size_t max_decoded_bytes,
     return scale_denominator;
   }
 
-  // Downsample according to the maximum decoded size. Use double to prevent
-  // precision loss that can trigger redundant decoder creation
-  // (crbug.com/500104917).
-  return static_cast<unsigned>(
-      floor(sqrt(static_cast<double>(max_decoded_bytes) / original_bytes) *
-            scale_denominator));
+  // Downsample according to the maximum decoded size.
+  return static_cast<unsigned>(floor(sqrt(
+      // MSVC needs explicit parameter type for sqrt().
+      static_cast<float>(max_decoded_bytes) / original_bytes *
+      scale_denominator * scale_denominator)));
 }
 
 bool JPEGImageDecoder::ShouldGenerateAllSizes() const {
@@ -1008,17 +1007,16 @@ bool JPEGImageDecoder::GetGainmapInfoAndData(
   // TODO(crbug.com/356827770): This function will be removed once all decoders
   // rely on ImageDecoder::aux_image_ to decode the gainmap, instead of
   // extracting gainmap data.
-  sk_sp<SkData> base_image_data = data_->GetAsSkData();
+  auto base_image_data = data_->GetAsSkData();
   DCHECK(base_image_data);
-  sk_sp<SkData> gainmap_image_data;
-  SkGainmapInfo gainmap_info;
-  if (!metadata_decoder->findGainmapImage(base_image_data, gainmap_image_data,
-                                          gainmap_info)) {
-    return false;
+  if (auto [ok, gainmap_info] =
+          metadata_decoder->findGainmapImage(base_image_data);
+      ok) {
+    out_gainmap_info = gainmap_info;
+    out_gainmap_data = data_;
+    return true;
   }
-  out_gainmap_info = gainmap_info;
-  out_gainmap_data = data_;
-  return true;
+  return false;
 }
 
 bool JPEGImageDecoder::HasC2PAManifest() const {

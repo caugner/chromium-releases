@@ -14,6 +14,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
@@ -143,6 +144,12 @@ enum class ScreenshotImageType {
   kMaxValue = kWebp,
 };
 
+// We use a timer on the viz side as well as a timer on the browser side and
+// offset them by this allowance. Hopefully having the viz timer fire always
+// as this will give us more information as to the failure.
+constexpr base::TimeDelta kScreenshotTimeoutBrowserAllowance =
+    base::Milliseconds(500);
+
 ScreenshotImageType GetScreenshotImageType() {
   if (!base::FeatureList::IsEnabled(kGlicTabScreenshotExperiment)) {
     return ScreenshotImageType::kJpeg;
@@ -180,7 +187,6 @@ base::expected<paint_preview::RedactionParams, std::string> GetRedactionParams(
           /*allowed_origins=*/{frame->GetLastCommittedOrigin()},
           /*allowed_sites=*/{});
   }
-  NOTREACHED();
 }
 
 SkBitmap RedactScreenshotOnWorkerThread(
@@ -202,6 +208,25 @@ SkBitmap RedactScreenshotOnWorkerThread(
   }
 
   return redacted_bitmap;
+}
+
+std::string_view ToString(content::CopyFromSurfaceError error) {
+  switch (error) {
+    case content::CopyFromSurfaceError::kUnknown:
+      return "Unknown";
+    case content::CopyFromSurfaceError::kNotImplemented:
+      return "Not implemented";
+    case content::CopyFromSurfaceError::kFrameGone:
+      return "Frame Gone";
+    case content::CopyFromSurfaceError::kTimeout:
+      return "Timeout";
+    case content::CopyFromSurfaceError::kEmbeddingTokenChanged:
+      return "EmbeddingTokenChanged";
+    case content::CopyFromSurfaceError::kVizSentEmptyBitmap:
+      return "VizSentEmptyBitmap";
+    case content::CopyFromSurfaceError::kUnknownVizError:
+      return "UnknownVizError";
+  }
 }
 
 // Combination of tracked states for when a PDF contents request is made.
@@ -416,7 +441,7 @@ class PageContextFetcher : public content::WebContentsObserver {
 
       view->CopyFromSurface(
           gfx::Rect(),  // Copy entire surface area.
-          GetScreenshotSize(view_size),
+          GetScreenshotSize(view_size), kScreenshotTimeout.Get(),
           base::BindOnce(&PageContextFetcher::ReceivedViewportBitmap,
                          GetWeakPtr()));
     }
@@ -433,13 +458,20 @@ class PageContextFetcher : public content::WebContentsObserver {
     // long. b/431837630.
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE,
-        base::BindOnce(&PageContextFetcher::ReceivedEncodedScreenshot,
-                       GetWeakPtr(), base::unexpected("ScreenshotTimeout")),
-        kScreenshotTimeout.Get());
+        base::BindOnce(&PageContextFetcher::OnScreenshotTimeout, GetWeakPtr()),
+        kScreenshotTimeout.Get() + kScreenshotTimeoutBrowserAllowance);
   }
 
-  void ReceivedViewportBitmap(const viz::CopyOutputBitmapWithMetadata& result) {
-    ReceivedViewportBitmapOrError(&result.bitmap);
+  void ReceivedViewportBitmap(const content::CopyFromSurfaceResult& result) {
+    if (!result.has_value()) {
+      base::UmaHistogramEnumeration(
+          "Glic.PageContextFetcher.GetScreenshotError", result.error());
+      ReceivedViewportBitmapOrError(
+          base::unexpected<std::string>(ToString(result.error())));
+      return;
+    }
+
+    ReceivedViewportBitmapOrError(base::ok(&result->bitmap));
   }
 
   void ReceivedViewportBitmapOrError(
@@ -453,7 +485,7 @@ class PageContextFetcher : public content::WebContentsObserver {
       pending_result_->screenshot_result.emplace(
           gfx::SkISizeToSize(bitmap->dimensions()));
       screenshot_bitmap_ = *bitmap;
-
+      screenshot_capture_done_ = true;
       base::UmaHistogramTimes("Glic.PageContextFetcher.GetScreenshot",
                               elapsed_timer_.Elapsed());
       RedactAndEncodeScreenshotIfNeeded();
@@ -475,32 +507,50 @@ class PageContextFetcher : public content::WebContentsObserver {
               SkBitmap redacted_bitmap = RedactScreenshotOnWorkerThread(
                   bitmap, visible_bounding_boxes_for_password_redaction);
               std::optional<std::vector<uint8_t>> encoded;
+              std::string encode_debug_data;
               switch (GetScreenshotImageType()) {
                 case ScreenshotImageType::kJpeg:
                   encoded = gfx::JPEGCodec::Encode(redacted_bitmap,
                                                    GetScreenshotJpegQuality());
+                  if (!encoded) {
+                    encode_debug_data = absl::StrFormat(
+                        "JPEG, quality=%d", GetScreenshotJpegQuality());
+                  }
                   break;
                 case ScreenshotImageType::kPng:
                   if (ShouldPngScreenshotBeLowQuality()) {
                     encoded = gfx::PNGCodec::FastEncodeBGRASkBitmap(
                         redacted_bitmap, /*discard_transparency=*/true);
+                    if (!encoded) {
+                      encode_debug_data = "PNG, quality=low";
+                    }
                   } else {
                     encoded = gfx::PNGCodec::EncodeBGRASkBitmap(
                         redacted_bitmap, /*discard_transparency=*/true);
+                    if (!encoded) {
+                      encode_debug_data = "PNG, quality=normal";
+                    }
                   }
                   break;
                 case ScreenshotImageType::kWebp:
                   encoded = gfx::WebpCodec::Encode(redacted_bitmap,
                                                    GetScreenshotWebPQuality());
+                  if (!encoded) {
+                    encode_debug_data = absl::StrFormat(
+                        "webp, quality=%d", GetScreenshotWebPQuality());
+                  }
                   break;
                 default:
-                  break;
+                  NOTREACHED();
               }
               base::expected<std::vector<uint8_t>, std::string> reply;
               if (encoded) {
                 reply.emplace(std::move(encoded.value()));
               } else {
-                reply = base::unexpected("JPEGCodec failed to encode");
+                reply = base::unexpected(absl::StrFormat(
+                    "Failed to encode %d x %d bitmap: %s",
+                    redacted_bitmap.width(), redacted_bitmap.height(),
+                    encode_debug_data));
               }
               return reply;
             },
@@ -543,6 +593,26 @@ class PageContextFetcher : public content::WebContentsObserver {
   void PrimaryPageChanged(content::Page& page) override {
     primary_page_changed_ = true;
     RunCallbackIfComplete();
+  }
+
+  void OnScreenshotTimeout() {
+    // When password redaction is enabled, the screenshot must wait for APC to
+    // finish before it can be encoded.
+    //
+    // The screenshot timer is intended to catch hangs during the initial bitmap
+    // capture. If we have already received the bitmap, we should ignore this
+    // timeout and allow the process to continue. This prevents missing
+    // screenshots when the capture was successful but APC is slow. In such
+    // cases, we rely on the APC-specific timeouts to eventually terminate the
+    // request if it hangs.
+    //
+    // It is also acceptable not to timeout during the encoding phase because it
+    // runs on a browser worker thread.
+    if (screenshot_capture_done_) {
+      return;
+    }
+
+    ReceivedEncodedScreenshot(base::unexpected("ScreenshotTimeout"));
   }
 
   void ReceivedEncodedScreenshot(
@@ -639,6 +709,8 @@ class PageContextFetcher : public content::WebContentsObserver {
       }
     }
 
+    RedactAndEncodeScreenshotIfNeeded();
+
     RunCallbackIfComplete();
   }
 
@@ -684,6 +756,7 @@ class PageContextFetcher : public content::WebContentsObserver {
 
   // Whether work is complete for each task, does not imply success.
   bool initialization_done_ = false;
+  bool screenshot_capture_done_ = false;
   bool screenshot_done_ = false;
   bool inner_text_done_ = false;
   bool pdf_done_ = false;

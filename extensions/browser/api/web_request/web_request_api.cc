@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include <algorithm>
-#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -302,10 +301,11 @@ void WebRequestAPI::ProxySet::OnDNRExtensionUnloaded(
 WebRequestAPI::RequestIDGenerator::RequestIDGenerator() = default;
 WebRequestAPI::RequestIDGenerator::~RequestIDGenerator() = default;
 
-int64_t WebRequestAPI::RequestIDGenerator::Generate(int32_t routing_id,
-                                                    int32_t client_request_id) {
+int64_t WebRequestAPI::RequestIDGenerator::Generate(
+    int32_t routing_id,
+    int32_t network_service_request_id) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  auto it = saved_id_map_.find({routing_id, client_request_id});
+  auto it = saved_id_map_.find({routing_id, network_service_request_id});
   if (it != saved_id_map_.end()) {
     int64_t id = it->second;
     saved_id_map_.erase(it);
@@ -314,22 +314,16 @@ int64_t WebRequestAPI::RequestIDGenerator::Generate(int32_t routing_id,
   return ++id_;
 }
 
-void WebRequestAPI::RequestIDGenerator::SaveID(int32_t routing_id,
-                                               int32_t client_request_id,
-                                               uint64_t request_id) {
-  // If `client_request_id` is 0, we cannot reliably match the generated ID to a
-  // restarted request, so ignore it.
-  if (client_request_id != 0) {
-    saved_id_map_.insert({{routing_id, client_request_id}, request_id});
+void WebRequestAPI::RequestIDGenerator::SaveID(
+    int32_t routing_id,
+    int32_t network_service_request_id,
+    uint64_t request_id) {
+  // If |network_service_request_id| is 0, we cannot reliably match the
+  // generated ID to a future request, so ignore it.
+  if (network_service_request_id != 0) {
+    saved_id_map_.insert(
+        {{routing_id, network_service_request_id}, request_id});
   }
-}
-
-int32_t WebRequestAPI::RequestIDGenerator::GenerateNetworkRequestId() {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (network_request_id_ == std::numeric_limits<int32_t>::max()) {
-    network_request_id_ = 0;
-  }
-  return ++network_request_id_;
 }
 
 WebRequestAPI::WebRequestAPI(content::BrowserContext* context)
@@ -431,10 +425,24 @@ void WebRequestAPI::OnListenerRemoved(const EventListenerInfo& details) {
         details.worker_thread_id, details.service_worker_version_id);
   }
 
-  // This PostTask is necessary even though we are already on the UI thread to
-  // allow cases where blocking listeners remove themselves inside the handler.
-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, std::move(remove_listener));
+  if (ExtensionRegistry::Get(details.browser_context)
+          ->enabled_extensions()
+          .GetByID(details.extension_id)) {
+    // The extension is still enabled, so this listener removal was likely
+    // initiated by a call from the extension itself. If the listener removal is
+    // performed synchronously, the listener will be removed before the
+    // handler's result can be processed. This `PostTask` is necessary, even
+    // though we are already on the UI thread, to defer the removal until after
+    // the event handling is complete.
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, std::move(remove_listener));
+  } else {
+    // The extension has been unloaded or disabled, so this removal is part of
+    // the teardown process. In this case, there are no running handlers to
+    // worry about, so we can remove the listener synchronously for immediate
+    // cleanup.
+    std::move(remove_listener).Run();
+  }
 }
 
 bool WebRequestAPI::MaybeProxyURLLoaderFactory(
@@ -636,10 +644,13 @@ void WebRequestAPI::ProxyWebSocket(
   const bool has_extra_headers =
       WebRequestEventRouter::Get(browser_context)
           ->HasAnyExtraHeadersListener(browser_context);
+  const bool has_security_info =
+      WebRequestEventRouter::Get(browser_context)
+          ->HasAnySecurityInfoListener(browser_context);
 
   WebRequestProxyingWebSocket::StartProxying(
       std::move(factory), url, site_for_cookies, user_agent,
-      std::move(handshake_client), has_extra_headers,
+      std::move(handshake_client), has_extra_headers, has_security_info,
       frame->GetProcess()->GetDeprecatedID(), frame->GetRoutingID(),
       &request_id_generator_, frame->GetLastCommittedOrigin(),
       frame->GetProcess()->GetBrowserContext(), proxies_.get());

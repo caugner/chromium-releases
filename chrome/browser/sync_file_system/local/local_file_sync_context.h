@@ -242,11 +242,11 @@ class LocalFileSyncContext
       const std::string& /* name */,
       base::File::Error error);
   SyncStatusCode InitializeChangeTrackerOnFileThread(
-      scoped_refptr<LocalFileChangeTracker>* tracker_ptr,
+      std::unique_ptr<LocalFileChangeTracker>* tracker_ptr,
       storage::FileSystemContext* file_system_context,
       std::set<GURL>* origins_with_changes);
   void DidInitializeChangeTrackerOnIOThread(
-      scoped_refptr<LocalFileChangeTracker>* tracker_ptr,
+      std::unique_ptr<LocalFileChangeTracker>* tracker_ptr,
       const GURL& source_url,
       storage::FileSystemContext* file_system_context,
       std::set<GURL>* origins_with_changes,

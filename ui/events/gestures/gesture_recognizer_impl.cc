@@ -9,11 +9,9 @@
 #include <algorithm>
 #include <limits>
 #include <memory>
-#include <vector>
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
@@ -30,31 +28,20 @@ namespace ui {
 
 namespace {
 
-void TransferConsumer(GestureConsumer* current_consumer,
-                      GestureConsumer* new_consumer,
-                      std::vector<base::WeakPtr<GestureConsumer>>& consumers) {
-  std::erase_if(consumers, [current_consumer](const auto& weak_ptr) {
-    return weak_ptr.get() == current_consumer;
-  });
+void TransferConsumer(
+    GestureConsumer* current_consumer,
+    GestureConsumer* new_consumer,
+    std::set<raw_ptr<GestureConsumer, SetExperimental>>& consumers) {
+  consumers.erase(current_consumer);
   if (!new_consumer) {
     current_consumer->reset_gesture_provider();
     return;
   }
   new_consumer->set_gesture_provider(current_consumer->TakeProvider());
   if (new_consumer->provider()) {
-    // We want to have no duplicate `GestureConsumer` within `consumers`. We use
-    // an `std::vector` instead of an `std::set` due to `base::WeakPtr` not
-    // supporting comparisons. We instead validate the existence of an entry
-    // ourselves.
-    if (std::ranges::find_if(consumers, [new_consumer](const auto& weak_ptr) {
-          return weak_ptr.get() == new_consumer;
-        }) == consumers.end()) {
-      consumers.push_back(new_consumer->GetWeakPtr());
-    }
+    consumers.insert(new_consumer);
   } else {
-    std::erase_if(consumers, [new_consumer](const auto& weak_ptr) {
-      return weak_ptr.get() == new_consumer;
-    });
+    consumers.erase(new_consumer);
   }
 }
 
@@ -88,10 +75,8 @@ GestureRecognizerImpl::~GestureRecognizerImpl() {
   // by `consumers_`. Clear `consumers`' providers
   // explicitly so that the notifications sent by gesture providers during
   // destruction are handled properly.
-  for (const auto& consumer : consumers_) {
-    if (consumer) {
-      consumer->reset_gesture_provider();
-    }
+  for (GestureConsumer* consumer : consumers_) {
+    consumer->reset_gesture_provider();
   }
   consumers_.clear();
 }
@@ -114,10 +99,7 @@ GestureConsumer* GestureRecognizerImpl::GetTargetForLocation(
   int closest_touch_id = 0;
   double closest_distance_squared = std::numeric_limits<double>::infinity();
 
-  for (const auto& consumer : consumers_) {
-    if (!consumer) {
-      continue;
-    }
+  for (GestureConsumer* consumer : consumers_) {
     GestureProviderAura* provider = consumer->provider();
     const MotionEventAura& pointer_state = provider->pointer_state();
     for (size_t j = 0; j < pointer_state.GetPointerCount(); ++j) {
@@ -148,9 +130,8 @@ void GestureRecognizerImpl::CancelActiveTouchesExcept(
 void GestureRecognizerImpl::CancelActiveTouchesOn(
     const std::vector<GestureConsumer*>& consumers) {
   for (auto* consumer : consumers) {
-    if (std::ranges::find_if(consumers_, [consumer](const auto& weak_ptr) {
-          return weak_ptr.get() == consumer;
-        }) != consumers_.end()) {
+    if (std::find(consumers_.begin(), consumers_.end(), consumer) !=
+        consumers_.end()) {
       CancelActiveTouchesImpl(consumer);
     }
   }
@@ -182,8 +163,7 @@ void GestureRecognizerImpl::TransferEventsTo(
   // See ash_unittests DragDropControllerTest.TabletSplitViewDragTwoBrowserTabs
   // for an example where this happens.
   base::WeakPtr<GestureConsumer> new_consumer_ptr = new_consumer->GetWeakPtr();
-  base::WeakPtr<GestureEventHelper> helper =
-      FindDispatchHelperForConsumer(current_consumer);
+  GestureEventHelper* helper = FindDispatchHelperForConsumer(current_consumer);
 
   std::vector<int> touchids_targeted_at_current;
 
@@ -209,9 +189,7 @@ void GestureRecognizerImpl::TransferEventsTo(
 
     for (std::unique_ptr<TouchEvent>& event : cancelling_touches) {
       gesture_provider->OnTouchEnter(*event);
-      if (helper) {
-        helper->DispatchSyntheticTouchEvent(event.get());
-      }
+      helper->DispatchSyntheticTouchEvent(event.get());
     }
   }
 
@@ -287,11 +265,7 @@ GestureProviderAura* GestureRecognizerImpl::GetGestureProviderForConsumer(
     GestureConsumer* consumer) {
   GestureProviderAura* provider = consumer->provider();
   if (!provider) {
-    if (std::ranges::find_if(consumers_, [consumer](const auto& weak_ptr) {
-          return weak_ptr.get() == consumer;
-        }) == consumers_.end()) {
-      consumers_.push_back(consumer->GetWeakPtr());
-    }
+    consumers_.insert(consumer);
     consumer->set_gesture_provider(
         std::make_unique<GestureProviderAura>(consumer, this));
   }
@@ -335,7 +309,7 @@ void GestureRecognizerImpl::DispatchGestureEvent(
     GestureConsumer* raw_input_consumer,
     GestureEvent* event) {
   if (raw_input_consumer) {
-    base::WeakPtr<GestureEventHelper> helper =
+    GestureEventHelper* helper =
         FindDispatchHelperForConsumer(raw_input_consumer);
     if (helper)
       helper->DispatchGestureEvent(raw_input_consumer, event);
@@ -369,17 +343,16 @@ void GestureRecognizerImpl::CancelActiveTouchesExceptImpl(
   // Do not iterate directly over |consumers_| because canceling
   // active touches may cause the consumer to be removed from
   // |consumers_|. See https://crbug.com/651258 for more info.
-  auto consumers(consumers_);
-  for (const auto& consumer : consumers) {
-    if (consumer && consumer.get() != not_cancelled) {
-      CancelActiveTouchesImpl(consumer.get());
+  std::set<raw_ptr<GestureConsumer, SetExperimental>> consumers(consumers_);
+  for (GestureConsumer* consumer : consumers) {
+    if (consumer != not_cancelled) {
+      CancelActiveTouchesImpl(consumer);
     }
   }
 }
 
 bool GestureRecognizerImpl::CancelActiveTouchesImpl(GestureConsumer* consumer) {
-  base::WeakPtr<GestureEventHelper> helper =
-      FindDispatchHelperForConsumer(consumer);
+  GestureEventHelper* helper = FindDispatchHelperForConsumer(consumer);
 
   if (!helper)
     return false;
@@ -388,13 +361,8 @@ bool GestureRecognizerImpl::CancelActiveTouchesImpl(GestureConsumer* consumer) {
       GetCancelledEventPerPointForConsumer(consumer);
   if (cancelling_touches.empty())
     return false;
-  for (const std::unique_ptr<TouchEvent>& cancelling_touch :
-       cancelling_touches) {
-    if (!helper) {
-      break;
-    }
+  for (const std::unique_ptr<TouchEvent>& cancelling_touch : cancelling_touches)
     helper->DispatchSyntheticTouchEvent(cancelling_touch.get());
-  }
   return true;
 }
 
@@ -407,30 +375,25 @@ bool GestureRecognizerImpl::CleanupStateForConsumer(GestureConsumer* consumer) {
     return state_cleaned_up;
   }
 
-  auto it = std::ranges::find_if(consumers_, [consumer](const auto& weak_ptr) {
-    return weak_ptr.get() == consumer;
-  });
-  if (it != consumers_.end()) {
+  if (consumers_.find(consumer) != consumers_.end()) {
     GestureProviderAura* provider = consumer->provider();
     if (provider) {
       RemoveValueFromMap(&event_to_gesture_provider_, provider);
       consumer->reset_gesture_provider();
     }
-    consumers_.erase(it);
+    consumers_.erase(consumer);
     state_cleaned_up = true;
   }
   return state_cleaned_up;
 }
 
 void GestureRecognizerImpl::AddGestureEventHelper(GestureEventHelper* helper) {
-  helpers_.push_back(helper->GetWeakPtr());
+  helpers_.push_back(helper);
 }
 
 void GestureRecognizerImpl::RemoveGestureEventHelper(
     GestureEventHelper* helper) {
-  auto it = std::ranges::find_if(helpers_, [helper](const auto& weak_helper) {
-    return weak_helper.get() == helper;
-  });
+  auto it = std::ranges::find(helpers_, helper);
   if (it != helpers_.end())
     helpers_.erase(it);
 }
@@ -466,13 +429,11 @@ void GestureRecognizerImpl::OnGestureProviderAuraWillBeDestroyed(
   }
 }
 
-base::WeakPtr<GestureEventHelper>
-GestureRecognizerImpl::FindDispatchHelperForConsumer(
+GestureEventHelper* GestureRecognizerImpl::FindDispatchHelperForConsumer(
     GestureConsumer* consumer) {
-  for (const auto& helper : helpers_) {
-    if (helper && helper->CanDispatchToConsumer(consumer)) {
+  for (GestureEventHelper* helper : helpers_) {
+    if (helper->CanDispatchToConsumer(consumer))
       return helper;
-    }
   }
   return nullptr;
 }

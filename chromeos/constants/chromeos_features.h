@@ -10,8 +10,7 @@
 #include "base/metrics/field_trial_params.h"
 #include "build/buildflag.h"
 
-namespace chromeos {
-namespace features {
+namespace chromeos::features {
 
 // All features in alphabetical order. The features should be documented
 // alongside the definition of their values in the .cc file. If a feature is
@@ -25,6 +24,8 @@ COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 BASE_DECLARE_FEATURE(kCachedLocationProvider);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) BASE_DECLARE_FEATURE(kCloudGamingDevice);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
+BASE_DECLARE_FEATURE(kSupportCustomIconsInStatusArea);
+COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 BASE_DECLARE_FEATURE(kAlmanacLauncherPayload);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) BASE_DECLARE_FEATURE(kBlinkExtension);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) BASE_DECLARE_FEATURE(kBlinkExtensionKiosk);
@@ -34,8 +35,6 @@ BASE_DECLARE_FEATURE(kDataControlsFileAccessDefaultDeny);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) BASE_DECLARE_FEATURE(kDataMigration);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 BASE_DECLARE_FEATURE(kDisableSystemBlur);
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-BASE_DECLARE_FEATURE(kDisableIdleSocketsCloseOnMemoryPressure);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 BASE_DECLARE_FEATURE(kDisableQuickAnswersV2Translation);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) BASE_DECLARE_FEATURE(kEssentialSearch);
@@ -112,8 +111,6 @@ BASE_DECLARE_FEATURE(kQuickAnswersV2SettingsSubToggle);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 BASE_DECLARE_FEATURE(kQuickShareV2);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS) BASE_DECLARE_FEATURE(kUploadOfficeToCloud);
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-BASE_DECLARE_FEATURE(kUploadOfficeToCloudForEnterprise);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 BASE_DECLARE_FEATURE(kUploadOfficeToCloudSync);
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
@@ -197,8 +194,6 @@ bool IsQuickShareV2Enabled();
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 bool IsUploadOfficeToCloudEnabled();
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-bool IsUploadOfficeToCloudForEnterpriseEnabled();
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 bool IsUploadOfficeToCloudSyncEnabled();
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 bool IsMicrosoft365ScopeExtensionsEnabled();
@@ -208,10 +203,7 @@ COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 bool IsMicrosoftOneDriveIntegrationForEnterpriseEnabled();
 COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
 bool IsFeatureManagementHistoryEmbeddingEnabled();
-COMPONENT_EXPORT(CHROMEOS_CONSTANTS)
-bool IsWebAppManifestProtocolHandlerSupportEnabled();
 
-}  // namespace features
-}  // namespace chromeos
+}  // namespace chromeos::features
 
 #endif  // CHROMEOS_CONSTANTS_CHROMEOS_FEATURES_H_

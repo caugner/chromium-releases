@@ -45,7 +45,7 @@
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
-#include "chrome/browser/ui/views/side_panel/glic/glic_side_panel_coordinator.h"
+#include "chrome/browser/glic/public/glic_side_panel_coordinator.h"
 #endif
 
 namespace contextual_cueing {
@@ -136,6 +136,10 @@ void ContextualCueingHelper::DidFinishNavigation(
                                ui::PAGE_TRANSITION_RELOAD)) {
     return;
   }
+  if (navigation_handle->GetPreviousPrimaryMainFrameURL() ==
+      navigation_handle->GetURL()) {
+    return;
+  }
 
   // Reset FCP state.
   has_first_contentful_paint_ = false;
@@ -148,7 +152,7 @@ void ContextualCueingHelper::DidFinishNavigation(
         web_contents()->GetPrimaryPage());
   }
 
-  // Ignore fragment changes.
+  // Ignore fragment changes for cueing only.
   if (navigation_handle->GetPreviousPrimaryMainFrameURL().GetWithoutRef() ==
       navigation_handle->GetURL().GetWithoutRef()) {
     return;
@@ -321,10 +325,7 @@ bool ContextualCueingHelper::IsBrowserBlockingNudges(
   }
 
   auto* glic_side_panel_coordinator =
-      tab_interface->GetTabFeatures() &&
-              tab_interface->GetTabFeatures()->glic_side_panel_coordinator()
-          ? tab_interface->GetTabFeatures()->glic_side_panel_coordinator()
-          : nullptr;
+      glic::GlicSidePanelCoordinator::GetForTab(tab_interface);
   if (glic_side_panel_coordinator && glic_side_panel_coordinator->IsShowing()) {
     recorder->set_nudge_decision(
         NudgeDecision::kNudgeNotShownSidePanelForTabShowing);
@@ -381,6 +382,36 @@ void ContextualCueingHelper::OnCueingDecision(
     return;
   }
 
+  // Handle side panel auto-open case: bypass nudge and open panel directly.
+  // If auto-open fails or is disabled, falls through to standard nudge.
+  const bool should_open_side_panel =
+      decision_result->auto_open_eligible &&
+      base::FeatureList::IsEnabled(kEnableAutoOpenGlicSidePanel);
+
+  if (should_open_side_panel) {
+    auto* tab_interface = tabs::TabInterface::GetFromContents(web_contents());
+    auto* browser_window_interface = tab_interface->GetBrowserWindowInterface();
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+    auto* glic_service =
+        glic::GlicKeyedServiceFactory::GetGlicKeyedService(profile);
+    if (glic_service && browser_window_interface) {
+      const bool auto_send_prompt =
+          decision_result->auto_send_params.has_value() &&
+          decision_result->auto_send_params->auto_send_eligible &&
+          !prompt_suggestion.empty();
+      glic_service->ToggleUI(
+          browser_window_interface,
+          /*prevent_close=*/true,
+          glic::mojom::InvocationSource::kAutoOpenedByContextualCue,
+          prompt_suggestion.empty() ? std::nullopt
+                                    : std::make_optional(prompt_suggestion),
+          auto_send_prompt);
+      return;
+    }
+    // Fall through to nudge if side panel open fails.
+  }
+
   GetGlicNudgeController()->UpdateNudgeLabel(
       web_contents(), cue_label,
       prompt_suggestion.empty() ? std::nullopt
@@ -395,9 +426,7 @@ void ContextualCueingHelper::OnCueingDecision(
 // static
 void ContextualCueingHelper::MaybeCreateForWebContents(
     content::WebContents* web_contents) {
-  if (!base::FeatureList::IsEnabled(contextual_cueing::kContextualCueing) &&
-      !base::FeatureList::IsEnabled(
-          contextual_cueing::kGlicZeroStateSuggestions)) {
+  if (!IsContextualCueingEnabled() && !IsZeroStateSuggestionsEnabled()) {
     return;
   }
 

@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/interaction/browser_elements_views.h"
+#include "chrome/browser/ui/views/tabs/glic_actor_constants.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_control_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
 #include "chrome/common/buildflags.h"
@@ -49,8 +50,6 @@ namespace glic {
 // TODO(crbug.com/461326322): Remove this flag when crbug.com/461326322 is
 // resolved.
 BASE_FEATURE(kGlicButtonHideLabelOnTaskNudge, base::FEATURE_ENABLED_BY_DEFAULT);
-BASE_FEATURE(kGlicButtonUpdateIconMarginsOnLabelSuppression,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 namespace {
 
@@ -67,12 +66,7 @@ constexpr ui::ColorId kForeground = kColorNewTabButtonForegroundFrameActive;
 constexpr ui::ColorId kForegroundOnAltBackground = ui::kColorSysOnSurface;
 
 constexpr int kIconSize = 16;
-// TODO(crbug.com/460400955): Move this constant to a shared location.
-// This should mirror the tween used for TabStripNudgeAnimationSession.
-constexpr gfx::Tween::Type kSlidingTextTween =
-    gfx::Tween::Type::ACCEL_20_DECEL_100;
-
-constexpr int kMinTargetWidthForAnimatingText = 41;
+constexpr int kCollapsedWidth = 41;
 
 bool EntrypointVariationsEnabled() {
   return base::FeatureList::IsEnabled(features::kGlicEntrypointVariations);
@@ -127,17 +121,14 @@ ui::ImageModel GetNormalIcon() {
         *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_GLIC_BUTTON_ALT_ICON));
   }
-  return ui::ImageModel::FromVectorIcon(
-      GlicVectorIcon(),
-      ShouldUseAltIcon() ? kForegroundOnAltBackground : kForeground, kIconSize);
+  return ui::ImageModel::FromVectorIcon(GlicVectorIcon(), kForeground,
+                                        kIconSize);
 }
 
 ui::ImageModel GetIconForHighlight() {
-  if (HighlightNudgeEnabled()) {
-    return ui::ImageModel::FromVectorIcon(GlicVectorIcon(), kTextOnHighlight,
-                                          kIconSize);
-  }
-  return {};
+  return ui::ImageModel::FromVectorIcon(
+      GlicVectorIcon(),
+      HighlightNudgeEnabled() ? kTextOnHighlight : kForeground, kIconSize);
 }
 
 gfx::Insets GetIconMargins(bool label_shown) {
@@ -160,6 +151,96 @@ base::TimeDelta DurationMs(int duration_ms) {
 
 }  // namespace
 
+class GlicButton::WidthAnimationController : public gfx::AnimationDelegate {
+ public:
+  WidthAnimationController(GlicButton& button,
+                           base::RepeatingClosure animation_done_callback)
+      : button_(button),
+        animation_done_callback_(std::move(animation_done_callback)) {}
+
+  void Start(WidthState old_state, WidthState new_state) {
+    DCHECK(old_state != new_state);
+
+    const bool to_or_from_nudge =
+        old_state == WidthState::kNudge || new_state == WidthState::kNudge;
+
+    const base::TimeDelta duration = GetDuration(old_state, new_state);
+
+    animation_.SetTweenType(to_or_from_nudge ? kNudgeTween : kCollapseTween);
+    animation_.SetSlideDuration(duration);
+    button_->SetWidthFactor(0.f);
+    animation_.Reset(0);
+    animation_.Show();
+
+    if (to_or_from_nudge) {
+      StartOpacityAnimationsForNudge(duration, new_state);
+    }
+  }
+
+  gfx::SlideAnimation* GetAnimationForTesting() { return &animation_; }
+
+ private:
+  static constexpr gfx::Tween::Type kNudgeTween = gfx::Tween::EASE_OUT_3;
+  // TODO(crbug.com/460400955): Move this constant to a shared location.
+  // This should mirror the tween used for TabStripNudgeAnimationSession.
+  static constexpr gfx::Tween::Type kCollapseTween =
+      gfx::Tween::ACCEL_20_DECEL_100;
+
+  static base::TimeDelta GetDuration(WidthState old_state,
+                                     WidthState new_state) {
+    if (old_state == WidthState::kNormal) {
+      if (new_state == WidthState::kNudge) {
+        return DurationMs(667);
+      }
+      return DurationMs(250);
+    }
+    return DurationMs(500);
+  }
+
+  void StartOpacityAnimationsForNudge(base::TimeDelta duration,
+                                      WidthState new_state) {
+    const bool show = (new_state == WidthState::kNudge);
+    const float final_highlight_opacity =
+        show && HighlightNudgeEnabled() ? 1 : 0;
+    const float final_close_button_opacity = show ? 1 : 0;
+    const base::TimeDelta close_button_fade_start =
+        show ? DurationMs(333) : base::TimeDelta();
+    const base::TimeDelta close_button_fade_duration =
+        show ? DurationMs(333) : DurationMs(117);
+
+    views::AnimationBuilder()
+        .Once()
+        // Highlight opacity, linear.
+        .SetOpacity(button_->highlight_view(), final_highlight_opacity,
+                    kNudgeTween)
+        .SetDuration(duration)
+        // Close button opacity, linear.
+        .At(close_button_fade_start)
+        .SetOpacity(button_->close_button(), final_close_button_opacity)
+        .SetDuration(close_button_fade_duration);
+  }
+
+  // gfx::AnimationDelegate:
+  void AnimationProgressed(const gfx::Animation* animation) override {
+    button_->SetWidthFactor(animation->GetCurrentValue());
+  }
+
+  void AnimationEnded(const gfx::Animation* animation) override {
+    AnimationProgressed(animation);
+
+    button_->OnAnimationEnded();
+    animation_done_callback_.Run();
+  }
+
+  void AnimationCanceled(const gfx::Animation* animation) override {
+    AnimationEnded(animation);
+  }
+
+  raw_ref<GlicButton> button_;
+  base::RepeatingClosure animation_done_callback_;
+  gfx::SlideAnimation animation_{this};
+};
+
 GlicButton::GlicButton(TabStripController* tab_strip_controller,
                        PressedCallback pressed_callback,
                        PressedCallback close_pressed_callback,
@@ -176,13 +257,20 @@ GlicButton::GlicButton(TabStripController* tab_strip_controller,
                           gfx::VectorIcon::EmptyIcon(),
                           /*show_close_button=*/true),
       menu_model_(CreateMenuModel()),
-      tab_strip_controller_(tab_strip_controller),
+      browser_window_interface_(
+          tab_strip_controller->GetBrowserWindowInterface()),
+      profile_(
+          tab_strip_controller->GetBrowserWindowInterface()
+              ? tab_strip_controller->GetBrowserWindowInterface()->GetProfile()
+              : nullptr),
       hovered_callback_(std::move(hovered_callback)),
       mouse_down_callback_(std::move(mouse_down_callback)),
-      expansion_animation_done_callback_(
-          std::move(expansion_animation_done_callback)),
       normal_icon_(GetNormalIcon()),
-      icon_for_highlight_(GetIconForHighlight()) {
+      icon_for_highlight_(GetIconForHighlight()),
+      width_animation_controller_(
+          std::make_unique<GlicButton::WidthAnimationController>(
+              *this,
+              std::move(expansion_animation_done_callback))) {
   SetProperty(views::kElementIdentifierKey, kGlicButtonElementId);
   SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
@@ -225,9 +313,9 @@ GlicButton::GlicButton(TabStripController* tab_strip_controller,
   layout_manager->set_main_axis_alignment(
       views::BoxLayout::MainAxisAlignment::kStart);
 
+
   // Subscribe to changes in state of glic FRE dialog and glic window.
-  glic::GlicKeyedService* service =
-      glic::GlicKeyedService::Get(tab_strip_controller_->GetProfile());
+  glic::GlicKeyedService* const service = glic::GlicKeyedService::Get(profile_);
   glic_window_activation_subscription_ =
       service->window_controller().AddWindowActivationChangedCallback(
           base::BindRepeating(&GlicButton::PanelStateChanged,
@@ -251,7 +339,7 @@ GlicButton* GlicButton::FromBrowser(BrowserWindowInterface* browser) {
 
 void GlicButton::SetNudgeLabel(std::string label) {
   if (!EntrypointVariationsEnabled()) {
-    initial_width_ = GetLayoutManager()->GetPreferredSize(this).width();
+    start_width_ = PreferredSize().width();
     return SetText(base::UTF8ToUTF16(label));
   }
   // Store the new label text until the right moment in the animation to update
@@ -259,21 +347,27 @@ void GlicButton::SetNudgeLabel(std::string label) {
   pending_text_ = base::UTF8ToUTF16(label);
 }
 
-void GlicButton::ShowDefaultLabel() {
-  is_label_suppressed_ = false;
+void GlicButton::Expand() {
   if (!base::FeatureList::IsEnabled(kGlicButtonHideLabelOnTaskNudge)) {
     return;
   }
+
+  // Update state.
+  if (width_state_ != WidthState::kCollapsed) {
+    return;
+  }
+  WidthState old_width_state = width_state_;
+  SetWidthState(WidthState::kNormal);
+
   // If the label should not show, no further animation is needed.
   if (base::FeatureList::IsEnabled(features::kGlicActorUiTaskNudgeUiFix) &&
       !ShouldShowLabel()) {
-    // Reset is_animating_text_ in case it was set earlier.
-    is_animating_text_ = false;
     return;
   }
 
-  is_animating_text_ = true;
-  StartSlidingTextAnimation(/*show=*/true);
+  start_width_ = kCollapsedWidth;
+  end_width_ = normal_width_;
+  width_animation_controller_->Start(old_width_state, width_state_);
 
   const base::TimeDelta kLabelFadeOutDuration = DurationMs(17);
   const base::TimeDelta kNudgeFadeInStart = DurationMs(50);
@@ -289,26 +383,26 @@ void GlicButton::ShowDefaultLabel() {
       .SetDuration(kLabelFadeOutDuration);
 }
 
-void GlicButton::SuppressLabel() {
+void GlicButton::Collapse() {
   if (!base::FeatureList::IsEnabled(kGlicButtonHideLabelOnTaskNudge)) {
     return;
   }
 
-  is_animating_text_ = true;
-  is_label_suppressed_ = true;
+  WidthState old_width_state = width_state_;
+  if (width_state_ == WidthState::kCollapsed) {
+    return;
+  }
+  SetWidthState(WidthState::kCollapsed);
 
-  StartSlidingTextAnimation(/*show=*/false);
+  start_width_ = PreferredSize().width();
+  end_width_ = kCollapsedWidth;
+  width_animation_controller_->Start(old_width_state, width_state_);
 
   label()->SetPaintToLayer();
   label()->layer()->SetFillsBoundsOpaquely(false);
   label()->layer()->SetOpacity(0.0f);
   ApplyTextAndFadeIn(std::make_optional<std::u16string>(u""), DurationMs(0),
                      DurationMs(0));
-  if (base::FeatureList::IsEnabled(
-          kGlicButtonUpdateIconMarginsOnLabelSuppression)) {
-    // Make sure related styling is updated when the label is suppressed.
-    OnLabelVisibilityChanged();
-  }
 }
 
 void GlicButton::RestoreDefaultLabel() {
@@ -321,10 +415,13 @@ void GlicButton::RestoreDefaultLabel() {
 }
 
 void GlicButton::SetGlicPanelIsOpen(bool open) {
-  if (glic_panel_is_open_ != open) {
-    glic_panel_is_open_ = open;
-    UpdateTextAndBackgroundColors();
+  if (glic_panel_is_open_ == open) {
+    return;
   }
+
+  glic_panel_is_open_ = open;
+  UpdateTextAndBackgroundColors();
+  UpdateIcon();
 }
 
 void GlicButton::OnFreWebUiStateChanged(mojom::FreWebUiState new_state) {
@@ -336,8 +433,7 @@ void GlicButton::PanelStateChanged(bool active) {
 }
 
 void GlicButton::UpdateTooltipText() {
-  GlicKeyedService* service =
-      GlicKeyedService::Get(tab_strip_controller_->GetProfile());
+  GlicKeyedService* const service = GlicKeyedService::Get(profile_);
   // Set tooltip and accessibility text based on whether any glic UI (window or
   // FRE) is open.
   std::u16string tooltip_text = l10n_util::GetStringUTF16(
@@ -352,20 +448,34 @@ void GlicButton::SetIsShowingNudge(bool is_showing) {
   if (is_showing) {
     SetCloseButtonFocusBehavior(FocusBehavior::ALWAYS);
     AnnounceNudgeShown();
-    StartShowAnimation();
+    ShowNudge();
   } else {
     SetCloseButtonFocusBehavior(FocusBehavior::NEVER);
-    StartHideAnimation();
+    HideNudge();
   }
 
-  is_showing_nudge_ = is_showing;
   PreferredSizeChanged();
 }
 
+bool GlicButton::GetIsShowingNudge() const {
+  return width_state_ == WidthState::kNudge;
+}
+
 void GlicButton::OnAnimationEnded() {
-  if (GetWidthFactor() == 0) {
-    RestoreDefaultLabel();
+  // TODO(crbug.com/469850069): Remove.
+  if (!EntrypointVariationsEnabled()) {
+    if (GetWidthFactor() == 0) {
+      RestoreDefaultLabel();
+    }
+    return;
   }
+
+  if (IsHidingNudge()) {
+    SetCloseButtonVisible(false);
+  }
+
+  last_width_state_ = width_state_;
+  OnLabelVisibilityChanged();
 }
 
 gfx::Size GlicButton::CalculatePreferredSize(
@@ -377,26 +487,18 @@ gfx::Size GlicButton::CalculatePreferredSize(
           views::SizeBounds(current_preferred_width, available_size.height()))
           .height();
 
-  if (is_animating_text_) {
-    const int width = std::lerp(kMinTargetWidthForAnimatingText,
-                                default_label_width_, GetWidthFactor());
-    return gfx::Size(width, height);
+  // Button must always be at least as wide as it is tall.
+  int start = std::max(start_width_, height);
+  int end = std::max(end_width_, height);
+
+  // TODO(crbug.com/469850069): Remove.
+  if (!EntrypointVariationsEnabled()) {
+    start = kCollapsedWidth;
+    end = current_preferred_width;
   }
 
-  // Get collapsed and expanded widths, which are set when the show animation
-  // starts.
-  const int collapsed_width =
-      initial_width_ ? initial_width_ : current_preferred_width;
-  const int expanded_width =
-      expanded_width_ ? expanded_width_ : current_preferred_width;
-
-  // If collapsed width is too small, make it match the height so the button
-  // will be square.
-  const int collapsed_width_or_square = std::max(collapsed_width, height);
-
-  // Interpolate between collapsed and expanded width based on animation state.
-  const int width =
-      std::lerp(collapsed_width_or_square, expanded_width, GetWidthFactor());
+  // Interpolate based on animation value.
+  const int width = std::lerp(start, end, GetWidthFactor());
   return gfx::Size(width, height);
 }
 
@@ -428,7 +530,24 @@ void GlicButton::AddedToWidget() {
   }
 
   TabStripNudgeButton::AddedToWidget();
-  default_label_width_ = GetLayoutManager()->GetPreferredSize(this).width();
+  // Button starts in WidthState::kNormal. Measure that state's width and set
+  // `start_width_` and `end_width_` for CalculatePreferredSize().
+  normal_width_ = PreferredSize().width();
+  start_width_ = normal_width_;
+  end_width_ = normal_width_;
+
+  if (browser_window_interface_ != nullptr) {
+    window_did_become_active_subscription_ =
+        browser_window_interface_->RegisterDidBecomeActive(
+            base::BindRepeating(&GlicButton::OnBrowserWindowDidBecomeActive,
+                                base::Unretained(this)));
+    window_did_become_inactive_subscription_ =
+        browser_window_interface_->RegisterDidBecomeInactive(
+            base::BindRepeating(&GlicButton::OnBrowserWindowDidBecomeInactive,
+                                base::Unretained(this)));
+
+    UpdateInkdropHoverColor(browser_window_interface_->IsActive());
+  }
 }
 
 void GlicButton::SetDropToAttachIndicator(bool indicate) {
@@ -449,7 +568,7 @@ void GlicButton::ShowContextMenuForViewImpl(
     View* source,
     const gfx::Point& point,
     ui::mojom::MenuSourceType source_type) {
-  if (!profile_prefs()->GetBoolean(glic::prefs::kGlicPinnedToTabstrip)) {
+  if (!GetPrefService()->GetBoolean(glic::prefs::kGlicPinnedToTabstrip)) {
     return;
   }
 
@@ -470,7 +589,7 @@ void GlicButton::ShowContextMenuForViewImpl(
 
 void GlicButton::ExecuteCommand(int command_id, int event_flags) {
   CHECK(command_id == IDC_GLIC_TOGGLE_PIN);
-  profile_prefs()->SetBoolean(glic::prefs::kGlicPinnedToTabstrip, false);
+  GetPrefService()->SetBoolean(glic::prefs::kGlicPinnedToTabstrip, false);
 }
 
 void GlicButton::SetText(std::u16string_view text) {
@@ -486,48 +605,6 @@ bool GlicButton::OnMousePressed(const ui::MouseEvent& event) {
     return true;
   }
   return false;
-}
-
-void GlicButton::AnimationProgressed(const gfx::Animation* animation) {
-  if (animation == expansion_animation_.get()) {
-    SetWidthFactor(animation->GetCurrentValue());
-  }
-}
-
-void GlicButton::AnimationEnded(const gfx::Animation* animation) {
-  if (animation == expansion_animation_.get()) {
-    AnimationProgressed(animation);
-
-    // If finished hiding, hide the close button so that we're ready to
-    // calculate the correct collapsed width when showing next time.
-    if (!is_showing_nudge_) {
-      SetCloseButtonVisible(false);
-    }
-
-    expansion_animation_done_callback_.Run();
-
-    if (!base::FeatureList::IsEnabled(
-            kGlicButtonUpdateIconMarginsOnLabelSuppression)) {
-      OnLabelVisibilityChanged();
-    }
-  }
-  if (is_animating_text_) {
-    is_animating_text_ = false;
-
-    // Makes sure the transition of the frames from is_animating_text_ to
-    // !is_animating_text_ in CalculatePreferredSize() is smooth.
-    initial_width_ = kMinTargetWidthForAnimatingText;
-    expanded_width_ = CalculateExpandedWidth();
-  }
-  if (base::FeatureList::IsEnabled(
-          kGlicButtonUpdateIconMarginsOnLabelSuppression)) {
-    // Make sure related styling is updated when the label is suppressed.
-    OnLabelVisibilityChanged();
-  }
-}
-
-void GlicButton::AnimationCanceled(const gfx::Animation* animation) {
-  AnimationEnded(animation);
 }
 
 bool GlicButton::IsContextMenuShowingForTest() {
@@ -553,6 +630,10 @@ void GlicButton::AnnounceNudgeShown() {
       IDS_GLIC_CONTEXTUAL_CUEING_ANNOUNCEMENT,
       GlicLauncherConfiguration::GetGlobalHotkey().GetShortcutText());
   GetViewAccessibility().AnnounceAlert(announcement);
+}
+
+PrefService* GlicButton::GetPrefService() {
+  return profile_->GetPrefs();
 }
 
 void GlicButton::SetDefaultColors() {
@@ -608,8 +689,13 @@ void GlicButton::NotifyClick(const ui::Event& event) {
 }
 
 void GlicButton::UpdateIcon() {
+  const bool solid_icon_for_pressed_state =
+      base::FeatureList::IsEnabled(features::kGlicButtonPressedState) &&
+      features::kGlicButtonPressedForceSolidIcon.Get() && glic_panel_is_open_;
   const ui::ImageModel& model =
-      IsHighlightVisible() ? icon_for_highlight_ : normal_icon_;
+      (solid_icon_for_pressed_state || IsHighlightVisible())
+          ? icon_for_highlight_
+          : normal_icon_;
 
   SetImageModel(views::Button::STATE_NORMAL, model);
   SetImageModel(views::Button::STATE_HOVERED, model);
@@ -618,7 +704,7 @@ void GlicButton::UpdateIcon() {
 }
 
 void GlicButton::MaybeFadeHighlightOnHover(float final_opacity) {
-  if (is_showing_nudge_ && HighlightNudgeEnabled()) {
+  if (GetIsShowingNudge() && HighlightNudgeEnabled()) {
     const base::TimeDelta kFadeDuration = DurationMs(170);
     views::AnimationBuilder()
         .Once()
@@ -628,34 +714,32 @@ void GlicButton::MaybeFadeHighlightOnHover(float final_opacity) {
 }
 
 bool GlicButton::IsHighlightVisible() const {
-  return HighlightNudgeEnabled() && is_showing_nudge_ &&
+  return HighlightNudgeEnabled() && GetIsShowingNudge() &&
          GetState() != STATE_HOVERED;
 }
 
-void GlicButton::StartShowAnimation() {
+void GlicButton::ShowNudge() {
+  WidthState old_width_state = width_state_;
+  collapsed_before_nudge_shown_ = width_state_ == WidthState::kCollapsed;
+  // Don't restart the animation if already nudging.
+  if (width_state_ == WidthState::kNudge) {
+    return;
+  }
+  SetWidthState(WidthState::kNudge);
+
   if (!EntrypointVariationsEnabled()) {
     // If flag is disabled, the parent drives the animation. Just update the
     // close button.
     return SetCloseButtonVisible(true);
   }
 
-  // Don't restart the animation if already expanding or expanded.
-  if (is_showing_nudge_) {
-    return;
-  }
-
   // Remember the button's original width before changing the text and showing
   // the close button.
-  initial_width_ = GetLayoutManager()->GetPreferredSize(this).width();
+  start_width_ = PreferredSize().width();
   SetCloseButtonVisible(true);
-  expanded_width_ = CalculateExpandedWidth();
+  end_width_ = CalculateExpandedWidth();
 
-  const base::TimeDelta kShowDuration = DurationMs(667);
-  const base::TimeDelta kCloseButtonFadeStart = DurationMs(333);
-  const base::TimeDelta kCloseButtonFadeDuration = DurationMs(333);
-  StartExpansionAnimations(
-      /*show=*/true, kShowDuration, kCloseButtonFadeStart,
-      kCloseButtonFadeDuration);
+  width_animation_controller_->Start(old_width_state, width_state_);
 
   const base::TimeDelta kLabelFadeOutDuration = DurationMs(17);
   const base::TimeDelta kNudgeFadeInStart =
@@ -673,24 +757,30 @@ void GlicButton::StartShowAnimation() {
       .SetDuration(kLabelFadeOutDuration);
 }
 
-void GlicButton::StartHideAnimation() {
+void GlicButton::HideNudge() {
+  WidthState old_width_state = width_state_;
+  // Only animate if transitioning from kNudge to kNormal or kCollapsed.
+  if (width_state_ != WidthState::kNudge) {
+    return;
+  }
+  // If the label was previously collapsed, return to the collapsed state.
+  if (base::FeatureList::IsEnabled(features::kGlicActorUiGlobalTaskIndicator) &&
+      collapsed_before_nudge_shown_) {
+    Collapse();
+    return;
+  }
+  // If the button wasn't collapsed, it must be transitioning back to kNormal.
+  SetWidthState(WidthState::kNormal);
+
   if (!EntrypointVariationsEnabled()) {
     // If flag is disabled, the parent drives the animation. Just update the
     // close button.
     return SetCloseButtonVisible(false);
   }
 
-  // Don't start the animation if already collapsing or collapsed.
-  if (!is_showing_nudge_) {
-    return;
-  }
-
-  const base::TimeDelta kHideDuration = DurationMs(500);
-  const base::TimeDelta kCloseButtonFadeStart = base::TimeDelta();
-  const base::TimeDelta kCloseButtonFadeDuration = DurationMs(117);
-  StartExpansionAnimations(
-      /*show=*/false, kHideDuration, kCloseButtonFadeStart,
-      kCloseButtonFadeDuration);
+  start_width_ = PreferredSize().width();
+  end_width_ = normal_width_;
+  width_animation_controller_->Start(old_width_state, width_state_);
 
   const base::TimeDelta kNudgeFadeOutStart =
       DurationMs(ShouldShowLabel() ? 0 : 50);
@@ -723,7 +813,7 @@ void GlicButton::ApplyTextAndFadeIn(std::optional<std::u16string> text,
   UpdateTextAndBackgroundColors();
   UpdateIcon();
 
-  if (is_showing_nudge_) {
+  if (width_state_ == WidthState::kNudge) {
     // Start at 50% opacity if replacing default label with nudge.
     label()->layer()->SetOpacity(ShouldShowLabel() ? 0.5 : 0);
   }
@@ -747,7 +837,7 @@ int GlicButton::CalculateExpandedWidth() {
     nudge_text_width = render_text->GetStringSize().width();
   }
 
-  const int old_width = GetLayoutManager()->GetPreferredSize(this).width();
+  const int old_width = PreferredSize().width();
   // Replace old label with new.
   int new_width = old_width - label()->width() + nudge_text_width;
   if (!ShouldShowLabel()) {
@@ -755,65 +845,13 @@ int GlicButton::CalculateExpandedWidth() {
     // margin is included.
     new_width += kLabelRightMargin;
   }
+  if (base::FeatureList::IsEnabled(features::kGlicActorUiGlobalTaskIndicator) &&
+      last_width_state_ == WidthState::kCollapsed) {
+    // Add extra margin if the label was previously collapsed, as the old_width
+    // is smaller.
+    new_width += kCloseButtonMargin;
+  }
   return new_width;
-}
-
-void GlicButton::StartSlidingTextAnimation(bool show) {
-  // Button width animation updates width_factor_, used in
-  // CalculatePreferredSize().
-  if (!expansion_animation_) {
-    expansion_animation_ = std::make_unique<gfx::SlideAnimation>(this);
-  }
-
-  expansion_animation_->SetTweenType(kSlidingTextTween);
-
-  if (show) {
-    expansion_animation_->SetSlideDuration(DurationMs(500));
-    expansion_animation_->Show();
-  } else {
-    expansion_animation_->SetSlideDuration(DurationMs(250));
-    expansion_animation_->Hide();
-  }
-}
-
-void GlicButton::StartExpansionAnimations(
-    bool show,
-    base::TimeDelta overall_duration,
-    base::TimeDelta close_button_fade_start,
-    base::TimeDelta close_button_fade_duration) {
-  constexpr gfx::Tween::Type kTween = gfx::Tween::EASE_OUT_3;
-
-  // Button width animation updates width_factor_, used in
-  // CalculatePreferredSize().
-  if (!expansion_animation_) {
-    expansion_animation_ = std::make_unique<gfx::SlideAnimation>(this);
-    expansion_animation_->SetTweenType(kTween);
-  }
-  expansion_animation_->SetSlideDuration(overall_duration);
-  if (show) {
-    // Makes sure the animation value always goes from 0 to 1 for show and 1 to
-    // 0 for hide.
-    SetWidthFactor(0.f);
-    expansion_animation_->Reset(0);
-    expansion_animation_->Show();
-  } else {
-    SetWidthFactor(1.f);
-    expansion_animation_->Reset(1);
-    expansion_animation_->Hide();
-  }
-
-  const float final_highlight_opacity = show && HighlightNudgeEnabled() ? 1 : 0;
-  const float final_close_button_opacity = show ? 1 : 0;
-
-  views::AnimationBuilder()
-      .Once()
-      // Highlight opacity, linear.
-      .SetOpacity(highlight_view_, final_highlight_opacity, kTween)
-      .SetDuration(overall_duration)
-      // Close button opacity, linear.
-      .At(close_button_fade_start)
-      .SetOpacity(close_button(), final_close_button_opacity)
-      .SetDuration(close_button_fade_duration);
 }
 
 void GlicButton::CreateIconAndLabelContainer() {
@@ -881,31 +919,72 @@ void GlicButton::RefreshBackground() {
 }
 
 void GlicButton::OnLabelVisibilityChanged() {
-  // Updates the margins of the icon container based on whether the label should
-  // be shown, if text is currently animating, and if the label is suppressed
-  // (controlled by the kGlicButtonUpdateIconMarginsOnLabelSuppression feature).
-  // This ensures correct spacing around the icon in various states.
-  if (base::FeatureList::IsEnabled(
-          kGlicButtonUpdateIconMarginsOnLabelSuppression)) {
-    bool use_label_margins = !is_label_suppressed_;
+  image_container_view()->SetProperty(
+      views::kMarginsKey,
+      GetIconMargins(ShouldShowLabel() && !IsAnimatingTextVisibility()));
+}
 
-    image_container_view()->SetProperty(
-        views::kMarginsKey,
-        GetIconMargins(ShouldShowLabel() && !is_animating_text_ &&
-                       use_label_margins));
-  } else {
-    image_container_view()->SetProperty(
-        views::kMarginsKey,
-        GetIconMargins(ShouldShowLabel() && !is_animating_text_));
-  }
+bool GlicButton::IsAnimatingTextVisibility() const {
+  return width_state_ == WidthState::kCollapsed ||
+         last_width_state_ == WidthState::kCollapsed;
+}
+
+bool GlicButton::IsHidingNudge() const {
+  return (width_state_ == WidthState::kNormal ||
+          (base::FeatureList::IsEnabled(
+               features::kGlicActorUiGlobalTaskIndicator) &&
+           width_state_ == WidthState::kCollapsed)) &&
+         last_width_state_ == WidthState::kNudge;
+}
+
+void GlicButton::SetWidthState(WidthState state) {
+  last_width_state_ = width_state_;
+  width_state_ = state;
+}
+
+gfx::Size GlicButton::PreferredSize() const {
+  return GetLayoutManager()->GetPreferredSize(this);
 }
 
 gfx::SlideAnimation* GlicButton::GetExpansionAnimationForTesting() {
-  return expansion_animation_.get();
+  return width_animation_controller_->GetAnimationForTesting();
 }
 
 bool GlicButton::GetLabelEnabledForTesting() const {
   return label()->GetEnabled();
+}
+
+void GlicButton::SetSplitButtonCornerStyling() {
+  SetLeftRightCornerRadii(kSplitButtonRoundedEdgeRadius,
+                          kSplitButtonFlatEdgeRadius);
+}
+
+void GlicButton::ResetSplitButtonCornerStyling() {
+  SetLeftRightCornerRadii(TabStripNudgeButton::GetCornerRadius(),
+                          TabStripNudgeButton::GetCornerRadius());
+}
+
+void GlicButton::RemovedFromWidget() {
+  window_did_become_active_subscription_ = {};
+  window_did_become_inactive_subscription_ = {};
+  TabStripNudgeButton::RemovedFromWidget();
+}
+
+void GlicButton::OnBrowserWindowDidBecomeActive(BrowserWindowInterface* bwi) {
+  UpdateInkdropHoverColor(true);
+}
+
+void GlicButton::OnBrowserWindowDidBecomeInactive(BrowserWindowInterface* bwi) {
+  UpdateInkdropHoverColor(false);
+}
+
+void GlicButton::UpdateInkdropHoverColor(bool is_frame_active) {
+  if (base::FeatureList::IsEnabled(features::kGlicActorUiGlobalTaskIndicator)) {
+    SetInkdropHoverColorId(is_frame_active
+                               ? kColorTabBackgroundInactiveHoverFrameActive
+                               : kColorTabBackgroundInactiveHoverFrameInactive);
+    UpdateColors();
+  }
 }
 
 BEGIN_METADATA(GlicButton)

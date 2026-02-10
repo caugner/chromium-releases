@@ -79,38 +79,6 @@ class WindowVisibilityObserver : public aura::WindowObserver {
   std::unique_ptr<Window> owned_window_;
 };
 
-class DeleteOnHideObserver : public aura::WindowObserver {
- public:
-  explicit DeleteOnHideObserver(aura::Window* window) : window_(window) {
-    window_->AddObserver(this);
-  }
-
-  DeleteOnHideObserver(const DeleteOnHideObserver&) = delete;
-  DeleteOnHideObserver& operator=(const DeleteOnHideObserver&) = delete;
-
-  ~DeleteOnHideObserver() override {
-    if (window_) {
-      window_->RemoveObserver(this);
-    }
-  }
-
-  void OnWindowVisibilityChanged(aura::Window* window, bool visible) override {
-    if (window == window_ && !visible) {
-      window_->RemoveObserver(this);
-      delete window_.ExtractAsDangling();
-    }
-  }
-
-  void OnWindowDestroyed(aura::Window* window) override {
-    if (window == window_) {
-      window_ = nullptr;
-    }
-  }
-
- private:
-  raw_ptr<aura::Window> window_;
-};
-
 class TransientWindowManagerTest : public aura::test::AuraTestBase {
  public:
   TransientWindowManagerTest() {}
@@ -656,34 +624,46 @@ TEST_F(TransientWindowManagerTest,
   EXPECT_FALSE(tracker.windows().empty());
 }
 
-// Tests that there is no UAF if a window is destroyed during Hide().
-// (crbug.com/40062312)
-TEST_F(TransientWindowManagerTest, DeleteDuringHideUAF) {
-  std::unique_ptr<aura::Window> parent(CreateTestWindow(
-      {.parent = root_window(), .bounds = {100, 100}, .window_id = 0}));
-  parent->Hide();
+// Tests that there is no crash if a window is removed from its parent while its
+// transient children are being restacked. (crbug.com/468794860)
+TEST_F(TransientWindowManagerTest, RemoveWindowDuringRestack) {
+  // Create a parent window.
+  std::unique_ptr<Window> parent(CreateTestWindow(
+      {.parent = root_window(), .bounds = {100, 100}, .window_id = 1}));
 
-  std::unique_ptr<aura::Window> child_ptr = CreateTestWindow(
-      {.parent = root_window(), .bounds = {100, 100}, .window_id = 1});
-  aura::Window* child = child_ptr.get();
+  // Create transient children.
+  std::unique_ptr<Window> t1(CreateTestWindow(
+      {.parent = root_window(), .bounds = {100, 100}, .window_id = 2}));
+  std::unique_ptr<Window> t2(CreateTestWindow(
+      {.parent = root_window(), .bounds = {100, 100}, .window_id = 3}));
 
-  TransientWindowManager::GetOrCreate(child)->set_parent_controls_visibility(
-      true);
-  AddTransientChild(parent.get(), child);
+  AddTransientChild(parent.get(), t1.get());
+  AddTransientChild(parent.get(), t2.get());
 
-  // This observer will delete 'child' when it's hidden.
-  auto observer = std::make_unique<DeleteOnHideObserver>(child);
+  // When t2 is restacked, remove t1 from parent.
+  class RemovalObserver : public aura::WindowObserver {
+   public:
+    RemovalObserver(Window* parent, Window* window_to_remove)
+        : parent_(parent), window_to_remove_(window_to_remove) {}
 
-  // Release the ownership of 'child' so that the observer can safely delete it.
-  [[maybe_unused]] aura::Window* released_child = child_ptr.release();
+    void OnWindowStackingChanged(aura::Window* window) override {
+      if (window_to_remove_->parent() == parent_) {
+        parent_->RemoveChild(window_to_remove_);
+      }
+    }
 
-  // This should trigger OnWindowVisibilityChanged on 'child'.
-  // Since 'parent' is hidden and parent_controls_visibility is true,
-  // it will call window_->Hide() internally.
-  // The observer will then delete 'child', which deletes its
-  // TransientWindowManager.
-  // WeakAutoReset will then safely check if the manager is alive.
-  child->Show();
+   private:
+    raw_ptr<Window> parent_;
+    raw_ptr<Window> window_to_remove_;
+  };
+
+  RemovalObserver observer(root_window(), t1.get());
+  t2->AddObserver(&observer);
+
+  // Trigger restacking. This should cause t2 to be stacked above parent.
+  root_window()->StackChildAtTop(parent.get());
+
+  t2->RemoveObserver(&observer);
 }
 
 }  // namespace wm

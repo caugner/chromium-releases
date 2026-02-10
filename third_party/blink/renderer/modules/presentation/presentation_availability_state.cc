@@ -103,23 +103,16 @@ void PresentationAvailabilityState::UpdateAvailability(
       observer->AvailabilityChanged(screen_availability);
     }
 
-    HeapVector<Member<PresentationAvailability>> availabilities;
-    for (auto& availability_ptr : listener->availabilities) {
-      if (availability_ptr) {
-        availabilities.push_back(availability_ptr);
-      }
-    }
-    listener->availabilities.clear();
-
     if (screen_availability == mojom::blink::ScreenAvailability::DISABLED) {
-      for (auto& availability_ptr : availabilities) {
+      for (auto& availability_ptr : listener->availabilities) {
         availability_ptr->RejectPendingPromises();
       }
     } else {
-      for (auto& availability_ptr : availabilities) {
+      for (auto& availability_ptr : listener->availabilities) {
         availability_ptr->ResolvePendingPromises();
       }
     }
+    listener->availabilities.clear();
 
     for (const auto& availability_url : listener->urls) {
       MaybeStopListeningToURL(availability_url);

@@ -35,11 +35,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileUpdateObserver {
   FileUpdateObserver& operator=(const FileUpdateObserver&) = delete;
   virtual ~FileUpdateObserver() = default;
 
-  virtual void AddRef() const = 0;
-  virtual void Release() const = 0;
-
-  virtual void Disable() = 0;
-
   virtual void OnStartUpdate(const FileSystemURL& url) = 0;
   virtual void OnUpdate(const FileSystemURL& url, int64_t delta) = 0;
   virtual void OnEndUpdate(const FileSystemURL& url) = 0;
@@ -56,11 +51,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileAccessObserver {
   FileAccessObserver& operator=(const FileAccessObserver&) = delete;
   virtual ~FileAccessObserver() = default;
 
-  virtual void AddRef() const = 0;
-  virtual void Release() const = 0;
-
-  virtual void Disable() = 0;
-
   virtual void OnAccess(const FileSystemURL& url) = 0;
 };
 
@@ -75,11 +65,6 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) FileChangeObserver {
   FileChangeObserver(const FileChangeObserver&) = delete;
   FileChangeObserver& operator=(const FileChangeObserver&) = delete;
   virtual ~FileChangeObserver() = default;
-
-  virtual void AddRef() const = 0;
-  virtual void Release() const = 0;
-
-  virtual void Disable() = 0;
 
   virtual void OnCreateFile(const FileSystemURL& url) = 0;
   // File copy

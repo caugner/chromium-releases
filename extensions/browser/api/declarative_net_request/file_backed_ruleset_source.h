@@ -112,11 +112,10 @@ struct ReadJSONRulesResult {
     // Status returned when the list of rules to be read exceeds the static rule
     // count limit.
     kRuleCountLimitExceeded = 5,
-    kRulesetFileSizeLimitExceeded = 6,
 
     // Magic constant used by histograms code. Should be equal to the maximum
     // enum value.
-    kMaxValue = kRulesetFileSizeLimitExceeded
+    kMaxValue = kRuleCountLimitExceeded
   };
 
   static ReadJSONRulesResult CreateErrorResult(Status status,

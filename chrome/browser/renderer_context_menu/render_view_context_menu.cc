@@ -14,7 +14,6 @@
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -560,13 +559,14 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_CLOSE_GLIC, 155},
        {IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 156},
        {IDC_CONTENT_CONTEXT_GLICSHAREIMAGE, 157},
+       {IDC_CONTENT_CONTEXT_ARCHIVE_GLIC, 158},
        // To add new items:
        //   - Add one more line above this comment block, using the UMA value
        //     from the line below this comment block.
        //   - Increment the UMA value in that latter line.
        //   - Add the new item to the RenderViewContextMenuItem enum in
        //     tools/metrics/histograms/metadata/ui/enums.xml.
-       {0, 158}});
+       {0, 159}});
   // LINT.ThenChange(//tools/metrics/histograms/metadata/ui/enums.xml:RenderViewContextMenuItem)
 
   // LINT.IfChange(ContextMenuOptionDesktop)
@@ -850,7 +850,7 @@ bool IsLensOptionEnteredThroughKeyboard(int event_flags) {
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
 }
 
-bool IsGlicWindow(RenderViewContextMenu* menu,
+bool IsGlicWindow(const RenderViewContextMenu* menu,
                   content::BrowserContext* browser_context) {
 #if BUILDFLAG(ENABLE_GLIC)
   if (glic::GlicEnabling::IsEnabledByFlags()) {
@@ -889,6 +889,8 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(RenderViewContextMenu,
                                       kGlicCloseMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(RenderViewContextMenu,
                                       kGlicReloadMenuItem);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(RenderViewContextMenu,
+                                      kGlicArchiveConversationMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(RenderViewContextMenu,
                                       kGlicShareImageMenuItem);
 DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(RenderViewContextMenu,
@@ -1185,6 +1187,15 @@ void RenderViewContextMenu::InitMenu() {
   if (!media_image &&
       content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_PRINT)) {
     AppendPrintItem();
+  } else {
+#if BUILDFLAG(ENABLE_GLIC)
+
+    if (IsGlicWindow(this, browser_context_) &&
+        base::FeatureList::IsEnabled(features::kGlicPrintMenuItem) &&
+        glic::GlicEnabling::IsMultiInstanceEnabled()) {
+      AppendPrintItem();
+    }
+#endif  // BUILDFLAG(ENABLE_GLIC)
   }
 
   // ITEM_GROUP_SMART_SELECTION is for selected text that is not a link.
@@ -1731,8 +1742,7 @@ void RenderViewContextMenu::AppendLinkItems() {
       // constraints as opening a link in a new tab since a split view tab is a
       // new tab that is then joined with the current active tab.
       Browser* const browser = GetBrowser();
-      if (base::FeatureList::IsEnabled(features::kSideBySide) && browser &&
-          browser->is_type_normal()) {
+      if (browser && browser->is_type_normal()) {
         int string_id = IDS_CONTENT_CONTEXT_OPENLINKSPLITVIEW;
         tabs::TabInterface* tab =
             tabs::TabInterface::MaybeGetFromContents(GetWebContents());
@@ -1781,7 +1791,8 @@ void RenderViewContextMenu::AppendLinkItems() {
 
 #if !BUILDFLAG(IS_ANDROID)
     if (base::FeatureList::IsEnabled(blink::features::kLinkPreview) &&
-        !is_link_to_iwa) {
+        !is_link_to_iwa &&
+        !extensions::WebViewGuest::FromRenderFrameHost(GetRenderFrameHost())) {
       menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKPREVIEW,
                                       IDS_CONTENT_CONTEXT_OPENLINKPREVIEW);
       // We don't show in-production-help for ChromeOS for now because we should
@@ -2420,11 +2431,24 @@ void RenderViewContextMenu::AppendGlicItems() {
         menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_RELOAD_GLIC)
             .value(),
         kGlicReloadMenuItem);
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CLOSE_GLIC,
-                                    IDS_CONTENT_CONTEXT_CLOSE_GLIC);
-    menu_model_.SetElementIdentifierAt(
-        menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_CLOSE_GLIC).value(),
-        kGlicCloseMenuItem);
+    if (!glic::GlicEnabling::IsMultiInstanceEnabled()) {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CLOSE_GLIC,
+                                      IDS_CONTENT_CONTEXT_CLOSE_GLIC);
+      menu_model_.SetElementIdentifierAt(
+          menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_CLOSE_GLIC)
+              .value(),
+          kGlicCloseMenuItem);
+    }
+    if (glic::GlicEnabling::IsMultiInstanceEnabled() &&
+        base::FeatureList::IsEnabled(features::kGlicArchiveConversation)) {
+      // Archive  Glic conversation.
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_ARCHIVE_GLIC,
+                                      IDS_CONTENT_CONTEXT_ARCHIVE_GLIC);
+      menu_model_.SetElementIdentifierAt(
+          menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_ARCHIVE_GLIC)
+              .value(),
+          kGlicArchiveConversationMenuItem);
+    }
   }
 #endif  // BUILDFLAG(ENABLE_GLIC)
 }
@@ -2471,8 +2495,7 @@ void RenderViewContextMenu::AppendSearchProvider() {
       return;
     }
 
-    if (!base::Contains(
-            params_.properties,
+    if (!params_.properties.contains(
             prefs::kDefaultSearchProviderContextMenuAccessAllowed)) {
       return;
     }
@@ -2611,7 +2634,11 @@ void RenderViewContextMenu::AppendOtherEditableItems() {
                                     IDS_CONTENT_CONTEXT_SELECTALL);
   }
 
-  AppendReadAnythingItem();
+  if (!menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE)
+           .has_value()) {
+    AppendReadAnythingItem();
+  }
+
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 }
 
@@ -3137,6 +3164,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
 
     case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
     case IDC_CONTENT_CONTEXT_CLOSE_GLIC:
+    case IDC_CONTENT_CONTEXT_ARCHIVE_GLIC:
       return true;
 
     case IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN:
@@ -3412,7 +3440,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_CLOSE_GLIC:
 #if BUILDFLAG(ENABLE_GLIC)
-      if (glic::GlicEnabling::IsEnabledByFlags()) {
+      if (glic::GlicEnabling::IsEnabledByFlags() &&
+          !glic::GlicEnabling::IsMultiInstanceEnabled()) {
         auto* glic_service = glic::GlicKeyedService::Get(browser_context_);
         if (glic_service) {
           // TODO(crbug.com/454112198): Clean up after multi-instance launches.
@@ -3423,6 +3452,19 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           } else {
             glic_service->CloseAndShutdown();
           }
+        }
+      }
+#endif  // BUILDFLAG(ENABLE_GLIC)
+      break;
+
+    case IDC_CONTENT_CONTEXT_ARCHIVE_GLIC:  // Added for archive conversation
+#if BUILDFLAG(ENABLE_GLIC)
+      if (glic::GlicEnabling::IsMultiInstanceEnabled() &&
+          base::FeatureList::IsEnabled(features::kGlicArchiveConversation)) {
+        auto* glic_service = glic::GlicKeyedService::Get(browser_context_);
+        if (glic_service) {
+          // Call the Archive method on the Glic service.
+          glic_service->Archive(GetRenderFrameHost()->GetOutermostMainFrame());
         }
       }
 #endif  // BUILDFLAG(ENABLE_GLIC)
@@ -3817,10 +3859,19 @@ bool RenderViewContextMenu::IsReloadEnabled() const {
 }
 
 bool RenderViewContextMenu::IsViewSourceEnabled() const {
-  if (!!extensions::MimeHandlerViewGuest::FromRenderFrameHost(
+  if (extensions::MimeHandlerViewGuest::FromRenderFrameHost(
           GetRenderFrameHost())) {
     return false;
   }
+
+  // Additional DevTools policy check if the new policy dialog feature is not
+  // enabled.
+  if (base::FeatureList::IsEnabled(features::kDevToolsShowPolicyDialog) &&
+      (!IsDevCommandEnabled(IDC_CONTENT_CONTEXT_INSPECTELEMENT) ||
+       !DevToolsWindow::AllowDevToolsFor(GetProfile(), source_web_contents_))) {
+    return false;
+  }
+
   // Disallow ViewSource if DevTools are disabled.
   if (!IsDevCommandEnabled(IDC_CONTENT_CONTEXT_INSPECTELEMENT)) {
     return false;
@@ -3839,8 +3890,11 @@ bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
 
     // Don't enable the web inspector if the developer tools are disabled via
     // the preference dev-tools-disabled.
-    if (!DevToolsWindow::AllowDevToolsFor(GetProfile(), source_web_contents_)) {
-      return false;
+    if (!base::FeatureList::IsEnabled(features::kDevToolsShowPolicyDialog)) {
+      if (!DevToolsWindow::AllowDevToolsFor(GetProfile(),
+                                            source_web_contents_)) {
+        return false;
+      }
     }
   }
 
@@ -3994,6 +4048,15 @@ bool RenderViewContextMenu::IsPasteAndMatchStyleEnabled() const {
 }
 
 bool RenderViewContextMenu::IsPrintPreviewEnabled() const {
+#if BUILDFLAG(ENABLE_GLIC)
+  if (IsGlicWindow(this, browser_context_) &&
+      base::FeatureList::IsEnabled(features::kGlicPrintMenuItem) &&
+      glic::GlicEnabling::IsMultiInstanceEnabled()) {
+    return GetPrefs(browser_context_)->GetBoolean(prefs::kPrintingEnabled) &&
+           (source_web_contents_ && !source_web_contents_->IsCrashed());
+  }
+#endif  // BUILDFLAG(ENABLE_GLIC)
+
   if (params_.media_type != ContextMenuDataMediaType::kNone &&
       !(params_.media_flags & ContextMenuData::kMediaCanPrint)) {
     return false;

@@ -1211,8 +1211,8 @@ SMILTimeContainer* SVGElement::GetTimeContainer() const {
 void SVGElement::SynchronizeAttributeInShadowInstances(
     const QualifiedName& name,
     const AtomicString& value) {
-  HeapHashSet<WeakMember<SVGElement>> instances = InstancesForElement();
-  for (SVGElement* instance : instances) {
+  const HeapHashSet<WeakMember<SVGElement>>& set = InstancesForElement();
+  for (SVGElement* instance : set) {
     instance->SetAttributeWithoutValidation(name, value);
   }
 }

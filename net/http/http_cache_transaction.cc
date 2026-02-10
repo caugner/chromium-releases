@@ -619,18 +619,6 @@ void HttpCache::Transaction::CloseConnectionOnDestruction() {
   }
 }
 
-bool HttpCache::Transaction::IsMdlMatchForMetrics() const {
-  if (network_transaction_info_.previous_mdl_match_for_metrics) {
-    return true;
-  }
-  const HttpTransaction* transaction = GetOwnedOrMovedNetworkTransaction();
-  if (transaction) {
-    return transaction->IsMdlMatchForMetrics();
-  } else {
-    return false;
-  }
-}
-
 void HttpCache::Transaction::SetValidatingCannotProceed() {
   DCHECK(!reading_);
   // Ensure this transaction is waiting for a callback.
@@ -1642,18 +1630,18 @@ int HttpCache::Transaction::DoCacheReadResponse() {
   TransitionToState(STATE_CACHE_READ_RESPONSE_COMPLETE);
 
   io_buf_len_ = entry_->GetEntry()->GetDataSize(kResponseInfoIndex);
-  cache_buf_ = base::MakeRefCounted<IOBufferWithSize>(io_buf_len_);
+  read_buf_ = base::MakeRefCounted<IOBufferWithSize>(io_buf_len_);
 
   net_log_.BeginEvent(NetLogEventType::HTTP_CACHE_READ_INFO);
   BeginDiskCacheAccessTimeCount();
-  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, cache_buf_.get(),
+  return entry_->GetEntry()->ReadData(kResponseInfoIndex, 0, read_buf_.get(),
                                       io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("net"),
                       "DoCacheReadResponseComplete", track_for_state_change_,
-                      "result", result, "io_buf_len", cache_buf_->size());
+                      "result", result, "io_buf_len", read_buf_->size());
   net_log_.EndEventWithNetErrorCode(NetLogEventType::HTTP_CACHE_READ_INFO,
                                     result);
   EndDiskCacheAccessTimeCount(DiskCacheAccessType::kRead);
@@ -1661,8 +1649,8 @@ int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
   // Record the time immediately before the cached response is parsed.
   read_headers_since_ = TimeTicks::Now();
 
-  if (result != cache_buf_->size() ||
-      !HttpCache::ParseResponseInfo(cache_buf_->span(), &response_,
+  if (result != read_buf_->size() ||
+      !HttpCache::ParseResponseInfo(read_buf_->span(), &response_,
                                     &truncated_)) {
     return OnCacheReadError(result, true);
   }
@@ -3368,6 +3356,8 @@ int HttpCache::Transaction::DoConnectedCallbackComplete(int result) {
   if (result != OK) {
     if (result ==
         ERR_CACHED_IP_ADDRESS_SPACE_BLOCKED_BY_LOCAL_NETWORK_ACCESS_POLICY) {
+      net_log_.AddEvent(
+          net::NetLogEventType::LOCAL_NETWORK_ACCESS_RETRY_DUE_TO_CACHE);
       DoomInconsistentEntry();
       UpdateCacheEntryStatusToOther(OtherStatusReason::kBlockedByIpSpace);
       TransitionToState(reading_ ? STATE_SEND_REQUEST
@@ -4052,10 +4042,6 @@ void HttpCache::Transaction::SaveNetworkTransactionInfo(
       connection_attempts.begin(), connection_attempts.end());
   network_transaction_info_.old_remote_endpoint = IPEndPoint();
   transaction.GetRemoteEndpoint(&network_transaction_info_.old_remote_endpoint);
-
-  if (transaction.IsMdlMatchForMetrics()) {
-    network_transaction_info_.previous_mdl_match_for_metrics = true;
-  }
 }
 
 void HttpCache::Transaction::OnIOComplete(int result) {

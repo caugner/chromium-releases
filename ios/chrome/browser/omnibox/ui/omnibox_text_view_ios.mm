@@ -21,14 +21,13 @@
 #import "ios/chrome/browser/omnibox/public/omnibox_util.h"
 #import "ios/chrome/browser/omnibox/ui/omnibox_text_input.h"
 #import "ios/chrome/browser/omnibox/ui/omnibox_text_input_delegate.h"
-#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/public/features/system_flags.h"
 #import "ios/chrome/browser/shared/ui/util/animation_util.h"
 #import "ios/chrome/browser/shared/ui/util/dynamic_type_util.h"
 #import "ios/chrome/browser/shared/ui/util/reversed_animation.h"
 #import "ios/chrome/browser/shared/ui/util/rtl_geometry.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
-#import "ios/chrome/browser/toolbar/ui_bundled/public/toolbar_constants.h"
+#import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_constants.h"
 #import "ios/chrome/common/material_timing.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/dynamic_type_util.h"
@@ -48,6 +47,13 @@ namespace {
 
 /// Minimum vertical inset, defaults from UITextView.
 const CGFloat kMinVerticalInset = 8.0;
+
+/// The placeholder leading padding.
+const CGFloat kPlaceholderLeadingPadding = 5.0;
+
+/// The vertical offset added to the text view. This is to align with the
+/// OmniboxTextFieldIOS that OmniboxTextViewIOS replaces.
+const CGFloat kVerticalOffset = 1;
 
 }  // namespace
 
@@ -131,6 +137,12 @@ const CGFloat kMinVerticalInset = 8.0;
       self.textDragInteraction.enabled = NO;
     }
 
+    // Remove drop when presented by the Composebox so that the composebox can
+    // handle all drop actions.
+    if (_presentationContext == OmniboxPresentationContext::kComposebox) {
+      [self removeInteraction:self.textDropInteraction];
+    }
+
     // Force initial layout of internal text label.
     self.font = self.currentFont;
     [self updateTextContainerInset];
@@ -177,7 +189,6 @@ const CGFloat kMinVerticalInset = 8.0;
   // Align placeholder with the text view's content area by constraining it
   // directly to the text view's frame and then adding the internal insets.
   UIEdgeInsets textInsets = self.textContainerInset;
-  CGFloat linePadding = self.textContainer.lineFragmentPadding;
   _placeholderTopConstraint =
       [placeholderLabel.topAnchor constraintEqualToAnchor:self.topAnchor
                                                  constant:textInsets.top];
@@ -185,7 +196,7 @@ const CGFloat kMinVerticalInset = 8.0;
     _placeholderTopConstraint,
     [placeholderLabel.leadingAnchor
         constraintEqualToAnchor:self.leadingAnchor
-                       constant:textInsets.left + linePadding],
+                       constant:kPlaceholderLeadingPadding],
     [placeholderLabel.trailingAnchor
         constraintEqualToAnchor:self.trailingAnchor],
   ]];
@@ -445,8 +456,6 @@ const CGFloat kMinVerticalInset = 8.0;
                           range:NSMakeRange(0, self.attributedText.length)];
   self.attributedText = attributedText;
 
-  // clearsOnInsertion calls selectAll which remove preEditing.
-  self.clearsOnInsertion = YES;
   self.preEditing = YES;
   [self.heightDelegate textViewContentChanged:self];
 }
@@ -457,7 +466,6 @@ const CGFloat kMinVerticalInset = 8.0;
     return;
   }
   self.preEditing = NO;
-  self.clearsOnInsertion = NO;
 
   NSMutableDictionary<NSAttributedStringKey, id>* attributes =
       self.typingAttributes.mutableCopy;
@@ -466,8 +474,8 @@ const CGFloat kMinVerticalInset = 8.0;
                 forKey:NSBackgroundColorAttributeName];
   self.typingAttributes = attributes;
 
-  // Also apply the attributes to the whole text.
   if (!self.clearingPreEditText) {
+    // Also apply the attributes to the whole text.
     NSMutableAttributedString* attributedText =
         [self.attributedText mutableCopy];
     [attributedText addAttributes:attributes
@@ -522,10 +530,13 @@ const CGFloat kMinVerticalInset = 8.0;
 }
 
 - (CGRect)caretRectForPosition:(UITextPosition*)position {
-  // Hide the caret when the text field is showing added text (autocomplete
+  // Hide the caret in pre-edit state or when showing added text (autocomplete
   // and/or additional text).
-  return ([self hasAddedText]) ? CGRectZero
-                               : [super caretRectForPosition:position];
+  if (self.isPreEditing || [self hasAddedText]) {
+    return CGRectZero;
+  }
+
+  return [super caretRectForPosition:position];
 }
 
 - (NSArray<UITextSelectionRect*>*)selectionRectsForRange:(UITextRange*)range {
@@ -1055,6 +1066,7 @@ const CGFloat kMinVerticalInset = 8.0;
 
   NSMutableAttributedString* fieldText =
       [[text attributedSubstringFromRange:userTextRange] mutableCopy];
+  [fieldText addAttributes:_omniboxTypingAttributes range:userTextRange];
 
   if (autocompleteLength > 0) {
     // Creating `autocompleteText` from `[text string]` has the added bonus of
@@ -1137,10 +1149,9 @@ const CGFloat kMinVerticalInset = 8.0;
 
 - (void)pasteboardDidChange:(NSNotification*)notification {
   __weak __typeof(self) weakSelf = self;
-  GetGeneralPasteboard(base::FeatureList::IsEnabled(kOnlyAccessClipboardAsync),
-                       base::BindOnce(^(UIPasteboard* pasteboard) {
-                         [weakSelf pasteboardDidChangeCallback:pasteboard];
-                       }));
+  GetGeneralPasteboard(base::BindOnce(^(UIPasteboard* pasteboard) {
+    [weakSelf pasteboardDidChangeCallback:pasteboard];
+  }));
 }
 
 - (void)pasteboardDidChangeCallback:(UIPasteboard*)pasteboard {
@@ -1175,7 +1186,7 @@ const CGFloat kMinVerticalInset = 8.0;
   CGFloat verticalPadding =
       MAX(kMinVerticalInset * 2.0, (minHeight - lineHeight));
   // Distribute padding.
-  CGFloat topPadding = verticalPadding / 2.0;
+  CGFloat topPadding = verticalPadding / 2.0 + kVerticalOffset;
   CGFloat bottomPadding = verticalPadding - topPadding;
   self.textContainerInset = UIEdgeInsetsMake(topPadding, 0, bottomPadding, 0);
   _placeholderTopConstraint.constant = topPadding;
@@ -1272,8 +1283,8 @@ const CGFloat kMinVerticalInset = 8.0;
 
 - (void)textViewDidBeginEditing:(UITextView*)textView {
   _editing = YES;
-  [self.omniboxTextInputDelegate textInputDidBeginEditing:self];
   [self updateOmniboxTypingAttributes];
+  [self.omniboxTextInputDelegate textInputDidBeginEditing:self];
 }
 
 - (void)textViewDidEndEditing:(UITextView*)textView {

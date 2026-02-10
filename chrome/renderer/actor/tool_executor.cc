@@ -52,6 +52,12 @@ ToolExecutor::~ToolExecutor() {
 
 void ToolExecutor::InvokeTool(mojom::ToolInvocationPtr invocation,
                               ToolExecutorCallback callback) {
+  journal_->Log(invocation->task_id, "ToolExecutor::InvokeTool Received", {});
+
+  // Send the buffer now so the journal shows we received the message. This
+  // helps when debugging unresponsive renderers.
+  journal_->SendLogBuffer();
+
   if (tool_) {
     std::move(callback).Run(
         MakeResult(mojom::ActionResultCode::kExecutorBusy,
@@ -167,6 +173,12 @@ void ToolExecutor::CancelTool(const actor::TaskId& task_id) {
       task_id, "ToolExecutor::CancelTool",
       JournalDetailsBuilder().Add("tool_already_finished", !tool_).Build());
 
+  // Send the buffer now so the journal shows we received the message. This
+  // helps when debugging unresponsive renderers.
+  // TODO(b/467336183): This instance should be removed once this bug is
+  // resolved.
+  journal_->SendLogBuffer();
+
   weak_ptr_factory_.InvalidateWeakPtrs();
   if (!tool_) {
     // Benign race condition: the tool has already finished.
@@ -177,17 +189,11 @@ void ToolExecutor::CancelTool(const actor::TaskId& task_id) {
   // The browser and renderer should agree on the active tool.
   CHECK_EQ(tool_->task_id(), task_id);
 
-  // tool_->Cancel() synchronously dispatches DOM events that might destroy the
-  // owning frame and this executor. Use a weak pointer to detect if `this` is
-  // still valid.
-  base::WeakPtr<ToolExecutor> weak_this = weak_ptr_factory_.GetWeakPtr();
   tool_->Cancel();
 
-  if (weak_this) {
-    // The result code doesn't matter as it will be ignored by the browser
-    // process.
-    ToolFinished(MakeResult(mojom::ActionResultCode::kInvokeCanceled));
-  }
+  // The result code doesn't matter as it will be ignored by the browser
+  // process.
+  ToolFinished(MakeResult(mojom::ActionResultCode::kInvokeCanceled));
 }
 
 void ToolExecutor::ToolFinished(mojom::ActionResultPtr result) {

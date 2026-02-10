@@ -10,7 +10,6 @@
 #include "content/browser/devtools/worker_devtools_manager.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/storage_partition_impl.h"
-#include "content/common/features.h"
 #include "content/public/browser/child_process_host.h"
 
 namespace content {
@@ -33,12 +32,7 @@ WorkerOrWorkletDevToolsAgentHost::WorkerOrWorkletDevToolsAgentHost(
   if (auto* rph = RenderProcessHost::FromID(process_id)) {
     process_observation_.Observe(rph);
   }
-  if (base::FeatureList::IsEnabled(
-          features::kWorkerOrWorkletAgentDoubleReleaseFix)) {
-    self_keepalive_ = this;
-  } else {
-    AddRef();  // Self keep-alive while the worker agent is alive.
-  }
+  AddRef();  // Self keep-alive while the worker agent is alive.
 }
 
 WorkerOrWorkletDevToolsAgentHost::~WorkerOrWorkletDevToolsAgentHost() = default;
@@ -76,19 +70,9 @@ void WorkerOrWorkletDevToolsAgentHost::Disconnected() {
   auto retain_this = ForceDetachAllSessionsImpl();
   GetRendererChannel()->SetRenderer(mojo::NullRemote(), mojo::NullReceiver(),
                                     ChildProcessHost::kInvalidUniqueID);
-
-  if (base::FeatureList::IsEnabled(
-          features::kWorkerOrWorkletAgentDoubleReleaseFix)) {
-    if (destroyed_callback_) {
-      std::move(destroyed_callback_).Run(this);
-    }
-    process_observation_.Reset();
-    self_keepalive_.reset();
-  } else {
-    std::move(destroyed_callback_).Run(this);
-    process_observation_.Reset();
-    Release();
-  }
+  std::move(destroyed_callback_).Run(this);
+  process_observation_.Reset();
+  Release();  // Matches AddRef() in constructor.
 }
 
 BrowserContext* WorkerOrWorkletDevToolsAgentHost::GetBrowserContext() {

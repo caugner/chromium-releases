@@ -177,7 +177,7 @@ class TestAutofillClientTemplate : public T {
     mock_autofill_optimization_guide_decider_.reset();
   }
 
-  MockAutofillAiManager* GetAutofillAiManager() override {
+  AutofillAiManager* GetAutofillAiManager() override {
     return mock_autofill_ai_delegate_.get();
   }
 
@@ -322,8 +322,7 @@ class TestAutofillClientTemplate : public T {
       base::WeakPtr<AutofillSuggestionDelegate> delegate) override {
     is_showing_popup_ = true;
     static AutofillClient::SuggestionUiSessionId::Generator generator;
-    suggestion_ui_session_id_ = generator.GenerateNextId();
-    return *suggestion_ui_session_id_;
+    return generator.GenerateNextId();
   }
 
   void UpdateAutofillDataListValues(
@@ -350,7 +349,6 @@ class TestAutofillClientTemplate : public T {
   void HideAutofillSuggestions(SuggestionHidingReason reason) override {
     popup_hidden_reason_ = reason;
     is_showing_popup_ = false;
-    suggestion_ui_session_id_.reset();
   }
 
   bool IsShowingAutofillPopup() { return is_showing_popup_; }
@@ -393,9 +391,6 @@ class TestAutofillClientTemplate : public T {
   bool IsAutocompleteEnabled() const override { return true; }
 
   bool IsPasswordManagerEnabled() const override { return true; }
-
-  void DidFillForm(AutofillTriggerSource trigger_source,
-                   bool is_refill) override {}
 
   bool IsContextSecure() const override {
     return last_committed_primary_main_frame_url_.SchemeIs("https");
@@ -508,8 +503,8 @@ class TestAutofillClientTemplate : public T {
     GetPrefs()->registry()->RegisterIntegerPref(
         optimization_guide::prefs::
             kAutofillPredictionImprovementsEnterprisePolicyAllowed,
-        base::to_underlying(optimization_guide::model_execution::prefs::
-                                ModelExecutionEnterprisePolicyValue::kAllow),
+        std::to_underlying(optimization_guide::model_execution::prefs::
+                               ModelExecutionEnterprisePolicyValue::kAllow),
         PrefRegistry::LOSSY_PREF);
 
     identity_test_environment().MakePrimaryAccountAvailable(

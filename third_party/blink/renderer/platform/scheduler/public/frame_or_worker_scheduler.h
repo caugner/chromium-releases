@@ -8,8 +8,6 @@
 #include "base/functional/callback.h"
 #include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
-#include "base/observer_list.h"
-#include "base/task/single_thread_task_runner.h"
 #include "base/types/strong_alias.h"
 #include "third_party/blink/public/platform/scheduler/web_scoped_virtual_time_pauser.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -19,6 +17,7 @@
 #include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_priority.h"
 #include "third_party/blink/renderer/platform/scheduler/public/web_scheduling_queue_type.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace {
 
@@ -28,6 +27,10 @@ namespace {
 constexpr size_t kMaxNumberOfBackForwardCacheBlockingDetails = 10;
 
 }  // namespace
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace blink {
 class FrameScheduler;
@@ -45,24 +48,17 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
   using OnLifecycleStateChangedCallback =
       base::RepeatingCallback<void(scheduler::SchedulingLifecycleState)>;
 
-  class PLATFORM_EXPORT LifecycleObserverHandle : public base::CheckedObserver {
+  class PLATFORM_EXPORT LifecycleObserverHandle {
     USING_FAST_MALLOC(LifecycleObserverHandle);
 
    public:
+    explicit LifecycleObserverHandle(FrameOrWorkerScheduler* scheduler);
     LifecycleObserverHandle(const LifecycleObserverHandle&) = delete;
     LifecycleObserverHandle& operator=(const LifecycleObserverHandle&) = delete;
-    ~LifecycleObserverHandle() override;
+    ~LifecycleObserverHandle();
 
    private:
-    friend class FrameOrWorkerScheduler;
-
-    LifecycleObserverHandle(FrameOrWorkerScheduler* scheduler,
-                            ObserverType type,
-                            OnLifecycleStateChangedCallback callback);
-
     base::WeakPtr<FrameOrWorkerScheduler> scheduler_;
-    ObserverType observer_type_;
-    OnLifecycleStateChangedCallback callback_;
   };
 
   // RAII handle which should be kept alive as long as the feature is active
@@ -259,13 +255,25 @@ class PLATFORM_EXPORT FrameOrWorkerScheduler {
   GetFrameOrWorkerSchedulerWeakPtr() = 0;
 
  private:
-  void RemoveLifecycleObserver(LifecycleObserverHandle*);
+  class ObserverState {
+   public:
+    ObserverState(ObserverType, OnLifecycleStateChangedCallback);
+    ObserverState(const ObserverState&) = delete;
+    ObserverState& operator=(const ObserverState&) = delete;
+    ~ObserverState();
 
-  base::ObserverList<LifecycleObserverHandle,
-                     /*check_empty=*/false,
-                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
-      lifecycle_observers_{base::ObserverListPolicy::EXISTING_ONLY};
+    ObserverType GetObserverType() const { return observer_type_; }
+    OnLifecycleStateChangedCallback& GetCallback() { return callback_; }
 
+   private:
+    ObserverType observer_type_;
+    OnLifecycleStateChangedCallback callback_;
+  };
+
+  void RemoveLifecycleObserver(LifecycleObserverHandle* handle);
+
+  HashMap<LifecycleObserverHandle*, std::unique_ptr<ObserverState>>
+      lifecycle_observers_;
   base::WeakPtrFactory<FrameOrWorkerScheduler> weak_factory_{this};
 };
 

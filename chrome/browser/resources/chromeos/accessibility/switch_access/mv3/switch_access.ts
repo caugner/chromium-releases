@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 import {AsyncUtil} from '/common/async_util.js';
-import {AutomationUtil} from '/common/automation_util.js';
 import {EventHandler} from '/common/event_handler.js';
 import {FlagName, Flags} from '/common/flags.js';
 import {TestImportManager} from '/common/testing/test_import_manager.js';
@@ -63,16 +62,16 @@ export class SwitchAccess {
   }
 
   /**
-   * Helper function to robustly find a node fitting a given FindParams in the
-   * non-webview portion of the desktop tree, even if that node has not yet been
-   * created. Used to find the menu, back button, and keyboard.
+   * Helper function to robustly find a node fitting a given FindParams, even if
+   * that node has not yet been created.
+   * Used to find the menu and back button.
    */
-  static findNodeInDesktopTree(
+  static findNodeMatching(
       findParams: FindParams,
       foundCallback: (node: AutomationNode) => void): void {
     const desktop = Navigator.byItem.desktopNode;
     // First, check if the node is currently in the tree.
-    let node = AutomationUtil.findNodeInDesktopTree(desktop, findParams);
+    let node = desktop.find(findParams);
     if (node) {
       foundCallback(node);
       return;
@@ -83,10 +82,17 @@ export class SwitchAccess {
         desktop, EventType.CHILDREN_CHANGED, (_evt: AutomationEvent) => {});
 
     const onEvent = (event: AutomationEvent): void => {
-      node = AutomationUtil.findNodeInDesktopTree(event.target, findParams);
-      if (node) {
+      if (event.target.matches(findParams)) {
+        // If the event target is the node we're looking for, we've found it.
         eventHandler.stop();
-        foundCallback(node);
+        foundCallback(event.target);
+      } else if (event.target.children.length > 0) {
+        // Otherwise, see if one of its children is the node we're looking for.
+        node = event.target.find(findParams);
+        if (node) {
+          eventHandler.stop();
+          foundCallback(node);
+        }
       }
     };
 

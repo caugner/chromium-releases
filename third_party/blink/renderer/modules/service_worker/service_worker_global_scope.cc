@@ -846,8 +846,8 @@ void ServiceWorkerGlobalScope::importScripts(
   Vector<String> url_strings;
   for (const auto& url : urls) {
     url_strings.push_back(TrustedTypesCheckForScriptURL(
-        url, GetExecutionContext(), "WorkerGlobalScope", "importScripts",
-        exception_state));
+        url, GetExecutionContext(), trusted_types_names::kWorkerGlobalScope,
+        trusted_types_names::kImportScripts, exception_state));
     if (exception_state.HadException()) {
       return;
     }
@@ -893,8 +893,8 @@ void ServiceWorkerGlobalScope::CountCacheStorageInstalledScript(
 
   base::UmaHistogramCustomCounts(
       "ServiceWorker.CacheStorageInstalledScript.ScriptSize",
-      base::saturated_cast<base::Histogram::Sample32>(script_size), 1000,
-      5000000, 50);
+      base::saturated_cast<base::Histogram::Sample32>(script_size), 1000, 5000000,
+      50);
 
   if (script_metadata_size) {
     base::UmaHistogramCustomCounts(
@@ -2767,12 +2767,12 @@ ServiceWorkerGlobalScope::FetchHandlerType() {
 }
 
 bool ServiceWorkerGlobalScope::HasHidEventHandlers() {
-  HID* hid = navigator()->GetHID();
+  HID* hid = Supplement<NavigatorBase>::From<HID>(*navigator());
   return hid ? hid->HasEventListeners() : false;
 }
 
 bool ServiceWorkerGlobalScope::HasUsbEventHandlers() {
-  USB* usb = navigator()->GetUSB();
+  USB* usb = Supplement<NavigatorBase>::From<USB>(*navigator());
   return usb ? usb->HasEventListeners() : false;
 }
 
@@ -2825,15 +2825,9 @@ void ServiceWorkerGlobalScope::InsertNewItemToRaceNetworkRequests(
   auto info = std::make_unique<RaceNetworkRequestInfo>(
       fetch_event_id, race_network_request_token,
       std::move(url_loader_factory));
-  RaceNetworkRequestInfo* info_raw = info.get();
+  race_network_request_fetch_event_ids_.insert(fetch_event_id, info.get());
   auto insert_result = race_network_requests_.insert(race_network_request_token,
                                                      std::move(info));
-  // WTF::HashMap::insert does not consume |info| on a duplicate key; in that
-  // case |info| (and |info_raw|) is freed at scope exit. Only publish the raw
-  // pointer into the secondary index after the owning insert succeeds.
-  if (insert_result.is_new_entry) {
-    race_network_request_fetch_event_ids_.insert(fetch_event_id, info_raw);
-  }
 
   // DumpWithoutCrashing if the token is empty, or not inserted as a new entry
   // to |race_network_request_loader_factories_|.

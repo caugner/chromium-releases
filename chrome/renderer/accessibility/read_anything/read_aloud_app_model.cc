@@ -28,13 +28,16 @@
 namespace {
 
 // Returns the dependency parser model for this renderer process.
-// All access to this model is asynchronous and safely executed on a background
-// sequenced task runner.
-base::SequenceBound<DependencyParserModel>& GetDependencyParserModel_() {
-  static base::NoDestructor<base::SequenceBound<DependencyParserModel>>
-      instance(base::ThreadPool::CreateSequencedTaskRunner(
-          {base::MayBlock(), base::TaskPriority::BEST_EFFORT}));
+DependencyParserModel& GetDependencyParserModel_() {
+  static base::NoDestructor<DependencyParserModel> instance;
   return *instance;
+}
+
+std::vector<size_t> GetDependencyHeads(base::span<const std::string> input) {
+  DependencyParserModel& dependency_parser_model = GetDependencyParserModel_();
+  return dependency_parser_model.IsAvailable()
+             ? dependency_parser_model.GetDependencyHeads(input)
+             : std::vector<size_t>();
 }
 
 }  // namespace
@@ -160,8 +163,7 @@ void ReadAloudAppModel::PreprocessTextForSpeech(
   }
 }
 
-base::SequenceBound<DependencyParserModel>&
-ReadAloudAppModel::GetDependencyParserModel() {
+DependencyParserModel& ReadAloudAppModel::GetDependencyParserModel() {
   return GetDependencyParserModel_();
 }
 
@@ -215,11 +217,11 @@ void ReadAloudAppModel::CalculatePhrases(
       static_cast<std::string (*)(std::u16string_view)>(&base::UTF16ToUTF8));
 
   // Perform computation of dependency heads asynchronously.
-  GetDependencyParserModel_()
-      .AsyncCall(&DependencyParserModel::GetDependencyHeads)
-      .WithArgs(phrase_tokens)
-      .Then(base::BindOnce(&ReadAloudAppModel::UpdatePhraseBoundaries,
-                           weak_ptr_factory_.GetWeakPtr(), phrase_tokens));
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+      base::BindOnce(&GetDependencyHeads, phrase_tokens),
+      base::BindOnce(&ReadAloudAppModel::UpdatePhraseBoundaries,
+                     weak_ptr_factory_.GetWeakPtr(), phrase_tokens));
 }
 
 static const Strategy kPhraseStrategy = Strategy::kWords;
@@ -636,11 +638,11 @@ int ReadAloudAppModel::GetCurrentTextEndIndex(const ui::AXNodeID& node_id) {
 bool ReadAloudAppModel::NodeBeenOrWillBeSpoken(
     const a11y::ReadAloudCurrentGranularity& current_granularity,
     const ui::AXNodeID& id) const {
-  if (base::Contains(current_granularity.segments, id)) {
+  if (current_granularity.segments.contains(id)) {
     return true;
   }
   for (const auto& granularity : processed_granularities_on_current_page_) {
-    if (base::Contains(granularity.segments, id)) {
+    if (granularity.segments.contains(id)) {
       return true;
     }
   }
@@ -677,7 +679,7 @@ bool ReadAloudAppModel::IsValidAXPosition(
   bool was_previously_spoken =
       NodeBeenOrWillBeSpoken(current_granularity, anchor_node->id());
   bool is_text_node = a11y::IsTextForReadAnything(anchor_node, is_pdf, is_docs);
-  bool contains_node = base::Contains(*current_nodes, anchor_node->id());
+  bool contains_node = current_nodes->contains(anchor_node->id());
   bool is_ignored = a11y::IsIgnored(anchor_node, is_pdf);
 
   return !is_ignored && !was_previously_spoken && is_text_node &&

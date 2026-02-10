@@ -62,15 +62,12 @@ BASE_FEATURE(kAndroidSpellcheckFullApiBlink, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
 // Avoids copying ResourceRequest::TrustedParams when possible.
-BASE_FEATURE(kAvoidTrustedParamsCopies, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kAvoidTrustedParamsCopies, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Async touchmoves after scroll.
+// TODO(https://crbug.com/468997811): Cleanup feature flag.
 BASE_FEATURE(kAsyncTouchMovesImmediatelyAfterScroll,
-#if BUILDFLAG(IS_ANDROID)
              base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
 );
 
 // Block all MIDI access with the MIDI_SYSEX permission
@@ -155,6 +152,10 @@ BASE_FEATURE(kBFCacheOpenBroadcastChannel, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kBFCacheWithSharedWorker, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kBackForwardCacheDWCOnJavaScriptExecution,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+// This is a kill switch for pausing microtask while the page is in the BFCache.
+// Remove by m148 if things go well.
+BASE_FEATURE(kBackForwardCachePauseMicrotasks,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enable background resource fetch in Blink. See https://crbug.com/1379780 for
@@ -372,11 +373,11 @@ BASE_FEATURE(kCanvas2DHibernationNoSmallCanvas,
 // of the renderer eviction reasons for Back/Forward Cache.
 BASE_FEATURE(kCaptureJSExecutionLocation, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kCheckHTMLParserBudgetLessOften,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
 BASE_FEATURE(kClearSiteDataPrefetchPrerenderCache,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Fix for CSS font comparison logic.
+BASE_FEATURE(kCSSFontComparisonFix, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enable legacy `dpr` client hint.
 BASE_FEATURE(kClientHintsDPR_DEPRECATED, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -611,14 +612,12 @@ BASE_FEATURE(kDiscardInputEventsToRecentlyMovedFrames,
 // Drop input events at the browser process until the process receives the first
 // signal that the renderer has sent a frame to cc (https://crbug.com/40057499).
 BASE_FEATURE(kDropInputEventsWhilePaintHolding,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Extends console.timestamp to support adding deep-links into the DevTools
 // Performance Panel, which (when clicked) call into a DevTools extension.
 BASE_FEATURE(kEnableDevtoolsDeepLinkViaExtensibilityApi,
              base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kEstablishGpuChannelAsync, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Whether to respect loading=lazy attribute for images when they are on
 // invisible pages.
@@ -991,12 +990,6 @@ constexpr base::FeatureParam<int>
 
 BASE_FEATURE(kInputPredictorTypeChoice, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kInputScenarioPriorityBoost, base::FEATURE_DISABLED_BY_DEFAULT);
-
-constexpr base::FeatureParam<bool> kInputScenarioPriorityBoostIncludesLoading{
-    &features::kInputScenarioPriorityBoost,
-    "input_scenario_priority_boost_includes_loading", false};
-
 // When enabled, wake ups from throttleable TaskQueues are limited to 1 per
 // minute in a page that has been backgrounded for 5 minutes.
 //
@@ -1042,6 +1035,10 @@ BASE_FEATURE_ENUM_PARAM(IsolateSandboxedIframesGrouping,
                         "grouping",
                         IsolateSandboxedIframesGrouping::kPerOrigin,
                         &isolated_sandboxed_iframes_grouping_types);
+
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+BASE_FEATURE(kJXLImageFormat, base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
 BASE_FEATURE(kKeepAliveInBrowserMigration, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -1547,7 +1544,7 @@ BASE_FEATURE(kLowLatencyWebGLImageChromium,
 
 BASE_FEATURE(kLowPriorityAsyncScriptExecution,
 // TODO(crbug/429069717): Fix the high power consumption on ChromeOS.
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_CHROMEOS)
              base::FEATURE_DISABLED_BY_DEFAULT
 #else
              base::FEATURE_ENABLED_BY_DEFAULT
@@ -2052,15 +2049,6 @@ BASE_FEATURE(kQuoteEmptySecChUaStringHeadersConsistently,
 // cross-origin requests.
 BASE_FEATURE(kReducedReferrerGranularity, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kRefactorCompositorThreadEventQueue,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE_PARAM(std::string,
-                   kUserAgentFrozenBuildVersion,
-                   &kReduceUserAgentMinorVersion,
-                   "build_version",
-                   "0");
-
 // Whether `blink::MemoryCache` and `blink::ResourceFetcher` release their
 // strong references to resources on memory pressure.
 BASE_FEATURE(kReleaseResourceStrongReferencesOnMemoryPressure,
@@ -2099,8 +2087,28 @@ BASE_FEATURE(kResamplingInputEvents, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kResamplingScrollEvents, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kResourceFetcherStoresStrongReferences,
+BASE_FEATURE(kRestrictLinkHeaderOnSubresource,
              base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(bool,
+                   kRestrictLinkHeaderOnSubresourceCompressionDictionary,
+                   &kRestrictLinkHeaderOnSubresource,
+                   "disable_compression_dictionary",
+                   false);
+BASE_FEATURE_PARAM(bool,
+                   kRestrictLinkHeaderOnSubresourceCrossOrigin,
+                   &kRestrictLinkHeaderOnSubresource,
+                   "disable_cross_origin",
+                   false);
+BASE_FEATURE_PARAM(bool,
+                   kRestrictLinkHeaderOnSubresourceNetworkHint,
+                   &kRestrictLinkHeaderOnSubresource,
+                   "disable_network_hint",
+                   false);
+BASE_FEATURE_PARAM(bool,
+                   kRestrictLinkHeaderOnSubresourceResourceLoad,
+                   &kRestrictLinkHeaderOnSubresource,
+                   "disable_resource_load",
+                   false);
 
 BASE_FEATURE(kRestrictSpellingAndGrammarHighlights,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -2263,22 +2271,7 @@ BASE_FEATURE_PARAM(bool,
                    kServiceWorkerSyntheticResponseBypassSubresource,
                    &kServiceWorkerSyntheticResponse,
                    "bypass_subresource",
-                   false);
-
-// 'Mode' parameter for blink::features::kSoftNavigationHeuristics.
-const base::FeatureParam<SoftNavigationHeuristicsMode>::Option
-    kSoftNavigationHeuristicsModes[] = {
-        {SoftNavigationHeuristicsMode::kBasic, "basic"},
-        {SoftNavigationHeuristicsMode::kAdvancedPaintAttribution,
-         "advanced_paint_attribution"},
-        {SoftNavigationHeuristicsMode::kPrePaintBasedAttribution,
-         "pre_paint_based_attribution"}};
-BASE_FEATURE_ENUM_PARAM(SoftNavigationHeuristicsMode,
-                        kSoftNavigationHeuristicsModeParam,
-                        &kSoftNavigationHeuristics,
-                        "mode",
-                        SoftNavigationHeuristicsMode::kBasic,
-                        &kSoftNavigationHeuristicsModes);
+                   true);
 
 // If enabled, force renderer process foregrounded from CommitNavigation to
 // DOMContentLoad (crbug/351953350).
@@ -2427,7 +2420,15 @@ BASE_FEATURE(kUnloadBlocklisted, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // When BeginMainFrame() is throttled, whether input-related BeginMainFrame()s
 // are marked urgent, and thus unthtrottled.
-BASE_FEATURE(kUrgentMainFrameForInput, base::FEATURE_DISABLED_BY_DEFAULT);
+//
+// Enabled on Android, since a field trial showed benefits.
+BASE_FEATURE(kUrgentMainFrameForInput,
+#if BUILDFLAG(IS_ANDROID)
+             base::FEATURE_ENABLED_BY_DEFAULT
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT
+#endif
+);
 
 // If enabled, URLPattern will use standard defined dummy URL canonicalization
 // to canonicalize URL properties. See https://crbug.com/409350827
@@ -2504,12 +2505,20 @@ BASE_FEATURE(kWebAppBorderless, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kWebAppEnableScopeExtensionsBySite,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Controls parsing and usage of localized fields in web app manifests.
+// See spec for more information:
+// https://www.w3.org/TR/appmanifest/#x_localized-members
+BASE_FEATURE(kWebAppManifestLocalization, base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Controls parsing of the "lock_screen" dictionary field and its "start_url"
 // entry in web app manifests.  See explainer for more information:
 // https://github.com/WICG/lock-screen/
 // Note: the lock screen API and OS integration is separately controlled by
 // the content feature `kWebLockScreenApi`.
 BASE_FEATURE(kWebAppManifestLockScreen, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enables web apps to be migrated from one manifest id to another.
+BASE_FEATURE(kWebAppMigrationApi, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Allow denormals in AudioWorklet and ScriptProcessorNode, to enable strict
 // JavaScript denormal compliance.  See https://crbug.com/382005099.
@@ -2574,6 +2583,9 @@ BASE_FEATURE(kWorkerThreadRespectTermRequest, base::FEATURE_ENABLED_BY_DEFAULT);
 // Indicates that renderer is running on an Android XR (AR/VR) device.
 // Enables certain features which are not needed on other platforms.
 BASE_FEATURE(kXrDevice, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enable the 'unframed' display override for IWAs. go/unframed-explainer-doc.
+BASE_FEATURE(kUnframedIwa, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // When adding new features or constants for features, please keep the features
 // sorted by identifier name (e.g. `kAwesomeFeature`), and the constants for

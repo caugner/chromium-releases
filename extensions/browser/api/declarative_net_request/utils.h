@@ -141,9 +141,6 @@ int GetRegexRuleLimit();
 // Returns the per-extension maximum amount of disabled static rules.
 int GetDisabledStaticRuleLimit();
 
-// Returns the maximum size, in bytes, of a JSON ruleset file.
-size_t GetMaximumRulesetFileSize();
-
 // Test helpers to override the various rule limits until the returned value is
 // in scope.
 using ScopedRuleLimitOverride = base::AutoReset<int>;
@@ -162,9 +159,6 @@ ScopedRuleLimitOverride CreateScopedUnsafeSessionRuleLimitOverrideForTesting(
     int limit);
 ScopedRuleLimitOverride CreateScopedDisabledStaticRuleLimitOverrideForTesting(
     int limit);
-
-base::AutoReset<size_t> CreateScopedMaxRulesetSizeOverrideForTesting(
-    size_t maximum_size);
 
 // Helper to convert a flatbufffers::String to a string-like object with type T.
 template <typename T>

@@ -116,17 +116,9 @@ ExtensionWebContentsObserver::ExtensionWebContentsObserver(
     : content::WebContentsObserver(web_contents),
       browser_context_(web_contents->GetBrowserContext()),
       dispatcher_(browser_context_),
-      initialized_(false) {
-  dispatcher_.set_delegate(this);
-}
+      initialized_(false) {}
 
 ExtensionWebContentsObserver::~ExtensionWebContentsObserver() {
-}
-
-content::WebContents* ExtensionWebContentsObserver::GetAssociatedWebContents()
-    const {
-  DCHECK(initialized_);
-  return web_contents();
 }
 
 void ExtensionWebContentsObserver::InitializeRenderFrame(
@@ -205,7 +197,6 @@ void ExtensionWebContentsObserver::SetUpRenderFrameHost(
 void ExtensionWebContentsObserver::RenderFrameDeleted(
     content::RenderFrameHost* render_frame_host) {
   DCHECK(initialized_);
-  extension_frame_host_->RenderFrameDeleted(render_frame_host);
   local_frame_map_.erase(render_frame_host);
   ProcessManager::Get(browser_context_)
       ->UnregisterRenderFrameHost(render_frame_host);

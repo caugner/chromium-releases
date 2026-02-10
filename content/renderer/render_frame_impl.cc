@@ -15,7 +15,6 @@
 #include "base/byte_count.h"
 #include "base/check_deref.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/to_vector.h"
 #include "base/debug/alias.h"
@@ -4191,6 +4190,12 @@ void RenderFrameImpl::DidFinishSameDocumentNavigation(
   same_document_params->same_document_metrics_token =
       same_document_metrics_token;
 
+  // `IsAdScriptInStack()` is the primary check. The IsAdFrame() check really
+  // only covers an edge scenario of a genuine user click (e.g., <a> tag) within
+  // an ad frame triggering a fragment navigation.
+  same_document_params->caused_by_ad =
+      GetWebFrame()->IsAdFrame() || GetWebFrame()->IsAdScriptInStack();
+
   DidCommitNavigationInternal(
       commit_type, transition, navigation_state.get(),
       network::ParsedPermissionsPolicy(),   // permissions_policy_header
@@ -4680,6 +4685,13 @@ void RenderFrameImpl::DidObserveSoftNavigation(
     blink::SoftNavigationMetricsForReporting metrics) {
   for (auto& observer : observers_) {
     observer.DidObserveSoftNavigation(metrics);
+  }
+}
+
+void RenderFrameImpl::DidObserveSoftLargestContentfulPaint(
+    const blink::LargestContentfulPaintDetailsForReporting& lcp) {
+  for (auto& observer : observers_) {
+    observer.DidObserveSoftLargestContentfulPaint(lcp);
   }
 }
 

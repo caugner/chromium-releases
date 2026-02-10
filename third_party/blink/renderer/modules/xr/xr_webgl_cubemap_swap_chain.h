@@ -6,25 +6,20 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_XR_XR_WEBGL_CUBEMAP_SWAP_CHAIN_H_
 
 #include "third_party/blink/renderer/modules/xr/xr_webgl_swap_chain.h"
-#include "third_party/blink/renderer/platform/heap/prefinalizer.h"
 
 namespace blink {
 
 // This swapchain is a shim which wraps another swapchain that has 6
-// square sub-images laid out from bottom to top, and produces a cubemap
+// square sub-images laid out as 3 tiles per row, and produces a cubemap
 // instead. When the frame ends the contents of each face of the cubemap are
 // copied to the corresponding location in the texture 2d. This obviously incurs
 // undesirable overhead, and it  would be ideal if we could use the cubemap
 // swapchains directly, but not all drivers support cubemap buffers. See
 // crbug.com/459811463.
 class XRWebGLCubemapSwapChain final : public XRWebGLSwapChain {
-  USING_PRE_FINALIZER(XRWebGLCubemapSwapChain, Dispose);
-
  public:
   explicit XRWebGLCubemapSwapChain(XRWebGLSwapChain* wrapped_swapchain);
-  ~XRWebGLCubemapSwapChain() override = default;
-
-  void Dispose();
+  ~XRWebGLCubemapSwapChain() override;
 
   bool IsCube() const override { return true; }
   WebGLUnownedTexture* ProduceTexture() override;

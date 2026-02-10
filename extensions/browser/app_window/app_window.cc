@@ -979,12 +979,8 @@ blink::mojom::DisplayMode AppWindow::GetDisplayMode(
                         : blink::mojom::DisplayMode::kStandalone;
 }
 
-WindowController* AppWindow::GetExtensionWindowController() const {
+WindowController* AppWindow::GetExtensionWindowController() {
   return app_window_contents_->GetWindowController();
-}
-
-content::WebContents* AppWindow::GetAssociatedWebContents() const {
-  return web_contents();
 }
 
 void AppWindow::OnExtensionUnloaded(BrowserContext* browser_context,

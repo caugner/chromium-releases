@@ -376,12 +376,11 @@ void FocusManager::SetFocusedView(View* view) {
 
 void FocusManager::ClearFocus() {
   // SetFocusedView(nullptr) is going to clear out the stored view to. We need
-  // to persist it in this case (assuming it survives the events sent out in the
-  // interim).
-  auto focused_view = std::make_unique<ViewTracker>(GetStoredFocusView());
+  // to persist it in this case.
+  views::View* focused_view = GetStoredFocusView();
   SetFocusedView(nullptr);
   ClearNativeFocus();
-  view_tracker_for_stored_view_ = std::move(focused_view);
+  SetStoredFocusView(focused_view);
 }
 
 void FocusManager::AdvanceFocusIfNecessary() {
@@ -402,14 +401,14 @@ void FocusManager::AdvanceFocusIfNecessary() {
 }
 
 void FocusManager::StoreFocusedView(bool clear_native_focus) {
+  View* focused_view = focused_view_;
   // Don't do anything if no focused view. Storing the view (which is nullptr),
   // in this case, would clobber the view that was previously saved.
   if (!focused_view_) {
     return;
   }
 
-  // This could go away when sending events below, so guard access.
-  ViewTracker old_view(focused_view_);
+  View* v = focused_view_;
 
   if (clear_native_focus) {
     // Temporarily disable notification.  ClearFocus() will set the focus to the
@@ -421,11 +420,11 @@ void FocusManager::StoreFocusedView(bool clear_native_focus) {
     ClearFocus();
   } else {
     SetFocusedView(nullptr);
-    SetStoredFocusView(old_view.view());
+    SetStoredFocusView(focused_view);
   }
 
-  if (auto* const view = old_view.view()) {
-    view->SchedulePaint();  // Remove focus border.
+  if (v) {
+    v->SchedulePaint();  // Remove focus border.
   }
 }
 
@@ -520,7 +519,7 @@ bool FocusManager::ProcessAccelerator(const ui::Accelerator& accelerator) {
   // breaks processing accelerators by the bubble itself.
   return false;
 #else
-  return RedirectAcceleratorToBubbleAnchorWidget(accelerator);
+  return RedirectAcceleratorToParentWidget(accelerator);
 #endif
 }
 
@@ -598,21 +597,14 @@ void FocusManager::OnViewIsDeleting(View* view) {
   SetFocusedView(nullptr);
 }
 
-bool FocusManager::RedirectAcceleratorToBubbleAnchorWidget(
+bool FocusManager::RedirectAcceleratorToParentWidget(
     const ui::Accelerator& accelerator) {
-  if (!widget_->widget_delegate()) {
+  Widget* parent_widget = widget_->parent();
+  if (!parent_widget || !widget_->widget_delegate()) {
     return false;
   }
 
-  views::BubbleDialogDelegate* widget_delegate =
-      widget_->widget_delegate()->AsBubbleDialogDelegate();
-  Widget* anchor_widget =
-      widget_delegate ? widget_delegate->anchor_widget() : nullptr;
-  if (!anchor_widget) {
-    return false;
-  }
-
-  FocusManager* focus_manager = anchor_widget->GetFocusManager();
+  FocusManager* focus_manager = parent_widget->GetFocusManager();
   if (!focus_manager->IsAcceleratorRegistered(accelerator)) {
     return false;
   }
@@ -624,11 +616,14 @@ bool FocusManager::RedirectAcceleratorToBubbleAnchorWidget(
   // variable.
   base::WeakPtr<Widget> widget_weak_ptr = widget_->GetWeakPtr();
   const bool close_widget_on_deactivate =
-      widget_delegate->ShouldCloseOnDeactivate();
+      widget_->widget_delegate()->AsBubbleDialogDelegate() &&
+      widget_->widget_delegate()
+          ->AsBubbleDialogDelegate()
+          ->ShouldCloseOnDeactivate();
 #endif
 
   // The parent view must be focused for it to process events.
-  focus_manager->SetFocusedView(anchor_widget->GetRootView());
+  focus_manager->SetFocusedView(parent_widget->GetRootView());
   const bool accelerator_processed =
       focus_manager->ProcessAccelerator(accelerator);
 

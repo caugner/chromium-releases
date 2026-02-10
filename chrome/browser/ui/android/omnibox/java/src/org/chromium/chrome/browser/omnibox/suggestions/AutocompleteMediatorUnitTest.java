@@ -66,6 +66,7 @@ import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.header.HeaderProcessor;
 import org.chromium.chrome.browser.omnibox.test.R;
+import org.chromium.chrome.browser.preloading.PreloadingFeatureMap;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.Tab.LoadUrlResult;
@@ -85,6 +86,7 @@ import org.chromium.components.omnibox.action.OmniboxActionDelegate;
 import org.chromium.components.omnibox.action.OmniboxActionFactoryJni;
 import org.chromium.components.omnibox.suggestions.OmniboxSuggestionUiType;
 import org.chromium.content_public.browser.NavigationHandle;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.insets.InsetObserver;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -132,6 +134,7 @@ public class AutocompleteMediatorUnitTest {
             mVisualStateObserver;
     private @Mock DeferredIMEWindowInsetApplicationCallback mDeferredImeCallback;
     private @Mock FuseboxCoordinator mFuseboxCoordinator;
+    private @Mock PreloadingFeatureMap mPreloadingFeatureMap;
     private @Captor ArgumentCaptor<OmniboxLoadUrlParams> mOmniboxLoadUrlParamsCaptor;
     private @Mock CachedZeroSuggestionsManager.OverridesForTesting
             mMockCachedZeroSuggestionsManager;
@@ -152,6 +155,7 @@ public class AutocompleteMediatorUnitTest {
                         ContextUtils.getApplicationContext(), R.style.Theme_BrowserUI_DayNight);
 
         CachedZeroSuggestionsManager.setOverridesForTesting(mMockCachedZeroSuggestionsManager);
+        PreloadingFeatureMap.setInstanceForTesting(mPreloadingFeatureMap);
         LargeIconBridgeJni.setInstanceForTesting(mLargeIconBridgeJniMock);
         OmniboxActionFactoryJni.setInstanceForTesting(mActionFactoryJni);
         AutocompleteControllerJni.setInstanceForTesting(mControllerJniMock);
@@ -231,7 +235,9 @@ public class AutocompleteMediatorUnitTest {
         mAutocompleteResult = spy(AutocompleteResult.fromCache(mSuggestionsList, null));
         lenient().doReturn(true).when(mAutocompleteDelegate).isKeyboardActive();
         setUpLocationBarDataProvider(
-                JUnitTestGURLs.NTP_URL, "New Tab Page", PageClassification.NTP_VALUE);
+                JUnitTestGURLs.NTP_URL,
+                "New Tab Page",
+                PageClassification.INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS_VALUE);
 
         mMediator.setOmniboxSuggestionsVisualStateObserver(mVisualStateObserver);
         mMediator.onTopResumedActivityChanged(true);
@@ -668,6 +674,23 @@ public class AutocompleteMediatorUnitTest {
         ShadowLooper.runUiThreadTasks();
         verify(mAutocompleteController, never()).start(any(), anyInt(), anyBoolean());
         verifyAutocompleteStartZeroSuggest("", url, pageClassification, title);
+    }
+
+    @Test
+    @SmallTest
+    public void onSuggestionsReceived_triggersPrewarm() {
+        mMediator.setAutocompleteProfile(mProfile);
+        mMediator.onNativeInitialized();
+        mMediator.onOmniboxSessionStateChange(true);
+
+        when(mPreloadingFeatureMap.shouldPrewarmOnAutocomplete()).thenReturn(true);
+        Tab tab = mock(Tab.class);
+        WebContents webContents = mock(WebContents.class);
+        when(mLocationBarDataProvider.getTab()).thenReturn(tab);
+        when(tab.getWebContents()).thenReturn(webContents);
+
+        mMediator.onSuggestionsReceived(mAutocompleteResult, /* isFinal= */ false);
+        verify(mAutocompleteController).startPrewarm(eq(webContents));
     }
 
     @Test
@@ -1667,6 +1690,10 @@ public class AutocompleteMediatorUnitTest {
         mMediator.setAutocompleteProfile(mProfile);
         mMediator.onNativeInitialized();
         mMediator.onOmniboxSessionStateChange(true);
+        setUpLocationBarDataProvider(
+                JUnitTestGURLs.NTP_URL,
+                "New Tab Page",
+                PageClassification.INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS_VALUE);
         when(mTextStateProvider.getTextWithoutAutocomplete()).thenReturn("test");
         when(mTextStateProvider.getTextWithAutocomplete()).thenReturn("test");
         mAutocompleteRequestTypeSupplier.set(AutocompleteRequestType.IMAGE_GENERATION);

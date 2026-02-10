@@ -43,9 +43,11 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
+#include "base/test/gmock_expected_support.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
 #include "base/test/test_future.h"
+#include "base/test/test_mock_time_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/test/test_trace_processor.h"
 #include "base/time/time.h"
@@ -6402,11 +6404,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   run_loop2.Run();
 
   // At this point, we should have two pending WebContents.
-  EXPECT_TRUE(base::Contains(
-      web_contents()->pending_contents_,
+  EXPECT_TRUE(web_contents()->pending_contents_.contains(
       GlobalRoutingID(process1->GetDeprecatedID(), routing_id1)));
-  EXPECT_TRUE(base::Contains(
-      web_contents()->pending_contents_,
+  EXPECT_TRUE(web_contents()->pending_contents_.contains(
       GlobalRoutingID(process2->GetDeprecatedID(), routing_id2)));
 
   // Both subframes were set up in the same way, so the next routing ID for the
@@ -6561,8 +6561,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       GlobalRoutingID(process1->GetDeprecatedID(), routing_id1);
   // Add an interceptor for first popup widget so it doesn't get closed
   // immediately while the other one is being opened.
-  EXPECT_TRUE(
-      base::Contains(web_contents()->pending_widgets_, first_popup_global_id));
+  EXPECT_TRUE(web_contents()->pending_widgets_.contains(first_popup_global_id));
 
   RequestCloseWidgetInterceptor child1_popup_widget_interceptor(
       static_cast<RenderWidgetHostImpl*>(
@@ -6582,10 +6581,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   run_loop2.Run();
 
   // At this point, we should have two pending widgets.
-  EXPECT_TRUE(
-      base::Contains(web_contents()->pending_widgets_, first_popup_global_id));
-  EXPECT_TRUE(base::Contains(
-      web_contents()->pending_widgets_,
+  EXPECT_TRUE(web_contents()->pending_widgets_.contains(first_popup_global_id));
+  EXPECT_TRUE(web_contents()->pending_widgets_.contains(
       GlobalRoutingID(process2->GetDeprecatedID(), routing_id2)));
 
   // Both subframes were set up in the same way, so the next routing ID for the
@@ -6596,11 +6593,9 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   // Now simulate both widgets being shown.
   interceptor1.ResumeShowPopupWidget();
   interceptor2.ResumeShowPopupWidget();
-  EXPECT_FALSE(base::Contains(
-      web_contents()->pending_widgets_,
+  EXPECT_FALSE(web_contents()->pending_widgets_.contains(
       GlobalRoutingID(process1->GetDeprecatedID(), routing_id1)));
-  EXPECT_FALSE(base::Contains(
-      web_contents()->pending_widgets_,
+  EXPECT_FALSE(web_contents()->pending_widgets_.contains(
       GlobalRoutingID(process2->GetDeprecatedID(), routing_id2)));
 
   // There are posted tasks that must be run before the test shuts down, lest
@@ -14071,10 +14066,55 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, GestureTapUnconfirmedOOPIF) {
       std::ceil((iframe_bounds.y() - root_view->GetViewBounds().y() + 10) *
                 scale_factor));
 
+  {
+    // A touch cancel to initialize gesture provider in Aura.
+    const std::string pointer_actions_json = R"HTML(
+        [{"source": "touch", "id": 0,
+              "actions": [
+              { "name": "pointerDown", "x": 50, "y": 50 },
+              { "name": "pointerCancel"}]}]
+        )HTML";
+
+    ASSERT_OK_AND_ASSIGN(
+        auto parsed_json,
+        base::JSONReader::ReadAndReturnValueWithError(
+            pointer_actions_json, base::JSON_PARSE_CHROMIUM_EXTENSIONS));
+    ActionsParser actions_parser(std::move(parsed_json));
+
+    ASSERT_TRUE(actions_parser.Parse());
+
+    auto run_loop = std::make_unique<base::RunLoop>();
+
+    root_rwh->QueueSyntheticGesture(
+        std::make_unique<SyntheticPointerAction>(
+            actions_parser.pointer_action_params()),
+        base::BindOnce(
+            [](base::RunLoop* run_loop, SyntheticGesture::Result result) {
+              EXPECT_EQ(SyntheticGesture::GESTURE_FINISHED, result);
+              run_loop->Quit();
+            },
+            run_loop.get()));
+
+    // Runs until we get the OnSyntheticGestureCompleted callback
+    run_loop->Run();
+  }
+
   SyntheticTapGestureParams params;
   params.gesture_source_type = content::mojom::GestureSourceType::kTouchInput;
   params.position = tap_pos;
   params.duration_ms = 100;
+
+  ui::GestureDetector* gesture_detector =
+      root_rwh->GetView()
+          ->GetFilteredGestureProviderForTesting()
+          ->GetGestureDetectorForTesting();
+  auto task_runner = base::MakeRefCounted<base::TestMockTimeTaskRunner>();
+  gesture_detector->SetGestureTimeoutHandlerTaskRunnerForTesting(task_runner);
+
+  GestureTapEventObserver tap_observer;
+  iframe_node->current_frame_host()
+      ->GetRenderWidgetHost()
+      ->AddInputEventObserver(&tap_observer);
 
   auto run_loop = std::make_unique<base::RunLoop>();
   root_rwh->QueueSyntheticGesture(
@@ -14084,10 +14124,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, GestureTapUnconfirmedOOPIF) {
                      run_loop.get()));
 
   run_loop->Run();
-  // After the tap gesture has been completed, the timer should be gone.
-  EXPECT_FALSE(root_rwh->GetView()
-                   ->GetFilteredGestureProviderForTesting()
-                   ->HasPendingTapTimeoutForTesting());
+
+  EXPECT_EQ(1, tap_observer.num_gesture_tap_seen());
+
+  // Advance the task runner clock by timeout delay, to make sure the tap
+  // timeout task runs.
+  task_runner->FastForwardBy(gesture_detector->GetDoubleTapTimeoutForTesting());
+
+  // No extra tap is seen by input observers.
+  EXPECT_EQ(1, tap_observer.num_gesture_tap_seen());
+
+  root_rwh->RemoveInputEventObserver(&tap_observer);
 }
 
 // Tests that verify the feature disabling process reuse.

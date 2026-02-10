@@ -73,19 +73,6 @@
   box-shadow: none;
 }
 
-:host([match-searchbox]) {
-  box-shadow: none;
-}
-
-:host([match-searchbox]:not([dropdown-is-visible]):hover) {
-  border: 1px solid transparent;
-  box-shadow: var(--cr-searchbox-shadow);
-}
-
-:host([match-searchbox]:not([is-dark]):not([dropdown-is-visible]):not(:hover)) {
-  border: 1px solid var(--color-searchbox-border);
-}
-
 #inputWrapper {
   background-color: var(--color-searchbox-background);
   border-radius: var(--cr-searchbox-border-radius);
@@ -94,9 +81,22 @@
   flex-direction: column;
   height: auto;
   min-height: var(--cr-searchbox-height);
-  overflow: hidden;
   position: relative;
   width: 100%;
+}
+
+:host([ntp-realbox-next-enabled]) #inputWrapper {
+  /* Elements like the IPH must overflow. */
+  overflow: visible;
+}
+
+:host([ntp-realbox-next-enabled]) .dropdownContainer {
+  border-radius: 0 0 var(--cr-searchbox-border-radius) var(--cr-searchbox-border-radius);
+  overflow: hidden;
+}
+
+:host([ntp-realbox-next-enabled]) .contextualEntrypointContainer {
+  overflow: visible;
 }
 
 :host([is-lens-searchbox_]) #inputWrapper {
@@ -143,12 +143,9 @@
   padding-top: 16px;
 }
 
-:host-context(:not([ntp-realbox-next-enabled])) input {
+:host(:not([ntp-realbox-next-enabled])) input,
+:host([searchbox-layout-mode='Compact']) input {
   align-self: center;
-  padding-top: 0;
-}
-
-:host-context([searchbox-layout-mode='Compact']) input {
   padding-top: 2px;
 }
 
@@ -215,7 +212,6 @@ cr-searchbox-icon {
 
 @media (forced-colors: active) {
   cr-searchbox-icon {
-    background-color: Highlight;
     border-radius: 4px;
   }
 }
@@ -409,11 +405,6 @@ cr-searchbox-dropdown::part(dropdown-content) {
   margin-top: 16px;
 }
 
-:host([ntp-realbox-next-enabled]) .dropdownContainer,
-:host([ntp-realbox-next-enabled]) .contextualEntrypointContainer {
-  overflow: visible;
-}
-
 #inputContainer {
   background-color: var(--color-searchbox-background);
   border-radius: 26px;
@@ -486,8 +477,7 @@ cr-searchbox-dropdown::part(dropdown-content) {
 }
 
 @media (forced-colors: active) {
-  :host([searchbox-layout-mode^='Tall']) .dropdownContainer,
-  :host([searchbox-layout-mode^='Tall']) .contextualEntrypointContainer {
+  :host([searchbox-layout-mode^='Tall']) .dropdownContainer {
     border: 1px solid ActiveBorder;
   }
 }
@@ -593,10 +583,13 @@ cr-searchbox-dropdown::part(dropdown-content) {
   opacity: 0;
 }
 
-#recentTabChipContainer {
+:host([searchbox-layout-mode='Compact'][dropdown-is-visible]) .dropdownContainer {
   padding-bottom: 10px;
+}
+
+#recentTabChipContainer {
+  padding-block: 6px;
   padding-inline: 16px;
-  padding-top: 6px;
 }
 
 :host([ntp-realbox-next-enabled][searchbox-layout-mode='Compact'])

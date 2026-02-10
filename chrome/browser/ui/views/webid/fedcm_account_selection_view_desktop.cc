@@ -34,7 +34,6 @@
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
-#include "third_party/blink/public/mojom/webid/federated_auth_request.mojom-shared.h"
 #include "third_party/blink/public/mojom/webid/federated_auth_request.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_ui_types.h"
@@ -687,6 +686,8 @@ void FedCmAccountSelectionView::OnLoginToIdP(const GURL& idp_config_url,
     return;
   }
 
+  delegate_->OnLoginToIdP(idp_config_url, idp_login_url);
+
   if (state_ == State::IDP_SIGNIN_STATUS_MISMATCH) {
     is_mismatch_continue_clicked_ = true;
     popup_window_state_ =
@@ -700,8 +701,6 @@ void FedCmAccountSelectionView::OnLoginToIdP(const GURL& idp_config_url,
     modal_account_chooser_state_ =
         webid::AccountChooserResult::kUseOtherAccountButton;
   }
-
-  delegate_->OnLoginToIdP(idp_config_url, idp_login_url);
 }
 
 void FedCmAccountSelectionView::OnGotIt(const ui::Event& event) {

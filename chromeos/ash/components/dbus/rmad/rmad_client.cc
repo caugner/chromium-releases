@@ -105,9 +105,7 @@ class RmadClientImpl : public RmadClient {
   void StartCheckForRmadFiles();
 
   raw_ptr<dbus::ObjectProxy> rmad_proxy_ = nullptr;
-  base::ObserverList<Observer,
-                     /*check_empty=*/true,
-                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
+  base::ObserverList<Observer, /*check_empty=*/true, /*allow_reentrancy=*/false>
       observers_;
 
   // True if the RMAD executable exists.

@@ -27,7 +27,6 @@ BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearchButton);
 BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearchInspirationCard);
 BASE_DECLARE_FEATURE(kRealboxCr23Theming);
 BASE_DECLARE_FEATURE(kRealboxMatchOmniboxTheme);
-BASE_DECLARE_FEATURE(kRealboxMatchSearchboxTheme);
 BASE_DECLARE_FEATURE(kRealboxUseGoogleGIcon);
 BASE_DECLARE_FEATURE(kNtpAlphaBackgroundCollections);
 BASE_DECLARE_FEATURE(kNtpBackgroundImageErrorDetection);
@@ -270,6 +269,11 @@ extern const base::FeatureParam<bool> kNtpNextClientSensitivityCheckParam;
 // and static data is used for steady state chips.
 extern const base::FeatureParam<bool>
     kNtpNextSuggestionsFromNewSearchSuggestionsEndpointParam;
+
+// Parameter determining if a recent tab chip/row should be generated in the
+// steady state in NTP. If false, one is NOT generated in the steady state,
+// while one is still generated in the deep-dive state.
+extern const base::FeatureParam<bool> kNtpNextShowStaticRecentTabChipParam;
 
 // Parameter determining if the Action Chips on the NTP should display the
 // NTP Simplification UI.

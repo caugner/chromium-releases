@@ -12,7 +12,6 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_auto_reset.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -448,9 +447,7 @@ void DesktopNativeWidgetAura::HandleActivationChanged(bool active) {
   // activation change event. This is needed since the activation client may
   // check whether this widget can receive activation when deciding which window
   // should receive activation next.
-  base::WeakAutoReset resetter(weak_ptr_factory_.GetWeakPtr(),
-                               &DesktopNativeWidgetAura::should_activate_,
-                               std::make_optional(active));
+  base::AutoReset<std::optional<bool>> resetter(&should_activate_, active);
 
   if (active) {
     // TODO(nektar): We need to harmonize the firing of accessibility

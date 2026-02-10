@@ -242,7 +242,8 @@ void WallpaperControllerClientImpl::SetWallpaperFetcherDelegateForTesting(
 void WallpaperControllerClientImpl::SetInitialWallpaper() {
   // Apply device customization.
   namespace customization_util = ash::customization_wallpaper_util;
-  if (customization_util::ShouldUseCustomizedDefaultWallpaper()) {
+  if (customization_util::ShouldUseCustomizedDefaultWallpaper(
+          local_state_.get())) {
     base::FilePath customized_default_small_path;
     base::FilePath customized_default_large_path;
     if (customization_util::GetCustomizedDefaultWallpaperPaths(
@@ -657,12 +658,7 @@ void WallpaperControllerClientImpl::OnGooglePhotosDailyAlbumFetched(
         return ids.Peek(base::PersistentHash(photo->id)) == ids.end();
       });
 
-  // If all photos are in the cache (e.g. repeated IDs in the album caused by a
-  // compromised network process), fallback to the first photo.
-  if (selected_itr == photos.end()) {
-    selected_itr = photos.begin();
-  }
-
+  DCHECK(selected_itr != photos.end());
   auto& selected = *selected_itr;
 
   ids.Put(base::PersistentHash(selected->id));

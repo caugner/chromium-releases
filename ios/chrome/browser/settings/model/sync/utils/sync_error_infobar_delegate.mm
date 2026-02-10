@@ -20,10 +20,11 @@
 #import "ios/chrome/browser/infobars/model/infobar_ios.h"
 #import "ios/chrome/browser/infobars/model/infobar_type.h"
 #import "ios/chrome/browser/infobars/model/infobar_utils.h"
-#import "ios/chrome/browser/settings/model/sync/utils/sync_presenter.h"
 #import "ios/chrome/browser/settings/model/sync/utils/sync_util.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
+#import "ios/chrome/browser/shared/public/commands/sync_presenter_commands.h"
+#import "ios/chrome/browser/signin/model/identity_manager_factory.h"
 #import "ios/chrome/browser/sync/model/sync_service_factory.h"
 
 namespace {
@@ -63,17 +64,18 @@ TrustedVaultTriggerFromInfoBarTrigger(SyncErrorInfoBarTrigger trigger) {
 }  // namespace
 
 // static
-bool SyncErrorInfoBarDelegate::Create(infobars::InfoBarManager* infobar_manager,
-                                      ProfileIOS* profile,
-                                      id<SyncPresenter> presenter,
-                                      SyncErrorInfoBarTrigger trigger) {
+bool SyncErrorInfoBarDelegate::Create(
+    infobars::InfoBarManager* infobar_manager,
+    ProfileIOS* profile,
+    id<SyncPresenterCommands> sync_presenter_handler,
+    SyncErrorInfoBarTrigger trigger) {
   if (SyncErrorNotificationsPaused(profile)) {
     return false;
   }
 
   CHECK(infobar_manager);
   std::unique_ptr<SyncErrorInfoBarDelegate> delegate(
-      new SyncErrorInfoBarDelegate(profile, presenter, trigger));
+      new SyncErrorInfoBarDelegate(profile, sync_presenter_handler, trigger));
   std::unique_ptr<InfoBarIOS> infobar = std::make_unique<InfoBarIOS>(
       InfobarType::kInfobarTypeSyncError, std::move(delegate));
   return !!infobar_manager->AddInfoBar(std::move(infobar));
@@ -81,9 +83,11 @@ bool SyncErrorInfoBarDelegate::Create(infobars::InfoBarManager* infobar_manager,
 
 SyncErrorInfoBarDelegate::SyncErrorInfoBarDelegate(
     ProfileIOS* profile,
-    id<SyncPresenter> presenter,
+    id<SyncPresenterCommands> sync_presenter_handler,
     SyncErrorInfoBarTrigger trigger)
-    : profile_(profile), presenter_(presenter), trigger_(trigger) {
+    : profile_(profile),
+      sync_presenter_handler_(sync_presenter_handler),
+      trigger_(trigger) {
   CHECK(!profile->IsOffTheRecord(), base::NotFatalUntil::M151);
   syncer::SyncService* sync_service =
       SyncServiceFactory::GetForProfile(profile_);
@@ -98,6 +102,9 @@ SyncErrorInfoBarDelegate::SyncErrorInfoBarDelegate(
 
   // Register for sync status changes.
   sync_observation_.Observe(sync_service);
+  signin::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile);
+  identity_manager_observation_.Observe(identity_manager);
 }
 
 SyncErrorInfoBarDelegate::~SyncErrorInfoBarDelegate() = default;
@@ -132,12 +139,12 @@ bool SyncErrorInfoBarDelegate::Accept() {
   }
   switch (error_state_) {
     case syncer::SyncService::UserActionableError::kSignInNeedsUpdate:
-      [presenter_ showPrimaryAccountReauth];
+      [sync_presenter_handler_ showPrimaryAccountReauth];
       break;
 
     case syncer::SyncService::UserActionableError::kNone:
       CHECK(ShouldShowSyncSettings(error_state_), base::NotFatalUntil::M151);
-      [presenter_ showAccountSettings];
+      [sync_presenter_handler_ showAccountSettings];
       break;
 
     case syncer::SyncService::UserActionableError::kNeedsClientUpgrade:
@@ -146,23 +153,25 @@ bool SyncErrorInfoBarDelegate::Accept() {
       NOTREACHED();
 
     case syncer::SyncService::UserActionableError::kNeedsPassphrase:
-      [presenter_ showSyncPassphraseSettings];
+      [sync_presenter_handler_ showSyncPassphraseSettings];
       break;
 
     case syncer::SyncService::UserActionableError::
         kNeedsTrustedVaultKeyForPasswords:
     case syncer::SyncService::UserActionableError::
         kNeedsTrustedVaultKeyForEverything:
-      [presenter_ showTrustedVaultReauthForFetchKeysWithTrigger:
-                      TrustedVaultTriggerFromInfoBarTrigger(trigger_)];
+      [sync_presenter_handler_
+          showTrustedVaultReauthForFetchKeysWithTrigger:
+              TrustedVaultTriggerFromInfoBarTrigger(trigger_)];
       break;
 
     case syncer::SyncService::UserActionableError::
         kTrustedVaultRecoverabilityDegradedForPasswords:
     case syncer::SyncService::UserActionableError::
         kTrustedVaultRecoverabilityDegradedForEverything:
-      [presenter_ showTrustedVaultReauthForDegradedRecoverabilityWithTrigger:
-                      TrustedVaultTriggerFromInfoBarTrigger(trigger_)];
+      [sync_presenter_handler_
+          showTrustedVaultReauthForDegradedRecoverabilityWithTrigger:
+              TrustedVaultTriggerFromInfoBarTrigger(trigger_)];
       break;
     case syncer::SyncService::UserActionableError::kBookmarksLimitExceeded:
       // TODO(crbug.com/452968646): Navigate to the concrete help center
@@ -170,7 +179,7 @@ bool SyncErrorInfoBarDelegate::Accept() {
       break;
   }
 
-  return false;
+  return true;
 }
 
 void SyncErrorInfoBarDelegate::InfoBarDismissed() {
@@ -204,7 +213,8 @@ void SyncErrorInfoBarDelegate::OnStateChanged(syncer::SyncService* sync) {
     infobars::InfoBarManager* infobar_manager = infobar->owner();
     if (infobar_manager) {
       std::unique_ptr<ConfirmInfoBarDelegate> new_infobar_delegate(
-          new SyncErrorInfoBarDelegate(profile_, presenter_, trigger_));
+          new SyncErrorInfoBarDelegate(profile_, sync_presenter_handler_,
+                                       trigger_));
       infobar_manager->ReplaceInfoBar(
           infobar, CreateConfirmInfoBar(std::move(new_infobar_delegate)));
     }
@@ -213,6 +223,27 @@ void SyncErrorInfoBarDelegate::OnStateChanged(syncer::SyncService* sync) {
 
 void SyncErrorInfoBarDelegate::OnSyncShutdown(syncer::SyncService* sync) {
   NOTREACHED();
+}
+
+void SyncErrorInfoBarDelegate::OnPrimaryAccountChanged(
+    const signin::PrimaryAccountChangeEvent& event_details) {
+  switch (event_details.GetEventTypeFor(signin::ConsentLevel::kSignin)) {
+    case signin::PrimaryAccountChangeEvent::Type::kNone:
+    case signin::PrimaryAccountChangeEvent::Type::kSet:
+      return;
+    case signin::PrimaryAccountChangeEvent::Type::kCleared:
+      break;
+  }
+  infobars::InfoBar* infobar = this->infobar();
+  if (!infobar) {
+    return;
+  }
+  infobar->RemoveSelf();
+}
+
+void SyncErrorInfoBarDelegate::OnIdentityManagerShutdown(
+    signin::IdentityManager* identity_manager) {
+  identity_manager_observation_.Reset();
 }
 
 void SyncErrorInfoBarDelegate::InfoBarDismissedByTimeout() const {

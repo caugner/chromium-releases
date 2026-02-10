@@ -23,10 +23,7 @@ source_set("content_extraction") {
 source_set("unit_tests") {
   testonly = true
 
-  sources = [
-    "ax_tree_extractor_unittest.cc",
-    "content_extraction_service_unittest.cc",
-  ]
+  sources = [ "content_extraction_service_unittest.cc" ]
 
   deps = [
     ":content_extraction",

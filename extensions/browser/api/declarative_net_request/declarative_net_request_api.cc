@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
@@ -209,8 +208,7 @@ void DeclarativeNetRequestGetDynamicRulesFunction::OnDynamicRulesFetched(
   // Unlike errors such as kJSONParseError, which normally denote corruption, a
   // read error is probably a transient error.  Hence raise an error instead of
   // returning an empty list.
-  if (read_json_result.status == Status::kFileReadError ||
-      read_json_result.status == Status::kRulesetFileSizeLimitExceeded) {
+  if (read_json_result.status == Status::kFileReadError) {
     Respond(Error(declarative_net_request::kInternalErrorGettingDynamicRules));
     return;
   }
@@ -351,7 +349,7 @@ DeclarativeNetRequestUpdateEnabledRulesetsFunction::Run() {
 
       // |ruleset_ids_to_enable| takes priority over |ruleset_ids_to_disable|.
       RulesetID id = it->second->id;
-      if (base::Contains(ids_to_enable, id)) {
+      if (ids_to_enable.contains(id)) {
         continue;
       }
 

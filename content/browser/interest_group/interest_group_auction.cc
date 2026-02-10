@@ -83,7 +83,6 @@
 #include "content/services/auction_worklet/public/cpp/auction_worklet_features.h"
 #include "content/services/auction_worklet/public/cpp/private_aggregation_reporting.h"
 #include "content/services/auction_worklet/public/cpp/real_time_reporting.h"
-#include "content/services/auction_worklet/public/mojom/bidder_worklet.mojom-forward.h"
 #include "content/services/auction_worklet/public/mojom/bidder_worklet.mojom.h"
 #include "content/services/auction_worklet/public/mojom/private_aggregation_request.mojom.h"
 #include "content/services/auction_worklet/public/mojom/real_time_reporting.mojom.h"
@@ -1211,7 +1210,7 @@ ConstructGhostWinnerFromGroupAndCandidate(
           return blink::HashedKAnonKeyForAdComponentBid(ad.render_url()) ==
                  component_ad_hash;
         });
-    if (component_ad_it == group.ads->end()) {
+    if (component_ad_it == group.ad_components->end()) {
       return std::nullopt;
     }
     result.ad_components.emplace_back(component_ad_it->render_url());
@@ -1640,25 +1639,16 @@ class InterestGroupAuction::BuyerHelper
                                       update_if_older_than);
     std::optional<double> new_priority;
     if (!priority_vector.empty()) {
-      bool valid_priority_vector = true;
-      for (const auto& [unused_signal_name, value] : priority_vector) {
-        if (!std::isfinite(value)) {
-          valid_priority_vector = false;
-          break;
-        }
-      }
-      if (valid_priority_vector) {
-        new_priority = CalculateInterestGroupPriority(
-            *auction_->config_, *(state->bidder), auction_->auction_start_time_,
-            priority_vector,
-            (interest_group.priority_vector &&
-             !interest_group.priority_vector->empty())
-                ? state->calculated_priority
-                : std::optional<double>());
-        if (*new_priority < 0) {
-          auction_->auction_metrics_recorder_
-              ->RecordBidFilteredDuringReprioritization();
-        }
+      new_priority = CalculateInterestGroupPriority(
+          *auction_->config_, *(state->bidder), auction_->auction_start_time_,
+          priority_vector,
+          (interest_group.priority_vector &&
+           !interest_group.priority_vector->empty())
+              ? state->calculated_priority
+              : std::optional<double>());
+      if (*new_priority < 0) {
+        auction_->auction_metrics_recorder_
+            ->RecordBidFilteredDuringReprioritization();
       }
     }
     OnBiddingSignalsReceivedInternal(state, new_priority,
@@ -5611,9 +5601,8 @@ bool InterestGroupAuction::IsBuyerOptedInToRealTimeReporting(
     const url::Origin& owner) {
   return config_->non_shared_params.per_buyer_real_time_reporting_types
              .has_value() &&
-         base::Contains(
-             *config_->non_shared_params.per_buyer_real_time_reporting_types,
-             owner);
+         config_->non_shared_params.per_buyer_real_time_reporting_types
+             ->contains(owner);
 }
 
 void InterestGroupAuction::MaybeAddScriptFailureRealTimeContribution(

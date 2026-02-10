@@ -108,19 +108,8 @@ Status FocusToElement(
         session, web_view, element_id, true, &is_displayed);
     if (status.IsError())
       return status;
-    if (is_displayed) {
-      // Check if the element is already the active element so we can
-      // skip the unnecessary kFocusScript call below, which disrupts
-      // selection state in contenteditable elements.
-      // We compare against document.activeElement directly rather than
-      // using IsElementFocused(), because the latter gates on
-      // document.hasFocus() which returns false in headless mode.
-      status = IsElementActive(session, web_view, element_id, &is_focused);
-      if (status.IsError()) {
-        return status;
-      }
+    if (is_displayed)
       break;
-    }
     status = IsElementFocused(session, web_view, element_id, &is_focused);
     if (status.IsError())
       return status;
@@ -332,16 +321,6 @@ Status ExecuteClickElement(Session* session,
     return Status{kAbortedByNavigation,
                   "frame was destroyed before click completion"};
   }
-
-  // `containing_web_view` may be a child OOPIF WebViewImpl owned by the
-  // page's FrameTracker. The outer ExecuteWindowCommand holder only locks the
-  // page-level view and its ancestors, so the inner WebViewImplHolder created
-  // by each CallFunctionWithTimeout below would be the *first* lock on the
-  // child and could free it in its destructor if the target detaches
-  // mid-call, leaving this raw pointer dangling. Hold it explicitly for the
-  // remainder of this function.
-  std::unique_ptr<WebViewHolder> containing_holder =
-      containing_web_view->GetHolder();
 
   WebPoint relative_location;
   status = GetElementClickableLocation(session, containing_web_view, element_id,
@@ -699,14 +678,13 @@ Status ExecuteSendKeysToElement(Session* session,
   bool is_text = is_text_control_type || is_textarea;
 
   if (get_content_editable->is_bool() && get_content_editable->GetBool()) {
-    // If element is contentEditable check if element is focused.
-    // We check against the active element directly rather than using
-    // IsElementFocused(), because the latter gates on document.hasFocus() which
-    // returns false in headless mode.
+    // If element is contentEditable
+    // check if element is focused
     bool is_focused = false;
-    status = IsElementActive(session, web_view, element_id, &is_focused);
+    status = IsElementFocused(session, web_view, element_id, &is_focused);
     if (status.IsError())
       return status;
+
     // Get top level contentEditable element
     std::unique_ptr<base::Value> result;
     status = web_view->CallFunction(session->GetCurrentFrameId(),
@@ -731,7 +709,7 @@ Status ExecuteSendKeysToElement(Session* session,
     // check if top level contentEditable element is focused
     bool is_top_focused = false;
     status =
-        IsElementActive(session, web_view, *top_element_id, &is_top_focused);
+        IsElementFocused(session, web_view, *top_element_id, &is_top_focused);
     if (status.IsError())
       return status;
     // If is_text we want to send keys to the element
@@ -1150,8 +1128,7 @@ Status ExecuteElementScreenshot(Session* session,
       "({x: window.pageXOffset,"
       "  y: window.pageYOffset,"
       "  height: document.documentElement.clientHeight,"
-      "  width: document.documentElement.clientWidth,"
-      "  device_pixel_ratio: window.devicePixelRatio})",
+      "  width: document.documentElement.clientWidth})",
       false, &browser_info);
   if (status.IsError())
     return status;
@@ -1161,8 +1138,6 @@ Status ExecuteElementScreenshot(Session* session,
   double scroll_top = browser_info_dict.FindDouble("y").value();
   double viewport_height = browser_info_dict.FindDouble("height").value();
   double viewport_width = browser_info_dict.FindDouble("width").value();
-  double device_pixel_ratio =
-      browser_info_dict.FindDouble("device_pixel_ratio").value();
 
   if (!clip->is_dict())
     return Status(kUnknownError, "Element Rect is not a dictionary");
@@ -1178,13 +1153,12 @@ Status ExecuteElementScreenshot(Session* session,
   // CaptureScreenshot.
   clip_dict.Set("x", location.x + scroll_left);
   clip_dict.Set("y", location.y + scroll_top);
-  clip_dict.Set("scale", 1 / device_pixel_ratio);
   // Crop screenshot by viewport if element is larger than viewport
   clip_dict.Set("height", std::min(viewport_height - location.y,
                                    clip_dict.FindDouble("height").value()));
   clip_dict.Set("width", std::min(viewport_width - location.x,
                                   clip_dict.FindDouble("width").value()));
-
+  clip_dict.Set("scale", 1);
   std::string screenshot;
   status = web_view->CaptureScreenshot(&screenshot, screenshot_params);
   if (status.IsError())

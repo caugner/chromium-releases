@@ -15,17 +15,10 @@ MockFileUpdateObserver::~MockFileUpdateObserver() = default;
 
 // static
 UpdateObserverList MockFileUpdateObserver::CreateList(
-    scoped_refptr<MockFileUpdateObserver> observer) {
+    MockFileUpdateObserver* observer) {
   UpdateObserverList list;
   return list.AddObserver(
-      std::move(observer),
-      base::SingleThreadTaskRunner::GetCurrentDefault().get());
-}
-
-void MockFileUpdateObserver::Disable() {
-  start_update_count_.clear();
-  end_update_count_.clear();
-  is_ready_ = false;
+      observer, base::SingleThreadTaskRunner::GetCurrentDefault().get());
 }
 
 void MockFileUpdateObserver::OnStartUpdate(const FileSystemURL& url) {

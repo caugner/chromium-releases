@@ -9,7 +9,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/test/test_future.h"
 #include "base/time/time.h"
 #include "chrome/renderer/accessibility/read_anything/read_aloud_traversal_utils.h"
 #include "chrome/test/base/chrome_render_view_test.h"
@@ -336,10 +335,10 @@ TEST_F(ReadAnythingReadAloudAppModelTest, EnabledLanguages) {
 
   const std::string enabled_lang = "fr";
   SetLanguageEnabled(enabled_lang, true);
-  EXPECT_TRUE(base::Contains(EnabledLanguages(), enabled_lang));
+  EXPECT_TRUE(EnabledLanguages().contains(enabled_lang));
 
   SetLanguageEnabled(enabled_lang, false);
-  EXPECT_FALSE(base::Contains(EnabledLanguages(), enabled_lang));
+  EXPECT_FALSE(EnabledLanguages().contains(enabled_lang));
 }
 
 TEST_F(ReadAnythingReadAloudAppModelTest, Voices) {
@@ -351,15 +350,15 @@ TEST_F(ReadAnythingReadAloudAppModelTest, Voices) {
   const char* voice2 = "Shang";
   SetVoice(voice1, lang1);
   SetVoice(voice2, lang2);
-  EXPECT_TRUE(base::Contains(Voices(), lang1));
-  EXPECT_TRUE(base::Contains(Voices(), lang2));
+  EXPECT_TRUE(Voices().contains(lang1));
+  EXPECT_TRUE(Voices().contains(lang2));
   EXPECT_STREQ(Voices().FindString(lang1)->c_str(), voice1);
   EXPECT_STREQ(Voices().FindString(lang2)->c_str(), voice2);
 
   const char* voice3 = "Mushu";
   SetVoice(voice3, lang2);
-  EXPECT_TRUE(base::Contains(Voices(), lang1));
-  EXPECT_TRUE(base::Contains(Voices(), lang2));
+  EXPECT_TRUE(Voices().contains(lang1));
+  EXPECT_TRUE(Voices().contains(lang2));
   EXPECT_STREQ(Voices().FindString(lang2)->c_str(), voice3);
 }
 
@@ -464,17 +463,10 @@ TEST_F(
 TEST_F(
     ReadAnythingReadAloudAppModelV8SegmentationTest,
     GetHighlightForCurrentSegmentIndex_PhrasesEnabled_ValidModel_SentenceSpansMultipleNodes_ReturnsCorrectNodes) {
-  model()
-      .GetDependencyParserModel()
-      .AsyncCall(&DependencyParserModel::UpdateWithFile)
-      .WithArgs(test::GetValidModelFile());
+  model().GetDependencyParserModel().UpdateWithFile(test::GetValidModelFile());
+  DependencyParserModel& phrase_model = model().GetDependencyParserModel();
 
-  base::test::TestFuture<bool> future;
-  model()
-      .GetDependencyParserModel()
-      .AsyncCall(&DependencyParserModel::IsAvailable)
-      .Then(future.GetCallback());
-  EXPECT_TRUE(future.Get());
+  EXPECT_TRUE(phrase_model.IsAvailable());
 
   // Text indices:             0123456789012345678901234567890
   std::u16string sentence1 = u"Never feel heavy or ";

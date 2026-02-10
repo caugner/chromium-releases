@@ -116,8 +116,7 @@ std::vector<FieldInfo> FieldInfoManager::GetFieldInfo(
 }
 
 void FieldInfoManager::ProcessServerPredictions(
-    const std::map<std::pair<autofill::FormSignature, int>, FormPredictions>&
-        predictions) {
+    const std::map<autofill::FormSignature, FormPredictions>& predictions) {
   for (auto& entry : field_info_cache_) {
     FieldInfo& field_info = entry.field_info;
     // Do nothing if predictions are already stored.
@@ -125,12 +124,12 @@ void FieldInfoManager::ProcessServerPredictions(
       continue;
     }
 
-    for (const auto& [key, form_predictions] : predictions) {
-      const int driver_id = key.second;
-      if (driver_id != field_info.driver_id) {
+    for (const auto& prediction : predictions) {
+      // Do nothing if drivers do not match.
+      if (field_info.driver_id != prediction.second.driver_id) {
         continue;
       }
-      if (StoresPredictionsForInfo(form_predictions, field_info)) {
+      if (StoresPredictionsForInfo(prediction.second, field_info)) {
         break;
       }
     }

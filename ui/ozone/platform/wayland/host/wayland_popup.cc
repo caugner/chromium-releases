@@ -56,11 +56,7 @@ bool WaylandPopup::CreateShellPopup() {
       parent_window()->applied_state().window_scale) {
     // If scale changed while this was hidden (when WaylandPopup hides, parent
     // window's child is reset), update buffer scale accordingly.
-    auto weak_this = AsWeakPtr();
     UpdateWindowScale(true);
-    if (!weak_this) {
-      return false;
-    }
   }
 
   auto bounds_dip =
@@ -126,19 +122,11 @@ void WaylandPopup::Show(bool inactive) {
   // Map parent window as WaylandPopup cannot become a visible child of a
   // window that is not mapped.
   DCHECK(parent_window());
-  auto weak_this = AsWeakPtr();
-  if (!parent_window()->IsVisible()) {
+  if (!parent_window()->IsVisible())
     parent_window()->Show(false);
-  }
-  if (!weak_this) {
-    return;
-  }
 
-  if (!CreateShellPopup() && weak_this) {
+  if (!CreateShellPopup()) {
     Close();
-    return;
-  }
-  if (!weak_this) {
     return;
   }
 
@@ -257,11 +245,7 @@ void WaylandPopup::HandlePopupConfigure(const gfx::Rect& bounds_dip) {
 
 void WaylandPopup::HandleSurfaceConfigure(uint32_t serial) {
   if (schedule_redraw_) {
-    auto weak_this = AsWeakPtr();
     delegate()->OnDamageRect(gfx::Rect{applied_state().size_px});
-    if (!weak_this) {
-      return;
-    }
     schedule_redraw_ = false;
   }
   ProcessPendingConfigureState(serial);

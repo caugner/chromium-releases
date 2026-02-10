@@ -15,7 +15,7 @@ namespace autofill::features {
 // All features in alphabetical order.
 
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAllowReentryFromRespondToDelegate);
+BASE_DECLARE_FEATURE(kAutofillAiBasedAmountExtractionIgnoreSeenTermsForTesting);
 #if BUILDFLAG(IS_IOS)
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillCreditCardScannerIos);
@@ -24,8 +24,6 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillDisableBnplCountryCheckForTesting);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableAiBasedAmountExtraction);
-COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillEnableAllowlistForBmoCardCategoryBenefits);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableAmountExtraction);
 COMPONENT_EXPORT(AUTOFILL)
@@ -46,10 +44,6 @@ BASE_DECLARE_FEATURE(kAutofillEnableCardBenefitsForAmericanExpress);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableCardBenefitsForBmo);
 COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillEnableCardBenefitsIph);
-COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillEnableCardBenefitsSourceSync);
-COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableCardBenefitsSync);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableCardInfoRuntimeRetrieval);
@@ -68,10 +62,6 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableFlatRateCardBenefitsFromCurinos);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableFpanRiskBasedAuthentication);
-
-COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(
-    kAutofillEnableMultipleRequestInVirtualCardDownstreamEnrollment);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableNewCardBenefitsToggleText);
 #if BUILDFLAG(IS_ANDROID)
@@ -79,8 +69,6 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableNewFopDisplayAndroid);
 #endif
 
-COMPONENT_EXPORT(AUTOFILL)
-BASE_DECLARE_FEATURE(kAutofillEnableNewFopDisplayDesktop);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableOffersInClankKeyboardAccessory);
 #if BUILDFLAG(IS_CHROMEOS)
@@ -104,6 +92,8 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableVcn3dsAuthentication);
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillEnableVirtualCardJavaPaymentsDataManager);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillEnableWalletBranding);
 #if BUILDFLAG(IS_IOS)
 COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillLocalSaveCardBottomSheet);
@@ -130,6 +120,8 @@ COMPONENT_EXPORT(AUTOFILL)
 BASE_DECLARE_FEATURE(kAutofillSkipSaveCardForTabModalPopup);
 #if BUILDFLAG(IS_ANDROID)
 COMPONENT_EXPORT(AUTOFILL) BASE_DECLARE_FEATURE(kAutofillSyncEwalletAccounts);
+COMPONENT_EXPORT(AUTOFILL)
+BASE_DECLARE_FEATURE(kAutofillTouchToFillShowManualFillForVcnFix);
 #endif
 
 COMPONENT_EXPORT(AUTOFILL)

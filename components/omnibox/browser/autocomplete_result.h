@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/memory/safety_checks.h"
+#include "base/memory/advanced_memory_safety_checks.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/actions/omnibox_action.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -97,7 +97,7 @@ class AutocompleteResult {
   // bounds of valid AutocompleteResult indices, where every other aspect of the
   // AutocompleteResult is correct.
   bool VerifyCoherency(JNIEnv* env,
-                       const base::android::JavaParamRef<jlongArray>& matches,
+                       const base::android::JavaRef<jlongArray>& matches,
                        jint match_index,
                        jint verification_point);
 #endif

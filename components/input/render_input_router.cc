@@ -60,6 +60,7 @@ class UnboundWidgetInputHandler : public blink::mojom::WidgetInputHandler {
                          const gfx::Range& range,
                          int32_t start,
                          int32_t end,
+                         blink::mojom::ImeState ime_state,
                          ImeSetCompositionCallback callback) override {
     DLOG(WARNING) << "Input request on unbound interface";
   }
@@ -783,6 +784,11 @@ void RenderInputRouter::RenderProcessBlockedStateChanged(bool blocked) {
   is_blocked_ = blocked;
   is_blocked_ ? StopInputEventAckTimeout()
               : RestartInputEventAckTimeoutIfNecessary();
+}
+
+void RenderInputRouter::SetHungRendererDelay(base::TimeDelta delay) {
+  CHECK_LE(delay, input::kHungRendererDelay);
+  hung_renderer_delay_ = delay;
 }
 
 void RenderInputRouter::SetInputTargetClientForTesting(

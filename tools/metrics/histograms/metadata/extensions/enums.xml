@@ -2867,6 +2867,16 @@ Called by update_extension_histograms.py.-->
   <int value="1952"
       label="AUTOFILLPRIVATE_SETWALLETABLEPASSDETECTIONOPTINSTATUS"/>
   <int value="1953" label="METRICSPRIVATE_RECORDEXTENSIONUSAGEUKM"/>
+  <int value="1954"
+      label="WEBSTOREPRIVATE_SHOULDSHOWENTERPRISEPROMOTIONBANNER"/>
+  <int value="1955" label="WEBSTOREPRIVATE_LOGENTERPRISEPROMOSHOWN"/>
+  <int value="1956" label="WEBSTOREPRIVATE_ONENTERPRISEPROMOCLICK"/>
+  <int value="1957"
+      label="AUTOFILLPRIVATE_AUTHENTICATEUSERBEFOREVIEWINGENTITYDATA"/>
+  <int value="1958" label="AUTOFILLPRIVATE_TOGGLEAUTOFILLAIREAUTHREQUIREMENT"/>
+  <int value="1959"
+      label="AUTOFILLPRIVATE_GETREQUIREDATTRIBUTETYPESFORENTITYTYPENAME"/>
+  <int value="1960" label="PDFVIEWERPRIVATE_GLICSUMMARIZE"/>
 </enum>
 
 <!-- LINT.ThenChange(//extensions/browser/extension_function_histogram_value.h:HistogramValue) -->
@@ -2897,6 +2907,7 @@ Called by update_extension_histograms.py.-->
   <int value="22" label="USER_CANCELED"/>
   <int value="23" label="USER_ABORTED"/>
   <int value="24" label="UPDATE_NON_EXISTING_EXTENSION"/>
+  <int value="25" label="PROFILE_SHUTTING_DOWN"/>
 </enum>
 
 <enum name="ExtensionInstallationDownloadingCacheStatus">
@@ -3351,11 +3362,18 @@ Called by update_extension_permission.py.-->
   <int value="3" label="Policy Violation"/>
 </enum>
 
+<!-- LINT.IfChange(ExtensionUsageAction) -->
+
 <enum name="ExtensionUsageAction">
   <int value="0" label="Extension Pinned"/>
   <int value="1" label="Extension Unpinned"/>
   <int value="2" label="Extension Context Menu Init"/>
+  <int value="3" label="Extension Action Clicked"/>
+  <int value="4" label="Extension Enabled"/>
+  <int value="5" label="Extension Disabled"/>
 </enum>
+
+<!-- LINT.ThenChange(//extensions/common/extension_usage.h:ExtensionUsageAction,//extensions/common/api/metrics_private.json) -->
 
 <enum name="ExternalItemState">
   <int value="0" label="DEPRECATED_DISABLED"/>
@@ -3424,7 +3442,6 @@ Called by update_extension_permission.py.-->
   <int value="3" label="Load failed - Checksum mismatch"/>
   <int value="4" label="Load failed - Version mismatch"/>
   <int value="5" label="Load failed - Checksum not found in prefs"/>
-  <int value="6" label="Load failed - Ruleset file size limit exceeded"/>
 </enum>
 
 <enum name="ManifestInvalidAppStatusError">
@@ -3460,7 +3477,7 @@ Called by update_extension_permission.py.-->
   <int value="3" label="SearchEngineAndNewTabPage"/>
 </enum>
 
-<!-- LINT.ThenChange(/chrome/browser/extensions/unpacked_installer.h:ManifestSettingsOverrideType) -->
+<!-- LINT.ThenChange(/chrome/browser/extensions/chrome_extensions_browser_client.h:ManifestSettingsOverrideType) -->
 
 <enum name="ManifestVersionPopulationSplit">
   <int value="0" label="No extensions"/>
@@ -3516,7 +3533,6 @@ Called by update_extension_permission.py.-->
   <int value="3" label="kJSONParseError"/>
   <int value="4" label="kJSONIsNotList"/>
   <int value="5" label="kRuleCountLimitExceeded"/>
-  <int value="6" label="kRulesetFileSizeLimitExceeded"/>
 </enum>
 
 <enum name="RegexRuleStatus">
@@ -3592,8 +3608,6 @@ Called by update_extension_permission.py.-->
   <int value="16" label="kErrorSerializeToJson"/>
   <int value="17" label="kErrorWriteJson"/>
   <int value="18" label="kErrorWriteFlatbuffer"/>
-  <int value="19" label="kErrorUnsafeRuleCountExceeded"/>
-  <int value="20" label="kErrorCreateMatcher_RulesetFileSizeLimitExceeded"/>
 </enum>
 
 <enum name="VerifiedFileType">

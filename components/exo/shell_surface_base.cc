@@ -21,7 +21,6 @@
 #include "ash/wm/window_util.h"
 #include "base/check.h"
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
@@ -540,17 +539,6 @@ void ShellSurfaceBase::SetSystemModal(bool system_modal) {
   if (system_modal == system_modal_)
     return;
 
-  if (system_modal) {
-    SecurityDelegate* security = GetSecurityDelegate();
-    if (!security || !security->CanSetSystemModal()) {
-      return;
-    }
-  }
-
-  // TODO(b/516545207): The system modal widget has to be created as a
-  // system modal and can only be changed to non system modal after that.
-  // It should fail if a client attemps to change from normal to system
-  // modal.
   bool non_system_modal_window_was_active =
       !system_modal_ && widget_ && widget_->IsActive();
 
@@ -1036,14 +1024,14 @@ void ShellSurfaceBase::RebindRootSurface(Surface* root_surface,
     // Int properties.
     for (auto* const key :
          {aura::client::kSkipImeProcessing, chromeos::kFrameRestoreLookKey}) {
-      if (base::Contains(window->GetAllPropertyKeys(), key)) {
+      if (window->GetAllPropertyKeys().contains(key)) {
         OnWindowPropertyChanged(window, key,
                                 /*old_value(unused)=*/0);
       }
     }
     // Boolean property.
-    if (base::Contains(window->GetAllPropertyKeys(),
-                       aura::client::kWindowWorkspaceKey)) {
+    if (window->GetAllPropertyKeys().contains(
+            aura::client::kWindowWorkspaceKey)) {
       OnWindowPropertyChanged(window, aura::client::kWindowWorkspaceKey,
                               /*old_value(unused)=*/0);
     }
@@ -1445,8 +1433,6 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
   if (lost_capture == gained_capture_parent)
     return;
 
-  base::WeakPtr<aura::Window> weak_gained =
-      gained_capture ? gained_capture->GetWeakPtrAsWindow() : nullptr;
   if (!gained_capture) {
     // If `gained_capture` is nullptr, find the closest ancestor of
     // `lost_capture` that is a popup with grab.
@@ -1457,17 +1443,11 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
         break;
       }
     }
+    // Give capture to the new `gained_capture`.
     if (gained_capture) {
-      base::WeakPtr<aura::Window> weak_lost =
-          lost_capture ? lost_capture->GetWeakPtrAsWindow() : nullptr;
-      weak_gained = gained_capture->GetWeakPtrAsWindow();
       ShellSurfaceBase* parent_shell_surface =
           GetShellSurfaceBaseForWindow(gained_capture);
       parent_shell_surface->StartCapture();
-      // If the lost capture is destroyed, there is nothing to close.
-      if (!weak_lost) {
-        return;
-      }
     }
   }
 
@@ -1494,7 +1474,7 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
 
   // Please note that `gained_capture_ancestors` also includes `gained_capture`.
   base::flat_set<aura::Window*> gained_capture_ancestors;
-  for (aura::Window* next = weak_gained.get(); next != nullptr;
+  for (aura::Window* next = gained_capture; next != nullptr;
        next = wm::GetTransientParent(next)) {
     gained_capture_ancestors.insert(next);
   }
@@ -1506,7 +1486,7 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
   auto is_close_candidate_with_popup_grab =
       [&gained_capture_ancestors](aura::Window* window) {
         return IsPopupWithGrab(window) &&
-               !base::Contains(gained_capture_ancestors, window);
+               !gained_capture_ancestors.contains(window);
       };
 
   aura::Window* root = wm::GetTransientRoot(lost_capture);

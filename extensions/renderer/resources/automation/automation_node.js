@@ -7,8 +7,6 @@ const automationInternal = getInternalApi('automationInternal');
 const AutomationTreeCache = require('automationTreeCache').AutomationTreeCache;
 const exceptionHandler = require('uncaught_exception_handler');
 
-const INT32_MAX = 2147483647;
-
 const natives = requireNative('automationInternal');
 
 const IsInteractPermitted = natives.IsInteractPermitted;
@@ -1751,13 +1749,19 @@ utils.defineProperty(AutomationRootNodeImpl, 'destroy', function(treeID) {
 utils.defineProperty(AutomationRootNodeImpl, 'destroyAll', function() {
   AutomationTreeCache.idToAutomationRootNode = {};
 });
+
+/**
+ * A counter keeping track of IDs to use for mapping action requests to
+ * their callback function.
+ */
+AutomationRootNodeImpl.actionRequestCounter = 0;
+
 /**
  * A map from a request ID to the corresponding callback function to call
- * when the action response event is received. Shared globally across trees
- * to allow cross-tree hitTest resolution (e.g. desktop hitTest landing in tab).
- * Request IDs are randomized to avoid cross-tree hijacking.
+ * when the action response event is received.
  */
 AutomationRootNodeImpl.actionRequestIDToCallback = {};
+
 AutomationRootNodeImpl.prototype = {
   __proto__: AutomationNodeImpl.prototype,
 
@@ -1964,18 +1968,14 @@ AutomationRootNodeImpl.prototype = {
   },
 
   addActionResultCallback: function(actionType, opt_args, callback) {
-    let requestID;
-    const map = AutomationRootNodeImpl.actionRequestIDToCallback;
-    do {
-      requestID = Math.floor(Math.random() * INT32_MAX);
-    } while (Object.hasOwn(map, requestID));
-
-    map[requestID] = {
+    AutomationRootNodeImpl
+        .actionRequestIDToCallback[++AutomationRootNodeImpl
+                                         .actionRequestCounter] = {
       actionType,
       opt_args,
       callback,
     };
-    return requestID;
+    return AutomationRootNodeImpl.actionRequestCounter;
   },
 
   onGetTextLocationResult: function(textLocationParams) {

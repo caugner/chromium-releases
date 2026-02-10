@@ -45,12 +45,12 @@ struct InjectionTarget {
 // Details specifying the read file (either CSS or JS) for the script to be
 // injected.
 struct InjectedFileSource {
-  InjectedFileSource(std::string file_name, std::unique_ptr<std::string> data);
+  InjectedFileSource(std::string file_name, std::string data);
   InjectedFileSource(InjectedFileSource&&);
   ~InjectedFileSource();
 
   std::string file_name;
-  std::unique_ptr<std::string> data;
+  std::string data;
 };
 
 using ResourcesLoadedCallback =
@@ -207,13 +207,6 @@ using ValidateScriptsResult =
 ValidateScriptsResult ValidateParsedScriptsOnFileThread(
     ExtensionResource::SymlinkPolicy symlink_policy,
     UserScriptList scripts);
-
-// Returns true if the `permissions` allow for injection into the given `frame`.
-// If false, populates `error`.
-bool HasPermissionToInjectIntoFrame(const PermissionsData& permissions,
-                                    int tab_id,
-                                    content::RenderFrameHost* frame,
-                                    std::string* error);
 
 // Returns whether the `target` can be accessed with the given `permissions`.
 // If the target can be accessed, populates `script_executor_out`,

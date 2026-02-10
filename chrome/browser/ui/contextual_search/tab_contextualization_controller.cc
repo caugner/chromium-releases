@@ -174,14 +174,10 @@ bool TabContextualizationController::GetInitialPageContextEligibility() {
     return false;
   }
 
-  std::optional<page_content_annotations::ExtractedPageContentResult>
-      extracted_page_content_result =
-          page_content_extraction_service
-              ->GetExtractedPageContentAndEligibilityForPage(
-                  web_contents->GetPrimaryPage());
-
-  return !extracted_page_content_result ||
-         extracted_page_content_result->is_eligible_for_server_upload;
+  std::optional<bool> server_upload_eligibility =
+      page_content_extraction_service->GetServerUploadEligibilityForPage(
+          web_contents->GetPrimaryPage());
+  return server_upload_eligibility.value_or(true);
 }
 
 bool TabContextualizationController::GetCurrentPageContextEligibility() {
@@ -340,7 +336,7 @@ void TabContextualizationController::CaptureScreenshot(
       std::move(callback));
 
   view->CopyFromSurface(
-      /*src_rect=*/gfx::Rect(), /*output_size=*/gfx::Size(),
+      /*src_rect=*/gfx::Rect(), /*output_size=*/gfx::Size(), base::TimeDelta(),
       base::BindPostTask(base::SequencedTaskRunner::GetCurrentDefault(),
                          std::move(callback_wrapper)));
 }
@@ -349,10 +345,10 @@ void TabContextualizationController::DownscaleScreenshotAndContinue(
     base::ScopedClosureRunner decrement_capturer_count_runner,
     std::optional<lens::ImageEncodingOptions> image_options,
     CaptureScreenshotCallback callback,
-    const viz::CopyOutputBitmapWithMetadata& result) {
+    const content::CopyFromSurfaceResult& result) {
   // `DecrementCapturerCount()` is called when `decrement_capturer_count_runner`
   // goes out of scope.
-  const SkBitmap& screenshot = result.bitmap;
+  const SkBitmap& screenshot = result.has_value() ? result->bitmap : SkBitmap();
 
   if (screenshot.drawsNothing() || !image_options.has_value()) {
     std::move(callback).Run(screenshot);

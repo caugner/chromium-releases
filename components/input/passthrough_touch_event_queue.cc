@@ -10,8 +10,8 @@
 
 #include "base/auto_reset.h"
 #include "base/feature_list.h"
-#include "base/memory/weak_auto_reset.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/typed_macros.h"
 #include "components/input/touch_timeout_handler.h"
@@ -246,26 +246,17 @@ bool PassthroughTouchEventQueue::Empty() const {
 void PassthroughTouchEventQueue::FlushQueue() {
   // Don't allow acks to be processed in AckCompletedEvents as that can
   // interfere with gesture event dispatch ordering.
-  base::WeakAutoReset reset_processing_acks(
-      weak_ptr_factory_.GetWeakPtr(),
-      &PassthroughTouchEventQueue::processing_acks_, true);
-
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
+  base::AutoReset<bool> process_acks(&processing_acks_, true);
   drop_remaining_touches_in_sequence_ = true;
   client_->FlushDeferredGestureQueue();
-  if (!weak_this) {
-    return;
-  }
-
   while (!outstanding_touches_.empty()) {
     auto iter = outstanding_touches_.begin();
     TouchEventWithLatencyInfoAndAckState event = *iter;
     outstanding_touches_.erase(iter);
-    if (event.ack_state() == blink::mojom::InputEventResultState::kUnknown) {
+    if (event.ack_state() == blink::mojom::InputEventResultState::kUnknown)
       event.set_ack_info(
           blink::mojom::InputEventResultSource::kBrowser,
           blink::mojom::InputEventResultState::kNoConsumerExists);
-    }
     AckTouchEventToClient(event, event.ack_source(), event.ack_state());
   }
 }
@@ -293,11 +284,7 @@ void PassthroughTouchEventQueue::AckCompletedEvents() {
     TRACE_EVENT_INSTANT("input", "ProcessingAcksAlready");
     return;
   }
-  base::WeakAutoReset reset_processing_acks(
-      weak_ptr_factory_.GetWeakPtr(),
-      &PassthroughTouchEventQueue::processing_acks_, true);
-
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
+  base::AutoReset<bool> process_acks(&processing_acks_, true);
   while (!outstanding_touches_.empty()) {
     auto iter = outstanding_touches_.begin();
     if (iter->ack_state() == blink::mojom::InputEventResultState::kUnknown) {
@@ -307,9 +294,6 @@ void PassthroughTouchEventQueue::AckCompletedEvents() {
     TouchEventWithLatencyInfoAndAckState event = *iter;
     outstanding_touches_.erase(iter);
     AckTouchEventToClient(event, event.ack_source(), event.ack_state());
-    if (!weak_this) {
-      return;
-    }
   }
 }
 
@@ -336,15 +320,22 @@ void PassthroughTouchEventQueue::SendTouchEventImmediately(
       touch->event.GetType() != WebInputEvent::Type::kTouchStart)
     touch->event.dispatch_type = WebInputEvent::DispatchType::kEventNonBlocking;
 
-  if (touch->event.GetType() == WebInputEvent::Type::kTouchStart)
+  if (touch->event.GetType() == WebInputEvent::Type::kTouchStart) {
     touch->event.touch_start_or_first_touch_move = true;
+    any_touchmove_moved_beyond_slop_region_ = false;
+  }
 
   // For touchmove events, compare touch points position from current event
   // to last sent event and update touch points state.
   if (touch->event.GetType() == WebInputEvent::Type::kTouchMove) {
     CHECK(last_sent_touchevent_);
-    if (last_sent_touchevent_->GetType() == WebInputEvent::Type::kTouchStart)
+    if (last_sent_touchevent_->GetType() == WebInputEvent::Type::kTouchStart ||
+        (last_sent_touchevent_->GetType() == WebInputEvent::Type::kTouchMove &&
+         !any_touchmove_moved_beyond_slop_region_)) {
       touch->event.touch_start_or_first_touch_move = true;
+      any_touchmove_moved_beyond_slop_region_ |=
+          touch->event.moved_beyond_slop_region;
+    }
     for (unsigned int i = 0; i < last_sent_touchevent_->touches_length; ++i) {
       const WebTouchPoint& last_touch_point = last_sent_touchevent_->touches[i];
       // Touches with same id may not have same index in Touches array.

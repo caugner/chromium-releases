@@ -57,14 +57,14 @@
 #include "chrome/browser/ui/webui/new_tab_page/ntp_promo/ntp_promo.mojom.h"
 #include "chrome/browser/ui/webui/new_tab_page_third_party/new_tab_page_third_party_ui.h"
 #include "chrome/browser/ui/webui/ntp_microsoft_auth/ntp_microsoft_auth_untrusted_ui.h"
+#include "chrome/browser/ui/webui/omnibox/logging/logs.mojom.h"
+#include "chrome/browser/ui/webui/omnibox/omnibox_ui.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_ui.h"
 #include "chrome/browser/ui/webui/on_device_internals/on_device_internals_ui.h"
 #include "chrome/browser/ui/webui/password_manager/password_manager_ui.h"
 #include "chrome/browser/ui/webui/privacy_sandbox/privacy_sandbox_internals_ui.h"
 #include "chrome/browser/ui/webui/privacy_sandbox/private_state_tokens/private_state_tokens.mojom.h"
 #include "chrome/browser/ui/webui/privacy_sandbox/related_website_sets/related_website_sets.mojom.h"
-#include "chrome/browser/ui/webui/reload_button/reload_button.mojom.h"
-#include "chrome/browser/ui/webui/reload_button/reload_button_ui.h"
 #include "chrome/browser/ui/webui/search_engine_choice/search_engine_choice.mojom.h"  // nogncheck crbug.com/1125897
 #include "chrome/browser/ui/webui/search_engine_choice/search_engine_choice_ui.h"
 #include "chrome/browser/ui/webui/settings/settings_ui.h"
@@ -88,6 +88,8 @@
 #include "chrome/browser/ui/webui/web_app_internals/web_app_internals.mojom.h"
 #include "chrome/browser/ui/webui/web_app_internals/web_app_internals_ui.h"
 #include "chrome/browser/ui/webui/webui_gallery/webui_gallery_ui.h"
+#include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar.mojom.h"
+#include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar_ui.h"
 #include "chrome/browser/ui/webui_browser/webui_browser.h"
 #include "chrome/browser/ui/webui_browser/webui_browser_ui.h"
 #include "chrome/common/chrome_features.h"
@@ -139,8 +141,15 @@
 #include "chrome/browser/ui/webui/signin/history_sync_optin/history_sync_optin_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_customization_ui.h"
 #include "chrome/browser/ui/webui/signin/profile_picker_ui.h"
+#include "chrome/browser/ui/webui/updater/updater_ui.h"
+#include "chrome/browser/ui/webui/updater/updater_ui.mojom.h"
 #include "chrome/browser/ui/webui/whats_new/whats_new_ui.h"
 #endif
+
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/ui/webui/unexportable_keys_internals/unexportable_keys_internals.mojom.h"
+#include "chrome/browser/ui/webui/unexportable_keys_internals/unexportable_keys_internals_ui.h"
+#endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/webui/diagnostics_ui/diagnostics_ui.h"
@@ -525,6 +534,8 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
   if (is_contextual_tasks_enabled) {
     RegisterWebUIControllerInterfaceBinder<
         contextual_tasks::mojom::PageHandlerFactory, ContextualTasksUI>(map);
+    RegisterWebUIControllerInterfaceBinder<
+        omnibox::logging::mojom::PageHandlerFactory, OmniboxUI>(map);
   }
 
   // Registering bindings for all WebUIControllers, even if only one of the
@@ -574,6 +585,17 @@ void PopulateChromeWebUIFrameBindersPartsDesktop(
             ContextualTasksInternalsPageHandlerFactory,
         ContextualTasksUI>(map);
   }
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+  RegisterWebUIControllerInterfaceBinder<updater_ui::mojom::PageHandlerFactory,
+                                         UpdaterUI>(map);
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+
+#if BUILDFLAG(IS_MAC)
+  RegisterWebUIControllerInterfaceBinder<
+      unexportable_keys_internals::mojom::PageHandlerFactory,
+      UnexportableKeysInternalsUI>(map);
+#endif  // BUILDFLAG(IS_MAC)
 }
 
 void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
@@ -611,6 +633,21 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
                CustomizeColorSchemeModeHandlerFactory>()
       .Add<help_bubble::mojom::HelpBubbleHandlerFactory>();
 
+  if (webui_browser::IsWebUIBrowserEnabled()) {
+    registry.ForWebUI<WebUIBrowserUI>()
+        .Add<webui_browser::mojom::PageHandlerFactory>()
+        .Add<bookmark_bar::mojom::PageHandlerFactory>()
+        .Add<extensions_bar::mojom::PageHandlerFactory>()
+        .Add<searchbox::mojom::PageHandler>()
+        .Add<tabs_api::mojom::TabStripService>()
+        .Add<tracked_element::mojom::TrackedElementHandler>();
+  }
+
+  if (features::IsWebUIReloadButtonEnabled()) {
+    registry.ForWebUI<WebUIToolbarUI>()
+        .Add<webui_toolbar::mojom::PageHandlerFactory>();
+  }
+
   // TODO(crbug.com/452983498): Migrate all remaining
   // RegisterWebUIControllerInterfaceBinder calls to registry.ForWebUI().Add()
   // calls.
@@ -618,6 +655,9 @@ void PopulateChromeWebUIFrameInterfaceBrokersTrustedPartsDesktop(
 
 void PopulateChromeWebUIFrameInterfaceBrokersUntrustedPartsDesktop(
     content::WebUIBrowserInterfaceBrokerRegistry& registry) {
+  registry.AddGlobal<color_change_listener::mojom::PageHandler>(
+      base::BindRepeating(&BindColorChangeListener));
+
   if (lens::features::IsLensOverlayEnabled()) {
     registry.ForWebUI<lens::LensSidePanelUntrustedUI>()
         .Add<lens::mojom::LensSidePanelPageHandlerFactory>()
@@ -643,21 +683,6 @@ void PopulateChromeWebUIFrameInterfaceBrokersUntrustedPartsDesktop(
   registry.ForWebUI<NtpMicrosoftAuthUntrustedUI>()
       .Add<new_tab_page::mojom::
                MicrosoftAuthUntrustedDocumentInterfacesFactory>();
-
-  if (webui_browser::IsWebUIBrowserEnabled()) {
-    registry.ForWebUI<WebUIBrowserUI>()
-        .Add<webui_browser::mojom::PageHandlerFactory>()
-        .Add<bookmark_bar::mojom::PageHandlerFactory>()
-        .Add<extensions_bar::mojom::PageHandlerFactory>()
-        .Add<searchbox::mojom::PageHandler>()
-        .Add<tabs_api::mojom::TabStripService>()
-        .Add<tracked_element::mojom::TrackedElementHandler>();
-  }
-
-  if (features::IsWebUIReloadButtonEnabled()) {
-    registry.ForWebUI<ReloadButtonUI>()
-        .Add<reload_button::mojom::PageHandlerFactory>();
-  }
 }
 
 }  // namespace chrome::internal

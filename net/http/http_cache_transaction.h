@@ -171,7 +171,6 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
       base::RepeatingCallback<bool()> callback) override;
   ConnectionAttempts GetConnectionAttempts() const override;
   void CloseConnectionOnDestruction() override;
-  bool IsMdlMatchForMetrics() const override;
 
   // Invoked when parallel validation cannot proceed due to response failure
   // and this transaction needs to be restarted.
@@ -214,10 +213,6 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
     int64_t received_body_bytes = 0;
     ConnectionAttempts old_connection_attempts;
     IPEndPoint old_remote_endpoint;
-    // For metrics. Can be removed when associated histograms are removed.
-    // Records whether any destroyed network transactions' ProxyInfo determined
-    // the request was to a Masked Domain List-covered domain.
-    bool previous_mdl_match_for_metrics = false;
   };
 
   enum State {
@@ -762,7 +757,6 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // Length of the buffer passed in Read().
   int read_buf_len_ = 0;
 
-  scoped_refptr<IOBuffer> cache_buf_;
   int io_buf_len_ = 0;
   int read_offset_ = 0;
   int effective_load_flags_ = 0;

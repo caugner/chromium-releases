@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "ash/constants/web_app_id_constants.h"
 #include "ash/webui/projector_app/public/cpp/projector_app_constants.h"
@@ -195,7 +196,7 @@ bool IsCapturableLinkNavigation(ui::PageTransition page_transition,
     return false;
   }
 
-  if (base::to_underlying(ui::PageTransitionGetQualifier(page_transition)) !=
+  if (std::to_underlying(ui::PageTransitionGetQualifier(page_transition)) !=
       0) {
     // Qualifiers indicate that this navigation was the result of a click on a
     // forward/back button, or typing in the URL bar. Don't handle any of those
@@ -580,9 +581,7 @@ ThrottleCheckResult ChromeOsReimplNavigationCapturingThrottle::HandleRequest() {
   // Close existing web contents if it is around.
   std::unique_ptr<ScopedKeepAlive> browser_keep_alive;
   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive;
-  bool closed_web_contents = IsEmptyDanglingWebContentsAfterLinkCapture();
-  debug_data->Set("closed_web_contents", closed_web_contents);
-  debug_data->Set("!result", "launched");
+  bool closed_web_contents = false;
   if (IsEmptyDanglingWebContentsAfterLinkCapture()) {
     browser_keep_alive = std::make_unique<ScopedKeepAlive>(
         KeepAliveOrigin::APP_LAUNCH, KeepAliveRestartOption::ENABLED);
@@ -590,12 +589,10 @@ ThrottleCheckResult ChromeOsReimplNavigationCapturingThrottle::HandleRequest() {
       profile_keep_alive = std::make_unique<ScopedProfileKeepAlive>(
           &profile_.get(), ProfileKeepAliveOrigin::kAppWindow);
     }
-    auto weak_this = weak_ptr_factory_.GetWeakPtr();
     handle->GetWebContents()->ClosePage();
-    if (!weak_this) {
-      return content::NavigationThrottle::CANCEL_AND_IGNORE;
-    }
+    closed_web_contents = true;
   }
+  debug_data->Set("closed_web_contents", closed_web_contents);
   base::OnceClosure launch_callback = base::BindOnce(
       [](std::unique_ptr<ScopedKeepAlive> browser_keep_alive,
          std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive,
@@ -612,6 +609,7 @@ ThrottleCheckResult ChromeOsReimplNavigationCapturingThrottle::HandleRequest() {
       std::move(browser_keep_alive), std::move(profile_keep_alive),
       closed_web_contents);
 
+  debug_data->Set("!result", "launched");
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&LaunchApp, proxy->GetWeakPtr(), launch_app_id,

@@ -15,18 +15,18 @@ export function getHtml(this: ContextualTasksAppElement) {
     <div id="toolbarOverlay">
       <top-toolbar id="toolbar"
           .title="${this.threadTitle_}"
-          .attachedTabs="${this.contextTabs_}"
           .darkMode="${this.darkMode_}"
           .isAiPage="${this.isAiPage_}"
           @new-thread-click="${this.onNewThreadClick_}">
       </top-toolbar>
     </div>
   `}
-  <webview id="threadFrame"></webview>
-  <div class="flex-center">
+  <webview id="threadFrame" allowtransparency="on" partition="persist:contextual-tasks"></webview>
+  <ghost-loader id="ghostLoader"></ghost-loader>
+  <div class="flex-center" id="flexCenterContainer">
     <div id="composeboxHeaderWrapper"
-        ?hidden="${this.isInBasicMode_}">
-      <h1 class="thread-header">
+        ?hidden="${this.isInBasicMode_ && !this.enableBasicModeZOrder_}">
+      <h1 class="thread-header" id="composeboxHeader">
           ${this.friendlyZeroStateTitle}
           ${this.friendlyZeroStateSubtitle.length > 0 ?
               html`<br>
@@ -34,10 +34,11 @@ export function getHtml(this: ContextualTasksAppElement) {
       </h1>
     </div>
     <contextual-tasks-composebox id="composebox"
-          ?hidden="${this.isInBasicMode_}"
+          ?hidden="${this.isInBasicMode_ && !this.enableBasicModeZOrder_}"
           .isZeroState="${this.isZeroState_}"
           .isSidePanel="${!this.isShownInTab_}"
-          .isLensOverlayShowing="${this.isLensOverlayShowing_}">
+          .enableNativeZeroStateSuggestions=
+              "${this.enableNativeZeroStateSuggestions}">
     </contextual-tasks-composebox>
   </div>
   <error-page id="errorPage"></error-page>

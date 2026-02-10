@@ -18,9 +18,8 @@ namespace content {
 // This is a base class for dedicated (but not shared or service) workers and
 // for common worklets. See DedicatedWorkerDevToolsAgentHost and
 // WorkletDevToolsAgentHost for concrete implementation.
-class CONTENT_EXPORT WorkerOrWorkletDevToolsAgentHost
-    : public DevToolsAgentHostImpl,
-      public RenderProcessHostObserver {
+class WorkerOrWorkletDevToolsAgentHost : public DevToolsAgentHostImpl,
+                                         RenderProcessHostObserver {
  public:
   WorkerOrWorkletDevToolsAgentHost(
       const WorkerOrWorkletDevToolsAgentHost&) = delete;
@@ -79,7 +78,6 @@ class CONTENT_EXPORT WorkerOrWorkletDevToolsAgentHost
   base::OnceCallback<void(DevToolsAgentHostImpl*)> destroyed_callback_;
   base::ScopedObservation<RenderProcessHost, RenderProcessHostObserver>
       process_observation_{this};
-  scoped_refptr<WorkerOrWorkletDevToolsAgentHost> self_keepalive_;
 };
 
 }  // namespace content

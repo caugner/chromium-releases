@@ -342,6 +342,7 @@
 <translation id="2201071101391734388">Vor Kurzem aufgenommenes Foto <ph name="INDEX" /> von <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Google Tasks minimieren</translation>
 <translation id="2208323208084708176">Unified Desktop-Modus</translation>
+<translation id="2210311543574621570">Die Zwischenablage wird angezeigt, wenn du Strg + V gedrückt hältst. Du kannst diese Tastenkombination deaktivieren, indem du unter „chrome://flags“ das Flag „#clipboard-history-longpress“ deaktivierst.</translation>
 <translation id="2215920961700443347">Kein Internet. Stell eine Internetverbindung her und versuche es noch einmal.</translation>
 <translation id="2222841058024245321">Desktop 7</translation>
 <translation id="2223384056430485343">In einem Splitscreen</translation>
@@ -373,7 +374,7 @@
 <translation id="2322173485024759474">Zurück um einen Buchstaben</translation>
 <translation id="2326112202058075478">Mehr Emojis anzeigen</translation>
 <translation id="2335091074961603075">Auf deinem Chromebook oder Bluetooth-Gerät wird eine ältere Bluetooth-Version genutzt. Verwende für eine bessere Audioqualität das interne Mikrofon.</translation>
-<translation id="2339073806695260576">Tippe auf die Eingabestift-Schaltfläche in der Ablage, um Notizen oder Screenshots zu erstellen, den Laserpointer oder die Vergrößerungsfunktion zu verwenden.</translation>
+<translation id="2339073806695260576">Tippe auf den Eingabestift-Button in der Ablage, um Notizen oder Screenshots zu erstellen, den Laserpointer oder die Vergrößerungsfunktion zu verwenden.</translation>
 <translation id="2341729377289034582">Vertikale Ausrichtung aktiv</translation>
 <translation id="2345226652884463045">Eingabetaste oder Suchtaste + Leertaste drücken, um den zu bearbeitenden Text auszuwählen.</translation>
 <translation id="2349785431103945039">Hotspot-Details anzeigen. Stelle eine Verbindung zu deinem Mobilfunknetz her, um den Hotspot zu verwenden.</translation>
@@ -874,6 +875,7 @@ Schließe dein Gerät an eine Steckdose an.</translation>
 <translation id="397105322502079400">Wird berechnet...</translation>
 <translation id="397726367135689299">Das Aufladen des Akkus kann unzuverlässig ablaufen.</translation>
 <translation id="3977512764614765090">Der Akkustand ist <ph name="PERCENTAGE" /> %. Der Akku wird aufgeladen.</translation>
+<translation id="3978162107953847778">Füge Links ganz einfach hinzu, etwa aus deinem Browserverlauf oder Google Drive. Du kannst auch Emojis, Bilddateien und weitere Elemente einfügen. <ph name="LINK_TO_LEARN_MORE" /></translation>
 <translation id="3982013579989864579">Audioausgabe wechseln?</translation>
 <translation id="3984536049089846927">Nächste Seite</translation>
 <translation id="3986082989454912832">Annehmen</translation>
@@ -940,7 +942,7 @@ Einige Funktionen sind eingeschränkt, um die Akkulaufzeit zu verlängern.</tran
 <translation id="4193969623755915875">Öffne „Hilfe“ mit „<ph name="NEW_SHORTCUT" />“ in der App „Entdecken“.</translation>
 <translation id="4195579532193195633">Aktuelle Version: <ph name="VERSION_NAME" /> (<ph name="OFFICIAL_STATUS" />) <ph name="CHANNEL_NAME" /> <ph name="PROCESSOR_VARIATION" /></translation>
 <translation id="4195814663415092787">Zuletzt angesehene Seiten öffnen</translation>
-<translation id="4195877955194704651">Schaltfläche für automatische Klicks</translation>
+<translation id="4195877955194704651">Button für automatische Klicks</translation>
 <translation id="4197790712631116042">Aus</translation>
 <translation id="4201033867194214117">"<ph name="FEATURE_NAME" />" ist nicht verfügbar.</translation>
 <translation id="4201051445878709314">Vorherigen Monat anzeigen</translation>
@@ -1024,7 +1026,6 @@ Einige Funktionen sind eingeschränkt, um die Akkulaufzeit zu verlängern.</tran
 <translation id="4449692009715125625">{NUM_NOTIFICATIONS,plural, =1{1 wichtige Benachrichtigung}other{# wichtige Benachrichtigungen}}</translation>
 <translation id="4450893287417543264">Nicht mehr anzeigen</translation>
 <translation id="4451374464530248585">Die Tastenkombination Alt + Abwärtspfeil hat sich geändert. Wenn du jetzt die Seite-nach-unten-Taste benötigst, drücke die <ph name="LAUNCHER_KEY_NAME" />-Taste + Abwärtspfeil.</translation>
-<translation id="4453876312474547652">Die Zwischenablage wird angezeigt, wenn du Strg + V gedrückt hältst. Du kannst diese Tastenkombination deaktivieren, indem du unter „chrome://flags“ (bei Verwendung von Lacros unter „os://flags“) das Flag „#clipboard-history-longpress“ deaktivierst.</translation>
 <translation id="445765352722456792">Vorschläge anpassen</translation>
 <translation id="4458688154122353284">Bildschirmaufzeichnung beenden</translation>
 <translation id="445923051607553918">Mit WLAN verbinden</translation>
@@ -1600,6 +1601,7 @@ Keine Geräte verbunden.</translation>
 <translation id="6260038345397266744"><ph name="TITLE" />. <ph name="DESCRIPTION" /></translation>
 <translation id="6267036997247669271"><ph name="NAME" />: Wird aktiviert...</translation>
 <translation id="6274202259872570803">Screencast</translation>
+<translation id="6274422179279280249">Füge Links, Emojis und weitere Elemente ein. Du kannst beim Schreiben auch Unterstützung von Google AI erhalten. <ph name="LINK_TO_LEARN_MORE" /></translation>
 <translation id="6276708887952587684">Seiten-Quelltext anzeigen</translation>
 <translation id="6285871695023807425">Zum Kalender hinzufügen</translation>
 <translation id="6288235558961782912"><ph name="USER_EMAIL_ADDRESS" /> kann später mit der Zustimmung eines Elternteils wieder hinzugefügt werden.</translation>
@@ -2190,6 +2192,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8237964652943995219">Nächster Desktop: <ph name="DESK_NAME" />. Desktop <ph name="DESK_INDEX" /> von <ph name="DESK_COUNT" />.</translation>
 <translation id="8238817965863339552">Sieh dir eine kurze Einführung zur Bedienung deines <ph name="PRODUCT_NAME" /> an. Nach 5 Schritten bist du startklar.</translation>
 <translation id="8239034820133090126">Desktop rechts aktivieren</translation>
+<translation id="8241650983304689286">Tab zu neuer geteilter Ansicht hinzufügen</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, Signalstärke bei <ph name="SIGNAL_STRENGTH" />, Smartphone-Akku bei <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Alle Google Drive-Inhalte anzeigen</translation>
 <translation id="8257510091797044096">Gerät einrichten</translation>
@@ -2346,7 +2349,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8825863694328519386">Von links nach rechts wischen, um zurückzugehen</translation>
 <translation id="8832513206237979203">Lesezeichenleiste ein- oder ausblenden</translation>
 <translation id="8834539327799336565">Derzeit verbunden</translation>
-<translation id="8841375032071747811">Schaltfläche "Zurück"</translation>
+<translation id="8841375032071747811">Button „Zurück“</translation>
 <translation id="8843682306134542540">Rotationssperre an/aus. <ph name="STATE_TEXT" /></translation>
 <translation id="8845001906332463065">Hilfe aufrufen</translation>
 <translation id="8847100217801213944">Temperatur in Fahrenheit anzeigen</translation>

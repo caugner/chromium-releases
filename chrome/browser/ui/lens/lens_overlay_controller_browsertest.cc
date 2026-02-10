@@ -16,6 +16,7 @@
 #include "base/files/file_util.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/path_service.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/test/bind.h"
@@ -35,7 +36,6 @@
 #include "chrome/browser/lens/core/mojom/overlay_object.mojom.h"
 #include "chrome/browser/lens/core/mojom/page_content_type.mojom.h"
 #include "chrome/browser/lens/core/mojom/polygon.mojom.h"
-#include "chrome/browser/lens/core/mojom/text.mojom-forward.h"
 #include "chrome/browser/lens/core/mojom/text.mojom.h"
 #include "chrome/browser/pdf/pdf_extension_test_base.h"
 #include "chrome/browser/profiles/profile.h"
@@ -3637,7 +3637,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   // Loading another url in the side panel should update the results page.
   const GURL third_search_url(
       "https://www.google.com/"
-      "search?source=chrome.cr.menu&vsint=CAMiBioEa2l3aSoKCgIIBxICCAMgAg&q="
+      "search?source=chrome.cr.menu&vsint=CAMiBioEa2l3aSoMCgIIBxICCAMYACAC&q="
       "kiwi&lns_fp=1"
       "&lns_mode=text&lns_surface=42&cs=0&gsc=2&hl=en-US");
   content::TestNavigationObserver third_search_observer(
@@ -3787,7 +3787,7 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
   // Loading a second url in the side panel should show the results page.
   const GURL second_search_url(
       "https://www.google.com/"
-      "search?source=chrome.cr.ctxi&vsint=CAMiBioEa2l3aSoKCgIIBxICCAMgAg&q="
+      "search?source=chrome.cr.ctxi&vsint=CAMiBioEa2l3aSoMCgIIBxICCAMYACAC&q="
       "kiwi&lns_fp="
       "1&lns_mode=text&lns_surface=42&cs=0&gsc=2&hl=en-US");
   content::TestNavigationObserver second_observer(
@@ -4524,7 +4524,14 @@ IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, SidePanelOpen) {
             SidePanel::State::kClosed);
 }
 
-IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest, FindBarClosesOverlay) {
+// TODO(crbug.com/471036459): Reenable this test on Mac
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_FindBarClosesOverlay DISABLED_FindBarClosesOverlay
+#else
+#define MAYBE_FindBarClosesOverlay FindBarClosesOverlay
+#endif
+IN_PROC_BROWSER_TEST_F(LensOverlayControllerBrowserTest,
+                       MAYBE_FindBarClosesOverlay) {
   WaitForPaint();
 
   // State should start in off.
@@ -8862,8 +8869,7 @@ class LensOverlayControllerSideBySideBrowserTest
  protected:
   void SetupFeatureList() override {
     feature_list_.InitWithFeaturesAndParameters(
-        {{lens::features::kLensOverlay, {{"use-blur", "true"}}},
-         {features::kSideBySide, {}}},
+        {{lens::features::kLensOverlay, {{"use-blur", "true"}}}},
         {contextual_tasks::kContextualTasks,
          lens::features::kLensSearchZeroStateCsb});
   }

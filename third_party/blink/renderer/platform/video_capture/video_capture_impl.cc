@@ -139,11 +139,11 @@ struct VideoCaptureImpl::BufferContext
     return gmb_resources_->gpu_memory_buffer_handle.Clone();
   }
 
-  static void MailboxHolderReleased(scoped_refptr<BufferContext> buffer_context,
-                                    const gpu::SyncToken& release_sync_token) {
+  static void SharedImageReleased(scoped_refptr<BufferContext> buffer_context,
+                                  const gpu::SyncToken& release_sync_token) {
     if (!buffer_context->media_task_runner_->RunsTasksInCurrentSequence()) {
       buffer_context->media_task_runner_->PostTask(
-          FROM_HERE, base::BindOnce(&BufferContext::MailboxHolderReleased,
+          FROM_HERE, base::BindOnce(&BufferContext::SharedImageReleased,
                                     buffer_context, release_sync_token));
       return;
     }
@@ -289,21 +289,6 @@ bool VideoCaptureImpl::ProcessBuffer(
             (media::VideoFrame::NumPlanes(
                  video_frame_init_data.ready_buffer->info->pixel_format) == 3))
             << "Currently, only YUV formats support custom strides.";
-        const auto pixel_format =
-            video_frame_init_data.ready_buffer->info->pixel_format;
-        const auto coded_width =
-            video_frame_init_data.ready_buffer->info->coded_size.width();
-        const auto& strides =
-            video_frame_init_data.ready_buffer->info->strides->stride_by_plane;
-        CHECK_GE(static_cast<size_t>(strides[0]),
-                 media::VideoFrame::RowBytes(media::VideoFrame::Plane::kY,
-                                             pixel_format, coded_width));
-        CHECK_GE(static_cast<size_t>(strides[1]),
-                 media::VideoFrame::RowBytes(media::VideoFrame::Plane::kU,
-                                             pixel_format, coded_width));
-        CHECK_GE(static_cast<size_t>(strides[2]),
-                 media::VideoFrame::RowBytes(media::VideoFrame::Plane::kV,
-                                             pixel_format, coded_width));
         const size_t y_size =
             (media::VideoFrame::Rows(
                  media::VideoFrame::Plane::kY,
@@ -550,6 +535,10 @@ bool VideoCaptureImpl::BindVideoFrameOnMediaTaskRunner(
 
   auto size = gfx::Size(video_frame_init_data.ready_buffer->info->coded_size);
   auto color_space = video_frame_init_data.ready_buffer->info->color_space;
+  if (!color_space.IsValid()) {
+    color_space = gfx::ColorSpace::CreateREC601();
+  }
+
   auto& shared_image =
       video_frame_init_data.buffer_context->gmb_resources()->shared_image;
   // If there is size or color space mismatch, recreate shared image with new
@@ -603,7 +592,7 @@ bool VideoCaptureImpl::BindVideoFrameOnMediaTaskRunner(
 
   auto frame = media::VideoFrame::WrapMappableSharedImage(
       shared_image, sync_token,
-      base::BindOnce(&BufferContext::MailboxHolderReleased,
+      base::BindOnce(&BufferContext::SharedImageReleased,
                      video_frame_init_data.buffer_context),
       gfx::Rect(video_frame_init_data.ready_buffer->info->visible_rect),
       video_frame_init_data.ready_buffer->info->visible_rect.size(),
@@ -1017,7 +1006,7 @@ void VideoCaptureImpl::OnBufferDestroyed(int32_t buffer_id) {
   const auto& cb_iter = client_buffers_.find(buffer_id);
   if (cb_iter != client_buffers_.end()) {
     // If the BufferContext is non-null, the GpuMemoryBufferHandle-backed frames
-    // can have more than one reference (held by MailboxHolderReleased).
+    // can have more than one reference (held by SharedImageReleased).
     // Otherwise, only one reference should be held.
     DCHECK(!cb_iter->second.get() ||
            cb_iter->second->buffer_type() ==
@@ -1067,7 +1056,7 @@ void VideoCaptureImpl::OnAllClientsFinishedConsumingFrame(
   buffer_context = nullptr;
   // For non-GMB case, there should be only one reference, from
   // |client_buffers_|. This DCHECK is invalid for GpuMemoryBufferHandle-backed
-  // frames, because MailboxHolderReleased may hold on to a reference to
+  // frames, because SharedImageReleased may hold on to a reference to
   // |buffer_context|.
   if (buffer_raw_ptr->buffer_type() !=
       VideoFrameBufferHandleType::kGpuMemoryBufferHandle) {

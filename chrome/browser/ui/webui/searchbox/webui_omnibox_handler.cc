@@ -23,7 +23,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_pedal_implementations.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/omnibox_utils.h"
-#include "chrome/browser/ui/tabs/tab_renderer_data.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/location_bar/selected_keyword_view.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/contextual_searchbox_handler.h"
@@ -49,6 +49,7 @@
 #include "components/omnibox/browser/omnibox_prefs.h"
 #include "components/omnibox/browser/search_suggestion_parser.h"
 #include "components/omnibox/browser/suggestion_answer.h"
+#include "components/omnibox/browser/vector_icons.h"
 #include "components/omnibox/common/omnibox_features.h"
 #include "components/prefs/pref_service.h"
 #include "components/profile_metrics/browser_profile_type.h"
@@ -202,6 +203,12 @@ void WebuiOmniboxHandler::OnKeywordStateChanged(bool is_keyword_selected) {
   page_->SetKeywordSelected(is_keyword_selected);
 }
 
+void WebuiOmniboxHandler::OnCharTyped(base::TimeTicks timestamp) {
+  if (metrics_reporter_ && !metrics_reporter_->HasLocalMark("CharTyped")) {
+    metrics_reporter_->Mark("CharTyped", timestamp);
+  }
+}
+
 void WebuiOmniboxHandler::OnSelectionChanged(
     OmniboxPopupSelection old_selection,
     OmniboxPopupSelection selection) {
@@ -287,18 +294,12 @@ void WebuiOmniboxHandler::AddTabContext(int32_t tab_id,
                                         AddTabContextCallback callback) {
   auto* browser_window_interface =
       webui::GetBrowserWindowInterface(web_contents_.get());
-  auto* tab_strip_model = browser_window_interface->GetTabStripModel();
   const tabs::TabHandle handle = tabs::TabHandle(tab_id);
   tabs::TabInterface* const tab = handle.Get();
   if (!tab) {
     std::move(callback).Run(std::nullopt);
     return;
   }
-
-  auto tab_strip_id = tab_strip_model->GetIndexOfTab(tab);
-
-  TabRendererData tab_renderer_data =
-      TabRendererData::FromTabInModel(tab_strip_model, tab_strip_id);
 
   SearchboxContextData* searchbox_context_data =
       browser_window_interface->GetFeatures().searchbox_context_data();
@@ -313,8 +314,8 @@ void WebuiOmniboxHandler::AddTabContext(int32_t tab_id,
 
   auto tab_attachment = searchbox::mojom::TabAttachment::New();
   tab_attachment->tab_id = tab_id;
-  tab_attachment->title = base::UTF16ToUTF8(tab_renderer_data.title);
-  tab_attachment->url = tab_renderer_data.last_committed_url;
+  tab_attachment->title = base::UTF16ToUTF8(TabUIHelper::From(tab)->GetTitle());
+  tab_attachment->url = tab->GetContents()->GetLastCommittedURL();
   context->file_infos.push_back(
       searchbox::mojom::SearchContextAttachment::NewTabAttachment(
           std::move(tab_attachment)));
@@ -388,25 +389,46 @@ WebuiOmniboxHandler::CreateAutocompleteMatch(
   return mojom_match;
 }
 
+std::string WebuiOmniboxHandler::AutocompleteIconToResourceName(
+    const gfx::VectorIcon& icon) const {
+  // The default icon for contextual suggestions is the subdirectory arrow right
+  // icon. If there is no header enabled (which is when the lens chip is not
+  // showing), use the search loupe instead.
+  const auto& input = autocomplete_controller()->input();
+  bool has_toolbelt_lens_action =
+      autocomplete_controller()->contextual_search_provider() &&
+      autocomplete_controller()
+          ->contextual_search_provider()
+          ->HasToolbeltLensAction();
+  const auto* client =
+      autocomplete_controller()->autocomplete_provider_client();
+  bool has_lens_search_chip =
+      client->IsOmniboxNextLensSearchChipEnabled() &&
+      ContextualSearchProvider::LensEntrypointEligible(input, client);
+  if (!(has_toolbelt_lens_action || has_lens_search_chip) &&
+      icon.name == omnibox::kSubdirectoryArrowRightIcon.name) {
+    return searchbox_internal::kSearchIconResourceName;
+  }
+
+  return SearchboxHandler::AutocompleteIconToResourceName(icon);
+}
+
 void WebuiOmniboxHandler::OnAimEligibilityChanged() {
+  auto* aim_eligibility_service =
+      AimEligibilityServiceFactory::GetForProfile(profile_);
+  if (!aim_eligibility_service) {
+    return;
+  }
+  InitializeInputStateModel();
+
   // Ignore the call until the page remote is bound and ready to receive calls.
   if (!IsRemoteBound()) {
     return;
   }
-
-  auto* aim_eligibility_service =
-      AimEligibilityServiceFactory::GetForProfile(profile_);
-  if (aim_eligibility_service) {
-    bool eligible = aim_eligibility_service->IsAimEligible();
-    page_->UpdateAimEligibility(eligible);
-  }
+  bool eligible = aim_eligibility_service->IsAimEligible();
+  page_->UpdateAimEligibility(eligible);
 }
 
 int WebuiOmniboxHandler::GetContextMenuMaxTabSuggestions() {
   return omnibox::kContextMenuMaxTabSuggestions.Get();
-}
-
-std::optional<lens::LensOverlayInvocationSource>
-WebuiOmniboxHandler::GetInvocationSource() const {
-  return lens::LensOverlayInvocationSource::kOmniboxContextualQuery;
 }

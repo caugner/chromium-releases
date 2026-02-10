@@ -727,13 +727,12 @@ void AccountSelectionModalView::OnContinueButtonClicked(
     return;
   }
 
+  owner_->OnAccountSelected(account, event);
   has_spinner_ = true;
 
   ReplaceButtonWithSpinner(continue_button_,
                            ui::kColorButtonForegroundProminent,
                            ui::kColorButtonBackgroundProminent);
-
-  owner_->OnAccountSelected(account, event);
 }
 
 void AccountSelectionModalView::OnUseOtherAccountButtonClicked(

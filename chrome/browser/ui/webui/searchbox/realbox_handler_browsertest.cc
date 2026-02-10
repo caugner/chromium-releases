@@ -28,11 +28,13 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_pedal_implementations.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/searchbox/searchbox_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/contextual_search/contextual_search_types.h"
 #include "components/omnibox/browser/actions/history_clusters_action.h"
 #include "components/omnibox/browser/actions/omnibox_action.h"
 #include "components/omnibox/browser/actions/omnibox_pedal.h"
@@ -77,9 +79,10 @@ class RealboxSearchBrowserTestPage : public searchbox::mojom::Page {
                     bool is_deletable) override {}
   void OnContextualInputStatusChanged(
       const base::UnguessableToken& token,
-      composebox_query::mojom::FileUploadStatus status,
-      std::optional<composebox_query::mojom::FileUploadErrorType> error_type)
+      contextual_search::FileUploadStatus status,
+      std::optional<contextual_search::FileUploadErrorType> error_type)
       override {}
+  void OnInputStateChanged(const omnibox::InputState& input_state) override {}
   void OnTabStripChanged() override {}
   void AddFileContext(
       const base::UnguessableToken& token,
@@ -207,10 +210,10 @@ IN_PROC_BROWSER_TEST_F(RealboxSearchPreloadWithSearchStatsBrowserTest,
 
   // Verify the prefetch and prerender URLs.
   // Only the prefetch URL should have the "pf=cs".
-  EXPECT_TRUE(base::Contains(prefetch_url.GetQuery(), "pf=cs&"));
-  EXPECT_FALSE(base::Contains(prerender_url.GetQuery(), "pf=cs&"));
-  EXPECT_TRUE(base::Contains(prefetch_url.GetQuery(), "gs_lcrp="));
-  EXPECT_TRUE(base::Contains(prerender_url.GetQuery(), "gs_lcrp="));
+  EXPECT_TRUE(prefetch_url.GetQuery().contains("pf=cs&"));
+  EXPECT_FALSE(prerender_url.GetQuery().contains("pf=cs&"));
+  EXPECT_TRUE(prefetch_url.GetQuery().contains("gs_lcrp="));
+  EXPECT_TRUE(prerender_url.GetQuery().contains("gs_lcrp="));
 
   // The prefetch should match the prerender.
   EXPECT_TRUE(IsSearchDestinationMatch(GetCanonicalSearchURL(prefetch_url),
@@ -223,13 +226,13 @@ IN_PROC_BROWSER_TEST_F(RealboxSearchPreloadWithoutSearchStatsBrowserTest,
 
   // Verify the prefetch and prerender URLs.
   // Only the prefetch URL should have the "pf=cs".
-  EXPECT_TRUE(base::Contains(prefetch_url.GetQuery(), "pf=cs&"));
-  EXPECT_FALSE(base::Contains(prerender_url.GetQuery(), "pf=cs&"));
+  EXPECT_TRUE(prefetch_url.GetQuery().contains("pf=cs&"));
+  EXPECT_FALSE(prerender_url.GetQuery().contains("pf=cs&"));
   // The prefetch URL should not have the "gs_lcrp" if
   // switches::kRemoveSearchboxStatsParamFromPrefetchRequests is true, while the
   // prerender URL should always have that.
-  EXPECT_FALSE(base::Contains(prefetch_url.GetQuery(), "gs_lcrp="));
-  EXPECT_TRUE(base::Contains(prerender_url.GetQuery(), "gs_lcrp="));
+  EXPECT_FALSE(prefetch_url.GetQuery().contains("gs_lcrp="));
+  EXPECT_TRUE(prerender_url.GetQuery().contains("gs_lcrp="));
 
   // The prefetch should match the prerender.
   EXPECT_TRUE(IsSearchDestinationMatch(GetCanonicalSearchURL(prefetch_url),
@@ -239,7 +242,12 @@ IN_PROC_BROWSER_TEST_F(RealboxSearchPreloadWithoutSearchStatsBrowserTest,
 class RealboxHandlerTest : public InProcessBrowserTest,
                            public testing::WithParamInterface<bool> {
  public:
-  RealboxHandlerTest() = default;
+  RealboxHandlerTest() {
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features*/ {omnibox::kWebUIOmniboxPopup,
+                              omnibox::internal::kWebUIOmniboxAimPopup},
+        /*disabled_features*/ {});
+  }
 
   RealboxHandlerTest(const RealboxHandlerTest&) = delete;
   RealboxHandlerTest& operator=(const RealboxHandlerTest&) = delete;
@@ -263,6 +271,8 @@ class RealboxHandlerTest : public InProcessBrowserTest,
   }
 
   void TearDownOnMainThread() override { handler_.reset(); }
+
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(RealboxHandlerTest, RealboxUpdatesEditModelInput) {
@@ -395,7 +405,8 @@ IN_PROC_BROWSER_TEST_P(RealboxHandlerTest, MatchVectorIcons) {
         // An empty resource name is effectively a blank icon.
         EXPECT_TRUE(svg_name.empty());
       } else if (is_bookmark) {
-        EXPECT_EQ("//resources/images/icon_bookmark.svg", svg_name);
+        EXPECT_EQ("//resources/cr_components/searchbox/icons/bookmark_cr23.svg",
+                  svg_name);
       } else {
         EXPECT_FALSE(svg_name.empty());
       }
@@ -415,7 +426,8 @@ IN_PROC_BROWSER_TEST_P(RealboxHandlerTest, AnswerVectorIcons) {
     const std::string& svg_name =
         handler_->AutocompleteIconToResourceName(vector_icon);
     if (is_bookmark) {
-      EXPECT_EQ("//resources/images/icon_bookmark.svg", svg_name);
+      EXPECT_EQ("//resources/cr_components/searchbox/icons/bookmark_cr23.svg",
+                svg_name);
     } else {
       EXPECT_FALSE(svg_name.empty());
       EXPECT_NE("search.svg", svg_name);

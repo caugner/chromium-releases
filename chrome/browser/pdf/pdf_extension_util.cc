@@ -42,6 +42,11 @@
 #include "chromeos/ash/components/browser_context_helper/browser_context_types.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
+#if BUILDFLAG(ENABLE_GLIC)
+#include "chrome/browser/glic/public/glic_enabling.h"
+#include "chrome/common/chrome_features.h"
+#endif  // BUILDFLAG(ENABLE_GLIC)
+
 #if BUILDFLAG(ENABLE_PDF_INK2)
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -132,6 +137,10 @@ base::Value::Dict GetPdfViewerStrings() {
       {"tooltipRotateCCW", IDS_PDF_TOOLTIP_ROTATE_CCW},
       {"tooltipThumbnails", IDS_PDF_TOOLTIP_THUMBNAILS},
       {"zoomTextInputAriaLabel", IDS_PDF_ZOOM_TEXT_INPUT_ARIA_LABEL},
+#if BUILDFLAG(ENABLE_GLIC)
+      {"glicSummarize", IDS_PDF_GLIC_SUMMARIZE},
+      {"glicSummarizeTooltip", IDS_PDF_GLIC_SUMMARIZE_TOOLTIP},
+#endif  // BUILDFLAG(ENABLE_GLIC)
 #if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
       {"saveToDriveDialogCancelUploadButtonLabel",
        IDS_SAVE_TO_DRIVE_DIALOG_CANCEL_UPLOAD_BUTTON_LABEL},
@@ -317,6 +326,10 @@ base::Value::Dict GetAdditionalData(content::BrowserContext* context) {
       "pdfSearchifySaveEnabled",
       base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSearchifySave));
 
+#if BUILDFLAG(ENABLE_GLIC)
+  dict.Set("pdfGlicSummarizeEnabled", ShouldShowGlicSummarizeButton(context));
+#endif  // BUILDFLAG(ENABLE_GLIC)
+
 #if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
   const bool save_to_drive_enabled =
       base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSaveToDrive) &&
@@ -409,6 +422,26 @@ void DispatchShouldUpdateViewportEvent(content::RenderFrameHost* embedder_host,
   extensions::EventRouter* event_router = extensions::EventRouter::Get(context);
   event_router->DispatchEventToExtension(extension_misc::kPdfExtensionId,
                                          std::move(event));
+}
+
+bool ShouldShowGlicSummarizeButton(content::BrowserContext* context) {
+#if BUILDFLAG(ENABLE_GLIC)
+  Profile* profile = Profile::FromBrowserContext(context);
+  if (!glic::GlicEnabling::IsEnabledForProfile(profile)) {
+    return false;
+  }
+
+  // If the user has not passed FRE, and `kPdfGlicSummarizeFre` is false, then
+  // don't show the button.
+  if (!base::FeatureList::IsEnabled(features::kPdfGlicSummarizeFre) &&
+      !glic::GlicEnabling::HasConsentedForProfile(profile)) {
+    return false;
+  }
+
+  return base::FeatureList::IsEnabled(features::kPdfGlicSummarize);
+#else
+  return false;
+#endif  // BUILDFLAG(ENABLE_GLIC)
 }
 
 }  // namespace pdf_extension_util

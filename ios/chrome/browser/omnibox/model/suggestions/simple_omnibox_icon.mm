@@ -46,12 +46,12 @@
 }
 
 - (UIImage*)iconImage {
-#if BUILDFLAG(IOS_USE_BRANDED_SYMBOLS)
+#if BUILDFLAG(IOS_USE_BRANDED_ASSETS)
   if (self.suggestionIconType == OmniboxSuggestionIconType::kFallbackAnswer &&
       self.defaultSearchEngineIsGoogle) {
     return GetBrandedGoogleIconForOmnibox();
   }
-#endif  // BUILDFLAG(IOS_USE_BRANDED_SYMBOLS)
+#endif  // BUILDFLAG(IOS_USE_BRANDED_ASSETS)
   return GetOmniboxSuggestionIcon(self.suggestionIconType);
 }
 
@@ -62,6 +62,7 @@
     case OmniboxSuggestionIconType::kSearchHistory:
     case OmniboxSuggestionIconType::kSearchTrend:
     case OmniboxSuggestionIconType::kSearchWithSparkle:
+    case OmniboxSuggestionIconType::kNotesSpark:
       return NO;
     case OmniboxSuggestionIconType::kCalculator:
     case OmniboxSuggestionIconType::kConversion:

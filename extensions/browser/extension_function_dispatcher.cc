@@ -149,18 +149,8 @@ class ScopedRequestParamsCrashKeys {
 }  // namespace
 
 WindowController*
-ExtensionFunctionDispatcher::Delegate::GetExtensionWindowController() const {
+ExtensionFunctionDispatcher::Delegate::GetExtensionWindowController() {
   return nullptr;
-}
-
-content::WebContents*
-ExtensionFunctionDispatcher::Delegate::GetAssociatedWebContents() const {
-  return nullptr;
-}
-
-content::WebContents*
-ExtensionFunctionDispatcher::Delegate::GetVisibleWebContents() const {
-  return GetAssociatedWebContents();
 }
 
 ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
@@ -285,20 +275,6 @@ void ExtensionFunctionDispatcher::DispatchWithCallbackInternal(
 
   const GURL* render_frame_host_url = nullptr;
   if (render_frame_host) {
-    // Error pages commit with the target URL and in their parents' process, but
-    // aren't actually on the page indicated by the committed URL.
-    // Bail out in this case. Error pages don't use extension APIs.
-    // If we had perfect timing and no race conditions, this could be a sign of
-    // a bad message; however, it's possible a page commits to an error page
-    // after a legitimate message is sent.
-    if (render_frame_host->IsErrorDocument()) {
-      constexpr char kCannotUseExtensionAPIsInErrorPages[] =
-          "Cannot call extension APIs from error pages.";
-      ResponseCallbackOnError(std::move(callback),
-                              ExtensionFunction::ResponseType::kFailed,
-                              kCannotUseExtensionAPIsInErrorPages);
-      return;
-    }
     render_frame_host_url = &render_frame_host->GetLastCommittedURL();
     DCHECK_EQ(render_process_id,
               render_frame_host->GetProcess()->GetDeprecatedID());
@@ -531,19 +507,8 @@ void ExtensionFunctionDispatcher::OnExtensionFunctionCompleted(
   }
 }
 
-WindowController*
-ExtensionFunctionDispatcher::GetExtensionWindowController() const {
+WindowController* ExtensionFunctionDispatcher::GetExtensionWindowController() {
   return delegate_ ? delegate_->GetExtensionWindowController() : nullptr;
-}
-
-content::WebContents*
-ExtensionFunctionDispatcher::GetAssociatedWebContents() const {
-  return delegate_ ? delegate_->GetAssociatedWebContents() : nullptr;
-}
-
-content::WebContents*
-ExtensionFunctionDispatcher::GetVisibleWebContents() const {
-  return delegate_ ? delegate_->GetVisibleWebContents() : nullptr;
 }
 
 void ExtensionFunctionDispatcher::AddResponseTarget(ExtensionFunction* func) {

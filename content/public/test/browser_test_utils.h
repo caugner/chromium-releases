@@ -224,7 +224,7 @@ void NavigateToURLBlockUntilNavigationsComplete(
 // To write a test where the renderer itself blocks or cancels the navigation,
 // use `ExecJs()` or `EvalJs()`, e.g.:
 //
-//   EXPECT_THAT(ExecJs("try { location = ''; } catch (e) { e.message; }")
+//   EXPECT_THAT(EvalJs("try { location = ''; } catch (e) { e.message; }")
 //                   .ExtractString(),
 //               HasSubStr("..."));
 //
@@ -1714,6 +1714,27 @@ class InputEventAckWaiter : public RenderWidgetHost::InputEventObserver {
   InputEventAckPredicate predicate_;
   bool event_received_ = false;
   base::OnceClosure quit_closure_;
+};
+
+// Watches for gesture tap events.
+class GestureTapEventObserver : public RenderWidgetHost::InputEventObserver {
+ public:
+  GestureTapEventObserver() = default;
+
+  GestureTapEventObserver(const GestureTapEventObserver&) = delete;
+  GestureTapEventObserver& operator=(const GestureTapEventObserver&) = delete;
+
+  ~GestureTapEventObserver() override = default;
+
+  // RenderWidgetHost::InputEventObserver:
+  void OnInputEvent(const RenderWidgetHost& host,
+                    const blink::WebInputEvent& event,
+                    InputEventSource source) override;
+
+  int num_gesture_tap_seen() const { return num_gesture_tap_seen_; }
+
+ private:
+  int num_gesture_tap_seen_ = 0;
 };
 
 // Sets up a ui::TestClipboard for use in browser tests. On Windows,

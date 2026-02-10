@@ -5,7 +5,6 @@
 #include <aura-shell-server-protocol.h>
 
 #include "ash/wm/desks/desks_util.h"
-#include "components/exo/security_delegate.h"
 #include "components/exo/wayland/server_util.h"
 #include "components/exo/wayland/zcr_remote_shell_impl.h"
 #include "components/exo/wm_helper.h"
@@ -217,8 +216,6 @@ void remote_shell_get_input_method_surface_v2(wl_client* client,
                            "surface has already been assigned a role");
     return;
   }
-
-  CHECK(GetSecurityDelegate(client)->CanAccessRemoteShell());
 
   std::unique_ptr<ClientControlledShellSurface> input_method_surface =
       GetUserDataAs<WaylandRemoteShell>(resource)->CreateInputMethodSurface(

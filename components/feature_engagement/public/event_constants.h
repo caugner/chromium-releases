@@ -299,6 +299,13 @@ extern const char
 // The user has tapped the Home customization menu's entrypoint.
 extern const char kHomeCustomizationMenuUsed[];
 
+// The user has opened the Home customization menu with background customization
+// enabled..
+extern const char kHomeBackgroundCustomizationMenuUsed[];
+
+// The user has seen the `kIPHHomeCustomizationMenuFeature` iph.
+extern const char kHomeCustomizationPromoTriggered[];
+
 // The user has tapped on the lens overlay entrypoint.
 extern const char kLensOverlayEntrypointUsed[];
 
@@ -356,6 +363,9 @@ extern const char kIOSFREBadgeHoldbackPeriodElapsed[];
 // The user has tapped on the Reader Mode entrypoint.
 extern const char kIOSReaderModeUsed[];
 
+// The Reading Mode expanded omnibox entrypoint is presented.
+extern const char kIOSReaderModeChipExpanded[];
+
 // Event fired when the Reader Mode "What's new" badge is displayed.
 extern const char kIOSIPHBadgedReaderModeTriggered[];
 
@@ -373,6 +383,9 @@ extern const char kIOSGeminiContextualCueChipTriggered[];
 
 // Event fired when the omnibox Gemini contextual cue chip is tapped.
 extern const char kIOSGeminiContextualCueChipUsed[];
+
+// Event fired when the Gemini Image Remix IPH is triggered.
+extern const char kIOSGeminiImageRemixIPHTrigger[];
 
 // Event fired when the Gemini Promo is completed for the first time on iOS.
 extern const char kIOSGeminiPromoFirstCompletion[];

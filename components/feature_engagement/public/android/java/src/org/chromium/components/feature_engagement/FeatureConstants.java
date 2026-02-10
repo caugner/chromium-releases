@@ -93,6 +93,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.CHROME_REENGAGEMENT_NOTIFICATION_2_FEATURE,
     FeatureConstants.CHROME_REENGAGEMENT_NOTIFICATION_3_FEATURE,
     FeatureConstants.MOST_VISITED_TILES_CUSTOMIZATION_PIN,
+    FeatureConstants.NEW_TAB_PAGE_THEME_CUSTOMIZATION_FEATURE,
     FeatureConstants.PAGE_INFO_FEATURE,
     FeatureConstants.PAGE_INFO_STORE_INFO_FEATURE,
     FeatureConstants.PAGE_ZOOM_FEATURE,
@@ -354,6 +355,9 @@ public @interface FeatureConstants {
     /** An IPH feature to show on a card menu on the FeedNewTabPage. */
     String FEED_CARD_MENU_FEATURE = "IPH_FeedCardMenu";
 
+    /** Used to track user engagement with the fusebox attachment button. */
+    String FUSEBOX_ATTACHMENT_FEATURE = "IPH_FuseboxAttachment";
+
     /** An IPH feature to prompt users to pull-to-refresh feed. */
     String FEED_SWIPE_REFRESH_FEATURE = "IPH_FeedSwipeRefresh";
 
@@ -383,6 +387,9 @@ public @interface FeatureConstants {
 
     /** An IPH feature to inform users about Most Visited Tile context menu "Pin this shortcut". */
     String MOST_VISITED_TILES_CUSTOMIZATION_PIN = "IPH_MostVisitedTilesCustomizationPin";
+
+    /** An IPH feature to inform users about the NTP theme customization options. */
+    String NEW_TAB_PAGE_THEME_CUSTOMIZATION_FEATURE = "IPH_NewTabPageThemeCustomization";
 
     /** An IPH feature to inform about changing permissions in PageInfo. */
     String PAGE_INFO_FEATURE = "IPH_PageInfo";

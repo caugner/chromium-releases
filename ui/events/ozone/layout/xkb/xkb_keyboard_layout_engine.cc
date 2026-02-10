@@ -654,10 +654,7 @@ void LoadKeymap(const std::string& layout_name,
         FROM_HERE, base::BindOnce(std::move(reply_callback), layout_name,
                                   std::move(keymap_str)));
   } else {
-    LOG(ERROR) << "Keymap file failed to load: " << layout_name;
-    reply_runner->PostTask(
-        FROM_HERE, base::BindOnce(std::move(reply_callback), layout_name,
-                                  std::unique_ptr<char, base::FreeDeleter>()));
+    LOG(FATAL) << "Keymap file failed to load: " << layout_name;
   }
 }
 #endif
@@ -703,13 +700,13 @@ bool XkbKeyboardLayoutEngine::CanSetCurrentLayout() const {
 
 void XkbKeyboardLayoutEngine::SetCurrentLayoutByName(
     const std::string& layout_name,
-    base::OnceCallback<void(bool)> callback) {
+    base::OnceCallback<void(bool success)> callback) {
 #if BUILDFLAG(IS_CHROMEOS)
   current_layout_name_ = layout_name;
   for (const auto& entry : xkb_keymaps_) {
     if (entry.layout_name == layout_name) {
       SetKeymap(entry.keymap);
-      std::move(callback).Run(true);
+      std::move(callback).Run(/*success=*/true);
       return;
     }
   }
@@ -728,29 +725,23 @@ void XkbKeyboardLayoutEngine::SetCurrentLayoutByName(
 }
 
 void XkbKeyboardLayoutEngine::OnKeymapLoaded(
-    base::OnceCallback<void(bool)> callback,
+    base::OnceCallback<void(bool success)> callback,
     const std::string& layout_name,
     std::unique_ptr<char, base::FreeDeleter> keymap_str) {
   if (keymap_str) {
     xkb_keymap* keymap = xkb_keymap_new_from_string(
         xkb_context_.get(), keymap_str.get(), XKB_KEYMAP_FORMAT_TEXT_V1,
         XKB_KEYMAP_COMPILE_NO_FLAGS);
-    if (!keymap) {
-      LOG(ERROR) << "Failed to compile keymap from string: " << layout_name;
-      std::move(callback).Run(/*success=*/false);
-      return;
-    }
     XkbKeymapEntry entry = {layout_name, keymap};
     xkb_keymaps_.push_back(entry);
     if (layout_name == current_layout_name_) {
       SetKeymap(keymap);
-      std::move(callback).Run(true);
+      std::move(callback).Run(/*success=*/true);
     } else {
-      std::move(callback).Run(false);
+      std::move(callback).Run(/*success=*/false);
     }
   } else {
-    LOG(ERROR) << "Keymap file failed to load: " << layout_name;
-    std::move(callback).Run(/*success=*/false);
+    LOG(FATAL) << "Keymap file failed to load: " << layout_name;
   }
 }
 
@@ -1154,19 +1145,6 @@ void XkbKeyboardLayoutEngine::ParseLayoutName(const std::string& layout_name,
   } else if (dash_index != std::string::npos) {
     *layout_id = layout_name.substr(0, dash_index);
     *layout_variant = layout_name.substr(dash_index + 1);
-  }
-
-  // Sanitize the layout ID and variant to only allow safe characters.
-  const char kAllowedChars[] =
-      "abcdefghijklmnopqrstuvwxyz"
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "0123456789"
-      "_()-:";
-  if (!base::ContainsOnlyChars(*layout_id, kAllowedChars)) {
-    layout_id->clear();
-  }
-  if (!base::ContainsOnlyChars(*layout_variant, kAllowedChars)) {
-    layout_variant->clear();
   }
 }
 

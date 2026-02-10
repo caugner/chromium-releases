@@ -25,6 +25,7 @@
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/aura/window_tracker.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/base/hit_test.h"
@@ -645,7 +646,7 @@ wm::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
   WindowState* window_state = WindowState::Get(source);
   const bool window_position_managed = window_state->GetWindowPositionManaged();
   window_state->SetWindowPositionManaged(false);
-  base::WeakPtr<aura::Window> source_weak = source->GetWeakPtrAsWindow();
+  aura::WindowTracker tracker({source});
 
   run_loop.Run();
 
@@ -653,9 +654,8 @@ wm::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
     return ::wm::MOVE_CANCELED;
 
   // Make sure the window hasn't been deleted.
-  if (source_weak) {
+  if (tracker.Contains(source))
     window_state->SetWindowPositionManaged(window_position_managed);
-  }
 
   in_move_loop_ = false;
   return result == DragResult::SUCCESS ? ::wm::MOVE_SUCCESSFUL

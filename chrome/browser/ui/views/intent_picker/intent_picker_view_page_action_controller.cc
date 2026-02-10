@@ -25,8 +25,7 @@ IntentPickerViewPageActionController::IntentPickerViewPageActionController(
 
 void IntentPickerViewPageActionController::UpdatePageActionVisibility(
     bool should_show_icon,
-    const ui::ImageModel& app_icon,
-    bool should_show_expanded_chip) {
+    const ui::ImageModel& app_icon) {
   Profile* const profile =
       tab_interface_->GetBrowserWindowInterface()->GetProfile();
   if (profile->IsOffTheRecord()) {
@@ -39,12 +38,7 @@ void IntentPickerViewPageActionController::UpdatePageActionVisibility(
     if (apps::features::ShouldShowLinkCapturingUX()) {
       // If link capturing is enabled, override the icon, text and tooltip
       // based upon the navigated website.
-      if (app_icon.IsEmpty()) {
-        page_action_controller->ClearOverrideImage(kActionShowIntentPicker);
-      } else {
-        page_action_controller->OverrideImage(kActionShowIntentPicker,
-                                              app_icon);
-      }
+      page_action_controller->OverrideImage(kActionShowIntentPicker, app_icon);
       page_action_controller->OverrideText(
           kActionShowIntentPicker,
           l10n_util::GetStringUTF16(IDS_INTENT_CHIP_OPEN_IN_APP));
@@ -52,11 +46,9 @@ void IntentPickerViewPageActionController::UpdatePageActionVisibility(
           kActionShowIntentPicker,
           l10n_util::GetStringUTF16(IDS_INTENT_CHIP_OPEN_IN_APP));
       page_action_controller->Show(kActionShowIntentPicker);
-
-      if (should_show_expanded_chip) {
-        page_action_controller->ShowSuggestionChip(kActionShowIntentPicker,
-                                                   {.should_animate = false});
-      }
+      page_action_controller->ShowSuggestionChip(kActionShowIntentPicker, {
+        .should_animate = false,
+      });
     } else {
       page_action_controller->Show(kActionShowIntentPicker);
     }

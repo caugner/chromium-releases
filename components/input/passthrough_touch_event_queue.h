@@ -13,7 +13,6 @@
 #include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/time/time.h"
 #include "components/input/dispatch_to_renderer_callback.h"
@@ -21,6 +20,10 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/input/input_event_result.mojom-shared.h"
 #include "ui/events/blink/blink_features.h"
+
+namespace base {
+class SequencedTaskRunner;
+} // namespace base
 
 namespace content {
 class InputRouterImplTestBase;
@@ -277,6 +280,9 @@ class COMPONENT_EXPORT(INPUT) PassthroughTouchEventQueue {
 
   // Event is saved to compare pointer positions for new touchmove events.
   std::unique_ptr<blink::WebTouchEvent> last_sent_touchevent_;
+  // Whether any touchmove event in the current sequence has moved beyond the
+  // slop region.
+  bool any_touchmove_moved_beyond_slop_region_ = false;
 
   // Stores outstanding touches that have been sent to the renderer but have
   // not yet been ack'd by the renderer. The set is explicitly ordered based
@@ -292,8 +298,6 @@ class COMPONENT_EXPORT(INPUT) PassthroughTouchEventQueue {
   // What events types are allowed to bypass the filter.
   const std::string events_to_always_forward_;
   static const base::FeatureParam<std::string> kSkipTouchEventFilterType;
-
-  base::WeakPtrFactory<PassthroughTouchEventQueue> weak_ptr_factory_{this};
 };
 
 }  // namespace input

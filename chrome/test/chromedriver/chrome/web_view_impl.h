@@ -233,8 +233,6 @@ class WebViewImpl : public WebView {
 
   WebView* FindContainerForFrame(const std::string& frame_id) override;
 
-  std::unique_ptr<WebViewHolder> GetHolder() override;
-
  protected:
   WebViewImpl(const std::string& id,
               const bool w3c_compliant,
@@ -335,14 +333,14 @@ class WebViewImpl : public WebView {
 
 // Responsible for locking a WebViewImpl and its associated data structure to
 // prevent them from being freed which they are still in use.
-class WebViewImplHolder : public WebViewHolder {
+class WebViewImplHolder {
  public:
   explicit WebViewImplHolder(WebViewImpl* web_view);
 
   WebViewImplHolder(const WebViewImplHolder&) = delete;
   WebViewImplHolder& operator=(const WebViewImplHolder&) = delete;
 
-  ~WebViewImplHolder() override;
+  ~WebViewImplHolder();
 
  private:
   struct Item {

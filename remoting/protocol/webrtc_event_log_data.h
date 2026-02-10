@@ -10,8 +10,6 @@
 #include <vector>
 
 #include "base/containers/circular_deque.h"
-#include "base/synchronization/lock.h"
-#include "base/thread_annotations.h"
 
 namespace remoting::protocol {
 
@@ -52,29 +50,24 @@ class WebrtcEventLogData {
 
  private:
   // Returns true if a new section must be created to store the event.
-  bool NeedNewSection(size_t log_event_size) const
-      EXCLUSIVE_LOCKS_REQUIRED(lock_);
+  bool NeedNewSection(size_t log_event_size) const;
 
   // Appends a new section of zero size to the end of the list, removing the
   // oldest one if necessary. On return, the section at the end (the list's
   // "back") will be empty, ready to accept the new data.
-  void CreateNewSection() EXCLUSIVE_LOCKS_REQUIRED(lock_);
+  void CreateNewSection();
 
-  // Removes all event data without acquiring lock_.
-  void ClearLocked() EXCLUSIVE_LOCKS_REQUIRED(lock_);
-
-  mutable base::Lock lock_;
-  base::circular_deque<LogSection> sections_ GUARDED_BY(lock_);
+  base::circular_deque<LogSection> sections_;
 
   // Value chosen to keep the memory-usage within reasonable limits, but also
   // allow for recording "most" sessions entirely.
   const int kMaxSections = 1000;
-  int max_sections_ GUARDED_BY(lock_) = kMaxSections;
+  int max_sections_ = kMaxSections;
 
   // A larger value will reduce memory-allocations at the cost of discarding a
   // larger chunk of the event log.
   const int kMaxSectionSize = 102400;  // 100K
-  int max_section_size_ GUARDED_BY(lock_) = kMaxSectionSize;
+  int max_section_size_ = kMaxSectionSize;
 };
 
 }  // namespace remoting::protocol

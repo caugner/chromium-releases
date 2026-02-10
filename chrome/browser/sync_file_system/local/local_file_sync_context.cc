@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -74,7 +73,7 @@ void LocalFileSyncContext::MaybeInitializeFileSystemContext(
     FileSystemContext* file_system_context,
     SyncStatusCallback callback) {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
-  if (base::Contains(file_system_contexts_, file_system_context)) {
+  if (file_system_contexts_.contains(file_system_context)) {
     // The context has been already initialized. Just dispatch the callback
     // with SYNC_STATUS_OK.
     ui_task_runner_->PostTask(
@@ -651,8 +650,8 @@ void LocalFileSyncContext::InitializeFileSystemContextOnIOThread(
     // Create and initialize LocalFileChangeTracker and call back this method
     // later again.
     std::set<GURL>* origins_with_changes = new std::set<GURL>;
-    scoped_refptr<LocalFileChangeTracker>* tracker_ptr(
-        new scoped_refptr<LocalFileChangeTracker>);
+    std::unique_ptr<LocalFileChangeTracker>* tracker_ptr(
+        new std::unique_ptr<LocalFileChangeTracker>);
     file_system_context->default_file_task_runner()->PostTaskAndReplyWithResult(
         FROM_HERE,
         base::BindOnce(
@@ -681,13 +680,13 @@ void LocalFileSyncContext::InitializeFileSystemContextOnIOThread(
 }
 
 SyncStatusCode LocalFileSyncContext::InitializeChangeTrackerOnFileThread(
-    scoped_refptr<LocalFileChangeTracker>* tracker_ptr,
+    std::unique_ptr<LocalFileChangeTracker>* tracker_ptr,
     FileSystemContext* file_system_context,
     std::set<GURL>* origins_with_changes) {
   DCHECK(file_system_context);
   DCHECK(tracker_ptr);
   DCHECK(origins_with_changes);
-  *tracker_ptr = base::MakeRefCounted<LocalFileChangeTracker>(
+  *tracker_ptr = std::make_unique<LocalFileChangeTracker>(
       file_system_context->partition_path(), env_override_,
       file_system_context->default_file_task_runner());
   const SyncStatusCode status = (*tracker_ptr)->Initialize(file_system_context);
@@ -709,7 +708,7 @@ SyncStatusCode LocalFileSyncContext::InitializeChangeTrackerOnFileThread(
 }
 
 void LocalFileSyncContext::DidInitializeChangeTrackerOnIOThread(
-    scoped_refptr<LocalFileChangeTracker>* tracker_ptr,
+    std::unique_ptr<LocalFileChangeTracker>* tracker_ptr,
     const GURL& source_url,
     FileSystemContext* file_system_context,
     std::set<GURL>* origins_with_changes,
@@ -750,8 +749,8 @@ void LocalFileSyncContext::DidInitialize(
     return;
   }
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
-  DCHECK(!base::Contains(file_system_contexts_, file_system_context));
-  DCHECK(base::Contains(pending_initialize_callbacks_, file_system_context));
+  DCHECK(!file_system_contexts_.contains(file_system_context));
+  DCHECK(pending_initialize_callbacks_.contains(file_system_context));
 
   SyncFileSystemBackend* backend =
       SyncFileSystemBackend::GetBackend(file_system_context);

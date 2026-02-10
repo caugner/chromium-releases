@@ -20,7 +20,6 @@ class GlicLegacySidePanelCoordinator;
 }  // namespace glic
 
 namespace tabs {
-class GlicActorTaskIconController;
 class GlicActorNudgeController;
 }  // namespace tabs
 #endif
@@ -54,6 +53,7 @@ class DataSharingBubbleController;
 class DesktopBrowserWindowCapabilities;
 class DevtoolsUIController;
 class EmbedderBrowserWindowFeatures;
+class ExtensionInstalledWatcher;
 class ExtensionKeybindingRegistryViews;
 class ExclusiveAccessManager;
 class FindBarController;
@@ -65,10 +65,12 @@ class IncognitoClearBrowsingDataDialogCoordinator;
 class ImmersiveModeController;
 class IOSPromoController;
 class InitialWebUIManager;
+class InitialWebUIWindowMetricsManager;
 class LocationBarModel;
 class MemorySaverOptInIPHController;
 class PinnedToolbarActionsController;
 class ProfileMenuCoordinator;
+class ProjectsPanelStateController;
 class ReadingListSidePanelCoordinator;
 class RecentActivityBubbleCoordinator;
 class BrowserSelectFileDialogController;
@@ -250,11 +252,6 @@ class BrowserWindowFeatures {
     return chrome_labs_coordinator_.get();
   }
 
-  contextual_tasks::ActiveTaskContextProvider*
-  contextual_tasks_active_task_context_provider() {
-    return contextual_tasks_active_task_context_provider_.get();
-  }
-
   media_router::CastBrowserController* cast_browser_controller() {
     return cast_browser_controller_.get();
   }
@@ -269,6 +266,10 @@ class BrowserWindowFeatures {
 
   CommentsSidePanelCoordinator* comments_side_panel_coordinator() {
     return comments_side_panel_coordinator_.get();
+  }
+
+  ExtensionInstalledWatcher* extension_installed_watcher() {
+    return extension_installed_watcher_.get();
   }
 
 #if BUILDFLAG(ENABLE_GLIC)
@@ -302,10 +303,6 @@ class BrowserWindowFeatures {
   // implementation is not inlined.
   SidePanelUI* side_panel_ui();
 
-  SidePanelCoordinator* side_panel_coordinator() {
-    return side_panel_coordinator_.get();
-  }
-
   lens::LensOverlayEntryPointController* lens_overlay_entry_point_controller() {
     return lens_overlay_entry_point_controller_.get();
   }
@@ -316,10 +313,6 @@ class BrowserWindowFeatures {
 
   tabs::TabDeclutterController* tab_declutter_controller() {
     return tab_declutter_controller_.get();
-  }
-
-  tabs::VerticalTabStripStateController* vertical_tab_strip_state_controller() {
-    return vertical_tab_strip_state_controller_.get();
   }
 
   tabs::GlicNudgeController* glic_nudge_controller() {
@@ -559,6 +552,9 @@ class BrowserWindowFeatures {
 
   std::unique_ptr<InitialWebUIManager> initial_web_ui_manager_;
 
+  std::unique_ptr<InitialWebUIWindowMetricsManager>
+      initial_webui_window_metrics_manager_;
+
   std::unique_ptr<IOSPromoController> ios_promo_controller_;
 
   std::unique_ptr<lens::LensOverlayEntryPointController>
@@ -575,6 +571,9 @@ class BrowserWindowFeatures {
   std::unique_ptr<tabs::VerticalTabStripStateController>
       vertical_tab_strip_state_controller_;
 
+  std::unique_ptr<ProjectsPanelStateController>
+      projects_panel_state_controller_;
+
   std::unique_ptr<MemorySaverOptInIPHController>
       memory_saver_opt_in_iph_controller_;
 
@@ -588,6 +587,8 @@ class BrowserWindowFeatures {
 
   std::unique_ptr<PinnedToolbarActionsController>
       pinned_toolbar_actions_controller_;
+
+  std::unique_ptr<ExtensionInstalledWatcher> extension_installed_watcher_;
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   std::unique_ptr<pdf::infobar::PdfInfoBarController> pdf_infobar_controller_;
@@ -654,8 +655,6 @@ class BrowserWindowFeatures {
   std::unique_ptr<tabs::GlicNudgeController> glic_nudge_controller_;
 
 #if BUILDFLAG(ENABLE_GLIC)
-  std::unique_ptr<tabs::GlicActorTaskIconController>
-      glic_actor_task_icon_controller_;
   std::unique_ptr<tabs::GlicActorNudgeController> glic_actor_nudge_controller_;
   std::unique_ptr<ActorTaskListBubbleController>
       actor_task_list_bubble_controller_;

@@ -9,7 +9,6 @@
 
 #include "base/component_export.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "ui/aura/window_observer.h"
 
@@ -119,8 +118,6 @@ class COMPONENT_EXPORT(UI_WM) TransientWindowManager
   bool pause_transient_descendants_restacking_ = false;
 
   base::ObserverList<TransientWindowObserver>::Unchecked observers_;
-
-  base::WeakPtrFactory<TransientWindowManager> weak_factory_{this};
 };
 
 }  // namespace wm

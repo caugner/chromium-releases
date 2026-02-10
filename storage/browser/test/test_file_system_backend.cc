@@ -103,31 +103,14 @@ class TestFileSystemBackend::QuotaUtil : public FileSystemQuotaUtil,
   }
 
   // FileUpdateObserver overrides.
-  void AddRef() const override {}
-  void Release() const override {}
-
-  void Disable() override { is_disabled_ = true; }
-
-  void OnStartUpdate(const FileSystemURL& url) override {
-    if (is_disabled_) {
-      return;
-    }
-  }
+  void OnStartUpdate(const FileSystemURL& url) override {}
   void OnUpdate(const FileSystemURL& url, int64_t delta) override {
-    if (is_disabled_) {
-      return;
-    }
     usage_ += delta;
   }
-  void OnEndUpdate(const FileSystemURL& url) override {
-    if (is_disabled_) {
-      return;
-    }
-  }
+  void OnEndUpdate(const FileSystemURL& url) override {}
 
  private:
   int64_t usage_;
-  bool is_disabled_ = false;
 };
 
 TestFileSystemBackend::TestFileSystemBackend(

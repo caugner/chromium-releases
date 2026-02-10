@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -69,6 +68,10 @@ const char* const kHashSourcePrefixes[] = {
   "'sha384-",
   "'sha512-"
 };
+
+// TODO(karandeepb): This is not the same list as used by the CSP spec. See
+// https://infra.spec.whatwg.org/#ascii-whitespace.
+const char kWhitespaceDelimiters[] = " \t\r\n";
 
 constexpr char kChromeResourcesUrl[] = "chrome://resources";
 
@@ -189,7 +192,7 @@ bool isNonWildcardTLD(const std::string& url,
 
   std::string host(url, start_of_host, end_of_host - start_of_host);
   // Global wildcards are not allowed.
-  if (host.empty() || base::Contains(host, "*")) {
+  if (host.empty() || host.contains("*")) {
     return false;
   }
 
@@ -560,7 +563,7 @@ void CSPParser::Parse() {
            policy_, ";", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
     // Get whitespace separated tokens.
     std::vector<std::string_view> tokens = base::SplitStringPiece(
-        directive_str, base::kWhitespaceASCII, base::TRIM_WHITESPACE,
+        directive_str, kWhitespaceDelimiters, base::TRIM_WHITESPACE,
         base::SPLIT_WANT_NONEMPTY);
 
     // |directive_str| is non-empty and has had whitespace trimmed. Hence, it

@@ -18,6 +18,10 @@
 #include "components/permissions/permissions_client.h"
 #include "components/permissions/resolvers/permission_prompt_options.h"
 
+namespace content {
+class RenderFrameHost;
+}  // namespace content
+
 class ChromePermissionsClient : public permissions::PermissionsClient {
  public:
   ChromePermissionsClient(const ChromePermissionsClient&) = delete;
@@ -29,8 +33,6 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
   HostContentSettingsMap* GetSettingsMap(
       content::BrowserContext* browser_context) override;
   scoped_refptr<content_settings::CookieSettings> GetCookieSettings(
-      content::BrowserContext* browser_context) override;
-  privacy_sandbox::TrackingProtectionSettings* GetTrackingProtectionSettings(
       content::BrowserContext* browser_context) override;
   bool IsSubresourceFilterActivated(content::BrowserContext* browser_context,
                                     const GURL& url) override;
@@ -53,7 +55,7 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
                                 const GURL& origin) override;
   void GetUkmSourceId(ContentSettingsType permission_type,
                       content::BrowserContext* browser_context,
-                      content::WebContents* web_contents,
+                      content::RenderFrameHost* render_frame_host,
                       const GURL& requesting_origin,
                       GetUkmSourceIdCallback callback) override;
   permissions::IconId GetOverrideIconId(
@@ -109,13 +111,12 @@ class ChromePermissionsClient : public permissions::PermissionsClient {
       const GURL& origin) override;
   bool CanBypassEmbeddingOriginCheck(const GURL& requesting_origin,
                                      const GURL& embedding_origin) override;
-  std::optional<GURL> OverrideCanonicalOrigin(
+  std::optional<GURL> GetCanonicalOriginOverride(
       const GURL& requesting_origin,
       const GURL& embedding_origin) override;
-  // Checks if `requesting_origin` and `embedding_origin` are the new tab page
-  // origins.
-  bool DoURLsMatchNewTabPage(const GURL& requesting_origin,
-                             const GURL& embedding_origin) override;
+  std::optional<GURL> GetEmbeddingOriginOverride(
+      const GURL& requesting_origin,
+      content::WebContents* web_contents) override;
 #if BUILDFLAG(IS_ANDROID)
   bool IsDseOrigin(content::BrowserContext* browser_context,
                    const url::Origin& origin) override;

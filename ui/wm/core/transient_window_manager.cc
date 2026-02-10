@@ -10,7 +10,6 @@
 #include "base/auto_reset.h"
 #include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/weak_auto_reset.h"
 #include "base/observer_list.h"
 #include "ui/aura/client/transient_window_client.h"
 #include "ui/aura/client/transient_window_client_observer.h"
@@ -168,12 +167,14 @@ void TransientWindowManager::RestackTransientDescendants() {
       Window::Windows(parent->children().rbegin(), parent->children().rend()));
   while (!tracker.windows().empty()) {
     auto* child_window = tracker.Pop();
+    if (!base::Contains(parent->children(), child_window)) {
+      continue;
+    }
     if (child_window != window_ &&
         HasTransientAncestor(child_window, window_)) {
       TransientWindowManager* descendant_manager = GetOrCreate(child_window);
-      base::WeakAutoReset resetter(descendant_manager->weak_factory_.GetWeakPtr(),
-                                   &TransientWindowManager::stacking_target_,
-                                   window_);
+      base::AutoReset<raw_ptr<Window>> resetter(
+          &descendant_manager->stacking_target_, window_);
       parent->StackChildAbove(child_window, window_);
     }
   }
@@ -193,12 +194,8 @@ void TransientWindowManager::OnWindowHierarchyChanged(
     // Reparenting multiple sibling transient children will call back onto us
     // (the transient parent) in [2] below, to restack all our descendants. We
     // should pause restacking until we're done with all the reparenting.
-    base::WeakAutoReset reset(
-        weak_factory_.GetWeakPtr(),
-        &TransientWindowManager::pause_transient_descendants_restacking_, true);
-    aura::WindowTracker tracker(transient_children_);
-    while (!tracker.windows().empty()) {
-      aura::Window* transient_child = tracker.Pop();
+    base::AutoReset<bool> reset(&pause_transient_descendants_restacking_, true);
+    for (aura::Window* transient_child : transient_children_) {
       if (transient_child->parent() == old_parent) {
         new_parent->AddChild(transient_child);
         should_restack = true;
@@ -218,9 +215,7 @@ void TransientWindowManager::OnWindowHierarchyChanged(
 
 void TransientWindowManager::UpdateTransientChildVisibility(
     bool parent_visible) {
-  base::WeakAutoReset reset(
-      weak_factory_.GetWeakPtr(),
-      &TransientWindowManager::ignore_visibility_changed_event_, true);
+  base::AutoReset<bool> reset(&ignore_visibility_changed_event_, true);
   if (!parent_visible) {
     show_on_parent_visible_ = window_->TargetVisibility();
     window_->Hide();
@@ -255,9 +250,7 @@ void TransientWindowManager::OnWindowVisibilityChanged(Window* window,
   }
 
   if (!transient_parent_->TargetVisibility() && visible) {
-    base::WeakAutoReset reset(
-        weak_factory_.GetWeakPtr(),
-        &TransientWindowManager::ignore_visibility_changed_event_, true);
+    base::AutoReset<bool> reset(&ignore_visibility_changed_event_, true);
     show_on_parent_visible_ = true;
     window_->Hide();
   } else if (!visible) {

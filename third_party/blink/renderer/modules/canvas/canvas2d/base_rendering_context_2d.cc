@@ -174,13 +174,15 @@ CanvasRenderingContext2DSettings* BaseRenderingContext2D::getContextAttributes()
 }
 
 void BaseRenderingContext2D::DispatchContextLostEvent(TimerBase*) {
-  CanvasRenderingContextHost* host = GetCanvasRenderingContextHost();
-  if (!host) {
-    return;
-  }
+  // If `need_dispatch_context_restored_` is `true`, the context has been
+  // restored already (e.g. by fixing a `kInvalidCanvasSize` context loss), but
+  // the oncontextrestored event was postponed until the oncontextlost event was
+  // dispatched first. This is happening now, so irrespective of how this
+  // function returns, `need_dispatch_context_restored_` should be cleared.
+  absl::Cleanup cleanup = [this] { need_dispatch_context_restored_ = false; };
 
   Event* event = Event::CreateCancelable(event_type_names::kContextlost);
-  host->HostDispatchEvent(event);
+  GetCanvasRenderingContextHost()->HostDispatchEvent(event);
 
   UseCounter::Count(GetTopExecutionContext(),
                     WebFeature::kCanvasRenderingContext2DContextLostEvent);
@@ -192,8 +194,7 @@ void BaseRenderingContext2D::DispatchContextLostEvent(TimerBase*) {
     return;
   }
 
-  if (context_lost_mode_ == CanvasRenderingContext::kInvalidCanvasSize &&
-      host->IsValidImageSize()) {
+  if (need_dispatch_context_restored_) {
     // The context is already restored (an invalid canvas size was probably
     // fixed). We can send the restored event right away.
     dispatch_context_restored_event_timer_.StartOneShot(base::TimeDelta(),
@@ -292,19 +293,15 @@ void BaseRenderingContext2D::RestoreFromInvalidSizeIfNeeded() {
   DCHECK(!GetResourceProvider());
 
   if (host->IsValidImageSize()) {
-    // The size was restored. Fire a contextrestored event, but only if there's
-    // no pending contextlost. contextlost needs to run first and it will take
-    // care of running contextrestored if the size is still valid at that point.
-    if (!dispatch_context_lost_event_timer_.IsActive()) {
+    if (dispatch_context_lost_event_timer_.IsActive()) {
+      // An oncontextlost event is still pending. We can't send the
+      // oncontextrestored right away because the oncontextlost callback could
+      // choose to prevent restoration. Thus, we need to delay queuing the
+      // restored event to after the lost event completed.
+      need_dispatch_context_restored_ = true;
+    } else {
       dispatch_context_restored_event_timer_.StartOneShot(base::TimeDelta(),
                                                           FROM_HERE);
-    }
-  } else {
-    // The canvas was given another invalid size. Abort any pending
-    // contextrestored event, these would have to wait until the canvas is given
-    // a valid size.
-    if (dispatch_context_restored_event_timer_.IsActive()) {
-      dispatch_context_restored_event_timer_.Stop();
     }
   }
 }
@@ -391,7 +388,8 @@ ImageData* BaseRenderingContext2D::getImageDataInternal(
   } else if (!sw || !sh) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kIndexSizeError,
-        String::Format("The source %s is 0.", sw ? "height" : "width"));
+        UNSAFE_TODO(
+            String::Format("The source %s is 0.", sw ? "height" : "width")));
   }
 
   if (exception_state.HadException())

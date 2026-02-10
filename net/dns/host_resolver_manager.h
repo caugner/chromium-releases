@@ -602,7 +602,7 @@ class NET_EXPORT HostResolverManager
   // For per-context cache invalidation notifications.
   base::ObserverList<ResolveContext,
                      true /* check_empty */,
-                     base::ObserverListReentrancyPolicy::kDisallowReentrancy>
+                     false /* allow_reentrancy */>
       registered_contexts_;
 
   // True while invalidating caches.

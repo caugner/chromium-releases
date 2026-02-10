@@ -39,6 +39,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -47,7 +48,6 @@
 #include "chrome/browser/ui/views/chrome_widget_sublevel.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
-#include "chrome/browser/ui/views/frame/tab_strip_view_interface.h"
 #include "chrome/browser/ui/views/interaction/browser_elements_views.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
@@ -211,8 +211,9 @@ void GlicWindowControllerImpl::OnWidgetDestroyed(views::Widget* widget) {
   // implementation currently does not support this.
   if (IsDetached() && GetGlicWidget() == widget) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE, base::BindOnce(&GlicWindowControllerImpl::Close,
-                                  weak_ptr_factory_.GetWeakPtr()));
+        FROM_HERE,
+        base::BindOnce(&GlicWindowControllerImpl::Close,
+                       weak_ptr_factory_.GetWeakPtr(), CloseOptions{}));
   }
 }
 
@@ -248,11 +249,6 @@ void GlicWindowControllerImpl::OnWidgetUserResizeEnded() {
     client->ManualResizeChanged(false);
   }
 
-  if (GetGlicView() &&
-      !base::FeatureList::IsEnabled(features::kGlicWindowDragRegions)) {
-    GetGlicView()->UpdatePrimaryDraggableAreaOnResize();
-  }
-
   if (GetGlicWidget()) {
     glic_size_ = GetGlicWidget()->GetClientAreaBoundsInScreen().size();
     SaveWidgetPosition(/*user_modified=*/true);
@@ -278,57 +274,48 @@ void GlicWindowControllerImpl::ShowAfterSignIn(base::WeakPtr<Browser> browser) {
          // Prefer the source that triggered the sign-in, but if that's not
          // available, report it as coming from the sign-in flow.
          opening_source_.value_or(mojom::InvocationSource::kAfterSignIn),
-         prompt_suggestion_);
+         prompt_suggestion_, false /* auto_send */);
 }
 
 void GlicWindowControllerImpl::Toggle(
     BrowserWindowInterface* bwi,
     bool prevent_close,
     mojom::InvocationSource source,
-    std::optional<std::string> prompt_suggestion) {
+    std::optional<std::string> prompt_suggestion,
+    bool auto_send) {
   Browser* new_attached_browser =
       bwi ? bwi->GetBrowserForMigrationOnly() : nullptr;
 
   if (!AlwaysDetached()) {
     ToggleWhenNotAlwaysDetached(new_attached_browser, prevent_close, source,
-                                prompt_suggestion);
+                                prompt_suggestion, auto_send);
     return;
   }
 
   auto maybe_close = [this, prevent_close] {
     if (!prevent_close) {
-      Close();
+      Close({});
     }
   };
 
-  // Send a change view request if the current view is different than the
-  // source.
-  // TODO(crbug.com/437140901): The client may not be connected yet. If not,
-  // this request is dropped.
-  MaybeSendViewChangeRequest(source);
-
   // If floaty is closed, open floaty
   if (state_ == State::kClosed) {
-    Show(new_attached_browser, source, prompt_suggestion);
+    Show(new_attached_browser, source, prompt_suggestion, /*auto_send=*/false);
     return;
   }
 
 #if BUILDFLAG(IS_WIN)
   // Clicking status tray on Windows makes floaty not active so always close.
   if (source == mojom::InvocationSource::kOsButton) {
-    Close();
+    Close({});
     return;
   }
 #endif  // BUILDFLAG(IS_WIN)
 
-  // TODO(crbug.com/438164568): Add handling to always close on the second
-  // click of the same source.
-  // If floaty is focused and click is not from the Task Icon or Glic
-  // Button, close it. If floaty is open and the current view matches the
-  // expected view, close it. If floaty is unfocused and open, focus it.
-  if ((IsActive() && (source != mojom::InvocationSource::kActorTaskIcon &&
-                      source != mojom::InvocationSource::kTopChromeButton)) ||
-      (InvocationSourceMatchesCurrentView(source) &&
+  // If floaty is focused or the source is the top button, close it.
+  // If floaty is unfocused and open, focus it.
+  if (IsActive() ||
+      (source == mojom::InvocationSource::kTopChromeButton &&
        !base::FeatureList::IsEnabled(features::kGlicZOrderChanges))) {
     maybe_close();
   } else if (state_ == State::kOpen) {
@@ -338,26 +325,15 @@ void GlicWindowControllerImpl::Toggle(
   }
 }
 
-void GlicWindowControllerImpl::MaybeSendViewChangeRequest(
-    mojom::InvocationSource source) {
-  auto current_view = host().GetPrimaryCurrentView();
-  if (source == mojom::InvocationSource::kActorTaskIcon &&
-      current_view == mojom::CurrentView::kConversation) {
-    MaybeSendActuationViewRequest();
-  } else if (source == mojom::InvocationSource::kTopChromeButton &&
-             current_view == mojom::CurrentView::kActuation) {
-    MaybeSendConversationViewRequest();
-  }
-}
-
 void GlicWindowControllerImpl::ToggleWhenNotAlwaysDetached(
     Browser* new_attached_browser,
     bool prevent_close,
     mojom::InvocationSource source,
-    std::optional<std::string> prompt_suggestion) {
+    std::optional<std::string> prompt_suggestion,
+    bool auto_send) {
   auto maybe_close = [this, prevent_close] {
     if (!prevent_close) {
-      Close();
+      Close({});
     }
   };
 
@@ -434,7 +410,7 @@ void GlicWindowControllerImpl::ToggleWhenNotAlwaysDetached(
     // Currently in the process of showing the widget, allow that to finish.
     return;
   } else {
-    Show(new_attached_browser, source, prompt_suggestion);
+    Show(new_attached_browser, source, prompt_suggestion, auto_send);
   }
 }
 
@@ -452,7 +428,8 @@ void GlicWindowControllerImpl::FocusIfOpen() {
 
 void GlicWindowControllerImpl::ShowDetachedForTesting() {
   glic::GlicProfileManager::GetInstance()->SetActiveGlic(glic_service_);
-  Show(nullptr, mojom::InvocationSource::kOsHotkey, std::nullopt);
+  Show(nullptr, mojom::InvocationSource::kOsHotkey, std::nullopt,
+       /*auto_send=*/false);
 }
 
 void GlicWindowControllerImpl::SetPreviousPositionForTesting(
@@ -481,10 +458,27 @@ GlicInstance* GlicWindowControllerImpl::GetInstanceForTab(
   return const_cast<GlicWindowControllerImpl*>(this);
 }
 
+void GlicWindowControllerImpl::CreateNewConversationForTabs(
+    const std::vector<tabs::TabInterface*>& tabs) {
+  NOTIMPLEMENTED();
+}
+
+void GlicWindowControllerImpl::MoveTabsToConversation(
+    const std::vector<tabs::TabInterface*>& tabs,
+    const std::string& conversation_id) {
+  NOTIMPLEMENTED();
+}
+
+std::vector<ConversationInfo> GlicWindowControllerImpl::GetRecentConversations(
+    size_t limit) {
+  return {};
+}
+
 bool GlicWindowControllerImpl::BeforeViewCreated(
     Browser* browser,
     mojom::InvocationSource source,
-    std::optional<std::string> prompt_suggestion) {
+    std::optional<std::string> prompt_suggestion,
+    bool auto_send) {
   if (state_ == State::kWaitingForSidePanelToShow) {
     return false;
   }
@@ -493,6 +487,7 @@ bool GlicWindowControllerImpl::BeforeViewCreated(
   CHECK(!attached_browser_);
   opening_source_ = source;
   prompt_suggestion_ = prompt_suggestion;
+  auto_send_ = auto_send;
   if (!glic_service_->GetAuthController().CheckAuthBeforeShowSync(
           base::BindOnce(&GlicWindowControllerImpl::ShowAfterSignIn,
                          weak_ptr_factory_.GetWeakPtr(),
@@ -528,8 +523,10 @@ void GlicWindowControllerImpl::AfterViewShown() {
   if (prompt_suggestion_) {
     open_options.prompt_suggestion = prompt_suggestion_.value();
   }
+  open_options.auto_send = auto_send_;
   host().PanelWillOpen(opening_source_.value(), std::move(open_options));
   prompt_suggestion_.reset();
+  auto_send_ = false;
 
   if (login_page_committed_) {
     // This indicates that we've warmed the web client and it has hit a login
@@ -546,8 +543,9 @@ void GlicWindowControllerImpl::AfterViewShown() {
 void GlicWindowControllerImpl::Show(
     Browser* browser,
     mojom::InvocationSource source,
-    std::optional<std::string> prompt_suggestion) {
-  if (!BeforeViewCreated(browser, source, prompt_suggestion)) {
+    std::optional<std::string> prompt_suggestion,
+    bool auto_send) {
+  if (!BeforeViewCreated(browser, source, prompt_suggestion, auto_send)) {
     return;
   }
   if (browser && !AlwaysDetached()) {
@@ -566,7 +564,7 @@ std::unique_ptr<views::View> GlicWindowControllerImpl::CreateViewForSidePanel(
   auto* browser = tab.GetBrowserWindowInterface()->GetBrowserForMigrationOnly();
   // TODO: Add Invocation source for toolbar button
   if (BeforeViewCreated(browser, mojom::InvocationSource::kThreeDotsMenu,
-                        std::nullopt) &&
+                        std::nullopt, /*auto_send=*/false) &&
       browser) {
     AttachToBrowser(*browser, AttachChangeReason::kInit);
   }
@@ -738,10 +736,7 @@ void GlicWindowControllerImpl::GlicLoadedAndReadyToDisplay() {
   // be visible now.
   SetWindowState(State::kOpen);
 
-  // Whenever the glic window is shown, it should have focus. The following line
-  // of code appears to be necessary but not sufficient and there are still some
-  // edge cases.
-  // TODO(crbug.com/390637019): Fully fix and remove this comment.
+  // Whenever the glic window is shown, it should have focus.
   GetGlicView()->GetWebContents()->Focus();
 
   if (!base::FeatureList::IsEnabled(features::kGlicHandleDraggingNatively)) {
@@ -782,7 +777,7 @@ GlicWidget* GlicWindowControllerImpl::GetGlicWidget() const {
 
 void GlicWindowControllerImpl::AttachedBrowserDidClose(
     BrowserWindowInterface* browser) {
-  Close();
+  Close({});
 }
 
 void GlicWindowControllerImpl::Attach() {
@@ -945,16 +940,6 @@ gfx::Size GlicWindowControllerImpl::GetPanelSize() {
   return browser_view->contents_height_side_panel()->size();
 }
 
-void GlicWindowControllerImpl::SetDraggableAreas(
-    const std::vector<gfx::Rect>& draggable_areas) {
-  GlicView* glic_view = GetGlicView();
-  if (!glic_view) {
-    return;
-  }
-
-  glic_view->SetDraggableAreas(draggable_areas);
-}
-
 void GlicWindowControllerImpl::SetMinimumWidgetSize(const gfx::Size& size) {
   if (!IsDetached()) {
     return;
@@ -965,7 +950,7 @@ void GlicWindowControllerImpl::SetMinimumWidgetSize(const gfx::Size& size) {
 
 void GlicWindowControllerImpl::CloseWithReason(
     views::Widget::ClosedReason reason) {
-  Close();
+  Close({});
 }
 
 bool GlicWindowControllerImpl::ActivateBrowser() {
@@ -988,7 +973,12 @@ void GlicWindowControllerImpl::CloseInstanceWithFrame(
   NOTREACHED();
 }
 
-void GlicWindowControllerImpl::Close() {
+void GlicWindowControllerImpl::ArchiveInstanceWithFrame(
+    content::RenderFrameHost* render_frame_host) {
+  NOTREACHED();
+}
+
+void GlicWindowControllerImpl::Close(const CloseOptions& options) {
   if (state_ == State::kClosed || state_ == State::kDetaching) {
     return;
   }
@@ -1029,9 +1019,15 @@ void GlicWindowControllerImpl::CloseAndShutdownInstanceWithFrame(
 }
 
 void GlicWindowControllerImpl::ClosePanel() {
-  Close();
+  Close({});
   if (screenshot_capturer_) {
     screenshot_capturer_->CloseScreenPicker();
+  }
+}
+
+void GlicWindowControllerImpl::OnReload() {
+  if (glic_view_) {
+    glic_view_->SetWebContents(host().webui_contents());
   }
 }
 
@@ -1332,7 +1328,7 @@ GlicWindowControllerImpl::GetWeakPtr() {
 
 void GlicWindowControllerImpl::Shutdown() {
   // Hide first, then clean up (but do not animate).
-  Close();
+  Close({});
   window_activation_callback_list_.Notify(false);
 }
 
@@ -1368,8 +1364,12 @@ std::optional<std::string> GlicWindowControllerImpl::conversation_id() const {
   return std::nullopt;
 }
 
-base::TimeTicks GlicWindowControllerImpl::GetLastActiveTime() const {
-  return base::TimeTicks();
+base::Time GlicWindowControllerImpl::GetLastActivationTimestamp() const {
+  return base::Time();
+}
+
+base::TimeDelta GlicWindowControllerImpl::GetTimeSinceLastActive() const {
+  return base::TimeDelta();
 }
 
 base::CallbackListSubscription GlicWindowControllerImpl::RegisterStateChange(
@@ -1495,29 +1495,6 @@ void GlicWindowControllerImpl::RemoveObserver(
     return;
   }
   modal_dialog_host_observers_.RemoveObserver(observer);
-}
-
-void GlicWindowControllerImpl::MaybeSendConversationViewRequest() {
-  auto request = mojom::ViewChangeRequest::New(
-      mojom::ViewChangeRequestDetails::NewConversation(
-          mojom::ViewChangeRequestConversation::New()));
-  host().SendViewChangeRequest(std::move(request));
-}
-
-void GlicWindowControllerImpl::MaybeSendActuationViewRequest() {
-  auto request = mojom::ViewChangeRequest::New(
-      mojom::ViewChangeRequestDetails::NewActuation(
-          mojom::ViewChangeRequestActuation::New()));
-  host().SendViewChangeRequest(std::move(request));
-}
-
-bool GlicWindowControllerImpl::InvocationSourceMatchesCurrentView(
-    mojom::InvocationSource source) {
-  auto current_view = host().GetPrimaryCurrentView();
-  return (source == mojom::InvocationSource::kActorTaskIcon &&
-          current_view == mojom::CurrentView::kActuation) ||
-         (source == mojom::InvocationSource::kTopChromeButton &&
-          current_view == mojom::CurrentView::kConversation);
 }
 
 glic::GlicInstanceMetrics* GlicWindowControllerImpl::instance_metrics() {

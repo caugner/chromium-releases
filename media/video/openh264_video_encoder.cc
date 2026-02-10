@@ -406,7 +406,7 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
                                 frame->format() == PIXEL_FORMAT_XRGB ||
                                 frame->format() == PIXEL_FORMAT_ABGR ||
                                 frame->format() == PIXEL_FORMAT_ARGB;
-  if ((!frame->IsMappable() && !frame->HasMappableGpuBuffer()) ||
+  if ((!frame->IsMappable() && !frame->HasMappableSharedImage()) ||
       !supported_format) {
     std::move(done_cb).Run(
         EncoderStatus(EncoderStatus::Codes::kUnsupportedFrameFormat,
@@ -417,7 +417,7 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
     return;
   }
 
-  if (frame->format() == PIXEL_FORMAT_NV12 && frame->HasMappableGpuBuffer()) {
+  if (frame->format() == PIXEL_FORMAT_NV12 && frame->HasMappableSharedImage()) {
     frame = ConvertToMemoryMappedFrame(frame);
     if (!frame) {
       std::move(done_cb).Run(
@@ -427,18 +427,12 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
     }
   }
 
-  bool requires_copy =
-      frame->format() != PIXEL_FORMAT_I420 ||
-      NeedsManualResizing(frame->visible_rect().size(), options_.frame_size) ||
-      frame->stride(VideoFrame::Plane::kU) !=
-          frame->stride(VideoFrame::Plane::kV);
-
-  if (requires_copy) {
+  if (frame->format() != PIXEL_FORMAT_I420 ||
+      NeedsManualResizing(frame->visible_rect().size(), options_.frame_size)) {
     // In cases where we need to
     // - enlarge the frame
-    // - change the pixel format
-    // - change the aspect ratio or
-    // - use matching U and V strides
+    // - change the pixel format or
+    // - change the aspect ratio
     // we are forced to convert and rescale manually.
     auto i420_frame = frame_pool_.CreateFrame(
         PIXEL_FORMAT_I420, options_.frame_size, gfx::Rect(options_.frame_size),

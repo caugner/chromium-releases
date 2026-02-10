@@ -121,7 +121,7 @@ ActorNavigationThrottle::WillProcessResponse() {
   }
 
   if (!execution_engine_ ||
-      !execution_engine_->ShouldGateNavigation(
+      !execution_engine_->ShouldDeferNavigation(
           *navigation_handle(),
           base::BindOnce(
               &ActorNavigationThrottle::OnNavigationConfirmationDecision,
@@ -237,6 +237,8 @@ void ActorNavigationThrottle::OnMayActOnUrlResult(
       case MayActOnUrlBlockReason::kTabIsErrorDocument:
       case MayActOnUrlBlockReason::kUrlNotInAllowlist:
       case MayActOnUrlBlockReason::kWrongScheme:
+      case MayActOnUrlBlockReason::kEnterprisePolicy:
+      case MayActOnUrlBlockReason::kBlockedByStaticList:
         tool_failure_code =
             mojom::ActionResultCode::kTriggeredNavigationBlocked;
         break;

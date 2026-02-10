@@ -37,14 +37,12 @@
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/api/extensions_api_client.h"
-#include "extensions/browser/background_script_executor.h"
 #include "extensions/browser/browsertest_util.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/permissions/active_tab_permission_granter.h"
 #include "extensions/browser/permissions/permissions_test_util.h"
 #include "extensions/browser/process_manager.h"
-#include "extensions/browser/script_executor.h"
 #include "extensions/browser/user_script_manager.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/common/features/feature_channel.h"
@@ -104,35 +102,6 @@ void ExecuteProgrammaticContentScript(content::WebContents* web_contents,
   std::string msg;
   EXPECT_TRUE(message_queue.WaitForMessage(&msg));
   EXPECT_EQ("\"Hello from acking script!\"", msg);
-}
-
-// Executes a `script` as a user script associated with the given `extension_id`
-// within the primary main frame of `web_contents`, waiting for the injection to
-// complete.
-void ExecuteUserScript(content::WebContents& web_contents,
-                       const ExtensionId& extension_id,
-                       const std::string& script) {
-  base::RunLoop run_loop;
-
-  ScriptExecutor script_executor(&web_contents);
-  std::vector<mojom::JSSourcePtr> sources;
-  sources.push_back(mojom::JSSource::New(script, GURL()));
-  script_executor.ExecuteScript(
-      mojom::HostID(mojom::HostID::HostType::kExtensions, extension_id),
-      mojom::CodeInjection::NewJs(mojom::JSInjection::New(
-          std::move(sources), mojom::ExecutionWorld::kUserScript,
-          /*world_id=*/std::nullopt,
-          blink::mojom::WantResultOption::kWantResult,
-          blink::mojom::UserActivationOption::kDoNotActivate,
-          blink::mojom::PromiseResultOption::kAwait)),
-      ScriptExecutor::SPECIFIED_FRAMES, {ExtensionApiFrameIdMap::kTopFrameId},
-      mojom::MatchOriginAsFallbackBehavior::kNever,
-      mojom::RunLocation::kDocumentIdle, ScriptExecutor::DEFAULT_PROCESS,
-      GURL() /* webview_src */,
-      base::IgnoreArgs<std::vector<ScriptExecutor::FrameResult>>(
-          run_loop.QuitWhenIdleClosure()));
-
-  run_loop.Run();
 }
 
 // Test suite covering `extensions::ScriptInjectionTracker` from
@@ -326,7 +295,8 @@ IN_PROC_BROWSER_TEST_F(ScriptInjectionTrackerBrowserTest,
   // Programmatically inject a user script.
   static constexpr char kUserScript[] =
       "document.body.innerText = 'user script has run';";
-  ExecuteUserScript(*web_contents, extension->id(), kUserScript);
+  browsertest_util::ExecuteUserScript(web_contents, extension->id(),
+                                      kUserScript);
 
   // Verify that the right processes show up as having been injected with
   // content scripts.
@@ -352,81 +322,6 @@ IN_PROC_BROWSER_TEST_F(ScriptInjectionTrackerBrowserTest,
             content::EvalJs(web_contents, "document.body.innerText"));
   EXPECT_TRUE(ScriptInjectionTracker::DidProcessRunUserScriptFromExtension(
       *web_contents->GetPrimaryMainFrame()->GetProcess(), extension->id()));
-}
-
-IN_PROC_BROWSER_TEST_F(
-    ScriptInjectionTrackerBrowserTest,
-    ProgrammaticContentScript_CrossOriginSubframe_NoPermission) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  // Install a test extension with permission for foo.com but not
-  // bar.com.
-  TestExtensionDir dir;
-  const char kManifestTemplate[] = R"(
-      {
-        "name": "CrossOriginNoPermission",
-        "version": "1.0",
-        "manifest_version": 3,
-        "host_permissions": ["http://foo.com/*"],
-        "permissions": ["scripting", "tabs"],
-        "background": {"service_worker": "background_script.js"}
-      } )";
-  dir.WriteManifest(kManifestTemplate);
-  dir.WriteFile(FILE_PATH_LITERAL("background_script.js"), "");
-  const Extension* extension = LoadExtension(dir.UnpackedPath());
-  ASSERT_TRUE(extension);
-
-  // Navigate to a page on foo.com.
-  GURL page_url = embedded_test_server()->GetURL("foo.com", "/title1.html");
-  content::WebContents* web_contents = GetActiveWebContents();
-  ASSERT_TRUE(NavigateToURL(web_contents, page_url));
-
-  // Add a cross-origin iframe pointing to bar.com.
-  GURL iframe_url = embedded_test_server()->GetURL("bar.com", "/title1.html");
-  const char kScript[] = R"(
-      let iframe = document.createElement('iframe');
-      iframe.src = $1;
-      document.body.appendChild(iframe);
-  )";
-  ASSERT_TRUE(ExecJs(web_contents, content::JsReplace(kScript, iframe_url)));
-  content::WaitForLoadStop(web_contents);
-
-  content::RenderFrameHost* main_frame = web_contents->GetPrimaryMainFrame();
-  content::RenderFrameHost* child_frame = content::ChildFrameAt(main_frame, 0);
-  ASSERT_TRUE(child_frame);
-  EXPECT_NE(main_frame->GetProcess(), child_frame->GetProcess());
-
-  // Verify that initially no processes show up as having been injected.
-  EXPECT_FALSE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
-      *main_frame->GetProcess(), extension->id()));
-  EXPECT_FALSE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
-      *child_frame->GetProcess(), extension->id()));
-
-  // Programmatically inject a content script with allFrames: true.
-  int tab_id = ExtensionTabUtil::GetTabId(web_contents);
-  const char kBackgroundScript[] = R"(
-      chrome.scripting.executeScript({
-          target: {tabId: $1, allFrames: true},
-          func: () => { window.executed = true; }
-      }, (results) => {
-          chrome.test.sendScriptResult(true);
-      });
-  )";
-
-  std::string background_script = content::JsReplace(kBackgroundScript, tab_id);
-  BackgroundScriptExecutor::ExecuteScript(
-      profile(), extension->id(), background_script,
-      BackgroundScriptExecutor::ResultCapture::kSendScriptResult);
-
-  // Verify that the main frame's process is authorized (since it has
-  // permission).
-  EXPECT_TRUE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
-      *main_frame->GetProcess(), extension->id()));
-
-  // Verify that the child frame's process is NOT authorized (since it lacks
-  // permission).
-  EXPECT_FALSE(ScriptInjectionTracker::DidProcessRunContentScriptFromExtension(
-      *child_frame->GetProcess(), extension->id()));
 }
 
 // Tests what happens when the ExtensionMsg_ExecuteCode is sent *after* sending

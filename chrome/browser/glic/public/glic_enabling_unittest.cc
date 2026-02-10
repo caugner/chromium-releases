@@ -4,7 +4,9 @@
 
 #include "chrome/browser/glic/public/glic_enabling.h"
 
+#include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/host/glic_features.mojom-features.h"
@@ -21,6 +23,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
+#include "components/variations/service/variations_service.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -34,12 +37,27 @@ using base::test::FeatureRef;
 namespace glic {
 namespace {
 
+class TestDelegate : public GlicGlobalEnabling::Delegate {
+ public:
+  std::string GetCountryCode() override { return country_code_; }
+  std::string GetLocale() override { return locale_; }
+  void SetCountryCode(const std::string& country_code) {
+    country_code_ = country_code;
+  }
+  void SetLocale(const std::string& locale) { locale_ = locale; }
+
+ private:
+  std::string country_code_ = "us";
+  std::string locale_ = "en-us";
+};
+
 class GlicEnablingTest : public testing::Test {
  public:
   void SetUp() override {
+    // Note: We're not creating GlobalFeatures in this unit test because
+    // GlicBackgroundModeManager fails to be constructed without additional
+    // setup.
     testing::Test::SetUp();
-
-    // Enable kGlic and kTabstripComboButton by default for testing.
     scoped_feature_list_.InitWithFeatures(
         {
             features::kGlic,
@@ -57,27 +75,131 @@ class GlicEnablingTest : public testing::Test {
   }
 
  protected:
+  TestDelegate delegate_;
   content::BrowserTaskEnvironment task_environment_;
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Test
 TEST_F(GlicEnablingTest, GlicFeatureEnabledTest) {
-  EXPECT_EQ(GlicEnabling::IsEnabledByFlags(), true);
+  EXPECT_EQ(GlicGlobalEnabling(delegate_).IsEnabledByFlags(), true);
 }
 
 TEST_F(GlicEnablingTest, GlicFeatureNotEnabledTest) {
   // Turn feature flag off
   scoped_feature_list_.Reset();
   scoped_feature_list_.InitWithFeatures({}, {features::kGlic});
-  EXPECT_EQ(GlicEnabling::IsEnabledByFlags(), false);
+  EXPECT_EQ(GlicGlobalEnabling(delegate_).IsEnabledByFlags(), false);
 }
 
 TEST_F(GlicEnablingTest, TabStripComboButtonFeatureNotEnabledTest) {
   // Turn tab strip combo button feature flag off
   scoped_feature_list_.Reset();
   scoped_feature_list_.InitWithFeatures({}, {features::kTabstripComboButton});
-  EXPECT_EQ(GlicEnabling::IsEnabledByFlags(), false);
+  EXPECT_EQ(GlicGlobalEnabling(delegate_).IsEnabledByFlags(), false);
+}
+
+TEST_F(GlicEnablingTest, CountryFilteringNotEnabled) {
+  base::test::ScopedFeatureList features;
+  features.InitAndDisableFeature(features::kGlicCountryFiltering);
+  delegate_.SetCountryCode("zz");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, CountryFilteringEnabledWithDefaultParams) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(features::kGlicCountryFiltering,
+                                              {});
+  delegate_.SetCountryCode("us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("US");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("zz");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, CountryFilteringEnabledWithLists) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(
+      features::kGlicCountryFiltering,
+      {{"disabled_countries", "zz"}, {"enabled_countries", "us,uk,zz"}});
+
+  delegate_.SetCountryCode("us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("UK");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("zz");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("qq");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, CountryFilteringEnabledWithStar) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(
+      features::kGlicCountryFiltering,
+      {{"disabled_countries", "zz"}, {"enabled_countries", "*"}});
+
+  delegate_.SetCountryCode("us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("ru");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetCountryCode("zz");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, LocaleFilteringNotEnabled) {
+  base::test::ScopedFeatureList features;
+  features.InitAndDisableFeature(features::kGlicLocaleFiltering);
+  delegate_.SetLocale("foobar");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, LocaleFilteringEnabledWithDefaults) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(features::kGlicLocaleFiltering);
+
+  delegate_.SetLocale("en-us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-uk");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, LocaleFilteringEnabledWithLists) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(
+      features::kGlicLocaleFiltering,
+      {{"disabled_locales", "en-zz"},
+       {"enabled_locales", "en-us,en-ru,en-zz"}});
+
+  delegate_.SetLocale("en-us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-US");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("EN_us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-ru");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-zz");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-ot");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+}
+
+TEST_F(GlicEnablingTest, LocaleFilteringEnabledStar) {
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeatureWithParameters(
+      features::kGlicLocaleFiltering,
+      {{"disabled_locales", "en-zz"}, {"enabled_locales", "*"}});
+
+  delegate_.SetLocale("en-us");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-ru");
+  EXPECT_TRUE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
+  delegate_.SetLocale("en-zz");
+  EXPECT_FALSE(GlicGlobalEnabling(delegate_).IsEnabledByFlags());
 }
 
 // Test for `glic::GlicEnabling::IsProfileEligible`.
@@ -93,30 +215,31 @@ class GlicEnablingProfileEligibilityTest : public testing::Test {
             chromeos::features::kFeatureManagementGlic,
 #endif  // BUILDFLAG(IS_CHROMEOS)
         },
-        /*disabled_features=*/{});
+        /*disabled_features=*/{
+            features::kGlicCountryFiltering,
+            features::kGlicLocaleFiltering,
+        });
   }
   ~GlicEnablingProfileEligibilityTest() override = default;
 
   void SetUp() override {
-    testing_profile_manager_ = std::make_unique<TestingProfileManager>(
-        TestingBrowserProcess::GetGlobal());
-    ASSERT_TRUE(testing_profile_manager_->SetUp());
-    TestingBrowserProcess::GetGlobal()->CreateGlobalFeaturesForTesting();
+    raw_ptr<TestingProfileManager> testing_profile_manager =
+        TestingBrowserProcess::GetGlobal()->SetUpGlobalFeaturesForTesting(
+            /*profile_manager=*/true);
 
 #if BUILDFLAG(IS_CHROMEOS)
     glic_user_session_test_helper_.PreProfileSetUp(
-        testing_profile_manager_->profile_manager());
+        testing_profile_manager->profile_manager());
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-    profile_ = testing_profile_manager_->CreateTestingProfile(
+    profile_ = testing_profile_manager->CreateTestingProfile(
         TestingProfile::kDefaultProfileUserName);
   }
 
   void TearDown() override {
-    TestingBrowserProcess::GetGlobal()->GetFeatures()->Shutdown();
-
     profile_ = nullptr;
-    testing_profile_manager_.reset();
+
+    TestingBrowserProcess::GetGlobal()->TearDownGlobalFeaturesForTesting();
 
 #if BUILDFLAG(IS_CHROMEOS)
     glic_user_session_test_helper_.PostProfileTearDown();
@@ -132,7 +255,6 @@ class GlicEnablingProfileEligibilityTest : public testing::Test {
 #if BUILDFLAG(IS_CHROMEOS)
   ash::GlicUserSessionTestHelper glic_user_session_test_helper_;
 #endif  // BUILDFLAG(IS_CHROMEOS)
-  std::unique_ptr<TestingProfileManager> testing_profile_manager_;
   raw_ptr<TestingProfile> profile_ = nullptr;
 };
 
@@ -151,7 +273,8 @@ class GlicEnablingProfileReadyStateTestBase
     // Disable rollout check and user status check complexities for these tests.
     // We already have kGlic enabled from the base class.
     scoped_feature_list_.InitWithFeatures(
-        /*enabled_features=*/{features::kGlicRollout},
+        /*enabled_features=*/{features::kGlicRollout,
+                              features::kTabstripComboButton},
         /*disabled_features=*/{features::kGlicUserStatusCheck});
 
     // Make sure we have a primary account so we don't fail the "capable" check.
@@ -206,6 +329,22 @@ TEST_F(GlicEnablingTrustFirstOnboardingTest, NotConsented_ReturnsReady) {
             mojom::ProfileReadyState::kReady);
 }
 
+TEST_F(GlicEnablingTrustFirstOnboardingTest, Consented_ReturnsFalse) {
+  profile()->GetPrefs()->SetInteger(
+      prefs::kGlicCompletedFre, static_cast<int>(prefs::FreStatus::kCompleted));
+
+  EXPECT_FALSE(
+      GlicEnabling::IsTrustFirstOnboardingEnabledForProfile(profile()));
+}
+
+TEST_F(GlicEnablingTrustFirstOnboardingTest, NotConsented_ReturnsTrue) {
+  profile()->GetPrefs()->SetInteger(
+      prefs::kGlicCompletedFre,
+      static_cast<int>(prefs::FreStatus::kIncomplete));
+
+  EXPECT_TRUE(GlicEnabling::IsTrustFirstOnboardingEnabledForProfile(profile()));
+}
+
 TEST_F(GlicEnablingStandardFreTest, NotConsented_ReturnsIneligible) {
   profile()->GetPrefs()->SetInteger(
       prefs::kGlicCompletedFre,
@@ -222,14 +361,16 @@ class GlicEnablingAnyFreModeTest : public GlicEnablingProfileReadyStateTestBase,
     GlicEnablingProfileReadyStateTestBase::SetUp();
     if (GetParam()) {
       scoped_feature_list_.InitWithFeatures(
-          /*enabled_features=*/{features::kGlicTrustFirstOnboarding,
-                                features::kGlicMultiInstance,
-                                mojom::features::kGlicMultiTab,
-                                features::kGlicMultitabUnderlines},
+          /*enabled_features=*/
+          {features::kGlicTrustFirstOnboarding, features::kGlicMultiInstance,
+           mojom::features::kGlicMultiTab, features::kGlicMultitabUnderlines,
+           features::kTabstripComboButton},
           /*disabled_features=*/{});
     } else {
-      scoped_feature_list_.InitAndDisableFeature(
-          features::kGlicTrustFirstOnboarding);
+      scoped_feature_list_.InitWithFeatures(
+          /*enabled_features=*/
+          {features::kTabstripComboButton}, /*disabled_features=*/
+          {features::kGlicTrustFirstOnboarding});
     }
   }
 

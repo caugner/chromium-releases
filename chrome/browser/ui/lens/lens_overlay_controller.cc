@@ -11,13 +11,13 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "base/numerics/checked_math.h"
 #include "base/process/kill.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -58,6 +58,8 @@
 #include "chrome/browser/ui/lens/lens_searchbox_controller.h"
 #include "chrome/browser/ui/lens/lens_session_metrics_logger.h"
 #include "chrome/browser/ui/lens/page_content_type_conversions.h"
+#include "chrome/browser/ui/promos/ios_promo_trigger_service.h"
+#include "chrome/browser/ui/promos/ios_promo_trigger_service_factory.h"
 #include "chrome/browser/ui/search/omnibox_utils.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -74,6 +76,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/branded_strings.h"
+#include "components/contextual_tasks/public/features.h"
+#include "components/desktop_to_mobile_promos/features.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/find_in_page/find_tab_helper.h"
 #include "components/lens/lens_features.h"
@@ -136,6 +140,10 @@ constexpr base::TimeDelta kFadeoutAnimationTimeout = base::Milliseconds(300);
 // The amount of time to wait for a reflow after closing the side panel before
 // taking a screenshot.
 constexpr base::TimeDelta kReflowWaitTimeout = base::Milliseconds(200);
+
+// The amount of time to wait after the side panel opens before showing the
+// mobile promo.
+constexpr base::TimeDelta kMobilePromoShowDelay = base::Seconds(4);
 
 // Copy the objects of a vector into another without transferring
 // ownership.
@@ -265,10 +273,21 @@ class LensOverlayController::UnderlyingWebContentsObserver
       return;
     }
 
+    auto* lens_search_controller =
+        lens_overlay_controller_->lens_search_controller_.get();
+    // If routing to contextual tasks, always close the overlay instead of
+    // hiding as the contextual tasks panel is not dependent on the overlay
+    // remaining alive and hidden.
+    if (lens_search_controller->should_route_to_contextual_tasks()) {
+      lens_search_controller->CloseLensAsync(
+          lens::LensOverlayDismissalSource::kPageChanged);
+      return;
+    }
+
     // If the page changes, only the overlay needs to be hidden, possibly
     // leaving the side panel open. The search controller will handle whether
     // the side panel should stay open or the entire session should terminate.
-    lens_overlay_controller_->lens_search_controller_->HideOverlay(
+    lens_search_controller->HideOverlay(
         lens::LensOverlayDismissalSource::kPageChanged);
     return;
   }
@@ -534,7 +553,7 @@ void LensOverlayController::SendRegionText(lens::mojom::TextPtr text,
 
 lens::mojom::OverlayThemePtr LensOverlayController::CreateTheme(
     lens::PaletteId palette_id) {
-  CHECK(base::Contains(lens::kPaletteColors, palette_id));
+  CHECK(lens::kPaletteColors.contains(palette_id));
   const auto& palette = lens::kPaletteColors.at(palette_id);
   auto theme = lens::mojom::OverlayTheme::New();
   theme->primary = palette.at(lens::ColorId::kPrimary);
@@ -565,6 +584,14 @@ void LensOverlayController::SendObjects(
 void LensOverlayController::NotifyResultsPanelOpened() {
   if (page_) {
     page_->NotifyResultsPanelOpened();
+  }
+
+  if (IsVisualSelectionType(lens_selection_type_)) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&LensOverlayController::MaybeShowMobilePromo,
+                       weak_factory_.GetWeakPtr()),
+        kMobilePromoShowDelay);
   }
 }
 
@@ -1580,16 +1607,11 @@ void LensOverlayController::ShowOverlay() {
   // TODO(crbug.com/443102583): Remove this block if overlay_view_ ends up
   // getting reparented such that it always shares a parent with
   // contents_web_view.
-  if (base::FeatureList::IsEnabled(features::kSideBySide)) {
-    // When split view is enabled, there are two additional layers of
-    // hierarchy:
-    // BrowserView->MultiContentsView->ContentsContainerView->ContentsWebView
-    // vs.
-    // BrowserView->ContentsWebView
-    // Since the overlay view is parented by BrowserView, to properly pass the
-    // check below, we should only compare direct children of BrowserView.
-    child_contents_view = child_contents_view->parent()->parent();
-  }
+  // The hierarchy to access the contents web view is:
+  // BrowserView->MultiContentsView->ContentsContainerView->ContentsWebView
+  // Since the overlay view is parented by BrowserView, to properly pass the
+  // check below, we should only compare direct children of BrowserView.
+  child_contents_view = child_contents_view->parent()->parent();
   CHECK(parent_view->GetIndexOf(overlay_view_) >
         parent_view->GetIndexOf(child_contents_view));
 
@@ -1695,36 +1717,10 @@ void LensOverlayController::InitializeOverlay(
   // Only start the query flow again if there is no full image response and the
   // side panel is not open. The side panel being open indicates that a full
   // image response could have been received and not passed to the overlay.
-  if (GetLensQueryFlowRouter()->IsOff()) {
-    if (!GetContextualizationController()->GetCurrentPageContextEligibility()) {
-      initialization_data_->initial_screenshot_ = SkBitmap();
-      initialization_data_->page_url_ = GURL();
-      initialization_data_->page_title_ = "";
-    }
-
-    GetLensQueryFlowRouter()->StartQueryFlow(
-        initialization_data_->initial_screenshot_,
-        initialization_data_->page_url_, initialization_data_->page_title_,
-        std::move(initialization_data_->significant_region_boxes_),
-        initialization_data_->page_contents_,
-        initialization_data_->primary_content_type_,
-        initialization_data_->last_retrieved_most_visible_page_,
-        GetUiScaleFactor(), invocation_time_);
-
-#if BUILDFLAG(ENABLE_PDF)
-    // TODO(crbug.com/418825720): When StorePageContentAndContinueInitialization
-    // is called, the contextualization controller does not update its own
-    // contextualization. In this case, the partial PDF text should be sent here
-    // if it is available.
-    if (initialization_data_->primary_content_type_ == lens::MimeType::kPdf) {
-      GetContextualizationController()
-          ->FetchVisiblePageIndexAndGetPartialPdfText(
-              initialization_data_->pdf_page_count_.value(),
-              base::BindOnce(
-                  &LensOverlayController::OnPdfPartialPageTextRetrieved,
-                  weak_factory_.GetWeakPtr()));
-    }
-#endif
+  if (lens_search_controller_->should_route_to_contextual_tasks() ||
+      GetLensQueryFlowRouter()->IsOff()) {
+    StartQueryFlow();
+    FetchPdfTextIfEligible();
   } else {
     // If the query flow is already started, update the page content with
     // the new viewport.
@@ -1775,7 +1771,8 @@ void LensOverlayController::InitializeOverlayUI(
 
   // Only show the CSB if the results side panel is not open.
   bool is_side_panel_open = IsResultsSidePanelShowing();
-  page_->ShouldShowContextualSearchBox(!is_side_panel_open);
+  page_->ShouldShowContextualSearchBox(
+      !is_side_panel_open && lens_search_controller_->should_show_csb());
   // If should show CSB, and the CSB viewport thumbnail is enabled, send it now.
   if (lens::features::GetVisualSelectionUpdatesEnableCsbThumbnail()) {
     lens_search_controller_->HandleThumbnailCreatedBitmap(
@@ -2026,9 +2023,6 @@ void LensOverlayController::OnSidePanelDidOpen() {
 
 void LensOverlayController::SetOverlayRoundedCorner() {
   CHECK(overlay_view_ && overlay_web_view_);
-  if (!base::FeatureList::IsEnabled(features::kSideBySide)) {
-    return;
-  }
 
   const bool should_round_corner = IsResultsSidePanelShowing();
   const float radius =
@@ -2355,7 +2349,7 @@ void LensOverlayController::ShowPreselectionBubble() {
     // Setup the preselection widget.
     preselection_widget_ = views::BubbleDialogDelegateView::CreateBubble(
         std::make_unique<lens::LensPreselectionBubble>(
-            weak_factory_.GetWeakPtr(), preselection_widget_anchor_,
+            tab_->GetHandle(), preselection_widget_anchor_,
             net::NetworkChangeNotifier::IsOffline(),
             /*exit_clicked_callback=*/
             base::BindRepeating(
@@ -2467,6 +2461,18 @@ void LensOverlayController::IssueSearchBoxRequestPart2(
     GetLensSessionMetricsLogger()->OnContextualSearchboxQueryIssued(
         is_zero_prefix_suggestion,
         /*is_initial_query=*/state_ == State::kOverlay);
+    if (lens_search_controller_->should_route_to_contextual_tasks() &&
+        state_ == State::kOverlay) {
+      // Post a task to close the overlay to avoid destroying the searchbox handler
+      // while it is still on the stack.
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE,
+          base::BindOnce(
+              &LensSearchController::CloseLensSync,
+              lens_search_controller_->GetWeakPtr(),
+              lens::LensOverlayDismissalSource::kContextualTasksQuerySubmitted));
+      return;
+    }
   } else if (initialization_data_->selected_region_.is_null()) {
     GetLensQueryFlowRouter()->SendTextOnlyQuery(
         query_start_time, search_box_text, lens_selection_type_,
@@ -3109,4 +3115,50 @@ LensOverlayController::GetContextualizationController() {
 lens::LensSessionMetricsLogger*
 LensOverlayController::GetLensSessionMetricsLogger() {
   return lens_search_controller_->lens_session_metrics_logger();
+}
+
+void LensOverlayController::StartQueryFlow() {
+  if (!GetContextualizationController()->GetCurrentPageContextEligibility()) {
+    initialization_data_->initial_screenshot_ = SkBitmap();
+    initialization_data_->page_url_ = GURL();
+    initialization_data_->page_title_ = "";
+  }
+
+  GetLensQueryFlowRouter()->StartQueryFlow(
+      initialization_data_->initial_screenshot_,
+      initialization_data_->page_url_, initialization_data_->page_title_,
+      std::move(initialization_data_->significant_region_boxes_),
+      initialization_data_->page_contents_,
+      initialization_data_->primary_content_type_,
+      initialization_data_->last_retrieved_most_visible_page_,
+      GetUiScaleFactor(), invocation_time_);
+}
+
+void LensOverlayController::FetchPdfTextIfEligible() {
+#if BUILDFLAG(ENABLE_PDF)
+  // TODO(crbug.com/418825720): When StorePageContentAndContinueInitialization
+  // is called, the contextualization controller does not update its own
+  // contextualization. In this case, the partial PDF text should be sent here
+  // if it is available.
+  if (initialization_data_->primary_content_type_ == lens::MimeType::kPdf) {
+    GetContextualizationController()->FetchVisiblePageIndexAndGetPartialPdfText(
+        initialization_data_->pdf_page_count_.value(),
+        base::BindOnce(&LensOverlayController::OnPdfPartialPageTextRetrieved,
+                       weak_factory_.GetWeakPtr()));
+  }
+#endif
+}
+
+void LensOverlayController::MaybeShowMobilePromo() {
+  if (MobilePromoOnDesktopTypeEnabled(
+          MobilePromoOnDesktopPromoType::kLensPromo)) {
+    IOSPromoTriggerService* service =
+        IOSPromoTriggerServiceFactory::GetForProfile(
+            Profile::FromBrowserContext(
+                tab_->GetContents()->GetBrowserContext()));
+    if (service) {
+      service->NotifyPromoShouldBeShown(
+          desktop_to_mobile_promos::PromoType::kLens);
+    }
+  }
 }

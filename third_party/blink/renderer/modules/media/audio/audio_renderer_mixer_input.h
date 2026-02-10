@@ -80,7 +80,6 @@ class BLINK_MODULES_EXPORT AudioRendererMixerInput
   void OnRenderError();
 
  private:
-  void StopInternal();
   ~AudioRendererMixerInput() override;
 
   friend class AudioRendererMixerInputTest;
@@ -119,9 +118,6 @@ class BLINK_MODULES_EXPORT AudioRendererMixerInput
                            scoped_refptr<media::AudioRendererSink> sink,
                            media::OutputDeviceInfo device_info);
 
-  // Prevents race conditions when Stop() is called during a device change.
-  base::Lock device_change_lock_;
-
   // AudioParameters received during Initialize().
   media::AudioParameters params_;
 
@@ -147,8 +143,7 @@ class BLINK_MODULES_EXPORT AudioRendererMixerInput
   // exclusive when executing; these flags indicate whether one or the other is
   // in progress. Each method will use the other method's to defer its action.
   bool godia_in_progress_ = false;
-  bool switch_output_device_in_progress_ GUARDED_BY(device_change_lock_) =
-      false;
+  bool switch_output_device_in_progress_ = false;
 
   // Set by GetOutputDeviceInfoAsync() if a SwitchOutputDevice() call is in
   // progress. GetOutputDeviceInfoAsync() will be invoked again with this value

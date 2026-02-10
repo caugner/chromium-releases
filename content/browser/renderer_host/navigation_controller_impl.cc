@@ -1208,7 +1208,14 @@ int NavigationControllerImpl::GetIndexForOffset(int offset) {
 }
 
 std::optional<int> NavigationControllerImpl::GetIndexForGoBack() {
-  for (int index = GetIndexForOffset(-1); index >= 0; index--) {
+  return GetIndexForGoBackWithSkipping(GetCurrentEntryIndex());
+}
+
+std::optional<int> NavigationControllerImpl::GetIndexForGoBackWithSkipping(
+    int from_index) {
+  // Start searching one step behind the provided index for the first entry that
+  // shouldn't be skipped by the history manipulation intervention.
+  for (int index = from_index - 1; index >= 0; index--) {
     if (!GetEntryAtIndex(index)->should_skip_on_back_forward_ui()) {
       return index;
     }
@@ -1241,7 +1248,14 @@ bool NavigationControllerImpl::ShouldEnableBackButton() {
 }
 
 std::optional<int> NavigationControllerImpl::GetIndexForGoForward() {
-  for (int index = GetIndexForOffset(1); index < GetEntryCount(); index++) {
+  return GetIndexForGoForwardWithSkipping(GetCurrentEntryIndex());
+}
+
+std::optional<int> NavigationControllerImpl::GetIndexForGoForwardWithSkipping(
+    int from_index) {
+  // Start searching one step ahead the provided index for the first entry that
+  // shouldn't be skipped by the history manipulation intervention.
+  for (int index = from_index + 1; index < GetEntryCount(); index++) {
     if (!GetEntryAtIndex(index)->should_skip_on_back_forward_ui()) {
       return index;
     }
@@ -1280,22 +1294,49 @@ bool NavigationControllerImpl::CanGoToOffset(int offset) {
 
 #if BUILDFLAG(IS_ANDROID)
 bool NavigationControllerImpl::CanGoToOffsetWithSkipping(int offset) {
+  return GetIndexForOffsetWithSkipping(offset).has_value();
+}
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
+std::optional<int> NavigationControllerImpl::GetIndexForOffsetWithSkipping(
+    int offset) {
+  int current_scan_index = GetCurrentEntryIndex();
+
   if (offset == 0) {
-    return true;
+    return current_scan_index;
   }
-  int increment = offset > 0 ? 1 : -1;
-  int non_skippable_entries = 0;
-  for (int index = GetIndexForOffset(increment);
-       index >= 0 && index < GetEntryCount(); index += increment) {
-    if (!GetEntryAtIndex(index)->should_skip_on_back_forward_ui()) {
-      non_skippable_entries++;
+
+  int steps = std::abs(offset);
+
+  // Note on time complexity:
+  //
+  // This algorithm is O(N) (where N is the number of entries) despite the
+  // nested loop structure.
+  //
+  // The outer loop runs 'steps' times. However, 'current_scan_index' is updated
+  // at the end of each iteration. The inner scanning functions
+  // (GetIndexForGoBackWithSkipping / GetIndexForGoForwardWithSkipping) start
+  // scanning strictly adjacent to the passed input index and never backtrack.
+  // This ensures that each entry in the navigation list is visited at most
+  // once.
+  for (int i = 0; i < steps; ++i) {
+    std::optional<int> next_index;
+
+    if (offset < 0) {
+      next_index = GetIndexForGoBackWithSkipping(current_scan_index);
+    } else {
+      next_index = GetIndexForGoForwardWithSkipping(current_scan_index);
     }
 
-    if (non_skippable_entries == std::abs(offset)) {
-      return true;
+    if (!next_index.has_value()) {
+      return std::nullopt;
     }
+
+    current_scan_index = next_index.value();
   }
-  return false;
+
+  return current_scan_index;
 }
 #endif
 
@@ -1412,32 +1453,14 @@ NavigationControllerImpl::GoToIndexAndReturnAllRequests(int index) {
 
 #if BUILDFLAG(IS_ANDROID)
 void NavigationControllerImpl::GoToOffsetWithSkipping(int offset) {
+  std::optional<int> target_index = GetIndexForOffsetWithSkipping(offset);
+
   // Note: This is actually reached in unit tests.
-  if (!CanGoToOffsetWithSkipping(offset)) {
+  if (!target_index.has_value()) {
     return;
   }
 
-  if (offset == 0) {
-    GoToIndex(GetIndexForOffset(offset));
-    return;
-  }
-  int increment = offset > 0 ? 1 : -1;
-  // Find the offset without counting skippable entries.
-  int target_index = GetIndexForOffset(increment);
-  int non_skippable_entries = 0;
-  for (int index = target_index; index >= 0 && index < GetEntryCount();
-       index += increment) {
-    if (!GetEntryAtIndex(index)->should_skip_on_back_forward_ui()) {
-      non_skippable_entries++;
-    }
-
-    if (non_skippable_entries == std::abs(offset)) {
-      target_index = index;
-      break;
-    }
-  }
-
-  GoToIndex(target_index);
+  GoToIndex(target_index.value());
 }
 #endif
 
@@ -1585,6 +1608,7 @@ bool NavigationControllerImpl::RendererDidNavigate(
     bool is_same_document_navigation,
     bool was_on_initial_empty_document,
     bool previous_document_had_history_intervention_activation,
+    bool caused_by_ad,
     NavigationRequest* navigation_request) {
   DCHECK(navigation_request);
 
@@ -1783,18 +1807,18 @@ bool NavigationControllerImpl::RendererDidNavigate(
     case NAVIGATION_TYPE_MAIN_FRAME_NEW_ENTRY:
       RendererDidNavigateToNewEntry(
           rfh, params, details->is_same_document, details->did_replace_entry,
-          previous_document_had_history_intervention_activation,
+          previous_document_had_history_intervention_activation, caused_by_ad,
           navigation_request, details, &deferred_notifier);
       break;
     case NAVIGATION_TYPE_MAIN_FRAME_EXISTING_ENTRY:
       RendererDidNavigateToExistingEntry(
-          rfh, params, details->is_same_document, was_restored,
+          rfh, params, details->is_same_document, was_restored, caused_by_ad,
           navigation_request, keep_pending_entry, details, &deferred_notifier);
       break;
     case NAVIGATION_TYPE_NEW_SUBFRAME:
       RendererDidNavigateNewSubframe(
           rfh, params, details->is_same_document, details->did_replace_entry,
-          previous_document_had_history_intervention_activation,
+          previous_document_had_history_intervention_activation, caused_by_ad,
           navigation_request, details, &deferred_notifier);
       break;
     case NAVIGATION_TYPE_AUTO_SUBFRAME:
@@ -2201,6 +2225,7 @@ void NavigationControllerImpl::RendererDidNavigateToNewEntry(
     bool is_same_document,
     bool replace_entry,
     bool previous_document_had_history_intervention_activation,
+    bool caused_by_ad,
     NavigationRequest* request,
     LoadCommittedDetails* commit_details,
     ScopedDeferredNavigationStateChangeNotifier* deferred_notifier) {
@@ -2362,6 +2387,10 @@ void NavigationControllerImpl::RendererDidNavigateToNewEntry(
       request->IsRendererInitiated(), request->GetPreviousPageUkmSourceId(),
       rfh);
 
+  SetAdCreatorAndTargetEntryStatusIfNeeded(
+      *new_entry, is_same_document, caused_by_ad, /*is_append=*/!replace_entry,
+      /*is_replace=*/replace_entry, /*is_main_frame=*/true);
+
   // If this is a history navigation and the old entry has an existing
   // back/forward cache metrics object, keep using the old one so that the
   // reasons logged from the last time the page navigated gets preserved.
@@ -2392,6 +2421,7 @@ void NavigationControllerImpl::RendererDidNavigateToExistingEntry(
     const mojom::DidCommitProvisionalLoadParams& params,
     bool is_same_document,
     bool was_restored,
+    bool caused_by_ad,
     NavigationRequest* request,
     bool keep_pending_entry,
     LoadCommittedDetails* commit_details,
@@ -2499,6 +2529,15 @@ void NavigationControllerImpl::RendererDidNavigateToExistingEntry(
                                NavigationEntryImpl::UpdatePolicy::kUpdate,
                                false /* is_new_entry */, commit_details);
 
+  // We determine if this is a replace operation (e.g., history.replaceState)
+  // by checking if we are reusing the current entry. This distinguishes it from
+  // back/forward navigation.
+  bool is_replace = (entry == GetLastCommittedEntry());
+
+  SetAdCreatorAndTargetEntryStatusIfNeeded(
+      *entry, is_same_document, caused_by_ad, /*is_append=*/false, is_replace,
+      /*is_main_frame=*/true);
+
   // The redirected to page should not inherit the favicon from the previous
   // page.
   if (ui::PageTransitionIsRedirect(params.transition) && !is_same_document) {
@@ -2531,6 +2570,7 @@ void NavigationControllerImpl::RendererDidNavigateNewSubframe(
     bool is_same_document,
     bool replace_entry,
     bool previous_document_had_history_intervention_activation,
+    bool caused_by_ad,
     NavigationRequest* request,
     LoadCommittedDetails* commit_details,
     ScopedDeferredNavigationStateChangeNotifier* deferred_notifier) {
@@ -2599,6 +2639,10 @@ void NavigationControllerImpl::RendererDidNavigateNewSubframe(
       replace_entry, previous_document_had_history_intervention_activation,
       request->IsRendererInitiated(), request->GetPreviousPageUkmSourceId(),
       rfh);
+
+  SetAdCreatorAndTargetEntryStatusIfNeeded(
+      *new_entry, is_same_document, caused_by_ad, /*is_append=*/!replace_entry,
+      /*is_replace=*/replace_entry, /*is_main_frame=*/false);
 
   // TODO(creis): Update this to add the frame_entry if we can't find the one
   // to replace, which can happen due to a unique name change. See
@@ -2883,8 +2927,7 @@ bool NavigationControllerImpl::ValidateDataURLAsString(
     return false;
   }
 
-  if (data_url_as_string->size() >
-      kMaxLengthOfDataURLString.InBytesUnsigned()) {
+  if (data_url_as_string->size() > kMaxLengthOfDataURLString.InBytes()) {
     return false;
   }
 
@@ -4900,6 +4943,43 @@ void NavigationControllerImpl::SetSkippableForSameDocumentEntries(
         document_sequence_number) {
       entry->set_should_skip_on_back_forward_ui(skippable);
     }
+  }
+}
+
+void NavigationControllerImpl::SetAdCreatorAndTargetEntryStatusIfNeeded(
+    NavigationEntryImpl& new_entry,
+    bool is_same_document,
+    bool caused_by_ad,
+    bool is_append,
+    bool is_replace,
+    bool is_main_frame) {
+  if (last_committed_entry_index_ == -1) {
+    return;
+  }
+
+  NavigationEntryImpl* last_entry = GetLastCommittedEntry();
+  DCHECK(last_entry);
+
+  // Only tag if the navigation appends or replaces an entry (e.g., not
+  // back/forward navigations or other cases).
+  if (!is_append && !is_replace) {
+    return;
+  }
+
+  // Skip tagging for main frame, cross-docment navigation.
+  if (is_main_frame && !is_same_document) {
+    return;
+  }
+
+  // Tag the new entry to indicate if it was created by an ad.
+  new_entry.set_is_entry_created_by_ad(caused_by_ad);
+
+  // For navigations that append a new entry due to an ad, mark the initiating
+  // NavigationEntry as an `ad_entry_creator`. This state is never reset for a
+  // given NavigationEntry, to prevent pages from hiding that an ad entry was
+  // created.
+  if (is_append && caused_by_ad) {
+    last_entry->set_is_ad_entry_creator(true);
   }
 }
 

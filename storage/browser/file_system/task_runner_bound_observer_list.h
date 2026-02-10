@@ -12,7 +12,6 @@
 #include "base/location.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/sequenced_task_runner.h"
-#include "storage/browser/file_system/file_observers.h"
 
 namespace storage {
 
@@ -26,8 +25,8 @@ namespace storage {
 template <typename Observer>
 class TaskRunnerBoundObserverList {
  public:
-  using ObserversListMap = std::map<scoped_refptr<Observer>,
-                                    scoped_refptr<base::SequencedTaskRunner>>;
+  using ObserversListMap =
+      std::map<Observer*, scoped_refptr<base::SequencedTaskRunner>>;
 
   // Creates an empty list.
   TaskRunnerBoundObserverList() = default;
@@ -47,17 +46,11 @@ class TaskRunnerBoundObserverList {
   // Note that this is a const method and does NOT change 'this' observer
   // list but returns a new list.
   TaskRunnerBoundObserverList AddObserver(
-      scoped_refptr<Observer> observer,
+      Observer* observer,
       base::SequencedTaskRunner* runner_to_notify) const {
     ObserversListMap observers = observers_;
-    observers.insert(std::make_pair(std::move(observer), runner_to_notify));
+    observers.insert(std::make_pair(observer, runner_to_notify));
     return TaskRunnerBoundObserverList(observers);
-  }
-
-  void Shutdown() {
-    for (auto& observer : observers_) {
-      observer.first->Disable();
-    }
   }
 
   // Notify on the task runner that is given to AddObserver.
@@ -70,13 +63,18 @@ class TaskRunnerBoundObserverList {
         continue;
       }
       observer.second->PostTask(
-          FROM_HERE, base::BindOnce(method, observer.first, params...));
+          FROM_HERE,
+          base::BindOnce(method, base::Unretained(observer.first), params...));
     }
   }
 
  private:
   ObserversListMap observers_;
 };
+
+class FileAccessObserver;
+class FileChangeObserver;
+class FileUpdateObserver;
 
 using AccessObserverList = TaskRunnerBoundObserverList<FileAccessObserver>;
 using ChangeObserverList = TaskRunnerBoundObserverList<FileChangeObserver>;

@@ -351,7 +351,3 @@ Status StubWebView::HandleDialog(bool accept,
 WebView* StubWebView::FindContainerForFrame(const std::string& frame_id) {
   return nullptr;
 }
-
-std::unique_ptr<WebViewHolder> StubWebView::GetHolder() {
-  return nullptr;
-}

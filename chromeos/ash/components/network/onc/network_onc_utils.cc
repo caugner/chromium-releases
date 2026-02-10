@@ -379,7 +379,7 @@ std::optional<base::Value::Dict> ConvertOncProxySettingsToProxyConfig(
   }
   if (type == ::onc::proxy::kPAC) {
     std::string pac_url = GetString(onc_proxy_settings, ::onc::proxy::kPAC);
-    GURL url(url_formatter::FixupURL(pac_url, std::string()));
+    GURL url(url_formatter::FixupURL(pac_url));
     return ProxyConfigDictionary::CreatePacScript(
         url.is_valid() ? url.spec() : std::string(), false);
   }
@@ -526,20 +526,6 @@ int ImportNetworksForUser(const user_manager::User* user,
           NetworkHandler::Get()->network_state_handler()->FirstNetworkByType(
               NetworkTypePattern::Ethernet());
       if (ethernet) {
-        // SetProperties() writes to the profile that already owns the
-        // Ethernet service, which is the device-wide shared profile. Refuse
-        // to let a per-user ONC import (e.g. from a guest or non-owner via
-        // chrome://network) cross that boundary and persist
-        // ProxySettings / StaticIPConfig.NameServers for all users and the
-        // login screen.
-        if (ethernet->profile_path() != profile->path) {
-          NET_LOG(ERROR)
-              << "User ONC import refused to write Ethernet properties to "
-                 "non-user shill profile: "
-              << ethernet->profile_path();
-          *error = "Ethernet configuration via user import is not allowed.";
-          continue;
-        }
         managed_network_config_handler->SetProperties(
             ethernet->path(), normalized_network.Clone(), base::OnceClosure(),
             network_handler::ErrorCallback());

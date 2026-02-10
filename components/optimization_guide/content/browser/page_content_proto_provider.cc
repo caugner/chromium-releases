@@ -11,8 +11,6 @@
 #include "base/barrier_closure.h"
 #include "base/cancelable_callback.h"
 #include "base/check.h"
-#include "base/features.h"
-#include "base/feature_list.h"
 #include "base/functional/callback.h"
 #include "base/functional/concurrent_closures.h"
 #include "base/i18n/char_iterator.h"
@@ -32,8 +30,6 @@
 #include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
@@ -43,18 +39,9 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom-data-view.h"
-#include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom-forward.h"
 #include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom.h"
 
 namespace optimization_guide {
-
-namespace features {
-// Controls whether or not we verify the process of a frame reporting a popup
-// matches an authorized popup widget in the browser process.
-BASE_FEATURE(kAnnotatedPageContentVerifyPopupProcess,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-}  // namespace features
 
 namespace {
 
@@ -82,10 +69,11 @@ class GetAIPageContentTimeoutHelper {
   base::OnceClosure GetClosureForMainFrame() {
     return base::BindOnce(
         &GetAIPageContentTimeoutHelper::OnMainFrameRunOrTimeout,
-        weak_ptr_factory_.GetWeakPtr());
+        weak_ptr_factory_.GetWeakPtr(),
+        /*did_timeout=*/false);
   }
 
-  void Start(base::OnceClosure callback,
+  void Start(base::OnceCallback<void(bool /*main_frame_did_timeout*/)> callback,
              std::optional<base::TimeDelta> subframe_timeout,
              std::optional<base::TimeDelta> main_frame_timeout) {
     CHECK(callback);
@@ -106,7 +94,8 @@ class GetAIPageContentTimeoutHelper {
           FROM_HERE, main_frame_timeout.value(),
           base::BindOnce(
               &GetAIPageContentTimeoutHelper::OnMainFrameRunOrTimeout,
-              base::Unretained(this)));
+              base::Unretained(this),
+              /*did_timeout=*/true));
     }
     std::move(concurrent_for_subframes_)
         .Done(base::BindOnce(
@@ -127,12 +116,12 @@ class GetAIPageContentTimeoutHelper {
     std::move(continue_callback).Run();
   }
 
-  void OnMainFrameRunOrTimeout() {
+  void OnMainFrameRunOrTimeout(bool did_timeout) {
     CHECK(!has_main_frame_run_or_timed_out_);
     has_main_frame_run_or_timed_out_ = true;
 
-    if (have_all_subframes_responded_or_timed_out_) {
-      std::move(callback_).Run();
+    if (did_timeout || have_all_subframes_responded_or_timed_out_) {
+      std::move(callback_).Run(did_timeout);
     }
   }
 
@@ -140,7 +129,8 @@ class GetAIPageContentTimeoutHelper {
     have_all_subframes_responded_or_timed_out_ = true;
     subframe_timeout_timer_.Stop();
     if (has_main_frame_run_or_timed_out_ && callback_) {
-      std::move(callback_).Run();
+      // If the main frame timed out it must already have invoked the callback.
+      std::move(callback_).Run(/*main_frame_did_timeout=*/false);
     }
   }
 
@@ -159,7 +149,7 @@ class GetAIPageContentTimeoutHelper {
   bool have_all_subframes_responded_or_timed_out_ = false;
   std::unique_ptr<optimization_guide::AIPageContentMap> page_content_map_;
   base::ConcurrentClosures concurrent_for_subframes_;
-  base::OnceClosure callback_;
+  base::OnceCallback<void(bool /*main_frame_did_timeout*/)> callback_;
   base::WeakPtrFactory<GetAIPageContentTimeoutHelper> weak_ptr_factory_{this};
 };
 
@@ -333,28 +323,6 @@ std::optional<optimization_guide::RenderFrameInfo> GetRenderFrameInfo(
   render_frame_info.source_origin = render_frame_host->GetLastCommittedOrigin();
   render_frame_info.url = render_frame_host->GetLastCommittedURL();
   render_frame_info.media_data = ComputeMediaData(render_frame_host);
-
-  if (base::FeatureList::IsEnabled(
-          features::kAnnotatedPageContentVerifyPopupProcess)) {
-    content::WebContents* web_contents =
-        content::WebContents::FromRenderFrameHost(render_frame_host);
-    if (web_contents) {
-      const content::RenderProcessHost* render_process_host =
-          render_frame_host->GetProcess();
-      for (auto* widget_view : web_contents->GetPopupWidgets()) {
-        if (widget_view && widget_view->GetRenderWidgetHost() &&
-            widget_view->GetRenderWidgetHost()->GetProcess() ==
-                render_process_host) {
-          render_frame_info.has_active_popup = true;
-          break;
-        }
-      }
-    }
-  } else {
-    // If verification is disabled, assume all reported popups are authorized.
-    render_frame_info.has_active_popup = true;
-  }
-
   return render_frame_info;
 }
 
@@ -474,11 +442,17 @@ void OnGotAIPageContentOrTimedOutForAllFrames(
     ukm::SourceId source_id,
     const gfx::Size& main_frame_viewport,
     std::unique_ptr<GetAIPageContentTimeoutHelper> timeout_helper,
-    OnAIPageContentDone done_callback) {
+    OnAIPageContentDone done_callback,
+    bool main_frame_did_timeout) {
   optimization_guide::AIPageContentResult page_content;
   optimization_guide::FrameTokenSet frame_token_set;
   auto mode = main_frame_options->mode;
   bool on_critical_path = main_frame_options->on_critical_path;
+
+  if (main_frame_did_timeout) {
+    std::move(done_callback).Run(base::unexpected("Timeout in Main Frame"));
+    return;
+  }
 
   if (auto result = optimization_guide::ConvertAIPageContentToProto(
           std::move(main_frame_options), main_frame_token,

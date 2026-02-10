@@ -97,10 +97,7 @@ class ScreencastsPendingStatusChangedObserver
 
 class PendingScreencastMangerBrowserTest : public InProcessBrowserTest {
  public:
-  PendingScreencastMangerBrowserTest() {
-    scoped_feature_list_.InitWithFeatures(
-        {features::kProjectorUpdateIndexableText}, {});
-  }
+  PendingScreencastMangerBrowserTest() = default;
   PendingScreencastMangerBrowserTest(
       const PendingScreencastMangerBrowserTest&) = delete;
   PendingScreencastMangerBrowserTest& operator=(
@@ -809,7 +806,6 @@ IN_PROC_BROWSER_TEST_F(PendingScreencastMangerBrowserTest,
                     url);
                 run_loop.Quit();
               }),
-          ProjectorAppClient::Get()->GetIdentityManager(),
           &test_url_loader_factory));
 
   // Mocks a metadata file finishes upload:

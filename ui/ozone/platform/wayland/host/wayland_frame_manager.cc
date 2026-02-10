@@ -197,11 +197,7 @@ void WaylandFrameManager::MaybeProcessPendingFrame() {
     if (!ValidateRect(config.bounds_rect)) {
       fatal_error_message_ = kBoundsRectNanOrInf;
     } else {
-      auto weak_this = weak_factory_.GetWeakPtr();
       window_->OnSequencePoint(frame->seq);
-      if (!weak_this) {
-        return;
-      }
       // During a tab dragging session, OnSequencePoint() can implicitly invoke
       // Hide(). |pending_frames_| will be cleared and we should return
       // directly.
@@ -431,7 +427,7 @@ std::optional<bool> WaylandFrameManager::ApplySurfaceConfigure(
       config.priority_hint == gfx::OverlayPriorityHint::kVideo);
   surface->SetImageDescription(
       config.color_space.value_or(gfx::ColorSpace::CreateSRGB()),
-      config.hdr_metadata.value_or(gfx::HDRMetadata()));
+      config.hdr_metadata);
   if (set_opaque_region) {
     auto region_px =
         config.enable_blend

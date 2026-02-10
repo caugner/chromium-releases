@@ -147,8 +147,6 @@ void GetActiveSuggestFieldTrialHashes(std::vector<uint32_t>* field_trial_hash);
 // particular provider, returns the limit. Otherwise returns the default limit.
 size_t GetProviderMaxMatches(AutocompleteProvider::Type provider);
 
-
-
 // ---------------------------------------------------------
 // For the HistoryURL provider new scoring experiment that is part of the
 // bundled omnibox field trial.
@@ -382,9 +380,6 @@ extern const base::FeatureParam<bool> kZeroSuggestPrefetchDebounceFromLastRun;
 
 // Determines the maximum number of entries stored by the in-memory ZPS cache.
 extern const base::FeatureParam<int> kZeroSuggestCacheMaxSize;
-
-// Returns true if any of the zero-suggest prefetching features are enabled.
-bool IsZeroSuggestPrefetchingEnabled();
 
 // Returns whether zero-suggest prefetching is enabled in the given context.
 bool IsZeroSuggestPrefetchingEnabledInContext(
@@ -717,9 +712,6 @@ inline constexpr base::FeatureParam<bool>
 
 // <-- Omnibox Improvement for Large Form Factors
 // Fusebox -->
-inline constexpr base::FeatureParam<bool> kOmniboxMultimodalInputMultiContext{
-    &omnibox::kOmniboxMultimodalInput, "multi_context", false};
-
 inline constexpr base::FeatureParam<bool>
     kOmniboxMultimodalPrioritizeSuggestionsForFirstDocument{
         &omnibox::kOmniboxMultimodalInput,

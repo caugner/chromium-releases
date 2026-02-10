@@ -18,7 +18,6 @@ namespace gpu {
 namespace gles2 {
 
 class Buffer;
-class Program;
 class TransformFeedbackManager;
 
 // Info about TransformFeedbacks currently in the system.
@@ -59,11 +58,6 @@ class GPU_GLES2_EXPORT TransformFeedback : public IndexedBufferBindingHost {
     return paused_;
   }
 
-  void SetActiveProgram(Program* program);
-  void ClearActiveProgram();
-
-  Program* active_program() const { return active_program_.get(); }
-
   GLenum primitive_mode() const {
     return primitive_mode_;
   }
@@ -102,8 +96,6 @@ class GPU_GLES2_EXPORT TransformFeedback : public IndexedBufferBindingHost {
 
   GLenum primitive_mode_;
   GLsizei vertices_drawn_;
-
-  scoped_refptr<Program> active_program_;
 };
 
 // This class keeps tracks of the transform feedbacks and their states.

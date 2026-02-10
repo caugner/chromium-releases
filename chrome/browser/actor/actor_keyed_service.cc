@@ -16,6 +16,7 @@
 #include "base/types/pass_key.h"
 #include "chrome/browser/actor/actor_features.h"
 #include "chrome/browser/actor/actor_keyed_service_factory.h"
+#include "chrome/browser/actor/actor_metrics.h"
 #include "chrome/browser/actor/actor_policy_checker.h"
 #include "chrome/browser/actor/actor_tab_data.h"
 #include "chrome/browser/actor/actor_task.h"
@@ -171,6 +172,8 @@ void ActorKeyedService::CreateActorTab(TaskId task_id,
   if (!task) {
     GetJournal().Log(GURL(), task_id, "CreateActorTab",
                      JournalDetailsBuilder().AddError("Invalid Task").Build());
+    std::move(callback).Run(nullptr);
+    return;
   }
 
   BrowserWindowInterface* window_for_new_tab = nullptr;
@@ -278,12 +281,13 @@ base::WeakPtr<ActorKeyedService> ActorKeyedService::GetWeakPtr() {
 
 TaskId ActorKeyedService::AddActiveTask(std::unique_ptr<ActorTask> task) {
   TRACE_EVENT0("actor", "ActorKeyedService::AddActiveTask");
-  TaskId task_id = next_task_id_.GenerateNextId();
+  const TaskId task_id = next_task_id_.GenerateNextId();
   task->SetId(base::PassKey<ActorKeyedService>(), task_id);
   task->GetExecutionEngine()->SetOwner(task.get());
-  // Notify of task creation now that the task id is set.
-  NotifyTaskStateChanged(task->id(), task->GetState());
+
+  const ActorTask::State task_state = task->GetState();
   active_tasks_[task_id] = std::move(task);
+  NotifyTaskStateChanged(task_id, task_state);
   return task_id;
 }
 
@@ -312,15 +316,15 @@ TaskId ActorKeyedService::CreateTaskWithOptions(
     webui::mojom::TaskOptionsPtr options,
     base::WeakPtr<ActorTaskDelegate> delegate) {
   TRACE_EVENT0("actor", "ActorKeyedService::CreateTask");
-  if (!policy_checker_->can_act_on_web()) {
-    base::UmaHistogramBoolean("Actor.Task.Created", false);
+  if (!policy_checker_->CanActOnWeb()) {
+    RecordActorTaskCreated(false);
     GetJournal().Log(GURL(), TaskId(), "ActorKeyedService::CreateTask",
                      JournalDetailsBuilder()
                          .AddError("Actuation capability disabled")
                          .Build());
     return TaskId();
   }
-  base::UmaHistogramBoolean("Actor.Task.Created", true);
+  RecordActorTaskCreated(true);
   auto execution_engine = std::make_unique<ExecutionEngine>(profile_.get());
   auto actor_task = std::make_unique<ActorTask>(
       profile_.get(), std::move(execution_engine),
@@ -467,7 +471,7 @@ void ActorKeyedService::PerformActions(
   std::vector<ActionResultWithLatencyInfo> empty_results;
   auto* task = GetTask(task_id);
   if (!task) {
-    GetJournal().Log(GURL(), TaskId(), "ActorKeyedService::PerformActions",
+    GetJournal().Log(GURL(), task_id, "ActorKeyedService::PerformActions",
                      JournalDetailsBuilder()
                          .Add("task_id", task_id)
                          .AddError("Invalid Task")
@@ -480,7 +484,7 @@ void ActorKeyedService::PerformActions(
 
   if (actions.empty()) {
     GetJournal().Log(
-        GURL(), TaskId(), "ActorKeyedService::PerformActions",
+        GURL(), task_id, "ActorKeyedService::PerformActions",
         JournalDetailsBuilder().AddError("Empty Actions List").Build());
     RunLater(base::BindOnce(std::move(callback),
                             mojom::ActionResultCode::kEmptyActionSequence,
@@ -520,7 +524,7 @@ void ActorKeyedService::StopAllTasks(ActorTask::StoppedReason stop_reason) {
 void ActorKeyedService::StopTask(TaskId task_id,
                                  ActorTask::StoppedReason stop_reason) {
   TRACE_EVENT0("actor", "ActorKeyedService::StopTask");
-  GetJournal().Log(GURL(), TaskId(), "ActorKeyedService::StopTask",
+  GetJournal().Log(GURL(), task_id, "ActorKeyedService::StopTask",
                    JournalDetailsBuilder()
                        .Add("task_id", task_id)
                        .Add("stop_reason", stop_reason)
@@ -590,7 +594,7 @@ void ActorKeyedService::OnDownloadCreated(content::DownloadManager* manager,
   if (content::WebContents* web_contents =
           content::DownloadItemUtils::GetWebContents(item)) {
     if (GetActingActorTaskForWebContents(web_contents)) {
-      base::UmaHistogramBoolean("Actor.Download.DirectDownloadTriggered", true);
+      RecordDirectDownloadTriggered(true);
     }
   }
 }

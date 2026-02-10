@@ -4,7 +4,6 @@
 
 #include "media/remoting/stream_provider.h"
 
-#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/single_thread_task_runner.h"
@@ -330,28 +329,6 @@ TEST_F(StreamProviderTest, FlushUntil) {
 
   EXPECT_EQ(GetAudioCurrentFrameCount(), flush_audio_count);
   EXPECT_EQ(GetVideoCurrentFrameCount(), flush_video_count);
-}
-
-TEST_F(StreamProviderTest, DuplicateAcquireDemuxer) {
-  InitializeDemuxer();
-  SendRpcAcquireDemuxer();
-  task_environment_.RunUntilIdle();
-  EXPECT_TRUE(stream_provider_initialized_);
-
-  // Cache raw pointers.
-  std::vector<DemuxerStream*> streams = stream_provider_->GetAllStreams();
-  ASSERT_EQ(streams.size(), 2u);
-  DemuxerStream* cached_audio =
-      streams[0]->type() == DemuxerStream::AUDIO ? streams[0] : streams[1];
-
-  // Second acquisition.
-  SendRpcAcquireDemuxer();
-  task_environment_.RunUntilIdle();
-
-  // The first streams should still be valid and not destroyed.
-  // If they were destroyed, this call would trigger a UAF.
-  cached_audio->Read(1, base::DoNothing());
-  task_environment_.RunUntilIdle();
 }
 
 }  // namespace remoting

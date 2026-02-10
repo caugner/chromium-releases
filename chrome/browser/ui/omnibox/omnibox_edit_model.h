@@ -14,8 +14,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/advanced_memory_safety_checks.h"
 #include "base/memory/raw_ptr.h"
-#include "base/memory/safety_checks.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list_types.h"
 #include "base/time/time.h"
@@ -92,6 +92,9 @@ class OmniboxEditModel {
 
     // The keyword state has changed.
     virtual void OnKeywordStateChanged(bool is_keyword_selected) = 0;
+
+    // Time when a character is inserted into the model.
+    virtual void OnCharTyped(base::TimeTicks timestamp) = 0;
 
     ~Observer() override = default;
   };
@@ -549,6 +552,9 @@ class OmniboxEditModel {
   void OnNavigationLikely(
       size_t line,
       omnibox::mojom::NavigationPredictor navigation_predictor);
+
+  // Notify listening observers of the timestamp of character insertion.
+  void NotifyObserversCharTyped(base::TimeTicks timestamp);
 
  protected:
   // Utility method to get current PrefService; protected instead of private

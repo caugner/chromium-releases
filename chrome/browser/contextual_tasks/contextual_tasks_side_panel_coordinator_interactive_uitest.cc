@@ -4,13 +4,17 @@
 
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
+#include "base/time/time.h"
 #include "chrome/browser/contextual_tasks/active_task_context_provider.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_composebox_handler.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_side_panel_coordinator.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/tabs/tab_list_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/common/webui_url_constants.h"
@@ -22,6 +26,7 @@
 #include "components/contextual_tasks/public/features.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/web_contents_tester.h"
@@ -80,10 +85,8 @@ class ContextualTasksSidePanelCoordinatorInteractiveUiTest
   ~ContextualTasksSidePanelCoordinatorInteractiveUiTest() override = default;
 
   void SetUpTasks() {
-    browser()
-        ->GetFeatures()
-        .contextual_tasks_active_task_context_provider()
-        ->AddObserver(&mock_active_task_context_provider_observer_);
+    ActiveTaskContextProvider::From(browser())->AddObserver(
+        &mock_active_task_context_provider_observer_);
 
     // Add tab1.
     chrome::AddTabAt(browser(), GURL(chrome::kChromeUISettingsURL), -1, false);
@@ -102,17 +105,17 @@ class ContextualTasksSidePanelCoordinatorInteractiveUiTest
     contextual_tasks_service->AssociateTabWithTask(
         task1.GetTaskId(),
         sessions::SessionTabHelper::IdForTab(
-            browser()->tab_strip_model()->GetWebContentsAt(0)));
+            TabListInterface::From(browser())->GetTab(0)->GetContents()));
     ContextualTask task2 = contextual_tasks_service->CreateTask();
     task_id2_ = task2.GetTaskId();
     contextual_tasks_service->AssociateTabWithTask(
         task2.GetTaskId(),
         sessions::SessionTabHelper::IdForTab(
-            browser()->tab_strip_model()->GetWebContentsAt(1)));
+            TabListInterface::From(browser())->GetTab(1)->GetContents()));
     contextual_tasks_service->AssociateTabWithTask(
         task1.GetTaskId(),
         sessions::SessionTabHelper::IdForTab(
-            browser()->tab_strip_model()->GetWebContentsAt(2)));
+            TabListInterface::From(browser())->GetTab(2)->GetContents()));
 
     // CachedWebContents are only created when transferring a tab to the side
     // panel or when calling Show(). Use the test-only method to imitate a
@@ -176,7 +179,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
 
         // Activate the second tab, verify the second side panel WebContents is
         // created for the second tab.
-        browser()->tab_strip_model()->ActivateTabAt(1);
+        TabListInterface* tab_list = TabListInterface::From(browser());
+        tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
         content::WebContents* side_panel_web_contents2 =
             coordinator->GetActiveWebContents();
         ASSERT_NE(nullptr, side_panel_web_contents2);
@@ -184,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
 
         // Activate the first tab, verify the active side panel WebContents is
         // swapped back.
-        browser()->tab_strip_model()->ActivateTabAt(0);
+        tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
         ASSERT_EQ(side_panel_web_contents1,
                   coordinator->GetActiveWebContents());
       }));
@@ -202,8 +206,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
       }),
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         // Verify the side panel is open for thread1.
-        EXPECT_EQ(0, browser()->tab_strip_model()->GetIndexOfWebContents(
-                         browser()->tab_strip_model()->GetActiveWebContents()));
+        EXPECT_EQ(0, TabListInterface::From(browser())->GetActiveIndex());
         EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
 
         // Activate tab1, verify the side panel is open for thread2.
@@ -211,7 +214,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(1);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
           EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
 
           histogram_tester.ExpectUniqueSample(
@@ -226,7 +230,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(0);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
           EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
 
           histogram_tester.ExpectUniqueSample(
@@ -246,7 +251,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(1);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
           EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
 
           histogram_tester.ExpectUniqueSample(
@@ -261,7 +267,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(2);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(2)->GetHandle());
           EXPECT_EQ(false, coordinator->IsSidePanelOpenForContextualTask());
 
           histogram_tester.ExpectUniqueSample(
@@ -276,7 +283,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(0);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
           EXPECT_EQ(false, coordinator->IsSidePanelOpenForContextualTask());
 
           // No tab change histograms should be recorded as this is the status
@@ -312,7 +320,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(2);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(2)->GetHandle());
           EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
 
           histogram_tester.ExpectUniqueSample(
@@ -328,7 +337,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           base::HistogramTester histogram_tester;
           base::UserActionTester user_action_tester;
 
-          browser()->tab_strip_model()->ActivateTabAt(3);
+          TabListInterface* tab_list = TabListInterface::From(browser());
+          tab_list->ActivateTab(tab_list->GetTab(3)->GetHandle());
           EXPECT_EQ(false, coordinator->IsSidePanelOpenForContextualTask());
 
           histogram_tester.ExpectUniqueSample(
@@ -358,8 +368,16 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
       }));
 }
 
+// TODO(crbug.com/478095504): Flakily fails on ASan/LSan
+#if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER)
+#define MAYBE_SidePanelOpenByTransferWebContentsFromTab \
+  DISABLED_SidePanelOpenByTransferWebContentsFromTab
+#else
+#define MAYBE_SidePanelOpenByTransferWebContentsFromTab \
+  SidePanelOpenByTransferWebContentsFromTab
+#endif
 IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
-                       SidePanelOpenByTransferWebContentsFromTab) {
+                       MAYBE_SidePanelOpenByTransferWebContentsFromTab) {
   SetUpTasks();
   // Add tab4 with contextual task side panel tab.
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
@@ -415,6 +433,64 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
         // Verify the tab web contents is still associated with task3.
         EXPECT_TRUE(contextual_tasks_service->GetContextualTaskForTab(
             sessions::SessionTabHelper::IdForTab(tab_web_contents)));
+      }));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
+                       DialogDelegateAddedOnTransferToSidePanel) {
+  SetUpTasks();
+
+  TabStripModel* tab_strip_model = browser()->tab_strip_model();
+
+  // The test should be set up with 4 tabs.
+  EXPECT_EQ(4, tab_strip_model->count());
+
+  // Tab 0 with task 1 should be focused.
+  int detach_index = tab_strip_model->GetIndexOfWebContents(
+      tab_strip_model->GetActiveWebContents());
+  EXPECT_EQ(0, detach_index);
+
+  // Navigate to contextual tasks.
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), GURL(chrome::kChromeUIContextualTasksURL)));
+
+  ContextualTasksSidePanelCoordinator* coordinator =
+      ContextualTasksSidePanelCoordinator::From(browser());
+
+  content::WebContents* tab_web_contents;
+
+  RunTestSequence(
+      Do([&]() {
+        // Select tab2 (also associated with task 1 in setup).
+        tab_strip_model->ActivateTabAt(2);
+
+        // Transfer the WebContents from tab 0 to the side panel.
+        std::unique_ptr<content::WebContents> contextual_task_contents =
+            tab_strip_model->DetachWebContentsAtForInsertion(
+                detach_index,
+                TabStripModelChange::RemoveReason::kInsertedIntoSidePanel);
+        tab_web_contents = contextual_task_contents.get();
+
+        EXPECT_EQ(nullptr,
+                  web_modal::WebContentsModalDialogManager::FromWebContents(
+                      tab_web_contents)
+                      ->delegate());
+
+        coordinator->TransferWebContentsFromTab(
+            task_id1_, std::move(contextual_task_contents));
+        coordinator->Show();
+      }),
+      WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
+        // Verify there are now 3 tabs in the tab strip.
+        EXPECT_EQ(3, tab_strip_model->count());
+
+        // Verify the tab web contents is transferred into the side panel.
+        EXPECT_EQ(tab_web_contents, coordinator->GetActiveWebContents());
+
+        EXPECT_NE(nullptr,
+                  web_modal::WebContentsModalDialogManager::FromWebContents(
+                      tab_web_contents)
+                      ->delegate());
       }));
 }
 
@@ -502,24 +578,24 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         content::WebContents* web_contents1 =
             coordinator->GetActiveWebContents();
+        TabListInterface* tab_list = TabListInterface::From(browser());
         // Change current task from task1 to a new task.
         ContextualTasksService* contextual_tasks_service =
             ContextualTasksServiceFactory::GetForProfile(browser()->profile());
         ContextualTask new_task = contextual_tasks_service->CreateTask();
         contextual_tasks_service->AssociateTabWithTask(
-            new_task.GetTaskId(),
-            sessions::SessionTabHelper::IdForTab(
-                browser()->tab_strip_model()->GetActiveWebContents()));
+            new_task.GetTaskId(), sessions::SessionTabHelper::IdForTab(
+                                      tab_list->GetActiveTab()->GetContents()));
         coordinator->OnTaskChanged(web_contents1, new_task.GetTaskId());
         EXPECT_TRUE(coordinator->IsSidePanelOpen());
 
         // Activate tab1, it associates with the task2 WebContents.
-        browser()->tab_strip_model()->ActivateTabAt(1);
+        tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
         EXPECT_NE(web_contents1, coordinator->GetActiveWebContents());
         EXPECT_TRUE(coordinator->IsSidePanelOpen());
 
         // Activate tab0, it associates with the new WebContents.
-        browser()->tab_strip_model()->ActivateTabAt(0);
+        tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
         EXPECT_EQ(web_contents1, coordinator->GetActiveWebContents());
         EXPECT_TRUE(coordinator->IsSidePanelOpen());
       }));
@@ -538,23 +614,23 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
       WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
         content::WebContents* web_contents1 =
             coordinator->GetActiveWebContents();
+        TabListInterface* tab_list = TabListInterface::From(browser());
         // Change current task from task1 to task2.
         ContextualTasksService* contextual_tasks_service =
             ContextualTasksServiceFactory::GetForProfile(browser()->profile());
         contextual_tasks_service->AssociateTabWithTask(
-            task_id2_,
-            sessions::SessionTabHelper::IdForTab(
-                browser()->tab_strip_model()->GetActiveWebContents()));
+            task_id2_, sessions::SessionTabHelper::IdForTab(
+                           tab_list->GetActiveTab()->GetContents()));
         coordinator->OnTaskChanged(web_contents1, task_id2_);
         EXPECT_TRUE(coordinator->IsSidePanelOpen());
 
         // Activate tab1, now it associates with the current WebContents.
-        browser()->tab_strip_model()->ActivateTabAt(1);
+        tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
         EXPECT_EQ(web_contents1, coordinator->GetActiveWebContents());
         EXPECT_TRUE(coordinator->IsSidePanelOpen());
 
         // Activate tab0, it still associates with the current WebContents.
-        browser()->tab_strip_model()->ActivateTabAt(0);
+        tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
         EXPECT_EQ(web_contents1, coordinator->GetActiveWebContents());
         EXPECT_TRUE(coordinator->IsSidePanelOpen());
       }));
@@ -589,7 +665,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
   auto mock_composebox_handler =
       std::make_unique<testing::NiceMock<MockContextualTasksComposeboxHandler>>(
           ui, browser()->profile(),
-          browser()->tab_strip_model()->GetWebContentsAt(0),
+          TabListInterface::From(browser())->GetTab(0)->GetContents(),
           std::move(composebox_handler_receiver),
           std::move(composebox_page_remote),
           std::move(searchbox_handler_receiver),
@@ -627,7 +703,8 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
       }),
       // 2. Switch tabs to another tab.
       Do([&]() {
-        browser()->tab_strip_model()->ActivateTabAt(2);
+        TabListInterface* tab_list = TabListInterface::From(browser());
+        tab_list->ActivateTab(tab_list->GetTab(2)->GetHandle());
         ui->SetComposeboxHandlerForTesting(nullptr);
       }));
 }
@@ -648,35 +725,71 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
         ContextualTasksService* contextual_tasks_service =
             ContextualTasksServiceFactory::GetForProfile(browser()->profile());
 
+        TabListInterface* tab_list = TabListInterface::From(browser());
         SessionID tab_id0 = sessions::SessionTabHelper::IdForTab(
-            browser()->tab_strip_model()->GetWebContentsAt(0));
+            tab_list->GetTab(0)->GetContents());
 
         // Close tab0, verify tab0 is removed from task1.
         EXPECT_EQ(task_id1_,
                   contextual_tasks_service->GetContextualTaskForTab(tab_id0)
                       ->GetTaskId());
-        browser()->tab_strip_model()->CloseWebContentsAt(
-            0, TabCloseTypes::CLOSE_NONE);
+        tab_list->CloseTab(tab_list->GetTab(0)->GetHandle());
         EXPECT_EQ(std::nullopt,
                   contextual_tasks_service->GetContextualTaskForTab(tab_id0));
 
         // Activate tab1, verify the side panel cache is still present.
-        browser()->tab_strip_model()->ActivateTabAt(1);
+        tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
         EXPECT_EQ(web_contents1, coordinator->GetActiveWebContents());
 
         SessionID tab_id1 = sessions::SessionTabHelper::IdForTab(
-            browser()->tab_strip_model()->GetWebContentsAt(1));
+            tab_list->GetTab(1)->GetContents());
 
         // Close tab1, verify tab1 is removed from task1 and side panel
         // WebContents is removed.
         EXPECT_EQ(task_id1_,
                   contextual_tasks_service->GetContextualTaskForTab(tab_id1)
                       ->GetTaskId());
-        browser()->tab_strip_model()->CloseWebContentsAt(
-            1, TabCloseTypes::CLOSE_NONE);
+        tab_list->CloseTab(tab_list->GetTab(1)->GetHandle());
         EXPECT_EQ(std::nullopt,
                   contextual_tasks_service->GetContextualTaskForTab(tab_id1));
 
+        EXPECT_EQ(nullptr, coordinator->GetActiveWebContents());
+      }));
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
+                       CleanUpExpiredSidePanelCache) {
+  SetUpTasks();
+  ContextualTasksSidePanelCoordinator* coordinator =
+      ContextualTasksSidePanelCoordinator::From(browser());
+  RunTestSequence(
+      Do([&]() {
+        // Open side panel.
+        coordinator->Show();
+      }),
+      WaitForShow(kContextualTasksSidePanelWebViewElementId), Do([&]() {
+        // Switch to tab 1 ->task 2.
+        browser()->tab_strip_model()->ActivateTabAt(1);
+        content::WebContents* web_contents =
+            coordinator->GetActiveWebContents();
+        EXPECT_NE(nullptr, coordinator->GetActiveWebContents());
+        // Switch to tab 0 -> task 1.
+        browser()->tab_strip_model()->ActivateTabAt(0);
+        EXPECT_NE(nullptr, coordinator->GetActiveWebContents());
+        // Update timestamp of task 2 side panel WebContents to simulate
+        // expiration.
+        coordinator->GetWebContentsCacheItemForWebContents(web_contents)
+            ->last_active_time_ticks =
+            base::TimeTicks::Now() -
+            base::Minutes(ContextualTasksInactiveSidePanelKeepInCacheMinutes() +
+                          100);
+        // Switch to tab 2 -> task 1. This should trigger logic to clean up the
+        // side panel WebContents of task 2.
+        browser()->tab_strip_model()->ActivateTabAt(2);
+        EXPECT_NE(nullptr, coordinator->GetActiveWebContents());
+        // Switch to tab 1, verify the side panel WebContents is no longer
+        // there.
+        browser()->tab_strip_model()->ActivateTabAt(1);
         EXPECT_EQ(nullptr, coordinator->GetActiveWebContents());
       }));
 }
@@ -686,9 +799,10 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
   SetUpTasks();
   // Set tab1 as active tab and create a new tab. The opener of tab4 is set to
   // tab1.
-  browser()->tab_strip_model()->ActivateTabAt(1);
+  TabListInterface* tab_list = TabListInterface::From(browser());
+  tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
   chrome::AddTabAt(browser(), GURL(chrome::kChromeUISettingsURL), -1, false);
-  EXPECT_EQ(5, browser()->tab_strip_model()->count());
+  EXPECT_EQ(5, tab_list->GetTabCount());
 
   // Tab4 will not inherit the task from tab1 as it is not created through link
   // click.
@@ -697,11 +811,11 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
   std::optional<ContextualTask> task1 =
       contextual_tasks_service->GetContextualTaskForTab(
           sessions::SessionTabHelper::IdForTab(
-              browser()->tab_strip_model()->GetWebContentsAt(1)));
+              tab_list->GetTab(1)->GetContents()));
   std::optional<ContextualTask> task1_2 =
       contextual_tasks_service->GetContextualTaskForTab(
           sessions::SessionTabHelper::IdForTab(
-              browser()->tab_strip_model()->GetWebContentsAt(4)));
+              tab_list->GetTab(4)->GetContents()));
   ASSERT_TRUE(task1);
   ASSERT_FALSE(task1_2);
 }
@@ -710,10 +824,11 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
                        OpenNewTabWithLinkClick_InheritsOpenerTask) {
   SetUpTasks();
   // Set tab1 as active tab and create a new tab through link click.
-  browser()->tab_strip_model()->ActivateTabAt(1);
+  TabListInterface* tab_list = TabListInterface::From(browser());
+  tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
   chrome::AddSelectedTabWithURL(browser(), GURL(chrome::kChromeUISettingsURL),
                                 ui::PAGE_TRANSITION_LINK);
-  EXPECT_EQ(5, browser()->tab_strip_model()->count());
+  EXPECT_EQ(5, tab_list->GetTabCount());
 
   // Since tab1 is associated with task1, verify tab 2 is associated with the
   // same task.
@@ -722,11 +837,11 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
   std::optional<ContextualTask> task1 =
       contextual_tasks_service->GetContextualTaskForTab(
           sessions::SessionTabHelper::IdForTab(
-              browser()->tab_strip_model()->GetWebContentsAt(1)));
+              tab_list->GetTab(1)->GetContents()));
   std::optional<ContextualTask> task1_2 =
       contextual_tasks_service->GetContextualTaskForTab(
           sessions::SessionTabHelper::IdForTab(
-              browser()->tab_strip_model()->GetWebContentsAt(2)));
+              tab_list->GetTab(2)->GetContents()));
   ASSERT_TRUE(task1);
   ASSERT_TRUE(task1_2);
   ASSERT_EQ(task1->GetTaskId(), task1_2->GetTaskId());
@@ -740,14 +855,14 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
 
   // Verify tab0 is associated to a task.
   content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetWebContentsAt(0);
+      TabListInterface::From(browser())->GetTab(0)->GetContents();
   std::optional<ContextualTask> task1 =
       contextual_tasks_service->GetContextualTaskForTab(
           sessions::SessionTabHelper::IdForTab(web_contents));
   ASSERT_TRUE(task1.has_value());
 
   // Move tab 0 to a new window.
-  browser()->tab_strip_model()->delegate()->MoveTabsToNewWindow({0});
+  chrome::MoveTabsToNewWindow(browser(), {0});
 
   // Verify tab0 is still associated to the same task.
   std::optional<ContextualTask> task2 =
@@ -755,6 +870,42 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
           sessions::SessionTabHelper::IdForTab(web_contents));
   ASSERT_TRUE(task2.has_value());
   ASSERT_EQ(task1->GetTaskId(), task2->GetTaskId());
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
+                       DoNotOpenSidePanelOnTabChanged) {
+  SetUpTasks();
+
+  TabListInterface* tab_list = TabListInterface::From(browser());
+  ContextualTasksSidePanelCoordinator* coordinator =
+      ContextualTasksSidePanelCoordinator::From(browser());
+
+  // Set Customize Chrome side panel not to override.
+  // Customize Chrome side panel is much easier to setup and always available.
+  coordinator->SetSidePanelIdNotToOverrideForTesting(
+      SidePanelEntry::Id::kCustomizeChrome);
+
+  // Show next side panel.
+  coordinator->Show();
+  EXPECT_TRUE(coordinator->IsSidePanelOpenForContextualTask());
+
+  // Show Customize Chrome side panel.
+  chrome::ExecuteCommand(browser(), IDC_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL);
+
+  // Verify next side panel is closed.
+  EXPECT_FALSE(coordinator->IsSidePanelOpenForContextualTask());
+
+  // Add a new foreground tab not associated with a task.
+  chrome::AddTabAt(browser(), GURL(chrome::kChromeUISettingsURL), -1, true);
+
+  // Verify the side panel is closed.
+  EXPECT_FALSE(coordinator->IsSidePanelOpenForContextualTask());
+
+  // Activate the previous tab.
+  // Verify the next side panel is still closed because Customize Chrome side
+  // panel is open.
+  tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
+  EXPECT_FALSE(coordinator->IsSidePanelOpenForContextualTask());
 }
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksSidePanelCoordinatorInteractiveUiTest,
@@ -779,7 +930,7 @@ class TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest
  public:
   TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest() {
     scoped_feature_list_.InitAndEnableFeatureWithParameters(
-        kContextualTasks, {{"TaskScopedSidePanel", "false"}});
+        kContextualTasks, {{"ContextualTasksTaskScopedSidePanel", "false"}});
   }
   ~TabScopedContextualTasksSidePanelCoordinatorInteractiveUiTest() override =
       default;
@@ -809,7 +960,8 @@ IN_PROC_BROWSER_TEST_F(
 
         // Activate the second tab, verify the second side panel WebContents is
         // created for the second tab.
-        browser()->tab_strip_model()->ActivateTabAt(1);
+        TabListInterface* tab_list = TabListInterface::From(browser());
+        tab_list->ActivateTab(tab_list->GetTab(1)->GetHandle());
         content::WebContents* side_panel_web_contents2 =
             coordinator->GetActiveWebContents();
         ASSERT_NE(nullptr, side_panel_web_contents2);
@@ -818,7 +970,7 @@ IN_PROC_BROWSER_TEST_F(
 
         // Activate the third tab, verify the active side panel WebContents is
         // swapped back.
-        browser()->tab_strip_model()->ActivateTabAt(2);
+        tab_list->ActivateTab(tab_list->GetTab(2)->GetHandle());
         ASSERT_EQ(side_panel_web_contents1,
                   coordinator->GetActiveWebContents());
         EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
@@ -829,7 +981,7 @@ IN_PROC_BROWSER_TEST_F(
 
         // Switch back to first tab, verify the side panel is still open because
         // the open state is tab scoped.
-        browser()->tab_strip_model()->ActivateTabAt(0);
+        tab_list->ActivateTab(tab_list->GetTab(0)->GetHandle());
         EXPECT_EQ(true, coordinator->IsSidePanelOpenForContextualTask());
       }));
 }

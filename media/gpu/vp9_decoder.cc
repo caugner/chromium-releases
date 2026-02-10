@@ -251,18 +251,12 @@ VP9Decoder::DecodeResult VP9Decoder::Decode() {
     gfx::Size new_pic_size = curr_frame_size_;
     gfx::Rect new_render_rect(curr_frame_hdr_->render_width,
                               curr_frame_hdr_->render_height);
-    const gfx::Rect frame_size(curr_frame_hdr_->frame_width,
-                               curr_frame_hdr_->frame_height);
-    if (!frame_size.Contains(new_render_rect)) {
-      // For safety, check the validity of render size or leave it as the actual
-      // per-frame decoded size. In the k-SVC path |curr_frame_size_| is the
-      // *maximum* layer size (Vp9Parser::ParseSVCFrame stamps allocate_size
-      // onto every layer), so clamping against it would allow render_rect to
-      // extend into the undecoded region of the surface (b/149727823).
-      DVLOG(1) << "Render size exceeds frame size. render size: "
+    // For safety, check the validity of render size or leave it as pic size.
+    if (!gfx::Rect(new_pic_size).Contains(new_render_rect)) {
+      DVLOG(1) << "Render size exceeds picture size. render size: "
                << new_render_rect.ToString()
-               << ", frame size: " << frame_size.ToString();
-      new_render_rect = frame_size;
+               << ", picture size: " << new_pic_size.ToString();
+      new_render_rect = gfx::Rect(new_pic_size);
     }
     VideoCodecProfile new_profile =
         VP9ProfileToVideoCodecProfile(curr_frame_hdr_->profile);
@@ -436,9 +430,9 @@ VideoColorSpace VP9Decoder::GetVideoColorSpace() const {
   return picture_color_space_;
 }
 
-std::optional<gfx::HDRMetadata> VP9Decoder::GetHDRMetadata() const {
+gfx::HDRMetadata VP9Decoder::GetHDRMetadata() const {
   // VP9 only allow HDR metadata exists in the container.
-  return std::nullopt;
+  return gfx::HDRMetadata();
 }
 
 size_t VP9Decoder::GetRequiredNumOfPictures() const {

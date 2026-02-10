@@ -12,7 +12,6 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -556,6 +555,12 @@ TestingProfile::~TestingProfile() {
   if (user_cloud_policy_manager_)
     user_cloud_policy_manager_->Shutdown();
 
+#if !BUILDFLAG(IS_CHROMEOS)
+  if (profile_cloud_policy_manager_) {
+    profile_cloud_policy_manager_->Shutdown();
+  }
+#endif  // !BUILDFLAG(IS_CHROMEOS)
+
   if (host_content_settings_map_.get())
     host_content_settings_map_->ShutdownOnUIThread();
 
@@ -672,7 +677,7 @@ void TestingProfile::DestroyOffTheRecordProfile(Profile* otr_profile) {
 
 bool TestingProfile::HasOffTheRecordProfile(
     const OTRProfileID& otr_profile_id) {
-  return base::Contains(otr_profiles_, otr_profile_id);
+  return otr_profiles_.contains(otr_profile_id);
 }
 
 bool TestingProfile::HasAnyOffTheRecordProfile() {
@@ -756,8 +761,8 @@ void TestingProfile::CreateIncognitoPrefService() {
 }
 
 void TestingProfile::CreateProfilePolicyConnector() {
-  schema_registry_service_ =
-      BuildSchemaRegistryServiceForProfile(this, policy::Schema(), nullptr);
+  schema_registry_service_ = BuildSchemaRegistryServiceForProfile(
+      this, policy::Schema(), policy::Schema(), nullptr);
 
   if (!policy_service_) {
     std::vector<

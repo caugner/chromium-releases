@@ -158,8 +158,7 @@ class PasswordFormManager : public PasswordFormManagerForUI,
   // |observed_form()|, initiates filling and stores predictions in
   // |predictions_|.
   void ProcessServerPredictions(
-      const std::map<std::pair<autofill::FormSignature, int>, FormPredictions>&
-          predictions);
+      const std::map<autofill::FormSignature, FormPredictions>& predictions);
 
   // Stores model predictions in the `parser_`.
   void ProcessModelPredictions(
@@ -175,8 +174,7 @@ class PasswordFormManager : public PasswordFormManagerForUI,
   // for server predictions.
   void UpdateFormManagerWithFormChanges(
       const autofill::FormData& observed_form_data,
-      const std::map<std::pair<autofill::FormSignature, int>, FormPredictions>&
-          predictions);
+      const std::map<autofill::FormSignature, FormPredictions>& predictions);
 
   void UpdateSubmissionIndicatorEvent(
       autofill::mojom::SubmissionIndicatorEvent event);
@@ -414,8 +412,7 @@ class PasswordFormManager : public PasswordFormManagerForUI,
   // Updates the server predictions stored in `parser_` with predictions
   // relevant for `observed_form_or_digest_`.
   void UpdateServerPredictionsForObservedForm(
-      const std::map<std::pair<autofill::FormSignature, int>, FormPredictions>&
-          predictions);
+      const std::map<autofill::FormSignature, FormPredictions>& predictions);
 
   // Creates a timer to wait for server side predictions. On timeout (or on
   // receiving server side predictions), `Fill()` is triggered.
@@ -488,7 +485,7 @@ class PasswordFormManager : public PasswordFormManagerForUI,
   std::optional<VotesUploader> votes_uploader_;
 
   // |is_submitted_| = true means that |*this| is ready for saving.
-  // TODO(https://crubg.com/875768): Come up with a better name.
+  // TODO(https://crbug.com/875768): Come up with a better name.
   bool is_submitted_ = false;
   autofill::FormData submitted_form_;
   std::unique_ptr<PasswordForm> parsed_submitted_form_;

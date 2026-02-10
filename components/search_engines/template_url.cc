@@ -279,6 +279,7 @@ size_t TemplateURLRef::SearchTermsArgs::EstimateMemoryUsage() const {
   res += base::trace_event::EstimateMemoryUsage(image_thumbnail_content_type);
   res += base::trace_event::EstimateMemoryUsage(image_url);
   res += base::trace_event::EstimateMemoryUsage(contextual_search_params);
+  res += base::trace_event::EstimateMemoryUsage(input_state);
   res += base::trace_event::EstimateMemoryUsage(image_translate_source_locale);
   res += base::trace_event::EstimateMemoryUsage(image_translate_target_locale);
 
@@ -1400,6 +1401,7 @@ std::string TemplateURLRef::HandleReplacements(
           case RequestSource::SEARCHBOX:
           case RequestSource::CROS_APP_LIST:
           case RequestSource::NTP_COMPOSEBOX:
+          case RequestSource::NTP_ACTION_CHIPS:
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
             HandleReplacement("sourceid", "chrome-mobile", replacement, &url);
 #else
@@ -1456,6 +1458,14 @@ std::string TemplateURLRef::HandleReplacements(
 #endif
             break;
           case RequestSource::NTP_COMPOSEBOX: {
+            // Co-browsing composebox uses a different client since its zps
+            // behave differently.
+            if (search_terms_args.page_classification ==
+                metrics::OmniboxEventProto::CO_BROWSING_COMPOSEBOX) {
+              HandleReplacement(std::string(), "chrome-cobrowse-compose",
+                                replacement, &url);
+              break;
+            }
             // RequestSource::NTP_COMPOSEBOX will use "chrome-omni" for delayed
             // context uploads. TODO(crbug.com/460858102) Figure out how to
             // support delayed uploads using "chrome-compose."
@@ -1469,6 +1479,11 @@ std::string TemplateURLRef::HandleReplacements(
                            : "chrome-compose")
                     : "chrome-omni";
             HandleReplacement(std::string(), client_replacement, replacement,
+                              &url);
+            break;
+          }
+          case RequestSource::NTP_ACTION_CHIPS: {
+            HandleReplacement(std::string(), "chrome-ntp-action", replacement,
                               &url);
             break;
           }
@@ -1504,6 +1519,7 @@ std::string TemplateURLRef::HandleReplacements(
           case RequestSource::NTP_MODULE:
           case RequestSource::LENS_OVERLAY:
           case RequestSource::NTP_COMPOSEBOX:
+          case RequestSource::NTP_ACTION_CHIPS:
             // No replacement. `gs_ri` is longer recommended for new clients.
             // New identifiers should be based on their client names.
             break;
