@@ -936,7 +936,7 @@ HRESULT GenerateSampleFromVideoFrame(
     gfx::GpuMemoryBufferHandle buffer_handle =
         frame->GetGpuMemoryBufferHandle();
     if (buffer_handle.is_null()) {
-      LOG(ERROR) << "Failed to get GMB for input frame";
+      LOG(ERROR) << "Failed to get GMB handle for input frame";
       return MF_E_INVALID_STREAM_DATA;
     }
 
@@ -956,7 +956,8 @@ HRESULT GenerateSampleFromVideoFrame(
     hr = device1->OpenSharedResource1(
         buffer_handle.dxgi_handle().buffer_handle(),
         IID_PPV_ARGS(&input_texture));
-    RETURN_ON_HR_FAILURE(hr, "Failed to open shared GMB D3D texture", hr);
+    RETURN_ON_HR_FAILURE(
+        hr, "Failed to open shared D3D texture from GMB handle", hr);
 
     if (use_dxgi_buffer) {
       hr = InitializeSampleFromTexture(frame, input_texture.Get(), sample);
@@ -1036,7 +1037,7 @@ HRESULT GenerateSampleFromVideoFrame(
 
 void GenerateResourceOnSyncTokenReleased(
     scoped_refptr<VideoFrame> frame,
-    bool use_same_device,
+    Microsoft::WRL::ComPtr<ID3D11Device> encoder_device,
     scoped_refptr<CommandBufferHelper> command_buffer_helper,
     ResourceAvailableCB sample_available_cb) {
   TRACE_EVENT0("media", "GenerateResourceOnSyncTokenReleased");
@@ -1049,12 +1050,20 @@ void GenerateResourceOnSyncTokenReleased(
     return;                                                                \
   }
 
+  auto* shared_image_stub = command_buffer_helper->GetSharedImageStub();
+  if (!shared_image_stub) {
+    RETURN_ON_FAILURE_WITH_CALLBACK(E_FAIL, "Invalid shared image stub");
+  }
+
+  if (!shared_image_stub->shared_context_state()) {
+    RETURN_ON_FAILURE_WITH_CALLBACK(E_FAIL, "Invalid shared context state");
+  }
+
   Microsoft::WRL::ComPtr<ID3D11Device> shared_d3d11_device =
-      command_buffer_helper->GetSharedImageStub()
-          ->shared_context_state()
-          ->GetD3D11Device();
+      shared_image_stub->shared_context_state()->GetD3D11Device();
   HRESULT hr = shared_d3d11_device ? S_OK : E_FAIL;
   RETURN_ON_FAILURE_WITH_CALLBACK(hr, "Invalid shared d3d11 device");
+  bool use_same_device = (encoder_device.Get() == shared_d3d11_device.Get());
   gpu::SharedImageManager* shared_image_manager =
       command_buffer_helper->GetSharedImageManager();
   std::unique_ptr<gpu::VideoImageRepresentation> image_representation =
@@ -1173,14 +1182,15 @@ void GenerateResourceOnSyncTokenReleased(
 
 void GenerateResourceFromSharedImageVideoFrame(
     scoped_refptr<VideoFrame> frame,
-    bool use_same_device,
+    Microsoft::WRL::ComPtr<ID3D11Device> encoder_device,
     scoped_refptr<CommandBufferHelper> command_buffer_helper,
     ResourceAvailableCB sample_available_cb) {
   gpu::SyncToken acquire_sync_token = frame->acquire_sync_token();
   command_buffer_helper->WaitForSyncToken(
       acquire_sync_token,
       base::BindOnce(&GenerateResourceOnSyncTokenReleased, std::move(frame),
-                     use_same_device, std::move(command_buffer_helper),
+                     std::move(encoder_device),
+                     std::move(command_buffer_helper),
                      std::move(sample_available_cb)));
 }
 

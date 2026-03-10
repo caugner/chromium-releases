@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/containers/fixed_flat_map.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
@@ -107,6 +106,7 @@ constexpr char kRequestFilterUrlsKey[] = "urls";
 constexpr char kRequestFilterTypesKey[] = "types";
 constexpr char kRequestFilterTabIdKey[] = "tabId";
 constexpr char kRequestFilterWindowIdKey[] = "windowId";
+constexpr char kRequestFilterOptionsKey[] = "_options";
 
 const char kListenerSubEventNameKey[] = "sub_event_name";
 const char kListenerFilterKey[] = "filter";
@@ -278,7 +278,7 @@ void SendOnMessageEventOnUI(
     return;
   }
 
-  base::Value::List event_args;
+  base::ListValue event_args;
   event_args.Append(event_details->GetAndClearDict());
 
   EventRouter* event_router = EventRouter::Get(browser_context);
@@ -292,7 +292,6 @@ void SendOnMessageEventOnUI(
   // process. We use a filter here so that only event listeners for a particular
   // <webview> will fire.
   if (is_web_view_guest) {
-    event_filtering_info->has_instance_id = true;
     event_filtering_info->instance_id = web_view_instance_id;
     histogram_value = events::WEB_VIEW_INTERNAL_ON_MESSAGE;
     event_name = kEventMessage;
@@ -573,13 +572,13 @@ WebRequestEventRouter::EventListener::~EventListener() = default;
 // static
 std::unique_ptr<WebRequestEventRouter::EventListener>
 WebRequestEventRouter::EventListener::InitFromInactiveListenerValue(
-    const base::Value::Dict& value,
+    const base::DictValue& value,
     const ExtensionId& extension_id,
     content::BrowserContext* context,
     std::string* error) {
   const std::string* sub_event_name =
       value.FindString(kListenerSubEventNameKey);
-  const base::Value::Dict* filter_dict = value.FindDict(kListenerFilterKey);
+  const base::DictValue* filter_dict = value.FindDict(kListenerFilterKey);
   std::optional<int> extra_info = value.FindInt(kListenerExtraInfoSpecKey);
 
   if (!sub_event_name || !filter_dict || !extra_info) {
@@ -625,9 +624,9 @@ WebRequestEventRouter::EventListener::InitFromInactiveListenerValue(
   return listener;
 }
 
-base::Value::Dict
-WebRequestEventRouter::EventListener::ToInactiveListenerValue() const {
-  base::Value::Dict dict;
+base::DictValue WebRequestEventRouter::EventListener::ToInactiveListenerValue()
+    const {
+  base::DictValue dict;
   dict.Set(kListenerSubEventNameKey, id.sub_event_name);
   dict.Set(kListenerExtraInfoSpecKey, extra_info_spec);
   dict.Set(kListenerFilterKey, filter.ToValue());
@@ -730,9 +729,9 @@ helpers::EventResponseDelta CalculateDelta(
   }
 }
 
-base::Value::List SerializeResponseHeaders(
+base::ListValue SerializeResponseHeaders(
     const helpers::ResponseHeaders& headers) {
-  base::Value::List serialized_headers;
+  base::ListValue serialized_headers;
   for (const auto& it : headers) {
     serialized_headers.Append(
         helpers::CreateHeaderDictionary(it.first, it.second));
@@ -741,15 +740,15 @@ base::Value::List SerializeResponseHeaders(
 }
 
 // Convert a RequestCookieModifications/ResponseCookieModifications object to a
-// base::Value::List which summarizes the changes made.  This is templated since
+// base::ListValue which summarizes the changes made.  This is templated since
 // the two types (request/response) are different but contain essentially the
 // same fields.
 template <typename CookieType>
-base::Value::List SummarizeCookieModifications(
+base::ListValue SummarizeCookieModifications(
     const std::vector<CookieType>& modifications) {
-  base::Value::List cookie_modifications;
+  base::ListValue cookie_modifications;
   for (const CookieType& mod : modifications) {
-    base::Value::Dict summary;
+    base::DictValue summary;
     switch (mod.type) {
       case helpers::ADD:
         summary.Set(activity_log::kCookieModificationTypeKey,
@@ -789,10 +788,10 @@ base::Value::List SummarizeCookieModifications(
 
 // Converts an EventResponseDelta object to a dictionary value suitable for the
 // activity log.
-base::Value::Dict SummarizeResponseDelta(
+base::DictValue SummarizeResponseDelta(
     const std::string& event_name,
     const helpers::EventResponseDelta& delta) {
-  base::Value::Dict details;
+  base::DictValue details;
   if (delta.cancel) {
     details.Set(activity_log::kCancelKey, true);
   }
@@ -800,7 +799,7 @@ base::Value::Dict SummarizeResponseDelta(
     details.Set(activity_log::kNewUrlKey, delta.new_url.spec());
   }
 
-  base::Value::List modified_headers;
+  base::ListValue modified_headers;
   net::HttpRequestHeaders::Iterator iter(delta.modified_request_headers);
   while (iter.GetNext()) {
     modified_headers.Append(
@@ -811,7 +810,7 @@ base::Value::Dict SummarizeResponseDelta(
                 std::move(modified_headers));
   }
 
-  base::Value::List deleted_headers;
+  base::ListValue deleted_headers;
   for (const std::string& header : delta.deleted_request_headers) {
     deleted_headers.Append(header);
   }
@@ -845,7 +844,7 @@ base::Value::Dict SummarizeResponseDelta(
 }  // namespace
 
 bool WebRequestEventRouter::RequestFilter::InitFromValue(
-    const base::Value::Dict& value,
+    const base::DictValue& value,
     std::string* error) {
   if (!value.Find(kRequestFilterUrlsKey)) {
     return false;
@@ -890,6 +889,12 @@ bool WebRequestEventRouter::RequestFilter::InitFromValue(
     } else if (dict_item.first == kRequestFilterWindowIdKey &&
                dict_item.second.is_int()) {
       window_id = dict_item.second.GetInt();
+    } else if (dict_item.first == kRequestFilterOptionsKey) {
+      // The renderer-side bindings inject an "_options" key into the
+      // filter to pass along some extra information (like `extraInfo` and
+      // `webViewInstanceId`). We ignore it here, as it's not a part of the
+      // RequestFilter.
+      continue;
     } else {
       return false;
     }
@@ -897,13 +902,13 @@ bool WebRequestEventRouter::RequestFilter::InitFromValue(
   return true;
 }
 
-base::Value::Dict WebRequestEventRouter::RequestFilter::ToValue() const {
-  base::Value::Dict dict;
+base::DictValue WebRequestEventRouter::RequestFilter::ToValue() const {
+  base::DictValue dict;
 
   dict.Set(kRequestFilterUrlsKey, urls.ToValue());
 
   if (!types.empty()) {
-    base::Value::List types_list;
+    base::ListValue types_list;
     for (WebRequestResourceType type : types) {
       types_list.Append(WebRequestResourceTypeToString(type));
     }
@@ -1784,7 +1789,7 @@ void WebRequestEventRouter::DispatchEventToListeners(
     }
 
     // Filter out the optional keys that this listener didn't request.
-    base::Value::List args_filtered;
+    base::ListValue args_filtered;
 
     args_filtered.Append(event_details->GetFilteredDict(
         listener->extra_info_spec, PermissionHelper::Get(browser_context),
@@ -1911,6 +1916,16 @@ bool WebRequestEventRouter::AddEventListener(
     return false;
   }
 
+  LOG(ERROR) << "AddEventListener: " << browser_context
+             << " extension_id: " << extension_id
+             << " extension_name: " << extension_name
+             << " event_name: " << event_name
+             << " sub_event_name: " << sub_event_name
+             << " render_process_id: " << render_process_id
+             << " web_view_instance_id: " << web_view_instance_id
+             << " worker_thread_id: " << worker_thread_id
+             << " service_worker_version_id: " << service_worker_version_id;
+
   auto listener = std::make_unique<EventListener>(std::move(id));
   listener->extension_name = extension_name;
   listener->histogram_value = GetEventHistogramValue(event_name);
@@ -2010,6 +2025,15 @@ WebRequestEventRouter::RemoveMatchingListeners(
         (!service_worker_version_id ||
          service_worker_version_id == id.service_worker_version_id);
     if (!listener_matches) {
+      ++iter;
+      continue;
+    }
+
+    if (id.web_view_instance_id != 0) {
+      // WebView listeners are managed by RemoveWebViewEventListeners, not here.
+      // There is not enough information here to know if the matching listener
+      // is for a WebView that is being destroyed, or an existing WebView that
+      // still needs its listener to be active.
       ++iter;
       continue;
     }
@@ -2163,7 +2187,7 @@ void WebRequestEventRouter::AddPersistedLazyListener(
   }
 
   ExtensionPrefs* prefs = ExtensionPrefs::Get(browser_context);
-  const base::Value::List* existing_listeners =
+  const base::ListValue* existing_listeners =
       prefs->ReadPrefAsList(extension_id, kFilteredLazyListeners);
 
   // Ensure we don't add duplicate listeners.
@@ -2180,7 +2204,7 @@ void WebRequestEventRouter::AddPersistedLazyListener(
     }
   }
 
-  base::Value::List new_listeners;
+  base::ListValue new_listeners;
   if (existing_listeners) {
     new_listeners = existing_listeners->Clone();
   }
@@ -2204,14 +2228,14 @@ void WebRequestEventRouter::RemovePersistedLazyListener(
   }
 
   ExtensionPrefs* prefs = ExtensionPrefs::Get(browser_context);
-  const base::Value::List* existing_listeners =
+  const base::ListValue* existing_listeners =
       prefs->ReadPrefAsList(extension_id, kFilteredLazyListeners);
   if (!existing_listeners) {
     return;
   }
 
   // Remove the listener(s) with the matching sub-event name.
-  base::Value::List new_listeners = existing_listeners->Clone();
+  base::ListValue new_listeners = existing_listeners->Clone();
   new_listeners.EraseIf([&](const base::Value& entry) {
     if (!entry.is_dict()) {
       return false;
@@ -2421,7 +2445,7 @@ void WebRequestEventRouter::LoadPersistedLazyListeners(
     return;
   }
 
-  const base::Value::List* persisted_listeners =
+  const base::ListValue* persisted_listeners =
       prefs->ReadPrefAsList(extension_id, kFilteredLazyListeners);
   if (!persisted_listeners) {
     return;
@@ -2436,9 +2460,6 @@ void WebRequestEventRouter::LoadPersistedLazyListeners(
     for (const auto& [event_name, listeners] : *listener_map) {
       for (const auto& listener : listeners) {
         if (listener->id.extension_id == extension_id) {
-          // TODO(crbug.com/448893426): remove these for loops if we can verify
-          // this never happens.
-          base::debug::DumpWithoutCrashing();
           return;
         }
       }
@@ -2676,7 +2697,8 @@ bool WebRequestEventRouter::ListenerMatchesRequest(
   }
 
   const std::vector<WebRequestResourceType>& types = listener.filter.types;
-  if (!types.empty() && !base::Contains(types, request.web_request_type)) {
+  if (!types.empty() &&
+      !std::ranges::contains(types, request.web_request_type)) {
     return false;
   }
 

@@ -153,7 +153,8 @@ bool IsNtpComposeboxEnabled(Profile* profile) {
   }
 
   return base::FeatureList::IsEnabled(kNtpComposebox) &&
-         aim_eligibility_service->IsAimEligible();
+         aim_eligibility_service->IsAimEligible() &&
+         aim_eligibility_service->IsFuseboxEligible();
 }
 
 bool IsDeepSearchEnabled(Profile* profile) {
@@ -331,7 +332,7 @@ bool IsNtpRealboxNextEnabled(Profile* profile) {
   }
 
   return base::FeatureList::IsEnabled(kNtpRealboxNext) &&
-         aim_eligibility_service->IsAimEligible();
+         aim_eligibility_service->IsFuseboxEligible();
 }
 
 BASE_FEATURE(kNtpRealboxNext, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -345,7 +346,7 @@ const base::FeatureParam<PlaceholderText>::Option kSteadyPlaceholderOptions[] =
 const base::FeatureParam<PlaceholderText> kSteadyPlaceholder(
     &kNtpRealboxNext,
     "SteadyPlaceholder",
-    PlaceholderText::ASK_OR_TYPE,
+    PlaceholderText::ASK,
     &kSteadyPlaceholderOptions);
 
 const base::FeatureParam<bool> kCyclingPlaceholders(&kNtpRealboxNext,

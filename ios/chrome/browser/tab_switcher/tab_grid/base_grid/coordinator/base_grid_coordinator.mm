@@ -16,6 +16,8 @@
 #import "ios/chrome/browser/collaboration/model/ios_collaboration_controller_delegate.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/menu/ui_bundled/tab_context_menu_delegate.h"
+#import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/tab_grid_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/web_state_list/tab_group.h"
@@ -303,6 +305,8 @@ using collaboration::CollaborationControllerDelegate;
   // regular grid view controller.
   self.gridViewController.gridScrollsToTopEnabled = YES;
 
+  self.browser->GetSceneState().tabGridState.visibleTabGroup = nullptr;
+
   [_tabGroupCoordinator stop];
   _tabGroupCoordinator = nil;
   self.mediator.baseDelegate = nil;
@@ -341,10 +345,12 @@ using collaboration::CollaborationControllerDelegate;
   _tabGroupCreator = nil;
 }
 
-- (void)showTabGroupEditionForGroup:(const TabGroup*)tabGroup {
+- (void)showTabGroupEditionForGroup:(base::WeakPtr<const TabGroup>)tabGroup {
   CHECK(!_tabGroupCreator) << "There is an attempt to edit a tab group when a "
                               "creation process is still running.";
-  CHECK(tabGroup) << "To edit a tab group you should pass a group.";
+  if (!tabGroup) {
+    return;
+  }
 
   UIViewController* backgroundView = _tabGroupCoordinator
                                          ? _tabGroupCoordinator.viewController
@@ -352,7 +358,7 @@ using collaboration::CollaborationControllerDelegate;
   _tabGroupCreator = [[CreateTabGroupCoordinator alloc]
       initTabGroupEditionWithBaseViewController:backgroundView
                                         browser:self.browser
-                                       tabGroup:tabGroup];
+                                       tabGroup:tabGroup.get()];
   _tabGroupCreator.delegate = self;
   [_tabGroupCreator start];
 }
@@ -485,6 +491,8 @@ using collaboration::CollaborationControllerDelegate;
     // There is an attempt to display a tab group when one is already presented.
     return;
   }
+
+  self.browser->GetSceneState().tabGridState.visibleTabGroup = tabGroup;
 
   // TODO(crbug.com/40942154): Replace base view controller by view controller
   // when the base grid coordinator will have access to the grid view

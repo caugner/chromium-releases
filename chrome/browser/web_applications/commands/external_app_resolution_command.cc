@@ -51,6 +51,7 @@
 #include "components/webapps/browser/web_contents/web_app_url_loader.h"
 #include "components/webapps/common/web_app_id.h"
 #include "content/public/browser/web_contents.h"
+#include "url/origin.h"
 
 namespace web_app {
 
@@ -475,11 +476,10 @@ void ExternalAppResolutionCommand::OnLockUpgradedFinalizeInstall(
   finalize_options.add_to_desktop = install_params_->add_to_desktop;
   finalize_options.add_to_quick_launch_bar =
       install_params_->add_to_quick_launch_bar;
-
-  if (apps_lock_->registrar().IsInstallState(
-          app_id_, {proto::InstallState::SUGGESTED_FROM_ANOTHER_DEVICE,
-                    proto::InstallState::INSTALLED_WITHOUT_OS_INTEGRATION,
-                    proto::InstallState::INSTALLED_WITH_OS_INTEGRATION})) {
+  // TODO(crbug.com/379136842): This is likely too 'permissive' of a check, and
+  // different more restrictive filter should likely be used instead.
+  if (apps_lock_->registrar().AppMatches(
+          app_id_, WebAppFilter::IsAppSurfaceableToUser())) {
     // If an installation is triggered for the same app but with a
     // different install_url, then we overwrite the manifest fields.
     // If icon downloads fail, then we would not overwrite the icon
@@ -718,6 +718,18 @@ void ExternalAppResolutionCommand::InstallFromInfo() {
   // trusted ones.
   web_app_info_->trusted_icons = web_app_info_->manifest_icons;
   web_app_info_->trusted_icon_bitmaps = web_app_info_->icon_bitmaps;
+
+  if (!web_app_info_->scope.is_valid() ||
+      !url::IsSameOriginWith(web_app_info_->scope,
+                             web_app_info_->start_url()) ||
+      !base::StartsWith(web_app_info_->start_url().spec(),
+                        web_app_info_->scope.spec(),
+                        base::CompareCase::SENSITIVE)) {
+    DLOG(ERROR) << "Invalid scope "
+                << web_app_info_->scope.possibly_invalid_spec()
+                << " for start_url " << web_app_info_->start_url();
+    web_app_info_->scope = web_app_info_->start_url().GetWithoutFilename();
+  }
 
   if (!apps_lock_) {
     apps_lock_ = std::make_unique<SharedWebContentsWithAppLock>();

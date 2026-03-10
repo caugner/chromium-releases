@@ -255,10 +255,11 @@ class TestingAimEligibilityService : public ChromeAimEligibilityService {
                                     /*template_url_service=*/nullptr,
                                     /*url_loader_factory=*/nullptr,
                                     /*identity_manager=*/nullptr,
-                                    /*is_off_the_record=*/false),
+                                    /*configuration=*/{}),
         is_aim_eligible_(is_aim_eligible) {}
 
   bool IsAimEligible() const override { return is_aim_eligible_; }
+  bool IsFuseboxEligible() const override { return is_aim_eligible_; }
   bool IsAimAllowedByDse() const override { return is_aim_eligible_; }
 
  private:
@@ -325,7 +326,7 @@ TEST_F(OmniboxNextAimEligibilityTest, ShouldShowAimContextMenuOption) {
   std::vector<TestCase> test_cases = {
       // If either AIM feature is enabled, then menu option should be shown.
       // Entry point is enabled:
-      {true, false, true, false, "", true},
+      {true, false, true, false, "below_results", true},
       // Context button is enabled:
       {true, false, false, true, "below_results", true},
       // If the user is AIM ineligible, then the menu option should be hidden

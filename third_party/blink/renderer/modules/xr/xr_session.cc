@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/dcheck_is_on.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
@@ -94,6 +93,9 @@ const char kMultiLayersNotEnabled[] =
     "This session does not support multiple layers.";
 
 const char kDuplicateLayer[] = "All layers in render state must be unique.";
+
+const char kTooManyLayers[] =
+    "The number of layers to be enabled exceeds maxRenderLayers.";
 
 const char kInlineVerticalFOVNotSupported[] =
     "This session does not support inlineVerticalFieldOfView";
@@ -543,6 +545,13 @@ void XRSession::updateRenderState(XRRenderStateInit* init,
         !IsFeatureEnabled(device::mojom::XRSessionFeature::LAYERS)) {
       exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                         kMultiLayersNotEnabled);
+      return;
+    }
+
+    // Validate that the number of layers is allowed.
+    if (init->layers()->size() > maxRenderLayers()) {
+      exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                        kTooManyLayers);
       return;
     }
 
@@ -2689,6 +2698,12 @@ device::mojom::blink::XRLayerManager* XRSession::LayerManager() {
     return nullptr;
   }
   return xr()->frameProvider()->layer_manager();
+}
+
+void XRSession::OnTransferComplete(const Vector<device::LayerId>& layer_ids) {
+  if (render_state_) {
+    render_state_->OnTransferComplete(layer_ids);
+  }
 }
 
 void XRSession::Trace(Visitor* visitor) const {

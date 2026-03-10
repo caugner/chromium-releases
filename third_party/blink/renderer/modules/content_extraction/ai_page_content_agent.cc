@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/modules/content_extraction/ai_page_content_agent.h"
 
+#include "base/check.h"
 #include "base/containers/adapters.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -17,6 +18,8 @@
 #include "third_party/blink/renderer/core/display_lock/display_lock_document_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
+#include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
@@ -66,14 +69,118 @@
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/web_test_support.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
+#include "third_party/blink/renderer/platform/wtf/text/character_names.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace blink {
+#if DCHECK_IS_ON()
+class AutoBuildHelper final : public NativeEventListener {
+ public:
+  explicit AutoBuildHelper(AIPageContentAgent& agent) : agent_(agent) {}
+
+  void Trace(Visitor* visitor) const override {
+    EventListener::Trace(visitor);
+    visitor->Trace(agent_);
+  }
+
+  void StartListening() {
+    AIPageContentAgent* agent = agent_.Get();
+    if (!agent) {
+      return;
+    }
+    Document* document = agent->GetSupplementable();
+    if (!document || listener_registered_) {
+      return;
+    }
+    document->addEventListener(event_type_names::kDOMContentLoaded, this,
+                               false);
+    listener_registered_ = true;
+  }
+
+  void Invoke(ExecutionContext* execution_context, Event* event) override {
+    DCHECK(execution_context->IsWindow());
+
+    LocalDOMWindow& window = *To<LocalDOMWindow>(execution_context);
+    Document& document = *window.document();
+    AIPageContentAgent* agent = agent_.Get();
+    if (!agent || agent->GetSupplementable() != &document) {
+      return;
+    }
+    RunAfterDOMContentLoaded();
+  }
+
+  void RunAfterDOMContentLoaded() {
+    AIPageContentAgent* agent = agent_.Get();
+    if (!agent) {
+      return;
+    }
+    Document* document = agent->GetSupplementable();
+    if (!document) {
+      return;
+    }
+    // When tracing is active (e.g. inspector-protocol tracing tests like
+    // http/tests/inspector-protocol/tracing/rendering.js), APC auto-build can
+    // trigger the list-based hit test used for actionable extraction. Inspector
+    // tracing records list-based hit tests with `listBased`/`rect` fields
+    // instead of `nodeId`/`nodeName`, which changes rendering-expected.txt.
+    // Skip auto- build to keep those tests stable.
+    if (base::TrackEvent::IsEnabled()) {
+      return;
+    }
+
+    // Reuse the common APC request path so lifecycle handling matches mojo
+    // calls.
+    LOG(INFO) << "\n" << agent->DumpContentNodeTreeForTest();
+  }
+
+ private:
+  Member<AIPageContentAgent> agent_;
+  bool listener_registered_ = false;
+};
+#endif  // DCHECK_IS_ON()
+
 namespace {
+
+String ReplaceUnpairedSurrogates(const String& node_text) {
+  if (!RuntimeEnabledFeatures::AIPageContentConvertNodeTextToUtf8Enabled()) {
+    return node_text;
+  }
+
+  if (node_text.IsNull() || node_text.empty()) {
+    return node_text;
+  }
+
+  // These strings need to be converted between formats (mojom, protobuf, etc)
+  // that might have varying tolerances for encoding jank, so we should
+  // sanitize them as much as possible. DOM strings may contain unpaired
+  // surrogates, which are a UTF-16 construct and not technically valid
+  // Unicode. Calling Utf8() here with kStrictReplacingErrors will replace
+  // unpaired surrogates with the default Unicode replacement character, which
+  // means that downstream consumers can correctly move between encodings
+  // (UTF-8, etc).
+  //
+  // But Utf8() conversion returns a std::string, so we need to convert back
+  // to a WTF::String for Blink usage.
+  //
+  // Strings that are already in 8 bit representation (like Latin1 encoding)
+  // can't contain unpaired surrogates, so we can return those transparently.
+  if (node_text.Is8Bit()) {
+    return node_text;
+  }
+
+  return String::FromUTF8(
+      node_text.Utf8(Utf8ConversionMode::kStrictReplacingErrors));
+}
+
+String ConvertNodeTextToUtf8(const AtomicString& node_text) {
+  return ReplaceUnpairedSurrogates(node_text.GetString());
+}
 
 // Coordinate mapping flags
 // - Viewport mapping: positions relative to the window/viewport origin.
@@ -324,7 +431,7 @@ void ComputeScrollerInfo(
 
 // TODO(crbug.com/383128653): This is duplicating logic from
 // UnsupportedTagTypeValueForNode, consider reusing it.
-bool IsHeadingTag(const HTMLElement& element) {
+bool IsHeadingTag(const Element& element) {
   return element.HasTagName(html_names::kH1Tag) ||
          element.HasTagName(html_names::kH2Tag) ||
          element.HasTagName(html_names::kH3Tag) ||
@@ -592,11 +699,28 @@ bool ShouldSkipDescendants(
 
   // Ensure that password editor subtrees are skipped even when the password
   // is revealed.
-  if (content_node->content_attributes->form_control_data &&
-      content_node->content_attributes->form_control_data->redaction_decision ==
-          mojom::blink::AIPageContentRedactionDecision::
-              kRedacted_HasBeenPassword) {
-    return true;
+  const auto* form_control_data =
+      content_node->content_attributes->form_control_data.get();
+  if (form_control_data) {
+    const auto redaction_decision = form_control_data->redaction_decision;
+    switch (redaction_decision) {
+      case mojom::blink::AIPageContentRedactionDecision::kNoRedactionNecessary:
+      case mojom::blink::AIPageContentRedactionDecision::
+          kUnredacted_EmptyPassword:
+      case mojom::blink::AIPageContentRedactionDecision::
+          kUnredacted_EmptyCustomPassword:
+        break;
+      case mojom::blink::AIPageContentRedactionDecision::
+          kRedacted_HasBeenPassword:
+      case mojom::blink::AIPageContentRedactionDecision::
+          kRedacted_CustomPassword_CSS:
+      case mojom::blink::AIPageContentRedactionDecision::
+          kRedacted_CustomPassword_JS:
+        // Custom password-like inputs (e.g. `-webkit-text-security`) can also
+        // have UA/editor subtrees which may contain sensitive text. Skip them
+        // to avoid leaking into extracted text nodes.
+        return true;
+    }
   }
 
   return false;
@@ -614,7 +738,8 @@ void ProcessTextNode(const LayoutText& layout_text,
   text_style->color = GetColor(*layout_text.Style());
 
   auto text_info = mojom::blink::AIPageContentTextInfo::New();
-  text_info->text_content = layout_text.TransformedText();
+  text_info->text_content =
+      ReplaceUnpairedSurrogates(layout_text.TransformedText());
   text_info->text_style = std::move(text_style);
   attributes.text_info = std::move(text_info);
 }
@@ -637,7 +762,8 @@ void ProcessImageNode(const LayoutObject& layout_image,
           DynamicTo<HTMLImageElement>(layout_image.GetNode())) {
     // TODO(crbug.com/383127202): A11y stack generates alt text using image
     // data which could be reused for this.
-    image_info->image_caption = image_element->AltText();
+    image_info->image_caption =
+        ReplaceUnpairedSurrogates(image_element->AltText());
   }
 
   // TODO(crbug.com/382558422): Include image source origin.
@@ -658,7 +784,8 @@ void ProcessSVGRoot(const LayoutSVGRoot& layout_svg,
   auto svg_root_data = mojom::blink::AIPageContentSvgRootData::New();
   // TODO(b/452908424): Consider removing this given that the inner text is
   // available in the text nodes.
-  svg_root_data->inner_text = element->GetInnerTextWithoutUpdate();
+  svg_root_data->inner_text =
+      ReplaceUnpairedSurrogates(element->GetInnerTextWithoutUpdate());
   attributes.svg_root_data = std::move(svg_root_data);
 }
 
@@ -719,7 +846,7 @@ void ProcessTableNode(const LayoutTable& layout_table,
           table_name.Append(layout_text->TransformedText());
         }
       }
-      table_data->table_name = table_name.ToString();
+      table_data->table_name = ReplaceUnpairedSurrogates(table_name.ToString());
     }
   }
   attributes.table_data = std::move(table_data);
@@ -733,11 +860,133 @@ void ProcessFormNode(const HTMLFormElement& form_element,
   }
   auto form_data = mojom::blink::AIPageContentFormData::New();
   if (const auto& name = form_element.GetName()) {
-    form_data->form_name = name;
+    form_data->form_name = ReplaceUnpairedSurrogates(name);
   }
   form_data->action_url = KURL(form_element.action());
 
   attributes.form_data = std::move(form_data);
+}
+
+// Roles that accept aria-checked, per WAI-ARIA. We only surface aria-checked
+// for these roles to avoid exposing unsupported states.
+bool RoleSupportsAriaChecked(ax::mojom::blink::Role role) {
+  switch (role) {
+    case ax::mojom::blink::Role::kCheckBox:
+    case ax::mojom::blink::Role::kListBoxOption:
+    case ax::mojom::blink::Role::kMenuItemCheckBox:
+    case ax::mojom::blink::Role::kMenuItemRadio:
+    case ax::mojom::blink::Role::kMenuListOption:
+    case ax::mojom::blink::Role::kRadioButton:
+    case ax::mojom::blink::Role::kSwitch:
+    case ax::mojom::blink::Role::kTreeItem:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// aria-placeholder is intended for text entry widgets, so scope to text fields
+// and combobox-like roles.
+bool RoleSupportsAriaPlaceholder(ax::mojom::blink::Role role) {
+  return ui::IsTextField(role) || ui::IsComboBox(role);
+}
+
+// Maps ARIA roles to a FormControlType where the semantics are clear enough to
+// surface APC form control data.
+bool FormControlTypeForAriaRole(ax::mojom::blink::Role role,
+                                mojom::blink::FormControlType* out_type) {
+  switch (role) {
+    case ax::mojom::blink::Role::kCheckBox:
+    case ax::mojom::blink::Role::kMenuItemCheckBox:
+    case ax::mojom::blink::Role::kSwitch:
+      *out_type = mojom::blink::FormControlType::kInputCheckbox;
+      return true;
+    case ax::mojom::blink::Role::kMenuItemRadio:
+    case ax::mojom::blink::Role::kRadioButton:
+      *out_type = mojom::blink::FormControlType::kInputRadio;
+      return true;
+    case ax::mojom::blink::Role::kSearchBox:
+      *out_type = mojom::blink::FormControlType::kInputSearch;
+      return true;
+    case ax::mojom::blink::Role::kTextField:
+    case ax::mojom::blink::Role::kTextFieldWithComboBox:
+      *out_type = mojom::blink::FormControlType::kInputText;
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Populates form control data for ARIA-based controls (e.g. role=checkbox).
+// Returns true if ARIA form control data should be emitted for this element.
+bool ProcessAriaFormControlNode(
+    const LayoutObject& object,
+    const Element& element,
+    mojom::blink::AIPageContentAttributes& attributes) {
+  // Use AXObject's raw role resolver so we only honor explicit ARIA roles and
+  // ignore implicit/native roles for ARIA-only control semantics.
+  ax::mojom::blink::Role aria_role = AXObject::DetermineRawAriaRole(element);
+  if (aria_role == ax::mojom::blink::Role::kUnknown) {
+    return false;
+  }
+
+  mojom::blink::FormControlType form_control_type;
+  if (!FormControlTypeForAriaRole(aria_role, &form_control_type)) {
+    return false;
+  }
+
+  bool aria_required =
+      ui::SupportsRequired(aria_role) &&
+      AXObject::IsAriaAttributeTrue(element, html_names::kAriaRequiredAttr);
+  bool aria_readonly =
+      ui::IsReadOnlySupported(aria_role) &&
+      AXObject::IsAriaAttributeTrue(element, html_names::kAriaReadonlyAttr);
+
+  String aria_placeholder;
+  if (RoleSupportsAriaPlaceholder(aria_role)) {
+    const AtomicString& aria_placeholder_attribute =
+        AXObject::AriaAttribute(element, html_names::kAriaPlaceholderAttr);
+    if (!aria_placeholder_attribute.empty()) {
+      aria_placeholder = aria_placeholder_attribute;
+    }
+  }
+
+  bool has_aria_checked = false;
+  bool aria_checked = false;
+  if (RoleSupportsAriaChecked(aria_role)) {
+    // Keep aria-checked handling simple: require the attribute to be present,
+    // and treat any non-false value (including "mixed") as true.
+    has_aria_checked =
+        AXObject::HasAriaAttribute(element, html_names::kAriaCheckedAttr);
+    if (has_aria_checked) {
+      aria_checked =
+          AXObject::IsAriaAttributeTrue(element, html_names::kAriaCheckedAttr);
+    }
+  }
+
+  attributes.attribute_type =
+      mojom::blink::AIPageContentAttributeType::kFormControl;
+
+  // Do not gate ARIA form control metadata on visibility. The node can still be
+  // included when visible descendants keep the subtree in the APC tree, so we
+  // preserve ARIA semantics for downstream consumers.
+  attributes.form_control_data =
+      mojom::blink::AIPageContentFormControlData::New();
+  auto& form_control_data = *attributes.form_control_data;
+  form_control_data.form_control_type = form_control_type;
+  form_control_data.is_required = aria_required;
+  form_control_data.is_readonly = aria_readonly;
+  form_control_data.redaction_decision =
+      mojom::blink::AIPageContentRedactionDecision::kNoRedactionNecessary;
+
+  if (!aria_placeholder.empty()) {
+    form_control_data.placeholder = ReplaceUnpairedSurrogates(aria_placeholder);
+  }
+
+  if (has_aria_checked) {
+    form_control_data.is_checked = aria_checked;
+  }
+  return true;
 }
 
 void ProcessFormControlNode(const HTMLFormControlElement& form_control_element,
@@ -747,10 +996,24 @@ void ProcessFormControlNode(const HTMLFormControlElement& form_control_element,
   if (!IsVisible(*form_control_element.GetLayoutObject())) {
     return;
   }
-  auto form_control_data = mojom::blink::AIPageContentFormControlData::New();
+  attributes.form_control_data =
+      mojom::blink::AIPageContentFormControlData::New();
+  auto* form_control_data = attributes.form_control_data.get();
   form_control_data->form_control_type = form_control_element.FormControlType();
-  form_control_data->field_name = form_control_element.GetName();
+  form_control_data->field_name =
+      ConvertNodeTextToUtf8(form_control_element.GetName());
   form_control_data->is_required = form_control_element.IsRequired();
+  form_control_data->is_readonly = form_control_element.IsReadOnly();
+
+  // Honor aria-required for native controls (and aria-readonly for text
+  // controls below) only when the native attributes are not set. This follows
+  // WAI-ARIA host language conflict guidance by keeping native semantics
+  // authoritative when present.
+  if (!form_control_data->is_required &&
+      AXObject::IsAriaAttributeTrue(form_control_element,
+                                    html_names::kAriaRequiredAttr)) {
+    form_control_data->is_required = true;
+  }
 
   // Set the default value for redaction, and override below as appropriate.
   form_control_data->redaction_decision =
@@ -773,10 +1036,25 @@ void ProcessFormControlNode(const HTMLFormControlElement& form_control_element,
     if (form_control_data->redaction_decision !=
         mojom::blink::AIPageContentRedactionDecision::
             kRedacted_HasBeenPassword) {
-      form_control_data->field_value = text_control_element->Value();
+      form_control_data->field_value =
+          ReplaceUnpairedSurrogates(text_control_element->Value());
+    }
+    String placeholder_value = text_control_element->GetPlaceholderValue();
+    if (placeholder_value.empty()) {
+      const AtomicString& aria_placeholder = AXObject::AriaAttribute(
+          form_control_element, html_names::kAriaPlaceholderAttr);
+      if (!aria_placeholder.empty()) {
+        placeholder_value = aria_placeholder;
+      }
     }
     form_control_data->placeholder =
-        text_control_element->GetPlaceholderValue();
+        ReplaceUnpairedSurrogates(placeholder_value);
+
+    if (!form_control_data->is_readonly &&
+        AXObject::IsAriaAttributeTrue(form_control_element,
+                                      html_names::kAriaReadonlyAttr)) {
+      form_control_data->is_readonly = true;
+    }
   }
   if (const auto* html_input_element =
           DynamicTo<HTMLInputElement>(form_control_element)) {
@@ -786,17 +1064,17 @@ void ProcessFormControlNode(const HTMLFormControlElement& form_control_element,
           DynamicTo<HTMLSelectElement>(form_control_element)) {
     for (auto& option_element : select_element->GetOptionList()) {
       auto select_option = mojom::blink::AIPageContentSelectOption::New();
-      select_option->value = option_element.value();
-      select_option->text = option_element.text();
+      select_option->value = ReplaceUnpairedSurrogates(option_element.value());
+      select_option->text = ReplaceUnpairedSurrogates(option_element.text());
       if (select_option->text.empty()) {
-        select_option->text = option_element.DisplayLabel();
+        select_option->text =
+            ReplaceUnpairedSurrogates(option_element.DisplayLabel());
       }
       select_option->is_selected = option_element.Selected();
       select_option->disabled = option_element.IsDisabledFormControl();
       form_control_data->select_options.push_back(std::move(select_option));
     }
   }
-  attributes.form_control_data = std::move(form_control_data);
 }
 
 mojom::blink::AIPageContentTableRowType GetTableRowType(
@@ -976,17 +1254,14 @@ void AIPageContentAgent::
   // installs its Document, so `frame` should always expose one here.
   Document* document = frame.GetDocument();
   DCHECK(document);
-  auto* agent = AIPageContentAgent::GetOrCreateForTesting(*document);
-  if (!agent->is_auto_actionable_extraction_pending_) {
-    agent->is_auto_actionable_extraction_pending_ = true;
-    agent->EnsureLifecycleObserverRegistered();
-    // Ensure that we get a lifecycle update no matter what.
-    LocalFrameView* frame_view = document->View();
-    Page* page = document->GetPage();
-    if (frame_view && page && !page->Animator().IsServicingAnimations()) {
-      page->Animator().ScheduleVisualUpdate(&frame);
-    }
+  // Skip the initial empty document to avoid auto-build work before the real
+  // navigation commits. Auto-builds for the initial empty document do not
+  // provide useful coverage and can interfere with subsequent loads.
+  if (document->IsInitialEmptyDocument()) {
+    return;
   }
+  auto* agent = AIPageContentAgent::GetOrCreateForTesting(*document);
+  agent->ListenForDOMContentLoadedForAutoBuild();
 }
 #endif
 
@@ -1009,6 +1284,9 @@ void AIPageContentAgent::Bind(
 void AIPageContentAgent::Trace(Visitor* visitor) const {
   visitor->Trace(receiver_set_);
   Supplement<Document>::Trace(visitor);
+#if DCHECK_IS_ON()
+  visitor->Trace(auto_build_helper_);
+#endif
 }
 
 void AIPageContentAgent::DidFinishPostLifecycleSteps(const LocalFrameView&) {
@@ -1016,9 +1294,6 @@ void AIPageContentAgent::DidFinishPostLifecycleSteps(const LocalFrameView&) {
     std::move(task).Run();
   }
   async_extraction_tasks_.clear();
-#if DCHECK_IS_ON()
-  MaybeRunAutomaticActionableExtraction();
-#endif
 }
 
 void AIPageContentAgent::GetAIPageContent(
@@ -1083,26 +1358,27 @@ void AIPageContentAgent::EnsureLifecycleObserverRegistered() {
 }
 
 #if DCHECK_IS_ON()
-void AIPageContentAgent::MaybeRunAutomaticActionableExtraction() {
-  if (!is_auto_actionable_extraction_pending_) {
+AutoBuildHelper* AIPageContentAgent::GetOrCreateAutoBuildHelper() {
+  if (!auto_build_helper_) {
+    auto_build_helper_ = MakeGarbageCollected<AutoBuildHelper>(*this);
+  }
+  return auto_build_helper_.Get();
+}
+
+void AIPageContentAgent::ListenForDOMContentLoadedForAutoBuild() {
+  Document* document = GetSupplementable();
+  if (!document) {
     return;
   }
 
-  if (!GetSupplementable()->LoadEventFinished()) {
-    return;
-  }
-  LocalFrame* frame = GetSupplementable()->GetFrame();
-  if (!frame) {
-    return;
-  }
+  // Register the DOMContentLoaded listener and schedule the auto-build after
+  // the event dispatch completes. This keeps auto-build out of document
+  // installation/handler execution windows where frame state can be unstable.
+  GetOrCreateAutoBuildHelper()->StartListening();
+}
 
-  is_auto_actionable_extraction_pending_ = false;
-
-  mojom::blink::AIPageContentOptions options;
-  options.on_critical_path = true;
-  options.mode = mojom::blink::AIPageContentMode::kActionableElements;
-
-  GetAIPageContentInternal(options);
+void AIPageContentAgent::RunAutoBuildAfterDOMContentLoadedForTesting() {
+  GetOrCreateAutoBuildHelper()->RunAfterDOMContentLoaded();
 }
 #endif
 
@@ -1149,15 +1425,137 @@ mojom::blink::AIPageContentPtr AIPageContentAgent::GetAIPageContentInternal(
     return nullptr;
   }
 
-  ContentBuilder builder(options);
+  ContentBuilder builder(options, *this);
   return builder.Build(*frame);
 }
 
 AIPageContentAgent::ContentBuilder::ContentBuilder(
-    const mojom::blink::AIPageContentOptions& options)
-    : options_(options) {}
+    const mojom::blink::AIPageContentOptions& options,
+    const AIPageContentAgent& agent)
+    : options_(options), agent_(agent) {}
 
 AIPageContentAgent::ContentBuilder::~ContentBuilder() = default;
+
+std::optional<AIPageContentAgent::CustomPasswordSource>
+AIPageContentAgent::CustomPasswordReason(DOMNodeId dom_node_id) const {
+  DCHECK_NE(dom_node_id, kInvalidDOMNodeId);
+  auto it = custom_password_decision_.find(dom_node_id);
+  if (it == custom_password_decision_.end()) {
+    return std::nullopt;
+  }
+  return it->value;
+}
+
+namespace {
+
+bool IsCSSSecurityMaskingEnabled(const LayoutObject& object) {
+  // Checks the computed value of the non-standard CSS property
+  // `-webkit-text-security`. Authors sometimes use this on non-password
+  // elements to create custom masked "password-like" fields.
+  const ComputedStyle* style = object.Style();
+  if (!style) {
+    return false;
+  }
+  return style->TextSecurity() != ETextSecurity::kNone;
+}
+
+bool IsSecurityMaskCharacter(UChar c) {
+  switch (c) {
+    // Standard Asterisks & Stars.
+    case '*':     // U+002A
+    case 0x2731:  // Heavy Asterisk (✱)
+    case 0x2732:  // Open Centre Asterisk (✲)
+    case 0x2733:  // Eight Spoked Asterisk (✳)
+    case 0xFF0A:  // Fullwidth Asterisk (＊)
+
+    // Standard Bullets & Circles.
+    case 0x2022:  // Bullet (•)
+    case 0x25CF:  // Black Circle (●)
+    case 0x25CB:  // White Circle (○)
+    case 0x25EF:  // Large Circle (◯)
+    case 0x26AB:  // Medium Black Circle (⚫)
+    case 0x2B24:  // Black Large Circle (⬤)
+    case 0x25E6:  // White Bullet (◦)
+    case 0x25C9:  // Fisheye (◉)
+
+    // Dots & Mathematical Operators.
+    case 0x00B7:  // Middle Dot (·)
+    case 0x2219:  // Bullet Operator (∙)
+    case 0x22C5:  // Dot Operator (⋅)
+    case 0x2802:  // Braille Dot-2 (⠂)
+    case 0x2812:  // Braille Dots-2-5 (⠒)
+    case 0x2836:  // Braille Dots-2-3-5-6 (⠶)
+
+    // Squares, Blocks & Diamonds.
+    case 0x25A0:  // Black Square (■)
+    case 0x25A1:  // White Square (□)
+    case 0x25AA:  // Black Small Square (▪)
+    case 0x25AB:  // White Small Square (▫)
+    case 0x25AE:  // Black Vertical Rectangle (▮)
+    case 0x2588:  // Full Block (█)
+    case 0x2589:  // Left Seven Eighths Block (▉)
+    case 0x25C6:  // Black Diamond (◆)
+    case 0x25C7:  // White Diamond (◇)
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+bool IsLikelyJSCustomPasswordField(const String& value) {
+  // Heuristic for JS-masked values where most characters are replaced by
+  // bullet-like mask characters but one character (often the last typed
+  // character) remains visible.
+  //
+  // Example: "••••a"
+  //
+  // This intentionally errs on the side of privacy: if a field *looks* like a
+  // password field, we redact it to prevent credential leakage.
+  if (value.length() < 2) {
+    return false;
+  }
+
+  wtf_size_t mask_count = 0;
+  bool has_visible_last_character = false;
+  for (wtf_size_t index = 0; index < value.length(); ++index) {
+    const UChar ch = value[index];
+    // Whitespace is a strong signal this is not a password field (e.g. a bullet
+    // used as a list marker: "• item"). Bail out early to reduce false
+    // positives and improve performance on large editor-like fields.
+    if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r') {
+      return false;
+    }
+    if (IsSecurityMaskCharacter(ch)) {
+      ++mask_count;
+    } else {
+      // If a non-mask character appears before the final character, this is
+      // unlikely to be a password-style control (typical patterns reveal at
+      // most the last typed character). Bail out early.
+      if (index + 1 < value.length()) {
+        return false;
+      }
+      has_visible_last_character = true;
+    }
+  }
+
+  // Prefer classifying early once masking begins to prevent leaking typed
+  // characters during initial entry. For example, some JS-masked fields show:
+  // - "•b" when the user has typed 2 characters.
+  // - "••c" when the user has typed 3 characters.
+  if (has_visible_last_character) {
+    if (mask_count >= 1) {
+      return true;
+    }
+    return value.length() == 2;
+  }
+
+  // Typical patterns show only one character (often the last). Require that
+  // the value is "mostly masked" to reduce false positives.
+  return mask_count >= value.length() - 1;
+}
+
+}  // namespace
 
 mojom::blink::AIPageContentPtr AIPageContentAgent::ContentBuilder::Build(
     LocalFrame& frame) {
@@ -1289,12 +1687,12 @@ void AIPageContentAgent::ContentBuilder::AddMetaData(
       continue;
     }
     auto meta = mojom::blink::AIPageContentMeta::New();
-    meta->name = name;
+    meta->name = ConvertNodeTextToUtf8(name);
     auto content = meta_element.Content();
     if (content.empty()) {
       meta->content = "";
     } else {
-      meta->content = content;
+      meta->content = ConvertNodeTextToUtf8(content);
     }
     meta_data.push_back(std::move(meta));
     count++;
@@ -1353,7 +1751,7 @@ bool AIPageContentAgent::ContentBuilder::IsGenericContainer(
 
   // Use `ExistingIdForNode` since an Id should have already been generated if
   // this node is interactive.
-  if (interactive_dom_node_ids_.contains(
+  if (interactive_dom_node_ids_.Contains(
           DOMNodeIds::ExistingIdForNode(object.GetNode()))) {
     return true;
   }
@@ -1514,13 +1912,17 @@ AIPageContentAgent::ContentBuilder::MaybeGenerateContentNode(
   // ContentNode before making the decision below.
   AddAnnotatedRoles(object, attributes.annotated_roles);
   AddForDomNodeId(object, attributes);
-  // Interaction info depends on aria role.
-  AddAriaRole(object, attributes);
+
+  auto* element = DynamicTo<Element>(object.GetNode());
+  if (actionable_mode() && element) {
+    attributes.aria_role = AXObject::DetermineRawAriaRole(*element);
+  }
   AddNodeInteractionInfo(object, attributes, recursion_data.is_aria_disabled);
+
+  const std::optional<DOMNodeId> dom_node_id = GetDomNodeId(object);
 
   // Set the attribute type and add any special attributes if the attribute type
   // requires it.
-  auto* element = DynamicTo<HTMLElement>(object.GetNode());
   if (const auto* iframe = GetIFrame(object)) {
     // If the `iframe` is invisible, it's Document can't override this and must
     // also be invisible.
@@ -1577,6 +1979,13 @@ AIPageContentAgent::ContentBuilder::MaybeGenerateContentNode(
   } else if (const auto* form_control =
                  DynamicTo<HTMLFormControlElement>(object.GetNode())) {
     ProcessFormControlNode(*form_control, attributes);
+    if (dom_node_id) {
+      ApplyCustomPasswordRedactionHeuristicsIfNeeded(object, *dom_node_id,
+                                                     attributes);
+    }
+  } else if (element &&
+             ProcessAriaFormControlNode(object, *element, attributes)) {
+    // ProcessAriaFormControlNode sets the attribute type and data.
   } else if (element && IsHeadingTag(*element)) {
     attributes.attribute_type =
         mojom::blink::AIPageContentAttributeType::kHeading;
@@ -1606,7 +2015,7 @@ AIPageContentAgent::ContentBuilder::MaybeGenerateContentNode(
     return nullptr;
   }
 
-  if (auto dom_node_id = GetDomNodeId(object)) {
+  if (dom_node_id) {
     attributes.dom_node_id = *dom_node_id;
   }
 
@@ -1616,6 +2025,95 @@ AIPageContentAgent::ContentBuilder::MaybeGenerateContentNode(
   attributes.is_ad_related = element && element->IsAdRelated();
 
   return content_node;
+}
+
+void AIPageContentAgent::ContentBuilder::
+    ApplyCustomPasswordRedactionHeuristicsIfNeeded(
+        const LayoutObject& object,
+        DOMNodeId dom_node_id,
+        mojom::blink::AIPageContentAttributes& attributes) const {
+  // Only form controls have `form_control_data`. Keep this defensive because
+  // callers may evolve and still call this helper.
+  if (!attributes.form_control_data) {
+    return;
+  }
+
+  // Only text controls can meaningfully contain sensitive freeform text.
+  const auto* text_control_element =
+      DynamicTo<TextControlElement>(object.GetNode());
+  if (!text_control_element) {
+    return;
+  }
+
+  // If this is already treated as a real password field, do not override the
+  // existing decision. The built-in HTMLInputElement::HasBeenPasswordField()
+  // logic should remain authoritative.
+  switch (attributes.form_control_data->redaction_decision) {
+    case mojom::blink::AIPageContentRedactionDecision::
+        kRedacted_HasBeenPassword:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kUnredacted_EmptyPassword:
+      return;
+    case mojom::blink::AIPageContentRedactionDecision::kNoRedactionNecessary:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kUnredacted_EmptyCustomPassword:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kRedacted_CustomPassword_CSS:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kRedacted_CustomPassword_JS:
+      break;
+  }
+
+  const String value = text_control_element->Value();
+
+  const std::optional<AIPageContentAgent::CustomPasswordSource>
+      existing_custom_password_like_reason =
+          agent_.CustomPasswordReason(dom_node_id);
+  bool is_custom_password = existing_custom_password_like_reason.has_value();
+  std::optional<AIPageContentAgent::CustomPasswordSource>
+      custom_password_like_reason = existing_custom_password_like_reason;
+  if (!is_custom_password && !value.empty()) {
+    if (IsCSSSecurityMaskingEnabled(object)) {
+      custom_password_like_reason =
+          AIPageContentAgent::CustomPasswordSource::kCSS;
+    } else if (IsLikelyJSCustomPasswordField(value)) {
+      custom_password_like_reason =
+          AIPageContentAgent::CustomPasswordSource::kJavaScript;
+    }
+    if (custom_password_like_reason) {
+      agent_.custom_password_decision_.Set(dom_node_id,
+                                           *custom_password_like_reason);
+      is_custom_password = true;
+    }
+  }
+
+  if (!is_custom_password) {
+    return;
+  }
+
+  // Preserve the classification even when empty, but only redact when there is
+  // actual sensitive content present.
+  if (value.empty()) {
+    attributes.form_control_data->redaction_decision = mojom::blink::
+        AIPageContentRedactionDecision::kUnredacted_EmptyCustomPassword;
+    attributes.form_control_data->field_value =
+        ReplaceUnpairedSurrogates(value);
+    return;
+  }
+
+  // Clear any captured value from earlier processing and redact.
+  attributes.form_control_data->field_value = String();
+  CHECK(custom_password_like_reason);
+  switch (*custom_password_like_reason) {
+    case AIPageContentAgent::CustomPasswordSource::kCSS:
+      attributes.form_control_data->redaction_decision = mojom::blink::
+          AIPageContentRedactionDecision::kRedacted_CustomPassword_CSS;
+      break;
+    case AIPageContentAgent::CustomPasswordSource::kJavaScript:
+      attributes.form_control_data->redaction_decision = mojom::blink::
+          AIPageContentRedactionDecision::kRedacted_CustomPassword_JS;
+      break;
+  }
 }
 
 void AIPageContentAgent::ContentBuilder::AddLabel(
@@ -1643,7 +2141,7 @@ void AIPageContentAgent::ContentBuilder::AddLabel(
       element->ElementsFromAttributeOrInternals(
           html_names::kAriaLabelledbyAttr);
   if (!aria_labelledby_elements) {
-    attributes.label = accumulated_text.ToString();
+    attributes.label = ReplaceUnpairedSurrogates(accumulated_text.ToString());
     return;
   }
 
@@ -1662,7 +2160,7 @@ void AIPageContentAgent::ContentBuilder::AddLabel(
     accumulated_text.Append(text_content);
   }
 
-  attributes.label = accumulated_text.ToString();
+  attributes.label = ReplaceUnpairedSurrogates(accumulated_text.ToString());
 }
 
 void AIPageContentAgent::ContentBuilder::AddForDomNodeId(
@@ -1699,40 +2197,44 @@ void AIPageContentAgent::ContentBuilder::AddAnnotatedRoles(
   if (!element) {
     return;
   }
+  // Use the ARIA role parser so role checks are case-insensitive and avoid
+  // re-implementing token parsing in APC.
+  const ax::mojom::blink::Role aria_role =
+      AXObject::DetermineRawAriaRole(*element);
   if (element->HasTagName(html_names::kHeaderTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "banner") {
+      aria_role == ax::mojom::blink::Role::kBanner) {
     annotated_roles.push_back(
         mojom::blink::AIPageContentAnnotatedRole::kHeader);
   }
   if (element->HasTagName(html_names::kNavTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "navigation") {
+      aria_role == ax::mojom::blink::Role::kNavigation) {
     annotated_roles.push_back(mojom::blink::AIPageContentAnnotatedRole::kNav);
   }
   if (element->HasTagName(html_names::kSearchTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "search") {
+      aria_role == ax::mojom::blink::Role::kSearch) {
     annotated_roles.push_back(
         mojom::blink::AIPageContentAnnotatedRole::kSearch);
   }
   if (element->HasTagName(html_names::kMainTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "main") {
+      aria_role == ax::mojom::blink::Role::kMain) {
     annotated_roles.push_back(mojom::blink::AIPageContentAnnotatedRole::kMain);
   }
   if (element->HasTagName(html_names::kArticleTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "article") {
+      aria_role == ax::mojom::blink::Role::kArticle) {
     annotated_roles.push_back(
         mojom::blink::AIPageContentAnnotatedRole::kArticle);
   }
   if (element->HasTagName(html_names::kSectionTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "region") {
+      aria_role == ax::mojom::blink::Role::kRegion) {
     annotated_roles.push_back(
         mojom::blink::AIPageContentAnnotatedRole::kSection);
   }
   if (element->HasTagName(html_names::kAsideTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "complementary") {
+      aria_role == ax::mojom::blink::Role::kComplementary) {
     annotated_roles.push_back(mojom::blink::AIPageContentAnnotatedRole::kAside);
   }
   if (element->HasTagName(html_names::kFooterTag) ||
-      element->FastGetAttribute(html_names::kRoleAttr) == "contentinfo") {
+      aria_role == ax::mojom::blink::Role::kContentInfo) {
     annotated_roles.push_back(
         mojom::blink::AIPageContentAnnotatedRole::kFooter);
   }
@@ -1758,9 +2260,15 @@ void AIPageContentAgent::ContentBuilder::TrackPasswordRedactionIfNeeded(
     case mojom::blink::AIPageContentRedactionDecision::kNoRedactionNecessary:
     case mojom::blink::AIPageContentRedactionDecision::
         kUnredacted_EmptyPassword:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kUnredacted_EmptyCustomPassword:
       return;
     case mojom::blink::AIPageContentRedactionDecision::
         kRedacted_HasBeenPassword:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kRedacted_CustomPassword_CSS:
+    case mojom::blink::AIPageContentRedactionDecision::
+        kRedacted_CustomPassword_JS:
       break;
   }
 
@@ -1961,7 +2469,7 @@ void AIPageContentAgent::ContentBuilder::AddFrameData(
     mojom::blink::AIPageContentFrameData& frame_data) {
   frame_data.frame_interaction_info =
       mojom::blink::AIPageContentFrameInteractionInfo::New();
-  frame_data.title = frame.GetDocument()->title();
+  frame_data.title = ReplaceUnpairedSurrogates(frame.GetDocument()->title());
   AddFrameInteractionInfo(frame, *frame_data.frame_interaction_info);
   AddMetaData(frame, frame_data.meta_data);
 
@@ -1992,7 +2500,7 @@ void AIPageContentAgent::ContentBuilder::AddFrameInteractionInfo(
         mojom::blink::AIPageContentSelection::New();
     mojom::blink::AIPageContentSelection& selection =
         *frame_interaction_info.selection;
-    selection.selected_text = frame.SelectedText();
+    selection.selected_text = ReplaceUnpairedSurrogates(frame.SelectedText());
 
     const SelectionInDOMTree& frame_selection =
         frame.Selection().GetSelectionInDOMTree();
@@ -2113,28 +2621,6 @@ void AIPageContentAgent::ContentBuilder::AddInteractionInfoForHitTesting(
   if (it != dom_node_to_z_order_.end()) {
     interaction_info.document_scoped_z_order = it->value;
   }
-}
-
-void AIPageContentAgent::ContentBuilder::AddAriaRole(
-    const LayoutObject& object,
-    mojom::blink::AIPageContentAttributes& attributes) {
-  if (!actionable_mode()) {
-    return;
-  }
-
-  auto* element = DynamicTo<Element>(object.GetNode());
-  if (!element) {
-    attributes.aria_role = ax::mojom::blink::Role::kUnknown;
-    return;
-  }
-
-  auto aria_role = AXObject::AriaAttribute(*element, html_names::kRoleAttr);
-  if (aria_role.empty()) {
-    attributes.aria_role = ax::mojom::blink::Role::kUnknown;
-    return;
-  }
-
-  attributes.aria_role = AXObject::FirstValidRoleInRoleString(aria_role);
 }
 
 void AIPageContentAgent::ContentBuilder::AddNodeInteractionInfo(

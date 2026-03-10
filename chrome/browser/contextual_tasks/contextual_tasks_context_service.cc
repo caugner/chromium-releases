@@ -4,9 +4,9 @@
 
 #include "chrome/browser/contextual_tasks/contextual_tasks_context_service.h"
 
+#include <algorithm>
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
@@ -17,19 +17,19 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_context_signal_utils.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_tab_visit_tracker.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
-#include "chrome/browser/page_content_annotations/page_content_annotations_web_contents_observer.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_service.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_types.h"
-#include "chrome/browser/passage_embeddings/page_embeddings_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
-#include "chrome/browser/ui/tabs/tab_list_interface.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/optimization_guide/core/model_quality/model_quality_log_entry.h"
 #include "components/optimization_guide/proto/features/contextual_tasks_context.pb.h"
-#include "components/passage_embeddings/passage_embeddings_types.h"
+#include "components/page_content_annotations/content/page_content_annotations_web_contents_observer.h"
+#include "components/page_content_annotations/content/page_content_extraction_service.h"
+#include "components/page_content_annotations/core/page_content_extraction_types.h"
+#include "components/passage_embeddings/content/page_embeddings_service.h"
+#include "components/passage_embeddings/core/passage_embeddings_types.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
@@ -180,7 +180,7 @@ void ContextualTasksContextService::GetRelevantTabsForQuery(
   }
 
   // Force active tab embedding to be processed.
-  page_embeddings_service_->ProcessAllEmbeddings();
+  page_embeddings_service_->ProcessEmbeddingsOnDemand();
 
   AUTO_CONTEXT_LOG("Submitted query to embedder");
   // TODO: crbug.com/452036470 - De-couple embeddings and recency signal
@@ -408,8 +408,8 @@ ContextualTasksContextService::SelectRelevantTabs(
       relevant_tabs.push_back(tab_signals.web_contents);
     }
 
-    tab_context->set_was_explicitly_chosen(
-        base::Contains(explicit_urls, web_contents->GetLastCommittedURL()));
+    tab_context->set_was_explicitly_chosen(std::ranges::contains(
+        explicit_urls, web_contents->GetLastCommittedURL()));
 
     base::UmaHistogramSparse("ContextualTasks.Context.TabScore",
                              static_cast<int>(std::min(100 * score, 100.0)));

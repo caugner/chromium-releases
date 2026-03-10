@@ -111,14 +111,10 @@ class LensSearchControllerFake : public lens::TestLensSearchController {
   std::unique_ptr<LensOverlayController> CreateLensOverlayController(
       tabs::TabInterface* tab,
       LensSearchController* lens_search_controller,
-      variations::VariationsClient* variations_client,
-      signin::IdentityManager* identity_manager,
       PrefService* pref_service,
-      syncer::SyncService* sync_service,
       ThemeService* theme_service) override {
     return std::make_unique<lens::TestLensOverlayController>(
-        tab, lens_search_controller, variations_client, identity_manager,
-        pref_service, sync_service, theme_service);
+        tab, lens_search_controller, pref_service);
   }
 
   std::unique_ptr<lens::LensOverlayQueryController> CreateLensQueryController(
@@ -666,6 +662,8 @@ IN_PROC_BROWSER_TEST_F(LensComposeboxControllerBrowserTest,
       ->HandleLensButtonClick();
   ASSERT_TRUE(
       base::test::RunUntil([&]() { return IsResultsSidePanelShowing(); }));
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return overlay_controller->state() == State::kOverlay; }));
 }
 
 IN_PROC_BROWSER_TEST_F(LensComposeboxControllerBrowserTest,

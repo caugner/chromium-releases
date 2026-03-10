@@ -6,22 +6,21 @@ import './searchbox_compose_button.js';
 import './searchbox_dropdown.js';
 import './searchbox_icon.js';
 import './searchbox_thumbnail.js';
-import '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
-import '//resources/cr_components/composebox/error_scrim.js';
+import '//resources/cr_components/composebox/composebox_file_inputs.js';
+import '//resources/cr_components/composebox/contextual_entrypoint_and_menu.js';
 import '//resources/cr_components/composebox/recent_tab_chip.js';
 import '//resources/cr_components/search/animated_glow.js';
 
-import type {ComposeboxFile, ContextualUpload, FileUpload, TabUpload, TabUploadOrigin} from '//resources/cr_components/composebox/common.js';
-import {GlifAnimationState} from '//resources/cr_components/composebox/common.js';
-import type {ContextualEntrypointAndCarouselElement} from '//resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
-import type {ErrorScrimElement} from '//resources/cr_components/composebox/error_scrim.js';
+import type {ContextualUpload, TabUpload, TabUploadOrigin} from '//resources/cr_components/composebox/common.js';
+import {GlifAnimationState, recordContextAdditionMethod} from '//resources/cr_components/composebox/common.js';
+import type {ContextualEntrypointAndMenuElement} from '//resources/cr_components/composebox/contextual_entrypoint_and_menu.js';
 import type {RecentTabChipElement} from '//resources/cr_components/composebox/recent_tab_chip.js';
-import {GlowAnimationState} from '//resources/cr_components/search/constants.js';
+import {ComposeboxContextAddedMethod, GlowAnimationState} from '//resources/cr_components/search/constants.js';
 import {DragAndDropHandler} from '//resources/cr_components/search/drag_drop_handler.js';
 import type {DragAndDropHost} from '//resources/cr_components/search/drag_drop_host.js';
 import {I18nMixinLit} from '//resources/cr_elements/i18n_mixin_lit.js';
 import {WebUiListenerMixinLit} from '//resources/cr_elements/web_ui_listener_mixin_lit.js';
-import {assert, assertNotReachedCase} from '//resources/js/assert.js';
+import {assert} from '//resources/js/assert.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {MetricsReporterImpl} from '//resources/js/metrics_reporter/metrics_reporter.js';
 import {isMac} from '//resources/js/platform.js';
@@ -33,7 +32,6 @@ import type {AutocompleteMatch, AutocompleteResult, PageCallbackRouter, PageHand
 import {SideType} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import type {InputState} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import {InputType, ModelMode, ToolMode} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
-import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 import type {Url} from '//resources/mojo/url/mojom/url.mojom-webui.js';
 
 import {getCss} from './searchbox.css.js';
@@ -41,6 +39,7 @@ import {getHtml} from './searchbox.html.js';
 import {SearchboxBrowserProxy} from './searchbox_browser_proxy.js';
 import type {SearchboxDropdownElement} from './searchbox_dropdown.js';
 import type {SearchboxIconElement} from './searchbox_icon.js';
+import {waitForLazyRender} from './utils.js';
 
 // LINT.IfChange(GhostLoaderTagName)
 const LENS_GHOST_LOADER_TAG_NAME = 'cr-searchbox-ghost-loader';
@@ -49,7 +48,6 @@ const LENS_GHOST_LOADER_TAG_NAME = 'cr-searchbox-ghost-loader';
 // the source value with the "crn" component.
 const DESKTOP_CHROME_NTP_REALBOX_ENTRY_SOURCE_VALUE = 'chrome.crn.rb';
 const DESKTOP_CHROME_NTP_REALBOX_ENTRY_POINT_VALUE = '42';
-const MULTILINE_INPUT_HEIGHT_THRESHOLD = 50;
 
 // Register --placeholder-opacity as type <number> so that we can animate it.
 CSS.registerProperty({
@@ -59,110 +57,7 @@ CSS.registerProperty({
   inherits: true,
 });
 
-enum AnimationState {
-  FADE_IN,
-  HOLD,
-  FADE_OUT,
-}
-
-interface AnimationDetails {
-  startOpacity: number;
-  endOpacity: number;
-  duration: number;
-  nextAnimationState: AnimationState;
-}
-
-/**
- * Responsible for cycling placeholder text animations on an HTMLInputElement.
- */
-export class PlaceholderTextCycler {
-  private input_: HTMLInputElement|HTMLTextAreaElement;
-  private animation_: Animation|null = null;
-  private placeholderTexts_: string[] = [];
-  private placeholderTextsCurrentIndex_: number = 0;
-  private changePlaceholderTextIntervalMs_: number = 4000;
-  private fadePlaceholderTextDurationMs_: number = 250;
-
-  constructor(
-      animatedPlaceholderContainer: HTMLInputElement|HTMLTextAreaElement,
-      placeholderTexts: string[], changeTextAnimationIntervalMs: number,
-      fadeTextAnimationDurationMs: number) {
-    assert(placeholderTexts.length > 0);
-
-    this.input_ = animatedPlaceholderContainer;
-    this.placeholderTexts_ = placeholderTexts;
-    this.changePlaceholderTextIntervalMs_ = changeTextAnimationIntervalMs;
-    this.fadePlaceholderTextDurationMs_ = fadeTextAnimationDurationMs;
-  }
-
-  start() {
-    this.stop();
-
-    this.placeholderTextsCurrentIndex_ = 0;
-    this.animate_(AnimationState.HOLD);
-  }
-
-  stop() {
-    if (this.animation_) {
-      this.animation_.cancel();
-      this.animation_ = null;
-    }
-
-    this.placeholderTextsCurrentIndex_ = 0;
-    this.input_.placeholder =
-        this.placeholderTexts_[this.placeholderTextsCurrentIndex_]!;
-  }
-
-  private animate_(state: AnimationState) {
-    let animationDetails: AnimationDetails|null = null;
-    switch (state) {
-      case AnimationState.FADE_IN:
-        this.input_.placeholder =
-            this.placeholderTexts_[this.placeholderTextsCurrentIndex_]!;
-        animationDetails = {
-          startOpacity: 0,
-          endOpacity: 1,
-          duration: this.fadePlaceholderTextDurationMs_,
-          nextAnimationState: AnimationState.HOLD,
-        };
-        break;
-      case AnimationState.HOLD:
-        animationDetails = {
-          startOpacity: 1,
-          endOpacity: 1,
-          duration: this.changePlaceholderTextIntervalMs_,
-          nextAnimationState: AnimationState.FADE_OUT,
-        };
-        break;
-      case AnimationState.FADE_OUT:
-        this.placeholderTextsCurrentIndex_ =
-            (this.placeholderTextsCurrentIndex_ + 1) %
-            this.placeholderTexts_.length;
-        animationDetails = {
-          startOpacity: 1,
-          endOpacity: 0,
-          duration: this.fadePlaceholderTextDurationMs_,
-          nextAnimationState: AnimationState.FADE_IN,
-        };
-        break;
-      default:
-        assertNotReachedCase(state);
-    }
-
-    this.animation_ = this.input_.animate(
-        [
-          {'--placeholder-opacity': animationDetails.startOpacity},
-          {'--placeholder-opacity': animationDetails.endOpacity},
-        ],
-        {duration: animationDetails.duration},
-    );
-    this.animation_.onfinish = () => {
-      if (this.animation_) {
-        this.animate_(animationDetails.nextAnimationState);
-      }
-    };
-  }
-}
+import {PlaceholderTextCycler} from './placeholder_text_cycler.js';
 
 interface Input {
   text: string;
@@ -188,8 +83,7 @@ export interface SearchboxElement {
     input: HTMLInputElement|HTMLTextAreaElement,
     inputWrapper: HTMLElement,
     matches: SearchboxDropdownElement,
-    context: ContextualEntrypointAndCarouselElement,
-    errorScrim: ErrorScrimElement,
+    context: ContextualEntrypointAndMenuElement,
   };
 }
 
@@ -411,7 +305,6 @@ export class SearchboxElement extends SearchboxElementBase implements
         reflect: true,
         type: String,
       },
-      errorMessage_: {type: String},
       showModelPicker_: {
         type: Boolean,
       },
@@ -443,7 +336,6 @@ export class SearchboxElement extends SearchboxElementBase implements
   accessor placeholderText: string = '';
   accessor isDraggingFile: boolean = false;
   accessor animationState: GlowAnimationState = GlowAnimationState.NONE;
-  protected accessor errorMessage_: string = '';
   protected accessor inputAriaLive_: string = '';
   protected accessor inputFocused_: boolean = false;
   private accessor isLensSearchbox_: boolean =
@@ -486,6 +378,7 @@ export class SearchboxElement extends SearchboxElementBase implements
   private onTabStripChangedListenerId_: number|null = null;
   private placeholderCycler_: PlaceholderTextCycler|null = null;
   private contextMenuOpened_: boolean = false;
+  private initialInputScrollHeight_: number = 0;
 
   constructor() {
     performance.mark('realbox-creation-start');
@@ -514,18 +407,6 @@ export class SearchboxElement extends SearchboxElementBase implements
       this.inputState_.activeModel = ModelMode.kUnspecified;
     }
 
-    if (this.cyclingPlaceholders) {
-      const {config} = await this.pageHandler_.getPlaceholderConfig();
-      const texts = config.texts;
-      assert(texts[0]);
-      this.placeholderText = texts[0];
-      this.placeholderCycler_ = new PlaceholderTextCycler(
-          this.$.input, texts,
-          Number(config.changeTextAnimationInterval.microseconds / 1000n),
-          Number(config.fadeTextAnimationDuration.microseconds / 1000n));
-      this.placeholderCycler_.start();
-    }
-
     if (this.ntpRealboxNextEnabled) {
       this.dragAndDropHandler =
           new DragAndDropHandler(this, this.dragAndDropEnabled_);
@@ -546,10 +427,6 @@ export class SearchboxElement extends SearchboxElementBase implements
     this.callbackRouter_.removeListener(this.onTabStripChangedListenerId_);
 
     this.placeholderCycler_?.stop();
-  }
-
-  override firstUpdated() {
-    performance.measure('realbox-creation', 'realbox-creation-start');
   }
 
   override willUpdate(changedProperties: PropertyValues<this>) {
@@ -588,6 +465,27 @@ export class SearchboxElement extends SearchboxElementBase implements
     }
   }
 
+  override firstUpdated() {
+    performance.measure('realbox-creation', 'realbox-creation-start');
+    if (this.multiLineEnabled) {
+      this.initialInputScrollHeight_ = this.$.input.scrollHeight;
+    }
+
+    if (this.cyclingPlaceholders) {
+      waitForLazyRender().then(async () => {
+        const {config} = await this.pageHandler_.getPlaceholderConfig();
+        const texts = config.texts;
+        assert(texts[0]);
+        this.placeholderText = texts[0];
+        this.placeholderCycler_ = new PlaceholderTextCycler(
+            this.$.input, texts,
+            Number(config.changeTextAnimationInterval.microseconds / 1000n),
+            Number(config.fadeTextAnimationDuration.microseconds / 1000n));
+        this.placeholderCycler_.start();
+      });
+    }
+  }
+
   private computeInputAriaLive_(): string {
     return this.selectedMatch_ ? 'off' : 'polite';
   }
@@ -597,11 +495,33 @@ export class SearchboxElement extends SearchboxElementBase implements
   }
 
   getDropTarget() {
-    return this.$.context;
+    return this;
+  }
+
+  addDroppedFiles(files: FileList) {
+    this.processFiles_(files, ComposeboxContextAddedMethod.DRAG_AND_DROP);
   }
 
   isInputEmpty(): boolean {
-    return !this.$.input.value.trim();
+    return !this.lastInput_.text.trim();
+  }
+
+  protected shouldShowVoiceLens_(isEnabled: boolean): boolean {
+    if (!isEnabled) {
+      return false;
+    }
+
+    if (!this.isInputEmpty()) {
+      return false;
+    }
+
+    if (this.dropdownIsVisible &&
+        (this.composeButtonEnabled ||
+         this.searchboxLayoutMode.startsWith('Tall'))) {
+      return false;
+    }
+
+    return true;
   }
 
   queryAutocomplete() {
@@ -644,11 +564,13 @@ export class SearchboxElement extends SearchboxElementBase implements
     });
 
     this.dropdownIsVisible = hasPrimaryMatches;
-    if (this.multiLineEnabled) {
-      const isUserTyping = result.input.trim().length > 0;
-      const matchNum = result.matches?.length || 0;
 
-      if (isUserTyping && (matchNum <= 1)) {
+    // In multi-line mode, suppress the dropdown when text wraps
+    // or when the only match is the mirror query.
+    if (this.multiLineEnabled && this.dropdownIsVisible) {
+      const isUserTyping = result.input.trim().length > 0;
+      if (isUserTyping &&
+          this.shouldSuppressDropdownForMultiline_(result.matches?.length || 0)) {
         this.dropdownIsVisible = false;
       }
     }
@@ -707,13 +629,14 @@ export class SearchboxElement extends SearchboxElementBase implements
     // Only handle cut/copy when input has content and it's all selected.
     if (!this.$.input.value || this.$.input.selectionStart !== 0 ||
         this.$.input.selectionEnd !== this.$.input.value.length ||
-        !this.result_ || this.result_.matches.length === 0) {
+        !this.result_ || !this.result_.matches ||
+        this.result_.matches.length === 0) {
       return;
     }
 
     if (this.selectedMatch_ && !this.selectedMatch_.isSearchType) {
       e.clipboardData!.setData(
-          'text/plain', this.selectedMatch_.destinationUrl.url);
+          'text/plain', this.selectedMatch_.destinationUrl);
       e.preventDefault();
       if (e.type === 'cut') {
         this.updateInput_({text: '', inline: ''});
@@ -848,7 +771,8 @@ export class SearchboxElement extends SearchboxElementBase implements
         e.preventDefault();
         const dataTransfer = new DataTransfer();
         files.forEach(file => dataTransfer.items.add(file));
-        this.$.context.addPastedFiles(dataTransfer.files);
+        this.processFiles_(
+            dataTransfer.files, ComposeboxContextAddedMethod.COPY_PASTE);
         return;
       }
     }
@@ -984,14 +908,12 @@ export class SearchboxElement extends SearchboxElementBase implements
       return;
     }
 
-    const matchNum = this.result_?.matches.length || 0;
-    const isMultiline =
-        this.$.input.scrollHeight > MULTILINE_INPUT_HEIGHT_THRESHOLD;
 
     // ArrowUp/ArrowDown query autocomplete when matches are not visible.
     if (!this.dropdownIsVisible) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (isMultiline || matchNum <= 1) {
+        if (this.multiLineEnabled &&
+            this.shouldSuppressDropdownForMultiline_(this.result_?.matches?.length || 0)) {
           return;
         }
         const inputValue = this.$.input.value;
@@ -1039,20 +961,23 @@ export class SearchboxElement extends SearchboxElementBase implements
       if (this.multiLineEnabled && e.shiftKey) {
         return;
       }
+      e.preventDefault();
       const array: HTMLElement[] = [this.$.matches, this.$.input];
-      if (array.includes(e.target as HTMLElement)) {
-        if (this.lastQueriedInput_ !== null &&
-            this.lastQueriedInput_.trimStart() === this.result_.input) {
-          if (this.selectedMatch_) {
-            this.navigateToMatch_(this.selectedMatchIndex_, e);
-          }
-        } else {
-          // User typed and pressed 'Enter' too quickly. Ignore this for now
-          // because the matches are stale. Navigate to the default match (if
-          // one exists) once the up-to-date matches arrive.
-          this.lastIgnoredEnterEvent_ = e;
-          e.preventDefault();
+      if (!array.includes(e.target as HTMLElement)) {
+        return;
+      }
+      const currentInput = this.result_?.input;
+      const lastQueriedInput = this.lastQueriedInput_?.trimStart();
+      if (currentInput !== undefined && lastQueriedInput !== undefined &&
+          lastQueriedInput === currentInput) {
+        if (this.selectedMatch_) {
+          this.navigateToMatch_(this.selectedMatchIndex_, e);
         }
+      } else {
+        // User typed and pressed 'Enter' too quickly. Ignore this for now
+        // because the matches are stale. Navigate to the default match (if
+        // one exists) once the up-to-date matches arrive.
+        this.lastIgnoredEnterEvent_ = e;
       }
       return;
     }
@@ -1138,22 +1063,9 @@ export class SearchboxElement extends SearchboxElementBase implements
     this.dispatchEvent(new Event('open-lens-search'));
   }
 
-  protected addFileContext_(e: CustomEvent<{
-    files: File[],
-    errorMessage?: string,
-                onContextAdded:
-                    (files: Map<UnguessableToken, ComposeboxFile>) => void,
-  }>) {
-    const uploads: ContextualUpload[] = [];
-    for (const file of e.detail.files) {
-      const attachment: FileUpload = {
-        file: file,
-      };
-      uploads.push(attachment);
-    }
-    this.openComposebox_(
-        uploads, ToolMode.kUnspecified, ModelMode.kUnspecified,
-        e.detail.errorMessage);
+  protected onFileChange_(e: CustomEvent<{files: FileList}>) {
+    this.processFiles_(
+        e.detail.files, ComposeboxContextAddedMethod.CONTEXT_MENU);
   }
 
   protected addTabContext_(e: CustomEvent<{
@@ -1161,7 +1073,6 @@ export class SearchboxElement extends SearchboxElementBase implements
     title: string,
     url: Url,
     delayUpload: boolean,
-    onContextAdded: (file: ComposeboxFile) => void,
     origin: TabUploadOrigin,
   }>) {
     const attachment: TabUpload = {
@@ -1177,18 +1088,13 @@ export class SearchboxElement extends SearchboxElementBase implements
   protected async refreshTabSuggestions_(forceRefresh: boolean = false) {
     // Only refresh tab suggestions if the context menu is opened or the recent
     // tab chip is visible.
-    const requiresRefresh = forceRefresh || this.contextMenuOpened_ ||
-        this.recentTabChipVisible_();
+    const requiresRefresh =
+        forceRefresh || this.contextMenuOpened_ || this.recentTabChipVisible_();
     if (!requiresRefresh) {
       return;
     }
     const {tabs} = await this.pageHandler_.getRecentTabs();
     this.tabSuggestions_ = [...tabs];
-  }
-
-  protected onFileValidationError_(e: CustomEvent<{errorMessage: string}>) {
-    this.errorMessage_ = e.detail.errorMessage;
-    this.dropdownIsVisible = false;
   }
 
   protected async getTabPreview_(e: CustomEvent<{
@@ -1200,17 +1106,28 @@ export class SearchboxElement extends SearchboxElementBase implements
     e.detail.onPreviewFetched(previewDataUrl || '');
   }
 
-  protected onErrorScrimDismissed_() {
-    this.errorMessage_ = '';
-  }
+  protected onContextMenuContainerClick_(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
 
-  protected onContextMenuContainerClick_() {
-    if (this.inputFocused_ || this.searchboxLayoutMode === 'Compact') {
+    if (e.button !== 0 || this.inputFocused_ ||
+        this.searchboxLayoutMode === 'Compact') {
       return;
     }
 
     this.focusInput();
     this.onInputMouseDown_(null);
+  }
+
+  protected onContextMenuContainerMouseDown_(e: FocusEvent) {
+    // Special treatment for the "Tall" layout variants where not clicking on an
+    // inner element should be treated as clicking on a non-focusable area.
+    if (this.searchboxLayoutMode !== 'Compact' &&
+        (e.target instanceof HTMLElement &&
+         e.target.id === 'contextMenuContainer')) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   }
 
   protected onContextMenuClosed_() {
@@ -1228,6 +1145,19 @@ export class SearchboxElement extends SearchboxElementBase implements
     // now a `ContextualSearchboxHandler`.
     this.pageHandler_.activateMetricsFunnel('AiModeButton');
     if (!this.composeboxEnabled || this.$.input.value.trim()) {
+      let source = 'Unknown';
+      if (loadTimeData.getBoolean('isLensSearchbox')) {
+        source = 'Lens';
+      } else if (loadTimeData.getBoolean('isTopChromeSearchbox')) {
+        source = 'Omnibox';
+      } else {
+        source = 'NewTabPage';
+      }
+      const metricName =
+          `ContextualSearch.UserAction.SubmitQuery.WithoutContext.${source}`;
+      chrome.histograms.recordUserAction(metricName);
+      chrome.histograms.recordBoolean(metricName, true);
+
       // Construct navigation url.
       const searchParams = new URLSearchParams();
       searchParams.append('sourceid', 'chrome');
@@ -1256,7 +1186,7 @@ export class SearchboxElement extends SearchboxElementBase implements
       this.openComposebox_();
     }
 
-    chrome.metricsPrivate.recordBoolean(
+    chrome.histograms.recordBoolean(
         'NewTabPage.ComposeEntrypoint.Click.UserTextPresent',
         !this.isInputEmpty());
   }
@@ -1265,8 +1195,16 @@ export class SearchboxElement extends SearchboxElementBase implements
     this.pageHandler_.activateMetricsFunnel('PlusButton');
   }
 
-  protected onSetToolMode_(e: CustomEvent<{tool: ToolMode, enabled: boolean}>) {
-    this.openComposebox_([], e.detail.tool);
+  protected onToolClick_(e: CustomEvent<{toolMode: ToolMode}>) {
+    this.openComposebox_([], e.detail.toolMode);
+  }
+
+  protected handleDeepSearchClick_() {
+    this.openComposebox_([], ToolMode.kDeepSearch);
+  }
+
+  protected handleImageGenClick_() {
+    this.openComposebox_([], ToolMode.kImageGen);
   }
 
   protected onModelClick_(e: CustomEvent<{model: ModelMode}>) {
@@ -1275,7 +1213,7 @@ export class SearchboxElement extends SearchboxElementBase implements
 
   protected openComposebox_(
       uploads: ContextualUpload[] = [], mode: ToolMode = ToolMode.kUnspecified,
-      model: ModelMode = ModelMode.kUnspecified, errorMessage: string = '') {
+      model: ModelMode = ModelMode.kUnspecified) {
     if (this.ntpRealboxNextEnabled) {
       this.$.context.closeMenu();
     }
@@ -1286,7 +1224,6 @@ export class SearchboxElement extends SearchboxElementBase implements
         mode: mode,
         model: model,
         inputState: this.inputState_,
-        errorMessage: errorMessage,
       },
       bubbles: true,
       composed: true,
@@ -1323,19 +1260,22 @@ export class SearchboxElement extends SearchboxElementBase implements
     return this.result_.matches[this.selectedMatchIndex_] || null;
   }
 
-  protected computeShowRecentTabChip_(): boolean {
-    // composeboxShowRecentTabChip is unavailable in the WebUI Browser.
-    return loadTimeData.valueExists('composeboxShowRecentTabChip') &&
-        loadTimeData.getBoolean('composeboxShowRecentTabChip') &&
-        this.result_?.input.length === 0;
+  private shouldSuppressDropdownForMultiline_(numMatches: number): boolean {
+    const inputHasWrapped = this.initialInputScrollHeight_ > 0 &&
+        this.$.input.scrollHeight > this.initialInputScrollHeight_;
+    return inputHasWrapped || numMatches === 1;
   }
 
-  protected shouldShowRecentTabChipInDropdown_(): boolean {
+  protected computeShowRecentTabChip_(): boolean {
+    // composeboxShowRecentTabChip is unavailable in the WebUI Browser.
+    const recentTabChipEnabled =
+        loadTimeData.valueExists('composeboxShowRecentTabChip') &&
+        loadTimeData.getBoolean('composeboxShowRecentTabChip');
     const isBrowserTabAllowed = !this.showModelPicker_ ||
         (!!this.inputState_ &&
          this.inputState_.allowedInputTypes.includes(InputType.kBrowserTab));
-    return !!this.recentTabForChip_ && this.dropdownIsVisible &&
-        this.isInputEmpty() && isBrowserTabAllowed;
+    return recentTabChipEnabled && !!this.recentTabForChip_ &&
+        this.dropdownIsVisible && this.isInputEmpty() && isBrowserTabAllowed;
   }
 
   protected computePlaceholderText_(placeholderText: string): string {
@@ -1431,11 +1371,8 @@ export class SearchboxElement extends SearchboxElementBase implements
     if (!this.ntpRealboxNextEnabled) {
       return false;
     }
-    const recentTabChip =
-        this.shadowRoot.querySelector<RecentTabChipElement>(
-            'composebox-recent-tab-chip') ||
-        this.$.context.shadowRoot.querySelector<RecentTabChipElement>(
-            'composebox-recent-tab-chip');
+    const recentTabChip = this.shadowRoot.querySelector<RecentTabChipElement>(
+        'composebox-recent-tab-chip');
     return !!recentTabChip;
   }
 
@@ -1455,6 +1392,21 @@ export class SearchboxElement extends SearchboxElementBase implements
 
   protected onHasSecondarySideChanged_(e: CustomEvent<{value: boolean}>) {
     this.hasSecondarySide = e.detail.value;
+  }
+
+  protected useCompactLayout_(): boolean {
+    return this.searchboxLayoutMode === 'Compact';
+  }
+
+  private processFiles_(
+      files: FileList|null,
+      contextAdditionMethod: ComposeboxContextAddedMethod) {
+    if (!files || files.length === 0) {
+      return;
+    }
+    recordContextAdditionMethod(
+        contextAdditionMethod, loadTimeData.getString('composeboxSource'));
+    this.openComposebox_(Array.from(files, (file) => ({file})));
   }
 }
 

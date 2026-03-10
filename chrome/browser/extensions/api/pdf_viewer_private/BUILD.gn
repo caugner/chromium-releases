@@ -42,10 +42,8 @@ source_set("pdf_viewer_private") {
 source_set("browser_tests") {
   testonly = true
   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
-  sources = []
 
-  # intentionally commented out as base class does not exist.
-  # sources = [ "pdf_viewer_private_browsertest.cc" ]
+  sources = [ "pdf_viewer_private_browsertest.cc" ]
   deps = [
     ":pdf_viewer_private",
     "//chrome/browser/glic",

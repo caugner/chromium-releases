@@ -149,16 +149,32 @@ class ContextualTasksUiService : public KeyedService {
       std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
           session_handle);
 
+  // Opens the contextual tasks side panel with the protected error page showing
+  // by default.
+  virtual void StartTaskUiInSidePanelWithErrorPage(
+      BrowserWindowInterface* browser_window_interface,
+      tabs::TabInterface* tab_interface,
+      std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+          session_handle);
+
   // Returns whether the provided URL is to an AI page.
   virtual bool IsAiUrl(const GURL& url);
 
+  // Returns whether the provided task ID is for a task that should show the
+  // error page on load.
+  virtual bool IsPendingErrorPage(const base::Uuid& task_id);
+
   // Returns whether the provided URL is to a contextual tasks WebUI page.
-  bool IsContextualTasksUrl(const GURL& url);
+  static bool IsContextualTasksUrl(const GURL& url);
+
+  // Returns whether the provided URL represents a contextual tasks "display
+  // URL" that should lead to the contextual tasks WebUI page upon navigation.
+  bool IsContextualTasksDisplayUrl(const GURL& url);
 
   // Returns whether the provided URL is a Google search results page. This
   // method does not check for the validity of any parameters that
   // differentiate different modes or queries.
-  bool IsSearchResultsUrl(const GURL& url);
+  static bool IsSearchResultsUrl(const GURL& url);
 
   // Returns whether the provided URL is a share URL.
   bool IsShareUrl(const GURL& url);
@@ -168,11 +184,16 @@ class ContextualTasksUiService : public KeyedService {
   // correct params and isn't a shopping query.
   bool IsValidSearchResultsPage(const GURL& url);
 
+  // Returns AIM URL found in the search param of the contextual tasks URL.
+  // Returns empty URL if not found or not from AIM.
+  static GURL GetAimUrlFromContextualTasksUrl(const GURL& url);
+
   // Called when the Lens overlay is shown/hidden. No-op if the active UI is not
   // in the side panel since the Lens button is always hidden in a tab.
   virtual void OnLensOverlayStateChanged(
       BrowserWindowInterface* browser_window_interface,
-      bool is_showing);
+      bool is_showing,
+      std::optional<lens::LensOverlayInvocationSource> invocation_source);
 
   // Associates a WebContents with a task, assuming the URL of the WebContents'
   // main frame or side panel is a contextual task URL.
@@ -208,7 +229,9 @@ class ContextualTasksUiService : public KeyedService {
 
   // Fetches an access token for the primary account.
   using GetAccessTokenCallback = base::OnceCallback<void(const std::string&)>;
-  virtual void GetAccessToken(GetAccessTokenCallback callback);
+  virtual void GetAccessToken(
+      GetAccessTokenCallback callback,
+      base::WeakPtr<content::WebContents> web_contents);
 
   // Gets the entry point override for a given task.
   omnibox::ChromeAimEntryPoint GetInitialEntryPointForTask(
@@ -231,6 +254,10 @@ class ContextualTasksUiService : public KeyedService {
   // Returns whether the provided URL is for the primary account in Chrome.
   virtual bool IsUrlForPrimaryAccount(const GURL& url);
 
+  // Used primarily for debugging - loads a URL in the specified WebContents.
+  virtual void LoadUrlInWebContents(const GURL& url,
+                                    content::WebContents* web_contents);
+
  private:
   void StartAccessTokenFetch();
 
@@ -240,6 +267,10 @@ class ContextualTasksUiService : public KeyedService {
   // callbacks if the error is persistent.
   void OnOAuthTokenReceived(GoogleServiceAuthError error,
                             signin::AccessTokenInfo access_token_info);
+
+  // Shows the OAuth error dialog for the given `web_contents`.
+  void ShowOauthErrorDialogForWebContents(
+      base::WeakPtr<content::WebContents> web_contents);
 
   // Runs all pending access token callbacks with the provided token.
   void RunPendingAccessTokenCallbacks(const std::string& token);
@@ -260,11 +291,19 @@ class ContextualTasksUiService : public KeyedService {
       base::WeakPtr<BrowserWindowInterface> browser,
       const std::vector<std::pair<std::string, bool>>& lookup_results);
 
+  // Helper method to associate the WebContents with the task and set the
+  // session handle.
+  void InitializeTaskInSidePanel(
+      content::WebContents* web_contents,
+      const base::Uuid& task_id,
+      std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+          session_handle);
+
   // Navigates to a share URL.
   virtual void OnShareUrlNavigation(const GURL& url);
 
   // Checks if the provided URL matches any of the allowed hosts.
-  bool IsAllowedHost(const GURL& url);
+  static bool IsAllowedHost(const GURL& url);
 
   const raw_ptr<Profile> profile_;
 
@@ -279,16 +318,15 @@ class ContextualTasksUiService : public KeyedService {
   std::unique_ptr<signin::AccessTokenFetcher> access_token_fetcher_;
 
   // Pending access token callbacks.
-  std::vector<GetAccessTokenCallback> pending_access_token_callbacks_;
+  std::vector<
+      std::pair<GetAccessTokenCallback, base::WeakPtr<content::WebContents>>>
+      pending_access_token_callbacks_;
 
   // Backoff entry used to control the retry logic for the OAuth token request.
   net::BackoffEntry request_access_token_backoff_;
 
   // A timer used to refresh the OAuth token before it expires.
   base::OneShotTimer token_refresh_timer_;
-
-  // The hosts of the AI page that is loaded into the WebUI.
-  std::vector<GURL> ai_page_hosts_;
 
   // Map a task's ID to the URL that was used to create it, if it exists. This
   // is primarily used in init flows where the contextual tasks UI is
@@ -302,6 +340,10 @@ class ContextualTasksUiService : public KeyedService {
   // are cleaned up.
   std::map<base::Uuid, omnibox::ChromeAimEntryPoint>
       task_id_to_entry_point_override_;
+
+  // Map of tasks that should show the error page on load to the source trigger.
+  std::map<base::Uuid, contextual_search::ContextualSearchSource>
+      pending_error_page_tasks_;
 
   base::WeakPtrFactory<ContextualTasksUiService> weak_ptr_factory_{this};
 };

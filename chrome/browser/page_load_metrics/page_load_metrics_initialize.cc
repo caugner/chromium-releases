@@ -10,10 +10,12 @@
 
 #include "base/functional/bind.h"
 #include "build/build_config.h"
+#include "build/buildflag.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/heavy_ad_intervention/heavy_ad_service_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/page_load_metrics/observers/bookmark_bar_page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/observers/captcha_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/chrome_gws_abandoned_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/chrome_gws_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/core/amp_page_load_metrics_observer.h"
@@ -26,7 +28,6 @@
 #include "chrome/browser/page_load_metrics/observers/javascript_frameworks_ukm_observer.h"
 #include "chrome/browser/page_load_metrics/observers/lcp_critical_path_predictor_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/loading_predictor_page_load_metrics_observer.h"
-#include "chrome/browser/page_load_metrics/observers/local_network_requests_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/multi_tab_loading_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/new_tab_page_initiated_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/new_tab_page_page_load_metrics_observer.h"
@@ -35,7 +36,6 @@
 #include "chrome/browser/page_load_metrics/observers/page_anchors_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/prefetch_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/preload_serving_metrics_page_load_metrics_observer.h"
-#include "chrome/browser/page_load_metrics/observers/preview_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/protocol_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/scheme_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/security_state_page_load_metrics_observer.h"
@@ -46,6 +46,7 @@
 #include "chrome/browser/preloading/prefetch/no_state_prefetch/chrome_no_state_prefetch_contents_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/ui/waap/waap_utils.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_contents.h"
 #include "components/page_load_metrics/browser/features.h"
 #include "components/page_load_metrics/browser/metrics_web_contents_observer.h"
@@ -79,8 +80,11 @@
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/page_load_metrics/observers/initial_webui_page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/observers/non_tab_webui_page_load_metrics_observer.h"
+#include "chrome/browser/page_load_metrics/observers/top_chrome_webui_metrics_observer.h"
 #include "chrome/browser/ui/waap/waap_utils.h"
 #include "chrome/browser/ui/webui/top_chrome/top_chrome_webui_config.h"
+#include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_ui.h"
+#include "chrome/common/webui_url_constants.h"
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -174,6 +178,19 @@ void PageLoadMetricsEmbedder::RegisterObservers(
     tracker->AddObserver(std::make_unique<NonTabPageLoadMetricsObserver>(
         std::string(GetNonTabWebUIName(web_contents()->GetBrowserContext(),
                                        navigation_handle->GetURL()))));
+    if (waap::IsForInitialWebUI(navigation_handle->GetURL())) {
+      // For initial WebUIs, record PageLoad UKMs.
+      std::unique_ptr<page_load_metrics::PageLoadMetricsObserver> ukm_observer =
+          UkmPageLoadMetricsObserver::CreateIfNeeded();
+      if (ukm_observer) {
+        tracker->AddObserver(std::move(ukm_observer));
+      }
+    }
+    if (navigation_handle->GetURL().host() ==
+        chrome::kChromeUIOmniboxPopupHost) {
+      tracker->AddObserver(std::make_unique<TopChromeWebUIMetricsObserver>(
+          std::string(OmniboxPopupUI::GetWebUIName())));
+    }
     return;
   }
 #endif
@@ -260,10 +277,7 @@ void PageLoadMetricsEmbedder::RegisterObservers(
           std::make_unique<LcpCriticalPathPredictorPageLoadMetricsObserver>());
     }
     tracker->AddObserver(
-        std::make_unique<LocalNetworkRequestsPageLoadMetricsObserver>());
-    tracker->AddObserver(
         std::make_unique<TabStripPageLoadMetricsObserver>(web_contents()));
-    tracker->AddObserver(std::make_unique<PreviewPageLoadMetricsObserver>());
     tracker->AddObserver(std::make_unique<BookmarkBarMetricsObserver>());
     tracker->AddObserver(
         std::make_unique<NewTabPageInitiatedPageLoadMetricsObserver>());
@@ -298,6 +312,8 @@ void PageLoadMetricsEmbedder::RegisterObservers(
             web_contents()));
   }
 #endif
+
+  tracker->AddObserver(std::make_unique<CaptchaMetricsObserver>());
 }
 
 bool PageLoadMetricsEmbedder::IsNewTabPageUrl(const GURL& url) {

@@ -105,6 +105,10 @@ void OmniboxPopupFileSelector::FileSelectionCanceled() {
 
 void OmniboxPopupFileSelector::OnFileDataReady(
     std::unique_ptr<FileData> file_data) {
+  base::UmaHistogramExactLinear(
+      "ContextualSearch.ContextAdded.ContextAddedMethod.Omnibox",
+      /*ContextMenu*/ 0, 4);
+
   lens::MimeType mime_type;
   if (file_data->mime_type.find("pdf") != std::string::npos) {
     mime_type = lens::MimeType::kPdf;
@@ -113,7 +117,7 @@ void OmniboxPopupFileSelector::OnFileDataReady(
   } else {
     UpdateSearchboxContextData(lens::MimeType::kUnknown, "", file_data->name,
                                file_data->mime_type,
-                               base::UnguessableToken::Create());
+                               base::ok(base::UnguessableToken::Create()));
     edit_model_->OpenAiMode(false, /*via_context_menu=*/true);
     return;
   }
@@ -169,9 +173,13 @@ void OmniboxPopupFileSelector::UpdateSearchboxContextData(
     std::string image_data_url,
     std::string file_name,
     std::string mime_string,
-    const base::UnguessableToken& file_token) {
+    base::expected<base::UnguessableToken,
+                   contextual_search::FileUploadErrorType> result) {
+  if (!result.has_value()) {
+    return;
+  }
   auto file_attachment = searchbox::mojom::FileAttachment::New();
-  file_attachment->uuid = file_token;
+  file_attachment->uuid = result.value();
   file_attachment->name = file_name;
   file_attachment->mime_type = mime_string;
 

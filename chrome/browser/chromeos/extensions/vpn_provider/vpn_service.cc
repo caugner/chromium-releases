@@ -263,10 +263,10 @@ void VpnService::CreateConfiguration(const std::string& extension_id,
   }
 
   VpnService::VpnConfiguration* configuration =
-      CreateConfigurationInternal(extension_id, configuration_name);
+      GetOrCreateConfigurationInternal(extension_id, configuration_name);
 
   auto properties =
-      base::Value::Dict()
+      base::DictValue()
           .Set(shill::kTypeProperty, shill::kTypeVPN)
           .Set(shill::kNameProperty, configuration_name)
           .Set(shill::kProviderHostProperty, extension_id)
@@ -305,7 +305,7 @@ void VpnService::NetworkListChanged() {
 
 void VpnService::OnGetShillProperties(
     const std::string& service_path,
-    std::optional<base::Value::Dict> configuration_properties) {
+    std::optional<base::DictValue> configuration_properties) {
   if (!configuration_properties || LookupConfiguration(service_path)) {
     return;
   }
@@ -333,7 +333,7 @@ void VpnService::OnGetShillProperties(
   }
 
   VpnService::VpnConfiguration* configuration =
-      CreateConfigurationInternal(*extension_id, *configuration_name);
+      GetOrCreateConfigurationInternal(*extension_id, *configuration_name);
   RegisterConfiguration(configuration, service_path);
 }
 
@@ -408,7 +408,7 @@ void VpnService::SetActiveConfiguration(
 }
 
 void VpnService::SetParameters(const std::string& extension_id,
-                               base::Value::Dict parameters,
+                               base::DictValue parameters,
                                SuccessCallback success,
                                FailureCallback failure) {
   VpnConfiguration* active_configuration =
@@ -504,9 +504,14 @@ void VpnService::DestroyConfigurationsForExtension(
   }
 }
 
-VpnService::VpnConfiguration* VpnService::CreateConfigurationInternal(
+VpnService::VpnConfiguration* VpnService::GetOrCreateConfigurationInternal(
     const std::string& extension_id,
     const std::string& configuration_name) {
+  if (auto* configuration =
+          LookupConfiguration(extension_id, configuration_name)) {
+    return configuration;
+  }
+
   const std::string key = GetKey(extension_id, configuration_name);
   auto configuration = std::make_unique<VpnConfiguration>(
       extension_id, configuration_name, key, this);
@@ -527,6 +532,12 @@ void VpnService::OnCreateConfigurationSuccess(
 void VpnService::RegisterConfiguration(
     VpnService::VpnConfiguration* configuration,
     const std::string& service_path) {
+  if (VpnConfiguration* existing_configuration =
+          LookupConfiguration(service_path)) {
+    CHECK_EQ(existing_configuration, configuration);
+    return;
+  }
+
   configuration->set_service_path(service_path);
   auto [_, inserted] =
       service_path_to_configuration_map_.emplace(service_path, configuration);

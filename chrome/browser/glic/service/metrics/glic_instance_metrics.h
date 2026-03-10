@@ -12,6 +12,7 @@
 #include "base/containers/flat_map.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/browser/glic/public/glic_instance_metrics_backwards_compatibility.h"
 #include "chrome/browser/glic/service/glic_state_tracker.h"
 #include "chrome/browser/glic/service/glic_ui_types.h"
 #include "chrome/browser/glic/service/metrics/glic_metrics_session_manager.h"
@@ -113,7 +114,7 @@ enum class GlicInstanceEvent {
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicInstanceEvent)
 
 // Tracks and logs lifecycle events for a single GlicInstance.
-class GlicInstanceMetrics {
+class GlicInstanceMetrics : public GlicInstanceMetricsBackwardsCompatibility {
  public:
   enum class EmbedderType {
     kUnknown,
@@ -123,10 +124,21 @@ class GlicInstanceMetrics {
 
   GlicInstanceMetrics();
   explicit GlicInstanceMetrics(GlicSharingManager* sharing_manager);
-  ~GlicInstanceMetrics();
+  ~GlicInstanceMetrics() override;
 
   GlicInstanceMetrics(const GlicInstanceMetrics&) = delete;
   GlicInstanceMetrics& operator=(const GlicInstanceMetrics&) = delete;
+
+  // `GlicInstanceMetricsBackwardsCompatibility`:
+  void OnUserInputSubmitted(mojom::WebClientMode mode) override;
+  void DidRequestContextFromTab(tabs::TabInterface& tab) override;
+  void OnResponseStarted() override;
+  void OnResponseStopped(mojom::ResponseStopCause cause) override;
+  void OnTurnCompleted(mojom::WebClientModel model,
+                       base::TimeDelta duration) override;
+  void OnReaction(mojom::MetricUserInputReactionType reaction_type) override;
+  void OnGlicScrollAttempt() override;
+  void OnGlicScrollComplete(bool success) override;
 
   // Called when GlicInstanceImpl is destroyed.
   void OnInstanceDestroyed();
@@ -152,8 +164,10 @@ class GlicInstanceMetrics {
   // Called when the floaty is hidden.
   void OnFloatyClosed();
 
+  enum class CloseReason { kExplicitlyClosed, kTabSwitched };
+
   // Called when the side panel is closed.
-  void OnSidePanelClosed(tabs::TabInterface* tab);
+  void OnSidePanelClosed(tabs::TabInterface* tab, CloseReason reason);
 
   // Called when an embedder is unbound from this instance.
   void OnUnbindEmbedder(EmbedderKey key);
@@ -217,11 +231,11 @@ class GlicInstanceMetrics {
   // Called when GlicInstanceImpl::ResumeActorTask is called.
   void OnResumeActorTask();
 
-  // Called when GlicInstanceImpl::InterruptActorTask is called.
-  void InterruptActorTask();
-
   // Called when GlicInstanceImpl::UninterruptActorTask is called.
   void UninterruptActorTask();
+
+  // Called when GlicInstanceImpl::InterruptActorTask is called.
+  void InterruptActorTask();
 
   // Called when GlicInstanceImpl::WebUiStateChanged is called.
   void OnWebUiStateChanged(mojom::WebUiState state);
@@ -229,20 +243,14 @@ class GlicInstanceMetrics {
   // Called when the client is ready to show.
   void OnClientReady(EmbedderType type);
 
-  // Turn metrics.
-  void OnUserInputSubmitted(mojom::WebClientMode mode);
-  void DidRequestContextFromFocusedTab();
-  void OnResponseStarted();
-  void OnResponseStopped(mojom::ResponseStopCause cause);
-  void OnTurnCompleted(mojom::WebClientModel model, base::TimeDelta duration);
-
   void OnUserResizeStarted(const gfx::Size& start_size);
   void OnUserResizeEnded(const gfx::Size& end_size);
 
-  void OnReaction(mojom::MetricUserInputReactionType reaction_type);
-
   // Records the number of tabs attached as context for a Glic response.
   void RecordAttachedContextTabCount(int tab_count);
+
+  void RecordTabPinningStatusEvent(tabs::TabInterface* tab,
+                                   GlicPinningStatusEvent event);
 
   int GetPinnedTabCount() const;
 
@@ -252,8 +260,13 @@ class GlicInstanceMetrics {
 
   GlicMetricsSessionManager& session_manager() { return session_manager_; }
 
+  std::optional<GlicEntrypoint> initial_entrypoint_for_testing() const {
+    return initial_entrypoint_;
+  }
+
  private:
   friend class GlicMetricsSessionManager;
+  friend class GlicInstanceMetricsTest;
 
   // Stores info scoped to the current turn. These members are cleared in
   // OnResponseStopped.
@@ -268,6 +281,8 @@ class GlicInstanceMetrics {
     bool reported_reaction_time_modelled_ = false;
     EmbedderType ui_mode_ = EmbedderType::kUnknown;
     mojom::WebClientMode input_mode_ = mojom::WebClientMode::kUnknown;
+    bool pending_scroll_complete_ = false;
+    ukm::SourceId chosen_source_id_ = ukm::NoURLSourceId();
   };
 
   // Logs the given event to the EventTotals histogram, and if the count is 0,
@@ -278,6 +293,9 @@ class GlicInstanceMetrics {
   // Called by the session manager when it starts and ends.
   void OnSessionStarted();
   void OnSessionFinished();
+
+  // Called when the instance is opened from a closed state.
+  void OnOpen(glic::mojom::InvocationSource source, const ShowOptions& options);
 
   void OnPinnedTabsChanged(
       const std::vector<content::WebContents*>& pinned_contents);
@@ -308,6 +326,7 @@ class GlicInstanceMetrics {
   // The last invocation source that was used to show the panel.
   mojom::InvocationSource last_invocation_source_ =
       mojom::InvocationSource::kUnsupported;
+  std::optional<GlicEntrypoint> initial_entrypoint_ = std::nullopt;
   // Timestamp of last show start.
   base::TimeTicks invocation_start_time_;
   base::TimeTicks web_ui_load_start_time_;
@@ -329,7 +348,16 @@ class GlicInstanceMetrics {
   std::map<tabs::TabHandle, int> tab_depths_;
 
   base::CallbackListSubscription pinned_tabs_changed_subscription_;
+  base::CallbackListSubscription tab_pinning_status_subscription_;
   raw_ptr<GlicSharingManager> sharing_manager_ = nullptr;
+
+  bool first_side_panel_close_recorded_ = false;
+
+  // The following variables are used for recording scroll related metrics.
+  //
+  // The number of scroll attempts (tracked per session and reset when the
+  // session ends).
+  int scroll_attempt_count_ = 0;
 };
 
 }  // namespace glic

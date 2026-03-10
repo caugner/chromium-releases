@@ -952,7 +952,7 @@
 <translation id="5145331109270917438">O‘zgartirilgan sanasi</translation>
 <translation id="5154917547274118687">Operativ xotira</translation>
 <translation id="5160857336552977725"><ph name="DEVICE_TYPE" /> hisobingizga kiring</translation>
-<translation id="5168185087976003268">Quvvat darajasi</translation>
+<translation id="5168185087976003268">Batareya holati</translation>
 <translation id="5170568018924773124">&amp;Jildda ko‘rsatish</translation>
 <translation id="517075088756846356">Yangilashda davom etish <ph name="DEVICE_NAME" /> quvvat kabelini uzib, qayta ulang</translation>
 <translation id="5180108905184566358">baobablar</translation>
@@ -1410,7 +1410,6 @@
 <translation id="7177485034254901881">Bu <ph name="DEVICE_TYPE" /> qurilmasi <ph name="MANAGER" /> domenida boshqariladi. Administratorlar qurilmani masofadan sozlashi mumkin.</translation>
 <translation id="7180611975245234373">Yangilash</translation>
 <translation id="7180865173735832675">Sozlash</translation>
-<translation id="7182063559013288142">Tezkor hotspot</translation>
 <translation id="7184043045742675738">Tugmani sozlash uchun istalgan klaviatura tugmasini bosing. Sichqoncha yoki strelka tugmalari bilan tugma joylashuvini oʻzgartiring</translation>
 <translation id="7187669805838282391">Chorshanba kuni</translation>
 <translation id="7205318498545665455">Mikrofonni tanlang</translation>

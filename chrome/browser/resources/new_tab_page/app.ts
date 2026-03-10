@@ -333,6 +333,10 @@ export class AppElement extends AppElementBase {
        * Whether to show the AIM threads rail when composebox is open.
        */
       enableThreadsRail_: {type: Boolean},
+      reducedMotionPreferred_: {
+        type: Boolean,
+        reflect: true,
+      },
     };
   }
 
@@ -358,6 +362,8 @@ export class AppElement extends AppElementBase {
   protected accessor wasComposeboxOpened_: boolean = false;
   protected accessor showLensUploadDialog_: boolean = false;
   protected accessor showComposebox_: boolean = false;
+  protected caretAnimationsEnabled_: boolean =
+      loadTimeData.getBoolean('caretAnimationEnabled');
   protected accessor logoEnabled_: boolean =
       loadTimeData.getBoolean('logoEnabled');
   protected accessor oneGoogleBarEnabled_: boolean =
@@ -414,10 +420,10 @@ export class AppElement extends AppElementBase {
       loadTimeData.getInteger('maxTilesBeforeShowMore');
   protected accessor containerFocused_: boolean = false;
   protected accessor showScrim_: boolean = false;
-  private reducedMotionPreferred_: boolean =
-      WindowProxy.getInstance()
-          .matchMedia('(prefers-reduced-motion: reduce)')
-          .matches;
+  private reducedMotionMediaQueryList_: MediaQueryList =
+      WindowProxy.getInstance().matchMedia('(prefers-reduced-motion: reduce)');
+  protected accessor reducedMotionPreferred_: boolean =
+      this.reducedMotionMediaQueryList_.matches;
   protected accessor contextMenuGlifAnimationState_: GlifAnimationState =
       !this.reducedMotionPreferred_ && this.ntpNextFeaturesEnabled_ &&
           this.isActionChipsVisible_ ?
@@ -454,7 +460,6 @@ export class AppElement extends AppElementBase {
   private pendingComposeboxMode_: ToolMode = ToolMode.kUnspecified;
   private pendingComposeboxModel_: ModelMode = ModelMode.kUnspecified;
   private pendingComposeboxInputState_: InputState|null = null;
-  private pendingComposeboxErrorMessage_: string = '';
   private pendingAutoRemovalToasts_:
       Array<{message: string, undo: () => void}> = [];
 
@@ -511,7 +516,9 @@ export class AppElement extends AppElementBase {
   override connectedCallback() {
     super.connectedCallback();
     realboxCanShowSecondarySideMediaQueryList.addEventListener(
-        'change', this.onRealboxCanShowSecondarySideChanged_.bind(this));
+        'change', this.onRealboxCanShowSecondarySideChanged_);
+    this.reducedMotionMediaQueryList_.addEventListener(
+        'change', this.onReducedMotionChanged_);
 
     // Listen for chrome-untrusted://ntp-microsoft-auth iframe trying to
     // connect to the NTP.
@@ -623,7 +630,9 @@ export class AppElement extends AppElementBase {
   override disconnectedCallback() {
     super.disconnectedCallback();
     realboxCanShowSecondarySideMediaQueryList.removeEventListener(
-        'change', this.onRealboxCanShowSecondarySideChanged_.bind(this));
+        'change', this.onRealboxCanShowSecondarySideChanged_);
+    this.reducedMotionMediaQueryList_.removeEventListener(
+        'change', this.onReducedMotionChanged_);
     this.callbackRouter_.removeListener(
         this.connectMicrosoftAuthToParentDocumentListenerId_!);
     this.callbackRouter_.removeListener(this.setThemeListenerId_!);
@@ -655,7 +664,7 @@ export class AppElement extends AppElementBase {
     if (this.ntpRealboxNextEnabled_ && this.realboxLayoutMode_ !== '') {
       this.registerHelpBubble(
           CONTEXTUAL_ENTRYPOINT_ELEMENT_ID,
-          ['#searchbox', '#context', '#contextEntrypoint'], {fixed: true});
+          ['#searchbox', '#context'], {fixed: true});
     }
   }
 
@@ -815,9 +824,7 @@ export class AppElement extends AppElementBase {
   }
 
   private computeBackgroundImageAttributionUrl_(): string {
-    return this.theme_ && this.theme_.backgroundImageAttributionUrl ?
-        this.theme_.backgroundImageAttributionUrl.url :
-        '';
+    return this.theme_ && this.theme_.backgroundImageAttributionUrl || '';
   }
 
   private computeRealboxShown_(): boolean {
@@ -833,9 +840,13 @@ export class AppElement extends AppElementBase {
          this.modulesLoadedStatus_ === ModuleLoadStatus.MODULE_LOAD_COMPLETE);
   }
 
-  private onRealboxCanShowSecondarySideChanged_(e: MediaQueryListEvent) {
+  private onRealboxCanShowSecondarySideChanged_ = (e: MediaQueryListEvent) => {
     this.realboxCanShowSecondarySide = e.matches;
-  }
+  };
+
+  private onReducedMotionChanged_ = (e: MediaQueryListEvent) => {
+    this.reducedMotionPreferred_ = e.matches;
+  };
 
   private onLazyRendered_() {
     // Integration tests use this attribute to determine when lazy load has
@@ -862,18 +873,17 @@ export class AppElement extends AppElementBase {
   protected onComposeboxInitialized_(e: CustomEvent<{
     initializeComposeboxState:
         (text: string, files: ContextualUpload[], mode: ToolMode, model: number,
-         inputState: InputState|null, errorMessage: string) => void,
+         inputState: InputState|null) => void,
   }>) {
     e.detail.initializeComposeboxState(
         this.pendingComposeboxText_, this.pendingComposeboxContextFiles_,
         this.pendingComposeboxMode_, this.pendingComposeboxModel_,
-        this.pendingComposeboxInputState_, this.pendingComposeboxErrorMessage_);
+        this.pendingComposeboxInputState_);
     this.pendingComposeboxContextFiles_ = [];
     this.pendingComposeboxText_ = '';
     this.pendingComposeboxMode_ = ToolMode.kUnspecified;
     this.pendingComposeboxModel_ = ModelMode.kUnspecified;
     this.pendingComposeboxInputState_ = null;
-    this.pendingComposeboxErrorMessage_ = '';
   }
 
   protected openComposebox_(e: CustomEvent<{
@@ -882,7 +892,6 @@ export class AppElement extends AppElementBase {
     mode: ToolMode,
     model: ModelMode,
     inputState: InputState|null,
-    errorMessage: string,
   }>) {
     if (e.detail.searchboxText) {
       this.pendingComposeboxText_ = e.detail.searchboxText;
@@ -893,9 +902,6 @@ export class AppElement extends AppElementBase {
     this.pendingComposeboxMode_ = e.detail.mode;
     this.pendingComposeboxModel_ = e.detail.model;
     this.pendingComposeboxInputState_ = e.detail.inputState;
-    if (e.detail.errorMessage) {
-      this.pendingComposeboxErrorMessage_ = e.detail.errorMessage;
-    }
     this.toggleComposebox_();
   }
 
@@ -1456,11 +1462,11 @@ export class AppElement extends AppElementBase {
 
   protected onActionChipsRetrievalStateChanged_(
       e: CustomEvent<{state: ActionChipsRetrievalState}>) {
-    const state = e.detail.state;
     if (this.reducedMotionPreferred_) {
       // The animation should not be started.
       return;
     }
+    const state = e.detail.state;
     // Mapping of ActionChipsRetrievalState => GlifAnimationState:
     // REQUESTED => SPINNER_ONLY
     // UPDATED => STARTED (or FINISHED if cr_context_menu_entrypoint sets it)

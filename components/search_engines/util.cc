@@ -87,7 +87,6 @@ WDKeywordsResult::Metadata ComputeMergeEnginesRequirements(
 GURL GetBaseSearchUrl(TemplateURLService* turl_service,
                       omnibox::ChromeAimEntryPoint aim_entrypoint,
                       bool is_aim_search,
-                      omnibox::ModelMode model_mode,
                       const base::Time& query_start_time,
                       const std::u16string& query_text,
                       std::map<std::string, std::string> additional_params) {
@@ -97,23 +96,23 @@ GURL GetBaseSearchUrl(TemplateURLService* turl_service,
       TemplateURLRef::SearchTermsArgs(query_text);
   GURL result_url = GURL(url_ref.ReplaceSearchTerms(
       search_term_args, turl_service->search_terms_data()));
+
+  if (is_aim_search) {
+    // For AIM queries, add udm=50 as a fallback if no udm or nem param is
+    // present.
+    if (additional_params.count("udm") == 0 &&
+        additional_params.count("nem") == 0) {
+      additional_params["udm"] = kAimUdmQueryParameterValue;
+    }
+  }
+
   // Append all additional params.
   for (auto const& param : additional_params) {
     result_url = net::AppendOrReplaceQueryParameter(result_url, param.first,
                                                     param.second);
   }
 
-  if (is_aim_search) {
-    if (model_mode == omnibox::ModelMode::MODEL_MODE_GEMINI_PRO) {
-      result_url = net::AppendOrReplaceQueryParameter(result_url, "nem", "143");
-    } else {
-      result_url = net::AppendOrReplaceQueryParameter(
-          result_url, "udm", kAimUdmQueryParameterValue);
-      if (model_mode == omnibox::ModelMode::MODEL_MODE_GEMINI_PRO_NO_GEN_UI) {
-        result_url = net::AppendOrReplaceQueryParameter(result_url, "arv", "1");
-      }
-    }
-  } else {
+  if (!is_aim_search) {
     std::string udm_value = query_text.empty()
                                 ? kUnimodalUdmQueryParameterValue
                                 : kMultimodalUdmQueryParameterValue;
@@ -310,8 +309,10 @@ void MergeIntoEngineData(const TemplateURL* original_turl,
                          TemplateURLMergeOption merge_option) {
   DCHECK(original_turl->prepopulate_id() == 0 ||
          original_turl->prepopulate_id() == url_to_update->prepopulate_id);
-  DCHECK(original_turl->starter_pack_id() == 0 ||
-         original_turl->starter_pack_id() == url_to_update->starter_pack_id);
+  DCHECK(original_turl->starter_pack_id() ==
+             template_url_starter_pack_data::StarterPackId::kNone ||
+         static_cast<int>(original_turl->starter_pack_id()) ==
+             url_to_update->starter_pack_id);
   // When the user modified search engine's properties or search engine is
   // imported from regulatory extensions we need to preserve certain search
   // engine properties from overriding with prepopulated data.
@@ -466,9 +467,11 @@ ActionsFromCurrentData CreateActionsFromCurrentStarterPackData(
   // starter_pack data (i.e. have a non-zero starter_pack_id()).
   std::map<int, TemplateURL*> id_to_turl;
   for (auto& turl : existing_urls) {
-    int starter_pack_id = turl->starter_pack_id();
-    if (starter_pack_id > 0) {
-      id_to_turl[starter_pack_id] = turl.get();
+    template_url_starter_pack_data::StarterPackId starter_pack_id =
+        turl->starter_pack_id();
+    if (starter_pack_id !=
+        template_url_starter_pack_data::StarterPackId::kNone) {
+      id_to_turl[static_cast<int>(starter_pack_id)] = turl.get();
     }
   }
 
@@ -676,11 +679,10 @@ GURL GetUrlForAim(
     const base::Time& query_start_time,
     const std::u16string& query_text,
     const std::optional<lens::LensOverlayInvocationSource> invocation_source,
-    std::map<std::string, std::string> additional_params,
-    omnibox::ModelMode model_mode) {
-  GURL result_url = GetBaseSearchUrl(
-      turl_service, aim_entrypoint, /*is_aim_search=*/true, model_mode,
-      query_start_time, query_text, additional_params);
+    std::map<std::string, std::string> additional_params) {
+  GURL result_url = GetBaseSearchUrl(turl_service, aim_entrypoint,
+                                     /*is_aim_search=*/true, query_start_time,
+                                     query_text, additional_params);
   if (invocation_source.has_value()) {
     // If the invocation source is set, send the contextual tasks invocation
     // source, as only the unmigrated LensOverlay flow, which uses a different
@@ -705,16 +707,20 @@ GURL GetUrlForMultimodalSearch(
     const std::string& lns_surface,
     const std::u16string& query_text,
     std::map<std::string, std::string> additional_params) {
-  GURL result_url = GetBaseSearchUrl(
-      turl_service, aim_entrypoint, is_aim_search,
-      /*model_mode=*/omnibox::ModelMode::MODEL_MODE_UNSPECIFIED,
-      query_start_time, query_text, additional_params);
-  std::string serialized_request_id;
-  CHECK(request_id->SerializeToString(&serialized_request_id));
-  std::string encoded_request_id;
-  base::Base64UrlEncode(serialized_request_id,
-                        base::Base64UrlEncodePolicy::OMIT_PADDING,
-                        &encoded_request_id);
+  GURL result_url =
+      GetBaseSearchUrl(turl_service, aim_entrypoint, is_aim_search,
+                       query_start_time, query_text, additional_params);
+  if (request_id) {
+    std::string serialized_request_id;
+    CHECK(request_id->SerializeToString(&serialized_request_id));
+    std::string encoded_request_id;
+    base::Base64UrlEncode(serialized_request_id,
+                          base::Base64UrlEncodePolicy::OMIT_PADDING,
+                          &encoded_request_id);
+    result_url = net::AppendOrReplaceQueryParameter(
+        result_url, kVisualRequestIdQueryParameter, encoded_request_id);
+  }
+
   if (invocation_source.has_value()) {
     // If the invocation source is set, this is a Lens query that is migrated
     // to the common ContextualSearchSessionHandle, which is only used for the
@@ -722,8 +728,6 @@ GURL GetUrlForMultimodalSearch(
     result_url = lens::AppendInvocationSourceParamToURL(
         result_url, *invocation_source, /*is_contextual_tasks=*/true);
   }
-  result_url = net::AppendOrReplaceQueryParameter(
-      result_url, kVisualRequestIdQueryParameter, encoded_request_id);
   result_url = net::AppendOrReplaceQueryParameter(
       result_url, kSearchSessionIdParameterKey, search_session_id);
   result_url = net::AppendOrReplaceQueryParameter(
@@ -742,10 +746,9 @@ GURL GetUrlForMultimodalSearch(
     const std::string& lns_surface,
     const std::u16string& query_text,
     std::map<std::string, std::string> additional_params) {
-  GURL result_url = GetBaseSearchUrl(
-      turl_service, aim_entrypoint, is_aim_search,
-      /*model_mode=*/omnibox::ModelMode::MODEL_MODE_UNSPECIFIED,
-      query_start_time, query_text, additional_params);
+  GURL result_url =
+      GetBaseSearchUrl(turl_service, aim_entrypoint, is_aim_search,
+                       query_start_time, query_text, additional_params);
   std::string serialized_contextual_inputs;
   CHECK(contextual_inputs->SerializeToString(&serialized_contextual_inputs));
   std::string encoded_contextual_inputs;

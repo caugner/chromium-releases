@@ -265,6 +265,7 @@
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/dbus/init/initialize_dbus_client.h"
 #include "chromeos/dbus/power/power_policy_controller.h"
+#include "chromeos/ui/clipboard_history/clipboard_history_types.h"
 #include "chromeos/ui/clipboard_history/clipboard_history_util.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -1902,7 +1903,7 @@ void Shell::Init(
   // `clipboard_history_controller_` is destroyed.
   chromeos::clipboard_history::SetQueryItemDescriptorsImpl(base::BindRepeating(
       [](ClipboardHistoryControllerImpl* controller) {
-        std::vector<crosapi::mojom::ClipboardHistoryItemDescriptor> descriptors;
+        std::vector<chromeos::clipboard_history::ItemDescriptor> descriptors;
         if (clipboard_history_util::IsEnabledInCurrentMode()) {
           const auto& items = controller->history()->GetItems();
           descriptors.reserve(items.size());
@@ -1915,7 +1916,7 @@ void Shell::Init(
   chromeos::clipboard_history::SetPasteClipboardItemByIdImpl(
       base::BindRepeating(
           [](const base::UnguessableToken& id, int event_flags,
-             crosapi::mojom::ClipboardHistoryControllerShowSource show_source) {
+             chromeos::clipboard_history::ShowSource show_source) {
             ClipboardHistoryController::Get()->PasteClipboardItemById(
                 id.ToString(), event_flags, show_source);
           }));

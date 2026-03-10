@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import type {WebClientInitialState} from '../glic.mojom-webui.js';
-import type {ActorTaskPauseReason, ActorTaskState, ActorTaskStopReason, AdditionalContext, AdditionalContextPart, AnnotatedPageData, AutofillSuggestion, CancelActionsResult, CaptureRegionErrorReason, CaptureRegionResult, ChromeVersion, ConversationInfo, CreateSkillRequest, Credential, DraggableArea, ErrorReasonTypes, ErrorWithReason, FocusedTabDataHasFocus, FocusedTabDataHasNoFocus, FormFillingRequest, GetPinCandidatesOptions, HostCapability, Journal, MetricUserInputReactionType, NavigationConfirmationRequest, NavigationConfirmationResponse, OnResponseStoppedDetails, OpenPanelInfo, OpenSettingsOptions, PageMetadata, PanelOpeningData, PanelState, PdfDocumentData, PinCandidate, PinTabsOptions, Platform, ResumeActorTaskResult, Screenshot, ScrollToParams, SelectAutofillSuggestionsDialogRequest, SelectAutofillSuggestionsDialogResponse, SelectCredentialDialogRequest, SelectCredentialDialogResponse, Skill, SkillPreview, TabContextOptions, TabContextResult, TabData, TaskOptions, UnpinTabsOptions, UpdateSkillRequest, UserConfirmationDialogRequest, UserConfirmationDialogResponse, UserProfileInfo, ViewChangedNotification, ViewChangeRequest, WebClientMode, ZeroStateSuggestions, ZeroStateSuggestionsOptions, ZeroStateSuggestionsV2} from '../glic_api/glic_api.js';
+import type {ActorTaskPauseReason, ActorTaskState, ActorTaskStopReason, AdditionalContext, AdditionalContextPart, AnnotatedPageData, AutofillSuggestion, CancelActionsResult, CaptureRegionErrorReason, CaptureRegionResult, ChromeVersion, ConversationInfo, CreateSkillRequest, Credential, DraggableArea, ErrorReasonTypes, ErrorWithReason, FocusedTabDataHasFocus, FocusedTabDataHasNoFocus, FormFillingRequest, GetPinCandidatesOptions, HostCapability, InvokeOptions, Journal, MetricUserInputReactionType, NavigationConfirmationRequest, NavigationConfirmationResponse, OnResponseStoppedDetails, OpenPanelInfo, OpenSettingsOptions, PageMetadata, PanelOpeningData, PanelState, PdfDocumentData, PinCandidate, PinTabsOptions, Platform, ResumeActorTaskResult, Screenshot, ScrollToParams, SelectAutofillSuggestionsDialogRequest, SelectAutofillSuggestionsDialogResponse, SelectCredentialDialogRequest, SelectCredentialDialogResponse, Skill, SkillPreview, TabContextOptions, TabContextResult, TabData, TaskOptions, UnpinTabsOptions, UpdateSkillRequest, UserConfirmationDialogRequest, UserConfirmationDialogResponse, UserProfileInfo, ViewChangedNotification, ViewChangeRequest, WebClientMode, ZeroStateSuggestions, ZeroStateSuggestionsOptions, ZeroStateSuggestionsV2} from '../glic_api/glic_api.js';
 
 /*
 This file defines messages sent over postMessage in-between the Glic WebUI
@@ -418,12 +418,6 @@ export declare type HostRequestTypes = ValidateRequestMap<{
     },
     backgroundAllowed: true,
   },
-  glicBrowserOnModelChanged: {
-    request: {
-      model: number,
-    },
-    backgroundAllowed: true,
-  },
   glicBrowserOnRecordUseCounter: {
     request: {
       counter: number,
@@ -503,6 +497,9 @@ export declare type HostRequestTypes = ValidateRequestMap<{
     response: {
       modalOpened: boolean,
     },
+  },
+  glicBrowserShowManageSkillsUi: {
+    backgroundAllowed: true,
   },
   glicBrowserGetSkill: {
     request: {
@@ -731,10 +728,21 @@ export declare type WebClientRequestTypes = ValidateRequestMap<{
       skillPreview: SkillPreview,
     },
   },
+  glicWebClientNotifyContextualSkillPreviewsChanged: {
+    request: {
+      contextualSkillPreviews: SkillPreview[],
+    },
+  },
   glicWebClientNotifySkillToInvokeChanged: {
     request: {
       skill: Skill,
     },
+  },
+  glicWebClientNotifySkillDeleted: {
+    request: {
+      skillId: string,
+    },
+    backgroundAllowed: true,
   },
   glicWebClientPinCandidatesChanged: {
     request: {
@@ -834,6 +842,12 @@ export declare type WebClientRequestTypes = ValidateRequestMap<{
     },
     backgroundAllowed: true,
   },
+  glicWebClientInvoke: {
+    request: {
+      options: InvokeOptionsPrivate,
+    },
+    backgroundAllowed: true,
+  },
 }>;
 
 
@@ -892,7 +906,7 @@ export const HOST_REQUEST_TYPES: HostRequestEnumNamesType&{MAX_VALUE: number} =
         OnResponseStopped: 41,
         OnSessionTerminated: 42,
         OnTurnCompleted: 43,
-        OnModelChanged: 44,
+        // Do not reuse deleted request ID: 44,
         ScrollTo: 45,
         SetSyntheticExperimentState: 46,
         OpenOsPermissionSettingsMenu: 47,
@@ -934,6 +948,7 @@ export const HOST_REQUEST_TYPES: HostRequestEnumNamesType&{MAX_VALUE: number} =
         UpdateSkill: 83,
         GetSkill: 84,
         CancelActions: 85,
+        ShowManageSkillsUi: 86,
       };
       return {...result, MAX_VALUE: Math.max(...Object.values(result))};
     })();
@@ -1109,6 +1124,11 @@ export declare interface AdditionalContextPartPrivate extends
 export declare interface AdditionalContextPrivate extends
     Omit<AdditionalContext, 'parts'> {
   parts: AdditionalContextPartPrivate[];
+}
+
+export declare interface InvokeOptionsPrivate extends
+    Omit<InvokeOptions, 'context'> {
+  context?: AdditionalContextPrivate;
 }
 
 export declare interface CredentialPrivate extends Omit<Credential, 'getIcon'> {

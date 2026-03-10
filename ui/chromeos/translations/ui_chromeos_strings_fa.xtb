@@ -260,7 +260,7 @@
 <translation id="3126026824346185272">Ctrl</translation>
 <translation id="3138624403379688522">پین نامعتبر است. <ph name="RETRIES" /> تلاش دیگر دارید.</translation>
 <translation id="3157931365184549694">بازگرداندن</translation>
-<translation id="3160842278951476457"><ph name="ISSUED_BY" /> [<ph name="ISSUED_TO" />] (پشتیبان‌گیری‌شده در سخت‌افزار)</translation>
+<translation id="3160842278951476457"><ph name="ISSUED_BY" /> [<ph name="ISSUED_TO" />] (دارای پشتوانه سخت‌افزاری)</translation>
 <translation id="3188257591659621405">فایل‌های من</translation>
 <translation id="3194553149358267393">هیچ فایل صوتی‌ای در موارد اخیر وجود ندارد</translation>
 <translation id="3197563288998582412">دووارک بریتانیایی</translation>
@@ -523,7 +523,7 @@
 <translation id="5123433949759960244">بسکتبال</translation>
 <translation id="5129662217315786329">لهستانی</translation>
 <translation id="5144820558584035333">مجموعه هانگول ۳ (۳۹۰‏)</translation>
-<translation id="5145331109270917438">تاریخ اصلاح شدن</translation>
+<translation id="5145331109270917438">تاریخ اصلاح</translation>
 <translation id="515594325917491223">شطرنج</translation>
 <translation id="5158983316805876233">استفاده از پراکسی یکسان برای همه پروتکل ها</translation>
 <translation id="5159383109919732130">‏<ph name="BEGIN_BOLD" />هنوز دستگاه خود را جدا نکنید!<ph name="END_BOLD" />
@@ -747,7 +747,7 @@
 <translation id="6876155724392614295">دوچرخه‌</translation>
 <translation id="6878261347041253038">صفحه‌کلید دواناگری (آوایی)</translation>
 <translation id="6885780034956018177">حلزون</translation>
-<translation id="6896758677409633944">کپی</translation>
+<translation id="6896758677409633944">کپی کردن</translation>
 <translation id="6898028766943174120">پوشه‌های فرعی بیشتر...</translation>
 <translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
@@ -984,7 +984,7 @@
 <translation id="8521441079177373948">بریتانیایی</translation>
 <translation id="853494022971700746">فرانسوی (فرانسه)</translation>
 <translation id="8540608333167683902">شبکه <ph name="NETWORK_INDEX" /> از <ph name="NETWORK_COUNT" />، <ph name="NETWORK_NAME" />، <ph name="CONNECTION_STATUS" />، قدرت سیگنال <ph name="SIGNAL_STRENGTH" />٪، جزئیات</translation>
-<translation id="8545476925160229291">انگلیسی (آمریکا)</translation>
+<translation id="8545476925160229291">انگلیسی (امریکا)</translation>
 <translation id="854655314928502177">نشانی وب «اکتشاف» خودکار پروکسی وب:</translation>
 <translation id="8547747809824590510">سرپرستتان قوانین ملغی کردن پراکسی را تنظیم کرده است</translation>
 <translation id="8549186985808798022">ایتالیایی</translation>

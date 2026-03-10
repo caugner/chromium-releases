@@ -33,9 +33,22 @@ BASE_DECLARE_FEATURE(kAutofillDedupeFormSubmission);
 // enabled.
 BASE_DECLARE_FEATURE(kAutofillFixXhrForXframe);
 
+// Extracts the full URL of the frame where the form is found.
+BASE_DECLARE_FEATURE(kAutofillExtractFullUrlOnIOs);
+
 // Listen to form submission events in capture mode before the events are
 // propagated.
 BASE_DECLARE_FEATURE(kAutofillFormSubmissionEventsInCaptureMode);
+
+// Detaches the listeners for the payments suggestion bottom sheet when the
+// listeners are invalidated (i.e. the field type is no longer a credit card
+// field). This can be used in combination with kAutofillPaymentsSheetV3Ios.
+BASE_DECLARE_FEATURE(kAutofillPaymentsSheetDetachInvalidatedListenersIos);
+
+// Enables the stateless version of the payments suggestion bottom sheet that
+// can directly pick the Autofill suggestions provider instead of intermediating
+// via the FormSuggestionController.
+BASE_DECLARE_FEATURE(kAutofillPaymentsSheetStateless);
 
 // Enables the second version of the payments suggestion bottom sheet to prevent
 // bugs that we've seen in production on other transaction sheets (e.g. some
@@ -50,6 +63,10 @@ BASE_DECLARE_FEATURE(kAutofillPaymentsSheetV3Ios);
 // Enables the refill functionality to allow autofilling of dynamically
 // expanding forms.
 BASE_DECLARE_FEATURE(kAutofillRefillForFormsIos);
+
+// Enables Undo for Autofill operations on iOS. This will replace the Clear form
+// button with the Undo autofill button in the keyboard accessory.
+BASE_DECLARE_FEATURE(kAutofillUndoIos);
 
 // Reports JS errors that occur upon handling form submission in the renderer.
 BASE_DECLARE_FEATURE(kAutofillReportFormSubmissionErrors);

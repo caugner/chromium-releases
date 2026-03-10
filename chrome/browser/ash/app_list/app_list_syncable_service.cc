@@ -197,7 +197,7 @@ void UpdateSyncItemInLocalStorage(
 
   ScopedDictPrefUpdate pref_update(profile->GetPrefs(),
                                    prefs::kAppListLocalState);
-  base::Value::Dict* dict_item = pref_update->EnsureDict(sync_item->item_id);
+  base::DictValue* dict_item = pref_update->EnsureDict(sync_item->item_id);
   dict_item->Set(kNameKey, sync_item->item_name);
   dict_item->Set(kPromisePackageIdKey, !sync_item->promise_package_id.empty()
                                            ? sync_item->promise_package_id
@@ -480,7 +480,7 @@ void AppListSyncableService::InitFromLocalStorage() {
   DCHECK(!IsInitialized());
 
   // Restore initial state from local storage.
-  const base::Value::Dict& local_items =
+  const base::DictValue& local_items =
       profile_->GetPrefs()->GetDict(prefs::kAppListLocalState);
   local_state_initially_empty_ = local_items.empty();
 
@@ -1602,7 +1602,14 @@ void AppListSyncableService::ProcessExistingSyncItem(SyncItem* sync_item) {
 
   // The only place where sync can change an item's folder. Prevent moving OEM
   // item to the folder, other than OEM folder.
-  const bool update_folder = !AppIsOem(sync_item->item_id);
+  bool update_folder = !AppIsOem(sync_item->item_id);
+  if (update_folder && !sync_item->parent_id.empty()) {
+    SyncItem* parent = FindSyncItem(sync_item->parent_id);
+    if (parent && parent->item_type != sync_pb::AppListSpecifics::TYPE_FOLDER) {
+      update_folder = false;
+    }
+  }
+
   model_updater_->UpdateAppItemFromSyncItem(
       sync_item,
       sync_item->item_id != ash::kOemFolderId,  // Don't sync oem folder's name.

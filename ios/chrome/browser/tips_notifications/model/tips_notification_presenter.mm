@@ -19,7 +19,7 @@
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/credential_provider_promo_commands.h"
-#import "ios/chrome/browser/shared/public/commands/docking_promo_commands.h"
+#import "ios/chrome/browser/shared/public/commands/promos_manager_commands.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/commands/show_signin_command.h"
@@ -148,8 +148,8 @@ void TipsNotificationPresenter::ShowSetUpListContinuation() {
 }
 
 void TipsNotificationPresenter::ShowDocking() {
-  [HandlerForProtocol(browser_->GetCommandDispatcher(), DockingPromoCommands)
-      showDockingPromo:YES];
+  [HandlerForProtocol(browser_->GetCommandDispatcher(), PromosManagerCommands)
+      showDockingPromo];
 }
 
 void TipsNotificationPresenter::ShowOmniboxPosition() {
@@ -209,7 +209,8 @@ void TipsNotificationPresenter::StartTrustedVaultKeyRetrievalFlow() {
   }
   [HandlerForProtocol(browser_->GetCommandDispatcher(), SyncPresenterCommands)
       showTrustedVaultReauthForFetchKeysWithTrigger:
-          trusted_vault::TrustedVaultUserActionTriggerForUMA::kNotification];
+          trusted_vault::TrustedVaultUserActionTriggerForUMA::kNotification
+                                         completion:nil];
   base::UmaHistogramEnumeration(
       metric_name, TrustedVaultNotificationEvents::kKeyRetrievalFlowStarted);
 }

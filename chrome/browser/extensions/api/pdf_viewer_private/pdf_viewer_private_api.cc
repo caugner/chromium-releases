@@ -18,6 +18,7 @@
 #include "chrome/browser/pdf/pdf_pref_names.h"
 #include "chrome/browser/pdf/pdf_viewer_stream_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/api/pdf_viewer_private.h"
 #include "chrome/common/pref_names.h"
 #include "components/pdf/common/constants.h"
@@ -52,9 +53,8 @@ namespace SetPdfPluginAttributes =
 namespace SetPdfDocumentTitle = api::pdf_viewer_private::SetPdfDocumentTitle;
 
 // Check if the current URL is allowed based on a list of allowlisted domains.
-bool IsUrlAllowedToEmbedLocalFiles(
-    const GURL& current_url,
-    const base::Value::List& allowlisted_domains) {
+bool IsUrlAllowedToEmbedLocalFiles(const GURL& current_url,
+                                   const base::ListValue& allowlisted_domains) {
   if (!current_url.is_valid() || !current_url.SchemeIs(url::kHttpsScheme)) {
     return false;
   }
@@ -316,11 +316,30 @@ ExtensionFunction::ResponseAction PdfViewerPrivateGlicSummarizeFunction::Run() {
           contents->GetBrowserContext());
   CHECK(glic_service);
 
-  glic_service->ToggleUI(tab_interface->GetBrowserWindowInterface(),
-                         /*prevent_close=*/true,
-                         glic::mojom::InvocationSource::kPdfSummarizeButton,
-                         /*prompt_suggestion=*/"summarize the pdf",
-                         /*auto_send=*/true);
+  int arm = features::kPdfGlicSummarizeArm.Get();
+  bool has_consented = glic::GlicEnabling::HasConsentedForProfile(
+      Profile::FromBrowserContext(contents->GetBrowserContext()));
+
+  glic::GlicInvokeOptions options{
+      glic::mojom::InvocationSource::kPdfSummarizeButton};
+  options.prompts.push_back("Summarize this document");
+  options.conversation = glic::NewConversation();
+
+  if (has_consented) {
+    glic_service->InvokeWithAutoSubmit(
+        glic::InvokeWithAutoSubmitPasskeyProvider::GetPassKey(), tab_interface,
+        std::move(options));
+  } else {
+    if (arm == 3) {
+      options.fre_override = glic::mojom::FreOverride::kTrustFirstInline;
+      glic_service->InvokeWithAutoSubmit(
+          glic::InvokeWithAutoSubmitPasskeyProvider::GetPassKey(),
+          tab_interface, std::move(options));
+    } else {
+      options.fre_override = glic::mojom::FreOverride::kTrustFirstText;
+      glic_service->Invoke(tab_interface, std::move(options));
+    }
+  }
 
   success = true;
   return RespondNow(NoArguments());

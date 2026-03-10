@@ -11,6 +11,7 @@
 #import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/coordinator/base_grid_mediator.h"
 #import "ios/web/public/web_state.h"
 
+@protocol ComposeboxDebuggerLogger;
 @class ComposeboxTabPickerMediator;
 @protocol ComposeboxTabPickerConsumer;
 
@@ -19,6 +20,9 @@
 
 // Returns the number of non-tab attachments.
 - (NSUInteger)nonTabAttachmentCount;
+
+// Returns the max number of tab attachments.
+- (NSUInteger)maxTabAttachmentCount;
 
 /// Sends the selected tabs identifiers to the tabs attachment delegate.
 /// `cachedWebStateIDs` contains the IDs of the tabs that have their content
@@ -41,6 +45,9 @@
                        (id<ComposeboxTabPickerConsumer>)tabPickerConsumer
               tabsAttachmentDelegate:
                   (id<ComposeboxTabsAttachmentDelegate>)tabsAttachmentDelegate;
+
+// Delegate for logging events
+@property(nonatomic, weak) id<ComposeboxDebuggerLogger> debugLogger;
 
 /// The mediator's delegate for attaching selected tabs.
 @property(nonatomic, weak) id<ComposeboxTabsAttachmentDelegate>

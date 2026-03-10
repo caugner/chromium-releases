@@ -56,6 +56,8 @@ java_framework_defaults_module = 'MODIFIED_BY_MAIN_AFTER_PARSING_ARGS_IF_YOU_SEE
 # Location of the project in the Android source tree.
 tree_path = 'MODIFIED_BY_MAIN_AFTER_PARSING_ARGS_IF_YOU_SEE_THIS_SOMETHING_BROKE_'
 
+LIBCRYPTO_STRIPPED = "libcrypto"
+LIBCRYPTO_UNSTRIPPED = "libcrypto_unstripped"
 
 def initialize_globals(import_channel: str):
   global IMPORT_CHANNEL
@@ -366,7 +368,7 @@ def enable_boringssl(module, arch):
     shared_libs = module.target[arch].shared_libs
     static_libs = module.target[arch].static_libs
     whole_static_libs = module.target[arch].whole_static_libs
-  shared_libs.add(f'{MODULE_PREFIX}libcrypto')
+  shared_libs.add(f'{MODULE_PREFIX}{LIBCRYPTO_UNSTRIPPED}')
   if module.type == "cc_library_static":
     static_libs.add(f'{MODULE_PREFIX}ssl_and_pki')
   else:
@@ -2108,7 +2110,14 @@ class ProtocJavaSanitizer(BaseActionSanitizer):
     self._set_value_arg('--protoc', '$(location %s)' % self._protoc)
     self._update_value_arg('--proto-path', self._sanitize_proto_path)
     self._set_value_arg('--srcjar', '$(out)')
-    self._update_arg_at(-1, self._sanitize_filepath_with_location_tag)
+    for i, arg in enumerate(self.target.args):
+      if arg == '--import-dir':
+        self.target.args[
+            i +
+            1] = f"{tree_path}/{self.target.args[i+1].removeprefix('../../')}"
+      elif arg.startswith('../../') and arg.removeprefix(
+          '../../') in self.get_srcs():
+        self.target.args[i] = self._sanitize_filepath_with_location_tag(arg)
 
   def _sanitize_inputs(self):
     super()._sanitize_inputs()
@@ -2667,6 +2676,14 @@ def _is_cflag_allowed(cflag):
       '-DUNSAFE_BUFFERS_BUILD',
       '-Wunsafe-buffer-usage',
       '-Wno-error=unsafe-buffer-usage',
+      # Causes Soong to fail with:
+      #   "Bad flag: `-gsplit-dwarf`, soong cannot track dependencies to split dwarf debuginfo"
+      # See https://crbug.com/481594099
+      '-gsplit-dwarf',
+      # Causes the build to fail with:
+      #   clang++-real: error: unknown argument: '-fsanitize-ignore-for-ubsan-feature=array-bounds'
+      # See https://crbug.com/481594099
+      '-fsanitize-ignore-for-ubsan-feature=array-bounds',
   ])
 
 def _get_cflags(cflags, defines):
@@ -3577,6 +3594,22 @@ def make_cc_defaults_from_boringssl(boringssl_module: Module) -> Module:
   libcrypto_cc_defaults_flags_module.defaults = [cc_defaults_module]
   return (cc_default_flags_module, libcrypto_cc_defaults_flags_module)
 
+
+def setup_libcrypto_stripping(blueprint):
+  # Two-step build process for libhttpengine.so:
+  # 1. Build against the full libcrypto to identify required symbols and
+  # generate a stripped variant of libcrypto.
+  # 2. Rebuild against that stripped libcrypto to guarantee no undefined symbols.
+  cronet_shared_library_module = blueprint.modules[
+      f"{MODULE_PREFIX}components_cronet_android_cronet"]
+  cronet_shared_library_copy = copy.deepcopy(cronet_shared_library_module)
+  cronet_shared_library_copy.name += "_against_unstripped_libcrypto"
+  cronet_shared_library_module.shared_libs.remove(
+      f"{MODULE_PREFIX}{LIBCRYPTO_UNSTRIPPED}")
+  cronet_shared_library_module.shared_libs.add(
+      f"{MODULE_PREFIX}{LIBCRYPTO_STRIPPED}")
+  blueprint.add_module(cronet_shared_library_copy)
+
 def create_blueprint_for_targets(gn, targets, test_targets):
   """Generate a blueprint for a list of GN targets."""
   blueprint = Blueprint()
@@ -3609,6 +3642,8 @@ def create_blueprint_for_targets(gn, targets, test_targets):
   for module in make_cc_defaults_from_boringssl(blueprint.modules[
       label_to_module_name("//third_party/boringssl:boringssl")]):
     blueprint.add_module(module)
+
+  setup_libcrypto_stripping(blueprint)
   return blueprint
 
 

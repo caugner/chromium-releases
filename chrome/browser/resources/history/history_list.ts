@@ -155,6 +155,8 @@ export class HistoryListElement extends HistoryListElementBase {
     querying: false,
     searchTerm: '',
     after: null,
+    includeUserVisits: true,
+    includeActorVisits: true,
   };
   accessor scrollTarget: HTMLElement = document.documentElement;
   accessor scrollOffset: number = 0;
@@ -478,10 +480,9 @@ export class HistoryListElement extends HistoryListElementBase {
   }
 
   private deleteItems_(items: HistoryEntry[]): Promise<void> {
-    const removalList = items.map(item => ({
-                                    url: item.url,
-                                    timestamps: item.allTimestamps,
-                                  }));
+    const removalList = items.flatMap(
+        item => Object.entries(item.allTimestamps)
+                    .map(([url, timestamps]) => ({url, timestamps})));
 
     this.pendingDelete = true;
     return this.pageHandler_.removeVisits(removalList);
@@ -566,7 +567,7 @@ export class HistoryListElement extends HistoryListElementBase {
 
     // Handle shift selection. Change the selection state of all items between
     // |path| and |lastSelected| to the selection state of |item|.
-    if (e.detail.shiftKey && this.lastSelectedIndex !== undefined) {
+    if (e.detail.shiftKey && this.lastSelectedIndex !== -1) {
       for (let i = Math.min(index, this.lastSelectedIndex);
            i <= Math.max(index, this.lastSelectedIndex); i++) {
         indices.push(i);

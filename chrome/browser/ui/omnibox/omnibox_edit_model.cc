@@ -36,6 +36,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_view.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_closer.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/core/url_utils.h"
@@ -97,6 +98,7 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icon_types.h"
 #include "url/third_party/mozilla/url_parse.h"
+#include "url/url_canon.h"
 #include "url/url_util.h"
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -504,19 +506,6 @@ ui::ImageModel OmniboxEditModel::GetSuperGIcon(int image_size,
 #endif
 }
 
-bool OmniboxEditModel::ShouldShowAddContextButton() const {
-  const bool aim_button_pref =
-      GetPrefService()->GetBoolean(omnibox::kShowAiModeOmniboxButton);
-  const bool is_aim_popup_enabled = controller_->client()->IsAimPopupEnabled();
-  const bool is_variant_inline =
-      omnibox::kWebUIOmniboxAimPopupAddContextButtonVariantParam.Get() ==
-      omnibox::AddContextButtonVariant::kInline;
-  const bool is_popup_open = controller_->IsPopupOpen();
-
-  return aim_button_pref && is_aim_popup_enabled && is_variant_inline &&
-         is_popup_open;
-}
-
 ui::ImageModel OmniboxEditModel::GetAddContextIcon(int image_size) const {
   return ui::ImageModel::FromVectorIcon(kAddChromeRefreshIcon,
                                         ui::kColorSysPrimary, image_size);
@@ -591,6 +580,7 @@ void OmniboxEditModel::SetInputInProgress(bool in_progress) {
 }
 
 void OmniboxEditModel::Revert() {
+  TRACE_EVENT("omnibox", "OmniboxEditModel::Revert");
   SetInputInProgress(false);
   input_.Clear();
   paste_state_ = PasteState::kNone;
@@ -808,12 +798,18 @@ void OmniboxEditModel::OpenAiMode(bool via_keyboard, bool via_context_menu) {
     }
   }
 
-  GURL ai_mode_url = GetUrlForAim(
-      controller_->client()->GetTemplateURLService(),
-      omnibox::DESKTOP_CHROME_OMNIBOX_KEYWORD_ENTRY_POINT,
-      /*query_start_time=*/base::Time::Now(), query_text,
-      lens::LensOverlayInvocationSource::kOmniboxContextualQuery,
-      /*additional_params=*/{}, omnibox::ModelMode::MODEL_MODE_UNSPECIFIED);
+  // Queries from the AI mode button will never have context.
+  base::RecordAction(base::UserMetricsAction(
+      "ContextualSearch.UserAction.SubmitQuery.WithoutContext.Omnibox"));
+  base::UmaHistogramBoolean(
+      "ContextualSearch.UserAction.SubmitQuery.WithoutContext.Omnibox", true);
+
+  GURL ai_mode_url =
+      GetUrlForAim(controller_->client()->GetTemplateURLService(),
+                   omnibox::DESKTOP_CHROME_OMNIBOX_KEYWORD_ENTRY_POINT,
+                   /*query_start_time=*/base::Time::Now(), query_text,
+                   lens::LensOverlayInvocationSource::kOmniboxContextualQuery,
+                   /*additional_params=*/{});
   controller_->client()->OpenUrl(ai_mode_url);
 }
 
@@ -882,10 +878,18 @@ void OmniboxEditModel::OpenSelection(OmniboxPopupSelection selection,
   }
 }
 
-void OmniboxEditModel::OpenSelectionForTesting(
-    base::TimeTicks timestamp,
-    WindowOpenDisposition disposition,
-    bool via_keyboard) {
+void OmniboxEditModel::OpenCurrentSelection(base::TimeTicks timestamp,
+                                            WindowOpenDisposition disposition,
+                                            bool via_keyboard) {
+  if (popup_view_ && popup_view_->IsSelectionPopupControlled()) {
+    // The webui popup handles its own selection state. Opening there might
+    // result in a call back to the native code to open a specified selection
+    // supported by native code. Any others not supported by the host may
+    // be acted on directly in the webui logic.
+    popup_view_->OpenCurrentSelection(disposition);
+    return;
+  }
+
   OpenSelection(popup_selection_, timestamp, disposition, via_keyboard);
 }
 
@@ -1225,6 +1229,17 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
     view_->RevertAll();
     view_->SelectAll(true);
   }
+
+  // On the "contextual tasks" page in particular, we need to (implicitly) blur
+  // the omnibox and focus the web contents, in order to ensure that the user
+  // doesn't accidentally copy an "about:blank" URL from the Omnibox.
+  if (controller_->client()->IsContextualTasksPage()) {
+    base::UmaHistogramEnumeration(kOmniboxEscapeHistogramName,
+                                  OmniboxEscapeAction::kBlur);
+    controller_->client()->FocusWebContents();
+    return true;
+  }
+
   if (user_input_was_in_progress) {
     base::UmaHistogramEnumeration(kOmniboxEscapeHistogramName,
                                   OmniboxEscapeAction::kClearUserInput);
@@ -1257,17 +1272,50 @@ void OmniboxEditModel::OnPaste() {
 }
 
 void OmniboxEditModel::OnUpOrDownPressed(bool down, bool page) {
-  const auto direction =
-      down ? OmniboxPopupSelection::kForward : OmniboxPopupSelection::kBackward;
-  const auto step = page ? OmniboxPopupSelection::kAllLines
-                         : OmniboxPopupSelection::kWholeLine;
+  const auto direction = down ? OmniboxPopupSelection::Direction::kForward
+                              : OmniboxPopupSelection::Direction::kBackward;
+  const auto step = page ? OmniboxPopupSelection::Step::kAllLines
+                         : OmniboxPopupSelection::Step::kWholeLine;
+
+  if (popup_view_ && popup_view_->IsSelectionPopupControlled()) {
+    const OmniboxPopupSelection old_selection = GetPopupSelection();
+    OmniboxPopupSelection new_selection = old_selection.GetNextSelection(
+        autocomplete_controller()->input(), autocomplete_controller()->result(),
+        controller_->client()->GetTemplateURLService(),
+        view_->AimButtonVisible(), direction, step);
+    // Pass through to native step if this is a keyword mode transition because
+    // the popup does not yet support keyword mode.
+    if (new_selection.state != OmniboxPopupSelection::LineState::KEYWORD_MODE) {
+      popup_view_->StepSelection(direction, step);
+      return;
+    }
+  }
+
   StepPopupSelection(direction, step);
 }
 
 void OmniboxEditModel::OnTabPressed(bool shift) {
-  StepPopupSelection(shift ? OmniboxPopupSelection::kBackward
-                           : OmniboxPopupSelection::kForward,
-                     OmniboxPopupSelection::kStateOrLine);
+  const OmniboxPopupSelection::Direction direction =
+      shift ? OmniboxPopupSelection::Direction::kBackward
+            : OmniboxPopupSelection::Direction::kForward;
+  const OmniboxPopupSelection::Step step =
+      OmniboxPopupSelection::Step::kStateOrLine;
+
+  if (popup_view_ && popup_view_->IsSelectionPopupControlled()) {
+    const OmniboxPopupSelection old_selection = GetPopupSelection();
+    OmniboxPopupSelection new_selection = old_selection.GetNextSelection(
+        autocomplete_controller()->input(), autocomplete_controller()->result(),
+        controller_->client()->GetTemplateURLService(),
+        view_->AimButtonVisible(), direction, step);
+    // Pass through to native step if this is a keyword mode transition because
+    // the popup does not yet support keyword mode.
+    if (new_selection.state != OmniboxPopupSelection::LineState::KEYWORD_MODE) {
+      popup_view_->StepSelection(direction, step);
+      return;
+    }
+  }
+
+  StepPopupSelection(direction, step);
 }
 
 bool OmniboxEditModel::OnSpacePressed() {
@@ -1866,15 +1914,22 @@ OmniboxPopupSelection OmniboxEditModel::GetPopupSelection() const {
 
 void OmniboxEditModel::SetPopupSelection(OmniboxPopupSelection new_selection,
                                          bool reset_to_default,
-                                         bool force_update_ui) {
+                                         bool force_update_ui,
+                                         bool native_update) {
   DCHECK(popup_view_);
+
+  // Special case for updating the focus ring around the AIM button.
+  view_->ApplyFocusRingToAimButton(new_selection.state ==
+                                   OmniboxPopupSelection::FOCUSED_BUTTON_AIM);
 
   if (autocomplete_controller()->result().empty()) {
     return;
   }
 
-  // Cancel the query so the matches don't change on the user.
-  controller_->StopAutocomplete(/*clear_result=*/false);
+  if (native_update) {
+    // Cancel the query so the matches don't change on the user.
+    controller_->StopAutocomplete(/*clear_result=*/false);
+  }
 
   if (new_selection == popup_selection_ && !force_update_ui) {
     // This occurs when e.g. pressing tab to select an action chip or the x
@@ -1886,20 +1941,15 @@ void OmniboxEditModel::SetPopupSelection(OmniboxPopupSelection new_selection,
   // `popup_selection_` to update themselves.
   const OmniboxPopupSelection old_selection = popup_selection_;
   popup_selection_ = new_selection;
-  observers_.Notify(&Observer::OnSelectionChanged, old_selection,
-                    popup_selection_);
-
-  // Special case for updating the focus ring around the AIM button.
-  bool apply_focus_ring_to_aim_button =
-      popup_selection_.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM;
-  bool remove_focus_ring_from_aim_button =
-      old_selection.state == OmniboxPopupSelection::FOCUSED_BUTTON_AIM;
-  if (apply_focus_ring_to_aim_button || remove_focus_ring_from_aim_button) {
-    view_->ApplyFocusRingToAimButton(apply_focus_ring_to_aim_button);
+  if (native_update) {
+    observers_.Notify(&Observer::OnSelectionChanged, old_selection,
+                      popup_selection_);
   }
 
   const AutocompleteMatch& match =
-      popup_selection_.line == OmniboxPopupSelection::kNoMatch
+      popup_selection_.line == OmniboxPopupSelection::kNoMatch ||
+              popup_selection_.line >=
+                  autocomplete_controller()->result().size()
           ? AutocompleteMatch()
           : autocomplete_controller()->result().match_at(popup_selection_.line);
 
@@ -2095,7 +2145,7 @@ std::u16string OmniboxEditModel::GetPopupAccessibilityLabelForCurrentSelection(
           match.associated_keyword, "");
       std::u16string replacement_string =
           turl ? turl->short_name() : match.contents;
-      bool ask_keyword = turl && turl->is_ask_starter_pack();
+      bool ask_keyword = turl && turl->is_ask_type();
       // For featured search engines, we also want to add the shortcut name.
       if (AutocompleteMatch::IsFeaturedSearchType(match.type)) {
         int message_id = ask_keyword ? IDS_ACC_ASK_KEYWORD_MODE_WITH_SHORTCUT
@@ -2202,6 +2252,8 @@ void OmniboxEditModel::UpdatePopupSelectionOnResultChanged() {
   if (!popup_view_) {
     return;
   }
+  TRACE_EVENT("omnibox",
+              "OmniboxEditModel::UpdatePopupSelectionOnResultChanged");
   rich_suggestion_bitmaps_.clear();
   const AutocompleteResult& result = autocomplete_controller()->result();
 
@@ -2223,6 +2275,7 @@ void OmniboxEditModel::OnPopupResultChanged() {
   if (!popup_view_) {
     return;
   }
+  TRACE_EVENT("omnibox", "OmniboxEditModel::OnPopupResultChanged");
   UpdatePopupSelectionOnResultChanged();
   observers_.Notify(&Observer::OnContentsChanged);
 }
@@ -2726,9 +2779,12 @@ void OmniboxEditModel::OpenMatch(OmniboxPopupSelection selection,
         base::TimeTicks::Now() - match_selection_timestamp);
     action->Execute(context);
     if (context.enter_starter_pack_id_ != 0 && template_url_service) {
+      template_url_starter_pack_data::StarterPackId starter_pack_id =
+          static_cast<template_url_starter_pack_data::StarterPackId>(
+              context.enter_starter_pack_id_);
       if (const TemplateURL* starter_pack_turl =
               template_url_service->FindStarterPackTemplateURL(
-                  context.enter_starter_pack_id_)) {
+                  starter_pack_id)) {
         EnterKeywordMode(
             OmniboxEventProto::TOOLBELT, starter_pack_turl,
             AutocompleteMatch::GetKeywordPlaceholder(

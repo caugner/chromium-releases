@@ -290,4 +290,101 @@ public class ModalDialogViewUnitTest {
         var model = modelBuilder.with(ModalDialogProperties.CUSTOM_VIEW, view).build();
         PropertyModelChangeProcessor.create(model, mDialogView, new ModalDialogViewBinder());
     }
+
+    @Test
+    public void testBottomSpacerVisibility_WithLargePadding() {
+        // Create model with no buttons but large bottom padding.
+        mModelBuilder.with(ModalDialogProperties.PADDING, new android.graphics.Rect(0, 0, 0, 20));
+        createModel(mModelBuilder, MIN_DIALOG_WIDTH, MIN_DIALOG_HEIGHT);
+
+        android.view.View spacer = mDialogView.findViewById(R.id.dialog_bottom_spacer);
+        assertEquals(
+                "Spacer should be gone when large padding is present.",
+                android.view.View.GONE,
+                spacer.getVisibility());
+    }
+
+    @Test
+    public void testBottomSpacerVisibility_ButtonsPresent() {
+        var model =
+                mModelBuilder
+                        .with(ModalDialogProperties.TITLE, "Title")
+                        .with(ModalDialogProperties.POSITIVE_BUTTON_TEXT, "OK")
+                        .build();
+        PropertyModelChangeProcessor.create(model, mDialogView, new ModalDialogViewBinder());
+
+        android.view.View spacer = mDialogView.findViewById(R.id.dialog_bottom_spacer);
+        assertEquals(
+                "Spacer should be GONE when buttons are present.",
+                android.view.View.GONE,
+                spacer.getVisibility());
+    }
+
+    @Test
+    public void testBottomSpacerVisibility_CustomButtonBarPresent() {
+        var customButtonBar = new FrameLayout(mActivity);
+        var model =
+                mModelBuilder
+                        .with(ModalDialogProperties.TITLE, "Title")
+                        .with(ModalDialogProperties.CUSTOM_BUTTON_BAR_VIEW, customButtonBar)
+                        .build();
+        PropertyModelChangeProcessor.create(model, mDialogView, new ModalDialogViewBinder());
+
+        android.view.View spacer = mDialogView.findViewById(R.id.dialog_bottom_spacer);
+        assertEquals(
+                "Spacer should be GONE when custom button bar is present.",
+                android.view.View.GONE,
+                spacer.getVisibility());
+    }
+
+    @Test
+    public void testBottomSpacerVisibility_CustomViewAtBottom() {
+        var customView = new FrameLayout(mActivity);
+        var model =
+                mModelBuilder
+                        .with(ModalDialogProperties.TITLE, "Title")
+                        .with(ModalDialogProperties.CUSTOM_VIEW, customView)
+                        .build();
+        PropertyModelChangeProcessor.create(model, mDialogView, new ModalDialogViewBinder());
+
+        android.view.View spacer = mDialogView.findViewById(R.id.dialog_bottom_spacer);
+        assertEquals(
+                "Spacer should be GONE when custom view is at the bottom.",
+                android.view.View.GONE,
+                spacer.getVisibility());
+    }
+
+    @Test
+    public void testBottomSpacerVisibility_FooterVisible() {
+        var model =
+                mModelBuilder
+                        .with(ModalDialogProperties.TITLE, "Title")
+                        .with(ModalDialogProperties.FOOTER_MESSAGE, "Footer")
+                        .build();
+        PropertyModelChangeProcessor.create(model, mDialogView, new ModalDialogViewBinder());
+
+        android.view.View spacer = mDialogView.findViewById(R.id.dialog_bottom_spacer);
+        assertEquals(
+                "Spacer should be GONE when footer is visible.",
+                android.view.View.GONE,
+                spacer.getVisibility());
+    }
+
+    @Test
+    public void testBottomSpacerVisibility_CheckboxBelowCustomView() {
+        var customView = new FrameLayout(mActivity);
+        var model =
+                mModelBuilder
+                        .with(ModalDialogProperties.TITLE, "Title")
+                        .with(ModalDialogProperties.CUSTOM_VIEW, customView)
+                        .with(ModalDialogProperties.CHECKBOX_TEXT, "Checkbox")
+                        .build();
+        PropertyModelChangeProcessor.create(model, mDialogView, new ModalDialogViewBinder());
+
+        android.view.View spacer = mDialogView.findViewById(R.id.dialog_bottom_spacer);
+        assertEquals(
+                "Spacer should be VISIBLE when checkbox is below a custom view.",
+                android.view.View.VISIBLE,
+                spacer.getVisibility());
+    }
 }

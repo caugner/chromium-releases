@@ -70,6 +70,17 @@ class GlicWebClientAccess {
 
   // Informs the web client that an actor task list row was clicked.
   virtual void NotifyActorTaskListRowClicked(int32_t task_id) = 0;
+
+  // Informs the web client that the skill to invoke is updated.
+  virtual void NotifySkillToInvokeChanged(mojom::SkillPtr skill) = 0;
+
+  // Informs the web client that the list of context skills has changed.
+  virtual void NotifyContextualSkillPreviewsChanged(
+      std::vector<mojom::SkillPreviewPtr> contextual_skill_previews) = 0;
+
+  // Informs the web client that the browser wants to invoke Glic.
+  virtual void Invoke(mojom::InvokeOptionsPtr options,
+                      base::OnceClosure callback) = 0;
 };
 
 }  // namespace glic

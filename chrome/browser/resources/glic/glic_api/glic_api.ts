@@ -4,17 +4,20 @@
 
 // API between the Chrome browser and the Glic web client.
 //
-// Overall notes:
+// Follow some notes providing more context about the Glic API and guidelines on
+// how the web client code should be constructed around it. Check the internal
+// documentation at http://shortn/_xFTHEnFhDV for more details.
+//
 // - There may be multiple instances of the web client running at a time, all
-//   sharing the same web storage space. Whenever one is started or restarted,
-//   the initialization steps will be repeated.
-// - As in TypeScript all `number`s are 64 bit floating points, we decided to
-//   make all identifier values be of the `string` type (e.g. for a window or a
-//   tab).
+//   sharing the same local web storage space. Whenever one is started or
+//   restarted, the initialization steps will be repeated.
 // - The defined functions and interfaces can be "evolved" to provide more
 //   functionality and data, as needed, but must be kept backwards compatible.
 // - Functions are documented with their known behavior. Exceptions and promise
 //   failures should be documented only if they are expected.
+// - As in TypeScript all `number`s are 64 bit floating points, we decided to
+//   make all identifier values be of the `string` type (e.g. for a window or a
+//   tab).
 // - The browser provided tab and window IDs are based on the browser's
 //   SessionID values, which are not stable between Chrome restarts, and should
 //   not be saved to persisted storage for later reuse. See:
@@ -23,6 +26,8 @@
 //   will be silently made empty if exceeding the 2 MiB length limit imposed by
 //   Mojo's URL implementation. See:
 //   https://crsrc.org/c/url/mojom/url.mojom
+// - Avoid doing exhaustive checks against enums defined by the API, as their
+//   values may evolve over time.
 
 /** Allows the Glic web client to register with the host WebUI. */
 export declare interface GlicHostRegistry {
@@ -40,6 +45,9 @@ export declare interface GlicHostRegistry {
 
 /** Additional context object. */
 export declare interface AdditionalContext {
+  /** Where the additional context came from */
+  source?: AdditionalContextSource;
+
   /** User facing name of the context.  Eg. the filename, or full url */
   name?: string;
 
@@ -78,6 +86,24 @@ export declare interface AdditionalContextPart {
   pdf?: PdfDocumentData;
   tabContext?: TabContextResult;
   region?: CapturedRegion;
+}
+
+/** Options for invoking Glic. */
+export declare interface InvokeOptions {
+  /** Source that triggered this invocation. */
+  invocationSource: InvocationSource;
+  /** Prompts to pre-populate or suggest. */
+  prompts?: string[];
+  /** Additional context to attach. */
+  context?: AdditionalContext;
+  /** Whether to automatically submit the prompt. */
+  autoSubmit: boolean;
+  /** Feature mode to switch to. */
+  featureMode: FeatureMode;
+  /** Whether to suppress Zero State Suggestions. */
+  disableZeroStateSuggestions: boolean;
+  /** Skill ID to trigger. */
+  skillId?: string;
 }
 
 /**
@@ -149,6 +175,14 @@ export declare interface GlicWebClient {
    * as unresponsive and displaying an error state to the user.
    */
   checkResponsive?(): Promise<void>;
+
+  /**
+   * Invokes Glic with specific options.
+   * This can be called to open the panel or update an existing session.
+   * Returns when the invocation has been received and processed by the client.
+   * @throws {Error} on failure.
+   */
+  invoke?(options: InvokeOptions): Promise<void>;
 
   // !!! ATTENTION !!!
   // Avoid adding new methods to this interface! Instead, to push information to
@@ -580,7 +614,10 @@ export declare interface GlicBrowserHost {
   /** Returns the state of the glic closed captioning setting. */
   getClosedCaptioningSetting?(): ObservableValue<boolean>;
 
-  /** Returns the state of the web actuation setting. */
+  /**
+   * Returns the state of the web actuation setting. This reflects a
+   * user-controlled toggle for whether actuation is allowed.
+   */
   getActuationOnWebSetting?(): ObservableValue<boolean>;
 
   /**
@@ -802,6 +839,11 @@ export declare interface GlicBrowserHost {
   updateSkill?(request: UpdateSkillRequest): Promise<void>;
 
   /**
+   * Requests that the browser open skill management UI.
+   */
+  showManageSkillsUi?(): void;
+
+  /**
    * Gets a skill by id. The web client should use this method to get the
    * full skill details including the prompt for display or run in the UI.
    * The promise will fail if the skill is not found.
@@ -963,7 +1005,10 @@ export declare interface GlicBrowserHost {
    */
   getAdditionalContext?(): Observable<AdditionalContext>;
 
-  /** Returns the host's capability to act on web pages. */
+  /**
+   * Returns the host's capability to act on web pages. This reflects enterprise
+   * policy for whether actuation is allowed.
+   */
   getActOnWebCapability?(): ObservableValue<boolean>;
 
   /**
@@ -1121,15 +1166,12 @@ export declare interface GlicBrowserHostMetrics {
   onTurnCompleted?(model: WebClientModel, duration: number): void;
 
   /**
-   * Called when the model is changed. Metrics may be recorded with a separate
-   * scope.
-   */
-  onModelChanged?(model: WebClientModel): void;
-
-  /**
    * Called when we want to record an use counter metric.
    */
   onRecordUseCounter?(action: WebUseCounter): void;
+
+  // Removed fields and methods :
+  onModelChanged?(): never;  // Last seen on Canary 146.0.7639.0
 }
 
 export enum ResponseStopCause {
@@ -1342,6 +1384,11 @@ export declare interface PanelOpeningData {
    */
   recentlyActiveConversations?: ConversationInfo[];
   /**
+   * Overrides the First Run Experience. If set, the panel will act as if the
+   * user was or wasn't in a specific FRE state.
+   */
+  freOverride?: FreOverride;
+  /**
    * Information about the conversation being opened.
    *
    * - The web client will load the requested `conversationInfo.conversationId`.
@@ -1534,6 +1581,7 @@ export declare interface PageMetadata {
  * available while the page is being loaded or if not provided by the page
  * itself.
  */
+
 export declare interface TabData {
   /**
    * Unique ID of the tab that owns the page. These values are unique across
@@ -1612,6 +1660,8 @@ export declare interface TabData {
    * consider whether the tab is active in the window.
    */
   isWindowActive?: boolean;
+  /** Lightweight page features detected on the page. */
+  lightweightPageFeatures?: LightweightPageFeature[];
 }
 
 /** A candidate for pinning. */
@@ -2025,6 +2075,8 @@ export declare interface ZeroStateSuggestionsV2 {
    * the current tab context.
    */
   isPending?: boolean;
+  /** The host's invocation source. */
+  invocationSource?: InvocationSource;
 }
 
 /**
@@ -2057,6 +2109,7 @@ export declare interface SuggestionContent {
   suggestion: string;
 }
 
+// LINT.IfChange(Skill)
 /** Represents a single skill preview. */
 export declare interface SkillPreview {
   /** A unique identifier for the skill. */
@@ -2067,6 +2120,8 @@ export declare interface SkillPreview {
   icon: string;
   /** The source of the skill. */
   source: SkillSource;
+  /** The description of the skill. */
+  description?: string;
 }
 
 /** Represents a single skill. */
@@ -2075,11 +2130,30 @@ export declare interface Skill {
   preview: SkillPreview;
   /** The underlying LLM prompt for the skill. */
   prompt: string;
+  /**
+   * The id of the source skill this skill is derived from. This is only
+   * present if the SkillSource is DERIVED_FROM_FIRST_PARTY.
+   */
+  sourceSkillId?: string;
 }
+// LINT.ThenChange(//chrome/browser/glic/host/glic.mojom:Skill)
 
 export declare interface CreateSkillRequest {
+  /**
+   * A unique identifier for the skill. This is only available when the user is
+   * trying to remix a 1P skill.
+   */
+  id?: string;
+  /** The user-facing name of the skill. Only available in 1P remix flow. */
+  name?: string;
+  /** The icon for the skill. Only available in 1P remix flow. */
+  icon?: string;
   /** A prompt for the skill, which can be empty. */
   prompt: string;
+  /** The description of the skill. Only available in 1P remix flow. */
+  description?: string;
+  /** The source of the skill. */
+  source?: SkillSource;
 }
 
 export declare interface UpdateSkillRequest {
@@ -2372,6 +2446,11 @@ export enum CreateTaskErrorReason {
   UNKNOWN = 0,
   // The host does not support the actor task system.
   TASK_SYSTEM_UNAVAILABLE = 1,
+  // The host already has an existing task in progress. The client must stop it
+  // before requesting a new task.
+  EXISTING_ACTIVE_TASK = 2,
+  // The user's browser policy or account settings prevent creating actor tasks.
+  BLOCKED_BY_POLICY = 3,
 }
 
 ///////////////////////////////////////////////
@@ -2439,6 +2518,7 @@ export enum Platform {
   WINDOWS = 2,
   LINUX = 3,
   CHROME_OS = 4,
+  ANDROID = 5,
 }
 
 ///////////////////////////////////////////////
@@ -2481,6 +2561,8 @@ export enum SkillSource {
   FIRST_PARTY = 1,
   // Skill created by an end-user.
   USER_CREATED = 2,
+  // Skill derived from a first party skill.
+  DERIVED_FROM_FIRST_PARTY = 3,
 }
 
 ///////////////////////////////////////////////
@@ -2561,6 +2643,19 @@ export enum PanelStateKind {
 
 ///////////////////////////////////////////////
 // WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// Represents an override of the First Run Experience (FRE).
+export enum FreOverride {
+  UNSPECIFIED = 0,
+  // Variation that requires text input from the user to unlock full client.
+  TRUST_FIRST_TEXT = 1,
+  // Variation that requires mouse click from the user to unlock full client.
+  TRUST_FIRST_CLICK = 2,
+  // Variation that starts with full client unlocked and shows inline consent.
+  TRUST_FIRST_INLINE = 3,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
 // Entry points that can trigger the opening of the panel.
 export enum InvocationSource {
   // Button in the OS.
@@ -2593,10 +2688,27 @@ export enum InvocationSource {
   SHARED_IMAGE = 13,
   // From the handoff button.
   HANDOFF_BUTTON = 14,
+  // From invoking skills.
+  SKILLS = 15,
   // Automatically opened from contextual cueing.
   AUTO_OPENED_BY_CONTEXTUAL_CUE = 16,
   // User clicked the summarize button in the PDF viewer.
   PDF_SUMMARIZE_BUTTON = 17,
+  // From a navigation capture.
+  NAVIGATION_CAPTURE = 18,
+  // Automatically opened for a PDF.
+  AUTO_OPENED_FOR_PDF = 19,
+  // From the context menu.
+  WEB_CONTENTS_CONTEXT_MENU = 23,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// Mode for specific feature behaviors.
+export enum FeatureMode {
+  UNSPECIFIED = 0,
+  IMAGE_GENERATION = 1,
+  BLUEDOG = 2,
 }
 
 ///////////////////////////////////////////////
@@ -2628,6 +2740,22 @@ export enum WebUseCounter {
   SUBMIT_PROMPT_WITH_AUTO_MODE = 1,
   TASK_INTERRUPTED_FOR_USER_CONFIRMATION = 2,
   TASK_INTERRUPTED_FOR_USER_CLARIFICATION = 3,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+export enum AdditionalContextSource {
+  SHARE_CONTEXT_MENU = 0,
+  REGION_SELECTION = 1,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// Lightweight page features detected on the page.
+export enum LightweightPageFeature {
+  UNKNOWN = 0,
+  // The YouTube "Ask" button is visible.
+  YT_ASK_BUTTON_PRESENT = 1,
 }
 
 ///////////////////////////////////////////////
@@ -2670,6 +2798,10 @@ export enum HostCapability {
   TRUST_FIRST_ONBOARDING_ARM2 = 5,
   // Glic host supports sharing additional image context.
   SHARE_ADDITIONAL_IMAGE_CONTEXT = 6,
+  // Enables the PDF Zero State Web UI.
+  PDF_ZERO_STATE = 7,
+  // Indicates that the host supports the invoke mechanism.
+  INVOKE = 8,
 }
 
 ///////////////////////////////////////////////

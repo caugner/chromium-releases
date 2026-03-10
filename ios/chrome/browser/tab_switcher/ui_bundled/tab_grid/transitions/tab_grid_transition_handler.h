@@ -9,6 +9,8 @@
 
 #import "base/ios/block_types.h"
 
+@protocol TabGridTransitionContextProvider;
+
 // TabGrid transitions directions available.
 enum class TabGridTransitionDirection {
   kFromTabGridToBrowser,
@@ -19,7 +21,6 @@ enum class TabGridTransitionDirection {
 enum class TabGridTransitionType {
   kNormal,
   kReducedMotion,
-  kAnimationDisabled,
 };
 
 @class LayoutGuideCenter;
@@ -31,18 +32,29 @@ enum class TabGridTransitionType {
 
 // Creates the transition object based on the provided `transitionType`,
 // `direction`, `tabGridTransitionLayoutProvider`, `tabGridViewController`,
-// `bvcContainerViewController`, `layoutGuideCenter`, `isRegularBrowserNTP`,
+// `layoutViewController`, `layoutGuideCenter`, `isRegularBrowserNTP`,
 // and `isIncognito`.
 - (instancetype)initWithTransitionType:(TabGridTransitionType)transitionType
                              direction:(TabGridTransitionDirection)direction
        tabGridTransitionLayoutProvider:
            (id<TabGridTransitionLayoutProviding>)tabGridTransitionLayoutProvider
                  tabGridViewController:(UIViewController*)tabGridViewController
-            bvcContainerViewController:
-                (UIViewController*)bvcContainerViewController
+           browserLayoutViewController:
+               (UIViewController<TabGridTransitionContextProvider>*)
+                   browserLayoutViewController
                      layoutGuideCenter:(LayoutGuideCenter*)layoutGuideCenter
                    isRegularBrowserNTP:(BOOL)isRegularBrowserNTP
                              incognito:(BOOL)incognito
+    NS_DESIGNATED_INITIALIZER;
+
+// Creates the transition object for a non-animated transition in `direction`.
+- (instancetype)
+    initWithDisabledAnimationWithDirection:(TabGridTransitionDirection)direction
+               browserLayoutViewController:
+                   (UIViewController<TabGridTransitionContextProvider>*)
+                       browserLayoutViewController
+                     tabGridViewController:
+                         (UIViewController*)tabGridViewController
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;

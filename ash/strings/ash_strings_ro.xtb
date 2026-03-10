@@ -342,7 +342,6 @@
 <translation id="2201071101391734388">Fotografia recentă <ph name="INDEX" /> din <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Restrânge Google Tasks</translation>
 <translation id="2208323208084708176">Modul Desktop unificat</translation>
-<translation id="2210311543574621570">Vei vedea clipboardul când apeși lung pe Ctrl + V. Poți să dezactivezi această comandă rapidă dezactivând funcția experimentală #clipboard-history-longpress în chrome://flags.</translation>
 <translation id="2215920961700443347">Nu există conexiune la internet. Conectează-te la internet și încearcă din nou.</translation>
 <translation id="2222841058024245321">Desktop 7</translation>
 <translation id="2223384056430485343">Pe un ecran împărțit</translation>
@@ -696,7 +695,7 @@
 <translation id="3409584356742878290">Afișează sau ascunde inspectorul Developer Tools</translation>
 <translation id="3410336247007142655">Afișează setările pentru tema întunecată</translation>
 <translation id="3413817803639110246">Încă nu este nimic de văzut</translation>
-<translation id="3417835166382867856">Caută în file</translation>
+<translation id="3417835166382867856">Caută file</translation>
 <translation id="3426253816581969877">Apasă lung pe <ph name="MODIFIER_1" /><ph name="MODIFIER_2" />, atinge <ph name="KEY" /> până când ajungi la fereastra pe care dorești să o deschizi, apoi eliberează</translation>
 <translation id="3428447136709161042">Deconectează-te de la <ph name="NETWORK_NAME" /></translation>
 <translation id="3430396595145920809">Glisează dinspre dreapta pentru a reveni</translation>
@@ -2195,7 +2194,6 @@ Pentru a închide dispozitivul, apasă lung pe butonul de pornire al dispozitivu
 <translation id="8241650983304689286">Adaugă o filă la noua afișare împărțită</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, puterea semnalului: <ph name="SIGNAL_STRENGTH" />, bateria telefonului: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Afișează tot conținutul din Google Drive</translation>
-<translation id="8257510091797044096">Configurează-ți dispozitivul</translation>
 <translation id="8261506727792406068">Șterge</translation>
 <translation id="8262312463845990408">Schimbă redarea</translation>
 <translation id="8268302343625273732">Vezi toate temele în Google Classroom</translation>

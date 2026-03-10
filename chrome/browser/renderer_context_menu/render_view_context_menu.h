@@ -19,6 +19,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/autofill/autofill_context_menu_manager.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
+#include "chromeos/ui/clipboard_history/clipboard_history_types.h"
 #include "components/compose/buildflags.h"
 #include "components/custom_handlers/protocol_handler_registry.h"
 #include "components/lens/buildflags.h"
@@ -28,7 +29,7 @@
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
 #include "components/renderer_context_menu/render_view_context_menu_proxy.h"
 #include "components/search_engines/template_url.h"
-#include "components/supervised_user/core/browser/supervised_user_url_filter.h"
+#include "components/supervised_user/core/browser/supervised_user_url_filtering_service.h"
 #include "content/public/browser/context_menu_params.h"
 #include "content/public/common/buildflags.h"
 #include "extensions/buildflags/buildflags.h"
@@ -221,6 +222,8 @@ class RenderViewContextMenu
                                bool started_from_context_menu) override;
 
  private:
+  void ExecGlic();
+
   friend class RenderViewContextMenuTest;
   friend class TestRenderViewContextMenu;
   friend class FormatUrlForClipboardTest;
@@ -321,9 +324,6 @@ class RenderViewContextMenu
   void AppendSearchWebForImageItems();
   void AppendGlicShareImageItem();
   void AppendProtocolHandlerSubMenu();
-  // TODO(b/316143236): Remove this method (along with the methods called by it)
-  // once `kPasswordManualFallbackAvailable` is rolled out.
-  void AppendPasswordItems();
   void AppendSharingItems();
   void AppendClickToCallItem();
   void AppendRegionSearchItem();
@@ -375,6 +375,7 @@ class RenderViewContextMenu
   void ExecProtocolHandler(int event_flags, int handler_index);
   void ExecOpenLinkInProfile(int profile_index);
   void ExecInspectElement();
+  void ExecInspectElementWithGemini();
   void ExecInspectBackgroundPage();
   void ExecSaveLinkAs();
   void ExecSaveAs();
@@ -443,7 +444,9 @@ class RenderViewContextMenu
   // Does not execute "Save link as" if the URL is blocked by the URL filter.
   void CheckSupervisedUserURLFilterAndSaveLinkAs();
   void OnSupervisedUserURLFilterChecked(
-      supervised_user::SupervisedUserURLFilter::Result result);
+      supervised_user::WebFilteringResult result);
+
+  void MaybeAppendOpenGlicItem();
 
   // Opens the Lens overlay to search a region defined by the given bounds of
   // the view and the image to be searched. Tab bounds and view bounds are
@@ -499,6 +502,9 @@ class RenderViewContextMenu
   // - Whether or not the registered protocols have changed since the menu was
   //   built.
   bool is_protocol_submenu_valid_ = false;
+
+  // Inspect sub-menu handling.
+  ui::SimpleMenuModel inspect_submenu_model_;
 
   // An observer that handles spelling suggestions, "Add to dictionary", and
   // "Use enhanced spell check" items.
@@ -600,7 +606,10 @@ class RenderViewContextMenu
 
            // Image loading commands.
            IDC_CONTENT_CONTEXT_LOAD_IMAGE,
-           IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB});
+           IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB,
+
+           // Opening Glic
+           IDC_CONTENT_CONTEXT_GLIC});
   // LINT.ThenChange(//chrome/app/chrome_command_ids.h:ChromeCommandIds)
 
   base::WeakPtrFactory<RenderViewContextMenu> weak_pointer_factory_{this};

@@ -32,6 +32,7 @@ ActorOverlayWebView::~ActorOverlayWebView() {
 
 void ActorOverlayWebView::ShowUI(tabs::TabInterface* tab,
                                  base::OnceClosure callback) {
+  CHECK(base::FeatureList::IsEnabled(features::kGlicActorUi));
   CHECK(features::kGlicActorUiOverlay.Get());
   if (!web_contents()) {
     // Creates a new web contents if one doesn't exist.
@@ -95,7 +96,7 @@ void ActorOverlayWebView::MoveCursorTo(const gfx::Point& point,
   // Ensure the callback runs on any early return. We Release() ownership only
   // when passing the callback to an asynchronous operation.
   base::ScopedClosureRunner runner(std::move(callback));
-  if (!base::FeatureList::IsEnabled(features::kGlicActorUiOverlayMagicCursor)) {
+  if (!base::FeatureList::IsEnabled(features::kGlicActorUiMagicCursor)) {
     return;
   }
   if (actor::ui::ActorOverlayUI* web_ui = GetWebUi()) {
@@ -107,7 +108,7 @@ void ActorOverlayWebView::TriggerClickAnimation(base::OnceClosure callback) {
   // Ensure the callback runs on any early return. We Release() ownership only
   // when passing the callback to an asynchronous operation.
   base::ScopedClosureRunner runner(std::move(callback));
-  if (!base::FeatureList::IsEnabled(features::kGlicActorUiOverlayMagicCursor)) {
+  if (!base::FeatureList::IsEnabled(features::kGlicActorUiMagicCursor)) {
     return;
   }
   if (actor::ui::ActorOverlayUI* web_ui = GetWebUi()) {

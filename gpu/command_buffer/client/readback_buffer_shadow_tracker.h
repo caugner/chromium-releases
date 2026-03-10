@@ -11,6 +11,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_span.h"
 #include "base/memory/weak_ptr.h"
+#include "gles2_impl_export.h"
 
 namespace gpu {
 
@@ -20,9 +21,9 @@ namespace gles2 {
 
 class GLES2CmdHelper;
 
-class ReadbackBufferShadowTracker {
+class GLES2_IMPL_EXPORT ReadbackBufferShadowTracker {
  public:
-  class Buffer final {
+  class GLES2_IMPL_EXPORT Buffer final {
    public:
     explicit Buffer(GLuint buffer_id,
                     MappedMemoryManager* mapped_memory,
@@ -39,8 +40,7 @@ class ReadbackBufferShadowTracker {
     void Free();
     void FreePendingToken(int32_t token);
 
-    // TODO(crbug.com/40285824): Return the span instead of a pointer.
-    void* MapReadbackShm(uint32_t offset, uint32_t map_size);
+    base::span<uint8_t> MapReadbackShm(uint32_t offset, uint32_t map_size);
     bool UnmapReadbackShm();
 
     void UpdateSerialTo(uint64_t serial);

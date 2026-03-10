@@ -96,6 +96,7 @@ public class AutocompleteMatch {
     private final String mInlineAutocompletion;
     private final String mAdditionalText;
     private final @Nullable String mTabGroupUuid;
+    private final @Nullable String mAssociatedKeyword;
     private final boolean mIsRefineable;
     private @Nullable SuggestTemplateInfo mSuggestTemplate;
 
@@ -126,6 +127,7 @@ public class AutocompleteMatch {
             String inlineAutocompletion,
             String additionalText,
             @Nullable String tabGroupUuid,
+            @Nullable String associatedKeyword,
             byte @Nullable [] serializedSuggestTemplate) {
         if (subtypes == null) {
             subtypes = Collections.emptySet();
@@ -164,6 +166,7 @@ public class AutocompleteMatch {
         mInlineAutocompletion = inlineAutocompletion;
         mAdditionalText = additionalText;
         mTabGroupUuid = tabGroupUuid;
+        mAssociatedKeyword = associatedKeyword;
         mIsRefineable =
                 !mHasTabMatch
                         && mType != OmniboxSuggestionType.URL_WHAT_YOU_TYPED
@@ -221,6 +224,7 @@ public class AutocompleteMatch {
             String inlineAutocompletion,
             String additionalText,
             String localTabGroupId,
+            String associatedKeyword,
             byte[] serializedSuggestTemplate) {
         assert contentClassificationOffsets.length == contentClassificationStyles.length;
         List<MatchClassification> contentClassifications = new ArrayList<>();
@@ -263,6 +267,7 @@ public class AutocompleteMatch {
                         inlineAutocompletion,
                         additionalText,
                         TextUtils.isEmpty(localTabGroupId) ? null : localTabGroupId,
+                        TextUtils.isEmpty(associatedKeyword) ? null : associatedKeyword,
                         serializedSuggestTemplate);
         match.updateNativeObjectRef(nativeObject);
         match.setDescription(
@@ -509,7 +514,8 @@ public class AutocompleteMatch {
                 && mAnswerType == suggestion.mAnswerType
                 && answer_template_is_equal
                 && suggest_template_is_equal
-                && ObjectsCompat.equals(mTabGroupUuid, suggestion.mTabGroupUuid);
+                && ObjectsCompat.equals(mTabGroupUuid, suggestion.mTabGroupUuid)
+                && ObjectsCompat.equals(mAssociatedKeyword, suggestion.mAssociatedKeyword);
     }
 
     /**
@@ -523,6 +529,10 @@ public class AutocompleteMatch {
 
     public @Nullable String getTabGroupUuid() {
         return mTabGroupUuid;
+    }
+
+    public @Nullable String getAssociatedKeyword() {
+        return mAssociatedKeyword;
     }
 
     public boolean isRefineable() {
@@ -638,6 +648,7 @@ public class AutocompleteMatch {
                 input.getInlineAutocompletion(),
                 input.getAdditionalText(),
                 /* tabGroupUuid= */ null,
+                /* associatedKeyword= */ null,
                 /* serializedSuggestTemplate= */ null);
     }
 

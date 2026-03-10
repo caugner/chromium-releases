@@ -13,6 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
 #include "base/uuid.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/companion/text_finder/text_finder_manager.h"
@@ -21,21 +22,24 @@
 #include "chrome/browser/contextual_search/contextual_search_web_contents_helper.h"
 #include "chrome/browser/contextual_tasks/active_task_context_provider.h"
 #include "chrome/browser/contextual_tasks/contextual_search_session_finder.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
-#include "chrome/browser/contextual_tasks/contextual_tasks_side_panel_coordinator.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_interface.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
-#include "chrome/browser/ui/tabs/tab_list_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/webui_url_constants.h"
+#include "components/contextual_search/contextual_search_metrics_recorder.h"
 #include "components/contextual_search/contextual_search_service.h"
 #include "components/contextual_tasks/public/account_utils.h"
 #include "components/contextual_tasks/public/contextual_task.h"
@@ -43,6 +47,8 @@
 #include "components/contextual_tasks/public/features.h"
 #include "components/lens/lens_url_utils.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
+#include "components/search_engines/template_url_service.h"
+#include "components/search_engines/util.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/shared_highlighting/core/common/fragment_directives_utils.h"
 #include "components/signin/public/base/consent_level.h"
@@ -53,9 +59,11 @@
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/schemeful_site.h"
 #include "net/base/url_util.h"
+#include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -94,6 +102,9 @@ constexpr net::BackoffEntry::Policy
 
 constexpr char kAiPageHost[] = "https://google.com";
 constexpr char kTaskQueryParam[] = "task";
+constexpr char kAimUrlQueryParam[] = "aim_url";
+constexpr char kDebugParam[] = "deb";
+constexpr char kDebugNoCobrowseValue[] = "nocobrowse1";
 
 // Parameters that the search results page must contain at least one of to be
 // considered a valid search results page.
@@ -126,8 +137,9 @@ enum class EntrypointSource {
   kFromWeb = 0,
   kFromOmnibox = 1,
   kFromNewTabPage = 2,
+  kFromLens = 3,
 
-  kMaxValue = kFromNewTabPage,
+  kMaxValue = kFromLens,
 };
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/contextual_tasks/enums.xml:EntrypointSource)
@@ -140,8 +152,9 @@ EntrypointSource ConvertContextualSearchSourceToEntrypointSource(
     case contextual_search::ContextualSearchSource::kNewTabPage:
       return EntrypointSource::kFromNewTabPage;
     case contextual_search::ContextualSearchSource::kLens:
+      return EntrypointSource::kFromLens;
     case contextual_search::ContextualSearchSource::kContextualTasks:
-      // These shouldn't happen but if they do - just fall through to say it's
+      // This shouldn't happen but is it does - just fall through to say it's
       // from web.
     case contextual_search::ContextualSearchSource::kUnknown:
       return EntrypointSource::kFromWeb;
@@ -184,7 +197,7 @@ GURL AppendAimEntryPointParams(GURL url,
 
 ContextualTasksUiService::ContextualTasksUiService(
     Profile* profile,
-    contextual_tasks::ContextualTasksService* contextual_tasks_service,
+    ContextualTasksService* contextual_tasks_service,
     signin::IdentityManager* identity_manager,
     AimEligibilityService* aim_eligibility_service)
     : profile_(profile),
@@ -192,13 +205,7 @@ ContextualTasksUiService::ContextualTasksUiService(
       identity_manager_(identity_manager),
       aim_eligibility_service_(aim_eligibility_service),
       request_access_token_backoff_(
-          &kIgnoreFirstErrorRequestAccessTokenBackoffPolicy) {
-  ai_page_hosts_.emplace_back(kAiPageHost);
-  std::string forced_host = contextual_tasks::GetForcedEmbeddedPageHost();
-  if (!forced_host.empty()) {
-    ai_page_hosts_.emplace_back(base::StrCat({"https://", forced_host}));
-  }
-}
+          &kIgnoreFirstErrorRequestAccessTokenBackoffPolicy) {}
 
 ContextualTasksUiService::~ContextualTasksUiService() = default;
 
@@ -224,27 +231,8 @@ void ContextualTasksUiService::OnNavigationToAiPageIntercepted(
     auto* helper = ContextualSearchWebContentsHelper::FromWebContents(
         source_tab->GetContents());
     if (helper && helper->session_handle()) {
-      source = helper->session_handle()->GetMetricsRecorder()->source();
-
-      auto* service =
-          ContextualSearchServiceFactory::GetForProfile(profile_.get());
-      if (service) {
-        // Create a new handle for existing session. The session handle should
-        // not be moved because there can be cases where a user opens the WebUI
-        // in a new tab (and would therefore leave the source tab without a
-        // handle).
-        session_handle =
-            service->GetSession(helper->session_handle()->session_id(),
-                                helper->session_handle()->invocation_source());
-        if (session_handle) {
-          session_handle->set_submitted_context_tokens(
-              helper->session_handle()->GetSubmittedContextTokens());
-          // TODO(crbug.com/469877869): Determine what to do with the return
-          // value of this call, or move this call to a different location.
-          session_handle->CheckSearchContentSharingSettings(
-              profile_->GetPrefs());
-        }
-      }
+      session_handle = helper->TakeSessionHandle();
+      source = session_handle->GetMetricsRecorder()->source();
     }
   }
   base::UmaHistogramEnumeration(
@@ -274,10 +262,10 @@ void ContextualTasksUiService::OnNavigationToAiPageIntercepted(
     BrowserWindow* window = BrowserWindow::FindBrowserWindowWithWebContents(
         source_tab->GetContents());
     if (window) {
-      auto* coordinator = ContextualTasksSidePanelCoordinator::From(
+      auto* controller = ContextualTasksPanelController::From(
           window->AsBrowserView()->browser());
-      coordinator->Show();
-      contextual_task_web_contents = coordinator->GetActiveWebContents();
+      controller->Show();
+      contextual_task_web_contents = controller->GetActiveWebContents();
     }
   } else if (!is_to_new_tab) {
     source_tab->GetContents()->GetController().LoadURLWithParams(
@@ -341,12 +329,34 @@ void ContextualTasksUiService::OnOAuthTokenReceived(
   RunPendingAccessTokenCallbacks(access_token_info.token);
 }
 
+void ContextualTasksUiService::ShowOauthErrorDialogForWebContents(
+    base::WeakPtr<content::WebContents> web_contents) {
+  content::WebUI* webui = web_contents->GetWebUI();
+  if (webui && webui->GetController()) {
+    auto* ui_controller = webui->GetController()->GetAs<ContextualTasksUI>();
+    if (ui_controller) {
+      ui_controller->ShowOauthErrorDialog();
+    }
+  }
+}
+
 void ContextualTasksUiService::RunPendingAccessTokenCallbacks(
     const std::string& token) {
-  std::vector<GetAccessTokenCallback> callbacks;
+  std::vector<
+      std::pair<GetAccessTokenCallback, base::WeakPtr<content::WebContents>>>
+      callbacks;
   std::swap(callbacks, pending_access_token_callbacks_);
-  for (auto& callback : callbacks) {
-    std::move(callback).Run(token);
+
+  if (token.empty()) {
+    for (const auto& callback_pair : callbacks) {
+      if (callback_pair.second) {
+        ShowOauthErrorDialogForWebContents(callback_pair.second);
+      }
+    }
+  }
+
+  for (auto& callback_pair : callbacks) {
+    std::move(callback_pair.first).Run(token);
   }
 }
 
@@ -444,6 +454,13 @@ void ContextualTasksUiService::OnThreadLinkClicked(
                          existing_tab->GetWeakPtr(), url, task_id, browser));
     }
 
+    if (auto* controller =
+            ContextualTasksPanelController::From(browser.get())) {
+      // Count as part of a cobrowsing session if the user interacted with the
+      // AI response.
+      controller->OnAiInteraction();
+    }
+
     return;
   }
 
@@ -468,24 +485,23 @@ void ContextualTasksUiService::OnThreadLinkClicked(
   // Detach the WebContents from tab.
   std::unique_ptr<content::WebContents> contextual_task_contents =
       tab_strip_model->DetachWebContentsAtForInsertion(
-          current_index,
-          TabStripModelChange::RemoveReason::kInsertedIntoSidePanel);
+          current_index, TabRemovedReason::kInsertedIntoSidePanel);
   content::WebContents* contextual_task_contents_ptr =
       contextual_task_contents.get();
 
   // Transfer the contextual task contents into the side panel cache.
-  ContextualTasksSidePanelCoordinator::From(browser.get())
+  ContextualTasksPanelController::From(browser.get())
       ->TransferWebContentsFromTab(task_id,
                                    std::move(contextual_task_contents));
 
   // Open the side panel.
-  ContextualTasksSidePanelCoordinator::From(browser.get())
+  ContextualTasksPanelController::From(browser.get())
       ->Show(/*transition_from_tab=*/true);
 
   // Notify the WebUI to adjust itself e.g. hide the toolbar.
   // `contextual_task_contents_ptr` is guaranteed to be alive here, since
   // the ownership of `contextual_task_contents` has been moved to
-  // ContextualTasksSidePanelCoordinator.
+  // the ContextualTasksPanelController implementation's instance.
   if (auto* web_ui_interface =
           GetWebUiInterface(contextual_task_contents_ptr)) {
     web_ui_interface->OnSidePanelStateChanged();
@@ -551,6 +567,19 @@ void ContextualTasksUiService::OnTextFinderLookupComplete(
       text_directives);
 }
 
+void ContextualTasksUiService::InitializeTaskInSidePanel(
+    content::WebContents* web_contents,
+    const base::Uuid& task_id,
+    std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+        session_handle) {
+  AssociateWebContentsToTask(web_contents, task_id);
+  if (session_handle) {
+    ContextualSearchWebContentsHelper::GetOrCreateForWebContents(web_contents)
+        ->SetTaskSession(task_id, std::move(session_handle),
+                         /*input_state_model=*/nullptr);
+  }
+}
+
 void ContextualTasksUiService::OnNonThreadNavigationInTab(
     const GURL& url,
     base::WeakPtr<tabs::TabInterface> tab) {
@@ -582,8 +611,11 @@ bool ContextualTasksUiService::HandleNavigation(
       is_from_embedded_page, is_to_new_tab);
 }
 
-void ContextualTasksUiService::GetAccessToken(GetAccessTokenCallback callback) {
-  pending_access_token_callbacks_.push_back(std::move(callback));
+void ContextualTasksUiService::GetAccessToken(
+    GetAccessTokenCallback callback,
+    base::WeakPtr<content::WebContents> web_contents) {
+  pending_access_token_callbacks_.emplace_back(std::move(callback),
+                                               web_contents);
 
   // If a request is already in progress, or we are waiting to retry, do
   // nothing.
@@ -632,12 +664,55 @@ bool ContextualTasksUiService::HandleNavigationImpl(
     return false;
   }
 
+  // If the target URL is a contextual tasks "display URL", then replace it with
+  // the proper AIM URL.
+  bool original_url_is_virtual = false;
+  if (IsContextualTasksDisplayUrl(url_params.url)) {
+    original_url_is_virtual = true;
+    const GURL aim_url =
+        GetUrlForAim(TemplateURLServiceFactory::GetForProfile(profile_.get()),
+                     omnibox::UNKNOWN_AIM_ENTRY_POINT, base::Time::Now(), u"",
+                     std::nullopt, {});
+
+    GURL::Replacements replacements;
+    replacements.SetSchemeStr(aim_url.scheme());
+    replacements.SetHostStr(aim_url.host());
+    replacements.SetPathStr(aim_url.path());
+
+    url_params.url = url_params.url.ReplaceComponents(replacements);
+  }
+
   // Allow any navigation to the contextual tasks host.
   if (IsContextualTasksUrl(url_params.url)) {
     return false;
   }
 
   bool is_nav_to_ai = IsAiUrl(url_params.url);
+
+  // The "deb" param is a debugging tool that allows a client to specify whether
+  // the browser intercepts an AI navigation, optionally allowing it to be shown
+  // in a top-level tab. In this case, if "nocobrowse1" is the value of this
+  // param and if set on a "virtual" URL, will cause a new navigation to the AI
+  // URL. If specified on a non-virtual AI URL, the navigation is simply allowed
+  // to proceed.
+  std::string debug_param_value;
+  if (is_nav_to_ai &&
+      net::GetValueForKeyInQuery(url_params.url, kDebugParam,
+                                 &debug_param_value) &&
+      debug_param_value.contains(kDebugNoCobrowseValue)) {
+    if (original_url_is_virtual) {
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE,
+          base::BindOnce(&ContextualTasksUiService::LoadUrlInWebContents,
+                         weak_ptr_factory_.GetWeakPtr(),
+                         net::AppendQueryParameter(url_params.url, kDebugParam,
+                                                   kDebugNoCobrowseValue),
+                         source_contents));
+      return true;
+    } else {
+      return false;
+    }
+  }
 
   // If the user is not signed in to Chrome, do not intercept.
   if (!IsSignedInToBrowserWithValidCredentials()) {
@@ -706,7 +781,7 @@ bool ContextualTasksUiService::HandleNavigationImpl(
                   tab->GetWeakPtr()));
           return true;
         } else {
-          // Allow any navigations to an AI page.
+          // Allow any navigations to an AI page from embedded page.
           return false;
         }
       } else if (IsValidSearchResultsPage(url_params.url) || is_nav_to_ai) {
@@ -743,6 +818,10 @@ bool ContextualTasksUiService::HandleNavigationImpl(
   // Navigations to the AI URL in the topmost frame should always be
   // intercepted.
   if (is_nav_to_ai) {
+    if (!aim_eligibility_service_->IsCobrowseEligible()) {
+      return false;
+    }
+
     // This needs to be posted in case the called method triggers a navigation
     // in the same WebContents, invalidating the nav handle used up the chain.
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
@@ -756,6 +835,14 @@ bool ContextualTasksUiService::HandleNavigationImpl(
 
   // Allow anything else.
   return false;
+}
+
+void ContextualTasksUiService::LoadUrlInWebContents(
+    const GURL& url,
+    content::WebContents* web_contents) {
+  content::NavigationController::LoadURLParams params(url);
+  params.transition_type = ::ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
+  web_contents->GetController().LoadURLWithParams(params);
 }
 
 bool ContextualTasksUiService::IsUrlForPrimaryAccount(const GURL& url) {
@@ -895,16 +982,15 @@ void ContextualTasksUiService::OnTaskChanged(
     return;
   }
 
-  ContextualTasksSidePanelCoordinator* side_panel_coordinator =
-      ContextualTasksSidePanelCoordinator::From(browser_window_interface);
+  ContextualTasksPanelController* controller =
+      ContextualTasksPanelController::From(browser_window_interface);
 
   if (is_shown_in_tab) {
     auto* contextual_search_service =
         ContextualSearchServiceFactory::GetForProfile(profile_.get());
     UpdateContextualSearchWebContentsHelperForTask(
         contextual_search_service, browser_window_interface,
-        contextual_tasks_service_, side_panel_coordinator, web_contents,
-        task_id);
+        contextual_tasks_service_, controller, web_contents, task_id);
 
     auto* active_task_context_provider =
         ActiveTaskContextProvider::From(browser_window_interface);
@@ -944,7 +1030,7 @@ void ContextualTasksUiService::OnTaskChanged(
       contextual_tasks_service_->AssociateTabWithTask(new_task_id, active_id);
     }
 
-    side_panel_coordinator->OnTaskChanged(web_contents, new_task_id);
+    controller->OnTaskChanged(web_contents, new_task_id);
   }
 }
 
@@ -952,9 +1038,8 @@ void ContextualTasksUiService::MoveTaskUiToNewTab(
     const base::Uuid& task_id,
     BrowserWindowInterface* browser,
     const GURL& inner_frame_url) {
-  auto* coordinator =
-      contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser);
-  CHECK(coordinator);
+  auto* controller = ContextualTasksPanelController::From(browser);
+  CHECK(controller);
 
   // If the side panel wasn't showing an AI page, don't embed the page in the
   // webui - navigate directly to the link instead.
@@ -969,7 +1054,7 @@ void ContextualTasksUiService::MoveTaskUiToNewTab(
 
   } else {
     std::unique_ptr<content::WebContents> web_contents =
-        coordinator->DetachWebContentsForTask(task_id);
+        controller->DetachWebContentsForTask(task_id);
     if (!web_contents) {
       return;
     }
@@ -989,11 +1074,10 @@ void ContextualTasksUiService::MoveTaskUiToNewTab(
     }
   }
 
-  coordinator->Close();
+  controller->Close();
 
   ContextualTasksService* task_service =
-      contextual_tasks::ContextualTasksServiceFactory::GetForProfile(
-          browser->GetProfile());
+      ContextualTasksServiceFactory::GetForProfile(browser->GetProfile());
   CHECK(task_service);
   task_service->DisassociateAllTabsFromTask(task_id);
 }
@@ -1006,27 +1090,20 @@ void ContextualTasksUiService::StartTaskUiInSidePanel(
         session_handle) {
   CHECK(contextual_tasks_service_);
 
-  // Get the coordinator for the current window.
-  auto* coordinator =
-      ContextualTasksSidePanelCoordinator::From(browser_window_interface);
-  auto* panel_contents = coordinator->GetActiveWebContents();
+  // Get the controller for the current window.
+  auto* controller =
+      ContextualTasksPanelController::From(browser_window_interface);
+  auto* panel_contents = controller->GetActiveWebContents();
 
   // Create a task for the URL if the side panel wasn't already showing a task.
-  if (!panel_contents || !coordinator->IsSidePanelOpenForContextualTask()) {
+  if (!panel_contents || !controller->IsPanelOpenForContextualTask()) {
     ContextualTask task = contextual_tasks_service_->CreateTaskFromUrl(url);
     task_id_to_creation_url_[task.GetTaskId()] = url;
     AssociateWebContentsToTask(tab_interface->GetContents(), task.GetTaskId());
-    coordinator->Show();
+    controller->Show();
 
-    // Associate the web contents with the task and set the session handle if
-    // provided.
-    content::WebContents* web_contents = coordinator->GetActiveWebContents();
-    AssociateWebContentsToTask(web_contents, task.GetTaskId());
-    if (session_handle) {
-      ContextualSearchWebContentsHelper::GetOrCreateForWebContents(web_contents)
-          ->SetTaskSession(task.GetTaskId(), std::move(session_handle),
-                           /*input_state_model=*/nullptr);
-    }
+    InitializeTaskInSidePanel(controller->GetActiveWebContents(),
+                              task.GetTaskId(), std::move(session_handle));
     return;
   }
 
@@ -1041,6 +1118,42 @@ void ContextualTasksUiService::StartTaskUiInSidePanel(
   }
 }
 
+void ContextualTasksUiService::StartTaskUiInSidePanelWithErrorPage(
+    BrowserWindowInterface* browser_window_interface,
+    tabs::TabInterface* tab_interface,
+    std::unique_ptr<contextual_search::ContextualSearchSessionHandle>
+        session_handle) {
+  // Create a new task.
+  ContextualTask task = contextual_tasks_service_->CreateTask();
+  auto* controller =
+      ContextualTasksPanelController::From(browser_window_interface);
+  auto* panel_contents = controller->GetActiveWebContents();
+  auto source = session_handle && session_handle->GetMetricsRecorder()
+                    ? session_handle->GetMetricsRecorder()->source()
+                    : contextual_search::ContextualSearchSource::kUnknown;
+
+  if (tab_interface) {
+    AssociateWebContentsToTask(tab_interface->GetContents(), task.GetTaskId());
+  }
+
+  bool panel_was_closed =
+      !panel_contents || !controller->IsPanelOpenForContextualTask();
+  if (panel_was_closed) {
+    pending_error_page_tasks_.emplace(task.GetTaskId(), source);
+    controller->Show();
+  }
+
+  content::WebContents* web_contents = controller->GetActiveWebContents();
+  InitializeTaskInSidePanel(web_contents, task.GetTaskId(),
+                            std::move(session_handle));
+
+  if (!panel_was_closed) {
+    if (auto* web_ui_interface = GetWebUiInterface(web_contents)) {
+      ShowAndRecordErrorPage(web_ui_interface->GetPageRemote(), source);
+    }
+  }
+}
+
 bool ContextualTasksUiService::IsAiUrl(const GURL& url) {
   if (!IsSearchResultsUrl(url)) {
     return false;
@@ -1049,9 +1162,23 @@ bool ContextualTasksUiService::IsAiUrl(const GURL& url) {
   return aim_eligibility_service_->HasAimUrlParams(url);
 }
 
+bool ContextualTasksUiService::IsPendingErrorPage(const base::Uuid& task_id) {
+  if (!pending_error_page_tasks_.contains(task_id)) {
+    return false;
+  }
+  RecordErrorPageShown(pending_error_page_tasks_[task_id]);
+  return true;
+}
+
 bool ContextualTasksUiService::IsContextualTasksUrl(const GURL& url) {
   return url.scheme() == content::kChromeUIScheme &&
          url.host() == chrome::kChromeUIContextualTasksHost;
+}
+
+bool ContextualTasksUiService::IsContextualTasksDisplayUrl(const GURL& url) {
+  return url.scheme() == GetContextualTasksDisplayUrlScheme() &&
+         url.host() == GetContextualTasksDisplayUrlHost() &&
+         url.path() == GetContextualTasksDisplayUrlPath();
 }
 
 bool ContextualTasksUiService::IsSearchResultsUrl(const GURL& url) {
@@ -1091,23 +1218,36 @@ bool ContextualTasksUiService::IsValidSearchResultsPage(const GURL& url) {
           !value.empty());
 }
 
+GURL ContextualTasksUiService::GetAimUrlFromContextualTasksUrl(
+    const GURL& url) {
+  std::string aim_url_str;
+  if (net::GetValueForKeyInQuery(url, kAimUrlQueryParam, &aim_url_str)) {
+    GURL aim_url = GURL(aim_url_str);
+    if (IsSearchResultsUrl(aim_url)) {
+      return aim_url;
+    }
+  }
+  return GURL();
+}
+
 void ContextualTasksUiService::OnLensOverlayStateChanged(
     BrowserWindowInterface* browser_window_interface,
-    bool is_showing) {
-  auto* coordinator =
-      ContextualTasksSidePanelCoordinator::From(browser_window_interface);
-  if (!coordinator || !coordinator->IsSidePanelOpenForContextualTask()) {
+    bool is_showing,
+    std::optional<lens::LensOverlayInvocationSource> invocation_source) {
+  auto* controller =
+      ContextualTasksPanelController::From(browser_window_interface);
+  if (!controller || !controller->IsPanelOpenForContextualTask()) {
     return;
   }
 
-  auto* panel_contents = coordinator->GetActiveWebContents();
+  auto* panel_contents = controller->GetActiveWebContents();
   if (!panel_contents) {
     return;
   }
 
   auto* web_ui_interface = GetWebUiInterface(panel_contents);
   if (web_ui_interface) {
-    web_ui_interface->OnLensOverlayStateChanged(is_showing);
+    web_ui_interface->OnLensOverlayStateChanged(is_showing, invocation_source);
   }
 }
 
@@ -1198,10 +1338,16 @@ void ContextualTasksUiService::OnImageClickedFromSourcesMenu(
 }
 
 bool ContextualTasksUiService::IsAllowedHost(const GURL& url) {
-  for (const auto& host : ai_page_hosts_) {
-    if (net::SchemefulSite::IsSameSite(url, host)) {
-      return true;
-    }
+  if (net::SchemefulSite::IsSameSite(url, GURL(kAiPageHost))) {
+    return true;
+  }
+  std::string forced_host = GetForcedEmbeddedPageHost();
+  if (!forced_host.empty() &&
+      net::SchemefulSite::IsSameSite(
+          url,
+          GURL(base::StrCat({url::kHttpsScheme, url::kStandardSchemeSeparator,
+                             forced_host})))) {
+    return true;
   }
   return false;
 }

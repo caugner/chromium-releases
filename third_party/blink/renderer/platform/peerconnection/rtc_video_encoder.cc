@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder.h"
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <numeric>
@@ -11,7 +12,6 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
@@ -76,7 +76,6 @@
 #include "third_party/webrtc/modules/video_coding/codecs/h264/include/h264.h"
 #include "third_party/webrtc/modules/video_coding/include/video_error_codes.h"
 #include "third_party/webrtc/modules/video_coding/svc/create_scalability_structure.h"
-#include "third_party/webrtc/modules/video_coding/svc/simulcast_to_svc_converter.h"
 #include "third_party/webrtc/rtc_base/time_utils.h"
 
 namespace {
@@ -610,22 +609,7 @@ void RecordEncoderStatusUMA(const media::EncoderStatus& status,
 
 bool IsZeroCopyEnabled(webrtc::VideoContentType content_type) {
   if (content_type == webrtc::VideoContentType::SCREENSHARE) {
-    // Zero copy screen capture.
-#if BUILDFLAG(IS_CHROMEOS)
-    // The zero-copy capture is available for all sources in ChromeOS
-    // Ash-chrome.
-    return base::FeatureList::IsEnabled(blink::features::kZeroCopyTabCapture);
-#else
-    // Currently, zero copy capture screenshare is available only for tabs.
-    // Since it is impossible to determine the content source, tab, window or
-    // monitor, we don't configure VideoEncodeAccelerator with NV12
-    // GpuMemoryBuffer instead we configure I420 SHMEM as if it is not zero
-    // copy, and we convert the NV12 GpuMemoryBuffer to I420 SHMEM in
-    // RtcVideoEncoder::Impl::Encode().
-    // TODO(b/267995715): Solve this problem by calling Initialize() in the
-    // first frame.
     return false;
-#endif
   }
   // Zero copy video capture from other sources (e.g. camera).
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -737,6 +721,7 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
   // its own thread, hence the |init_event| argument.
   void CreateAndInitializeVEA(
       const media::VideoEncodeAccelerator::Config& vea_config,
+      std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter,
       SignaledValue init_event);
 
   // Enqueue a frame from WebRTC for encoding. This function is called
@@ -782,8 +767,6 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
   void Drain(SignaledValue event);
   void DrainCompleted(bool success);
 
-  void SetSimulcastToSvcConverter(std::optional<webrtc::SimulcastToSvcConverter>
-                                      simulcast_to_svc_converter);
   void UpdateSharedImageSupport(bool supports_shared_images);
 
  private:
@@ -1093,11 +1076,13 @@ RTCVideoEncoder::Impl::Impl(
 
 void RTCVideoEncoder::Impl::CreateAndInitializeVEA(
     const media::VideoEncodeAccelerator::Config& vea_config,
+    std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter,
     SignaledValue init_event) {
   TRACE_EVENT0("webrtc", "RTCVideoEncoder::Impl::CreateAndInitializeVEA");
   DVLOG(3) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  simulcast_to_svc_converter_ = std::move(simulcast_to_svc_converter);
   status_ = WEBRTC_VIDEO_CODEC_UNINITIALIZED;
   async_init_event_ = ScopedSignaledValue(std::move(init_event));
 
@@ -1289,11 +1274,6 @@ void RTCVideoEncoder::Impl::DrainCompleted(bool success) {
     NotifyErrorStatus({media::EncoderStatus::Codes::kEncoderInitializationError,
                        "Failed to flush VideoEncodeAccelerator"});
   }
-}
-
-void RTCVideoEncoder::Impl::SetSimulcastToSvcConverter(
-    std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter) {
-  simulcast_to_svc_converter_ = std::move(simulcast_to_svc_converter);
 }
 
 void RTCVideoEncoder::Impl::UpdateSharedImageSupport(
@@ -2004,7 +1984,7 @@ bool RTCVideoEncoder::Impl::NeedConvertToMemoryFrame(
       STORAGE_OWNED_MEMORY,
       STORAGE_SHMEM,
   };
-  if (!base::Contains(kStorageTypeSupportedByMojo, storage_type)) {
+  if (!std::ranges::contains(kStorageTypeSupportedByMojo, storage_type)) {
     // We need to convert to I420 memory frame if mojo doesn't support it.
     return true;
   }
@@ -2271,8 +2251,8 @@ void RTCVideoEncoder::Impl::EncodeOneFrame(FrameChunk frame_chunk) {
   frame->set_timestamp(timestamp);
 
   if (!failed_timestamp_match_) {
-    DCHECK(!base::Contains(submitted_frames_, timestamp,
-                           &FrameInfo::media_timestamp_));
+    DCHECK(!std::ranges::contains(submitted_frames_, timestamp,
+                                  &FrameInfo::media_timestamp_));
     submitted_frames_.emplace_back(timestamp, frame_chunk.timestamp,
                                    frame_chunk.render_time_ms,
                                    GetActiveSpatialLayers());
@@ -2402,8 +2382,8 @@ void RTCVideoEncoder::Impl::DoNativeEncodeWithNativeInput(
   frame->set_timestamp(base::Microseconds(frame_chunk.timestamp_us));
 
   if (!failed_timestamp_match_) {
-    DCHECK(!base::Contains(submitted_frames_, frame->timestamp(),
-                           &FrameInfo::media_timestamp_));
+    DCHECK(!std::ranges::contains(submitted_frames_, frame->timestamp(),
+                                  &FrameInfo::media_timestamp_));
     submitted_frames_.emplace_back(frame->timestamp(), frame_chunk.timestamp,
                                    frame_chunk.render_time_ms,
                                    GetActiveSpatialLayers());
@@ -2436,7 +2416,6 @@ bool RTCVideoEncoder::Impl::CreateBlackMappableSIFrame(
   auto mapping = shared_image->Map();
   if (!mapping) {
     LOG(ERROR) << "Mapping shared image failed.";
-    sii->DestroySharedImage(gpu::SyncToken(), std::move(shared_image));
     return false;
   }
   // Fills the NV12 frame with YUV black (0x00, 0x80, 0x80).
@@ -2593,7 +2572,8 @@ int32_t RTCVideoEncoder::DrainEncoderAndUpdateFrameSize(
 }
 
 int32_t RTCVideoEncoder::InitializeEncoder(
-    const media::VideoEncodeAccelerator::Config& vea_config) {
+    const media::VideoEncodeAccelerator::Config& vea_config,
+    std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(webrtc_sequence_checker_);
   TRACE_EVENT1("webrtc", "RTCVideoEncoder::InitEncode", "config",
                vea_config.AsHumanReadableString());
@@ -2613,7 +2593,7 @@ int32_t RTCVideoEncoder::InitializeEncoder(
         *gpu_task_runner_.get(), FROM_HERE,
         CrossThreadBindOnce(
             &RTCVideoEncoder::Impl::CreateAndInitializeVEA, weak_impl_,
-            vea_config,
+            vea_config, std::move(simulcast_to_svc_converter),
             SignaledValue(&initialization_waiter, &initialization_retval)));
     // webrtc::VideoEncoder expects this call to be synchronous.
     initialization_waiter.Wait();
@@ -2863,12 +2843,11 @@ int32_t RTCVideoEncoder::InitEncode(
         media::VideoEncodeAccelerator::Config::EncoderType::kNoPreference;
   }
 
-  int32_t initialization_ret = InitializeEncoder(vea_config);
+  int32_t initialization_ret =
+      InitializeEncoder(vea_config, std::move(simulcast_to_svc_converter));
   if (initialization_ret != WEBRTC_VIDEO_CODEC_OK) {
     ReleaseImpl();
     CHECK(!impl_);
-  } else {
-    impl_->SetSimulcastToSvcConverter(std::move(simulcast_to_svc_converter));
   }
   return initialization_ret;
 }

@@ -37,7 +37,6 @@
 #include "third_party/blink/renderer/core/css/rule_feature_set.h"
 #include "third_party/blink/renderer/core/css/valid_property_filter.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/route_matching/route_match_state.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_stack.h"
@@ -65,10 +64,10 @@ enum AddRuleFlag {
   kRuleIsStartingStyle = 1 << 1,
 };
 
-
 class CSSSelector;
 class MediaQueryEvaluator;
 class StyleSheetContents;
+class RouteMatchState;
 
 // This is a wrapper around a StyleRule, pointing to one of the N complex
 // selectors in the StyleRule. This allows us to treat each selector
@@ -232,7 +231,7 @@ class RuleMap {
 
  public:
   // Returns false on failure (which should be very rare).
-  bool Add(const AtomicString& key, const RuleData& rule_data);
+  [[nodiscard]] bool Add(const AtomicString& key, const RuleData& rule_data);
   void AddFilteredRulesFromOtherSet(
       const RuleMap& other,
       const HeapHashSet<Member<StyleRule>>& only_include,

@@ -23,8 +23,6 @@ class GlicSharingManager;
 class GlicInstance;
 class Host;
 
-#if !BUILDFLAG(IS_ANDROID)
-
 // A class for managing sending zero state suggestions through the mojo api.
 class GlicZeroStateSuggestionsManager {
  public:
@@ -65,6 +63,7 @@ class GlicZeroStateSuggestionsManager {
   void Reset();
 
  private:
+  bool WasAutoOpenedForPdf();
   void FilterTabs(std::vector<content::WebContents*>& tabs);
 
   // A helper function to route GetZeroStateSuggestionsForFocusedTabCallback
@@ -113,22 +112,6 @@ class GlicZeroStateSuggestionsManager {
 
   base::WeakPtrFactory<GlicZeroStateSuggestionsManager> weak_ptr_factory_{this};
 };
-#else
-
-// Not yet implemented on Android. This always returns an empty list.
-class GlicZeroStateSuggestionsManager {
- public:
-  void ObserveZeroStateSuggestions(
-      bool is_notifying,
-      bool is_first_run,
-      const std::vector<std::string>& supported_tools,
-      glic::mojom::WebClientHandler::GetZeroStateSuggestionsAndSubscribeCallback
-          callback);
-
-  void Reset() {}
-};
-
-#endif
 
 }  // namespace glic
 

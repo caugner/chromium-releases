@@ -1,4 +1,4 @@
-// Copyright 2025 The Chromium Authors
+// Copyright 2026 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,7 +48,11 @@ PinInfoBarController::PinInfoBarController(BrowserWindowInterface* browser)
           &PinInfoBarController::OnBrowserClosed, base::Unretained(this))));
 }
 
-PinInfoBarController::~PinInfoBarController() = default;
+PinInfoBarController::~PinInfoBarController() {
+  if (infobar_manager_) {
+    infobar_manager_->RemoveObserver(this);
+  }
+}
 
 void PinInfoBarController::OnBrowserClosed(BrowserWindowInterface* browser) {
   if (infobar_) {
@@ -61,6 +65,14 @@ void PinInfoBarController::OnInfoBarRemoved(infobars::InfoBar* infobar,
   if (infobar_ != infobar) {
     return;
   }
+  infobar_ = nullptr;
+  infobar_manager_->RemoveObserver(this);
+  infobar_manager_ = nullptr;
+}
+
+void PinInfoBarController::OnManagerWillBeDestroyed(
+    infobars::InfoBarManager* manager) {
+  DCHECK_EQ(infobar_manager_, manager);
   infobar_ = nullptr;
   infobar_manager_->RemoveObserver(this);
   infobar_manager_ = nullptr;
@@ -94,7 +106,13 @@ void PinInfoBarController::MaybeShowInfoBar(
 void PinInfoBarController::OnIsDefaultBrowserResult(
     base::OnceCallback<void(bool)> done_callback,
     shell_integration::DefaultWebClientState default_state) {
-  if (default_state != shell_integration::DefaultWebClientState::IS_DEFAULT) {
+  const bool can_proceed =
+      (default_state == shell_integration::DefaultWebClientState::IS_DEFAULT)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+      || base::FeatureList::IsEnabled(features::kSeparateDefaultAndPinPrompt)
+#endif
+      ;
+  if (!can_proceed) {
     std::move(done_callback).Run(false);
     return;
   }
@@ -133,13 +151,31 @@ void PinInfoBarController::OnShouldOfferToPinResult(
     return;
   }
 
-  // Show the pin-to-taskbar infobar.
+  // On startup, the TabStripModel might not have an active WebContents yet.
   content::WebContents* web_contents =
       browser_->GetTabStripModel()->GetActiveWebContents();
-  infobar_manager_ =
+  if (!web_contents) {
+    std::move(done_callback).Run(false);
+    return;
+  }
+
+  infobars::ContentInfoBarManager* infobar_manager =
       infobars::ContentInfoBarManager::FromWebContents(web_contents);
+  if (!infobar_manager) {
+    std::move(done_callback).Run(false);
+    return;
+  }
+
+  infobar_ = PinInfoBarDelegate::Create(infobar_manager);
+  if (!infobar_) {
+    std::move(done_callback).Run(false);
+    return;
+  }
+
+  // Only start observing after successful infobar creation to avoid leaks
+  // if creation fails (e.g., if an identical infobar already exists).
+  infobar_manager_ = infobar_manager;
   infobar_manager_->AddObserver(this);
-  infobar_ = PinInfoBarDelegate::Create(infobar_manager_);
   SetInfoBarShownRecently();
   std::move(done_callback).Run(true);
 }
